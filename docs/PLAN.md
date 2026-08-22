@@ -83,6 +83,12 @@ pooling and no cloud custody.
   server required simply disappears.
 - **No stored indexes** — memory index and note catalog are derived per
   session; files edited out-of-band can never go stale against an index.
+- **Notes replace skills** — a ghost does not load pi "skills" (`noSkills`
+  stays on). Skills are instructions, and in the ghost system the durable
+  place for instructions the ghost should follow is its notes. A ghost can
+  *read* a skill file (markdown) and, when the owner asks to adopt it, turn
+  it into a note — so adoption is an explicit, owner-driven act that lands in
+  the one place the ghost already carries forward, not a parallel loader.
 - **Two browser modes**: "My browser" (relay into the creator's real signed-in Chromium via MV3 extension + chrome.debugger, creator-only, next wave) and "Ghost's browser" (per-ghost Playwright profile, isolated/autonomous), one backend-agnostic tool surface.
 - **Quickshell shell surfaces, not a webapp window** — Omarchy's own shell
   is Quickshell; a layer-shell HUD + bar widget is native in a way no app

@@ -131,4 +131,46 @@ describe("loadConfig", () => {
     expect(() => loadConfig({ env: { GHOSTD_PORT: "not-a-port" }, home: root }))
       .toThrowError(/Invalid port/);
   });
+
+  it("defaults compaction to enabled with no explicit thresholds", () => {
+    const root = makeHome();
+    const config = loadConfig({ env: {}, home: root });
+    expect(config.compaction).toEqual({ enabled: true });
+  });
+
+  it("reads compaction from the file and lets env and overrides win", () => {
+    const root = makeHome();
+    writeConfig(root, {
+      compaction: { enabled: false, thresholdTokens: 50_000, thresholdFraction: 0.5 },
+    });
+    expect(loadConfig({ env: {}, home: root }).compaction).toEqual({
+      enabled: false,
+      thresholdTokens: 50_000,
+      thresholdFraction: 0.5,
+    });
+    // env overrides the file's enabled flag
+    expect(loadConfig({ env: { GHOSTD_COMPACTION: "1" }, home: root }).compaction.enabled).toBe(true);
+    // env can retune the threshold
+    expect(
+      loadConfig({ env: { GHOSTD_COMPACTION_THRESHOLD_TOKENS: "1234" }, home: root }).compaction
+        .thresholdTokens,
+    ).toBe(1234);
+    // explicit override beats env
+    expect(
+      loadConfig({
+        env: { GHOSTD_COMPACTION: "0" },
+        home: root,
+        compaction: { enabled: true },
+      }).compaction.enabled,
+    ).toBe(true);
+  });
+
+  it("rejects an out-of-range compaction fraction", () => {
+    const root = makeHome();
+    expect(() => loadConfig({ env: { GHOSTD_COMPACTION_THRESHOLD_FRACTION: "2" }, home: root }))
+      .toThrowError(/Invalid fraction/);
+    writeConfig(root, { compaction: { thresholdFraction: 0 } });
+    expect(() => loadConfig({ env: {}, home: root }))
+      .toThrowError(/"compaction.thresholdFraction" must be a number/);
+  });
 });

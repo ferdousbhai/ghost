@@ -191,6 +191,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     logger,
     offline: config.offline,
     browserMode: config.browserMode,
+    compaction: config.compaction,
     ...(relay ? { relayTransport: relay } : {}),
   });
   const login = new LoginManager({ registry, logger, offline: config.offline });

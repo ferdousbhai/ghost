@@ -11,6 +11,7 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
+import { DEFAULT_COMPACTION_CONFIG, type CompactionConfig } from "./compaction.js";
 
 /** Resolved, absolute daemon configuration. */
 export interface DaemonConfig {
@@ -43,6 +44,12 @@ export interface DaemonConfig {
    *   (Playwright). Works with no extension; isolated from your real sessions.
    */
   browserMode: "relay" | "profile";
+  /**
+   * Background context-compaction policy. Enabled by default, triggering at
+   * `min(0.8 × contextWindow, 100_000)` tokens. See compaction.ts. Turn it off
+   * (or retune the threshold) to change how a ghost handles a long transcript.
+   */
+  compaction: CompactionConfig;
   /** Where the config was read from, or null when defaults/env only. */
   configPath: string | null;
 }
@@ -54,6 +61,11 @@ export interface DaemonConfigFile {
   ghostsRoot?: string;
   offline?: boolean;
   browserMode?: "relay" | "profile";
+  compaction?: {
+    enabled?: boolean;
+    thresholdTokens?: number;
+    thresholdFraction?: number;
+  };
 }
 
 /** Explicit overrides from CLI flags — highest precedence. */
@@ -63,6 +75,7 @@ export interface DaemonConfigOverrides {
   ghostsRoot?: string;
   offline?: boolean;
   browserMode?: "relay" | "profile";
+  compaction?: CompactionConfig;
   /** Config file path; defaults to <XDG_CONFIG_HOME>/ghost/config.json. */
   configPath?: string;
   /** Injected for tests. Defaults to process.env. */
@@ -146,6 +159,32 @@ function readConfigFile(path: string): DaemonConfigFile | null {
     }
     config.browserMode = file.browserMode;
   }
+  if (file.compaction !== undefined) {
+    if (file.compaction === null || typeof file.compaction !== "object" || Array.isArray(file.compaction)) {
+      throw new Error(`${path}: "compaction" must be a JSON object.`);
+    }
+    const raw = file.compaction as Record<string, unknown>;
+    const compaction: DaemonConfigFile["compaction"] = {};
+    if (raw.enabled !== undefined) {
+      if (typeof raw.enabled !== "boolean") {
+        throw new Error(`${path}: "compaction.enabled" must be a boolean.`);
+      }
+      compaction.enabled = raw.enabled;
+    }
+    if (raw.thresholdTokens !== undefined) {
+      if (typeof raw.thresholdTokens !== "number" || !Number.isFinite(raw.thresholdTokens) || raw.thresholdTokens <= 0) {
+        throw new Error(`${path}: "compaction.thresholdTokens" must be a positive number.`);
+      }
+      compaction.thresholdTokens = raw.thresholdTokens;
+    }
+    if (raw.thresholdFraction !== undefined) {
+      if (typeof raw.thresholdFraction !== "number" || !(raw.thresholdFraction > 0 && raw.thresholdFraction <= 1)) {
+        throw new Error(`${path}: "compaction.thresholdFraction" must be a number in (0, 1].`);
+      }
+      compaction.thresholdFraction = raw.thresholdFraction;
+    }
+    config.compaction = compaction;
+  }
   return config;
 }
 
@@ -158,6 +197,22 @@ function parseBoolean(raw: string, source: string): boolean {
   if (["1", "true", "yes", "on"].includes(raw.toLowerCase())) return true;
   if (["0", "false", "no", "off"].includes(raw.toLowerCase())) return false;
   throw new Error(`Invalid boolean from ${source}: ${JSON.stringify(raw)}`);
+}
+
+function parsePositiveNumber(raw: string, source: string): number {
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new Error(`Invalid positive number from ${source}: ${JSON.stringify(raw)}`);
+  }
+  return value;
+}
+
+function parseFraction(raw: string, source: string): number {
+  const value = Number(raw);
+  if (!(value > 0 && value <= 1)) {
+    throw new Error(`Invalid fraction from ${source}: ${JSON.stringify(raw)} (want (0, 1])`);
+  }
+  return value;
 }
 
 /** Expand a leading `~` so config.json can say `~/Ghosts`. */
@@ -176,6 +231,9 @@ function expandHome(path: string, home: string): string {
  * - `GHOSTS_ROOT`       → ghostsRoot
  * - `GHOSTD_OFFLINE`    → offline
  * - `GHOST_BROWSER_MODE`→ browserMode ("relay" | "profile")
+ * - `GHOSTD_COMPACTION` → compaction.enabled
+ * - `GHOSTD_COMPACTION_THRESHOLD_TOKENS`   → compaction.thresholdTokens
+ * - `GHOSTD_COMPACTION_THRESHOLD_FRACTION` → compaction.thresholdFraction
  * - `GHOSTD_CONFIG`     → config file path
  * - `XDG_CONFIG_HOME`   → config file directory
  */
@@ -192,6 +250,9 @@ export function loadConfig(overrides: DaemonConfigOverrides = {}): DaemonConfig 
   const envRoot = env.GHOSTS_ROOT?.trim();
   const envOffline = env.GHOSTD_OFFLINE?.trim();
   const envBrowserMode = env.GHOST_BROWSER_MODE?.trim();
+  const envCompaction = env.GHOSTD_COMPACTION?.trim();
+  const envCompactionTokens = env.GHOSTD_COMPACTION_THRESHOLD_TOKENS?.trim();
+  const envCompactionFraction = env.GHOSTD_COMPACTION_THRESHOLD_FRACTION?.trim();
 
   const port = overrides.port
     ?? (envPort ? parsePort(envPort, "GHOSTD_PORT") : undefined)
@@ -213,6 +274,22 @@ export function loadConfig(overrides: DaemonConfigOverrides = {}): DaemonConfig 
     ?? file?.browserMode
     ?? "relay";
 
+  const enabled = overrides.compaction?.enabled
+    ?? (envCompaction ? parseBoolean(envCompaction, "GHOSTD_COMPACTION") : undefined)
+    ?? file?.compaction?.enabled
+    ?? DEFAULT_COMPACTION_CONFIG.enabled;
+  const thresholdTokens = overrides.compaction?.thresholdTokens
+    ?? (envCompactionTokens ? parsePositiveNumber(envCompactionTokens, "GHOSTD_COMPACTION_THRESHOLD_TOKENS") : undefined)
+    ?? file?.compaction?.thresholdTokens;
+  const thresholdFraction = overrides.compaction?.thresholdFraction
+    ?? (envCompactionFraction ? parseFraction(envCompactionFraction, "GHOSTD_COMPACTION_THRESHOLD_FRACTION") : undefined)
+    ?? file?.compaction?.thresholdFraction;
+  const compaction: CompactionConfig = {
+    enabled,
+    ...(thresholdTokens !== undefined ? { thresholdTokens } : {}),
+    ...(thresholdFraction !== undefined ? { thresholdFraction } : {}),
+  };
+
   assertLoopback(host);
   return {
     port,
@@ -220,6 +297,7 @@ export function loadConfig(overrides: DaemonConfigOverrides = {}): DaemonConfig 
     ghostsRoot: resolve(expandHome(rawRoot, home)),
     offline,
     browserMode,
+    compaction,
     configPath: file ? configPath : null,
   };
 }
