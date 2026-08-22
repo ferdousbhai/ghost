@@ -1,0 +1,116 @@
+# Developing the ghost shell
+
+No daemon, no pi, no models needed. `mock-ghostd.mjs` implements enough of the
+CONTRACTS.md API to build and demo every surface.
+
+## Demo script
+
+Four terminals' worth of commands, in order. Nothing here touches your running
+Omarchy shell — the ghost config is a *separate* Quickshell process launched by
+path.
+
+```sh
+cd packages/shell
+
+# 1. The fake daemon. Two ghosts, a canned streamed reply with one tool call.
+node dev/mock-ghostd.mjs            # add --slow to watch deltas land
+                                    #     --fail to end the turn in an error
+
+# 2. The shell, isolated. Never `qs` with no arguments — that would load the
+#    user's default config.
+quickshell -p qml/shell.qml
+
+# 3. Drive it.
+qs -p qml/shell.qml ipc show                      # the IPC surface
+qs -p qml/shell.qml ipc call ghost status         # JSON state
+qs -p qml/shell.qml ipc call ghost open
+qs -p qml/shell.qml ipc call ghost ask "who lives here?"
+qs -p qml/shell.qml ipc call ghost close
+
+# 4. Stop.
+qs -p qml/shell.qml kill
+```
+
+### What you should see
+
+- **Nothing on screen until `open`.** The HUD is a `PanelWindow` with
+  `visible: false`; loading the config paints no surface. This makes almost all
+  of the shell testable without putting anything over the developer's desktop.
+- On `open`: a centred 880×620 card, 64px below the top edge, in the current
+  Omarchy theme's colours. Roster on the left (`casper`, `moaning-myrtle`,
+  `+ new ghost`), transcript in the middle, composer at the bottom.
+- On `ask`: the pulsing activity dot, then `read_memory` in the activity line,
+  then the reply arriving word by word with `**bold**` rendered as bold.
+  The finished bubble keeps `⚒ read_memory` as its tool trail.
+- With the HUD closed, a finished turn raises a `notify-send` notification
+  instead.
+- `Esc` cancels a running turn; `Esc` again dismisses. Clicking outside the
+  card dismisses (Hyprland focus grab).
+- `hyprctl layers | grep ghost-hud` shows the surface and its geometry.
+
+`dev/evidence/ghost-hud.png` is a capture of exactly this, cropped to the HUD's
+own rectangle.
+
+## Validation
+
+```sh
+pnpm --filter @ghost/shell lint     # qmllint over every QML file
+```
+
+`qmllint` needs the `qs.*` modules Quickshell synthesises at runtime resolved
+by hand, which is what the `.qmllint/qs -> ../qml` symlink and `-I .qmllint`
+are for. Use `/usr/lib/qt6/bin/qmllint`, never `/usr/bin/qmllint` — on Arch the
+latter is a **Qt 5 stub that exits 0 on any input**, including files with
+misspelled properties.
+
+### Expected warnings
+
+Three, all on the two `PanelWindow` files, all artifacts of how Quickshell
+registers its types rather than problems in this code:
+
+```
+Type PanelWindow is not creatable.           [uncreatable-type]
+unknown grouped property scope margins.      [unqualified]
+Type margins is used but it is not resolved  [unresolved-type]
+```
+
+`PanelWindow` is registered `isCreatable: false` because Quickshell substitutes
+the platform backend (`WlrLayershell`) at runtime — its own docs say
+"`PanelWindow` in particular cannot be resolved". The `margins` value type is
+exported from `Quickshell` while `PanelWindowInterface` lives in
+`Quickshell._Window`, which does not depend on it; `anchors` on the same type
+resolves fine. Anything beyond these three is a real finding.
+
+## What was verified live, and what was not
+
+Verified on this machine (Omarchy 4.0.0.alpha, Hyprland 0.56.2, Quickshell
+0.3.0, Qt 6.11.2):
+
+- Streaming `XMLHttpRequest` — `readyState 3` fires once per network chunk for
+  both GET and POST, with cumulative `responseText`. Measured headlessly
+  against a chunked SSE server before any UI existed.
+- Config load with zero QML errors; `qs ipc show`/`call`/`prop get`.
+- A full turn end to end against the mock: roster fetch, POST, SSE parse, tool
+  activity, markdown render, terminal `done`, notification.
+- The HUD surface under Hyprland: layer, geometry (`hyprctl layers`), theme
+  colours, focus grab, Esc.
+- `contrib/omarchy/scripts/ghost-bar-status` against a live and a dead shell.
+
+Not verified live:
+
+- **The real `ghostd`.** It does not exist yet. Everything is against the mock,
+  which follows the pi-messages event union but cannot prove the daemon emits
+  it. First integration risk: whether the daemon owns conversation history via
+  `options.sessionId` (what this client assumes) or expects the full `context`
+  replayed (set `GHOST_HUD_REPLAY=1` if so).
+- **The Omarchy bar module in Omarchy's bar.** Installing it would mean editing
+  the developer's live `shell.json` and reloading their desktop shell. It is
+  written against the documented contract in
+  `/usr/share/omarchy/shell/plugins/bar/README.md` and lints clean standalone.
+- **Theme switching.** The `theme.name` watch is reasoned from
+  `omarchy-theme-set`'s implementation (`rm -rf` + `mv`, then `echo >
+  theme.name`), not observed — switching themes would have restyled the
+  developer's whole desktop.
+- **Multi-monitor.** One output here. The HUD does not wrap itself in
+  `Variants`, so it appears on the compositor's default output.
+- `notify-send` output was raised but its rendering was not inspected.

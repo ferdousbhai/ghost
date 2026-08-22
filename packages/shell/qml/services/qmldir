@@ -1,0 +1,5 @@
+module qs.services
+
+singleton Theme 1.0 Theme.qml
+singleton Ghostd 1.0 Ghostd.qml
+singleton Notifier 1.0 Notifier.qml

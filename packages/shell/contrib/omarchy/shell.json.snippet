@@ -1,0 +1,29 @@
+// Merge ONE of these entries into the `bar.layout.<section>` array in
+// ~/.config/omarchy/shell.json. Do not replace the file — it already holds
+// your whole bar layout. `omarchy bar move ghost right` can reposition it
+// afterwards.
+//
+// (JSON has no comments; strip these lines before pasting.)
+
+// --- QML module (animated dot, no subprocess per repaint) -------------------
+// Needs ~/.config/omarchy/bar/modules/ghost.qml from ../bar-modules/.
+{ "id": "ghost", "type": "qml" }
+
+// --- Command module (no QML, survives any Omarchy widget-contract change) ---
+// Needs ~/.config/omarchy/bar/scripts/ghost-bar-status from ../scripts/.
+{
+  "id": "ghost",
+  "type": "command",
+  "exec": "~/.config/omarchy/bar/scripts/ghost-bar-status",
+  "interval": 2,
+  "tooltip": "Ghost",
+  "onClick": "qs -c ghost ipc call ghost toggle"
+}
+
+// Example result, right section:
+//
+// "right": [
+//   { "id": "omarchy.tray" },
+//   { "id": "ghost", "type": "qml" },
+//   { "id": "omarchy.audio" }
+// ]

@@ -1,0 +1,171 @@
+pragma Singleton
+
+// Theme — the ghost surfaces wear whatever Omarchy is wearing.
+//
+// Omarchy (>= 4.0 "Quattro") keeps the active theme as a *copy* at
+// ~/.local/state/omarchy/current/theme/. Two files matter to us:
+//
+//   colors.toml   flat `key = "#rrggbb"` pairs + `mode = "dark"|"light"`
+//   shell.toml    sectioned TOML; [bar] gives us bar height/colors so a
+//                 standalone ghost bar surface lines up with Omarchy's own
+//
+// Only the keys the theme author actually wrote are present in colors.toml —
+// Omarchy derives the rest (color0..15, bg/fg aliases, bright_* mixes) in
+// `omarchy-theme-color`. We deliberately do NOT shell out to that script on
+// every read: the ~10 keys we need are the ones every stock theme writes, and
+// a synchronous subprocess in a HUD open path is worse than a fallback.
+//
+// Theme switches: `omarchy-theme-set` does `rm -rf theme/ && mv next-theme/
+// theme/`, which destroys any inotify watch on files *inside* that directory —
+// Omarchy's own shell hits this and sets watchChanges: false. It then rewrites
+// theme.name in place with `echo >`, so a watch on *that* file survives and
+// gives us a reliable single-shot edge. We watch theme.name and re-read
+// colors.toml when it fires.
+//
+// Everything degrades to the fallback palette below when Omarchy is absent,
+// so these surfaces still run on a bare Hyprland or in a nested compositor.
+import Quickshell
+import Quickshell.Io
+import QtQuick
+
+Singleton {
+    id: root
+
+    readonly property string stateDir: (Quickshell.env("XDG_STATE_HOME") || (Quickshell.env("HOME") + "/.local/state"))
+        + "/omarchy/current"
+
+    /** Raw key → value from colors.toml. Empty when Omarchy is not installed. */
+    property var colors: ({})
+    /** Raw "section.key" → value from shell.toml. */
+    property var shell: ({})
+    /** Theme name, e.g. "tokyo-night". Empty when unknown. */
+    property string themeName: ""
+    /** True when we are painting on top of an Omarchy theme rather than the fallback. */
+    readonly property bool themed: Object.keys(root.colors).length > 0
+
+    // ---- Fallback palette -------------------------------------------------
+    // Tokyo Night, Omarchy's default theme. Chosen so a non-Omarchy machine
+    // gets a coherent dark surface rather than Qt's default battleship grey.
+    readonly property var fallback: ({
+        "mode": "dark",
+        "background": "#1a1b26",
+        "dark_background": "#13141c",
+        "darker_background": "#0e0e14",
+        "lighter_background": "#24283b",
+        "foreground": "#a9b1d6",
+        "dark_foreground": "#565f89",
+        "bright_foreground": "#c0caf5",
+        "accent": "#7aa2f7",
+        "selection": "#292e42",
+        "muted": "#414868",
+        "red": "#f7768e",
+        "green": "#9ece6a",
+        "yellow": "#e0af68",
+        "magenta": "#ad8ee6"
+    })
+
+    function pick(key: string): string {
+        const value = root.colors[key];
+        return (value !== undefined && value !== "") ? value : root.fallback[key];
+    }
+
+    // ---- Semantic roles ---------------------------------------------------
+    readonly property bool light: root.pick("mode") === "light"
+    readonly property color background: root.pick("background")
+    readonly property color surface: root.pick("lighter_background")
+    readonly property color surfaceDeep: root.pick("dark_background")
+    readonly property color foreground: root.pick("foreground")
+    readonly property color foregroundBright: root.pick("bright_foreground")
+    readonly property color foregroundDim: root.pick("dark_foreground")
+    readonly property color accent: root.pick("accent")
+    readonly property color selection: root.pick("selection")
+    readonly property color muted: root.pick("muted")
+    readonly property color danger: root.pick("red")
+    readonly property color ok: root.pick("green")
+    readonly property color warn: root.pick("yellow")
+    readonly property color thinking: root.pick("magenta")
+
+    /** Bar geometry, from the theme's [bar] section when present. */
+    readonly property int barSize: Number(root.shell["bar.size-horizontal"]) || 26
+    readonly property color barBackground: root.shell["bar.background"] || root.background
+    readonly property color barForeground: root.shell["bar.text"] || root.foreground
+    readonly property color barActive: root.shell["bar.active"] || root.accent
+
+    // ---- Fixed design tokens ---------------------------------------------
+    // Not themed by Omarchy; kept here so every surface agrees.
+    readonly property int radius: 10
+    readonly property int pad: 14
+    readonly property int gap: 8
+    readonly property string fontFamily: root.shell["font.family"] || "CaskaydiaMono Nerd Font"
+    readonly property int fontSize: Number(root.shell["font.size"]) || 13
+    readonly property int fontSizeSmall: root.fontSize - 2
+
+    // ---- TOML ------------------------------------------------------------
+    // A deliberately small parser. Omarchy's theme files are generated from
+    // templates and only ever contain `key = "value"`, `key = number`,
+    // `key = true`, `# comment` and `[section]`. Anything fancier (arrays,
+    // inline tables, multi-line strings) does not appear and is skipped rather
+    // than mis-parsed.
+    function parseToml(text: string, sectioned: bool): var {
+        const out = {};
+        let section = "";
+        for (const rawLine of text.split("\n")) {
+            const line = rawLine.trim();
+            if (line === "" || line.startsWith("#")) continue;
+            if (line.startsWith("[")) {
+                section = sectioned ? line.replace(/^\[|\]$/gu, "").trim() + "." : "";
+                continue;
+            }
+            const eq = line.indexOf("=");
+            if (eq < 0) continue;
+            const key = line.slice(0, eq).trim();
+            let value = line.slice(eq + 1).trim().replace(/\s+#.*$/u, "");
+            if (/^["']/u.test(value)) value = value.slice(1, -1);
+            out[section + key] = value;
+        }
+        return out;
+    }
+
+    function reload(): void {
+        colorsFile.reload();
+        shellFile.reload();
+        nameFile.reload();
+    }
+
+    FileView {
+        id: colorsFile
+        path: root.stateDir + "/theme/colors.toml"
+        blockLoading: true
+        printErrors: false
+        onLoaded: root.colors = root.parseToml(colorsFile.text(), false)
+        onLoadFailed: root.colors = ({})
+    }
+
+    FileView {
+        id: shellFile
+        path: root.stateDir + "/theme/shell.toml"
+        blockLoading: true
+        printErrors: false
+        onLoaded: root.shell = root.parseToml(shellFile.text(), true)
+        onLoadFailed: root.shell = ({})
+    }
+
+    // The one watchable file: rewritten in place on every theme switch, and
+    // it survives the directory swap that kills watches inside theme/.
+    FileView {
+        id: nameFile
+        path: root.stateDir + "/theme.name"
+        blockLoading: true
+        watchChanges: true
+        printErrors: false
+        onLoaded: root.themeName = nameFile.text().trim()
+        onLoadFailed: root.themeName = ""
+        onFileChanged: {
+            nameFile.reload();
+            // The directory swap has already happened by the time theme.name is
+            // rewritten, so re-reading immediately is safe.
+            colorsFile.reload();
+            shellFile.reload();
+        }
+    }
+}

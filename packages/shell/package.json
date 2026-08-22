@@ -1,0 +1,23 @@
+{
+  "name": "@ghost/shell",
+  "version": "0.0.1",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "description": "Omarchy-native Quickshell surfaces for ghostd: summonable HUD, roster, bar indicator",
+  "files": [
+    "qml",
+    "contrib"
+  ],
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "lint": "bash dev/qmllint.sh",
+    "dev": "node dev/mock-ghostd.mjs",
+    "shell": "quickshell -p qml/shell.qml",
+    "build": "true",
+    "typecheck": "true",
+    "test": "true"
+  }
+}
