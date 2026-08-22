@@ -1,0 +1,33 @@
+[Unit]
+Description=Ghost daemon (ghostd)
+Documentation=https://github.com/ferdousbhai/ghost
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/ghostd
+Restart=on-failure
+RestartSec=2
+
+# The daemon scrubs inherited provider credentials itself (see env-scrub.ts),
+# but a service that never had them is better than one that drops them.
+# Do NOT add an EnvironmentFile with API keys here: a ghost's credentials
+# belong in %h/Ghosts/<name>/.pi/{models.json,auth.json}.
+Environment=GHOSTD_HOST=127.0.0.1
+
+# Local-only service; nothing here should reach outside the user's own files.
+PrivateTmp=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-write
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=no
+ReadWritePaths=%h/Ghosts %h/.config/ghost
+
+[Install]
+WantedBy=default.target

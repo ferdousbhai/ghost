@@ -1,0 +1,51 @@
+/** The ghost-home/v1 value types, shared by the reader/writer and the extensions. */
+import type { GhostScope } from "./scope.js";
+
+export const GHOST_HOME_FORMAT = "ghost-home/v1";
+
+/** Frontmatter a note carries. `public` absent or false means private. */
+export interface NoteFrontmatter {
+  /** `public: true` is the only thing that publishes a note. */
+  readonly public: boolean;
+  readonly title: string | undefined;
+  readonly tags: readonly string[];
+  readonly archived: boolean;
+  /** The pre-sanitization app path, when the export had to rewrite it. */
+  readonly appPath: string | undefined;
+}
+
+export interface NoteMeta extends NoteFrontmatter {
+  /** Path relative to `notes/`, always ending in `.md`, always `/`-separated. */
+  readonly path: string;
+}
+
+export interface NoteFile {
+  readonly meta: NoteMeta;
+  /** The note body, exactly as stored. */
+  readonly body: string;
+}
+
+export interface CharacterFile {
+  readonly public: boolean;
+  readonly title: string | undefined;
+  readonly body: string;
+}
+
+export interface MemoryRecord {
+  readonly slug: string;
+  readonly description: string;
+  readonly content: string;
+  /** `updated:` from the file, `YYYY-MM-DD`. */
+  readonly updated: string | undefined;
+  readonly scope: GhostScope;
+}
+
+export interface NoteCatalog {
+  /** Budgeted catalog lines, a contiguous prefix of the path-sorted catalog. */
+  readonly lines: readonly string[];
+  readonly chars: number;
+  readonly omitted: number;
+  /** Notes visible in this scope. */
+  readonly total: number;
+  readonly publicCount: number;
+}
