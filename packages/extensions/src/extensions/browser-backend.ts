@@ -41,7 +41,14 @@ export type BrowserFailure =
   /** The action's own parameters do not make sense. */
   | "invalid_input"
   /** A visitor session asked for the browser. */
-  | "forbidden_scope";
+  | "forbidden_scope"
+  /**
+   * A consequential action (click/type) was aimed at a page off the
+   * creator-opened origin's registrable domain — the prompt-injection guardrail.
+   */
+  | "blocked_action"
+  /** The per-open budget of consequential actions is spent. */
+  | "action_budget";
 
 const FAILURE_CODES = {
   browser_unavailable: "not_found",
@@ -53,6 +60,8 @@ const FAILURE_CODES = {
   element_not_found: "not_found",
   invalid_input: "invalid_format",
   forbidden_scope: "forbidden",
+  blocked_action: "forbidden",
+  action_budget: "limit_exceeded",
 } as const;
 
 export class GhostBrowserError extends GhostError {

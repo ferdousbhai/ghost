@@ -33,7 +33,7 @@ import {
   type PageSummary,
 } from "./browser-backend.js";
 import { playwrightBackend } from "./browser-playwright.js";
-import { checkUrl, type UrlPolicyOptions } from "./browser-policy.js";
+import { checkActingScope, checkUrl, type UrlPolicyOptions } from "./browser-policy.js";
 
 export const SCREENSHOT_DIRNAME = ".screenshots";
 
@@ -44,6 +44,15 @@ export const MIN_READ_BUDGET_CHARS = 200;
 export const DEFAULT_FIND_LIMIT = 20;
 export const MAX_FIND_LIMIT = 100;
 
+/**
+ * How many consequential actions (click/type) may fire between two explicit
+ * `open()`s. An injected page that hijacks the ghost cannot issue an `open()` on
+ * the creator's behalf, so bounding actions per creator-directed navigation caps
+ * how much a single hijack can do before the transcript shows another deliberate
+ * step. Generous by design — a normal form fill is one or two actions.
+ */
+export const DEFAULT_ACTING_BUDGET = 12;
+
 export interface BrowserSessionOptions {
   /** The ghost home. Screenshots and any per-ghost backend state live under it. */
   readonly homeDir: string;
@@ -52,6 +61,19 @@ export interface BrowserSessionOptions {
   /** Close the browser after this long with no action. Zero disables it. */
   readonly idleTimeoutMs?: number;
   readonly actionTimeoutMs?: number;
+  /**
+   * Consequential actions allowed per creator-directed `open()`. See
+   * {@link DEFAULT_ACTING_BUDGET}. Zero or negative disables the budget (the
+   * domain-scope guardrail still applies).
+   */
+  readonly actingBudget?: number;
+  /**
+   * Per-conversation escape hatch: let consequential actions run off the
+   * opened origin's registrable domain by default, for a creator who is running
+   * a deliberate multi-site workflow. Off by default; the per-call
+   * `allowCrossDomain` is the usual, more legible way to widen scope.
+   */
+  readonly allowActionsOffOrigin?: boolean;
 }
 
 export interface SessionReadResult extends PageSummary {
@@ -81,8 +103,17 @@ export class GhostBrowserSession {
   #refPageUrl: string | undefined;
   #screenshotCount = 0;
 
+  /** The URL the creator's most recent `open()` landed on — the trusted origin. */
+  #originUrl: string | undefined;
+  /** Navigations the page itself drove since that open (link-follows / redirects). */
+  #originHops = 0;
+  /** Consequential actions left before the next `open()` re-anchors the origin. */
+  #actingRemaining: number;
+
   readonly #idleTimeoutMs: number;
   readonly #actionTimeoutMs: number;
+  readonly #actingBudget: number;
+  readonly #allowActionsOffOrigin: boolean;
 
   constructor(options: BrowserSessionOptions) {
     this.homeDir = resolve(options.homeDir);
@@ -90,6 +121,9 @@ export class GhostBrowserSession {
     this.backend = (options.backend ?? playwrightBackend())({ homeDir: this.homeDir });
     this.#idleTimeoutMs = options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
     this.#actionTimeoutMs = options.actionTimeoutMs ?? DEFAULT_ACTION_TIMEOUT_MS;
+    this.#actingBudget = options.actingBudget ?? DEFAULT_ACTING_BUDGET;
+    this.#allowActionsOffOrigin = options.allowActionsOffOrigin ?? false;
+    this.#actingRemaining = this.#actingBudget;
   }
 
   get running(): boolean {
@@ -111,6 +145,21 @@ export class GhostBrowserSession {
 
   get refPageUrl(): string | undefined {
     return this.#refPageUrl;
+  }
+
+  /** The trusted origin (last `open()`), for tests and result rendering. */
+  get originUrl(): string | undefined {
+    return this.#originUrl;
+  }
+
+  /** Navigations the page drove since the last `open()`. */
+  get originHops(): number {
+    return this.#originHops;
+  }
+
+  /** Consequential actions left before the next `open()` re-anchors the origin. */
+  get actingRemaining(): number {
+    return this.#actingRemaining;
   }
 
   // -------------------------------------------------------------------- helpers
@@ -173,6 +222,39 @@ export class GhostBrowserSession {
     );
   }
 
+  /**
+   * The prompt-injection gate for consequential actions. Refuses to click, type,
+   * or submit on a page off the creator-opened origin's registrable domain, and
+   * spends one unit of the per-open acting budget. Reads never call this.
+   *
+   * Fails closed, before the backend ever hears about the action, with a
+   * structured `GhostBrowserError` that names how the creator can widen scope.
+   */
+  #gateActing(currentUrl: string, allowCrossDomain: boolean): void {
+    const scope = checkActingScope(this.#originUrl, currentUrl, this.#originHops, {
+      allowCrossDomain: allowCrossDomain || this.#allowActionsOffOrigin,
+    });
+    if (!scope.ok) {
+      throw new GhostBrowserError("blocked_action", scope.reason, scope.details);
+    }
+    if (this.#actingBudget > 0 && this.#actingRemaining <= 0) {
+      throw new GhostBrowserError(
+        "action_budget",
+        `That is more than ${this.#actingBudget} consequential actions since the `
+        + "last page you opened. This bounds how far a single hijacked page can "
+        + "push the browser. If the creator asked for this, re-open the page you "
+        + "mean to act on with action \"open\" (which resets the budget) and "
+        + "continue from there.",
+        {
+          failure: "action_budget",
+          budget: this.#actingBudget,
+          originUrl: this.#originUrl,
+        },
+      );
+    }
+    if (this.#actingBudget > 0) this.#actingRemaining -= 1;
+  }
+
   /** Nothing but `open` and `close` may act on a browser with no page loaded. */
   async #requirePage(): Promise<PageSummary> {
     const page = await this.backend.current();
@@ -196,6 +278,11 @@ export class GhostBrowserSession {
       }
       this.#invalidateRefs();
       const page = await this.backend.open(checked.url, this.#timeout(options.timeoutMs));
+      // This is the creator's own navigation: re-anchor the trusted origin to
+      // where it actually landed, reset the hop count, and refill the budget.
+      this.#originUrl = page.url;
+      this.#originHops = 0;
+      this.#actingRemaining = this.#actingBudget;
       this.#touchIdleTimer();
       return page;
     });
@@ -241,13 +328,19 @@ export class GhostBrowserSession {
     });
   }
 
-  click(target: BackendTarget & { timeoutMs?: number }) {
+  click(target: BackendTarget & { timeoutMs?: number; allowCrossDomain?: boolean }) {
     return this.#serial(async (): Promise<PageSummary> => {
       const checked = this.#checkTarget(target);
       const before = await this.#requirePage();
+      // Clicking is consequential: gate it against the trusted origin first.
+      this.#gateActing(before.url, target.allowCrossDomain === true);
       const page = await this.backend.click(checked, this.#timeout(target.timeoutMs));
-      // A click that navigated invalidates every ref minted on the old page.
-      if (page.url !== before.url) this.#invalidateRefs();
+      // A click that navigated invalidates every ref minted on the old page and
+      // counts as one more hop the page — not the creator — drove.
+      if (page.url !== before.url) {
+        this.#invalidateRefs();
+        this.#originHops += 1;
+      }
       this.#touchIdleTimer();
       return page;
     });
@@ -257,10 +350,13 @@ export class GhostBrowserSession {
     text: string;
     submit?: boolean;
     timeoutMs?: number;
+    allowCrossDomain?: boolean;
   }) {
     return this.#serial(async (): Promise<SessionTypeResult> => {
       const checked = this.#checkTarget(input);
-      await this.#requirePage();
+      const before = await this.#requirePage();
+      // Typing into and submitting someone's form is consequential too.
+      this.#gateActing(before.url, input.allowCrossDomain === true);
       // Submitting is a separate, explicit act: filling a field is reversible,
       // pressing Enter on someone's form is not.
       const submit = input.submit === true;
@@ -268,7 +364,10 @@ export class GhostBrowserSession {
         { ...checked, text: input.text, submit },
         this.#timeout(input.timeoutMs),
       );
-      if (submit) this.#invalidateRefs();
+      if (submit) {
+        this.#invalidateRefs();
+        if (page.url !== before.url) this.#originHops += 1;
+      }
       this.#touchIdleTimer();
       return { ...page, submitted: submit };
     });
@@ -295,6 +394,9 @@ export class GhostBrowserSession {
     return this.#serial(async (): Promise<BackendBackResult> => {
       await this.#requirePage();
       const page = await this.backend.back(this.#timeout(options.timeoutMs));
+      // Going back steps toward the origin, so it undoes a hop rather than adding
+      // one. Observing only — no gate — but the hop count has to stay honest.
+      if (page.moved && this.#originHops > 0) this.#originHops -= 1;
       this.#invalidateRefs();
       this.#touchIdleTimer();
       return page;
@@ -306,6 +408,10 @@ export class GhostBrowserSession {
     if (this.#idleTimer) clearTimeout(this.#idleTimer);
     this.#idleTimer = undefined;
     this.#invalidateRefs();
+    // A fresh browser has no trusted origin until the next open().
+    this.#originUrl = undefined;
+    this.#originHops = 0;
+    this.#actingRemaining = this.#actingBudget;
     return this.backend.close();
   }
 }

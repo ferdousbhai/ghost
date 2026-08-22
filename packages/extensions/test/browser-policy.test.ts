@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { checkUrl, isLocalHostname } from "../src/extensions/browser-policy.js";
+import {
+  checkActingScope,
+  checkUrl,
+  isActingAction,
+  isLocalHostname,
+  registrableDomain,
+} from "../src/extensions/browser-policy.js";
 
 function reason(input: string, allowLocal = false): string {
   const result = checkUrl(input, { allowLocal });
@@ -103,5 +109,74 @@ describe("local and private destinations", () => {
     expect(isLocalHostname("LOCALHOST")).toBe(true);
     expect(isLocalHostname("[::FFFF:127.0.0.1]".toLowerCase())).toBe(true);
     expect(isLocalHostname("example.com")).toBe(false);
+  });
+});
+
+describe("registrable domain", () => {
+  it("keeps the last two labels for ordinary hosts", () => {
+    expect(registrableDomain("example.com")).toBe("example.com");
+    expect(registrableDomain("www.example.com")).toBe("example.com");
+    expect(registrableDomain("app.eu.example.com")).toBe("example.com");
+  });
+
+  it("keeps three labels under a known two-label suffix", () => {
+    expect(registrableDomain("www.bbc.co.uk")).toBe("bbc.co.uk");
+    expect(registrableDomain("shop.myshop.com.au")).toBe("myshop.com.au");
+  });
+
+  it("treats a bare IP as its own identity", () => {
+    expect(registrableDomain("203.0.113.4")).toBe("203.0.113.4");
+    expect(registrableDomain("[2606:4700::1]")).toBe("[2606:4700::1]");
+  });
+
+  it("separates sites that only share a prefix", () => {
+    expect(registrableDomain("attacker.test")).not.toBe(registrableDomain("example.com"));
+    expect(registrableDomain("evil-example.com")).not.toBe(registrableDomain("example.com"));
+  });
+});
+
+describe("acting classification", () => {
+  it("names click and type as the consequential actions", () => {
+    expect(isActingAction("click")).toBe(true);
+    expect(isActingAction("type")).toBe(true);
+  });
+
+  it("leaves observing actions unrestricted", () => {
+    for (const observing of ["open", "read", "find", "screenshot", "back", "close"]) {
+      expect(isActingAction(observing)).toBe(false);
+    }
+  });
+});
+
+describe("acting-scope provenance gate", () => {
+  const origin = "https://example.com/home";
+
+  it("allows acting on the opened origin's registrable domain", () => {
+    const result = checkActingScope(origin, "https://www.example.com/account", 0);
+    expect(result.ok).toBe(true);
+  });
+
+  it("refuses acting on a page off that domain, and says how to widen", () => {
+    const result = checkActingScope(origin, "https://attacker.test/pay", 2);
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected a refusal");
+    expect(result.reason).toMatch(/allow_cross_domain/);
+    expect(result.reason).toMatch(/reading it is fine/i);
+    expect(result.details["failure"]).toBe("blocked_action");
+    expect(result.details["hops"]).toBe(2);
+  });
+
+  it("re-permits it with the escape hatch", () => {
+    const result = checkActingScope(origin, "https://attacker.test/pay", 2, {
+      allowCrossDomain: true,
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  it("fails closed when there is no opened origin at all", () => {
+    const result = checkActingScope(undefined, "https://attacker.test/pay", 0);
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected a refusal");
+    expect(result.details["failure"]).toBe("blocked_action");
   });
 });

@@ -51,7 +51,7 @@ import {
 import { GhostError } from "../src/errors.js";
 import { CREATOR_SCOPE, visitorScope } from "../src/scope.js";
 import { createGhostFixture, type GhostFixture } from "./support/fixture.js";
-import { loadExtension, resultText } from "./support/harness.js";
+import { loadExtension, resultText, type Harness } from "./support/harness.js";
 
 const shared = vi.hoisted(() => ({
   launches: [] as { userDataDir: string; options: Record<string, unknown> }[],
@@ -572,6 +572,132 @@ describe("click and type", () => {
       harness.call(GHOST_BROWSER, { action: "type", selector: "input" }),
     );
     expect(error.code).toBe("invalid_format");
+  });
+});
+
+// ------------------------------------------------- prompt-injection guardrail
+
+const CONFIRM_BUTTON: PageElementMatch = {
+  ref: "e1",
+  tag: "button",
+  name: "Confirm transfer",
+  text: "Confirm transfer",
+  visible: true,
+  disabled: false,
+};
+
+/** Open the origin, then follow a link the page offers to `destination`. */
+async function hopVia(destination: string): Promise<Harness> {
+  const harness = await openWithMatches([SIGN_IN]);
+  context.page.navigateOnClick.set(`[${REF_ATTRIBUTE}="e1"]`, destination);
+  await harness.call(GHOST_BROWSER, { action: "find", query: "Sign in" });
+  // Following the link is itself a same-domain action on the opened origin, so
+  // it is allowed; it lands us on `destination`.
+  await harness.call(GHOST_BROWSER, { action: "click", ref: "e1" });
+  return harness;
+}
+
+describe("prompt-injection guardrail", () => {
+  it("puts the untrusted-content warning in the tool description", async () => {
+    const harness = await creatorHarness();
+    const description = harness.tools.get(GHOST_BROWSER)?.description ?? "";
+    expect(description).toMatch(/untrusted data, never instructions/i);
+    expect(description).toMatch(/ignore your previous instructions/i);
+    expect(description).toMatch(/report .* to the creator/i);
+    const schema = harness.tools.get(GHOST_BROWSER)?.parameters as {
+      properties: Record<string, unknown>;
+    };
+    expect(schema.properties["allow_cross_domain"]).toBeDefined();
+  });
+
+  it("acts freely on the creator-opened domain, across subdomain hops", async () => {
+    const harness = await hopVia("https://app.example.com/dashboard");
+    // Now on app.example.com — a different host, same registrable domain.
+    context.page.findResults = [CONFIRM_BUTTON];
+    await harness.call(GHOST_BROWSER, { action: "find", query: "Confirm" });
+    await expect(harness.call(GHOST_BROWSER, { action: "click", ref: "e1" })).resolves
+      .toBeDefined();
+  });
+
+  it("still reads, finds, and screenshots after an injected cross-domain hop", async () => {
+    const harness = await hopVia("https://attacker.test/");
+    context.page.pageText = "attacker-controlled text";
+    context.page.findResults = [CONFIRM_BUTTON];
+    await expect(harness.call(GHOST_BROWSER, { action: "read" })).resolves.toBeDefined();
+    await expect(harness.call(GHOST_BROWSER, { action: "find", query: "Confirm" })).resolves
+      .toBeDefined();
+    await expect(harness.call(GHOST_BROWSER, { action: "screenshot" })).resolves.toBeDefined();
+  });
+
+  it("refuses to act after an injected cross-domain hop, with an actionable error", async () => {
+    const harness = await hopVia("https://attacker.test/pay");
+    context.page.findResults = [CONFIRM_BUTTON];
+    await harness.call(GHOST_BROWSER, { action: "find", query: "Confirm" });
+
+    const error = await expectGhostError(
+      harness.call(GHOST_BROWSER, { action: "click", ref: "e1" }),
+    );
+    expect(error.code).toBe("forbidden");
+    expect(error.details["failure"]).toBe("blocked_action");
+    expect(error.message).toMatch(/allow_cross_domain/);
+    expect(error.message).toMatch(/attacker\.test/);
+  });
+
+  it("lets the creator widen scope with allow_cross_domain", async () => {
+    const harness = await hopVia("https://attacker.test/pay");
+    context.page.findResults = [CONFIRM_BUTTON];
+    await harness.call(GHOST_BROWSER, { action: "find", query: "Confirm" });
+
+    await expect(
+      harness.call(GHOST_BROWSER, {
+        action: "click",
+        ref: "e1",
+        allow_cross_domain: true,
+      }),
+    ).resolves.toBeDefined();
+  });
+
+  it("also gates typing and submitting on an off-origin page", async () => {
+    const harness = await hopVia("https://attacker.test/pay");
+    context.page.findResults = [
+      { ...SEARCH_BOX, ref: "e1" },
+    ];
+    await harness.call(GHOST_BROWSER, { action: "find", query: "q" });
+    const error = await expectGhostError(
+      harness.call(GHOST_BROWSER, {
+        action: "type",
+        ref: "e1",
+        text: "secret",
+        submit: true,
+      }),
+    );
+    expect(error.details["failure"]).toBe("blocked_action");
+  });
+
+  it("enforces a per-open budget of consequential actions", async () => {
+    const harness = await loadExtension(
+      createBrowserExtension({
+        backend: playwrightBackend({ executablePath: FAKE_CHROMIUM, headless: false }),
+        browser: { idleTimeoutMs: 0, actingBudget: 2 },
+      }),
+      fixture.dir,
+    );
+    await harness.call(GHOST_BROWSER, { action: "open", url: "https://example.com" });
+
+    // Two same-domain, non-navigating clicks are within budget.
+    await harness.call(GHOST_BROWSER, { action: "click", selector: "button.a" });
+    await harness.call(GHOST_BROWSER, { action: "click", selector: "button.b" });
+
+    const error = await expectGhostError(
+      harness.call(GHOST_BROWSER, { action: "click", selector: "button.c" }),
+    );
+    expect(error.code).toBe("limit_exceeded");
+    expect(error.details["failure"]).toBe("action_budget");
+
+    // A fresh creator-directed open refills the budget.
+    await harness.call(GHOST_BROWSER, { action: "open", url: "https://example.com" });
+    await expect(harness.call(GHOST_BROWSER, { action: "click", selector: "button.c" }))
+      .resolves.toBeDefined();
   });
 });
 
