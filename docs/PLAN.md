@@ -9,6 +9,20 @@ extended with pi extensions and skills, and (later) shared with visitors on
 the creator's terms over a Nostr control plane, with payments going directly
 creator ↔ visitor. No server holds a copy. "Your ghost, not our copy of it."
 
+## Design goal: modifiable, infinitely extensible
+
+**The ghost is modifiable and infinitely extensible. pi already showed the
+way.** The official repo is the point of collaboration on a narrow,
+opinionated core — ghost home, daemon, shell, the built-in extensions — but
+ghosts are meant to be modified: creators glob onto the plugin and extension
+interfaces (pi extensions, skills, model roles, browser backends, tool
+factories) and grow their ghost to whatever their needs are. Core stays
+small and holds the contracts; everything else is a creator's extension.
+When a capability is generic enough for every ghost, it graduates into core
+(or upstream into pi itself); until then it lives in the creator's ghost
+home. The measure of success is not what core ships — it is what creators
+can bolt on without asking.
+
 ## Positioning
 
 The product shape Grok Bot validated — always-on AI teammates with a
@@ -17,7 +31,7 @@ open source (Apache-2.0), and on the OS they skipped (Linux/Omarchy)**.
 Ghosts are hired teammates, not configured assistants: name, job, a chat
 thread, check-ins. Where Grok Bot gives every bot one shared cloud computer
 and pooled credentials, each ghost gets a real Hyprland workspace on your
-actual machine, per-ghost homes, and approval gates — with no credential
+actual machine, per-ghost homes, and structural scope gates, with no credential
 pooling and no cloud custody.
 
 ## Phases
