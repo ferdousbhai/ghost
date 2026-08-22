@@ -1,0 +1,288 @@
+/**
+ * A scripted runtime for the extensions that reach outside the ghost home —
+ * vision, screen, and desktop.
+ *
+ * `support/harness.ts` gives every extension a context with nothing but `cwd`,
+ * which is all persona/memory/notes ever read. These three read `ctx.model` and
+ * `ctx.modelRegistry` as well, and they run programs. So this harness adds:
+ *
+ * - a **fixture model catalogue** with real `input` and `cost` values, so the
+ *   "cheapest credentialed vision model" rule is tested against data rather
+ *   than against a mock that agrees with it;
+ * - a **recording command runner**, so `grim`/`hyprctl`/`notify-send` are never
+ *   actually invoked and every argv the extensions build is inspectable;
+ * - the `context` and `session_start` events the vision fallback hangs off.
+ *
+ * No model is contacted and no desktop is touched.
+ */
+import type {
+  AgentToolResult,
+  ExtensionAPI,
+  ExtensionContext,
+  ExtensionFactory,
+  ToolCallEvent,
+  ToolCallEventResult,
+  ToolDefinition,
+} from "@earendil-works/pi-coding-agent";
+import type { VisionModel } from "../../src/extensions/vision.js";
+import type { CommandResult, CommandRunner, RunCommandOptions } from "../../src/extensions/shared.js";
+import { CommandError } from "../../src/extensions/shared.js";
+
+type AnyTool = ToolDefinition<any, any, any>;
+type AnyHandler = (event: any, ctx: any) => unknown;
+
+/** A 1×1 transparent PNG — the smallest thing that is genuinely an image. */
+export const TINY_PNG_BASE64 =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+
+export interface FixtureModelInput {
+  provider: string;
+  id: string;
+  /** Omit entirely to model a provider entry that never declared `input`. */
+  input?: Array<"text" | "image">;
+  costInput?: number;
+  costOutput?: number;
+}
+
+/** A `Model` shaped exactly enough for the rules under test. */
+export function fixtureModel(input: FixtureModelInput): VisionModel {
+  const model: Record<string, unknown> = {
+    id: input.id,
+    name: input.id,
+    api: "openai-completions",
+    provider: input.provider,
+    baseUrl: "https://example.invalid/v1",
+    reasoning: false,
+    cost: {
+      input: input.costInput ?? 1,
+      output: input.costOutput ?? 1,
+      cacheRead: 0,
+      cacheWrite: 0,
+    },
+    contextWindow: 128_000,
+    maxTokens: 8_192,
+  };
+  if (input.input !== undefined) model["input"] = input.input;
+  return model as unknown as VisionModel;
+}
+
+export interface FixtureRegistryOptions {
+  readonly models: readonly VisionModel[];
+  /** Providers with credentials. Defaults to every provider in `models`. */
+  readonly credentialed?: readonly string[];
+  /** What `complete()` answers with. Defaults to a fixed description. */
+  readonly completion?: string;
+}
+
+export interface FixtureRegistry {
+  readonly registry: ExtensionContext["modelRegistry"];
+  /** Every `complete()` call, in order. */
+  readonly completions: Array<{ model: string; prompt: string; systemPrompt: string }>;
+}
+
+export function fixtureRegistry(options: FixtureRegistryOptions): FixtureRegistry {
+  const credentialed = new Set(
+    options.credentialed ?? options.models.map((model) => model.provider),
+  );
+  const completions: FixtureRegistry["completions"] = [];
+
+  const registry = {
+    getAll: () => [...options.models],
+    getAvailable: () => options.models.filter((model) => credentialed.has(model.provider)),
+    find: (provider: string, modelId: string) =>
+      options.models.find((model) => model.provider === provider && model.id === modelId),
+    hasConfiguredAuth: (model: VisionModel) => credentialed.has(model.provider),
+    complete: async (model: VisionModel, context: { systemPrompt?: string; messages: any[] }) => {
+      const last = context.messages[context.messages.length - 1];
+      const text = (last?.content ?? [])
+        .filter((part: { type?: string }) => part.type === "text")
+        .map((part: { text: string }) => part.text)
+        .join("\n");
+      completions.push({
+        model: `${model.provider}/${model.id}`,
+        prompt: text,
+        systemPrompt: context.systemPrompt ?? "",
+      });
+      return {
+        role: "assistant" as const,
+        content: [{ type: "text" as const, text: options.completion ?? "a red square" }],
+        api: "openai-completions",
+        provider: model.provider,
+        model: model.id,
+        usage: {},
+        stopReason: "stop" as const,
+        timestamp: Date.now(),
+      };
+    },
+  };
+
+  return { registry: registry as unknown as ExtensionContext["modelRegistry"], completions };
+}
+
+// ---------------------------------------------------------------------------
+// Command runner
+// ---------------------------------------------------------------------------
+
+export interface RecordedCommand {
+  readonly command: string;
+  readonly args: readonly string[];
+  readonly options: RunCommandOptions | undefined;
+}
+
+export interface FakeRunner {
+  readonly run: CommandRunner;
+  readonly calls: RecordedCommand[];
+  /** Commands recorded as `"grim -g 0,0 10x10 /tmp/x.png"`, for assertions. */
+  lines(): string[];
+}
+
+export type FakeCommandHandler = (
+  command: string,
+  args: readonly string[],
+) => Promise<CommandResult | void> | CommandResult | void;
+
+/** A runner that records every invocation and answers from `handler`. */
+export function fakeRunner(handler: FakeCommandHandler = () => undefined): FakeRunner {
+  const calls: RecordedCommand[] = [];
+  const run: CommandRunner = async (command, args, options) => {
+    calls.push({ command, args: [...args], options });
+    const result = await handler(command, args);
+    return result ?? { stdout: "", stderr: "" };
+  };
+  return {
+    run,
+    calls,
+    lines: () => calls.map((call) => [call.command, ...call.args].join(" ")),
+  };
+}
+
+/** The failure `execFile` produces for a program that is not installed. */
+export function missingBinary(command: string): CommandError {
+  return new CommandError(command, [], `spawn ${command} ENOENT`, { errno: "ENOENT" });
+}
+
+// ---------------------------------------------------------------------------
+// Context and harness
+// ---------------------------------------------------------------------------
+
+export interface ContextOptions {
+  readonly cwd: string;
+  readonly model?: VisionModel | undefined;
+  readonly modelRegistry?: ExtensionContext["modelRegistry"];
+}
+
+export function makeContext(options: ContextOptions): ExtensionContext {
+  return {
+    cwd: options.cwd,
+    mode: "print",
+    hasUI: false,
+    model: options.model,
+    modelRegistry: options.modelRegistry,
+  } as unknown as ExtensionContext;
+}
+
+export interface DesktopHarness {
+  readonly tools: Map<string, AnyTool>;
+  readonly handlers: Map<string, AnyHandler[]>;
+  /** What `pi.setActiveTools` last left active. */
+  activeTools: string[];
+  toolNames(): string[];
+  call(name: string, params?: Record<string, unknown>): Promise<AgentToolResult<any>>;
+  toolCall(
+    toolName: string,
+    input?: Record<string, unknown>,
+  ): Promise<ToolCallEventResult | undefined>;
+  /** Fire `context`, returning the messages the chain produced. */
+  transformContext(messages: unknown[]): Promise<unknown[]>;
+  /** Fire `session_start`. */
+  sessionStart(): Promise<void>;
+  /** Fire `before_agent_start`. */
+  beforeAgentStart(): Promise<void>;
+}
+
+export async function loadExtensionWith(
+  factory: ExtensionFactory,
+  ctx: ExtensionContext,
+): Promise<DesktopHarness> {
+  const tools = new Map<string, AnyTool>();
+  const handlers = new Map<string, AnyHandler[]>();
+
+  const harness: DesktopHarness = {
+    tools,
+    handlers,
+    activeTools: [],
+    toolNames: () => [...tools.keys()],
+    async call(name, params = {}) {
+      const tool = tools.get(name);
+      if (!tool) throw new Error(`Tool ${name} is not registered`);
+      return tool.execute(`call-${name}`, params, undefined, undefined, ctx);
+    },
+    async toolCall(toolName, input = {}) {
+      const event = { type: "tool_call", toolCallId: "call-1", toolName, input } as ToolCallEvent;
+      for (const handler of handlers.get("tool_call") ?? []) {
+        const result = (await handler(event, ctx)) as ToolCallEventResult | undefined;
+        if (result?.block) return result;
+      }
+      return undefined;
+    },
+    async transformContext(messages) {
+      let current = messages;
+      for (const handler of handlers.get("context") ?? []) {
+        const result = (await handler({ type: "context", messages: current }, ctx)) as
+          | { messages?: unknown[] }
+          | undefined;
+        if (result?.messages) current = result.messages;
+      }
+      return current;
+    },
+    async sessionStart() {
+      for (const handler of handlers.get("session_start") ?? []) {
+        await handler({ type: "session_start" }, ctx);
+      }
+    },
+    async beforeAgentStart() {
+      for (const handler of handlers.get("before_agent_start") ?? []) {
+        await handler(
+          { type: "before_agent_start", prompt: "hello", systemPrompt: "", systemPromptOptions: {} },
+          ctx,
+        );
+      }
+    },
+  };
+
+  const api = {
+    registerTool(tool: AnyTool) {
+      tools.set(tool.name, tool);
+      harness.activeTools = [...harness.activeTools, tool.name];
+    },
+    on(event: string, handler: AnyHandler) {
+      const existing = handlers.get(event) ?? [];
+      existing.push(handler);
+      handlers.set(event, existing);
+    },
+    getActiveTools: () => [...harness.activeTools],
+    setActiveTools: (names: string[]) => {
+      harness.activeTools = [...names];
+    },
+  } as unknown as ExtensionAPI;
+
+  await factory(api);
+  return harness;
+}
+
+/** The text a tool returned, joined. */
+export function resultText(result: AgentToolResult<any>): string {
+  return result.content
+    .filter((part): part is { type: "text"; text: string } => part.type === "text")
+    .map((part) => part.text)
+    .join("\n");
+}
+
+/** The image blocks a tool returned. */
+export function resultImages(
+  result: AgentToolResult<any>,
+): Array<{ type: "image"; data: string; mimeType: string }> {
+  return result.content.filter(
+    (part): part is { type: "image"; data: string; mimeType: string } => part.type === "image",
+  );
+}

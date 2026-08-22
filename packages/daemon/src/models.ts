@@ -77,11 +77,24 @@ export interface GhostModelRoleBinding {
 }
 
 /**
- * The inference roles a ghost binds. Only `chat_model` is used in phase 1;
- * the rest exist so a role added later does not need a file migration.
+ * The inference roles a ghost binds. Only `chat_model` is load-bearing for a
+ * chat turn; the rest exist so a role added later does not need a file
+ * migration. `vision_model` is the first to take that promise up — a plain
+ * addition to this union, and every existing `models.json` keeps working,
+ * because `roles` is optional, each role within it is optional, and pi's own
+ * schema has no `additionalProperties` constraint to trip over.
+ *
+ * - `chat_model` — answers the turn.
+ * - `vision_model` — reads images when `chat_model` cannot; must be a model
+ *   whose `input` includes `"image"`. Unbound, `@ghost/extensions` falls back
+ *   to the cheapest credentialed vision-capable model in the ghost's own
+ *   catalogue, ranked by `cost.input`. With none available it raises a loud,
+ *   actionable error rather than letting the image be dropped in silence.
+ * - `general_purpose_model`, `research_model` — reserved.
  */
 export type GhostModelRole =
   | "chat_model"
+  | "vision_model"
   | "general_purpose_model"
   | "research_model";
 
