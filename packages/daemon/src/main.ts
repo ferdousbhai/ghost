@@ -13,6 +13,7 @@
  * environment. See env-scrub.ts for why.
  */
 import { LoginManager } from "./auth.js";
+import { importCommand } from "./import-command.js";
 import { loginCommand } from "./login-command.js";
 import { loadConfig, type DaemonConfigOverrides } from "./config.js";
 import { scrubProviderEnv } from "./env-scrub.js";
@@ -27,10 +28,13 @@ const USAGE = `ghostd — your ghost, on your machine
 
 Usage:
   ghostd [options]
+  ghostd import <archive> [--name <name>] [--overwrite] [options]
   ghostd login [<ghost>] [--provider <id>] [--api-key] [options]
   ghostd relay-token [--rotate] [--quiet]
 
 Subcommands:
+  import                   Import a ghost from a "Download my ghost" archive
+                           (zip or directory) into ~/Ghosts/<name>.
   login                    Sign a ghost into a model provider from the terminal
                            (the same flow the shell drives over HTTP). Prompts
                            for the ghost and provider when not given; --api-key
@@ -139,6 +143,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   // anything else so they work while a daemon is already running.
   if (argv[0] === "relay-token") return relayTokenCommand(argv.slice(1));
   if (argv[0] === "login") return loginCommand(argv.slice(1));
+  if (argv[0] === "import") return importCommand(argv.slice(1));
 
   let parsed: ParsedArgs;
   try {
