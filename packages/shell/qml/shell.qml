@@ -68,6 +68,19 @@ ShellRoot {
             Ghostd.send(prompt);
         }
 
+        /** Open the HUD on the "Connect a model" panel for the active ghost. */
+        function login(): void {
+            hud.open();
+            hud.openLogin();
+        }
+
+        /** Open the panel and begin a specific login straight away. */
+        function loginTo(provider: string, authType: string): void {
+            hud.open();
+            hud.openLogin();
+            if (provider !== "") Ghostd.startLogin(provider, authType === "" ? "oauth" : authType);
+        }
+
         function status(): string {
             return JSON.stringify({
                 ghost: Ghostd.activeGhost,

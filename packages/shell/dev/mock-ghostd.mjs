@@ -4,12 +4,19 @@
  * the Quickshell surfaces without pi, models, or a real ghost home.
  *
  * Implements:
- *   GET  /api/ghosts                  → [{ name, dir, createdAt }]
- *   POST /api/ghosts { name }         → 201 + the new ghost
- *   POST /api/ghosts/:name/messages   → pi-messages SSE (canned reply)
- *   GET  /api/ghosts/:name/sessions   → session listing
+ *   GET  /api/ghosts                          → [{ name, dir, createdAt }]
+ *   POST /api/ghosts { name }                 → 201 + the new ghost
+ *   POST /api/ghosts/:name/messages           → pi-messages SSE (canned reply)
+ *   GET  /api/ghosts/:name/sessions           → session listing
+ *   GET  /api/ghosts/:name/providers          → loginable providers
+ *   POST /api/ghosts/:name/login              → start a login → { loginId, status }
+ *   GET  /api/ghosts/:name/login/:loginId     → current login step
+ *   POST /api/ghosts/:name/login/:loginId/input → satisfy an awaiting prompt
  *
- * Nothing touches the filesystem: ghosts live in memory and vanish on exit.
+ * The login flows are scripted (no real provider): openai-codex OAuth offers a
+ * select (browser callback vs device code), openrouter OAuth shows an auth URL
+ * plus a paste field, and api-key flows ask for a masked key. Nothing touches
+ * the filesystem: ghosts and logins live in memory and vanish on exit.
  *
  * Usage:  node dev/mock-ghostd.mjs [--port 7717] [--slow] [--fail]
  *   --slow   30ms between text deltas instead of 12ms
@@ -126,6 +133,82 @@ function extractPrompt(body) {
   return "(no prompt)";
 }
 
+// ---- Scripted login flows --------------------------------------------------
+
+const PROVIDERS = [
+  { id: "openai-codex", name: "OpenAI Codex", subscription: true, authTypes: ["oauth"] },
+  { id: "anthropic", name: "Anthropic", subscription: true, authTypes: ["oauth", "api_key"] },
+  {
+    id: "openrouter",
+    name: "OpenRouter",
+    subscription: false,
+    authTypes: ["oauth", "api_key"],
+    loginLabel: "Sign in with OpenRouter",
+  },
+];
+
+/** loginId → mutable login session. */
+const logins = new Map();
+
+function startLogin(providerId, authType) {
+  const loginId = "login-" + Math.random().toString(36).slice(2, 10);
+  const session = { loginId, providerId, authType, view: { loginId, providerId, authType } };
+  logins.set(loginId, session);
+  if (authType === "api_key") {
+    session.view.status = "awaiting_input";
+    session.view.prompt = { kind: "secret", message: `${providerId} API key`, secret: true };
+  } else if (providerId === "openai-codex") {
+    // Offer the same choice pi's own codex flow does.
+    session.view.status = "awaiting_select";
+    session.view.prompt = {
+      kind: "select",
+      message: "How do you want to sign in?",
+      secret: false,
+      options: [
+        { id: "callback", label: "Open a browser" },
+        { id: "device_code", label: "Use a device code" },
+      ],
+    };
+  } else {
+    // openrouter (and anything else) OAuth: a callback URL plus a paste field.
+    session.view.status = "awaiting_input";
+    session.view.authUrl = "https://example.com/oauth/authorize?client=ghost&code=demo";
+    session.view.prompt = { kind: "manual_code", message: "Paste the code from your browser", secret: true };
+  }
+  return session.view;
+}
+
+function loginInput(session, value) {
+  const view = session.view;
+  if (view.status === "awaiting_select") {
+    if (value === "device_code") {
+      view.status = "awaiting_device_code";
+      view.deviceCode = "GHOST-1234";
+      view.verificationUrl = "https://example.com/activate";
+      view.deviceExpiresInSeconds = 900;
+      delete view.prompt;
+      // Auto-complete the device poll shortly, like a real provider would.
+      setTimeout(() => finishLogin(session), 4000);
+    } else {
+      view.status = "awaiting_input";
+      view.authUrl = "https://example.com/oauth/authorize?client=ghost&code=demo";
+      view.prompt = { kind: "manual_code", message: "Paste the code from your browser", secret: true };
+    }
+    return view;
+  }
+  // A pasted code / api key completes the flow.
+  finishLogin(session);
+  return session.view;
+}
+
+function finishLogin(session) {
+  const view = session.view;
+  view.status = "succeeded";
+  view.message = "Signed in.";
+  view.modelBound = { provider: session.providerId, modelId: "demo/first-model" };
+  delete view.prompt;
+}
+
 createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", `http://${HOST}:${PORT}`);
   const parts = url.pathname.split("/").filter(Boolean); // ["api","ghosts",...]
@@ -158,6 +241,36 @@ createServer(async (req, res) => {
       { id: "sess-mock-1", title: "first contact", updatedAt: new Date().toISOString(), messageCount: 4 },
     ]);
   }
+
+  // ---- Login endpoints -----------------------------------------------------
+  if (parts[3] === "providers" && req.method === "GET") {
+    return json(res, 200, { providers: PROVIDERS });
+  }
+  if (parts[3] === "login" && parts.length === 4 && req.method === "POST") {
+    const body = await readBody(req).catch(() => ({}));
+    const providerId = typeof body?.providerId === "string" ? body.providerId : "";
+    const authType = body?.authType === "api_key" ? "api_key" : "oauth";
+    if (!PROVIDERS.some((p) => p.id === providerId && p.authTypes.includes(authType))) {
+      return json(res, 400, { error: { message: "unknown provider", code: "unknown_provider" } });
+    }
+    return json(res, 201, startLogin(providerId, authType));
+  }
+  if (parts[3] === "login" && parts.length === 5 && req.method === "GET") {
+    const session = logins.get(parts[4]);
+    if (!session) return json(res, 404, { error: { message: "no such login", code: "login_not_found" } });
+    return json(res, 200, session.view);
+  }
+  if (parts[3] === "login" && parts.length === 6 && parts[5] === "input" && req.method === "POST") {
+    const session = logins.get(parts[4]);
+    if (!session) return json(res, 404, { error: { message: "no such login", code: "login_not_found" } });
+    if (session.view.status === "succeeded" || session.view.status === "failed") {
+      return json(res, 409, { error: { message: "login already settled", code: "login_settled" } });
+    }
+    const body = await readBody(req).catch(() => ({}));
+    const value = typeof body?.value === "string" ? body.value : "";
+    return json(res, 200, loginInput(session, value));
+  }
+
   return json(res, 404, { error: "not found" });
 }).listen(PORT, HOST, () => {
   console.error(`mock-ghostd on http://${HOST}:${PORT} — ghosts: ${ghosts.map((g) => g.name).join(", ")}`);

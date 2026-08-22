@@ -61,6 +61,8 @@ qs -c ghost ipc call ghost toggle
 qs -c ghost ipc call ghost open|close
 qs -c ghost ipc call ghost summon <name>
 qs -c ghost ipc call ghost ask "<prompt>"     # reply arrives as a notification
+qs -c ghost ipc call ghost login              # open "Connect a model"
+qs -c ghost ipc call ghost loginTo <id> <oauth|api_key>   # and start one
 qs -c ghost ipc call ghost status             # JSON
 qs -c ghost ipc call ghost refresh            # re-read roster and theme
 ```

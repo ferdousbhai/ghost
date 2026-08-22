@@ -5,6 +5,16 @@
  * surface, so a UI shell or a test can drive the same pieces in-process.
  */
 export {
+  bindDefaultChatModelIfUnset,
+  LoginManager,
+  type LoginManagerOptions,
+  type LoginPromptView,
+  type LoginRuntime,
+  type LoginStatus,
+  type LoginView,
+  type ProviderInfo,
+} from "./auth.js";
+export {
   assertLoopback,
   DEFAULT_GHOSTS_DIRNAME,
   DEFAULT_HOST,

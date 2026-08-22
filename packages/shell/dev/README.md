@@ -95,6 +95,11 @@ Verified on this machine (Omarchy 4.0.0.alpha, Hyprland 0.56.2, Quickshell
 - The HUD surface under Hyprland: layer, geometry (`hyprctl layers`), theme
   colours, focus grab, Esc.
 - `contrib/omarchy/scripts/ghost-bar-status` against a live and a dead shell.
+- **The "Connect a model" panel** (`ModelLogin.qml`) against the mock's login
+  endpoints: the provider picker, the OAuth auth-URL + paste-code step, the
+  `select` step, and the api-key step, each rendered live and captured under
+  `dev/evidence/model-login*.png`. Driven by `ipc call ghost login` /
+  `loginTo <id> <authType>`.
 
 Not verified live:
 

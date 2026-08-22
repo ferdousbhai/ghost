@@ -135,18 +135,22 @@ and `isSubscription: true` (provider id `openai-codex`, api
 `{ "type": "oauth", access, refresh, expires }`, and `ModelRuntime` refreshes
 them under a store lock.
 
-The daemon **does not implement an OAuth flow of its own** — it reuses pi's
-by pointing `ModelRuntime` at the ghost's `auth.json`. To sign in today, run
-pi's own login against the ghost's agent directory:
+The daemon **does not implement an OAuth flow of its own** — it wraps pi's.
+`LoginManager` (`src/auth.ts`) drives `ModelRuntime.login(providerId, type,
+interaction)` against the ghost's own `auth.json`, bridging pi's interactive
+`AuthInteraction` (which emits `auth_url` / `device_code` events and awaits
+`prompt`s) onto a small pollable HTTP state machine — the `/providers` and
+`/login` routes in CONTRACTS.md. The Quickshell HUD's "Connect a model" panel
+drives those routes; no terminal required.
+
+For a headless box the same flow runs on a TTY:
 
 ```bash
-PI_CODING_AGENT_DIR=~/Ghosts/<name>/.pi pnpm exec pi
-# then: /login  → pick the provider → "Sign in with ChatGPT"
+ghostd login <ghost> --provider openai-codex     # OAuth; --api-key to paste a key
 ```
 
-`PI_CODING_AGENT_DIR` relocates pi's whole global state, `auth.json`
-included, so the credential is written exactly where the daemon reads it.
-Then bind the role:
+On success the credential lands in `auth.json` exactly where the daemon reads
+it, and — if the ghost had no chat model — the login binds one:
 
 ```jsonc
 { "providers": {},
@@ -156,12 +160,9 @@ Then bind the role:
 (`builtinProviderPreset("openai-codex", "gpt-5-codex")` writes that.) No
 `providers` entry is needed: pi supplies the endpoint and the catalog.
 
-**Gap — wrap, not upstream:** a first-run user should not need a terminal.
-Driving `ModelRuntime.login(providerId, "oauth", interaction)` from the
-daemon needs an interaction channel (the flow emits `auth_url` / `device_code`
-events and awaits prompts), which means HTTP routes CONTRACTS.md does not
-have. That is a deliberate follow-up for the UI milestone, not an upstream
-change: pi's API is sufficient as it stands.
+A pasted code or api key is never written to a log or returned from a GET; it
+flows straight into pi's `login()`, which is the only thing that writes to
+`auth.json`.
 
 ### Anything else
 

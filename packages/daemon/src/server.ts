@@ -26,6 +26,8 @@
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
+import type { AuthType } from "@earendil-works/pi-ai";
+import type { LoginManager } from "./auth.js";
 import { assertLoopback } from "./config.js";
 import { GhostError, type GhostRegistry } from "./ghosts.js";
 import { silentLogger, type Logger } from "./log.js";
@@ -44,6 +46,12 @@ import type { SessionHost } from "./session-host.js";
 export interface ServerOptions {
   registry: GhostRegistry;
   host: SessionHost;
+  /**
+   * Provider login orchestration. Omit to leave the `/providers` and `/login`
+   * routes out entirely (they 404) — a server that only ever runs turns needs
+   * no login surface.
+   */
+  login?: LoginManager;
   logger?: Logger;
   /** Max request body. A turn is a few KB; this is a sanity bound. */
   maxBodyBytes?: number;
@@ -178,6 +186,81 @@ export function createDaemonServer(options: ServerOptions): Server {
     jsonResponse(response, 200, await options.host.listSessions(ghostName));
   };
 
+  const handleListProviders = async (
+    ghostName: string,
+    response: ServerResponse,
+  ): Promise<void> => {
+    if (!options.login) {
+      errorResponse(response, 404, "not_found", "Login is not enabled on this daemon.");
+      return;
+    }
+    jsonResponse(response, 200, { providers: await options.login.listProviders(ghostName) });
+  };
+
+  const handleStartLogin = async (
+    ghostName: string,
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): Promise<void> => {
+    if (!options.login) {
+      errorResponse(response, 404, "not_found", "Login is not enabled on this daemon.");
+      return;
+    }
+    const body = await readJsonBody(request, maxBodyBytes);
+    if (body === null || typeof body !== "object" || Array.isArray(body)) {
+      errorResponse(response, 400, "invalid_request", "Request body must be a JSON object.");
+      return;
+    }
+    const { providerId, authType } = body as { providerId?: unknown; authType?: unknown };
+    if (typeof providerId !== "string") {
+      errorResponse(response, 400, "invalid_request", "\"providerId\" must be a string.");
+      return;
+    }
+    if (authType !== "oauth" && authType !== "api_key") {
+      errorResponse(response, 400, "invalid_request", "\"authType\" must be \"oauth\" or \"api_key\".");
+      return;
+    }
+    const view = await options.login.start(ghostName, providerId, authType as AuthType);
+    // The status line stays 200; a failed login is a state the client polls,
+    // not an HTTP error.
+    jsonResponse(response, 201, view);
+  };
+
+  const handleLoginStatus = (
+    ghostName: string,
+    loginId: string,
+    response: ServerResponse,
+  ): void => {
+    if (!options.login) {
+      errorResponse(response, 404, "not_found", "Login is not enabled on this daemon.");
+      return;
+    }
+    jsonResponse(response, 200, options.login.view(ghostName, loginId));
+  };
+
+  const handleLoginInput = async (
+    ghostName: string,
+    loginId: string,
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): Promise<void> => {
+    if (!options.login) {
+      errorResponse(response, 404, "not_found", "Login is not enabled on this daemon.");
+      return;
+    }
+    const body = await readJsonBody(request, maxBodyBytes);
+    if (body === null || typeof body !== "object" || Array.isArray(body)) {
+      errorResponse(response, 400, "invalid_request", "Request body must be a JSON object.");
+      return;
+    }
+    const value = (body as { value?: unknown }).value;
+    if (typeof value !== "string") {
+      errorResponse(response, 400, "invalid_request", "\"value\" must be a string.");
+      return;
+    }
+    jsonResponse(response, 200, options.login.submitInput(ghostName, loginId, value));
+  };
+
   const handleMessages = async (
     ghostName: string,
     request: IncomingMessage,
@@ -300,6 +383,34 @@ export function createDaemonServer(options: ServerOptions): Server {
             return;
           }
           return await handleListSessions(ghostName, response);
+        }
+        if (segments.length === 4 && segments[3] === "providers") {
+          if (method !== "GET") {
+            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+            return;
+          }
+          return await handleListProviders(ghostName, response);
+        }
+        if (segments.length === 4 && segments[3] === "login") {
+          if (method !== "POST") {
+            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+            return;
+          }
+          return await handleStartLogin(ghostName, request, response);
+        }
+        if (segments.length === 5 && segments[3] === "login") {
+          if (method !== "GET") {
+            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+            return;
+          }
+          return handleLoginStatus(ghostName, decodeURIComponent(segments[4] ?? ""), response);
+        }
+        if (segments.length === 6 && segments[3] === "login" && segments[5] === "input") {
+          if (method !== "POST") {
+            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+            return;
+          }
+          return await handleLoginInput(ghostName, decodeURIComponent(segments[4] ?? ""), request, response);
         }
         errorResponse(response, 404, "not_found", "Not found.");
       } catch (error) {

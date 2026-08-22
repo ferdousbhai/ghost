@@ -12,6 +12,8 @@
  * exists — is scrub inherited provider credentials out of the process
  * environment. See env-scrub.ts for why.
  */
+import { LoginManager } from "./auth.js";
+import { loginCommand } from "./login-command.js";
 import { loadConfig, type DaemonConfigOverrides } from "./config.js";
 import { scrubProviderEnv } from "./env-scrub.js";
 import { GhostRegistry } from "./ghosts.js";
@@ -25,9 +27,14 @@ const USAGE = `ghostd — your ghost, on your machine
 
 Usage:
   ghostd [options]
+  ghostd login [<ghost>] [--provider <id>] [--api-key] [options]
   ghostd relay-token [--rotate] [--quiet]
 
 Subcommands:
+  login                    Sign a ghost into a model provider from the terminal
+                           (the same flow the shell drives over HTTP). Prompts
+                           for the ghost and provider when not given; --api-key
+                           selects the api-key flow over OAuth.
   relay-token              Print the browser-relay pairing token (minting one on
                            first run) to paste into the Chromium extension.
                            --rotate mints a new one and invalidates the old.
@@ -128,9 +135,10 @@ async function readVersion(): Promise<string> {
 }
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
-  // The one subcommand: it touches no config, starts no server, and must work
-  // while a daemon is already running, so it is handled before anything else.
+  // Subcommands that touch no config and start no server, handled before
+  // anything else so they work while a daemon is already running.
   if (argv[0] === "relay-token") return relayTokenCommand(argv.slice(1));
+  if (argv[0] === "login") return loginCommand(argv.slice(1));
 
   let parsed: ParsedArgs;
   try {
@@ -180,12 +188,14 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     browserMode: config.browserMode,
     ...(relay ? { relayTransport: relay } : {}),
   });
+  const login = new LoginManager({ registry, logger, offline: config.offline });
 
   let listening;
   try {
     listening = await startDaemonServer({
       registry,
       host,
+      login,
       logger,
       port: config.port,
       address: config.host,
@@ -218,6 +228,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       logger.info("shutting down", { signal });
       void (async () => {
         try {
+          login.dispose();
           await listening.close();
           await host.disposeAll();
         } catch (error) {

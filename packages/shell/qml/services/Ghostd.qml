@@ -48,11 +48,24 @@ Singleton {
     signal turnFinished(string ghost, string text)
     signal turnFailed(string ghost, string message)
 
+    // ---- Model login ------------------------------------------------------
+    /** [{ id, name, subscription, authTypes, loginLabel, configured, connectedVia }]. */
+    property var providers: []
+    /** The active login's id, or "" when none is running. */
+    property string loginId: ""
+    /** The current login view from GET .../login/:id — the step to render. */
+    property var loginState: ({})
+    /** Which ghost the running login belongs to (a login is per ghost). */
+    property string loginGhost: ""
+    /** Non-empty while a login request is in flight or has failed to reach ghostd. */
+    property string loginError: ""
+
     // ---- Internals --------------------------------------------------------
     // The XHR must be held by a property. A request whose only reference is the
     // closure it installed on itself is eligible for collection mid-flight.
     property var request: null
     property var listRequest: null
+    property var loginRequest: null
 
     property var sessions: ({})       // ghost name -> pi session id
     property var blocks: ({})         // contentIndex -> { kind, text }
@@ -72,6 +85,16 @@ Singleton {
         interval: 50
         repeat: true
         onTriggered: root.flush()
+    }
+
+    // A login is interactive and multi-step; the daemon models it as a pollable
+    // session. We poll once a second while one is running and stop the moment
+    // it settles.
+    Timer {
+        id: loginPoll
+        interval: 1000
+        repeat: true
+        onTriggered: root.pollLogin()
     }
 
     Component.onCompleted: root.refresh()
@@ -337,6 +360,135 @@ Singleton {
         } else {
             root.turnFinished(ghost, text);
         }
+    }
+
+    // ---- Model login ------------------------------------------------------
+
+    /** GET the providers this ghost can log into. Call when the panel opens. */
+    function fetchProviders(): void {
+        const ghost = root.activeGhost;
+        if (ghost === "") return;
+        const xhr = new XMLHttpRequest();
+        root.loginRequest = xhr;
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4) return;
+            if (xhr.status === 200) {
+                try {
+                    const body = JSON.parse(xhr.responseText);
+                    root.providers = Array.isArray(body.providers) ? body.providers : [];
+                    root.loginError = "";
+                } catch (error) {
+                    root.loginError = "ghostd sent a malformed provider list";
+                }
+            } else {
+                root.loginError = root.describeError(xhr, "GET providers");
+            }
+        };
+        xhr.open("GET", root.baseUrl + "/api/ghosts/" + encodeURIComponent(ghost) + "/providers");
+        xhr.send();
+    }
+
+    /** Begin a login for the active ghost. authType is "oauth" or "api_key". */
+    function startLogin(providerId: string, authType: string): void {
+        const ghost = root.activeGhost;
+        if (ghost === "") return;
+        root.resetLogin();
+        root.loginGhost = ghost;
+        const xhr = new XMLHttpRequest();
+        root.loginRequest = xhr;
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4) return;
+            if (xhr.status === 200 || xhr.status === 201) {
+                try {
+                    const view = JSON.parse(xhr.responseText);
+                    root.loginId = view.loginId;
+                    root.loginState = view;
+                    root.loginError = "";
+                    if (!root.isLoginTerminal()) loginPoll.start();
+                } catch (error) {
+                    root.loginError = "ghostd sent a malformed login response";
+                }
+            } else {
+                root.loginError = root.describeError(xhr, "POST login");
+            }
+        };
+        xhr.open("POST", root.baseUrl + "/api/ghosts/" + encodeURIComponent(ghost) + "/login");
+        xhr.setRequestHeader("Content-Type", "application/json");
+        xhr.send(JSON.stringify({ providerId: providerId, authType: authType }));
+    }
+
+    /** Poll the running login's current step. */
+    function pollLogin(): void {
+        if (root.loginId === "" || root.loginGhost === "") return;
+        const xhr = new XMLHttpRequest();
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4) return;
+            if (xhr.status === 200) {
+                try {
+                    root.loginState = JSON.parse(xhr.responseText);
+                    root.loginError = "";
+                    if (root.isLoginTerminal()) {
+                        loginPoll.stop();
+                        // A finished login may have set the ghost's chat model;
+                        // refresh so the roster reflects it.
+                        if (root.loginState.status === "succeeded") root.refresh();
+                    }
+                } catch (error) {
+                    root.loginError = "ghostd sent a malformed login step";
+                }
+            } else {
+                loginPoll.stop();
+                root.loginError = root.describeError(xhr, "GET login");
+            }
+        };
+        xhr.open("GET", root.baseUrl + "/api/ghosts/"
+            + encodeURIComponent(root.loginGhost) + "/login/" + encodeURIComponent(root.loginId));
+        xhr.send();
+    }
+
+    /** Satisfy an awaiting prompt with a pasted code, API key, or selected id. */
+    function submitLoginInput(value: string): void {
+        if (root.loginId === "" || root.loginGhost === "") return;
+        const xhr = new XMLHttpRequest();
+        root.loginRequest = xhr;
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4) return;
+            if (xhr.status === 200) {
+                try {
+                    root.loginState = JSON.parse(xhr.responseText);
+                    root.loginError = "";
+                    if (root.isLoginTerminal()) loginPoll.stop();
+                    else loginPoll.start();
+                } catch (error) {
+                    root.loginError = "ghostd sent a malformed login step";
+                }
+            } else {
+                root.loginError = root.describeError(xhr, "POST login input");
+            }
+        };
+        xhr.open("POST", root.baseUrl + "/api/ghosts/"
+            + encodeURIComponent(root.loginGhost) + "/login/" + encodeURIComponent(root.loginId) + "/input");
+        xhr.setRequestHeader("Content-Type", "application/json");
+        xhr.send(JSON.stringify({ value: value }));
+    }
+
+    /** Open the current auth URL in the creator's browser. */
+    function openLoginUrl(url: string): void {
+        if (url && url !== "") Quickshell.execDetached(["xdg-open", url]);
+    }
+
+    function isLoginTerminal(): bool {
+        const status = root.loginState ? root.loginState.status : "";
+        return status === "succeeded" || status === "failed";
+    }
+
+    /** Clear login state and stop polling. Leaves the provider list intact. */
+    function resetLogin(): void {
+        loginPoll.stop();
+        root.loginId = "";
+        root.loginState = ({});
+        root.loginGhost = "";
+        root.loginError = "";
     }
 
     // ---- Errors -----------------------------------------------------------

@@ -34,6 +34,8 @@ PanelWindow {
     /** Driven by IPC; see the IpcHandler in shell.qml. */
     property bool shown: false
     property bool rosterOpen: true
+    /** The "Connect a model" panel replaces the transcript body when open. */
+    property bool loginOpen: false
 
     visible: hud.shown
 
@@ -52,12 +54,18 @@ PanelWindow {
 
     function open(): void {
         hud.shown = true;
+        hud.loginOpen = false;
         Ghostd.refresh();
         composer.take();
     }
 
     function close(): void {
         hud.shown = false;
+    }
+
+    function openLogin(): void {
+        hud.loginOpen = true;
+        modelLogin.open();
     }
 
     function toggle(): void {
@@ -129,6 +137,25 @@ PanelWindow {
                     spacing: Theme.pad
 
                     Text {
+                        id: connectModel
+                        anchors.verticalCenter: parent.verticalCenter
+                        visible: Ghostd.activeGhost !== ""
+                        text: hud.loginOpen ? "back to chat" : "connect a model"
+                        color: hud.loginOpen ? Theme.accent : Theme.foregroundDim
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSizeSmall
+
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                if (hud.loginOpen) hud.loginOpen = false;
+                                else hud.openLogin();
+                            }
+                        }
+                    }
+
+                    Text {
                         id: rosterToggle
                         anchors.verticalCenter: parent.verticalCenter
                         text: hud.rosterOpen ? "hide roster" : "show roster"
@@ -161,6 +188,7 @@ PanelWindow {
 
             // ---- Body -----------------------------------------------------
             RowLayout {
+                visible: !hud.loginOpen
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 spacing: Theme.pad
@@ -170,7 +198,10 @@ PanelWindow {
                     visible: hud.rosterOpen
                     Layout.preferredWidth: implicitWidth
                     Layout.fillHeight: true
-                    onPicked: composer.take()
+                    onPicked: {
+                        hud.loginOpen = false;
+                        composer.take();
+                    }
                 }
 
                 ColumnLayout {
@@ -241,6 +272,15 @@ PanelWindow {
                         onSubmitted: prompt => Ghostd.send(prompt)
                     }
                 }
+            }
+
+            // "Connect a model": swaps in over the transcript body.
+            ModelLogin {
+                id: modelLogin
+                visible: hud.loginOpen
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                onCloseRequested: hud.loginOpen = false
             }
         }
     }

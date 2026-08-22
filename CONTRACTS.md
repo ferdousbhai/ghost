@@ -36,6 +36,38 @@ Terminology: **visitors**, never "callers".
   (`~/github.com/ferdousbhai/summon-ghost`, read-only reference).
 - `GET  /api/ghosts/:name/sessions` → pi session listing for that ghost.
 
+### Model login (`ghostd` drives pi's provider OAuth / api-key flows)
+
+Signing a ghost into a provider is interactive and multi-step, so it is modeled
+as a short-lived, pollable login session. Credentials are written by pi's own
+`login()` to the ghost's `<home>/.pi/auth.json` and nowhere else; a pasted code
+or key is never echoed in a GET body or a log.
+
+- `GET  /api/ghosts/:name/providers` → `{ providers: [{ id, name, subscription,
+  authTypes: ("oauth"|"api_key")[], loginLabel?, configured, connectedVia? }] }`,
+  derived from pi's registry (openai-codex, openrouter, anthropic, github-copilot,
+  xai, …). Ambient-only providers (no interactive login) are omitted.
+- `POST /api/ghosts/:name/login` `{ providerId, authType }` → `201` with the
+  initial **login view** (below), including `loginId`.
+- `GET  /api/ghosts/:name/login/:loginId` → the current **login view**: the step
+  to show. Poll it.
+- `POST /api/ghosts/:name/login/:loginId/input` `{ value }` → satisfy an awaiting
+  prompt (a pasted code, an api key, or a selected option id) → the updated view.
+
+The **login view** is
+`{ loginId, providerId, authType, status, message?, authUrl?, authInstructions?,
+deviceCode?, verificationUrl?, deviceExpiresInSeconds?, prompt?, modelBound?,
+error? }` where `status` is one of `starting | working | awaiting_url |
+awaiting_device_code | awaiting_input | awaiting_select | succeeded | failed`,
+and `prompt` (when present) is `{ kind: "text"|"secret"|"manual_code"|"select",
+message, placeholder?, secret, options? }`. A callback-server flow carries an
+`authUrl` AND a paste `prompt` at once (open the URL, or paste the code). On
+`succeeded`, `modelBound` is set when the ghost had no chat model and one was
+bound. Abandoned logins time out and are cleaned up server-side.
+
+The same flow runs in the terminal as `ghostd login [<ghost>] [--provider <id>]
+[--api-key]`.
+
 Bind to `127.0.0.1`. No auth in v1 (localhost trust); revisit before any
 non-local exposure.
 
