@@ -83,6 +83,7 @@ pooling and no cloud custody.
   server required simply disappears.
 - **No stored indexes** — memory index and note catalog are derived per
   session; files edited out-of-band can never go stale against an index.
+- **Two browser modes**: "My browser" (relay into the creator's real signed-in Chromium via MV3 extension + chrome.debugger, creator-only, next wave) and "Ghost's browser" (per-ghost Playwright profile, isolated/autonomous), one backend-agnostic tool surface.
 - **Quickshell shell surfaces, not a webapp window** — Omarchy's own shell
   is Quickshell; a layer-shell HUD + bar widget is native in a way no app
   window is. A chromium "deep workspace" view must earn its way in.
@@ -116,8 +117,10 @@ Super+G, start talking. Existing summonghost.com users: sign in there,
 - **Always-on**: laptop lids close; presence-honesty covers Phase 2, but the
   "keep answering while I'm away" story (remote node? second device?) is
   unresolved and deliberately later.
-- **Codex/ChatGPT-subscription OAuth in pi** — requirement recorded;
-  pi-support verification in flight.
+- **Codex/ChatGPT-subscription OAuth**: RESOLVED — pi-ai 0.84.2 ships
+  native OAuth for `openai-codex` (plus anthropic, openrouter,
+  github-copilot, xai). Remaining work is only UI plumbing to drive the
+  login flow from the shell instead of a terminal.
 - **Teach-by-demonstration** — the Wayland-native version (screen capture +
   input observation → draft skill); v1 fallback is "save this session as a
   skill".
@@ -127,5 +130,6 @@ Super+G, start talking. Existing summonghost.com users: sign in there,
   support (works anywhere Hyprland+Quickshell runs, but supported where?).
 - **NIP-AE-style binding** — exact owner↔ghost key-binding and kind
   allocation for the paid-call microstandard.
-- **Frozen-platform economics** — does hosted chat go read-only during the
-  freeze (decision owned by the predecessor repo's transition plan).
+- **Frozen-platform economics**: RESOLVED — all visitor surface (and with
+  it subsidized inference) was removed from summonghost.com 2026-08-22;
+  the frozen cost is the ~$6/mo Cloudflare floor.
