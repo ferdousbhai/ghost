@@ -10,7 +10,16 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, sep } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { ghostPaths } from "../src/ghosts.js";
+import { ghostToolNamesFor } from "@ghost/extensions";
 import { PI_BUILTIN_TOOL_NAMES, SessionHost, sessionFileNameFor } from "../src/session-host.js";
+
+/**
+ * Every tool a creator session may expose. The real invariant is "only the
+ * ghost's own extension tools, nothing from pi" — a name prefix was a loose
+ * proxy for it, and the vision fallback tool is deliberately `look_at_image`
+ * (a model-facing verb, not `ghost_`-prefixed), so assert membership instead.
+ */
+const CREATOR_GHOST_TOOLS = new Set(ghostToolNamesFor({}));
 import type { PiMessagesEvent } from "../src/pi-messages.js";
 import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
 import { startMockProvider, type MockProvider } from "./helpers/mock-provider.js";
@@ -69,7 +78,9 @@ describe("SessionHost.open", () => {
     for (const builtin of PI_BUILTIN_TOOL_NAMES) {
       expect(names, `built-in ${builtin} must not be active`).not.toContain(builtin);
     }
-    expect(names.every((name) => name.startsWith("ghost_"))).toBe(true);
+    for (const name of names) {
+      expect(CREATOR_GHOST_TOOLS, `${name} must be a ghost tool`).toContain(name);
+    }
   });
 
   it("reuses one session per conversation id and separates different ids", async () => {
@@ -157,7 +168,9 @@ describe("SessionHost.runTurn", () => {
     // pi's coding-agent prompt and its built-in tools are both absent.
     expect(request?.system.toLowerCase()).not.toContain("coding agent");
     expect(request?.toolNames ?? []).not.toContain("bash");
-    expect(request?.toolNames.every((name) => name.startsWith("ghost_"))).toBe(true);
+    for (const name of request?.toolNames ?? []) {
+      expect(CREATOR_GHOST_TOOLS, `${name} must be a ghost tool`).toContain(name);
+    }
   });
 
   it("persists a memory file the ghost writes", async () => {

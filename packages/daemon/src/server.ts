@@ -1,15 +1,23 @@
 /**
- * The daemon's HTTP API — exactly the four routes in CONTRACTS.md, on
- * loopback, with no auth (v1 localhost trust).
+ * The daemon's HTTP API — the four routes in CONTRACTS.md, on loopback, with no
+ * auth (v1 localhost trust), plus the browser relay.
  *
  *   GET  /api/ghosts                  → [{ name, dir, createdAt }]
  *   POST /api/ghosts                  { name } → creates ~/Ghosts/<name>/
  *   POST /api/ghosts/:name/messages   pi-messages request → SSE of pi-messages events
  *   GET  /api/ghosts/:name/sessions   → pi session listing for that ghost
+ *   GET  /api/relay/status            → whether the creator's Chromium is paired
+ *   WS   /relay                       → the MV3 extension's socket (token-gated)
  *
- * Node's built-in `http` plus a twenty-line router: the surface is four
- * routes and one of them is a stream, which is precisely the shape a
- * framework would add weight to without adding clarity.
+ * Node's built-in `http` plus a twenty-line router: the surface is small and one
+ * route is a stream, which is precisely the shape a framework would add weight to
+ * without adding clarity.
+ *
+ * The relay is the one thing here that is *not* covered by localhost trust, and
+ * the reason is worth stating: the peer is a browser, and a browser runs code
+ * written by strangers. `/relay` therefore carries a pairing token, refuses any
+ * `Origin` that is not a browser extension, and accepts one connection at a time.
+ * `/api/relay/status` never returns the token — `ghostd relay-token` does.
  *
  * Error bodies are `{ "error": { "message", "code" } }` — the shape the
  * pinned pi-messages client parses out of a non-2xx response
@@ -30,6 +38,7 @@ import {
   SSE_KEEPALIVE_INTERVAL_MS,
   type PiMessagesEvent,
 } from "./pi-messages.js";
+import { attachRelay, createRelayHub, type RelayHub } from "./relay.js";
 import type { SessionHost } from "./session-host.js";
 
 export interface ServerOptions {
@@ -40,12 +49,19 @@ export interface ServerOptions {
   maxBodyBytes?: number;
   /** Forward `thinking_*` blocks on the wire. Off by default. */
   includeThinking?: boolean;
+  /**
+   * The browser relay. Omitted, one is built from the XDG token file unless
+   * `GHOSTD_RELAY=off`; pass `null` to leave the endpoint out entirely.
+   */
+  relay?: RelayHub | null;
 }
 
 export interface ListeningServer {
   server: Server;
   port: number;
   address: string;
+  /** The browser relay, when this server has one. */
+  relay: RelayHub | undefined;
   /** Stop accepting, end live streams, and resolve once closed. */
   close(): Promise<void>;
 }
@@ -54,6 +70,8 @@ const DEFAULT_MAX_BODY_BYTES = 1_048_576;
 const TURN_ID_PATTERN = /^[A-Za-z0-9_.:-]{1,64}$/;
 /** Live SSE responses, stashed on the server so close() can end them. */
 const LIVE_STREAMS = Symbol.for("ghostd.liveStreams");
+/** The relay hub, stashed on the server so close() can hang up on the browser. */
+const RELAY_HUB = Symbol.for("ghostd.relayHub");
 
 /**
  * Same-origin is the intended deployment (the Omarchy webapp wraps
@@ -125,6 +143,10 @@ export function createDaemonServer(options: ServerOptions): Server {
   const logger = options.logger ?? silentLogger;
   const maxBodyBytes = options.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
   const liveStreams = new Set<ServerResponse>();
+  // `undefined` means "decide for me"; `null` means "no relay on this server".
+  const relay = options.relay === undefined
+    ? createRelayHub({ ...(options.logger ? { logger: options.logger } : {}) })
+    : options.relay;
 
   const handleListGhosts = (response: ServerResponse): void => {
     jsonResponse(response, 200, options.registry.list());
@@ -238,7 +260,23 @@ export function createDaemonServer(options: ServerOptions): Server {
       const segments = url.pathname.split("/").filter(Boolean);
 
       try {
-        if (segments[0] !== "api" || segments[1] !== "ghosts") {
+        if (segments[0] !== "api") {
+          errorResponse(response, 404, "not_found", "Not found.");
+          return;
+        }
+        if (segments[1] === "relay" && segments[2] === "status" && segments.length === 3) {
+          if (method !== "GET") {
+            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+            return;
+          }
+          // Never the token itself, only where it lives: this route has no auth,
+          // and a page on a loopback origin can read it.
+          jsonResponse(response, 200, relay
+            ? { enabled: true, ...relay.status() }
+            : { enabled: false, connected: false, reason: "The relay is off (GHOSTD_RELAY)." });
+          return;
+        }
+        if (segments[1] !== "ghosts") {
           errorResponse(response, 404, "not_found", "Not found.");
           return;
         }
@@ -297,9 +335,22 @@ export function createDaemonServer(options: ServerOptions): Server {
     })();
   });
 
+  if (relay) {
+    attachRelay(server, relay);
+  } else {
+    // Without a relay there is no upgrade handler, and Node leaves an unhandled
+    // upgrade socket open forever. Hang up rather than leaking it.
+    server.on("upgrade", (_request, socket) => socket.destroy());
+  }
+
   // Exposed so close() can end streams that would otherwise hold shutdown open.
-  Object.assign(server, { [LIVE_STREAMS]: liveStreams });
+  Object.assign(server, { [LIVE_STREAMS]: liveStreams, [RELAY_HUB]: relay });
   return server;
+}
+
+/** The relay hub a `createDaemonServer` built for itself, if it built one. */
+export function relayHubOf(server: Server): RelayHub | undefined {
+  return (server as unknown as Record<symbol, RelayHub | null | undefined>)[RELAY_HUB] ?? undefined;
 }
 
 /** Start the API on a loopback address. `port: 0` picks an ephemeral port. */
@@ -317,12 +368,19 @@ export async function startDaemonServer(
     });
   });
   const bound = server.address() as AddressInfo;
+  const relay = relayHubOf(server);
+  // The port is only known now, and the extension has to be told which one.
+  relay?.setPublicUrl(`ws://${address}:${bound.port}/relay`);
   return {
     server,
     port: bound.port,
     address,
-    close: () =>
-      new Promise<void>((resolvePromise, rejectPromise) => {
+    relay,
+    close: async () => {
+      // Hang up on the browser before closing the listener: a live WebSocket is
+      // an open connection, and `server.close()` waits for those.
+      await relay?.close();
+      await new Promise<void>((resolvePromise, rejectPromise) => {
         const streams = (server as unknown as Record<symbol, Set<ServerResponse>>)[LIVE_STREAMS];
         for (const stream of streams ?? []) {
           if (!stream.writableEnded) stream.end();
@@ -331,6 +389,7 @@ export async function startDaemonServer(
         // Keep-alive sockets would otherwise hold the close open until they
         // time out; a local daemon should exit when it is told to.
         server.closeIdleConnections();
-      }),
+      });
+    },
   };
 }

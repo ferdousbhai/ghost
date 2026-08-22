@@ -82,7 +82,45 @@ export {
   type PiMessagesRequest,
 } from "./pi-messages.js";
 export {
+  attachRelay,
+  createRelayHub,
+  RELAY_CLOSE_GOING_AWAY,
+  RELAY_PING_INTERVAL_MS,
+  RELAY_TIMEOUT_GRACE_MS,
+  RelayHub,
+  type RelayHubOptions,
+  type RelayStatus,
+} from "./relay.js";
+export {
+  authorizeRelayUpgrade,
+  encodeServerFrame,
+  isRelayOp,
+  MAX_FRAME_BYTES,
+  parseClientFrame,
+  RELAY_OPS,
+  RELAY_PATH,
+  RELAY_PROTOCOL_VERSION,
+  RELAY_SUBPROTOCOL,
+  RELAY_TOKEN_SUBPROTOCOL_PREFIX,
+  type ParsedClientFrame,
+  type RelayClientFrame,
+  type RelayRequestFrame,
+  type RelayServerFrame,
+  type RelayUpgradeDecision,
+} from "./relay-protocol.js";
+export {
+  defaultRelayTokenPath,
+  readOrCreateRelayToken,
+  readRelayToken,
+  RELAY_TOKEN_FILENAME,
+  relayTokenCommand,
+  relayTokenMatches,
+  rotateRelayToken,
+  type RelayTokenStoreOptions,
+} from "./relay-token.js";
+export {
   createDaemonServer,
+  relayHubOf,
   startDaemonServer,
   type ListeningServer,
   type ServerOptions,

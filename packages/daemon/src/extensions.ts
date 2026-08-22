@@ -23,12 +23,16 @@ import type { InlineExtension } from "@earendil-works/pi-coding-agent";
 import {
   createGhostExtension,
   ghostToolNamesFor,
+  isVisitorScope,
+  relayBackend,
   CREATOR_SCOPE,
   visitorScope,
+  type BrowserBackendFactory,
   type GhostScope,
+  type RelayTransport,
 } from "@ghost/extensions";
 
-export type { GhostScope };
+export type { GhostScope, RelayTransport };
 export { CREATOR_SCOPE, visitorScope };
 
 /** How the daemon asks for a session's extension set. */
@@ -41,6 +45,34 @@ export interface GhostExtensionOptions {
   visitorId?: string | null;
   /** Overrides the ghost home directory name as the ghost's name. */
   ghostName?: string;
+  /**
+   * Which browser `ghost_browser` drives. `"relay"` (with a `relayTransport`
+   * present) points the tool at the creator's real Chromium; `"profile"` (or
+   * no transport) leaves the extension's default per-ghost Playwright profile.
+   * Ignored for visitor sessions, which never get the browser tool.
+   */
+  browserMode?: "relay" | "profile";
+  /**
+   * The daemon's relay hub, adapted as a transport. Present only when the
+   * relay is enabled; the relay backend is built from it per creator session.
+   */
+  relayTransport?: RelayTransport;
+}
+
+/**
+ * Choose the browser backend for a session. Relay when asked for and available
+ * and the session is the creator's; otherwise `undefined` so the extension
+ * keeps its Playwright default. A visitor never reaches the relay backend (it
+ * would throw), and never gets the browser tool anyway.
+ */
+function selectBrowserBackend(
+  options: GhostExtensionOptions,
+  scope: GhostScope,
+): BrowserBackendFactory | undefined {
+  if (isVisitorScope(scope)) return undefined;
+  if (options.browserMode === "profile") return undefined;
+  if (!options.relayTransport) return undefined;
+  return relayBackend({ transport: options.relayTransport, scope });
 }
 
 export interface ResolvedGhostExtensions {
@@ -71,9 +103,11 @@ export function resolveGhostExtensions(
   options: GhostExtensionOptions = {},
 ): ResolvedGhostExtensions {
   const scope = resolveGhostScope(options.visitorId);
+  const backend = selectBrowserBackend(options, scope);
   const extensionOptions = {
     scope,
     ...(options.ghostName === undefined ? {} : { ghostName: options.ghostName }),
+    ...(backend === undefined ? {} : { backend }),
   };
   return {
     factories: [{ name: "ghost", factory: createGhostExtension(extensionOptions) }],

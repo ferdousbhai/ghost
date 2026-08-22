@@ -8,6 +8,8 @@ importers:
 
   .: {}
 
+  packages/chromium-extension: {}
+
   packages/daemon:
     dependencies:
       '@earendil-works/pi-agent-core':
@@ -22,10 +24,16 @@ importers:
       '@ghost/extensions':
         specifier: workspace:*
         version: link:../extensions
+      ws:
+        specifier: ^8.18.0
+        version: 8.21.3
     devDependencies:
       '@types/node':
         specifier: ^22.15.0
         version: 22.20.1
+      '@types/ws':
+        specifier: ^8.5.13
+        version: 8.18.1
       typescript:
         specifier: ^5.8.3
         version: 5.9.3
@@ -652,6 +660,9 @@ packages:
 
   '@types/retry@0.12.0':
     resolution: {integrity: sha512-wWKOClTTiizcZhXnPY4wikVAwmdYHp8q6DmC+EJUzAMsycb7HB32Kh9RN4+0gExjmPmZSAQjgURXIGATPegAvA==}
+
+  '@types/ws@8.18.1':
+    resolution: {integrity: sha512-ThVF6DCVhA8kUGy+aazFQ4kXQ7E1Ty7A3ypFOe0IcJV8O/M511G99AW24irKrW56Wt44yG9+ij8FaqoBGkuBXg==}
 
   '@vitest/expect@3.2.7':
     resolution: {integrity: sha512-E8eBXaKibuvH2pSZErOjdVb5vF4PbKYcrnluBTYxEk1l/VhhwZg1kZQsdtjq+CsF5CFydf2Rdkz7jDHKSisi3w==}
@@ -1778,6 +1789,10 @@ snapshots:
       undici-types: 6.21.0
 
   '@types/retry@0.12.0': {}
+
+  '@types/ws@8.18.1':
+    dependencies:
+      '@types/node': 22.20.1
 
   '@vitest/expect@3.2.7':
     dependencies:

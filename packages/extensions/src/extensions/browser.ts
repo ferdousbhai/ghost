@@ -142,10 +142,11 @@ export function createBrowserExtension(
       name: GHOST_BROWSER,
       label: "Browse the web",
       description:
-        "Browse the web in your own browser — a profile that belongs to you, "
-        + "separate from the creator's, so anything you sign into stays yours and "
-        + "persists between conversations. The window is visible on the creator's "
-        + "desktop; they can watch what you do.\n"
+        "Browse the web in a real browser on the creator's desktop. Depending "
+        + "on setup this is either the creator's own signed-in browser (you act "
+        + "as them, using sessions they are already logged into) or a browser "
+        + "profile of your own; either way the window is visible and the creator "
+        + "can watch what you do.\n"
         + "Work in steps: open a page, read it, find the element you want, then "
         + "click or type. Refs like e1 come from find and stay valid until the "
         + "page changes. Only http and https pages are reachable; local files and "

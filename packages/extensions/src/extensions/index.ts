@@ -94,6 +94,23 @@ export function ghostToolNamesFor(options: GhostExtensionSetOptions = {}): strin
 }
 
 export * from "./browser.js";
+export * from "./browser-relay-backend.js";
+/**
+ * `browser.js` re-exports the seam's *shapes*; the relay needs its error class and
+ * failure vocabulary too, because the daemon translates socket frames into them.
+ */
+export {
+  GhostBrowserError,
+  type BackendActionOptions,
+  type BackendBackResult,
+  type BackendReadResult,
+  type BackendScreenshotOptions,
+  type BackendTarget,
+  type BackendTypeInput,
+  type BrowserBackendContext,
+  type BrowserFailure,
+  type PageSummary,
+} from "./browser-backend.js";
 export * from "./hyprland.js";
 export * from "./memory.js";
 export * from "./notes.js";

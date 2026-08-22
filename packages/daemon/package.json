@@ -29,13 +29,15 @@
     "dev": "node --experimental-strip-types src/main.ts"
   },
   "dependencies": {
-    "@ghost/extensions": "workspace:*",
     "@earendil-works/pi-agent-core": "^0.84.2",
     "@earendil-works/pi-ai": "^0.84.2",
-    "@earendil-works/pi-coding-agent": "^0.84.2"
+    "@earendil-works/pi-coding-agent": "^0.84.2",
+    "@ghost/extensions": "workspace:*",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",
+    "@types/ws": "^8.5.13",
     "typescript": "^5.8.3",
     "vitest": "^3.1.4"
   }

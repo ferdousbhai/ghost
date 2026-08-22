@@ -39,8 +39,25 @@ describe("loadConfig", () => {
       host: DEFAULT_HOST,
       ghostsRoot: join(root, "Ghosts"),
       offline: false,
+      browserMode: "relay",
       configPath: null,
     });
+  });
+
+  it("takes browserMode from env, then file, defaulting to relay", () => {
+    const root = makeHome();
+    expect(loadConfig({ env: { GHOST_BROWSER_MODE: "profile" }, home: root }).browserMode)
+      .toBe("profile");
+    writeConfig(root, { browserMode: "profile" });
+    expect(loadConfig({ env: {}, home: root }).browserMode).toBe("profile");
+    // env wins over file
+    expect(loadConfig({ env: { GHOST_BROWSER_MODE: "relay" }, home: root }).browserMode)
+      .toBe("relay");
+  });
+
+  it("rejects an invalid browserMode", () => {
+    const root = makeHome();
+    expect(() => loadConfig({ env: { GHOST_BROWSER_MODE: "chrome" }, home: root })).toThrow();
   });
 
   it("reads the XDG config file", () => {

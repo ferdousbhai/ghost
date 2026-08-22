@@ -16,6 +16,8 @@ import { loadConfig, type DaemonConfigOverrides } from "./config.js";
 import { scrubProviderEnv } from "./env-scrub.js";
 import { GhostRegistry } from "./ghosts.js";
 import { createLogger, type LogLevel } from "./log.js";
+import { createRelayHub } from "./relay.js";
+import { relayTokenCommand } from "./relay-token.js";
 import { startDaemonServer } from "./server.js";
 import { SessionHost } from "./session-host.js";
 
@@ -23,6 +25,12 @@ const USAGE = `ghostd — your ghost, on your machine
 
 Usage:
   ghostd [options]
+  ghostd relay-token [--rotate] [--quiet]
+
+Subcommands:
+  relay-token              Print the browser-relay pairing token (minting one on
+                           first run) to paste into the Chromium extension.
+                           --rotate mints a new one and invalidates the old.
 
 Options:
   -p, --port <port>        TCP port to bind on 127.0.0.1 (default 7717)
@@ -120,6 +128,10 @@ async function readVersion(): Promise<string> {
 }
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
+  // The one subcommand: it touches no config, starts no server, and must work
+  // while a daemon is already running, so it is handled before anything else.
+  if (argv[0] === "relay-token") return relayTokenCommand(argv.slice(1));
+
   let parsed: ParsedArgs;
   try {
     parsed = parseArgs(argv);
@@ -154,7 +166,20 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 
   const registry = new GhostRegistry(config.ghostsRoot);
   registry.ensureRoot();
-  const host = new SessionHost({ registry, logger, offline: config.offline });
+
+  // One relay hub, shared: the server exposes /relay over it and the session
+  // host uses it as the browser backend's transport, so a ghost drives the
+  // very browser the extension is connected to. `undefined` when GHOSTD_RELAY
+  // is off, which also disables the relay browser mode (sessions fall back to
+  // the per-ghost profile).
+  const relay = createRelayHub({ logger });
+  const host = new SessionHost({
+    registry,
+    logger,
+    offline: config.offline,
+    browserMode: config.browserMode,
+    ...(relay ? { relayTransport: relay } : {}),
+  });
 
   let listening;
   try {
@@ -164,6 +189,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       logger,
       port: config.port,
       address: config.host,
+      relay: relay ?? null,
     });
   } catch (error) {
     logger.error("could not bind", {
@@ -180,6 +206,8 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     ghosts: registry.list().length,
     offline: config.offline,
     config: config.configPath,
+    // Never the token; `ghostd relay-token` is the only way to see it.
+    relay: listening.relay ? `ws://${config.host}:${listening.port}/relay` : "off",
   });
 
   await new Promise<void>((resolvePromise) => {

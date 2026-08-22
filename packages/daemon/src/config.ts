@@ -33,6 +33,16 @@ export interface DaemonConfig {
    * env-scrub.ts, which is unconditional.
    */
   offline: boolean;
+  /**
+   * Which browser a ghost's `ghost_browser` tool drives:
+   * - `"relay"` (default): the creator's own signed-in Chromium, via the MV3
+   *   relay extension. The flagship "my browser" mode — the ghost acts as you.
+   *   Until the extension is installed and connected, the tool returns an
+   *   actionable "open your browser / install the relay" error.
+   * - `"profile"`: a dedicated per-ghost Chromium profile under the ghost home
+   *   (Playwright). Works with no extension; isolated from your real sessions.
+   */
+  browserMode: "relay" | "profile";
   /** Where the config was read from, or null when defaults/env only. */
   configPath: string | null;
 }
@@ -43,6 +53,7 @@ export interface DaemonConfigFile {
   host?: string;
   ghostsRoot?: string;
   offline?: boolean;
+  browserMode?: "relay" | "profile";
 }
 
 /** Explicit overrides from CLI flags — highest precedence. */
@@ -51,6 +62,7 @@ export interface DaemonConfigOverrides {
   host?: string;
   ghostsRoot?: string;
   offline?: boolean;
+  browserMode?: "relay" | "profile";
   /** Config file path; defaults to <XDG_CONFIG_HOME>/ghost/config.json. */
   configPath?: string;
   /** Injected for tests. Defaults to process.env. */
@@ -128,7 +140,18 @@ function readConfigFile(path: string): DaemonConfigFile | null {
     }
     config.offline = file.offline;
   }
+  if (file.browserMode !== undefined) {
+    if (file.browserMode !== "relay" && file.browserMode !== "profile") {
+      throw new Error(`${path}: "browserMode" must be "relay" or "profile".`);
+    }
+    config.browserMode = file.browserMode;
+  }
   return config;
+}
+
+function parseBrowserMode(raw: string, source: string): "relay" | "profile" {
+  if (raw === "relay" || raw === "profile") return raw;
+  throw new Error(`Invalid browserMode from ${source}: ${JSON.stringify(raw)} (want "relay" or "profile")`);
 }
 
 function parseBoolean(raw: string, source: string): boolean {
@@ -152,6 +175,7 @@ function expandHome(path: string, home: string): string {
  * - `GHOSTD_HOST`       → host (must stay loopback)
  * - `GHOSTS_ROOT`       → ghostsRoot
  * - `GHOSTD_OFFLINE`    → offline
+ * - `GHOST_BROWSER_MODE`→ browserMode ("relay" | "profile")
  * - `GHOSTD_CONFIG`     → config file path
  * - `XDG_CONFIG_HOME`   → config file directory
  */
@@ -167,6 +191,7 @@ export function loadConfig(overrides: DaemonConfigOverrides = {}): DaemonConfig 
   const envHost = env.GHOSTD_HOST?.trim();
   const envRoot = env.GHOSTS_ROOT?.trim();
   const envOffline = env.GHOSTD_OFFLINE?.trim();
+  const envBrowserMode = env.GHOST_BROWSER_MODE?.trim();
 
   const port = overrides.port
     ?? (envPort ? parsePort(envPort, "GHOSTD_PORT") : undefined)
@@ -183,12 +208,18 @@ export function loadConfig(overrides: DaemonConfigOverrides = {}): DaemonConfig 
     ?? file?.offline
     ?? false;
 
+  const browserMode = overrides.browserMode
+    ?? (envBrowserMode ? parseBrowserMode(envBrowserMode, "GHOST_BROWSER_MODE") : undefined)
+    ?? file?.browserMode
+    ?? "relay";
+
   assertLoopback(host);
   return {
     port,
     host,
     ghostsRoot: resolve(expandHome(rawRoot, home)),
     offline,
+    browserMode,
     configPath: file ? configPath : null,
   };
 }
