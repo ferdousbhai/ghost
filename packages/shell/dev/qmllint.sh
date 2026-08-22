@@ -33,6 +33,7 @@ echo "$QMLLINT ($version)"
 exec "$QMLLINT" -I .qmllint \
   qml/shell.qml \
   qml/GhostHud.qml \
+  qml/TrayBridge.qml \
   qml/GhostBarWidget.qml \
   qml/GhostBarSurface.qml \
   qml/components/*.qml \

@@ -88,6 +88,23 @@ Set `GHOST_BAR_SURFACE=1` and the shell puts up its own small layer strip
 (`GhostBarSurface.qml`, namespace `ghost-bar`, bottom-right, no exclusive
 zone). It is off by default for the reason above.
 
+## System tray
+
+Nothing to install: whenever the shell runs, `TrayBridge.qml` spawns
+`qml/tray/ghost-tray.py`, which puts a ghost StatusNotifierItem in any SNI tray
+(Omarchy's bar included) — left-click toggles the HUD, right-click opens a menu
+of Summon / per-ghost switch / Connect a model / Quit. It needs the two Python
+D-Bus bindings, both stock on Arch/Omarchy:
+
+```sh
+sudo pacman -S --needed python-dbus python-gobject
+```
+
+Missing them, the helper exits and only the tray icon is absent; the rest of the
+shell is unaffected. This is separate from — and complementary to — the in-bar
+indicator above: the tray item is the shell advertising itself system-wide, the
+bar module is Omarchy's bar polling the shell.
+
 ## Layer namespaces
 
 `ghost-hud` and `ghost-bar`. Deliberately not prefixed `omarchy-`: Omarchy's

@@ -13,6 +13,8 @@ qml/
   GhostHud.qml         the summonable overlay (Overlay layer, focus-grabbed)
   GhostBarWidget.qml   status dot + ghost name, embeddable
   GhostBarSurface.qml  opt-in standalone layer strip carrying the widget
+  TrayBridge.qml       system-tray (StatusNotifierItem) presence, via a helper
+  tray/ghost-tray.py   the SNI + DBusMenu D-Bus object Quickshell cannot expose
   components/          Bubble, Roster, Composer, ActivityLine   → qs.components
   services/            Ghostd, Theme, Notifier (singletons)     → qs.services
 contrib/               keybinds, systemd unit, Omarchy bar integration
@@ -44,6 +46,24 @@ that trade.
 the keyboard from the compositor too, so `SUPER+G` could not toggle the HUD
 back off. `OnDemand` plus a `HyprlandFocusGrab` gets the keyboard *and*
 click-outside-to-dismiss while leaving compositor binds alive.
+
+## System tray
+
+The ghost also shows up as a system-tray icon — a StatusNotifierItem — for as
+long as the shell is running: a ghost glyph tinted to the theme (dim when idle,
+accent while streaming, red when `ghostd` is unreachable), tooltip'd with the
+active ghost's name, left-click to toggle the HUD, and a DBusMenu with Summon,
+a radio entry per ghost in the roster, "Connect a model", and Quit.
+
+Quickshell 0.3.0 can *consume* an SNI (`Quickshell.Services.SystemTray`) but
+exposes nothing to *produce* one — no generic D-Bus object or bus-name API
+anywhere in its QML surface. So the D-Bus object lives in a tiny helper,
+`tray/ghost-tray.py` (dbus-python + GLib), which `TrayBridge.qml` spawns as a
+child of the shell: it is alive exactly when the shell is, no watcher needed.
+The shell pushes live `Ghostd`/`Theme` state down the helper's stdin and the
+helper pushes clicks back up its stdout, so there is still one `Ghostd` client
+and every ghost decision stays in QML. See `dev/README.md` for what was proven
+against a live tray.
 
 ## Theming
 
@@ -78,7 +98,10 @@ qs -c ghost ipc call ghost refresh            # re-read roster and theme
 
 ## Status
 
-Every surface has been exercised against `dev/mock-ghostd.mjs`; none has been
-run against a real `ghostd`, which does not exist yet. The open contract
-question is who owns conversation history — this client assumes the daemon
-does, keyed by `options.sessionId`.
+The daemon is real now: `ghostd` is built, dogfooded, and runs as a systemd
+user service. `dev/mock-ghostd.mjs` is a development harness — it implements
+enough of the CONTRACTS.md API to build and demo every surface without the
+daemon, pi, or a model — not a stand-in for something that does not exist. The
+client assumes the daemon owns conversation history, keyed by
+`options.sessionId`; set `GHOST_HUD_REPLAY=1` if a build turns out to be
+stateless per request.

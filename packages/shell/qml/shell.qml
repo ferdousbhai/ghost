@@ -20,6 +20,13 @@ ShellRoot {
         id: hud
     }
 
+    // System-tray presence (StatusNotifierItem). Runs a helper process for the
+    // one thing Quickshell 0.3.0 cannot do itself — expose an SNI item over
+    // D-Bus — and routes its clicks back into the same HUD this shell owns.
+    TrayBridge {
+        hud: hud
+    }
+
     // Opt-in fallback strip; see GhostBarSurface.qml for why it is not default.
     LazyLoader {
         id: barLoader

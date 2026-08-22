@@ -100,14 +100,34 @@ Verified on this machine (Omarchy 4.0.0.alpha, Hyprland 0.56.2, Quickshell
   `select` step, and the api-key step, each rendered live and captured under
   `dev/evidence/model-login*.png`. Driven by `ipc call ghost login` /
   `loginTo <id> <authType>`.
+- **The system-tray item** (`TrayBridge.qml` + `tray/ghost-tray.py`). Registered
+  against this machine's live `org.kde.StatusNotifierWatcher` (the one hosting
+  the Omarchy bar's tray). Verified by `gdbus`: the item appears in
+  `RegisteredStatusNotifierItems`; `org.kde.StatusNotifierItem` `GetAll` returns
+  `Id=ghost`, `Status=Active`, `ItemIsMenu=false`, `Menu=/MenuBar`, and a
+  status-tinted `IconPixmap`; `com.canonical.dbusmenu` `GetLayout` returns the
+  Summon / per-ghost radio / Connect-a-model / Quit tree; a synthesised
+  `Activate` emitted `{"action":"toggle"}` and, end to end, opened the
+  `ghost-hud` layer (`hyprctl layers`). The three status glyphs the helper draws
+  are captured at `dev/evidence/tray-glyph-{idle,streaming,unreachable}.png` and
+  the live bar at `dev/evidence/tray-bar.png`. `Qt.quit()` was confirmed to
+  terminate a Quickshell process (the Quit menu entry's action).
 
 Not verified live:
 
-- **The real `ghostd`.** It does not exist yet. Everything is against the mock,
-  which follows the pi-messages event union but cannot prove the daemon emits
-  it. First integration risk: whether the daemon owns conversation history via
-  `options.sessionId` (what this client assumes) or expects the full `context`
-  replayed (set `GHOST_HUD_REPLAY=1` if so).
+- **A full streamed turn against the real `ghostd`.** `ghostd` now exists and
+  runs as a systemd user service; the tray helper's shell connected to it and
+  read the roster live. But the streaming turn path here was exercised only
+  against the mock, which follows the pi-messages event union but cannot prove
+  the daemon emits it. First integration risk: whether the daemon owns
+  conversation history via `options.sessionId` (what this client assumes) or
+  expects the full `context` replayed (set `GHOST_HUD_REPLAY=1` if so).
+- **The tray icon rendered inline in Omarchy's bar.** The item registers and the
+  bar (its SNI host) accepts it, but omarchy-bar collapses tray items into an
+  expandable group, so a freshly-registered `Active` item lands behind the bar's
+  `<` overflow toggle rather than inline — same as several stock items. Which
+  items show inline is omarchy-bar's own config, not something the SNI item
+  controls.
 - **The Omarchy bar module in Omarchy's bar.** Installing it would mean editing
   the developer's live `shell.json` and reloading their desktop shell. It is
   written against the documented contract in
