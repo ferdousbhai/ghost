@@ -36,6 +36,43 @@ Terminology: **visitors**, never "callers".
   (`~/github.com/ferdousbhai/summon-ghost`, read-only reference).
 - `GET  /api/ghosts/:name/sessions` → pi session listing for that ghost.
 
+### Model indicator + switcher (which model a ghost uses, and switching it)
+
+Every model here comes from pi's own catalogue (`ModelRuntime`, which rides
+models.dev via pi's vendored registry — no hardcoded list), read per-ghost from
+that ghost's `models.json`/`auth.json`. No credential is ever read into or
+emitted from a response.
+
+- `GET  /api/ghosts/:name/model` → the current selection:
+  `{ current: { provider, id, name?, contextWindow?, hasVision } | null,
+  source: "role" | "default" | "none" }`. `role` — `roles.chat_model` is set
+  and resolves; `default` — pi's fallback (a hand-declared provider's first
+  model, then the first available model); `none` — nothing usable, `current` is
+  null. Resolved with the same logic session-host uses.
+- `GET  /api/ghosts/:name/models?scope=available|catalog&provider=<id>&q=<search>&limit=<n>&offset=<n>`
+  → `{ scope, models: [...], total, limit, offset, provider?, q? }`.
+  - `scope=available` (default): models the ghost can use right now (from
+    credentialed providers, via `getAvailable()`). Each row is
+    `{ provider, id, name?, contextWindow?, cost?, hasVision, connectedVia?,
+    current }`, tagged by `provider`, with `current: true` on the selected one.
+  - `scope=catalog`: the FULL pi catalogue (`getModels()`, every provider,
+    logged in or not), same row shape plus `usable: boolean` (is the provider
+    credentialed; `connectedVia` present only when usable). Supports the
+    `provider` filter and a case-insensitive `q` substring match on id/name.
+  - Both scopes are paginated and sorted by `(provider, id)`: `total` is the
+    full filtered count, `limit` defaults to 100 and is capped at 500, `offset`
+    pages in. A single response never ships more than 500 rows, so the shell can
+    search ~1,270 models by refining `q` rather than downloading them all.
+- `PUT  /api/ghosts/:name/model` `{ provider, id }` → set `roles.chat_model`.
+  Validates the model exists in the catalogue (`getModel`); an unknown model is
+  a structured `400 unknown_model`. If the provider is not credentialed the
+  write still happens and the response is `{ ok: true, usable: false, warning,
+  current, source: "role" }` so the shell can prompt a login rather than the
+  switch failing silently; a credentialed provider returns
+  `{ ok: true, usable: true, current, source: "role" }`.
+
+Requires `PUT` in the loopback CORS allow-list.
+
 ### Model login (`ghostd` drives pi's provider OAuth / api-key flows)
 
 Signing a ghost into a provider is interactive and multi-step, so it is modeled

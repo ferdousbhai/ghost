@@ -19,6 +19,7 @@ import { loadConfig, type DaemonConfigOverrides } from "./config.js";
 import { scrubProviderEnv } from "./env-scrub.js";
 import { GhostRegistry } from "./ghosts.js";
 import { createLogger, type LogLevel } from "./log.js";
+import { ModelCatalog } from "./model-catalog.js";
 import { createRelayHub } from "./relay.js";
 import { relayTokenCommand } from "./relay-token.js";
 import { startDaemonServer } from "./server.js";
@@ -195,6 +196,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     ...(relay ? { relayTransport: relay } : {}),
   });
   const login = new LoginManager({ registry, logger, offline: config.offline });
+  const catalog = new ModelCatalog({ registry, logger, offline: config.offline });
 
   let listening;
   try {
@@ -202,6 +204,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       registry,
       host,
       login,
+      catalog,
       logger,
       port: config.port,
       address: config.host,

@@ -170,6 +170,25 @@ export function resolveChatModelRef(
   return null;
 }
 
+/**
+ * Set `roles.chat_model` to a specific (provider, modelId), the writer behind
+ * the model switcher. Reuses `readGhostModels`/`writeGhostModels`, preserves
+ * every other key (providers, other roles) untouched, and creates the file
+ * when the ghost has none yet. Unlike `bindDefaultChatModelIfUnset` in auth.ts,
+ * this always overwrites the binding — it is the explicit "switch to this
+ * model" action, not a first-run default.
+ */
+export function setChatModelRole(
+  agentDir: string,
+  provider: string,
+  modelId: string,
+): GhostModelsFile {
+  const file: GhostModelsFile = readGhostModels(agentDir) ?? { providers: {} };
+  file.roles = { ...(file.roles ?? {}), chat_model: { provider, modelId } };
+  writeGhostModels(agentDir, file);
+  return file;
+}
+
 // ---------------------------------------------------------------------------
 // Presets
 // ---------------------------------------------------------------------------

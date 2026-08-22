@@ -1,0 +1,286 @@
+/**
+ * The model indicator + switcher HTTP surface, end to end over a real
+ * listening loopback server, with a fake catalogue so no real `ModelRuntime`,
+ * provider, or network is touched.
+ *
+ *   GET /api/ghosts/:name/model
+ *   GET /api/ghosts/:name/models?scope=available|catalog&provider=&q=&limit=&offset=
+ *   PUT /api/ghosts/:name/model  { provider, id }
+ */
+import { afterEach, describe, expect, it } from "vitest";
+import { ghostPaths } from "../src/ghosts.js";
+import {
+  DEFAULT_MODELS_LIMIT,
+  MAX_MODELS_LIMIT,
+  ModelCatalog,
+  type ModelCatalogRuntime,
+} from "../src/model-catalog.js";
+import { setChatModelRole, writeGhostModels } from "../src/models.js";
+import { startDaemonServer, type ListeningServer } from "../src/server.js";
+import { SessionHost } from "../src/session-host.js";
+import {
+  makeFakeCatalogRuntime,
+  sampleCatalog,
+  type FakeCatalogModel,
+} from "./helpers/fake-catalog-runtime.js";
+import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
+
+let temp: TempGhosts | null = null;
+let host: SessionHost | null = null;
+let listening: ListeningServer | null = null;
+
+afterEach(async () => {
+  await listening?.close();
+  listening = null;
+  await host?.disposeAll();
+  host = null;
+  temp?.cleanup();
+  temp = null;
+});
+
+interface ServeOptions {
+  models?: FakeCatalogModel[];
+  credentialed?: string[];
+  oauth?: string[];
+}
+
+/** Boot a server whose catalogue is the given fake runtime. Returns the base URL. */
+async function serve(options: ServeOptions = {}): Promise<string> {
+  temp = makeTempGhosts();
+  temp.registry.ensureRoot();
+  seedGhost(temp.root, { name: "casper" });
+  host = new SessionHost({ registry: temp.registry, offline: true });
+  const runtime: ModelCatalogRuntime = makeFakeCatalogRuntime({
+    models: options.models ?? sampleCatalog(),
+    ...(options.credentialed ? { credentialed: options.credentialed } : {}),
+    ...(options.oauth ? { oauth: options.oauth } : {}),
+  });
+  const catalog = new ModelCatalog({
+    registry: temp.registry,
+    offline: true,
+    createRuntime: async () => runtime,
+  });
+  listening = await startDaemonServer({ registry: temp.registry, host, catalog, port: 0, relay: null });
+  return `http://127.0.0.1:${listening.port}`;
+}
+
+function agentDir(name = "casper"): string {
+  if (!temp) throw new Error("no temp ghosts");
+  return ghostPaths(`${temp.root}/${name}`).agentDir;
+}
+
+async function getJson(url: string): Promise<{ status: number; body: Record<string, unknown>; raw: string }> {
+  const response = await fetch(url);
+  const raw = await response.text();
+  return { status: response.status, body: JSON.parse(raw) as Record<string, unknown>, raw };
+}
+
+describe("GET /api/ghosts/:name/model", () => {
+  it("reports source=role when roles.chat_model is set and resolves", async () => {
+    const base = await serve({ credentialed: ["openai-codex"] });
+    setChatModelRole(agentDir(), "openai-codex", "gpt-5-codex");
+    const { status, body } = await getJson(`${base}/api/ghosts/casper/model`);
+    expect(status).toBe(200);
+    expect(body.source).toBe("role");
+    expect(body.current).toMatchObject({
+      provider: "openai-codex",
+      id: "gpt-5-codex",
+      hasVision: true,
+      contextWindow: 400_000,
+    });
+  });
+
+  it("reports source=default from a hand-declared provider model when no role is set", async () => {
+    const base = await serve({ credentialed: [] });
+    // A providers block with a model but no roles.chat_model: pi's fallback.
+    writeGhostModels(agentDir(), {
+      providers: { "openai-codex": { models: [{ id: "gpt-5-mini" }] } },
+    });
+    const { body } = await getJson(`${base}/api/ghosts/casper/model`);
+    expect(body.source).toBe("default");
+    expect(body.current).toMatchObject({ provider: "openai-codex", id: "gpt-5-mini" });
+  });
+
+  it("reports source=default from the first available model when nothing is declared", async () => {
+    const base = await serve({ credentialed: ["anthropic"] });
+    const { body } = await getJson(`${base}/api/ghosts/casper/model`);
+    expect(body.source).toBe("default");
+    expect(body.current).toMatchObject({ provider: "anthropic", id: "claude-opus-4" });
+  });
+
+  it("reports source=none when nothing is usable", async () => {
+    const base = await serve({ credentialed: [] });
+    const { body } = await getJson(`${base}/api/ghosts/casper/model`);
+    expect(body).toEqual({ current: null, source: "none" });
+  });
+});
+
+describe("GET /api/ghosts/:name/models?scope=available", () => {
+  it("lists only credentialed providers and flags the current selection", async () => {
+    const base = await serve({ credentialed: ["openai-codex"], oauth: ["openai-codex"] });
+    setChatModelRole(agentDir(), "openai-codex", "gpt-5-codex");
+    const { body } = await getJson(`${base}/api/ghosts/casper/models`);
+    expect(body.scope).toBe("available");
+    const models = body.models as Array<Record<string, unknown>>;
+    // Only openai-codex is credentialed; anthropic must be absent.
+    expect(models.every((m) => m.provider === "openai-codex")).toBe(true);
+    expect(models).toHaveLength(2);
+    const current = models.find((m) => m.current === true);
+    expect(current).toMatchObject({ id: "gpt-5-codex", connectedVia: "oauth", hasVision: true });
+    // available rows carry cost and connectedVia but no `usable` flag.
+    expect(current).toHaveProperty("cost");
+    expect(current).not.toHaveProperty("usable");
+  });
+
+  it("returns an empty list when no provider is credentialed", async () => {
+    const base = await serve({ credentialed: [] });
+    const { body } = await getJson(`${base}/api/ghosts/casper/models?scope=available`);
+    expect(body.models).toEqual([]);
+    expect(body.total).toBe(0);
+  });
+});
+
+describe("GET /api/ghosts/:name/models?scope=catalog", () => {
+  it("includes uncredentialed models with usable=false and connectedVia only when usable", async () => {
+    const base = await serve({ credentialed: ["openai-codex"], oauth: ["openai-codex"] });
+    const { body } = await getJson(`${base}/api/ghosts/casper/models?scope=catalog`);
+    expect(body.scope).toBe("catalog");
+    const models = body.models as Array<Record<string, unknown>>;
+    expect(models).toHaveLength(3);
+    const anthropic = models.find((m) => m.provider === "anthropic");
+    expect(anthropic).toMatchObject({ usable: false });
+    expect(anthropic).not.toHaveProperty("connectedVia");
+    const codex = models.find((m) => m.id === "gpt-5-codex");
+    expect(codex).toMatchObject({ usable: true, connectedVia: "oauth" });
+  });
+
+  it("honors the provider filter", async () => {
+    const base = await serve({ credentialed: ["openai-codex"] });
+    const { body } = await getJson(`${base}/api/ghosts/casper/models?scope=catalog&provider=anthropic`);
+    const models = body.models as Array<Record<string, unknown>>;
+    expect(models).toHaveLength(1);
+    expect(models[0]).toMatchObject({ provider: "anthropic", id: "claude-opus-4" });
+    expect(body.provider).toBe("anthropic");
+  });
+
+  it("honors the q substring filter on id and name", async () => {
+    const base = await serve({ credentialed: ["openai-codex"] });
+    const byId = await getJson(`${base}/api/ghosts/casper/models?scope=catalog&q=mini`);
+    expect((byId.body.models as unknown[]).length).toBe(1);
+    expect((byId.body.models as Array<Record<string, unknown>>)[0]).toMatchObject({ id: "gpt-5-mini" });
+    const byName = await getJson(`${base}/api/ghosts/casper/models?scope=catalog&q=opus`);
+    expect((byName.body.models as Array<Record<string, unknown>>)[0]).toMatchObject({ id: "claude-opus-4" });
+  });
+
+  it("paginates and caps a large catalogue", async () => {
+    const big: FakeCatalogModel[] = Array.from({ length: 250 }, (_, i) => ({
+      provider: "big",
+      id: `model-${String(i).padStart(3, "0")}`,
+      input: ["text"] as const,
+    }));
+    const base = await serve({ models: big, credentialed: [] });
+
+    // Default page caps at DEFAULT_MODELS_LIMIT with the full count in `total`.
+    const first = await getJson(`${base}/api/ghosts/casper/models?scope=catalog`);
+    expect((first.body.models as unknown[]).length).toBe(DEFAULT_MODELS_LIMIT);
+    expect(first.body.total).toBe(250);
+    expect(first.body.limit).toBe(DEFAULT_MODELS_LIMIT);
+    expect((first.body.models as Array<{ id: string }>)[0]?.id).toBe("model-000");
+
+    // offset pages into the sorted list.
+    const paged = await getJson(`${base}/api/ghosts/casper/models?scope=catalog&limit=10&offset=100`);
+    const ids = (paged.body.models as Array<{ id: string }>).map((m) => m.id);
+    expect(ids).toHaveLength(10);
+    expect(ids[0]).toBe("model-100");
+
+    // limit is clamped to MAX_MODELS_LIMIT.
+    const huge = await getJson(`${base}/api/ghosts/casper/models?scope=catalog&limit=100000`);
+    expect(huge.body.limit).toBe(MAX_MODELS_LIMIT);
+    expect((huge.body.models as unknown[]).length).toBe(250);
+  });
+
+  it("400s an invalid scope", async () => {
+    const base = await serve();
+    const { status, body } = await getJson(`${base}/api/ghosts/casper/models?scope=bogus`);
+    expect(status).toBe(400);
+    expect(body).toMatchObject({ error: { code: "invalid_request" } });
+  });
+});
+
+describe("PUT /api/ghosts/:name/model", () => {
+  async function put(base: string, payload: unknown): Promise<{ status: number; body: Record<string, unknown> }> {
+    const response = await fetch(`${base}/api/ghosts/casper/model`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    return { status: response.status, body: (await response.json()) as Record<string, unknown> };
+  }
+
+  it("writes roles.chat_model and round-trips through GET", async () => {
+    const base = await serve({ credentialed: ["openai-codex"] });
+    const set = await put(base, { provider: "openai-codex", id: "gpt-5-codex" });
+    expect(set.status).toBe(200);
+    expect(set.body).toMatchObject({
+      ok: true,
+      usable: true,
+      source: "role",
+      current: { provider: "openai-codex", id: "gpt-5-codex" },
+    });
+    expect(set.body).not.toHaveProperty("warning");
+
+    const after = await getJson(`${base}/api/ghosts/casper/model`);
+    expect(after.body.source).toBe("role");
+    expect(after.body.current).toMatchObject({ provider: "openai-codex", id: "gpt-5-codex" });
+  });
+
+  it("still writes an uncredentialed provider but returns usable=false + warning", async () => {
+    const base = await serve({ credentialed: [] });
+    const set = await put(base, { provider: "anthropic", id: "claude-opus-4" });
+    expect(set.status).toBe(200);
+    expect(set.body).toMatchObject({ ok: true, usable: false });
+    expect(typeof set.body.warning).toBe("string");
+    // The selection was written even though it cannot answer yet.
+    const after = await getJson(`${base}/api/ghosts/casper/model`);
+    expect(after.body.current).toMatchObject({ provider: "anthropic", id: "claude-opus-4" });
+  });
+
+  it("400s a model not in the catalogue", async () => {
+    const base = await serve({ credentialed: ["openai-codex"] });
+    const { status, body } = await put(base, { provider: "openai-codex", id: "no-such-model" });
+    expect(status).toBe(400);
+    expect(body).toMatchObject({ error: { code: "unknown_model" } });
+  });
+
+  it("400s a missing provider or id", async () => {
+    const base = await serve();
+    expect((await put(base, { id: "gpt-5-codex" })).status).toBe(400);
+    expect((await put(base, { provider: "openai-codex" })).status).toBe(400);
+  });
+});
+
+describe("no credential ever leaks into a response", () => {
+  it("omits the models.json apiKey from every model response", async () => {
+    const secret = "sk-super-secret-key-xyz";
+    const base = await serve({ credentialed: ["openai-codex"] });
+    // A real models.json with an apiKey on disk. The endpoints read the pi
+    // catalogue, never the raw file, so the key must never appear.
+    writeGhostModels(agentDir(), {
+      providers: { "openai-codex": { apiKey: secret, models: [{ id: "gpt-5-codex" }] } },
+      roles: { chat_model: { provider: "openai-codex", modelId: "gpt-5-codex" } },
+    });
+    const current = await getJson(`${base}/api/ghosts/casper/model`);
+    const available = await getJson(`${base}/api/ghosts/casper/models?scope=available`);
+    const catalog = await getJson(`${base}/api/ghosts/casper/models?scope=catalog`);
+    const put = await fetch(`${base}/api/ghosts/casper/model`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ provider: "openai-codex", id: "gpt-5-codex" }),
+    });
+    const putRaw = await put.text();
+    expect(current.raw).not.toContain(secret);
+    expect(available.raw).not.toContain(secret);
+    expect(catalog.raw).not.toContain(secret);
+    expect(putRaw).not.toContain(secret);
+  });
+});

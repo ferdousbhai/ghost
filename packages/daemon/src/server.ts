@@ -29,6 +29,7 @@ import type { AddressInfo } from "node:net";
 import type { AuthType } from "@earendil-works/pi-ai";
 import type { LoginManager } from "./auth.js";
 import { assertLoopback } from "./config.js";
+import type { ListModelsQuery, ModelCatalog, ModelScope } from "./model-catalog.js";
 import { GhostError, type GhostRegistry } from "./ghosts.js";
 import { silentLogger, type Logger } from "./log.js";
 import {
@@ -52,6 +53,12 @@ export interface ServerOptions {
    * no login surface.
    */
   login?: LoginManager;
+  /**
+   * The per-ghost model indicator + switcher. Omit to leave the `/model` and
+   * `/models` routes out entirely (they 404) — a server that only runs turns
+   * needs no switcher surface.
+   */
+  catalog?: ModelCatalog;
   logger?: Logger;
   /** Max request body. A turn is a few KB; this is a sanity bound. */
   maxBodyBytes?: number;
@@ -118,7 +125,7 @@ function applyCors(request: IncomingMessage, response: ServerResponse): void {
   if (typeof origin !== "string" || !LOOPBACK_ORIGIN.test(origin)) return;
   response.setHeader("access-control-allow-origin", origin);
   response.setHeader("vary", "origin");
-  response.setHeader("access-control-allow-methods", "GET, POST, OPTIONS");
+  response.setHeader("access-control-allow-methods", "GET, POST, PUT, OPTIONS");
   response.setHeader("access-control-allow-headers", "content-type, authorization, x-ghost-turn-id");
   response.setHeader("access-control-expose-headers", "x-ghost-turn-id");
 }
@@ -261,6 +268,84 @@ export function createDaemonServer(options: ServerOptions): Server {
     jsonResponse(response, 200, options.login.submitInput(ghostName, loginId, value));
   };
 
+  const handleCurrentModel = async (
+    ghostName: string,
+    response: ServerResponse,
+  ): Promise<void> => {
+    if (!options.catalog) {
+      errorResponse(response, 404, "not_found", "The model switcher is not enabled on this daemon.");
+      return;
+    }
+    jsonResponse(response, 200, await options.catalog.getCurrent(ghostName));
+  };
+
+  const handleListModels = async (
+    ghostName: string,
+    url: URL,
+    response: ServerResponse,
+  ): Promise<void> => {
+    if (!options.catalog) {
+      errorResponse(response, 404, "not_found", "The model switcher is not enabled on this daemon.");
+      return;
+    }
+    const scopeParam = url.searchParams.get("scope");
+    if (scopeParam !== null && scopeParam !== "available" && scopeParam !== "catalog") {
+      errorResponse(response, 400, "invalid_request", "\"scope\" must be \"available\" or \"catalog\".");
+      return;
+    }
+    const query: ListModelsQuery = {};
+    if (scopeParam) query.scope = scopeParam as ModelScope;
+    const provider = url.searchParams.get("provider");
+    if (provider) query.provider = provider;
+    const q = url.searchParams.get("q");
+    if (q) query.q = q;
+    const limit = url.searchParams.get("limit");
+    if (limit !== null) {
+      const parsed = Number(limit);
+      if (!Number.isFinite(parsed)) {
+        errorResponse(response, 400, "invalid_request", "\"limit\" must be a number.");
+        return;
+      }
+      query.limit = parsed;
+    }
+    const offset = url.searchParams.get("offset");
+    if (offset !== null) {
+      const parsed = Number(offset);
+      if (!Number.isFinite(parsed)) {
+        errorResponse(response, 400, "invalid_request", "\"offset\" must be a number.");
+        return;
+      }
+      query.offset = parsed;
+    }
+    jsonResponse(response, 200, await options.catalog.listModels(ghostName, query));
+  };
+
+  const handleSetModel = async (
+    ghostName: string,
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): Promise<void> => {
+    if (!options.catalog) {
+      errorResponse(response, 404, "not_found", "The model switcher is not enabled on this daemon.");
+      return;
+    }
+    const body = await readJsonBody(request, maxBodyBytes);
+    if (body === null || typeof body !== "object" || Array.isArray(body)) {
+      errorResponse(response, 400, "invalid_request", "Request body must be a JSON object.");
+      return;
+    }
+    const { provider, id } = body as { provider?: unknown; id?: unknown };
+    if (typeof provider !== "string" || provider === "") {
+      errorResponse(response, 400, "invalid_request", "\"provider\" must be a non-empty string.");
+      return;
+    }
+    if (typeof id !== "string" || id === "") {
+      errorResponse(response, 400, "invalid_request", "\"id\" must be a non-empty string.");
+      return;
+    }
+    jsonResponse(response, 200, await options.catalog.setChatModel(ghostName, provider, id));
+  };
+
   const handleMessages = async (
     ghostName: string,
     request: IncomingMessage,
@@ -383,6 +468,19 @@ export function createDaemonServer(options: ServerOptions): Server {
             return;
           }
           return await handleListSessions(ghostName, response);
+        }
+        if (segments.length === 4 && segments[3] === "model") {
+          if (method === "GET") return await handleCurrentModel(ghostName, response);
+          if (method === "PUT") return await handleSetModel(ghostName, request, response);
+          errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+          return;
+        }
+        if (segments.length === 4 && segments[3] === "models") {
+          if (method !== "GET") {
+            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+            return;
+          }
+          return await handleListModels(ghostName, url, response);
         }
         if (segments.length === 4 && segments[3] === "providers") {
           if (method !== "GET") {
