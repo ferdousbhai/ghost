@@ -8,6 +8,7 @@
  *   POST /api/ghosts { name }                 → 201 + the new ghost
  *   POST /api/ghosts/:name/messages           → pi-messages SSE (canned reply)
  *   GET  /api/ghosts/:name/sessions           → { sessions: [...] }, newest first
+ *   DELETE /api/ghosts/:name/sessions/:id     → delete one conversation
  *   GET  /api/ghosts/:name/sessions/:id/transcript → { id, title, messages }
  *   GET  /api/ghosts/:name/providers          → loginable providers
  *   POST /api/ghosts/:name/login              → start a login → { loginId, status }
@@ -461,6 +462,12 @@ createServer(async (req, res) => {
       .map(sessionSummary)
       .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
     return json(res, 200, { sessions: list });
+  }
+  if (parts[3] === "sessions" && parts.length === 5 && req.method === "DELETE") {
+    const deleted = ghostSessions(name).delete(decodeURIComponent(parts[4]));
+    return deleted
+      ? json(res, 200, { ok: true })
+      : json(res, 404, { error: { message: "no such session", code: "not_found" } });
   }
   if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "transcript" && req.method === "GET") {
     const s = ghostSessions(name).get(decodeURIComponent(parts[4]));

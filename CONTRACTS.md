@@ -90,6 +90,10 @@ one must not be a leak of both.
   one is generated (see "Conversation titles" below). OMP transcripts and Claude
   Code resume sidecars share this shape (a Claude conversation's `title` is
   `"Claude Code"`).
+- `DELETE /api/ghosts/:name/sessions/:id` → `{ ok: true }` — permanently deletes
+  the conversation's OMP transcript and/or Claude Code resume sidecar. An active
+  conversation must finish or be cancelled first (`409 session_busy`); an
+  unknown conversation returns `404 not_found`.
 - `GET  /api/ghosts/:name/sessions/:id/transcript` → `{ id, title, messages,
   total, truncated }` — a past conversation's history so the shell can rehydrate
   it (issue #26). `messages` are OMP's `{ role, content }` messages (user and

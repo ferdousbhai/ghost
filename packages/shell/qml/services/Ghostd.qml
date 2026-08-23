@@ -71,6 +71,8 @@ Singleton {
     property string currentSessionId: ""
     /** Non-empty when a sessions/transcript fetch failed. */
     property string sessionsError: ""
+    /** Conversation currently being deleted, or "" when idle. */
+    property string deletingSessionId: ""
 
     // ---- Turn state -------------------------------------------------------
     /** ListModel of { role, text, tools, toolActivity, error, pending }. */
@@ -151,6 +153,7 @@ Singleton {
     property var modelRoutingRequest: null
     property var sessionsRequest: null
     property var transcriptRequest: null
+    property var deleteSessionRequest: null
     property var askRequest: null
     property var askSubmitRequest: null
     property var queueRequest: null
@@ -429,6 +432,42 @@ Singleton {
         root.currentSessionId = id;
         root.clearTranscript();
         root.fetchSessions(ghost);
+    }
+
+    /** Permanently delete one stored conversation after the UI confirms it. */
+    function deleteConversation(id: string): void {
+        const ghost = root.activeGhost;
+        if (ghost === "" || id === "" || root.deletingSessionId !== "") return;
+        if (id === root.currentSessionId && root.streaming) {
+            root.sessionsError = "Cancel the current answer before deleting this conversation";
+            return;
+        }
+        root.deletingSessionId = id;
+        root.sessionsError = "";
+        const xhr = new XMLHttpRequest();
+        root.deleteSessionRequest = xhr;
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || xhr !== root.deleteSessionRequest) return;
+            root.deletingSessionId = "";
+            if (xhr.status === 200) {
+                if (ghost === root.activeGhost) {
+                    root.sessions = root.sessions.filter(function (session) {
+                        return session.id !== id;
+                    });
+                    if (root.currentSessionId === id) {
+                        root.sessionIds[ghost] = "";
+                        root.currentSessionId = "";
+                        root.clearTranscript();
+                    }
+                    root.sessionsError = "";
+                    root.fetchSessions(ghost);
+                }
+            } else if (ghost === root.activeGhost) {
+                root.sessionsError = root.describeError(xhr, "DELETE conversation");
+            }
+        };
+        root.dispatch(xhr, "DELETE", "/api/ghosts/" + encodeURIComponent(ghost)
+            + "/sessions/" + encodeURIComponent(id), ({}), null);
     }
 
     /**

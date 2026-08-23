@@ -23,6 +23,7 @@ import {
   readFile,
   readdir,
   rename,
+  unlink,
   writeFile,
 } from "node:fs/promises";
 import { delimiter, isAbsolute, join, resolve } from "node:path";
@@ -901,6 +902,26 @@ export class ClaudeCodeRuntime {
       await runtime.interrupt();
     } finally {
       runtime.close();
+    }
+  }
+
+  /** Delete one persisted resume sidecar. Returns false when none exists. */
+  async deleteSession(ghost: Ghost, conversationId: string): Promise<boolean> {
+    if (this.isBusy(ghost.name, conversationId)) {
+      throw new GhostError(
+        "session_busy",
+        "Wait for this conversation to finish before deleting it.",
+        409,
+      );
+    }
+    await this.close(ghost.name, conversationId);
+    const path = claudeSessionMetadataPath(ghostPaths(ghost.dir).sessionDir, conversationId);
+    try {
+      await unlink(path);
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+      throw error;
     }
   }
 

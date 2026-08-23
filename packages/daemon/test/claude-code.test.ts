@@ -194,6 +194,19 @@ describe("Claude Code subscription runtime", () => {
     ]);
   });
 
+  it("deletes a Claude Code resume sidecar", async () => {
+    setupClaudeHost();
+    await host!.runTurn("casper", {
+      sessionId: "conversation-delete",
+      prompt: "Remember this",
+      emit: () => {},
+    });
+    expect(await host!.listSessions("casper")).toHaveLength(1);
+
+    await host!.deleteSession("casper", "conversation-delete");
+    expect(await host!.listSessions("casper")).toEqual([]);
+  });
+
   it("applies session_stop continuations before the Claude turn settles", async () => {
     const hooks = new GhostHookRunner();
     const active: boolean[] = [];

@@ -133,6 +133,7 @@ The authoritative route and payload contract is
 
 | method | path | purpose |
 |---|---|---|
+| DELETE | `/api/ghosts/:name/sessions/:id` | permanently delete an idle conversation |
 | GET/POST | `/api/ghosts/:name/sessions/:id/ask` | poll or resolve the active ask |
 | GET/POST | `/api/ghosts/:name/sessions/:id/queue` | inspect or enqueue steer/follow-up |
 | POST | `/api/ghosts/:name/sessions/:id/branch` | rewind or navigate the session tree |

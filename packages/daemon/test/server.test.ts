@@ -355,6 +355,29 @@ describe("GET /api/ghosts/:name/sessions", () => {
   });
 });
 
+describe("DELETE /api/ghosts/:name/sessions/:id", () => {
+  it("permanently deletes a stored conversation", async () => {
+    const base = await serve();
+    await postTurn(base, TURN_BODY);
+
+    const deleted = await fetch(`${base}/api/ghosts/casper/sessions/conv-1`, {
+      method: "DELETE",
+    });
+    expect(deleted.status).toBe(200);
+    expect(await deleted.json()).toEqual({ ok: true });
+    expect(await (await fetch(`${base}/api/ghosts/casper/sessions`)).json())
+      .toEqual({ sessions: [] });
+    expect((await fetch(`${base}/api/ghosts/casper/sessions/conv-1/transcript`)).status)
+      .toBe(404);
+
+    const missing = await fetch(`${base}/api/ghosts/casper/sessions/conv-1`, {
+      method: "DELETE",
+    });
+    expect(missing.status).toBe(404);
+    expect(await missing.json()).toMatchObject({ error: { code: "not_found" } });
+  });
+});
+
 describe("GET /api/ghosts/:name/sessions/:id/transcript", () => {
   it("returns the conversation's renderable messages", async () => {
     const base = await serve([{ kind: "text", text: "I set type for a living." }]);

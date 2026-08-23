@@ -225,6 +225,7 @@ describe("the two deliberate exemptions", () => {
     });
     expect(response.status).toBe(204);
     expect(response.headers.get("access-control-allow-headers")).toContain("authorization");
+    expect(response.headers.get("access-control-allow-methods")).toContain("DELETE");
   });
 
   it("serves /api/relay/status unauthenticated, and it still leaks nothing", async () => {

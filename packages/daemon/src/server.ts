@@ -6,6 +6,7 @@
  *   POST /api/ghosts                  { name } → creates ~/Ghosts/<name>/
  *   POST /api/ghosts/:name/messages   pi-messages request → SSE of pi-messages events
  *   GET  /api/ghosts/:name/sessions   → { sessions } — conversation listing for that ghost
+ *   DELETE /api/ghosts/:name/sessions/:id → permanently delete one conversation
  *   GET  /api/ghosts/:name/sessions/:id/transcript → { id, title, messages } for resume
  *   GET  /api/ghosts/:name/sessions/:id/ask → { ask } — current OMP ask, if any
  *   POST /api/ghosts/:name/sessions/:id/ask → resolve that ask
@@ -205,7 +206,7 @@ function applyCors(request: IncomingMessage, response: ServerResponse): void {
   if (typeof origin !== "string" || !LOOPBACK_ORIGIN.test(origin)) return;
   response.setHeader("access-control-allow-origin", origin);
   response.setHeader("vary", "origin");
-  response.setHeader("access-control-allow-methods", "GET, POST, PUT, OPTIONS");
+  response.setHeader("access-control-allow-methods", "GET, POST, PUT, DELETE, OPTIONS");
   response.setHeader("access-control-allow-headers", "content-type, authorization, x-ghost-turn-id");
   response.setHeader("access-control-expose-headers", "x-ghost-turn-id");
 }
@@ -339,6 +340,15 @@ export function createDaemonServer(options: ServerOptions): Server {
     response: ServerResponse,
   ): Promise<void> => {
     jsonResponse(response, 200, { sessions: await options.host.listSessions(ghostName) });
+  };
+
+  const handleDeleteSession = async (
+    ghostName: string,
+    conversationId: string,
+    response: ServerResponse,
+  ): Promise<void> => {
+    await options.host.deleteSession(ghostName, conversationId);
+    jsonResponse(response, 200, { ok: true });
   };
 
   const handleTranscript = async (
@@ -855,6 +865,17 @@ export function createDaemonServer(options: ServerOptions): Server {
             return;
           }
           return await handleListSessions(ghostName, response);
+        }
+        if (segments.length === 5 && segments[3] === "sessions") {
+          if (method !== "DELETE") {
+            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+            return;
+          }
+          return await handleDeleteSession(
+            ghostName,
+            decodePathSegment(segments[4] ?? ""),
+            response,
+          );
         }
         if (segments.length === 6 && segments[3] === "sessions" && segments[5] === "transcript") {
           if (method !== "GET") {

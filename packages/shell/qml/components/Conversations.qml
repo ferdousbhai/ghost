@@ -15,6 +15,9 @@ Item {
         HUD can return focus to the composer. */
     signal picked()
 
+    /** A destructive action takes two clicks; only one row can be armed. */
+    property string confirmingSessionId: ""
+
     implicitWidth: 190
     implicitHeight: column.implicitHeight
 
@@ -62,6 +65,10 @@ Item {
                 required property var modelData
 
                 readonly property bool active: entry.modelData.id === Ghostd.currentSessionId
+                readonly property bool confirmingDelete:
+                    root.confirmingSessionId === entry.modelData.id
+                readonly property bool deleting:
+                    Ghostd.deletingSessionId === entry.modelData.id
 
                 width: root.width
                 // Grow to fit a wrapped title instead of eliding it.
@@ -71,6 +78,7 @@ Item {
                     : (entryArea.containsMouse ? Theme.hover : "transparent")
 
                 Row {
+                    z: 1
                     anchors.verticalCenter: parent.verticalCenter
                     anchors.left: parent.left
                     anchors.leftMargin: Theme.gap
@@ -90,7 +98,7 @@ Item {
                     Text {
                         id: titleText
                         anchors.verticalCenter: parent.verticalCenter
-                        width: parent.width - 2 - when.width - Theme.gap * 2
+                        width: parent.width - 2 - when.width - deleteAction.width - Theme.gap * 3
                         text: root.titleOf(entry.modelData)
                         color: entry.active ? Theme.foregroundBright : Theme.foreground
                         font.family: Theme.fontFamily
@@ -102,10 +110,53 @@ Item {
                         id: when
                         anchors.verticalCenter: parent.verticalCenter
                         width: implicitWidth
-                        text: root.whenOf(entry.modelData)
+                        text: entry.confirmingDelete || entry.deleting
+                            ? ""
+                            : root.whenOf(entry.modelData)
                         color: Theme.foregroundDim
                         font.family: Theme.fontFamily
                         font.pixelSize: Theme.fontSizeSmall
+                    }
+
+                    Item {
+                        id: deleteAction
+                        anchors.verticalCenter: parent.verticalCenter
+                        // Reserve the close affordance even before hover so a
+                        // long wrapped title does not jump as the pointer enters.
+                        width: entry.confirmingDelete || entry.deleting ? 42 : 16
+                        height: Theme.controlHeight
+                        visible: (entryArea.containsMouse || deleteArea.containsMouse
+                            || entry.confirmingDelete || entry.deleting)
+                            && !(entry.active && Ghostd.streaming)
+                        z: 2
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: entry.deleting ? "…"
+                                : (entry.confirmingDelete ? "Delete" : "×")
+                            color: Theme.danger
+                            font.family: Theme.fontFamily
+                            font.pixelSize: entry.confirmingDelete
+                                ? Theme.fontSizeSmall
+                                : Theme.fontSize
+                            font.weight: entry.confirmingDelete ? Font.DemiBold : Font.Normal
+                        }
+
+                        MouseArea {
+                            id: deleteArea
+                            anchors.fill: parent
+                            enabled: !entry.deleting
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                if (entry.confirmingDelete) {
+                                    root.confirmingSessionId = "";
+                                    Ghostd.deleteConversation(entry.modelData.id);
+                                } else {
+                                    root.confirmingSessionId = entry.modelData.id;
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -115,11 +166,22 @@ Item {
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     onClicked: {
+                        root.confirmingSessionId = "";
                         Ghostd.openConversation(entry.modelData.id);
                         root.picked();
                     }
                 }
             }
+        }
+
+        Text {
+            visible: Ghostd.sessionsError !== "" && Ghostd.sessions.length > 0
+            width: root.width
+            text: Ghostd.sessionsError
+            color: Theme.danger
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontSizeSmall
+            wrapMode: Text.Wrap
         }
 
         Text {
@@ -161,6 +223,7 @@ Item {
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
                 onClicked: {
+                    root.confirmingSessionId = "";
                     Ghostd.newConversation();
                     root.picked();
                 }

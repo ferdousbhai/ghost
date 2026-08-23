@@ -546,6 +546,21 @@ describe("SessionHost.runTurn", () => {
     await first;
   });
 
+  it("refuses to delete a conversation while it is answering", async () => {
+    await setup([{ kind: "text", text: "hello" }]);
+    const turn = host!.runTurn("casper", {
+      sessionId: "conv-busy-delete",
+      prompt: "one",
+      emit: () => {},
+    });
+    await expect(host!.deleteSession("casper", "conv-busy-delete")).rejects.toMatchObject({
+      code: "session_busy",
+      status: 409,
+    });
+    await turn;
+    await expect(host!.deleteSession("casper", "conv-busy-delete")).resolves.toBeUndefined();
+  });
+
   it("terminates with an error event when the provider fails", async () => {
     // 400, not 500: a server error is retryable and pi would back off for
     // seconds before giving up. A bad request fails once, immediately.
@@ -685,6 +700,28 @@ describe("session listing", () => {
     await host!.runTurn("casper", { sessionId: "newer", prompt: "two", emit: () => {} });
     const sessions = await host!.listSessions("casper");
     expect(sessions.map((session) => session.id)).toEqual(["newer", "older"]);
+  });
+
+  it("deletes a stored conversation and lets the id start fresh", async () => {
+    const { dir } = await setup([{ kind: "text", text: "hello" }]);
+    await host!.runTurn("casper", { sessionId: "conv-delete", prompt: "one", emit: () => {} });
+    const path = join(ghostPaths(dir).sessionDir, sessionFileNameFor("conv-delete"));
+    expect(existsSync(path)).toBe(true);
+
+    await host!.deleteSession("casper", "conv-delete");
+    expect(existsSync(path)).toBe(false);
+    expect(await host!.listSessions("casper")).toEqual([]);
+    await expect(host!.readTranscript("casper", "conv-delete")).rejects.toMatchObject({
+      code: "not_found",
+      status: 404,
+    });
+    await expect(host!.deleteSession("casper", "conv-delete")).rejects.toMatchObject({
+      code: "not_found",
+      status: 404,
+    });
+
+    await host!.runTurn("casper", { sessionId: "conv-delete", prompt: "fresh", emit: () => {} });
+    expect((await host!.listSessions("casper"))[0]?.messageCount).toBe(2);
   });
 });
 

@@ -39,6 +39,7 @@
  *    approval surface; all other capabilities come from Ghost extensions.
  */
 import { existsSync, mkdirSync } from "node:fs";
+import { unlink } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { join, sep } from "node:path";
 import {
@@ -415,6 +416,8 @@ export class SessionHost {
   private readonly sessions = new Map<string, HostedSession>();
   /** In-flight opens, so two concurrent turns never build two sessions. */
   private readonly opening = new Map<string, Promise<HostedSession>>();
+  /** Conversation ids reserved by a destructive delete operation. */
+  private readonly deleting = new Set<string>();
   private disposed = false;
 
   constructor(options: SessionHostOptions) {
@@ -460,6 +463,13 @@ export class SessionHost {
       throw new GhostError("shutting_down", "The daemon is shutting down.", 503);
     }
     const key = this.keyOf(ghostName, sessionId);
+    if (this.deleting.has(key)) {
+      throw new GhostError(
+        "session_busy",
+        "Wait for this conversation to finish deleting before opening it.",
+        409,
+      );
+    }
     const existing = this.sessions.get(key);
     if (existing) return existing;
     const pending = this.opening.get(key);
@@ -808,6 +818,13 @@ export class SessionHost {
         );
       }
       await this.closePi(ghostName, options.sessionId);
+      if (this.deleting.has(this.keyOf(ghostName, options.sessionId))) {
+        throw new GhostError(
+          "session_busy",
+          "Wait for this conversation to finish deleting before opening it.",
+          409,
+        );
+      }
       await this.claudeCode.runTurn(ghost, conversationId, configured.modelId, options);
       return;
     }
@@ -1368,6 +1385,53 @@ export class SessionHost {
   async close(ghostName: string, sessionId?: string | null): Promise<void> {
     await this.claudeCode.close(ghostName, sessionId || DEFAULT_SESSION_KEY);
     await this.closePi(ghostName, sessionId);
+  }
+
+  /** Permanently delete one idle conversation, regardless of its runtime. */
+  async deleteSession(ghostName: string, sessionId?: string | null): Promise<void> {
+    const ghost = this.registry.get(ghostName);
+    const id = sessionId || DEFAULT_SESSION_KEY;
+    const key = this.keyOf(ghostName, sessionId);
+    const hosted = this.sessions.get(key);
+    if (this.deleting.has(key) || this.opening.has(key) || hosted?.busy
+      || this.claudeCode.isBusy(ghostName, id)) {
+      throw new GhostError(
+        "session_busy",
+        "Wait for this conversation to finish before deleting it.",
+        409,
+      );
+    }
+
+    this.deleting.add(key);
+    try {
+      // Title generation and compaction can still append to an otherwise-idle
+      // transcript. Let them settle before disposal so deletion cannot race a
+      // late write that recreates the file.
+      const background = [hosted?.title, hosted?.compaction]
+        .filter((task): task is Promise<void> => task !== undefined);
+      if (background.length > 0) await Promise.allSettled(background);
+
+      await this.closePi(ghostName, sessionId);
+      const paths = ghostPaths(ghost.dir);
+      const piPath = join(paths.sessionDir, sessionFileNameFor(id));
+      let deleted = await this.claudeCode.deleteSession(ghost, id);
+      try {
+        await unlink(piPath);
+        deleted = true;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+      if (!deleted) {
+        throw new GhostError(
+          "not_found",
+          `This ghost has no conversation ${JSON.stringify(id)}.`,
+          404,
+        );
+      }
+      this.logger.info("deleted ghost conversation", { ghost: ghostName, session: id });
+    } finally {
+      this.deleting.delete(key);
+    }
   }
 
   private async closePi(ghostName: string, sessionId?: string | null): Promise<void> {
