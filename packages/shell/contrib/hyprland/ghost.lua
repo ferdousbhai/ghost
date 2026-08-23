@@ -8,22 +8,32 @@
 -- `o.bind(keys, description, command)` is Omarchy's wrapper — the description
 -- is what `omarchy menu keybindings` shows, so give it a real one.
 
--- ---- Summon ---------------------------------------------------------------
+-- ---- Summon (launch-or-focus) ---------------------------------------------
+-- The chat HUD is a normal toplevel window (app-id `ghost`), so SUPER+G is
+-- launch-or-focus: it reveals and focuses the window (pulling it to the front
+-- if already open elsewhere) and hides it only when it is already focused.
 o.bind("SUPER + G", "Summon ghost", "qs -c ghost ipc call ghost toggle")
 
 -- Summon a named ghost directly.
 -- o.bind("SUPER + SHIFT + G", "Summon casper", "qs -c ghost ipc call ghost summon casper")
 
--- ---- Move between monitors ------------------------------------------------
--- The HUD is a wlr-layer surface, so Hyprland's window move-to-monitor binds do
--- not act on it. Summoning already places it on the focused output; this moves
--- an already-open HUD to the next output. No-op with a single monitor.
-o.bind("SUPER + ALT + G", "Move ghost to next monitor", "qs -c ghost ipc call ghost moveNext")
+-- ---- Moving the window ----------------------------------------------------
+-- Nothing to bind. The HUD is a real toplevel window, so Hyprland's own binds
+-- act on it like any app: SHIFT+SUPER+<n> sends it to a workspace and it
+-- tiles/resizes in the normal layout. The old `moveNext` IPC workaround (only
+-- needed while the HUD was a layer surface) is gone.
+
+-- ---- Window rules (optional) ----------------------------------------------
+-- The HUD tiles by default. To float it at a fixed size instead, target its
+-- app-id. Uncomment to taste:
+-- hl.window_rule({ match = { class = "^(ghost)$" }, float = true })
+-- hl.window_rule({ match = { class = "^(ghost)$" }, size = { 880, 620 } })
 
 -- ---- Layer rules ----------------------------------------------------------
--- The HUD animates itself; skip the compositor's layer fade so summoning is
--- instant. `^ghost-` is anchored so it cannot collide with Omarchy's own
--- namespaces (note Omarchy's `omarchy-bar` rule is deliberately unanchored).
+-- Only the opt-in bar strip (GHOST_BAR_SURFACE=1) is still a layer surface; the
+-- HUD is a normal window and takes no layer rule. Skip the bar's fade so it
+-- appears instantly. `^ghost-` is anchored so it cannot collide with Omarchy's
+-- own namespaces (note Omarchy's `omarchy-bar` rule is deliberately unanchored).
 hl.layer_rule({ match = { namespace = "^ghost-" }, no_anim = true, animation = "none" })
 
 -- ---- Autostart ------------------------------------------------------------

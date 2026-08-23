@@ -33,23 +33,26 @@ qs -p qml/shell.qml kill
 
 ### What you should see
 
-- **Nothing on screen until `open`.** The HUD is a `PanelWindow` with
-  `visible: false`; loading the config paints no surface. This makes almost all
-  of the shell testable without putting anything over the developer's desktop.
-- On `open`: a centred 880×620 card, 64px below the top edge, in the current
-  Omarchy theme's colours. Roster on the left (`casper`, `moaning-myrtle`,
-  `+ new ghost`), transcript in the middle, composer at the bottom.
+- **Nothing on screen until `open`.** The HUD is a `FloatingWindow` bound to
+  `visible: false`; loading the config maps no window. This makes almost all of
+  the shell testable without putting anything over the developer's desktop.
+- On `open`: an 880×620 window (app-id `ghost`) that Hyprland tiles into the
+  layout like any app, in the current Omarchy theme's colours. Roster on the
+  left (`casper`, `moaning-myrtle`, `+ new ghost`), transcript in the middle,
+  composer at the bottom. `SUPER+G` is launch-or-focus: reveal+focus when
+  hidden/unfocused, hide only when already focused.
 - On `ask`: the pulsing activity dot, then `read_memory` in the activity line,
   then the reply arriving word by word with `**bold**` rendered as bold.
   The finished bubble keeps `⚒ read_memory` as its tool trail.
 - With the HUD closed, a finished turn raises a `notify-send` notification
   instead.
-- `Esc` cancels a running turn; `Esc` again dismisses. Clicking outside the
-  card dismisses (Hyprland focus grab).
-- `hyprctl layers | grep ghost-hud` shows the surface and its geometry.
+- `Esc` cancels a running turn (nothing when idle — a normal window is not
+  dismissed with Esc; use `SUPER+G` or the tray).
+- `hyprctl clients -j` lists it as a real toplevel with `class: "ghost"` — it is
+  NOT in `hyprctl layers`. `SHIFT+SUPER+<n>` moves it between workspaces.
 
-`dev/evidence/ghost-hud.png` is a capture of exactly this, cropped to the HUD's
-own rectangle.
+`dev/evidence/ghost-hud.png` is a capture of the HUD (from its earlier
+layer-shell incarnation; the card contents are unchanged).
 
 ## Validation
 
@@ -65,8 +68,9 @@ misspelled properties.
 
 ### Expected warnings
 
-Three, all on the two `PanelWindow` files, all artifacts of how Quickshell
-registers its types rather than problems in this code:
+Three, all on `GhostBarSurface.qml` — the one remaining `PanelWindow` — and all
+artifacts of how Quickshell registers its types rather than problems in this
+code:
 
 ```
 Type PanelWindow is not creatable.           [uncreatable-type]
@@ -79,7 +83,8 @@ the platform backend (`WlrLayershell`) at runtime — its own docs say
 "`PanelWindow` in particular cannot be resolved". The `margins` value type is
 exported from `Quickshell` while `PanelWindowInterface` lives in
 `Quickshell._Window`, which does not depend on it; `anchors` on the same type
-resolves fine. Anything beyond these three is a real finding.
+resolves fine. `FloatingWindow` (the HUD) is a creatable type and raises none of
+these. Anything beyond these three is a real finding.
 
 ## What was verified live, and what was not
 
@@ -107,8 +112,9 @@ Verified on this machine (Omarchy 4.0.0.alpha, Hyprland 0.56.2, Quickshell
   `Id=ghost`, `Status=Active`, `ItemIsMenu=false`, `Menu=/MenuBar`, and a
   status-tinted `IconPixmap`; `com.canonical.dbusmenu` `GetLayout` returns the
   Summon / per-ghost radio / Choose-a-model / Quit tree; a synthesised
-  `Activate` emitted `{"action":"toggle"}` and, end to end, opened the
-  `ghost-hud` layer (`hyprctl layers`). The three status glyphs the helper draws
+  `Activate` emitted `{"action":"toggle"}` and, end to end, opened the ghost HUD
+  window (against the layer-shell HUD of the time; the seam is unchanged). The
+  three status glyphs the helper draws
   are captured at `dev/evidence/tray-glyph-{idle,streaming,unreachable}.png` and
   the live bar at `dev/evidence/tray-bar.png`. `Qt.quit()` was confirmed to
   terminate a Quickshell process (the Quit menu entry's action).
@@ -136,6 +142,8 @@ Not verified live:
   `omarchy-theme-set`'s implementation (`rm -rf` + `mv`, then `echo >
   theme.name`), not observed — switching themes would have restyled the
   developer's whole desktop.
-- **Multi-monitor.** One output here. The HUD does not wrap itself in
-  `Variants`, so it appears on the compositor's default output.
+- **Multi-monitor.** One output here. As a normal toplevel the HUD is placed by
+  Hyprland on the focused workspace, and `focuswindow class:ghost` (the "focus"
+  half of launch-or-focus) pulls an already-open window across outputs — neither
+  path was exercised against a second monitor.
 - `notify-send` output was raised but its rendering was not inspected.

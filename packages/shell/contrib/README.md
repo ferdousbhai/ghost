@@ -33,6 +33,15 @@ hl.layer_rule({ match = { namespace = "^ghost-" }, no_anim = true, animation = "
 
 On a plain (non-Omarchy) Hyprland, `source` `hyprland/ghost.conf` instead.
 
+`SUPER+G` is **launch-or-focus**: the chat HUD is a normal toplevel window
+(app-id `ghost`), so the key reveals and focuses it, pulls it to the front if it
+is already open on another workspace, and hides it only when it is already the
+focused window. Because it is a real window, Hyprland's own binds move it —
+`SHIFT+SUPER+<n>` sends it to a workspace, and it tiles/resizes in the normal
+layout — so there is no move-to-monitor keybind to install any more. To float it
+at a fixed size instead of tiling, add a `windowrule`/`window_rule` against
+`class:^(ghost)$`; both contrib files carry commented examples.
+
 > The IPC function names avoid `show`, `call`, `wait`, `listen`, `prop`, `log`,
 > `list` and `kill`. Quickshell's CLI lets subcommands fall through positional
 > arguments, so `qs ipc call ghost show` silently runs `qs ipc show`. Keep that
@@ -105,8 +114,11 @@ shell is unaffected. This is separate from — and complementary to — the in-b
 indicator above: the tray item is the shell advertising itself system-wide, the
 bar module is Omarchy's bar polling the shell.
 
-## Layer namespaces
+## Window and layer namespaces
 
-`ghost-hud` and `ghost-bar`. Deliberately not prefixed `omarchy-`: Omarchy's
-own `omarchy-bar` layer rule is unanchored, so any namespace *containing*
+The chat HUD is a normal toplevel window with **app-id `ghost`** (set by
+`//@ pragma AppId ghost` in `shell.qml`) — target it with `class:^(ghost)$` in a
+`windowrule`. The only remaining layer surface is the opt-in bar strip,
+namespace **`ghost-bar`**. Deliberately not prefixed `omarchy-`: Omarchy's own
+`omarchy-bar` layer rule is unanchored, so any namespace *containing*
 `omarchy-bar` would silently inherit it.

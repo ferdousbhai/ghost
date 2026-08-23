@@ -1,37 +1,43 @@
 pragma ComponentBehavior: Bound
 
-// GhostHud — the summonable overlay. Toggled from a Hyprland keybind through
-// Quickshell IPC (see contrib/hyprland/ghost.conf), not by clicking anything.
+// GhostHud — the chat window. A normal xdg-toplevel (FloatingWindow), NOT a
+// wlr-layer surface: Hyprland tiles it, resizes it, and moves it between
+// workspaces with its own binds (Shift+SUPER+<n>, movewindow, …) like any app.
+// Summoned from a keybind or the tray through Quickshell IPC (see shell.qml and
+// contrib/hyprland/), not by clicking anything on the desktop.
 //
-// Surface shape decisions:
+// Window-shape decisions:
 //
-//   layer: Overlay        it must land above fullscreen windows, because the
-//                         point is to reach your ghost from wherever you are.
-//   anchors { top }       anchored on one edge only, so the compositor centres
-//                         it horizontally. Deliberately NOT a fullscreen scrim:
-//                         a HUD that swallows every click on the desktop is a
-//                         modal dialog wearing a HUD's clothes.
-//   exclusionMode: Ignore an overlay must never reserve screen area or it
-//                         would shove every tiled window sideways on summon.
-//   keyboardFocus: OnDemand + HyprlandFocusGrab
-//                         Exclusive would take the keyboard away from the
-//                         compositor too, so SUPER+G could not toggle the HUD
-//                         back off. OnDemand plus an explicit focus grab gives
-//                         us the keyboard AND click-outside-to-dismiss, while
-//                         leaving compositor binds alive. This is the same
-//                         pattern Quickshell launchers use on Hyprland.
+//   FloatingWindow        the one Quickshell 0.3.0 construct that presents as a
+//                         standard toplevel window. It is what makes the WM
+//                         treat the HUD as a real client (`hyprctl clients`),
+//                         so no custom screen-move code is needed any more —
+//                         the compositor owns placement, tiling and monitors.
+//   app-id "ghost"        set process-wide via `//@ pragma AppId ghost` in
+//                         shell.qml (an instance pragma; it must live in the
+//                         root file). That is the window class Hyprland sees,
+//                         so a user can target it with `windowrule = …,
+//                         class:^(ghost)$`. The title carries the active ghost.
+//   color / no border     the window paints an opaque Theme.background and lets
+//                         Hyprland draw the frame, border and rounding. An app
+//                         drawing its own rounded border inside the WM's frame
+//                         just doubles the edge.
+//
+// Summon is launch-or-focus, not overlay-toggle: `open`/`summon` reveal the
+// window and focus it (Hyprland auto-focuses a freshly mapped toplevel, and
+// `focuswindow` handles the already-open case); the SUPER+G `toggle` hides it
+// only when it is already the focused window, otherwise it reveals+focuses.
 import Quickshell
-import Quickshell.Wayland
 import Quickshell.Hyprland
 import QtQuick
 import QtQuick.Layouts
 import qs.services
 import qs.components
 
-PanelWindow {
+FloatingWindow {
     id: hud
 
-    /** Driven by IPC; see the IpcHandler in shell.qml. */
+    /** Driven by IPC; see the IpcHandler in shell.qml. Bound to `visible`. */
     property bool shown: false
     property bool rosterOpen: true
     /** The "Connect a model" panel replaces the transcript body when open. */
@@ -42,23 +48,22 @@ PanelWindow {
     property bool loginFromSwitcher: false
 
     visible: hud.shown
+    color: Theme.background
+    title: Ghostd.activeGhost === "" ? "Ghost" : "Ghost — " + Ghostd.activeGhost
 
-    WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.namespace: "ghost-hud"
-    WlrLayershell.keyboardFocus: WlrKeyboardFocus.OnDemand
-
-    anchors.top: true
-    margins.top: 64
-    exclusionMode: ExclusionMode.Ignore
-    focusable: true
-    color: "transparent"
-
+    // A reasonable default; the WM resizes/tiles from here. minimumSize keeps a
+    // tiled slice from collapsing the composer and roster into nothing.
     implicitWidth: 880
     implicitHeight: 620
+    minimumSize: Qt.size(480, 360)
 
     function open(): void {
-        hud.moveToFocused();
         hud.shown = true;
+        // The "focus" half of launch-or-focus. A freshly mapped toplevel is
+        // auto-focused by Hyprland; this also pulls an already-open window
+        // (possibly on another workspace) to the foreground. Matches the
+        // app-id set by `//@ pragma AppId ghost` in shell.qml.
+        Hyprland.dispatch("focuswindow class:ghost");
         hud.loginOpen = false;
         hud.switcherOpen = false;
         Ghostd.refresh();
@@ -91,74 +96,40 @@ PanelWindow {
         modelLogin.open();
     }
 
+    /**
+     * Launch-or-focus on a single bind (SUPER+G). Reveal+focus when hidden or
+     * when open but not the focused window; hide only when it is already the
+     * focused window. Hyprland's own move/tile/workspace binds handle placement,
+     * so there is no screen-move code here — the WM owns it.
+     */
     function toggle(): void {
-        if (hud.shown) hud.close();
-        else hud.open();
+        if (!hud.shown || !hud.focused())
+            hud.open();
+        else
+            hud.close();
     }
 
-    // ---- Screen placement -------------------------------------------------
-    // A layer surface is not a toplevel window, so Hyprland's move-to-monitor
-    // binds never touch it. We place it ourselves: on the focused output at
-    // summon (so it lands where the creator is looking), and on the next output
-    // via IPC (`qs -c ghost ipc call ghost moveNext`) for multi-monitor users.
-
-    /** The Quickshell screen matching Hyprland's focused monitor, or null. */
-    function focusedScreen(): var {
-        const mon = Hyprland.focusedMonitor;
-        if (!mon)
-            return null;
-        const screens = Quickshell.screens;
-        for (let i = 0; i < screens.length; i++)
-            if (screens[i].name === mon.name)
-                return screens[i];
-        return null;
-    }
-
-    /** Summon on the output the creator is looking at. No-op if it can't be found. */
-    function moveToFocused(): void {
-        const s = hud.focusedScreen();
-        if (s)
-            hud.screen = s;
-    }
-
-    /** Relocate to the next output. No-op with a single output. */
-    function moveNext(): void {
-        const screens = Quickshell.screens;
-        if (screens.length < 2)
-            return;
-        let idx = 0;
-        const current = hud.screen;
-        for (let i = 0; i < screens.length; i++)
-            if (current && screens[i].name === current.name) {
-                idx = i;
-                break;
-            }
-        hud.screen = screens[(idx + 1) % screens.length];
-    }
-
-    // Clicking anywhere outside the grabbed window dismisses. On a compositor
-    // without Hyprland's focus-grab protocol this simply never activates and
-    // the HUD stays until Esc — degraded, not broken.
-    HyprlandFocusGrab {
-        active: hud.shown
-        windows: [hud]
-        onCleared: hud.close()
+    /** True when our toplevel (app-id "ghost") is Hyprland's focused window. */
+    function focused(): bool {
+        const top = Hyprland.activeToplevel;
+        return !!(top && top.lastIpcObject && top.lastIpcObject["class"] === "ghost");
     }
 
     Rectangle {
         id: card
 
+        // Fill the window and paint a plain rectangle; Hyprland draws the frame,
+        // border and rounding for a normal toplevel.
         anchors.fill: parent
-        radius: Theme.radius * 1.6
         color: Theme.background
-        border.width: 1
-        border.color: Theme.muted
 
         focus: true
+        // Esc-to-close is unusual for a normal app window, so Esc only cancels a
+        // running turn; dismiss with SUPER+G or the tray. Left unhandled when
+        // idle so it never swallows a compositor bind.
         Keys.onEscapePressed: event => {
+            event.accepted = Ghostd.streaming;
             if (Ghostd.streaming) Ghostd.cancel();
-            else hud.close();
-            event.accepted = true;
         }
 
         ColumnLayout {
@@ -292,7 +263,8 @@ PanelWindow {
 
                     Text {
                         anchors.verticalCenter: parent.verticalCenter
-                        text: "esc"
+                        visible: Ghostd.streaming
+                        text: "esc to stop"
                         color: Theme.foregroundDim
                         font.family: Theme.fontFamily
                         font.pixelSize: Theme.fontSizeSmall

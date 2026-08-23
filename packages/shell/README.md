@@ -1,16 +1,20 @@
 # @ghost/shell
 
 Omarchy-native desktop surfaces for `ghostd`, built with
-[Quickshell](https://quickshell.org) (QML on wlr-layer-shell).
+[Quickshell](https://quickshell.org) (QML).
 
-Not an app window. Omarchy runs its bar, launcher, notifications and lock as
-one Quickshell process; a ghost belongs in that same layer, summoned by a key
-from wherever you already are, wearing whatever theme the desktop is wearing.
+The chat HUD is a normal application window — a Quickshell `FloatingWindow`
+(xdg-toplevel), app-id `ghost` — so Hyprland tiles it, resizes it, and moves it
+between workspaces with its own binds, exactly like any app. `SUPER+G` is
+launch-or-focus, not an overlay toggle. The persistent chrome around it stays in
+the layer/tray world: the bar widget is a wlr-layer surface and the tray icon is
+a StatusNotifierItem, both alive for as long as the shell runs and wearing
+whatever theme the desktop wears.
 
 ```
 qml/
-  shell.qml            entry point: surfaces, IPC, notification wiring
-  GhostHud.qml         the summonable overlay (Overlay layer, focus-grabbed)
+  shell.qml            entry point: surfaces, IPC, notification wiring, AppId
+  GhostHud.qml         the chat window (FloatingWindow / xdg-toplevel)
   GhostBarWidget.qml   status dot + ghost name, embeddable
   GhostBarSurface.qml  opt-in standalone layer strip carrying the widget
   TrayBridge.qml       system-tray (StatusNotifierItem) presence, via a helper
@@ -42,10 +46,15 @@ second connection to the daemon. The one place that cannot work is inside
 *Omarchy's* bar, which is a different process — see `contrib/README.md` for
 that trade.
 
-**Focus grab, not exclusive keyboard.** `WlrKeyboardFocus.Exclusive` would take
-the keyboard from the compositor too, so `SUPER+G` could not toggle the HUD
-back off. `OnDemand` plus a `HyprlandFocusGrab` gets the keyboard *and*
-click-outside-to-dismiss while leaving compositor binds alive.
+**A normal window, not a layer surface.** The HUD is a `FloatingWindow`, so it
+is a real xdg-toplevel: `hyprctl clients` lists it, the WM tiles and resizes it,
+and `SHIFT+SUPER+<n>` moves it between workspaces — no custom screen-move code.
+Its app-id is set process-wide by `//@ pragma AppId ghost` (an *instance*
+pragma, so it must live in `shell.qml`), which is the class Hyprland exposes for
+`windowrule`s. `SUPER+G` (`toggle`) is launch-or-focus: reveal+focus when hidden
+or unfocused, hide only when already focused. It replaced an earlier layer-shell
+HUD whose `HyprlandFocusGrab` and custom `moveNext` monitor-move IPC existed only
+because a layer surface is invisible to the WM's own window binds.
 
 ## System tray
 
@@ -84,7 +93,6 @@ qs -c ghost ipc call ghost ask "<prompt>"     # reply arrives as a notification
 qs -c ghost ipc call ghost login              # open "Connect a model"
 qs -c ghost ipc call ghost loginTo <id> <oauth|api_key>   # and start one
 qs -c ghost ipc call ghost switcher           # open the model switcher
-qs -c ghost ipc call ghost moveNext           # move the HUD to the next output
 qs -c ghost ipc call ghost status             # JSON
 qs -c ghost ipc call ghost refresh            # re-read roster and theme
 ```

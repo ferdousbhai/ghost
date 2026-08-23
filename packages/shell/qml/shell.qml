@@ -8,6 +8,13 @@ pragma ComponentBehavior: Bound
 // One process owns every ghost surface so they can share one Ghostd client:
 // the HUD's live stream is the same state the bar dot reads, with no polling
 // and no second connection to the daemon.
+//
+// AppId is an *instance* pragma: it can only live in the root shell.qml, and it
+// sets the Wayland app-id (the window class Hyprland sees) for this process. The
+// chat HUD is the one toplevel window here, so this is what makes it show up as
+// `class: ghost` in `hyprctl clients` and lets a user write windowrules against
+// it. The bar/tray surfaces are layer/SNI and ignore the app-id.
+//@ pragma AppId ghost
 import Quickshell
 import Quickshell.Io
 import QtQuick
@@ -108,15 +115,6 @@ ShellRoot {
         function refresh(): void {
             Ghostd.refresh();
             Theme.reload();
-        }
-
-        /**
-         * Relocate the HUD to the next output. The HUD is a layer surface, so
-         * Hyprland's move-window binds do not act on it; this is how a
-         * multi-monitor user moves it. No-op with a single output.
-         */
-        function moveNext(): void {
-            hud.moveNext();
         }
     }
 
