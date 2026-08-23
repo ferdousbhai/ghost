@@ -1,5 +1,5 @@
 /**
- * The notes tools, and the visibility gate that makes a visitor session safe.
+ * Visitor-scoped note tools and their visibility gate.
  *
  * `public: true` publishes a note. Absent or false is private. A visitor session
  * gets two independent enforcements of that rule:
@@ -12,9 +12,10 @@
  *    model's context. The gate is structural, not an instruction in the prompt,
  *    so no amount of persuasion moves it.
  *
- * The gate also refuses pi's built-in filesystem and shell tools outright in
- * visitor mode. The daemon already runs visitor sessions with `noTools: "all"`
- * plus an allowlist; this is the second lock on the same door.
+ * Creator sessions use OMP's native read/grep/glob/write/edit tools directly
+ * against the plain `notes/` directory. Visitor sessions cannot receive those
+ * tools because they would bypass note publication, so this extension keeps the
+ * scoped list/search/read surface for visitors only.
  */
 import type {
   ExtensionAPI,
@@ -123,6 +124,8 @@ export function createNotesExtension(
   const visitor = isVisitorScope(scope);
 
   return (pi: ExtensionAPI) => {
+    if (!visitor) return;
+
     pi.registerTool({
       name: GHOST_NOTES_LIST,
       label: "List notes",
@@ -238,54 +241,9 @@ export function createNotesExtension(
       },
     });
 
-    // A visitor session gets no writer at all; registering one and blocking every
-    // call would just be a tool that always fails.
-    if (!visitor) {
-      pi.registerTool({
-        name: GHOST_NOTES_WRITE,
-        label: "Write note",
-        description:
-          "Write a note to a path, replacing whatever is there. Notes are private "
-          + "unless you publish them: set public to true only for something you are "
-          + "willing to say to any visitor.",
-        parameters: Type.Object({
-          path: Type.String({
-            description: "The note path, such as craft/paper-notes.md.",
-          }),
-          body: Type.String({ description: "The note text, in markdown." }),
-          title: Type.Optional(Type.String({ description: "A title for the note." })),
-          public: Type.Optional(Type.Boolean({
-            description: "Publish this note to visitors. Private by default.",
-          })),
-          tags: Type.Optional(Type.Array(Type.String(), {
-            description: "Tags for this note.",
-          })),
-          archived: Type.Optional(Type.Boolean({
-            description: "Mark the note archived, keeping it out of the working set.",
-          })),
-        }),
-        execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
-          const home = resolveHome(options, ctx);
-          const meta = await home.writeNote(params.path, {
-            body: params.body,
-            ...(params.title === undefined ? {} : { title: params.title }),
-            ...(params.public === undefined ? {} : { public: params.public }),
-            ...(params.tags === undefined ? {} : { tags: params.tags }),
-            ...(params.archived === undefined ? {} : { archived: params.archived }),
-          });
-          return textResult(
-            `Wrote notes/${meta.path} (${meta.public ? "public" : "private"}).`,
-            { path: meta.path, public: meta.public },
-          );
-        },
-      });
-    }
-
-    if (visitor) {
-      pi.on("tool_call", createNotesVisibilityGate(options));
-    }
+    pi.on("tool_call", createNotesVisibilityGate(options));
   };
 }
 
-/** Creator-mode notes tools over the session's own ghost home; no gate. */
+/** Visitor tools when scoped; creator sessions use OMP's filesystem tools. */
 export default createNotesExtension();

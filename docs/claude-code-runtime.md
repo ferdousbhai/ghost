@@ -70,21 +70,25 @@ For each turn Ghost:
 2. requires Claude.ai plan auth rather than accepting an API-key-backed
    status;
 3. rebuilds the persona, memory index, and note catalogue from the ghost home;
-4. captures the existing `@ghost/extensions` tool definitions and exposes
-   them as one in-process SDK MCP server;
+4. captures the Ghost-specific `@ghost/extensions` tool definitions and
+   exposes them as one in-process SDK MCP server;
 5. starts an Effect-scoped Agent SDK query and maps the SDK's async message
    stream onto Ghost's existing pi-messages SSE protocol;
 6. persists only the opaque Claude session id and listing metadata before it
    emits the terminal `done`, then closes the query process.
 
-The query options are fail-closed:
+The query is deliberately unrestricted for its local creator:
 
-- a custom Ghost system prompt replaces Claude Code's coding prompt;
-- `tools: []` removes all built-in tools, including Bash/Read/Edit/Write;
-- filesystem settings, project instructions, skills, and plugins are disabled;
-- strict MCP mode exposes only Ghost's in-process MCP server;
-- only the explicit Ghost tool names are auto-allowed;
-- inherited provider credential variables are scrubbed from the child
+- Claude Code's native system prompt is preserved and the Ghost persona is
+  appended;
+- the native Claude Code tool preset, including Bash/Read/Edit/Write, web
+  search, subagents, and background work, remains enabled;
+- user/project settings, instructions, skills, plugins, and MCP servers use
+  Claude Code's normal discovery;
+- Ghost's own browser, desktop, character, and structured memory writer are
+  added through an in-process MCP server;
+- `bypassPermissions` is explicit because the HUD has no Claude approval UI;
+- inherited provider credential variables are still scrubbed from the child
   environment, including Anthropic API and OAuth token variables.
 
 `look_at_image` is omitted because Claude can consume image content directly.
@@ -136,9 +140,9 @@ are:
 - T3's parent-tool-use filtering: subagent text/thinking is never merged into
   the parent response.
 
-The full T3 provider graph, approvals UI, coding tools, project settings,
-subagents, and long-lived queue were intentionally not copied: they are either
-outside Ghost's pi-messages contract or would widen its capability boundary.
+The full T3 provider graph, approvals UI, and long-lived queue were not copied;
+Claude Code's own coding tools, project settings, plugins, skills, MCP, and
+subagents are used directly instead of reimplementing T3's surfaces.
 The dependency versions match the reviewed T3 implementation:
 `@anthropic-ai/claude-agent-sdk@0.3.170`,
 `@anthropic-ai/sdk@0.93.0`, `@modelcontextprotocol/sdk@1.29.0`,

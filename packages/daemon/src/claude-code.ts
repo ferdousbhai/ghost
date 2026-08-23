@@ -1,7 +1,7 @@
 /**
  * Owner-local Claude Code runtime.
  *
- * This is the narrow T3 path: the official Claude Agent SDK drives an
+ * The official Claude Agent SDK drives an
  * installed, unmodified `claude` executable which reads the creator's own
  * Claude Code login. Ghost never asks for, reads, stores, or proxies Claude
  * credentials. The Effect lifecycle below is adapted from T3 Code's MIT-
@@ -361,20 +361,12 @@ async function buildPersona(homeDir: string, ghostName: string): Promise<string>
     memory: deriveMemoryIndex(memory.files),
     notes: deriveNoteCatalog(notes.notes, CREATOR_SCOPE),
     scope: CREATOR_SCOPE,
-    extraSections: [
-      [
-        "## Runtime boundary",
-        "You are running inside Ghost through Claude Code. The tools shown to you are the entire "
-          + "capability boundary. You do not have Claude Code's coding, shell, arbitrary-file, skill, "
-          + "plugin, or project-instruction tools. Never claim that you used one.",
-      ].join("\n"),
-      // This runtime is creator-only (a visitor scope is refused before we get
-      // here), so a seeded character.md means the same thing it means on the
-      // OMP path: this ghost has not met its owner yet.
-      ...(isSeededCharacter(ghostName, readCharacterFile(homeDir))
-        ? [FIRST_MEETING_SECTION]
-        : []),
-    ],
+    // This runtime is creator-only (a visitor scope is refused before we get
+    // here), so a seeded character.md means the same thing it means on the OMP
+    // path: this ghost has not met its owner yet.
+    extraSections: isSeededCharacter(ghostName, readCharacterFile(homeDir))
+      ? [FIRST_MEETING_SECTION]
+      : [],
   });
 }
 
@@ -493,12 +485,15 @@ async function buildMcpTools(
   browserMode: "relay" | "profile",
   relayTransport: RelayTransport | undefined,
 ): Promise<{ tools: SdkMcpToolDefinition[]; names: string[] }> {
-  const resolved = resolveGhostExtensions({
-    ...extensionOptions,
-    ghostName,
-    browserMode,
-    ...(relayTransport ? { relayTransport } : {}),
-  });
+  const resolved = resolveGhostExtensions(
+    {
+      ...extensionOptions,
+      ghostName,
+      browserMode,
+      ...(relayTransport ? { relayTransport } : {}),
+    },
+    homeDir,
+  );
   if (resolved.scope.kind !== "creator") {
     throw new GhostError(
       "claude_code_owner_only",
@@ -589,15 +584,17 @@ function queryOptions(input: {
     cwd: input.cwd,
     ...(input.modelId === CLAUDE_CODE_DEFAULT_MODEL_ID ? {} : { model: input.modelId }),
     pathToClaudeCodeExecutable: input.binaryPath,
-    systemPrompt: input.systemPrompt,
+    systemPrompt: {
+      type: "preset",
+      preset: "claude_code",
+      append: input.systemPrompt,
+    },
     title: `${input.ghostName} in Ghost`,
-    settingSources: [],
-    skills: [],
-    plugins: [],
-    tools: [],
+    skills: "all",
+    tools: { type: "preset", preset: "claude_code" },
     allowedTools: input.toolNames.map((name) => `mcp__ghost__${name}`),
-    permissionMode: "dontAsk",
-    strictMcpConfig: true,
+    permissionMode: "bypassPermissions",
+    allowDangerouslySkipPermissions: true,
     mcpServers: { ghost: mcp },
     includePartialMessages: true,
     persistSession: true,

@@ -11,10 +11,8 @@
  *
  * - the composed extension factory (persona + memory + notes over one home
  *   and one scope), and
- * - the tool allowlist that goes with that scope, which the daemon passes to
- *   `createAgentSession` as `tools` alongside `noTools: "all"`. The session
- *   host separately adds OMP's `ask`; a visitor gets a shorter extension list
- *   (no note writer) because the scope says so.
+ * - the scope-specific Ghost tool names. They are additive metadata for a
+ *   creator session and the complete allowlist for a restricted visitor.
  *
  * Scope is fixed at session construction, never toggled at runtime: nothing
  * the model emits during a turn can widen a visitor into a creator.
@@ -85,9 +83,9 @@ function selectBrowserBackend(
 }
 
 export interface ResolvedGhostExtensions {
-  /** Inline factories for `DefaultResourceLoader({ extensionFactories })`. */
+  /** Inline factories passed to OMP's native extension loader. */
   factories: ExtensionFactory[];
-  /** Tool allowlist for `createAgentSession({ noTools: "all", tools })`. */
+  /** Additive creator tools, or the visitor session's complete allowlist. */
   toolNames: string[];
   scope: GhostScope;
 }
@@ -103,18 +101,20 @@ export function resolveGhostScope(visitorId?: string | null): GhostScope {
 }
 
 /**
- * Build the extension set for one session. The ghost home is NOT passed:
- * every extension resolves it from `ctx.cwd`, which the daemon sets to the
- * ghost home, so one process can host many ghosts concurrently without a
- * shared global to race over.
+ * Build the extension set for one session. `homeDir` pins Ghost-owned files to
+ * the ghost home even when OMP's native `!cd` changes the conversation cwd.
+ * It is still per-session data, never a process-global value, so concurrent
+ * ghosts cannot race or share a home.
  */
 export function resolveGhostExtensions(
   options: GhostExtensionOptions = {},
+  homeDir?: string,
 ): ResolvedGhostExtensions {
   const scope = resolveGhostScope(options.visitorId);
   const backend = selectBrowserBackend(options, scope);
   const extensionOptions = {
     scope,
+    ...(homeDir === undefined ? {} : { home: homeDir }),
     ...(options.ghostName === undefined ? {} : { ghostName: options.ghostName }),
     ...(backend === undefined ? {} : { backend }),
     ...(options.extraSections === undefined ? {} : { extraSections: options.extraSections }),

@@ -4,7 +4,7 @@
  * Modern Oh My Pi is the default provider-agnostic `AgentSession` harness. An explicit
  * `claude-code` role instead uses the owner-local, Effect-scoped Agent SDK
  * backend in `claude-code.ts`. One daemon process hosts many ghosts
- * concurrently; the OMP path is isolated entirely through SDK options — no env
+ * concurrently; the OMP path is scoped entirely through SDK options — no env
  * var, no child process — following the spike (`pi-spike/concurrent-ghosts.mjs`):
  *
  *   cwd        = ~/Ghosts/<name>            the ghost home; extensions derive
@@ -21,27 +21,23 @@
  *    "one directory is the whole ghost" property that backup and future
  *    per-ghost encryption depend on.
  *
- * 2. **A ghost is not a coding agent.** `noContextFiles`, `noSkills`,
- *    `noPromptTemplates`, and `appendSystemPromptOverride: () => []` together
- *    stop OMP from walking up for `AGENTS.md` / `APPEND_SYSTEM.md` and layering
- *    a coding-agent prompt under the persona. All four are required; the
- *    spike verified that the result is a system prompt containing zero bytes
- *    of OMP's coding-agent prompt.
+ * 2. **Creator sessions use the native OMP runtime.** Its prompt, filesystem,
+ *    Bash, skills, rules, project context, plugins, MCP, web search, task/hub,
+ *    and background-job machinery stay enabled. Ghost appends its persona and
+ *    adds the capabilities that are genuinely Ghost-specific.
  *
- * 3. **Project trust is denied by default.** `noExtensions: true` disables
- *    discovery, so a `.ts` file dropped into `~/Ghosts/<name>/.pi/extensions/`
- *    is NOT loaded. A ghost home is user data that may arrive in an imported
- *    archive; treating it as an extension source would be arbitrary code
- *    execution. Only the factories the daemon passes in run.
+ * 3. **Visitor sessions are still a security boundary.** They disable native
+ *    discovery and use only Ghost's scope-aware tools. Otherwise native read
+ *    or Bash could bypass the published-note and visitor-memory contracts.
  *
- * 4. **Only the human-input built-in.** Coding/filesystem built-ins stay on an
- *    explicit denylist. OMP's `ask` is added as a UI bridge, with no tool
- *    approval surface; all other capabilities come from Ghost extensions.
+ * 4. **Ghost has no approval UI.** Creator sessions are deliberately local and
+ *    unrestricted; visitor sessions rely on their explicit tool allowlist.
+ *    OMP's `ask` remains the human-input bridge for both scopes.
  */
 import { existsSync, mkdirSync } from "node:fs";
-import { unlink } from "node:fs/promises";
-import { createHash } from "node:crypto";
-import { join, sep } from "node:path";
+import { stat, unlink } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { isAbsolute, join, resolve, sep } from "node:path";
 import {
   createAgentSession,
 } from "@oh-my-pi/pi-coding-agent/sdk";
@@ -53,6 +49,20 @@ import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import type { SessionEntry } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import type { SettingPath } from "@oh-my-pi/pi-coding-agent/config/settings";
+import {
+  buildSkillPromptMessage,
+  parseSkillInvocation,
+} from "@oh-my-pi/pi-coding-agent/extensibility/skills";
+import { SKILL_PROMPT_MESSAGE_TYPE } from "@oh-my-pi/pi-coding-agent/session/messages";
+import {
+  bashExecutionToText,
+  type BashExecutionMessage,
+} from "@oh-my-pi/pi-coding-agent/session/messages";
+import {
+  isPersistentShellCdCommand,
+  type BashResult,
+} from "@oh-my-pi/pi-coding-agent/exec/bash-executor";
 import { AskTool } from "@oh-my-pi/pi-coding-agent/tools/ask";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { ToolAbortError } from "@oh-my-pi/pi-coding-agent/tools/tool-errors";
@@ -108,25 +118,100 @@ import {
   resolveSmolModelRef,
   type GhostModelRoleBinding,
 } from "./models.js";
-import { createPiMessagesAdapter, type PiMessagesEvent } from "./pi-messages.js";
+import {
+  createPiMessagesAdapter,
+  type PiMessagesEvent,
+  zeroUsage,
+} from "./pi-messages.js";
 import { generateTitle } from "./title.js";
 import { createGhostOmpRuntime, type GhostOmpRuntime } from "./omp-runtime.js";
 import { AskBroker, AskBrokerError, type PendingAsk } from "./ask-broker.js";
 
 /**
- * OMP's coding/filesystem built-ins. Excluded wholesale so no ghost can shell out or touch
- * the filesystem outside its own extension tools, and so the daemon does not
- * have to know the names of the tools `@ghost/extensions` registers.
+ * The core OMP capabilities Ghost deliberately inherits in creator scope.
+ * OMP may add or gate tools by configuration and model capability, so this is
+ * a documented minimum rather than an exhaustive registry.
  */
-export const PI_BUILTIN_TOOL_NAMES: readonly string[] = [
+export const OMP_NATIVE_CREATOR_TOOL_NAMES: readonly string[] = [
   "bash",
   "edit",
-  "find",
+  "glob",
   "grep",
-  "ls",
+  "hub",
   "read",
+  "task",
+  "web_search",
   "write",
 ];
+
+/** @deprecated Use `OMP_NATIVE_CREATOR_TOOL_NAMES`. */
+export const PI_BUILTIN_TOOL_NAMES = OMP_NATIVE_CREATOR_TOOL_NAMES;
+
+export interface UserBashCommand {
+  command: string;
+  /** `!!command` runs locally but excludes its result from model context. */
+  excludeFromContext: boolean;
+}
+
+/** Parse OMP's direct local-command sigils without intercepting ordinary text. */
+export function parseUserBashCommand(text: string): UserBashCommand | null {
+  const trimmed = text.trimStart();
+  if (!trimmed.startsWith("!")) return null;
+  const excludeFromContext = trimmed.startsWith("!!");
+  const command = trimmed.slice(excludeFromContext ? 2 : 1).trim();
+  return { command, excludeFromContext };
+}
+
+function bashExecutionText(
+  command: UserBashCommand,
+  result: BashResult,
+): string {
+  const message: BashExecutionMessage = {
+    role: "bashExecution",
+    command: command.command,
+    output: result.output,
+    exitCode: result.exitCode,
+    cancelled: result.cancelled,
+    truncated: result.truncated,
+    timestamp: Date.now(),
+    ...(command.excludeFromContext ? { excludeFromContext: true } : {}),
+  };
+  return bashExecutionToText(message);
+}
+
+function tailSummary(text: string, maxLength = 800): string | undefined {
+  const clean = text.trimEnd();
+  if (!clean) return undefined;
+  return clean.length <= maxLength ? clean : `…${clean.slice(-maxLength)}`;
+}
+
+/**
+ * Preserve OMP's explicit `/skill:name args` command surface. Native `read`
+ * lets the model discover skills; this path is the user's force-invocation.
+ */
+async function promptOmpSession(session: AgentSession, prompt: string): Promise<void> {
+  if (session.skillsSettings?.enableSkillCommands) {
+    const invocation = parseSkillInvocation(prompt);
+    const skill = invocation
+      ? session.skills.find((candidate) => candidate.name === invocation.name)
+      : undefined;
+    if (invocation && skill) {
+      const built = await buildSkillPromptMessage(skill, invocation.args, "user");
+      await session.promptCustomMessage({
+        customType: SKILL_PROMPT_MESSAGE_TYPE,
+        content: built.message,
+        display: true,
+        details: built.details,
+        attribution: "user",
+      }, {
+        streamingBehavior: "steer",
+        queueChipText: prompt,
+      });
+      return;
+    }
+  }
+  await session.prompt(prompt);
+}
 
 /**
  * Generate a title for a new conversation from its first user message. Throws
@@ -404,6 +489,16 @@ function projectTranscriptMessage(
 ): TranscriptMessage | null {
   const message = entry.message;
   const role = (message as { role?: unknown } | null)?.role;
+  if (role === "bashExecution") {
+    const bashMessage = message as BashExecutionMessage;
+    return {
+      role: "assistant",
+      content: [{ type: "text", text: bashExecutionToText(bashMessage) }],
+      entryId: entry.id,
+      parentId: entry.parentId,
+      ...(typeof bashMessage.timestamp === "number" ? { timestamp: bashMessage.timestamp } : {}),
+    };
+  }
   if (role !== "user" && role !== "assistant") return null;
   let content = (message as { content?: unknown }).content;
   if (role === "assistant" && Array.isArray(content)) {
@@ -548,10 +643,12 @@ export class SessionHost {
   ): Promise<HostedSession> {
     const ghost = this.registry.get(ghostName);
     const paths = ghostPaths(ghost.dir);
+    const scope = resolveGhostScope(this.extensionOptions.visitorId);
+    const visitor = isVisitorScope(scope);
     mkdirSync(paths.agentDir, { recursive: true });
     mkdirSync(paths.sessionDir, { recursive: true });
 
-    const settings = Settings.isolated({
+    const settingsOverrides: Partial<Record<SettingPath, unknown>> = {
       "compaction.enabled": false,
       // Modern OMP owns retry classification, cooldowns, and fallback
       // reversion. Ghost only supplies the role assignments and ordered
@@ -559,13 +656,22 @@ export class SessionHost {
       "retry.modelFallback": true,
       "retry.fallbackRevertPolicy": "cooldown-expiry",
       // Ghost supplies its own scoped `look_at_image` extension. Keep OMP's
-      // model-sensitive `inspect_image` builtin from widening that allowlist
-      // when a text-only chat model is selected.
+      // overlapping image/browser/computer built-ins out of the creator slate.
+      // Everything else remains governed by the user's native OMP setup.
       "inspect_image.mode": "off",
-      // Ghost has no approval surface by design. Its explicit extension-tool
-      // allowlist is the capability boundary.
+      "browser.enabled": false,
+      "computer.enabled": false,
+      // Ghost has no approval surface. Creator sessions are explicitly local
+      // and unrestricted; visitor sessions have a narrow tool allowlist below.
       "tools.approvalMode": "yolo",
-    });
+    };
+    const settings = visitor
+      ? Settings.isolated(settingsOverrides)
+      : await Settings.loadReadOnly({
+          cwd: paths.home,
+          agentDir: paths.agentDir,
+          overrides: settingsOverrides,
+        });
     try {
       const routing = ghostOmpModelRouting(readGhostModels(paths.agentDir));
       settings.override("modelRoles", routing.modelRoles);
@@ -590,13 +696,16 @@ export class SessionHost {
       ...(this.extensionOptions.extraSections ?? []),
       ...(this.isFirstMeeting(ghost) ? [FIRST_MEETING_SECTION] : []),
     ];
-    const extensions = resolveGhostExtensions({
-      ghostName,
-      browserMode: this.browserMode,
-      ...(this.relayTransport ? { relayTransport: this.relayTransport } : {}),
-      ...this.extensionOptions,
-      ...(extraSections.length > 0 ? { extraSections } : {}),
-    });
+    const extensions = resolveGhostExtensions(
+      {
+        ghostName,
+        browserMode: this.browserMode,
+        ...(this.relayTransport ? { relayTransport: this.relayTransport } : {}),
+        ...this.extensionOptions,
+        ...(extraSections.length > 0 ? { extraSections } : {}),
+      },
+      paths.home,
+    );
 
     const modelRuntime = await createGhostOmpRuntime({
       authPath: ghostAuthPath(paths.agentDir),
@@ -614,6 +723,25 @@ export class SessionHost {
     );
 
     const ask = new AskBroker();
+    const visitorRestrictions = visitor
+      ? {
+          disableExtensionDiscovery: true,
+          additionalExtensionPaths: [],
+          preloadedExtensionPaths: [],
+          preloadedCustomToolPaths: [],
+          contextFiles: [],
+          skills: [],
+          rules: [],
+          promptTemplates: [],
+          slashCommands: [],
+          systemPrompt: [],
+          enableMCP: false,
+          enableLsp: false,
+          enableIrc: false,
+          skipPythonPreflight: true,
+          toolNames: [...extensions.toolNames, "ask"],
+        }
+      : {};
     const { session, extensionsResult, setToolUIContext } = await createAgentSession({
       cwd: paths.home,
       agentDir: paths.agentDir,
@@ -621,20 +749,6 @@ export class SessionHost {
       authStorage: modelRuntime.authStorage,
       modelRegistry: modelRuntime.modelRegistry,
       extensions: extensions.factories,
-      disableExtensionDiscovery: true,
-      additionalExtensionPaths: [],
-      preloadedExtensionPaths: [],
-      preloadedCustomToolPaths: [],
-      contextFiles: [],
-      skills: [],
-      rules: [],
-      promptTemplates: [],
-      slashCommands: [],
-      systemPrompt: [],
-      enableMCP: false,
-      enableLsp: false,
-      enableIrc: false,
-      skipPythonPreflight: true,
       hasUI: false,
       // `ask` is a human-input bridge, not a tool-approval surface. OMP keeps
       // those concerns separate: interactivePrompts exposes AskTool while the
@@ -646,10 +760,7 @@ export class SessionHost {
       // that does not exist yet creates it, so a conversation id maps to a
       // stable transcript across daemon restarts.
       sessionManager,
-      // See decision 4. The allowlist comes from @ghost/extensions (it is
-      // scope-dependent — a visitor session has no note writer); the denylist
-      // is belt-and-braces so a future built-in cannot appear by name.
-      toolNames: [...extensions.toolNames, "ask"],
+      ...visitorRestrictions,
     });
     setToolUIContext(ask.uiContext, true);
 
@@ -849,6 +960,152 @@ export class SessionHost {
     return current ? { provider: current.provider, id: current.id } : null;
   }
 
+  /** Run OMP's direct `!`/`!!` command surface without asking a model. */
+  private async runUserBash(
+    ghostName: string,
+    command: UserBashCommand,
+    options: RunTurnOptions,
+  ): Promise<void> {
+    const conversationId = options.sessionId || DEFAULT_SESSION_KEY;
+    if (this.claudeCode.isBusy(ghostName, conversationId)) {
+      throw new GhostError(
+        "session_busy",
+        "This ghost is already answering in this conversation.",
+        409,
+      );
+    }
+
+    const hosted = (await this.open(ghostName, options.sessionId)) as HostedSession;
+    if (hosted.busy || hosted.session.isBashRunning) {
+      throw new GhostError(
+        "session_busy",
+        "This ghost is already working in this conversation.",
+        409,
+      );
+    }
+    hosted.busy = true;
+    if (hosted.compaction) await hosted.compaction;
+
+    const id = `bash-${randomUUID()}`;
+    let streamedTail = "";
+    let lastUpdate = 0;
+    let toolFinished = false;
+    options.emit({ type: "start" });
+    options.emit({
+      type: "tool_execution_start",
+      id,
+      toolName: "bash",
+      arguments: {
+        command: command.command,
+        excludeFromContext: command.excludeFromContext,
+      },
+      intent: "Run a local command",
+    });
+
+    const onAbort = () => hosted.session.abortBash();
+    options.signal?.addEventListener("abort", onAbort, { once: true });
+    try {
+      const result = await hosted.session.executeBash(
+        command.command,
+        (chunk) => {
+          streamedTail = `${streamedTail}${chunk}`.slice(-4_000);
+          const now = Date.now();
+          if (now - lastUpdate < 75) return;
+          lastUpdate = now;
+          options.emit({
+            type: "tool_execution_update",
+            id,
+            toolName: "bash",
+            summary: tailSummary(streamedTail),
+          });
+        },
+        {
+          excludeFromContext: command.excludeFromContext,
+          useUserShell: true,
+        },
+      );
+
+      if (
+        isPersistentShellCdCommand(command.command)
+        && !result.cancelled
+        && result.exitCode === 0
+        && result.workingDir
+        && isAbsolute(result.workingDir)
+      ) {
+        const nextCwd = resolve(result.workingDir);
+        if (nextCwd !== resolve(hosted.session.sessionManager.getCwd())) {
+          try {
+            if ((await stat(nextCwd)).isDirectory()) {
+              const sessionDir = ghostPaths(hosted.ghost.dir).sessionDir;
+              await hosted.session.sessionManager.moveTo(nextCwd, sessionDir);
+            }
+          } catch (error) {
+            this.logger.warn("bash changed directory but the session cwd could not follow", {
+              ghost: ghostName,
+              cwd: nextCwd,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
+      }
+
+      const isError = result.cancelled || result.timedOut === true
+        || (result.exitCode !== undefined && result.exitCode !== 0);
+      options.emit({
+        type: "tool_execution_end",
+        id,
+        toolName: "bash",
+        isError,
+        summary: tailSummary(result.output)
+          ?? (result.cancelled ? "Command cancelled" : `Exit ${result.exitCode ?? 0}`),
+      });
+      toolFinished = true;
+
+      const text = bashExecutionText(command, result);
+      options.emit({ type: "text_start", contentIndex: 0 });
+      options.emit({ type: "text_delta", contentIndex: 0, delta: text });
+      options.emit({ type: "text_end", contentIndex: 0, content: text });
+      if (options.signal?.aborted) {
+        options.emit({
+          type: "error",
+          reason: "aborted",
+          usage: zeroUsage(),
+          errorMessage: "Command aborted.",
+        });
+      } else {
+        options.emit({ type: "done", reason: "stop", usage: zeroUsage() });
+      }
+    } catch (error) {
+      this.logger.error("direct bash command failed", {
+        ghost: ghostName,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      if (!toolFinished) {
+        options.emit({
+          type: "tool_execution_end",
+          id,
+          toolName: "bash",
+          isError: true,
+          summary: error instanceof Error ? error.message : String(error),
+        });
+      }
+      options.emit({
+        type: "error",
+        reason: options.signal?.aborted ? "aborted" : "error",
+        usage: zeroUsage(),
+        errorMessage: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      options.signal?.removeEventListener("abort", onAbort);
+      hosted.busy = false;
+      if (hosted.pendingRebind) {
+        hosted.pendingRebind = false;
+        await this.rebindSessionModel(hosted, ghostName);
+      }
+      this.startBackgroundCompaction(hosted, ghostName);
+    }
+  }
+
   /**
    * Run one turn, streaming pi-messages events to `emit`.
    *
@@ -858,6 +1115,21 @@ export class SessionHost {
   async runTurn(ghostName: string, options: RunTurnOptions): Promise<void> {
     const ghost = this.registry.get(ghostName);
     const paths = ghostPaths(ghost.dir);
+    const bashCommand = parseUserBashCommand(options.prompt);
+    if (bashCommand) {
+      if (isVisitorScope(resolveGhostScope(this.extensionOptions.visitorId))) {
+        throw new GhostError(
+          "forbidden",
+          "Direct local commands are available only to the ghost's creator.",
+          403,
+        );
+      }
+      if (!bashCommand.command) {
+        throw new GhostError("invalid_request", "Write a command after ! or !!.", 400);
+      }
+      await this.runUserBash(ghostName, bashCommand, options);
+      return;
+    }
     let configured: ReturnType<typeof resolveChatModelRef> = null;
     try {
       configured = resolveChatModelRef(readGhostModels(paths.agentDir));
@@ -963,7 +1235,7 @@ export class SessionHost {
           }, { triggerTurn: false });
         }
       }
-      await hosted.session.prompt(options.prompt);
+      await promptOmpSession(hosted.session, options.prompt);
 
       let stopHookActive = false;
       let continuationCount = 0;
@@ -1647,7 +1919,10 @@ export class SessionHost {
     const hosted = this.sessions.get(key);
     if (!hosted) return;
     this.sessions.delete(key);
-    if (hosted.busy) await hosted.session.abort();
+    if (hosted.busy) {
+      hosted.session.abortBash();
+      await hosted.session.abort();
+    }
     hosted.ask.close();
     try {
       await hosted.session.dispose();
@@ -1664,7 +1939,10 @@ export class SessionHost {
     this.sessions.clear();
     for (const entry of hosted) {
       try {
-        if (entry.busy) await entry.session.abort();
+        if (entry.busy) {
+          entry.session.abortBash();
+          await entry.session.abort();
+        }
         entry.ask.close();
         try {
           await entry.session.dispose();

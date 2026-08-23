@@ -2,7 +2,7 @@
  * The ghost extensions, and the composition the daemon actually wants: one
  * factory that installs persona, character, memory, notes, and the computer-use
  * set (vision, screen, desktop, browser) over the same ghost home and scope,
- * plus the tool allowlist that goes with it.
+ * plus the visitor-only tool allowlist that goes with it.
  */
 import type { ExtensionFactory } from "@oh-my-pi/pi-coding-agent";
 import { browserToolNames, createBrowserExtension, type BrowserExtensionOptions } from "./browser.js";
@@ -24,7 +24,6 @@ import {
   GHOST_NOTES_GREP,
   GHOST_NOTES_LIST,
   GHOST_NOTES_READ,
-  GHOST_NOTES_WRITE,
 } from "./notes.js";
 import { createPersonaExtension, type PersonaExtensionOptions } from "./persona.js";
 import { createScreenExtension, screenToolNames, type ScreenExtensionOptions } from "./screen.js";
@@ -39,25 +38,26 @@ export type GhostExtensionSetOptions = PersonaExtensionOptions
   & BrowserExtensionOptions;
 
 /**
- * Every tool this package registers for a scope, in the order they should be
- * offered. Pass it as `tools` alongside `noTools: "all"` so the session has the
- * ghost tools and nothing else — no bash, no read, no write.
+ * Every Ghost-specific tool this package registers for a scope. Creator OMP
+ * sessions layer these onto the native tool set; visitor sessions use this as
+ * their complete allowlist because native filesystem access would bypass note
+ * publication and visitor memory scoping.
  */
 export function ghostToolNames(
   scope: GhostScope,
   options: GhostExtensionSetOptions = {},
 ): string[] {
-  const names = [
-    GHOST_NOTES_LIST,
-    GHOST_NOTES_READ,
-    GHOST_NOTES_GREP,
-    GHOST_MEMORY_LIST,
-    GHOST_MEMORY_READ,
-    GHOST_MEMORY_WRITE,
-  ];
-  // A visitor session has no note writer to allow.
-  if (!isVisitorScope(scope)) names.push(GHOST_NOTES_WRITE);
-  // Creator-only, like the note writer: a visitor never rewrites the persona.
+  const names = isVisitorScope(scope)
+    ? [
+        GHOST_NOTES_LIST,
+        GHOST_NOTES_READ,
+        GHOST_NOTES_GREP,
+        GHOST_MEMORY_LIST,
+        GHOST_MEMORY_READ,
+        GHOST_MEMORY_WRITE,
+      ]
+    : [GHOST_MEMORY_WRITE];
+  // Creator-only: a visitor never rewrites the persona.
   const scoped = { ...options, scope };
   names.push(...characterToolNames(scoped));
   // Computer-use tools: every one of these returns [] in visitor scope.

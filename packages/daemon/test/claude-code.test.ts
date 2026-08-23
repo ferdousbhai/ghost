@@ -159,18 +159,21 @@ describe("Claude Code subscription runtime", () => {
     expect(seenOptions).toHaveLength(1);
     expect(seenOptions[0]).toMatchObject({
       cwd: expect.stringContaining("casper"),
-      tools: [],
-      settingSources: [],
-      skills: [],
-      plugins: [],
-      permissionMode: "dontAsk",
-      strictMcpConfig: true,
+      tools: { type: "preset", preset: "claude_code" },
+      skills: "all",
+      permissionMode: "bypassPermissions",
+      allowDangerouslySkipPermissions: true,
       persistSession: true,
     });
-    expect(seenOptions[0]?.systemPrompt).toContain("letterpress printer");
-    expect(seenOptions[0]?.systemPrompt).not.toContain("coding agent");
-    expect(seenOptions[0]?.allowedTools).toContain("mcp__ghost__ghost_memory_read");
-    expect(seenOptions[0]?.allowedTools).not.toContain("Bash");
+    expect(seenOptions[0]).not.toHaveProperty("settingSources");
+    expect(seenOptions[0]).not.toHaveProperty("plugins");
+    expect(seenOptions[0]).not.toHaveProperty("strictMcpConfig");
+    expect(seenOptions[0]?.systemPrompt).toMatchObject({
+      type: "preset",
+      preset: "claude_code",
+      append: expect.stringContaining("letterpress printer"),
+    });
+    expect(seenOptions[0]?.allowedTools).toContain("mcp__ghost__ghost_memory_write");
     expect(lifecycle.closed).toBe(1);
     const sessionId = seenOptions[0]?.sessionId;
     expect(sessionId).toMatch(/^[0-9a-f-]{36}$/);

@@ -3,16 +3,8 @@ import { fileURLToPath } from "node:url";
 import { discoverAndLoadExtensions } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/loader";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
-  GHOST_MEMORY_LIST,
-  GHOST_MEMORY_READ,
   GHOST_MEMORY_WRITE,
 } from "../src/extensions/memory.js";
-import {
-  GHOST_NOTES_GREP,
-  GHOST_NOTES_LIST,
-  GHOST_NOTES_READ,
-  GHOST_NOTES_WRITE,
-} from "../src/extensions/notes.js";
 import { createGhostFixture, type GhostFixture } from "./support/fixture.js";
 
 const SRC = fileURLToPath(new URL("../src/extensions", import.meta.url));
@@ -51,16 +43,7 @@ describe("pi's own extension loader", () => {
       ]),
     );
     expect([...byFile.get("persona.ts")!.handlers.keys()]).toEqual(["before_agent_start"]);
-    expect([...byFile.get("memory.ts")!.tools.keys()]).toEqual([
-      GHOST_MEMORY_LIST,
-      GHOST_MEMORY_READ,
-      GHOST_MEMORY_WRITE,
-    ]);
-    expect([...byFile.get("notes.ts")!.tools.keys()]).toEqual([
-      GHOST_NOTES_LIST,
-      GHOST_NOTES_READ,
-      GHOST_NOTES_GREP,
-      GHOST_NOTES_WRITE,
-    ]);
+    expect([...byFile.get("memory.ts")!.tools.keys()]).toEqual([GHOST_MEMORY_WRITE]);
+    expect([...byFile.get("notes.ts")!.tools.keys()]).toEqual([]);
   });
 });

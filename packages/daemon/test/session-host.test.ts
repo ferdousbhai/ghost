@@ -2,9 +2,9 @@
  * Session host against a mock provider. No real model is ever called.
  *
  * The properties under test are the ones the spike found are easy to lose:
- * sessions inside the ghost home, no built-in tools, a persona that fully
- * replaces pi's coding-agent prompt, and two ghosts staying separate while
- * answering at the same time in one process.
+ * sessions inside the ghost home, OMP-native creator tools and discovery, a
+ * Ghost persona layered onto the harness, and two ghosts staying separate
+ * while answering at the same time in one process.
  */
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, sep } from "node:path";
@@ -17,22 +17,13 @@ import {
   type GhostModelDefinition,
   type GhostModelsFile,
 } from "../src/models.js";
-import { ghostToolNamesFor } from "@ghost/extensions";
 import { GhostHookRunner } from "../src/hooks.js";
 import {
-  PI_BUILTIN_TOOL_NAMES,
   SessionHost,
+  parseUserBashCommand,
   sessionFileNameFor,
   sessionKeyOf,
 } from "../src/session-host.js";
-
-/**
- * Every tool a creator session may expose. The real invariant is "only the
- * ghost's own extension tools, nothing from pi" — a name prefix was a loose
- * proxy for it, and the vision fallback tool is deliberately `look_at_image`
- * (a model-facing verb, not `ghost_`-prefixed), so assert membership instead.
- */
-const CREATOR_GHOST_TOOLS = new Set([...ghostToolNamesFor({}), "ask"]);
 import type { PiMessagesEvent } from "../src/pi-messages.js";
 import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
 import { startMockProvider, type MockProvider } from "./helpers/mock-provider.js";
@@ -104,6 +95,20 @@ describe("sessionKeyOf", () => {
   });
 });
 
+describe("parseUserBashCommand", () => {
+  it("recognizes OMP's contextual and context-free command sigils", () => {
+    expect(parseUserBashCommand("!pwd")).toEqual({
+      command: "pwd",
+      excludeFromContext: false,
+    });
+    expect(parseUserBashCommand("  !! printenv TOKEN ")).toEqual({
+      command: "printenv TOKEN",
+      excludeFromContext: true,
+    });
+    expect(parseUserBashCommand("ordinary message!")).toBeNull();
+  });
+});
+
 describe("SessionHost.open", () => {
   it("keeps sessions, settings, and models inside the ghost home", async () => {
     const { dir } = await setup([{ kind: "text", text: "hello" }]);
@@ -126,17 +131,25 @@ describe("SessionHost.open", () => {
     expect(handle.session.model?.provider).toBe("ghost-local");
   });
 
-  it("exposes only the ghost's own tools — no bash, no filesystem", async () => {
+  it("inherits OMP's native tools and adds Ghost's own capabilities", async () => {
     await setup([{ kind: "text", text: "hello" }]);
     const handle = await host!.open("casper", "conv-1");
     const names = handle.session.getActiveToolNames();
 
-    expect(names.length).toBeGreaterThan(0);
-    for (const builtin of PI_BUILTIN_TOOL_NAMES) {
-      expect(names, `built-in ${builtin} must not be active`).not.toContain(builtin);
+    expect(names).toEqual(expect.arrayContaining([
+      "read",
+      "bash",
+      "edit",
+    ]));
+    // Xdev may mount these behind read/write instead of advertising them at
+    // top level; either way they are present in OMP's native registry.
+    for (const name of ["write", "grep", "glob", "task", "hub", "web_search"]) {
+      expect(handle.session.getToolByName(name), `${name} must be available`).toBeDefined();
     }
-    for (const name of names) {
-      expect(CREATOR_GHOST_TOOLS, `${name} must be a ghost tool`).toContain(name);
+    // OMP may mount non-core capabilities under xd:// instead of advertising
+    // them as top-level tools, but they remain invokable through its registry.
+    for (const name of ["ghost_memory_write", "ghost_browser", "ghost_desktop"]) {
+      expect(handle.session.getToolByName(name), `${name} must be available`).toBeDefined();
     }
   });
 
@@ -151,23 +164,63 @@ describe("SessionHost.open", () => {
     expect(other.sessionFile).not.toBe(first.sessionFile);
   });
 
-  it("does not load extensions dropped into the ghost home", async () => {
+  it("loads native OMP project extensions from the ghost home", async () => {
     const { dir } = await setup([{ kind: "text", text: "hello" }]);
     const { mkdirSync, writeFileSync } = await import("node:fs");
-    const extDir = join(dir, ".pi", "extensions");
+    const extDir = join(dir, ".omp", "extensions");
     mkdirSync(extDir, { recursive: true });
     writeFileSync(
-      join(extDir, "evil.ts"),
+      join(extDir, "project.ts"),
       `export default function (pi: any) {
-         pi.registerTool({ name: "evil_tool", label: "evil", description: "no",
+         pi.registerTool({ name: "project_tool", label: "project", description: "project tool",
            parameters: { type: "object", properties: {} },
            execute: async () => ({ content: [] }) });
        }\n`,
       "utf8",
     );
-    await host!.close("casper", "conv-1");
     const handle = await host!.open("casper", "conv-1");
-    expect(handle.session.getActiveToolNames()).not.toContain("evil_tool");
+    expect(handle.session.getToolByName("project_tool")).toBeDefined();
+  });
+
+  it("discovers OMP project context and supports /skill:name invocation", async () => {
+    const { dir } = await setup([{ kind: "text", text: "skill applied" }]);
+    const { mkdirSync, writeFileSync } = await import("node:fs");
+    writeFileSync(
+      join(dir, "AGENTS.md"),
+      "# Workshop rule\nAlways identify the composing stick.\n",
+      "utf8",
+    );
+    const skillDir = join(dir, ".omp", "skills", "press-review");
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(
+      join(skillDir, "SKILL.md"),
+      [
+        "---",
+        "name: press-review",
+        "description: Review a printing press repair plan.",
+        "---",
+        "",
+        "Check the tympan and packing before suggesting a repair.",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const handle = await host!.open("casper", "conv-skill");
+    expect(handle.session.skills.map((skill) => skill.name)).toContain("press-review");
+    expect(handle.session.systemPrompt.join("\n")).toContain(
+      "Always identify the composing stick",
+    );
+
+    await host!.runTurn("casper", {
+      sessionId: "conv-skill",
+      prompt: "/skill:press-review focus on the rollers",
+      emit: () => {},
+    });
+    expect(JSON.stringify(provider!.requests[0]?.messages)).toContain(
+      "Check the tympan and packing",
+    );
+    expect(JSON.stringify(provider!.requests[0]?.messages)).toContain("focus on the rollers");
   });
 });
 
@@ -326,7 +379,8 @@ describe("SessionHost.runTurn", () => {
 
     expect(host!.pendingAsk("casper", "conv-ask")).toBeNull();
     expect(events.at(-1)?.type).toBe("done");
-    expect(provider!.requests).toHaveLength(2);
+    expect(provider!.requests.filter((request) => request.system.includes("letterpress printer")))
+      .toHaveLength(2);
     expect(JSON.stringify(provider!.requests[1]?.messages)).toContain("Matte");
   });
 
@@ -461,7 +515,6 @@ describe("SessionHost.runTurn", () => {
       emit: (event) => events.push(event),
     });
 
-    expect(provider!.requests).toHaveLength(2);
     expect(active).toEqual([false, true]);
     expect(events.filter((event) => event.type === "start")).toHaveLength(1);
     expect(events.filter((event) => event.type === "done")).toHaveLength(1);
@@ -489,8 +542,9 @@ describe("SessionHost.runTurn", () => {
     );
   });
 
-  it("gives the provider the ghost's persona and none of pi's coding prompt", async () => {
+  it("layers the ghost persona onto OMP's native prompt and tools", async () => {
     await setup([{ kind: "text", text: "hi" }]);
+    const handle = await host!.open("casper", "conv-1");
     await host!.runTurn("casper", {
       sessionId: "conv-1",
       prompt: "Who are you?",
@@ -500,12 +554,62 @@ describe("SessionHost.runTurn", () => {
     const request = provider!.requests[0];
     expect(request?.system).toContain("casper");
     expect(request?.system).toContain("letterpress printer");
-    // pi's coding-agent prompt and its built-in tools are both absent.
-    expect(request?.system.toLowerCase()).not.toContain("coding agent");
-    expect(request?.toolNames ?? []).not.toContain("bash");
-    for (const name of request?.toolNames ?? []) {
-      expect(CREATOR_GHOST_TOOLS, `${name} must be a ghost tool`).toContain(name);
-    }
+    expect(request?.toolNames ?? []).toEqual(expect.arrayContaining([
+      "read",
+      "bash",
+      "edit",
+    ]));
+    expect(handle.session.getToolByName("ghost_memory_write")).toBeDefined();
+  });
+
+  it("runs !command through OMP without asking the model", async () => {
+    await setup([{ kind: "text", text: "the model must not run" }]);
+    const events: PiMessagesEvent[] = [];
+    await host!.runTurn("casper", {
+      sessionId: "conv-bash",
+      prompt: "!printf ghost-bash",
+      emit: (event) => events.push(event),
+    });
+
+    expect(provider!.requests).toHaveLength(0);
+    expect(events.at(-1)?.type).toBe("done");
+    expect(events.some((event) => event.type === "text_delta"
+      && event.delta.includes("ghost-bash"))).toBe(true);
+    const transcript = await host!.readTranscript("casper", "conv-bash");
+    expect(JSON.stringify(transcript.messages)).toContain("ghost-bash");
+  });
+
+  it("keeps !!command out of model context", async () => {
+    await setup([{ kind: "text", text: "ok" }]);
+    await host!.runTurn("casper", {
+      sessionId: "conv-secret-bash",
+      prompt: "!!printf secret",
+      emit: () => {},
+    });
+    const handle = await host!.open("casper", "conv-secret-bash");
+    expect(handle.session.messages.at(-1)).toMatchObject({
+      role: "bashExecution",
+      excludeFromContext: true,
+    });
+  });
+
+  it("lets !cd move OMP's cwd without moving or forgetting the ghost home", async () => {
+    const { dir } = await setup([{ kind: "text", text: "still Casper" }]);
+    await host!.runTurn("casper", {
+      sessionId: "conv-cd",
+      prompt: "!cd notes",
+      emit: () => {},
+    });
+    const handle = await host!.open("casper", "conv-cd");
+    expect(handle.session.sessionManager.getCwd()).toBe(join(dir, "notes"));
+    expect(handle.sessionFile?.startsWith(ghostPaths(dir).sessionDir + sep)).toBe(true);
+
+    await host!.runTurn("casper", {
+      sessionId: "conv-cd",
+      prompt: "Do you still know who you are?",
+      emit: () => {},
+    });
+    expect(provider!.requests.at(-1)?.system).toContain("letterpress printer");
   });
 
   it("persists a memory file the ghost writes", async () => {
@@ -965,6 +1069,24 @@ describe("the first meeting", () => {
     await setupSeeded("visitor-1");
     const system = await systemPromptFor("wisp");
     expect(system).not.toContain("## Your first meeting");
+  });
+
+  it("keeps native filesystem and direct Bash outside the visitor boundary", async () => {
+    await setupSeeded("visitor-1");
+    const handle = await host!.open("wisp", "conv-visitor-tools");
+    const names = handle.session.getActiveToolNames();
+    expect(names).toEqual(expect.arrayContaining([
+      "ghost_notes_list",
+      "ghost_notes_read",
+      "ghost_memory_write",
+      "ask",
+    ]));
+    for (const name of ["bash", "read", "write"]) expect(names).not.toContain(name);
+    await expect(host!.runTurn("wisp", {
+      sessionId: "conv-visitor-tools",
+      prompt: "!pwd",
+      emit: () => {},
+    })).rejects.toMatchObject({ code: "forbidden", status: 403 });
   });
 
   it("stops once the character file has been written", async () => {

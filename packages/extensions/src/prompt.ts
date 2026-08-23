@@ -1,10 +1,9 @@
 /**
  * The ghost's system prompt.
  *
- * This string **replaces** OMP's coding-agent prompt wholesale — the harness
- * confirmed that returning `systemPrompt` from `before_agent_start` leaves zero
- * bytes of the original (report §3). Nothing here should read like a coding
- * agent: no tool preambles about files and shells, no coding-agent identity.
+ * This string is Ghost's persona section. The persona extension appends it to
+ * OMP's native system prompt, which retains the harness's tool, skill, rule,
+ * and project-context guidance.
  *
  * The two derived sections are assembled from the ghost home on every session
  * start. They are context, not storage: no MEMORY.md, no catalog file.
@@ -43,9 +42,10 @@ function memorySection(input: GhostSystemPromptInput): string[] {
     ? "Memory files you have written about this visitor. Each line is one file; "
       + "open it with ghost_memory_read, and write a new one with ghost_memory_write "
       + "when you learn something worth keeping."
-    : "Memory files you have written. Each line is one file; open it with "
-      + "ghost_memory_read, and write a new one with ghost_memory_write when you "
-      + "learn something worth keeping.";
+    : "Memory files you have written. Each line names a file under memory/. Use "
+      + "read to open one and grep or glob to search the directory. Save a new "
+      + "atomic memory with the ghost_memory_write capability when you learn something "
+      + "worth keeping; OMP may expose that capability through its xd:// registry.";
   const lines = input.memory.lines.length > 0
     ? [...input.memory.lines]
     : ["(nothing yet)"];
@@ -62,9 +62,9 @@ function notesSection(input: GhostSystemPromptInput): string[] {
     ? "The notes published to visitors, by path. Read one with ghost_notes_read or "
       + "search them with ghost_notes_grep. This list is everything you have; there "
       + "is nothing else you can open."
-    : "Your notes, by path. Read one with ghost_notes_read or search them with "
-      + "ghost_notes_grep. Notes marked private are yours alone — they are never "
-      + "shown to visitors, so do not treat them as something a visitor knows.";
+    : "Your notes, by path under notes/. Use read to open them, grep or glob to "
+      + "search them, and write or edit to maintain them. Notes marked private are "
+      + "yours alone; do not treat them as something a visitor knows.";
   const lines = input.notes.lines.length > 0
     ? [...input.notes.lines]
     : ["(no notes yet)"];

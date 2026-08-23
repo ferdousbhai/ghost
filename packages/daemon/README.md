@@ -55,10 +55,11 @@ removes provider keys and routing variables before OMP is loaded. Provider
 login writes `agent.db`; a previous `.pi/auth.json` is imported once, without
 being deleted.
 
-Ghost homes are data, not trusted projects. The session disables discovered
-extensions, project context, prompt templates, skills, MCP, LSP, IRC, and OMP's
-coding/filesystem tools. It explicitly enables only Ghost's scoped extension
-tools and OMP's `ask` human-input tool. Tool approval UI is disabled
+Creator sessions are trusted local OMP projects. They keep native filesystem,
+Bash, skills, rules, project context, plugins, MCP, LSP, task/hub, web search,
+and background jobs, then add Ghost's scoped extensions. Visitor sessions
+disable that native discovery/tool surface and expose only publication-aware
+note/memory tools plus OMP's `ask`. Tool approval UI is disabled
 (`approvalMode: yolo`, `autoApprove: true`); `ask` is not an approval prompt.
 
 ## Models and routing

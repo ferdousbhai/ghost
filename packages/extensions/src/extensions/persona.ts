@@ -1,17 +1,10 @@
 /**
  * The persona extension: the ghost's system prompt.
  *
- * `before_agent_start` returning `systemPrompt` replaces pi's assembled prompt
- * wholesale — the spike captured the provider-side request and confirmed zero
- * bytes of the coding-agent prompt survive (report §3). The prompt is rebuilt on
- * every agent start, so a note published or a memory written mid-session is
- * reflected on the next turn without a session restart.
- *
- * For the replacement to be complete the daemon must also pass
- * `noContextFiles`, `noSkills`, `noPromptTemplates`, and
- * `appendSystemPromptOverride: () => []` when creating the session; otherwise
- * AGENTS.md and APPEND_SYSTEM.md above the ghost home leak into the persona
- * (report §6.3). That is the daemon's half of this contract.
+ * The Ghost persona is appended to OMP's assembled prompt, preserving the
+ * harness's native tool, skill, rule, and project-context guidance. The Ghost
+ * section is rebuilt before every agent start, so a note or memory written
+ * mid-session is reflected on the next turn without a session restart.
  */
 import type { ExtensionAPI, ExtensionFactory } from "@oh-my-pi/pi-coding-agent";
 import { deriveNoteCatalog } from "../catalog.js";
@@ -32,7 +25,7 @@ export function createPersonaExtension(
   const scope = resolveScope(options);
 
   return (pi: ExtensionAPI) => {
-    pi.on("before_agent_start", async (_event, ctx) => {
+    pi.on("before_agent_start", async (event, ctx) => {
       const home = resolveHome(options, ctx);
       const [character, memory, notes] = await Promise.all([
         home.readCharacter(),
@@ -40,8 +33,7 @@ export function createPersonaExtension(
         home.listNotes(),
       ]);
       return {
-        // Returned, not appended: this IS the system prompt.
-        systemPrompt: [buildGhostSystemPrompt({
+        systemPrompt: [...event.systemPrompt, buildGhostSystemPrompt({
           ghostName: options.ghostName ?? home.name,
           character,
           memory: deriveMemoryIndex(memory.files),

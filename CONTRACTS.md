@@ -17,6 +17,10 @@ catalog) is derived per session and never stored.
                                body = the fact
   memory/.visitors/<id>/*.md   per-visitor memory, same format; dot-folder keeps it
                                out of the creator's default view but inspectable
+  .omp/                        OMP-native project skills, rules, tools, commands,
+                               extensions, plugins, prompts, and MCP configuration
+  .pi/                         per-ghost OMP settings, model roles, and credentials
+  .sessions/                   daemon-owned OMP transcripts and runtime sidecars
   conversations/*.json         transcripts (import fixture from the hosted export;
                                the daemon's own sessions live in pi session storage)
   export-manifest.json         present in imported archives; counts, pathRewrites,
@@ -24,6 +28,35 @@ catalog) is derived per session and never stored.
 ```
 
 Terminology: **visitors**, never "callers".
+
+### Creator and visitor capability boundary
+
+A creator session is OMP-native. Ghost preserves OMP's system prompt and
+discovery, then appends the Ghost persona and derived memory/note sections.
+Native filesystem and search (`read`, `glob`, `grep`), mutation (`write`,
+`edit`), Bash, web search, task/hub subagents, background jobs, skills, rules,
+project context, extensions/plugins, commands, and MCP remain available under
+OMP's normal configuration and xd:// presentation. Ghost disables only the
+overlapping OMP browser/computer/image tools because `ghost_browser`,
+`ghost_desktop`, `ghost_screen`, and `look_at_image` own those surfaces.
+
+Creator notes and memory retrieval use those native filesystem tools directly.
+Ghost registers no duplicate creator note list/read/search/write tools, and
+keeps only `ghost_memory_write` for validated, atomic memory-file writes. The
+memory index and note catalog are derived from disk before each model turn and
+are never stored. `/skill:<name> [args]` is explicit force-invocation of a
+discovered skill; native `read` remains the model-driven discovery path.
+
+`!command` executes immediately through OMP's session-aware Bash runner without
+a model turn. `!!command` does the same but excludes the result from future
+model context. Both are creator-only, appear in the live event stream, and are
+persisted in an OMP transcript; a successful standalone `cd` changes the
+conversation working directory without relocating that transcript.
+
+A visitor session remains deliberately restricted to Ghost's scope-aware
+extension tools and `ask`. Native filesystem, Bash, discovery, MCP, LSP, IRC,
+and project context stay disabled because any of them could bypass published
+note visibility or per-visitor memory isolation.
 
 ## Daemon HTTP API (localhost only)
 
@@ -291,10 +324,14 @@ variables from the subprocess environment.
 
 The runtime is creator-only. A visitor scope fails with
 `403 claude_code_owner_only`; the creator's subscription must never fund or be
-resold to visitor traffic. Claude built-in coding/filesystem tools, filesystem
-settings, project instructions, skills, plugins, and non-Ghost MCP servers are
-disabled. Existing Ghost extension tools are exposed through one in-process
-SDK MCP server, and the output is normalized back to pi-messages.
+resold to visitor traffic. The native Claude Code system prompt, tools,
+filesystem settings, project instructions, skills, plugins, subagents, web
+search, and MCP configuration remain enabled with bypass-permissions mode,
+matching the creator-local unrestricted OMP runtime. Existing Ghost extension
+tools are added through one in-process SDK MCP server, and the output is
+normalized back to pi-messages. Ambient provider credentials are still
+scrubbed; removing tool restrictions does not turn Ghost into a credential
+proxy.
 
 Each turn is an Effect scope. It rebuilds the Ghost system prompt, resumes the
 opaque Claude session id, streams one turn, atomically writes a mode-`0600`
@@ -335,7 +372,13 @@ whole model before any non-local exposure.
   (e.g. `GEMINI_API_KEY`) silently add cloud models to a sovereign ghost.
 - Parallel tool calls: wrap shared-file mutations in a file mutation queue.
 - Tools should throw structured errors, not return `isError` payloads.
-- Disable discovered resources, context files, skills, MCP/LSP/IRC, and coding
-  tools explicitly. Ghost enables only its scoped extensions and OMP's `ask`.
+- Creator sessions omit discovery/tool restrictions and load read-only effective
+  OMP settings for the ghost cwd/agent directory. Visitor sessions explicitly
+  disable discovery, context, skills, MCP/LSP/IRC, and native tools.
+- OMP may mount non-core tools under xd://; absence from
+  `getActiveToolNames()` does not mean absence from its tool registry.
+- Set `PI_NO_TITLE=1`: Ghost's smol lane owns the single persisted conversation
+  title, so OMP's otherwise-native automatic title completion would duplicate
+  work and race the same session-name slot.
 - Tool approvals remain disabled (`yolo`/auto-approve); `ask` is never an
   approval prompt.

@@ -5,9 +5,7 @@ import {
   GHOST_NOTES_GREP,
   GHOST_NOTES_LIST,
   GHOST_NOTES_READ,
-  GHOST_NOTES_WRITE,
 } from "../src/extensions/notes.js";
-import { openGhostHome } from "../src/home.js";
 import { CREATOR_SCOPE, visitorScope } from "../src/scope.js";
 import {
   ARCHIVED_NOTE_PATH,
@@ -32,67 +30,10 @@ afterEach(async () => {
 });
 
 describe("creator mode", () => {
-  it("registers the full tool set including the writer", async () => {
+  it("uses OMP's native filesystem tools instead of duplicate note tools", async () => {
     const harness = await loadExtension(createNotesExtension(), fixture.dir);
-    expect(harness.toolNames()).toEqual([
-      GHOST_NOTES_LIST,
-      GHOST_NOTES_READ,
-      GHOST_NOTES_GREP,
-      GHOST_NOTES_WRITE,
-    ]);
+    expect(harness.toolNames()).toEqual([]);
     expect(harness.handlers.get("tool_call")).toBeUndefined();
-  });
-
-  it("reads a private note without complaint", async () => {
-    const harness = await loadExtension(createNotesExtension(), fixture.dir);
-    expect(resultText(await harness.call(GHOST_NOTES_READ, { path: PRIVATE_NOTE_PATH })))
-      .toContain(SECRET);
-  });
-
-  it("lists notes with their visibility and hides archived ones by default", async () => {
-    const harness = await loadExtension(createNotesExtension(), fixture.dir);
-    const listed = resultText(await harness.call(GHOST_NOTES_LIST));
-    expect(listed).toContain(`${PRIVATE_NOTE_PATH}: Estate and finances (private)`);
-    expect(listed).not.toContain(ARCHIVED_NOTE_PATH);
-    const withArchived = resultText(
-      await harness.call(GHOST_NOTES_LIST, { include_archived: true }),
-    );
-    expect(withArchived).toContain(ARCHIVED_NOTE_PATH);
-  });
-
-  it("writes a note, private unless published", async () => {
-    const harness = await loadExtension(createNotesExtension(), fixture.dir);
-    await harness.call(GHOST_NOTES_WRITE, { path: "ideas/new", body: "a thought" });
-    const note = await openGhostHome(fixture.dir).readNote("ideas/new.md");
-    expect(note.body).toBe("a thought");
-    expect(note.meta.public).toBe(false);
-  });
-
-  it("greps note bodies", async () => {
-    const harness = await loadExtension(createNotesExtension(), fixture.dir);
-    const found = resultText(await harness.call(GHOST_NOTES_GREP, { query: "carriage" }));
-    expect(found).toContain("press-restoration.md:1:");
-  });
-
-  it("truncates a huge note body with an accurate footer", async () => {
-    await openGhostHome(fixture.dir).writeNote("big.md", { body: "x".repeat(20_000) });
-    const harness = await loadExtension(createNotesExtension(), fixture.dir);
-    const text = resultText(await harness.call(GHOST_NOTES_READ, { path: "big.md" }));
-    expect(text).toContain("showing the first 8000 of 20000 characters");
-    // The footer's numbers are honest: the returned body really is capped.
-    expect(text.length).toBeLessThan(9_000);
-  });
-
-  it("caps an over-long grep match line", async () => {
-    await openGhostHome(fixture.dir).writeNote("long.md", {
-      body: `needle ${"y".repeat(500)}`,
-    });
-    const harness = await loadExtension(createNotesExtension(), fixture.dir);
-    const text = resultText(await harness.call(GHOST_NOTES_GREP, { query: "needle" }));
-    const line = text.split("\n").find((entry) => entry.startsWith("long.md:"));
-    expect(line).toBeDefined();
-    expect(line).toContain("…");
-    expect((line as string).length).toBeLessThan(260);
   });
 });
 

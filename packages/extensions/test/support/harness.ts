@@ -96,7 +96,7 @@ export async function loadExtension(
           {
             type: "before_agent_start",
             prompt: "hello",
-            systemPrompt: systemPrompt ?? incomingSystemPrompt,
+            systemPrompt: [systemPrompt ?? incomingSystemPrompt],
             systemPromptOptions: {},
           },
           ctx,

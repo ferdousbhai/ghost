@@ -23,13 +23,12 @@ afterEach(async () => {
 });
 
 describe("persona extension", () => {
-  it("replaces pi's system prompt wholesale", async () => {
+  it("appends the ghost persona to pi's native system prompt", async () => {
     const harness = await loadExtension(createPersonaExtension(), fixture.dir);
     const prompt = await harness.beforeAgentStart(PI_PROMPT);
     expect(prompt).toBeDefined();
-    expect(prompt).not.toContain("coding agent");
-    expect(prompt).not.toContain("bash");
-    expect(prompt?.startsWith("# Casper")).toBe(true);
+    expect(prompt?.startsWith(PI_PROMPT)).toBe(true);
+    expect(prompt).toContain("# Casper");
   });
 
   it("assembles character, derived memory index, and derived note catalog", async () => {
@@ -96,8 +95,8 @@ describe("persona extension", () => {
         casper.beforeAgentStart(),
         mina.beforeAgentStart(),
       ]);
-      expect(casperPrompt?.startsWith("# Casper")).toBe(true);
-      expect(minaPrompt?.startsWith("# Mina")).toBe(true);
+      expect(casperPrompt).toContain("# Casper");
+      expect(minaPrompt).toContain("# Mina");
     } finally {
       await other.cleanup();
     }

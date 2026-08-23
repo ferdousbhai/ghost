@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   findProviderCredentialEnv,
+  PI_NO_TITLE_ENV_VAR,
   PI_OFFLINE_ENV_VAR,
   PROVIDER_ROUTING_ENV_VARS,
   scrubProviderEnv,
@@ -74,5 +75,11 @@ describe("scrubProviderEnv", () => {
     // Unspecified leaves whatever policy was last applied.
     scrubProviderEnv(env);
     expect(env[PI_OFFLINE_ENV_VAR]).toBe("1");
+  });
+
+  it("disables OMP's duplicate title completion", () => {
+    const env: NodeJS.ProcessEnv = {};
+    scrubProviderEnv(env);
+    expect(env[PI_NO_TITLE_ENV_VAR]).toBe("1");
   });
 });

@@ -152,6 +152,8 @@ export const PROVIDER_CREDENTIAL_ENV_PATTERNS: readonly RegExp[] = [
  * and that guarantee does not depend on being offline.
  */
 export const PI_OFFLINE_ENV_VAR = "PI_OFFLINE";
+/** Ghost's smol lane owns session titles, so OMP must not generate a duplicate. */
+export const PI_NO_TITLE_ENV_VAR = "PI_NO_TITLE";
 
 export interface ScrubOptions {
   /** Set `PI_OFFLINE`; when false, an inherited `PI_OFFLINE` is cleared. */
@@ -191,6 +193,7 @@ export function scrubProviderEnv(
     // The daemon's policy wins over whatever the launching shell had set.
     delete env[PI_OFFLINE_ENV_VAR];
   }
+  env[PI_NO_TITLE_ENV_VAR] = "1";
   return { removed: removed.sort() };
 }
 

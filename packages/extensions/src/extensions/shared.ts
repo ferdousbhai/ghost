@@ -100,8 +100,9 @@ export function budgetFooter(result: BudgetedText): string | null {
  * The desktop extensions (screen, hyprland) reach the machine by running small
  * programs — `grim`, `hyprctl`, `notify-send`. They do it through `execFile`
  * with an **argument array and no shell**, so nothing the model emits is ever
- * parsed by `/bin/sh`. There is deliberately no `runShell` here: adding one
- * would hand a ghost the `bash` tool it is documented not to have.
+ * parsed by `/bin/sh`. There is deliberately no `runShell` here: creator
+ * sessions already have OMP's audited Bash runner, while visitor sessions must
+ * not gain an unscoped shell through a Ghost extension.
  */
 export interface CommandResult {
   readonly stdout: string;

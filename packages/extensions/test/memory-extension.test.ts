@@ -23,8 +23,16 @@ afterEach(async () => {
 });
 
 describe("memory extension", () => {
-  it("registers exactly the three memory tools", async () => {
+  it("keeps only the structured writer in creator scope", async () => {
     const harness = await loadExtension(createMemoryExtension(), fixture.dir);
+    expect(harness.toolNames()).toEqual([GHOST_MEMORY_WRITE]);
+  });
+
+  it("keeps scoped list/read/write tools for visitors", async () => {
+    const harness = await loadExtension(
+      createMemoryExtension({ scope: visitorScope("visitor-1") }),
+      fixture.dir,
+    );
     expect(harness.toolNames()).toEqual([
       GHOST_MEMORY_LIST,
       GHOST_MEMORY_READ,
@@ -32,28 +40,40 @@ describe("memory extension", () => {
     ]);
   });
 
-  it("lists the derived index, not a stored file", async () => {
-    const harness = await loadExtension(createMemoryExtension(), fixture.dir);
+  it("lists the visitor's derived index, not a stored file", async () => {
+    const harness = await loadExtension(
+      createMemoryExtension({ scope: visitorScope("visitor-1") }),
+      fixture.dir,
+    );
     const text = resultText(await harness.call(GHOST_MEMORY_LIST));
-    expect(text).toContain("- apprentice-question.md: A visitor asked how to start");
-    expect(text).toContain("- working-habit.md: I work in the morning");
+    expect(text).toContain("- asked-about-press.md: This visitor keeps circling back");
+    expect(text).not.toContain("working-habit.md");
   });
 
-  it("reads one memory file", async () => {
-    const harness = await loadExtension(createMemoryExtension(), fixture.dir);
-    const result = await harness.call(GHOST_MEMORY_READ, { name: "working-habit.md" });
-    expect(resultText(result)).toContain("The press is cold until ten.");
-    expect(result.details).toMatchObject({ slug: "working-habit", updated: "2026-08-02" });
+  it("reads one visitor memory file", async () => {
+    const harness = await loadExtension(
+      createMemoryExtension({ scope: visitorScope("visitor-1") }),
+      fixture.dir,
+    );
+    const result = await harness.call(GHOST_MEMORY_READ, { name: "asked-about-press.md" });
+    expect(resultText(result)).toContain("Third time they have asked");
+    expect(result.details).toMatchObject({ slug: "asked-about-press", updated: "2026-08-03" });
   });
 
   it("throws on a missing file rather than returning an error payload", async () => {
-    const harness = await loadExtension(createMemoryExtension(), fixture.dir);
+    const harness = await loadExtension(
+      createMemoryExtension({ scope: visitorScope("visitor-1") }),
+      fixture.dir,
+    );
     await expect(harness.call(GHOST_MEMORY_READ, { name: "nope.md" }))
       .rejects.toMatchObject({ code: "not_found" });
   });
 
   it("throws with instructional guidance on a bad name", async () => {
-    const harness = await loadExtension(createMemoryExtension(), fixture.dir);
+    const harness = await loadExtension(
+      createMemoryExtension({ scope: visitorScope("visitor-1") }),
+      fixture.dir,
+    );
     await expect(harness.call(GHOST_MEMORY_READ, { name: "../../character.md" }))
       .rejects.toThrow(/kebab-case/);
   });
