@@ -168,6 +168,12 @@ Rectangle {
         }
 
         Row {
+            id: askRow
+
+            // Bindings evaluate even while invisible, so a null askBranch must
+            // read as an empty object rather than a TypeError per property.
+            readonly property var nav: root.askBranch || ({})
+
             visible: root.activity.name === "ask" && root.askBranch !== null
             width: parent.width
             spacing: Theme.gap
@@ -180,43 +186,43 @@ Rectangle {
                 MouseArea {
                     anchors.fill: parent
                     cursorShape: Qt.PointingHandCursor
-                    onClicked: Ghostd.reanswerHistoricalAsk(root.askBranch.resultEntryId || "")
+                    onClicked: Ghostd.reanswerHistoricalAsk(askRow.nav.resultEntryId || "")
                 }
             }
 
             Text {
-                visible: root.askBranch && root.askBranch.count > 1
-                text: root.askBranch.previousTargetId ? "‹" : "·"
-                color: root.askBranch.previousTargetId ? Theme.ghostAmber : root.detailColor
+                visible: askRow.nav.count > 1
+                text: askRow.nav.previousTargetId ? "‹" : "·"
+                color: askRow.nav.previousTargetId ? Theme.ghostAmber : root.detailColor
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontSizeSmall
                 MouseArea {
                     anchors.fill: parent
-                    enabled: Boolean(root.askBranch && root.askBranch.previousTargetId)
+                    enabled: Boolean(askRow.nav.previousTargetId)
                     cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-                    onClicked: Ghostd.navigateBranch(root.askBranch.previousTargetId)
+                    onClicked: Ghostd.navigateBranch(askRow.nav.previousTargetId)
                 }
             }
 
             Text {
-                visible: root.askBranch && root.askBranch.count > 1
-                text: (root.askBranch.index + 1) + "/" + root.askBranch.count
+                visible: askRow.nav.count > 1
+                text: (askRow.nav.index + 1) + "/" + askRow.nav.count
                 color: root.detailColor
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontSizeSmall
             }
 
             Text {
-                visible: root.askBranch && root.askBranch.count > 1
-                text: root.askBranch.nextTargetId ? "›" : "·"
-                color: root.askBranch.nextTargetId ? Theme.ghostAmber : root.detailColor
+                visible: askRow.nav.count > 1
+                text: askRow.nav.nextTargetId ? "›" : "·"
+                color: askRow.nav.nextTargetId ? Theme.ghostAmber : root.detailColor
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontSizeSmall
                 MouseArea {
                     anchors.fill: parent
-                    enabled: Boolean(root.askBranch && root.askBranch.nextTargetId)
+                    enabled: Boolean(askRow.nav.nextTargetId)
                     cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-                    onClicked: Ghostd.navigateBranch(root.askBranch.nextTargetId)
+                    onClicked: Ghostd.navigateBranch(askRow.nav.nextTargetId)
                 }
             }
         }

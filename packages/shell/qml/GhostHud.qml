@@ -125,6 +125,14 @@ FloatingWindow {
         return !!(top && top.lastIpcObject && top.lastIpcObject["class"] === "ghost");
     }
 
+    // Materialize on summon: the content takes a breath of scale and opacity
+    // instead of cutting in. Content-level, because the compositor owns the
+    // surface itself; Hyprland's own open animation composes with it.
+    onShownChanged: {
+        if (hud.shown && !Theme.reducedMotion)
+            materialize.restart();
+    }
+
     Rectangle {
         id: card
 
@@ -132,6 +140,24 @@ FloatingWindow {
         // border and rounding for a normal toplevel.
         anchors.fill: parent
         color: Theme.background
+
+        ParallelAnimation {
+            id: materialize
+            NumberAnimation {
+                target: card; property: "opacity"; from: 0; to: 1
+                duration: 250; easing.type: Easing.OutCubic
+            }
+            SequentialAnimation {
+                NumberAnimation {
+                    target: card; property: "scale"; from: 0.97; to: 1.008
+                    duration: 260; easing.type: Easing.OutCubic
+                }
+                NumberAnimation {
+                    target: card; property: "scale"; from: 1.008; to: 1
+                    duration: 180; easing.type: Easing.InOutQuad
+                }
+            }
+        }
 
         focus: true
         // Esc-to-close is unusual for a normal app window, so Esc only cancels a
@@ -628,33 +654,16 @@ FloatingWindow {
                                 border.width: 1
                                 border.color: Theme.amber(0.15)
 
-                                Column {
+                                Text {
                                     id: invitation
                                     anchors.centerIn: parent
                                     width: parent.width - Theme.pad * 2
-                                    spacing: Theme.gap / 2
-
-                                    Text {
-                                        width: parent.width
-                                        horizontalAlignment: Text.AlignHCenter
-                                        text: "What's on your mind?"
-                                        color: Theme.foreground
-                                        font.family: Theme.fontFamily
-                                        font.pixelSize: Theme.fontSize
-                                        wrapMode: Text.Wrap
-                                    }
-
-                                    Text {
-                                        width: parent.width
-                                        horizontalAlignment: Text.AlignHCenter
-                                        text: "Your ghost is listening."
-                                        color: Theme.foregroundDim
-                                        font.family: Theme.fontFamily
-                                        font.pixelSize: Theme.fontSizeSmall
-                                        font.weight: Font.Light
-                                        font.letterSpacing: 0.5
-                                        wrapMode: Text.Wrap
-                                    }
+                                    horizontalAlignment: Text.AlignHCenter
+                                    text: "What's on your mind?"
+                                    color: Theme.foreground
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: Theme.fontSize
+                                    wrapMode: Text.Wrap
                                 }
                             }
 
