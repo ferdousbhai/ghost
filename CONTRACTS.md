@@ -34,14 +34,18 @@ Terminology: **visitors**, never "callers".
   (request `{ model, context, options }` → SSE stream of pi-messages events).
   The pinned client in the summon-ghost repo is the normative spec
   (`~/github.com/ferdousbhai/summon-ghost`, read-only reference).
-- `GET  /api/ghosts/:name/sessions` → pi session listing for that ghost.
+- `GET  /api/ghosts/:name/sessions` → session listing for that ghost. pi
+  transcripts and Claude Code resume-metadata sidecars share the same response
+  shape.
 
 ### Model indicator + switcher (which model a ghost uses, and switching it)
 
-Every model here comes from pi's own catalogue (`ModelRuntime`, which rides
-models.dev via pi's vendored registry — no hardcoded list), read per-ghost from
-that ghost's `models.json`/`auth.json`. No credential is ever read into or
-emitted from a response.
+Provider models come from pi's own catalogue (`ModelRuntime`, which rides
+models.dev via pi's vendored registry). One runtime entry is code-owned:
+`claude-code/default`, representing the installed Claude Code harness rather
+than an API model. Its usability comes from the boolean result of external
+`claude auth status --json`; no credential is read into or emitted from a
+response.
 
 - `GET  /api/ghosts/:name/model` → the current selection:
   `{ current: { provider, id, name?, contextWindow?, hasVision } | null,
@@ -55,6 +59,7 @@ emitted from a response.
     credentialed providers, via `getAvailable()`). Each row is
     `{ provider, id, name?, contextWindow?, cost?, hasVision, connectedVia?,
     current }`, tagged by `provider`, with `current: true` on the selected one.
+    `connectedVia` is `oauth | api_key | claude_plan`.
   - `scope=catalog`: the FULL pi catalogue (`getModels()`, every provider,
     logged in or not), same row shape plus `usable: boolean` (is the provider
     credentialed; `connectedVia` present only when usable). Supports the
@@ -64,8 +69,9 @@ emitted from a response.
     pages in. A single response never ships more than 500 rows, so the shell can
     search ~1,270 models by refining `q` rather than downloading them all.
 - `PUT  /api/ghosts/:name/model` `{ provider, id }` → set `roles.chat_model`.
-  Validates the model exists in the catalogue (`getModel`); an unknown model is
-  a structured `400 unknown_model`. If the provider is not credentialed the
+  Validates the model exists in the pi catalogue (`getModel`) or equals the
+  code-owned `claude-code/default` runtime entry; an unknown model is a
+  structured `400 unknown_model`. If the provider/runtime is not usable the
   write still happens and the response is `{ ok: true, usable: false, warning,
   current, source: "role" }` so the shell can prompt a login rather than the
   switch failing silently; a credentialed provider returns
@@ -81,9 +87,11 @@ as a short-lived, pollable login session. Credentials are written by pi's own
 or key is never echoed in a GET body or a log.
 
 - `GET  /api/ghosts/:name/providers` → `{ providers: [{ id, name, subscription,
-  authTypes: ("oauth"|"api_key")[], loginLabel?, configured, connectedVia? }] }`,
+  authTypes: ("oauth"|"api_key")[], loginLabel?, billingNote?, configured,
+  connectedVia? }] }`,
   derived from pi's registry (openai-codex, openrouter, anthropic, github-copilot,
-  xai, …). Ambient-only providers (no interactive login) are omitted.
+  xai, …). Ambient-only providers and the externally authenticated
+  `claude-code` runtime are omitted.
 - `POST /api/ghosts/:name/login` `{ providerId, authType }` → `201` with the
   initial **login view** (below), including `loginId`.
 - `GET  /api/ghosts/:name/login/:loginId` → the current **login view**: the step
@@ -105,6 +113,32 @@ bound. Abandoned logins time out and are cleaned up server-side.
 The same flow runs in the terminal as `ghostd login [<ghost>] [--provider <id>]
 [--api-key]`.
 
+The pinned pi 0.84.2 documentation says its `anthropic` OAuth path uses
+Anthropic extra usage billed per token; it is not the Claude-plan path below.
+
+### Claude Code plan runtime (external auth)
+
+`roles.chat_model = { provider: "claude-code", modelId: "default" }` selects
+the official Claude Agent SDK + an installed, unmodified `claude` executable.
+The creator runs `claude auth login` outside Ghost. Ghost accepts no Claude
+credential, stores no Claude credential, and removes ambient API/OAuth-token
+variables from the subprocess environment.
+
+The runtime is creator-only. A visitor scope fails with
+`403 claude_code_owner_only`; the creator's subscription must never fund or be
+resold to visitor traffic. Claude built-in coding/filesystem tools, filesystem
+settings, project instructions, skills, plugins, and non-Ghost MCP servers are
+disabled. Existing Ghost extension tools are exposed through one in-process
+SDK MCP server, and the output is normalized back to pi-messages.
+
+Each turn is an Effect scope. It rebuilds the Ghost system prompt, resumes the
+opaque Claude session id, streams one turn, atomically writes a mode-`0600`
+metadata sidecar under `.sessions/`, emits one terminal event, and closes the
+query. Claude Code owns the actual transcript under its own
+`~/.claude/projects/` storage; the sidecar is not a transcript. Full rationale,
+T3 Code provenance, policy caveat, and legal boundary:
+[`docs/claude-code-runtime.md`](docs/claude-code-runtime.md).
+
 Bind to `127.0.0.1`. No auth in v1 (localhost trust); revisit before any
 non-local exposure.
 
@@ -113,8 +147,9 @@ non-local exposure.
 - `packages/extensions` — pure pi extensions + ghost-home fs helpers. No HTTP,
   no daemon lifecycle. Exports the extension factories and the ghost-home
   reader/writer.
-- `packages/daemon` — per-ghost `AgentSession` lifecycle, env scrubbing,
-  credential injection, the HTTP API, systemd unit. Depends on `extensions`.
+- `packages/daemon` — per-ghost pi `AgentSession` and Claude Code query
+  lifecycles, env scrubbing, model/runtime selection, the HTTP API, systemd
+  unit. Depends on `extensions`.
 - UI package: TBD (Omarchy shell technology decision pending).
 
 ## Known pi 0.84.2 gotchas (from the spike, scratchpad pi-spike-report.md)
