@@ -18,6 +18,6 @@
     "shell": "quickshell -p qml/shell.qml",
     "build": "true",
     "typecheck": "true",
-    "test": "true"
+    "test": "bash dev/test.sh"
   }
 }

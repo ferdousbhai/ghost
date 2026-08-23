@@ -4,7 +4,6 @@
 // natively, which covers everything a v1 reply needs (emphasis, code spans,
 // lists, headings) without shipping a parser. User text renders plain so a
 // prompt containing backticks or underscores survives verbatim.
-import Quickshell
 import QtQuick
 import qs.services
 
@@ -61,7 +60,7 @@ Item {
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontSize
                 wrapMode: Text.Wrap
-                onLinkActivated: link => Quickshell.execDetached(["xdg-open", link])
+                onLinkActivated: link => ExternalLinks.openModelUrl(link)
             }
 
             Text {

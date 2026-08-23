@@ -780,7 +780,7 @@ Singleton {
 
     /** Open the current auth URL in the creator's browser. */
     function openLoginUrl(url: string): void {
-        if (url && url !== "") Quickshell.execDetached(["xdg-open", url]);
+        if (!ExternalLinks.openLoginUrl(url)) root.loginError = "ghostd sent an unsafe login URL";
     }
 
     function isLoginTerminal(): bool {
