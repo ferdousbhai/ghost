@@ -73,6 +73,27 @@ describe("creator mode", () => {
     const found = resultText(await harness.call(GHOST_NOTES_GREP, { query: "carriage" }));
     expect(found).toContain("press-restoration.md:1:");
   });
+
+  it("truncates a huge note body with an accurate footer", async () => {
+    await openGhostHome(fixture.dir).writeNote("big.md", { body: "x".repeat(20_000) });
+    const harness = await loadExtension(createNotesExtension(), fixture.dir);
+    const text = resultText(await harness.call(GHOST_NOTES_READ, { path: "big.md" }));
+    expect(text).toContain("showing the first 8000 of 20000 characters");
+    // The footer's numbers are honest: the returned body really is capped.
+    expect(text.length).toBeLessThan(9_000);
+  });
+
+  it("caps an over-long grep match line", async () => {
+    await openGhostHome(fixture.dir).writeNote("long.md", {
+      body: `needle ${"y".repeat(500)}`,
+    });
+    const harness = await loadExtension(createNotesExtension(), fixture.dir);
+    const text = resultText(await harness.call(GHOST_NOTES_GREP, { query: "needle" }));
+    const line = text.split("\n").find((entry) => entry.startsWith("long.md:"));
+    expect(line).toBeDefined();
+    expect(line).toContain("…");
+    expect((line as string).length).toBeLessThan(260);
+  });
 });
 
 describe("visitor mode", () => {

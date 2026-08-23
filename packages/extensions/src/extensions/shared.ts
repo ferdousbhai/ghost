@@ -53,6 +53,46 @@ export function textResult<TDetails>(
 }
 
 // ---------------------------------------------------------------------------
+// Bounded output
+// ---------------------------------------------------------------------------
+
+/**
+ * Default cap on a single note body handed to the model, in characters. One
+ * imported note with no size ceiling can blow the context window in a single
+ * `ghost_notes_read`; this mirrors the browser tool's `DEFAULT_READ_BUDGET_CHARS`.
+ */
+export const DEFAULT_NOTE_READ_BUDGET_CHARS = 8_000;
+
+/** Cap on a single grep match line handed to the model, in characters. */
+export const MAX_GREP_LINE_CHARS = 200;
+
+export interface BudgetedText {
+  /** The text, truncated to the budget. */
+  readonly text: string;
+  /** True when the original was longer than the budget. */
+  readonly truncated: boolean;
+  /** The length before truncation, so the model knows what it is missing. */
+  readonly totalLength: number;
+}
+
+/**
+ * Cap a string to `maxChars`. Every string a ghost tool sends to the model —
+ * a note body, a search match line — passes through here, so no single call can
+ * return an unbounded amount of text. Mirrors the browser tool's read budget.
+ */
+export function budgeted(text: string, maxChars: number): BudgetedText {
+  const totalLength = text.length;
+  if (totalLength <= maxChars) return { text, truncated: false, totalLength };
+  return { text: text.slice(0, maxChars), truncated: true, totalLength };
+}
+
+/** The `(showing the first N of M characters)` footer, or null when whole. */
+export function budgetFooter(result: BudgetedText): string | null {
+  if (!result.truncated) return null;
+  return `(showing the first ${result.text.length} of ${result.totalLength} characters)`;
+}
+
+// ---------------------------------------------------------------------------
 // Running local programs
 // ---------------------------------------------------------------------------
 

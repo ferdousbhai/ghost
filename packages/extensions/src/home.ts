@@ -26,6 +26,7 @@
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
+import { isSafe } from "redos-detector";
 import { isNoteVisible } from "./catalog.js";
 import { GhostError } from "./errors.js";
 import {
@@ -132,6 +133,28 @@ export interface NoteSearchResult {
 }
 
 const DEFAULT_SEARCH_RESULTS = 50;
+
+/**
+ * ReDoS defence for `searchNotes` with `regex: true`. The query is model- or
+ * page-supplied (a ghost greps text it just read off the web), and it is compiled
+ * and `.test()`ed against every line. Without a guard, a pattern like `(a+)+$`
+ * against one long line backtracks catastrophically and pins the daemon's single
+ * event loop, taking the HTTP API and every ghost session down with it.
+ *
+ * The guarantee has three parts:
+ *   1. Cap the pattern length, so the analysis below always gets a small input.
+ *   2. Prove the pattern cannot backtrack super-linearly, with `redos-detector`
+ *      (a static, linear-time analysis; no native binding, unlike RE2, which
+ *      would need a workspace-root build-script allowlist). The analysis itself
+ *      is wall-time bounded and fails closed — a timeout counts as unsafe.
+ *   3. Cap the characters of any one line handed to the matcher, so even a
+ *      proven-linear pattern does bounded work per line.
+ * A literal (non-regex) query is escaped before compiling and is always linear,
+ * so it skips this gate entirely.
+ */
+const MAX_GREP_PATTERN_CHARS = 1_000;
+const REDOS_ANALYSIS_TIMEOUT_MS = 50;
+const MAX_GREP_LINE_SCAN_CHARS = 10_000;
 
 async function exists(path: string): Promise<boolean> {
   try {
@@ -391,6 +414,13 @@ export class GhostHome {
     const scope = options.scope ?? CREATOR_SCOPE;
     const maxResults = Math.max(1, options.maxResults ?? DEFAULT_SEARCH_RESULTS);
     const flags = options.caseSensitive ? "" : "i";
+    if (options.regex && query.length > MAX_GREP_PATTERN_CHARS) {
+      throw new GhostError(
+        "invalid_format",
+        `A regular-expression search may be at most ${MAX_GREP_PATTERN_CHARS} characters.`,
+        { query },
+      );
+    }
     let pattern: RegExp;
     try {
       pattern = options.regex
@@ -400,6 +430,17 @@ export class GhostHome {
       throw new GhostError(
         "invalid_format",
         `Invalid search pattern: ${message(error)}`,
+        { query },
+      );
+    }
+    // Only a caller-supplied *regex* can be adversarial; the escaped literal above
+    // is always linear. See MAX_GREP_PATTERN_CHARS for the full rationale.
+    if (options.regex && !isSafe(pattern, { timeout: REDOS_ANALYSIS_TIMEOUT_MS }).safe) {
+      throw new GhostError(
+        "invalid_format",
+        "That regular expression can backtrack catastrophically and could hang the "
+        + "daemon, so it was refused. Simplify it — remove nested quantifiers such as "
+        + "\"(a+)+\" — or search for a plain phrase instead.",
         { query },
       );
     }
@@ -414,23 +455,39 @@ export class GhostHome {
     let truncated = false;
     let notesSearched = 0;
 
+    // One collector for title and body matches alike. The title push used to
+    // bypass maxResults entirely and never set `truncated`, so a corpus of
+    // title-matching notes could overrun the cap silently; now every match is
+    // gated the same way. Returns false once the cap is reached.
+    const collect = (match: NoteSearchMatch): boolean => {
+      if (matches.length >= maxResults) {
+        truncated = true;
+        return false;
+      }
+      matches.push(match);
+      return true;
+    };
+
     for (const note of candidates) {
       notesSearched += 1;
       const { body, meta } = await this.readNote(note.path);
       if (meta.title !== undefined && pattern.test(meta.title)) {
-        matches.push({ path: note.path, line: 0, text: `title: ${meta.title}` });
+        if (!collect({ path: note.path, line: 0, text: `title: ${meta.title}` })) break;
       }
       const lines = body.split("\n");
+      let overflowed = false;
       for (let index = 0; index < lines.length; index += 1) {
-        const text = lines[index] as string;
-        if (!pattern.test(text)) continue;
-        if (matches.length >= maxResults) {
-          truncated = true;
+        const line = lines[index] as string;
+        const scanned = line.length > MAX_GREP_LINE_SCAN_CHARS
+          ? line.slice(0, MAX_GREP_LINE_SCAN_CHARS)
+          : line;
+        if (!pattern.test(scanned)) continue;
+        if (!collect({ path: note.path, line: index + 1, text: line.trim() })) {
+          overflowed = true;
           break;
         }
-        matches.push({ path: note.path, line: index + 1, text: text.trim() });
       }
-      if (truncated) break;
+      if (overflowed) break;
     }
 
     return { matches, truncated, notesSearched };

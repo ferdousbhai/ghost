@@ -129,6 +129,44 @@ describe("notes", () => {
     expect((await home.searchNotes("Superseded", { scope })).matches).toEqual([]);
     expect((await home.searchNotes("Damp", { scope })).matches).toHaveLength(1);
   });
+
+  it("refuses a catastrophic-backtracking regex fast instead of hanging", async () => {
+    const started = Date.now();
+    await expect(home.searchNotes("(a+)+$", { regex: true }))
+      .rejects.toMatchObject({ code: "invalid_format" });
+    await expect(home.searchNotes("(.*a){30}", { regex: true }))
+      .rejects.toMatchObject({ code: "invalid_format" });
+    // The whole guard, analysis included, is bounded well under a second.
+    expect(Date.now() - started).toBeLessThan(2_000);
+  });
+
+  it("still runs an ordinary regex search", async () => {
+    const result = await home.searchNotes("carr[a-z]+", { regex: true });
+    expect(result.matches.length).toBeGreaterThan(0);
+    expect(result.matches[0]?.path).toBe("press-restoration.md");
+  });
+
+  it("leaves the literal (non-regex) path untouched by the ReDoS guard", async () => {
+    // The same string that is refused as a regex is a fine literal query: it is
+    // escaped, so it can never backtrack, and it simply matches nothing here.
+    const result = await home.searchNotes("(a+)+$");
+    expect(result.matches).toEqual([]);
+    expect(result.notesSearched).toBeGreaterThan(0);
+  });
+
+  it("caps title matches at max_results and reports truncation", async () => {
+    for (let index = 0; index < 10; index += 1) {
+      await home.writeNote(`widgets/w${index}.md`, {
+        body: "nothing to match in the body",
+        title: `Widget number ${index}`,
+      });
+    }
+    const result = await home.searchNotes("Widget number", { maxResults: 3 });
+    expect(result.matches).toHaveLength(3);
+    expect(result.truncated).toBe(true);
+    // Every returned match is a title hit (line 0), the path that used to overrun.
+    expect(result.matches.every((match) => match.line === 0)).toBe(true);
+  });
 });
 
 describe("note catalog", () => {

@@ -29,6 +29,10 @@ import { GhostError } from "../errors.js";
 import { normalizeNotePath } from "../home.js";
 import { describeScope, isVisitorScope } from "../scope.js";
 import {
+  budgeted,
+  budgetFooter,
+  DEFAULT_NOTE_READ_BUDGET_CHARS,
+  MAX_GREP_LINE_CHARS,
   resolveHome,
   resolveScope,
   textResult,
@@ -175,12 +179,21 @@ export function createNotesExtension(
           });
         }
         const heading = note.meta.title ?? note.meta.path;
-        return textResult(`# ${heading}\n\n${note.body}`, {
-          path: note.meta.path,
-          public: note.meta.public,
-          archived: note.meta.archived,
-          tags: [...note.meta.tags],
-        });
+        // A note body is unbounded — an imported note can be enormous — so it is
+        // capped before it reaches the model, with a footer saying what was cut.
+        const body = budgeted(note.body, DEFAULT_NOTE_READ_BUDGET_CHARS);
+        const footer = budgetFooter(body);
+        return textResult(
+          `# ${heading}\n\n${body.text}${footer ? `\n\n${footer}` : ""}`,
+          {
+            path: note.meta.path,
+            public: note.meta.public,
+            archived: note.meta.archived,
+            tags: [...note.meta.tags],
+            truncated: body.truncated,
+            totalLength: body.totalLength,
+          },
+        );
       },
     });
 
@@ -208,9 +221,13 @@ export function createNotesExtension(
           ...(params.regex === undefined ? {} : { regex: params.regex }),
           ...(params.max_results === undefined ? {} : { maxResults: params.max_results }),
         });
-        const lines = result.matches.map(
-          (match) => `${match.path}:${match.line}: ${match.text}`,
-        );
+        const lines = result.matches.map((match) => {
+          // A single match line can be arbitrarily long; cap each one so a note
+          // full of long lines cannot flood the model's context.
+          const shown = budgeted(match.text, MAX_GREP_LINE_CHARS);
+          const text = shown.truncated ? `${shown.text}…` : shown.text;
+          return `${match.path}:${match.line}: ${text}`;
+        });
         if (lines.length === 0) lines.push("(no matches)");
         if (result.truncated) lines.push("(more matches were not listed)");
         return textResult(lines.join("\n"), {

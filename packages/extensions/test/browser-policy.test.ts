@@ -76,6 +76,14 @@ describe("local and private destinations", () => {
     "http://router.home.arpa/",
     "http://[fd00::1]/",
     "http://[fe80::1]/",
+    // Hex IPv4-mapped forms — the spelling WHATWG URL actually produces.
+    "http://[::ffff:7f00:1]/", // 127.0.0.1
+    "http://[::ffff:c0a8:1]/", // 192.168.0.1
+    "http://[64:ff9b::7f00:1]/", // NAT64 of 127.0.0.1
+    // Trailing-dot FQDNs resolve to the same place as their bare form.
+    "http://localhost./",
+    "http://nas.local./",
+    "http://vault.internal./",
   ];
 
   it("blocks every one of them by default", () => {
@@ -100,6 +108,7 @@ describe("local and private destinations", () => {
       "http://100.128.0.1/",
       "https://locality.example.com/",
       "https://mylocalhost.com/",
+      "http://[::ffff:808:808]/", // 8.8.8.8, a public IPv4-mapped address
     ]) {
       expect(() => url(input)).not.toThrow();
     }
@@ -108,6 +117,16 @@ describe("local and private destinations", () => {
   it("classifies hostnames directly", () => {
     expect(isLocalHostname("LOCALHOST")).toBe(true);
     expect(isLocalHostname("[::FFFF:127.0.0.1]".toLowerCase())).toBe(true);
+    // WHATWG serialises the mapped address to hex; both spellings must classify.
+    expect(isLocalHostname("[::ffff:7f00:1]")).toBe(true); // 127.0.0.1
+    expect(isLocalHostname("[::ffff:c0a8:1]")).toBe(true); // 192.168.0.1
+    expect(isLocalHostname("[64:ff9b::7f00:1]")).toBe(true); // NAT64 127.0.0.1
+    // A trailing-dot FQDN resolves to the same host.
+    expect(isLocalHostname("localhost.")).toBe(true);
+    expect(isLocalHostname("nas.local.")).toBe(true);
+    expect(isLocalHostname("vault.internal.")).toBe(true);
+    // But a public IPv4-mapped address stays public.
+    expect(isLocalHostname("[::ffff:808:808]")).toBe(false); // 8.8.8.8
     expect(isLocalHostname("example.com")).toBe(false);
   });
 });

@@ -28,6 +28,7 @@
     "@earendil-works/pi-coding-agent": "^0.84.2",
     "fflate": "^0.8.2",
     "playwright-core": "^1.62.1",
+    "redos-detector": "^6.1.4",
     "typebox": "^1.3.7"
   },
   "devDependencies": {

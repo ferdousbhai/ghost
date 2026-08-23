@@ -64,23 +64,93 @@ function isPrivateIpv4(host: string): boolean {
   return false;
 }
 
+/**
+ * Parse an IPv6 literal into its 8 hextets, or null if it is not one. Handles
+ * `::` compression and an embedded dotted-IPv4 tail (`::ffff:127.0.0.1`). We
+ * parse rather than pattern-match because WHATWG URL serialises a mapped address
+ * to the *hex* form — `::ffff:127.0.0.1` comes back as `::ffff:7f00:1` — so a
+ * regex written against the dotted spelling silently lets the hex one past.
+ */
+function parseIpv6(inner: string): number[] | null {
+  const doubleColon = inner.indexOf("::");
+  let headPart: string;
+  let tailPart: string;
+  if (doubleColon >= 0) {
+    if (inner.indexOf("::", doubleColon + 1) >= 0) return null; // only one `::`
+    headPart = inner.slice(0, doubleColon);
+    tailPart = inner.slice(doubleColon + 2);
+  } else {
+    headPart = inner;
+    tailPart = "";
+  }
+  const toGroups = (segment: string): number[] | null => {
+    if (segment === "") return [];
+    const groups: number[] = [];
+    const tokens = segment.split(":");
+    for (let index = 0; index < tokens.length; index += 1) {
+      const token = tokens[index] as string;
+      if (token.includes(".")) {
+        if (index !== tokens.length - 1) return null; // v4 tail must be last
+        const parts = token.split(".");
+        if (parts.length !== 4) return null;
+        const octets: number[] = [];
+        for (const part of parts) {
+          if (!/^\d{1,3}$/.test(part)) return null;
+          const value = Number(part);
+          if (value > 255) return null;
+          octets.push(value);
+        }
+        groups.push(
+          ((octets[0] as number) << 8) | (octets[1] as number),
+          ((octets[2] as number) << 8) | (octets[3] as number),
+        );
+      } else {
+        if (!/^[0-9a-f]{1,4}$/.test(token)) return null;
+        groups.push(parseInt(token, 16));
+      }
+    }
+    return groups;
+  };
+  const head = toGroups(headPart);
+  const tail = toGroups(tailPart);
+  if (head === null || tail === null) return null;
+  if (doubleColon >= 0) {
+    const missing = 8 - head.length - tail.length;
+    if (missing < 0) return null;
+    return [...head, ...new Array<number>(missing).fill(0), ...tail];
+  }
+  if (head.length !== 8) return null;
+  return head;
+}
+
 function isPrivateIpv6(host: string): boolean {
   // URL parsing hands IPv6 hosts back bracketed and lowercased.
   const inner = host.startsWith("[") && host.endsWith("]") ? host.slice(1, -1) : host;
   if (!inner.includes(":")) return false;
-  if (inner === "::1" || inner === "::") return true;
-  // IPv4-mapped (::ffff:127.0.0.1) inherits the IPv4 verdict.
-  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(inner);
-  if (mapped?.[1]) return isPrivateIpv4(mapped[1]);
-  const head = inner.slice(0, 2);
-  if (head === "fc" || head === "fd") return true; // unique-local fc00::/7
-  if (/^fe[89ab]/.test(inner)) return true; // link-local fe80::/10
+  const hextets = parseIpv6(inner.toLowerCase());
+  if (hextets === null) return false;
+  const [h0 = 0, h1 = 0, h2 = 0, h3 = 0, h4 = 0, h5 = 0, h6 = 0, h7 = 0] = hextets;
+  if (h0 === 0 && h1 === 0 && h2 === 0 && h3 === 0 && h4 === 0 && h5 === 0 && h6 === 0) {
+    return h7 === 0 || h7 === 1; // unspecified :: and loopback ::1
+  }
+  // ::ffff:0:0/96 (IPv4-mapped) and 64:ff9b::/96 (NAT64) both embed an IPv4
+  // address in the low 32 bits; it inherits the IPv4 verdict.
+  const ipv4Mapped = h0 === 0 && h1 === 0 && h2 === 0 && h3 === 0 && h4 === 0 && h5 === 0xffff;
+  const nat64 = h0 === 0x0064 && h1 === 0xff9b && h2 === 0 && h3 === 0 && h4 === 0 && h5 === 0;
+  if (ipv4Mapped || nat64) {
+    return isPrivateIpv4(`${h6 >> 8}.${h6 & 0xff}.${h7 >> 8}.${h7 & 0xff}`);
+  }
+  if ((h0 & 0xfe00) === 0xfc00) return true; // unique-local fc00::/7
+  if ((h0 & 0xffc0) === 0xfe80) return true; // link-local fe80::/10
   return false;
 }
 
 /** True when this hostname names the creator's own machine or private network. */
 export function isLocalHostname(hostname: string): boolean {
-  const host = hostname.toLowerCase();
+  // A trailing dot is a fully-qualified spelling of the same name: `localhost.`
+  // resolves exactly where `localhost` does, so strip one before classifying or
+  // the FQDN form slips past every check below.
+  const host = hostname.toLowerCase().replace(/\.$/, "");
   if (host === "" || host === "localhost") return true;
   if (LOCAL_SUFFIXES.some((suffix) => host.endsWith(suffix))) return true;
   return isPrivateIpv4(host) || isPrivateIpv6(host);
