@@ -57,9 +57,10 @@ Item {
                 text: root.body
                 textFormat: root.mine ? Text.PlainText : Text.MarkdownText
                 color: root.mine ? Theme.foregroundBright : Theme.foreground
-                // Links use the palette accent (still underlined by the markdown
-                // renderer) rather than Qt's default browser-blue.
-                linkColor: Theme.accent
+                // Monochrome links: the markdown renderer underlines them, so
+                // link-ness reads from the underline, not a saturated colour
+                // (the palette accent is blue). Restrained, per the design system.
+                linkColor: Theme.foregroundBright
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontSize
                 wrapMode: Text.Wrap
