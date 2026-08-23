@@ -204,7 +204,14 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     ...(relay ? { relayTransport: relay } : {}),
   });
   const login = new LoginManager({ registry, logger, offline: config.offline });
-  const catalog = new ModelCatalog({ registry, logger, offline: config.offline });
+  const catalog = new ModelCatalog({
+    registry,
+    logger,
+    offline: config.offline,
+    // A model switch must reach any conversation that is already open, not just
+    // the next freshly built session: rebind the live cached sessions.
+    onChatModelChanged: (name) => host.rebindModel(name),
+  });
 
   let listening;
   try {

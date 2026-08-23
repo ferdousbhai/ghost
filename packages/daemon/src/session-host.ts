@@ -183,6 +183,18 @@ export interface GhostSessionHandle {
 interface HostedSession extends GhostSessionHandle {
   busy: boolean;
   /**
+   * The runtime this session's model was bound from, kept so a later model
+   * switch can re-resolve against the same catalogue the session was built
+   * with (see `rebindModel`).
+   */
+  modelRuntime: ModelRuntime;
+  /**
+   * Set when a model switch arrived while this session was mid-turn: the model
+   * is not yanked out from under a running prompt, it is rebound in runTurn's
+   * `finally` once the turn settles.
+   */
+  pendingRebind?: boolean;
+  /**
    * The in-flight background compaction, if any. A turn awaits this before
    * prompting, because pi's `session.prompt()` throws while a manual
    * compaction is running. Resolves (never rejects) when compaction settles.
@@ -469,8 +481,62 @@ export class SessionHost {
       session,
       sessionFile: session.sessionFile,
       model,
+      modelRuntime,
       busy: false,
     };
+  }
+
+  /**
+   * Re-bind the chat model on every live session for one ghost.
+   *
+   * A cached `AgentSession` binds its model exactly once, at construction
+   * (createSession → selectModel). The model switcher writes a new
+   * `roles.chat_model` to models.json but holds no reference to a running
+   * session, so without this a switch never reaches a conversation that is
+   * already open: `GET /model` would report the new model while every further
+   * turn kept answering on the old one (there is no idle eviction).
+   * `ModelCatalog.setChatModel` calls this right after the write.
+   *
+   * A busy session is not yanked mid-turn — pi's active run keeps the model it
+   * started on. It is flagged instead and rebound in runTurn's `finally`, once
+   * the current turn settles and before the next one begins.
+   *
+   * Claude Code sessions need no rebinding: they are scoped per turn and read
+   * `roles.chat_model` fresh each time (see runTurn), so the next turn already
+   * picks up the switch — and a stale pi session for the same conversation is
+   * dropped by `closePi` on that next turn.
+   */
+  async rebindModel(ghostName: string): Promise<void> {
+    for (const hosted of this.sessions.values()) {
+      if (hosted.ghost.name !== ghostName) continue;
+      if (hosted.busy) {
+        hosted.pendingRebind = true;
+        continue;
+      }
+      await this.rebindSessionModel(hosted, ghostName);
+    }
+  }
+
+  /**
+   * Re-resolve `roles.chat_model` from the ghost's models.json and rebind it on
+   * one idle session, against the runtime the session was built with. Never
+   * throws — a failure leaves the previous binding in place and is logged.
+   */
+  private async rebindSessionModel(hosted: HostedSession, ghostName: string): Promise<void> {
+    const agentDir = ghostPaths(hosted.ghost.dir).agentDir;
+    try {
+      hosted.model = await this.selectModel(
+        hosted.session,
+        hosted.modelRuntime,
+        agentDir,
+        ghostName,
+      );
+    } catch (error) {
+      this.logger.warn("model rebind failed", {
+        ghost: ghostName,
+        error: (error as Error).message,
+      });
+    }
   }
 
   /**
@@ -614,6 +680,13 @@ export class SessionHost {
       options.signal?.removeEventListener("abort", onAbort);
       unsubscribe();
       hosted.busy = false;
+      // A model switch that arrived mid-turn was deferred rather than applied to
+      // the running prompt; apply it now the turn has settled — before the next
+      // turn, and before compaction so any summary runs on the new model.
+      if (hosted.pendingRebind) {
+        hosted.pendingRebind = false;
+        await this.rebindSessionModel(hosted, ghostName);
+      }
       // Kick compaction AFTER unsubscribing and releasing the turn: it must run
       // on an idle session (pi's compact() aborts any active run), and its
       // compaction_start/end events must not leak into this turn's stream.

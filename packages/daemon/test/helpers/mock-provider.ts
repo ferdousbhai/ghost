@@ -20,6 +20,8 @@ export interface CapturedRequest {
   system: string;
   messages: unknown[];
   toolNames: string[];
+  /** The model id the agent asked to run on (OpenAI `model` field). */
+  model: string;
 }
 
 export interface MockProvider {
@@ -71,6 +73,7 @@ export async function startMockProvider(
       const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as {
         messages?: Array<{ role?: string; content?: unknown }>;
         tools?: Array<{ function?: { name?: string } }>;
+        model?: string;
         stream?: boolean;
       };
       const system = body.messages?.find((message) => message.role === "system");
@@ -80,6 +83,7 @@ export async function startMockProvider(
           : JSON.stringify(system?.content ?? ""),
         messages: body.messages ?? [],
         toolNames: (body.tools ?? []).map((tool) => tool.function?.name ?? "?"),
+        model: typeof body.model === "string" ? body.model : "",
       });
 
       const turn = stepIndexFor(body.messages ?? []);
@@ -100,7 +104,8 @@ export async function startMockProvider(
         id,
         object: "chat.completion.chunk",
         created: Math.floor(Date.now() / 1000),
-        model: modelId,
+        // Echo the requested model so a switch is observable and never mismatches.
+        model: (typeof body.model === "string" && body.model) || modelId,
       };
       response.writeHead(200, {
         "content-type": "text/event-stream",

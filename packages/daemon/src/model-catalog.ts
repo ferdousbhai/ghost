@@ -172,6 +172,15 @@ export interface ModelCatalogOptions {
   }) => Promise<ModelCatalogRuntime>;
   /** Test seam for the external, credential-free Claude Code status probe. */
   claudeCodePlanStatus?: () => Promise<boolean>;
+  /**
+   * Notified after `roles.chat_model` is written, with the ghost name, so a
+   * live cached session rebinds to the new model instead of answering on the
+   * old one forever (a cached session binds its model once, at construction).
+   * The daemon wires this to `SessionHost.rebindModel`. Awaited so the switch
+   * is in effect before the response returns; a failure is logged, never fatal
+   * to the write.
+   */
+  onChatModelChanged?: (ghostName: string) => void | Promise<void>;
 }
 
 const CLAUDE_CODE_MODEL: CatalogModel = {
@@ -238,6 +247,7 @@ export class ModelCatalog {
   private readonly claudeCodePlanStatus: NonNullable<
     ModelCatalogOptions["claudeCodePlanStatus"]
   >;
+  private readonly onChatModelChanged: ModelCatalogOptions["onChatModelChanged"];
 
   constructor(options: ModelCatalogOptions) {
     this.registry = options.registry;
@@ -245,6 +255,23 @@ export class ModelCatalog {
     this.offline = options.offline ?? false;
     this.createRuntime = options.createRuntime ?? defaultCreateRuntime;
     this.claudeCodePlanStatus = options.claudeCodePlanStatus ?? defaultClaudeCodePlanStatus;
+    this.onChatModelChanged = options.onChatModelChanged;
+  }
+
+  /**
+   * Fire the post-write hook so live sessions rebind to the new model. Never
+   * throws: a failure to rebind must not turn a successful write into an error.
+   */
+  private async notifyChatModelChanged(ghostName: string): Promise<void> {
+    if (!this.onChatModelChanged) return;
+    try {
+      await this.onChatModelChanged(ghostName);
+    } catch (error) {
+      this.logger.warn("chat-model change hook failed", {
+        ghost: ghostName,
+        error: (error as Error).message,
+      });
+    }
   }
 
   private async prepare(ghostName: string): Promise<{ runtime: ModelCatalogRuntime; agentDir: string }> {
@@ -428,6 +455,7 @@ export class ModelCatalog {
         );
       }
       setChatModelRole(agentDir, provider, id);
+      await this.notifyChatModelChanged(ghostName);
       const usable = await this.claudeCodePlanStatus();
       this.logger.info("ghost chat model set", {
         ghost: ghostName,
@@ -457,6 +485,7 @@ export class ModelCatalog {
       );
     }
     setChatModelRole(agentDir, model.provider, model.id);
+    await this.notifyChatModelChanged(ghostName);
     const usable = runtime.getProviderAuthStatus(model.provider).configured;
     this.logger.info("ghost chat model set", { ghost: ghostName, provider: model.provider, model: model.id, usable });
     const result: SetModelResult = {
