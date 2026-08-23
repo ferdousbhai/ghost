@@ -19,7 +19,7 @@ Rectangle {
     radius: Theme.radius
     color: Theme.surface
     border.width: 1
-    border.color: Theme.accent
+    border.color: Theme.border
 
     onInteractionChanged: root.answers = ({})
 
@@ -113,12 +113,11 @@ Rectangle {
             Layout.fillWidth: true
             spacing: Theme.gap
 
-            Text {
-                text: "?"
+            Rectangle {
+                implicitWidth: 3
+                implicitHeight: 18
+                radius: 1
                 color: Theme.accent
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSize + 2
-                font.bold: true
             }
 
             Text {
@@ -126,8 +125,8 @@ Rectangle {
                 text: "A quick question"
                 color: Theme.foregroundBright
                 font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSize
-                font.bold: true
+                font.pixelSize: Theme.fontSize + 1
+                font.weight: Font.DemiBold
             }
 
             Text {
@@ -185,10 +184,10 @@ Rectangle {
                                     id: headerText
                                     anchors.centerIn: parent
                                     text: questionBlock.question.header || ""
-                                    color: Theme.accent
+                                    color: Theme.foreground
                                     font.family: Theme.fontFamily
                                     font.pixelSize: Theme.fontSizeSmall
-                                    font.bold: true
+                                    font.weight: Font.DemiBold
                                 }
                             }
 
@@ -216,22 +215,34 @@ Rectangle {
                                 width: questionBlock.width
                                 height: optionText.implicitHeight + Theme.gap
                                 radius: Theme.radius / 2
-                                color: chosen ? Theme.selection : Theme.surfaceDeep
-                                border.width: 1
-                                border.color: chosen ? Theme.accent : Theme.muted
+                                color: chosen ? Theme.selection
+                                    : (optionArea.containsMouse ? Theme.hover : "transparent")
+                                border.width: 0
+                                border.color: Theme.border
 
                                 Row {
                                     anchors.fill: parent
                                     anchors.margins: Theme.gap / 2
                                     spacing: Theme.gap
 
-                                    Text {
-                                        text: questionBlock.question.multi === true
-                                            ? (optionRow.chosen ? "☑" : "☐")
-                                            : (optionRow.chosen ? "●" : "○")
-                                        color: optionRow.chosen ? Theme.accent : Theme.foregroundDim
-                                        font.family: Theme.fontFamily
-                                        font.pixelSize: Theme.fontSize
+                                    Rectangle {
+                                        anchors.top: parent.top
+                                        anchors.topMargin: 1
+                                        width: 16
+                                        height: 16
+                                        radius: questionBlock.question.multi === true ? 3 : 8
+                                        color: "transparent"
+                                        border.width: 1
+                                        border.color: optionRow.chosen ? Theme.accent : Theme.borderStrong
+
+                                        Rectangle {
+                                            anchors.centerIn: parent
+                                            width: questionBlock.question.multi === true ? 8 : 7
+                                            height: questionBlock.question.multi === true ? 8 : 7
+                                            radius: questionBlock.question.multi === true ? 1 : 4
+                                            visible: optionRow.chosen
+                                            color: Theme.accent
+                                        }
                                     }
 
                                     Column {
@@ -249,7 +260,7 @@ Rectangle {
                                                 ? Theme.foregroundBright : Theme.foreground
                                             font.family: Theme.fontFamily
                                             font.pixelSize: Theme.fontSize
-                                            font.bold: optionRow.chosen
+                                            font.weight: optionRow.chosen ? Font.DemiBold : Font.Normal
                                             wrapMode: Text.Wrap
                                         }
 
@@ -278,7 +289,9 @@ Rectangle {
                                 }
 
                                 MouseArea {
+                                    id: optionArea
                                     anchors.fill: parent
+                                    hoverEnabled: true
                                     cursorShape: Qt.PointingHandCursor
                                     onClicked: root.toggle(questionBlock.question, optionRow.modelData.label)
                                 }
@@ -291,7 +304,7 @@ Rectangle {
                             radius: Theme.radius / 2
                             color: Theme.surfaceDeep
                             border.width: 1
-                            border.color: otherInput.activeFocus ? Theme.accent : Theme.muted
+                            border.color: otherInput.activeFocus ? Theme.accent : Theme.border
 
                             TextInput {
                                 id: otherInput
@@ -321,7 +334,7 @@ Rectangle {
                             radius: Theme.radius / 2
                             color: "transparent"
                             border.width: 1
-                            border.color: noteInput.activeFocus ? Theme.accent : Theme.muted
+                            border.color: noteInput.activeFocus ? Theme.accent : Theme.border
 
                             TextInput {
                                 id: noteInput
@@ -367,9 +380,9 @@ Rectangle {
                 implicitWidth: chatLabel.implicitWidth + Theme.pad
                 implicitHeight: 30
                 radius: Theme.radius / 2
-                color: chatArea.containsMouse ? Theme.selection : "transparent"
-                border.width: 1
-                border.color: Theme.muted
+                color: chatArea.containsMouse ? Theme.hover : "transparent"
+                border.width: 0
+                border.color: Theme.border
                 opacity: root.submitting ? 0.5 : 1
 
                 Text {
@@ -397,17 +410,17 @@ Rectangle {
                 implicitWidth: submitLabel.implicitWidth + Theme.pad
                 implicitHeight: 30
                 radius: Theme.radius / 2
-                color: root.canSubmit() ? Theme.accent : Theme.muted
+                color: root.canSubmit() ? Theme.accent : Theme.borderStrong
                 opacity: root.submitting ? 0.5 : 1
 
                 Text {
                     id: submitLabel
                     anchors.centerIn: parent
                     text: root.submitting ? "Sending…" : "Answer"
-                    color: Theme.background
+                    color: root.canSubmit() ? Theme.onAccent : Theme.foregroundDim
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.fontSizeSmall
-                    font.bold: true
+                    font.weight: Font.DemiBold
                 }
 
                 MouseArea {

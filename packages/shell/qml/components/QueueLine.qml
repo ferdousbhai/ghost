@@ -20,7 +20,7 @@ ColumnLayout {
         spacing: Theme.gap / 2
 
         Text {
-            text: "steering →"
+            text: "Steering →"
             color: Theme.accent
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontSizeSmall
@@ -56,7 +56,7 @@ ColumnLayout {
         spacing: Theme.gap / 2
 
         Text {
-            text: "then →"
+            text: "Then →"
             color: Theme.warn
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontSizeSmall
@@ -71,8 +71,8 @@ ColumnLayout {
                 implicitHeight: 22
                 radius: Theme.radius / 2
                 color: Theme.surfaceDeep
-                border.width: 1
-                border.color: Theme.warn
+                border.width: 0
+                border.color: Theme.border
 
                 Text {
                     id: followText

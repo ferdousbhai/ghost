@@ -11,14 +11,15 @@ Item {
     property int phraseIndex: 0
     property int ellipsisStep: 0
     readonly property var phrases: root.phrasesFor(root.stateKey)
-    readonly property string phrase: root.phrases[root.phraseIndex % root.phrases.length]
+    readonly property string phrase: root.phrases && root.phrases.length > 0
+        ? root.phrases[root.phraseIndex % root.phrases.length] : ""
 
     implicitHeight: visible ? 30 : 0
     visible: Ghostd.streaming || root.failing
     clip: false
 
     function randomPhrase(current: int): int {
-        if (root.phrases.length <= 1) return 0;
+        if (!root.phrases || root.phrases.length <= 1) return 0;
         let next = Math.floor(Math.random() * root.phrases.length);
         if (next === current) next = (next + 1) % root.phrases.length;
         return next;
@@ -139,7 +140,6 @@ Item {
             color: root.failing ? Theme.danger : Theme.foregroundDim
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontSizeSmall
-            font.letterSpacing: 0.25
             elide: Text.ElideRight
         }
     }

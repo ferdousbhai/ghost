@@ -1,6 +1,9 @@
 pragma Singleton
 
-// Theme — the ghost surfaces wear whatever Omarchy is wearing.
+// Theme — Ghost keeps Omarchy's accent and semantic colours, while its own
+// reading surfaces use a quiet neutral foundation. This prevents a theme's
+// decorative muted colour from becoming low-contrast body copy and gives the
+// HUD a stable hierarchy across light and dark Omarchy themes.
 //
 // Omarchy (>= 4.0 "Quattro") keeps the active theme as a *copy* at
 // ~/.local/state/omarchy/current/theme/. Two files matter to us:
@@ -76,19 +79,37 @@ Singleton {
 
     // ---- Semantic roles ---------------------------------------------------
     readonly property bool light: root.pick("mode") === "light"
-    readonly property color background: root.pick("background")
-    readonly property color surface: root.pick("lighter_background")
-    readonly property color surfaceDeep: root.pick("dark_background")
-    readonly property color foreground: root.pick("foreground")
-    readonly property color foregroundBright: root.pick("bright_foreground")
-    readonly property color foregroundDim: root.pick("dark_foreground")
+
+    // Neutral canvas and ink ladder. Omarchy can be richly coloured; the chat
+    // itself stays neutral so long-form text, rows, and controls remain calm.
+    readonly property color background: root.light ? "#fafafa" : "#0d0d0d"
+    readonly property color surface: root.light ? "#ffffff" : "#161616"
+    readonly property color surfaceDeep: root.light ? "#f2f2f2" : "#1b1b1b"
+    readonly property color foregroundBright: root.light ? "#111111" : "#f5f5f5"
+    readonly property color foreground: root.light ? "#383838" : "#c7c7c7"
+    readonly property color foregroundDim: root.light ? "#666666" : "#929292"
+    readonly property color foregroundFaint: root.light ? "#858585" : "#707070"
+
+    // Chrome has its own ladder instead of borrowing a text colour.
+    readonly property color hover: root.light ? "#eeeeee" : "#212121"
+    readonly property color selection: root.light ? "#e5e5e5" : "#2a2a2a"
+    readonly property color pressed: root.light ? "#dddddd" : "#343434"
+    readonly property color border: root.light ? "#dedede" : "#292929"
+    readonly property color borderStrong: root.light ? "#bdbdbd" : "#444444"
+    // Compatibility alias for host integrations; new UI code should choose a
+    // text or border token explicitly.
+    readonly property color muted: root.border
+
+    // One inherited accent carries focus, selection, and the active state.
     readonly property color accent: root.pick("accent")
-    readonly property color selection: root.pick("selection")
-    readonly property color muted: root.pick("muted")
     readonly property color danger: root.pick("red")
     readonly property color ok: root.pick("green")
     readonly property color warn: root.pick("yellow")
     readonly property color thinking: root.pick("magenta")
+    readonly property color onAccent: {
+        const luma = root.accent.r * 0.299 + root.accent.g * 0.587 + root.accent.b * 0.114;
+        return luma > 0.58 ? "#111111" : "#ffffff";
+    }
 
     /** Bar geometry, from the theme's [bar] section when present. */
     readonly property int barSize: Number(root.shell["bar.size-horizontal"]) || 26
@@ -97,13 +118,17 @@ Singleton {
     readonly property color barActive: root.shell["bar.active"] || root.accent
 
     // ---- Fixed design tokens ---------------------------------------------
-    // Not themed by Omarchy; kept here so every surface agrees.
-    readonly property int radius: 10
-    readonly property int pad: 14
+    // Not themed by Omarchy; kept here so every surface agrees on an 8px
+    // rhythm, restrained rounding, and a readable native type scale.
+    readonly property int radius: 8
+    readonly property int pad: 16
     readonly property int gap: 8
-    readonly property string fontFamily: root.shell["font.family"] || "CaskaydiaMono Nerd Font"
-    readonly property int fontSize: Number(root.shell["font.size"]) || 13
-    readonly property int fontSizeSmall: root.fontSize - 2
+    readonly property int sectionGap: 24
+    readonly property int controlHeight: 36
+    readonly property string fontFamily: "sans-serif"
+    readonly property string fontFamilyMono: root.shell["font.family"] || "monospace"
+    readonly property int fontSize: Number(root.shell["font.body"]) || 14
+    readonly property int fontSizeSmall: Number(root.shell["font.body-small"]) || 12
 
     // ---- TOML ------------------------------------------------------------
     // A deliberately small parser. Omarchy's theme files are generated from

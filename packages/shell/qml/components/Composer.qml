@@ -2,8 +2,7 @@
 // to the HUD so a half-typed prompt is never a reason you can't dismiss.
 //
 // Plain TextEdit rather than QtQuick.Controls TextArea: Controls would pull in
-// a style whose colors we would then have to fight, and everything here is
-// themed from Omarchy anyway.
+// a style whose colours would compete with the shared neutral design tokens.
 import QtQuick
 import qs.services
 
@@ -14,11 +13,11 @@ Rectangle {
 
     property alias text: field.text
 
-    implicitHeight: Math.min(Math.max(field.implicitHeight + Theme.pad, 44), 160)
+    implicitHeight: Math.min(Math.max(field.implicitHeight + Theme.pad, 48), 160)
     radius: Theme.radius
-    color: Theme.surfaceDeep
+    color: Theme.surface
     border.width: 1
-    border.color: field.activeFocus ? Theme.accent : Theme.muted
+    border.color: field.activeFocus ? Theme.accent : Theme.border
 
     function take(): void {
         field.forceActiveFocus();
@@ -62,10 +61,10 @@ Rectangle {
                 anchors.fill: parent
                 visible: field.text === ""
                 text: Ghostd.activeGhost === ""
-                    ? "no ghost selected"
+                    ? "No ghost selected"
                     : (Ghostd.streaming
-                        ? "steer " + Ghostd.activeGhost + "…  ·  Ctrl+Enter follows up"
-                        : "talk to " + Ghostd.activeGhost + "…")
+                        ? "Steer " + Ghostd.activeGhost + "…  ·  Ctrl+Enter follows up"
+                        : "Message " + Ghostd.activeGhost + "…")
                 color: Theme.foregroundDim
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontSize

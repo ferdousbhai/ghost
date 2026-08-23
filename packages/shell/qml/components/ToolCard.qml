@@ -15,12 +15,11 @@ Rectangle {
     readonly property string detail: root.detailText()
     readonly property var askBranch: activity.askBranch || null
 
-    implicitHeight: toolContent.implicitHeight + Theme.gap
+    implicitHeight: toolContent.implicitHeight + 12
     radius: Theme.radius / 2
     color: Theme.surface
-    border.width: 1
-    border.color: root.failed ? Theme.danger
-        : (root.running ? Theme.accent : Theme.muted)
+    border.width: root.failed ? 1 : 0
+    border.color: Theme.danger
 
     function titleFor(name: string): string {
         const names = {
@@ -89,20 +88,19 @@ Rectangle {
             spacing: Theme.gap / 2
 
             Item {
-                width: 14
+                width: 12
                 height: 16
 
-                Text {
+                Rectangle {
                     anchors.centerIn: parent
-                    text: root.failed ? "!" : (root.running ? "●" : "✓")
+                    width: 7
+                    height: 7
+                    radius: root.failed ? 1 : 4
                     color: root.failed ? Theme.danger
-                        : (root.running ? Theme.accent : Theme.foregroundDim)
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeSmall
-                    font.bold: true
+                        : (root.running ? Theme.accent : Theme.foregroundFaint)
 
                     SequentialAnimation on opacity {
-                        running: root.running
+                        running: root.running && !Theme.reducedMotion
                         loops: Animation.Infinite
                         NumberAnimation { to: 0.25; duration: 550; easing.type: Easing.InOutQuad }
                         NumberAnimation { to: 1; duration: 550; easing.type: Easing.InOutQuad }
@@ -116,16 +114,16 @@ Rectangle {
                 color: Theme.foregroundBright
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontSizeSmall
-                font.bold: true
+                font.weight: Font.DemiBold
                 elide: Text.ElideRight
             }
 
             Text {
                 id: statusText
-                text: root.failed ? "failed"
-                    : (root.activity.status === "complete" ? "done"
-                        : (root.activity.status === "preparing" ? "preparing"
-                            : (root.activity.status === "queued" ? "queued" : "running")))
+                text: root.failed ? "Failed"
+                    : (root.activity.status === "complete" ? "Done"
+                        : (root.activity.status === "preparing" ? "Preparing"
+                            : (root.activity.status === "queued" ? "Queued" : "Running")))
                 color: root.failed ? Theme.danger : Theme.foregroundDim
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontSizeSmall
@@ -160,7 +158,7 @@ Rectangle {
             spacing: Theme.gap
 
             Text {
-                text: "re-answer"
+                text: "Re-answer"
                 color: Theme.accent
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontSizeSmall

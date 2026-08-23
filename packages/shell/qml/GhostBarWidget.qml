@@ -17,7 +17,7 @@ Item {
     /** Colors are overridable so a host bar can impose its own palette. */
     property color foregroundColor: Theme.barForeground
     property color activeColor: Theme.barActive
-    property color idleColor: Theme.muted
+    property color idleColor: Theme.foregroundDim
     property bool showName: true
 
     signal activated()

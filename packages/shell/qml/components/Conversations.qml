@@ -46,11 +46,11 @@ Item {
         spacing: Theme.gap
 
         Text {
-            text: "CONVERSATIONS"
-            color: Theme.foregroundDim
+            text: "Conversations"
+            color: Theme.foreground
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontSizeSmall
-            font.letterSpacing: 1.5
+            font.weight: Font.DemiBold
         }
 
         Repeater {
@@ -65,9 +65,10 @@ Item {
 
                 width: root.width
                 // Grow to fit a wrapped title instead of eliding it.
-                height: Math.max(30, titleText.implicitHeight + Theme.gap)
+                height: Math.max(Theme.controlHeight, titleText.implicitHeight + Theme.gap)
                 radius: Theme.radius / 2
-                color: entry.active ? Theme.selection : "transparent"
+                color: entry.active ? Theme.selection
+                    : (entryArea.containsMouse ? Theme.hover : "transparent")
 
                 Row {
                     anchors.verticalCenter: parent.verticalCenter
@@ -79,10 +80,22 @@ Item {
 
                     Rectangle {
                         anchors.verticalCenter: parent.verticalCenter
-                        width: 6
-                        height: 6
-                        radius: 3
-                        color: entry.active && Ghostd.streaming ? Theme.accent : Theme.muted
+                        width: 2
+                        height: 18
+                        radius: 1
+                        visible: entry.active
+                        color: Theme.accent
+                    }
+
+                    Text {
+                        id: titleText
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: parent.width - 2 - when.width - Theme.gap * 2
+                        text: root.titleOf(entry.modelData)
+                        color: entry.active ? Theme.foregroundBright : Theme.foreground
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSize
+                        wrapMode: Text.WrapAtWordBoundaryOrAnywhere
                     }
 
                     Text {
@@ -94,21 +107,12 @@ Item {
                         font.family: Theme.fontFamily
                         font.pixelSize: Theme.fontSizeSmall
                     }
-
-                    Text {
-                        id: titleText
-                        anchors.verticalCenter: parent.verticalCenter
-                        width: parent.width - 6 - when.width - Theme.gap * 2
-                        text: root.titleOf(entry.modelData)
-                        color: entry.active ? Theme.foregroundBright : Theme.foreground
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSize
-                        wrapMode: Text.WrapAtWordBoundaryOrAnywhere
-                    }
                 }
 
                 MouseArea {
+                    id: entryArea
                     anchors.fill: parent
+                    hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     onClicked: {
                         Ghostd.openConversation(entry.modelData.id);
@@ -122,8 +126,8 @@ Item {
             visible: Ghostd.sessions.length === 0
             width: root.width
             text: Ghostd.activeGhost === ""
-                ? "no ghost selected"
-                : (Ghostd.sessionsError !== "" ? "conversations unavailable" : "no conversations yet")
+                ? "No ghost selected"
+                : (Ghostd.sessionsError !== "" ? "Conversations unavailable" : "No conversations yet")
             color: Ghostd.sessionsError !== "" ? Theme.danger : Theme.foregroundDim
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontSizeSmall
@@ -134,23 +138,27 @@ Item {
 
         Rectangle {
             width: root.width
-            height: 30
+            height: Theme.controlHeight
             radius: Theme.radius / 2
-            color: "transparent"
-            border.width: 1
-            border.color: Theme.muted
+            color: newConversationArea.containsMouse ? Theme.hover : "transparent"
+            border.width: 0
+            border.color: Theme.border
             visible: Ghostd.activeGhost !== ""
 
             Text {
-                anchors.centerIn: parent
-                text: "+ new conversation"
-                color: Theme.foregroundDim
+                anchors.left: parent.left
+                anchors.leftMargin: Theme.gap
+                anchors.verticalCenter: parent.verticalCenter
+                text: "+ New conversation"
+                color: Theme.foreground
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontSizeSmall
             }
 
             MouseArea {
+                id: newConversationArea
                 anchors.fill: parent
+                hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
                 onClicked: {
                     Ghostd.newConversation();

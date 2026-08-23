@@ -64,7 +64,7 @@ Rectangle {
                 color: Theme.foregroundBright
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontSize + 1
-                font.bold: true
+                font.weight: Font.DemiBold
             }
 
             Text {
@@ -77,7 +77,7 @@ Rectangle {
             Item { Layout.fillWidth: true }
 
             Text {
-                text: "close"
+                text: "Close"
                 color: Theme.foregroundDim
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontSizeSmall
@@ -87,12 +87,6 @@ Rectangle {
                     onClicked: root.closeRequested()
                 }
             }
-        }
-
-        Rectangle {
-            Layout.fillWidth: true
-            implicitHeight: 1
-            color: Theme.muted
         }
 
         // ---- Provider picker ----------------------------------------------
@@ -135,9 +129,9 @@ Rectangle {
                         width: providerColumn.width
                         implicitHeight: 46
                         radius: Theme.radius / 2
-                        color: Theme.surfaceDeep
-                        border.width: 1
-                        border.color: Theme.muted
+                        color: Theme.surface
+                        border.width: 0
+                        border.color: Theme.border
 
                         RowLayout {
                             anchors.fill: parent
@@ -181,9 +175,10 @@ Rectangle {
                                 implicitWidth: primaryLabel.implicitWidth + Theme.pad
                                 implicitHeight: 26
                                 radius: Theme.radius / 2
-                                color: primaryArea.containsMouse ? Theme.selection : "transparent"
-                                border.width: 1
+                                color: Theme.accent
+                                border.width: 0
                                 border.color: Theme.accent
+                                opacity: primaryArea.containsMouse ? 0.88 : 1
 
                                 Text {
                                     id: primaryLabel
@@ -191,7 +186,7 @@ Rectangle {
                                     text: providerRow.hasOauth
                                         ? (providerRow.modelData.loginLabel || "Sign in")
                                         : "Paste API key"
-                                    color: Theme.accent
+                                    color: Theme.onAccent
                                     font.family: Theme.fontFamily
                                     font.pixelSize: Theme.fontSizeSmall
                                 }
@@ -245,7 +240,7 @@ Rectangle {
                 Text {
                     visible: root.status === "succeeded"
                     width: parent.width
-                    text: "✓ Signed in"
+                    text: "Signed in"
                         + (root.view && root.view.modelBound
                             ? " · chat model " + root.view.modelBound.modelId
                             : ".")
@@ -315,14 +310,15 @@ Rectangle {
                         implicitWidth: openLabel.implicitWidth + Theme.pad
                         implicitHeight: 28
                         radius: Theme.radius / 2
-                        color: openArea.containsMouse ? Theme.selection : "transparent"
-                        border.width: 1
+                        color: Theme.accent
+                        border.width: 0
                         border.color: Theme.accent
+                        opacity: openArea.containsMouse ? 0.88 : 1
                         Text {
                             id: openLabel
                             anchors.centerIn: parent
                             text: "Open in browser"
-                            color: Theme.accent
+                            color: Theme.onAccent
                             font.family: Theme.fontFamily
                             font.pixelSize: Theme.fontSizeSmall
                         }
@@ -354,9 +350,9 @@ Rectangle {
                     Text {
                         text: root.deviceCode
                         color: Theme.foregroundBright
-                        font.family: Theme.fontFamily
+                        font.family: Theme.fontFamilyMono
                         font.pixelSize: Theme.fontSize + 6
-                        font.bold: true
+                        font.weight: Font.DemiBold
                     }
 
                     Rectangle {
@@ -364,14 +360,15 @@ Rectangle {
                         implicitWidth: deviceOpenLabel.implicitWidth + Theme.pad
                         implicitHeight: 28
                         radius: Theme.radius / 2
-                        color: deviceOpenArea.containsMouse ? Theme.selection : "transparent"
-                        border.width: 1
+                        color: Theme.accent
+                        border.width: 0
                         border.color: Theme.accent
+                        opacity: deviceOpenArea.containsMouse ? 0.88 : 1
                         Text {
                             id: deviceOpenLabel
                             anchors.centerIn: parent
                             text: "Open verification page"
-                            color: Theme.accent
+                            color: Theme.onAccent
                             font.family: Theme.fontFamily
                             font.pixelSize: Theme.fontSizeSmall
                         }
@@ -407,7 +404,7 @@ Rectangle {
                         radius: Theme.radius / 2
                         color: Theme.surfaceDeep
                         border.width: 1
-                        border.color: codeField.activeFocus ? Theme.accent : Theme.muted
+                        border.color: codeField.activeFocus ? Theme.accent : Theme.border
 
                         TextInput {
                             id: codeField
@@ -442,14 +439,15 @@ Rectangle {
                         implicitWidth: submitLabel.implicitWidth + Theme.pad
                         implicitHeight: 28
                         radius: Theme.radius / 2
-                        color: submitArea.containsMouse ? Theme.selection : "transparent"
-                        border.width: 1
+                        color: Theme.accent
+                        border.width: 0
                         border.color: Theme.accent
+                        opacity: submitArea.containsMouse ? 0.88 : 1
                         Text {
                             id: submitLabel
                             anchors.centerIn: parent
                             text: "Submit"
-                            color: Theme.accent
+                            color: Theme.onAccent
                             font.family: Theme.fontFamily
                             font.pixelSize: Theme.fontSizeSmall
                         }
@@ -488,9 +486,9 @@ Rectangle {
                             width: flowColumn.width
                             implicitHeight: 36
                             radius: Theme.radius / 2
-                            color: optionArea.containsMouse ? Theme.selection : Theme.surfaceDeep
-                            border.width: 1
-                            border.color: Theme.muted
+                            color: optionArea.containsMouse ? Theme.hover : Theme.surface
+                            border.width: 0
+                            border.color: Theme.border
 
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
@@ -526,14 +524,15 @@ Rectangle {
                         implicitWidth: doneLabel.implicitWidth + Theme.pad
                         implicitHeight: 28
                         radius: Theme.radius / 2
-                        color: doneArea.containsMouse ? Theme.selection : "transparent"
-                        border.width: 1
+                        color: Theme.accent
+                        border.width: 0
                         border.color: Theme.accent
+                        opacity: doneArea.containsMouse ? 0.88 : 1
                         Text {
                             id: doneLabel
                             anchors.centerIn: parent
                             text: root.status === "succeeded" ? "Done" : "Back"
-                            color: Theme.accent
+                            color: Theme.onAccent
                             font.family: Theme.fontFamily
                             font.pixelSize: Theme.fontSizeSmall
                         }

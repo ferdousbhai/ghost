@@ -37,7 +37,8 @@ qs -p qml/shell.qml kill
   `visible: false`; loading the config maps no window. This makes almost all of
   the shell testable without putting anything over the developer's desktop.
 - On `open`: an 880×620 window (app-id `ghost`) that Hyprland tiles into the
-  layout like any app, in the current Omarchy theme's colours. Roster on the
+  layout like any app. The HUD uses a neutral reading canvas with the current
+  Omarchy accent and semantic status colours. Roster on the
   left (`casper`, `moaning-myrtle`, `+ new ghost`), transcript in the middle,
   composer at the bottom. `SUPER+G` is launch-or-focus: reveal+focus when
   hidden/unfocused, hide only when already focused.

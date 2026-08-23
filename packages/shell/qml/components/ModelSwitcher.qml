@@ -121,7 +121,7 @@ Rectangle {
                 color: Theme.foregroundBright
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontSize + 1
-                font.bold: true
+                font.weight: Font.DemiBold
             }
 
             Text {
@@ -134,8 +134,8 @@ Rectangle {
             Item { Layout.fillWidth: true }
 
             Text {
-                text: root.routingView ? "models" : "routing"
-                color: Theme.accent
+                text: root.routingView ? "Models" : "Routing"
+                color: Theme.foreground
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontSizeSmall
                 MouseArea {
@@ -151,7 +151,7 @@ Rectangle {
             }
 
             Text {
-                text: "connect another provider"
+                text: "Connect provider"
                 color: Theme.accent
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontSizeSmall
@@ -163,7 +163,7 @@ Rectangle {
             }
 
             Text {
-                text: "close"
+                text: "Close"
                 color: Theme.foregroundDim
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontSizeSmall
@@ -181,9 +181,9 @@ Rectangle {
             Layout.fillWidth: true
             implicitHeight: 40
             radius: Theme.radius / 2
-            color: Theme.surfaceDeep
+            color: Theme.surface
             border.width: 1
-            border.color: searchField.activeFocus ? Theme.accent : Theme.muted
+            border.color: searchField.activeFocus ? Theme.accent : Theme.border
 
             TextInput {
                 id: searchField
@@ -222,20 +222,20 @@ Rectangle {
                 if (Ghostd.modelWarning !== "") return Ghostd.modelWarning;
                 if (root.pickingRoute) {
                     return root.routeTarget === "fallback"
-                        ? "choose the next model OMP should try"
-                        : "choose the model for this role";
+                        ? "Choose the next model OMP should try"
+                        : "Choose the model for this role";
                 }
                 if (root.searching) {
-                    if (Ghostd.catalogLoading) return "searching…";
+                    if (Ghostd.catalogLoading) return "Searching…";
                     const shown = Ghostd.catalogModels.length;
                     return shown === 0
-                        ? "no models match \"" + Ghostd.catalogQuery + "\""
-                        : "showing " + (Ghostd.catalogOffset + 1)
+                        ? "No models match \"" + Ghostd.catalogQuery + "\""
+                        : "Showing " + (Ghostd.catalogOffset + 1)
                             + "–" + (Ghostd.catalogOffset + shown)
                             + " of " + Ghostd.catalogTotal;
                 }
                 return Ghostd.availableModels.length === 0
-                    ? "no usable models yet — connect a provider"
+                    ? "No usable models yet — connect a provider"
                     : Ghostd.availableModels.length + " model"
                         + (Ghostd.availableModels.length === 1 ? "" : "s") + " ready to use";
             }
@@ -265,7 +265,7 @@ Rectangle {
                 Text {
                     width: parent.width
                     text: Ghostd.modelRoutingLoading
-                        ? "loading OMP routes…"
+                        ? "Loading OMP routes…"
                         : "Each role has one primary model and an ordered retry chain."
                     color: Theme.foregroundDim
                     font.family: Theme.fontFamily
@@ -283,11 +283,11 @@ Rectangle {
                             ? routeRow.modelData.fallbacks : []
 
                         width: routingColumn.width
-                        implicitHeight: 86
+                        implicitHeight: 92
                         radius: Theme.radius / 2
-                        color: Theme.surfaceDeep
-                        border.width: 1
-                        border.color: Theme.muted
+                        color: Theme.surface
+                        border.width: 0
+                        border.color: Theme.border
 
                         ColumnLayout {
                             anchors.fill: parent
@@ -301,7 +301,7 @@ Rectangle {
                                     color: Theme.foregroundBright
                                     font.family: Theme.fontFamily
                                     font.pixelSize: Theme.fontSize
-                                    font.bold: true
+                                    font.weight: Font.DemiBold
                                 }
                                 Text {
                                     text: "OMP @" + routeRow.modelData.ompRole
@@ -311,7 +311,7 @@ Rectangle {
                                 }
                                 Item { Layout.fillWidth: true }
                                 Text {
-                                    text: routeRow.modelData.primary ? "change" : "set primary"
+                                    text: routeRow.modelData.primary ? "Change" : "Set primary"
                                     color: Theme.accent
                                     font.family: Theme.fontFamily
                                     font.pixelSize: Theme.fontSizeSmall
@@ -325,7 +325,7 @@ Rectangle {
                                     }
                                 }
                                 Text {
-                                    text: "+ fallback"
+                                    text: "+ Fallback"
                                     color: Theme.accent
                                     font.family: Theme.fontFamily
                                     font.pixelSize: Theme.fontSizeSmall
@@ -340,7 +340,7 @@ Rectangle {
                                 }
                                 Text {
                                     visible: routeRow.chain.length > 0
-                                    text: "clear"
+                                    text: "Clear"
                                     color: Theme.foregroundDim
                                     font.family: Theme.fontFamily
                                     font.pixelSize: Theme.fontSizeSmall
@@ -354,7 +354,7 @@ Rectangle {
 
                             Text {
                                 Layout.fillWidth: true
-                                text: "primary  " + root.routeModelName(routeRow.modelData.primary)
+                                text: "Primary  " + root.routeModelName(routeRow.modelData.primary)
                                 color: routeRow.modelData.primary ? Theme.foreground : Theme.foregroundDim
                                 font.family: Theme.fontFamily
                                 font.pixelSize: Theme.fontSizeSmall
@@ -364,8 +364,8 @@ Rectangle {
                             Text {
                                 Layout.fillWidth: true
                                 text: routeRow.chain.length === 0
-                                    ? "fallbacks  none"
-                                    : "fallbacks  " + routeRow.chain.map((model, index) =>
+                                    ? "Fallbacks  none"
+                                    : "Fallbacks  " + routeRow.chain.map((model, index) =>
                                         (index + 1) + " " + root.routeModelName(model)).join("  →  ")
                                 color: Theme.foregroundDim
                                 font.family: Theme.fontFamily
@@ -399,9 +399,9 @@ Rectangle {
                     width: parent.width
                     implicitHeight: 40
                     radius: Theme.radius / 2
-                    color: connectArea.containsMouse ? Theme.selection : "transparent"
+                    color: connectArea.containsMouse ? Theme.hover : Theme.surface
                     border.width: 1
-                    border.color: Theme.accent
+                    border.color: Theme.border
                     Text {
                         anchors.centerIn: parent
                         text: "Connect a provider to get a model"
@@ -434,11 +434,11 @@ Rectangle {
                             anchors.left: parent.left
                             anchors.bottom: parent.bottom
                             anchors.bottomMargin: 2
-                            text: (availRow.modelData.provider || "").toUpperCase()
-                            color: Theme.foregroundDim
+                            text: availRow.modelData.provider || ""
+                            color: Theme.foreground
                             font.family: Theme.fontFamily
                             font.pixelSize: Theme.fontSizeSmall
-                            font.letterSpacing: 1.5
+                            font.weight: Font.DemiBold
                         }
 
                         // A usable model row.
@@ -449,11 +449,10 @@ Rectangle {
                             radius: Theme.radius / 2
                             readonly property bool isCurrent: availRow.modelData.model
                                 && availRow.modelData.model.current === true
-                            color: modelArea.containsMouse
-                                ? Theme.selection
-                                : (isCurrent ? Theme.selection : Theme.surfaceDeep)
-                            border.width: 1
-                            border.color: isCurrent ? Theme.accent : Theme.muted
+                            color: isCurrent ? Theme.selection
+                                : (modelArea.containsMouse ? Theme.hover : "transparent")
+                            border.width: 0
+                            border.color: Theme.border
 
                             RowLayout {
                                 anchors.fill: parent
@@ -461,11 +460,13 @@ Rectangle {
                                 anchors.rightMargin: Theme.pad
                                 spacing: Theme.gap
 
-                                Text {
-                                    text: usableRow.isCurrent ? "●" : "○"
-                                    color: usableRow.isCurrent ? Theme.accent : Theme.muted
-                                    font.family: Theme.fontFamily
-                                    font.pixelSize: Theme.fontSizeSmall
+                                Rectangle {
+                                    Layout.alignment: Qt.AlignVCenter
+                                    visible: usableRow.isCurrent
+                                    implicitWidth: 2
+                                    implicitHeight: 22
+                                    radius: 1
+                                    color: Theme.accent
                                 }
 
                                 ColumnLayout {
@@ -509,11 +510,11 @@ Rectangle {
                                     radius: Theme.radius / 3
                                     color: "transparent"
                                     border.width: 1
-                                    border.color: Theme.muted
+                                    border.color: Theme.border
                                     Text {
                                         id: visionLabel
                                         anchors.centerIn: parent
-                                        text: "vision"
+                                        text: "Vision"
                                         color: Theme.foregroundDim
                                         font.family: Theme.fontFamily
                                         font.pixelSize: Theme.fontSizeSmall - 1
@@ -522,7 +523,7 @@ Rectangle {
 
                                 Text {
                                     visible: usableRow.isCurrent
-                                    text: "current"
+                                    text: "Current"
                                     color: Theme.accent
                                     font.family: Theme.fontFamily
                                     font.pixelSize: Theme.fontSizeSmall
@@ -573,11 +574,10 @@ Rectangle {
                         width: catalogColumn.width
                         implicitHeight: 48
                         radius: Theme.radius / 2
-                        color: catArea.containsMouse
-                            ? Theme.selection
-                            : (catRow.modelData.current === true ? Theme.selection : Theme.surfaceDeep)
-                        border.width: 1
-                        border.color: catRow.modelData.current === true ? Theme.accent : Theme.muted
+                        color: catRow.modelData.current === true ? Theme.selection
+                            : (catArea.containsMouse ? Theme.hover : "transparent")
+                        border.width: 0
+                        border.color: Theme.border
 
                         RowLayout {
                             anchors.fill: parent
@@ -619,11 +619,11 @@ Rectangle {
                                 radius: Theme.radius / 3
                                 color: "transparent"
                                 border.width: 1
-                                border.color: Theme.muted
+                                border.color: Theme.border
                                 Text {
                                     id: catVisionLabel
                                     anchors.centerIn: parent
-                                    text: "vision"
+                                    text: "Vision"
                                     color: Theme.foregroundDim
                                     font.family: Theme.fontFamily
                                     font.pixelSize: Theme.fontSizeSmall - 1
@@ -634,10 +634,10 @@ Rectangle {
                             // login, or Claude Code's external desktop login.
                             Text {
                                 text: catRow.usable
-                                    ? "use"
+                                    ? "Use"
                                     : (catRow.modelData.provider === "claude-code"
-                                        ? "run claude auth login"
-                                        : "log in →")
+                                        ? "Run claude auth login"
+                                        : "Log in →")
                                 color: catRow.usable ? Theme.accent : Theme.warn
                                 font.family: Theme.fontFamily
                                 font.pixelSize: Theme.fontSizeSmall
@@ -672,11 +672,11 @@ Rectangle {
                         opacity: canPage ? 1 : 0.4
                         color: prevArea.containsMouse && canPage ? Theme.selection : "transparent"
                         border.width: 1
-                        border.color: Theme.muted
+                        border.color: Theme.border
                         Text {
                             id: prevLabel
                             anchors.centerIn: parent
-                            text: "‹ prev"
+                            text: "‹ Previous"
                             color: Theme.foreground
                             font.family: Theme.fontFamily
                             font.pixelSize: Theme.fontSizeSmall
@@ -706,11 +706,11 @@ Rectangle {
                         opacity: canPage ? 1 : 0.4
                         color: nextArea.containsMouse && canPage ? Theme.selection : "transparent"
                         border.width: 1
-                        border.color: Theme.muted
+                        border.color: Theme.border
                         Text {
                             id: nextLabel
                             anchors.centerIn: parent
-                            text: "next ›"
+                            text: "Next ›"
                             color: Theme.foreground
                             font.family: Theme.fontFamily
                             font.pixelSize: Theme.fontSizeSmall

@@ -22,11 +22,11 @@ Item {
         spacing: Theme.gap
 
         Text {
-            text: "GHOSTS"
-            color: Theme.foregroundDim
+            text: "Ghosts"
+            color: Theme.foreground
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontSizeSmall
-            font.letterSpacing: 1.5
+            font.weight: Font.DemiBold
         }
 
         Repeater {
@@ -38,9 +38,11 @@ Item {
                 required property var modelData
 
                 width: root.width
-                height: 30
+                height: Theme.controlHeight
                 radius: Theme.radius / 2
-                color: entry.modelData.name === Ghostd.activeGhost ? Theme.selection : "transparent"
+                color: entry.modelData.name === Ghostd.activeGhost
+                    ? Theme.selection
+                    : (entryArea.containsMouse ? Theme.hover : "transparent")
 
                 Row {
                     anchors.verticalCenter: parent.verticalCenter
@@ -52,17 +54,16 @@ Item {
 
                     Rectangle {
                         anchors.verticalCenter: parent.verticalCenter
-                        width: 6
-                        height: 6
-                        radius: 3
-                        color: entry.modelData.name === Ghostd.activeGhost && Ghostd.streaming
-                            ? Theme.accent
-                            : Theme.muted
+                        width: 2
+                        height: 18
+                        radius: 1
+                        visible: entry.modelData.name === Ghostd.activeGhost
+                        color: Theme.accent
                     }
 
                     Text {
                         anchors.verticalCenter: parent.verticalCenter
-                        width: parent.width - 6 - Theme.gap
+                        width: parent.width - 2 - Theme.gap
                         text: entry.modelData.name
                         color: entry.modelData.name === Ghostd.activeGhost
                             ? Theme.foregroundBright
@@ -74,7 +75,9 @@ Item {
                 }
 
                 MouseArea {
+                    id: entryArea
                     anchors.fill: parent
+                    hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     onClicked: {
                         Ghostd.selectGhost(entry.modelData.name);
@@ -87,7 +90,7 @@ Item {
         Text {
             visible: Ghostd.ghosts.length === 0
             width: root.width
-            text: Ghostd.reachable ? "no ghosts yet" : "ghostd unreachable"
+            text: Ghostd.reachable ? "No ghosts yet" : "ghostd unreachable"
             color: Ghostd.reachable ? Theme.foregroundDim : Theme.danger
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontSizeSmall
@@ -98,17 +101,20 @@ Item {
 
         Rectangle {
             width: root.width
-            height: 30
+            height: Theme.controlHeight
             radius: Theme.radius / 2
-            color: root.naming ? Theme.surfaceDeep : "transparent"
-            border.width: 1
-            border.color: root.naming ? Theme.accent : Theme.muted
+            color: root.naming ? Theme.surfaceDeep
+                : (newGhostArea.containsMouse ? Theme.hover : "transparent")
+            border.width: root.naming ? 1 : 0
+            border.color: root.naming ? Theme.accent : Theme.border
 
             Text {
                 visible: !root.naming
-                anchors.centerIn: parent
-                text: "+ new ghost"
-                color: Theme.foregroundDim
+                anchors.left: parent.left
+                anchors.leftMargin: Theme.gap
+                anchors.verticalCenter: parent.verticalCenter
+                text: "+ New ghost"
+                color: Theme.foreground
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontSizeSmall
             }
@@ -138,8 +144,10 @@ Item {
             }
 
             MouseArea {
+                id: newGhostArea
                 anchors.fill: parent
                 visible: !root.naming
+                hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
                 onClicked: {
                     root.naming = true;

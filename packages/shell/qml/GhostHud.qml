@@ -158,19 +158,19 @@ FloatingWindow {
             // ---- Header ---------------------------------------------------
             Item {
                 Layout.fillWidth: true
-                implicitHeight: 26
+                implicitHeight: 32
 
                 Row {
                     anchors.left: parent.left
                     anchors.verticalCenter: parent.verticalCenter
                     spacing: Theme.gap
 
-                    Text {
+                    Rectangle {
                         anchors.verticalCenter: parent.verticalCenter
-                        text: "◉"
+                        width: 8
+                        height: 8
+                        radius: 4
                         color: Ghostd.reachable ? Theme.accent : Theme.danger
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSize + 3
                     }
 
                     Text {
@@ -179,7 +179,7 @@ FloatingWindow {
                         color: Theme.foregroundBright
                         font.family: Theme.fontFamily
                         font.pixelSize: Theme.fontSize + 1
-                        font.bold: true
+                        font.weight: Font.DemiBold
                     }
                 }
 
@@ -199,13 +199,14 @@ FloatingWindow {
 
                         anchors.verticalCenter: parent.verticalCenter
                         visible: Ghostd.activeGhost !== ""
-                        implicitWidth: indicatorRow.implicitWidth + Theme.pad
-                        implicitHeight: 22
+                        implicitWidth: indicatorRow.implicitWidth + Theme.pad * 1.5
+                        implicitHeight: 28
                         radius: Theme.radius / 2
-                        color: indicatorArea.containsMouse ? Theme.selection : "transparent"
-                        border.width: 1
+                        color: hud.switcherOpen ? Theme.selection
+                            : (indicatorArea.containsMouse ? Theme.hover : "transparent")
+                        border.width: hud.switcherOpen || modelIndicator.noneSet ? 1 : 0
                         border.color: hud.switcherOpen ? Theme.accent
-                            : (modelIndicator.noneSet ? Theme.warn : Theme.muted)
+                            : (modelIndicator.noneSet ? Theme.warn : Theme.border)
 
                         Row {
                             id: indicatorRow
@@ -214,7 +215,7 @@ FloatingWindow {
 
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
-                                text: hud.switcherOpen ? "back to chat"
+                                text: hud.switcherOpen ? "Back to chat"
                                     : (Ghostd.currentModel
                                         ? (Ghostd.currentModel.name || Ghostd.currentModel.id)
                                         : "Choose a model")
@@ -230,7 +231,7 @@ FloatingWindow {
                                 anchors.verticalCenter: parent.verticalCenter
                                 visible: !hud.switcherOpen && Ghostd.currentModel
                                     && Ghostd.currentModel.hasVision === true
-                                text: "· vision"
+                                text: "· Vision"
                                 color: Theme.foregroundDim
                                 font.family: Theme.fontFamily
                                 font.pixelSize: Theme.fontSizeSmall
@@ -241,7 +242,7 @@ FloatingWindow {
                                 anchors.verticalCenter: parent.verticalCenter
                                 visible: !hud.switcherOpen && Ghostd.currentModel
                                     && Ghostd.modelSource === "default"
-                                text: "· default"
+                                text: "· Default"
                                 color: Theme.foregroundDim
                                 font.family: Theme.fontFamily
                                 font.pixelSize: Theme.fontSizeSmall
@@ -267,7 +268,7 @@ FloatingWindow {
                     Text {
                         anchors.verticalCenter: parent.verticalCenter
                         visible: Ghostd.streaming
-                        text: "esc to stop"
+                        text: "Esc to stop"
                         color: Theme.foregroundDim
                         font.family: Theme.fontFamily
                         font.pixelSize: Theme.fontSizeSmall
@@ -275,18 +276,12 @@ FloatingWindow {
                 }
             }
 
-            Rectangle {
-                Layout.fillWidth: true
-                implicitHeight: 1
-                color: Theme.muted
-            }
-
             // ---- Body -----------------------------------------------------
             RowLayout {
                 visible: !hud.loginOpen && !hud.switcherOpen
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                spacing: Theme.pad
+                spacing: Theme.sectionGap
 
                 // Left sidebar: the ghost roster stacked over this ghost's
                 // conversations, each in its own scroller so a long list never
@@ -302,7 +297,7 @@ FloatingWindow {
                     Layout.minimumWidth: 190
                     Layout.maximumWidth: 190
                     Layout.fillHeight: true
-                    spacing: Theme.gap
+                    spacing: Theme.sectionGap
 
                     Flickable {
                         id: rosterScroll
@@ -328,12 +323,6 @@ FloatingWindow {
                                 composer.take();
                             }
                         }
-                    }
-
-                    Rectangle {
-                        Layout.fillWidth: true
-                        implicitHeight: 1
-                        color: Theme.muted
                     }
 
                     Flickable {

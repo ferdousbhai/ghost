@@ -103,10 +103,17 @@ against a live tray.
 
 Reads Omarchy's active theme from
 `~/.local/state/omarchy/current/theme/colors.toml` (colours, `mode`) and
-`shell.toml` (bar sizing, font), and re-reads on theme switch by watching
+`shell.toml` (bar sizing and optional technical font), and re-reads on theme switch by watching
 `theme.name` — the one file that survives `omarchy-theme-set`'s
-`rm -rf theme/ && mv next-theme/ theme/`. Without Omarchy it falls back to a
-Tokyo Night palette, so the surfaces still run on bare Hyprland.
+`rm -rf theme/ && mv next-theme/ theme/`.
+
+The compact bar and tray continue to wear the desktop palette. The reading HUD
+uses a Scandinavian neutral canvas and system sans-serif type, then carries in
+one Omarchy accent for focus/current state plus the theme's semantic status
+colours. Its text, chrome, hover, and selected-state ladders are deliberately
+separate, so a decorative theme `muted` colour can never become low-contrast
+body copy. Without Omarchy, the remaining accent and status roles fall back to
+Tokyo Night values, so every surface still runs on bare Hyprland.
 
 ## IPC
 

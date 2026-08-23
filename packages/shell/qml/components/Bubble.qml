@@ -22,6 +22,7 @@ Item {
     required property var branchNavigation
 
     readonly property bool mine: root.speaker === "user"
+    readonly property int contentInset: root.mine ? 12 : 0
 
     implicitHeight: card.implicitHeight
 
@@ -31,19 +32,20 @@ Item {
         anchors.right: root.mine ? parent.right : undefined
         anchors.left: root.mine ? undefined : parent.left
         width: root.mine
-            ? Math.min(parent.width * 0.82, implicitWidth + Theme.pad * 2)
+            ? Math.min(parent.width * 0.82,
+                Math.max(bodyText.implicitWidth + root.contentInset * 2, 72))
             : parent.width
-        implicitWidth: Math.max(content.implicitWidth, 1) + Theme.pad * 2
-        implicitHeight: content.implicitHeight + Theme.pad * 2
+        implicitWidth: Math.max(content.implicitWidth, 1) + root.contentInset * 2
+        implicitHeight: content.implicitHeight + root.contentInset * 2
         radius: Theme.radius
-        color: root.mine ? Theme.selection : Theme.surfaceDeep
+        color: root.mine ? Theme.surfaceDeep : "transparent"
         border.width: root.failure === "" ? 0 : 1
         border.color: Theme.danger
 
         Column {
             id: content
             anchors.fill: parent
-            anchors.margins: Theme.pad
+            anchors.margins: root.contentInset
             spacing: Theme.gap / 2
 
             Repeater {
@@ -61,7 +63,7 @@ Item {
                 visible: (!root.activities || root.activities.length === 0)
                     && root.toolTrail !== ""
                 width: parent.width
-                text: "⚒ " + root.toolTrail
+                text: "Tools · " + root.toolTrail
                 color: Theme.foregroundDim
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontSizeSmall
@@ -69,6 +71,7 @@ Item {
             }
 
             Text {
+                id: bodyText
                 width: parent.width
                 visible: root.body !== ""
                 text: root.body
@@ -89,7 +92,7 @@ Item {
                 spacing: Theme.gap
 
                 Text {
-                    text: "branch"
+                    text: "Branch"
                     color: Theme.accent
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.fontSizeSmall
@@ -101,38 +104,43 @@ Item {
                 }
 
                 Text {
-                    visible: root.branchNavigation && root.branchNavigation.count > 1
-                    text: root.branchNavigation.previousTargetId ? "‹" : "·"
-                    color: root.branchNavigation.previousTargetId ? Theme.accent : Theme.foregroundDim
+                    visible: Boolean(root.branchNavigation && root.branchNavigation.count > 1)
+                    text: root.branchNavigation && root.branchNavigation.previousTargetId ? "‹" : "·"
+                    color: root.branchNavigation && root.branchNavigation.previousTargetId
+                        ? Theme.accent : Theme.foregroundDim
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.fontSizeSmall
                     MouseArea {
                         anchors.fill: parent
                         enabled: Boolean(root.branchNavigation && root.branchNavigation.previousTargetId)
                         cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-                        onClicked: Ghostd.navigateBranch(root.branchNavigation.previousTargetId)
+                        onClicked: if (root.branchNavigation)
+                            Ghostd.navigateBranch(root.branchNavigation.previousTargetId)
                     }
                 }
 
                 Text {
-                    visible: root.branchNavigation && root.branchNavigation.count > 1
-                    text: (root.branchNavigation.index + 1) + "/" + root.branchNavigation.count
+                    visible: Boolean(root.branchNavigation && root.branchNavigation.count > 1)
+                    text: root.branchNavigation
+                        ? (root.branchNavigation.index + 1) + "/" + root.branchNavigation.count : ""
                     color: Theme.foregroundDim
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.fontSizeSmall
                 }
 
                 Text {
-                    visible: root.branchNavigation && root.branchNavigation.count > 1
-                    text: root.branchNavigation.nextTargetId ? "›" : "·"
-                    color: root.branchNavigation.nextTargetId ? Theme.accent : Theme.foregroundDim
+                    visible: Boolean(root.branchNavigation && root.branchNavigation.count > 1)
+                    text: root.branchNavigation && root.branchNavigation.nextTargetId ? "›" : "·"
+                    color: root.branchNavigation && root.branchNavigation.nextTargetId
+                        ? Theme.accent : Theme.foregroundDim
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.fontSizeSmall
                     MouseArea {
                         anchors.fill: parent
                         enabled: Boolean(root.branchNavigation && root.branchNavigation.nextTargetId)
                         cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-                        onClicked: Ghostd.navigateBranch(root.branchNavigation.nextTargetId)
+                        onClicked: if (root.branchNavigation)
+                            Ghostd.navigateBranch(root.branchNavigation.nextTargetId)
                     }
                 }
             }
