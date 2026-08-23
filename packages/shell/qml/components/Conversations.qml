@@ -64,7 +64,8 @@ Item {
                 readonly property bool active: entry.modelData.id === Ghostd.currentSessionId
 
                 width: root.width
-                height: 30
+                // Grow to fit a wrapped title instead of eliding it.
+                height: Math.max(30, titleText.implicitHeight + Theme.gap)
                 radius: Theme.radius / 2
                 color: entry.active ? Theme.selection : "transparent"
 
@@ -95,13 +96,14 @@ Item {
                     }
 
                     Text {
+                        id: titleText
                         anchors.verticalCenter: parent.verticalCenter
                         width: parent.width - 6 - when.width - Theme.gap * 2
                         text: root.titleOf(entry.modelData)
                         color: entry.active ? Theme.foregroundBright : Theme.foreground
                         font.family: Theme.fontFamily
                         font.pixelSize: Theme.fontSize
-                        elide: Text.ElideRight
+                        wrapMode: Text.WrapAtWordBoundaryOrAnywhere
                     }
                 }
 

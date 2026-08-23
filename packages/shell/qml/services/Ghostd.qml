@@ -461,6 +461,11 @@ Singleton {
         root.request = xhr;
         xhr.onreadystatechange = function () {
             if (xhr.readyState >= 3 && xhr.status === 200) {
+                // A live stream is proof the daemon is answering; clear any stale
+                // connectivity error a past blip (e.g. a daemon restart) left set,
+                // which nothing else clears while `reachable` stayed true.
+                root.reachable = true;
+                root.lastError = "";
                 const whole = xhr.responseText;
                 root.ingest(whole.substring(root.consumed));
                 root.consumed = whole.length;
@@ -647,6 +652,9 @@ Singleton {
             root.lastError = errorMessage;
             root.turnFailed(ghost, errorMessage);
         } else {
+            // A turn that completed is proof the daemon answered; drop any stale
+            // error banner so it does not linger under a good reply.
+            root.lastError = "";
             root.turnFinished(ghost, text);
         }
     }
