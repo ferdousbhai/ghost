@@ -57,19 +57,6 @@ Item {
                 }
             }
 
-            // Compatibility fallback for older transcript rows that only have
-            // the pre-card comma-separated trail.
-            Text {
-                visible: (!root.activities || root.activities.length === 0)
-                    && root.toolTrail !== ""
-                width: parent.width
-                text: "Tools · " + root.toolTrail
-                color: Theme.foregroundDim
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSizeSmall
-                elide: Text.ElideRight
-            }
-
             Text {
                 id: bodyText
                 width: parent.width

@@ -70,8 +70,9 @@ it is separate from tool approval, which Ghost does not expose. While a model
 is streaming, Enter steers the active run, Ctrl+Enter queues a follow-up, and
 Shift+Enter inserts a newline. The queued state is visible below the composer.
 
-Tool calls persist as lifecycle cards with bounded summaries and error/fallback
-states. User messages expose editable branch points and sibling navigation;
+Tool work persists as compact traces: purpose while active, outcome when one is
+available, and implementation details only when expanded. User messages expose
+editable branch points and sibling navigation;
 historical ask cards can be re-answered to create a sibling branch and resume
 generation from it.
 

@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import qs.services
+import "ToolTrace.js" as ToolTrace
 
 Rectangle {
     id: root
@@ -11,67 +12,26 @@ Rectangle {
 
     readonly property bool running: activity.status === "running"
         || activity.status === "preparing" || activity.status === "queued"
+    readonly property bool completed: activity.status === "complete"
     readonly property bool failed: activity.status === "failed"
-    readonly property string detail: root.detailText()
+    readonly property string trace: ToolTrace.text(
+        root.activity, root.completed, root.failed, root.expanded)
+    readonly property string diagnosticInput: ToolTrace.input(root.activity)
     readonly property var askBranch: activity.askBranch || null
+    readonly property bool hasDiagnostics: ToolTrace.hasDiagnostics(root.activity)
 
-    implicitHeight: toolContent.implicitHeight + 12
+    visible: root.trace !== "" || root.askBranch !== null
+    implicitHeight: visible ? toolContent.implicitHeight + 12 : 0
     radius: Theme.radius / 2
     color: Theme.surface
     border.width: root.failed ? 1 : 0
     border.color: Theme.danger
 
-    function titleFor(name: string): string {
-        const names = {
-            ask: "Asked a question",
-            ghost_notes_list: "Listed notes",
-            ghost_notes_read: "Read a note",
-            ghost_notes_grep: "Searched notes",
-            ghost_notes_write: "Wrote a note",
-            ghost_memory_list: "Listed memories",
-            ghost_memory_read: "Read a memory",
-            ghost_memory_write: "Saved a memory",
-            look_at_image: "Looked at an image",
-            ghost_screen: "Captured the screen",
-            ghost_browser: "Used the browser",
-            ghost_desktop: "Used the desktop"
-        };
-        if (names[name]) return names[name];
-        return String(name || "tool").replace(/^ghost_/u, "").replaceAll("_", " ");
-    }
-
-    function compact(value: string, limit: int): string {
-        const oneLine = String(value || "").replace(/\s+/gu, " ").trim();
-        return oneLine.length > limit ? oneLine.slice(0, limit - 1) + "…" : oneLine;
-    }
-
-    function argumentText(): string {
-        const args = root.activity.arguments;
-        if (!args || typeof args !== "object") return "";
-        if (Array.isArray(args.questions)) {
-            const count = args.questions.length;
-            return count + (count === 1 ? " question" : " questions");
-        }
-        const keys = ["query", "path", "name", "url", "action", "prompt", "source"];
-        for (const key of keys) {
-            if (typeof args[key] === "string" && args[key].trim() !== "")
-                return root.compact(args[key], 150);
-        }
-        const json = JSON.stringify(args);
-        return json === "{}" ? "" : root.compact(json, 150);
-    }
-
-    function detailText(): string {
-        if (root.activity.summary) return root.compact(root.activity.summary, root.expanded ? 1200 : 180);
-        if (root.activity.intent) return root.compact(root.activity.intent, root.expanded ? 1200 : 180);
-        return root.argumentText();
-    }
-
     // Declared before the action row so its smaller MouseAreas win hit-testing.
     MouseArea {
         anchors.fill: parent
-        cursorShape: root.detail === "" ? Qt.ArrowCursor : Qt.PointingHandCursor
-        enabled: root.detail !== ""
+        cursorShape: root.hasDiagnostics ? Qt.PointingHandCursor : Qt.ArrowCursor
+        enabled: root.hasDiagnostics
         onClicked: root.expanded = !root.expanded
     }
 
@@ -92,12 +52,12 @@ Rectangle {
                 height: 16
 
                 Rectangle {
+                    visible: root.running
                     anchors.centerIn: parent
                     width: 7
                     height: 7
-                    radius: root.failed ? 1 : 4
-                    color: root.failed ? Theme.danger
-                        : (root.running ? Theme.accent : Theme.foregroundFaint)
+                    radius: 4
+                    color: Theme.accent
 
                     SequentialAnimation on opacity {
                         running: root.running && !Theme.reducedMotion
@@ -106,48 +66,56 @@ Rectangle {
                         NumberAnimation { to: 1; duration: 550; easing.type: Easing.InOutQuad }
                     }
                 }
+
+                Text {
+                    visible: !root.running
+                    anchors.centerIn: parent
+                    text: root.failed ? "×" : "✓"
+                    color: root.failed ? Theme.danger : Theme.foregroundFaint
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSizeSmall
+                    font.weight: Font.DemiBold
+                }
             }
 
             Text {
-                width: parent.width - x - statusText.implicitWidth - Theme.gap
-                text: root.titleFor(root.activity.name)
+                width: parent.width - x
+                text: root.trace
                 color: Theme.foregroundBright
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontSizeSmall
                 font.weight: Font.DemiBold
-                elide: Text.ElideRight
-            }
-
-            Text {
-                id: statusText
-                text: root.failed ? "Failed"
-                    : (root.activity.status === "complete" ? "Done"
-                        : (root.activity.status === "preparing" ? "Preparing"
-                            : (root.activity.status === "queued" ? "Queued" : "Running")))
-                color: root.failed ? Theme.danger : Theme.foregroundDim
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSizeSmall
+                wrapMode: root.expanded ? Text.Wrap : Text.NoWrap
+                elide: root.expanded ? Text.ElideNone : Text.ElideRight
             }
         }
 
         Text {
-            visible: root.detail !== ""
+            visible: root.expanded && root.activity.summary && root.activity.intent
             width: parent.width
-            text: root.detail
+            text: "Intent · " + ToolTrace.compact(root.activity.intent, 1200)
             color: Theme.foregroundDim
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontSizeSmall
-            wrapMode: root.expanded ? Text.Wrap : Text.NoWrap
-            elide: root.expanded ? Text.ElideNone : Text.ElideRight
+            wrapMode: Text.Wrap
         }
 
         Text {
-            visible: root.expanded && root.argumentText() !== ""
-                && root.argumentText() !== root.detail
+            visible: root.expanded && root.activity.name !== ""
             width: parent.width
-            text: root.argumentText()
+            text: "Tool · " + root.activity.name
             color: Theme.foregroundDim
-            font.family: Theme.fontFamily
+            font.family: Theme.fontFamilyMono
+            font.pixelSize: Theme.fontSizeSmall
+            wrapMode: Text.Wrap
+        }
+
+        Text {
+            visible: root.expanded && root.diagnosticInput !== ""
+            width: parent.width
+            text: "Input · " + root.diagnosticInput
+            color: Theme.foregroundDim
+            font.family: Theme.fontFamilyMono
             font.pixelSize: Theme.fontSizeSmall
             wrapMode: Text.Wrap
         }
