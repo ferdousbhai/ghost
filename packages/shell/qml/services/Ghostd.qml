@@ -49,7 +49,7 @@ Singleton {
     signal turnFailed(string ghost, string message)
 
     // ---- Model login ------------------------------------------------------
-    /** [{ id, name, subscription, authTypes, loginLabel, configured, connectedVia }]. */
+    /** [{ id, name, subscription, authTypes, loginLabel, billingNote, configured, connectedVia }]. */
     property var providers: []
     /** The active login's id, or "" when none is running. */
     property string loginId: ""
@@ -60,12 +60,41 @@ Singleton {
     /** Non-empty while a login request is in flight or has failed to reach ghostd. */
     property string loginError: ""
 
+    // ---- Model selection --------------------------------------------------
+    /** The resolved current model: { provider, id, name?, contextWindow?, hasVision } | null. */
+    property var currentModel: null
+    /** How currentModel was chosen: "role" (explicit pick), "default" (fallback), "none". */
+    property string modelSource: "none"
+    /** scope=available rows the ghost can use now: [{ provider, id, name?, …, current }]. */
+    property var availableModels: []
+    /** scope=catalog rows for the last search: same shape plus `usable`. */
+    property var catalogModels: []
+    /** Full filtered count behind the current catalog page (may exceed catalogModels.length). */
+    property int catalogTotal: 0
+    /** The query and page offset the catalog list currently reflects. */
+    property string catalogQuery: ""
+    property int catalogOffset: 0
+    readonly property int catalogLimit: 50
+    /** True while a catalog search is in flight; drives the switcher's "searching…" line. */
+    property bool catalogLoading: false
+    /** Non-empty when a model fetch or switch failed. */
+    property string modelError: ""
+    /** Non-fatal setup instruction returned by a successful model switch. */
+    property string modelWarning: ""
+
+    /** PUT /model wrote a role whose provider is not credentialed — prompt a login. */
+    signal modelSwitchNeedsLogin(string provider)
+
     // ---- Internals --------------------------------------------------------
     // The XHR must be held by a property. A request whose only reference is the
     // closure it installed on itself is eligible for collection mid-flight.
     property var request: null
     property var listRequest: null
     property var loginRequest: null
+    property var modelRequest: null
+    property var availRequest: null
+    property var catalogRequest: null
+    property var setModelRequest: null
 
     property var sessions: ({})       // ghost name -> pi session id
     property var blocks: ({})         // contentIndex -> { kind, text }
@@ -114,6 +143,7 @@ Singleton {
                     root.lastError = "";
                     if (root.activeGhost === "" && root.ghosts.length > 0)
                         root.activeGhost = root.ghosts[0].name;
+                    if (root.activeGhost !== "") root.fetchCurrentModel();
                 } catch (error) {
                     root.fail("ghostd sent a malformed ghost list: " + error);
                 }
@@ -156,6 +186,12 @@ Singleton {
         root.cancel();
         root.activeGhost = name;
         root.clearTranscript();
+        // Model selection is per ghost; drop the old one and fetch the new.
+        root.currentModel = null;
+        root.modelSource = "none";
+        root.availableModels = [];
+        root.modelWarning = "";
+        root.fetchCurrentModel();
     }
 
     function clearTranscript(): void {
@@ -429,9 +465,14 @@ Singleton {
                     root.loginError = "";
                     if (root.isLoginTerminal()) {
                         loginPoll.stop();
-                        // A finished login may have set the ghost's chat model;
-                        // refresh so the roster reflects it.
-                        if (root.loginState.status === "succeeded") root.refresh();
+                        // A finished login may have set the ghost's chat model
+                        // and always changes which models are usable; refresh both
+                        // the roster and the model indicator/available list.
+                        if (root.loginState.status === "succeeded") {
+                            root.refresh();
+                            root.fetchCurrentModel();
+                            root.fetchAvailableModels();
+                        }
                     }
                 } catch (error) {
                     root.loginError = "ghostd sent a malformed login step";
@@ -457,8 +498,18 @@ Singleton {
                 try {
                     root.loginState = JSON.parse(xhr.responseText);
                     root.loginError = "";
-                    if (root.isLoginTerminal()) loginPoll.stop();
-                    else loginPoll.start();
+                    if (root.isLoginTerminal()) {
+                        loginPoll.stop();
+                        // A paste/api-key flow can settle here without a poll;
+                        // reflect the new credentials in the model surfaces.
+                        if (root.loginState.status === "succeeded") {
+                            root.refresh();
+                            root.fetchCurrentModel();
+                            root.fetchAvailableModels();
+                        }
+                    } else {
+                        loginPoll.start();
+                    }
                 } catch (error) {
                     root.loginError = "ghostd sent a malformed login step";
                 }
@@ -489,6 +540,134 @@ Singleton {
         root.loginState = ({});
         root.loginGhost = "";
         root.loginError = "";
+    }
+
+    // ---- Model selection --------------------------------------------------
+
+    /** GET the ghost's current model. Cheap; called on refresh, ghost switch, panel open. */
+    function fetchCurrentModel(): void {
+        const ghost = root.activeGhost;
+        if (ghost === "") return;
+        const xhr = new XMLHttpRequest();
+        root.modelRequest = xhr;
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4) return;
+            if (xhr.status === 200) {
+                try {
+                    const body = JSON.parse(xhr.responseText);
+                    root.currentModel = body.current || null;
+                    root.modelSource = body.source || "none";
+                    root.modelError = "";
+                } catch (error) {
+                    root.modelError = "ghostd sent a malformed model selection";
+                }
+            } else {
+                root.modelError = root.describeError(xhr, "GET model");
+            }
+        };
+        xhr.open("GET", root.baseUrl + "/api/ghosts/" + encodeURIComponent(ghost) + "/model");
+        xhr.send();
+    }
+
+    /** GET the models this ghost can use right now (credentialed providers only). */
+    function fetchAvailableModels(): void {
+        const ghost = root.activeGhost;
+        if (ghost === "") return;
+        const xhr = new XMLHttpRequest();
+        root.availRequest = xhr;
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4) return;
+            if (xhr.status === 200) {
+                try {
+                    const body = JSON.parse(xhr.responseText);
+                    root.availableModels = Array.isArray(body.models) ? body.models : [];
+                    root.modelError = "";
+                } catch (error) {
+                    root.modelError = "ghostd sent a malformed model list";
+                }
+            } else {
+                root.modelError = root.describeError(xhr, "GET models (available)");
+            }
+        };
+        xhr.open("GET", root.baseUrl + "/api/ghosts/" + encodeURIComponent(ghost)
+            + "/models?scope=available");
+        xhr.send();
+    }
+
+    /**
+     * Search the FULL pi catalogue. `query` is a case-insensitive substring on
+     * id/name; `offset` pages by catalogLimit. Result → catalogModels/catalogTotal.
+     * A stale reply (a newer search already fired) is dropped.
+     */
+    function fetchCatalog(query: string, offset: int): void {
+        const ghost = root.activeGhost;
+        if (ghost === "") return;
+        root.catalogQuery = query;
+        root.catalogOffset = offset;
+        root.catalogLoading = true;
+        const xhr = new XMLHttpRequest();
+        root.catalogRequest = xhr;
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4) return;
+            if (xhr !== root.catalogRequest) return;   // superseded by a newer search
+            root.catalogLoading = false;
+            if (xhr.status === 200) {
+                try {
+                    const body = JSON.parse(xhr.responseText);
+                    root.catalogModels = Array.isArray(body.models) ? body.models : [];
+                    root.catalogTotal = Number(body.total) || 0;
+                    root.modelError = "";
+                } catch (error) {
+                    root.modelError = "ghostd sent a malformed catalogue";
+                }
+            } else {
+                root.modelError = root.describeError(xhr, "GET models (catalog)");
+            }
+        };
+        const q = query === "" ? "" : "&q=" + encodeURIComponent(query);
+        xhr.open("GET", root.baseUrl + "/api/ghosts/" + encodeURIComponent(ghost)
+            + "/models?scope=catalog&limit=" + root.catalogLimit + "&offset=" + offset + q);
+        xhr.send();
+    }
+
+    /**
+     * Set roles.chat_model. The daemon writes the role even when the provider is
+     * not credentialed and answers { usable: false, … } — we then emit
+     * modelSwitchNeedsLogin so the shell can surface a login rather than fail the
+     * switch silently. The indicator and available list are refreshed either way.
+     */
+    function setModel(provider: string, id: string): void {
+        const ghost = root.activeGhost;
+        if (ghost === "" || provider === "" || id === "") return;
+        root.modelWarning = "";
+        const xhr = new XMLHttpRequest();
+        root.setModelRequest = xhr;
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4) return;
+            if (xhr.status === 200) {
+                let body = {};
+                try {
+                    body = JSON.parse(xhr.responseText);
+                } catch (error) {
+                    body = {};
+                }
+                root.modelWarning = body.usable === false && typeof body.warning === "string"
+                    ? body.warning
+                    : "";
+                root.modelError = "";
+                root.fetchCurrentModel();
+                root.fetchAvailableModels();
+                // Claude Code owns its external desktop login. Opening Ghost's
+                // per-ghost provider form here would offer no usable action.
+                if (body.usable === false && provider !== "claude-code")
+                    root.modelSwitchNeedsLogin(provider);
+            } else {
+                root.modelError = root.describeError(xhr, "PUT model");
+            }
+        };
+        xhr.open("PUT", root.baseUrl + "/api/ghosts/" + encodeURIComponent(ghost) + "/model");
+        xhr.setRequestHeader("Content-Type", "application/json");
+        xhr.send(JSON.stringify({ provider: provider, id: id }));
     }
 
     // ---- Errors -----------------------------------------------------------

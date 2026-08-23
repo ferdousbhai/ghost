@@ -201,12 +201,100 @@ function loginInput(session, value) {
   return session.view;
 }
 
+// A finished login credentials the catalogue provider it maps to, so a model
+// that was usable:false becomes usable after the switcher routes through login.
+const LOGIN_TO_CATALOG = { "openai-codex": "openai", anthropic: "anthropic", openrouter: "google" };
+
 function finishLogin(session) {
   const view = session.view;
   view.status = "succeeded";
   view.message = "Signed in.";
+  const mapped = LOGIN_TO_CATALOG[session.providerId];
+  if (mapped) credentialed.add(mapped);
   view.modelBound = { provider: session.providerId, modelId: "demo/first-model" };
   delete view.prompt;
+}
+
+// ---- Scripted model catalogue ----------------------------------------------
+// A small stand-in for pi's ~1,270-model registry: enough providers and rows
+// to exercise available-vs-catalog, the vision badge, search, and paging.
+
+/** @type {{ provider: string, id: string, name: string, contextWindow: number, cost: object, hasVision: boolean }[]} */
+const CATALOG = [
+  { provider: "anthropic", id: "claude-opus-4", name: "Claude Opus 4", contextWindow: 200000, cost: { input: 15, output: 75 }, hasVision: true },
+  { provider: "anthropic", id: "claude-sonnet-4", name: "Claude Sonnet 4", contextWindow: 200000, cost: { input: 3, output: 15 }, hasVision: true },
+  { provider: "anthropic", id: "claude-haiku-3-5", name: "Claude Haiku 3.5", contextWindow: 200000, cost: { input: 0.8, output: 4 }, hasVision: true },
+  { provider: "google", id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", contextWindow: 1000000, cost: { input: 0.3, output: 2.5 }, hasVision: true },
+  { provider: "google", id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", contextWindow: 2000000, cost: { input: 1.25, output: 10 }, hasVision: true },
+  { provider: "ollama", id: "llama3.2", name: "Llama 3.2 (local)", contextWindow: 131072, cost: { input: 0, output: 0 }, hasVision: false },
+  { provider: "ollama", id: "qwen2.5-coder", name: "Qwen2.5 Coder (local)", contextWindow: 32768, cost: { input: 0, output: 0 }, hasVision: false },
+  { provider: "openai", id: "gpt-4o", name: "GPT-4o", contextWindow: 128000, cost: { input: 2.5, output: 10 }, hasVision: true },
+  { provider: "openai", id: "gpt-4o-mini", name: "GPT-4o mini", contextWindow: 128000, cost: { input: 0.15, output: 0.6 }, hasVision: true },
+  { provider: "openai", id: "o3", name: "o3", contextWindow: 200000, cost: { input: 2, output: 8 }, hasVision: true },
+  { provider: "xai", id: "grok-4", name: "Grok 4", contextWindow: 256000, cost: { input: 5, output: 15 }, hasVision: false },
+  { provider: "xai", id: "grok-4-fast", name: "Grok 4 Fast", contextWindow: 256000, cost: { input: 0.2, output: 0.5 }, hasVision: false },
+].sort((a, b) => (a.provider + a.id).localeCompare(b.provider + b.id));
+
+// Which providers this mock pretends to be credentialed for. `anthropic` starts
+// connected so the available list is non-empty; the rest route through login.
+const credentialed = new Set(["anthropic"]);
+/** ghost name → { provider, id } explicit chat-model role. */
+const roles = new Map();
+
+const modelRow = (m) => ({
+  provider: m.provider,
+  id: m.id,
+  name: m.name,
+  contextWindow: m.contextWindow,
+  cost: m.cost,
+  hasVision: m.hasVision,
+});
+
+function resolveCurrent(name) {
+  const role = roles.get(name);
+  if (role) {
+    const m = CATALOG.find((x) => x.provider === role.provider && x.id === role.id);
+    if (m) {
+      return {
+        current: { provider: m.provider, id: m.id, name: m.name, contextWindow: m.contextWindow, hasVision: m.hasVision },
+        source: "role",
+      };
+    }
+  }
+  const first = CATALOG.find((x) => credentialed.has(x.provider));
+  if (first) {
+    return {
+      current: { provider: first.provider, id: first.id, name: first.name, contextWindow: first.contextWindow, hasVision: first.hasVision },
+      source: "default",
+    };
+  }
+  return { current: null, source: "none" };
+}
+
+function listModels(name, params) {
+  const scope = params.get("scope") === "catalog" ? "catalog" : "available";
+  const provider = params.get("provider") || "";
+  const q = (params.get("q") || "").toLowerCase();
+  const limit = Math.min(500, Number(params.get("limit")) || 100);
+  const offset = Math.max(0, Number(params.get("offset")) || 0);
+  const cur = resolveCurrent(name).current;
+
+  let rows = CATALOG.filter((m) => (scope === "available" ? credentialed.has(m.provider) : true));
+  if (provider) rows = rows.filter((m) => m.provider === provider);
+  if (q) rows = rows.filter((m) => (m.id + " " + m.name).toLowerCase().includes(q));
+  const total = rows.length;
+  const page = rows.slice(offset, offset + limit).map((m) => {
+    const row = modelRow(m);
+    row.current = Boolean(cur && cur.provider === m.provider && cur.id === m.id);
+    if (scope === "catalog") {
+      row.usable = credentialed.has(m.provider);
+      if (row.usable) row.connectedVia = "api_key";
+    } else {
+      row.connectedVia = "api_key";
+    }
+    return row;
+  });
+  return { scope, models: page, total, limit, offset, provider: provider || undefined, q: params.get("q") || undefined };
 }
 
 createServer(async (req, res) => {
@@ -240,6 +328,28 @@ createServer(async (req, res) => {
     return json(res, 200, [
       { id: "sess-mock-1", title: "first contact", updatedAt: new Date().toISOString(), messageCount: 4 },
     ]);
+  }
+
+  // ---- Model indicator + switcher ------------------------------------------
+  if (parts[3] === "model" && parts.length === 4 && req.method === "GET") {
+    return json(res, 200, resolveCurrent(name));
+  }
+  if (parts[3] === "models" && parts.length === 4 && req.method === "GET") {
+    return json(res, 200, listModels(name, url.searchParams));
+  }
+  if (parts[3] === "model" && parts.length === 4 && req.method === "PUT") {
+    const body = await readBody(req).catch(() => ({}));
+    const provider = typeof body?.provider === "string" ? body.provider : "";
+    const id = typeof body?.id === "string" ? body.id : "";
+    if (!CATALOG.some((m) => m.provider === provider && m.id === id)) {
+      return json(res, 400, { error: { message: `unknown model ${provider}/${id}`, code: "unknown_model" } });
+    }
+    roles.set(name, { provider, id });
+    const usable = credentialed.has(provider);
+    const { current, source } = resolveCurrent(name);
+    return json(res, 200, usable
+      ? { ok: true, usable: true, current, source }
+      : { ok: true, usable: false, warning: `${provider} is not connected; sign in to use this model`, current, source });
   }
 
   // ---- Login endpoints -----------------------------------------------------

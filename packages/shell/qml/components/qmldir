@@ -4,4 +4,5 @@ ActivityLine 1.0 ActivityLine.qml
 Bubble 1.0 Bubble.qml
 Composer 1.0 Composer.qml
 ModelLogin 1.0 ModelLogin.qml
+ModelSwitcher 1.0 ModelSwitcher.qml
 Roster 1.0 Roster.qml

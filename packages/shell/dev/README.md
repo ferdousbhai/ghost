@@ -106,7 +106,7 @@ Verified on this machine (Omarchy 4.0.0.alpha, Hyprland 0.56.2, Quickshell
   `RegisteredStatusNotifierItems`; `org.kde.StatusNotifierItem` `GetAll` returns
   `Id=ghost`, `Status=Active`, `ItemIsMenu=false`, `Menu=/MenuBar`, and a
   status-tinted `IconPixmap`; `com.canonical.dbusmenu` `GetLayout` returns the
-  Summon / per-ghost radio / Connect-a-model / Quit tree; a synthesised
+  Summon / per-ghost radio / Choose-a-model / Quit tree; a synthesised
   `Activate` emitted `{"action":"toggle"}` and, end to end, opened the
   `ghost-hud` layer (`hyprctl layers`). The three status glyphs the helper draws
   are captured at `dev/evidence/tray-glyph-{idle,streaming,unreachable}.png` and

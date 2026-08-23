@@ -36,6 +36,10 @@ PanelWindow {
     property bool rosterOpen: true
     /** The "Connect a model" panel replaces the transcript body when open. */
     property bool loginOpen: false
+    /** The model switcher replaces the transcript body when open. */
+    property bool switcherOpen: false
+    /** True when login was reached from the switcher, so closing returns there. */
+    property bool loginFromSwitcher: false
 
     visible: hud.shown
 
@@ -53,8 +57,10 @@ PanelWindow {
     implicitHeight: 620
 
     function open(): void {
+        hud.moveToFocused();
         hud.shown = true;
         hud.loginOpen = false;
+        hud.switcherOpen = false;
         Ghostd.refresh();
         composer.take();
     }
@@ -64,6 +70,23 @@ PanelWindow {
     }
 
     function openLogin(): void {
+        hud.loginFromSwitcher = false;
+        hud.switcherOpen = false;
+        hud.loginOpen = true;
+        modelLogin.open();
+    }
+
+    /** Open the model switcher over the transcript. */
+    function openSwitcher(): void {
+        hud.loginOpen = false;
+        hud.switcherOpen = true;
+        modelSwitcher.open();
+    }
+
+    /** Reach the provider login from the switcher; closing it returns to the switcher. */
+    function openLoginFromSwitcher(): void {
+        hud.loginFromSwitcher = true;
+        hud.switcherOpen = false;
         hud.loginOpen = true;
         modelLogin.open();
     }
@@ -71,6 +94,46 @@ PanelWindow {
     function toggle(): void {
         if (hud.shown) hud.close();
         else hud.open();
+    }
+
+    // ---- Screen placement -------------------------------------------------
+    // A layer surface is not a toplevel window, so Hyprland's move-to-monitor
+    // binds never touch it. We place it ourselves: on the focused output at
+    // summon (so it lands where the creator is looking), and on the next output
+    // via IPC (`qs -c ghost ipc call ghost moveNext`) for multi-monitor users.
+
+    /** The Quickshell screen matching Hyprland's focused monitor, or null. */
+    function focusedScreen(): var {
+        const mon = Hyprland.focusedMonitor;
+        if (!mon)
+            return null;
+        const screens = Quickshell.screens;
+        for (let i = 0; i < screens.length; i++)
+            if (screens[i].name === mon.name)
+                return screens[i];
+        return null;
+    }
+
+    /** Summon on the output the creator is looking at. No-op if it can't be found. */
+    function moveToFocused(): void {
+        const s = hud.focusedScreen();
+        if (s)
+            hud.screen = s;
+    }
+
+    /** Relocate to the next output. No-op with a single output. */
+    function moveNext(): void {
+        const screens = Quickshell.screens;
+        if (screens.length < 2)
+            return;
+        let idx = 0;
+        const current = hud.screen;
+        for (let i = 0; i < screens.length; i++)
+            if (current && screens[i].name === current.name) {
+                idx = i;
+                break;
+            }
+        hud.screen = screens[(idx + 1) % screens.length];
     }
 
     // Clicking anywhere outside the grabbed window dismisses. On a compositor
@@ -136,21 +199,78 @@ PanelWindow {
                     anchors.verticalCenter: parent.verticalCenter
                     spacing: Theme.pad
 
-                    Text {
-                        id: connectModel
+                    // Current-model indicator → opens the switcher. Shows the
+                    // model name (or id), a vision badge, a "default" hint when
+                    // the pick is only a fallback, and a CTA when nothing is set.
+                    Rectangle {
+                        id: modelIndicator
+
+                        readonly property bool noneSet: Ghostd.currentModel === null
+                            || Ghostd.modelSource === "none"
+
                         anchors.verticalCenter: parent.verticalCenter
                         visible: Ghostd.activeGhost !== ""
-                        text: hud.loginOpen ? "back to chat" : "connect a model"
-                        color: hud.loginOpen ? Theme.accent : Theme.foregroundDim
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSizeSmall
+                        implicitWidth: indicatorRow.implicitWidth + Theme.pad
+                        implicitHeight: 22
+                        radius: Theme.radius / 2
+                        color: indicatorArea.containsMouse ? Theme.selection : "transparent"
+                        border.width: 1
+                        border.color: hud.switcherOpen ? Theme.accent
+                            : (modelIndicator.noneSet ? Theme.warn : Theme.muted)
+
+                        Row {
+                            id: indicatorRow
+                            anchors.centerIn: parent
+                            spacing: Theme.gap / 2
+
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: hud.switcherOpen ? "back to chat"
+                                    : (Ghostd.currentModel
+                                        ? (Ghostd.currentModel.name || Ghostd.currentModel.id)
+                                        : "Choose a model")
+                                color: hud.switcherOpen ? Theme.accent
+                                    : (modelIndicator.noneSet ? Theme.warn : Theme.foreground)
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSizeSmall
+                                elide: Text.ElideRight
+                            }
+
+                            // Vision badge.
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                visible: !hud.switcherOpen && Ghostd.currentModel
+                                    && Ghostd.currentModel.hasVision === true
+                                text: "· vision"
+                                color: Theme.foregroundDim
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSizeSmall
+                            }
+
+                            // Fallback hint: this model was not explicitly chosen.
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                visible: !hud.switcherOpen && Ghostd.currentModel
+                                    && Ghostd.modelSource === "default"
+                                text: "· default"
+                                color: Theme.foregroundDim
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSizeSmall
+                            }
+                        }
 
                         MouseArea {
+                            id: indicatorArea
                             anchors.fill: parent
+                            hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
                             onClicked: {
-                                if (hud.loginOpen) hud.loginOpen = false;
-                                else hud.openLogin();
+                                if (hud.switcherOpen) {
+                                    hud.switcherOpen = false;
+                                    composer.take();
+                                } else {
+                                    hud.openSwitcher();
+                                }
                             }
                         }
                     }
@@ -188,7 +308,7 @@ PanelWindow {
 
             // ---- Body -----------------------------------------------------
             RowLayout {
-                visible: !hud.loginOpen
+                visible: !hud.loginOpen && !hud.switcherOpen
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 spacing: Theme.pad
@@ -274,13 +394,41 @@ PanelWindow {
                 }
             }
 
+            // Model switcher: swaps in over the transcript body.
+            ModelSwitcher {
+                id: modelSwitcher
+                visible: hud.switcherOpen && !hud.loginOpen
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                onCloseRequested: {
+                    hud.switcherOpen = false;
+                    composer.take();
+                }
+                onConnectProviderRequested: hud.openLoginFromSwitcher()
+            }
+
             // "Connect a model": swaps in over the transcript body.
             ModelLogin {
                 id: modelLogin
                 visible: hud.loginOpen
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                onCloseRequested: hud.loginOpen = false
+                onCloseRequested: {
+                    hud.loginOpen = false;
+                    if (hud.loginFromSwitcher) {
+                        hud.loginFromSwitcher = false;
+                        hud.openSwitcher();
+                    }
+                }
+            }
+        }
+
+        // A switch to an uncredentialed provider's model wrote the role but
+        // needs a login before it resolves; route into the login flow.
+        Connections {
+            target: Ghostd
+            function onModelSwitchNeedsLogin(provider: string): void {
+                hud.openLoginFromSwitcher();
             }
         }
     }

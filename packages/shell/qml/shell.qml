@@ -81,6 +81,12 @@ ShellRoot {
             hud.openLogin();
         }
 
+        /** Open the HUD on the model switcher for the active ghost. */
+        function switcher(): void {
+            hud.open();
+            hud.openSwitcher();
+        }
+
         /** Open the panel and begin a specific login straight away. */
         function loginTo(provider: string, authType: string): void {
             hud.open();
@@ -102,6 +108,15 @@ ShellRoot {
         function refresh(): void {
             Ghostd.refresh();
             Theme.reload();
+        }
+
+        /**
+         * Relocate the HUD to the next output. The HUD is a layer surface, so
+         * Hyprland's move-window binds do not act on it; this is how a
+         * multi-monitor user moves it. No-op with a single output.
+         */
+        function moveNext(): void {
+            hud.moveNext();
         }
     }
 

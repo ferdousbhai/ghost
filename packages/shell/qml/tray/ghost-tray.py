@@ -28,7 +28,7 @@
 #                                      "danger":"#rrggbb"}}
 #   stdout (here -> shell): {"action":"toggle"}            left click
 #                           {"action":"summon","name":..}  ghost menu entry
-#                           {"action":"login"}             connect a model
+#                           {"action":"switcher"}          choose a model
 #                           {"action":"quit"}              quit
 #
 # DEPENDENCIES: python3 + dbus-python + PyGObject (GLib). Both bindings ship on
@@ -170,7 +170,7 @@ class Menu(dbus.service.Object):
                     "toggle-state": 1 if name == active else 0,
                 }, ("summon", name)))
             items.append((3, {"type": "separator"}, None))
-        items.append((4, {"label": "Connect a model…"}, ("login", None)))
+        items.append((4, {"label": "Choose a model…"}, ("switcher", None)))
         items.append((5, {"type": "separator"}, None))
         items.append((6, {"label": "Quit"}, ("quit", None)))
         self._items = items

@@ -14,6 +14,12 @@ o.bind("SUPER + G", "Summon ghost", "qs -c ghost ipc call ghost toggle")
 -- Summon a named ghost directly.
 -- o.bind("SUPER + SHIFT + G", "Summon casper", "qs -c ghost ipc call ghost summon casper")
 
+-- ---- Move between monitors ------------------------------------------------
+-- The HUD is a wlr-layer surface, so Hyprland's window move-to-monitor binds do
+-- not act on it. Summoning already places it on the focused output; this moves
+-- an already-open HUD to the next output. No-op with a single monitor.
+o.bind("SUPER + ALT + G", "Move ghost to next monitor", "qs -c ghost ipc call ghost moveNext")
+
 -- ---- Layer rules ----------------------------------------------------------
 -- The HUD animates itself; skip the compositor's layer fade so summoning is
 -- instant. `^ghost-` is anchored so it cannot collide with Omarchy's own

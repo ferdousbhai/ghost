@@ -96,6 +96,10 @@ Item {
             if (message.name) Ghostd.selectGhost(message.name);
             bridge.hud.open();
             break;
+        case "switcher":
+            bridge.hud.open();
+            bridge.hud.openSwitcher();
+            break;
         case "login":
             bridge.hud.open();
             bridge.hud.openLogin();

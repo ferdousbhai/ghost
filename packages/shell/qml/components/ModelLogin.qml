@@ -162,6 +162,7 @@ Rectangle {
                                     readonly property string tags: {
                                         const parts = [];
                                         if (providerRow.modelData.subscription) parts.push("subscription");
+                                        if (providerRow.modelData.billingNote) parts.push(providerRow.modelData.billingNote);
                                         if (providerRow.modelData.configured) parts.push("connected");
                                         return parts.join(" · ");
                                     }
@@ -170,6 +171,8 @@ Rectangle {
                                     color: providerRow.modelData.configured ? Theme.ok : Theme.foregroundDim
                                     font.family: Theme.fontFamily
                                     font.pixelSize: Theme.fontSizeSmall
+                                    elide: Text.ElideRight
+                                    Layout.fillWidth: true
                                 }
                             }
 

@@ -53,7 +53,7 @@ The ghost also shows up as a system-tray icon — a StatusNotifierItem — for a
 long as the shell is running: a ghost glyph tinted to the theme (dim when idle,
 accent while streaming, red when `ghostd` is unreachable), tooltip'd with the
 active ghost's name, left-click to toggle the HUD, and a DBusMenu with Summon,
-a radio entry per ghost in the roster, "Connect a model", and Quit.
+a radio entry per ghost in the roster, "Choose a model", and Quit.
 
 Quickshell 0.3.0 can *consume* an SNI (`Quickshell.Services.SystemTray`) but
 exposes nothing to *produce* one — no generic D-Bus object or bus-name API
@@ -83,6 +83,8 @@ qs -c ghost ipc call ghost summon <name>
 qs -c ghost ipc call ghost ask "<prompt>"     # reply arrives as a notification
 qs -c ghost ipc call ghost login              # open "Connect a model"
 qs -c ghost ipc call ghost loginTo <id> <oauth|api_key>   # and start one
+qs -c ghost ipc call ghost switcher           # open the model switcher
+qs -c ghost ipc call ghost moveNext           # move the HUD to the next output
 qs -c ghost ipc call ghost status             # JSON
 qs -c ghost ipc call ghost refresh            # re-read roster and theme
 ```
