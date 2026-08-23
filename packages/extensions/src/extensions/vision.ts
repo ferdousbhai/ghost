@@ -438,9 +438,48 @@ export const resizeWithPi: ImageResizer = async (image) => {
   }
 };
 
-function mimeForPath(path: string): string {
+/**
+ * The MIME a path's extension claims, or `undefined` when the extension is not a
+ * known image type. It must NEVER default-guess `image/png`: on the send path an
+ * unknown extension is an error the model sees, not a silent relabel that would
+ * ship arbitrary bytes (a note, `.pi/auth.json`) to the vision provider.
+ */
+function mimeForPath(path: string): string | undefined {
   const ext = path.slice(path.lastIndexOf(".") + 1).toLowerCase();
-  return EXTENSION_MIMES[ext] ?? "image/png";
+  return EXTENSION_MIMES[ext];
+}
+
+/**
+ * The image formats `EXTENSION_MIMES` covers, keyed by their leading magic
+ * bytes. Returns the detected MIME, or `undefined` when the bytes are not one of
+ * them — an extension is a claim, and this is the proof.
+ */
+function sniffImageMime(bytes: Buffer): string | undefined {
+  // PNG: 89 50 4E 47 0D 0A 1A 0A
+  if (
+    bytes.length >= 8
+    && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47
+    && bytes[4] === 0x0d && bytes[5] === 0x0a && bytes[6] === 0x1a && bytes[7] === 0x0a
+  ) {
+    return "image/png";
+  }
+  // JPEG: FF D8 FF
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    return "image/jpeg";
+  }
+  // GIF: "GIF87a" / "GIF89a"
+  if (bytes.length >= 6 && bytes.toString("ascii", 0, 4) === "GIF8") {
+    return "image/gif";
+  }
+  // WebP: "RIFF" <4-byte size> "WEBP"
+  if (
+    bytes.length >= 12
+    && bytes.toString("ascii", 0, 4) === "RIFF"
+    && bytes.toString("ascii", 8, 12) === "WEBP"
+  ) {
+    return "image/webp";
+  }
+  return undefined;
 }
 
 function extensionForMime(mimeType: string): string {
@@ -465,6 +504,31 @@ export async function readImageFile(
       { path },
     );
   }
+  // The `.pi/` directory holds this ghost's credentials and model config
+  // (`auth.json`, `models.json`), never an image. A prompt-injected
+  // look_at_image({ path: ".pi/auth.json" }) must not be able to base64 those
+  // secrets and ship them to a vision provider — refuse the directory outright,
+  // before any bytes are read, even if a file in it somehow had an image name.
+  const piDir = join(home.dir, GHOST_AGENT_DIRNAME);
+  if (absolute === piDir || absolute.startsWith(piDir + sep)) {
+    throw new GhostError(
+      "invalid_path",
+      `${JSON.stringify(path)} is inside the ${GHOST_AGENT_DIRNAME}/ config directory, which `
+      + "holds credentials, not images. Point at a real image, such as .screenshots/…",
+      { path },
+    );
+  }
+  // The extension must be a known image type. An unknown extension is an error
+  // the model sees, not a silent relabel to image/png that hands arbitrary
+  // bytes to the vision provider.
+  if (!mimeForPath(absolute)) {
+    throw new GhostError(
+      "invalid_path",
+      `${JSON.stringify(path)} is not a supported image. Supported extensions: `
+      + `${Object.keys(EXTENSION_MIMES).sort().join(", ")}.`,
+      { path },
+    );
+  }
   let bytes: Buffer;
   try {
     bytes = await readFile(absolute);
@@ -484,8 +548,22 @@ export async function readImageFile(
       { path, bytes: bytes.byteLength },
     );
   }
+  // Defense in depth: an image extension is a claim, the leading bytes are the
+  // proof. A note or `auth.json` renamed `something.png` is rejected here rather
+  // than base64'd and posted to the provider (which would 400 — after the secret
+  // has already left the machine). The sniffed type, not the extension, is what
+  // we label the payload, so a real JPEG named `.png` is sent honestly.
+  const sniffedMime = sniffImageMime(bytes);
+  if (!sniffedMime) {
+    throw new GhostError(
+      "invalid_format",
+      `${JSON.stringify(path)} has an image extension but its contents are not a supported `
+      + "image (PNG, JPEG, GIF, or WebP).",
+      { path },
+    );
+  }
   return {
-    image: { type: "image", data: bytes.toString("base64"), mimeType: mimeForPath(absolute) },
+    image: { type: "image", data: bytes.toString("base64"), mimeType: sniffedMime },
     absolutePath: absolute,
   };
 }

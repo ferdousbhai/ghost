@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 import { discoverAndLoadExtensions } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { GhostError } from "../src/errors.js";
+import { GhostHome } from "../src/home.js";
 import { visitorScope } from "../src/scope.js";
 import {
   createVisionExtension,
@@ -21,6 +22,7 @@ import {
   hasVision,
   IMAGES_DIRNAME,
   rankVisionModels,
+  readImageFile,
   readVisionModelRole,
   resolveVisionModel,
   SCREENSHOTS_DIRNAME,
@@ -233,6 +235,100 @@ describe("readVisionModelRole", () => {
     await mkdir(join(fixture.dir, ".pi"), { recursive: true });
     await writeFile(join(fixture.dir, ".pi", "models.json"), "{ not json", "utf8");
     expect(await readVisionModelRole(fixture.dir)).toBeUndefined();
+  });
+});
+
+describe("readImageFile", () => {
+  // The harness calls the read/validation path directly, exactly as the audit
+  // notes the tool harness does — schema coercion is not what is under test.
+  // What is under test is the P0: look_at_image must never base64 a non-image
+  // (a private note, `.pi/auth.json`) and ship it to a vision provider.
+  let fixture: GhostFixture;
+  let home: GhostHome;
+
+  beforeEach(async () => {
+    fixture = await createGhostFixture();
+    home = new GhostHome(fixture.dir);
+    await mkdir(join(fixture.dir, SCREENSHOTS_DIRNAME), { recursive: true });
+  });
+  afterEach(() => fixture.cleanup());
+
+  it("reads a real PNG and labels it by its true type", async () => {
+    await writeFile(
+      join(fixture.dir, SCREENSHOTS_DIRNAME, "real.png"),
+      Buffer.from(TINY_PNG_BASE64, "base64"),
+    );
+    const { image } = await readImageFile(home, `${SCREENSHOTS_DIRNAME}/real.png`);
+    expect(image.type).toBe("image");
+    expect(image.mimeType).toBe("image/png");
+    expect(image.data).toBe(TINY_PNG_BASE64);
+  });
+
+  it("rejects a non-image file wearing a spoofed .png name", async () => {
+    // A secret note renamed to look like a screenshot. Magic-byte sniffing must
+    // catch it before the bytes are handed to the provider.
+    await writeFile(
+      join(fixture.dir, SCREENSHOTS_DIRNAME, "secret.png"),
+      "these are private credentials, not pixels",
+      "utf8",
+    );
+    let thrown: unknown;
+    try {
+      await readImageFile(home, `${SCREENSHOTS_DIRNAME}/secret.png`);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(GhostError);
+    expect((thrown as GhostError).code).toBe("invalid_format");
+    expect((thrown as GhostError).message).toMatch(/not a supported image/);
+  });
+
+  it("refuses .pi/auth.json outright — this is the exfiltration path", async () => {
+    await mkdir(join(fixture.dir, ".pi"), { recursive: true });
+    await writeFile(
+      join(fixture.dir, ".pi", "auth.json"),
+      JSON.stringify({ anthropic: { apiKey: "sk-secret" } }),
+      "utf8",
+    );
+    let thrown: unknown;
+    try {
+      await readImageFile(home, ".pi/auth.json");
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(GhostError);
+    expect((thrown as GhostError).code).toBe("invalid_path");
+    expect((thrown as GhostError).message).toMatch(/\.pi\/ config directory/);
+  });
+
+  it("refuses a file in .pi even when it is a genuine image", async () => {
+    // The directory is excluded outright, before any read: a valid PNG dropped
+    // into .pi is still refused, so no credential-adjacent file is ever a source.
+    await mkdir(join(fixture.dir, ".pi"), { recursive: true });
+    await writeFile(
+      join(fixture.dir, ".pi", "decoy.png"),
+      Buffer.from(TINY_PNG_BASE64, "base64"),
+    );
+    await expect(readImageFile(home, ".pi/decoy.png")).rejects.toThrowError(
+      /\.pi\/ config directory/,
+    );
+  });
+
+  it("rejects an unknown, non-image extension", async () => {
+    await writeFile(
+      join(fixture.dir, "notes.txt"),
+      "a private note the model tried to look at",
+      "utf8",
+    );
+    let thrown: unknown;
+    try {
+      await readImageFile(home, "notes.txt");
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(GhostError);
+    expect((thrown as GhostError).code).toBe("invalid_path");
+    expect((thrown as GhostError).message).toMatch(/not a supported image/);
   });
 });
 
