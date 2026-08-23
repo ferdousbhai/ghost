@@ -180,7 +180,7 @@ describe("Claude Code subscription runtime", () => {
     expect(sessions).toEqual([
       expect.objectContaining({
         id: "conversation-1",
-        name: "Claude Code",
+        title: "Claude Code",
         messageCount: 4,
       }),
     ]);

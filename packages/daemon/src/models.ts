@@ -98,11 +98,18 @@ export interface GhostModelRoleBinding {
  *   to the cheapest credentialed vision-capable model in the ghost's own
  *   catalogue, ranked by `cost.input`. With none available it raises a loud,
  *   actionable error rather than letting the image be dropped in silence.
+ * - `title_model` — the cheap model that names a new conversation (see
+ *   `title.ts`). Unbound, the daemon falls back to the cheapest USABLE model,
+ *   subscription-aware: a capable model on an already-authenticated
+ *   subscription (OAuth / included plan → zero marginal cost) is preferred over
+ *   a cheaper metered model. Used only for a single, fire-and-forget completion
+ *   after the first turn; a failure never affects the conversation.
  * - `general_purpose_model`, `research_model` — reserved.
  */
 export type GhostModelRole =
   | "chat_model"
   | "vision_model"
+  | "title_model"
   | "general_purpose_model"
   | "research_model";
 
@@ -175,6 +182,22 @@ export function resolveChatModelRef(
     const first = config.models?.[0];
     if (first?.id) return { provider, modelId: first.id };
   }
+  return null;
+}
+
+/**
+ * The explicit `roles.title_model` binding, or null.
+ *
+ * Unlike `resolveChatModelRef`, there is NO fallback to the first declared
+ * provider's model: an unbound title role means "let the daemon pick the
+ * cheapest usable model" (see `resolveTitleModel` in title.ts), not "reuse the
+ * chat model". Returning null here is exactly that signal.
+ */
+export function resolveTitleModelRef(
+  file: GhostModelsFile | null,
+): GhostModelRoleBinding | null {
+  const bound = file?.roles?.title_model;
+  if (bound?.provider && bound.modelId) return bound;
   return null;
 }
 

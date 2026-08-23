@@ -181,7 +181,9 @@ describe("POST /api/ghosts/:name/messages", () => {
     const base = await serve();
     await postTurn(base, TURN_BODY);
     await postTurn(base, { ...TURN_BODY, options: { sessionId: "conv-2" } });
-    const sessions = await (await fetch(`${base}/api/ghosts/casper/sessions`)).json() as unknown[];
+    const { sessions } = await (await fetch(`${base}/api/ghosts/casper/sessions`)).json() as {
+      sessions: unknown[];
+    };
     expect(sessions).toHaveLength(2);
   });
 
@@ -227,16 +229,48 @@ describe("POST /api/ghosts/:name/messages", () => {
 describe("GET /api/ghosts/:name/sessions", () => {
   it("is empty before the first turn and lists it after", async () => {
     const base = await serve();
-    expect(await (await fetch(`${base}/api/ghosts/casper/sessions`)).json()).toEqual([]);
+    expect(await (await fetch(`${base}/api/ghosts/casper/sessions`)).json())
+      .toEqual({ sessions: [] });
     await postTurn(base, TURN_BODY);
-    const sessions = await (await fetch(`${base}/api/ghosts/casper/sessions`)).json() as Array<{
-      id: string;
-      path: string;
-      messageCount: number;
-    }>;
+    const { sessions } = await (await fetch(`${base}/api/ghosts/casper/sessions`)).json() as {
+      sessions: Array<{
+        id: string;
+        title: string | null;
+        createdAt: string;
+        updatedAt: string;
+        messageCount: number;
+      }>;
+    };
     expect(sessions).toHaveLength(1);
+    expect(sessions[0]?.id).toBe("conv-1");
     expect(sessions[0]?.messageCount).toBeGreaterThan(0);
-    expect(sessions[0]?.path).toContain(".sessions");
+    expect(sessions[0]?.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect("title" in sessions[0]!).toBe(true);
+  });
+});
+
+describe("GET /api/ghosts/:name/sessions/:id/transcript", () => {
+  it("returns the conversation's renderable messages", async () => {
+    const base = await serve([{ kind: "text", text: "I set type for a living." }]);
+    await postTurn(base, TURN_BODY);
+    const response = await fetch(`${base}/api/ghosts/casper/sessions/conv-1/transcript`);
+    expect(response.status).toBe(200);
+    const transcript = await response.json() as {
+      id: string;
+      title: string | null;
+      messages: Array<{ role: string; content: unknown }>;
+    };
+    expect(transcript.id).toBe("conv-1");
+    expect(transcript.messages.length).toBeGreaterThanOrEqual(2);
+    expect(transcript.messages[0]?.role).toBe("user");
+    expect(transcript.messages.some((message) => message.role === "assistant")).toBe(true);
+  });
+
+  it("404s an unknown conversation id", async () => {
+    const base = await serve();
+    const response = await fetch(`${base}/api/ghosts/casper/sessions/nope/transcript`);
+    expect(response.status).toBe(404);
+    expect(await response.json()).toMatchObject({ error: { code: "not_found" } });
   });
 });
 

@@ -38,9 +38,9 @@
  *    of every pi built-in means a ghost can never reach bash, the filesystem,
  *    or a browser. Its tools are exactly the ones its extensions register.
  */
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import {
   createAgentSession,
   DefaultResourceLoader,
@@ -53,7 +53,6 @@ import {
 import {
   CLAUDE_CODE_PROVIDER_ID,
   ClaudeCodeRuntime,
-  claudeSessionMetadataPath,
   type ClaudeCodeRuntimeOptions,
 } from "./claude-code.js";
 import {
@@ -74,8 +73,10 @@ import {
   ghostModelsPath,
   readGhostModels,
   resolveChatModelRef,
+  resolveTitleModelRef,
 } from "./models.js";
 import { createPiMessagesAdapter, type PiMessagesEvent } from "./pi-messages.js";
+import { generateTitle } from "./title.js";
 
 /**
  * pi's built-in tools. Excluded wholesale so no ghost can shell out or touch
@@ -92,11 +93,48 @@ export const PI_BUILTIN_TOOL_NAMES: readonly string[] = [
   "write",
 ];
 
+/**
+ * Generate a title for a new conversation from its first user message. Throws
+ * on failure; the caller swallows it. Injectable so a test can drive title
+ * behaviour without a real model. The default reads `roles.title_model` and
+ * runs one completion on the cheapest usable model (see title.ts).
+ */
+export type TitleGenerator = (input: {
+  session: AgentSession;
+  ghostName: string;
+  agentDir: string;
+  firstPrompt: string;
+}) => Promise<string>;
+
+export interface TitleConfig {
+  /** Master switch. Defaults to enabled. */
+  enabled?: boolean;
+  /** Test seam: replace the default title generator. */
+  generate?: TitleGenerator;
+}
+
+/** The default: resolve title_model against the session's own runtime, complete once. */
+const defaultTitleGenerator: TitleGenerator = async ({ session, agentDir, firstPrompt }) => {
+  let ref = null;
+  try {
+    ref = resolveTitleModelRef(readGhostModels(agentDir));
+  } catch {
+    // A broken models.json is not fatal to titling: fall back to cheapest usable.
+    ref = null;
+  }
+  return generateTitle({ runtime: session.modelRuntime, firstPrompt, ref });
+};
+
 export interface SessionHostOptions {
   registry: GhostRegistry;
   logger?: Logger;
   /** Sets `PI_OFFLINE` and forbids catalog refresh. See config.offline. */
   offline?: boolean;
+  /**
+   * Background conversation-title generation. Enabled by default; a title is
+   * generated once, after the first turn of a conversation, fire-and-forget.
+   */
+  title?: TitleConfig;
   /** Passed to the `@ghost/extensions` factories. */
   extensionOptions?: GhostExtensionOptions;
   /**
@@ -150,6 +188,12 @@ interface HostedSession extends GhostSessionHandle {
    * compaction is running. Resolves (never rejects) when compaction settles.
    */
   compaction?: Promise<void>;
+  /**
+   * The in-flight background title generation, if any. `listSessions` awaits it
+   * so a just-generated title shows up in the listing; it never blocks a turn.
+   * Resolves (never rejects) when title generation settles.
+   */
+  title?: Promise<void>;
 }
 
 const DEFAULT_SESSION_KEY = "default";
@@ -183,6 +227,79 @@ export function sessionFileNameFor(sessionKey: string): string {
   return `${safe || "session"}-${digest}.jsonl`;
 }
 
+/**
+ * Recover the conversation id from a transcript file path — the inverse of
+ * `sessionFileNameFor` for any filename-safe id (which is what a client should
+ * send). The listing returns this so the shell can resume the conversation via
+ * the same id it passes as `options.sessionId`.
+ */
+export function conversationIdFromSessionFile(sessionFile: string): string {
+  const base = sessionFile.slice(sessionFile.lastIndexOf(sep) + 1);
+  return base.endsWith(".jsonl") ? base.slice(0, -".jsonl".length) : base;
+}
+
+/** One row in the conversation listing. Titles are null until generated. */
+export interface SessionSummary {
+  id: string;
+  title: string | null;
+  createdAt: string;
+  updatedAt: string;
+  messageCount: number;
+}
+
+/** A renderable transcript message: pi's own message shape, reasoning removed. */
+export interface TranscriptMessage {
+  role: "user" | "assistant";
+  content: unknown;
+  timestamp?: number;
+}
+
+/** A conversation's history for rehydration in the shell. */
+export interface Transcript {
+  id: string;
+  title: string | null;
+  messages: TranscriptMessage[];
+  /** Total renderable messages before the page cap. */
+  total: number;
+  /** True when this page omits messages (paged, or over the cap). */
+  truncated: boolean;
+}
+
+/** Default and hard cap on messages returned from one transcript read. */
+export const DEFAULT_TRANSCRIPT_LIMIT = 1_000;
+export const MAX_TRANSCRIPT_LIMIT = 2_000;
+
+function clampTranscriptLimit(limit: number | undefined): number {
+  if (typeof limit !== "number" || !Number.isFinite(limit)) return DEFAULT_TRANSCRIPT_LIMIT;
+  return Math.max(1, Math.min(MAX_TRANSCRIPT_LIMIT, Math.floor(limit)));
+}
+
+function clampTranscriptOffset(offset: number | undefined): number {
+  if (typeof offset !== "number" || !Number.isFinite(offset) || offset < 0) return 0;
+  return Math.floor(offset);
+}
+
+/**
+ * Project one session message entry to a renderable transcript message, or null
+ * to drop it. Keeps user and assistant messages (the assistant's `toolCall`
+ * blocks included, exactly as the live stream sends them); drops internal
+ * `toolResult` messages and any private `thinking` content.
+ */
+function projectTranscriptMessage(message: unknown): TranscriptMessage | null {
+  const role = (message as { role?: unknown } | null)?.role;
+  if (role !== "user" && role !== "assistant") return null;
+  let content = (message as { content?: unknown }).content;
+  if (role === "assistant" && Array.isArray(content)) {
+    content = content.filter(
+      (part) => (part as { type?: unknown } | null)?.type !== "thinking",
+    );
+  }
+  const projected: TranscriptMessage = { role, content };
+  const timestamp = (message as { timestamp?: unknown }).timestamp;
+  if (typeof timestamp === "number") projected.timestamp = timestamp;
+  return projected;
+}
+
 export class SessionHost {
   private readonly registry: GhostRegistry;
   private readonly logger: Logger;
@@ -191,6 +308,8 @@ export class SessionHost {
   private readonly browserMode: "relay" | "profile";
   private readonly relayTransport: RelayTransport | undefined;
   private readonly compactionConfig: CompactionConfig;
+  private readonly titleEnabled: boolean;
+  private readonly generateTitle: TitleGenerator;
   private readonly claudeCode: ClaudeCodeRuntime;
   private readonly sessions = new Map<string, HostedSession>();
   /** In-flight opens, so two concurrent turns never build two sessions. */
@@ -205,6 +324,8 @@ export class SessionHost {
     this.browserMode = options.browserMode ?? "relay";
     this.relayTransport = options.relayTransport;
     this.compactionConfig = options.compaction ?? DEFAULT_COMPACTION_CONFIG;
+    this.titleEnabled = options.title?.enabled ?? true;
+    this.generateTitle = options.title?.generate ?? defaultTitleGenerator;
     this.claudeCode = new ClaudeCodeRuntime({
       logger: this.logger,
       extensionOptions: this.extensionOptions,
@@ -448,6 +569,14 @@ export class SessionHost {
     }
     hosted.busy = true;
 
+    // Decide, BEFORE prompting, whether this turn should name the conversation:
+    // titling is on, the conversation has no title yet, and this is its first
+    // turn (no assistant message so far — a resumed transcript already has one).
+    // `options.prompt` is then the first user message the title is built from.
+    const shouldTitle = this.titleEnabled
+      && !hosted.session.sessionName
+      && !hosted.session.messages.some((message) => message.role === "assistant");
+
     // A background compaction from the previous turn may still be running.
     // pi's `session.prompt()` throws while a manual compaction is in progress,
     // so wait it out first. This is the only place a turn can be delayed by
@@ -489,7 +618,55 @@ export class SessionHost {
       // on an idle session (pi's compact() aborts any active run), and its
       // compaction_start/end events must not leak into this turn's stream.
       this.startBackgroundCompaction(hosted, ghostName);
+      // Name the conversation from its first message, fire-and-forget. Runs
+      // after the reply is fully delivered and never blocks the next turn.
+      if (shouldTitle) {
+        this.startBackgroundTitle(hosted, ghostName, paths.agentDir, options.prompt);
+      }
     }
+  }
+
+  /**
+   * Fire-and-forget conversation titling. Non-blocking by construction: the
+   * promise is stored on the session so `listSessions` can await it before
+   * reading titles, but this method never awaits and never throws — a failure
+   * is logged and the conversation simply stays untitled. Generation is a
+   * single completion on the title_model (see title.ts); the result is stored
+   * as a pi `session_info` entry, which never enters the model's context.
+   */
+  private startBackgroundTitle(
+    hosted: HostedSession,
+    ghostName: string,
+    agentDir: string,
+    firstPrompt: string,
+  ): void {
+    const promise = this.generateTitle({
+      session: hosted.session,
+      ghostName,
+      agentDir,
+      firstPrompt,
+    })
+      .then((raw) => {
+        const title = raw.trim();
+        // A concurrent turn may have titled it first; do not overwrite.
+        if (!title || hosted.session.sessionName) return;
+        hosted.session.sessionManager.appendSessionInfo(title);
+        this.logger.info("named ghost conversation", {
+          ghost: ghostName,
+          session: hosted.session.sessionId,
+          title,
+        });
+      })
+      .catch((error: unknown) => {
+        this.logger.warn("conversation title generation failed", {
+          ghost: ghostName,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+    const tracked: Promise<void> = promise.finally(() => {
+      if (hosted.title === tracked) hosted.title = undefined;
+    });
+    hosted.title = tracked;
   }
 
   /**
@@ -516,17 +693,22 @@ export class SessionHost {
     hosted.compaction = tracked;
   }
 
-  /** pi transcripts plus Claude Code metadata sidecars, newest first. */
-  async listSessions(ghostName: string): Promise<
-    Array<{
-      id: string;
-      path: string;
-      name?: string;
-      created: string;
-      modified: string;
-      messageCount: number;
-    }>
-  > {
+  /**
+   * The ghost's conversations, newest-updated first — pi transcripts plus
+   * Claude Code resume sidecars, in one shape.
+   *
+   * `id` is the conversation id the shell uses to resume (the pi-messages
+   * `options.sessionId`), recovered from the transcript filename; `title` is
+   * null until the background titler names it. Any in-flight title write for
+   * this ghost is awaited first, so a title generated by the turn that just
+   * finished is already visible here.
+   */
+  async listSessions(ghostName: string): Promise<SessionSummary[]> {
+    const inflightTitles = [...this.sessions.values()]
+      .filter((hosted) => hosted.ghost.name === ghostName && hosted.title)
+      .map((hosted) => hosted.title as Promise<void>);
+    if (inflightTitles.length > 0) await Promise.allSettled(inflightTitles);
+
     const ghost = this.registry.get(ghostName);
     const paths = ghostPaths(ghost.dir);
     mkdirSync(paths.sessionDir, { recursive: true });
@@ -534,25 +716,72 @@ export class SessionHost {
       SessionManager.list(paths.home, paths.sessionDir),
       this.claudeCode.listSessions(ghost),
     ]);
-    const piSessions = sessions
-      .map((info) => ({
-        id: info.id,
-        path: info.path,
-        ...(info.name ? { name: info.name } : {}),
-        created: info.created.toISOString(),
-        modified: info.modified.toISOString(),
-        messageCount: info.messageCount,
-      }));
-    const claude = claudeSessions.map((info) => ({
-      id: info.conversationId,
-      path: claudeSessionMetadataPath(paths.sessionDir, info.conversationId),
-      name: "Claude Code",
-      created: info.created,
-      modified: info.modified,
+    const piSessions: SessionSummary[] = sessions.map((info) => ({
+      id: conversationIdFromSessionFile(info.path),
+      title: info.name && info.name.trim() ? info.name : null,
+      createdAt: info.created.toISOString(),
+      updatedAt: info.modified.toISOString(),
       messageCount: info.messageCount,
     }));
-    return [...piSessions, ...claude]
-      .sort((a, b) => b.modified.localeCompare(a.modified));
+    const claude: SessionSummary[] = claudeSessions.map((info) => ({
+      id: info.conversationId,
+      title: "Claude Code",
+      createdAt: info.created,
+      updatedAt: info.modified,
+      messageCount: info.messageCount,
+    }));
+    return [...piSessions, ...claude].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  }
+
+  /**
+   * Read one conversation's messages so the shell can rehydrate it (issue #26).
+   *
+   * Reuses pi's own session read: the transcript file is opened read-only and
+   * its message entries are projected to the same `{ role, content }` shape a
+   * pi-messages client renders. Private reasoning (`thinking` blocks) and
+   * internal `toolResult` messages are dropped — exactly what the live wire
+   * omits — so a resumed conversation shows what the visitor actually saw.
+   * Capped/paged via `limit`/`offset` for a very long transcript.
+   */
+  async readTranscript(
+    ghostName: string,
+    conversationId: string | null | undefined,
+    options: { limit?: number; offset?: number } = {},
+  ): Promise<Transcript> {
+    const ghost = this.registry.get(ghostName);
+    const paths = ghostPaths(ghost.dir);
+    const id = conversationId || DEFAULT_SESSION_KEY;
+    const path = join(paths.sessionDir, sessionFileNameFor(id));
+    if (!existsSync(path)) {
+      throw new GhostError(
+        "not_found",
+        `This ghost has no conversation ${JSON.stringify(id)}.`,
+        404,
+      );
+    }
+    // Await an in-flight title for this exact conversation, so a resume made
+    // right after the first turn carries the freshly generated title.
+    const hosted = this.sessions.get(this.keyOf(ghostName, conversationId));
+    if (hosted?.title) await hosted.title.catch(() => {});
+
+    const manager = SessionManager.open(path, paths.sessionDir, paths.home);
+    const all: TranscriptMessage[] = [];
+    for (const entry of manager.getEntries()) {
+      if (entry.type !== "message") continue;
+      const message = projectTranscriptMessage(entry.message);
+      if (message) all.push(message);
+    }
+    const total = all.length;
+    const limit = clampTranscriptLimit(options.limit);
+    const offset = Math.min(clampTranscriptOffset(options.offset), total);
+    const messages = all.slice(offset, offset + limit);
+    return {
+      id,
+      title: manager.getSessionName() ?? null,
+      messages,
+      total,
+      truncated: offset > 0 || offset + messages.length < total,
+    };
   }
 
   /** Drop one hosted session (aborting an in-flight turn). */

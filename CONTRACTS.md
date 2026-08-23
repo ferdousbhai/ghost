@@ -34,9 +34,48 @@ Terminology: **visitors**, never "callers".
   (request `{ model, context, options }` → SSE stream of pi-messages events).
   The pinned client in the summon-ghost repo is the normative spec
   (`~/github.com/ferdousbhai/summon-ghost`, read-only reference).
-- `GET  /api/ghosts/:name/sessions` → session listing for that ghost. pi
-  transcripts and Claude Code resume-metadata sidecars share the same response
-  shape.
+- `GET  /api/ghosts/:name/sessions` → `{ sessions: [{ id, title, createdAt,
+  updatedAt, messageCount }] }` — the ghost's conversations, **newest-updated
+  first**. `id` is the conversation id used to resume it (the pi-messages
+  `options.sessionId`); `title` is a short auto-generated name or `null` until
+  one is generated (see "Conversation titles" below). pi transcripts and Claude
+  Code resume sidecars share this shape (a Claude conversation's `title` is
+  `"Claude Code"`).
+- `GET  /api/ghosts/:name/sessions/:id/transcript` → `{ id, title, messages,
+  total, truncated }` — a past conversation's history so the shell can rehydrate
+  it (issue #26). `messages` are pi's own `{ role, content }` messages (user and
+  assistant only; private `thinking` reasoning and internal tool-result messages
+  are dropped, exactly as the live stream omits them), the same shape a
+  pi-messages client renders. Paged with `?limit` (default 1000, max 2000) and
+  `?offset`; `total` is the full renderable count and `truncated` is true when a
+  page omits messages. `404 not_found` for an unknown conversation id. Only pi
+  conversations are readable here; a Claude Code conversation's transcript lives
+  in that runtime's own storage.
+
+### Conversation titles (the `title_model` role)
+
+After the first turn of a conversation completes, the daemon generates a 3-6
+word title from the first user message with one cheap completion, fire-and-forget
+(mirroring background compaction): it never blocks the reply and a failure is
+logged, never fatal. A conversation is titled once and never re-titled.
+
+The title is stored as a pi **`session_info` entry** inside the conversation's
+own `.sessions/*.jsonl` transcript (pi's native display-name mechanism, which
+never enters the model's context), so it needs no sidecar and rides the same
+per-ghost storage backup and future encryption cover. `GET …/sessions` surfaces
+it as `title`.
+
+Which model writes the title is the `title_model` role in `.pi/models.json`,
+resolved daemon-side:
+
+1. `roles.title_model` — the creator's explicit choice; a missing or
+   uncredentialed model there is a loud (logged) error, not a silent fallback.
+2. otherwise the **cheapest USABLE model, subscription-aware** (issue #484): a
+   capable model on an already-authenticated subscription — `isSubscription`, or
+   `connectedVia` `oauth`/`claude_plan` — has zero marginal cost and is preferred
+   over a cheaper metered model; only then cheapest by `cost.input`. "Cheapest
+   effective cost, subscription = free."
+3. otherwise a loud error — only when there is genuinely no usable model.
 
 ### Model indicator + switcher (which model a ghost uses, and switching it)
 

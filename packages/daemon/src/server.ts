@@ -5,7 +5,8 @@
  *   GET  /api/ghosts                  → [{ name, dir, createdAt }]
  *   POST /api/ghosts                  { name } → creates ~/Ghosts/<name>/
  *   POST /api/ghosts/:name/messages   pi-messages request → SSE of pi-messages events
- *   GET  /api/ghosts/:name/sessions   → chat-runtime session listing for that ghost
+ *   GET  /api/ghosts/:name/sessions   → { sessions } — conversation listing for that ghost
+ *   GET  /api/ghosts/:name/sessions/:id/transcript → { id, title, messages } for resume
  *   GET  /api/relay/status            → whether the creator's Chromium is paired
  *   WS   /relay                       → the MV3 extension's socket (token-gated)
  *
@@ -190,7 +191,35 @@ export function createDaemonServer(options: ServerOptions): Server {
     ghostName: string,
     response: ServerResponse,
   ): Promise<void> => {
-    jsonResponse(response, 200, await options.host.listSessions(ghostName));
+    jsonResponse(response, 200, { sessions: await options.host.listSessions(ghostName) });
+  };
+
+  const handleTranscript = async (
+    ghostName: string,
+    conversationId: string,
+    url: URL,
+    response: ServerResponse,
+  ): Promise<void> => {
+    const query: { limit?: number; offset?: number } = {};
+    const limit = url.searchParams.get("limit");
+    if (limit !== null) {
+      const parsed = Number(limit);
+      if (!Number.isFinite(parsed)) {
+        errorResponse(response, 400, "invalid_request", "\"limit\" must be a number.");
+        return;
+      }
+      query.limit = parsed;
+    }
+    const offset = url.searchParams.get("offset");
+    if (offset !== null) {
+      const parsed = Number(offset);
+      if (!Number.isFinite(parsed)) {
+        errorResponse(response, 400, "invalid_request", "\"offset\" must be a number.");
+        return;
+      }
+      query.offset = parsed;
+    }
+    jsonResponse(response, 200, await options.host.readTranscript(ghostName, conversationId, query));
   };
 
   const handleListProviders = async (
@@ -468,6 +497,18 @@ export function createDaemonServer(options: ServerOptions): Server {
             return;
           }
           return await handleListSessions(ghostName, response);
+        }
+        if (segments.length === 6 && segments[3] === "sessions" && segments[5] === "transcript") {
+          if (method !== "GET") {
+            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+            return;
+          }
+          return await handleTranscript(
+            ghostName,
+            decodeURIComponent(segments[4] ?? ""),
+            url,
+            response,
+          );
         }
         if (segments.length === 4 && segments[3] === "model") {
           if (method === "GET") return await handleCurrentModel(ghostName, response);
