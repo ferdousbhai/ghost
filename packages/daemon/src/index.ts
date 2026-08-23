@@ -5,6 +5,26 @@
  * surface, so a UI shell or a test can drive the same pieces in-process.
  */
 export {
+  API_TOKEN_FILENAME,
+  API_TOKEN_PATTERN,
+  apiTokenCommand,
+  apiTokenMatches,
+  defaultApiTokenPath,
+  readApiToken,
+  readOrCreateApiToken,
+  rotateApiToken,
+  type ApiTokenStoreOptions,
+} from "./api-token.js";
+export {
+  createTokenStore,
+  TOKEN_PATTERN,
+  tokenMatches,
+  type TokenCommandOptions,
+  type TokenStore,
+  type TokenStoreOptions,
+  type TokenStoreSpec,
+} from "./token-store.js";
+export {
   ANTHROPIC_EXTRA_USAGE_NOTE,
   bindDefaultChatModelIfUnset,
   LoginManager,

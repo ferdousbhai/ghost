@@ -1,6 +1,6 @@
 /**
- * The daemon's HTTP API — the four routes in CONTRACTS.md, on loopback, with no
- * auth (v1 localhost trust), plus the browser relay.
+ * The daemon's HTTP API — the routes in CONTRACTS.md, on loopback, behind a
+ * machine-local bearer token, plus the browser relay.
  *
  *   GET  /api/ghosts                  → [{ name, dir, createdAt }]
  *   POST /api/ghosts                  { name } → creates ~/Ghosts/<name>/
@@ -14,11 +14,29 @@
  * route is a stream, which is precisely the shape a framework would add weight to
  * without adding clarity.
  *
- * The relay is the one thing here that is *not* covered by localhost trust, and
- * the reason is worth stating: the peer is a browser, and a browser runs code
- * written by strangers. `/relay` therefore carries a pairing token, refuses any
- * `Origin` that is not a browser extension, and accepts one connection at a time.
- * `/api/relay/status` never returns the token — `ghostd relay-token` does.
+ * Binding to loopback is not authentication (issue #485). Every browser on the
+ * machine can reach `127.0.0.1`, and a page can send a `text/plain` POST there
+ * with no preflight at all — CORS governs reading the *response*, not sending
+ * the request, so a visited web page could otherwise drive a ghost's browser
+ * and desktop tools. Three checks, applied before routing, close that:
+ *
+ *   1. A present `Origin` must be loopback. A browser always sends one on a
+ *      cross-site request; a file-reading client sends none.
+ *   2. `Authorization: Bearer <token>` must match the machine-local token in
+ *      `$XDG_STATE_HOME/ghost/api-token` (api-token.ts). A page cannot read a
+ *      file, so it cannot forge this.
+ *   3. `POST`/`PUT` must be `application/json`, which no simple-request form
+ *      post can be — belt to the Origin check's braces.
+ *
+ * `OPTIONS` answers 204 unauthenticated (a preflight carries no credentials by
+ * definition) and `GET /api/relay/status` is exempt on purpose: it returns no
+ * secret, and it is the one thing a client with no token yet may need to read.
+ *
+ * The relay is authenticated separately, and the reason is worth stating: the
+ * peer is a browser, and a browser runs code written by strangers. `/relay`
+ * therefore carries its own pairing token, refuses any `Origin` that is not a
+ * browser extension, and accepts one connection at a time.
+ * `/api/relay/status` never returns that token — `ghostd relay-token` does.
  *
  * Error bodies are `{ "error": { "message", "code" } }` — the shape the
  * pinned pi-messages client parses out of a non-2xx response
@@ -28,6 +46,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { AuthType } from "@earendil-works/pi-ai";
+import { apiTokenMatches, readOrCreateApiToken } from "./api-token.js";
 import type { LoginManager } from "./auth.js";
 import { assertLoopback } from "./config.js";
 import type { ListModelsQuery, ModelCatalog, ModelScope } from "./model-catalog.js";
@@ -70,6 +89,20 @@ export interface ServerOptions {
    * `GHOSTD_RELAY=off`; pass `null` to leave the endpoint out entirely.
    */
   relay?: RelayHub | null;
+  /**
+   * The bearer token every `/api` route but `GET /api/relay/status` requires.
+   *
+   * Omitted (the production default) it is read from — and minted into —
+   * `$XDG_STATE_HOME/ghost/api-token`, so a client that reads that file is
+   * authenticated and a web page that cannot read files is not. A string uses
+   * that token instead, for tests that want to present one.
+   *
+   * `null` switches authentication off entirely. That is a **test-only**
+   * escape hatch, for the many tests whose subject is routing or streaming
+   * rather than auth; nothing that ships may pass it, because a daemon with
+   * `apiToken: null` is exactly the CSRF hole issue #485 closed.
+   */
+  apiToken?: string | null;
 }
 
 export interface ListeningServer {
@@ -121,6 +154,24 @@ function errorResponse(
   jsonResponse(response, status, { error: { message, code } });
 }
 
+/** The token out of `Authorization: Bearer <token>`, or "" when there is none. */
+function bearerToken(header: string | string[] | undefined): string {
+  if (typeof header !== "string") return "";
+  const match = /^ *bearer +(\S+) *$/i.exec(header);
+  return match?.[1] ?? "";
+}
+
+/**
+ * `application/json`, parameters allowed (`; charset=utf-8`). The point is to
+ * exclude the three types a form can post without a preflight —
+ * `text/plain`, `application/x-www-form-urlencoded`, `multipart/form-data` —
+ * so a mutating route cannot be reached by a simple cross-site request.
+ */
+function isJsonContentType(header: string | string[] | undefined): boolean {
+  if (typeof header !== "string") return false;
+  return (header.split(";")[0] ?? "").trim().toLowerCase() === "application/json";
+}
+
 function applyCors(request: IncomingMessage, response: ServerResponse): void {
   const origin = request.headers.origin;
   if (typeof origin !== "string" || !LOOPBACK_ORIGIN.test(origin)) return;
@@ -155,6 +206,29 @@ async function readJsonBody(
   }
 }
 
+/**
+ * What `ServerOptions.apiToken` means. `undefined` is the machine-local token,
+ * minted here rather than on the first authenticated request so a client that
+ * starts alongside the daemon finds the file. `null` is no authentication at
+ * all, which is test-only and says so out loud.
+ */
+function resolveApiToken(
+  configured: string | null | undefined,
+  logger: Logger,
+): string | null {
+  if (configured === null) {
+    logger.warn("the HTTP API is running without authentication");
+    return null;
+  }
+  if (configured !== undefined) return configured;
+  const minted = readOrCreateApiToken();
+  // The path, never the token: `ghostd api-token` is the only way to see it.
+  logger.info(minted.created ? "minted the API token" : "API token loaded", {
+    path: minted.path,
+  });
+  return minted.token;
+}
+
 export function createDaemonServer(options: ServerOptions): Server {
   const logger = options.logger ?? silentLogger;
   const maxBodyBytes = options.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
@@ -163,6 +237,51 @@ export function createDaemonServer(options: ServerOptions): Server {
   const relay = options.relay === undefined
     ? createRelayHub({ ...(options.logger ? { logger: options.logger } : {}) })
     : options.relay;
+  const apiToken = resolveApiToken(options.apiToken, logger);
+
+  /**
+   * The gate every `/api` request passes before it is routed. Returns true when
+   * it has already answered, in which case the caller must stop.
+   */
+  const refuseUnauthenticated = (
+    request: IncomingMessage,
+    response: ServerResponse,
+    method: string,
+    segments: readonly string[],
+  ): boolean => {
+    if (apiToken === null) return false;
+    if (segments[0] !== "api") return false;
+    // Deliberately open: it carries no secret, and a client with no token yet
+    // may still need to ask whether the relay is up.
+    if (segments[1] === "relay" && segments[2] === "status" && segments.length === 3) return false;
+
+    const origin = request.headers.origin;
+    if (typeof origin === "string" && !LOOPBACK_ORIGIN.test(origin)) {
+      errorResponse(response, 403, "forbidden_origin", "That origin may not call this daemon.");
+      return true;
+    }
+    const presented = bearerToken(request.headers.authorization);
+    if (presented === "" || !apiTokenMatches(apiToken, presented)) {
+      response.setHeader("www-authenticate", "Bearer");
+      errorResponse(
+        response,
+        401,
+        "unauthorized",
+        "This API needs the machine-local bearer token. Run `ghostd api-token`.",
+      );
+      return true;
+    }
+    if ((method === "POST" || method === "PUT") && !isJsonContentType(request.headers["content-type"])) {
+      errorResponse(
+        response,
+        415,
+        "unsupported_media_type",
+        "Mutating requests must be application/json.",
+      );
+      return true;
+    }
+    return false;
+  };
 
   const handleListGhosts = (response: ServerResponse): void => {
     jsonResponse(response, 200, options.registry.list());
@@ -450,11 +569,14 @@ export function createDaemonServer(options: ServerOptions): Server {
       applyCors(request, response);
       const method = request.method ?? "GET";
       if (method === "OPTIONS") {
+        // A preflight cannot carry credentials — that is what it is asking
+        // permission to do. Answering it reveals nothing.
         response.writeHead(204).end();
         return;
       }
       const url = new URL(request.url ?? "/", "http://127.0.0.1");
       const segments = url.pathname.split("/").filter(Boolean);
+      if (refuseUnauthenticated(request, response, method, segments)) return;
 
       try {
         if (segments[0] !== "api") {
@@ -466,8 +588,9 @@ export function createDaemonServer(options: ServerOptions): Server {
             errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
             return;
           }
-          // Never the token itself, only where it lives: this route has no auth,
-          // and a page on a loopback origin can read it.
+          // Never the token itself, only where it lives. This route is the one
+          // `/api` path exempt from the bearer token and the origin check, so
+          // anything it returns is readable by anything that can reach the port.
           jsonResponse(response, 200, relay
             ? { enabled: true, ...relay.status() }
             : { enabled: false, connected: false, reason: "The relay is off (GHOSTD_RELAY)." });

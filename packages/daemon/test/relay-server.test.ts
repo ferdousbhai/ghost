@@ -46,6 +46,8 @@ async function serve(relay: RelayHub | null | undefined): Promise<string> {
     registry: temp.registry,
     host,
     port: 0,
+    // The relay's own auth is the subject here, not the API's.
+    apiToken: null,
     ...(relay === undefined ? {} : { relay }),
   });
   return `http://127.0.0.1:${listening.port}`;
@@ -154,7 +156,7 @@ describe("building a server does not mint a secret", () => {
     const sessionHost = new SessionHost({ registry, offline: true });
     // The default path: a hub built here must not create it. `tokenPath` is
     // computed, not created.
-    const server = createDaemonServer({ registry, host: sessionHost });
+    const server = createDaemonServer({ registry, host: sessionHost, apiToken: null });
     const hub = relayHubOf(server);
     expect(hub?.tokenPath).toMatch(/relay-token$/);
     server.close();

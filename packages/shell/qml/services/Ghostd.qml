@@ -14,7 +14,16 @@ pragma Singleton
 // fragments, not cumulative snapshots; `text_end` carries the authoritative
 // full block and we replace with it. There is no tool-*result* event in the
 // vocabulary — tool activity is start/delta/end only.
+//
+// Auth: the daemon binds loopback, which is not the same as being private —
+// every browser on this machine can reach 127.0.0.1 too, and a page the user
+// visits could otherwise drive a ghost with a form post (issue #485). So every
+// /api route but relay/status wants `Authorization: Bearer <token>`, where the
+// token is a 0600 file the daemon mints at startup. We can read a file; a web
+// page cannot. Nothing here opens a request directly — `dispatch()` does, so
+// the header and the rotation retry exist in one place rather than fourteen.
 import Quickshell
+import Quickshell.Io
 import QtQuick
 
 Singleton {
@@ -27,6 +36,21 @@ Singleton {
     readonly property string baseUrl: "http://"
         + (root.host.indexOf(":") >= 0 ? "[" + root.host + "]" : root.host)
         + ":" + root.port
+
+    // ---- Auth -------------------------------------------------------------
+    // Same resolution the daemon does (packages/daemon/src/api-token.ts): an
+    // explicit override, else $XDG_STATE_HOME/ghost/api-token, else the XDG
+    // default. A relative XDG_STATE_HOME is not a state home, so it is ignored.
+    readonly property string tokenPath: {
+        const explicit = Quickshell.env("GHOSTD_API_TOKEN_FILE") || "";
+        if (explicit !== "") return explicit;
+        const state = Quickshell.env("XDG_STATE_HOME") || "";
+        const base = state.charAt(0) === "/" ? state
+            : (Quickshell.env("HOME") || "") + "/.local/state";
+        return base + "/ghost/api-token";
+    }
+    /** The bearer token, "" until the file has been read (or if it cannot be). */
+    property string apiToken: ""
 
     /** [{ name, dir, createdAt }], newest listing from GET /api/ghosts. */
     property var ghosts: []
@@ -120,6 +144,20 @@ Singleton {
 
     ListModel { id: transcriptModel }
 
+    // blockLoading, like Theme.qml's palette files: the shell has nothing
+    // useful to do before it can authenticate, and a token that arrives one
+    // event loop after the first request would just produce a 401 to retry.
+    // printErrors stays off — a daemon that has never run has no token file,
+    // and that is a "not started yet", not a fault.
+    FileView {
+        id: apiTokenFile
+        path: root.tokenPath
+        blockLoading: true
+        printErrors: false
+        onLoaded: root.apiToken = apiTokenFile.text().trim()
+        onLoadFailed: root.apiToken = ""
+    }
+
     // Deltas arrive faster than a text layout can keep up with (a local model
     // can emit hundreds a second). Buffer them and flush on a frame-ish timer;
     // the model only sees ~20 updates a second regardless of token rate.
@@ -141,6 +179,65 @@ Singleton {
     }
 
     Component.onCompleted: root.refresh()
+
+    // ---- Authenticated requests -------------------------------------------
+
+    /** The token, reading the file on first use. "" when there is none yet. */
+    function token(): string {
+        if (root.apiToken === "") {
+            const text = apiTokenFile.text();
+            root.apiToken = text ? text.trim() : "";
+        }
+        return root.apiToken;
+    }
+
+    /** Re-read the token file. Returns the token, which may be unchanged. */
+    function reloadToken(): string {
+        apiTokenFile.reload();
+        const text = apiTokenFile.text();
+        root.apiToken = text ? text.trim() : "";
+        return root.apiToken;
+    }
+
+    /**
+     * Open, authenticate, and send `xhr`. `headers` is a plain object of extra
+     * request headers; `body` is a string, or null for a bodyless request.
+     *
+     * Callers install their onreadystatechange handler *before* calling this —
+     * we wrap it, because a 401 is not necessarily fatal. `ghostd api-token
+     * --rotate` can replace the secret while the shell is running, so the first
+     * 401 re-reads the file and replays the request once; only then does the
+     * caller's handler see it. The replay is deferred with callLater rather
+     * than reopening the XHR from inside its own callback.
+     */
+    function dispatch(xhr: var, method: string, path: string, headers: var, body: var): void {
+        const url = root.baseUrl + path;
+        const inner = xhr.onreadystatechange;
+        let retried = false;
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState === 4 && xhr.status === 401 && !retried) {
+                retried = true;
+                const before = root.apiToken;
+                if (root.reloadToken() !== "" && root.apiToken !== before) {
+                    Qt.callLater(function () {
+                        root.deliver(xhr, method, url, headers, body);
+                    });
+                    return;
+                }
+            }
+            inner();
+        };
+        root.deliver(xhr, method, url, headers, body);
+    }
+
+    function deliver(xhr: var, method: string, url: string, headers: var, body: var): void {
+        xhr.open(method, url);
+        const bearer = root.token();
+        if (bearer !== "") xhr.setRequestHeader("Authorization", "Bearer " + bearer);
+        for (const name in headers) xhr.setRequestHeader(name, headers[name]);
+        if (body === null || body === undefined) xhr.send();
+        else xhr.send(body);
+    }
 
     // ---- Ghost roster -----------------------------------------------------
 
@@ -170,8 +267,7 @@ Singleton {
                     : "GET /api/ghosts → " + xhr.status);
             }
         };
-        xhr.open("GET", root.baseUrl + "/api/ghosts");
-        xhr.send();
+        root.dispatch(xhr, "GET", "/api/ghosts", ({}), null);
     }
 
     function createGhost(name: string): void {
@@ -195,9 +291,9 @@ Singleton {
                 root.fail(root.describeError(xhr, "POST /api/ghosts"));
             }
         };
-        xhr.open("POST", root.baseUrl + "/api/ghosts");
-        xhr.setRequestHeader("Content-Type", "application/json");
-        xhr.send(JSON.stringify({ name: trimmed }));
+        root.dispatch(xhr, "POST", "/api/ghosts",
+            ({ "Content-Type": "application/json" }),
+            JSON.stringify({ name: trimmed }));
     }
 
     function selectGhost(name: string): void {
@@ -257,8 +353,8 @@ Singleton {
                 root.sessionsError = root.describeError(xhr, "GET sessions");
             }
         };
-        xhr.open("GET", root.baseUrl + "/api/ghosts/" + encodeURIComponent(g) + "/sessions");
-        xhr.send();
+        root.dispatch(xhr, "GET",
+            "/api/ghosts/" + encodeURIComponent(g) + "/sessions", ({}), null);
     }
 
     /**
@@ -312,9 +408,8 @@ Singleton {
                 root.sessionsError = root.describeError(xhr, "GET transcript");
             }
         };
-        xhr.open("GET", root.baseUrl + "/api/ghosts/" + encodeURIComponent(ghost)
-            + "/sessions/" + encodeURIComponent(id) + "/transcript");
-        xhr.send();
+        root.dispatch(xhr, "GET", "/api/ghosts/" + encodeURIComponent(ghost)
+            + "/sessions/" + encodeURIComponent(id) + "/transcript", ({}), null);
     }
 
     /** Replace the transcript view with a conversation's stored messages. */
@@ -380,10 +475,10 @@ Singleton {
                 root.endTurn(ghost, "the stream ended mid-turn");
             }
         };
-        xhr.open("POST", root.baseUrl + "/api/ghosts/" + encodeURIComponent(ghost) + "/messages");
-        xhr.setRequestHeader("Content-Type", "application/json");
-        xhr.setRequestHeader("Accept", "text/event-stream");
-        xhr.send(JSON.stringify(root.buildBody(ghost, prompt)));
+        root.dispatch(xhr, "POST",
+            "/api/ghosts/" + encodeURIComponent(ghost) + "/messages",
+            ({ "Content-Type": "application/json", "Accept": "text/event-stream" }),
+            JSON.stringify(root.buildBody(ghost, prompt)));
     }
 
     function cancel(): void {
@@ -578,8 +673,8 @@ Singleton {
                 root.loginError = root.describeError(xhr, "GET providers");
             }
         };
-        xhr.open("GET", root.baseUrl + "/api/ghosts/" + encodeURIComponent(ghost) + "/providers");
-        xhr.send();
+        root.dispatch(xhr, "GET",
+            "/api/ghosts/" + encodeURIComponent(ghost) + "/providers", ({}), null);
     }
 
     /** Begin a login for the active ghost. authType is "oauth" or "api_key". */
@@ -606,9 +701,10 @@ Singleton {
                 root.loginError = root.describeError(xhr, "POST login");
             }
         };
-        xhr.open("POST", root.baseUrl + "/api/ghosts/" + encodeURIComponent(ghost) + "/login");
-        xhr.setRequestHeader("Content-Type", "application/json");
-        xhr.send(JSON.stringify({ providerId: providerId, authType: authType }));
+        root.dispatch(xhr, "POST",
+            "/api/ghosts/" + encodeURIComponent(ghost) + "/login",
+            ({ "Content-Type": "application/json" }),
+            JSON.stringify({ providerId: providerId, authType: authType }));
     }
 
     /** Poll the running login's current step. */
@@ -640,9 +736,9 @@ Singleton {
                 root.loginError = root.describeError(xhr, "GET login");
             }
         };
-        xhr.open("GET", root.baseUrl + "/api/ghosts/"
-            + encodeURIComponent(root.loginGhost) + "/login/" + encodeURIComponent(root.loginId));
-        xhr.send();
+        root.dispatch(xhr, "GET", "/api/ghosts/"
+            + encodeURIComponent(root.loginGhost) + "/login/" + encodeURIComponent(root.loginId),
+            ({}), null);
     }
 
     /** Satisfy an awaiting prompt with a pasted code, API key, or selected id. */
@@ -675,10 +771,11 @@ Singleton {
                 root.loginError = root.describeError(xhr, "POST login input");
             }
         };
-        xhr.open("POST", root.baseUrl + "/api/ghosts/"
-            + encodeURIComponent(root.loginGhost) + "/login/" + encodeURIComponent(root.loginId) + "/input");
-        xhr.setRequestHeader("Content-Type", "application/json");
-        xhr.send(JSON.stringify({ value: value }));
+        root.dispatch(xhr, "POST", "/api/ghosts/"
+            + encodeURIComponent(root.loginGhost) + "/login/"
+            + encodeURIComponent(root.loginId) + "/input",
+            ({ "Content-Type": "application/json" }),
+            JSON.stringify({ value: value }));
     }
 
     /** Open the current auth URL in the creator's browser. */
@@ -723,8 +820,8 @@ Singleton {
                 root.modelError = root.describeError(xhr, "GET model");
             }
         };
-        xhr.open("GET", root.baseUrl + "/api/ghosts/" + encodeURIComponent(ghost) + "/model");
-        xhr.send();
+        root.dispatch(xhr, "GET",
+            "/api/ghosts/" + encodeURIComponent(ghost) + "/model", ({}), null);
     }
 
     /** GET the models this ghost can use right now (credentialed providers only). */
@@ -747,9 +844,8 @@ Singleton {
                 root.modelError = root.describeError(xhr, "GET models (available)");
             }
         };
-        xhr.open("GET", root.baseUrl + "/api/ghosts/" + encodeURIComponent(ghost)
-            + "/models?scope=available");
-        xhr.send();
+        root.dispatch(xhr, "GET", "/api/ghosts/" + encodeURIComponent(ghost)
+            + "/models?scope=available", ({}), null);
     }
 
     /**
@@ -783,9 +879,9 @@ Singleton {
             }
         };
         const q = query === "" ? "" : "&q=" + encodeURIComponent(query);
-        xhr.open("GET", root.baseUrl + "/api/ghosts/" + encodeURIComponent(ghost)
-            + "/models?scope=catalog&limit=" + root.catalogLimit + "&offset=" + offset + q);
-        xhr.send();
+        root.dispatch(xhr, "GET", "/api/ghosts/" + encodeURIComponent(ghost)
+            + "/models?scope=catalog&limit=" + root.catalogLimit + "&offset=" + offset + q,
+            ({}), null);
     }
 
     /**
@@ -823,15 +919,20 @@ Singleton {
                 root.modelError = root.describeError(xhr, "PUT model");
             }
         };
-        xhr.open("PUT", root.baseUrl + "/api/ghosts/" + encodeURIComponent(ghost) + "/model");
-        xhr.setRequestHeader("Content-Type", "application/json");
-        xhr.send(JSON.stringify({ provider: provider, id: id }));
+        root.dispatch(xhr, "PUT",
+            "/api/ghosts/" + encodeURIComponent(ghost) + "/model",
+            ({ "Content-Type": "application/json" }),
+            JSON.stringify({ provider: provider, id: id }));
     }
 
     // ---- Errors -----------------------------------------------------------
 
     function describeError(xhr: var, what: string): string {
         if (xhr.status === 0) return "ghostd is not answering on " + root.baseUrl;
+        // dispatch() already re-read the file and retried once, so a 401 that
+        // reaches here means the token on disk is not the one ghostd wants.
+        if (xhr.status === 401)
+            return what + " → 401: ghostd rejected the API token in " + root.tokenPath;
         let detail = "";
         try {
             const body = JSON.parse(xhr.responseText);

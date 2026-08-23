@@ -103,6 +103,7 @@ qs -c ghost ipc call ghost refresh            # re-read roster and theme
 |---|---|---|
 | `GHOSTD_HOST` | `127.0.0.1` | daemon host (loopback only) |
 | `GHOSTD_PORT` | `7717` | daemon port |
+| `GHOSTD_API_TOKEN_FILE` | `$XDG_STATE_HOME/ghost/api-token` | the `0600` file holding the API bearer token the daemon mints at startup; `Ghostd.qml` reads it and sends `Authorization: Bearer …` on every request, re-reading once on a `401` so `ghostd api-token --rotate` does not need a shell restart |
 | `GHOST_BAR_SURFACE` | unset | `1` puts up the standalone bar strip |
 | `GHOST_HUD_REPLAY` | unset | `1` replays local history in every request instead of relying on `options.sessionId` |
 

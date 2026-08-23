@@ -62,7 +62,9 @@ async function serve(options: ServeOptions = {}): Promise<string> {
     createRuntime: async () => runtime,
     claudeCodePlanStatus: async () => options.claudePlan ?? false,
   });
-  listening = await startDaemonServer({ registry: temp.registry, host, catalog, port: 0, relay: null });
+  listening = await startDaemonServer({
+    registry: temp.registry, host, catalog, port: 0, relay: null, apiToken: null,
+  });
   return `http://127.0.0.1:${listening.port}`;
 }
 

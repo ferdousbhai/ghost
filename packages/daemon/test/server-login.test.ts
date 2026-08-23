@@ -40,7 +40,9 @@ async function serve(loginImpl: LoginImpl, models?: Record<string, string[]>): P
     registry: temp.registry,
     createRuntime: async () => makeFakeRuntime({ login: loginImpl, ...(models ? { models } : {}) }),
   });
-  listening = await startDaemonServer({ registry: temp.registry, host, login, port: 0, relay: null });
+  listening = await startDaemonServer({
+    registry: temp.registry, host, login, port: 0, relay: null, apiToken: null,
+  });
   return `http://127.0.0.1:${listening.port}`;
 }
 

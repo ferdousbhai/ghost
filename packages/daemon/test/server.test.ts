@@ -34,7 +34,7 @@ async function serve(
   script: Parameters<typeof startMockProvider>[0]["script"] = [
     { kind: "text", text: "hello there" },
   ],
-  serverOptions: { maxBodyBytes?: number } = {},
+  serverOptions: { maxBodyBytes?: number; apiToken?: string | null } = {},
 ) {
   temp = makeTempGhosts();
   temp.registry.ensureRoot();
@@ -48,6 +48,8 @@ async function serve(
     registry: temp.registry,
     host,
     port: 0,
+    // Routing and streaming are the subject here; auth has its own file.
+    apiToken: null,
     ...serverOptions,
   });
   return `http://127.0.0.1:${listening.port}`;

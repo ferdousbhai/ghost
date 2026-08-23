@@ -144,6 +144,7 @@ and the creator's installed, unmodified `claude` executable:
 ```bash
 claude auth login
 curl -X PUT http://127.0.0.1:7717/api/ghosts/casper/model \
+  -H "authorization: Bearer $(ghostd api-token --quiet)" \
   -H 'content-type: application/json' \
   --data '{"provider":"claude-code","id":"default"}'
 ```
@@ -270,7 +271,14 @@ own background-compaction policy.
 
 ## HTTP API
 
-Exactly CONTRACTS.md, on `127.0.0.1`, no auth.
+Exactly CONTRACTS.md, on `127.0.0.1`, behind a machine-local bearer token.
+
+Every `/api` route but `GET /api/relay/status` requires
+`Authorization: Bearer $(ghostd api-token --quiet)`, refuses a non-loopback
+`Origin`, and requires `application/json` on `POST`/`PUT` — a loopback bind is
+not authentication, because the browser is already on loopback (issue #485).
+The token is 64 hex characters in `$XDG_STATE_HOME/ghost/api-token`, mode 0600,
+minted when the daemon starts. See CONTRACTS.md for the full model.
 
 | method | path | body → response |
 |---|---|---|
@@ -283,6 +291,7 @@ Errors are `{ "error": { "message", "code" } }` — the shape the pinned
 pi-messages client parses out of a non-2xx response, and the same shape the
 hosted relay returns. Codes: `invalid_request`, `invalid_name`, `not_found`,
 `already_exists`, `session_busy`, `payload_too_large`, `method_not_allowed`,
+`unauthorized`, `forbidden_origin`, `unsupported_media_type`,
 `shutting_down`, `claude_code_missing`, `claude_code_subscription_required`,
 `claude_code_owner_only`, `claude_session_invalid`, `internal_error`.
 

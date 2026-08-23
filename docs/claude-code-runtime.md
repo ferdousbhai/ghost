@@ -37,6 +37,7 @@ The second command should report `"loggedIn": true` and
 
 ```bash
 curl -X PUT http://127.0.0.1:7717/api/ghosts/casper/model \
+  -H "authorization: Bearer $(ghostd api-token --quiet)" \
   -H 'content-type: application/json' \
   --data '{"provider":"claude-code","id":"default"}'
 ```

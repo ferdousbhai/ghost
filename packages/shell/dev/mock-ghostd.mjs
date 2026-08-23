@@ -19,6 +19,13 @@
  * plus a paste field, and api-key flows ask for a masked key. Nothing touches
  * the filesystem: ghosts and logins live in memory and vanish on exit.
  *
+ * Auth: none. The real daemon requires `Authorization: Bearer <token>` on
+ * every /api route (CONTRACTS.md); the mock accepts and ignores the header so
+ * the surfaces can be driven on a machine where `ghostd` has never run and no
+ * token file exists. Ghostd.qml sends no header when it cannot read one, so
+ * both paths work. Anything testing the *auth* itself belongs against the real
+ * daemon, not here.
+ *
  * Usage:  node dev/mock-ghostd.mjs [--port 7717] [--slow] [--fail]
  *   --slow   30ms between text deltas instead of 12ms
  *   --fail   terminate the next turn with a pi-messages `error` event

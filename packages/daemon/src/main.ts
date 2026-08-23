@@ -12,6 +12,7 @@
  * exists — is scrub inherited provider credentials out of the process
  * environment. See env-scrub.ts for why.
  */
+import { apiTokenCommand } from "./api-token.js";
 import { LoginManager } from "./auth.js";
 import { importCommand } from "./import-command.js";
 import { loginCommand } from "./login-command.js";
@@ -32,6 +33,7 @@ Usage:
   ghostd import <archive> [--name <name>] [--overwrite] [options]
   ghostd login [<ghost>] [--provider <id>] [--api-key] [options]
   ghostd relay-token [--rotate] [--quiet]
+  ghostd api-token [--rotate] [--quiet]
 
 Subcommands:
   import                   Import a ghost from a "Download my ghost" archive
@@ -43,6 +45,10 @@ Subcommands:
   relay-token              Print the browser-relay pairing token (minting one on
                            first run) to paste into the Chromium extension.
                            --rotate mints a new one and invalidates the old.
+  api-token                Print the bearer token local API clients present
+                           (minting one on first run). The shell reads the file
+                           itself; this is for curl, scripts, and diagnosing a
+                           401. --rotate mints a new one and invalidates the old.
 
 Options:
   -p, --port <port>        TCP port to bind on 127.0.0.1 (default 7717)
@@ -55,7 +61,8 @@ Options:
 
 Environment:
   GHOSTD_PORT, GHOSTD_HOST, GHOSTS_ROOT, GHOSTD_OFFLINE, GHOSTD_CONFIG,
-  XDG_CONFIG_HOME
+  XDG_CONFIG_HOME, XDG_STATE_HOME, GHOSTD_API_TOKEN_FILE,
+  GHOSTD_RELAY_TOKEN_FILE
 `;
 
 export interface ParsedArgs {
@@ -143,6 +150,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   // Subcommands that touch no config and start no server, handled before
   // anything else so they work while a daemon is already running.
   if (argv[0] === "relay-token") return relayTokenCommand(argv.slice(1));
+  if (argv[0] === "api-token") return apiTokenCommand(argv.slice(1));
   if (argv[0] === "login") return loginCommand(argv.slice(1));
   if (argv[0] === "import") return importCommand(argv.slice(1));
 

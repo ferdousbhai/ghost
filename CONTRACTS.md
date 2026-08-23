@@ -27,6 +27,55 @@ Terminology: **visitors**, never "callers".
 
 ## Daemon HTTP API (localhost only)
 
+### Authentication
+
+Bind to `127.0.0.1`, **and** authenticate. A loopback bind is not
+authentication: every browser on the machine reaches loopback too, and a page
+the creator visits can send a `text/plain` POST to
+`http://127.0.0.1:7717/api/ghosts/<name>/messages` with no preflight at all —
+CORS decides whether a page may *read* a response, not whether it may *send* a
+request, and a CSRF attacker does not want the response. Without the checks
+below, any web page could silently drive a ghost turn, including its browser
+and desktop tools (issue #485).
+
+Three checks, applied to every `/api` request before routing:
+
+1. **Bearer token.** `Authorization: Bearer <token>`, compared in constant
+   time, where `<token>` is 64 hex characters read from
+   `$XDG_STATE_HOME/ghost/api-token` (default
+   `~/.local/state/ghost/api-token`; override with `GHOSTD_API_TOKEN_FILE`),
+   mode `0600` in a `0700` directory. The daemon mints it when the server
+   starts — not lazily on first use, so a client starting alongside it finds
+   the file. Missing or wrong → `401 unauthorized` with
+   `www-authenticate: Bearer`. A local client authenticates by *reading the
+   file*; a web page cannot read files, which is the whole mechanism.
+2. **Origin.** A request that carries an `Origin` header must carry a loopback
+   one (`http://127.0.0.1|localhost|[::1]`, optional port), else
+   `403 forbidden_origin`. Browsers always send `Origin` on a cross-site
+   request; file-reading clients send none, so absent is allowed.
+3. **Content type.** `POST` and `PUT` must be `application/json` (parameters
+   such as `; charset=utf-8` are fine), else `415 unsupported_media_type`.
+   That excludes exactly the three types a cross-site form post can produce
+   without a preflight.
+
+Two deliberate exemptions, which must not be widened:
+
+- `OPTIONS` answers `204` unauthenticated. A preflight cannot carry
+  credentials — carrying them is what it is asking permission to do.
+- `GET /api/relay/status` is exempt from both the token and the origin check.
+  It returns no secret (never the relay token, only the path it lives at), and
+  it is the one thing a client with no token yet may legitimately need to read.
+
+`ghostd api-token [--rotate] [--quiet]` prints the token — for curl, scripts,
+and diagnosing a 401. Clients read the file themselves. `--rotate` mints a new
+one; a running daemon keeps the token it started with, and a running client
+should re-read the file on its first `401` and retry once. The browser relay's
+pairing token is a **separate** secret in the same directory (`relay-token`,
+`ghostd relay-token`) because it is pasted into a browser extension; a leak of
+one must not be a leak of both.
+
+### Routes
+
 - `GET  /api/ghosts` → `[{ name, dir, createdAt }]`
 - `POST /api/ghosts` `{ name }` → creates `~/Ghosts/<name>/` with a seeded
   `character.md`
@@ -178,8 +227,9 @@ query. Claude Code owns the actual transcript under its own
 T3 Code provenance, policy caveat, and legal boundary:
 [`docs/claude-code-runtime.md`](docs/claude-code-runtime.md).
 
-Bind to `127.0.0.1`. No auth in v1 (localhost trust); revisit before any
-non-local exposure.
+Bind to `127.0.0.1`, and require the bearer token described under
+[Authentication](#authentication) above. Loopback bind ≠ auth. Revisit the
+whole model before any non-local exposure.
 
 ## Package boundaries
 
