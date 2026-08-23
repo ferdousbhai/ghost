@@ -5,6 +5,7 @@
  *   GET  /api/ghosts                  → [{ name, dir, createdAt }]
  *   POST /api/ghosts                  { name } → creates ~/Ghosts/<name>/
  *   POST /api/ghosts/:name/messages   pi-messages request → SSE of pi-messages events
+ *   POST /api/ghosts/:name/greeting   → { greeting, onboarding } — the empty-chat opener
  *   GET  /api/ghosts/:name/sessions   → { sessions } — conversation listing for that ghost
  *   DELETE /api/ghosts/:name/sessions/:id → permanently delete one conversation
  *   GET  /api/ghosts/:name/sessions/:id/transcript → { id, title, messages } for resume
@@ -340,6 +341,27 @@ export function createDaemonServer(options: ServerOptions): Server {
     response: ServerResponse,
   ): Promise<void> => {
     jsonResponse(response, 200, { sessions: await options.host.listSessions(ghostName) });
+  };
+
+  /**
+   * The opening line for an empty chat. `greeting` is null whenever one could
+   * not be written — no usable model, a provider hiccup, output that did not
+   * survive cleaning — and that is a 200, not a 5xx: the shell renders its own
+   * static line and the window still opens. Only an unknown ghost fails.
+   */
+  const handleGreeting = async (
+    ghostName: string,
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): Promise<void> => {
+    try {
+      await readJsonBody(request, maxBodyBytes);
+    } catch (error) {
+      // The body is `{}` by contract and carries nothing; an absent or
+      // malformed one means the same thing. An oversized one is still refused.
+      if (error instanceof PiMessagesRequestError && error.code === "payload_too_large") throw error;
+    }
+    jsonResponse(response, 200, await options.host.greeting(ghostName));
   };
 
   const handleDeleteSession = async (
@@ -858,6 +880,13 @@ export function createDaemonServer(options: ServerOptions): Server {
             return;
           }
           return await handleMessages(ghostName, request, response);
+        }
+        if (segments.length === 4 && segments[3] === "greeting") {
+          if (method !== "POST") {
+            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+            return;
+          }
+          return await handleGreeting(ghostName, request, response);
         }
         if (segments.length === 4 && segments[3] === "sessions") {
           if (method !== "GET") {

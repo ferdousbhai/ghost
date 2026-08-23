@@ -74,6 +74,18 @@ Singleton {
     /** Conversation currently being deleted, or "" when idle. */
     property string deletingSessionId: ""
 
+    // ---- Greeting ---------------------------------------------------------
+    // The ghost's opening line for an empty chat. Pure upside: the HUD paints
+    // its own static invitation the instant the card appears and only swaps to
+    // this if and when it arrives, so a slow, absent, or failed greeting costs
+    // the creator nothing. Every failure path therefore leaves it "".
+    /** The daemon's opening line for the active ghost, or "". */
+    property string greeting: ""
+    /** True when that greeting is the "we have not met yet" onboarding one. */
+    property bool greetingOnboarding: false
+    /** The ghost the current greeting was fetched for; the once-per-ghost latch. */
+    property string greetingGhost: ""
+
     // ---- Turn state -------------------------------------------------------
     /** ListModel of { role, text, tools, toolActivity, error, pending }. */
     property alias transcript: transcriptModel
@@ -152,6 +164,7 @@ Singleton {
     property var setModelRequest: null
     property var modelRoutingRequest: null
     property var sessionsRequest: null
+    property var greetingRequest: null
     property var transcriptRequest: null
     property var deleteSessionRequest: null
     property var askRequest: null
@@ -307,6 +320,7 @@ Singleton {
                     if (root.activeGhost !== "") {
                         root.fetchCurrentModel();
                         root.fetchSessions(root.activeGhost);
+                        root.fetchGreeting();
                     }
                 } catch (error) {
                     root.fail("ghostd sent a malformed ghost list: " + error);
@@ -336,6 +350,7 @@ Singleton {
                 root.currentSessionId = "";
                 root.sessions = [];
                 root.clearTranscript();
+                root.clearGreeting();
                 root.refresh();
             } else {
                 root.fail(root.describeError(xhr, "POST /api/ghosts"));
@@ -364,8 +379,11 @@ Singleton {
         root.modelRouting = [];
         root.modelRoutingLoading = false;
         root.modelWarning = "";
+        // The greeting is this ghost's own voice, so it never carries over.
+        root.clearGreeting();
         root.fetchCurrentModel();
         root.fetchSessions(name);
+        root.fetchGreeting();
     }
 
     function clearTranscript(): void {
@@ -378,6 +396,53 @@ Singleton {
         root.followUpQueue = [];
         root.queueSubmitting = false;
         root.queueError = "";
+    }
+
+    // ---- Greeting ---------------------------------------------------------
+
+    /** Forget the current greeting so the next fetch asks for a fresh one. */
+    function clearGreeting(): void {
+        root.greeting = "";
+        root.greetingOnboarding = false;
+        root.greetingGhost = "";
+    }
+
+    /**
+     * Ask the active ghost for its opening line.
+     *
+     * Fired from the roster/selection refresh the HUD's open path already runs,
+     * so the HUD needs no plumbing beyond reading `greeting`. The
+     * `greetingGhost` latch keeps that from becoming a per-poll request: one
+     * fetch per ghost selection, cleared by clearGreeting() when the empty chat
+     * genuinely comes back (new/deleted conversation, ghost switch).
+     *
+     * A greeting the daemon could not produce is a 200 with `greeting: null`,
+     * and everything else — non-200, malformed body, unreachable — is treated
+     * the same way: leave the properties empty and let the static line stand.
+     */
+    function fetchGreeting(): void {
+        const ghost = root.activeGhost;
+        if (ghost === "" || ghost === root.greetingGhost) return;
+        if (root.greetingRequest && root.greetingRequest.readyState !== 4) return;
+        root.greetingGhost = ghost;
+        const xhr = new XMLHttpRequest();
+        root.greetingRequest = xhr;
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || xhr !== root.greetingRequest) return;
+            // A greeting for a ghost the creator has since left is not theirs.
+            if (ghost !== root.activeGhost || xhr.status !== 200) return;
+            try {
+                const body = JSON.parse(xhr.responseText);
+                root.greeting = typeof body.greeting === "string" ? body.greeting.trim() : "";
+                root.greetingOnboarding = root.greeting !== "" && body.onboarding === true;
+            } catch (error) {
+                root.greeting = "";
+                root.greetingOnboarding = false;
+            }
+        };
+        root.dispatch(xhr, "POST",
+            "/api/ghosts/" + encodeURIComponent(ghost) + "/greeting",
+            ({ "Content-Type": "application/json" }), JSON.stringify({}));
     }
 
     // ---- Conversations ----------------------------------------------------
@@ -431,6 +496,9 @@ Singleton {
         root.sessionIds[ghost] = id;
         root.currentSessionId = id;
         root.clearTranscript();
+        // A blank chat is back on screen, so it earns a fresh opening line.
+        root.clearGreeting();
+        root.fetchGreeting();
         root.fetchSessions(ghost);
     }
 
@@ -458,6 +526,8 @@ Singleton {
                         root.sessionIds[ghost] = "";
                         root.currentSessionId = "";
                         root.clearTranscript();
+                        root.clearGreeting();
+                        root.fetchGreeting();
                     }
                     root.sessionsError = "";
                     root.fetchSessions(ghost);
@@ -482,6 +552,9 @@ Singleton {
         root.sessionIds[ghost] = id;
         root.currentSessionId = id;
         root.clearTranscript();
+        // A resumed conversation has its own history; an opening line would be
+        // answering a question nobody just asked.
+        root.clearGreeting();
         const xhr = new XMLHttpRequest();
         root.transcriptRequest = xhr;
         xhr.onreadystatechange = function () {
@@ -699,6 +772,8 @@ Singleton {
             entryId: "", branch: ({})
         });
         root.assistantRow = transcriptModel.count - 1;
+        // The conversation has messages now; the opening line has been answered.
+        root.clearGreeting();
 
         root.blocks = ({});
         root.toolNames = [];

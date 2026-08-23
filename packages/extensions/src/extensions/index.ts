@@ -1,11 +1,16 @@
 /**
  * The ghost extensions, and the composition the daemon actually wants: one
- * factory that installs persona, memory, notes, and the computer-use set
- * (vision, screen, desktop, browser) over the same ghost home and scope, plus
- * the tool allowlist that goes with it.
+ * factory that installs persona, character, memory, notes, and the computer-use
+ * set (vision, screen, desktop, browser) over the same ghost home and scope,
+ * plus the tool allowlist that goes with it.
  */
 import type { ExtensionFactory } from "@oh-my-pi/pi-coding-agent";
 import { browserToolNames, createBrowserExtension, type BrowserExtensionOptions } from "./browser.js";
+import {
+  characterToolNames,
+  createCharacterExtension,
+  type CharacterExtensionOptions,
+} from "./character.js";
 import { createHyprlandExtension, desktopToolNames, type HyprlandExtensionOptions } from "./hyprland.js";
 import { isVisitorScope, type GhostScope } from "../scope.js";
 import {
@@ -27,6 +32,7 @@ import { createVisionExtension, visionToolNames, type VisionExtensionOptions } f
 import { resolveScope } from "./shared.js";
 
 export type GhostExtensionSetOptions = PersonaExtensionOptions
+  & CharacterExtensionOptions
   & VisionExtensionOptions
   & ScreenExtensionOptions
   & HyprlandExtensionOptions
@@ -51,8 +57,10 @@ export function ghostToolNames(
   ];
   // A visitor session has no note writer to allow.
   if (!isVisitorScope(scope)) names.push(GHOST_NOTES_WRITE);
-  // Computer-use tools: every one of these returns [] in visitor scope.
+  // Creator-only, like the note writer: a visitor never rewrites the persona.
   const scoped = { ...options, scope };
+  names.push(...characterToolNames(scoped));
+  // Computer-use tools: every one of these returns [] in visitor scope.
   names.push(
     ...visionToolNames(scoped),
     ...screenToolNames(scoped),
@@ -63,14 +71,16 @@ export function ghostToolNames(
 }
 
 /**
- * Persona + memory + notes + computer use (vision fallback, screen, desktop,
- * browser), sharing one home and one scope. The computer-use factories each
- * register nothing in visitor scope, so composing them unconditionally is safe.
+ * Persona + character + memory + notes + computer use (vision fallback, screen,
+ * desktop, browser), sharing one home and one scope. The character and
+ * computer-use factories each register nothing in visitor scope, so composing
+ * them unconditionally is safe.
  */
 export function createGhostExtension(
   options: GhostExtensionSetOptions = {},
 ): ExtensionFactory {
   const persona = createPersonaExtension(options);
+  const character = createCharacterExtension(options);
   const memory = createMemoryExtension(options);
   const notes = createNotesExtension(options);
   const vision = createVisionExtension(options);
@@ -79,6 +89,7 @@ export function createGhostExtension(
   const browser = createBrowserExtension(options);
   return async (pi) => {
     await persona(pi);
+    await character(pi);
     await memory(pi);
     await notes(pi);
     await vision(pi);
@@ -111,6 +122,7 @@ export {
   type BrowserFailure,
   type PageSummary,
 } from "./browser-backend.js";
+export * from "./character.js";
 export * from "./hyprland.js";
 export * from "./memory.js";
 export * from "./notes.js";

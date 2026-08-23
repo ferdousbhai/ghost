@@ -448,6 +448,36 @@ describe("OMP model roles and fallback chains", () => {
     });
   });
 
+  it("routes the smol role and rejects its retired title_model name", async () => {
+    const base = await serve({ credentialed: ["anthropic"] });
+    expect((await putRouting(base, {
+      role: "smol_model",
+      target: "primary",
+      provider: "anthropic",
+      id: "claude-opus-4",
+    })).status).toBe(200);
+    const route = await getJson(`${base}/api/ghosts/casper/model-routing`);
+    const smol = (route.body.roles as Array<Record<string, unknown>>)
+      .find((item) => item.role === "smol_model") as Record<string, unknown>;
+    expect(smol).toMatchObject({
+      ompRole: "smol",
+      primary: { provider: "anthropic", id: "claude-opus-4", resolved: true },
+    });
+    expect((route.body.roles as Array<Record<string, unknown>>)
+      .some((item) => item.role === "title_model")).toBe(false);
+    expect(readGhostModels(agentDir())).toMatchObject({
+      roles: { smol_model: { provider: "anthropic", modelId: "claude-opus-4" } },
+    });
+
+    // The old name is a client-facing role name, not an alias: it is unknown now.
+    expect(await putRouting(base, {
+      role: "title_model",
+      target: "primary",
+      provider: "anthropic",
+      id: "claude-opus-4",
+    })).toMatchObject({ status: 400, body: { error: { code: "invalid_request" } } });
+  });
+
   it("clears a role's fallbacks without changing its primary", async () => {
     const base = await serve({ credentialed: ["openai-codex", "anthropic"] });
     await putRouting(base, {

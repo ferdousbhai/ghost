@@ -101,42 +101,50 @@ export interface GhostModelRoleBinding {
  *   to the cheapest credentialed vision-capable model in the ghost's own
  *   catalogue, ranked by `cost.input`. With none available it raises a loud,
  *   actionable error rather than letting the image be dropped in silence.
- * - `title_model` — the cheap model that names a new conversation (see
- *   `title.ts`). Unbound, the daemon falls back to the cheapest USABLE model,
- *   subscription-aware: a capable model on an already-authenticated
+ * - `smol_model` — the cheap, fast lane for a ghost's throwaway completions:
+ *   the name of a new conversation (`title.ts`) and the opening line of an empty
+ *   chat (`greeting.ts`). Unbound, the daemon falls back to the cheapest USABLE
+ *   model, subscription-aware: a capable model on an already-authenticated
  *   subscription (OAuth / included plan → zero marginal cost) is preferred over
- *   a cheaper metered model. Used only for a single, fire-and-forget completion
- *   after the first turn; a failure never affects the conversation.
+ *   a cheaper metered model. Every use is a single, fire-and-forget completion;
+ *   a failure never affects the conversation.
  * - `general_purpose_model`, `research_model` — reserved.
  */
 export type GhostModelRole =
   | "chat_model"
   | "vision_model"
-  | "title_model"
+  | "smol_model"
   | "general_purpose_model"
   | "research_model";
 
 export const GHOST_MODEL_ROLES: readonly GhostModelRole[] = [
   "chat_model",
   "vision_model",
-  "title_model",
+  "smol_model",
   "general_purpose_model",
   "research_model",
 ];
 
 /**
- * OMP has first-class `default` and `vision` roles and permits custom ones.
- * Keep Ghost's public role vocabulary stable and translate only at the harness
- * boundary; `title`, `general`, and `research` are intentionally custom OMP
- * roles rather than misleading aliases for its coding-specific roles.
+ * OMP has first-class `default`, `vision`, and `smol` roles and permits custom
+ * ones. Keep Ghost's public role vocabulary stable and translate only at the
+ * harness boundary; `general` and `research` are intentionally custom OMP roles
+ * rather than misleading aliases for its coding-specific roles.
  */
 export const GHOST_TO_OMP_MODEL_ROLE: Readonly<Record<GhostModelRole, string>> = {
   chat_model: "default",
   vision_model: "vision",
-  title_model: "title",
+  smol_model: "smol",
   general_purpose_model: "general",
   research_model: "research",
 };
+
+/**
+ * `smol_model` was called `title_model` before the role grew a second consumer.
+ * `readGhostModels` normalises the old key away, so nothing downstream of a read
+ * — including every writer, which round-trips through it — ever sees it again.
+ */
+const LEGACY_SMOL_MODEL_ROLE = "title_model";
 
 export interface GhostModelsFile {
   providers: Record<string, GhostProviderConfig>;
@@ -162,7 +170,7 @@ export function ghostModelSelector(binding: GhostModelRoleBinding): string {
  *
  * The implicit first declared chat model remains supported for hand-written
  * one-provider files. Other roles are explicit: silently borrowing the chat
- * model for vision/title/research would defeat the reason those roles exist.
+ * model for vision/smol/research would defeat the reason those roles exist.
  */
 export function ghostOmpModelRouting(file: GhostModelsFile | null): GhostOmpModelRouting {
   const modelRoles: Record<string, string> = {};
@@ -373,6 +381,28 @@ function persistGhostModels(path: string, file: GhostModelsFile): void {
   }
 }
 
+/**
+ * Fold a legacy `title_model` entry into `smol_model`, in place.
+ *
+ * The old key is always removed, so a file read here and written back — every
+ * mutation in this module round-trips that way — loses it. A file carrying both
+ * keys is one an older Ghost wrote after a newer one had already migrated it:
+ * the new key is the current truth and wins.
+ */
+function migrateLegacySmolRole<T>(
+  bindings: Partial<Record<string, T>> | undefined,
+): Partial<Record<GhostModelRole, T>> | undefined {
+  if (!bindings || !(LEGACY_SMOL_MODEL_ROLE in bindings)) {
+    return bindings as Partial<Record<GhostModelRole, T>> | undefined;
+  }
+  const { [LEGACY_SMOL_MODEL_ROLE]: legacy, ...rest } = bindings;
+  const migrated = rest as Partial<Record<GhostModelRole, T>>;
+  if (migrated.smol_model === undefined && legacy !== undefined) {
+    migrated.smol_model = legacy;
+  }
+  return migrated;
+}
+
 /** Read `<agentDir>/models.json`, or null when absent. Throws on malformed. */
 export function readGhostModels(agentDir: string): GhostModelsFile | null {
   const path = ghostModelsPath(agentDir);
@@ -408,8 +438,8 @@ export function readGhostModels(agentDir: string): GhostModelsFile | null {
   return {
     ...file,
     providers: (file.providers as Record<string, GhostProviderConfig>) ?? {},
-    roles: file.roles as GhostModelsFile["roles"],
-    fallbacks: file.fallbacks as GhostModelsFile["fallbacks"],
+    roles: migrateLegacySmolRole(file.roles as GhostModelsFile["roles"]),
+    fallbacks: migrateLegacySmolRole(file.fallbacks as GhostModelsFile["fallbacks"]),
   };
 }
 
@@ -441,17 +471,17 @@ export function resolveChatModelRef(
 }
 
 /**
- * The explicit `roles.title_model` binding, or null.
+ * The explicit `roles.smol_model` binding, or null.
  *
  * Unlike `resolveChatModelRef`, there is NO fallback to the first declared
- * provider's model: an unbound title role means "let the daemon pick the
- * cheapest usable model" (see `resolveTitleModel` in title.ts), not "reuse the
+ * provider's model: an unbound smol role means "let the daemon pick the
+ * cheapest usable model" (see `resolveSmolModel` in smol.ts), not "reuse the
  * chat model". Returning null here is exactly that signal.
  */
-export function resolveTitleModelRef(
+export function resolveSmolModelRef(
   file: GhostModelsFile | null,
 ): GhostModelRoleBinding | null {
-  const bound = file?.roles?.title_model;
+  const bound = file?.roles?.smol_model;
   if (bound?.provider && bound.modelId) return bound;
   return null;
 }

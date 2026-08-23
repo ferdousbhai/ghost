@@ -521,11 +521,11 @@ FloatingWindow {
                             // settling back. Reduced motion gets the end state.
                             opacity: Theme.reducedMotion ? 1 : 0
                             scale: 1
-                            onVisibleChanged: if (welcome.visible && !Theme.reducedMotion) materialize.restart()
-                            Component.onCompleted: if (welcome.visible && !Theme.reducedMotion) materialize.start()
+                            onVisibleChanged: if (welcome.visible && !Theme.reducedMotion) welcomeMaterialize.restart()
+                            Component.onCompleted: if (welcome.visible && !Theme.reducedMotion) welcomeMaterialize.start()
 
                             SequentialAnimation {
-                                id: materialize
+                                id: welcomeMaterialize
                                 ParallelAnimation {
                                     NumberAnimation {
                                         target: welcome; property: "opacity"
@@ -644,26 +644,86 @@ FloatingWindow {
 
                             // The invitation. Amber film, so the ghost's own
                             // colour asks the question.
+                            //
+                            // Instant-then-upgrade: the static line paints the
+                            // moment the card appears, and the ghost's own
+                            // greeting — fetched in the background, often a
+                            // second or two behind — crossfades in over it if
+                            // it arrives at all. No spinner, because there is
+                            // nothing to wait for: the card is already usable.
                             Rectangle {
                                 anchors.horizontalCenter: parent.horizontalCenter
                                 visible: Ghostd.reachable
                                 width: parent.width
+                                // A greeting is two or three sentences, so this
+                                // follows the *wrapped* height of a Text with a
+                                // fixed width, and glides rather than snapping.
                                 height: invitation.implicitHeight + Theme.pad * 2
                                 radius: Theme.radiusLarge
                                 color: Theme.amber(0.06)
                                 border.width: 1
                                 border.color: Theme.amber(0.15)
 
+                                Behavior on height {
+                                    enabled: !Theme.reducedMotion
+                                    NumberAnimation {
+                                        duration: Theme.durMed
+                                        easing.type: Easing.OutCubic
+                                    }
+                                }
+
                                 Text {
                                     id: invitation
+
+                                    /** What the card should be saying. */
+                                    readonly property string line: Ghostd.greeting !== ""
+                                        ? Ghostd.greeting : "What's on your mind?"
+
                                     anchors.centerIn: parent
                                     width: parent.width - Theme.pad * 2
                                     horizontalAlignment: Text.AlignHCenter
+                                    // Deliberately unbound: the crossfade swaps
+                                    // the words at the bottom of the opacity dip
+                                    // so neither line is ever half-visible.
                                     text: "What's on your mind?"
                                     color: Theme.foreground
                                     font.family: Theme.fontFamily
                                     font.pixelSize: Theme.fontSize
                                     wrapMode: Text.Wrap
+
+                                    onLineChanged: {
+                                        // Reduced motion, or a card nobody is
+                                        // looking at, takes the end state.
+                                        if (Theme.reducedMotion || !invitation.visible) {
+                                            crossfade.stop();
+                                            invitation.opacity = 1;
+                                            invitation.text = invitation.line;
+                                        } else {
+                                            crossfade.restart();
+                                        }
+                                    }
+                                    // A greeting that landed before this card
+                                    // existed changed nothing to listen for.
+                                    Component.onCompleted: invitation.text = invitation.line
+
+                                    SequentialAnimation {
+                                        id: crossfade
+                                        NumberAnimation {
+                                            target: invitation; property: "opacity"
+                                            to: 0
+                                            duration: Theme.durMed / 2
+                                            easing.type: Easing.InCubic
+                                        }
+                                        ScriptAction {
+                                            script: invitation.text = invitation.line
+                                        }
+                                        NumberAnimation {
+                                            target: invitation; property: "opacity"
+                                            to: 1
+                                            duration: Theme.durMed / 2
+                                            easing.type: Easing.OutCubic
+                                        }
+                                    }
                                 }
                             }
 

@@ -22,8 +22,11 @@
 import type { ExtensionFactory } from "@oh-my-pi/pi-coding-agent";
 import {
   createGhostExtension,
+  deriveMemoryIndex,
+  deriveNoteCatalog,
   ghostToolNamesFor,
   isVisitorScope,
+  openGhostHome,
   relayBackend,
   CREATOR_SCOPE,
   visitorScope,
@@ -33,7 +36,7 @@ import {
 } from "@ghost/extensions";
 
 export type { GhostScope, RelayTransport };
-export { CREATOR_SCOPE, visitorScope };
+export { CREATOR_SCOPE, isVisitorScope, visitorScope };
 
 /** How the daemon asks for a session's extension set. */
 export interface GhostExtensionOptions {
@@ -57,6 +60,12 @@ export interface GhostExtensionOptions {
    * relay is enabled; the relay backend is built from it per creator session.
    */
   relayTransport?: RelayTransport;
+  /**
+   * Extra system-prompt sections, appended after the persona's derived ones.
+   * Fixed for the session's lifetime — the persona extension rebuilds the
+   * prompt every turn, but from the sections it was constructed with.
+   */
+  extraSections?: readonly string[];
 }
 
 /**
@@ -108,10 +117,43 @@ export function resolveGhostExtensions(
     scope,
     ...(options.ghostName === undefined ? {} : { ghostName: options.ghostName }),
     ...(backend === undefined ? {} : { backend }),
+    ...(options.extraSections === undefined ? {} : { extraSections: options.extraSections }),
   };
   return {
     factories: [createGhostExtension(extensionOptions)],
     toolNames: ghostToolNamesFor(extensionOptions),
     scope,
+  };
+}
+
+/**
+ * What the persona prompt is assembled from, read once outside any session.
+ *
+ * The greeting generator needs the same material the persona extension derives
+ * per turn, but it has no `AgentSession` to derive it inside of — so the read
+ * crosses the seam here rather than in `greeting.ts`, which never imports
+ * `@ghost/extensions` directly.
+ *
+ * Creator scope only: a greeting opens the owner's own chat window. Derived,
+ * never stored, exactly as it is in a session.
+ */
+export interface GhostHomeDigest {
+  /** The character body, or null when there is no character file. */
+  character: string | null;
+  memoryLines: readonly string[];
+  noteLines: readonly string[];
+}
+
+export async function readGhostHomeDigest(homeDir: string): Promise<GhostHomeDigest> {
+  const home = openGhostHome(homeDir);
+  const [character, memory, notes] = await Promise.all([
+    home.readCharacter(),
+    home.listMemory(CREATOR_SCOPE),
+    home.listNotes(),
+  ]);
+  return {
+    character: character?.body ?? null,
+    memoryLines: deriveMemoryIndex(memory.files).lines,
+    noteLines: deriveNoteCatalog(notes.notes, CREATOR_SCOPE).lines,
   };
 }

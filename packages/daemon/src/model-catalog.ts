@@ -181,7 +181,7 @@ export interface ModelRoutingView {
 const MODEL_ROLE_LABELS: Readonly<Record<GhostModelRole, string>> = {
   chat_model: "Chat",
   vision_model: "Vision",
-  title_model: "Titles",
+  smol_model: "Smol",
   general_purpose_model: "General purpose",
   research_model: "Research",
 };

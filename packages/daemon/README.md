@@ -87,7 +87,7 @@ Ghost maps its roles to OMP as follows:
 |---|---|
 | `chat_model` | `default` |
 | `vision_model` | `vision` |
-| `title_model` | `title` |
+| `smol_model` | `smol` |
 | `general_purpose_model` | `general` |
 | `research_model` | `research` |
 

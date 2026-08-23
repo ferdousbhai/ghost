@@ -913,3 +913,65 @@ describe("transcript resume", () => {
       .rejects.toMatchObject({ code: "not_found", status: 404 });
   });
 });
+
+describe("the first meeting", () => {
+  /**
+   * A ghost straight out of `GhostRegistry.create`: its character.md is the
+   * untouched seed, which is the whole definition of "never been met".
+   */
+  async function setupSeeded(visitorId?: string) {
+    temp = makeTempGhosts();
+    temp.registry.ensureRoot();
+    provider = await startMockProvider({ script: [{ kind: "text", text: "hello" }] });
+    const ghost = temp.registry.create("wisp");
+    writeGhostModels(
+      ghostPaths(ghost.dir).agentDir,
+      openAiCompatiblePreset({
+        providerId: "ghost-local",
+        baseUrl: provider.url,
+        modelId: provider.modelId,
+        apiKey: "not-needed",
+      }),
+    );
+    host = new SessionHost({
+      registry: temp.registry,
+      offline: true,
+      ...(visitorId ? { extensionOptions: { visitorId } } : {}),
+    });
+    return ghost;
+  }
+
+  async function systemPromptFor(ghostName: string): Promise<string> {
+    await host!.runTurn(ghostName, {
+      sessionId: "conv-first",
+      prompt: "Hello?",
+      emit: () => {},
+    });
+    return provider!.requests[0]?.system ?? "";
+  }
+
+  it("interviews the owner while the character file is still the seed", async () => {
+    await setupSeeded();
+    const system = await systemPromptFor("wisp");
+    expect(system).toContain("## Your first meeting");
+    expect(system).toContain("one question at a time");
+    // The interview ends by writing the character file with the ghost's own tool.
+    expect(system).toContain("ghost_character");
+    // And it is a ritual, not a gate.
+    expect(system).toContain("Their request always comes first");
+  });
+
+  it("never runs the ritual on a visitor — onboarding is the owner's", async () => {
+    await setupSeeded("visitor-1");
+    const system = await systemPromptFor("wisp");
+    expect(system).not.toContain("## Your first meeting");
+  });
+
+  it("stops once the character file has been written", async () => {
+    await setup([{ kind: "text", text: "hello" }]);
+    // `setup` seeds a ghost whose character.md the owner wrote.
+    const system = await systemPromptFor("casper");
+    expect(system).toContain("letterpress printer");
+    expect(system).not.toContain("## Your first meeting");
+  });
+});

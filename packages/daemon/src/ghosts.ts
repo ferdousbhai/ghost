@@ -11,7 +11,7 @@
  * own ghost stays the plain files they wrote — the same precedent as
  * `memory/.visitors/`.
  */
-import { mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 /** One discovered ghost, as served by `GET /api/ghosts`. */
@@ -132,6 +132,46 @@ Your notes and memory files are yours. Read them before you answer a question
 they cover, and write a memory file when you learn something about a visitor
 that you would want to remember the next time they come back.
 `;
+
+/**
+ * The character file's raw bytes, or null when the ghost has none.
+ *
+ * Raw rather than parsed on purpose: both callers are asking "has the owner
+ * been here yet", which is a question about the file as written, not about the
+ * persona it parses into.
+ */
+export function readCharacterFile(dir: string): string | null {
+  try {
+    return readFileSync(ghostPaths(dir).characterFile, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+/**
+ * True when `text` is still the file `GhostRegistry.create` wrote — the ghost
+ * has been summoned but never met.
+ *
+ * A populated character file is the durable "this ghost has been onboarded"
+ * latch. There is deliberately no flag file beside it: a flag would be a second
+ * source of truth about a question the character file already answers, and the
+ * two would drift the first time somebody edited one of them by hand.
+ *
+ * Missing and blank both count as seeded. An empty character.md is not a persona
+ * somebody wrote; it is the same "the owner has not been here" the seed means.
+ *
+ * The comparison is exact. `@ghost/extensions` has its own advisory
+ * `isSeededCharacterBody` (it cannot import the daemon, so it matches marker
+ * lines instead); this is the authoritative one, and it is deliberately the
+ * stricter of the two — being wrong here means offering onboarding to a ghost
+ * that has already been written, which is worse than missing it once.
+ */
+export function isSeededCharacter(name: string, text: string | null | undefined): boolean {
+  if (text === null || text === undefined) return true;
+  if (text.trim() === "") return true;
+  return text === SEEDED_CHARACTER(name);
+}
 
 export class GhostRegistry {
   readonly root: string;

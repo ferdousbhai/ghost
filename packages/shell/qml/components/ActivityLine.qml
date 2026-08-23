@@ -76,6 +76,10 @@ Item {
             look_at_image: [
                 "Peering through the spectral lens", "Reading the haunted image",
                 "Tracing shapes beyond the veil"
+            ],
+            ghost_character: [
+                "Sketching the spirit self", "Inking the ghost’s character",
+                "Learning who I am"
             ]
         };
         if (state.startsWith("switching model") || state.startsWith("using fallback")) {

@@ -68,7 +68,14 @@ import {
   type GhostExtensionOptions,
   type RelayTransport,
 } from "./extensions.js";
-import { GhostError, ghostPaths, type Ghost } from "./ghosts.js";
+import { FIRST_MEETING_SECTION } from "./greeting.js";
+import {
+  GhostError,
+  ghostPaths,
+  isSeededCharacter,
+  readCharacterFile,
+  type Ghost,
+} from "./ghosts.js";
 import { silentLogger, type Logger } from "./log.js";
 import type { RunTurnOptions } from "./session-host.js";
 
@@ -361,6 +368,12 @@ async function buildPersona(homeDir: string, ghostName: string): Promise<string>
           + "capability boundary. You do not have Claude Code's coding, shell, arbitrary-file, skill, "
           + "plugin, or project-instruction tools. Never claim that you used one.",
       ].join("\n"),
+      // This runtime is creator-only (a visitor scope is refused before we get
+      // here), so a seeded character.md means the same thing it means on the
+      // OMP path: this ghost has not met its owner yet.
+      ...(isSeededCharacter(ghostName, readCharacterFile(homeDir))
+        ? [FIRST_MEETING_SECTION]
+        : []),
     ],
   });
 }

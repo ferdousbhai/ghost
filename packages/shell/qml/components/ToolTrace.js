@@ -61,6 +61,12 @@ function fallback(activity, completed) {
     case "ghost_memory_write":
     case "write_memory":
         return completed ? "Saved something to memory" : "Saving something to memory";
+    // The ghost's own character.md. It is the only file the ghost is the
+    // subject of rather than the reader of, so the trace says "its own".
+    case "ghost_character":
+        if (action === "write")
+            return completed ? "Wrote its character" : "Writing its character";
+        return completed ? "Read its own character" : "Reading its own character";
     case "look_at_image":
         return completed ? "Looked closely at the image" : "Looking closely at the image";
     case "ghost_screen":

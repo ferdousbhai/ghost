@@ -122,24 +122,44 @@ one must not be a leak of both.
 - `POST /api/ghosts/:name/sessions/:id/reanswer` with `{ entryId }` reopens a
   persisted `ask` result, commits the answer as a sibling, and resumes the model
   on that branch. Its response is an SSE stream and includes `branch_changed`.
+- `POST /api/ghosts/:name/greeting` `{}` → `{ greeting: string | null,
+  onboarding: boolean }` — one smol-lane completion (see below) writes a short
+  in-persona opener for an empty chat from the character file, memory index,
+  note catalog, and the current time. `greeting` is `null` on ANY generation
+  failure (no usable model, provider error, timeout, output rejected by
+  validation) — never a 5xx; the shell keeps its static invitation and the
+  greeting is pure upside. `onboarding` is true while `character.md` is
+  missing, blank, or still byte-equal to the seed, and is recomputed per
+  request even when generation fails. Cached per ghost (TTL ~10 min,
+  single-flight), invalidated when `character.md` changes.
 
-### Conversation titles (the `title_model` role)
+### The smol lane (the `smol_model` role)
 
-After the first turn of a conversation completes, the daemon generates a 3-6
-word title from the first user message with one cheap completion, fire-and-forget
-(mirroring background compaction): it never blocks the reply and a failure is
-logged, never fatal. A conversation is titled once and never re-titled.
+One cheap, fast model role carries every side-completion that must never block
+a reply or bill like a chat turn. The role name adopts OMP's own convention
+(`modelRoles.smol`, the `@smol` alias family). Two consumers today:
 
-The title is stored as an OMP **`session_info` entry** inside the conversation's
-own `.sessions/*.jsonl` transcript (OMP's native display-name mechanism, which
-never enters the model's context), so it needs no sidecar and rides the same
-per-ghost storage backup and future encryption cover. `GET …/sessions` surfaces
-it as `title`.
+**Conversation titles.** After the first turn of a conversation completes, the
+daemon generates a 3-6 word title from the first user message with one smol
+completion, fire-and-forget (mirroring background compaction): it never blocks
+the reply and a failure is logged, never fatal. A conversation is titled once
+and never re-titled. The title is stored as an OMP **`session_info` entry**
+inside the conversation's own `.sessions/*.jsonl` transcript (OMP's native
+display-name mechanism, which never enters the model's context), so it needs
+no sidecar and rides the same per-ghost storage backup and future encryption
+cover. `GET …/sessions` surfaces it as `title`.
 
-Which model writes the title is the `title_model` role in `.pi/models.json`,
+**Greetings.** `POST …/greeting` (above) writes the empty-chat opener with one
+smol completion: 1-3 sentences in the ghost's own voice, at most one timely
+detail (time of day, a gap since the last conversation, something from memory),
+ending with an invitation to talk. Character, memory-index, and note-catalog
+inputs are fenced as untrusted data; output that answers instead of greeting is
+rejected outright, never truncated.
+
+Which model serves the lane is the `smol_model` role in `.pi/models.json`,
 resolved daemon-side:
 
-1. `roles.title_model` — the creator's explicit choice; a missing or
+1. `roles.smol_model` — the creator's explicit choice; a missing or
    uncredentialed model there is a loud (logged) error, not a silent fallback.
 2. otherwise the **cheapest USABLE model, subscription-aware** (issue #484): a
    capable model on an already-authenticated subscription — `isSubscription`, or
@@ -147,6 +167,23 @@ resolved daemon-side:
    over a cheaper metered model; only then cheapest by `cost.input`. "Cheapest
    effective cost, subscription = free."
 3. otherwise a loud error — only when there is genuinely no usable model.
+
+Legacy `roles.title_model` / `fallbacks.title_model` keys (the role's old name)
+are read as `smol_model` when the new key is absent; writers persist only
+`smol_model`.
+
+### The first meeting (onboarding)
+
+While `character.md` is missing, blank, or byte-equal to the seed, creator
+sessions — OMP and Claude Code runtimes alike, never visitor scopes — get a
+"first meeting" system-prompt section: interview the owner with genuine
+curiosity (one question at a time, the owner's request always first), save
+durable facts as declarative memories, offer notes for ongoing projects, and
+eventually draft and write the character with the creator-only
+`ghost_character` tool (read/write `character.md`). The populated character
+file IS the completion latch — there is no separate onboarding state — and the
+section stops being injected on the first session after the file deviates from
+the seed.
 
 ### Model indicator + switcher (which model a ghost uses, and switching it)
 
@@ -192,7 +229,7 @@ Requires `PUT` in the loopback CORS allow-list.
 ### Model roles and fallback chains
 
 `GET /api/ghosts/:name/model-routing` returns `{ roles }` for `chat_model`,
-`vision_model`, `title_model`, `general_purpose_model`, and `research_model`.
+`vision_model`, `smol_model`, `general_purpose_model`, and `research_model`.
 Each row contains the OMP role name, its primary model, and its ordered
 fallbacks with resolved/usable status.
 
@@ -281,6 +318,14 @@ whole model before any non-local exposure.
   unit. Depends on `extensions`.
 - `packages/shell` — the Omarchy/Quickshell HUD, model routing, ask/queue and
   branching UI, live tool cards, and summoning indicator.
+- `packages/chromium-extension` — the "my browser" relay, driving one tab of the
+  browser the user is already signed into. The default mode stays "Ghost's
+  browser", a dedicated Playwright Chromium profile under the ghost home, and
+  remains the right choice for anything autonomous.
+- `packages/desktop-helper` — Python, not pnpm. A long-lived PyGObject sidecar
+  for Hyprland/Wayland computer-use, driven by the `ghost_desktop` and
+  `ghost_screen` extensions over line-oriented JSON on stdin/stdout. Managed with
+  `uv`; the root `pnpm -r` scripts do not reach it.
 
 ## OMP 18 harness invariants
 

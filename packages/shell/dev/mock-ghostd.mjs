@@ -7,6 +7,7 @@
  *   GET  /api/ghosts                          → [{ name, dir, createdAt }]
  *   POST /api/ghosts { name }                 → 201 + the new ghost
  *   POST /api/ghosts/:name/messages           → pi-messages SSE (canned reply)
+ *   POST /api/ghosts/:name/greeting           → { greeting, onboarding }, ~800ms late
  *   GET  /api/ghosts/:name/sessions           → { sessions: [...] }, newest first
  *   DELETE /api/ghosts/:name/sessions/:id     → delete one conversation
  *   GET  /api/ghosts/:name/sessions/:id/transcript → { id, title, messages }
@@ -119,6 +120,31 @@ function recordTurn(name, sessionId, prompt, assistantText) {
   if (!s.title) s.title = prompt.slice(0, 40) || "New conversation";
 }
 
+// ---- Greetings -------------------------------------------------------------
+// The empty-chat opening line. Both branches of the contract are demoable:
+// `casper` answers as a ghost that already knows the creator, `moaning-myrtle`
+// answers `onboarding: true` (it has no character.md yet and says so), and any
+// ghost created at runtime falls through to `greeting: null` — the "the daemon
+// could not produce one" case, where the HUD must simply keep its static line.
+
+/** @type {Record<string, { greeting: string, onboarding: boolean }>} */
+const GREETINGS = {
+  casper: {
+    greeting:
+      "You left the launch notes half-written last night, and the kettle is still on in roadmap.md. "
+      + "Want to pick that thread back up? I can also just sit here quietly.",
+    onboarding: false,
+  },
+  "moaning-myrtle": {
+    greeting:
+      "We haven’t met yet. I don’t have a character to speak from — no name I chose, no temperament, "
+      + "nothing about how you want me to talk to you. Tell me any of it and I’ll write it down as mine.",
+    onboarding: true,
+  },
+};
+
+const GREETING_MS = 800;
+
 const json = (res, status, body) => {
   const payload = JSON.stringify(body);
   res.writeHead(status, {
@@ -142,18 +168,38 @@ const readBody = (req) =>
     req.on("error", reject);
   });
 
-/** A scripted turn: one tool call, then a two-paragraph answer. */
+/**
+ * A scripted turn: one tool call — two for a ghost still being written — then a
+ * two-paragraph answer.
+ */
 function* script(name, prompt) {
+  let contentIndex = 0;
   yield { type: "start" };
-  yield { type: "toolcall_start", contentIndex: 0, id: "call_1", toolName: "read_memory" };
-  yield { type: "toolcall_delta", contentIndex: 0, delta: '{"query":"' };
-  yield { type: "toolcall_delta", contentIndex: 0, delta: `${prompt.slice(0, 24)}"}` };
+  const memory = contentIndex++;
+  yield { type: "toolcall_start", contentIndex: memory, id: "call_1", toolName: "read_memory" };
+  yield { type: "toolcall_delta", contentIndex: memory, delta: '{"query":"' };
+  yield { type: "toolcall_delta", contentIndex: memory, delta: `${prompt.slice(0, 24)}"}` };
   yield {
     type: "toolcall_end",
-    contentIndex: 0,
+    contentIndex: memory,
     toolCall: { type: "toolCall", id: "call_1", name: "read_memory", arguments: { query: prompt.slice(0, 24) } },
   };
-  yield { type: "text_start", contentIndex: 1 };
+  // A ghost whose greeting said it has no character writes one during the turn,
+  // which is what puts a `ghost_character` card in the trace to look at.
+  if (GREETINGS[name]?.onboarding) {
+    const character = contentIndex++;
+    const content = `# ${name}\n\nDrafted in the dev harness, from: ${prompt.slice(0, 40)}`;
+    yield { type: "toolcall_start", contentIndex: character, id: "call_2", toolName: "ghost_character" };
+    yield { type: "toolcall_delta", contentIndex: character, delta: '{"action":"write"' };
+    yield { type: "toolcall_delta", contentIndex: character, delta: `,"content":${JSON.stringify(content)}}` };
+    yield {
+      type: "toolcall_end",
+      contentIndex: character,
+      toolCall: { type: "toolCall", id: "call_2", name: "ghost_character", arguments: { action: "write", content } },
+    };
+  }
+  const answer = contentIndex++;
+  yield { type: "text_start", contentIndex: answer };
   const reply =
     `You said: **${prompt}**\n\n`
     + `I am ${name}, a mock ghost. I live entirely in this dev harness — no pi session, `
@@ -161,9 +207,9 @@ function* script(name, prompt) {
     + `so whatever renders here renders there.\n\n`
     + `Visitors get their own memory scope; this mock has none.`;
   for (const chunk of reply.match(/\s*\S+/gu) ?? []) {
-    yield { type: "text_delta", contentIndex: 1, delta: chunk };
+    yield { type: "text_delta", contentIndex: answer, delta: chunk };
   }
-  yield { type: "text_end", contentIndex: 1, content: reply };
+  yield { type: "text_end", contentIndex: answer, content: reply };
   const usage = {
     input: 812,
     output: reply.length >> 2,
@@ -342,7 +388,7 @@ const routing = new Map();
 const ROUTE_ROLES = [
   ["chat_model", "default", "Chat"],
   ["vision_model", "vision", "Vision"],
-  ["title_model", "title", "Titles"],
+  ["smol_model", "smol", "Smol"],
   ["general_purpose_model", "general", "General purpose"],
   ["research_model", "research", "Research"],
 ];
@@ -456,6 +502,13 @@ createServer(async (req, res) => {
   if (parts[3] === "messages" && req.method === "POST") {
     const body = await readBody(req).catch(() => ({}));
     return streamTurn(req, res, name, body);
+  }
+  if (parts[3] === "greeting" && parts.length === 4 && req.method === "POST") {
+    await readBody(req).catch(() => ({}));
+    // The delay is the point, not an accident: the real daemon runs a model to
+    // write this, so the HUD must paint its static line first and crossfade.
+    await new Promise((r) => setTimeout(r, GREETING_MS));
+    return json(res, 200, GREETINGS[name] ?? { greeting: null, onboarding: false });
   }
   if (parts[3] === "sessions" && parts.length === 4 && req.method === "GET") {
     const list = [...ghostSessions(name).values()]

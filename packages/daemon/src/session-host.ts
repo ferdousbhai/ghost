@@ -73,11 +73,31 @@ import {
   ghostSessionStopContinuation,
 } from "./hooks.js";
 import {
+  isVisitorScope,
+  readGhostHomeDigest,
   resolveGhostExtensions,
+  resolveGhostScope,
   type GhostExtensionOptions,
+  type GhostHomeDigest,
   type RelayTransport,
 } from "./extensions.js";
-import { GhostError, ghostPaths, type Ghost, type GhostRegistry } from "./ghosts.js";
+import {
+  FIRST_MEETING_SECTION,
+  generateGreeting,
+  GreetingCache,
+  localTimeString,
+  wholeDaysSince,
+  type GreetingContextInput,
+  type GreetingResult,
+} from "./greeting.js";
+import {
+  GhostError,
+  ghostPaths,
+  isSeededCharacter,
+  readCharacterFile,
+  type Ghost,
+  type GhostRegistry,
+} from "./ghosts.js";
 import { silentLogger, type Logger } from "./log.js";
 import {
   ghostOmpModelRouting,
@@ -85,7 +105,8 @@ import {
   ghostModelsPath,
   readGhostModels,
   resolveChatModelRef,
-  resolveTitleModelRef,
+  resolveSmolModelRef,
+  type GhostModelRoleBinding,
 } from "./models.js";
 import { createPiMessagesAdapter, type PiMessagesEvent } from "./pi-messages.js";
 import { generateTitle } from "./title.js";
@@ -110,7 +131,7 @@ export const PI_BUILTIN_TOOL_NAMES: readonly string[] = [
 /**
  * Generate a title for a new conversation from its first user message. Throws
  * on failure; the caller swallows it. Injectable so a test can drive title
- * behaviour without a real model. The default reads `roles.title_model` and
+ * behaviour without a real model. The default reads `roles.smol_model` and
  * runs one completion on the cheapest usable model (see title.ts).
  */
 export type TitleGenerator = (input: {
@@ -128,17 +149,36 @@ export interface TitleConfig {
   generate?: TitleGenerator;
 }
 
-/** The default: resolve title_model against the session's own runtime, complete once. */
+/** The default: resolve smol_model against the session's own runtime, complete once. */
 const defaultTitleGenerator: TitleGenerator = async ({ runtime, agentDir, firstPrompt }) => {
   let ref = null;
   try {
-    ref = resolveTitleModelRef(readGhostModels(agentDir));
+    ref = resolveSmolModelRef(readGhostModels(agentDir));
   } catch {
     // A broken models.json is not fatal to titling: fall back to cheapest usable.
     ref = null;
   }
   return generateTitle({ runtime, firstPrompt, ref });
 };
+
+/**
+ * Write the greeting that opens an empty chat. Injectable so a test can drive
+ * the route and the cache without a model. The default resolves `smol_model`
+ * against a runtime for this ghost and runs one completion (see greeting.ts).
+ */
+export type GreetingGenerator = (input: {
+  ghost: Ghost;
+  context: GreetingContextInput;
+}) => Promise<string | null>;
+
+export interface GreetingConfig {
+  /** Master switch. Defaults to enabled; off answers `greeting: null`. */
+  enabled?: boolean;
+  /** Cache lifetime. Defaults to `GREETING_CACHE_TTL_MS`. */
+  ttlMs?: number;
+  /** Test seam: replace the default generator. */
+  generate?: GreetingGenerator;
+}
 
 export interface SessionHostOptions {
   registry: GhostRegistry;
@@ -150,6 +190,11 @@ export interface SessionHostOptions {
    * generated once, after the first turn of a conversation, fire-and-forget.
    */
   title?: TitleConfig;
+  /**
+   * The greeting that opens an empty chat, and the onboarding flag that rides
+   * with it. Enabled by default; cached per ghost.
+   */
+  greeting?: GreetingConfig;
   /** Passed to the `@ghost/extensions` factories. */
   extensionOptions?: GhostExtensionOptions;
   /**
@@ -411,6 +456,9 @@ export class SessionHost {
   private readonly compactionConfig: CompactionConfig;
   private readonly titleEnabled: boolean;
   private readonly generateTitle: TitleGenerator;
+  private readonly greetingEnabled: boolean;
+  private readonly greetings: GreetingCache;
+  private readonly generateGreetingFor: GreetingGenerator;
   private readonly claudeCode: ClaudeCodeRuntime;
   private readonly hooks: GhostHookRunner;
   private readonly sessions = new Map<string, HostedSession>();
@@ -430,6 +478,12 @@ export class SessionHost {
     this.compactionConfig = options.compaction ?? DEFAULT_COMPACTION_CONFIG;
     this.titleEnabled = options.title?.enabled ?? true;
     this.generateTitle = options.title?.generate ?? defaultTitleGenerator;
+    this.greetingEnabled = options.greeting?.enabled ?? true;
+    this.greetings = new GreetingCache(
+      options.greeting?.ttlMs === undefined ? {} : { ttlMs: options.greeting.ttlMs },
+    );
+    this.generateGreetingFor = options.greeting?.generate
+      ?? ((input) => this.defaultGreeting(input));
     this.hooks = options.hooks ?? new GhostHookRunner({ logger: this.logger });
     this.claudeCode = new ClaudeCodeRuntime({
       logger: this.logger,
@@ -528,11 +582,20 @@ export class SessionHost {
     // instead driven from runTurn via `maybeCompact` — see compaction.ts. The
     // manual `session.compact()` path ignores this flag, so disabling the auto
     // trigger here does not disable compaction itself.
+    // A ghost whose character.md is still the seed has been summoned but never
+    // met, so its conversations carry the first-meeting section until that file
+    // is written. Creator scope only: onboarding is the owner's ritual, and a
+    // visitor is not the person the ghost is trying to become.
+    const extraSections = [
+      ...(this.extensionOptions.extraSections ?? []),
+      ...(this.isFirstMeeting(ghost) ? [FIRST_MEETING_SECTION] : []),
+    ];
     const extensions = resolveGhostExtensions({
       ghostName,
       browserMode: this.browserMode,
       ...(this.relayTransport ? { relayTransport: this.relayTransport } : {}),
       ...this.extensionOptions,
+      ...(extraSections.length > 0 ? { extraSections } : {}),
     });
 
     const modelRuntime = await createGhostOmpRuntime({
@@ -979,7 +1042,7 @@ export class SessionHost {
    * promise is stored on the session so `listSessions` can await it before
    * reading titles, but this method never awaits and never throws — a failure
    * is logged and the conversation simply stays untitled. Generation is a
-   * single completion on the title_model (see title.ts); the result is stored
+   * single completion on the smol_model (see title.ts); the result is stored
    * as a pi `session_info` entry, which never enters the model's context.
    */
   private startBackgroundTitle(
@@ -1040,6 +1103,151 @@ export class SessionHost {
       if (hosted.compaction === tracked) hosted.compaction = undefined;
     });
     hosted.compaction = tracked;
+  }
+
+  /**
+   * Whether a session for this ghost should carry the first-meeting section:
+   * the creator's own conversation with a ghost that is still the seed.
+   *
+   * An unreadable character.md answers "no". Being wrong the other way would
+   * push a written ghost back through an interview it has already had, which
+   * reads as amnesia rather than as a first meeting.
+   */
+  private isFirstMeeting(ghost: Ghost): boolean {
+    if (isVisitorScope(resolveGhostScope(this.extensionOptions.visitorId))) return false;
+    try {
+      return isSeededCharacter(ghost.name, readCharacterFile(ghost.dir));
+    } catch (error) {
+      this.logger.warn("could not read character.md", {
+        ghost: ghost.name,
+        error: (error as Error).message,
+      });
+      return false;
+    }
+  }
+
+  /**
+   * The line the shell opens an empty chat with, and whether this ghost has
+   * been met yet.
+   *
+   * A generation failure is never an HTTP failure: `greeting: null` is the
+   * contract, and the shell keeps its own static line. An unknown ghost is
+   * still a 404 — that is a client bug, not a model that was busy.
+   *
+   * The onboarding flag is computed from character.md on every request, not
+   * from the cached entry, so it is correct even when generation fails.
+   */
+  async greeting(ghostName: string): Promise<GreetingResult> {
+    const ghost = this.registry.get(ghostName);
+    const character = readCharacterFile(ghost.dir);
+    const onboarding = isSeededCharacter(ghost.name, character);
+    if (!this.greetingEnabled) return { greeting: null, onboarding };
+
+    // The character file IS the cache key's second half: writing it is exactly
+    // the event that must produce a different greeting immediately.
+    const fingerprint = createHash("sha256").update(character ?? "").digest("hex");
+    return this.greetings.get(ghost.name, fingerprint, async () => {
+      try {
+        const context = await this.greetingContext(ghost, onboarding);
+        return { greeting: await this.generateGreetingFor({ ghost, context }), onboarding };
+      } catch (error) {
+        this.logger.warn("greeting generation failed", {
+          ghost: ghost.name,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return { greeting: null, onboarding };
+      }
+    });
+  }
+
+  /**
+   * Assemble the greeting prompt's inputs. Every part is best-effort: a ghost
+   * home that cannot be read still gets a greeting, just a less specific one.
+   */
+  private async greetingContext(
+    ghost: Ghost,
+    onboarding: boolean,
+  ): Promise<GreetingContextInput> {
+    const paths = ghostPaths(ghost.dir);
+    let digest: GhostHomeDigest = { character: null, memoryLines: [], noteLines: [] };
+    try {
+      digest = await readGhostHomeDigest(paths.home);
+    } catch (error) {
+      this.logger.warn("could not read the ghost home for a greeting", {
+        ghost: ghost.name,
+        error: (error as Error).message,
+      });
+    }
+
+    let daysSinceLastConversation: number | null = null;
+    try {
+      // listSessions is newest-updated first, so the head is the last time the
+      // owner and this ghost actually spoke.
+      const newest = (await this.listSessions(ghost.name))[0]?.updatedAt;
+      if (newest) daysSinceLastConversation = wholeDaysSince(newest);
+    } catch (error) {
+      this.logger.warn("could not read conversations for a greeting", {
+        ghost: ghost.name,
+        error: (error as Error).message,
+      });
+    }
+
+    return {
+      ghostName: ghost.name,
+      character: digest.character,
+      memoryLines: digest.memoryLines,
+      noteLines: digest.noteLines,
+      localTime: localTimeString(),
+      daysSinceLastConversation,
+      onboarding,
+    };
+  }
+
+  /** The default generator: `roles.smol_model`, one completion, clean or null. */
+  private async defaultGreeting(input: {
+    ghost: Ghost;
+    context: GreetingContextInput;
+  }): Promise<string | null> {
+    const agentDir = ghostPaths(input.ghost.dir).agentDir;
+    let ref: GhostModelRoleBinding | null = null;
+    try {
+      ref = resolveSmolModelRef(readGhostModels(agentDir));
+    } catch {
+      // A broken models.json is not fatal to greeting: fall back to cheapest usable.
+      ref = null;
+    }
+    return this.withGreetingRuntime(input.ghost, (runtime) =>
+      generateGreeting({ runtime, context: input.context, ref }));
+  }
+
+  /**
+   * A runtime to `complete()` on, outside any session.
+   *
+   * A live conversation already has one bound to this ghost's credentials, so
+   * reuse it rather than opening a second `agent.db` handle for one throwaway
+   * call; with nothing open, build one exactly as `createSession` does and close
+   * it again. (Reusing a live one can race a concurrent `closePi`, which closes
+   * that runtime — the completion then fails and the greeting is null, which is
+   * the same answer every other failure gives.)
+   */
+  private async withGreetingRuntime<T>(
+    ghost: Ghost,
+    use: (runtime: GhostOmpRuntime) => Promise<T>,
+  ): Promise<T> {
+    for (const hosted of this.sessions.values()) {
+      if (hosted.ghost.name === ghost.name) return use(hosted.modelRuntime);
+    }
+    const paths = ghostPaths(ghost.dir);
+    const runtime = await createGhostOmpRuntime({
+      authPath: ghostAuthPath(paths.agentDir),
+      modelsPath: ghostModelsPath(paths.agentDir),
+      allowModelNetwork: !this.offline,
+    });
+    try {
+      return await use(runtime);
+    } finally {
+      runtime.close();
+    }
   }
 
   /**

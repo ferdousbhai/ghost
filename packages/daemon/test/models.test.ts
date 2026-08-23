@@ -4,6 +4,7 @@ import {
   chmodSync,
   existsSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -26,6 +27,7 @@ import {
   OPENROUTER_DEFAULT_FREE_MODEL,
   readGhostModels,
   resolveChatModelRef,
+  resolveSmolModelRef,
   setChatModelRole,
   setGhostModelRole,
   writeGhostModels,
@@ -226,6 +228,7 @@ describe("OMP model routing projection", () => {
       roles: {
         chat_model: { provider: "openai-codex", modelId: "gpt-5.6-sol" },
         vision_model: { provider: "openai-codex", modelId: "gpt-5.6" },
+        smol_model: { provider: "anthropic", modelId: "claude-haiku-4-5" },
         research_model: { provider: "anthropic", modelId: "claude-opus-4-6" },
       },
       fallbacks: {
@@ -238,11 +241,104 @@ describe("OMP model routing projection", () => {
       modelRoles: {
         default: "openai-codex/gpt-5.6-sol",
         vision: "openai-codex/gpt-5.6",
+        smol: "anthropic/claude-haiku-4-5",
         research: "anthropic/claude-opus-4-6",
       },
       fallbackChains: {
         default: ["anthropic/claude-sonnet-4-6", "xai/grok-code-fast-1"],
       },
+    });
+  });
+});
+
+describe("the legacy title_model role", () => {
+  /** Write a raw models.json, bypassing the writer, as an older Ghost left it. */
+  function writeRaw(agentDir: string, file: unknown): void {
+    writeFileSync(ghostModelsPath(agentDir), `${JSON.stringify(file, null, 2)}\n`, "utf8");
+  }
+
+  function readRaw(agentDir: string): {
+    roles?: Record<string, unknown>;
+    fallbacks?: Record<string, unknown>;
+  } {
+    return JSON.parse(readFileSync(ghostModelsPath(agentDir), "utf8"));
+  }
+
+  it("reads a legacy-only file as smol_model, in roles and in fallbacks", () => {
+    const agentDir = makeAgentDir();
+    writeRaw(agentDir, {
+      providers: {},
+      roles: { title_model: { provider: "anthropic", modelId: "claude-haiku-4-5" } },
+      fallbacks: { title_model: [{ provider: "xai", modelId: "grok-4-fast" }] },
+    });
+    const file = readGhostModels(agentDir);
+    expect(file?.roles).toEqual({
+      smol_model: { provider: "anthropic", modelId: "claude-haiku-4-5" },
+    });
+    expect(file?.fallbacks).toEqual({
+      smol_model: [{ provider: "xai", modelId: "grok-4-fast" }],
+    });
+    expect(resolveSmolModelRef(file)).toEqual({
+      provider: "anthropic",
+      modelId: "claude-haiku-4-5",
+    });
+    expect(ghostOmpModelRouting(file)).toEqual({
+      modelRoles: { smol: "anthropic/claude-haiku-4-5" },
+      fallbackChains: { smol: ["xai/grok-4-fast"] },
+    });
+  });
+
+  it("prefers smol_model when a file carries both keys", () => {
+    const agentDir = makeAgentDir();
+    writeRaw(agentDir, {
+      providers: {},
+      roles: {
+        title_model: { provider: "stale", modelId: "old" },
+        smol_model: { provider: "fresh", modelId: "new" },
+      },
+      fallbacks: {
+        title_model: [{ provider: "stale", modelId: "old" }],
+        smol_model: [{ provider: "fresh", modelId: "new" }],
+      },
+    });
+    const file = readGhostModels(agentDir);
+    expect(file?.roles).toEqual({ smol_model: { provider: "fresh", modelId: "new" } });
+    expect(file?.fallbacks).toEqual({ smol_model: [{ provider: "fresh", modelId: "new" }] });
+  });
+
+  it("drops the stale key from disk the next time a role is written", () => {
+    const agentDir = makeAgentDir();
+    writeRaw(agentDir, {
+      providers: {},
+      roles: {
+        chat_model: { provider: "openai-codex", modelId: "gpt-5.6" },
+        title_model: { provider: "anthropic", modelId: "claude-haiku-4-5" },
+      },
+      fallbacks: { title_model: [{ provider: "xai", modelId: "grok-4-fast" }] },
+    });
+    setGhostModelRole(agentDir, "smol_model", "openrouter", "cheap-1");
+    const raw = readRaw(agentDir);
+    expect(raw.roles).toEqual({
+      chat_model: { provider: "openai-codex", modelId: "gpt-5.6" },
+      smol_model: { provider: "openrouter", modelId: "cheap-1" },
+    });
+    expect(raw.fallbacks).toEqual({
+      smol_model: [{ provider: "xai", modelId: "grok-4-fast" }],
+    });
+    expect("title_model" in (raw.roles ?? {})).toBe(false);
+    expect("title_model" in (raw.fallbacks ?? {})).toBe(false);
+  });
+
+  it("migrates the stale key even when another role is the one being written", () => {
+    const agentDir = makeAgentDir();
+    writeRaw(agentDir, {
+      providers: {},
+      roles: { title_model: { provider: "anthropic", modelId: "claude-haiku-4-5" } },
+    });
+    setChatModelRole(agentDir, "openai-codex", "gpt-5.6");
+    expect(readRaw(agentDir).roles).toEqual({
+      smol_model: { provider: "anthropic", modelId: "claude-haiku-4-5" },
+      chat_model: { provider: "openai-codex", modelId: "gpt-5.6" },
     });
   });
 });
