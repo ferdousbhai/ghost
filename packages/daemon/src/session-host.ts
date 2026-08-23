@@ -390,13 +390,13 @@ function branchNavigation(
   if (siblings.length <= 1) return undefined;
   const index = siblings.findIndex((candidate) => candidate.id === entry.id);
   if (index < 0) return undefined;
+  const previous = siblings[index - 1];
+  const next = siblings[index + 1];
   return {
     index,
     count: siblings.length,
-    ...(index > 0 ? { previousTargetId: deepestTarget(siblings[index - 1]!.id) } : {}),
-    ...(index + 1 < siblings.length
-      ? { nextTargetId: deepestTarget(siblings[index + 1]!.id) }
-      : {}),
+    ...(previous ? { previousTargetId: deepestTarget(previous.id) } : {}),
+    ...(next ? { nextTargetId: deepestTarget(next.id) } : {}),
   };
 }
 
@@ -1050,7 +1050,7 @@ export class SessionHost {
     ]);
     const piSessions: SessionSummary[] = sessions.map((info) => ({
       id: conversationIdFromSessionFile(info.path),
-      title: info.title && info.title.trim() ? info.title : null,
+      title: info.title?.trim() ? info.title : null,
       createdAt: info.created.toISOString(),
       updatedAt: info.modified.toISOString(),
       messageCount: info.messageCount,
@@ -1126,7 +1126,8 @@ export class SessionHost {
       const stack = [entryId];
       const visited = new Set<string>();
       while (stack.length > 0) {
-        const current = stack.pop()!;
+        const current = stack.pop();
+        if (current === undefined) break;
         if (visited.has(current)) continue;
         visited.add(current);
         const descendants = children.get(current) ?? [];

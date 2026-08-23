@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { deriveNoteCatalog } from "../src/catalog.js";
 import { GhostError, MemoryFileFormatError } from "../src/errors.js";
-import { GhostHome, openGhostHome } from "../src/home.js";
+import { type GhostHome, openGhostHome } from "../src/home.js";
 import { deriveMemoryIndex } from "../src/memory-file.js";
 import { CREATOR_SCOPE, visitorScope } from "../src/scope.js";
 import {

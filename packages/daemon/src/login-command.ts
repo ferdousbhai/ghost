@@ -108,7 +108,9 @@ async function resolveGhost(rl: Interface, registry: GhostRegistry, requested?: 
   if (ghosts.length === 0) throw new Error("No ghosts yet. Create one first.");
   if (ghosts.length === 1) return ghosts[0] as Ghost;
   out("Which ghost?");
-  ghosts.forEach((ghost, i) => out(`  ${i + 1}. ${ghost.name}`));
+  ghosts.forEach((ghost, i) => {
+    out(`  ${i + 1}. ${ghost.name}`);
+  });
   const answer = (await rl.question("> ")).trim();
   const byIndex = Number(answer);
   if (Number.isInteger(byIndex) && byIndex >= 1 && byIndex <= ghosts.length) {
@@ -169,13 +171,13 @@ async function resolveProvider(
   }
 
   out("Sign in to which provider?");
-  candidates.forEach((provider, i) =>
+  candidates.forEach((provider, i) => {
     out(`  ${i + 1}. ${provider.name} (`
       + `${provider.authType}`
       + `${provider.subscription ? ", subscription" : ""}`
       + `${provider.billingNote ? `, ${provider.billingNote}` : ""}`
-      + ")"),
-  );
+      + ")");
+  });
   const answer = (await rl.question("> ")).trim();
   const byIndex = Number(answer);
   if (Number.isInteger(byIndex) && byIndex >= 1 && byIndex <= candidates.length) {
@@ -213,9 +215,9 @@ function terminalInteraction(rl: Interface): AuthInteraction {
       const options = prompt.signal ? { signal: prompt.signal } : {};
       if (prompt.type === "select") {
         out(prompt.message);
-        prompt.options.forEach((option, i) =>
-          out(`  ${i + 1}. ${option.label}${option.description ? ` — ${option.description}` : ""}`),
-        );
+        prompt.options.forEach((option, i) => {
+          out(`  ${i + 1}. ${option.label}${option.description ? ` — ${option.description}` : ""}`);
+        });
         const answer = (await rl.question("> ", options)).trim();
         const byIndex = Number(answer);
         if (Number.isInteger(byIndex) && byIndex >= 1 && byIndex <= prompt.options.length) {

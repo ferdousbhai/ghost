@@ -17,7 +17,7 @@ import { apiTokenCommand } from "./api-token.js";
 import { LoginManager } from "./auth.js";
 import { importCommand } from "./import-command.js";
 import { loginCommand } from "./login-command.js";
-import { loadConfig, type DaemonConfigOverrides } from "./config.js";
+import { loadConfig, type DaemonConfig, type DaemonConfigOverrides } from "./config.js";
 import { scrubProviderEnv } from "./env-scrub.js";
 import { GhostRegistry } from "./ghosts.js";
 import { GhostHookRunner } from "./hooks.js";
@@ -25,7 +25,7 @@ import { createLogger, type LogLevel } from "./log.js";
 import { ModelCatalog } from "./model-catalog.js";
 import { createRelayHub } from "./relay.js";
 import { relayTokenCommand } from "./relay-token.js";
-import { startDaemonServer } from "./server.js";
+import { startDaemonServer, type ListeningServer } from "./server.js";
 import { SessionHost } from "./session-host.js";
 
 const USAGE = `ghostd — your ghost, on your machine
@@ -173,7 +173,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   }
 
   const logger = createLogger(parsed.logLevel);
-  let config;
+  let config: DaemonConfig;
   try {
     config = loadConfig(parsed.overrides);
   } catch (error) {
@@ -228,7 +228,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     onModelRoutingChanged: (name) => host.rebindModel(name),
   });
 
-  let listening;
+  let listening: ListeningServer;
   try {
     listening = await startDaemonServer({
       registry,

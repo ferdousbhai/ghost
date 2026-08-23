@@ -116,9 +116,9 @@ export class AskBroker {
         "Ask answer must contain exactly one result for every question.",
       );
     }
-    const rawResults = body.results as RawAnswerItem[];
+    const rawResults = body.results;
     const results = active.questions.map((question, index) =>
-      this.#validateResult(question, rawResults[index]!));
+      this.#validateResult(question, rawResults[index]));
     this.#settle(active, { kind: "submit", results });
   }
 
@@ -167,24 +167,25 @@ export class AskBroker {
 
   #validateResult(
     question: ExtensionAskDialogQuestion,
-    raw: RawAnswerItem,
+    raw: unknown,
   ): ExtensionAskDialogResultItem {
     if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
       throw new AskBrokerError("invalid_ask_answer", `Answer for ${question.id} must be an object.`);
     }
-    if (raw.id !== question.id) {
+    const answer = raw as RawAnswerItem;
+    if (answer.id !== question.id) {
       throw new AskBrokerError(
         "invalid_ask_answer",
         `Expected answer id ${JSON.stringify(question.id)} in question order.`,
       );
     }
-    if (!Array.isArray(raw.selectedOptions) || !raw.selectedOptions.every((value) => typeof value === "string")) {
+    if (!Array.isArray(answer.selectedOptions) || !answer.selectedOptions.every((value) => typeof value === "string")) {
       throw new AskBrokerError(
         "invalid_ask_answer",
         `selectedOptions for ${question.id} must be an array of strings.`,
       );
     }
-    const selectedOptions = raw.selectedOptions as string[];
+    const selectedOptions = answer.selectedOptions as string[];
     if (new Set(selectedOptions).size !== selectedOptions.length) {
       throw new AskBrokerError("invalid_ask_answer", `Selections for ${question.id} must be unique.`);
     }
@@ -196,8 +197,8 @@ export class AskBroker {
       );
     }
     const multi = question.multi ?? false;
-    const customInput = stringField(raw.customInput, `customInput for ${question.id}`);
-    const note = stringField(raw.note, `note for ${question.id}`);
+    const customInput = stringField(answer.customInput, `customInput for ${question.id}`);
+    const note = stringField(answer.note, `note for ${question.id}`);
     if (!multi && selectedOptions.length > 1) {
       throw new AskBrokerError("invalid_ask_answer", `${question.id} accepts only one option.`);
     }

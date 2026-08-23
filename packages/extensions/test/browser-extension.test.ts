@@ -725,7 +725,8 @@ describe("screenshot, back, close", () => {
     await harness.call(GHOST_BROWSER, { action: "open", url: "https://example.com" });
     await harness.call(GHOST_BROWSER, { action: "screenshot", full_page: true });
     const shot = context.page.calls.findLast((call) => call.name === "screenshot");
-    expect((shot?.args[0] as { fullPage: boolean }).fullPage).toBe(true);
+    if (!shot) throw new Error("Expected a screenshot call");
+    expect((shot.args[0] as { fullPage: boolean }).fullPage).toBe(true);
   });
 
   it("goes back, and says when there is nowhere to go", async () => {
@@ -775,18 +776,21 @@ describe("timeouts", () => {
       timeout_ms: 4_000,
     });
     const goto = context.page.calls.findLast((call) => call.name === "goto");
-    expect((goto?.args[1] as { timeout: number }).timeout).toBe(4_000);
+    if (!goto) throw new Error("Expected a goto call");
+    expect((goto.args[1] as { timeout: number }).timeout).toBe(4_000);
 
     await harness.call(GHOST_BROWSER, { action: "click", selector: "a", timeout_ms: 4_000 });
     const click = context.page.calls.findLast((call) => call.name === "click");
-    expect((click?.args[1] as { timeout: number }).timeout).toBe(4_000);
+    if (!click) throw new Error("Expected a click call");
+    expect((click.args[1] as { timeout: number }).timeout).toBe(4_000);
   });
 
   it("has a default timeout on navigation even when none was asked for", async () => {
     const harness = await creatorHarness();
     await harness.call(GHOST_BROWSER, { action: "open", url: "https://example.com" });
     const goto = context.page.calls.findLast((call) => call.name === "goto");
-    expect((goto?.args[1] as { timeout: number }).timeout).toBeGreaterThan(0);
+    if (!goto) throw new Error("Expected a goto call");
+    expect((goto.args[1] as { timeout: number }).timeout).toBeGreaterThan(0);
   });
 
   it("shuts the browser down once it has been idle", async () => {

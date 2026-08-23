@@ -281,7 +281,7 @@ export function resolveHelperCommand(
   override?: string,
 ): ResolvedHelperCommand {
   const explicit = override ?? env[HELPER_COMMAND_ENV];
-  if (explicit && explicit.trim()) {
+  if (explicit?.trim()) {
     const found = findOnPath(explicit.trim(), env);
     return { command: found ?? explicit.trim(), args: [] };
   }
@@ -548,7 +548,7 @@ export class DesktopHelperClient implements DesktopHelper {
     if (options.signal?.aborted) throw abortError(op);
     await this.start();
     const child = this.child;
-    if (!child || !child.stdin || child.stdin.writable === false) {
+    if (!child?.stdin || child.stdin.writable === false) {
       throw new GhostError(
         "not_found",
         `The desktop helper is not running, so ${op} cannot be sent.`,

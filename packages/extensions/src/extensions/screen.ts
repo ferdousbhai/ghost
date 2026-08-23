@@ -45,7 +45,7 @@ import { GhostError } from "../errors.js";
 import type { GhostHome } from "../home.js";
 import { isVisitorScope } from "../scope.js";
 import { stringEnum } from "../tool-schema.js";
-import { resolveHome, resolveScope, type GhostExtensionOptions } from "./shared.js";
+import { resolveHome, resolveScope } from "./shared.js";
 import { honestyNote } from "./hyprland.js";
 import {
   getSharedDesktopHelper,

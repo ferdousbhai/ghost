@@ -148,11 +148,9 @@ export function maybeCompact(
   // Guard against a second concurrent run: OMP tracks one compaction at a time.
   if (session.isCompacting) return undefined;
   const usage = session.getContextUsage();
-  if (!shouldCompactNow(usage, config)) return undefined;
+  if (!usage || usage.tokens == null || !shouldCompactNow(usage, config)) return undefined;
 
-  // usage is non-null and usage.tokens is a number here (shouldCompactNow).
-  const tokens = usage!.tokens!;
-  const contextWindow = usage!.contextWindow;
+  const { tokens, contextWindow } = usage;
   handlers.onStart?.({
     tokens,
     contextWindow,

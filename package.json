@@ -8,6 +8,9 @@
     "build": "pnpm -r build",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
-    "lint": "biome check ."
+    "lint": "biome check . --diagnostic-level=warn --error-on-warnings"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.10"
   }
 }

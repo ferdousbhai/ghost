@@ -158,7 +158,7 @@ export class RelayHub implements RelayTransport {
     options: RelayRequestOptions,
   ): Promise<RelayReply> {
     const socket = this.#socket;
-    if (!socket || socket.readyState !== 1) return Promise.resolve(disconnectedReply(op));
+    if (socket?.readyState !== 1) return Promise.resolve(disconnectedReply(op));
 
     const id = this.#nextId;
     this.#nextId += 1;
