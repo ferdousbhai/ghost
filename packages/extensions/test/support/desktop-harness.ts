@@ -27,6 +27,12 @@ import type {
 import type { VisionModel } from "../../src/extensions/vision.js";
 import type { CommandResult, CommandRunner, RunCommandOptions } from "../../src/extensions/shared.js";
 import { CommandError } from "../../src/extensions/shared.js";
+import type {
+  AvailableBackends,
+  DesktopHelper,
+  HelloPayload,
+  RequestOptions,
+} from "../../src/extensions/desktop-helper-client.js";
 
 type AnyTool = ToolDefinition<any, any, any>;
 type AnyHandler = (event: any, ctx: any) => unknown;
@@ -159,6 +165,73 @@ export function fakeRunner(handler: FakeCommandHandler = () => undefined): FakeR
 /** The failure `execFile` produces for a program that is not installed. */
 export function missingBinary(command: string): CommandError {
   return new CommandError(command, [], `spawn ${command} ENOENT`, { errno: "ENOENT" });
+}
+
+// ---------------------------------------------------------------------------
+// Fake desktop helper (injected at the DesktopHelper boundary)
+// ---------------------------------------------------------------------------
+
+/** Every backend present and usable — the happy path a test starts from. */
+export const FULL_BACKENDS: AvailableBackends = {
+  hyprctl: { available: true, path: "/usr/bin/hyprctl" },
+  grim: { available: true, path: "/usr/bin/grim", foreign_toplevel: true },
+  wtype: { available: true, path: "/usr/bin/wtype" },
+  ydotool: { available: true, usable: true, path: "/usr/bin/ydotool" },
+  atspi: { available: true, interpreter: "3.14" },
+  foreign_toplevel_protocol: { supported: true, error: null },
+};
+
+export interface FakeHelperOptions {
+  /** Answer an op. Return the result, or throw to simulate a refusal. */
+  readonly handle?: (op: string, args: Record<string, unknown>) => unknown;
+  /** Backends to merge over {@link FULL_BACKENDS}. */
+  readonly backends?: Partial<AvailableBackends>;
+  /** Defaults to true. */
+  readonly inHyprland?: boolean;
+}
+
+export interface FakeHelper extends DesktopHelper {
+  readonly requests: Array<{ op: string; args: Record<string, unknown> }>;
+  disposed: boolean;
+}
+
+/**
+ * A `DesktopHelper` that never spawns a process. It records every request and
+ * answers from `handle`, so a tool test drives the ax_query→ref→ax_perform flow,
+ * dispatch routing, honesty surfacing, and backend-missing degradation without a
+ * real desktop.
+ */
+export function fakeHelper(options: FakeHelperOptions = {}): FakeHelper {
+  const backends: AvailableBackends = { ...FULL_BACKENDS, ...options.backends };
+  const hello: HelloPayload = {
+    type: "hello",
+    helper: "ghost-desktop-helper",
+    version: "0.1.0",
+    protocol: 1,
+    ops: ["state", "capture", "ax_query"],
+    in_hyprland_session: options.inHyprland ?? true,
+    "available-backends": backends,
+  };
+  const requests: FakeHelper["requests"] = [];
+  const helper: FakeHelper = {
+    requests,
+    disposed: false,
+    async hello() {
+      return hello;
+    },
+    async capabilities() {
+      return backends;
+    },
+    async request<T>(op: string, args: Record<string, unknown> = {}, _opts?: RequestOptions) {
+      requests.push({ op, args });
+      const result = options.handle ? options.handle(op, args) : undefined;
+      return result as T;
+    },
+    async dispose() {
+      helper.disposed = true;
+    },
+  };
+  return helper;
 }
 
 // ---------------------------------------------------------------------------

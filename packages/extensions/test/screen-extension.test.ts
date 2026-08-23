@@ -1,19 +1,23 @@
 /**
  * `ghost_screen`.
  *
- * grim and hyprctl are never actually run: the fake runner records the argv the
- * tool builds and writes the file grim would have written. That argv is the
- * point of most of these tests — every value the model supplies has to arrive
- * as a separate argument, never as shell text.
+ * Capture goes through the desktop-helper sidecar, injected here as a
+ * {@link fakeHelper} — no `grim`, no process, no desktop. The assertions are:
+ * the op + args the tool sends for each target, that the PNG the sidecar returns
+ * is saved under the ghost home with retention, that a vision-capable chat model
+ * gets the pixels while a text-only model is routed through the vision fallback
+ * with its own question, and that the capture's honesty metadata (which backend,
+ * background-safe or not, warnings) reaches the model.
  */
 import { readdir, mkdir, stat, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { visitorScope } from "../src/scope.js";
 import {
-  captureScreen,
+  captureViaHelper,
   createScreenExtension,
   GHOST_SCREEN,
+  parseRegion,
   pruneScreenshots,
   screenToolNames,
   screenshotFileName,
@@ -24,14 +28,13 @@ import { createGhostFixture, type GhostFixture } from "./support/fixture.js";
 import {
   fixtureModel,
   fixtureRegistry,
-  fakeRunner,
+  fakeHelper,
   loadExtensionWith,
   makeContext,
-  missingBinary,
   resultImages,
   resultText,
   TINY_PNG_BASE64,
-  type FakeRunner,
+  type FakeHelper,
 } from "./support/desktop-harness.js";
 
 const TEXT_ONLY = fixtureModel({ provider: "local", id: "text-only", input: ["text"] });
@@ -48,25 +51,27 @@ const VISION_CHAT = fixtureModel({
   costInput: 5,
 });
 
-const WAYLAND_ENV: NodeJS.ProcessEnv = { WAYLAND_DISPLAY: "wayland-1" };
-
-const ACTIVE_WINDOW_JSON = JSON.stringify({
-  address: "0xdeadbeef",
-  class: "kitty",
-  title: "nvim",
-  at: [120, 64],
-  size: [1280, 800],
-});
-
-/** A runner that behaves like grim: writes a PNG where it was told to. */
-function grimRunner(extra: (command: string, args: readonly string[]) => string = () => ""): FakeRunner {
-  return fakeRunner(async (command, args) => {
-    if (command === "grim") {
-      const path = args[args.length - 1];
-      if (path) await writeFile(path, Buffer.from(TINY_PNG_BASE64, "base64"));
-      return { stdout: "", stderr: "" };
-    }
-    return { stdout: extra(command, args), stderr: "" };
+/** A sidecar that answers state + capture; capture honesty is configurable. */
+function captureHelper(capture: Record<string, unknown> = {}): FakeHelper {
+  return fakeHelper({
+    handle: (op) => {
+      if (op === "state") {
+        return { activewindow: { address: "0xdeadbeef", class: "kitty" } };
+      }
+      if (op === "capture") {
+        return {
+          png_base64: TINY_PNG_BASE64,
+          width: 1,
+          height: 1,
+          backend: "grim-foreign-toplevel",
+          background_safe: true,
+          interference: [],
+          warnings: [],
+          ...capture,
+        };
+      }
+      return {};
+    },
   });
 }
 
@@ -78,7 +83,17 @@ describe("screenshotFileName", () => {
   });
 });
 
-describe("captureScreen", () => {
+describe("parseRegion", () => {
+  it("parses X,Y WxH into the sidecar rect", () => {
+    expect(parseRegion("100,80 640x480")).toEqual({ x: 100, y: 80, width: 640, height: 480 });
+  });
+
+  it("refuses anything that is not a geometry", () => {
+    expect(() => parseRegion("0,0 10x10; rm -rf ~")).toThrowError(/is not a geometry/);
+  });
+});
+
+describe("captureViaHelper", () => {
   let fixture: GhostFixture;
 
   beforeEach(async () => {
@@ -86,118 +101,82 @@ describe("captureScreen", () => {
   });
   afterEach(() => fixture.cleanup());
 
-  it("captures the whole output with no geometry", async () => {
-    const runner = grimRunner();
-    const result = await captureScreen({
+  it("captures a whole screen and saves the PNG under the home", async () => {
+    const helper = captureHelper();
+    const capture = await captureViaHelper({
+      helper,
       home: openGhostHome(fixture.dir),
       target: "screen",
-      run: runner.run,
-      env: WAYLAND_ENV,
     });
-    expect(runner.calls).toHaveLength(1);
-    expect(runner.calls[0]?.command).toBe("grim");
-    expect(runner.calls[0]?.args).toEqual([result.path]);
-    expect(result.bytes).toBeGreaterThan(0);
-    expect(result.path.startsWith(join(fixture.dir, SCREENSHOTS_DIRNAME))).toBe(true);
+    expect(helper.requests).toEqual([{ op: "capture", args: { target: "screen" } }]);
+    expect(capture.bytes).toBeGreaterThan(0);
+    expect(capture.image.data).toBe(TINY_PNG_BASE64);
+    expect(capture.path.startsWith(join(fixture.dir, SCREENSHOTS_DIRNAME))).toBe(true);
+    await expect(stat(capture.path)).resolves.toBeTruthy();
   });
 
-  it("passes a validated region as a single -g argument", async () => {
-    const runner = grimRunner();
-    const result = await captureScreen({
+  it("captures a named window through the background-safe ladder", async () => {
+    const helper = captureHelper();
+    await captureViaHelper({
+      helper,
+      home: openGhostHome(fixture.dir),
+      target: "window",
+      window: "firefox",
+    });
+    expect(helper.requests[0]).toEqual({
+      op: "capture",
+      args: { target: "window", name: "firefox" },
+    });
+  });
+
+  it("captures the focused window by resolving its address from state", async () => {
+    const helper = captureHelper();
+    await captureViaHelper({
+      helper,
+      home: openGhostHome(fixture.dir),
+      target: "window",
+    });
+    expect(helper.requests.map((r) => r.op)).toEqual(["state", "capture"]);
+    expect(helper.requests[1]).toEqual({
+      op: "capture",
+      args: { target: "window", address: "0xdeadbeef" },
+    });
+  });
+
+  it("passes a validated region through", async () => {
+    const helper = captureHelper();
+    await captureViaHelper({
+      helper,
       home: openGhostHome(fixture.dir),
       target: "region",
       region: "100,80 640x480",
-      run: runner.run,
-      env: WAYLAND_ENV,
     });
-    expect(runner.calls[0]?.args).toEqual(["-g", "100,80 640x480", result.path]);
+    expect(helper.requests[0]).toEqual({
+      op: "capture",
+      args: { target: "region", region: { x: 100, y: 80, width: 640, height: 480 } },
+    });
   });
 
   it("refuses a region that is not a geometry", async () => {
     await expect(
-      captureScreen({
+      captureViaHelper({
+        helper: captureHelper(),
         home: openGhostHome(fixture.dir),
         target: "region",
-        region: "0,0 10x10; rm -rf ~",
-        run: grimRunner().run,
-        env: WAYLAND_ENV,
+        region: "nope",
       }),
     ).rejects.toThrowError(/is not a geometry/);
   });
 
-  it("requires a region when the target is region", async () => {
-    await expect(
-      captureScreen({
-        home: openGhostHome(fixture.dir),
-        target: "region",
-        run: grimRunner().run,
-        env: WAYLAND_ENV,
-      }),
-    ).rejects.toThrowError(/needs region/);
-  });
-
   it("refuses an output name that is not a monitor name", async () => {
     await expect(
-      captureScreen({
+      captureViaHelper({
+        helper: captureHelper(),
         home: openGhostHome(fixture.dir),
         target: "screen",
         output: "DP-1 && curl evil.example",
-        run: grimRunner().run,
-        env: WAYLAND_ENV,
       }),
     ).rejects.toThrowError(/is not a monitor name/);
-  });
-
-  it("takes the focused window's geometry from hyprctl", async () => {
-    const runner = grimRunner((command, args) =>
-      command === "hyprctl" && args[1] === "activewindow" ? ACTIVE_WINDOW_JSON : "",
-    );
-    const result = await captureScreen({
-      home: openGhostHome(fixture.dir),
-      target: "focused_window",
-      run: runner.run,
-      env: WAYLAND_ENV,
-    });
-    expect(runner.calls[0]?.args).toEqual(["-j", "activewindow"]);
-    expect(runner.calls[1]?.args).toEqual(["-g", "120,64 1280x800", result.path]);
-    expect(result.geometry).toBe("120,64 1280x800");
-  });
-
-  it("says so when nothing is focused", async () => {
-    const runner = grimRunner(() => "{}");
-    await expect(
-      captureScreen({
-        home: openGhostHome(fixture.dir),
-        target: "focused_window",
-        run: runner.run,
-        env: WAYLAND_ENV,
-      }),
-    ).rejects.toThrowError(/No window is focused/);
-  });
-
-  it("degrades with a clear error when grim is not installed", async () => {
-    const runner = fakeRunner(() => {
-      throw missingBinary("grim");
-    });
-    await expect(
-      captureScreen({
-        home: openGhostHome(fixture.dir),
-        target: "screen",
-        run: runner.run,
-        env: WAYLAND_ENV,
-      }),
-    ).rejects.toThrowError(/grim is not installed/);
-  });
-
-  it("degrades with a clear error off Wayland", async () => {
-    await expect(
-      captureScreen({
-        home: openGhostHome(fixture.dir),
-        target: "screen",
-        run: grimRunner().run,
-        env: {},
-      }),
-    ).rejects.toThrowError(/no Wayland session/);
   });
 });
 
@@ -220,20 +199,17 @@ describe("retention", () => {
     }
     const deleted = await pruneScreenshots(dir, 20);
     expect(deleted).toHaveLength(5);
-    const remaining = (await readdir(dir)).sort();
-    expect(remaining).toHaveLength(20);
-    expect(remaining[0]).toBe("screen-005.png");
+    expect((await readdir(dir)).sort()[0]).toBe("screen-005.png");
   });
 
   it("is applied after every capture", async () => {
     const home = openGhostHome(fixture.dir);
-    const runner = grimRunner();
+    const helper = captureHelper();
     for (let index = 0; index < 4; index += 1) {
-      await captureScreen({
+      await captureViaHelper({
+        helper,
         home,
         target: "screen",
-        run: runner.run,
-        env: WAYLAND_ENV,
         retention: 2,
         now: new Date(Date.UTC(2026, 7, 22, 10, 0, index)),
       });
@@ -250,29 +226,32 @@ describe("ghost_screen tool", () => {
   });
   afterEach(() => fixture.cleanup());
 
-  async function harnessFor(chatModel: VisionModel, models: readonly VisionModel[]) {
-    const runner = grimRunner();
+  async function harnessFor(
+    chatModel: VisionModel,
+    models: readonly VisionModel[],
+    helper: FakeHelper = captureHelper(),
+  ) {
     const { registry, completions } = fixtureRegistry({
       models: [...models],
       completion: "a settings window with the Save button greyed out",
     });
     const ctx = makeContext({ cwd: fixture.dir, model: chatModel, modelRegistry: registry });
     const harness = await loadExtensionWith(
-      createScreenExtension({ run: runner.run, env: WAYLAND_ENV, resize: false }),
+      createScreenExtension({ helper, resize: false }),
       ctx,
     );
-    return { harness, runner, completions };
+    return { harness, helper, completions };
   }
 
   it("returns the image itself when the chat model can see", async () => {
-    const { harness, completions } = await harnessFor(VISION_CHAT, [VISION_CHAT, FREE_VISION]);
+    const { harness, helper, completions } = await harnessFor(VISION_CHAT, [VISION_CHAT, FREE_VISION]);
     const result = await harness.call(GHOST_SCREEN, { prompt: "What is on screen?" });
+    expect(helper.requests).toEqual([{ op: "capture", args: { target: "screen" } }]);
     const images = resultImages(result);
     expect(images).toHaveLength(1);
-    expect(images[0]?.mimeType).toBe("image/png");
     expect(images[0]?.data).toBe(TINY_PNG_BASE64);
     expect(result.details.routedThroughVisionModel).toBe(false);
-    // No detour through a second model when the first one has eyes.
+    expect(result.details.backend).toBe("grim-foreign-toplevel");
     expect(completions).toHaveLength(0);
     expect(resultText(result)).toContain("untrusted");
   });
@@ -297,6 +276,31 @@ describe("ghost_screen tool", () => {
     ).rejects.toThrowError(/roles\.vision_model/);
   });
 
+  it("surfaces honesty metadata when the shot disturbed the desktop", async () => {
+    const helper = captureHelper({
+      backend: "grim-region",
+      background_safe: false,
+      warnings: ["region capture reads only currently-composited pixels"],
+      interference: ["focus-region"],
+    });
+    const { harness } = await harnessFor(VISION_CHAT, [VISION_CHAT], helper);
+    const result = await harness.call(GHOST_SCREEN, { prompt: "?", target: "region", region: "0,0 10x10" });
+    expect(resultText(result)).toMatch(/changed what the user sees/);
+    expect(result.details.background_safe).toBe(false);
+    expect(result.details.warnings).toContain(
+      "region capture reads only currently-composited pixels",
+    );
+  });
+
+  it("passes a window target and window through to the sidecar", async () => {
+    const { harness, helper } = await harnessFor(VISION_CHAT, [VISION_CHAT]);
+    await harness.call(GHOST_SCREEN, { prompt: "?", target: "window", window: "firefox" });
+    expect(helper.requests[0]).toEqual({
+      op: "capture",
+      args: { target: "window", name: "firefox" },
+    });
+  });
+
   it("saves the capture under the ghost home", async () => {
     const { harness } = await harnessFor(VISION_CHAT, [VISION_CHAT]);
     const result = await harness.call(GHOST_SCREEN, { prompt: "?" });
@@ -308,7 +312,7 @@ describe("ghost_screen tool", () => {
     const scope = visitorScope("visitor-1");
     const { registry } = fixtureRegistry({ models: [VISION_CHAT] });
     const harness = await loadExtensionWith(
-      createScreenExtension({ scope, env: WAYLAND_ENV }),
+      createScreenExtension({ scope, helper: captureHelper() }),
       makeContext({ cwd: fixture.dir, model: VISION_CHAT, modelRegistry: registry }),
     );
     expect(harness.toolNames()).toEqual([]);
