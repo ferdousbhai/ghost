@@ -13,6 +13,11 @@ Item {
 
     property bool naming: false
 
+    // Names that have already made their entrance. Ghostd.ghosts is replaced
+    // wholesale on every poll, which rebuilds every delegate; without this the
+    // roster would re-emerge on each refresh.
+    property var summoned: ({})
+
     implicitWidth: 190
     implicitHeight: column.implicitHeight
 
@@ -23,10 +28,12 @@ Item {
 
         Text {
             text: "Ghosts"
-            color: Theme.foreground
+            color: Theme.foregroundDim
             font.family: Theme.fontFamily
-            font.pixelSize: Theme.fontSizeSmall
+            font.pixelSize: Theme.fontSizeSmall - 1
             font.weight: Font.DemiBold
+            font.capitalization: Font.AllUppercase
+            font.letterSpacing: 1
         }
 
         Repeater {
@@ -36,13 +43,55 @@ Item {
                 id: entry
 
                 required property var modelData
+                required property int index
+
+                readonly property bool active: entry.modelData.name === Ghostd.activeGhost
 
                 width: root.width
                 height: Theme.controlHeight
                 radius: Theme.radius / 2
-                color: entry.modelData.name === Ghostd.activeGhost
-                    ? Theme.selection
-                    : (entryArea.containsMouse ? Theme.hover : "transparent")
+                color: entry.active ? Theme.film(0.10)
+                    : (entryArea.containsMouse ? Theme.film(0.06) : "transparent")
+
+                Behavior on color {
+                    enabled: !Theme.reducedMotion
+                    ColorAnimation { duration: Theme.durFast }
+                }
+
+                // Rise into place, staggered down the list, the first time this
+                // name is seen.
+                transform: Translate { id: rise }
+
+                Component.onCompleted: {
+                    const seen = root.summoned[entry.modelData.name] === true;
+                    root.summoned[entry.modelData.name] = true;
+                    if (seen || Theme.reducedMotion)
+                        return;
+                    entry.opacity = 0;
+                    rise.y = 4;
+                    emerge.start();
+                }
+
+                SequentialAnimation {
+                    id: emerge
+                    PauseAnimation { duration: entry.index * 40 }
+                    ParallelAnimation {
+                        NumberAnimation {
+                            target: entry
+                            property: "opacity"
+                            to: 1
+                            duration: Theme.durMed
+                            easing.type: Easing.OutCubic
+                        }
+                        NumberAnimation {
+                            target: rise
+                            property: "y"
+                            to: 0
+                            duration: Theme.durMed
+                            easing.type: Easing.OutCubic
+                        }
+                    }
+                }
 
                 Row {
                     anchors.verticalCenter: parent.verticalCenter
@@ -52,22 +101,19 @@ Item {
                     anchors.rightMargin: Theme.gap
                     spacing: Theme.gap
 
-                    Rectangle {
+                    // Every row is a little ghost; only the active one is lit.
+                    GhostGlyph {
                         anchors.verticalCenter: parent.verticalCenter
-                        width: 2
-                        height: 18
-                        radius: 1
-                        visible: entry.modelData.name === Ghostd.activeGhost
-                        color: Theme.accent
+                        size: 14
+                        strokeWidth: 2
+                        tint: entry.active ? Theme.ghostAmber : Theme.foregroundFaint
                     }
 
                     Text {
                         anchors.verticalCenter: parent.verticalCenter
-                        width: parent.width - 2 - Theme.gap
+                        width: parent.width - 14 - Theme.gap
                         text: entry.modelData.name
-                        color: entry.modelData.name === Ghostd.activeGhost
-                            ? Theme.foregroundBright
-                            : Theme.foreground
+                        color: entry.active ? Theme.foregroundBright : Theme.foreground
                         font.family: Theme.fontFamily
                         font.pixelSize: Theme.fontSize
                         elide: Text.ElideRight
@@ -90,7 +136,7 @@ Item {
         Text {
             visible: Ghostd.ghosts.length === 0
             width: root.width
-            text: Ghostd.reachable ? "No ghosts yet" : "ghostd unreachable"
+            text: Ghostd.reachable ? "No ghosts haunt this machine yet." : "ghostd unreachable"
             color: Ghostd.reachable ? Theme.foregroundDim : Theme.danger
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontSizeSmall
@@ -102,19 +148,25 @@ Item {
         Rectangle {
             width: root.width
             height: Theme.controlHeight
-            radius: Theme.radius / 2
-            color: root.naming ? Theme.surfaceDeep
-                : (newGhostArea.containsMouse ? Theme.hover : "transparent")
-            border.width: root.naming ? 1 : 0
-            border.color: root.naming ? Theme.accent : Theme.border
+            radius: Theme.radius
+            color: root.naming ? Theme.film(0.05)
+                : (newGhostArea.containsMouse ? Theme.amber(0.15) : Theme.amber(0.10))
+            border.width: 1
+            border.color: root.naming ? Theme.amber(0.50)
+                : (newGhostArea.containsMouse ? Theme.amber(0.30) : Theme.amber(0.20))
+
+            Behavior on color {
+                enabled: !Theme.reducedMotion
+                ColorAnimation { duration: Theme.durFast }
+            }
 
             Text {
                 visible: !root.naming
                 anchors.left: parent.left
                 anchors.leftMargin: Theme.gap
                 anchors.verticalCenter: parent.verticalCenter
-                text: "+ New ghost"
-                color: Theme.foreground
+                text: "+ Summon a ghost"
+                color: Theme.ghostAmberBright
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontSizeSmall
             }

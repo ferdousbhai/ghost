@@ -80,22 +80,23 @@ Singleton {
     // ---- Semantic roles ---------------------------------------------------
     readonly property bool light: root.pick("mode") === "light"
 
-    // Neutral canvas and ink ladder. Omarchy can be richly coloured; the chat
-    // itself stays neutral so long-form text, rows, and controls remain calm.
-    readonly property color background: root.light ? "#fafafa" : "#0d0d0d"
-    readonly property color surface: root.light ? "#ffffff" : "#161616"
-    readonly property color surfaceDeep: root.light ? "#f2f2f2" : "#1b1b1b"
-    readonly property color foregroundBright: root.light ? "#111111" : "#f5f5f5"
-    readonly property color foreground: root.light ? "#383838" : "#c7c7c7"
-    readonly property color foregroundDim: root.light ? "#666666" : "#929292"
-    readonly property color foregroundFaint: root.light ? "#858585" : "#707070"
+    // The summon-ghost canvas: a cool near-black (hue ~260) so the warm amber
+    // brand has something cold to glow against. Light mode keeps a plain
+    // neutral paper; the ghost identity reads through the amber tokens there.
+    readonly property color background: root.light ? "#fafafa" : "#05070b"
+    readonly property color surface: root.light ? "#ffffff" : "#0b0d12"
+    readonly property color surfaceDeep: root.light ? "#f2f2f2" : "#11141b"
+    readonly property color foregroundBright: root.light ? "#111111" : "#f8f8f8"
+    readonly property color foreground: root.light ? "#383838" : "#c9ccd4"
+    readonly property color foregroundDim: root.light ? "#666666" : "#8c8f95"
+    readonly property color foregroundFaint: root.light ? "#858585" : "#6a6e76"
 
     // Chrome has its own ladder instead of borrowing a text colour.
-    readonly property color hover: root.light ? "#eeeeee" : "#212121"
-    readonly property color selection: root.light ? "#e5e5e5" : "#2a2a2a"
-    readonly property color pressed: root.light ? "#dddddd" : "#343434"
-    readonly property color border: root.light ? "#dedede" : "#292929"
-    readonly property color borderStrong: root.light ? "#bdbdbd" : "#444444"
+    readonly property color hover: root.light ? "#eeeeee" : "#151920"
+    readonly property color selection: root.light ? "#e5e5e5" : "#1c2029"
+    readonly property color pressed: root.light ? "#dddddd" : "#232834"
+    readonly property color border: root.light ? "#dedede" : "#1e222a"
+    readonly property color borderStrong: root.light ? "#bdbdbd" : "#363c47"
     // Compatibility alias for host integrations; new UI code should choose a
     // text or border token explicitly.
     readonly property color muted: root.border
@@ -117,14 +118,48 @@ Singleton {
     readonly property color barForeground: root.shell["bar.text"] || root.foreground
     readonly property color barActive: root.shell["bar.active"] || root.accent
 
+    // ---- Ghost brand ------------------------------------------------------
+    // The summon-ghost identity, ported from the Cloudflare app: warm amber
+    // for the ghost's presence, actions, and ownership; cold spectral
+    // blue-white for machine thinking (the orb, ambient fog). Fixed brand
+    // colour, not themed — it layers over whatever Omarchy provides.
+    readonly property color ghostAmber: "#fbbf24"
+    readonly property color ghostAmberBright: "#fcd34d"
+    readonly property color ghostAmberDeep: "#f59e0b"
+    readonly property color ghostEmber: "#f97316"
+    readonly property color ghostRose: "#fb7185"
+    readonly property color spectral: "#c8dcff"
+
+    /** Translucent ink film over the canvas — the old app's white/N% surfaces. */
+    function film(alpha: real): color {
+        return root.light ? Qt.rgba(0, 0, 0, alpha * 0.8) : Qt.rgba(1, 1, 1, alpha);
+    }
+    /** Ghost amber at low alpha, for tinted fills, borders, and glows. */
+    function amber(alpha: real): color {
+        return Qt.rgba(0.984, 0.749, 0.141, alpha);
+    }
+    /** Ember orange at low alpha; the middle of the brand gradient. */
+    function ember(alpha: real): color {
+        return Qt.rgba(0.976, 0.451, 0.086, alpha);
+    }
+    /** Rose at low alpha; the cool end of the brand gradient. */
+    function rose(alpha: real): color {
+        return Qt.rgba(0.984, 0.443, 0.522, alpha);
+    }
+
     // ---- Fixed design tokens ---------------------------------------------
     // Not themed by Omarchy; kept here so every surface agrees on an 8px
-    // rhythm, restrained rounding, and a readable native type scale.
+    // rhythm and a readable native type scale.
     readonly property int radius: 8
+    readonly property int radiusLarge: 16
+    readonly property int radiusTail: 2
     readonly property int pad: 16
     readonly property int gap: 8
     readonly property int sectionGap: 24
     readonly property int controlHeight: 36
+    readonly property int durFast: 200
+    readonly property int durMed: 300
+    readonly property int durSlow: 500
     readonly property string fontFamily: "sans-serif"
     readonly property string fontFamilyMono: root.shell["font.family"] || "monospace"
     readonly property int fontSize: Number(root.shell["font.body"]) || 14

@@ -14,6 +14,11 @@ Item {
     readonly property string phrase: root.phrases && root.phrases.length > 0
         ? root.phrases[root.phraseIndex % root.phrases.length] : ""
 
+    // The web original whispered its phrases in slate-300 at 80%. Light mode has
+    // no such near-white to dim, so the neutral dim token carries the same role.
+    readonly property color phraseColor: Theme.light
+        ? Theme.foregroundDim : Qt.rgba(0.796, 0.835, 0.882, 0.8)
+
     implicitHeight: visible ? 30 : 0
     visible: Ghostd.streaming || root.failing
     clip: false
@@ -127,7 +132,7 @@ Item {
                 width: 6
                 height: 6
                 radius: 3
-                color: Theme.danger
+                color: Theme.ghostRose
             }
         }
 
@@ -137,9 +142,11 @@ Item {
             text: root.failing
                 ? Ghostd.lastError
                 : root.phrase + (Theme.reducedMotion ? "…" : ".".repeat(root.ellipsisStep))
-            color: root.failing ? Theme.danger : Theme.foregroundDim
+            color: root.failing ? Theme.ghostRose : root.phraseColor
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontSizeSmall
+            font.weight: Font.Light
+            font.letterSpacing: 0.5
             elide: Text.ElideRight
         }
     }

@@ -31,6 +31,7 @@ import Quickshell
 import Quickshell.Hyprland
 import QtQuick
 import QtQuick.Layouts
+import Qt5Compat.GraphicalEffects
 import qs.services
 import qs.components
 
@@ -150,6 +151,60 @@ FloatingWindow {
             }
         }
 
+        // ---- Ambient fog ----------------------------------------------
+        // The old app's AmbientBackground: two cold blobs breathing far under
+        // the reading surface. `z: -1` puts them over the card's own fill but
+        // beneath every layout child, and `enabled: false` keeps the whole
+        // layer out of the input chain. Alphas are held low enough (0.05 /
+        // 0.04 at the core) that body text contrast is untouched.
+        Item {
+            anchors.fill: parent
+            z: -1
+            enabled: false
+
+            RadialGradient {
+                x: parent.width * 0.15 - width / 2
+                y: parent.height * 0.2 - height / 2
+                width: 400
+                height: width
+                horizontalRadius: width / 2
+                verticalRadius: height / 2
+                gradient: Gradient {
+                    GradientStop { position: 0.0; color: "#0d8b5cf6" }
+                    GradientStop { position: 0.6; color: "#048b5cf6" }
+                    GradientStop { position: 1.0; color: "#008b5cf6" }
+                }
+
+                SequentialAnimation on opacity {
+                    running: !Theme.reducedMotion
+                    loops: Animation.Infinite
+                    NumberAnimation { to: 0.45; duration: 6000; easing.type: Easing.InOutSine }
+                    NumberAnimation { to: 1.0; duration: 6000; easing.type: Easing.InOutSine }
+                }
+            }
+
+            RadialGradient {
+                x: parent.width * 0.85 - width / 2
+                y: parent.height * 0.8 - height / 2
+                width: 400
+                height: width
+                horizontalRadius: width / 2
+                verticalRadius: height / 2
+                gradient: Gradient {
+                    GradientStop { position: 0.0; color: "#0a3b82f6" }
+                    GradientStop { position: 0.6; color: "#033b82f6" }
+                    GradientStop { position: 1.0; color: "#003b82f6" }
+                }
+
+                SequentialAnimation on opacity {
+                    running: !Theme.reducedMotion
+                    loops: Animation.Infinite
+                    NumberAnimation { to: 0.5; duration: 7500; easing.type: Easing.InOutSine }
+                    NumberAnimation { to: 1.0; duration: 7500; easing.type: Easing.InOutSine }
+                }
+            }
+        }
+
         ColumnLayout {
             anchors.fill: parent
             anchors.margins: Theme.pad
@@ -165,12 +220,37 @@ FloatingWindow {
                     anchors.verticalCenter: parent.verticalCenter
                     spacing: Theme.gap
 
-                    Rectangle {
+                    // Presence, not a status LED: the mascot itself carries
+                    // reachability. Amber and haloed when the daemon answers,
+                    // bare danger-red when it does not.
+                    Item {
                         anchors.verticalCenter: parent.verticalCenter
-                        width: 8
-                        height: 8
-                        radius: 4
-                        color: Ghostd.reachable ? Theme.accent : Theme.danger
+                        implicitWidth: 16
+                        implicitHeight: 16
+
+                        // The radii are explicit on every glow here:
+                        // RadialGradient defaults them to the full width, not
+                        // half, so the falloff would otherwise still be mid-hue
+                        // at the bounds and paint a hard-edged square.
+                        RadialGradient {
+                            anchors.centerIn: parent
+                            width: 16 * 2.2
+                            height: width
+                            horizontalRadius: width / 2
+                            verticalRadius: height / 2
+                            visible: Ghostd.reachable
+                            gradient: Gradient {
+                                GradientStop { position: 0.0; color: Theme.amber(0.25) }
+                                GradientStop { position: 0.55; color: Theme.amber(0.08) }
+                                GradientStop { position: 1.0; color: Theme.amber(0) }
+                            }
+                        }
+
+                        GhostGlyph {
+                            anchors.centerIn: parent
+                            size: 16
+                            tint: Ghostd.reachable ? Theme.ghostAmber : Theme.danger
+                        }
                     }
 
                     Text {
@@ -379,8 +459,10 @@ FloatingWindow {
                             required property bool pending
                             required property string entryId
                             required property var branch
+                            required property int index
 
                             width: transcriptView.width
+                            rowIndex: index
                             speaker: role
                             body: text
                             toolTrail: tools
@@ -395,18 +477,210 @@ FloatingWindow {
                         onCountChanged: if (pinned) positionViewAtEnd()
                         onContentHeightChanged: if (pinned) positionViewAtEnd()
 
-                        Text {
-                            anchors.centerIn: parent
+                        // ---- Empty transcript: the welcome hero -----------
+                        // A declared child of a ListView lands in the scrolling
+                        // contentItem, whose height is 0 while the list is
+                        // empty — so centre against the *view* explicitly
+                        // rather than against `parent`.
+                        Column {
+                            id: welcome
+
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            y: Math.max(0, (transcriptView.height - height) / 2)
                             visible: transcriptView.count === 0
-                            width: transcriptView.width * 0.7
-                            horizontalAlignment: Text.AlignHCenter
-                            text: Ghostd.reachable
-                                ? "Nothing said yet."
-                                : "ghostd is not answering on " + Ghostd.baseUrl
-                            color: Theme.foregroundDim
-                            font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSize
-                            wrapMode: Text.Wrap
+                            width: Math.min(transcriptView.width * 0.8, 340)
+                            spacing: Theme.pad
+
+                            // Materialize: fade up while swelling past 1 and
+                            // settling back. Reduced motion gets the end state.
+                            opacity: Theme.reducedMotion ? 1 : 0
+                            scale: 1
+                            onVisibleChanged: if (welcome.visible && !Theme.reducedMotion) materialize.restart()
+                            Component.onCompleted: if (welcome.visible && !Theme.reducedMotion) materialize.start()
+
+                            SequentialAnimation {
+                                id: materialize
+                                ParallelAnimation {
+                                    NumberAnimation {
+                                        target: welcome; property: "opacity"
+                                        from: 0; to: 1
+                                        duration: Theme.durSlow
+                                        easing.type: Easing.OutExpo
+                                    }
+                                    SequentialAnimation {
+                                        NumberAnimation {
+                                            target: welcome; property: "scale"
+                                            from: 0.8; to: 1.05
+                                            duration: 460
+                                            easing.type: Easing.OutExpo
+                                        }
+                                        NumberAnimation {
+                                            target: welcome; property: "scale"
+                                            to: 1.0
+                                            duration: 240
+                                            easing.type: Easing.OutCubic
+                                        }
+                                    }
+                                }
+                            }
+
+                            Item {
+                                id: plinth
+
+                                /** Idle float. Kept off `y` so the Column keeps owning layout. */
+                                property real bob: 0
+
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                width: 72
+                                height: 72
+
+                                SequentialAnimation on bob {
+                                    running: !Theme.reducedMotion
+                                    loops: Animation.Infinite
+                                    NumberAnimation { to: -6; duration: 3000; easing.type: Easing.InOutSine }
+                                    NumberAnimation { to: 6; duration: 3000; easing.type: Easing.InOutSine }
+                                }
+
+                                Item {
+                                    width: parent.width
+                                    height: parent.height
+                                    y: plinth.bob
+
+                                    // Two breathing halos, drifting out of phase
+                                    // because their periods differ rather than
+                                    // because either one waits.
+                                    RadialGradient {
+                                        anchors.centerIn: parent
+                                        width: 200
+                                        height: width
+                                        horizontalRadius: width / 2
+                                        verticalRadius: height / 2
+                                        visible: Ghostd.reachable
+                                        gradient: Gradient {
+                                            GradientStop { position: 0.0; color: Theme.amber(0.15) }
+                                            GradientStop { position: 0.5; color: Theme.amber(0.05) }
+                                            GradientStop { position: 1.0; color: Theme.amber(0) }
+                                        }
+
+                                        SequentialAnimation on opacity {
+                                            running: !Theme.reducedMotion
+                                            loops: Animation.Infinite
+                                            NumberAnimation { to: 0.5; duration: 2000; easing.type: Easing.InOutSine }
+                                            NumberAnimation { to: 1.0; duration: 2000; easing.type: Easing.InOutSine }
+                                        }
+                                    }
+
+                                    RadialGradient {
+                                        anchors.centerIn: parent
+                                        width: 132
+                                        height: width
+                                        horizontalRadius: width / 2
+                                        verticalRadius: height / 2
+                                        visible: Ghostd.reachable
+                                        gradient: Gradient {
+                                            GradientStop { position: 0.0; color: Theme.ember(0.10) }
+                                            GradientStop { position: 0.5; color: Theme.ember(0.04) }
+                                            GradientStop { position: 1.0; color: Theme.ember(0) }
+                                        }
+
+                                        SequentialAnimation on opacity {
+                                            running: !Theme.reducedMotion
+                                            loops: Animation.Infinite
+                                            NumberAnimation { to: 0.45; duration: 1500; easing.type: Easing.InOutSine }
+                                            NumberAnimation { to: 1.0; duration: 1500; easing.type: Easing.InOutSine }
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        anchors.fill: parent
+                                        radius: Theme.radiusLarge
+                                        color: Theme.film(0.04)
+                                        border.width: 1
+                                        border.color: Theme.film(0.10)
+
+                                        GhostGlyph {
+                                            anchors.centerIn: parent
+                                            size: 36
+                                            tint: Ghostd.reachable ? Theme.ghostAmberBright : Theme.danger
+                                        }
+                                    }
+                                }
+                            }
+
+                            Text {
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                text: Ghostd.activeGhost === "" ? "ghost" : Ghostd.activeGhost
+                                color: Theme.foregroundBright
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSize + 8
+                                font.weight: Font.Medium
+                            }
+
+                            // The invitation. Amber film, so the ghost's own
+                            // colour asks the question.
+                            Rectangle {
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                visible: Ghostd.reachable
+                                width: parent.width
+                                height: invitation.implicitHeight + Theme.pad * 2
+                                radius: Theme.radiusLarge
+                                color: Theme.amber(0.06)
+                                border.width: 1
+                                border.color: Theme.amber(0.15)
+
+                                Column {
+                                    id: invitation
+                                    anchors.centerIn: parent
+                                    width: parent.width - Theme.pad * 2
+                                    spacing: Theme.gap / 2
+
+                                    Text {
+                                        width: parent.width
+                                        horizontalAlignment: Text.AlignHCenter
+                                        text: "What's on your mind?"
+                                        color: Theme.foreground
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: Theme.fontSize
+                                        wrapMode: Text.Wrap
+                                    }
+
+                                    Text {
+                                        width: parent.width
+                                        horizontalAlignment: Text.AlignHCenter
+                                        text: "Your ghost is listening."
+                                        color: Theme.foregroundDim
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: Theme.fontSizeSmall
+                                        font.weight: Font.Light
+                                        font.letterSpacing: 0.5
+                                        wrapMode: Text.Wrap
+                                    }
+                                }
+                            }
+
+                            // The same hero, failed: rose film instead of amber.
+                            Rectangle {
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                visible: !Ghostd.reachable
+                                width: parent.width
+                                height: unreachable.implicitHeight + Theme.pad * 2
+                                radius: Theme.radiusLarge
+                                color: Theme.rose(0.08)
+                                border.width: 1
+                                border.color: Theme.rose(0.20)
+
+                                Text {
+                                    id: unreachable
+                                    anchors.centerIn: parent
+                                    width: parent.width - Theme.pad * 2
+                                    horizontalAlignment: Text.AlignHCenter
+                                    text: "ghostd is not answering on " + Ghostd.baseUrl
+                                    color: Theme.foreground
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: Theme.fontSize
+                                    wrapMode: Text.Wrap
+                                }
+                            }
                         }
                     }
 

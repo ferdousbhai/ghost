@@ -5,6 +5,7 @@ AskDialog 1.0 AskDialog.qml
 Bubble 1.0 Bubble.qml
 Composer 1.0 Composer.qml
 Conversations 1.0 Conversations.qml
+GhostGlyph 1.0 GhostGlyph.qml
 ModelLogin 1.0 ModelLogin.qml
 ModelSwitcher 1.0 ModelSwitcher.qml
 QueueLine 1.0 QueueLine.qml

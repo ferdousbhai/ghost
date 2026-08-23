@@ -50,10 +50,12 @@ Item {
 
         Text {
             text: "Conversations"
-            color: Theme.foreground
+            color: Theme.foregroundDim
             font.family: Theme.fontFamily
-            font.pixelSize: Theme.fontSizeSmall
+            font.pixelSize: Theme.fontSizeSmall - 1
             font.weight: Font.DemiBold
+            font.capitalization: Font.AllUppercase
+            font.letterSpacing: 1
         }
 
         Repeater {
@@ -74,8 +76,13 @@ Item {
                 // Grow to fit a wrapped title instead of eliding it.
                 height: Math.max(Theme.controlHeight, titleText.implicitHeight + Theme.gap)
                 radius: Theme.radius / 2
-                color: entry.active ? Theme.selection
-                    : (entryArea.containsMouse ? Theme.hover : "transparent")
+                color: entry.active ? Theme.film(0.10)
+                    : (entryArea.containsMouse ? Theme.film(0.06) : "transparent")
+
+                Behavior on color {
+                    enabled: !Theme.reducedMotion
+                    ColorAnimation { duration: Theme.durFast }
+                }
 
                 Row {
                     z: 1
@@ -92,7 +99,7 @@ Item {
                         height: 18
                         radius: 1
                         visible: entry.active
-                        color: Theme.accent
+                        color: Theme.ghostAmber
                     }
 
                     Text {
@@ -100,7 +107,8 @@ Item {
                         anchors.verticalCenter: parent.verticalCenter
                         width: parent.width - 2 - when.width - deleteAction.width - Theme.gap * 3
                         text: root.titleOf(entry.modelData)
-                        color: entry.active ? Theme.foregroundBright : Theme.foreground
+                        color: entry.active ? Theme.foregroundBright
+                            : (entryArea.containsMouse ? Theme.foreground : Theme.foregroundDim)
                         font.family: Theme.fontFamily
                         font.pixelSize: Theme.fontSize
                         wrapMode: Text.WrapAtWordBoundaryOrAnywhere
@@ -113,12 +121,12 @@ Item {
                         text: entry.confirmingDelete || entry.deleting
                             ? ""
                             : root.whenOf(entry.modelData)
-                        color: Theme.foregroundDim
+                        color: Theme.foregroundFaint
                         font.family: Theme.fontFamily
                         font.pixelSize: Theme.fontSizeSmall
                     }
 
-                    Item {
+                    Rectangle {
                         id: deleteAction
                         anchors.verticalCenter: parent.verticalCenter
                         // Reserve the close affordance even before hover so a
@@ -129,12 +137,24 @@ Item {
                             || entry.confirmingDelete || entry.deleting)
                             && !(entry.active && Ghostd.streaming)
                         z: 2
+                        radius: Theme.radius / 2
+                        color: deleteArea.containsMouse || entry.confirmingDelete || entry.deleting
+                            ? Theme.rose(0.10)
+                            : "transparent"
+
+                        Behavior on color {
+                            enabled: !Theme.reducedMotion
+                            ColorAnimation { duration: Theme.durFast }
+                        }
 
                         Text {
                             anchors.centerIn: parent
                             text: entry.deleting ? "…"
                                 : (entry.confirmingDelete ? "Delete" : "×")
-                            color: Theme.danger
+                            color: deleteArea.containsMouse || entry.confirmingDelete
+                                || entry.deleting
+                                ? Theme.ghostRose
+                                : Theme.foregroundFaint
                             font.family: Theme.fontFamily
                             font.pixelSize: entry.confirmingDelete
                                 ? Theme.fontSizeSmall
@@ -201,18 +221,25 @@ Item {
         Rectangle {
             width: root.width
             height: Theme.controlHeight
-            radius: Theme.radius / 2
-            color: newConversationArea.containsMouse ? Theme.hover : "transparent"
-            border.width: 0
-            border.color: Theme.border
+            radius: Theme.radius
+            color: newConversationArea.containsMouse ? Theme.amber(0.15) : Theme.amber(0.10)
+            border.width: 1
+            border.color: newConversationArea.containsMouse
+                ? Theme.amber(0.30)
+                : Theme.amber(0.20)
             visible: Ghostd.activeGhost !== ""
+
+            Behavior on color {
+                enabled: !Theme.reducedMotion
+                ColorAnimation { duration: Theme.durFast }
+            }
 
             Text {
                 anchors.left: parent.left
                 anchors.leftMargin: Theme.gap
                 anchors.verticalCenter: parent.verticalCenter
                 text: "+ New conversation"
-                color: Theme.foreground
+                color: Theme.ghostAmberBright
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontSizeSmall
             }
