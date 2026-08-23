@@ -26,12 +26,15 @@ from omaharness.errors import (
 )
 
 from . import __version__, capabilities
-from .bridge import GhostDesktop
+from .bridge import GhostDesktop, UnknownRefError
 
+# Order matters: _error_code returns the first isinstance match, so the more
+# specific OmaHarnessError subclasses (UnknownRefError) precede OmaHarnessError.
 _ERROR_CODES: dict[type, str] = {
     CapabilityError: "capability",
     AmbiguousTargetError: "ambiguous_target",
     StateRestoreError: "state_restore",
+    UnknownRefError: "unknown_ref",
     OmaHarnessError: "harness",
     ValueError: "invalid_args",
     KeyError: "invalid_args",
@@ -186,11 +189,18 @@ class Server:
                     "unknown_op",
                     f"Unknown op {op!r}; known ops: {', '.join(OPS)}",
                 )
-        except BaseException as exc:  # noqa: BLE001 - one bad op never kills the loop
+        except (KeyboardInterrupt, SystemExit):
+            # A shutdown signal is not an op failure: let it unwind the loop
+            # instead of swallowing it into a JSON error the caller ignores.
+            raise
+        except Exception as exc:  # noqa: BLE001 - one bad op never kills the loop
             self._log(f"op {op!r} failed: {exc!r}\n{traceback.format_exc()}")
             details: dict[str, Any] = {}
             if isinstance(exc, StateRestoreError):
                 details["state_restore"] = True
+            extra = getattr(exc, "details", None)
+            if isinstance(extra, dict):
+                details.update(extra)
             return self._fail(request_id, _error_code(exc), str(exc), details)
         return {"id": request_id, "ok": True, "result": result}
 

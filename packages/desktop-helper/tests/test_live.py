@@ -106,3 +106,41 @@ def test_ax_query_against_any_gtk_app(desktop):
             assert "app" in result
             return
     pytest.skip("no AT-SPI-exposing window found in this session")
+
+
+def test_ax_ref_resolves_then_stales_on_the_real_bus(desktop):
+    """The P0 fix, end to end on the real bindings, without disrupting anyone.
+
+    Proves the ax_query -> ref -> resolve path (the read half ax_perform relies
+    on) works on live AT-SPI, and that a second snapshot renders the earlier
+    ref stale rather than silently redirecting it. The actual do_action is
+    deliberately NOT invoked, so no real window is clicked or focus stolen.
+    """
+    from omaharness import atspi as atspi_module
+
+    from ghost_desktop_helper.bridge import UnknownRefError
+
+    if not atspi_module.available():
+        pytest.skip("PyGObject/AT-SPI bindings not importable")
+
+    d = GhostDesktop()  # a private instance so module-scoped state is untouched
+    for client in d.hyprctl.clients():
+        try:
+            result = d.ax_query(app=client["address"], limit=5)
+        except Exception:  # noqa: BLE001 - app without an AT-SPI tree; try next
+            continue
+        if result["count"] < 1:
+            continue
+        ref = result["elements"][0]["ref"]
+        assert ":" in str(ref)  # epoch-qualified, not a bare index
+        assert d._ax_element(ref) is not None  # resolves on the live bus
+        epoch = d._ax_epoch
+
+        # A second snapshot bumps the epoch; the earlier ref is now stale.
+        d.ax_roles(app=client["address"])
+        assert d._ax_epoch == epoch + 1
+        with pytest.raises(UnknownRefError) as exc:
+            d.ax_perform(ref=ref)
+        assert exc.value.details["reason"] == "stale"
+        return
+    pytest.skip("no AT-SPI-exposing window with a resolvable ref found")

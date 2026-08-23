@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from conftest import FakeHyprctl, sample_window, unlocked_runner
 
 from ghost_desktop_helper.bridge import GhostDesktop
@@ -71,3 +73,27 @@ def test_response_is_json_serialisable():
     resp = _server(_desktop()).handle({"id": 4, "op": "layers"})
     json.dumps(resp)  # must not raise
     assert resp["result"]["count"] >= 1
+
+
+def test_stale_ref_maps_to_unknown_ref_code_with_details():
+    server = _server(_desktop())
+    resp = server.handle(
+        {"id": 5, "op": "ax_perform", "args": {"ref": "99:0"}}
+    )
+    assert resp["ok"] is False
+    assert resp["error"]["code"] == "unknown_ref"
+    # The structured details forwarded from UnknownRefError distinguish a stale
+    # ref from a never-minted one.
+    assert resp["error"]["details"]["reason"] == "stale"
+    json.dumps(resp)  # still serialisable
+
+
+def test_keyboard_interrupt_is_not_swallowed_into_a_json_error():
+    class Boom(GhostDesktop):
+        def state(self):  # noqa: D401 - test stub
+            raise KeyboardInterrupt
+
+    server = _server(Boom(hyprctl=FakeHyprctl(_clients=[sample_window()]),
+                          runner=unlocked_runner))
+    with pytest.raises(KeyboardInterrupt):
+        server.handle({"id": 6, "op": "state"})

@@ -125,11 +125,17 @@ def test_ax_query_finds_by_role_and_registers_refs():
     assert d._ax_element(el["ref"]) is not None
 
 
-def test_ax_query_unknown_role_refuses_and_lists_present():
+def test_ax_query_unknown_role_returns_empty_with_present_roles():
     d = _desktop(_tree())
-    with pytest.raises(Exception) as exc:
-        d.ax_query(app="0xaaaa", role="treeview")
-    assert "role" in str(exc.value).casefold()
+    # A zero-match role is a normal empty read (consistent with a zero-match
+    # text filter), not a raise; the present roles come back as a warning so the
+    # model can recover in one round-trip.
+    result = d.ax_query(app="0xaaaa", role="treeview")
+    assert result["count"] == 0
+    assert result["elements"] == []
+    warning = " ".join(result["warnings"]).casefold()
+    assert "treeview" in warning
+    assert "button" in warning  # the roles that ARE present are listed
 
 
 def test_ax_roles_counts_canonical():
@@ -151,21 +157,113 @@ def test_ax_perform_invokes_action_with_honesty():
     assert d._ax_element(ref).did == ["click"]
 
 
+def _ref_for(result, element_index):
+    """The minted, epoch-qualified ref for a given element_index in a query."""
+    return next(
+        el["ref"] for el in result["elements"] if el["element_index"] == element_index
+    )
+
+
 def test_ax_set_text_records_replace_and_honesty():
     d = _desktop(_tree())
-    d.ax_query(app="0xaaaa")  # snapshot to populate refs
+    q = d.ax_query(app="0xaaaa")  # snapshot to populate refs
     # the entry is element_index 2 (frame=0, button=1, entry=2)
-    result = d.ax_set(ref=2, attribute="text", value="hello")
-    assert d._ax_element(2).inserted == ("hello", True)
+    ref = _ref_for(q, 2)
+    result = d.ax_set(ref=ref, attribute="text", value="hello")
+    assert d._ax_element(ref).inserted == ("hello", True)
     assert result["background_safe"] is True
 
 
 def test_ax_set_focused_reports_focus_change():
     d = _desktop(_tree())
-    d.ax_query(app="0xaaaa")
-    result = d.ax_set(ref=1, attribute="focused", value=True)
+    q = d.ax_query(app="0xaaaa")
+    ref = _ref_for(q, 1)  # the focusable button
+    result = d.ax_set(ref=ref, attribute="focused", value=True)
     assert "focus-change" in result["interference"]
     assert result["background_safe"] is False
+
+
+def test_bare_int_ref_is_rejected_as_malformed():
+    d = _desktop(_tree())
+    d.ax_query(app="0xaaaa")
+    from ghost_desktop_helper.bridge import UnknownRefError
+
+    with pytest.raises(UnknownRefError) as exc:
+        d.ax_perform(ref=1)  # a bare index carries no epoch to validate
+    assert exc.value.details["reason"] == "malformed"
+
+
+def test_ref_from_earlier_snapshot_rejected_after_new_snapshot():
+    """A ref minted by snapshot N is stale once snapshot N+1 replaces the tree.
+
+    This is the core P0: without an epoch, ref 1 from a firefox query would
+    silently address whatever element 1 happens to be in the next app's tree.
+    """
+    from ghost_desktop_helper.bridge import UnknownRefError
+
+    d = _desktop(_tree())
+    first = d.ax_query(app="0xaaaa", role="button")
+    stale_ref = first["elements"][0]["ref"]
+    assert d._ax_epoch == 1
+
+    # A second snapshot (here via ax_roles) bumps the epoch and replaces the table.
+    d.ax_roles(app="0xaaaa")
+    assert d._ax_epoch == 2
+
+    with pytest.raises(UnknownRefError) as exc:
+        d.ax_perform(ref=stale_ref, action="click")
+    assert exc.value.details["reason"] == "stale"
+    assert exc.value.details["snapshot"] == 1
+    assert exc.value.details["current_snapshot"] == 2
+
+
+def test_type_between_query_and_perform_does_not_invalidate_ref():
+    """type() takes a private snapshot; it must not renumber or stale the ref.
+
+    The old code re-snapshotted inside _focused_editable and overwrote the ref
+    table, so a bare type() between a query and a perform redirected the ref.
+    """
+    d = _desktop(_tree())
+    q = d.ax_query(app="0xaaaa", role="button")
+    ref = q["elements"][0]["ref"]
+    epoch_before = d._ax_epoch
+
+    typed = d.type("hi", app="0xaaaa")  # goes through _focused_editable
+    assert typed["backend"] == "atspi"
+    assert d._ax_epoch == epoch_before  # private snapshot did not bump the epoch
+
+    # The ref still resolves to the same button, and the perform lands on it.
+    result = d.ax_perform(ref=ref, action="click")
+    assert result["backend"] == "atspi"
+    assert d._ax_element(ref).did == ["click"]
+
+
+def test_walk_knobs_are_clamped_server_side():
+    # Hostile / careless arguments are bounded to defensible ceilings.
+    assert GhostDesktop._clamp_nodes(10**9) == 5000
+    assert GhostDesktop._clamp_nodes(0) == 1
+    assert GhostDesktop._clamp_depth(10**9) == 40
+    assert GhostDesktop._clamp_depth(-5) == 0
+    assert GhostDesktop._clamp_timeout(10**9) == 5.0
+    assert GhostDesktop._clamp_timeout("nonsense") == 1.5
+    # limit <= 0 means "up to the ceiling", never "unlimited".
+    assert GhostDesktop._effective_limit(0) == 200
+    assert GhostDesktop._effective_limit(-1) == 200
+    assert GhostDesktop._effective_limit(10**9) == 200
+    assert GhostDesktop._effective_limit(5) == 5
+
+
+def test_snapshot_wall_clock_budget_aborts_a_slow_walk():
+    """A small tree of pathologically slow nodes still terminates."""
+    from ghost_desktop_helper.bridge import _BudgetedTree
+
+    clock = iter([0.0, 0.0, 100.0, 100.0, 100.0, 100.0])
+    tree = _BudgetedTree(
+        FakeAtspi(_tree()), budget_s=1.0, clock=lambda: next(clock)
+    )
+    with pytest.raises(Exception) as exc:
+        tree.snapshot(_tree())
+    assert "budget" in str(exc.value).casefold()
 
 
 def test_type_via_atspi_uses_focused_editable():

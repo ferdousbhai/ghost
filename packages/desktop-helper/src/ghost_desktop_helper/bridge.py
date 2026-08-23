@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import base64
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +41,80 @@ from omaharness.transaction import CompositorTransaction
 
 _SKELETAL_TREE = 3
 _CHROMIUM_HINTS = ("chrom", "electron", "code", "slack", "discord", "spotify")
+
+# Server-side ceilings for the model-supplied AT-SPI walk knobs. A recursive
+# D-Bus tree walk is strictly serial on the single request line, so an
+# unbounded max_nodes wedges every subsequent desktop op behind it. These caps
+# turn a hostile or careless argument into a bounded walk; they are documented
+# in DESKTOP_HELPER.md.
+_MAX_NODES_CAP = 5000
+_MAX_DEPTH_CAP = 40
+_MAX_LIMIT_CAP = 200
+_MAX_TIMEOUT_CAP = 5.0
+#: Wall-clock budget for a single snapshot walk, independent of node/depth caps:
+#: a small tree of pathologically slow nodes must still terminate.
+_SNAPSHOT_BUDGET_S = 5.0
+
+
+class UnknownRefError(OmaHarnessError):
+    """An element ref does not address the current accessibility snapshot.
+
+    Mirrors the browser relay's ``unknown_ref`` failure (see
+    ``packages/extensions`` ``browser-session.ts``): a ref no snapshot minted, a
+    ref a newer snapshot has since invalidated (stale epoch), or one whose index
+    is out of range. The protocol layer maps this to the ``unknown_ref`` error
+    code and forwards ``details`` so the model can tell a stale ref from a
+    never-minted one and re-run ``ax_query``.
+    """
+
+    def __init__(self, message: str, **details: Any) -> None:
+        super().__init__(message)
+        self.details = details
+
+
+class _BudgetedTree(atspi_module.AccessibleTree):
+    """An AccessibleTree that aborts its walk past a wall-clock deadline.
+
+    The vendored ``snapshot`` bounds itself by node count and depth but not by
+    time; a slow-per-node D-Bus tree can still run for minutes. This subclass
+    layers a monotonic deadline over the unmodified vendored walk by checking it
+    once per node in ``describe``, which is where the per-node D-Bus reads
+    happen.
+    """
+
+    def __init__(
+        self,
+        backend: Any,
+        *,
+        window_bounds: dict[str, float] | None = None,
+        budget_s: float | None = _SNAPSHOT_BUDGET_S,
+        clock: Any = time.monotonic,
+    ) -> None:
+        super().__init__(backend, window_bounds=window_bounds)
+        self._budget_s = budget_s
+        self._clock = clock
+        self._deadline: float | None = None
+
+    def snapshot(self, root: Any, **kwargs: Any) -> list[dict[str, Any]]:
+        self._deadline = (
+            None if self._budget_s is None else self._clock() + self._budget_s
+        )
+        return super().snapshot(root, **kwargs)
+
+    def describe(self, node: Any, index: int, depth: int = 0) -> dict[str, Any]:
+        # index 0 is the root: always describe at least it, so a query never
+        # fails before doing any work.
+        if (
+            self._deadline is not None
+            and index > 0
+            and self._clock() > self._deadline
+        ):
+            raise CapabilityError(
+                f"AT-SPI snapshot exceeded its {self._budget_s:g}s wall-clock "
+                f"budget after {index} nodes; narrow the walk with a smaller "
+                "max_nodes/max_depth or target a specific app"
+            )
+        return super().describe(node, index, depth)
 
 
 def _honesty(
@@ -105,7 +180,13 @@ class GhostDesktop:
             else toplevel_lister
         )
         self._last_window: dict[str, Any] | None = None
+        # The accessibility ref table the model addresses, plus the epoch and
+        # owning window it belongs to. Every new public snapshot bumps the epoch
+        # so refs minted against an older snapshot (or a different app) are
+        # detectably stale rather than silently redirected to a live index.
         self._ax_elements: dict[int, Any] = {}
+        self._ax_epoch: int = 0
+        self._ax_window: dict[str, Any] | None = None
 
     # --- target resolution (ported from omaharness.desktop) --------------
 
@@ -207,19 +288,102 @@ class GhostDesktop:
             )
         return application
 
-    def _ax_tree(self, window: dict[str, Any]) -> atspi_module.AccessibleTree:
-        return atspi_module.AccessibleTree(
-            self._ax_backend(), window_bounds=window.get("bounds")
+    def _ax_tree(self, window: dict[str, Any]) -> _BudgetedTree:
+        return _BudgetedTree(
+            self._ax_backend(),
+            window_bounds=window.get("bounds"),
+            budget_s=_SNAPSHOT_BUDGET_S,
         )
 
-    def _ax_element(self, ref: Any) -> Any:
+    def _publish_snapshot(self, tree: Any, window: dict[str, Any]) -> int:
+        """Install ``tree`` as the ref table the model addresses; return its epoch.
+
+        Each call increments the epoch, so every ref minted before it - from an
+        earlier query, or a snapshot of a different app - is now detectably
+        stale. The owning window travels with the table so a ref carries its
+        window without leaning on the mutable ``_last_window``.
+        """
+        self._ax_epoch += 1
+        self._ax_elements = dict(tree.elements)
+        self._ax_window = window
+        return self._ax_epoch
+
+    def _mint_ref(self, epoch: int, element_index: int) -> str:
+        return f"{epoch}:{element_index}"
+
+    @staticmethod
+    def _parse_ref(ref: Any) -> tuple[int, int]:
+        epoch_text, sep, index_text = str(ref).strip().partition(":")
+        if not sep:
+            raise UnknownRefError(
+                f"Element ref {ref!r} is not a snapshot-qualified ref; run "
+                "ax_query or ax_roles to mint a fresh 'epoch:index' ref",
+                ref=ref,
+                reason="malformed",
+            )
         try:
-            return self._ax_elements[int(ref)]
-        except (KeyError, TypeError, ValueError) as exc:
-            raise OmaHarnessError(
-                f"Unknown element ref {ref!r}; run ax_query or ax_roles first to "
-                "take a fresh accessibility snapshot"
+            return int(epoch_text), int(index_text)
+        except ValueError as exc:
+            raise UnknownRefError(
+                f"Element ref {ref!r} is malformed; expected 'epoch:index' as "
+                "minted by ax_query",
+                ref=ref,
+                reason="malformed",
             ) from exc
+
+    def _ax_element(self, ref: Any) -> Any:
+        epoch, index = self._parse_ref(ref)
+        if not self._ax_elements or epoch != self._ax_epoch:
+            raise UnknownRefError(
+                f"Element ref {ref!r} is stale: it addresses accessibility "
+                f"snapshot #{epoch}, but the current snapshot is "
+                f"#{self._ax_epoch}. A newer ax_query/ax_roles - or a query of a "
+                "different app - replaced the tree; re-run ax_query and use the "
+                "refs it returns.",
+                ref=ref,
+                reason="stale",
+                snapshot=epoch,
+                current_snapshot=self._ax_epoch,
+            )
+        try:
+            return self._ax_elements[index]
+        except (KeyError, TypeError) as exc:
+            raise UnknownRefError(
+                f"Element ref {ref!r} is out of range for snapshot "
+                f"#{self._ax_epoch} ({len(self._ax_elements)} elements); re-run "
+                "ax_query",
+                ref=ref,
+                reason="out_of_range",
+            ) from exc
+
+    # --- server-side clamps for model-supplied walk knobs ----------------
+
+    @staticmethod
+    def _clamp_nodes(value: Any) -> int:
+        return max(1, min(int(value), _MAX_NODES_CAP))
+
+    @staticmethod
+    def _clamp_depth(value: Any) -> int:
+        return max(0, min(int(value), _MAX_DEPTH_CAP))
+
+    @staticmethod
+    def _clamp_timeout(value: Any, *, default: float = 1.5) -> float:
+        try:
+            seconds = float(value)
+        except (TypeError, ValueError):
+            seconds = default
+        return min(max(0.0, seconds), _MAX_TIMEOUT_CAP)
+
+    @staticmethod
+    def _effective_limit(limit: Any) -> int:
+        """Resolve a match limit to a positive cap.
+
+        ``limit <= 0`` is documented to mean "as many as the ceiling allows"
+        rather than "unlimited", so a query can never bypass the cap by asking
+        for zero or a negative count.
+        """
+        limit = int(limit)
+        return _MAX_LIMIT_CAP if limit <= 0 else min(limit, _MAX_LIMIT_CAP)
 
     # --- ops: windows / desktop state ------------------------------------
 
@@ -272,6 +436,7 @@ class GhostDesktop:
 
     def toplevels(self, *, timeout: float = 1.5) -> dict[str, Any]:
         """ext-foreign-toplevel-list-v1 list reconciled with hyprctl clients."""
+        timeout = self._clamp_timeout(timeout)
         listing = self._toplevel_lister(timeout=timeout)
         report = listing.as_dict()
         try:
@@ -308,16 +473,17 @@ class GhostDesktop:
         max_depth: int = 25,
         max_nodes: int = 3000,
     ) -> dict[str, Any]:
+        max_depth = self._clamp_depth(max_depth)
+        max_nodes = self._clamp_nodes(max_nodes)
+        effective_limit = self._effective_limit(limit)
         window = self._resolve_window(app)
         tree = self._ax_tree(window)
         nodes = tree.snapshot(
             self._ax_root(window), max_depth=max_depth, max_nodes=max_nodes
         )
-        self._ax_elements = dict(tree.elements)
+        epoch = self._publish_snapshot(tree, window)
         needle = text.casefold() if text is not None else None
         wanted_states = {s.casefold() for s in self._as_state_list(attributes)}
-        if role is not None:
-            self._require_role_exists(role, nodes)
         matches: list[dict[str, Any]] = []
         for node in nodes:
             if role is not None and not atspi_module.role_matches(
@@ -333,16 +499,25 @@ class GhostDesktop:
                 for f in ("name", "description", "text", "value")
             ):
                 continue
-            matches.append({**node, "ref": node["element_index"]})
-            if 0 < limit <= len(matches):
+            matches.append(
+                {**node, "ref": self._mint_ref(epoch, node["element_index"])}
+            )
+            if len(matches) >= effective_limit:
                 break
+        warnings = self._tree_warnings(window, nodes)
+        # A zero-match role is a normal read result, not a capability failure:
+        # returning empty with the roles that *are* present gives the model the
+        # better recovery signal (what to query instead) in one round-trip, and
+        # matches how a zero-match text filter already behaves.
+        if role is not None and not matches:
+            warnings = [*warnings, self._role_absent_warning(role, nodes)]
         return {
             "app": window["class"] or window["initial_class"],
             "pid": window["pid"],
             "elements": matches,
             "count": len(matches),
             "truncated": len(nodes) >= max_nodes,
-            "warnings": self._tree_warnings(window, nodes),
+            "warnings": warnings,
         }
 
     @staticmethod
@@ -360,16 +535,19 @@ class GhostDesktop:
             return list(attributes)
         return []
 
-    def _require_role_exists(
-        self, role: str, nodes: list[dict[str, Any]]
-    ) -> None:
+    @staticmethod
+    def _roles_present(nodes: list[dict[str, Any]]) -> list[str]:
         present = {atspi_module.canonical_role(n.get("role", "")) for n in nodes}
         present.discard("")
-        if atspi_module.canonical_role(role) in present:
-            return
-        raise CapabilityError(
-            f"No element in this tree has the role {role!r}. Roles present here: "
-            f"{', '.join(sorted(present)) or '(none)'}"
+        return sorted(present)
+
+    def _role_absent_warning(
+        self, role: str, nodes: list[dict[str, Any]]
+    ) -> str:
+        present = self._roles_present(nodes)
+        return (
+            f"No element in this tree has the role {role!r}. Roles present "
+            f"here: {', '.join(present) or '(none)'}"
         )
 
     def ax_roles(
@@ -379,12 +557,14 @@ class GhostDesktop:
         max_depth: int = 25,
         max_nodes: int = 3000,
     ) -> dict[str, Any]:
+        max_depth = self._clamp_depth(max_depth)
+        max_nodes = self._clamp_nodes(max_nodes)
         window = self._resolve_window(app)
         tree = self._ax_tree(window)
         nodes = tree.snapshot(
             self._ax_root(window), max_depth=max_depth, max_nodes=max_nodes
         )
-        self._ax_elements = dict(tree.elements)
+        self._publish_snapshot(tree, window)
         counts: dict[str, int] = {}
         for node in nodes:
             name = atspi_module.canonical_role(node.get("role", ""))
@@ -541,9 +721,12 @@ class GhostDesktop:
         except CapabilityError as exc:
             warnings.append(str(exc))
             return None
+        # This is a PRIVATE snapshot: it resolves the focused field for one
+        # type() call and must NOT replace the ref table the model is
+        # addressing, or a bare type() between a query and a perform would
+        # silently invalidate (and renumber) the model's refs. It reads from
+        # this local tree only and leaves _ax_elements / _ax_epoch untouched.
         nodes = tree.snapshot(root)
-        self._ax_elements = dict(tree.elements)
-        backend = self._ax_backend()
         for index, node in enumerate(nodes):
             states = {s.casefold() for s in node.get("states", [])}
             if "editable" in states and {"focused", "active"} & states:
@@ -601,11 +784,20 @@ class GhostDesktop:
 
     def _click_ref(self, ref: Any, *, button: str, clicks: int) -> dict[str, Any]:
         node = self._ax_element(ref)
+        # The ref carries the window it was snapshotted in; _ax_element already
+        # proved the ref is current, so this window is the one that owns it -
+        # never the mutable _last_window, which a later resolve may have moved.
+        window = self._ax_window
+        if window is None:
+            raise OmaHarnessError(
+                f"Element ref {ref!r} has no associated window; run ax_query "
+                "first to take a fresh accessibility snapshot"
+            )
         backend = self._ax_backend()
         bounds, reliability = atspi_module.normalize_bounds(
             window_extent=backend.extents(node, relative_to_window=True),
             screen_extent=backend.extents(node, relative_to_window=False),
-            window_bounds=(self._last_window or {}).get("bounds"),
+            window_bounds=window.get("bounds"),
         )
         if not bounds or not atspi_module.bounds_are_trustworthy(reliability):
             raise CapabilityError(
@@ -615,7 +807,6 @@ class GhostDesktop:
             )
         center_x = float(bounds["x"]) + float(bounds["width"]) / 2
         center_y = float(bounds["y"]) + float(bounds["height"]) / 2
-        window = self._last_window
         self._require_input_allowed("click")
         self.ydotool.require()
         transaction = self._transaction("click")
