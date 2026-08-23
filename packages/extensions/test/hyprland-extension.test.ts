@@ -417,11 +417,31 @@ describe("ghost_desktop notify (local, not the sidecar)", () => {
     expect(runner.calls[0]?.args).toEqual([
       "--app-name=ghost",
       "--urgency=low",
+      "--",
       "Casper",
       "the build finished",
     ]);
     expect(resultText(result)).toBe("Notification shown.");
     expect(helper.requests).toHaveLength(0);
+  });
+
+  it("separates leading-dash title and message values from options", async () => {
+    const runner = fakeRunner();
+    const { extension } = await harness(undefined, runner);
+    await extension.call(GHOST_DESKTOP, {
+      action: "notify",
+      message: "--expire-time=0",
+      title: "--critical",
+      urgency: "normal",
+    });
+    expect(runner.calls[0]?.command).toBe("notify-send");
+    expect(runner.calls[0]?.args).toEqual([
+      "--app-name=ghost",
+      "--urgency=normal",
+      "--",
+      "--critical",
+      "--expire-time=0",
+    ]);
   });
 
   it("needs a message", async () => {

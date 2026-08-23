@@ -45,7 +45,11 @@ import {
   playwrightBackend,
 } from "../src/extensions/browser-playwright.js";
 import {
+  browserSessionFor,
   closeAllBrowserSessions,
+  DEFAULT_ACTION_TIMEOUT_MS,
+  DEFAULT_ACTING_BUDGET,
+  DEFAULT_IDLE_TIMEOUT_MS,
   SCREENSHOT_DIRNAME,
 } from "../src/extensions/browser-session.js";
 import { GhostError } from "../src/errors.js";
@@ -970,5 +974,87 @@ describe("the backend is a choice, and policy sits above it", () => {
     const path = (result.details as { path: string }).path;
     expect(path.startsWith(join(fixture.dir, SCREENSHOT_DIRNAME))).toBe(true);
     await expect(access(path)).resolves.toBeUndefined();
+  });
+});
+
+// ------------------------------------------------------------ session registry
+
+describe("the process-wide browser session registry", () => {
+  it("reuses a session for omitted and explicitly-defaulted options", () => {
+    const first = browserSessionFor(fixture.dir);
+    const omitted = browserSessionFor(fixture.dir);
+    const explicitDefaults = browserSessionFor(fixture.dir, {
+      idleTimeoutMs: DEFAULT_IDLE_TIMEOUT_MS,
+      actionTimeoutMs: DEFAULT_ACTION_TIMEOUT_MS,
+      actingBudget: DEFAULT_ACTING_BUDGET,
+      allowActionsOffOrigin: false,
+    });
+
+    expect(omitted).toBe(first);
+    expect(explicitDefaults).toBe(first);
+  });
+
+  it("reuses an identical custom backend factory", () => {
+    const backend = new RecordingBackend();
+    const factory = () => backend;
+    const first = browserSessionFor(fixture.dir, { backend: factory, idleTimeoutMs: 0 });
+
+    expect(browserSessionFor(fixture.dir, { backend: factory, idleTimeoutMs: 0 })).toBe(first);
+  });
+
+  it("reuses independently-created Playwright factories with identical settings", () => {
+    const options = { executablePath: FAKE_CHROMIUM, headless: false } as const;
+    const first = browserSessionFor(fixture.dir, {
+      backend: playwrightBackend(options),
+      idleTimeoutMs: 0,
+    });
+
+    expect(
+      browserSessionFor(fixture.dir, {
+        backend: playwrightBackend(options),
+        idleTimeoutMs: 0,
+      }),
+    ).toBe(first);
+  });
+
+  it("throws a typed conflict when the requested backend changes", () => {
+    browserSessionFor(fixture.dir, {
+      backend: () => new RecordingBackend(),
+      idleTimeoutMs: 0,
+    });
+
+    try {
+      browserSessionFor(fixture.dir, {
+        backend: () => new RecordingBackend(),
+        idleTimeoutMs: 0,
+      });
+      throw new Error("expected a browser session configuration conflict");
+    } catch (error) {
+      expect(error).toBeInstanceOf(GhostError);
+      expect((error as GhostError).code).toBe("conflict");
+      expect((error as GhostError).details["conflict"]).toBe(
+        "browser_session_configuration",
+      );
+      expect((error as GhostError).details["changedOptions"]).toEqual(["backend"]);
+      expect((error as Error).message).toMatch(/closeAllBrowserSessions/);
+    }
+  });
+
+  it.each([
+    ["idleTimeoutMs", { idleTimeoutMs: DEFAULT_IDLE_TIMEOUT_MS + 1 }],
+    ["actionTimeoutMs", { actionTimeoutMs: DEFAULT_ACTION_TIMEOUT_MS + 1 }],
+    ["actingBudget", { actingBudget: DEFAULT_ACTING_BUDGET + 1 }],
+    ["allowActionsOffOrigin", { allowActionsOffOrigin: true }],
+  ] as const)("throws rather than discarding a changed %s", (name, changed) => {
+    browserSessionFor(fixture.dir);
+
+    try {
+      browserSessionFor(fixture.dir, changed);
+      throw new Error("expected a browser session configuration conflict");
+    } catch (error) {
+      expect(error).toBeInstanceOf(GhostError);
+      expect((error as GhostError).code).toBe("conflict");
+      expect((error as GhostError).details["changedOptions"]).toEqual([name]);
+    }
   });
 });

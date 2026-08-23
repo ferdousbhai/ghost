@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { MemoryFileFormatError } from "../src/errors.js";
 import {
+  assertWritableMemory,
   coerceMemorySlug,
   deriveMemoryIndex,
   MAX_MEMORY_FILE_CONTENT_LENGTH,
+  MAX_MEMORY_FILE_DESCRIPTION_LENGTH,
   MEMORY_INDEX_BUDGET_CHARS,
   memorySlugForText,
   parseMemoryFile,
@@ -50,6 +52,34 @@ describe("serialize/parse", () => {
     expect(parsed.description).toBe("I work in the morning");
     expect(parsed.content).toBe("The press is cold until ten.");
     expect(parsed.updated).toBe("2026-08-02");
+  });
+
+  it("quotes and round-trips descriptions with YAML-sensitive characters", () => {
+    for (const description of ["true", "likes: tea", 'says "hello"', String.raw`uses C:\ghost`]) {
+      const text = serializeMemoryFile({
+        description,
+        content: "body",
+        updatedAt: new Date("2026-08-02T11:00:00.000Z"),
+      });
+      expect(text.split("\n")[1]).toMatch(/^description: ".*"$/);
+      expect(parseMemoryFile(text).description).toBe(description);
+    }
+  });
+
+  it("checks the normalized description length that writeMemory persists", () => {
+    expect(() =>
+      assertWritableMemory(`  ${"x".repeat(MAX_MEMORY_FILE_DESCRIPTION_LENGTH)}  `, "body"),
+    ).not.toThrow();
+    expect(() =>
+      assertWritableMemory(`  ${"x".repeat(MAX_MEMORY_FILE_DESCRIPTION_LENGTH + 1)}  `, "body"),
+    ).toThrow(MemoryFileFormatError);
+  });
+
+  it("rejects every line separator in a one-line description", () => {
+    for (const separator of ["\n", "\r", "\u2028", "\u2029"]) {
+      expect(() => assertWritableMemory(`first${separator}second`, "body"))
+        .toThrowError(/single line/);
+    }
   });
 
   it("requires a description", () => {

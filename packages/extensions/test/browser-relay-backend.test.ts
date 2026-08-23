@@ -85,6 +85,7 @@ function transportWithPage(): ScriptedTransport {
   const transport = new ScriptedTransport();
   transport.answer("open", { page: PAGE });
   transport.answer("current", { page: PAGE });
+  transport.answer("close", { closed: true });
   return transport;
 }
 
@@ -311,12 +312,40 @@ describe("when the relay is not there", () => {
     expect(await backend.current()).toBeUndefined();
   });
 
-  it("reports close as a no-op when nothing is connected", async () => {
+  it("reports a disconnected close as a relay failure, then remembers the tab is gone", async () => {
     const transport = transportWithPage();
     const backend = await opened(transport);
     transport.connected = false;
-    expect(await backend.close()).toBe(true);
+    const error = await expectGhostError(backend.close());
+    expect(error.details["failure"]).toBe("browser_unavailable");
     expect(await backend.close()).toBe(false);
+  });
+
+  it("reports a disconnected current probe when it previously had a tab", async () => {
+    const transport = transportWithPage();
+    const backend = await opened(transport);
+    transport.connected = false;
+
+    const error = await expectGhostError(backend.current());
+    expect(error.details["failure"]).toBe("browser_unavailable");
+    expect(await backend.current()).toBeUndefined();
+  });
+
+  it("does not turn current or close failures into false no-page results", async () => {
+    const transport = transportWithPage();
+    const backend = await opened(transport);
+
+    transport.refuse("current", "timeout", "current timed out");
+    const currentError = await expectGhostError(backend.current());
+    expect(currentError.details["failure"]).toBe("timeout");
+    expect(currentError.message).toBe("current timed out");
+    expect(backend.running).toBe(true);
+
+    transport.refuse("close", "timeout", "close timed out");
+    const closeError = await expectGhostError(backend.close());
+    expect(closeError.details["failure"]).toBe("timeout");
+    expect(closeError.message).toBe("close timed out");
+    expect(backend.running).toBe(true);
   });
 
   it("carries each failure through as itself", async () => {
@@ -399,6 +428,10 @@ describe("the session layer's policy applies to the relay too", () => {
   function session() {
     return browserSessionFor(dir, { backend: relayBackend({ transport }), idleTimeoutMs: 0 });
   }
+
+  it("reuses independently-created relay factories for the same transport", () => {
+    expect(session()).toBe(session());
+  });
 
   it("refuses a file URL before the relay hears about it", async () => {
     await expectGhostError(session().open("file:///etc/shadow"));

@@ -44,6 +44,7 @@ import { Type } from "typebox";
 import { GhostError } from "../errors.js";
 import type { GhostHome } from "../home.js";
 import { isVisitorScope } from "../scope.js";
+import { stringEnum } from "../tool-schema.js";
 import { resolveHome, resolveScope, type GhostExtensionOptions } from "./shared.js";
 import { honestyNote } from "./hyprland.js";
 import {
@@ -328,7 +329,7 @@ export function createScreenExtension(
             "What you want to know from the screen. Be specific: what to read, what "
             + "to identify, what to compare.",
         }),
-        target: Type.Optional(Type.Enum([...SCREEN_TARGETS], {
+        target: Type.Optional(stringEnum(SCREEN_TARGETS, {
           description:
             "screen: a whole monitor. window: a single window (background-safe "
             + "ladder), named by window or the focused one. region: the rectangle "

@@ -27,6 +27,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { isVisitorScope, type GhostScope } from "../scope.js";
+import { stringEnum } from "../tool-schema.js";
 import {
   GhostBrowserError,
   type BrowserBackendFactory,
@@ -166,8 +167,7 @@ export function createBrowserExtension(
         + "that domain) is refused unless the creator wants it — then pass "
         + "allow_cross_domain: true on that action.",
       parameters: Type.Object({
-        action: Type.Enum([...BROWSER_ACTIONS], {
-          type: "string",
+        action: stringEnum(BROWSER_ACTIONS, {
           description:
             "open: go to a URL. read: the current page as text. find: locate "
             + "elements by text or CSS selector and get refs for them. click: "
@@ -403,6 +403,9 @@ export function createBrowserExtension(
   };
 }
 
+export {
+  identifiedBrowserBackendFactory,
+} from "./browser-backend.js";
 export {
   browserSessionFor,
   closeAllBrowserSessions,

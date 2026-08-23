@@ -23,6 +23,7 @@
  */
 import { mkdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { GhostError } from "../errors.js";
 import {
   GhostBrowserError,
   type BackendBackResult,
@@ -43,6 +44,8 @@ export const DEFAULT_READ_BUDGET_CHARS = 8_000;
 export const MIN_READ_BUDGET_CHARS = 200;
 export const DEFAULT_FIND_LIMIT = 20;
 export const MAX_FIND_LIMIT = 100;
+
+const DEFAULT_BROWSER_BACKEND = playwrightBackend();
 
 /**
  * How many consequential actions (click/type) may fire between two explicit
@@ -118,7 +121,7 @@ export class GhostBrowserSession {
   constructor(options: BrowserSessionOptions) {
     this.homeDir = resolve(options.homeDir);
     this.screenshotDir = join(this.homeDir, SCREENSHOT_DIRNAME);
-    this.backend = (options.backend ?? playwrightBackend())({ homeDir: this.homeDir });
+    this.backend = (options.backend ?? DEFAULT_BROWSER_BACKEND)({ homeDir: this.homeDir });
     this.#idleTimeoutMs = options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
     this.#actionTimeoutMs = options.actionTimeoutMs ?? DEFAULT_ACTION_TIMEOUT_MS;
     this.#actingBudget = options.actingBudget ?? DEFAULT_ACTING_BUDGET;
@@ -418,7 +421,67 @@ export class GhostBrowserSession {
 
 // ------------------------------------------------------------------- registry
 
-const sessions = new Map<string, GhostBrowserSession>();
+interface EffectiveSessionOptions {
+  readonly backend: BrowserBackendFactory;
+  readonly backendIdentity: readonly unknown[];
+  readonly backendDescription: string;
+  readonly idleTimeoutMs: number;
+  readonly actionTimeoutMs: number;
+  readonly actingBudget: number;
+  readonly allowActionsOffOrigin: boolean;
+}
+
+interface BrowserSessionEntry {
+  readonly session: GhostBrowserSession;
+  readonly options: EffectiveSessionOptions;
+}
+
+const sessions = new Map<string, BrowserSessionEntry>();
+
+function effectiveSessionOptions(
+  options: Omit<BrowserSessionOptions, "homeDir">,
+): EffectiveSessionOptions {
+  const backend = options.backend ?? DEFAULT_BROWSER_BACKEND;
+  return {
+    backend,
+    backendIdentity: Object.freeze([...(backend.sessionIdentity ?? [backend])]),
+    backendDescription: backend.sessionDescription ?? (backend.name || "custom backend"),
+    idleTimeoutMs: options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS,
+    actionTimeoutMs: options.actionTimeoutMs ?? DEFAULT_ACTION_TIMEOUT_MS,
+    actingBudget: options.actingBudget ?? DEFAULT_ACTING_BUDGET,
+    allowActionsOffOrigin: options.allowActionsOffOrigin ?? false,
+  };
+}
+
+function sameIdentity(left: readonly unknown[], right: readonly unknown[]): boolean {
+  return left.length === right.length
+    && left.every((part, index) => Object.is(part, right[index]));
+}
+
+function changedSessionOptions(
+  existing: EffectiveSessionOptions,
+  requested: EffectiveSessionOptions,
+): string[] {
+  const changed: string[] = [];
+  if (!sameIdentity(existing.backendIdentity, requested.backendIdentity)) changed.push("backend");
+  if (existing.idleTimeoutMs !== requested.idleTimeoutMs) changed.push("idleTimeoutMs");
+  if (existing.actionTimeoutMs !== requested.actionTimeoutMs) changed.push("actionTimeoutMs");
+  if (existing.actingBudget !== requested.actingBudget) changed.push("actingBudget");
+  if (existing.allowActionsOffOrigin !== requested.allowActionsOffOrigin) {
+    changed.push("allowActionsOffOrigin");
+  }
+  return changed;
+}
+
+function sessionOptionSummary(options: EffectiveSessionOptions): Record<string, unknown> {
+  return {
+    backend: options.backendDescription,
+    idleTimeoutMs: options.idleTimeoutMs,
+    actionTimeoutMs: options.actionTimeoutMs,
+    actingBudget: options.actingBudget,
+    allowActionsOffOrigin: options.allowActionsOffOrigin,
+  };
+}
 
 /** Where a ghost's screenshots go. */
 export function screenshotDirFor(homeDir: string): string {
@@ -428,23 +491,49 @@ export function screenshotDirFor(homeDir: string): string {
 /**
  * The one session for this ghost home, created on first ask. Keyed on the home
  * because that is what a launched Chromium locks, and because a ghost should
- * have one browser, not one per conversation.
+ * have one browser, not one per conversation. Later requests must describe the
+ * same effective configuration; immutable changes are a typed conflict instead
+ * of being silently discarded.
  */
 export function browserSessionFor(
   homeDir: string,
   options: Omit<BrowserSessionOptions, "homeDir"> = {},
 ): GhostBrowserSession {
   const key = resolve(homeDir);
+  const requested = effectiveSessionOptions(options);
   const existing = sessions.get(key);
-  if (existing) return existing;
-  const session = new GhostBrowserSession({ homeDir: key, ...options });
-  sessions.set(key, session);
+  if (existing) {
+    const changed = changedSessionOptions(existing.options, requested);
+    if (changed.length === 0) return existing.session;
+    throw new GhostError(
+      "conflict",
+      `A browser session for ${key} already exists with different immutable settings: `
+        + `${changed.join(", ")}. Reuse the existing settings, or call `
+        + "closeAllBrowserSessions() before changing them (restart ghostd after a config change).",
+      {
+        conflict: "browser_session_configuration",
+        homeDir: key,
+        changedOptions: changed,
+        existing: sessionOptionSummary(existing.options),
+        requested: sessionOptionSummary(requested),
+      },
+    );
+  }
+  const session = new GhostBrowserSession({
+    homeDir: key,
+    backend: requested.backend,
+    idleTimeoutMs: requested.idleTimeoutMs,
+    actionTimeoutMs: requested.actionTimeoutMs,
+    actingBudget: requested.actingBudget,
+    allowActionsOffOrigin: requested.allowActionsOffOrigin,
+  });
+  sessions.set(key, { session, options: requested });
   return session;
 }
 
 /** Close every browser this process opened. The daemon calls this on shutdown. */
 export async function closeAllBrowserSessions(): Promise<void> {
-  const open = [...sessions.values()];
+  const open = [...sessions.values()].map((entry) => entry.session);
   sessions.clear();
   await Promise.all(open.map((session) => session.close()));
 }

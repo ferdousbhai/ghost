@@ -186,8 +186,32 @@ export interface BrowserBackendContext {
   readonly homeDir: string;
 }
 
-/** How a session gets its backend. Selected once, when the session is built. */
-export type BrowserBackendFactory = (ctx: BrowserBackendContext) => GhostBrowserBackend;
+/**
+ * How a session gets its backend. Selected once, when the session is built.
+ *
+ * A backend factory may describe when two independently-created factories have
+ * the same effective configuration. Identity parts are compared with
+ * `Object.is`: use primitives for settings and stable object references for
+ * injected capabilities such as a relay transport. A factory without an
+ * identity is deliberately equivalent only to itself.
+ */
+export interface BrowserBackendFactory {
+  (ctx: BrowserBackendContext): GhostBrowserBackend;
+  readonly sessionIdentity?: readonly unknown[];
+  readonly sessionDescription?: string;
+}
+
+/** Attach an explicit session identity without hiding it in an ad-hoc property. */
+export function identifiedBrowserBackendFactory(
+  factory: (ctx: BrowserBackendContext) => GhostBrowserBackend,
+  description: string,
+  identity: readonly unknown[],
+): BrowserBackendFactory {
+  return Object.assign(factory, {
+    sessionDescription: description,
+    sessionIdentity: Object.freeze([...identity]),
+  });
+}
 
 // --------------------------------------------------------------- shared helpers
 

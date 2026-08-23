@@ -431,6 +431,7 @@ export class DesktopHelperClient implements DesktopHelper {
       }
 
       child.on("error", (error: Error) => {
+        if (this.child !== child) return;
         clearTimeout(startTimer);
         const wrapped = new GhostError(
           "not_found",
@@ -444,6 +445,7 @@ export class DesktopHelperClient implements DesktopHelper {
       });
 
       child.on("exit", (code, signal) => {
+        if (this.child !== child) return;
         clearTimeout(startTimer);
         const detail = this.stderrBuffer.trim().slice(-500);
         const exited = new GhostError(

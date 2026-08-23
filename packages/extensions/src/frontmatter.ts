@@ -138,6 +138,11 @@ function unquote(value: string): string {
   return value;
 }
 
+/** Parse one scalar that the caller's schema requires to remain a string. */
+export function parseYamlStringScalar(raw: string): string {
+  return unquote(raw.trim());
+}
+
 /** Split a flow-list body on commas that are not inside quotes. */
 function splitFlowItems(inner: string): string[] {
   const items: string[] = [];

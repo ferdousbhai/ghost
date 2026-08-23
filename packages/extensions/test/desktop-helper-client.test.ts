@@ -80,6 +80,14 @@ function clientFor(
   });
 }
 
+function emitLifecycleEvent(proc: FakeProcess, event: "error" | "exit"): void {
+  if (event === "error") {
+    proc.emit("error", new Error("helper failed"));
+    return;
+  }
+  proc.emit("exit", 1, null);
+}
+
 describe("hello handshake", () => {
   it("reads the unsolicited hello and exposes capabilities", async () => {
     const proc = new FakeProcess();
@@ -208,6 +216,49 @@ describe("lifecycle", () => {
     proc.emit("exit", 0, null);
     await expect(pending).rejects.toThrowError(/exited/);
   });
+
+  it.each(["error", "exit"] as const)(
+    "ignores a stale child %s without weakening current-child cleanup",
+    async (event) => {
+      const first = new FakeProcess();
+      const replacement = new FakeProcess();
+      const processes = [first, replacement];
+      let spawnIndex = 0;
+      const client = new DesktopHelperClient({
+        spawn: () => processes[spawnIndex++] as unknown as HelperProcess,
+      });
+
+      const firstReady = client.hello();
+      first.line(HELLO);
+      await firstReady;
+      emitLifecycleEvent(first, event);
+      expect(first.killed).toBe(true);
+
+      const replacementReady = client.hello();
+      replacement.line(HELLO);
+      await replacementReady;
+
+      const surviving = client.request<{ survived: boolean }>("state", {});
+      await tick();
+      emitLifecycleEvent(first, event);
+      expect(replacement.killed).toBe(false);
+      replacement.line({
+        id: replacement.requestId(0),
+        ok: true,
+        result: { survived: true },
+      });
+      await expect(surviving).resolves.toEqual({ survived: true });
+
+      const rejected = client.request("state", {});
+      await tick();
+      emitLifecycleEvent(replacement, event);
+      await expect(rejected).rejects.toThrowError(
+        event === "error" ? /could not be started/ : /exited/,
+      );
+      expect(replacement.killed).toBe(true);
+      await client.dispose();
+    },
+  );
 });
 
 describe("resolveHelperCommand", () => {

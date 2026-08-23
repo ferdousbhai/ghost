@@ -41,6 +41,7 @@ import { writeFile } from "node:fs/promises";
 import { isVisitorScope, type GhostScope } from "../scope.js";
 import {
   GhostBrowserError,
+  identifiedBrowserBackendFactory,
   type BackendActionOptions,
   type BackendBackResult,
   type BackendReadResult,
@@ -258,18 +259,11 @@ export class RelayBrowserBackend implements GhostBrowserBackend {
   // --------------------------------------------------------------------- actions
 
   async current(): Promise<PageSummary | undefined> {
-    // Cheap and non-committal, per the seam's contract: no connection and no tab
-    // both mean "nothing is loaded", and neither may start anything to find out.
-    if (!this.#transport.connected || !this.#hasTab) return undefined;
-    let result: Record<string, unknown>;
-    try {
-      result = await this.#call("current", {}, { timeoutMs: 5_000 });
-    } catch {
-      // `current` is asked before almost every action purely to decide whether
-      // there is a page; a relay hiccup here must read as "nothing", not blow up
-      // an action that had not started yet.
-      return undefined;
-    }
+    // Cheap and non-committal when no tab has ever been opened: do not start or
+    // contact anything merely to confirm absence. Once a tab is believed to
+    // exist, however, a disconnected relay is a real failure and #call reports it.
+    if (!this.#hasTab) return undefined;
+    const result = await this.#call("current", {}, { timeoutMs: 5_000 });
     const page = result["page"];
     if (page === null || page === undefined) {
       this.#hasTab = false;
@@ -338,15 +332,15 @@ export class RelayBrowserBackend implements GhostBrowserBackend {
    * their day open in it.
    */
   async close(): Promise<boolean> {
-    if (!this.#transport.connected) {
-      const had = this.#hasTab;
-      this.#hasTab = false;
-      return had;
-    }
+    if (!this.#hasTab) return false;
+    const result = await this.#call("close", {}, { timeoutMs: 10_000 });
+    const closed = result["closed"];
+    if (typeof closed !== "boolean") malformed("close", "closed is not a boolean");
+    // `false` means the extension authoritatively found no tab, not that the
+    // close request failed. Failures throw above and preserve state unless the
+    // failure itself says the tab/browser disappeared.
     this.#hasTab = false;
-    const reply = await this.#transport.request("close", {}, { timeoutMs: 10_000 });
-    if (!reply.ok) return false;
-    return isRecord(reply.result) && reply.result["closed"] === true;
+    return closed;
   }
 }
 
@@ -373,5 +367,9 @@ export function relayBackend(options: RelayBackendOptions): BrowserBackendFactor
       visitorId: options.scope.visitorId,
     });
   }
-  return (_ctx: BrowserBackendContext) => new RelayBrowserBackend(options);
+  return identifiedBrowserBackendFactory(
+    (_ctx: BrowserBackendContext) => new RelayBrowserBackend(options),
+    "relay",
+    ["relay", options.transport],
+  );
 }

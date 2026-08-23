@@ -9,6 +9,7 @@
  * written to disk.
  */
 import { MemoryFileFormatError } from "./errors.js";
+import { parseYamlStringScalar, yamlScalar } from "./frontmatter.js";
 
 export const MAX_MEMORY_FILE_CONTENT_LENGTH = 2_000;
 export const MAX_MEMORY_FILE_DESCRIPTION_LENGTH = 200;
@@ -86,7 +87,7 @@ export function serializeMemoryFile(input: {
   const updated = input.updatedAt.toISOString().slice(0, 10);
   return [
     FRONTMATTER_FENCE,
-    `description: ${input.description}`,
+    `description: ${yamlScalar(input.description)}`,
     `updated: ${updated}`,
     FRONTMATTER_FENCE,
     "",
@@ -128,7 +129,7 @@ export function parseMemoryFile(markdown: string): ParsedMemoryFile {
       );
     }
     const key = trimmed.slice(0, separator).trim().toLowerCase();
-    const value = trimmed.slice(separator + 1).trim().replace(/^["']|["']$/g, "");
+    const value = parseYamlStringScalar(trimmed.slice(separator + 1));
     if (key === "description") description = value;
     if (key === "updated") updated = value;
     // Other keys (including the retired `type`) are tolerated so files written
@@ -158,17 +159,18 @@ export function parseMemoryFile(markdown: string): ParsedMemoryFile {
 
 /** Validate a memory file the model is about to write, before it hits disk. */
 export function assertWritableMemory(description: string, content: string): void {
-  if (description.trim().length === 0) {
+  const normalizedDescription = description.trim();
+  if (normalizedDescription.length === 0) {
     throw new MemoryFileFormatError(
       "description must be a non-empty one-liner; it becomes this memory's line in the index.",
     );
   }
-  if (description.length > MAX_MEMORY_FILE_DESCRIPTION_LENGTH) {
+  if (normalizedDescription.length > MAX_MEMORY_FILE_DESCRIPTION_LENGTH) {
     throw new MemoryFileFormatError(
       `description must be ${MAX_MEMORY_FILE_DESCRIPTION_LENGTH} characters or fewer.`,
     );
   }
-  if (description.includes("\n")) {
+  if (/[\r\n\u2028\u2029]/u.test(description)) {
     throw new MemoryFileFormatError("description must be a single line.");
   }
   if (content.length > MAX_MEMORY_FILE_CONTENT_LENGTH) {

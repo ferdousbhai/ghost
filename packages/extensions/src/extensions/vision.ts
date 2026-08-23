@@ -48,6 +48,7 @@ import { Type } from "typebox";
 import { GhostError } from "../errors.js";
 import type { GhostHome } from "../home.js";
 import { isVisitorScope } from "../scope.js";
+import { stringEnum } from "../tool-schema.js";
 import {
   resolveHome,
   resolveScope,
@@ -894,7 +895,7 @@ export function createVisionExtension(
             "What you want to know about the image. Be specific: what to read, "
             + "what to identify, what to compare.",
         }),
-        source: Type.Optional(Type.Enum(["path", "latest_screenshot"], {
+        source: Type.Optional(stringEnum(["path", "latest_screenshot"], {
           description:
             "path: read the image named by path. latest_screenshot: use the most "
             + "recent capture from ghost_screen. Defaults to path.",

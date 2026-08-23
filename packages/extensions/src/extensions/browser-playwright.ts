@@ -29,6 +29,7 @@ import { GhostError } from "../errors.js";
 import {
   errorMessage,
   GhostBrowserError,
+  identifiedBrowserBackendFactory,
   rethrowBackendError,
   withTimeout,
   type BackendActionOptions,
@@ -434,6 +435,16 @@ export class PlaywrightBrowserBackend implements GhostBrowserBackend {
 export function playwrightBackend(
   options: PlaywrightBackendOptions = {},
 ): BrowserBackendFactory {
-  return (ctx: BrowserBackendContext) =>
-    new PlaywrightBrowserBackend(join(resolve(ctx.homeDir), BROWSER_PROFILE_DIRNAME), options);
+  const launchTimeoutMs = options.launchTimeoutMs ?? DEFAULT_LAUNCH_TIMEOUT_MS;
+  return identifiedBrowserBackendFactory(
+    (ctx: BrowserBackendContext) =>
+      new PlaywrightBrowserBackend(join(resolve(ctx.homeDir), BROWSER_PROFILE_DIRNAME), options),
+    "playwright",
+    [
+      "playwright",
+      options.headless ?? "auto",
+      options.executablePath ?? "auto",
+      launchTimeoutMs,
+    ],
+  );
 }
