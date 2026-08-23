@@ -37,6 +37,18 @@ Singleton {
     /** Human-readable last failure, or "". */
     property string lastError: ""
 
+    // ---- Conversations ----------------------------------------------------
+    // A ghost owns many conversations (pi sessions). The daemon persists them;
+    // the HUD lists them per ghost, resumes one by loading its transcript, and
+    // starts a fresh one on demand. This fixes #26 — a restart no longer loses
+    // history, because a conversation lives in the daemon keyed by session id.
+    /** Session listing for the active ghost: [{ id, title, createdAt, updatedAt, messageCount }], newest first. */
+    property var sessions: []
+    /** The active ghost's current conversation id. "" until one is minted or opened. */
+    property string currentSessionId: ""
+    /** Non-empty when a sessions/transcript fetch failed. */
+    property string sessionsError: ""
+
     // ---- Turn state -------------------------------------------------------
     /** ListModel of { role, text, tools, error, pending }. */
     property alias transcript: transcriptModel
@@ -95,8 +107,10 @@ Singleton {
     property var availRequest: null
     property var catalogRequest: null
     property var setModelRequest: null
+    property var sessionsRequest: null
+    property var transcriptRequest: null
 
-    property var sessions: ({})       // ghost name -> pi session id
+    property var sessionIds: ({})     // ghost name -> active pi session id
     property var blocks: ({})         // contentIndex -> { kind, text }
     property var toolNames: []        // tool names seen this turn, in order
     property int assistantRow: -1
@@ -143,7 +157,10 @@ Singleton {
                     root.lastError = "";
                     if (root.activeGhost === "" && root.ghosts.length > 0)
                         root.activeGhost = root.ghosts[0].name;
-                    if (root.activeGhost !== "") root.fetchCurrentModel();
+                    if (root.activeGhost !== "") {
+                        root.fetchCurrentModel();
+                        root.fetchSessions(root.activeGhost);
+                    }
                 } catch (error) {
                     root.fail("ghostd sent a malformed ghost list: " + error);
                 }
@@ -170,6 +187,8 @@ Singleton {
                 } catch (error) {
                     root.activeGhost = trimmed;
                 }
+                root.currentSessionId = "";
+                root.sessions = [];
                 root.clearTranscript();
                 root.refresh();
             } else {
@@ -186,17 +205,142 @@ Singleton {
         root.cancel();
         root.activeGhost = name;
         root.clearTranscript();
+        // Conversations are per ghost; restore this ghost's last-active session
+        // id (if any) and list its conversations. The transcript view stays
+        // empty until the user opens one — a switch shows the list, not a body.
+        root.currentSessionId = root.sessionIds[name] || "";
+        root.sessions = [];
+        root.sessionsError = "";
         // Model selection is per ghost; drop the old one and fetch the new.
         root.currentModel = null;
         root.modelSource = "none";
         root.availableModels = [];
         root.modelWarning = "";
         root.fetchCurrentModel();
+        root.fetchSessions(name);
     }
 
     function clearTranscript(): void {
         transcriptModel.clear();
         root.activity = "";
+    }
+
+    // ---- Conversations ----------------------------------------------------
+
+    /** GET the active ghost's conversation listing. Newest-updated first. */
+    function fetchSessions(ghost: string): void {
+        const g = ghost || root.activeGhost;
+        if (g === "") {
+            root.sessions = [];
+            return;
+        }
+        const xhr = new XMLHttpRequest();
+        root.sessionsRequest = xhr;
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4) return;
+            // A reply for a ghost the user has since switched away from is stale.
+            if (g !== root.activeGhost) return;
+            if (xhr.status === 200) {
+                try {
+                    const body = JSON.parse(xhr.responseText);
+                    // Contract is { sessions: [...] }; tolerate a bare array too.
+                    const list = Array.isArray(body) ? body
+                        : (Array.isArray(body.sessions) ? body.sessions : []);
+                    root.sessions = list;
+                    root.sessionsError = "";
+                } catch (error) {
+                    root.sessions = [];
+                    root.sessionsError = "ghostd sent a malformed session list";
+                }
+            } else {
+                root.sessions = [];
+                root.sessionsError = root.describeError(xhr, "GET sessions");
+            }
+        };
+        xhr.open("GET", root.baseUrl + "/api/ghosts/" + encodeURIComponent(g) + "/sessions");
+        xhr.send();
+    }
+
+    /**
+     * Start a fresh conversation for the active ghost: mint a session id, clear
+     * the transcript view, and re-list. The daemon creates the session lazily on
+     * the first turn and titles it in the background afterwards, so no listing
+     * row exists yet — the composer is simply ready for a new thread.
+     */
+    function newConversation(): void {
+        const ghost = root.activeGhost;
+        if (ghost === "") return;
+        root.cancel();
+        const id = "hud-" + Date.now().toString(36)
+            + "-" + Math.floor(Math.random() * 0xffffff).toString(36);
+        root.sessionIds[ghost] = id;
+        root.currentSessionId = id;
+        root.clearTranscript();
+        root.fetchSessions(ghost);
+    }
+
+    /**
+     * Resume a conversation: make it active for the ghost and load its transcript
+     * so history is visible. A 404 or an empty/unstarted session leaves the view
+     * cleared rather than erroring — the conversation is simply blank.
+     */
+    function openConversation(id: string): void {
+        const ghost = root.activeGhost;
+        if (ghost === "" || id === "") return;
+        root.cancel();
+        root.sessionIds[ghost] = id;
+        root.currentSessionId = id;
+        root.clearTranscript();
+        const xhr = new XMLHttpRequest();
+        root.transcriptRequest = xhr;
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4) return;
+            // Ignore a transcript that arrives after the user moved on.
+            if (ghost !== root.activeGhost || id !== root.currentSessionId) return;
+            if (xhr.status === 200) {
+                try {
+                    const body = JSON.parse(xhr.responseText);
+                    root.rehydrate(Array.isArray(body.messages) ? body.messages : []);
+                    root.sessionsError = "";
+                } catch (error) {
+                    root.sessionsError = "ghostd sent a malformed transcript";
+                }
+            } else if (xhr.status === 404) {
+                // An unstarted conversation has no transcript yet; that is fine.
+                root.sessionsError = "";
+            } else {
+                root.sessionsError = root.describeError(xhr, "GET transcript");
+            }
+        };
+        xhr.open("GET", root.baseUrl + "/api/ghosts/" + encodeURIComponent(ghost)
+            + "/sessions/" + encodeURIComponent(id) + "/transcript");
+        xhr.send();
+    }
+
+    /** Replace the transcript view with a conversation's stored messages. */
+    function rehydrate(messages: var): void {
+        transcriptModel.clear();
+        root.activity = "";
+        for (const message of messages) {
+            const role = message.role === "assistant" ? "assistant" : "user";
+            if (message.role !== "user" && message.role !== "assistant") continue;
+            const text = root.messageText(message);
+            if (text === "") continue;
+            transcriptModel.append({ role: role, text: text, tools: "", error: "", pending: false });
+        }
+    }
+
+    /** Flatten a stored message's content to display text (string or parts). */
+    function messageText(message: var): string {
+        if (typeof message.content === "string") return message.content;
+        if (Array.isArray(message.content)) {
+            return message.content
+                .filter(part => part && part.type === "text" && typeof part.text === "string")
+                .map(part => part.text)
+                .join("\n\n");
+        }
+        if (typeof message.text === "string") return message.text;
+        return "";
     }
 
     // ---- A turn -----------------------------------------------------------
@@ -265,10 +409,7 @@ Singleton {
      * replay the local transcript instead.
      */
     function buildBody(ghost: string, prompt: string): var {
-        if (!root.sessions[ghost]) {
-            root.sessions[ghost] = "hud-" + Date.now().toString(36)
-                + "-" + Math.floor(Math.random() * 0xffffff).toString(36);
-        }
+        const sessionId = root.ensureSession(ghost);
         const messages = [];
         if (Quickshell.env("GHOST_HUD_REPLAY")) {
             for (let i = 0; i < transcriptModel.count - 1; i++) {
@@ -282,8 +423,22 @@ Singleton {
         return {
             model: "ghost/" + ghost,
             context: { messages: messages },
-            options: { sessionId: root.sessions[ghost] }
+            options: { sessionId: sessionId }
         };
+    }
+
+    /**
+     * The active session id for a ghost, minting one on first use. A conversation
+     * is created lazily by the daemon on the first turn; until then it lives only
+     * as this id, which `options.sessionId` carries into the POST.
+     */
+    function ensureSession(ghost: string): string {
+        if (!root.sessionIds[ghost]) {
+            root.sessionIds[ghost] = "hud-" + Date.now().toString(36)
+                + "-" + Math.floor(Math.random() * 0xffffff).toString(36);
+        }
+        if (ghost === root.activeGhost) root.currentSessionId = root.sessionIds[ghost];
+        return root.sessionIds[ghost];
     }
 
     // ---- SSE --------------------------------------------------------------
@@ -390,6 +545,9 @@ Singleton {
             text = transcriptModel.get(root.assistantRow).text;
         }
         root.assistantRow = -1;
+        // The turn may have created this conversation or triggered background
+        // titling; re-list so the sidebar reflects it. Only for the active ghost.
+        if (ghost === root.activeGhost) root.fetchSessions(ghost);
         if (errorMessage !== "") {
             root.lastError = errorMessage;
             root.turnFailed(ghost, errorMessage);

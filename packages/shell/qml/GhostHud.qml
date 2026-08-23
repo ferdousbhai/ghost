@@ -39,7 +39,8 @@ FloatingWindow {
 
     /** Driven by IPC; see the IpcHandler in shell.qml. Bound to `visible`. */
     property bool shown: false
-    property bool rosterOpen: true
+    /** The whole left sidebar (ghost roster + conversations). Toggled with Ctrl+B. */
+    property bool sidebarOpen: true
     /** The "Connect a model" panel replaces the transcript body when open. */
     property bool loginOpen: false
     /** The model switcher replaces the transcript body when open. */
@@ -130,6 +131,15 @@ FloatingWindow {
         Keys.onEscapePressed: event => {
             event.accepted = Ghostd.streaming;
             if (Ghostd.streaming) Ghostd.cancel();
+        }
+        // Ctrl+B toggles the whole left sidebar, editor-style. This reaches the
+        // card by focus-chain propagation even while the composer holds focus,
+        // since a plain TextEdit does not consume Ctrl+B.
+        Keys.onPressed: event => {
+            if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_B) {
+                hud.sidebarOpen = !hud.sidebarOpen;
+                event.accepted = true;
+            }
         }
 
         ColumnLayout {
@@ -247,21 +257,6 @@ FloatingWindow {
                     }
 
                     Text {
-                        id: rosterToggle
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: hud.rosterOpen ? "hide roster" : "show roster"
-                        color: Theme.foregroundDim
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSizeSmall
-
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: hud.rosterOpen = !hud.rosterOpen
-                        }
-                    }
-
-                    Text {
                         anchors.verticalCenter: parent.verticalCenter
                         visible: Ghostd.streaming
                         text: "esc to stop"
@@ -285,14 +280,66 @@ FloatingWindow {
                 Layout.fillHeight: true
                 spacing: Theme.pad
 
-                Roster {
-                    id: roster
-                    visible: hud.rosterOpen
-                    Layout.preferredWidth: implicitWidth
+                // Left sidebar: the ghost roster stacked over this ghost's
+                // conversations, each in its own scroller so a long list never
+                // crowds the other out. Toggled as one unit with Ctrl+B.
+                ColumnLayout {
+                    id: sidebar
+                    visible: hud.sidebarOpen
+                    Layout.preferredWidth: 190
                     Layout.fillHeight: true
-                    onPicked: {
-                        hud.loginOpen = false;
-                        composer.take();
+                    spacing: Theme.gap
+
+                    Flickable {
+                        id: rosterScroll
+                        Layout.fillWidth: true
+                        // Prefer the roster's own height, but cap it with a fixed
+                        // ceiling so a long ghost list never starves the
+                        // conversations below; both scroll past their share.
+                        // The cap is a constant on purpose — deriving it from
+                        // `sidebar.height` feeds the layout's size back into a
+                        // child hint and trips a recursive rearrange.
+                        Layout.preferredHeight: Math.min(roster.implicitHeight, 220)
+                        contentWidth: width
+                        contentHeight: roster.implicitHeight
+                        clip: true
+                        interactive: contentHeight > height
+                        boundsBehavior: Flickable.StopAtBounds
+
+                        Roster {
+                            id: roster
+                            width: rosterScroll.width
+                            onPicked: {
+                                hud.loginOpen = false;
+                                composer.take();
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        implicitHeight: 1
+                        color: Theme.muted
+                    }
+
+                    Flickable {
+                        id: convoScroll
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        contentWidth: width
+                        contentHeight: conversations.implicitHeight
+                        clip: true
+                        interactive: contentHeight > height
+                        boundsBehavior: Flickable.StopAtBounds
+
+                        Conversations {
+                            id: conversations
+                            width: convoScroll.width
+                            onPicked: {
+                                hud.loginOpen = false;
+                                composer.take();
+                            }
+                        }
                     }
                 }
 

@@ -7,7 +7,8 @@
  *   GET  /api/ghosts                          → [{ name, dir, createdAt }]
  *   POST /api/ghosts { name }                 → 201 + the new ghost
  *   POST /api/ghosts/:name/messages           → pi-messages SSE (canned reply)
- *   GET  /api/ghosts/:name/sessions           → session listing
+ *   GET  /api/ghosts/:name/sessions           → { sessions: [...] }, newest first
+ *   GET  /api/ghosts/:name/sessions/:id/transcript → { id, title, messages }
  *   GET  /api/ghosts/:name/providers          → loginable providers
  *   POST /api/ghosts/:name/login              → start a login → { loginId, status }
  *   GET  /api/ghosts/:name/login/:loginId     → current login step
@@ -44,6 +45,71 @@ const ghosts = ["casper", "moaning-myrtle"].map((name) => ({
   dir: join(GHOSTS_ROOT, name),
   createdAt: new Date(Date.now() - 86_400_000).toISOString(),
 }));
+
+// ---- Conversation store ----------------------------------------------------
+// The daemon persists a ghost's conversations (pi sessions); the mock keeps
+// them in memory. Each ghost is seeded with a titled thread and an untitled one
+// (title === null exercises the HUD's fallback). A turn appends to its session
+// and, on the first turn, "titles" it in the background like the real daemon.
+
+/** @type {Map<string, Map<string, { id, title, createdAt, updatedAt, messages }>>} */
+const sessionStore = new Map();
+
+function ghostSessions(name) {
+  if (!sessionStore.has(name)) {
+    const now = Date.now();
+    const seed = new Map();
+    const titled = {
+      id: `sess-${name}-1`,
+      title: "first contact",
+      createdAt: new Date(now - 7_200_000).toISOString(),
+      updatedAt: new Date(now - 3_600_000).toISOString(),
+      messages: [
+        { role: "user", content: "hello, who lives here?", timestamp: now - 7_200_000 },
+        { role: "assistant", content: `I'm **${name}**. This thread was seeded by the mock so resume has history to show.`, timestamp: now - 7_195_000 },
+      ],
+    };
+    const untitled = {
+      id: `sess-${name}-2`,
+      title: null, // background titling hasn't run — exercises the fallback label
+      createdAt: new Date(now - 600_000).toISOString(),
+      updatedAt: new Date(now - 600_000).toISOString(),
+      messages: [
+        { role: "user", content: "quick question about memory", timestamp: now - 600_000 },
+        { role: "assistant", content: "Ask away — this is the untitled seed conversation.", timestamp: now - 595_000 },
+      ],
+    };
+    seed.set(titled.id, titled);
+    seed.set(untitled.id, untitled);
+    sessionStore.set(name, seed);
+  }
+  return sessionStore.get(name);
+}
+
+const sessionSummary = (s) => ({
+  id: s.id,
+  title: s.title ?? null,
+  createdAt: s.createdAt,
+  updatedAt: s.updatedAt,
+  messageCount: s.messages.length,
+});
+
+function recordTurn(name, sessionId, prompt, assistantText) {
+  if (!sessionId) return;
+  const store = ghostSessions(name);
+  const now = Date.now();
+  let s = store.get(sessionId);
+  if (!s) {
+    // A brand-new conversation the HUD minted: the daemon creates it lazily here.
+    s = { id: sessionId, title: null, createdAt: new Date(now).toISOString(), updatedAt: new Date(now).toISOString(), messages: [] };
+    store.set(sessionId, s);
+  }
+  s.messages.push({ role: "user", content: prompt, timestamp: now });
+  s.messages.push({ role: "assistant", content: assistantText, timestamp: now });
+  s.updatedAt = new Date(now).toISOString();
+  // Background titling after the first turn: derive a title from the prompt.
+  if (!s.title) s.title = prompt.slice(0, 40) || "New conversation";
+}
 
 const json = (res, status, body) => {
   const payload = JSON.stringify(body);
@@ -105,6 +171,7 @@ function* script(name, prompt) {
 
 async function streamTurn(req, res, name, body) {
   const prompt = extractPrompt(body);
+  const sessionId = body?.options?.sessionId;
   res.writeHead(200, {
     "content-type": "text/event-stream; charset=utf-8",
     "cache-control": "no-store",
@@ -113,13 +180,19 @@ async function streamTurn(req, res, name, body) {
   });
   const events = script(name, prompt);
   let closed = false;
+  let assistantText = "";
   res.on("close", () => (closed = true));
   for (const event of events) {
     if (closed) return;
+    if (event.type === "text_end") assistantText = event.content;
     res.write(`data: ${JSON.stringify(event)}\n\n`);
     await new Promise((r) => setTimeout(r, event.type === "text_delta" ? DELTA_MS : 220));
   }
   res.end();
+  // Persist the completed turn so the session listing + transcript reflect it,
+  // matching the daemon's lazy-create-and-title behaviour. A --fail turn wrote
+  // no reply, so nothing is recorded.
+  if (!flag("--fail")) recordTurn(name, sessionId, prompt, assistantText);
 }
 
 /** Pull the last user message's text out of a pi-messages `context`. */
@@ -324,10 +397,16 @@ createServer(async (req, res) => {
     const body = await readBody(req).catch(() => ({}));
     return streamTurn(req, res, name, body);
   }
-  if (parts[3] === "sessions" && req.method === "GET") {
-    return json(res, 200, [
-      { id: "sess-mock-1", title: "first contact", updatedAt: new Date().toISOString(), messageCount: 4 },
-    ]);
+  if (parts[3] === "sessions" && parts.length === 4 && req.method === "GET") {
+    const list = [...ghostSessions(name).values()]
+      .map(sessionSummary)
+      .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+    return json(res, 200, { sessions: list });
+  }
+  if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "transcript" && req.method === "GET") {
+    const s = ghostSessions(name).get(decodeURIComponent(parts[4]));
+    if (!s) return json(res, 404, { error: { message: "no such session", code: "session_not_found" } });
+    return json(res, 200, { id: s.id, title: s.title ?? null, messages: s.messages });
   }
 
   // ---- Model indicator + switcher ------------------------------------------

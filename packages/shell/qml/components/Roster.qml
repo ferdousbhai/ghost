@@ -14,9 +14,11 @@ Item {
     property bool naming: false
 
     implicitWidth: 190
+    implicitHeight: column.implicitHeight
 
     Column {
-        anchors.fill: parent
+        id: column
+        width: root.width
         spacing: Theme.gap
 
         Text {
