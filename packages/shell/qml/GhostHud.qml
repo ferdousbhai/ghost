@@ -286,7 +286,13 @@ FloatingWindow {
                 ColumnLayout {
                     id: sidebar
                     visible: hud.sidebarOpen
+                    // A nested Layout defaults Layout.fillWidth to true, which
+                    // would let the sidebar swallow the whole row and crush the
+                    // transcript; pin it to a fixed column instead.
+                    Layout.fillWidth: false
                     Layout.preferredWidth: 190
+                    Layout.minimumWidth: 190
+                    Layout.maximumWidth: 190
                     Layout.fillHeight: true
                     spacing: Theme.gap
 
