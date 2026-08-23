@@ -154,6 +154,26 @@ function errorResponse(
   jsonResponse(response, status, { error: { message, code } });
 }
 
+class InvalidPathEncodingError extends Error {
+  readonly code = "invalid_request";
+  readonly status = 400;
+
+  constructor() {
+    super("URL path segments must use valid percent-encoding.");
+    this.name = "InvalidPathEncodingError";
+  }
+}
+
+/** Decode one dynamic route segment without letting `URIError` escape as a 500. */
+function decodePathSegment(segment: string): string {
+  try {
+    return decodeURIComponent(segment);
+  } catch (error) {
+    if (error instanceof URIError) throw new InvalidPathEncodingError();
+    throw error;
+  }
+}
+
 /** The token out of `Authorization: Bearer <token>`, or "" when there is none. */
 function bearerToken(header: string | string[] | undefined): string {
   if (typeof header !== "string") return "";
@@ -606,7 +626,7 @@ export function createDaemonServer(options: ServerOptions): Server {
           errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
           return;
         }
-        const ghostName = decodeURIComponent(segments[2] ?? "");
+        const ghostName = decodePathSegment(segments[2] ?? "");
         if (segments.length === 4 && segments[3] === "messages") {
           if (method !== "POST") {
             errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
@@ -628,7 +648,7 @@ export function createDaemonServer(options: ServerOptions): Server {
           }
           return await handleTranscript(
             ghostName,
-            decodeURIComponent(segments[4] ?? ""),
+            decodePathSegment(segments[4] ?? ""),
             url,
             response,
           );
@@ -665,14 +685,19 @@ export function createDaemonServer(options: ServerOptions): Server {
             errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
             return;
           }
-          return handleLoginStatus(ghostName, decodeURIComponent(segments[4] ?? ""), response);
+          return handleLoginStatus(ghostName, decodePathSegment(segments[4] ?? ""), response);
         }
         if (segments.length === 6 && segments[3] === "login" && segments[5] === "input") {
           if (method !== "POST") {
             errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
             return;
           }
-          return await handleLoginInput(ghostName, decodeURIComponent(segments[4] ?? ""), request, response);
+          return await handleLoginInput(
+            ghostName,
+            decodePathSegment(segments[4] ?? ""),
+            request,
+            response,
+          );
         }
         errorResponse(response, 404, "not_found", "Not found.");
       } catch (error) {
@@ -697,6 +722,10 @@ export function createDaemonServer(options: ServerOptions): Server {
             return;
           }
           errorResponse(response, 400, error.code, error.message);
+          return;
+        }
+        if (error instanceof InvalidPathEncodingError) {
+          errorResponse(response, error.status, error.code, error.message);
           return;
         }
         logger.error("request failed", {

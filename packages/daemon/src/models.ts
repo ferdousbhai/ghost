@@ -50,7 +50,16 @@
  * `anthropic` OAuth uses per-token extra usage rather than included plan
  * limits; the two selections must not be conflated.
  */
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import {
+  chmodSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 
 /** One model entry, a subset of pi's `ModelsJsonModel`. */
@@ -120,6 +129,43 @@ export interface GhostModelsFile {
 
 export const MODELS_FILENAME = "models.json";
 export const AUTH_FILENAME = "auth.json";
+const MODELS_LOCK_SUFFIX = ".lock";
+const MODELS_LOCK_WAIT_MS = 500;
+const MODELS_LOCK_POLL_MS = 10;
+const lockSleepCell = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
+
+interface GhostModelsLockOwner {
+  token: string;
+  pid: number;
+}
+
+export class GhostModelsWriteConflictError extends Error {
+  readonly code = "ghost_models_write_conflict";
+
+  constructor(
+    readonly path: string,
+    readonly lockPath: string,
+    readonly ownerPid: number | undefined,
+    readonly retryable: boolean,
+  ) {
+    const owner = ownerPid === undefined ? "another writer" : `process ${ownerPid}`;
+    super(
+      retryable
+        ? `${path} is locked by ${owner} at ${lockPath}; retry the operation.`
+        : `${path} has a re-entrant mutation from ${owner} at ${lockPath}.`,
+    );
+    this.name = "GhostModelsWriteConflictError";
+  }
+}
+
+export class GhostModelsLockError extends Error {
+  readonly code = "ghost_models_lock_error";
+
+  constructor(readonly lockPath: string, message: string, options?: ErrorOptions) {
+    super(`${lockPath}: ${message}`, options);
+    this.name = "GhostModelsLockError";
+  }
+}
 
 export function ghostModelsPath(agentDir: string): string {
   return join(agentDir, MODELS_FILENAME);
@@ -127,6 +173,145 @@ export function ghostModelsPath(agentDir: string): string {
 
 export function ghostAuthPath(agentDir: string): string {
   return join(agentDir, AUTH_FILENAME);
+}
+
+export function ghostModelsLockPath(agentDir: string): string {
+  return `${ghostModelsPath(agentDir)}${MODELS_LOCK_SUFFIX}`;
+}
+
+function parseLockOwner(raw: string): GhostModelsLockOwner | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  const owner = parsed as Partial<GhostModelsLockOwner> | null;
+  if (typeof owner?.token !== "string"
+    || !owner.token
+    || typeof owner.pid !== "number"
+    || !Number.isSafeInteger(owner.pid)
+    || owner.pid <= 0) {
+    return null;
+  }
+  return owner as GhostModelsLockOwner;
+}
+
+function readLockOwner(lockPath: string): GhostModelsLockOwner | null {
+  let raw: string;
+  try {
+    raw = readFileSync(lockPath, "utf8");
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    // Missing/malformed ownership is ambiguous: fail closed and leave the lock
+    // for explicit operator inspection/removal rather than guessing it is stale.
+    if (code === "ENOENT" || code === "EISDIR") return null;
+    throw error;
+  }
+  return parseLockOwner(raw);
+}
+
+function releaseModelsLock(lockPath: string, owner: GhostModelsLockOwner): void {
+  const current = readLockOwner(lockPath);
+  if (current?.token !== owner.token) {
+    throw new GhostModelsLockError(lockPath, "lock ownership was lost before release.");
+  }
+  try {
+    unlinkSync(lockPath);
+  } catch (error) {
+    throw new GhostModelsLockError(lockPath, "the owned lock could not be released.", { cause: error });
+  }
+}
+
+function tryCreateModelsLock(lockPath: string): GhostModelsLockOwner | null {
+  const owner: GhostModelsLockOwner = {
+    token: randomUUID(),
+    pid: process.pid,
+  };
+  try {
+    writeFileSync(lockPath, `${JSON.stringify(owner)}\n`, {
+      encoding: "utf8",
+      flag: "wx",
+      mode: 0o600,
+    });
+    chmodSync(lockPath, 0o600);
+    return owner;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") return null;
+    throw new GhostModelsLockError(
+      lockPath,
+      "the writer lock could not be initialized; inspect and remove it before retrying if it exists.",
+      { cause: error },
+    );
+  }
+}
+
+function acquireModelsLock(path: string): { lockPath: string; owner: GhostModelsLockOwner } {
+  const lockPath = `${path}${MODELS_LOCK_SUFFIX}`;
+  const deadline = Date.now() + MODELS_LOCK_WAIT_MS;
+  for (;;) {
+    const acquired = tryCreateModelsLock(lockPath);
+    if (acquired) return { lockPath, owner: acquired };
+    const owner = readLockOwner(lockPath);
+    if (owner?.pid === process.pid) {
+      throw new GhostModelsWriteConflictError(path, lockPath, owner.pid, false);
+    }
+    if (Date.now() >= deadline) {
+      throw new GhostModelsWriteConflictError(path, lockPath, owner?.pid, true);
+    }
+    Atomics.wait(lockSleepCell, 0, 0, MODELS_LOCK_POLL_MS);
+  }
+}
+
+function withSerializedModelsWrite<T>(path: string, mutation: () => T): T {
+  const { lockPath, owner } = acquireModelsLock(path);
+  let value: T;
+  try {
+    value = mutation();
+  } catch (error) {
+    try {
+      releaseModelsLock(lockPath, owner);
+    } catch (releaseError) {
+      throw new AggregateError(
+        [error, releaseError],
+        `${path} failed during mutation and its writer lock could not be released.`,
+      );
+    }
+    throw error;
+  }
+  releaseModelsLock(lockPath, owner);
+  return value;
+}
+
+/**
+ * Replace `models.json` atomically with a private inode.
+ *
+ * The temporary lives beside the destination so `renameSync` cannot cross a
+ * filesystem boundary. Its random, exclusive name prevents concurrent daemon
+ * processes from sharing a staging file; mode 0600 protects an embedded
+ * provider key during staging as well as after rename.
+ */
+function persistGhostModels(path: string, file: GhostModelsFile): void {
+  const text = `${JSON.stringify(file, null, 2)}\n`;
+  const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    writeFileSync(temporary, text, { encoding: "utf8", flag: "wx", mode: 0o600 });
+    // Creation mode is filtered through umask; force the promised final mode.
+    chmodSync(temporary, 0o600);
+    renameSync(temporary, path);
+  } catch (error) {
+    try {
+      // `writeFileSync` may create and partially populate the temporary before
+      // throwing, so cleanup cannot depend on the call having returned.
+      rmSync(temporary, { force: true });
+    } catch (cleanupError) {
+      throw new AggregateError(
+        [error, cleanupError],
+        `${path} could not be replaced and its private temporary file could not be removed.`,
+      );
+    }
+    throw error;
+  }
 }
 
 /** Read `<agentDir>/models.json`, or null when absent. Throws on malformed. */
@@ -161,7 +346,8 @@ export function readGhostModels(agentDir: string): GhostModelsFile | null {
 
 export function writeGhostModels(agentDir: string, file: GhostModelsFile): void {
   mkdirSync(agentDir, { recursive: true });
-  writeFileSync(ghostModelsPath(agentDir), `${JSON.stringify(file, null, 2)}\n`, "utf8");
+  const path = ghostModelsPath(agentDir);
+  withSerializedModelsWrite(path, () => persistGhostModels(path, file));
 }
 
 /**
@@ -214,10 +400,39 @@ export function setChatModelRole(
   provider: string,
   modelId: string,
 ): GhostModelsFile {
-  const file: GhostModelsFile = readGhostModels(agentDir) ?? { providers: {} };
-  file.roles = { ...(file.roles ?? {}), chat_model: { provider, modelId } };
-  writeGhostModels(agentDir, file);
-  return file;
+  mkdirSync(agentDir, { recursive: true });
+  const path = ghostModelsPath(agentDir);
+  return withSerializedModelsWrite(path, () => {
+    const file: GhostModelsFile = readGhostModels(agentDir) ?? { providers: {} };
+    file.roles = { ...(file.roles ?? {}), chat_model: { provider, modelId } };
+    persistGhostModels(path, file);
+    return file;
+  });
+}
+
+/**
+ * Bind a default only while the role is still unclaimed.
+ *
+ * Provider discovery is asynchronous, so a creator can make an explicit
+ * selection while a just-completed login is resolving its suggested default.
+ * Re-reading and testing inside the serialized mutation prevents that stale
+ * login snapshot from overwriting the creator's choice.
+ */
+export function setChatModelRoleIfUnset(
+  agentDir: string,
+  provider: string,
+  modelId: string,
+): GhostModelRoleBinding | null {
+  mkdirSync(agentDir, { recursive: true });
+  const path = ghostModelsPath(agentDir);
+  return withSerializedModelsWrite(path, () => {
+    const file: GhostModelsFile = readGhostModels(agentDir) ?? { providers: {} };
+    if (resolveChatModelRef(file)) return null;
+    const binding = { provider, modelId };
+    file.roles = { ...(file.roles ?? {}), chat_model: binding };
+    persistGhostModels(path, file);
+    return binding;
+  });
 }
 
 // ---------------------------------------------------------------------------

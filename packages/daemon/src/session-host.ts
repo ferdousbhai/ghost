@@ -62,6 +62,11 @@ import {
 } from "./compaction.js";
 import { scrubProviderEnv } from "./env-scrub.js";
 import {
+  GHOST_SESSION_STOP_CONTINUATION_CAP,
+  GhostHookRunner,
+  ghostSessionStopContinuation,
+} from "./hooks.js";
+import {
   resolveGhostExtensions,
   type GhostExtensionOptions,
   type RelayTransport,
@@ -157,8 +162,10 @@ export interface SessionHostOptions {
    */
   claudeCode?: Omit<
     ClaudeCodeRuntimeOptions,
-    "logger" | "extensionOptions" | "browserMode" | "relayTransport"
+    "logger" | "extensionOptions" | "browserMode" | "relayTransport" | "hooks"
   >;
+  /** Awaited Ghost-owned lifecycle hooks, shared by every model harness. */
+  hooks?: GhostHookRunner;
 }
 
 export interface RunTurnOptions {
@@ -206,6 +213,8 @@ interface HostedSession extends GhostSessionHandle {
    * Resolves (never rejects) when title generation settles.
    */
   title?: Promise<void>;
+  /** Monotonic external turn id used by the Ghost session_stop contract. */
+  turnId: number;
 }
 
 const DEFAULT_SESSION_KEY = "default";
@@ -323,6 +332,7 @@ export class SessionHost {
   private readonly titleEnabled: boolean;
   private readonly generateTitle: TitleGenerator;
   private readonly claudeCode: ClaudeCodeRuntime;
+  private readonly hooks: GhostHookRunner;
   private readonly sessions = new Map<string, HostedSession>();
   /** In-flight opens, so two concurrent turns never build two sessions. */
   private readonly opening = new Map<string, Promise<HostedSession>>();
@@ -338,19 +348,23 @@ export class SessionHost {
     this.compactionConfig = options.compaction ?? DEFAULT_COMPACTION_CONFIG;
     this.titleEnabled = options.title?.enabled ?? true;
     this.generateTitle = options.title?.generate ?? defaultTitleGenerator;
+    this.hooks = options.hooks ?? new GhostHookRunner({ logger: this.logger });
     this.claudeCode = new ClaudeCodeRuntime({
       logger: this.logger,
       extensionOptions: this.extensionOptions,
       browserMode: this.browserMode,
       ...(this.relayTransport ? { relayTransport: this.relayTransport } : {}),
+      hooks: this.hooks,
       ...(options.claudeCode ?? {}),
     });
     // Idempotent: main.ts already scrubbed at boot. Repeated here so that a
     // library consumer (or a test) that skips main.ts still cannot leak an
-    // ambient provider key into a ghost.
+    // ambient provider key or routing override into a ghost.
     const { removed } = scrubProviderEnv(process.env, { offline: this.offline });
     if (removed.length > 0) {
-      this.logger.warn("scrubbed inherited provider credentials", { removed });
+      this.logger.warn("scrubbed inherited provider credentials and routing overrides", {
+        removed,
+      });
     }
   }
 
@@ -483,6 +497,7 @@ export class SessionHost {
       model,
       modelRuntime,
       busy: false,
+      turnId: 0,
     };
   }
 
@@ -652,6 +667,9 @@ export class SessionHost {
 
     const adapter = createPiMessagesAdapter(options.emit, {
       includeThinking: options.includeThinking,
+      // Ghost owns the settle boundary so session_stop can continue this same
+      // HTTP turn before its one terminal frame is emitted.
+      deferAgentEnd: true,
     });
     const unsubscribe = hosted.session.subscribe((event: AgentSessionEvent) => {
       adapter.handle(event);
@@ -663,7 +681,46 @@ export class SessionHost {
     options.signal?.addEventListener("abort", onAbort, { once: true });
 
     try {
+      hosted.turnId += 1;
       await hosted.session.prompt(options.prompt);
+
+      let stopHookActive = false;
+      let continuationCount = 0;
+      while (!adapter.isTerminal() && !options.signal?.aborted && this.hooks.hasHandlers("session_stop")) {
+        const messages = [...hosted.session.messages];
+        const lastAssistant = [...messages].reverse().find((message) => message.role === "assistant");
+        const result = await this.hooks.emitSessionStop({
+          type: "session_stop",
+          messages,
+          turn_id: hosted.turnId,
+          ...(lastAssistant ? { last_assistant_message: lastAssistant } : {}),
+          session_id: hosted.session.sessionId,
+          ...(hosted.session.sessionFile ? { session_file: hosted.session.sessionFile } : {}),
+          stop_hook_active: stopHookActive,
+          signal: options.signal ?? new AbortController().signal,
+          ghost_name: ghostName,
+          cwd: paths.home,
+          runtime: "pi",
+        });
+        const additionalContext = ghostSessionStopContinuation(result);
+        if (!additionalContext) break;
+        if (continuationCount >= GHOST_SESSION_STOP_CONTINUATION_CAP) {
+          this.logger.warn("session_stop continuation cap reached", {
+            ghost: ghostName,
+            session: hosted.session.sessionId,
+            cap: GHOST_SESSION_STOP_CONTINUATION_CAP,
+          });
+          break;
+        }
+        continuationCount += 1;
+        stopHookActive = true;
+        await hosted.session.sendCustomMessage({
+          customType: "session-stop-continuation",
+          content: additionalContext,
+          display: false,
+        }, { triggerTurn: true });
+      }
+
       if (!adapter.isTerminal()) {
         if (options.signal?.aborted) adapter.finishError(new Error("Turn aborted."), true);
         else adapter.finishDone();

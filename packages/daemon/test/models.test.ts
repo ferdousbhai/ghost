@@ -1,4 +1,13 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
@@ -6,13 +15,16 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   builtinProviderPreset,
   ghostAuthPath,
+  ghostModelsLockPath,
   ghostModelsPath,
+  GhostModelsWriteConflictError,
   openAiCompatiblePreset,
   openRouterPreset,
   OPENROUTER_BASE_URL,
   OPENROUTER_DEFAULT_FREE_MODEL,
   readGhostModels,
   resolveChatModelRef,
+  setChatModelRole,
   writeGhostModels,
 } from "../src/models.js";
 
@@ -43,6 +55,103 @@ describe("models.json round-trip", () => {
       provider: "openrouter",
       modelId: OPENROUTER_DEFAULT_FREE_MODEL,
     });
+  });
+
+  it("replaces a permissive models.json atomically with mode 0600", () => {
+    const agentDir = makeAgentDir();
+    const path = ghostModelsPath(agentDir);
+    writeFileSync(path, '{"providers":{}}\n', { encoding: "utf8", mode: 0o644 });
+    chmodSync(path, 0o644);
+    const originalInode = statSync(path).ino;
+
+    writeGhostModels(agentDir, openRouterPreset({ apiKey: "sk-private" }));
+
+    const replaced = statSync(path);
+    expect(replaced.mode & 0o777).toBe(0o600);
+    // A direct truncating write keeps the inode; a same-directory atomic
+    // replacement publishes the fully-written temporary inode in one rename.
+    expect(replaced.ino).not.toBe(originalInode);
+    expect(readGhostModels(agentDir)?.providers.openrouter?.apiKey).toBe("sk-private");
+  });
+
+  function lockHoldingChild(lockPath: string, holdMs: number) {
+    return spawn(process.execPath, [
+      "-e",
+      [
+        "const fs = require('node:fs');",
+        "const lockPath = process.argv[1];",
+        "const holdMs = Number(process.argv[2]);",
+        "fs.writeFileSync(lockPath, JSON.stringify({",
+        "  token: 'child-owner', pid: process.pid,",
+        "}) + '\\n', { mode: 0o600 });",
+        "process.stdout.write('ready\\n');",
+        "setTimeout(() => {",
+        "  fs.unlinkSync(lockPath);",
+        "}, holdMs);",
+      ].join("\n"),
+      lockPath,
+      String(holdMs),
+    ], { stdio: ["ignore", "pipe", "pipe"] });
+  }
+
+  it("waits for a cross-process writer and then commits without losing its update", async () => {
+    const agentDir = makeAgentDir();
+    const lockPath = ghostModelsLockPath(agentDir);
+    const child = lockHoldingChild(lockPath, 100);
+    await once(child.stdout, "data");
+    const childExited = once(child, "exit");
+
+    setChatModelRole(agentDir, "local", "after-wait");
+    await childExited;
+    expect(existsSync(lockPath)).toBe(false);
+    expect(readGhostModels(agentDir)?.roles?.chat_model?.modelId).toBe("after-wait");
+  });
+
+  it("times out with a typed conflict without breaking another process's lock", async () => {
+    const agentDir = makeAgentDir();
+    const lockPath = ghostModelsLockPath(agentDir);
+    const child = lockHoldingChild(lockPath, 2_000);
+    await once(child.stdout, "data");
+
+    let conflict: unknown;
+    try {
+      setChatModelRole(agentDir, "local", "blocked");
+    } catch (error) {
+      conflict = error;
+    }
+    expect(conflict).toBeInstanceOf(GhostModelsWriteConflictError);
+    expect(conflict).toMatchObject({
+      code: "ghost_models_write_conflict",
+      lockPath,
+      ownerPid: child.pid,
+      retryable: true,
+    });
+    expect(existsSync(lockPath)).toBe(true);
+
+    const exited = once(child, "exit");
+    child.kill("SIGKILL");
+    await exited;
+    // Crash leftovers are deliberately fail-closed and require explicit
+    // operator inspection/removal; tests clean up their own fixture.
+    expect(existsSync(lockPath)).toBe(true);
+  });
+
+  it("reports a re-entrant same-process lock without breaking it", () => {
+    const agentDir = makeAgentDir();
+    const lockPath = ghostModelsLockPath(agentDir);
+    writeFileSync(lockPath, `${JSON.stringify({
+      token: "same-process-owner",
+      pid: process.pid,
+    })}\n`, { mode: 0o600 });
+
+    expect(() => setChatModelRole(agentDir, "local", "blocked")).toThrowError(
+      expect.objectContaining({
+        code: "ghost_models_write_conflict",
+        ownerPid: process.pid,
+        retryable: false,
+      }),
+    );
+    expect(existsSync(lockPath)).toBe(true);
   });
 
   it("refuses a malformed file rather than running on a default", () => {

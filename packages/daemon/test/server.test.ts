@@ -293,6 +293,33 @@ describe("routing and transport", () => {
     expect((await fetch(`${base}/api/ghosts/casper/messages`)).status).toBe(405);
   });
 
+  it("returns a typed 400 for malformed percent-encoding in dynamic path segments", async () => {
+    const base = await serve();
+    for (const path of [
+      "/api/ghosts/%/sessions",
+      "/api/ghosts/casper/sessions/%/transcript",
+    ]) {
+      const response = await fetch(`${base}${path}`);
+      expect(response.status, path).toBe(400);
+      expect(await response.json(), path).toEqual({
+        error: {
+          code: "invalid_request",
+          message: "URL path segments must use valid percent-encoding.",
+        },
+      });
+    }
+  });
+
+  it("decodes valid ghost names and conversation ids", async () => {
+    const base = await serve();
+    expect((await fetch(`${base}/api/ghosts/casp%65r/sessions`)).status).toBe(200);
+
+    await postTurn(base, TURN_BODY);
+    const transcript = await fetch(`${base}/api/ghosts/casp%65r/sessions/conv%2D1/transcript`);
+    expect(transcript.status).toBe(200);
+    expect(await transcript.json()).toMatchObject({ id: "conv-1" });
+  });
+
   it("allows a loopback browser origin and refuses a remote one", async () => {
     const base = await serve();
     const local = await fetch(`${base}/api/ghosts`, {

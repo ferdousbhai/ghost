@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   findProviderCredentialEnv,
   PI_OFFLINE_ENV_VAR,
+  PROVIDER_ROUTING_ENV_VARS,
   scrubProviderEnv,
 } from "../src/env-scrub.js";
 
@@ -40,6 +41,22 @@ describe("scrubProviderEnv", () => {
     expect(env.ANOTHER_AUTH_TOKEN).toBeUndefined();
     expect(env.A_THIRD_ACCESS_TOKEN).toBeUndefined();
     expect(env.NOT_A_CREDENTIAL).toBe("fine");
+  });
+
+  it("removes routing overrides that can redirect or change own-plan turns", () => {
+    const env: NodeJS.ProcessEnv = {
+      ...Object.fromEntries(PROVIDER_ROUTING_ENV_VARS.map((name) => [name, "ambient"])),
+      VERTEX_REGION_CLAUDE_4_5_SONNET: "ambient-region",
+      PATH: "/usr/bin",
+    };
+
+    const { removed } = scrubProviderEnv(env);
+
+    expect(removed).toEqual(
+      [...PROVIDER_ROUTING_ENV_VARS, "VERTEX_REGION_CLAUDE_4_5_SONNET"].sort(),
+    );
+    expect(findProviderCredentialEnv(env)).toEqual([]);
+    expect(env.PATH).toBe("/usr/bin");
   });
 
   it("is idempotent", () => {

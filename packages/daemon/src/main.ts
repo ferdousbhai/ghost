@@ -12,6 +12,7 @@
  * exists — is scrub inherited provider credentials out of the process
  * environment. See env-scrub.ts for why.
  */
+import { pathToFileURL } from "node:url";
 import { apiTokenCommand } from "./api-token.js";
 import { LoginManager } from "./auth.js";
 import { importCommand } from "./import-command.js";
@@ -19,6 +20,7 @@ import { loginCommand } from "./login-command.js";
 import { loadConfig, type DaemonConfigOverrides } from "./config.js";
 import { scrubProviderEnv } from "./env-scrub.js";
 import { GhostRegistry } from "./ghosts.js";
+import { GhostHookRunner } from "./hooks.js";
 import { createLogger, type LogLevel } from "./log.js";
 import { ModelCatalog } from "./model-catalog.js";
 import { createRelayHub } from "./relay.js";
@@ -183,7 +185,19 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   // matters: everything downstream inherits this environment.
   const { removed } = scrubProviderEnv(process.env, { offline: config.offline });
   if (removed.length > 0) {
-    logger.warn("removed inherited provider credentials from the environment", { removed });
+    logger.warn("removed inherited provider credentials and routing overrides", { removed });
+  }
+
+  let hooks: GhostHookRunner;
+  const hooksPath = config.hooksPath;
+  try {
+    hooks = GhostHookRunner.fromConfig(hooksPath, { logger });
+  } catch (error) {
+    logger.error("hook configuration is invalid", {
+      path: hooksPath,
+      error: (error as Error).message,
+    });
+    return 1;
   }
 
   const registry = new GhostRegistry(config.ghostsRoot);
@@ -201,6 +215,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     offline: config.offline,
     browserMode: config.browserMode,
     compaction: config.compaction,
+    hooks,
     ...(relay ? { relayTransport: relay } : {}),
   });
   const login = new LoginManager({ registry, logger, offline: config.offline });
@@ -240,6 +255,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     ghosts: registry.list().length,
     offline: config.offline,
     config: config.configPath,
+    hooks: hooksPath,
     // Never the token; `ghostd relay-token` is the only way to see it.
     relay: listening.relay ? `ws://${config.host}:${listening.port}/relay` : "off",
   });
@@ -270,9 +286,12 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   return 0;
 }
 
+export function isDirectInvocation(moduleUrl: string, entryPath: string | undefined): boolean {
+  return entryPath !== undefined && moduleUrl === pathToFileURL(entryPath).href;
+}
+
 // Only run when executed, so tests can import parseArgs/main.
-const invokedDirectly = process.argv[1] !== undefined
-  && import.meta.url === `file://${process.argv[1]}`;
+const invokedDirectly = isDirectInvocation(import.meta.url, process.argv[1]);
 if (invokedDirectly) {
   main().then(
     (code) => {

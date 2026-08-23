@@ -57,9 +57,14 @@ package lands.
 }
 ```
 
+Awaited command hooks are configured separately in
+`~/.config/ghost/hooks.json`; see [`docs/hooks.md`](../../docs/hooks.md).
+`GHOSTD_HOOKS` overrides that path.
+
 Precedence: defaults < config file < environment < CLI flags. Environment
 overrides are `GHOSTD_PORT`, `GHOSTD_HOST`, `GHOSTS_ROOT`, `GHOSTD_OFFLINE`,
-`GHOSTD_CONFIG`, `XDG_CONFIG_HOME`. A missing config file is fine; a
+`GHOSTD_CONFIG`, `GHOSTD_HOOKS`, and `XDG_CONFIG_HOME`. A missing config file
+is fine; a
 malformed one is an error rather than a silent fallback, because defaulting
 would quietly move someone's ghosts.
 

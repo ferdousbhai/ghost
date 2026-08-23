@@ -55,7 +55,7 @@ export function zeroUsage(): Usage {
   };
 }
 
-function addUsage(total: Usage, delta: Usage | undefined): void {
+export function addUsage(total: Usage, delta: Usage | undefined): void {
   if (!delta) return;
   total.input += delta.input ?? 0;
   total.output += delta.output ?? 0;
@@ -70,7 +70,7 @@ function addUsage(total: Usage, delta: Usage | undefined): void {
   total.cost.total += delta.cost.total ?? 0;
 }
 
-function copyUsage(usage: Usage): Usage {
+export function copyUsage(usage: Usage): Usage {
   return { ...usage, cost: { ...usage.cost } };
 }
 
@@ -173,6 +173,8 @@ export interface PiMessagesAdapterOptions {
    * visitors either. Suppressed blocks consume no wire index.
    */
   includeThinking?: boolean;
+  /** Let the harness hold `done` across hidden session-stop continuations. */
+  deferAgentEnd?: boolean;
 }
 
 export interface PiMessagesAdapter {
@@ -209,6 +211,7 @@ export function createPiMessagesAdapter(
   options: PiMessagesAdapterOptions = {},
 ): PiMessagesAdapter {
   const includeThinking = options.includeThinking === true;
+  const deferAgentEnd = options.deferAgentEnd === true;
   const usage = zeroUsage();
   let started = false;
   let terminal = false;
@@ -357,7 +360,7 @@ export function createPiMessagesAdapter(
         }
         case "agent_end":
           // An auto-retry keeps the turn alive; only a settled run terminates.
-          if (event.willRetry) return;
+          if (event.willRetry || deferAgentEnd) return;
           this.finishDone();
           return;
         default:

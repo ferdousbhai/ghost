@@ -261,7 +261,7 @@ export async function loginCommand(argv: string[]): Promise<number> {
     out(`\nSigning ${ghost.name} in to ${choice.name} (${choice.authType})...`);
     await runtime.login(choice.id, choice.authType, terminalInteraction(rl));
 
-    const bound = await bindDefaultChatModelIfUnset(paths.agentDir, runtime, choice.id).catch(() => null);
+    const bound = await bindDefaultChatModelIfUnset(paths.agentDir, runtime, choice.id);
     out(`\n✓ ${ghost.name} is signed in to ${choice.name}.`);
     if (bound) out(`  Chat model set to ${bound.provider}/${bound.modelId}.`);
     else out("  Pick a model in the shell, or set roles.chat_model in models.json.");

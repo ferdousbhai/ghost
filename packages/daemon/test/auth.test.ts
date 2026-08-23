@@ -7,9 +7,18 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { AuthInteraction } from "@earendil-works/pi-ai";
-import { LoginManager, type LoginManagerOptions, type LoginView } from "../src/auth.js";
+import {
+  bindDefaultChatModelIfUnset,
+  LoginManager,
+  type LoginManagerOptions,
+  type LoginView,
+} from "../src/auth.js";
 import { ghostPaths } from "../src/ghosts.js";
-import { ghostModelsPath } from "../src/models.js";
+import {
+  ghostModelsPath,
+  readGhostModels,
+  setChatModelRole,
+} from "../src/models.js";
 import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
 import {
   apiKeyCredential,
@@ -190,6 +199,40 @@ describe("api-key paste flow", () => {
     expect(models.roles.chat_model).toEqual({ provider: "openrouter", modelId: "deepseek/deepseek-r1:free" });
     // The secret is nowhere in the ghost's models.json either.
     expect(JSON.stringify(models)).not.toContain("sk-or-SECRET-KEY");
+  });
+});
+
+describe("default model binding", () => {
+  it("does not overwrite an explicit choice made while provider discovery is pending", async () => {
+    temp = makeTempGhosts();
+    temp.registry.ensureRoot();
+    const dir = seedGhost(temp.root, { name: "casper" });
+    const agentDir = ghostPaths(dir).agentDir;
+    const discoveryStarted = deferred();
+    const finishDiscovery = deferred<readonly { id: string }[]>();
+    const binding = bindDefaultChatModelIfUnset(
+      agentDir,
+      {
+        async getAvailable() {
+          discoveryStarted.resolve();
+          return finishDiscovery.promise;
+        },
+        getModels() {
+          return [];
+        },
+      },
+      "openrouter",
+    );
+    await discoveryStarted.promise;
+
+    setChatModelRole(agentDir, "openai-codex", "gpt-5-codex");
+    finishDiscovery.resolve([{ id: "login-default" }]);
+
+    await expect(binding).resolves.toBeNull();
+    expect(readGhostModels(agentDir)?.roles?.chat_model).toEqual({
+      provider: "openai-codex",
+      modelId: "gpt-5-codex",
+    });
   });
 });
 

@@ -6,6 +6,7 @@ import type {
 } from "@anthropic-ai/claude-agent-sdk";
 import { afterEach, describe, expect, it } from "vitest";
 import { ghostPaths } from "../src/ghosts.js";
+import { GhostHookRunner } from "../src/hooks.js";
 import { setChatModelRole } from "../src/models.js";
 import type { PiMessagesEvent } from "../src/pi-messages.js";
 import { SessionHost } from "../src/session-host.js";
@@ -100,6 +101,7 @@ function responseMessages(sessionId: string, text: string): SDKMessage[] {
 function setupClaudeHost(options: {
   visitorId?: string;
   authStatus?: { loggedIn: boolean; authMethod?: string; subscriptionType?: string };
+  hooks?: GhostHookRunner;
 } = {}) {
   temp = makeTempGhosts();
   const dir = seedGhost(temp.root, {
@@ -116,6 +118,7 @@ function setupClaudeHost(options: {
     registry: temp.registry,
     offline: true,
     ...(options.visitorId ? { extensionOptions: { visitorId: options.visitorId } } : {}),
+    ...(options.hooks ? { hooks: options.hooks } : {}),
     claudeCode: {
       binaryPath: process.execPath,
       readAuthStatus: async () => options.authStatus ?? ({
@@ -184,6 +187,32 @@ describe("Claude Code subscription runtime", () => {
         messageCount: 4,
       }),
     ]);
+  });
+
+  it("applies session_stop continuations before the Claude turn settles", async () => {
+    const hooks = new GhostHookRunner();
+    const active: boolean[] = [];
+    await hooks.register((api) => {
+      api.on("session_stop", (event) => {
+        active.push(event.stop_hook_active);
+        if (!event.stop_hook_active) return { continue: true, additionalContext: "Revise it once." };
+      });
+    });
+    const { seenOptions, lifecycle } = setupClaudeHost({ hooks });
+    const events: PiMessagesEvent[] = [];
+
+    await host!.runTurn("casper", {
+      sessionId: "conversation-hooks",
+      prompt: "hello",
+      emit: (event) => events.push(event),
+    });
+
+    expect(lifecycle.queries).toBe(2);
+    expect(active).toEqual([false, true]);
+    expect(seenOptions[1]?.resume).toBe(seenOptions[0]?.sessionId);
+    expect(events.filter((event) => event.type === "start")).toHaveLength(1);
+    expect(events.filter((event) => event.type === "done")).toHaveLength(1);
+    expect(events.at(-1)).toMatchObject({ type: "done", usage: { totalTokens: 4 } });
   });
 
   it("never makes an owner subscription available to a visitor scope", async () => {

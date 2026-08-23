@@ -57,6 +57,11 @@ import { z } from "zod";
 import { createClaudePiMessagesAdapter } from "./claude-pi-messages.js";
 import { scrubProviderEnv } from "./env-scrub.js";
 import {
+  GHOST_SESSION_STOP_CONTINUATION_CAP,
+  GhostHookRunner,
+  ghostSessionStopContinuation,
+} from "./hooks.js";
+import {
   CREATOR_SCOPE,
   resolveGhostExtensions,
   type GhostExtensionOptions,
@@ -111,6 +116,8 @@ export interface ClaudeCodeRuntimeOptions {
   createQuery?: ClaudeCodeQueryFactory;
   /** Test seam for the external `claude auth status` preflight. */
   readAuthStatus?: (binaryPath: string) => Promise<ClaudeCodeAuthStatus>;
+  /** Ghost-owned lifecycle hooks shared with the pi harness. */
+  hooks?: GhostHookRunner;
 }
 
 export class ClaudeCodeProcessError extends Error {
@@ -122,7 +129,8 @@ export class ClaudeCodeProcessError extends Error {
 }
 
 function credentialFreeEnvironment(): NodeJS.ProcessEnv {
-  // main.ts / SessionHost already scrub provider credentials process-wide.
+  // main.ts / SessionHost already scrub provider credentials and routing
+  // overrides process-wide.
   // Copy the result because the SDK replaces, rather than merges, `env`.
   const env = {
     ...process.env,
@@ -629,6 +637,7 @@ export class ClaudeCodeRuntime {
   private readonly configuredBinaryPath: string;
   private readonly createQuery: ClaudeCodeQueryFactory;
   private readonly readAuthStatus: NonNullable<ClaudeCodeRuntimeOptions["readAuthStatus"]>;
+  private readonly hooks: GhostHookRunner;
   private readonly busy = new Set<string>();
   private readonly active = new Map<string, Query>();
   private disposed = false;
@@ -644,6 +653,7 @@ export class ClaudeCodeRuntime {
     this.createQuery = options.createQuery
       ?? ((input) => query({ prompt: input.prompt, options: input.options }));
     this.readAuthStatus = options.readAuthStatus ?? readClaudeCodeAuthStatus;
+    this.hooks = options.hooks ?? new GhostHookRunner({ logger: this.logger });
   }
 
   isBusy(ghostName: string, conversationId: string): boolean {
@@ -694,8 +704,8 @@ export class ClaudeCodeRuntime {
 
       const paths = ghostPaths(ghost.dir);
       await mkdir(paths.sessionDir, { recursive: true });
-      const metadata = await readMetadata(paths.sessionDir, conversationId);
-      const newSessionId = randomUUID();
+      let metadata = await readMetadata(paths.sessionDir, conversationId);
+      const turnId = Math.floor((metadata?.messageCount ?? 0) / 2);
       const systemPrompt = await buildPersona(paths.home, ghost.name);
       const bridge = await buildMcpTools(
         paths.home,
@@ -705,63 +715,109 @@ export class ClaudeCodeRuntime {
         this.browserMode,
         this.relayTransport,
       );
-      const abortController = new AbortController();
-      const sdkOptions = queryOptions({
-        binaryPath,
-        cwd: paths.home,
-        ghostName: ghost.name,
-        modelId,
-        systemPrompt,
-        tools: bridge.tools,
-        toolNames: bridge.names,
-        metadata,
-        newSessionId,
-        abortController,
-      });
 
-      let terminalResult: SDKResultMessage | null = null;
-      await Effect.runPromise(runQueryEffect({
-        createQuery: this.createQuery,
-        prompt: options.prompt,
-        options: sdkOptions,
-        signal: options.signal,
-        onQuery: (active) => {
-          if (active) this.active.set(key, active);
-          else this.active.delete(key);
-        },
-        onMessage: (message) => {
-          if (message.type === "result") {
-            // Hold the terminal frame until its resume metadata is durable. A
-            // `done` followed by a failed sidecar write would lie to the shell
-            // that this conversation can survive a daemon restart.
-            terminalResult = message;
-          } else {
-            adapter.handle(message);
-          }
-        },
-      }));
+      let prompt = options.prompt;
+      let stopHookActive = false;
+      let continuationCount = 0;
+      while (!adapter.isTerminal()) {
+        const abortController = new AbortController();
+        const sdkOptions = queryOptions({
+          binaryPath,
+          cwd: paths.home,
+          ghostName: ghost.name,
+          modelId,
+          systemPrompt,
+          tools: bridge.tools,
+          toolNames: bridge.names,
+          metadata,
+          newSessionId: randomUUID(),
+          abortController,
+        });
 
-      if (!terminalResult) {
-        throw new ClaudeCodeProcessError("Claude Code ended without a terminal result.");
-      }
-      const completed = terminalResult as SDKResultMessage;
-      if (completed.num_turns > 0) {
-        const now = new Date().toISOString();
-        const next: ClaudeSessionMetadata = {
-          version: 1,
-          runtime: "claude-code",
-          conversationId,
-          sessionId: completed.session_id,
-          created: metadata?.created ?? now,
-          modified: now,
-          messageCount: (metadata?.messageCount ?? 0) + 2,
+        let terminalResult: SDKResultMessage | null = null;
+        await Effect.runPromise(runQueryEffect({
+          createQuery: this.createQuery,
+          prompt,
+          options: sdkOptions,
+          signal: options.signal,
+          onQuery: (active) => {
+            if (active) this.active.set(key, active);
+            else this.active.delete(key);
+          },
+          onMessage: (message) => {
+            if (message.type === "result") {
+              // Hold the terminal frame until its resume metadata is durable. A
+              // `done` followed by a failed sidecar write would lie to the shell
+              // that this conversation can survive a daemon restart.
+              terminalResult = message;
+            } else {
+              adapter.handle(message);
+            }
+          },
+        }));
+
+        if (!terminalResult) {
+          throw new ClaudeCodeProcessError("Claude Code ended without a terminal result.");
+        }
+        const completed = terminalResult as SDKResultMessage;
+        if (completed.num_turns > 0) {
+          const now = new Date().toISOString();
+          metadata = {
+            version: 1,
+            runtime: "claude-code",
+            conversationId,
+            sessionId: completed.session_id,
+            created: metadata?.created ?? now,
+            modified: now,
+            messageCount: (metadata?.messageCount ?? 0) + 2,
+          };
+          await writeMetadata(paths.sessionDir, metadata);
+        }
+        if (options.signal?.aborted) {
+          adapter.finishError(new Error("Turn aborted."), true);
+          break;
+        }
+
+        const resultText = "result" in completed && typeof completed.result === "string"
+          ? completed.result
+          : "";
+        const lastAssistant = {
+          role: "assistant",
+          content: resultText ? [{ type: "text", text: resultText }] : [],
         };
-        await writeMetadata(paths.sessionDir, next);
-      }
-      if (options.signal?.aborted) {
-        adapter.finishError(new Error("Turn aborted."), true);
-      } else {
-        adapter.handle(completed);
+        const hookResult = completed.subtype === "success" && this.hooks.hasHandlers("session_stop")
+          ? await this.hooks.emitSessionStop({
+            type: "session_stop",
+            messages: [lastAssistant],
+            turn_id: turnId,
+            last_assistant_message: lastAssistant,
+            session_id: completed.session_id,
+            session_file: claudeSessionMetadataPath(paths.sessionDir, conversationId),
+            stop_hook_active: stopHookActive,
+            signal: options.signal ?? new AbortController().signal,
+            ghost_name: ghost.name,
+            cwd: paths.home,
+            runtime: "claude-code",
+          })
+          : undefined;
+        const additionalContext = ghostSessionStopContinuation(hookResult);
+        if (!additionalContext) {
+          adapter.handle(completed);
+          break;
+        }
+        if (continuationCount >= GHOST_SESSION_STOP_CONTINUATION_CAP) {
+          this.logger.warn("session_stop continuation cap reached", {
+            ghost: ghost.name,
+            session: completed.session_id,
+            cap: GHOST_SESSION_STOP_CONTINUATION_CAP,
+          });
+          adapter.handle(completed);
+          break;
+        }
+        adapter.recordUsage(completed);
+        continuationCount += 1;
+        stopHookActive = true;
+        prompt = additionalContext;
       }
       if (!adapter.isTerminal()) {
         throw new ClaudeCodeProcessError("Claude Code result did not terminate the turn.");

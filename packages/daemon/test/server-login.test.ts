@@ -172,3 +172,55 @@ describe("input errors", () => {
     expect(late.status).toBe(409);
   });
 });
+
+describe("encoded login route segments", () => {
+  it("returns a typed 400 for malformed login ids on status and input routes", async () => {
+    const base = await serve(async () => oauthCredential());
+    for (const request of [
+      { path: "/api/ghosts/casper/login/%", init: undefined },
+      {
+        path: "/api/ghosts/casper/login/%/input",
+        init: {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ value: "code" }),
+        },
+      },
+    ]) {
+      const response = await fetch(`${base}${request.path}`, request.init);
+      expect(response.status, request.path).toBe(400);
+      expect(await response.json(), request.path).toEqual({
+        error: {
+          code: "invalid_request",
+          message: "URL path segments must use valid percent-encoding.",
+        },
+      });
+    }
+  });
+
+  it("decodes valid login ids on status and input routes", async () => {
+    const impl: LoginImpl = async (_id, _type, interaction) => {
+      const value = await interaction.prompt({ type: "text", message: "Paste the code" });
+      expect(value).toBe("accepted");
+      return oauthCredential();
+    };
+    const base = await serve(impl);
+    const start = await fetch(`${base}/api/ghosts/casper/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ providerId: "openai-codex", authType: "oauth" }),
+    });
+    const { loginId } = (await start.json()) as { loginId: string };
+    const encodedLoginId = loginId.replace("-", "%2D");
+
+    expect((await waitForStatus(base, encodedLoginId, "awaiting_input")).loginId).toBe(loginId);
+    const input = await fetch(`${base}/api/ghosts/casper/login/${encodedLoginId}/input`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ value: "accepted" }),
+    });
+    expect(input.status).toBe(200);
+    expect((await input.json() as { loginId: string }).loginId).toBe(loginId);
+    expect((await waitForStatus(base, encodedLoginId, "succeeded")).loginId).toBe(loginId);
+  });
+});

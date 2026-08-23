@@ -10,7 +10,7 @@
  */
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { DEFAULT_COMPACTION_CONFIG, type CompactionConfig } from "./compaction.js";
 
 /** Resolved, absolute daemon configuration. */
@@ -52,6 +52,8 @@ export interface DaemonConfig {
   compaction: CompactionConfig;
   /** Where the config was read from, or null when defaults/env only. */
   configPath: string | null;
+  /** Trusted user-level command-hook configuration beside config.json. */
+  hooksPath: string;
 }
 
 /** The subset a user may write into config.json. */
@@ -235,7 +237,8 @@ function expandHome(path: string, home: string): string {
  * - `GHOSTD_COMPACTION_THRESHOLD_TOKENS`   → compaction.thresholdTokens
  * - `GHOSTD_COMPACTION_THRESHOLD_FRACTION` → compaction.thresholdFraction
  * - `GHOSTD_CONFIG`     → config file path
- * - `XDG_CONFIG_HOME`   → config file directory
+ * - `GHOSTD_HOOKS`      → trusted user command-hook file
+ * - `XDG_CONFIG_HOME`   → config and hook directory
  */
 export function loadConfig(overrides: DaemonConfigOverrides = {}): DaemonConfig {
   const env = overrides.env ?? process.env;
@@ -253,6 +256,7 @@ export function loadConfig(overrides: DaemonConfigOverrides = {}): DaemonConfig 
   const envCompaction = env.GHOSTD_COMPACTION?.trim();
   const envCompactionTokens = env.GHOSTD_COMPACTION_THRESHOLD_TOKENS?.trim();
   const envCompactionFraction = env.GHOSTD_COMPACTION_THRESHOLD_FRACTION?.trim();
+  const envHooksPath = env.GHOSTD_HOOKS?.trim();
 
   const port = overrides.port
     ?? (envPort ? parsePort(envPort, "GHOSTD_PORT") : undefined)
@@ -290,6 +294,8 @@ export function loadConfig(overrides: DaemonConfigOverrides = {}): DaemonConfig 
     ...(thresholdFraction !== undefined ? { thresholdFraction } : {}),
   };
 
+  const hooksPath = resolve(expandHome(envHooksPath || join(dirname(configPath), "hooks.json"), home));
+
   assertLoopback(host);
   return {
     port,
@@ -299,5 +305,6 @@ export function loadConfig(overrides: DaemonConfigOverrides = {}): DaemonConfig 
     browserMode,
     compaction,
     configPath: file ? configPath : null,
+    hooksPath,
   };
 }

@@ -70,6 +70,7 @@ export {
   PI_OFFLINE_ENV_VAR,
   PROVIDER_CREDENTIAL_ENV_PATTERNS,
   PROVIDER_CREDENTIAL_ENV_VARS,
+  PROVIDER_ROUTING_ENV_VARS,
   scrubProviderEnv,
   type ScrubOptions,
   type ScrubResult,
@@ -95,6 +96,19 @@ export {
   isValidGhostName,
   type Ghost,
 } from "./ghosts.js";
+export {
+  defaultGhostHooksPath,
+  GHOST_HOOK_HANDLER_TIMEOUT_MS,
+  GHOST_SESSION_STOP_CONTINUATION_CAP,
+  GhostHookRunner,
+  ghostSessionStopContinuation,
+  type GhostHookAPI,
+  type GhostHookContext,
+  type GhostHookFactory,
+  type GhostSessionStopEvent,
+  type GhostSessionStopHandler,
+  type GhostSessionStopResult,
+} from "./hooks.js";
 export { createLogger, silentLogger, type Logger, type LogLevel } from "./log.js";
 export {
   DEFAULT_MODELS_LIMIT,
@@ -114,7 +128,10 @@ export {
   AUTH_FILENAME,
   builtinProviderPreset,
   ghostAuthPath,
+  ghostModelsLockPath,
   ghostModelsPath,
+  GhostModelsLockError,
+  GhostModelsWriteConflictError,
   MODELS_FILENAME,
   OPENROUTER_BASE_URL,
   OPENROUTER_DEFAULT_FREE_MODEL,

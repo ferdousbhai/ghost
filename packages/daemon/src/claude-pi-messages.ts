@@ -14,10 +14,12 @@ import type {
   SDKResultMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import type { Usage } from "@earendil-works/pi-ai";
-import { zeroUsage, type PiMessagesEvent } from "./pi-messages.js";
+import { addUsage, copyUsage, zeroUsage, type PiMessagesEvent } from "./pi-messages.js";
 
 export interface ClaudePiMessagesAdapter {
   handle(message: SDKMessage): void;
+  /** Add a hidden continuation pass's usage without terminating the stream. */
+  recordUsage(result: SDKResultMessage): void;
   finishError(error: unknown, aborted?: boolean): void;
   isTerminal(): boolean;
 }
@@ -107,6 +109,13 @@ export function createClaudePiMessagesAdapter(
   let started = false;
   let terminal = false;
   let emittedText = false;
+  const totalUsage = zeroUsage();
+
+  const addResultUsage = (result: SDKResultMessage): void => {
+    addUsage(totalUsage, usageFromResult(result));
+  };
+
+  const usageSnapshot = (): Usage => copyUsage(totalUsage);
 
   const send = (event: PiMessagesEvent): void => {
     if (terminal) return;
@@ -263,7 +272,8 @@ export function createClaudePiMessagesAdapter(
       }
 
       ensureStarted();
-      const usage = usageFromResult(message);
+      addResultUsage(message);
+      const usage = usageSnapshot();
       if (message.subtype === "success") {
         const reason = message.stop_reason === "max_tokens" ? "length" : "stop";
         send({ type: "done", reason, usage, responseId: message.session_id });
@@ -277,12 +287,15 @@ export function createClaudePiMessagesAdapter(
         });
       }
     },
+    recordUsage(result) {
+      if (!terminal) addResultUsage(result);
+    },
     finishError(error, aborted = false) {
       ensureStarted();
       send({
         type: "error",
         reason: aborted ? "aborted" : "error",
-        usage: zeroUsage(),
+        usage: usageSnapshot(),
         errorMessage: error instanceof Error ? error.message : String(error),
       });
     },

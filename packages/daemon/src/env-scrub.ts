@@ -1,5 +1,5 @@
 /**
- * Credential isolation for hosted ghost sessions.
+ * Provider isolation for hosted ghost sessions.
  *
  * pi's `ModelRuntime` resolves provider credentials from the ambient
  * environment as a fallback when a provider has no stored auth. The spike
@@ -23,11 +23,12 @@
  *
  * ## What is removed
  *
- * Every provider-credential variable pi-ai 0.84.2 reads, plus the ambient
- * cloud-credential variables that let a provider authenticate without an
- * explicit key. Listed exhaustively (rather than by pattern alone) so that a
- * reader can audit the policy without grepping pi's source; the patterns
- * below then catch provider variables added by a future pi release.
+ * Every provider-credential variable pi-ai 0.84.2 reads, the ambient cloud
+ * credentials that let a provider authenticate without an explicit key, and
+ * Claude Code routing overrides that can redirect or change a request before
+ * it reaches the configured provider. Listed explicitly so a reader can audit
+ * the policy without grepping dependency source; the patterns below then catch
+ * credential variables added by a future pi release.
  */
 
 /** Exact variable names, grouped by why they are dangerous. */
@@ -86,6 +87,49 @@ export const PROVIDER_CREDENTIAL_ENV_VARS: readonly string[] = [
 ];
 
 /**
+ * Claude Code endpoint, backend, header, region, and model overrides.
+ *
+ * These are as security-sensitive as credentials: inheriting one can route a
+ * ghost's own-plan request through a third party or silently select a backend
+ * or model other than the one chosen for that ghost. Keep this list aligned
+ * with the bundled Claude Agent SDK/CLI environment surface.
+ */
+export const PROVIDER_ROUTING_ENV_VARS: readonly string[] = [
+  "ANTHROPIC_AWS_BASE_URL",
+  "ANTHROPIC_BASE_URL",
+  "ANTHROPIC_BEDROCK_BASE_URL",
+  "ANTHROPIC_BEDROCK_MANTLE_BASE_URL",
+  "ANTHROPIC_CUSTOM_HEADERS",
+  "ANTHROPIC_DEFAULT_FABLE_MODEL",
+  "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+  "ANTHROPIC_DEFAULT_OPUS_MODEL",
+  "ANTHROPIC_DEFAULT_SONNET_MODEL",
+  "ANTHROPIC_FOUNDRY_BASE_URL",
+  "ANTHROPIC_FOUNDRY_RESOURCE",
+  "ANTHROPIC_MODEL",
+  "ANTHROPIC_SMALL_FAST_MODEL",
+  "ANTHROPIC_VERTEX_BASE_URL",
+  "ANTHROPIC_VERTEX_PROJECT_ID",
+  "AWS_DEFAULT_REGION",
+  "AWS_EC2_METADATA_SERVICE_ENDPOINT",
+  "AWS_ENDPOINT",
+  "AWS_ENDPOINT_URL",
+  "AWS_REGION",
+  "CLAUDE_CODE_API_BASE_URL",
+  "CLAUDE_CODE_AUTO_MODE_MODEL",
+  "CLAUDE_CODE_BG_CLASSIFIER_MODEL",
+  "CLAUDE_CODE_GB_BASE_URL",
+  "CLAUDE_CODE_SUBAGENT_MODEL",
+  "CLAUDE_CODE_USE_ANTHROPIC_AWS",
+  "CLAUDE_CODE_USE_BEDROCK",
+  "CLAUDE_CODE_USE_FOUNDRY",
+  "CLAUDE_CODE_USE_MANTLE",
+  "CLAUDE_CODE_USE_VERTEX",
+  // Retained for older Claude Code releases that used the unprefixed name.
+  "USE_VERTEX",
+];
+
+/**
  * Forward compatibility: any variable whose *name* says "credential" goes
  * too. Nothing in ghostd reads a key from the environment, so a broad sweep
  * here costs nothing and closes the gap when a future pi adds a provider we
@@ -119,15 +163,17 @@ export interface ScrubResult {
   removed: string[];
 }
 
-function isCredentialVar(name: string): boolean {
+function isProviderEnvOverride(name: string): boolean {
   if (PROVIDER_CREDENTIAL_ENV_VARS.includes(name)) return true;
+  if (PROVIDER_ROUTING_ENV_VARS.includes(name)) return true;
+  if (name.startsWith("VERTEX_REGION_CLAUDE_")) return true;
   return PROVIDER_CREDENTIAL_ENV_PATTERNS.some((pattern) => pattern.test(name));
 }
 
 /**
- * Remove every provider credential from `env` (default `process.env`) and
- * apply the daemon's own pi environment. Idempotent; returns the names it
- * removed so the caller can log the fact — never the values.
+ * Remove every provider credential and routing override from `env` (default
+ * `process.env`) and apply the daemon's own pi environment. Idempotent;
+ * returns the names it removed so the caller can log the fact — never values.
  */
 export function scrubProviderEnv(
   env: NodeJS.ProcessEnv = process.env,
@@ -135,7 +181,7 @@ export function scrubProviderEnv(
 ): ScrubResult {
   const removed: string[] = [];
   for (const name of Object.keys(env)) {
-    if (!isCredentialVar(name)) continue;
+    if (!isProviderEnvOverride(name)) continue;
     delete env[name];
     removed.push(name);
   }
@@ -152,5 +198,5 @@ export function scrubProviderEnv(
 export function findProviderCredentialEnv(
   env: NodeJS.ProcessEnv = process.env,
 ): string[] {
-  return Object.keys(env).filter(isCredentialVar).sort();
+  return Object.keys(env).filter(isProviderEnvOverride).sort();
 }

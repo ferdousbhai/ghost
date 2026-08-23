@@ -58,8 +58,7 @@ import {
   ghostModelsPath,
   readGhostModels,
   resolveChatModelRef,
-  writeGhostModels,
-  type GhostModelsFile,
+  setChatModelRoleIfUnset,
 } from "./models.js";
 
 /**
@@ -235,10 +234,7 @@ export async function bindDefaultChatModelIfUnset(
   if (!modelId) modelId = runtime.getModels(providerId)[0]?.id;
   if (!modelId) return null;
 
-  const file: GhostModelsFile = existing ?? { providers: {} };
-  file.roles = { ...(file.roles ?? {}), chat_model: { provider: providerId, modelId } };
-  writeGhostModels(agentDir, file);
-  return { provider: providerId, modelId };
+  return setChatModelRoleIfUnset(agentDir, providerId, modelId);
 }
 
 export class LoginManager {
