@@ -42,6 +42,7 @@ interface ServeOptions {
   models?: FakeCatalogModel[];
   credentialed?: string[];
   oauth?: string[];
+  claudePlan?: boolean;
 }
 
 /** Boot a server whose catalogue is the given fake runtime. Returns the base URL. */
@@ -59,6 +60,7 @@ async function serve(options: ServeOptions = {}): Promise<string> {
     registry: temp.registry,
     offline: true,
     createRuntime: async () => runtime,
+    claudeCodePlanStatus: async () => options.claudePlan ?? false,
   });
   listening = await startDaemonServer({ registry: temp.registry, host, catalog, port: 0, relay: null });
   return `http://127.0.0.1:${listening.port}`;
@@ -76,6 +78,22 @@ async function getJson(url: string): Promise<{ status: number; body: Record<stri
 }
 
 describe("GET /api/ghosts/:name/model", () => {
+  it("reports the external Claude Code runtime without asking pi to resolve it", async () => {
+    const base = await serve({ claudePlan: true });
+    setChatModelRole(agentDir(), "claude-code", "default");
+    const { status, body } = await getJson(`${base}/api/ghosts/casper/model`);
+    expect(status).toBe(200);
+    expect(body).toEqual({
+      current: {
+        provider: "claude-code",
+        id: "default",
+        name: "Claude Code (your Claude plan)",
+        hasVision: true,
+      },
+      source: "role",
+    });
+  });
+
   it("reports source=role when roles.chat_model is set and resolves", async () => {
     const base = await serve({ credentialed: ["openai-codex"] });
     setChatModelRole(agentDir(), "openai-codex", "gpt-5-codex");
@@ -116,6 +134,17 @@ describe("GET /api/ghosts/:name/model", () => {
 });
 
 describe("GET /api/ghosts/:name/models?scope=available", () => {
+  it("includes Claude Code only when the external CLI has plan auth", async () => {
+    const base = await serve({ claudePlan: true });
+    const { body } = await getJson(`${base}/api/ghosts/casper/models?provider=claude-code`);
+    expect(body.models).toEqual([expect.objectContaining({
+      provider: "claude-code",
+      id: "default",
+      connectedVia: "claude_plan",
+      hasVision: true,
+    })]);
+  });
+
   it("lists only credentialed providers and flags the current selection", async () => {
     const base = await serve({ credentialed: ["openai-codex"], oauth: ["openai-codex"] });
     setChatModelRole(agentDir(), "openai-codex", "gpt-5-codex");
@@ -141,17 +170,31 @@ describe("GET /api/ghosts/:name/models?scope=available", () => {
 });
 
 describe("GET /api/ghosts/:name/models?scope=catalog", () => {
+  it("shows an unauthenticated Claude Code choice with usable=false", async () => {
+    const base = await serve({ claudePlan: false });
+    const { body } = await getJson(
+      `${base}/api/ghosts/casper/models?scope=catalog&provider=claude-code`,
+    );
+    expect(body.models).toEqual([expect.objectContaining({
+      provider: "claude-code",
+      id: "default",
+      usable: false,
+    })]);
+  });
+
   it("includes uncredentialed models with usable=false and connectedVia only when usable", async () => {
     const base = await serve({ credentialed: ["openai-codex"], oauth: ["openai-codex"] });
     const { body } = await getJson(`${base}/api/ghosts/casper/models?scope=catalog`);
     expect(body.scope).toBe("catalog");
     const models = body.models as Array<Record<string, unknown>>;
-    expect(models).toHaveLength(3);
+    expect(models).toHaveLength(4);
     const anthropic = models.find((m) => m.provider === "anthropic");
     expect(anthropic).toMatchObject({ usable: false });
     expect(anthropic).not.toHaveProperty("connectedVia");
     const codex = models.find((m) => m.id === "gpt-5-codex");
     expect(codex).toMatchObject({ usable: true, connectedVia: "oauth" });
+    const claudeCode = models.find((m) => m.provider === "claude-code");
+    expect(claudeCode).toMatchObject({ usable: false });
   });
 
   it("honors the provider filter", async () => {
@@ -181,20 +224,24 @@ describe("GET /api/ghosts/:name/models?scope=catalog", () => {
     const base = await serve({ models: big, credentialed: [] });
 
     // Default page caps at DEFAULT_MODELS_LIMIT with the full count in `total`.
-    const first = await getJson(`${base}/api/ghosts/casper/models?scope=catalog`);
+    const first = await getJson(`${base}/api/ghosts/casper/models?scope=catalog&provider=big`);
     expect((first.body.models as unknown[]).length).toBe(DEFAULT_MODELS_LIMIT);
     expect(first.body.total).toBe(250);
     expect(first.body.limit).toBe(DEFAULT_MODELS_LIMIT);
     expect((first.body.models as Array<{ id: string }>)[0]?.id).toBe("model-000");
 
     // offset pages into the sorted list.
-    const paged = await getJson(`${base}/api/ghosts/casper/models?scope=catalog&limit=10&offset=100`);
+    const paged = await getJson(
+      `${base}/api/ghosts/casper/models?scope=catalog&provider=big&limit=10&offset=100`,
+    );
     const ids = (paged.body.models as Array<{ id: string }>).map((m) => m.id);
     expect(ids).toHaveLength(10);
     expect(ids[0]).toBe("model-100");
 
     // limit is clamped to MAX_MODELS_LIMIT.
-    const huge = await getJson(`${base}/api/ghosts/casper/models?scope=catalog&limit=100000`);
+    const huge = await getJson(
+      `${base}/api/ghosts/casper/models?scope=catalog&provider=big&limit=100000`,
+    );
     expect(huge.body.limit).toBe(MAX_MODELS_LIMIT);
     expect((huge.body.models as unknown[]).length).toBe(250);
   });
@@ -232,6 +279,29 @@ describe("PUT /api/ghosts/:name/model", () => {
     const after = await getJson(`${base}/api/ghosts/casper/model`);
     expect(after.body.source).toBe("role");
     expect(after.body.current).toMatchObject({ provider: "openai-codex", id: "gpt-5-codex" });
+  });
+
+  it("selects the externally authenticated Claude Code plan runtime", async () => {
+    const base = await serve({ claudePlan: true });
+    const set = await put(base, { provider: "claude-code", id: "default" });
+    expect(set.status).toBe(200);
+    expect(set.body).toMatchObject({
+      ok: true,
+      usable: true,
+      current: { provider: "claude-code", id: "default" },
+    });
+    expect(set.body).not.toHaveProperty("warning");
+
+    const after = await getJson(`${base}/api/ghosts/casper/model`);
+    expect(after.body.current).toMatchObject({ provider: "claude-code", id: "default" });
+  });
+
+  it("writes Claude Code selection but explains external login when unavailable", async () => {
+    const base = await serve({ claudePlan: false });
+    const set = await put(base, { provider: "claude-code", id: "default" });
+    expect(set.status).toBe(200);
+    expect(set.body).toMatchObject({ ok: true, usable: false });
+    expect(set.body.warning).toContain("claude auth login");
   });
 
   it("still writes an uncredentialed provider but returns usable=false + warning", async () => {

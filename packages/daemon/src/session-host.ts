@@ -1,9 +1,11 @@
 /**
- * Per-ghost pi `AgentSession` lifecycle.
+ * Per-ghost chat-runtime lifecycle.
  *
- * One daemon process hosts many ghosts concurrently. Isolation is achieved
- * entirely through SDK options — no env var, no child process — following
- * the spike (`pi-spike/concurrent-ghosts.mjs`):
+ * pi remains the default provider-agnostic `AgentSession` harness. An explicit
+ * `claude-code` role instead uses the owner-local, Effect-scoped Agent SDK
+ * backend in `claude-code.ts`. One daemon process hosts many ghosts
+ * concurrently; the pi path is isolated entirely through SDK options — no env
+ * var, no child process — following the spike (`pi-spike/concurrent-ghosts.mjs`):
  *
  *   cwd        = ~/Ghosts/<name>            the ghost home; extensions derive
  *                                           their paths from ctx.cwd
@@ -48,6 +50,12 @@ import {
   type AgentSession,
   type AgentSessionEvent,
 } from "@earendil-works/pi-coding-agent";
+import {
+  CLAUDE_CODE_PROVIDER_ID,
+  ClaudeCodeRuntime,
+  claudeSessionMetadataPath,
+  type ClaudeCodeRuntimeOptions,
+} from "./claude-code.js";
 import {
   DEFAULT_COMPACTION_CONFIG,
   maybeCompact,
@@ -104,6 +112,15 @@ export interface SessionHostOptions {
    * `min(0.8 × contextWindow, 100_000)` tokens. See compaction.ts.
    */
   compaction?: CompactionConfig;
+  /**
+   * Owner-local Claude Code harness. It is dormant unless
+   * `roles.chat_model.provider` is `claude-code`; options are chiefly the
+   * executable override and test seams.
+   */
+  claudeCode?: Omit<
+    ClaudeCodeRuntimeOptions,
+    "logger" | "extensionOptions" | "browserMode" | "relayTransport"
+  >;
 }
 
 export interface RunTurnOptions {
@@ -174,6 +191,7 @@ export class SessionHost {
   private readonly browserMode: "relay" | "profile";
   private readonly relayTransport: RelayTransport | undefined;
   private readonly compactionConfig: CompactionConfig;
+  private readonly claudeCode: ClaudeCodeRuntime;
   private readonly sessions = new Map<string, HostedSession>();
   /** In-flight opens, so two concurrent turns never build two sessions. */
   private readonly opening = new Map<string, Promise<HostedSession>>();
@@ -187,6 +205,13 @@ export class SessionHost {
     this.browserMode = options.browserMode ?? "relay";
     this.relayTransport = options.relayTransport;
     this.compactionConfig = options.compaction ?? DEFAULT_COMPACTION_CONFIG;
+    this.claudeCode = new ClaudeCodeRuntime({
+      logger: this.logger,
+      extensionOptions: this.extensionOptions,
+      browserMode: this.browserMode,
+      ...(this.relayTransport ? { relayTransport: this.relayTransport } : {}),
+      ...(options.claudeCode ?? {}),
+    });
     // Idempotent: main.ts already scrubbed at boot. Repeated here so that a
     // library consumer (or a test) that skips main.ts still cannot leak an
     // ambient provider key into a ghost.
@@ -375,6 +400,44 @@ export class SessionHost {
    * client treats a stream that ends without one as a failure.
    */
   async runTurn(ghostName: string, options: RunTurnOptions): Promise<void> {
+    const ghost = this.registry.get(ghostName);
+    const paths = ghostPaths(ghost.dir);
+    let configured: ReturnType<typeof resolveChatModelRef> = null;
+    try {
+      configured = resolveChatModelRef(readGhostModels(paths.agentDir));
+    } catch (error) {
+      this.logger.error("models.json is unusable", {
+        ghost: ghostName,
+        error: (error as Error).message,
+      });
+    }
+    if (configured?.provider === CLAUDE_CODE_PROVIDER_ID) {
+      const conversationId = options.sessionId || DEFAULT_SESSION_KEY;
+      // A model switch must not leave a stale pi AgentSession owning this
+      // conversation. Claude itself is scoped per turn and keeps only its
+      // opaque resume id between turns.
+      const piSession = this.sessions.get(this.keyOf(ghostName, options.sessionId));
+      if (piSession?.busy) {
+        throw new GhostError(
+          "session_busy",
+          "This ghost is already answering in this conversation.",
+          409,
+        );
+      }
+      await this.closePi(ghostName, options.sessionId);
+      await this.claudeCode.runTurn(ghost, conversationId, configured.modelId, options);
+      return;
+    }
+
+    const conversationId = options.sessionId || DEFAULT_SESSION_KEY;
+    if (this.claudeCode.isBusy(ghostName, conversationId)) {
+      throw new GhostError(
+        "session_busy",
+        "This ghost is already answering in this conversation.",
+        409,
+      );
+    }
+
     const hosted = (await this.open(ghostName, options.sessionId)) as HostedSession;
     if (hosted.busy) {
       throw new GhostError(
@@ -453,7 +516,7 @@ export class SessionHost {
     hosted.compaction = tracked;
   }
 
-  /** pi's session listing for one ghost, newest first. */
+  /** pi transcripts plus Claude Code metadata sidecars, newest first. */
   async listSessions(ghostName: string): Promise<
     Array<{
       id: string;
@@ -467,8 +530,11 @@ export class SessionHost {
     const ghost = this.registry.get(ghostName);
     const paths = ghostPaths(ghost.dir);
     mkdirSync(paths.sessionDir, { recursive: true });
-    const sessions = await SessionManager.list(paths.home, paths.sessionDir);
-    return sessions
+    const [sessions, claudeSessions] = await Promise.all([
+      SessionManager.list(paths.home, paths.sessionDir),
+      this.claudeCode.listSessions(ghost),
+    ]);
+    const piSessions = sessions
       .map((info) => ({
         id: info.id,
         path: info.path,
@@ -476,12 +542,26 @@ export class SessionHost {
         created: info.created.toISOString(),
         modified: info.modified.toISOString(),
         messageCount: info.messageCount,
-      }))
+      }));
+    const claude = claudeSessions.map((info) => ({
+      id: info.conversationId,
+      path: claudeSessionMetadataPath(paths.sessionDir, info.conversationId),
+      name: "Claude Code",
+      created: info.created,
+      modified: info.modified,
+      messageCount: info.messageCount,
+    }));
+    return [...piSessions, ...claude]
       .sort((a, b) => b.modified.localeCompare(a.modified));
   }
 
   /** Drop one hosted session (aborting an in-flight turn). */
   async close(ghostName: string, sessionId?: string | null): Promise<void> {
+    await this.claudeCode.close(ghostName, sessionId || DEFAULT_SESSION_KEY);
+    await this.closePi(ghostName, sessionId);
+  }
+
+  private async closePi(ghostName: string, sessionId?: string | null): Promise<void> {
     const key = this.keyOf(ghostName, sessionId);
     const hosted = this.sessions.get(key);
     if (!hosted) return;
@@ -493,6 +573,7 @@ export class SessionHost {
   /** Tear down every hosted session. Idempotent. */
   async disposeAll(): Promise<void> {
     this.disposed = true;
+    await this.claudeCode.disposeAll();
     const hosted = [...this.sessions.values()];
     this.sessions.clear();
     for (const entry of hosted) {

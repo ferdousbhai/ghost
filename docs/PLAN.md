@@ -39,7 +39,8 @@ pooling and no cloud custody.
 - **Phase 1 — creator-local (IN PROGRESS).** Feature-complete creator ghost:
   multi-ghost plain-file homes, persona/memory/notes pi extensions, `ghostd`
   daemon, Quickshell HUD (Super+G) + bar widget + notifications, import of
-  the hosted export, AUR packaging. Current status: workspace scaffolded;
+  the hosted export, optional owner-local Claude Code plan runtime, AUR
+  packaging. Current status: workspace scaffolded;
   `packages/extensions`, `packages/daemon`, `packages/shell` in parallel
   construction; pi SDK path proven by spike (zero fork-risk).
 - **Phase 2 — visitors.** Nostr control plane: keypair identity per ghost,
@@ -69,15 +70,17 @@ pooling and no cloud custody.
 
 ## Key decisions (one-line rationales)
 
-- **Build ON pi (pi-coding-agent SDK), never fork** — the spike proved
-  `createAgentSession` + extensions express everything; gaps are wrap-or-
-  upstream, zero fork-risk.
+- **Build ON pi by default, never fork; add official harnesses at explicit
+  runtime boundaries** — the spike proved `createAgentSession` + extensions
+  express the normal path. `claude-code/default` is the narrow exception: the
+  official Claude Agent SDK invokes an installed, unmodified Claude Code so a
+  creator can use their own plan. Both consume the same Ghost system prompt,
+  tools, and pi-messages wire; neither dependency is forked.
 - **Model-agnostic like pi; bring any provider.** Two named requirements:
   existing **OpenAI Codex/ChatGPT subscriptions usable as auth**
-  (Codex-style OAuth sign-in, not only API keys — pi-support verification
-  pending), and **OpenRouter first-class** with its always-available free
-  models as the intended zero-cost onboarding: anyone can try their ghost
-  free with just an OpenRouter account.
+  through pi's Codex OAuth, **Claude plans through the Claude Code harness**
+  (not pi's per-token Anthropic extra-usage path), and **OpenRouter
+  first-class** with its free models as a zero-cost onboarding option.
 - **Files, not a database** — plain markdown + YAML frontmatter is the
   store; owner-readable, greppable, git-friendly; the sync machinery a
   server required simply disappears.
@@ -114,7 +117,8 @@ pooling and no cloud custody.
 
 Install from AUR → create a ghost (name + job → seeded `character.md`) →
 pick a model: OpenRouter free model (zero cost, just an account), an OpenAI
-Codex/ChatGPT subscription sign-in, any API key, or a local model — →
+Codex/ChatGPT subscription sign-in, an externally authenticated Claude Code
+plan, any API key, or a local model — →
 Super+G, start talking. Existing summonghost.com users: sign in there,
 "Download my ghost", import.
 
@@ -127,6 +131,11 @@ Super+G, start talking. Existing summonghost.com users: sign in there,
   native OAuth for `openai-codex` (plus anthropic, openrouter,
   github-copilot, xai). Remaining work is only UI plumbing to drive the
   login flow from the shell instead of a terminal.
+- **Claude subscription use**: RESOLVED for Phase 1 creator-local —
+  `claude-code/default` uses the T3-style official Agent SDK harness and the
+  creator's external Claude Code login. It is forbidden for visitor scopes;
+  pi's `anthropic` OAuth remains a separate extra-usage/per-token path. Recheck
+  Anthropic policy before every release that advertises plan accounting.
 - **Teach-by-demonstration** — the Wayland-native version (screen capture +
   input observation → draft skill); v1 fallback is "save this session as a
   skill".

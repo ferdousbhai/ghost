@@ -7,15 +7,18 @@
  * that: it resolves which model answers a ghost's turns, lists the usable and
  * the catalogue-wide models, and writes a new `roles.chat_model` selection.
  *
- * ## The catalogue is pi's, never ours
+ * ## Provider catalogue is pi's; harness entries are ours
  *
- * Every model this module reports comes from pi's `ModelRuntime` — `getModels`
+ * Every provider model this module reports comes from pi's `ModelRuntime` — `getModels`
  * for the full catalogue (pi rides models.dev via its vendored registry, ~1.3k
  * models across every provider) and `getAvailable` for the ones a credentialed
  * provider can serve right now. The daemon hardcodes no model list, so a model
  * pi learns about on its next catalogue refresh appears here with no code
  * change. A `ModelRuntime` built for a ghost home reads that ghost's own
- * `models.json` + `auth.json`, so "usable" is per-ghost by construction.
+ * `models.json` + `auth.json`, so "usable" is per-ghost by construction. The
+ * single code-owned row, `claude-code/default`, is a runtime selector rather
+ * than a model id: its usability is the external Claude Code plan-login
+ * status, and selecting it bypasses pi's model lookup.
  *
  * ## Secrets
  *
@@ -27,6 +30,14 @@
  * without a real provider or a network call, exactly as `LoginManager` does.
  */
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import {
+  CLAUDE_CODE_BINARY_ENV,
+  CLAUDE_CODE_DEFAULT_MODEL_ID,
+  CLAUDE_CODE_PROVIDER_ID,
+  isClaudePlanAuth,
+  readClaudeCodeAuthStatus,
+  resolveClaudeCodeExecutable,
+} from "./claude-code.js";
 import { GhostError, ghostPaths, type GhostRegistry } from "./ghosts.js";
 import { silentLogger, type Logger } from "./log.js";
 import {
@@ -97,7 +108,7 @@ export interface ModelListItem {
   cost?: { input: number; output: number; cacheRead: number; cacheWrite: number };
   hasVision: boolean;
   /** How the provider is signed in, when it is. Absent for an uncredentialed one. */
-  connectedVia?: "oauth" | "api_key";
+  connectedVia?: "oauth" | "api_key" | "claude_plan";
   /** `catalog` scope only: whether the provider is credentialed. */
   usable?: boolean;
   /** True for the ghost's current chat-model selection. */
@@ -159,6 +170,26 @@ export interface ModelCatalogOptions {
     modelsPath: string;
     allowModelNetwork: boolean;
   }) => Promise<ModelCatalogRuntime>;
+  /** Test seam for the external, credential-free Claude Code status probe. */
+  claudeCodePlanStatus?: () => Promise<boolean>;
+}
+
+const CLAUDE_CODE_MODEL: CatalogModel = {
+  provider: CLAUDE_CODE_PROVIDER_ID,
+  id: CLAUDE_CODE_DEFAULT_MODEL_ID,
+  name: "Claude Code (your Claude plan)",
+  input: ["text", "image"],
+};
+
+async function defaultClaudeCodePlanStatus(): Promise<boolean> {
+  try {
+    const binary = await resolveClaudeCodeExecutable(
+      process.env[CLAUDE_CODE_BINARY_ENV] ?? "claude",
+    );
+    return isClaudePlanAuth(await readClaudeCodeAuthStatus(binary));
+  } catch {
+    return false;
+  }
 }
 
 async function defaultCreateRuntime(input: {
@@ -204,12 +235,16 @@ export class ModelCatalog {
   private readonly logger: Logger;
   private readonly offline: boolean;
   private readonly createRuntime: NonNullable<ModelCatalogOptions["createRuntime"]>;
+  private readonly claudeCodePlanStatus: NonNullable<
+    ModelCatalogOptions["claudeCodePlanStatus"]
+  >;
 
   constructor(options: ModelCatalogOptions) {
     this.registry = options.registry;
     this.logger = options.logger ?? silentLogger;
     this.offline = options.offline ?? false;
     this.createRuntime = options.createRuntime ?? defaultCreateRuntime;
+    this.claudeCodePlanStatus = options.claudeCodePlanStatus ?? defaultClaudeCodePlanStatus;
   }
 
   private async prepare(ghostName: string): Promise<{ runtime: ModelCatalogRuntime; agentDir: string }> {
@@ -249,6 +284,18 @@ export class ModelCatalog {
   ): Promise<CurrentModel> {
     const role = file?.roles?.chat_model;
     if (role?.provider && role.modelId) {
+      if (role.provider === CLAUDE_CODE_PROVIDER_ID) {
+        return {
+          current: modelView({
+            ...CLAUDE_CODE_MODEL,
+            id: role.modelId,
+            ...(role.modelId === CLAUDE_CODE_DEFAULT_MODEL_ID
+              ? {}
+              : { name: `Claude Code (${role.modelId})` }),
+          }),
+          source: "role",
+        };
+      }
       const model = runtime.getModel(role.provider, role.modelId);
       if (model) return { current: modelView(model), source: "role" };
     }
@@ -276,19 +323,38 @@ export class ModelCatalog {
     const providerFilter = query.provider && query.provider !== "" ? query.provider : undefined;
     const needle = query.q?.trim().toLowerCase();
 
-    const source = scope === "catalog"
+    const includesClaudeProvider = providerFilter === undefined
+      || providerFilter === CLAUDE_CODE_PROVIDER_ID;
+    const claudePlan = includesClaudeProvider
+      ? await this.claudeCodePlanStatus()
+      : false;
+    const piSource = scope === "catalog"
       ? runtime.getModels(providerFilter)
       : await runtime.getAvailable(providerFilter);
+    const source = [
+      ...piSource,
+      ...(includesClaudeProvider && (scope === "catalog" || claudePlan)
+        ? [CLAUDE_CODE_MODEL]
+        : []),
+    ];
 
     // Cache per-provider credential facts: getAvailable/getProviderAuthStatus
     // are not free, and a catalogue page revisits the same providers often.
-    const connectedVia = new Map<string, "oauth" | "api_key" | undefined>();
+    const connectedVia = new Map<
+      string,
+      "oauth" | "api_key" | "claude_plan" | undefined
+    >();
     const usableOf = (provider: string): boolean => {
+      if (provider === CLAUDE_CODE_PROVIDER_ID) return claudePlan;
       if (scope === "available") return true;
       return runtime.getProviderAuthStatus(provider).configured;
     };
-    const connectedViaOf = (provider: string, usable: boolean): "oauth" | "api_key" | undefined => {
+    const connectedViaOf = (
+      provider: string,
+      usable: boolean,
+    ): "oauth" | "api_key" | "claude_plan" | undefined => {
       if (!usable) return undefined;
+      if (provider === CLAUDE_CODE_PROVIDER_ID) return "claude_plan";
       if (!connectedVia.has(provider)) {
         connectedVia.set(provider, runtime.isUsingOAuth(provider) ? "oauth" : "api_key");
       }
@@ -353,6 +419,35 @@ export class ModelCatalog {
    */
   async setChatModel(ghostName: string, provider: string, id: string): Promise<SetModelResult> {
     const { runtime, agentDir } = await this.prepare(ghostName);
+    if (provider === CLAUDE_CODE_PROVIDER_ID) {
+      if (id !== CLAUDE_CODE_DEFAULT_MODEL_ID) {
+        throw new GhostError(
+          "unknown_model",
+          `No model ${JSON.stringify(id)} from provider ${JSON.stringify(provider)} in the catalogue.`,
+          400,
+        );
+      }
+      setChatModelRole(agentDir, provider, id);
+      const usable = await this.claudeCodePlanStatus();
+      this.logger.info("ghost chat model set", {
+        ghost: ghostName,
+        provider,
+        model: id,
+        usable,
+      });
+      return {
+        ok: true,
+        usable,
+        current: modelView(CLAUDE_CODE_MODEL),
+        source: "role",
+        ...(!usable
+          ? {
+              warning: "Claude Code is not signed into a Claude.ai plan. Run `claude auth login` "
+                + "as this desktop user; Ghost never receives that credential.",
+            }
+          : {}),
+      };
+    }
     const model = runtime.getModel(provider, id);
     if (!model) {
       throw new GhostError(

@@ -1,8 +1,10 @@
 /**
  * Per-ghost model configuration.
  *
- * A ghost is model-agnostic, exactly like pi: the daemon never names a
- * provider in a code path. Model choice lives entirely in the ghost's own
+ * A ghost is model-agnostic across pi providers. The one explicit runtime
+ * marker is `claude-code/default`, because an installed Claude Code process
+ * has different auth/accounting semantics than pi's Anthropic provider.
+ * Model/runtime choice lives in the ghost's own
  * `<home>/.pi/models.json` — pi's native format, read by pi's own
  * `ModelConfig.load()` — plus pi's credential store at
  * `<home>/.pi/auth.json`. The daemon's job is to point pi at those two files
@@ -34,13 +36,19 @@
  *
  * 1. `apiKey` in `models.json` (device-local; fine for keyless local servers
  *    and for a key the user pastes into their own ghost).
- * 2. `auth.json`, pi's credential store, which holds **subscription OAuth**
- *    credentials as well as API keys. Verified present in pi-ai 0.84.2:
- *    `openai-codex` ("OpenAI (ChatGPT Plus/Pro)", `isSubscription: true`),
- *    `anthropic` (Claude Pro/Max), `openrouter` ("Sign in with OpenRouter"),
+ * 2. `auth.json`, pi's credential store, which holds OAuth credentials as
+ *    well as API keys. Verified present in pi-ai 0.84.2: `openai-codex`
+ *    ("OpenAI (ChatGPT Plus/Pro)", `isSubscription: true`), `anthropic`,
+ *    `openrouter` ("Sign in with OpenRouter"),
  *    `github-copilot`, `xai`, `kimi-coding`, `radius`. The daemon does not
- *    implement an OAuth flow of its own — see README "Signing in with a
+ *    implement an OAuth flow of its own — see README "Using an existing
  *    subscription" for the wrap that reuses pi's.
+ *
+ * `claude-code/default` uses neither source: the official Agent SDK invokes
+ * the installed `claude`, and that unmodified executable reads the creator's
+ * own external Claude Code login. The pinned pi docs explicitly say its
+ * `anthropic` OAuth uses per-token extra usage rather than included plan
+ * limits; the two selections must not be conflated.
  */
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";

@@ -5,6 +5,7 @@
  * surface, so a UI shell or a test can drive the same pieces in-process.
  */
 export {
+  ANTHROPIC_EXTRA_USAGE_NOTE,
   bindDefaultChatModelIfUnset,
   LoginManager,
   type LoginManagerOptions,
@@ -25,6 +26,25 @@ export {
   type DaemonConfigFile,
   type DaemonConfigOverrides,
 } from "./config.js";
+export {
+  CLAUDE_CODE_BINARY_ENV,
+  CLAUDE_CODE_DEFAULT_MODEL_ID,
+  CLAUDE_CODE_PROVIDER_ID,
+  ClaudeCodeProcessError,
+  ClaudeCodeRuntime,
+  claudeSessionMetadataPath,
+  isClaudePlanAuth,
+  readClaudeCodeAuthStatus,
+  resolveClaudeCodeExecutable,
+  type ClaudeCodeAuthStatus,
+  type ClaudeCodeQueryFactory,
+  type ClaudeCodeRuntimeOptions,
+  type ClaudeSessionMetadata,
+} from "./claude-code.js";
+export {
+  createClaudePiMessagesAdapter,
+  type ClaudePiMessagesAdapter,
+} from "./claude-pi-messages.js";
 export {
   findProviderCredentialEnv,
   PI_OFFLINE_ENV_VAR,
@@ -56,6 +76,20 @@ export {
   type Ghost,
 } from "./ghosts.js";
 export { createLogger, silentLogger, type Logger, type LogLevel } from "./log.js";
+export {
+  DEFAULT_MODELS_LIMIT,
+  MAX_MODELS_LIMIT,
+  ModelCatalog,
+  type CatalogModel,
+  type CurrentModel,
+  type ListModelsQuery,
+  type ListModelsResult,
+  type ModelCatalogOptions,
+  type ModelListItem,
+  type ModelScope,
+  type ModelView,
+  type SetModelResult,
+} from "./model-catalog.js";
 export {
   AUTH_FILENAME,
   builtinProviderPreset,

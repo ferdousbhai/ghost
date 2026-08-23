@@ -1,8 +1,9 @@
 # `@ghost/daemon` — `ghostd`
 
-The local process that hosts your ghosts. One `AgentSession` per ghost per
-conversation, an HTTP API on `127.0.0.1`, and nothing else: what a ghost *is*
-lives in `@ghost/extensions`, and how an agent *runs* is pi's.
+The local process that hosts your ghosts. It uses a pi `AgentSession` by
+default and an owner-local Claude Code harness when that runtime is selected,
+behind one HTTP API on `127.0.0.1`. What a ghost *is* lives in
+`@ghost/extensions`; the daemon owns the runtime boundary.
 
 ## Running it
 
@@ -71,10 +72,13 @@ can only use models declared statically in its own `models.json`, which would
 break the zero-cost onboarding path below for anyone who had not written
 their catalog out by hand. Credential isolation does not depend on it.
 
-## Models — provider-agnostic by construction
+## Models — provider-agnostic by default
 
-Nothing in the daemon names a provider. A ghost's model configuration is
-pi's own `models.json`, in the ghost's own directory:
+Normal provider/model choice comes from pi's own catalogue. The one explicit
+harness selection is `claude-code/default`, because an installed Claude Code
+process has different authentication, accounting, and lifecycle semantics
+than pi's Anthropic provider. A ghost's selection still lives in pi's
+`models.json`, in the ghost's own directory:
 
 ```
 ~/Ghosts/<name>/.pi/models.json    providers + our `roles` binding
@@ -124,16 +128,45 @@ curl -s https://openrouter.ai/api/v1/models \
 
 (or <https://openrouter.ai/models?max_price=0>).
 
-### Signing in with a subscription (ChatGPT, Claude, …)
+### Using an existing subscription
 
-**Verified in pi-ai 0.84.2:** subscription OAuth is first-class. The package
-ships `auth/oauth/openai-codex.js` with `name: "OpenAI (ChatGPT Plus/Pro)"`
-and `isSubscription: true` (provider id `openai-codex`, api
-`openai-codex-responses`), alongside OAuth for `anthropic` (Claude Pro/Max),
+There are two distinct harnesses; selecting the right one changes who meters
+the turn.
+
+**ChatGPT Plus/Pro:** pi-ai 0.84.2 ships `openai-codex` subscription OAuth
+(`name: "OpenAI (ChatGPT Plus/Pro)"`, `isSubscription: true`, api
+`openai-codex-responses`). Use the normal Ghost login flow below.
+
+**Claude Pro/Max:** select `claude-code/default`, not pi's `anthropic`
+provider. Ghost follows the T3 Code path through the official Claude Agent SDK
+and the creator's installed, unmodified `claude` executable:
+
+```bash
+claude auth login
+curl -X PUT http://127.0.0.1:7717/api/ghosts/casper/model \
+  -H 'content-type: application/json' \
+  --data '{"provider":"claude-code","id":"default"}'
+```
+
+The login remains in Claude Code's own store; Ghost never sees it. Anthropic
+currently counts Agent SDK use against the user's plan limits, subject to plan
+limits and enabled overage. See [the full design, policy caveat, legal boundary,
+and T3 provenance](../../docs/claude-code-runtime.md).
+
+Do not confuse this with pi's `anthropic` OAuth. The documentation bundled
+with the pinned pi 0.84.2 says third-party harness use on that path draws from
+Anthropic “extra usage” billed per token, not the included Claude plan. Ghost
+keeps the pi provider available for users who deliberately want that billing
+path, but does not present it as subscription savings.
+
+### pi provider login
+
+Alongside `openai-codex`, pi provides interactive auth for `anthropic`,
 `openrouter` ("Sign in with OpenRouter"), `github-copilot`, `xai`,
-`kimi-coding`, and `radius`. Credentials land in `auth.json` as
+`kimi-coding`, and `radius`. Credentials land in the ghost's `auth.json` as
 `{ "type": "oauth", access, refresh, expires }`, and `ModelRuntime` refreshes
-them under a store lock.
+them under a store lock. These flows are provider authentication, not a general
+promise that a consumer subscription includes third-party harness usage.
 
 The daemon **does not implement an OAuth flow of its own** — it wraps pi's.
 `LoginManager` (`src/auth.ts`) drives `ModelRuntime.login(providerId, type,
@@ -201,6 +234,7 @@ ghost home — the same precedent as `memory/.visitors/`:
 ```
 ~/Ghosts/<name>/.pi/         settings.json, models.json, auth.json
 ~/Ghosts/<name>/.sessions/   <conversation>.jsonl transcripts
+                              claude-<sha256>.json Claude resume metadata
 ```
 
 `createAgentSession({ agentDir })` does **not** redirect session storage; only
@@ -208,6 +242,12 @@ ghost home — the same precedent as `memory/.visitors/`:
 `SessionManager.open(<sessionDir>/<conversationId>.jsonl, sessionDir, home)`,
 which creates the file when it does not exist, so a conversation id maps to a
 stable transcript across daemon restarts.
+
+For `claude-code`, the sidecar contains only the conversation id, Claude's
+opaque session id, timestamps, and message count; it is mode `0600`. Claude
+Code owns the actual transcript in its normal `~/.claude/projects/` storage.
+That external transcript is an explicit backup exception, documented in
+[`docs/claude-code-runtime.md`](../../docs/claude-code-runtime.md).
 
 Three more deliberate settings, all verified by tests:
 
@@ -224,8 +264,9 @@ Three more deliberate settings, all verified by tests:
   `@ghost/extensions` (`ghostToolNamesFor(scope)`) plus an `excludeTools`
   denylist of every pi built-in. A ghost has no bash and no filesystem.
 
-Compaction is disabled: a ghost's durable memory is its memory files, not its
-transcript.
+The Claude Code path is scoped and closed once per turn so the next turn can
+resume with a freshly derived memory/note system prompt. pi sessions keep their
+own background-compaction policy.
 
 ## HTTP API
 
@@ -242,7 +283,8 @@ Errors are `{ "error": { "message", "code" } }` — the shape the pinned
 pi-messages client parses out of a non-2xx response, and the same shape the
 hosted relay returns. Codes: `invalid_request`, `invalid_name`, `not_found`,
 `already_exists`, `session_busy`, `payload_too_large`, `method_not_allowed`,
-`shutting_down`, `internal_error`.
+`shutting_down`, `claude_code_missing`, `claude_code_subscription_required`,
+`claude_code_owner_only`, `claude_session_invalid`, `internal_error`.
 
 ### The pi-messages wire
 

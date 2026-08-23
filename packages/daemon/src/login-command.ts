@@ -17,7 +17,10 @@ import { createInterface, type Interface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { AuthInteraction, AuthPrompt, AuthType } from "@earendil-works/pi-ai";
-import { bindDefaultChatModelIfUnset } from "./auth.js";
+import {
+  ANTHROPIC_EXTRA_USAGE_NOTE,
+  bindDefaultChatModelIfUnset,
+} from "./auth.js";
 import { loadConfig, type DaemonConfigOverrides } from "./config.js";
 import { scrubProviderEnv } from "./env-scrub.js";
 import { GhostRegistry, ghostPaths, type Ghost } from "./ghosts.js";
@@ -118,6 +121,7 @@ interface LoginProviderOption {
   name: string;
   authType: AuthType;
   subscription: boolean;
+  billingNote?: string;
 }
 
 function loginableProviders(runtime: ModelRuntime): LoginProviderOption[] {
@@ -128,7 +132,12 @@ function loginableProviders(runtime: ModelRuntime): LoginProviderOption[] {
         id: provider.id,
         name: provider.name,
         authType: "oauth",
-        subscription: provider.auth.oauth.isSubscription ?? false,
+        subscription: provider.id === "anthropic"
+          ? false
+          : provider.auth.oauth.isSubscription ?? false,
+        ...(provider.id === "anthropic"
+          ? { billingNote: ANTHROPIC_EXTRA_USAGE_NOTE }
+          : {}),
       });
     }
     if (provider.auth.apiKey?.login) {
@@ -158,7 +167,11 @@ async function resolveProvider(
 
   out("Sign in to which provider?");
   candidates.forEach((provider, i) =>
-    out(`  ${i + 1}. ${provider.name} (${provider.authType}${provider.subscription ? ", subscription" : ""})`),
+    out(`  ${i + 1}. ${provider.name} (`
+      + `${provider.authType}`
+      + `${provider.subscription ? ", subscription" : ""}`
+      + `${provider.billingNote ? `, ${provider.billingNote}` : ""}`
+      + ")"),
   );
   const answer = (await rl.question("> ")).trim();
   const byIndex = Number(answer);

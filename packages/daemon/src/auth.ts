@@ -133,6 +133,8 @@ export interface ProviderInfo {
   loginLabel?: string;
   /** Whether the ghost already has a working credential for this provider. */
   configured: boolean;
+  /** Billing caveat safe to show in provider pickers. */
+  billingNote?: string;
   /** How it is configured, when it is. */
   connectedVia?: AuthType;
 }
@@ -173,6 +175,7 @@ const DEFAULT_LOGIN_TTL_MS = 5 * 60_000;
 const DEFAULT_RETAIN_SETTLED_MS = 60_000;
 const CANCELLED_MESSAGE = "Login cancelled";
 const AUTH_TYPES: readonly AuthType[] = ["oauth", "api_key"];
+export const ANTHROPIC_EXTRA_USAGE_NOTE = "extra usage billed per token; not Claude plan limits";
 
 /**
  * Curated fallback, used ONLY if pi's registry comes back empty (it never
@@ -180,7 +183,15 @@ const AUTH_TYPES: readonly AuthType[] = ["oauth", "api_key"];
  */
 const FALLBACK_PROVIDERS: readonly ProviderInfo[] = [
   { id: "openai-codex", name: "OpenAI Codex", subscription: true, authTypes: ["oauth"], configured: false },
-  { id: "anthropic", name: "Anthropic", subscription: true, authTypes: ["oauth", "api_key"], configured: false },
+  {
+    id: "anthropic",
+    name: "Anthropic",
+    subscription: false,
+    authTypes: ["oauth", "api_key"],
+    loginLabel: "Sign in (extra usage)",
+    billingNote: ANTHROPIC_EXTRA_USAGE_NOTE,
+    configured: false,
+  },
   { id: "openrouter", name: "OpenRouter", subscription: false, authTypes: ["oauth", "api_key"], configured: false },
 ];
 
@@ -282,11 +293,22 @@ export class LoginManager {
       const info: ProviderInfo = {
         id: provider.id,
         name: provider.name,
-        subscription: provider.auth.oauth?.isSubscription ?? false,
+        // pi marks Anthropic's OAuth mechanism as subscription auth, but its
+        // pinned provider docs say third-party harness calls draw per-token
+        // "extra usage", not included Claude plan limits. Do not label that
+        // picker row as subscription; `claude-code/default` is the plan path.
+        subscription: provider.id === "anthropic"
+          ? false
+          : provider.auth.oauth?.isSubscription ?? false,
         authTypes,
         configured: status.configured,
       };
-      if (provider.auth.oauth?.loginLabel) info.loginLabel = provider.auth.oauth.loginLabel;
+      if (provider.id === "anthropic") {
+        info.loginLabel = "Sign in (extra usage)";
+        info.billingNote = ANTHROPIC_EXTRA_USAGE_NOTE;
+      } else if (provider.auth.oauth?.loginLabel) {
+        info.loginLabel = provider.auth.oauth.loginLabel;
+      }
       if (status.configured) info.connectedVia = runtime.isUsingOAuth(provider.id) ? "oauth" : "api_key";
       infos.push(info);
     }

@@ -5,7 +5,7 @@
  *   GET  /api/ghosts                  → [{ name, dir, createdAt }]
  *   POST /api/ghosts                  { name } → creates ~/Ghosts/<name>/
  *   POST /api/ghosts/:name/messages   pi-messages request → SSE of pi-messages events
- *   GET  /api/ghosts/:name/sessions   → pi session listing for that ghost
+ *   GET  /api/ghosts/:name/sessions   → chat-runtime session listing for that ghost
  *   GET  /api/relay/status            → whether the creator's Chromium is paired
  *   WS   /relay                       → the MV3 extension's socket (token-gated)
  *

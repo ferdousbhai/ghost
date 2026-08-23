@@ -79,6 +79,11 @@ describe("listProviders", () => {
     const openrouter = providers.find((p) => p.id === "openrouter")!;
     expect(openrouter.authTypes).toEqual(["oauth", "api_key"]);
     expect(openrouter.loginLabel).toBe("Sign in with OpenRouter");
+
+    const anthropic = providers.find((p) => p.id === "anthropic")!;
+    expect(anthropic.subscription).toBe(false);
+    expect(anthropic.loginLabel).toBe("Sign in (extra usage)");
+    expect(anthropic.billingNote).toContain("not Claude plan limits");
   });
 });
 
