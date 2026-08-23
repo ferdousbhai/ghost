@@ -1,0 +1,68 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ghost-desktop-helper"
+version = "0.1.0"
+description = "The ghost's Omarchy (Hyprland/Wayland) computer-use Python sidecar: a line-oriented JSON bridge over a vendored subset of omarchy-quattro-harness."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+keywords = [
+  "ghost",
+  "omarchy",
+  "hyprland",
+  "wayland",
+  "at-spi",
+  "accessibility",
+  "computer-use",
+]
+classifiers = [
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Topic :: Desktop Environment",
+]
+# No mandatory PyPI runtime deps: the capability tools are SYSTEM packages
+# (grim, wtype, ydotool, hyprctl) and AT-SPI rides the system PyGObject stack.
+# The helper detects each at runtime and degrades with a clear error rather
+# than crashing when one is absent. See the optional extras and README for the
+# system packages to install (`sudo pacman -S grim wtype ydotool python-gobject
+# at-spi2-core`).
+dependencies = []
+
+[project.optional-dependencies]
+# AT-SPI needs the system GObject introspection stack. On Omarchy the supported
+# route is the system package (`sudo pacman -S python-gobject at-spi2-core`);
+# this extra exists only for virtualenvs that build PyGObject themselves.
+atspi = ["PyGObject>=3.50; sys_platform == 'linux'"]
+# Pillow is not required by any op today (the ghost_screen extension does its
+# own downscaling / vision routing on the base64 PNG this helper returns), but
+# it is offered for callers that want in-helper thumbnailing.
+image = ["pillow>=10"]
+
+[dependency-groups]
+dev = [
+  "pytest>=8.0",
+]
+
+[project.scripts]
+ghost-desktop-helper = "ghost_desktop_helper.protocol:main"
+
+[tool.hatch.build.targets.wheel]
+# Ship both our bridge and the vendored harness (as the top-level `omaharness`
+# package) so `import omaharness` resolves from an installed wheel exactly as it
+# does from the source checkout via the sibling-vendor bootstrap in __init__.py.
+packages = ["src/ghost_desktop_helper", "vendor/omaharness"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"vendor/omaharness/LICENSE" = "omaharness/LICENSE"
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "vendor", "tests", "README.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+  "live: needs a real Hyprland session; skipped unless GHOST_DESKTOP_LIVE=1",
+]

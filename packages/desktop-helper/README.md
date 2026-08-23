@@ -1,0 +1,182 @@
+# ghost-desktop-helper
+
+The ghost's **computer-use sidecar** for Omarchy (Hyprland / Wayland). A single
+long-lived Python process that the ghost's TypeScript extensions
+(`ghost_desktop`, `ghost_screen`) drive over a line-oriented JSON protocol on
+stdin/stdout — the same shape as `TrayBridge.qml` → `ghost-tray.py`.
+
+It gives the ghost the hard desktop capabilities that are natural in PyGObject
+and already solved, MIT-licensed, in
+[omarchy-quattro-harness](https://github.com/fabiopauli/omarchy-quattro-harness)
+by Fabio Pauli:
+
+- **AT-SPI accessibility** — semantic queries, actions, and text/value edits.
+- **Background-safe capture** — the grim foreign-toplevel → headless-output →
+  focused-region ladder, each rung honestly labelled.
+- **Layout-safe input** — `wtype` for text, `hyprctl sendshortcut` / `ydotool`
+  for chords, closed-loop pointer moves.
+- **Hyprland dispatcher-grammar correctness** — auto-detected 0.55 string vs
+  0.56+ `hl.dsp.*` Lua grammar (see below).
+
+Vision is **not** here: semantic (AT-SPI) access is preferred where it exists;
+the ghost's `look_at_image` vision routing (in the extensions package) is the
+universal fallback for canvas / Qt-without-a11y / web / games. The strongest
+path uses both — try semantic, fall back to a screenshot + vision.
+
+There is deliberately **no `exec` op**: this is desktop control only. The ghost
+has pi's own bash creator-side.
+
+## Transport
+
+One process. One request object per line in, one response object per line out,
+correlated by `id`. Stderr is logs.
+
+```
+request:  {"id": <n>, "op": "<name>", "args": { ... }}
+response: {"id": <n>, "ok": true,  "result": { ... }}
+          {"id": <n>, "ok": false, "error": {"code": "...", "message": "...", "details": {}}}
+```
+
+On startup the helper emits an unsolicited `hello` line (also available as the
+`hello` op) reporting helper version, Hyprland version, the detected dispatcher
+grammar, and which backends are actually available:
+
+```json
+{"type":"hello","helper":"ghost-desktop-helper","version":"0.1.0","protocol":1,
+ "ops":[...], "in_hyprland_session":true,
+ "hyprland-version":{"tag":"v0.56.2", ...},
+ "detected-dispatch-grammar":{"generation":"lua-table","detected_by":"probe",
+   "evidence":"hyprctl dispatch 'hl.dsp.no_op()' accepted", "dispatchers":{...}},
+ "available-backends":{"hyprctl":{...},"grim":{...,"foreign_toplevel":true},
+   "wtype":{...},"ydotool":{...,"usable":false},"atspi":{"available":true,...},
+   "foreign_toplevel_protocol":{"supported":true}}}
+```
+
+Every **capture / input / perform** result carries honesty metadata:
+
+```json
+{"backend":"grim-foreign-toplevel","background_safe":true,
+ "interference":[],"warnings":[]}
+```
+
+The helper **refuses rather than fakes**: a missing backend, a locked session,
+or an unreadable value is a structured error with remediation, never a blank
+screenshot or an empty tree dressed up as success.
+
+## Ops
+
+| Op | Args | Result |
+|----|------|--------|
+| `see` | `{name?}` | windows matching (address, title, class, workspace, geometry, focused) |
+| `state` | — | condensed clients + workspaces + activeworkspace + activewindow + monitors |
+| `layers` | `{namespace?, output?}` | wlr-layer-shell surfaces with logical geometry |
+| `toplevels` | `{timeout?}` | `ext-foreign-toplevel-list-v1` list reconciled with hyprctl clients |
+| `ax_query` | `{app?, role?, text?, attributes?, limit?}` | matching AT-SPI elements (role, name, text, bounds, actions, `ref`) |
+| `ax_roles` | `{app?}` | role → count for an app's tree |
+| `ax_perform` | `{ref, action}` | invoke a semantic action; honesty metadata |
+| `ax_set` | `{ref, attribute, value}` | set `text` / `value` / `focused`; honesty metadata |
+| `key` | `{chord, app?, prefer_dispatch?}` | keyboard chord (sendshortcut, else ydotool); honesty metadata |
+| `type` | `{text, app?, ref?, replace?}` | text via AT-SPI insert or `wtype`; honesty metadata |
+| `click` | `{x, y, coordinate_space?} \| {ref}` | pointer click (ref resolves via AT-SPI bounds); honesty metadata |
+| `capture` | `{target:"window"\|"screen"\|"region", name?, address?, region?, output?}` | base64 PNG via the 3-tier ladder; honesty metadata |
+| `focus` | `{address \| name}` | focus a window; honesty metadata |
+| `workspace` | `{id \| name}` | switch workspace; honesty metadata |
+| `hello` / `doctor` | — | the handshake payload above |
+
+Roles use a unified GTK3/4 vocabulary (`push button` and `button` fold to one);
+`ax_query` refuses an unknown role and lists the ones actually present.
+
+Element `ref`s are the `element_index` values returned by the most recent
+`ax_query` / `ax_roles` snapshot; take a fresh snapshot before reusing them.
+
+### Safety
+
+- **Session lock, fail closed.** Every mutating op (`key`, `type`, `click`,
+  `ax_perform`, `ax_set`, `focus`, `workspace`) refuses when the session is
+  locked — or when neither Hyprland nor logind can say whether it is.
+- **`fcntl` transaction locking.** The one path that must temporarily change
+  compositor state (focused-region capture, injected input) takes a
+  single-writer lock under `$XDG_RUNTIME_DIR`, snapshots focus/workspace/cursor,
+  does the work, restores, and reports the interference. Concurrent calls cannot
+  interleave their snapshot/restore windows; a user who moved the pointer
+  mid-flight gets a reported race, not a yanked cursor.
+
+## Hyprland dispatcher grammar (the core fix)
+
+Hyprland changed its dispatcher contract in 0.56. Up to 0.55 a dispatch was a
+verb plus one comma-joined string:
+
+```
+hyprctl dispatch focuswindow address:0x55f1c0ffee
+```
+
+0.56+ wraps arguments in `return hl.dispatch(...)`, so the same intent is a Lua
+call with named fields:
+
+```
+hyprctl dispatch 'hl.dsp.focus{ window = "address:0x55f1c0ffee" }'
+```
+
+On 0.56 the old spelling is not deprecated — it is a **Lua syntax error**, so a
+helper that hard-codes either grammar is broken on half the fleet. This helper
+detects the live grammar by probing `hl.dsp.no_op()` (a real no-op dispatcher
+safe to send at an unknown compositor), caches the answer with its provenance,
+and encodes every intent accordingly. Override with the
+`OMAHARNESS_DISPATCH_API` environment variable (`lua-table` or `legacy-string`)
+when detection can't run.
+
+## Runtime requirements
+
+The heavy capabilities are **system tools**, detected at runtime; the helper
+degrades with a clear "install X" error (and `hello` reports the gap) rather
+than crashing when one is absent.
+
+| Tool | Purpose | Install (Arch/Omarchy) |
+|------|---------|------------------------|
+| `hyprctl` | compositor inspection + dispatch | `sudo pacman -S hyprland` (present in-session) |
+| `grim` (with `-T`) | background-safe + region + output capture | `sudo pacman -S grim` |
+| `wtype` | layout-safe text injection | `sudo pacman -S wtype` |
+| `ydotool` + `ydotoold` | evdev chords + coordinate clicks | `sudo pacman -S ydotool`; `systemctl --user enable --now ydotool` |
+| PyGObject + at-spi2-core | AT-SPI accessibility | `sudo pacman -S python-gobject at-spi2-core` |
+
+Without `ydotool` the helper still observes, captures, sends chords via
+`hyprctl sendshortcut`, and types via `wtype`; only raw coordinate clicks and
+evdev-only chords refuse. Without PyGObject the `ax_*` ops refuse (with the
+exact interpreter-aware remediation) while everything else works.
+
+Python ≥ 3.11. No mandatory PyPI runtime dependencies.
+
+## Running
+
+```
+# from a source checkout (uv resolves the vendored omaharness automatically)
+uv run ghost-desktop-helper
+# or
+python -m ghost_desktop_helper
+```
+
+## Tests
+
+Two tiers, mirroring the harness:
+
+```
+uv run --with pytest python -m pytest tests -q            # mocked (no compositor)
+GHOST_DESKTOP_LIVE=1 uv run --with pytest python -m pytest tests/test_live.py -q
+```
+
+The mocked tier covers protocol shaping, dispatch-grammar selection, honesty
+metadata, and fail-closed session locking. The live tier runs only read-only /
+non-disruptive checks against the real compositor (it never steals focus,
+injects input, or switches workspace; the grammar check uses a fake window
+address so the dispatcher runs but changes nothing).
+
+## Attribution
+
+`vendor/omaharness/` is a minimal, unmodified, desktop-only vendor of
+[omarchy-quattro-harness](https://github.com/fabiopauli/omarchy-quattro-harness)
+— Copyright (c) 2026 Fabio Pauli, MIT License (see
+`vendor/omaharness/LICENSE` and the repo-root `THIRD_PARTY_NOTICES.md`). The
+browser, CLI, desktop-orchestrator, knowledge, overlay, native-plugin, and
+XWayland modules are intentionally **not** vendored. The thin JSON bridge in
+`src/ghost_desktop_helper/` is original Ghost code (Apache-2.0, matching the
+workspace).

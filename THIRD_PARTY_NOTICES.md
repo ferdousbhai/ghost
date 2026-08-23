@@ -28,3 +28,37 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+## omarchy-quattro-harness
+
+`packages/desktop-helper/vendor/omaharness/` is a minimal, unmodified,
+desktop-only vendor of
+[omarchy-quattro-harness](https://github.com/fabiopauli/omarchy-quattro-harness)
+by Fabio Pauli. The vendored modules (`atspi`, `capture`, `dispatch`, `errors`,
+`headless`, `hypr`, `inputs`, `keys`, `process`, `session`, `toplevels`,
+`transaction`) carry a provenance header pointing back to their upstream path;
+only that header was added. The browser, CLI, desktop-orchestrator, knowledge,
+overlay, native-plugin, and XWayland modules are intentionally not vendored.
+See `packages/desktop-helper/vendor/omaharness/LICENSE` for the full text.
+
+MIT License
+
+Copyright (c) 2026 Fabio Pauli
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
