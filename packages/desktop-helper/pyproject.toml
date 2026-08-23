@@ -46,6 +46,15 @@ dev = [
   "pytest>=8.0",
 ]
 
+[tool.uv]
+# The pure-Python code runs on 3.11+, but AT-SPI does not: PyGObject ships no
+# wheels, so the bindings are whatever the distro compiled, for exactly one
+# minor version (`/usr/lib/python3.14/site-packages/gi` on Omarchy today). A
+# uv-*managed* interpreter would therefore be a silently a11y-less helper, so
+# the environment is built on the system Python that owns those bindings; the
+# version itself is pinned in `.python-version`.
+python-preference = "only-system"
+
 [project.scripts]
 ghost-desktop-helper = "ghost_desktop_helper.protocol:main"
 

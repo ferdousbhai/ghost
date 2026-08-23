@@ -146,6 +146,30 @@ exact interpreter-aware remediation) while everything else works.
 
 Python ≥ 3.11. No mandatory PyPI runtime dependencies.
 
+### The one system dependency that constrains the interpreter
+
+PyGObject publishes **no wheels** — PyPI carries an sdist only — so `gi` is
+never "just a pip install": it is whatever the distro compiled, against exactly
+one Python minor version, into `/usr/lib/pythonX.Y/site-packages`. On Omarchy
+today `python-gobject` is built for **Python 3.14**, so:
+
+- `.python-version` pins the project to `3.14`, and `[tool.uv]
+  python-preference = "only-system"` keeps uv on the system interpreter that
+  owns those bindings. A uv-*managed* 3.x would resolve, install, and run — and
+  every `ax_*` op would refuse, which is the expensive way to find out.
+- The helper appends the matching system `site-packages` to `sys.path` at
+  import when (and only when) `gi` is missing from an isolated environment —
+  see `_bootstrap_system_gi` in `src/ghost_desktop_helper/__init__.py`. That is
+  what makes a plain `uv run` / `uv tool install` work at all, since neither
+  can be told `--system-site-packages` from project config. It appends rather
+  than prepends (no distro package can shadow the environment) and is guarded
+  on the exact minor version. Set `GHOST_DESKTOP_NO_SYSTEM_GI=1` to skip it in
+  an environment that compiled its own bindings.
+
+`hello` / `doctor` report `available-backends.atspi` with the interpreter, the
+reason, and the remediation, so a dark accessibility path says so out loud
+instead of quietly returning nothing.
+
 ## Running
 
 ```
@@ -154,6 +178,19 @@ uv run ghost-desktop-helper
 # or
 python -m ghost_desktop_helper
 ```
+
+The TypeScript extensions spawn the helper *by name*: `$GHOST_DESKTOP_HELPER`
+if set, else `ghost-desktop-helper` on `PATH`, else `python3 -m
+ghost_desktop_helper`. A source checkout is on none of those, so install the
+console script once —
+
+```
+uv tool install --editable --no-managed-python --python 3.14 .
+```
+
+— which puts `ghost-desktop-helper` in `~/.local/bin` pointing back at this
+checkout. Without it the ghost's desktop and screen tools fall through to
+`python3 -m ghost_desktop_helper`, which cannot import the package at all.
 
 ## Tests
 
