@@ -23,7 +23,7 @@ import type {
   ToolCallEvent,
   ToolCallEventResult,
   ToolDefinition,
-} from "@earendil-works/pi-coding-agent";
+} from "@oh-my-pi/pi-coding-agent";
 import type { VisionModel } from "../../src/extensions/vision.js";
 import type { CommandResult, CommandRunner, RunCommandOptions } from "../../src/extensions/shared.js";
 import { CommandError } from "../../src/extensions/shared.js";
@@ -34,7 +34,7 @@ import type {
   RequestOptions,
 } from "../../src/extensions/desktop-helper-client.js";
 
-type AnyTool = ToolDefinition<any, any, any>;
+type AnyTool = ToolDefinition<any, any>;
 type AnyHandler = (event: any, ctx: any) => unknown;
 
 /** A 1×1 transparent PNG — the smallest thing that is genuinely an image. */

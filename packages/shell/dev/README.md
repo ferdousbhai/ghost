@@ -1,6 +1,6 @@
 # Developing the ghost shell
 
-No daemon, no pi, no models needed. `mock-ghostd.mjs` implements enough of the
+No daemon, no OMP, no models needed. `mock-ghostd.mjs` implements enough of the
 CONTRACTS.md API to build and demo every surface.
 
 ## Demo script
@@ -41,9 +41,8 @@ qs -p qml/shell.qml kill
   left (`casper`, `moaning-myrtle`, `+ new ghost`), transcript in the middle,
   composer at the bottom. `SUPER+G` is launch-or-focus: reveal+focus when
   hidden/unfocused, hide only when already focused.
-- On `ask`: the pulsing activity dot, then `read_memory` in the activity line,
+- On `ask`: the spectral summoning orb, then a `read_memory` lifecycle card,
   then the reply arriving word by word with `**bold**` rendered as bold.
-  The finished bubble keeps `⚒ read_memory` as its tool trail.
 - With the HUD closed, a finished turn raises a `notify-send` notification
   instead.
 - `Esc` cancels a running turn (nothing when idle — a normal window is not

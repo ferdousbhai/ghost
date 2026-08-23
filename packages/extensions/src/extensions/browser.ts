@@ -24,8 +24,8 @@ import type {
   ExtensionHandler,
   ToolCallEvent,
   ToolCallEventResult,
-} from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
+} from "@oh-my-pi/pi-coding-agent";
+import { Type } from "@oh-my-pi/pi-coding-agent/extensibility/legacy-typebox";
 import { isVisitorScope, type GhostScope } from "../scope.js";
 import { stringEnum } from "../tool-schema.js";
 import {

@@ -4,7 +4,7 @@
  * (vision, screen, desktop, browser) over the same ghost home and scope, plus
  * the tool allowlist that goes with it.
  */
-import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
+import type { ExtensionFactory } from "@oh-my-pi/pi-coding-agent";
 import { browserToolNames, createBrowserExtension, type BrowserExtensionOptions } from "./browser.js";
 import { createHyprlandExtension, desktopToolNames, type HyprlandExtensionOptions } from "./hyprland.js";
 import { isVisitorScope, type GhostScope } from "../scope.js";

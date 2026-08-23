@@ -39,8 +39,8 @@ import type {
   ExtensionHandler,
   ToolCallEvent,
   ToolCallEventResult,
-} from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
+} from "@oh-my-pi/pi-coding-agent";
+import { Type } from "@oh-my-pi/pi-coding-agent/extensibility/legacy-typebox";
 import { GhostError } from "../errors.js";
 import type { GhostHome } from "../home.js";
 import { isVisitorScope } from "../scope.js";
@@ -353,7 +353,7 @@ export function createScreenExtension(
       }),
       // Two captures at once would race on the same directory and mean nothing;
       // one at a time also keeps the shutter honest about what "now" was.
-      executionMode: "sequential",
+      ...({ concurrency: "exclusive" as const }),
       execute: async (_toolCallId, params, signal, _onUpdate, ctx) => {
         const home = resolveHome(options, ctx);
         const capture = await captureViaHelper({

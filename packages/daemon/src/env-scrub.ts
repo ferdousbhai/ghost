@@ -1,7 +1,7 @@
 /**
  * Provider isolation for hosted ghost sessions.
  *
- * pi's `ModelRuntime` resolves provider credentials from the ambient
+ * OMP's provider layer can resolve credentials from the ambient
  * environment as a fallback when a provider has no stored auth. The spike
  * proved the consequence: with `GEMINI_API_KEY` merely *present* in the
  * shell, a sovereign ghost silently gained 22 Google cloud models it was
@@ -10,8 +10,8 @@
  * inherit from the user's login shell, a systemd `EnvironmentFile`, or a
  * terminal that had just sourced a project `.envrc`.
  *
- * There is no per-session environment in pi 0.84.2: `getAuth()` reads
- * `process.env` for the whole process. So the scrub is process-global and
+ * Provider SDKs read `process.env` for the whole process. So the scrub is
+ * process-global and
  * must run **before the first session is created**. `ghostd` runs it at boot
  * (`main.ts`) and `SessionHost` runs it again in its constructor, which is
  * idempotent — the second call finds nothing left to remove.
@@ -19,16 +19,16 @@
  * Credentials therefore come from exactly two places, both per-ghost and
  * both inside the ghost home:
  *   - `<home>/.pi/models.json` — provider definitions incl. `apiKey`
- *   - `<home>/.pi/auth.json`   — pi's own credential store
+ *   - `<home>/.pi/agent.db`    — OMP's credential store
  *
  * ## What is removed
  *
- * Every provider-credential variable pi-ai 0.84.2 reads, the ambient cloud
+ * Every provider-credential variable the pinned OMP providers read, the ambient cloud
  * credentials that let a provider authenticate without an explicit key, and
  * Claude Code routing overrides that can redirect or change a request before
  * it reaches the configured provider. Listed explicitly so a reader can audit
  * the policy without grepping dependency source; the patterns below then catch
- * credential variables added by a future pi release.
+ * credential variables added by a future OMP release.
  */
 
 /** Exact variable names, grouped by why they are dangerous. */
@@ -132,7 +132,7 @@ export const PROVIDER_ROUTING_ENV_VARS: readonly string[] = [
 /**
  * Forward compatibility: any variable whose *name* says "credential" goes
  * too. Nothing in ghostd reads a key from the environment, so a broad sweep
- * here costs nothing and closes the gap when a future pi adds a provider we
+ * here costs nothing and closes the gap when a future OMP release adds a provider we
  * have not enumerated.
  */
 export const PROVIDER_CREDENTIAL_ENV_PATTERNS: readonly RegExp[] = [
@@ -144,7 +144,7 @@ export const PROVIDER_CREDENTIAL_ENV_PATTERNS: readonly RegExp[] = [
 ];
 
 /**
- * `PI_OFFLINE` kills pi's own network traffic (update checks, provider
+ * `PI_OFFLINE` disables OMP's own network traffic (update checks, provider
  * catalog refresh, telemetry). It is NOT set by the scrub: it is a separate,
  * opt-in policy (`offline` in the daemon config), because it also stops
  * catalog refresh and would break a ghost whose provider publishes its model
@@ -172,7 +172,7 @@ function isProviderEnvOverride(name: string): boolean {
 
 /**
  * Remove every provider credential and routing override from `env` (default
- * `process.env`) and apply the daemon's own pi environment. Idempotent;
+ * `process.env`) and apply the daemon's own OMP environment. Idempotent;
  * returns the names it removed so the caller can log the fact — never values.
  */
 export function scrubProviderEnv(

@@ -9,8 +9,7 @@ pragma Singleton
 // dev/README.md. So SSE needs no helper process: we track a consumed offset,
 // buffer the trailing partial frame, and parse `data:` frames ourselves.
 //
-// The wire format is pi-messages, whose normative definition is the pinned
-// client in summon-ghost (@earendil-works/pi-ai). Deltas are INCREMENTAL
+// The wire format is pi-messages as fixed in CONTRACTS.md. Deltas are INCREMENTAL
 // fragments, not cumulative snapshots; `text_end` carries the authoritative
 // full block and we replace with it. There is no tool-*result* event in the
 // vocabulary — tool activity is start/delta/end only.
@@ -74,15 +73,26 @@ Singleton {
     property string sessionsError: ""
 
     // ---- Turn state -------------------------------------------------------
-    /** ListModel of { role, text, tools, error, pending }. */
+    /** ListModel of { role, text, tools, toolActivity, error, pending }. */
     property alias transcript: transcriptModel
     /** True from `start` until `done`/`error`. */
     property bool streaming: false
     /** Compact activity line: "thinking", "read_memory", "" when idle. */
     property string activity: ""
+    /** OMP's currently-blocking ask interaction, or null. */
+    property var pendingAsk: null
+    property bool askSubmitting: false
+    property string askError: ""
+    /** OMP's user-visible pending queues. Enter steers; Ctrl+Enter follows up. */
+    property var steeringQueue: []
+    property var followUpQueue: []
+    property bool queueSubmitting: false
+    property string queueError: ""
 
     signal turnFinished(string ghost, string text)
     signal turnFailed(string ghost, string message)
+    signal queueMessageRejected(string text)
+    signal branchDraftReady(string text)
 
     // ---- Model login ------------------------------------------------------
     /** [{ id, name, subscription, authTypes, loginLabel, billingNote, configured, connectedVia }]. */
@@ -117,9 +127,16 @@ Singleton {
     property string modelError: ""
     /** Non-fatal setup instruction returned by a successful model switch. */
     property string modelWarning: ""
+    /** [{ role, ompRole, label, primary, fallbacks }] from modern OMP routing. */
+    property var modelRouting: []
+    property bool modelRoutingLoading: false
 
     /** PUT /model wrote a role whose provider is not credentialed — prompt a login. */
     signal modelSwitchNeedsLogin(string provider)
+    /** PUT /model completed with a usable selection — return the HUD to chat. */
+    signal modelSwitchCompleted(string provider, string id)
+    /** One advanced role/fallback mutation completed — return to the route overview. */
+    signal modelRouteCompleted(string role, string target)
 
     // ---- Internals --------------------------------------------------------
     // The XHR must be held by a property. A request whose only reference is the
@@ -131,12 +148,21 @@ Singleton {
     property var availRequest: null
     property var catalogRequest: null
     property var setModelRequest: null
+    property var modelRoutingRequest: null
     property var sessionsRequest: null
     property var transcriptRequest: null
+    property var askRequest: null
+    property var askSubmitRequest: null
+    property var queueRequest: null
+    property var queueStatusRequest: null
+    property var branchRequest: null
 
     property var sessionIds: ({})     // ghost name -> active pi session id
     property var blocks: ({})         // contentIndex -> { kind, text }
     property var toolNames: []        // tool names seen this turn, in order
+    property var toolActivities: []   // stateful cards for the current assistant row
+    property var toolIdsByContent: ({})
+    property var toolArgumentText: ({})
     property int assistantRow: -1
     property string consumedPrefix: ""
     property int consumed: 0
@@ -176,6 +202,27 @@ Singleton {
         interval: 1000
         repeat: true
         onTriggered: root.pollLogin()
+    }
+
+    // OMP's ask tool pauses the provider turn while the HTTP SSE stream stays
+    // open. The dialog itself is a separate, reconnectable resource, so poll
+    // only during the short gap between seeing the ask tool call and receiving
+    // its payload.
+    Timer {
+        id: askPoll
+        interval: 200
+        repeat: true
+        running: root.streaming && root.activity === "ask"
+            && root.pendingAsk === null && !root.askSubmitting
+        onTriggered: root.fetchPendingAsk()
+    }
+
+    Timer {
+        id: queuePoll
+        interval: 350
+        repeat: true
+        running: root.streaming && root.pendingAsk === null
+        onTriggered: root.fetchQueue()
     }
 
     Component.onCompleted: root.refresh()
@@ -311,6 +358,8 @@ Singleton {
         root.currentModel = null;
         root.modelSource = "none";
         root.availableModels = [];
+        root.modelRouting = [];
+        root.modelRoutingLoading = false;
         root.modelWarning = "";
         root.fetchCurrentModel();
         root.fetchSessions(name);
@@ -319,6 +368,13 @@ Singleton {
     function clearTranscript(): void {
         transcriptModel.clear();
         root.activity = "";
+        root.pendingAsk = null;
+        root.askSubmitting = false;
+        root.askError = "";
+        root.steeringQueue = [];
+        root.followUpQueue = [];
+        root.queueSubmitting = false;
+        root.queueError = "";
     }
 
     // ---- Conversations ----------------------------------------------------
@@ -412,6 +468,29 @@ Singleton {
             + "/sessions/" + encodeURIComponent(id) + "/transcript", ({}), null);
     }
 
+    /** Refresh entry ids and branch metadata after a settled live turn. */
+    function refreshCurrentTranscript(): void {
+        const ghost = root.activeGhost;
+        const id = root.currentSessionId;
+        if (ghost === "" || id === "" || root.streaming) return;
+        const xhr = new XMLHttpRequest();
+        root.transcriptRequest = xhr;
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || xhr !== root.transcriptRequest) return;
+            if (ghost !== root.activeGhost || id !== root.currentSessionId || root.streaming) return;
+            if (xhr.status === 200) {
+                try {
+                    const body = JSON.parse(xhr.responseText);
+                    root.rehydrate(Array.isArray(body.messages) ? body.messages : []);
+                } catch (error) {
+                    root.sessionsError = "ghostd sent a malformed transcript";
+                }
+            }
+        };
+        root.dispatch(xhr, "GET", "/api/ghosts/" + encodeURIComponent(ghost)
+            + "/sessions/" + encodeURIComponent(id) + "/transcript", ({}), null);
+    }
+
     /** Replace the transcript view with a conversation's stored messages. */
     function rehydrate(messages: var): void {
         transcriptModel.clear();
@@ -421,7 +500,16 @@ Singleton {
             if (message.role !== "user" && message.role !== "assistant") continue;
             const text = root.messageText(message);
             if (text === "") continue;
-            transcriptModel.append({ role: role, text: text, tools: "", error: "", pending: false });
+            transcriptModel.append({
+                role: role,
+                text: text,
+                tools: "",
+                toolActivity: role === "assistant" ? root.messageTools(message) : [],
+                error: "",
+                pending: false,
+                entryId: typeof message.entryId === "string" ? message.entryId : "",
+                branch: message.branch || ({})
+            });
         }
     }
 
@@ -438,21 +526,156 @@ Singleton {
         return "";
     }
 
+    /** Recover completed tool cards from an assistant message on transcript load. */
+    function messageTools(message: var): var {
+        if (!Array.isArray(message.content)) return [];
+        return message.content
+            .filter(part => part && part.type === "toolCall")
+            .map(part => ({
+                id: part.id || ("history-" + Math.random()),
+                name: part.name || "tool",
+                status: "complete",
+                arguments: part.arguments || ({}),
+                summary: "",
+                intent: "",
+                askBranch: part.ghostAsk || null
+            }));
+    }
+
+    /** Rewind before a user message; the next send appends a sibling branch. */
+    function branchFrom(entryId: string): void {
+        const ghost = root.activeGhost;
+        const sessionId = root.currentSessionId;
+        if (root.streaming || ghost === "" || sessionId === "" || entryId === "") return;
+        const xhr = new XMLHttpRequest();
+        root.branchRequest = xhr;
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || xhr !== root.branchRequest) return;
+            if (xhr.status === 200) {
+                try {
+                    const body = JSON.parse(xhr.responseText);
+                    root.rehydrate(body.transcript && Array.isArray(body.transcript.messages)
+                        ? body.transcript.messages : []);
+                    root.sessionsError = "";
+                    root.branchDraftReady(typeof body.draft === "string" ? body.draft : "");
+                } catch (error) {
+                    root.sessionsError = "ghostd sent malformed branch state";
+                }
+            } else {
+                root.sessionsError = root.describeError(xhr, "branch conversation");
+            }
+        };
+        root.dispatch(xhr, "POST", "/api/ghosts/" + encodeURIComponent(ghost)
+            + "/sessions/" + encodeURIComponent(sessionId) + "/branch",
+            ({ "Content-Type": "application/json" }),
+            JSON.stringify({ action: "rewind", entryId: entryId }));
+    }
+
+    /** Switch to an already-existing sibling leaf. */
+    function navigateBranch(targetId: string): void {
+        const ghost = root.activeGhost;
+        const sessionId = root.currentSessionId;
+        if (root.streaming || ghost === "" || sessionId === "" || targetId === "") return;
+        const xhr = new XMLHttpRequest();
+        root.branchRequest = xhr;
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || xhr !== root.branchRequest) return;
+            if (xhr.status === 200) {
+                try {
+                    const body = JSON.parse(xhr.responseText);
+                    root.rehydrate(body.transcript && Array.isArray(body.transcript.messages)
+                        ? body.transcript.messages : []);
+                    root.sessionsError = "";
+                } catch (error) {
+                    root.sessionsError = "ghostd sent malformed branch state";
+                }
+            } else {
+                root.sessionsError = root.describeError(xhr, "navigate branch");
+            }
+        };
+        root.dispatch(xhr, "POST", "/api/ghosts/" + encodeURIComponent(ghost)
+            + "/sessions/" + encodeURIComponent(sessionId) + "/branch",
+            ({ "Content-Type": "application/json" }),
+            JSON.stringify({ action: "navigate", entryId: targetId }));
+    }
+
+    /** Run modern OMP's two-phase Ask tree re-answer as a streamed continuation. */
+    function reanswerHistoricalAsk(entryId: string): void {
+        const ghost = root.activeGhost;
+        const sessionId = root.currentSessionId;
+        if (root.streaming || ghost === "" || sessionId === "" || entryId === "") return;
+
+        root.blocks = ({});
+        root.toolNames = [];
+        root.toolActivities = [];
+        root.toolIdsByContent = ({});
+        root.toolArgumentText = ({});
+        root.assistantRow = -1;
+        root.consumed = 0;
+        root.frameBuffer = "";
+        root.activity = "waiting for ghostd";
+        root.pendingAsk = null;
+        root.askSubmitting = false;
+        root.askError = "";
+        root.streaming = true;
+        flushTimer.start();
+
+        const xhr = new XMLHttpRequest();
+        root.request = xhr;
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState >= 3 && xhr.status === 200) {
+                root.reachable = true;
+                root.lastError = "";
+                const whole = xhr.responseText;
+                root.ingest(whole.substring(root.consumed));
+                root.consumed = whole.length;
+            }
+            if (xhr.readyState !== 4) return;
+            flushTimer.stop();
+            root.flush();
+            if (xhr.status !== 200) {
+                root.endTurn(ghost, root.describeError(xhr, "re-answer ask"));
+            } else if (root.streaming) {
+                root.endTurn(ghost, "the re-answer stream ended mid-turn");
+            }
+        };
+        root.dispatch(xhr, "POST", "/api/ghosts/" + encodeURIComponent(ghost)
+            + "/sessions/" + encodeURIComponent(sessionId) + "/reanswer",
+            ({ "Content-Type": "application/json", "Accept": "text/event-stream" }),
+            JSON.stringify({ entryId: entryId }));
+    }
+
     // ---- A turn -----------------------------------------------------------
 
     function send(text: string): void {
         const prompt = text.trim();
         if (prompt === "" || root.streaming || root.activeGhost === "") return;
 
-        transcriptModel.append({ role: "user", text: prompt, tools: "", error: "", pending: false });
-        transcriptModel.append({ role: "assistant", text: "", tools: "", error: "", pending: true });
+        transcriptModel.append({
+            role: "user", text: prompt, tools: "", toolActivity: [], error: "", pending: false,
+            entryId: "", branch: ({})
+        });
+        transcriptModel.append({
+            role: "assistant", text: "", tools: "", toolActivity: [], error: "", pending: true,
+            entryId: "", branch: ({})
+        });
         root.assistantRow = transcriptModel.count - 1;
 
         root.blocks = ({});
         root.toolNames = [];
+        root.toolActivities = [];
+        root.toolIdsByContent = ({});
+        root.toolArgumentText = ({});
         root.consumed = 0;
         root.frameBuffer = "";
         root.activity = "waiting for ghostd";
+        root.pendingAsk = null;
+        root.askSubmitting = false;
+        root.askError = "";
+        root.steeringQueue = [];
+        root.followUpQueue = [];
+        root.queueSubmitting = false;
+        root.queueError = "";
         root.streaming = true;
         flushTimer.start();
 
@@ -491,6 +714,13 @@ Singleton {
         flushTimer.stop();
         root.streaming = false;
         root.activity = "";
+        root.pendingAsk = null;
+        root.askSubmitting = false;
+        root.askError = "";
+        root.steeringQueue = [];
+        root.followUpQueue = [];
+        root.queueSubmitting = false;
+        root.queueError = "";
         if (root.assistantRow >= 0 && root.assistantRow < transcriptModel.count) {
             transcriptModel.setProperty(root.assistantRow, "pending", false);
             if (transcriptModel.get(root.assistantRow).text === "")
@@ -595,10 +825,78 @@ Singleton {
         case "toolcall_start":
             root.activity = event.toolName;
             root.toolNames = root.toolNames.concat([event.toolName]);
+            root.toolIdsByContent[event.contentIndex] = event.id;
+            root.toolArgumentText[event.id] = "";
+            root.updateTool(event.id, {
+                name: event.toolName,
+                status: "preparing",
+                arguments: ({}),
+                summary: "",
+                intent: ""
+            });
+            if (event.toolName === "ask") Qt.callLater(root.fetchPendingAsk);
             break;
         case "toolcall_delta":
+            const deltaId = root.toolIdsByContent[event.contentIndex];
+            if (deltaId) root.toolArgumentText[deltaId]
+                = (root.toolArgumentText[deltaId] || "") + event.delta;
             break;
         case "toolcall_end":
+            root.activity = "";
+            root.updateTool(event.toolCall.id, {
+                name: event.toolCall.name,
+                status: "queued",
+                arguments: event.toolCall.arguments || ({}),
+                summary: "",
+                intent: ""
+            });
+            root.pendingAsk = null;
+            root.askSubmitting = false;
+            root.askError = "";
+            break;
+        case "tool_execution_start":
+            root.activity = event.toolName;
+            root.updateTool(event.id, {
+                name: event.toolName,
+                status: "running",
+                arguments: event.arguments || ({}),
+                intent: event.intent || ""
+            });
+            if (event.toolName === "ask") Qt.callLater(root.fetchPendingAsk);
+            break;
+        case "tool_execution_update":
+            root.updateTool(event.id, {
+                name: event.toolName,
+                status: "running",
+                summary: event.summary || ""
+            });
+            break;
+        case "tool_execution_end":
+            root.activity = "";
+            root.updateTool(event.id, {
+                name: event.toolName,
+                status: event.isError ? "failed" : "complete",
+                summary: event.summary || ""
+            });
+            break;
+        case "model_fallback":
+            root.activity = event.phase === "applied"
+                ? "switching model · " + event.to
+                : "using fallback · " + event.model;
+            break;
+        case "branch_changed":
+            root.rehydrate(event.transcript && Array.isArray(event.transcript.messages)
+                ? event.transcript.messages : []);
+            transcriptModel.append({
+                role: "assistant", text: "", tools: "", toolActivity: [], error: "", pending: true,
+                entryId: "", branch: ({})
+            });
+            root.assistantRow = transcriptModel.count - 1;
+            root.blocks = ({});
+            root.toolNames = [];
+            root.toolActivities = [];
+            root.toolIdsByContent = ({});
+            root.toolArgumentText = ({});
             root.activity = "";
             break;
         case "done":
@@ -610,6 +908,44 @@ Singleton {
         default:
             console.warn("ghost: unknown pi-messages event:", event.type);
         }
+    }
+
+    function updateTool(id: string, patch: var): void {
+        const next = [];
+        let found = false;
+        for (const item of root.toolActivities) {
+            if (item.id === id) {
+                next.push(Object.assign({}, item, patch));
+                found = true;
+            } else {
+                next.push(item);
+            }
+        }
+        if (!found) next.push(Object.assign({
+            id: id,
+            name: patch.name || "tool",
+            status: "preparing",
+            arguments: ({}),
+            summary: "",
+            intent: ""
+        }, patch));
+        root.toolActivities = next;
+        root.syncToolActivity();
+    }
+
+    function syncToolActivity(): void {
+        if (root.assistantRow < 0 || root.assistantRow >= transcriptModel.count) return;
+        transcriptModel.setProperty(root.assistantRow, "toolActivity", root.toolActivities);
+    }
+
+    function settleToolActivity(): void {
+        const next = [];
+        for (const item of root.toolActivities) {
+            next.push(item.status === "failed" || item.status === "complete"
+                ? item : Object.assign({}, item, { status: "complete" }));
+        }
+        root.toolActivities = next;
+        root.syncToolActivity();
     }
 
     /** Push buffered block text into the model. Cheap when nothing changed. */
@@ -635,8 +971,16 @@ Singleton {
 
     function endTurn(ghost: string, errorMessage: string): void {
         if (!root.streaming) return;
+        root.settleToolActivity();
         root.streaming = false;
         root.activity = "";
+        root.pendingAsk = null;
+        root.askSubmitting = false;
+        root.askError = "";
+        root.steeringQueue = [];
+        root.followUpQueue = [];
+        root.queueSubmitting = false;
+        root.queueError = "";
         flushTimer.stop();
         let text = "";
         if (root.assistantRow >= 0 && root.assistantRow < transcriptModel.count) {
@@ -657,6 +1001,138 @@ Singleton {
             root.lastError = "";
             root.turnFinished(ghost, text);
         }
+        if (ghost === root.activeGhost && root.currentSessionId !== "")
+            Qt.callLater(root.refreshCurrentTranscript);
+    }
+
+    // ---- OMP ask ---------------------------------------------------------
+
+    /** Fetch the ask payload surfaced by the live conversation, if ready. */
+    function fetchPendingAsk(): void {
+        const ghost = root.activeGhost;
+        const sessionId = root.currentSessionId;
+        if (!root.streaming || root.activity !== "ask" || ghost === "" || sessionId === "") return;
+        if (root.askRequest && root.askRequest.readyState !== 4) return;
+        const xhr = new XMLHttpRequest();
+        root.askRequest = xhr;
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4) return;
+            if (ghost !== root.activeGhost || sessionId !== root.currentSessionId || !root.streaming) return;
+            if (xhr.status === 200) {
+                try {
+                    const body = JSON.parse(xhr.responseText);
+                    root.pendingAsk = body.ask || null;
+                    root.askError = "";
+                } catch (error) {
+                    root.askError = "ghostd sent a malformed ask interaction";
+                }
+            } else {
+                root.askError = root.describeError(xhr, "GET ask");
+            }
+        };
+        root.dispatch(xhr, "GET", "/api/ghosts/" + encodeURIComponent(ghost)
+            + "/sessions/" + encodeURIComponent(sessionId) + "/ask", ({}), null);
+    }
+
+    /** Submit an OMP ask result. `answer` is { kind, results? }. */
+    function answerAsk(answer: var): void {
+        const ask = root.pendingAsk;
+        const ghost = root.activeGhost;
+        const sessionId = root.currentSessionId;
+        if (!ask || root.askSubmitting || ghost === "" || sessionId === "") return;
+        root.askSubmitting = true;
+        root.askError = "";
+        const xhr = new XMLHttpRequest();
+        root.askSubmitRequest = xhr;
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4) return;
+            if (ghost !== root.activeGhost || sessionId !== root.currentSessionId) return;
+            root.askSubmitting = false;
+            if (xhr.status === 200) {
+                root.pendingAsk = null;
+                root.askError = "";
+            } else {
+                root.askError = root.describeError(xhr, "POST ask");
+                // A stale interaction may already have advanced. Refresh once
+                // so the card never remains stuck on an answer nobody can take.
+                if (xhr.status === 409) root.fetchPendingAsk();
+            }
+        };
+        const body = Object.assign({ askId: ask.id }, answer);
+        root.dispatch(xhr, "POST", "/api/ghosts/" + encodeURIComponent(ghost)
+            + "/sessions/" + encodeURIComponent(sessionId) + "/ask",
+            ({ "Content-Type": "application/json" }), JSON.stringify(body));
+    }
+
+    function chatAboutAsk(): void {
+        root.answerAsk({ kind: "chat" });
+    }
+
+    // ---- OMP steering + follow-up queues --------------------------------
+
+    function applyQueue(body: var): void {
+        root.steeringQueue = Array.isArray(body.steering) ? body.steering : [];
+        root.followUpQueue = Array.isArray(body.followUp) ? body.followUp : [];
+    }
+
+    function fetchQueue(): void {
+        const ghost = root.activeGhost;
+        const sessionId = root.currentSessionId;
+        if (!root.streaming || ghost === "" || sessionId === "") return;
+        if (root.queueStatusRequest && root.queueStatusRequest.readyState !== 4) return;
+        const xhr = new XMLHttpRequest();
+        root.queueStatusRequest = xhr;
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4) return;
+            if (ghost !== root.activeGhost || sessionId !== root.currentSessionId || !root.streaming) return;
+            if (xhr.status === 200) {
+                try {
+                    root.applyQueue(JSON.parse(xhr.responseText));
+                } catch (error) {
+                    root.queueError = "ghostd sent malformed queue state";
+                }
+            }
+        };
+        root.dispatch(xhr, "GET", "/api/ghosts/" + encodeURIComponent(ghost)
+            + "/sessions/" + encodeURIComponent(sessionId) + "/queue", ({}), null);
+    }
+
+    function queueMessage(text: string, mode: string): void {
+        const prompt = text.trim();
+        const ghost = root.activeGhost;
+        const sessionId = root.currentSessionId;
+        if (prompt === "" || root.queueSubmitting || !root.streaming
+                || ghost === "" || sessionId === "") return;
+        root.queueSubmitting = true;
+        root.queueError = "";
+        // Show the chip immediately; the authoritative GET will remove it once
+        // OMP consumes it into the next provider boundary.
+        if (mode === "followUp") root.followUpQueue = root.followUpQueue.concat([prompt]);
+        else root.steeringQueue = root.steeringQueue.concat([prompt]);
+
+        const xhr = new XMLHttpRequest();
+        root.queueRequest = xhr;
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4) return;
+            if (ghost !== root.activeGhost || sessionId !== root.currentSessionId) return;
+            root.queueSubmitting = false;
+            if (xhr.status === 200) {
+                try {
+                    root.applyQueue(JSON.parse(xhr.responseText));
+                    root.queueError = "";
+                } catch (error) {
+                    root.queueError = "ghostd sent malformed queue state";
+                }
+            } else {
+                root.queueError = root.describeError(xhr, "POST queue");
+                root.fetchQueue();
+                root.queueMessageRejected(prompt);
+            }
+        };
+        root.dispatch(xhr, "POST", "/api/ghosts/" + encodeURIComponent(ghost)
+            + "/sessions/" + encodeURIComponent(sessionId) + "/queue",
+            ({ "Content-Type": "application/json" }),
+            JSON.stringify({ mode: mode, text: prompt }));
     }
 
     // ---- Model login ------------------------------------------------------
@@ -921,8 +1397,11 @@ Singleton {
                 root.fetchAvailableModels();
                 // Claude Code owns its external desktop login. Opening Ghost's
                 // per-ghost provider form here would offer no usable action.
-                if (body.usable === false && provider !== "claude-code")
+                if (body.usable === true) {
+                    root.modelSwitchCompleted(provider, id);
+                } else if (body.usable === false && provider !== "claude-code") {
                     root.modelSwitchNeedsLogin(provider);
+                }
             } else {
                 root.modelError = root.describeError(xhr, "PUT model");
             }
@@ -931,6 +1410,90 @@ Singleton {
             "/api/ghosts/" + encodeURIComponent(ghost) + "/model",
             ({ "Content-Type": "application/json" }),
             JSON.stringify({ provider: provider, id: id }));
+    }
+
+    function applyModelRouting(body: var): void {
+        root.modelRouting = Array.isArray(body.roles) ? body.roles : [];
+    }
+
+    /** Fetch Ghost roles plus the OMP role/fallback projection. */
+    function fetchModelRouting(): void {
+        const ghost = root.activeGhost;
+        if (ghost === "") return;
+        root.modelRoutingLoading = true;
+        const xhr = new XMLHttpRequest();
+        root.modelRoutingRequest = xhr;
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || xhr !== root.modelRoutingRequest) return;
+            root.modelRoutingLoading = false;
+            if (xhr.status === 200) {
+                try {
+                    root.applyModelRouting(JSON.parse(xhr.responseText));
+                    root.modelError = "";
+                } catch (error) {
+                    root.modelError = "ghostd sent malformed model routing";
+                }
+            } else {
+                root.modelError = root.describeError(xhr, "GET model routing");
+            }
+        };
+        root.dispatch(xhr, "GET", "/api/ghosts/" + encodeURIComponent(ghost)
+            + "/model-routing", ({}), null);
+    }
+
+    /** Assign a primary model or append an ordered OMP retry fallback. */
+    function setModelRoute(role: string, target: string, provider: string, id: string): void {
+        const ghost = root.activeGhost;
+        if (ghost === "" || role === "" || provider === "" || id === "") return;
+        root.modelRoutingLoading = true;
+        const xhr = new XMLHttpRequest();
+        root.modelRoutingRequest = xhr;
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || xhr !== root.modelRoutingRequest) return;
+            root.modelRoutingLoading = false;
+            if (xhr.status === 200) {
+                try {
+                    root.applyModelRouting(JSON.parse(xhr.responseText));
+                    root.modelError = "";
+                    root.fetchCurrentModel();
+                    root.fetchAvailableModels();
+                    root.modelRouteCompleted(role, target);
+                } catch (error) {
+                    root.modelError = "ghostd sent malformed model routing";
+                }
+            } else {
+                root.modelError = root.describeError(xhr, "PUT model routing");
+            }
+        };
+        root.dispatch(xhr, "PUT", "/api/ghosts/" + encodeURIComponent(ghost)
+            + "/model-routing", ({ "Content-Type": "application/json" }),
+            JSON.stringify({ role: role, target: target, provider: provider, id: id }));
+    }
+
+    function clearModelFallbacks(role: string): void {
+        const ghost = root.activeGhost;
+        if (ghost === "" || role === "") return;
+        root.modelRoutingLoading = true;
+        const xhr = new XMLHttpRequest();
+        root.modelRoutingRequest = xhr;
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || xhr !== root.modelRoutingRequest) return;
+            root.modelRoutingLoading = false;
+            if (xhr.status === 200) {
+                try {
+                    root.applyModelRouting(JSON.parse(xhr.responseText));
+                    root.modelError = "";
+                    root.modelRouteCompleted(role, "clear_fallbacks");
+                } catch (error) {
+                    root.modelError = "ghostd sent malformed model routing";
+                }
+            } else {
+                root.modelError = root.describeError(xhr, "clear model fallbacks");
+            }
+        };
+        root.dispatch(xhr, "PUT", "/api/ghosts/" + encodeURIComponent(ghost)
+            + "/model-routing", ({ "Content-Type": "application/json" }),
+            JSON.stringify({ role: role, target: "clear_fallbacks" }));
     }
 
     // ---- Errors -----------------------------------------------------------

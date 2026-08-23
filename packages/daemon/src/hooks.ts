@@ -18,18 +18,31 @@ export function defaultGhostHooksPath(
   return join(configHome, "ghost", "hooks.json");
 }
 
-export interface GhostSessionStopEvent {
+interface GhostHookEventBase {
+  session_id: string;
+  session_file?: string;
+  signal: AbortSignal;
+  ghost_name: string;
+  cwd: string;
+  runtime: "omp" | "claude-code";
+}
+
+export interface GhostBeforePromptEvent extends GhostHookEventBase {
+  type: "before_prompt";
+  prompt: string;
+  turn_id: number;
+}
+
+export interface GhostBeforePromptResult {
+  additionalContext?: string;
+}
+
+export interface GhostSessionStopEvent extends GhostHookEventBase {
   type: "session_stop";
   messages: unknown[];
   turn_id: number;
   last_assistant_message?: unknown;
-  session_id: string;
-  session_file?: string;
   stop_hook_active: boolean;
-  signal: AbortSignal;
-  ghost_name: string;
-  cwd: string;
-  runtime: "pi" | "claude-code";
 }
 
 export interface GhostSessionStopResult {
@@ -39,19 +52,33 @@ export interface GhostSessionStopResult {
   reason?: string;
 }
 
+export type GhostHookEvent = GhostBeforePromptEvent | GhostSessionStopEvent;
+export type GhostHookResult = GhostBeforePromptResult | GhostSessionStopResult;
+
 export interface GhostHookContext {
   ghostName: string;
   cwd: string;
-  runtime: "pi" | "claude-code";
+  runtime: "omp" | "claude-code";
   signal: AbortSignal;
 }
+
+export type GhostBeforePromptHandler = (
+  event: GhostBeforePromptEvent,
+  context: GhostHookContext,
+) => Promise<GhostBeforePromptResult | undefined | void> | GhostBeforePromptResult | undefined | void;
 
 export type GhostSessionStopHandler = (
   event: GhostSessionStopEvent,
   context: GhostHookContext,
 ) => Promise<GhostSessionStopResult | undefined | void> | GhostSessionStopResult | undefined | void;
 
+type GhostHookHandler = (
+  event: GhostHookEvent,
+  context: GhostHookContext,
+) => Promise<GhostHookResult | undefined | void> | GhostHookResult | undefined | void;
+
 export interface GhostHookAPI {
+  on(event: "before_prompt", handler: GhostBeforePromptHandler): void;
   on(event: "session_stop", handler: GhostSessionStopHandler): void;
 }
 
@@ -59,6 +86,7 @@ export type GhostHookFactory = (hooks: GhostHookAPI) => void | Promise<void>;
 
 interface CommandHook {
   type: "command";
+  eventName: GhostHookEvent["type"];
   command: string;
   timeoutMs: number;
   source: string;
@@ -99,35 +127,39 @@ function parseCommandHooks(path: string): CommandHook[] {
   const hooks = parsed.hooks;
   if (hooks === undefined) return [];
   if (!isObject(hooks)) throw new Error(`${path}: "hooks" must be an object.`);
+  const supported = new Set<GhostHookEvent["type"]>(["before_prompt", "session_stop"]);
   for (const eventName of Object.keys(hooks)) {
-    if (eventName !== "session_stop") {
+    if (!supported.has(eventName as GhostHookEvent["type"])) {
       throw new Error(`${path}: unsupported hook event ${JSON.stringify(eventName)}.`);
     }
   }
-  const groups = hooks.session_stop;
-  if (groups === undefined) return [];
-  if (!Array.isArray(groups)) throw new Error(`${path}: "hooks.session_stop" must be an array.`);
 
   const result: CommandHook[] = [];
-  for (const [groupIndex, group] of groups.entries()) {
-    if (!isObject(group) || !Array.isArray(group.hooks)) {
-      throw new Error(`${path}: hooks.session_stop[${groupIndex}].hooks must be an array.`);
-    }
-    for (const [handlerIndex, raw] of group.hooks.entries()) {
-      const label = `hooks.session_stop[${groupIndex}].hooks[${handlerIndex}]`;
-      if (!isObject(raw) || raw.type !== "command" || typeof raw.command !== "string" || !raw.command.trim()) {
-        throw new Error(`${path}: ${label} must be a command hook with a non-empty command.`);
+  for (const eventName of supported) {
+    const groups = hooks[eventName];
+    if (groups === undefined) continue;
+    if (!Array.isArray(groups)) throw new Error(`${path}: "hooks.${eventName}" must be an array.`);
+    for (const [groupIndex, group] of groups.entries()) {
+      if (!isObject(group) || !Array.isArray(group.hooks)) {
+        throw new Error(`${path}: hooks.${eventName}[${groupIndex}].hooks must be an array.`);
       }
-      const timeoutSeconds = raw.timeout === undefined ? GHOST_HOOK_HANDLER_TIMEOUT_MS / 1_000 : raw.timeout;
-      if (typeof timeoutSeconds !== "number" || !Number.isFinite(timeoutSeconds) || timeoutSeconds <= 0 || timeoutSeconds > 600) {
-        throw new Error(`${path}: ${label}.timeout must be a number in (0, 600].`);
+      for (const [handlerIndex, raw] of group.hooks.entries()) {
+        const label = `hooks.${eventName}[${groupIndex}].hooks[${handlerIndex}]`;
+        if (!isObject(raw) || raw.type !== "command" || typeof raw.command !== "string" || !raw.command.trim()) {
+          throw new Error(`${path}: ${label} must be a command hook with a non-empty command.`);
+        }
+        const timeoutSeconds = raw.timeout === undefined ? GHOST_HOOK_HANDLER_TIMEOUT_MS / 1_000 : raw.timeout;
+        if (typeof timeoutSeconds !== "number" || !Number.isFinite(timeoutSeconds) || timeoutSeconds <= 0 || timeoutSeconds > 600) {
+          throw new Error(`${path}: ${label}.timeout must be a number in (0, 600].`);
+        }
+        result.push({
+          type: "command",
+          eventName,
+          command: raw.command,
+          timeoutMs: Math.floor(timeoutSeconds * 1_000),
+          source: `${path}#${label}`,
+        });
       }
-      result.push({
-        type: "command",
-        command: raw.command,
-        timeoutMs: Math.floor(timeoutSeconds * 1_000),
-        source: `${path}#${label}`,
-      });
     }
   }
   return result;
@@ -143,7 +175,7 @@ interface CommandResult {
 
 function runCommandHook(
   hook: CommandHook,
-  event: GhostSessionStopEvent,
+  event: GhostHookEvent,
 ): Promise<CommandResult> {
   return new Promise((resolve) => {
     if (event.signal.aborted) {
@@ -216,17 +248,21 @@ function parseCommandResult(
   hook: CommandHook,
   result: CommandResult,
   logger: Logger,
-): GhostSessionStopResult | undefined {
+): GhostHookResult | undefined {
   if (result.aborted) return undefined;
   if (result.timedOut) {
-    logger.warn("session_stop hook timed out", { source: hook.source, timeoutMs: hook.timeoutMs });
+    logger.warn(`${hook.eventName} hook timed out`, { source: hook.source, timeoutMs: hook.timeoutMs });
     return undefined;
   }
   if (result.exitCode === 2) {
+    if (hook.eventName === "before_prompt") {
+      logger.warn("before_prompt hook attempted to block and was ignored", { source: hook.source });
+      return undefined;
+    }
     return { decision: "block", reason: result.stderr.trim() || "A Ghost hook blocked the stop." };
   }
   if (result.exitCode !== 0) {
-    logger.warn("session_stop hook failed open", {
+    logger.warn(`${hook.eventName} hook failed open`, {
       source: hook.source,
       exitCode: result.exitCode,
       error: result.stderr.trim() || "command failed",
@@ -238,6 +274,14 @@ function parseCommandResult(
   try {
     const parsed = JSON.parse(output);
     if (!isObject(parsed)) throw new Error("hook output must be a JSON object");
+    if (hook.eventName === "before_prompt") {
+      if (parsed.decision !== undefined || parsed.continue !== undefined || parsed.reason !== undefined) {
+        throw new Error("before_prompt only supports additionalContext");
+      }
+      return typeof parsed.additionalContext === "string"
+        ? { additionalContext: parsed.additionalContext }
+        : undefined;
+    }
     const decision = parsed.decision;
     if (decision !== undefined && decision !== "block") {
       throw new Error(`unsupported decision ${JSON.stringify(decision)}`);
@@ -249,7 +293,7 @@ function parseCommandResult(
       ...(typeof parsed.reason === "string" ? { reason: parsed.reason } : {}),
     };
   } catch (error) {
-    logger.warn("session_stop hook returned invalid JSON", {
+    logger.warn(`${hook.eventName} hook returned invalid JSON`, {
       source: hook.source,
       error: (error as Error).message,
     });
@@ -260,7 +304,10 @@ function parseCommandResult(
 export class GhostHookRunner {
   private readonly logger: Logger;
   private readonly handlerTimeoutMs: number;
-  private readonly handlers: GhostSessionStopHandler[] = [];
+  private readonly handlers: Record<GhostHookEvent["type"], GhostHookHandler[]> = {
+    before_prompt: [],
+    session_stop: [],
+  };
   private readonly commands: CommandHook[];
 
   constructor(options: GhostHookRunnerOptions & { commands?: CommandHook[] } = {}) {
@@ -275,18 +322,20 @@ export class GhostHookRunner {
 
   async register(factory: GhostHookFactory): Promise<void> {
     await factory({
-      on: (event, handler) => {
-        if (event !== "session_stop") throw new Error(`Unsupported Ghost hook event: ${event}`);
-        this.handlers.push(handler);
+      on: (event: GhostHookEvent["type"], handler: GhostHookHandler) => {
+        this.handlers[event].push(handler);
       },
-    });
+    } as GhostHookAPI);
   }
 
-  hasHandlers(event: "session_stop"): boolean {
-    return event === "session_stop" && (this.handlers.length > 0 || this.commands.length > 0);
+  hasHandlers(event: GhostHookEvent["type"]): boolean {
+    return this.handlers[event].length > 0 || this.commands.some((hook) => hook.eventName === event);
   }
 
-  async emitSessionStop(event: GhostSessionStopEvent): Promise<GhostSessionStopResult | undefined> {
+  private async runHandler(
+    handler: GhostHookHandler,
+    event: GhostHookEvent,
+  ): Promise<GhostHookResult | undefined> {
     if (event.signal.aborted) return undefined;
     const context: GhostHookContext = {
       ghostName: event.ghost_name,
@@ -294,45 +343,73 @@ export class GhostHookRunner {
       runtime: event.runtime,
       signal: event.signal,
     };
-
-    for (const handler of this.handlers) {
-      if (event.signal.aborted) return undefined;
-      let timer: NodeJS.Timeout | undefined;
-      let resolveAbort: (() => void) | undefined;
-      const timeout = new Promise<{ kind: "timeout" }>((resolve) => {
-        timer = setTimeout(() => resolve({ kind: "timeout" }), this.handlerTimeoutMs);
-        timer.unref();
-      });
-      const aborted = new Promise<{ kind: "aborted" }>((resolve) => {
-        resolveAbort = () => resolve({ kind: "aborted" });
-        event.signal.addEventListener("abort", resolveAbort, { once: true });
-      });
-      const handled = Promise.resolve()
-        .then(() => handler(event, context))
-        .then((result) => ({ kind: "result" as const, result: result ?? undefined }))
-        .catch((error) => {
-          this.logger.warn("session_stop hook failed open", {
-            ghost: event.ghost_name,
-            error: error instanceof Error ? error.message : String(error),
-          });
-          return { kind: "result" as const, result: undefined };
-        });
-      const settled = await Promise.race([handled, timeout, aborted]);
-      if (timer) clearTimeout(timer);
-      if (resolveAbort) event.signal.removeEventListener("abort", resolveAbort);
-      if (settled.kind === "timeout") {
-        this.logger.warn("session_stop hook timed out", {
+    let timer: NodeJS.Timeout | undefined;
+    let resolveAbort: (() => void) | undefined;
+    const timeout = new Promise<{ kind: "timeout" }>((resolve) => {
+      timer = setTimeout(() => resolve({ kind: "timeout" }), this.handlerTimeoutMs);
+      timer.unref();
+    });
+    const aborted = new Promise<{ kind: "aborted" }>((resolve) => {
+      resolveAbort = () => resolve({ kind: "aborted" });
+      event.signal.addEventListener("abort", resolveAbort, { once: true });
+    });
+    const handled = Promise.resolve()
+      .then(() => handler(event, context))
+      .then((result) => ({ kind: "result" as const, result: result ?? undefined }))
+      .catch((error) => {
+        this.logger.warn(`${event.type} hook failed open`, {
           ghost: event.ghost_name,
-          timeoutMs: this.handlerTimeoutMs,
+          error: error instanceof Error ? error.message : String(error),
         });
-        continue;
-      }
-      if (settled.kind === "aborted") return undefined;
-      if (ghostSessionStopContinuation(settled.result)) return settled.result;
+        return { kind: "result" as const, result: undefined };
+      });
+    const settled = await Promise.race([handled, timeout, aborted]);
+    if (timer) clearTimeout(timer);
+    if (resolveAbort) event.signal.removeEventListener("abort", resolveAbort);
+    if (settled.kind === "timeout") {
+      this.logger.warn(`${event.type} hook timed out`, {
+        ghost: event.ghost_name,
+        timeoutMs: this.handlerTimeoutMs,
+      });
+      return undefined;
     }
+    if (settled.kind === "aborted") return undefined;
+    return settled.result;
+  }
 
-    for (const command of this.commands) {
+  async emitBeforePrompt(event: GhostBeforePromptEvent): Promise<GhostBeforePromptResult | undefined> {
+    if (event.signal.aborted) return undefined;
+    const contexts: string[] = [];
+    for (const handler of this.handlers.before_prompt) {
+      const result = await this.runHandler(handler, event);
+      if (event.signal.aborted) return undefined;
+      if (typeof result?.additionalContext === "string" && result.additionalContext.length > 0) {
+        contexts.push(result.additionalContext);
+      }
+    }
+    for (const command of this.commands.filter((hook) => hook.eventName === "before_prompt")) {
       const result = parseCommandResult(command, await runCommandHook(command, event), this.logger);
+      if (event.signal.aborted) return undefined;
+      if (typeof result?.additionalContext === "string" && result.additionalContext.length > 0) {
+        contexts.push(result.additionalContext);
+      }
+    }
+    return contexts.length > 0 ? { additionalContext: contexts.join("\n\n") } : undefined;
+  }
+
+  async emitSessionStop(event: GhostSessionStopEvent): Promise<GhostSessionStopResult | undefined> {
+    if (event.signal.aborted) return undefined;
+    for (const handler of this.handlers.session_stop) {
+      const result = await this.runHandler(handler, event) as GhostSessionStopResult | undefined;
+      if (event.signal.aborted) return undefined;
+      if (ghostSessionStopContinuation(result)) return result;
+    }
+    for (const command of this.commands.filter((hook) => hook.eventName === "session_stop")) {
+      const result = parseCommandResult(
+        command,
+        await runCommandHook(command, event),
+        this.logger,
+      ) as GhostSessionStopResult | undefined;
       if (ghostSessionStopContinuation(result)) return result;
     }
     return undefined;

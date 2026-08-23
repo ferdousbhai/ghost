@@ -2,10 +2,9 @@
  * Provider login orchestration — signing a ghost into a model provider from
  * the shell instead of a terminal.
  *
- * pi already owns the hard part. `ModelRuntime.login(providerId, type,
- * interaction)` drives every provider's OAuth or api-key flow and persists the
- * result to the ghost's own `<home>/.pi/auth.json` (the same file
- * `session-host.ts`/`models.ts` read). What pi assumes is a TTY: an
+ * OMP already owns the hard part. `GhostOmpRuntime.login(providerId, type,
+ * interaction)` drives each provider's OAuth or API-key flow and persists the
+ * result to the ghost's own `<home>/.pi/agent.db`. What OMP assumes is a TTY: an
  * `AuthInteraction` whose `prompt()` blocks for a typed answer and whose
  * `notify()` prints a URL or a device code. This module is the wrap that turns
  * that interactive, multi-step flow into a small pollable HTTP state machine so
@@ -22,7 +21,7 @@
  *   notify(device_code)  → view.deviceCode + verificationUrl
  *   notify(progress|info)→ view.message
  *   prompt(secret|text)  → view.prompt, status awaiting_input; resolved by submitInput
- *   prompt(manual_code)  → view.prompt (raced against pi's own callback server)
+ *   prompt(manual_code)  → view.prompt (raced against OMP's callback server)
  *   prompt(select)       → view.prompt.options, status awaiting_select
  *
  * A callback-server flow (openai-codex, openrouter, anthropic) notifies an
@@ -34,23 +33,15 @@
  * ## Secrets
  *
  * A pasted code or api key flows straight from `submitInput()` into the
- * `prompt()` promise pi is awaiting; it is NEVER stored on the view, returned
- * from a GET, or written to a log. Tokens land in exactly one place — pi's
- * `auth.json`, written by `login()` itself. Device codes and auth URLs are not
+ * `prompt()` promise OMP is awaiting; it is NEVER stored on the view, returned
+ * from a GET, or written to a log. Tokens land in exactly one place — OMP's
+ * `agent.db`, written by `AuthStorage`. Device codes and auth URLs are not
  * secrets (they are meant to be shown), but are not logged either.
  *
  * The runtime is injected (`createRuntime`) so tests drive a fake `login()`
  * through every callback path without touching a real provider.
  */
 import { randomUUID } from "node:crypto";
-import type {
-  AuthEvent,
-  AuthInteraction,
-  AuthPrompt,
-  AuthType,
-  Credential,
-} from "@earendil-works/pi-ai";
-import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { GhostError, ghostPaths, type GhostRegistry } from "./ghosts.js";
 import { silentLogger, type Logger } from "./log.js";
 import {
@@ -60,10 +51,50 @@ import {
   resolveChatModelRef,
   setChatModelRoleIfUnset,
 } from "./models.js";
+import { createGhostOmpRuntime } from "./omp-runtime.js";
+
+export type AuthType = "oauth" | "api_key";
+export type Credential =
+  | { type: "api_key"; key: string; source?: "login" }
+  | {
+      type: "oauth";
+      refresh: string;
+      access: string;
+      expires: number;
+      [key: string]: unknown;
+    };
+export type AuthEvent =
+  | { type: "auth_url"; url: string; instructions?: string }
+  | {
+      type: "device_code";
+      userCode: string;
+      verificationUri: string;
+      expiresInSeconds?: number;
+    }
+  | { type: "info"; message: string; links?: Array<{ label?: string; url: string }> }
+  | { type: "progress"; message: string };
+export type AuthPrompt =
+  | {
+      type: "text" | "secret" | "manual_code";
+      message: string;
+      placeholder?: string;
+      signal?: AbortSignal;
+    }
+  | {
+      type: "select";
+      message: string;
+      options: Array<{ id: string; label: string; description?: string }>;
+      signal?: AbortSignal;
+    };
+export interface AuthInteraction {
+  signal?: AbortSignal;
+  notify(event: AuthEvent): void;
+  prompt(prompt: AuthPrompt): Promise<string>;
+}
 
 /**
- * The minimum of `ModelRuntime` this module drives. `ModelRuntime` satisfies
- * it structurally; a test passes a fake with a scripted `login()`.
+ * The minimum of `GhostOmpRuntime` this module drives; tests pass a fake with
+ * a scripted `login()`.
  */
 export interface LoginRuntime {
   getProviders(): readonly {
@@ -120,7 +151,7 @@ export interface LoginView {
   error?: string;
 }
 
-/** One provider a ghost can log into, derived from pi's registry. */
+/** One provider a ghost can log into, derived from OMP's registry. */
 export interface ProviderInfo {
   id: string;
   name: string;
@@ -159,7 +190,7 @@ interface LoginSession {
 export interface LoginManagerOptions {
   registry: GhostRegistry;
   logger?: Logger;
-  /** Sets pi's offline posture on the runtime it builds. See config.offline. */
+  /** Sets OMP's offline posture on the runtime it builds. See config.offline. */
   offline?: boolean;
   /** Abandon an unfinished login after this long. Default 5 min. */
   loginTtlMs?: number;
@@ -177,7 +208,7 @@ const AUTH_TYPES: readonly AuthType[] = ["oauth", "api_key"];
 export const ANTHROPIC_EXTRA_USAGE_NOTE = "extra usage billed per token; not Claude plan limits";
 
 /**
- * Curated fallback, used ONLY if pi's registry comes back empty (it never
+ * Curated fallback, used ONLY if OMP's registry comes back empty (it should not
  * should). The real list is derived from `runtime.getProviders()`.
  */
 const FALLBACK_PROVIDERS: readonly ProviderInfo[] = [
@@ -203,7 +234,7 @@ async function defaultCreateRuntime(input: {
   // the provider's own OAuth HTTP, so a login works offline. create() still
   // builds the local credential snapshot, which `configured`/`connectedVia`
   // read.
-  return ModelRuntime.create({
+  return createGhostOmpRuntime({
     authPath: input.authPath,
     modelsPath: input.modelsPath,
     allowModelNetwork: false,
@@ -267,7 +298,7 @@ export class LoginManager {
     });
   }
 
-  /** The providers this ghost can log into, derived from pi's registry. */
+  /** The providers this ghost can log into, derived from OMP's registry. */
   async listProviders(ghostName: string): Promise<ProviderInfo[]> {
     const ghost = this.registry.get(ghostName);
     const runtime = await this.buildRuntime(ghost.dir);
@@ -312,7 +343,7 @@ export class LoginManager {
   }
 
   /**
-   * Begin a login. Validates the provider/authType against pi's registry,
+   * Begin a login. Validates the provider/authType against OMP's registry,
    * then drives `runtime.login()` in the background. Returns the initial view.
    */
   async start(ghostName: string, providerId: string, authType: AuthType): Promise<LoginView> {

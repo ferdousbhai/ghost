@@ -1,13 +1,15 @@
 # Ghost hooks
 
 Ghost owns an awaited lifecycle boundary above its model harnesses. A hook has
-the same behavior whether a conversation uses pi or the owner-local Claude Code
+the same behavior whether a conversation uses OMP or the owner-local Claude Code
 runtime.
 
-The first supported event is `session_stop`: it runs after an assistant pass and
-before Ghost emits the turn's terminal `done` frame. A hook can accept the pass
-or return model-visible context for a hidden continuation. This follows OMP's
-contract rather than trying to infer completion from notification-only
+Ghost supports two events. `before_prompt` runs after the user submits a prompt
+but before the model request. It can add advisory context to that request without
+blocking or creating another model turn. `session_stop` runs after an assistant
+pass and before Ghost emits the turn's terminal `done` frame. It can accept the
+pass or return model-visible context for a hidden continuation. The stop boundary
+follows OMP's contract rather than inferring completion from notification-only
 `agent_end` events.
 
 ## Configuration
@@ -18,6 +20,17 @@ User hooks live in `$XDG_CONFIG_HOME/ghost/hooks.json` (normally
 ```json
 {
   "hooks": {
+    "before_prompt": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/absolute/path/to/advisory-context",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
     "session_stop": [
       {
         "hooks": [
@@ -34,13 +47,44 @@ User hooks live in `$XDG_CONFIG_HOME/ghost/hooks.json` (normally
 ```
 
 Restart `ghostd` after changing the file. Groups and handlers run in file order.
-The first handler that requests a continuation wins.
+All non-empty `before_prompt` contexts are combined. The first `session_stop`
+handler that requests a continuation wins.
 
 Ghost deliberately does not discover executable hooks inside a ghost home. A
 home can come from an imported archive, so treating files under it as code would
 turn data import into arbitrary code execution. The user-level hook file is a
 trusted machine configuration surface. Commands run with the daemon user's
 permissions.
+
+## `before_prompt` protocol
+
+A command receives the user prompt, session metadata, runtime, ghost name, and
+working directory:
+
+```json
+{
+  "type": "before_prompt",
+  "prompt": "Continue.",
+  "turn_id": 4,
+  "session_id": "...",
+  "session_file": "...",
+  "ghost_name": "casper",
+  "cwd": "/home/me/Ghosts/casper",
+  "runtime": "omp"
+}
+```
+
+Exit 0 with no output or `{}` adds nothing. To add model-visible guidance to the
+same user-initiated model request, return:
+
+```json
+{ "additionalContext": "Avoid the style warning from the previous reply." }
+```
+
+`before_prompt` cannot block and does not accept continuation decisions. Errors,
+timeouts, and malformed output fail open. Context is hidden from the chat UI. In
+the OMP runtime it is a non-displayed custom context message; in the Claude Code
+runtime it is a synthetic, non-querying message paired with the real user prompt.
 
 ## `session_stop` protocol
 
@@ -60,11 +104,11 @@ A command receives JSON on stdin:
   "stop_hook_active": false,
   "ghost_name": "casper",
   "cwd": "/home/me/Ghosts/casper",
-  "runtime": "pi"
+  "runtime": "omp"
 }
 ```
 
-`runtime` is `pi` or `claude-code`. Claude Code exposes the current assistant
+`runtime` is `omp` or `claude-code`. Claude Code exposes the current assistant
 pass in `messages`; its full transcript remains owned by Claude Code.
 
 Exit 0 with no output or `{}` accepts the pass. Either response below requests a
@@ -96,6 +140,9 @@ pass it to `SessionHost({ hooks })`:
 ```ts
 const hooks = new GhostHookRunner();
 await hooks.register((api) => {
+  api.on("before_prompt", async () => ({
+    additionalContext: "Remember the advisory from the prior reply.",
+  }));
   api.on("session_stop", async (event) => {
     if (event.stop_hook_active) return;
     return { decision: "block", reason: "Run one final verification pass." };

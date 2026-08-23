@@ -10,7 +10,7 @@ import qs.services
 Rectangle {
     id: root
 
-    signal submitted(string text)
+    signal submitted(string text, string mode)
 
     property alias text: field.text
 
@@ -44,12 +44,15 @@ Rectangle {
             selectByMouse: true
             selectionColor: Theme.selection
             selectedTextColor: Theme.foregroundBright
-            enabled: !Ghostd.streaming
+            enabled: Ghostd.pendingAsk === null
 
             Keys.onPressed: event => {
                 const enter = event.key === Qt.Key_Return || event.key === Qt.Key_Enter;
                 if (enter && !(event.modifiers & Qt.ShiftModifier)) {
-                    root.submitted(field.text);
+                    const mode = Ghostd.streaming
+                        ? ((event.modifiers & Qt.ControlModifier) ? "followUp" : "steer")
+                        : "prompt";
+                    root.submitted(field.text, mode);
                     field.text = "";
                     event.accepted = true;
                 }
@@ -60,7 +63,9 @@ Rectangle {
                 visible: field.text === ""
                 text: Ghostd.activeGhost === ""
                     ? "no ghost selected"
-                    : "talk to " + Ghostd.activeGhost + "…"
+                    : (Ghostd.streaming
+                        ? "steer " + Ghostd.activeGhost + "…  ·  Ctrl+Enter follows up"
+                        : "talk to " + Ghostd.activeGhost + "…")
                 color: Theme.foregroundDim
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontSize

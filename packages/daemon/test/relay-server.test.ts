@@ -8,7 +8,7 @@
  * status payload is the one place a token could accidentally be published to an
  * unauthenticated route.
  */
-import { createServer } from "node:http";
+import { createServer, request } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
@@ -119,15 +119,30 @@ describe("the upgrade shares the port with the API", () => {
 
   it("hangs up on an upgrade when there is no relay, rather than leaking the socket", async () => {
     await serve(null);
-    const socket = new WebSocket(`ws://127.0.0.1:${listening?.port}${RELAY_PATH}?token=${TOKEN}`);
-    const error = await new Promise<Error | undefined>((resolve) => {
-      socket.once("open", () => resolve(undefined));
-      socket.once("error", (reason) => resolve(reason));
-      socket.once("close", () => resolve(new Error("closed")));
+    const outcome = await new Promise<"upgraded" | "closed">((resolve) => {
+      const upgrade = request({
+        host: "127.0.0.1",
+        port: listening?.port,
+        path: `${RELAY_PATH}?token=${TOKEN}`,
+        headers: {
+          Connection: "Upgrade",
+          Upgrade: "websocket",
+          "Sec-WebSocket-Key": Buffer.from("ghost-relay-test").toString("base64"),
+          "Sec-WebSocket-Version": "13",
+        },
+      });
+      upgrade.once("upgrade", (_response, socket) => {
+        socket.destroy();
+        resolve("upgraded");
+      });
+      upgrade.once("response", (response) => {
+        response.resume();
+        resolve("closed");
+      });
+      upgrade.once("error", () => resolve("closed"));
+      upgrade.end();
     });
-    socket.removeAllListeners();
-    socket.terminate();
-    expect(error).toBeDefined();
+    expect(outcome).toBe("closed");
   });
 
   it("closing the daemon hangs up on the browser first", async () => {

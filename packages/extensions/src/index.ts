@@ -1,9 +1,9 @@
 /**
- * `@ghost/extensions` — the pi extensions that make a plain-file ghost home
+ * `@ghost/extensions` — the OMP extensions that make a plain-file ghost home
  * behave like a persona, plus the typed reader/writer for that layout.
  *
  * Boundary (CONTRACTS.md): no HTTP, no daemon lifecycle, no session management.
- * Anything about *how an agent runs* is pi's; anything about *what a ghost is*
+ * Anything about *how an agent runs* is OMP's; anything about *what a ghost is*
  * lives here.
  */
 export {

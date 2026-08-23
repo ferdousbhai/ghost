@@ -10,11 +10,13 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   builtinProviderPreset,
+  appendGhostModelFallback,
+  clearGhostModelFallbacks,
   ghostAuthPath,
+  ghostOmpModelRouting,
   ghostModelsLockPath,
   ghostModelsPath,
   GhostModelsWriteConflictError,
@@ -25,8 +27,10 @@ import {
   readGhostModels,
   resolveChatModelRef,
   setChatModelRole,
+  setGhostModelRole,
   writeGhostModels,
 } from "../src/models.js";
+import { createGhostOmpRuntime } from "../src/omp-runtime.js";
 
 let dir: string | null = null;
 
@@ -55,6 +59,25 @@ describe("models.json round-trip", () => {
       provider: "openrouter",
       modelId: OPENROUTER_DEFAULT_FREE_MODEL,
     });
+  });
+
+  it("preserves unknown top-level OMP/provider configuration while mutating routing", () => {
+    const agentDir = makeAgentDir();
+    writeFileSync(ghostModelsPath(agentDir), `${JSON.stringify({
+      providers: {},
+      futureSetting: { enabled: true },
+    })}\n`, "utf8");
+    setGhostModelRole(agentDir, "vision_model", "openai-codex", "gpt-5.6");
+    appendGhostModelFallback(agentDir, "vision_model", "anthropic", "claude-sonnet-4-6");
+    expect(readGhostModels(agentDir)).toMatchObject({
+      futureSetting: { enabled: true },
+      roles: { vision_model: { provider: "openai-codex", modelId: "gpt-5.6" } },
+      fallbacks: {
+        vision_model: [{ provider: "anthropic", modelId: "claude-sonnet-4-6" }],
+      },
+    });
+    clearGhostModelFallbacks(agentDir, "vision_model");
+    expect(readGhostModels(agentDir)?.fallbacks?.vision_model).toBeUndefined();
   });
 
   it("replaces a permissive models.json atomically with mode 0600", () => {
@@ -196,8 +219,36 @@ describe("resolveChatModelRef", () => {
   });
 });
 
-describe("pi compatibility", () => {
-  it("loads our models.json — including the roles key pi does not know", async () => {
+describe("OMP model routing projection", () => {
+  it("maps Ghost roles and ordered fallbacks onto OMP role settings", () => {
+    expect(ghostOmpModelRouting({
+      providers: {},
+      roles: {
+        chat_model: { provider: "openai-codex", modelId: "gpt-5.6-sol" },
+        vision_model: { provider: "openai-codex", modelId: "gpt-5.6" },
+        research_model: { provider: "anthropic", modelId: "claude-opus-4-6" },
+      },
+      fallbacks: {
+        chat_model: [
+          { provider: "anthropic", modelId: "claude-sonnet-4-6" },
+          { provider: "xai", modelId: "grok-code-fast-1" },
+        ],
+      },
+    })).toEqual({
+      modelRoles: {
+        default: "openai-codex/gpt-5.6-sol",
+        vision: "openai-codex/gpt-5.6",
+        research: "anthropic/claude-opus-4-6",
+      },
+      fallbackChains: {
+        default: ["anthropic/claude-sonnet-4-6", "xai/grok-code-fast-1"],
+      },
+    });
+  });
+});
+
+describe("OMP compatibility", () => {
+  it("loads our models.json after projecting Ghost-only routing keys", async () => {
     const agentDir = makeAgentDir();
     writeGhostModels(
       agentDir,
@@ -208,15 +259,38 @@ describe("pi compatibility", () => {
         apiKey: "not-needed",
       }),
     );
-    const runtime = await ModelRuntime.create({
+    const runtime = await createGhostOmpRuntime({
       authPath: ghostAuthPath(agentDir),
       modelsPath: ghostModelsPath(agentDir),
       allowModelNetwork: false,
     });
     // A schema rejection would surface here rather than as a missing model.
-    expect(runtime.getError()).toBeUndefined();
+    expect(runtime.modelRegistry.getError()).toBeUndefined();
     const model = runtime.getModel("ghost-local", "mock-ghost-1");
     expect(model?.baseUrl).toBe("http://127.0.0.1:1/v1");
+    runtime.close();
+  });
+
+  it("imports legacy auth.json once and keeps the source intact", async () => {
+    const agentDir = makeAgentDir();
+    const authPath = ghostAuthPath(agentDir);
+    writeFileSync(authPath, JSON.stringify({
+      openrouter: { type: "api_key", key: "legacy-secret" },
+    }), { encoding: "utf8", mode: 0o600 });
+
+    const runtime = await createGhostOmpRuntime({
+      authPath,
+      modelsPath: ghostModelsPath(agentDir),
+      allowModelNetwork: false,
+    });
+    expect(runtime.authStorage.get("openrouter")).toMatchObject({
+      type: "api_key",
+      key: "legacy-secret",
+    });
+    expect(existsSync(join(agentDir, "agent.db"))).toBe(true);
+    expect(existsSync(join(agentDir, ".auth-json-imported-v18"))).toBe(true);
+    expect(existsSync(authPath)).toBe(true);
+    runtime.close();
   });
 
   it("is provider-agnostic: any OpenAI-compatible endpoint is one preset call", () => {
@@ -229,7 +303,7 @@ describe("pi compatibility", () => {
       expect(file.providers[providerId]?.baseUrl).toBe(baseUrl);
       expect(file.providers[providerId]?.api).toBe("openai-completions");
     }
-    // pi-messages is a first-class api value, so a relay backend is declared
+    // pi-messages is a first-class API value, so a relay backend is declared
     // the same way as any other provider.
     const relay = openAiCompatiblePreset({
       providerId: "relay",

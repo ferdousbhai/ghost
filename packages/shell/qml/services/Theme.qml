@@ -42,6 +42,11 @@ Singleton {
     property string themeName: ""
     /** True when we are painting on top of an Omarchy theme rather than the fallback. */
     readonly property bool themed: Object.keys(root.colors).length > 0
+    /** Explicit accessibility escape hatch for every decorative loop. */
+    readonly property bool reducedMotion: {
+        const value = String(Quickshell.env("GHOST_REDUCE_MOTION") || "").toLowerCase();
+        return value === "1" || value === "true" || value === "yes";
+    }
 
     // ---- Fallback palette -------------------------------------------------
     // Tokyo Night, Omarchy's default theme. Chosen so a non-Omarchy machine

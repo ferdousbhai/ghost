@@ -1,14 +1,14 @@
 /**
  * Per-ghost model configuration.
  *
- * A ghost is model-agnostic across pi providers. The one explicit runtime
+ * A ghost is model-agnostic across Oh My Pi providers. The one explicit runtime
  * marker is `claude-code/default`, because an installed Claude Code process
- * has different auth/accounting semantics than pi's Anthropic provider.
- * Model/runtime choice lives in the ghost's own
- * `<home>/.pi/models.json` — pi's native format, read by pi's own
- * `ModelConfig.load()` — plus pi's credential store at
- * `<home>/.pi/auth.json`. The daemon's job is to point pi at those two files
- * and to resolve which model plays the chat role.
+ * has different auth/accounting semantics than OMP's Anthropic provider.
+ * Durable model/runtime choice lives in the ghost's own
+ * `<home>/.pi/models.json`. `omp-runtime.ts` projects the provider portion to
+ * OMP while retaining Ghost's role and fallback metadata. OMP's canonical
+ * credential store is `<home>/.pi/agent.db`; a legacy `auth.json` is imported
+ * once and retained as a recoverable migration source.
  *
  * ## The file
  *
@@ -17,16 +17,15 @@
  *   "providers": {
  *     "<providerId>": { "name", "baseUrl", "api", "apiKey", "headers", "models": [...] }
  *   },
- *   // Ours, not pi's. pi's schema has no additionalProperties constraint, so
- *   // an unknown top-level key rides along untouched.
- *   "roles": { "chat_model": { "provider": "<providerId>", "modelId": "<id>" } }
+ *   "roles": { "chat_model": { "provider": "<providerId>", "modelId": "<id>" } },
+ *   "fallbacks": { "chat_model": [{ "provider": "<providerId>", "modelId": "<id>" }] }
  * }
  * ```
  *
- * A provider that pi already knows (`openrouter`, `openai-codex`,
+ * A provider that OMP already knows (`openrouter`, `openai-codex`,
  * `anthropic`, `openai`, `github-copilot`, `xai`, …) needs NO `providers`
  * entry at all — declare only the `roles` binding and log in. An
- * OpenAI-compatible endpoint pi does not know (Ollama, vLLM, llama.cpp, a
+ * OpenAI-compatible endpoint OMP does not know (Ollama, vLLM, llama.cpp, a
  * relay speaking `pi-messages`) is declared in full under `providers`.
  *
  * ## Credentials
@@ -36,17 +35,13 @@
  *
  * 1. `apiKey` in `models.json` (device-local; fine for keyless local servers
  *    and for a key the user pastes into their own ghost).
- * 2. `auth.json`, pi's credential store, which holds OAuth credentials as
- *    well as API keys. Verified present in pi-ai 0.84.2: `openai-codex`
- *    ("OpenAI (ChatGPT Plus/Pro)", `isSubscription: true`), `anthropic`,
- *    `openrouter` ("Sign in with OpenRouter"),
- *    `github-copilot`, `xai`, `kimi-coding`, `radius`. The daemon does not
- *    implement an OAuth flow of its own — see README "Using an existing
- *    subscription" for the wrap that reuses pi's.
+ * 2. `agent.db`, OMP's SQLite credential store, which holds OAuth credentials
+ *    and API keys. The daemon does not implement provider OAuth itself; its
+ *    login broker drives OMP's registry and `AuthStorage` interaction.
  *
  * `claude-code/default` uses neither source: the official Agent SDK invokes
  * the installed `claude`, and that unmodified executable reads the creator's
- * own external Claude Code login. The pinned pi docs explicitly say its
+ * own external Claude Code login. The upstream provider path and this external
  * `anthropic` OAuth uses per-token extra usage rather than included plan
  * limits; the two selections must not be conflated.
  */
@@ -62,7 +57,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 
-/** One model entry, a subset of pi's `ModelsJsonModel`. */
+/** One model entry, a subset of OMP's models-file model. */
 export interface GhostModelDefinition {
   id: string;
   name?: string;
@@ -76,7 +71,7 @@ export interface GhostModelDefinition {
   [key: string]: unknown;
 }
 
-/** One provider entry, a subset of pi's `ModelsJsonProvider`. */
+/** One provider entry, a subset of OMP's models-file provider. */
 export interface GhostProviderConfig {
   name?: string;
   baseUrl?: string;
@@ -98,8 +93,7 @@ export interface GhostModelRoleBinding {
  * chat turn; the rest exist so a role added later does not need a file
  * migration. `vision_model` is the first to take that promise up — a plain
  * addition to this union, and every existing `models.json` keeps working,
- * because `roles` is optional, each role within it is optional, and pi's own
- * schema has no `additionalProperties` constraint to trip over.
+ * because `roles` is optional and each role within it is optional.
  *
  * - `chat_model` — answers the turn.
  * - `vision_model` — reads images when `chat_model` cannot; must be a model
@@ -122,9 +116,74 @@ export type GhostModelRole =
   | "general_purpose_model"
   | "research_model";
 
+export const GHOST_MODEL_ROLES: readonly GhostModelRole[] = [
+  "chat_model",
+  "vision_model",
+  "title_model",
+  "general_purpose_model",
+  "research_model",
+];
+
+/**
+ * OMP has first-class `default` and `vision` roles and permits custom ones.
+ * Keep Ghost's public role vocabulary stable and translate only at the harness
+ * boundary; `title`, `general`, and `research` are intentionally custom OMP
+ * roles rather than misleading aliases for its coding-specific roles.
+ */
+export const GHOST_TO_OMP_MODEL_ROLE: Readonly<Record<GhostModelRole, string>> = {
+  chat_model: "default",
+  vision_model: "vision",
+  title_model: "title",
+  general_purpose_model: "general",
+  research_model: "research",
+};
+
 export interface GhostModelsFile {
   providers: Record<string, GhostProviderConfig>;
   roles?: Partial<Record<GhostModelRole, GhostModelRoleBinding>>;
+  /** Ordered retry choices, projected to OMP's `retry.fallbackChains`. */
+  fallbacks?: Partial<Record<GhostModelRole, GhostModelRoleBinding[]>>;
+  /** Preserve OMP/provider additions this version of Ghost does not interpret. */
+  [key: string]: unknown;
+}
+
+export interface GhostOmpModelRouting {
+  modelRoles: Record<string, string>;
+  fallbackChains: Record<string, string[]>;
+}
+
+/** OMP's unambiguous provider-qualified selector. */
+export function ghostModelSelector(binding: GhostModelRoleBinding): string {
+  return `${binding.provider}/${binding.modelId}`;
+}
+
+/**
+ * Project Ghost's durable model routing onto modern OMP settings.
+ *
+ * The implicit first declared chat model remains supported for hand-written
+ * one-provider files. Other roles are explicit: silently borrowing the chat
+ * model for vision/title/research would defeat the reason those roles exist.
+ */
+export function ghostOmpModelRouting(file: GhostModelsFile | null): GhostOmpModelRouting {
+  const modelRoles: Record<string, string> = {};
+  const fallbackChains: Record<string, string[]> = {};
+  const chat = resolveChatModelRef(file);
+  if (chat) modelRoles.default = ghostModelSelector(chat);
+  if (!file) return { modelRoles, fallbackChains };
+
+  for (const role of GHOST_MODEL_ROLES) {
+    if (role !== "chat_model") {
+      const primary = file.roles?.[role];
+      if (primary?.provider && primary.modelId) {
+        modelRoles[GHOST_TO_OMP_MODEL_ROLE[role]] = ghostModelSelector(primary);
+      }
+    }
+    const chain = file.fallbacks?.[role];
+    if (chain?.length) {
+      fallbackChains[GHOST_TO_OMP_MODEL_ROLE[role]] = chain.map(ghostModelSelector);
+    }
+  }
+  return { modelRoles, fallbackChains };
 }
 
 export const MODELS_FILENAME = "models.json";
@@ -333,14 +392,24 @@ export function readGhostModels(agentDir: string): GhostModelsFile | null {
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new Error(`${path} must contain a JSON object.`);
   }
-  const file = parsed as { providers?: unknown; roles?: unknown };
+  const file = parsed as Record<string, unknown> & { providers?: unknown; roles?: unknown; fallbacks?: unknown };
   if (file.providers !== undefined
     && (file.providers === null || typeof file.providers !== "object" || Array.isArray(file.providers))) {
     throw new Error(`${path}: "providers" must be an object.`);
   }
+  if (file.roles !== undefined
+    && (file.roles === null || typeof file.roles !== "object" || Array.isArray(file.roles))) {
+    throw new Error(`${path}: "roles" must be an object.`);
+  }
+  if (file.fallbacks !== undefined
+    && (file.fallbacks === null || typeof file.fallbacks !== "object" || Array.isArray(file.fallbacks))) {
+    throw new Error(`${path}: "fallbacks" must be an object.`);
+  }
   return {
+    ...file,
     providers: (file.providers as Record<string, GhostProviderConfig>) ?? {},
     roles: file.roles as GhostModelsFile["roles"],
+    fallbacks: file.fallbacks as GhostModelsFile["fallbacks"],
   };
 }
 
@@ -410,6 +479,61 @@ export function setChatModelRole(
   });
 }
 
+/** Set any Ghost model role while preserving providers, other roles, and chains. */
+export function setGhostModelRole(
+  agentDir: string,
+  role: GhostModelRole,
+  provider: string,
+  modelId: string,
+): GhostModelsFile {
+  mkdirSync(agentDir, { recursive: true });
+  const path = ghostModelsPath(agentDir);
+  return withSerializedModelsWrite(path, () => {
+    const file: GhostModelsFile = readGhostModels(agentDir) ?? { providers: {} };
+    file.roles = { ...(file.roles ?? {}), [role]: { provider, modelId } };
+    persistGhostModels(path, file);
+    return file;
+  });
+}
+
+/** Append one retry choice unless the same provider/model is already present. */
+export function appendGhostModelFallback(
+  agentDir: string,
+  role: GhostModelRole,
+  provider: string,
+  modelId: string,
+): GhostModelsFile {
+  mkdirSync(agentDir, { recursive: true });
+  const path = ghostModelsPath(agentDir);
+  return withSerializedModelsWrite(path, () => {
+    const file: GhostModelsFile = readGhostModels(agentDir) ?? { providers: {} };
+    const current = [...(file.fallbacks?.[role] ?? [])];
+    if (!current.some((binding) => binding.provider === provider && binding.modelId === modelId)) {
+      current.push({ provider, modelId });
+    }
+    file.fallbacks = { ...(file.fallbacks ?? {}), [role]: current };
+    persistGhostModels(path, file);
+    return file;
+  });
+}
+
+/** Clear a role's retry chain without disturbing its primary binding. */
+export function clearGhostModelFallbacks(
+  agentDir: string,
+  role: GhostModelRole,
+): GhostModelsFile {
+  mkdirSync(agentDir, { recursive: true });
+  const path = ghostModelsPath(agentDir);
+  return withSerializedModelsWrite(path, () => {
+    const file: GhostModelsFile = readGhostModels(agentDir) ?? { providers: {} };
+    const fallbacks = { ...(file.fallbacks ?? {}) };
+    delete fallbacks[role];
+    file.fallbacks = fallbacks;
+    persistGhostModels(path, file);
+    return file;
+  });
+}
+
 /**
  * Bind a default only while the role is still unclaimed.
  *
@@ -459,7 +583,7 @@ export interface OpenRouterPresetOptions {
   apiKey?: string;
   /** Model id to bind to the chat role. Defaults to the free model above. */
   modelId?: string;
-  /** Display name for the model in pi's picker. */
+  /** Display name for the model in OMP's picker. */
   modelName?: string;
   contextWindow?: number;
   maxTokens?: number;
@@ -468,7 +592,7 @@ export interface OpenRouterPresetOptions {
 /**
  * OpenRouter as a fully declared provider.
  *
- * pi has a built-in `openrouter` provider whose catalog is fetched over the
+ * OMP has a built-in `openrouter` provider whose catalog is fetched over the
  * network; declaring the model statically here means the ghost works with
  * `offline: true` and on first run, before any catalog has been cached.
  * Cost is zeroed because the intended entry point is a `:free` model —
@@ -506,7 +630,7 @@ export interface OpenAiCompatiblePresetOptions {
   baseUrl: string;
   modelId: string;
   name?: string;
-  /** pi stream api. Defaults to `openai-completions`. `pi-messages` works too. */
+  /** OMP stream API. Defaults to `openai-completions`; `pi-messages` works too. */
   api?: string;
   apiKey?: string;
   headers?: Record<string, string>;
@@ -547,11 +671,9 @@ export function openAiCompatiblePreset(
 }
 
 /**
- * Bind a model served by a provider pi already knows, authenticated from
- * `auth.json` — an API key or, for the providers that support it, a
- * subscription OAuth credential (`openai-codex`, `anthropic`, `openrouter`,
- * `github-copilot`, `xai`, `kimi-coding`, `radius`). No `providers` entry is
- * emitted: pi supplies the endpoint and the catalog.
+ * Bind a model served by a provider OMP already knows, authenticated from its
+ * `agent.db` store. No `providers` entry is emitted: OMP supplies the endpoint
+ * and catalogue.
  */
 export function builtinProviderPreset(
   providerId: string,

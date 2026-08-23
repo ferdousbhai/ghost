@@ -8,7 +8,7 @@
  * things a scripted transport cannot tell you about, so this suite stands up a
  * `http.Server`, points `ws` at it, and pretends to be Chromium.
  */
-import { createServer, type Server } from "node:http";
+import { createServer, request, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
@@ -104,12 +104,40 @@ async function connectExtension(options: {
 }
 
 async function expectUpgradeRefused(options: Parameters<typeof connectExtension>[0] = {}) {
-  const error = await connectExtension(options).then(
-    () => undefined,
-    (reason: Error) => reason,
-  );
-  expect(error, "expected the upgrade to be refused").toBeDefined();
-  return error as Error;
+  const token = options.token ?? TOKEN;
+  const status = await new Promise<number>((resolve, reject) => {
+    const headers: Record<string, string> = {
+      Connection: "Upgrade",
+      Upgrade: "websocket",
+      "Sec-WebSocket-Key": Buffer.from("ghost-relay-test").toString("base64"),
+      "Sec-WebSocket-Version": "13",
+      "Sec-WebSocket-Protocol": [
+        RELAY_SUBPROTOCOL,
+        `${RELAY_TOKEN_SUBPROTOCOL_PREFIX}${token}`,
+      ].join(", "),
+    };
+    if (options.origin !== null) {
+      headers.Origin = options.origin ?? "chrome-extension://fakefakefake";
+    }
+    const upgrade = request({
+      host: "127.0.0.1",
+      port,
+      path: RELAY_PATH,
+      headers,
+    });
+    upgrade.once("response", (response) => {
+      response.resume();
+      resolve(response.statusCode ?? 0);
+    });
+    upgrade.once("upgrade", (_response, socket) => {
+      socket.destroy();
+      resolve(101);
+    });
+    upgrade.once("error", reject);
+    upgrade.end();
+  });
+  expect(status, "expected the upgrade to be refused").not.toBe(101);
+  return new Error(`HTTP ${status}`);
 }
 
 function waitFor(predicate: () => boolean, timeoutMs = 2_000): Promise<void> {

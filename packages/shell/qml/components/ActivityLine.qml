@@ -1,6 +1,5 @@
-// One line between the transcript and the composer that says what the ghost
-// is doing right now: waiting, thinking, or inside a named tool. It replaces
-// itself with the last error when a turn fails, and is invisible when idle.
+// SummoningIndicator — state-aware copy and the layered orb recovered from
+// summon-ghost. Tool activity wins over thinking; copy rotates every 2.5s.
 import QtQuick
 import qs.services
 
@@ -8,40 +7,140 @@ Item {
     id: root
 
     readonly property bool failing: !Ghostd.streaming && Ghostd.lastError !== ""
-    readonly property string label: root.failing
-        ? Ghostd.lastError
-        : (Ghostd.activity !== "" ? Ghostd.activity : "thinking")
+    readonly property string stateKey: Ghostd.activity !== "" ? Ghostd.activity : "thinking"
+    property int phraseIndex: 0
+    property int ellipsisStep: 0
+    readonly property var phrases: root.phrasesFor(root.stateKey)
+    readonly property string phrase: root.phrases[root.phraseIndex % root.phrases.length]
 
-    implicitHeight: visible ? 18 : 0
+    implicitHeight: visible ? 30 : 0
     visible: Ghostd.streaming || root.failing
+    clip: false
+
+    function randomPhrase(current: int): int {
+        if (root.phrases.length <= 1) return 0;
+        let next = Math.floor(Math.random() * root.phrases.length);
+        if (next === current) next = (next + 1) % root.phrases.length;
+        return next;
+    }
+
+    function phrasesFor(state: string): var {
+        const copy = {
+            thinking: [
+                "Weighing the haunted question", "Threading the ghost thought",
+                "Reading the shadow veil", "Clearing the spectral fog",
+                "Tracing the phantom logic", "Polishing the spirit reply"
+            ],
+            ask: [
+                "Asking the ghost keeper", "Passing the haunted question",
+                "Opening the séance door", "Waiting for the phantom voice"
+            ],
+            ghost_browser: [
+                "Scrying the live web", "Following fresh omens",
+                "Peering past the veil", "Gathering spectral whispers"
+            ],
+            ghost_notes_list: [
+                "Opening the haunted vault", "Listing the spectral archive",
+                "Following phantom folder trails"
+            ],
+            ghost_notes_read: [
+                "Unfolding the ghost note", "Drawing out spectral detail",
+                "Reading the haunted archive"
+            ],
+            ghost_notes_grep: [
+                "Searching the haunted vault", "Matching spectral pages",
+                "Following phantom ink trails"
+            ],
+            ghost_notes_write: [
+                "Inscribing the haunted archive", "Putting spectral ink to paper",
+                "Sealing the ghost note"
+            ],
+            ghost_memory_list: [
+                "Opening the spirit memory", "Sorting the spectral echoes",
+                "Following remembered threads"
+            ],
+            ghost_memory_read: [
+                "Recalling a spectral echo", "Reading the haunted memory",
+                "Following an old ghost thread"
+            ],
+            ghost_memory_write: [
+                "Saving the spectral echo", "Binding a ghost memory",
+                "Keeping the haunted thread"
+            ],
+            look_at_image: [
+                "Peering through the spectral lens", "Reading the haunted image",
+                "Tracing shapes beyond the veil"
+            ]
+        };
+        if (state.startsWith("switching model") || state.startsWith("using fallback")) {
+            return [
+                "Crossing to a steadier spirit",
+                "Calling the next spectral voice",
+                "Reweaving the model thread"
+            ];
+        }
+        return copy[state] || [
+            "Summoning the ghost spark", "Gathering the spectral thread",
+            "Coaxing the haunted mist", "Finding the veil glow",
+            "Shaping the spirit reply", "Crossing the phantom veil"
+        ];
+    }
+
+    onStateKeyChanged: phraseIndex = root.randomPhrase(-1)
+
+    Timer {
+        interval: 2500
+        repeat: true
+        running: Ghostd.streaming
+        onTriggered: root.phraseIndex = root.randomPhrase(root.phraseIndex)
+    }
+
+    Timer {
+        interval: 430
+        repeat: true
+        running: Ghostd.streaming && !Theme.reducedMotion
+        onTriggered: root.ellipsisStep = (root.ellipsisStep + 1) % 4
+    }
 
     Row {
+        anchors.left: parent.left
+        anchors.right: parent.right
         anchors.verticalCenter: parent.verticalCenter
         spacing: Theme.gap
 
-        Rectangle {
-            anchors.verticalCenter: parent.verticalCenter
-            width: 6
-            height: 6
-            radius: 3
-            color: root.failing ? Theme.danger : Theme.accent
+        Item {
+            width: 22
+            height: 22
+            clip: false
 
-            SequentialAnimation on opacity {
+            SpectralOrb {
+                visible: Ghostd.streaming
+                anchors.centerIn: parent
+                diameter: 20
                 running: Ghostd.streaming
-                loops: Animation.Infinite
-                NumberAnimation { to: 0.25; duration: 700; easing.type: Easing.InOutQuad }
-                NumberAnimation { to: 1.0; duration: 700; easing.type: Easing.InOutQuad }
+            }
+
+            Rectangle {
+                visible: root.failing
+                anchors.centerIn: parent
+                width: 6
+                height: 6
+                radius: 3
+                color: Theme.danger
             }
         }
 
         Text {
             anchors.verticalCenter: parent.verticalCenter
-            text: root.label
+            width: Math.max(parent.width - 22 - Theme.gap, 0)
+            text: root.failing
+                ? Ghostd.lastError
+                : root.phrase + (Theme.reducedMotion ? "…" : ".".repeat(root.ellipsisStep))
             color: root.failing ? Theme.danger : Theme.foregroundDim
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontSizeSmall
+            font.letterSpacing: 0.25
             elide: Text.ElideRight
-            width: Math.max(root.width - 6 - Theme.gap, 0)
         }
     }
 }

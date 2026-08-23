@@ -19,13 +19,12 @@
  *    computed per session (`deriveMemoryIndex`, `deriveNoteCatalog`). There is no
  *    MEMORY.md and no catalog file, by contract.
  *
- * Every mutation goes through pi's `withFileMutationQueue`, keyed on the target
- * path: pi runs tool calls in parallel by default, so two `ghost_memory_write`
- * calls in one batch can otherwise interleave on the same file.
+ * Every mutation goes through a path-keyed queue: OMP runs tool calls in
+ * parallel by default, so two `ghost_memory_write` calls in one batch can
+ * otherwise interleave on the same file.
  */
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve, sep } from "node:path";
-import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { isSafe } from "redos-detector";
 import { isNoteVisible } from "./catalog.js";
 import { GhostError } from "./errors.js";
@@ -133,6 +132,20 @@ export interface NoteSearchResult {
 }
 
 const DEFAULT_SEARCH_RESULTS = 50;
+
+/** Serialize mutations to the same file while allowing unrelated files to proceed. */
+const fileMutationQueues = new Map<string, Promise<unknown>>();
+
+async function withFileMutationQueue<T>(path: string, mutate: () => Promise<T>): Promise<T> {
+  const previous = fileMutationQueues.get(path) ?? Promise.resolve();
+  const running = previous.catch(() => undefined).then(mutate);
+  fileMutationQueues.set(path, running);
+  try {
+    return await running;
+  } finally {
+    if (fileMutationQueues.get(path) === running) fileMutationQueues.delete(path);
+  }
+}
 
 /**
  * ReDoS defence for `searchNotes` with `regex: true`. The query is model- or

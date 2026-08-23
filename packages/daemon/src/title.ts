@@ -28,7 +28,7 @@
  * The claude-code runtime is never a title candidate: it is not reachable
  * through a plain `complete()` call, and `getModels()` never lists it.
  */
-import type { AssistantMessage, Context, Model } from "@earendil-works/pi-ai";
+import type { AssistantMessage, Context, Model } from "@oh-my-pi/pi-ai";
 import type { GhostModelRoleBinding } from "./models.js";
 
 /** The role name in `<home>/.pi/models.json`. Mirrors `GhostModelRole`. */
@@ -74,7 +74,7 @@ export interface TitleCandidate {
 
 /**
  * The slice of a model catalogue the resolver reads. Narrowed to an interface
- * so the rules can be tested against a fixture with no pi runtime at all.
+ * so the rules can be tested against a fixture with no OMP runtime at all.
  */
 export interface TitleModelCatalog {
   /** Every model the ghost can use right now (its provider is credentialed). */
@@ -196,8 +196,8 @@ export function resolveTitleModel(
 // ---------------------------------------------------------------------------
 
 /**
- * The slice of pi's `ModelRuntime` this module drives. A real `ModelRuntime`
- * satisfies it structurally; a test passes a fake. `getModels`/`getModel` read
+ * The slice of `GhostOmpRuntime` this module drives. A test passes a fake.
+ * `getModels`/`getModel` read
  * the static catalogue synchronously (no availability network call), and the
  * subscription/OAuth/credential predicates are the ones `ModelCatalog` reads.
  */
@@ -224,7 +224,7 @@ function toCandidate(runtime: TitleRuntime, model: TitleModel): TitleCandidate {
 }
 
 /**
- * Build a `TitleModelCatalog` over a `ModelRuntime`. "Usable" is a model whose
+ * Build a `TitleModelCatalog` over a Ghost OMP runtime. "Usable" is a model whose
  * provider has a configured credential — the same credential-based notion of
  * usability the model switcher reports, computed synchronously so a background
  * title never blocks on an availability probe.

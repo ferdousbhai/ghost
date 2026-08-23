@@ -184,10 +184,18 @@ export async function startMockProvider(
     url: `http://127.0.0.1:${port}/v1`,
     modelId,
     requests,
-    close: () =>
-      new Promise<void>((resolvePromise, rejectPromise) => {
+    close: () => {
+      if (!server.listening) return Promise.resolve();
+      return new Promise<void>((resolvePromise, rejectPromise) => {
         server.closeAllConnections();
-        server.close((error) => (error ? rejectPromise(error) : resolvePromise()));
-      }),
+        server.close((error) => {
+          if (!error || (error as NodeJS.ErrnoException).code === "ERR_SERVER_NOT_RUNNING") {
+            resolvePromise();
+            return;
+          }
+          rejectPromise(error);
+        });
+      });
+    },
   };
 }

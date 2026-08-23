@@ -1,4 +1,8 @@
-import { Type, type TEnum, type TSchemaOptions } from "typebox";
+import {
+  Type,
+  type Meta,
+  type TEnum,
+} from "@oh-my-pi/pi-coding-agent/extensibility/legacy-typebox";
 
 /**
  * Build a string enum that is valid both to TypeBox and to strict tool-schema
@@ -7,7 +11,7 @@ import { Type, type TEnum, type TSchemaOptions } from "typebox";
  */
 export function stringEnum<const Values extends string[]>(
   values: readonly [...Values],
-  options: TSchemaOptions = {},
+  options: Meta = {},
 ): TEnum<Values> {
   return Type.Enum(values, { ...options, type: "string" });
 }

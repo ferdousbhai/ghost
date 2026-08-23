@@ -116,7 +116,7 @@ describe("cross-check against pi's YAML frontmatter parser", () => {
   // Our writer is hand-rolled, so the values it emits must still be valid YAML
   // as pi (and any other reader of these files) understands it.
   it("emits scalars pi reads back unchanged", async () => {
-    const { parseFrontmatter } = await import("@earendil-works/pi-coding-agent");
+    const { parseFrontmatter } = await import("@oh-my-pi/pi-utils/frontmatter");
     const values = [
       "Paper notes",
       "Restoring the Vandercook 4: notes",
@@ -132,7 +132,7 @@ describe("cross-check against pi's YAML frontmatter parser", () => {
     for (const value of values) {
       const text = renderDocument([`title: ${yamlScalar(value)}`], "body");
       expect(
-        parseFrontmatter<{ title: string }>(text).frontmatter.title,
+        (parseFrontmatter(text).frontmatter as { title: string }).title,
         JSON.stringify(value),
       ).toBe(value);
       expect(parseFrontmatterLines([`title: ${yamlScalar(value)}`])["title"]).toBe(value);
@@ -140,10 +140,10 @@ describe("cross-check against pi's YAML frontmatter parser", () => {
   });
 
   it("emits tag lists pi reads back unchanged", async () => {
-    const { parseFrontmatter } = await import("@earendil-works/pi-coding-agent");
+    const { parseFrontmatter } = await import("@oh-my-pi/pi-utils/frontmatter");
     const tags = ["paper", "press work", "one, two", "3"];
     const text = renderDocument([`tags: ${yamlFlowList(tags)}`], "body");
-    expect(parseFrontmatter<{ tags: string[] }>(text).frontmatter.tags).toEqual(tags);
+    expect((parseFrontmatter(text).frontmatter as { tags: string[] }).tags).toEqual(tags);
     expect(parseFrontmatterLines([`tags: ${yamlFlowList(tags)}`])["tags"]).toEqual(tags);
   });
 });

@@ -1,8 +1,8 @@
 /**
  * The pi-messages wire protocol, daemon side.
  *
- * The normative spec is the pinned client in `@earendil-works/pi-ai@0.84.2`
- * (`dist/api/pi-messages.js`), which the summon-ghost web UI already speaks.
+ * This is Ghost's preserved pi-messages compatibility contract, originally
+ * spoken by summon-ghost and now translated from OMP's native session events.
  * Its contract, restated so the code below can be checked against it:
  *
  * - Request: `POST <baseUrl>/messages` with a JSON body
@@ -22,11 +22,84 @@
  *
  * Everything here is pure: no HTTP, no pi session. `server.ts` wires it up.
  */
-import type { Usage } from "@earendil-works/pi-ai";
-import type { PiMessagesEvent } from "@earendil-works/pi-ai/api/pi-messages";
-import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
+import type { Usage } from "@oh-my-pi/pi-ai";
+import type { AgentSessionEvent } from "@oh-my-pi/pi-coding-agent";
 
-export type { PiMessagesEvent };
+export type PiMessagesEvent =
+  | { type: "start" }
+  | { type: "text_start"; contentIndex: number }
+  | { type: "text_delta"; contentIndex: number; delta: string }
+  | { type: "text_end"; contentIndex: number; content: string }
+  | { type: "thinking_start"; contentIndex: number }
+  | { type: "thinking_delta"; contentIndex: number; delta: string }
+  | { type: "thinking_end"; contentIndex: number; content: string }
+  | { type: "toolcall_start"; contentIndex: number; id: string; toolName: string }
+  | { type: "toolcall_delta"; contentIndex: number; delta: string }
+  | {
+      type: "toolcall_end";
+      contentIndex: number;
+      toolCall: { type?: "toolCall"; id: string; name: string; arguments: unknown };
+    }
+  | {
+      type: "tool_execution_start";
+      id: string;
+      toolName: string;
+      arguments: unknown;
+      intent?: string;
+    }
+  | {
+      type: "tool_execution_update";
+      id: string;
+      toolName: string;
+      summary?: string;
+    }
+  | {
+      type: "tool_execution_end";
+      id: string;
+      toolName: string;
+      isError: boolean;
+      summary?: string;
+    }
+  | {
+      type: "model_fallback";
+      phase: "applied";
+      from: string;
+      to: string;
+      role: string;
+    }
+  | {
+      /** OMP tree navigation committed a new active branch mid-stream. */
+      type: "branch_changed";
+      transcript: TranscriptWireView;
+    }
+  | {
+      type: "model_fallback";
+      phase: "succeeded";
+      model: string;
+      role: string;
+    }
+  | {
+      type: "done";
+      reason: "stop" | "length" | "toolUse";
+      usage: Usage;
+      responseId?: string;
+    }
+  | {
+      type: "error";
+      reason: string;
+      usage: Usage;
+      errorMessage?: string;
+      responseId?: string;
+    };
+
+/** Kept structural here to avoid coupling the wire codec back to SessionHost. */
+export interface TranscriptWireView {
+  id: string;
+  title: string | null;
+  messages: unknown[];
+  total: number;
+  truncated: boolean;
+}
 
 /** SSE framing, byte-identical to the hosted relay's. */
 export function encodeSseEvent(event: unknown): string {
@@ -196,10 +269,36 @@ type AssistantContentBlock =
   | { type: "toolCall"; id: string; name: string; arguments: unknown }
   | { type: string; [key: string]: unknown };
 
+const TOOL_SUMMARY_LIMIT = 240;
+
+/** Small human-facing excerpt only; tool results can contain files/images/DOM. */
+function toolResultSummary(result: unknown): string | undefined {
+  let text: string | undefined;
+  if (typeof result === "string") text = result;
+  else if (result && typeof result === "object") {
+    const content = (result as { content?: unknown }).content;
+    if (Array.isArray(content)) {
+      text = content
+        .filter((part): part is { type: "text"; text: string } =>
+          Boolean(part)
+          && typeof part === "object"
+          && (part as { type?: unknown }).type === "text"
+          && typeof (part as { text?: unknown }).text === "string")
+        .map((part) => part.text)
+        .join(" ");
+    }
+  }
+  const compact = text?.replace(/\s+/g, " ").trim();
+  if (!compact) return undefined;
+  return compact.length > TOOL_SUMMARY_LIMIT
+    ? `${compact.slice(0, TOOL_SUMMARY_LIMIT - 1)}…`
+    : compact;
+}
+
 /**
  * Translate one agent run into the flattened pi-messages event sequence.
  *
- * The seam is `message_update.assistantMessageEvent`: pi's agent loop
+ * The seam is `message_update.assistantMessageEvent`: OMP's agent loop
  * forwards the provider's `AssistantMessageEvent` stream there verbatim,
  * which is the same event type the hosted runtime tapped. Step boundaries
  * (`message_start` / `message_end`) are invisible on the wire, but each step
@@ -219,6 +318,7 @@ export function createPiMessagesAdapter(
   /** Per-step map: the step's own contentIndex → this turn's wire index. */
   let wireIndexByStepIndex = new Map<number, number>();
   let lastStopReason: string | undefined;
+  let lastErrorMessage: string | undefined;
 
   const send = (event: PiMessagesEvent): void => {
     if (terminal) return;
@@ -279,7 +379,7 @@ export function createPiMessagesAdapter(
         return;
       case "toolcall_start": {
         if (stepIndex === undefined) return;
-        // pi's toolcall_start carries no id/name of its own; they are already
+        // OMP's toolcall_start carries no id/name of its own; they are already
         // set on the partial message's content block.
         const block = event.partial?.content?.[stepIndex];
         if (!block || block.type !== "toolCall") return;
@@ -349,18 +449,72 @@ export function createPiMessagesAdapter(
           lastStopReason = message.stopReason;
           if (message.stopReason === "error" || message.stopReason === "aborted") {
             ensureStarted();
-            send({
-              type: "error",
-              reason: message.stopReason,
-              usage: copyUsage(usage),
-              ...(message.errorMessage ? { errorMessage: message.errorMessage } : {}),
-            });
+            // OMP owns retry/fallback recovery after a failed provider step.
+            // Do not terminate the Ghost stream here: a later model may still
+            // answer this same turn. `finishDone` turns the *last* failed step
+            // into an error only after AgentSession.prompt() has settled.
+            lastErrorMessage = message.errorMessage;
+          } else {
+            lastErrorMessage = undefined;
           }
           return;
         }
+        case "tool_execution_start":
+          ensureStarted();
+          send({
+            type: "tool_execution_start",
+            id: event.toolCallId,
+            toolName: event.toolName,
+            arguments: event.args,
+            ...(event.intent ? { intent: event.intent } : {}),
+          });
+          return;
+        case "tool_execution_update": {
+          ensureStarted();
+          const summary = toolResultSummary(event.partialResult);
+          send({
+            type: "tool_execution_update",
+            id: event.toolCallId,
+            toolName: event.toolName,
+            ...(summary ? { summary } : {}),
+          });
+          return;
+        }
+        case "tool_execution_end": {
+          ensureStarted();
+          const summary = toolResultSummary(event.result);
+          send({
+            type: "tool_execution_end",
+            id: event.toolCallId,
+            toolName: event.toolName,
+            isError: event.isError === true,
+            ...(summary ? { summary } : {}),
+          });
+          return;
+        }
+        case "retry_fallback_applied":
+          ensureStarted();
+          send({
+            type: "model_fallback",
+            phase: "applied",
+            from: event.from,
+            to: event.to,
+            role: event.role,
+          });
+          return;
+        case "retry_fallback_succeeded":
+          ensureStarted();
+          send({
+            type: "model_fallback",
+            phase: "succeeded",
+            model: event.model,
+            role: event.role,
+          });
+          return;
         case "agent_end":
-          // An auto-retry keeps the turn alive; only a settled run terminates.
-          if (event.willRetry || deferAgentEnd) return;
+          // Legacy pi emitted this hint; tolerate it on replayed/test events
+          // even though OMP 18 now owns retrying inside the settled run.
+          if ((event as typeof event & { willRetry?: boolean }).willRetry || deferAgentEnd) return;
           this.finishDone();
           return;
         default:
@@ -369,6 +523,15 @@ export function createPiMessagesAdapter(
     },
     finishDone(reason) {
       ensureStarted();
+      if (lastStopReason === "error" || lastStopReason === "aborted") {
+        send({
+          type: "error",
+          reason: lastStopReason,
+          usage: copyUsage(usage),
+          ...(lastErrorMessage ? { errorMessage: lastErrorMessage } : {}),
+        });
+        return;
+      }
       const resolved = reason
         ?? (lastStopReason === "length" || lastStopReason === "toolUse"
           ? lastStopReason

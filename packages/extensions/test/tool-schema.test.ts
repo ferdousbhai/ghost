@@ -26,7 +26,10 @@ interface JsonSchema {
 
 describe("stringEnum", () => {
   it("emits a JSON Schema string type alongside the enum", () => {
-    expect(stringEnum(["first", "second"], { description: "An example." })).toMatchObject({
+    const schema = stringEnum(["first", "second"], { description: "An example." }) as unknown as {
+      toJsonSchema(): unknown;
+    };
+    expect(schema.toJsonSchema()).toMatchObject({
       type: "string",
       enum: ["first", "second"],
       description: "An example.",

@@ -81,6 +81,26 @@ const TURN_BODY = {
   options: { sessionId: "conv-1" },
 };
 
+async function waitForAsk(base: string, sessionId: string): Promise<{
+  id: string;
+  questions: Array<{ id: string; question: string }>;
+}> {
+  const deadline = Date.now() + 2_000;
+  while (Date.now() < deadline) {
+    const response = await fetch(
+      `${base}/api/ghosts/casper/sessions/${encodeURIComponent(sessionId)}/ask`,
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json() as { ask: null | {
+      id: string;
+      questions: Array<{ id: string; question: string }>;
+    } };
+    if (body.ask) return body.ask;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("timed out waiting for ask interaction");
+}
+
 describe("GET /api/ghosts", () => {
   it("lists ghosts with name, dir, and createdAt", async () => {
     const base = await serve();
@@ -146,6 +166,8 @@ describe("POST /api/ghosts/:name/messages", () => {
     expect(types.filter((type) => type === "start")).toHaveLength(1);
     expect(types).toContain("toolcall_start");
     expect(types).toContain("toolcall_end");
+    expect(types).toContain("tool_execution_start");
+    expect(types).toContain("tool_execution_end");
     expect(types).toContain("text_start");
     expect(types).toContain("text_delta");
     expect(types).toContain("text_end");
@@ -228,6 +250,88 @@ describe("POST /api/ghosts/:name/messages", () => {
   });
 });
 
+describe("OMP ask interaction", () => {
+  it("publishes a blocking ask and accepts the first validated answer", async () => {
+    const base = await serve([
+      {
+        kind: "tool",
+        name: "ask",
+        args: {
+          questions: [{
+            id: "paper",
+            question: "Which paper stock?",
+            options: [{ label: "Cream" }, { label: "White" }],
+            recommended: 0,
+          }],
+        },
+      },
+      { kind: "text", text: "Cream stock selected." },
+    ]);
+    const turn = postTurn(base, {
+      ...TURN_BODY,
+      options: { sessionId: "conv-ask" },
+    });
+    const ask = await waitForAsk(base, "conv-ask");
+    expect(ask.questions[0]).toMatchObject({ id: "paper", question: "Which paper stock?" });
+
+    const queued = await fetch(`${base}/api/ghosts/casper/sessions/conv-ask/queue`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ mode: "steer", text: "Keep the result understated." }),
+    });
+    expect(queued.status).toBe(200);
+    expect(await queued.json()).toMatchObject({
+      streaming: true,
+      steering: ["Keep the result understated."],
+    });
+    const queueStatus = await fetch(`${base}/api/ghosts/casper/sessions/conv-ask/queue`);
+    expect(await queueStatus.json()).toMatchObject({ count: 1 });
+
+    const invalid = await fetch(`${base}/api/ghosts/casper/sessions/conv-ask/ask`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        askId: ask.id,
+        kind: "submit",
+        results: [{ id: "paper", selectedOptions: ["Cardboard"] }],
+      }),
+    });
+    expect(invalid.status).toBe(400);
+    expect(await invalid.json()).toMatchObject({ error: { code: "invalid_ask_answer" } });
+
+    const accepted = await fetch(`${base}/api/ghosts/casper/sessions/conv-ask/ask`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        askId: ask.id,
+        kind: "submit",
+        results: [{ id: "paper", selectedOptions: ["Cream"] }],
+      }),
+    });
+    expect(accepted.status).toBe(200);
+    expect(await accepted.json()).toEqual({ accepted: true });
+
+    const completed = await turn;
+    expect(completed.events.at(-1)?.type).toBe("done");
+    const after = await fetch(`${base}/api/ghosts/casper/sessions/conv-ask/ask`);
+    expect(await after.json()).toEqual({ ask: null });
+
+    const duplicate = await fetch(`${base}/api/ghosts/casper/sessions/conv-ask/ask`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ askId: ask.id, kind: "chat" }),
+    });
+    expect(duplicate.status).toBe(409);
+
+    const tooLate = await fetch(`${base}/api/ghosts/casper/sessions/conv-ask/queue`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ mode: "followUp", text: "Too late" }),
+    });
+    expect(tooLate.status).toBe(409);
+  });
+});
+
 describe("GET /api/ghosts/:name/sessions", () => {
   it("is empty before the first turn and lists it after", async () => {
     const base = await serve();
@@ -273,6 +377,111 @@ describe("GET /api/ghosts/:name/sessions/:id/transcript", () => {
     const response = await fetch(`${base}/api/ghosts/casper/sessions/nope/transcript`);
     expect(response.status).toBe(404);
     expect(await response.json()).toMatchObject({ error: { code: "not_found" } });
+  });
+});
+
+describe("OMP conversation tree routes", () => {
+  it("rewinds, creates, and navigates sibling user-message branches over HTTP", async () => {
+    const base = await serve([{ kind: "text", text: "Branch answer." }]);
+    await postTurn(base, { ...TURN_BODY, options: { sessionId: "conv-tree" } });
+    await postTurn(base, {
+      ...TURN_BODY,
+      context: { messages: [{ role: "user", content: "Original follow-up" }] },
+      options: { sessionId: "conv-tree" },
+    });
+    const original = await (await fetch(
+      `${base}/api/ghosts/casper/sessions/conv-tree/transcript`,
+    )).json() as { messages: Array<{ role: string; entryId: string }> };
+    const firstUser = original.messages.find((message) => message.role === "user")!;
+    const rewind = await fetch(`${base}/api/ghosts/casper/sessions/conv-tree/branch`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "rewind", entryId: firstUser.entryId }),
+    });
+    expect(rewind.status).toBe(200);
+    expect(await rewind.json()).toMatchObject({ draft: "Who are you?", transcript: { messages: [] } });
+
+    await postTurn(base, {
+      ...TURN_BODY,
+      context: { messages: [{ role: "user", content: "Alternative question" }] },
+      options: { sessionId: "conv-tree" },
+    });
+    const alternative = await (await fetch(
+      `${base}/api/ghosts/casper/sessions/conv-tree/transcript`,
+    )).json() as {
+      messages: Array<{
+        role: string;
+        branch?: { index: number; count: number; previousTargetId?: string };
+      }>;
+    };
+    const branch = alternative.messages.find((message) => message.role === "user")?.branch;
+    expect(branch).toMatchObject({ index: 1, count: 2 });
+
+    const navigate = await fetch(`${base}/api/ghosts/casper/sessions/conv-tree/branch`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "navigate", entryId: branch?.previousTargetId }),
+    });
+    expect(navigate.status).toBe(200);
+    expect(JSON.stringify(await navigate.json())).toContain("Original follow-up");
+  });
+
+  it("streams a historical Ask re-answer and its resumed model continuation", async () => {
+    const base = await serve([
+      {
+        kind: "tool",
+        name: "ask",
+        args: {
+          questions: [{
+            id: "paper",
+            question: "Which paper stock?",
+            options: [{ label: "Cream" }, { label: "White" }],
+          }],
+        },
+      },
+      { kind: "text", text: "Stock selected." },
+    ]);
+    const initial = postTurn(base, { ...TURN_BODY, options: { sessionId: "conv-reanswer" } });
+    const firstAsk = await waitForAsk(base, "conv-reanswer");
+    await fetch(`${base}/api/ghosts/casper/sessions/conv-reanswer/ask`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        askId: firstAsk.id,
+        kind: "submit",
+        results: [{ id: "paper", selectedOptions: ["Cream"] }],
+      }),
+    });
+    await initial;
+    const transcript = await (await fetch(
+      `${base}/api/ghosts/casper/sessions/conv-reanswer/transcript`,
+    )).json() as { messages: Array<{ content: unknown }> };
+    const askCall = transcript.messages
+      .flatMap((message) => Array.isArray(message.content) ? message.content : [])
+      .find((part) => (part as { name?: unknown }).name === "ask") as {
+        ghostAsk?: { resultEntryId?: string };
+      };
+
+    const reanswerResponse = fetch(`${base}/api/ghosts/casper/sessions/conv-reanswer/reanswer`, {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "text/event-stream" },
+      body: JSON.stringify({ entryId: askCall.ghostAsk?.resultEntryId }),
+    }).then(async (response) => ({ response, raw: await response.text() }));
+    const revised = await waitForAsk(base, "conv-reanswer");
+    await fetch(`${base}/api/ghosts/casper/sessions/conv-reanswer/ask`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        askId: revised.id,
+        kind: "submit",
+        results: [{ id: "paper", selectedOptions: ["White"] }],
+      }),
+    });
+    const completed = await reanswerResponse;
+    expect(completed.response.status).toBe(200);
+    const events = parseSseStream(completed.raw);
+    expect(events.some((event) => event.type === "branch_changed")).toBe(true);
+    expect(events.at(-1)?.type).toBe("done");
   });
 });
 

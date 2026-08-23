@@ -42,9 +42,10 @@ import type {
   ExtensionHandler,
   ToolCallEvent,
   ToolCallEventResult,
-} from "@earendil-works/pi-coding-agent";
-import { resizeImage } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
+} from "@oh-my-pi/pi-coding-agent";
+import { completeSimple } from "@oh-my-pi/pi-ai";
+import { resizeImage } from "@oh-my-pi/pi-coding-agent/utils/image-resize";
+import { Type } from "@oh-my-pi/pi-coding-agent/extensibility/legacy-typebox";
 import { GhostError } from "../errors.js";
 import type { GhostHome } from "../home.js";
 import { isVisitorScope } from "../scope.js";
@@ -57,13 +58,12 @@ import {
 } from "./shared.js";
 
 // ---------------------------------------------------------------------------
-// Types borrowed structurally from pi
+// Types borrowed structurally from OMP
 // ---------------------------------------------------------------------------
 
 /**
- * pi's `Model`. Taken structurally off `ExtensionContext` rather than imported
- * from `@earendil-works/pi-ai`, which is not a direct dependency of this
- * package — a phantom import would work today and break on any hoisting change.
+ * OMP's `Model`. Taken structurally off `ExtensionContext` so the extension
+ * follows the exact model type supplied by its harness context.
  */
 export type VisionModel = NonNullable<ExtensionContext["model"]>;
 
@@ -71,7 +71,7 @@ type ElementOf<T> = T extends readonly (infer E)[] ? E : never;
 
 type ToolContent = ElementOf<AgentToolResult<unknown>["content"]>;
 
-/** pi's `ImageContent`: base64 `data` plus a `mimeType`. */
+/** OMP's `ImageContent`: base64 `data` plus a `mimeType`. */
 export type GhostImageContent = Extract<ToolContent, { type: "image" }>;
 
 type ContextMessage = ElementOf<ContextEvent["messages"]>;
@@ -83,7 +83,7 @@ type ContextMessage = ElementOf<ContextEvent["messages"]>;
 /**
  * Can this model be handed an image?
  *
- * `input` is required on pi's `Model` type but **optional in its models.json
+ * `input` is required on OMP's `Model` type but **optional in its models.json
  * config schema**, so a hand-written OpenAI-compatible provider entry (Ollama,
  * vLLM, a relay) can omit it, and a purely dynamic provider has no static row
  * at all until a catalogue refresh that `PI_OFFLINE` blocks. Missing `input` is
@@ -274,7 +274,7 @@ export function resolveVisionModel(
         `This ghost's ${VISION_MODEL_ROLE} role names ${modelLabel(model)}, but there `
         + `are no credentials for "${model.provider}". Add an apiKey to that provider `
         + `in ${GHOST_AGENT_DIRNAME}/${GHOST_MODELS_FILENAME}, or sign in so it lands `
-        + `in ${GHOST_AGENT_DIRNAME}/auth.json.`,
+        + `through Ghost's provider login (stored in ${GHOST_AGENT_DIRNAME}/agent.db).`,
         { model: modelLabel(model), reason: "no_credentials" },
       );
     }
@@ -327,23 +327,38 @@ export const VISION_SYSTEM_PROMPT =
  * transcript buy nothing for "describe this image".
  */
 export const completeWithRegistry: VisionCompleter = async (request, ctx) => {
-  const response = await ctx.modelRegistry.complete(
-    request.model,
+  const messages = [
     {
-      systemPrompt: request.systemPrompt,
-      messages: [
-        {
-          role: "user" as const,
-          content: [
-            { type: "image" as const, data: request.image.data, mimeType: request.image.mimeType },
-            { type: "text" as const, text: request.prompt },
-          ],
-          timestamp: Date.now(),
-        },
+      role: "user" as const,
+      content: [
+        { type: "image" as const, data: request.image.data, mimeType: request.image.mimeType },
+        { type: "text" as const, text: request.prompt },
       ],
+      timestamp: Date.now(),
     },
-    request.signal ? { signal: request.signal } : {},
-  );
+  ];
+  // Keep accepting the completion seam exposed by older/custom registries.
+  // OMP 18's native registry resolves credentials and completeSimple owns the
+  // provider call; deterministic extension tests intentionally use this seam.
+  const compatibleComplete = (ctx.modelRegistry as unknown as {
+    complete?: (model: VisionModel, context: {
+      systemPrompt: string;
+      messages: typeof messages;
+    }) => ReturnType<typeof completeSimple>;
+  }).complete;
+  const response = compatibleComplete
+    ? await compatibleComplete(request.model, {
+        systemPrompt: request.systemPrompt,
+        messages,
+      })
+    : await completeSimple(
+        request.model,
+        { systemPrompt: [request.systemPrompt], messages },
+        {
+          apiKey: ctx.modelRegistry.resolver(request.model),
+          ...(request.signal ? { signal: request.signal } : {}),
+        },
+      );
   if (response.stopReason === "error") {
     throw new VisionUnavailableError(
       `${modelLabel(request.model)} failed to read the image: `
@@ -427,12 +442,7 @@ export type ImageResizer = (
  */
 export const resizeWithPi: ImageResizer = async (image) => {
   try {
-    const resized = await resizeImage(
-      Buffer.from(image.data, "base64"),
-      image.mimeType,
-      { ...IMAGE_RESIZE_OPTIONS },
-    );
-    if (!resized) return image;
+    const resized = await resizeImage(image, { ...IMAGE_RESIZE_OPTIONS });
     return { type: "image", data: resized.data, mimeType: resized.mimeType };
   } catch {
     return image;
@@ -443,7 +453,7 @@ export const resizeWithPi: ImageResizer = async (image) => {
  * The MIME a path's extension claims, or `undefined` when the extension is not a
  * known image type. It must NEVER default-guess `image/png`: on the send path an
  * unknown extension is an error the model sees, not a silent relabel that would
- * ship arbitrary bytes (a note, `.pi/auth.json`) to the vision provider.
+ * ship arbitrary bytes (a note, `.pi/agent.db`) to the vision provider.
  */
 function mimeForPath(path: string): string | undefined {
   const ext = path.slice(path.lastIndexOf(".") + 1).toLowerCase();
@@ -506,8 +516,8 @@ export async function readImageFile(
     );
   }
   // The `.pi/` directory holds this ghost's credentials and model config
-  // (`auth.json`, `models.json`), never an image. A prompt-injected
-  // look_at_image({ path: ".pi/auth.json" }) must not be able to base64 those
+  // (`agent.db`, legacy `auth.json`, `models.json`), never an image. A prompt-injected
+  // look_at_image({ path: ".pi/agent.db" }) must not be able to base64 those
   // secrets and ship them to a vision provider — refuse the directory outright,
   // before any bytes are read, even if a file in it somehow had an image name.
   const piDir = join(home.dir, GHOST_AGENT_DIRNAME);
@@ -550,7 +560,7 @@ export async function readImageFile(
     );
   }
   // Defense in depth: an image extension is a claim, the leading bytes are the
-  // proof. A note or `auth.json` renamed `something.png` is rejected here rather
+  // proof. A note or credential database renamed `something.png` is rejected here rather
   // than base64'd and posted to the provider (which would 400 — after the secret
   // has already left the machine). The sniffed type, not the extension, is what
   // we label the payload, so a real JPEG named `.png` is sent honestly.

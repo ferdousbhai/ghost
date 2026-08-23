@@ -311,7 +311,7 @@ describe("launching", () => {
     const harness = await creatorHarness();
     await harness.call(GHOST_BROWSER, { action: "open", url: "https://example.com" });
     await expect(access(join(fixture.dir, BROWSER_PROFILE_DIRNAME))).resolves
-      .toBeUndefined();
+      .toBeFalsy();
   });
 
   it("honours headless when asked, before the browser starts", async () => {
@@ -717,7 +717,7 @@ describe("screenshot, back, close", () => {
     expect(path.startsWith(join(fixture.dir, SCREENSHOT_DIRNAME))).toBe(true);
     expect(path.endsWith(".png")).toBe(true);
     expect(resultText(result)).toContain(path);
-    await expect(access(path)).resolves.toBeUndefined();
+    await expect(access(path)).resolves.toBeFalsy();
   });
 
   it("passes full_page through", async () => {
@@ -828,7 +828,7 @@ describe("finding a browser to launch", () => {
   it("only ever returns an executable that exists", async () => {
     const found = await findChromiumExecutable({ PATH: "/nonexistent-bin" });
     if (found !== undefined) {
-      await expect(access(found)).resolves.toBeUndefined();
+      await expect(access(found)).resolves.toBeFalsy();
     }
   });
 });
@@ -973,7 +973,7 @@ describe("the backend is a choice, and policy sits above it", () => {
     const result = await harness.call(GHOST_BROWSER, { action: "screenshot" });
     const path = (result.details as { path: string }).path;
     expect(path.startsWith(join(fixture.dir, SCREENSHOT_DIRNAME))).toBe(true);
-    await expect(access(path)).resolves.toBeUndefined();
+    await expect(access(path)).resolves.toBeFalsy();
   });
 });
 

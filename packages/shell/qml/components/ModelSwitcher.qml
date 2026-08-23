@@ -27,11 +27,18 @@ Rectangle {
     /** Open the provider login (ModelLogin), keeping the switcher as the origin. */
     signal connectProviderRequested()
 
+    /** Advanced OMP role/fallback overview, separate from the one-click chat picker. */
+    property bool routingView: false
+    property string routeRole: ""
+    property string routeLabel: ""
+    property string routeTarget: "primary"
+    readonly property bool pickingRoute: routeRole !== ""
+
     /** True once the user has typed a search: show catalog instead of available. */
     readonly property bool searching: searchField.text.trim() !== ""
 
     // Available models, flattened into provider-header + model rows for a single
-    // Repeater. The list arrives already sorted by (provider, id).
+    // Repeater. The list arrives in ghostd's OMP-style semantic model order.
     readonly property var availableRows: {
         const rows = [];
         let lastProvider = "";
@@ -53,8 +60,32 @@ Rectangle {
     /** Open the panel: fresh current model + available list; clear any old search. */
     function open(): void {
         searchField.text = "";
+        root.routingView = false;
+        root.routeRole = "";
         Ghostd.fetchCurrentModel();
         Ghostd.fetchAvailableModels();
+        Ghostd.fetchModelRouting();
+    }
+
+    function routeModelName(model: var): string {
+        if (!model) return "not assigned";
+        return model.provider + "/" + model.id;
+    }
+
+    function beginRoutePick(role: string, label: string, target: string): void {
+        root.routeRole = role;
+        root.routeLabel = label;
+        root.routeTarget = target;
+        root.routingView = false;
+        searchField.text = "";
+        Ghostd.fetchAvailableModels();
+    }
+
+    function chooseModel(provider: string, id: string): void {
+        if (root.pickingRoute)
+            Ghostd.setModelRoute(root.routeRole, root.routeTarget, provider, id);
+        else
+            Ghostd.setModel(provider, id);
     }
 
     /** (Re)run the catalog search from the box, debounced. */
@@ -81,7 +112,12 @@ Rectangle {
             spacing: Theme.gap
 
             Text {
-                text: "Choose a model"
+                text: root.routingView
+                    ? "Model routing"
+                    : (root.pickingRoute
+                        ? (root.routeTarget === "fallback" ? "Add fallback" : "Choose primary")
+                            + " · " + root.routeLabel
+                        : "Choose a model")
                 color: Theme.foregroundBright
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontSize + 1
@@ -96,6 +132,23 @@ Rectangle {
             }
 
             Item { Layout.fillWidth: true }
+
+            Text {
+                text: root.routingView ? "models" : "routing"
+                color: Theme.accent
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeSmall
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: {
+                        root.routeRole = "";
+                        root.routingView = !root.routingView;
+                        searchField.text = "";
+                        if (root.routingView) Ghostd.fetchModelRouting();
+                    }
+                }
+            }
 
             Text {
                 text: "connect another provider"
@@ -124,6 +177,7 @@ Rectangle {
 
         // ---- Search box ---------------------------------------------------
         Rectangle {
+            visible: !root.routingView
             Layout.fillWidth: true
             implicitHeight: 40
             radius: Theme.radius / 2
@@ -161,10 +215,16 @@ Rectangle {
 
         // A one-line status: what the list below is showing.
         Text {
+            visible: !root.routingView
             Layout.fillWidth: true
             text: {
                 if (Ghostd.modelError !== "") return Ghostd.modelError;
                 if (Ghostd.modelWarning !== "") return Ghostd.modelWarning;
+                if (root.pickingRoute) {
+                    return root.routeTarget === "fallback"
+                        ? "choose the next model OMP should try"
+                        : "choose the model for this role";
+                }
                 if (root.searching) {
                     if (Ghostd.catalogLoading) return "searching…";
                     const shown = Ghostd.catalogModels.length;
@@ -187,9 +247,140 @@ Rectangle {
             elide: Text.ElideRight
         }
 
+        // ---- OMP role + fallback routing ---------------------------------
+        Flickable {
+            visible: root.routingView
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            contentWidth: width
+            contentHeight: routingColumn.implicitHeight
+            clip: true
+            interactive: contentHeight > height
+
+            Column {
+                id: routingColumn
+                width: parent.width
+                spacing: Theme.gap
+
+                Text {
+                    width: parent.width
+                    text: Ghostd.modelRoutingLoading
+                        ? "loading OMP routes…"
+                        : "Each role has one primary model and an ordered retry chain."
+                    color: Theme.foregroundDim
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSizeSmall
+                    wrapMode: Text.WordWrap
+                }
+
+                Repeater {
+                    model: Ghostd.modelRouting
+
+                    Rectangle {
+                        id: routeRow
+                        required property var modelData
+                        readonly property var chain: Array.isArray(routeRow.modelData.fallbacks)
+                            ? routeRow.modelData.fallbacks : []
+
+                        width: routingColumn.width
+                        implicitHeight: 86
+                        radius: Theme.radius / 2
+                        color: Theme.surfaceDeep
+                        border.width: 1
+                        border.color: Theme.muted
+
+                        ColumnLayout {
+                            anchors.fill: parent
+                            anchors.margins: Theme.pad
+                            spacing: 2
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Text {
+                                    text: routeRow.modelData.label || routeRow.modelData.role
+                                    color: Theme.foregroundBright
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: Theme.fontSize
+                                    font.bold: true
+                                }
+                                Text {
+                                    text: "OMP @" + routeRow.modelData.ompRole
+                                    color: Theme.foregroundDim
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: Theme.fontSizeSmall - 1
+                                }
+                                Item { Layout.fillWidth: true }
+                                Text {
+                                    text: routeRow.modelData.primary ? "change" : "set primary"
+                                    color: Theme.accent
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: Theme.fontSizeSmall
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: root.beginRoutePick(
+                                            routeRow.modelData.role,
+                                            routeRow.modelData.label,
+                                            "primary")
+                                    }
+                                }
+                                Text {
+                                    text: "+ fallback"
+                                    color: Theme.accent
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: Theme.fontSizeSmall
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: root.beginRoutePick(
+                                            routeRow.modelData.role,
+                                            routeRow.modelData.label,
+                                            "fallback")
+                                    }
+                                }
+                                Text {
+                                    visible: routeRow.chain.length > 0
+                                    text: "clear"
+                                    color: Theme.foregroundDim
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: Theme.fontSizeSmall
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: Ghostd.clearModelFallbacks(routeRow.modelData.role)
+                                    }
+                                }
+                            }
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: "primary  " + root.routeModelName(routeRow.modelData.primary)
+                                color: routeRow.modelData.primary ? Theme.foreground : Theme.foregroundDim
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSizeSmall
+                                elide: Text.ElideRight
+                            }
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: routeRow.chain.length === 0
+                                    ? "fallbacks  none"
+                                    : "fallbacks  " + routeRow.chain.map((model, index) =>
+                                        (index + 1) + " " + root.routeModelName(model)).join("  →  ")
+                                color: Theme.foregroundDim
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSizeSmall
+                                elide: Text.ElideRight
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // ---- Available list (default view) --------------------------------
         Flickable {
-            visible: !root.searching
+            visible: !root.routingView && !root.searching
             Layout.fillWidth: true
             Layout.fillHeight: true
             contentWidth: width
@@ -345,7 +536,7 @@ Rectangle {
                                 cursorShape: Qt.PointingHandCursor
                                 onClicked: {
                                     if (availRow.modelData.model)
-                                        Ghostd.setModel(availRow.modelData.model.provider,
+                                        root.chooseModel(availRow.modelData.model.provider,
                                             availRow.modelData.model.id);
                                 }
                             }
@@ -357,7 +548,7 @@ Rectangle {
 
         // ---- Catalog list (while searching) -------------------------------
         Flickable {
-            visible: root.searching
+            visible: !root.routingView && root.searching
             Layout.fillWidth: true
             Layout.fillHeight: true
             contentWidth: width
@@ -461,7 +652,7 @@ Rectangle {
                             // Both paths PUT the role. Ghostd opens in-app login
                             // for providers and leaves Claude's external command
                             // as an inline setup warning.
-                            onClicked: Ghostd.setModel(catRow.modelData.provider, catRow.modelData.id)
+                            onClicked: root.chooseModel(catRow.modelData.provider, catRow.modelData.id)
                         }
                     }
                 }
@@ -538,6 +729,15 @@ Rectangle {
                     }
                 }
             }
+        }
+    }
+
+    Connections {
+        target: Ghostd
+        function onModelRouteCompleted(role: string, target: string): void {
+            root.routeRole = "";
+            root.routingView = true;
+            searchField.text = "";
         }
     }
 }

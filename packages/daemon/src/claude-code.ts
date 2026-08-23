@@ -43,7 +43,7 @@ import type {
   ExtensionAPI,
   ExtensionContext,
   ToolDefinition,
-} from "@earendil-works/pi-coding-agent";
+} from "@oh-my-pi/pi-coding-agent";
 import {
   buildGhostSystemPrompt,
   deriveMemoryIndex,
@@ -53,7 +53,7 @@ import {
 } from "@ghost/extensions";
 import * as Effect from "effect/Effect";
 import * as Stream from "effect/Stream";
-import { z } from "zod";
+import * as z from "zod";
 import { createClaudePiMessagesAdapter } from "./claude-pi-messages.js";
 import { scrubProviderEnv } from "./env-scrub.js";
 import {
@@ -378,8 +378,7 @@ function captureToolDefinitions(
     },
     setActiveTools() {},
   } as unknown as ExtensionAPI;
-  return Promise.all(factories.map(async (inline) => {
-    const factory = typeof inline === "function" ? inline : inline.factory;
+  return Promise.all(factories.map(async (factory) => {
     await factory(api);
   })).then(() => definitions);
 }
@@ -454,7 +453,16 @@ function mcpContent(result: AgentToolResult<unknown>): Array<
 }
 
 function zodShapeFor(definition: ToolDefinition): Record<string, z.ZodType> {
-  const schema = z.fromJSONSchema(definition.parameters as unknown as Record<string, unknown>);
+  const parameters = definition.parameters as unknown as {
+    toJsonSchema?: () => unknown;
+  };
+  // OMP 18's schema values are callable omptype objects. Claude's SDK wants a
+  // Zod shape, so cross the provider boundary through their canonical JSON
+  // representation instead of handing zod the runtime wrapper itself.
+  const jsonSchema = typeof parameters.toJsonSchema === "function"
+    ? parameters.toJsonSchema()
+    : definition.parameters;
+  const schema = z.fromJSONSchema(jsonSchema as Record<string, unknown>);
   if (!(schema instanceof z.ZodObject)) {
     throw new ClaudeCodeProcessError(
       `Ghost tool ${JSON.stringify(definition.name)} does not have an object input schema.`,
@@ -525,7 +533,19 @@ async function buildMcpTools(
   return { tools, names };
 }
 
-async function* singlePrompt(prompt: string): AsyncIterable<SDKUserMessage> {
+async function* promptMessages(
+  prompt: string,
+  additionalContext?: string,
+): AsyncIterable<SDKUserMessage> {
+  if (additionalContext) {
+    yield {
+      type: "user",
+      message: { role: "user", content: [{ type: "text", text: additionalContext }] },
+      parent_tool_use_id: null,
+      isSynthetic: true,
+      shouldQuery: false,
+    };
+  }
   yield {
     type: "user",
     message: { role: "user", content: [{ type: "text", text: prompt }] },
@@ -584,6 +604,7 @@ function queryOptions(input: {
 function runQueryEffect(input: {
   createQuery: ClaudeCodeQueryFactory;
   prompt: string;
+  additionalContext?: string;
   options: ClaudeQueryOptions;
   signal: AbortSignal | undefined;
   onQuery: (query: Query | null) => void;
@@ -593,7 +614,7 @@ function runQueryEffect(input: {
     const runtime = yield* Effect.acquireRelease(
       Effect.try({
         try: () => input.createQuery({
-          prompt: singlePrompt(input.prompt),
+          prompt: promptMessages(input.prompt, input.additionalContext),
           options: input.options,
         }),
         catch: (cause) => new ClaudeCodeProcessError(
@@ -707,6 +728,23 @@ export class ClaudeCodeRuntime {
       let metadata = await readMetadata(paths.sessionDir, conversationId);
       const turnId = Math.floor((metadata?.messageCount ?? 0) / 2);
       const systemPrompt = await buildPersona(paths.home, ghost.name);
+      let beforePromptContext: string | undefined;
+      if (this.hooks.hasHandlers("before_prompt")) {
+        const result = await this.hooks.emitBeforePrompt({
+          type: "before_prompt",
+          prompt: options.prompt,
+          turn_id: turnId + 1,
+          session_id: metadata?.sessionId ?? conversationId,
+          session_file: claudeSessionMetadataPath(paths.sessionDir, conversationId),
+          signal: options.signal ?? new AbortController().signal,
+          ghost_name: ghost.name,
+          cwd: paths.home,
+          runtime: "claude-code",
+        });
+        if (result?.additionalContext && !options.signal?.aborted) {
+          beforePromptContext = result.additionalContext;
+        }
+      }
       const bridge = await buildMcpTools(
         paths.home,
         ghost.name,
@@ -738,6 +776,9 @@ export class ClaudeCodeRuntime {
         await Effect.runPromise(runQueryEffect({
           createQuery: this.createQuery,
           prompt,
+          ...(continuationCount === 0 && beforePromptContext
+            ? { additionalContext: beforePromptContext }
+            : {}),
           options: sdkOptions,
           signal: options.signal,
           onQuery: (active) => {

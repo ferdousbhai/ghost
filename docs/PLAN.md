@@ -3,23 +3,23 @@
 ## Vision
 
 A ghost is an AI persona — character, memory, notes, tools — that lives
-entirely on its creator's machine as an Omarchy-native desktop app: a pi
+entirely on its creator's machine as an Omarchy-native desktop app: an OMP
 engine over a folder of plain markdown files, summoned with a keystroke,
-extended with pi extensions and skills, and (later) shared with visitors on
+extended with OMP extensions and skills, and (later) shared with visitors on
 the creator's terms over a Nostr control plane, with payments going directly
 creator ↔ visitor. No server holds a copy. "Your ghost, not our copy of it."
 
 ## Design goal: modifiable, infinitely extensible
 
-**The ghost is modifiable and infinitely extensible. pi already showed the
+**The ghost is modifiable and infinitely extensible. Oh My Pi showed the
 way.** The official repo is the point of collaboration on a narrow,
 opinionated core — ghost home, daemon, shell, the built-in extensions — but
 ghosts are meant to be modified: creators glob onto the plugin and extension
-interfaces (pi extensions, skills, model roles, browser backends, tool
+interfaces (OMP extensions, skills, model roles, browser backends, tool
 factories) and grow their ghost to whatever their needs are. Core stays
 small and holds the contracts; everything else is a creator's extension.
 When a capability is generic enough for every ghost, it graduates into core
-(or upstream into pi itself); until then it lives in the creator's ghost
+(or upstream into OMP itself); until then it lives in the creator's ghost
 home. The measure of success is not what core ships — it is what creators
 can bolt on without asking.
 
@@ -70,16 +70,16 @@ pooling and no cloud custody.
 
 ## Key decisions (one-line rationales)
 
-- **Build ON pi by default, never fork; add official harnesses at explicit
+- **Build on modern OMP by default, never fork; add official harnesses at explicit
   runtime boundaries** — the spike proved `createAgentSession` + extensions
   express the normal path. `claude-code/default` is the narrow exception: the
   official Claude Agent SDK invokes an installed, unmodified Claude Code so a
   creator can use their own plan. Both consume the same Ghost system prompt,
   tools, and pi-messages wire; neither dependency is forked.
-- **Model-agnostic like pi; bring any provider.** Two named requirements:
+- **Model-agnostic like OMP; bring any provider.** Two named requirements:
   existing **OpenAI Codex/ChatGPT subscriptions usable as auth**
-  through pi's Codex OAuth, **Claude plans through the Claude Code harness**
-  (not pi's per-token Anthropic extra-usage path), and **OpenRouter
+  through OMP's Codex OAuth, **Claude plans through the Claude Code harness**
+  (a separate runtime from OMP's Anthropic provider), and **OpenRouter
   first-class** with its free models as a zero-cost onboarding option.
 - **Files, not a database** — plain markdown + YAML frontmatter is the
   store; owner-readable, greppable, git-friendly; the sync machinery a
@@ -127,14 +127,13 @@ Super+G, start talking. Existing summonghost.com users: sign in there,
 - **Always-on**: laptop lids close; presence-honesty covers Phase 2, but the
   "keep answering while I'm away" story (remote node? second device?) is
   unresolved and deliberately later.
-- **Codex/ChatGPT-subscription OAuth**: RESOLVED — pi-ai 0.84.2 ships
-  native OAuth for `openai-codex` (plus anthropic, openrouter,
-  github-copilot, xai). Remaining work is only UI plumbing to drive the
-  login flow from the shell instead of a terminal.
+- **Codex/ChatGPT-subscription OAuth**: RESOLVED — OMP 18 ships native OAuth
+  for `openai-codex` (plus other registry providers), and Ghost exposes the
+  same flow in both the shell and terminal.
 - **Claude subscription use**: RESOLVED for Phase 1 creator-local —
   `claude-code/default` uses the T3-style official Agent SDK harness and the
   creator's external Claude Code login. It is forbidden for visitor scopes;
-  pi's `anthropic` OAuth remains a separate extra-usage/per-token path. Recheck
+  OMP's `anthropic` provider remains a separate accounting path. Recheck
   Anthropic policy before every release that advertises plan accounting.
 - **Teach-by-demonstration** — the Wayland-native version (screen capture +
   input observation → draft skill); v1 fallback is "save this session as a

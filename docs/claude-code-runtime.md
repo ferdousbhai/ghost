@@ -10,14 +10,12 @@ creator signs into that executable directly with `claude auth login`; Ghost
 never receives or stores the Claude credential.
 
 Anthropic currently says Claude Agent SDK usage can draw from a user's Claude
-plan limits. That makes this different from Ghost's `anthropic` provider in
-pi: pi 0.84.2 documents that its third-party Anthropic OAuth path uses extra
-usage billed per token, not the included plan allowance. The plan/runtime
-boundary is therefore explicit:
+plan limits. That external plan-authenticated runtime remains distinct from an
+Anthropic provider configured through OMP. The boundary is explicit:
 
 | selection | harness | authentication | accounting path |
 |---|---|---|---|
-| `anthropic/<model>` | pi | per-ghost `.pi/auth.json` | Anthropic extra usage / API-style billing |
+| `anthropic/<model>` | OMP | per-ghost `.pi/agent.db` | the provider account's current API/OAuth terms |
 | `claude-code/default` | official Claude Agent SDK + installed `claude` | creator's external Claude Code login | creator's Claude plan limits, subject to Anthropic's current policy and any enabled overage |
 
 Policy and product behavior can change. Before making a pricing promise, check
@@ -54,7 +52,7 @@ Equivalently, the resulting `<ghost>/.pi/models.json` role is:
 ```
 
 There is deliberately no `providers.claude-code` entry and no Claude token in
-`.pi/auth.json`. `default` delegates model selection to the authenticated
+Ghost's `.pi/agent.db`. `default` delegates model selection to the authenticated
 Claude Code installation. Set `GHOST_CLAUDE_BINARY` when `claude` is not on
 the daemon's `PATH`. On Omarchy systems where `~/.local/bin/claude` is a mise
 launcher, Ghost resolves and gives the Agent SDK the underlying executable;
@@ -90,7 +88,7 @@ The query options are fail-closed:
   environment, including Anthropic API and OAuth token variables.
 
 `look_at_image` is omitted because Claude can consume image content directly.
-`ghost_screen` still returns the actual image block. No pi `ModelRegistry` is
+`ghost_screen` still returns the actual image block. No OMP `ModelRegistry` is
 fabricated as a fallback.
 
 The backend is owner-local by construction. If a session is resolved with a

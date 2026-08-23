@@ -1,10 +1,10 @@
 /**
  * The ghost's system prompt.
  *
- * This string **replaces** pi's coding-agent prompt wholesale — the spike
+ * This string **replaces** OMP's coding-agent prompt wholesale — the harness
  * confirmed that returning `systemPrompt` from `before_agent_start` leaves zero
  * bytes of the original (report §3). Nothing here should read like a coding
- * agent: no tool preambles about files and shells, no "you are pi".
+ * agent: no tool preambles about files and shells, no coding-agent identity.
  *
  * The two derived sections are assembled from the ghost home on every session
  * start. They are context, not storage: no MEMORY.md, no catalog file.

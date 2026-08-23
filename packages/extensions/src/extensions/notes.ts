@@ -22,8 +22,8 @@ import type {
   ExtensionHandler,
   ToolCallEvent,
   ToolCallEventResult,
-} from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
+} from "@oh-my-pi/pi-coding-agent";
+import { Type } from "@oh-my-pi/pi-coding-agent/extensibility/legacy-typebox";
 import { deriveNoteCatalog, isNoteVisible } from "../catalog.js";
 import { GhostError } from "../errors.js";
 import { normalizeNotePath } from "../home.js";

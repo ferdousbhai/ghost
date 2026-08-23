@@ -6,6 +6,7 @@ import {
   GHOST_SESSION_STOP_CONTINUATION_CAP,
   GhostHookRunner,
   ghostSessionStopContinuation,
+  type GhostBeforePromptEvent,
   type GhostSessionStopEvent,
 } from "../src/hooks.js";
 
@@ -20,6 +21,20 @@ function temporaryDirectory(): string {
   return directory;
 }
 
+function beforePromptEvent(overrides: Partial<GhostBeforePromptEvent> = {}): GhostBeforePromptEvent {
+  return {
+    type: "before_prompt",
+    prompt: "Continue",
+    turn_id: 2,
+    session_id: "session-1",
+    signal: new AbortController().signal,
+    ghost_name: "casper",
+    cwd: process.cwd(),
+    runtime: "omp",
+    ...overrides,
+  };
+}
+
 function event(overrides: Partial<GhostSessionStopEvent> = {}): GhostSessionStopEvent {
   return {
     type: "session_stop",
@@ -30,7 +45,7 @@ function event(overrides: Partial<GhostSessionStopEvent> = {}): GhostSessionStop
     signal: new AbortController().signal,
     ghost_name: "casper",
     cwd: process.cwd(),
-    runtime: "pi",
+    runtime: "omp",
     ...overrides,
   };
 }
@@ -57,6 +72,22 @@ describe("GhostHookRunner", () => {
     expect(calls).toEqual(["first", "second"]);
     expect(ghostSessionStopContinuation(result)).toBe("Revise this answer.");
     expect(GHOST_SESSION_STOP_CONTINUATION_CAP).toBe(8);
+  });
+
+  it("combines nonblocking before_prompt context without starting a continuation", async () => {
+    const runner = new GhostHookRunner();
+    const calls: string[] = [];
+    await runner.register((api) => {
+      api.on("before_prompt", (input) => {
+        calls.push(input.prompt);
+        return { additionalContext: "First advisory." };
+      });
+      api.on("before_prompt", () => ({ additionalContext: "Second advisory." }));
+    });
+
+    const result = await runner.emitBeforePrompt(beforePromptEvent());
+    expect(calls).toEqual(["Continue"]);
+    expect(result?.additionalContext).toBe("First advisory.\n\nSecond advisory.");
   });
 
   it("loads Claude-style command groups and passes the OMP-compatible payload", async () => {
@@ -92,6 +123,37 @@ describe("GhostHookRunner", () => {
       type: "session_stop",
       ghost_name: "casper",
       stop_hook_active: true,
+    });
+  });
+
+  it("runs configured before_prompt hooks and returns advisory context", async () => {
+    const directory = temporaryDirectory();
+    const script = join(directory, "before-prompt.mjs");
+    const observed = join(directory, "before-prompt.json");
+    writeFileSync(script, `
+      import { writeFileSync } from "node:fs";
+      let input = "";
+      process.stdin.setEncoding("utf8");
+      for await (const chunk of process.stdin) input += chunk;
+      writeFileSync(${JSON.stringify(observed)}, input);
+      process.stdout.write(JSON.stringify({ additionalContext: "Avoid the prior warning." }));
+    `);
+    const config = join(directory, "hooks.json");
+    writeFileSync(config, JSON.stringify({
+      hooks: {
+        before_prompt: [{
+          hooks: [{ type: "command", command: `${JSON.stringify(process.execPath)} ${JSON.stringify(script)}` }],
+        }],
+      },
+    }));
+
+    const runner = GhostHookRunner.fromConfig(config);
+    const result = await runner.emitBeforePrompt(beforePromptEvent());
+    expect(result?.additionalContext).toBe("Avoid the prior warning.");
+    expect(JSON.parse(readFileSync(observed, "utf8"))).toMatchObject({
+      type: "before_prompt",
+      session_id: "session-1",
+      prompt: "Continue",
     });
   });
 

@@ -11,7 +11,7 @@
 import { mkdir, readFile, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { discoverAndLoadExtensions } from "@earendil-works/pi-coding-agent";
+import { discoverAndLoadExtensions } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/loader";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { GhostError } from "../src/errors.js";
 import { GhostHome } from "../src/home.js";
@@ -242,7 +242,7 @@ describe("readImageFile", () => {
   // The harness calls the read/validation path directly, exactly as the audit
   // notes the tool harness does — schema coercion is not what is under test.
   // What is under test is the P0: look_at_image must never base64 a non-image
-  // (a private note, `.pi/auth.json`) and ship it to a vision provider.
+  // (a private note, `.pi/agent.db`) and ship it to a vision provider.
   let fixture: GhostFixture;
   let home: GhostHome;
 
@@ -299,6 +299,14 @@ describe("readImageFile", () => {
     expect(thrown).toBeInstanceOf(GhostError);
     expect((thrown as GhostError).code).toBe("invalid_path");
     expect((thrown as GhostError).message).toMatch(/\.pi\/ config directory/);
+  });
+
+  it("refuses OMP's canonical .pi/agent.db credential store outright", async () => {
+    await mkdir(join(fixture.dir, ".pi"), { recursive: true });
+    await writeFile(join(fixture.dir, ".pi", "agent.db"), "sqlite credentials", "utf8");
+    await expect(readImageFile(home, ".pi/agent.db")).rejects.toMatchObject({
+      code: "invalid_path",
+    });
   });
 
   it("refuses a file in .pi even when it is a genuine image", async () => {
@@ -586,7 +594,7 @@ describe("pre-turn image substitution", () => {
 });
 
 /**
- * The suite above drives a scripted stand-in for pi's extension runtime. This
+ * The suite above drives a scripted stand-in for OMP's extension runtime. This
  * loads the real thing — pi's own loader, compiling these files from source and
  * registering against the real `ExtensionAPI` — so the harness is not testing a
  * fiction about how tools get registered.
@@ -604,8 +612,9 @@ describe("pi's own extension loader", () => {
     const result = await discoverAndLoadExtensions(
       ["vision", "screen", "hyprland"].map((name) => join(src, `${name}.ts`)),
       fixture.dir,
-      // A directory that does not exist, so no ambient user extensions load.
-      join(fixture.root, "no-agent-dir"),
+      undefined,
+      undefined,
+      { ambient: false },
     );
     expect(result.errors).toEqual([]);
     const byFile = new Map(

@@ -1,15 +1,15 @@
 /**
  * Per-ghost chat-runtime lifecycle.
  *
- * pi remains the default provider-agnostic `AgentSession` harness. An explicit
+ * Modern Oh My Pi is the default provider-agnostic `AgentSession` harness. An explicit
  * `claude-code` role instead uses the owner-local, Effect-scoped Agent SDK
  * backend in `claude-code.ts`. One daemon process hosts many ghosts
- * concurrently; the pi path is isolated entirely through SDK options — no env
+ * concurrently; the OMP path is isolated entirely through SDK options — no env
  * var, no child process — following the spike (`pi-spike/concurrent-ghosts.mjs`):
  *
  *   cwd        = ~/Ghosts/<name>            the ghost home; extensions derive
  *                                           their paths from ctx.cwd
- *   agentDir   = ~/Ghosts/<name>/.pi        settings.json, models.json, auth.json
+ *   agentDir   = ~/Ghosts/<name>/.pi        settings, models.json, agent.db
  *   sessionDir = ~/Ghosts/<name>/.sessions  transcripts
  *
  * Four decisions that are easy to get wrong and are load-bearing here:
@@ -23,10 +23,10 @@
  *
  * 2. **A ghost is not a coding agent.** `noContextFiles`, `noSkills`,
  *    `noPromptTemplates`, and `appendSystemPromptOverride: () => []` together
- *    stop pi from walking up for `AGENTS.md` / `APPEND_SYSTEM.md` and layering
+ *    stop OMP from walking up for `AGENTS.md` / `APPEND_SYSTEM.md` and layering
  *    a coding-agent prompt under the persona. All four are required; the
  *    spike verified that the result is a system prompt containing zero bytes
- *    of pi's own.
+ *    of OMP's coding-agent prompt.
  *
  * 3. **Project trust is denied by default.** `noExtensions: true` disables
  *    discovery, so a `.ts` file dropped into `~/Ghosts/<name>/.pi/extensions/`
@@ -34,22 +34,27 @@
  *    archive; treating it as an extension source would be arbitrary code
  *    execution. Only the factories the daemon passes in run.
  *
- * 4. **No built-in tools.** `noTools: "all"` plus an `excludeTools` denylist
- *    of every pi built-in means a ghost can never reach bash, the filesystem,
- *    or a browser. Its tools are exactly the ones its extensions register.
+ * 4. **Only the human-input built-in.** Coding/filesystem built-ins stay on an
+ *    explicit denylist. OMP's `ask` is added as a UI bridge, with no tool
+ *    approval surface; all other capabilities come from Ghost extensions.
  */
 import { existsSync, mkdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join, sep } from "node:path";
 import {
   createAgentSession,
-  DefaultResourceLoader,
-  ModelRuntime,
-  SessionManager,
-  SettingsManager,
-  type AgentSession,
-  type AgentSessionEvent,
-} from "@earendil-works/pi-coding-agent";
+} from "@oh-my-pi/pi-coding-agent/sdk";
+import type {
+  AgentSession,
+  AgentSessionEvent,
+} from "@oh-my-pi/pi-coding-agent/session/agent-session";
+import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
+import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import type { SessionEntry } from "@oh-my-pi/pi-coding-agent/session/session-entries";
+import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { AskTool } from "@oh-my-pi/pi-coding-agent/tools/ask";
+import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
+import { ToolAbortError } from "@oh-my-pi/pi-coding-agent/tools/tool-errors";
 import {
   CLAUDE_CODE_PROVIDER_ID,
   ClaudeCodeRuntime,
@@ -74,6 +79,7 @@ import {
 import { GhostError, ghostPaths, type Ghost, type GhostRegistry } from "./ghosts.js";
 import { silentLogger, type Logger } from "./log.js";
 import {
+  ghostOmpModelRouting,
   ghostAuthPath,
   ghostModelsPath,
   readGhostModels,
@@ -82,9 +88,11 @@ import {
 } from "./models.js";
 import { createPiMessagesAdapter, type PiMessagesEvent } from "./pi-messages.js";
 import { generateTitle } from "./title.js";
+import { createGhostOmpRuntime, type GhostOmpRuntime } from "./omp-runtime.js";
+import { AskBroker, AskBrokerError, type PendingAsk } from "./ask-broker.js";
 
 /**
- * pi's built-in tools. Excluded wholesale so no ghost can shell out or touch
+ * OMP's coding/filesystem built-ins. Excluded wholesale so no ghost can shell out or touch
  * the filesystem outside its own extension tools, and so the daemon does not
  * have to know the names of the tools `@ghost/extensions` registers.
  */
@@ -106,6 +114,7 @@ export const PI_BUILTIN_TOOL_NAMES: readonly string[] = [
  */
 export type TitleGenerator = (input: {
   session: AgentSession;
+  runtime: GhostOmpRuntime;
   ghostName: string;
   agentDir: string;
   firstPrompt: string;
@@ -119,7 +128,7 @@ export interface TitleConfig {
 }
 
 /** The default: resolve title_model against the session's own runtime, complete once. */
-const defaultTitleGenerator: TitleGenerator = async ({ session, agentDir, firstPrompt }) => {
+const defaultTitleGenerator: TitleGenerator = async ({ runtime, agentDir, firstPrompt }) => {
   let ref = null;
   try {
     ref = resolveTitleModelRef(readGhostModels(agentDir));
@@ -127,7 +136,7 @@ const defaultTitleGenerator: TitleGenerator = async ({ session, agentDir, firstP
     // A broken models.json is not fatal to titling: fall back to cheapest usable.
     ref = null;
   }
-  return generateTitle({ runtime: session.modelRuntime, firstPrompt, ref });
+  return generateTitle({ runtime, firstPrompt, ref });
 };
 
 export interface SessionHostOptions {
@@ -178,6 +187,15 @@ export interface RunTurnOptions {
   includeThinking?: boolean;
 }
 
+export interface RunAskReanswerOptions {
+  sessionId?: string | null;
+  /** Persisted `ask` toolResult entry selected from the branch tree. */
+  entryId: string;
+  emit: (event: PiMessagesEvent) => void;
+  signal?: AbortSignal;
+  includeThinking?: boolean;
+}
+
 export interface GhostSessionHandle {
   ghost: Ghost;
   sessionKey: string;
@@ -187,14 +205,25 @@ export interface GhostSessionHandle {
   model: { provider: string; id: string } | null;
 }
 
+export interface QueuedMessages {
+  streaming: boolean;
+  count: number;
+  steering: readonly string[];
+  followUp: readonly string[];
+}
+
+export type QueueMode = "steer" | "followUp";
+
 interface HostedSession extends GhostSessionHandle {
   busy: boolean;
+  /** HTTP-backed implementation of OMP's built-in `ask` UI contract. */
+  ask: AskBroker;
   /**
    * The runtime this session's model was bound from, kept so a later model
    * switch can re-resolve against the same catalogue the session was built
    * with (see `rebindModel`).
    */
-  modelRuntime: ModelRuntime;
+  modelRuntime: GhostOmpRuntime;
   /**
    * Set when a model switch arrived while this session was mid-turn: the model
    * is not yanked out from under a running prompt, it is rebound in runTurn's
@@ -203,7 +232,7 @@ interface HostedSession extends GhostSessionHandle {
   pendingRebind?: boolean;
   /**
    * The in-flight background compaction, if any. A turn awaits this before
-   * prompting, because pi's `session.prompt()` throws while a manual
+   * prompting, because OMP's `session.prompt()` throws while a manual
    * compaction is running. Resolves (never rejects) when compaction settles.
    */
   compaction?: Promise<void>;
@@ -268,11 +297,27 @@ export interface SessionSummary {
   messageCount: number;
 }
 
-/** A renderable transcript message: pi's own message shape, reasoning removed. */
+/** A renderable transcript message: OMP's message shape, reasoning removed. */
 export interface TranscriptMessage {
   role: "user" | "assistant";
   content: unknown;
   timestamp?: number;
+  entryId: string;
+  parentId: string | null;
+  /** Sibling user-message branches reachable at this point in the tree. */
+  branch?: BranchNavigation;
+}
+
+export interface BranchNavigation {
+  index: number;
+  count: number;
+  previousTargetId?: string;
+  nextTargetId?: string;
+}
+
+export interface AskBranchNavigation extends BranchNavigation {
+  /** The active ask toolResult entry; selecting re-answer creates its sibling. */
+  resultEntryId: string;
 }
 
 /** A conversation's history for rehydration in the shell. */
@@ -306,19 +351,53 @@ function clampTranscriptOffset(offset: number | undefined): number {
  * blocks included, exactly as the live stream sends them); drops internal
  * `toolResult` messages and any private `thinking` content.
  */
-function projectTranscriptMessage(message: unknown): TranscriptMessage | null {
+function projectTranscriptMessage(
+  entry: Extract<SessionEntry, { type: "message" }>,
+  branch: BranchNavigation | undefined,
+  askBranches: ReadonlyMap<string, AskBranchNavigation>,
+): TranscriptMessage | null {
+  const message = entry.message;
   const role = (message as { role?: unknown } | null)?.role;
   if (role !== "user" && role !== "assistant") return null;
   let content = (message as { content?: unknown }).content;
   if (role === "assistant" && Array.isArray(content)) {
     content = content.filter(
       (part) => (part as { type?: unknown } | null)?.type !== "thinking",
-    );
+    ).map((part) => {
+      const toolCall = part as { type?: unknown; id?: unknown } | null;
+      if (toolCall?.type !== "toolCall" || typeof toolCall.id !== "string") return part;
+      const askBranch = askBranches.get(toolCall.id);
+      return askBranch ? { ...(part as object), ghostAsk: askBranch } : part;
+    });
   }
-  const projected: TranscriptMessage = { role, content };
+  const projected: TranscriptMessage = {
+    role,
+    content,
+    entryId: entry.id,
+    parentId: entry.parentId,
+    ...(branch ? { branch } : {}),
+  };
   const timestamp = (message as { timestamp?: unknown }).timestamp;
   if (typeof timestamp === "number") projected.timestamp = timestamp;
   return projected;
+}
+
+function branchNavigation(
+  entry: SessionEntry,
+  siblings: readonly SessionEntry[],
+  deepestTarget: (entryId: string) => string,
+): BranchNavigation | undefined {
+  if (siblings.length <= 1) return undefined;
+  const index = siblings.findIndex((candidate) => candidate.id === entry.id);
+  if (index < 0) return undefined;
+  return {
+    index,
+    count: siblings.length,
+    ...(index > 0 ? { previousTargetId: deepestTarget(siblings[index - 1]!.id) } : {}),
+    ...(index + 1 < siblings.length
+      ? { nextTargetId: deepestTarget(siblings[index + 1]!.id) }
+      : {}),
+  };
 }
 
 export class SessionHost {
@@ -408,15 +487,37 @@ export class SessionHost {
     mkdirSync(paths.agentDir, { recursive: true });
     mkdirSync(paths.sessionDir, { recursive: true });
 
-    const settingsManager = SettingsManager.create(paths.home, paths.agentDir);
-    // pi's *automatic* compaction is left off (this `enabled: false` is exactly
+    const settings = Settings.isolated({
+      "compaction.enabled": false,
+      // Modern OMP owns retry classification, cooldowns, and fallback
+      // reversion. Ghost only supplies the role assignments and ordered
+      // chains from models.json.
+      "retry.modelFallback": true,
+      "retry.fallbackRevertPolicy": "cooldown-expiry",
+      // Ghost supplies its own scoped `look_at_image` extension. Keep OMP's
+      // model-sensitive `inspect_image` builtin from widening that allowlist
+      // when a text-only chat model is selected.
+      "inspect_image.mode": "off",
+      // Ghost has no approval surface by design. Its explicit extension-tool
+      // allowlist is the capability boundary.
+      "tools.approvalMode": "yolo",
+    });
+    try {
+      const routing = ghostOmpModelRouting(readGhostModels(paths.agentDir));
+      settings.override("modelRoles", routing.modelRoles);
+      settings.override("retry.fallbackChains", routing.fallbackChains);
+    } catch (error) {
+      this.logger.error("models.json routing is unusable", {
+        ghost: ghostName,
+        error: (error as Error).message,
+      });
+    }
+    // OMP's *automatic* compaction is left off (this `enabled: false` is exactly
     // what gates its `_checkCompaction`), because its auto path both blocks the
     // next turn and gives no hook for our own summary prompt. Compaction is
     // instead driven from runTurn via `maybeCompact` — see compaction.ts. The
     // manual `session.compact()` path ignores this flag, so disabling the auto
     // trigger here does not disable compaction itself.
-    settingsManager.applyOverrides({ compaction: { enabled: false } });
-
     const extensions = resolveGhostExtensions({
       ghostName,
       browserMode: this.browserMode,
@@ -424,59 +525,68 @@ export class SessionHost {
       ...this.extensionOptions,
     });
 
-    const resourceLoader = new DefaultResourceLoader({
+    const modelRuntime = await createGhostOmpRuntime({
+      authPath: ghostAuthPath(paths.agentDir),
+      modelsPath: ghostModelsPath(paths.agentDir),
+      // Provider catalogs are fetched only when the daemon is not offline.
+      allowModelNetwork: !this.offline,
+      settings,
+    });
+
+    const sessionManager = await SessionManager.open(
+      join(paths.sessionDir, sessionFileNameFor(sessionKey)),
+      paths.sessionDir,
+      undefined,
+      { initialCwd: paths.home },
+    );
+
+    const ask = new AskBroker();
+    const { session, extensionsResult, setToolUIContext } = await createAgentSession({
       cwd: paths.home,
       agentDir: paths.agentDir,
-      settingsManager,
-      extensionFactories: extensions.factories,
-      // See decision 3 in the module comment: no discovery of extensions
-      // sitting inside the ghost home.
-      noExtensions: true,
-      // See decision 2: a ghost is not a coding agent.
-      noContextFiles: true,
-      noSkills: true,
-      noPromptTemplates: true,
-      noThemes: true,
-      appendSystemPromptOverride: () => [],
+      settings,
+      authStorage: modelRuntime.authStorage,
+      modelRegistry: modelRuntime.modelRegistry,
+      extensions: extensions.factories,
+      disableExtensionDiscovery: true,
+      additionalExtensionPaths: [],
+      preloadedExtensionPaths: [],
+      preloadedCustomToolPaths: [],
+      contextFiles: [],
+      skills: [],
+      rules: [],
+      promptTemplates: [],
+      slashCommands: [],
+      systemPrompt: [],
+      enableMCP: false,
+      enableLsp: false,
+      enableIrc: false,
+      skipPythonPreflight: true,
+      hasUI: false,
+      // `ask` is a human-input bridge, not a tool-approval surface. OMP keeps
+      // those concerns separate: interactivePrompts exposes AskTool while the
+      // yolo approval mode above still auto-accepts the explicit capability set.
+      interactivePrompts: true,
+      autoApprove: true,
+      agentRegistry: new AgentRegistry(),
+      // See decision 1: sessions live under the ghost home. `open` on a path
+      // that does not exist yet creates it, so a conversation id maps to a
+      // stable transcript across daemon restarts.
+      sessionManager,
+      // See decision 4. The allowlist comes from @ghost/extensions (it is
+      // scope-dependent — a visitor session has no note writer); the denylist
+      // is belt-and-braces so a future built-in cannot appear by name.
+      toolNames: [...extensions.toolNames, "ask"],
     });
-    await resourceLoader.reload();
-    const loaded = resourceLoader.getExtensions();
-    for (const error of loaded.errors ?? []) {
+    setToolUIContext(ask.uiContext, true);
+
+    for (const error of extensionsResult.errors ?? []) {
       this.logger.error("extension failed to load", {
         ghost: ghostName,
         path: error.path,
         error: String(error.error),
       });
     }
-
-    const modelRuntime = await ModelRuntime.create({
-      authPath: ghostAuthPath(paths.agentDir),
-      modelsPath: ghostModelsPath(paths.agentDir),
-      // Provider catalogs are fetched only when the daemon is not offline.
-      allowModelNetwork: !this.offline,
-    });
-
-    const { session } = await createAgentSession({
-      cwd: paths.home,
-      agentDir: paths.agentDir,
-      resourceLoader,
-      settingsManager,
-      modelRuntime,
-      // See decision 1: sessions live under the ghost home. `open` on a path
-      // that does not exist yet creates it, so a conversation id maps to a
-      // stable transcript across daemon restarts.
-      sessionManager: SessionManager.open(
-        join(paths.sessionDir, sessionFileNameFor(sessionKey)),
-        paths.sessionDir,
-        paths.home,
-      ),
-      // See decision 4. The allowlist comes from @ghost/extensions (it is
-      // scope-dependent — a visitor session has no note writer); the denylist
-      // is belt-and-braces so a future built-in cannot appear by name.
-      noTools: "all",
-      tools: extensions.toolNames,
-      excludeTools: [...PI_BUILTIN_TOOL_NAMES],
-    });
 
     const toolNames = session.getActiveToolNames();
     const model = await this.selectModel(session, modelRuntime, paths.agentDir, ghostName);
@@ -497,8 +607,75 @@ export class SessionHost {
       model,
       modelRuntime,
       busy: false,
+      ask,
       turnId: 0,
     };
+  }
+
+  /** The currently blocked OMP `ask`, if this live conversation has one. */
+  pendingAsk(ghostName: string, sessionId?: string | null): PendingAsk | null {
+    this.registry.get(ghostName);
+    return this.sessions.get(this.keyOf(ghostName, sessionId))?.ask.pending ?? null;
+  }
+
+  /** Resolve the current ask. AskBroker validates ids/options and is first-response-wins. */
+  answerAsk(
+    ghostName: string,
+    sessionId: string | null | undefined,
+    askId: string,
+    answer: unknown,
+  ): void {
+    this.registry.get(ghostName);
+    const hosted = this.sessions.get(this.keyOf(ghostName, sessionId));
+    if (!hosted) {
+      throw new GhostError("ask_not_pending", "This conversation is not waiting for an answer.", 409);
+    }
+    try {
+      hosted.ask.answer(askId, answer);
+    } catch (error) {
+      if (error instanceof AskBrokerError) {
+        throw new GhostError(
+          error.code,
+          error.message,
+          error.code === "invalid_ask_answer" ? 400 : 409,
+        );
+      }
+      throw error;
+    }
+  }
+
+  queuedMessages(ghostName: string, sessionId?: string | null): QueuedMessages {
+    this.registry.get(ghostName);
+    const hosted = this.sessions.get(this.keyOf(ghostName, sessionId));
+    if (!hosted) return { streaming: false, count: 0, steering: [], followUp: [] };
+    const queued = hosted.session.getQueuedMessages();
+    return {
+      streaming: hosted.session.isStreaming,
+      count: hosted.session.queuedMessageCount,
+      steering: [...queued.steering],
+      followUp: [...queued.followUp],
+    };
+  }
+
+  /** Queue text using OMP's native steering/follow-up semantics. */
+  async queueMessage(
+    ghostName: string,
+    sessionId: string | null | undefined,
+    mode: QueueMode,
+    text: string,
+  ): Promise<QueuedMessages> {
+    this.registry.get(ghostName);
+    const hosted = this.sessions.get(this.keyOf(ghostName, sessionId));
+    if (!hosted?.busy || !hosted.session.isStreaming) {
+      throw new GhostError(
+        "session_not_streaming",
+        "This conversation is not currently streaming; send a normal message instead.",
+        409,
+      );
+    }
+    if (mode === "followUp") await hosted.session.followUp(text);
+    else await hosted.session.steer(text);
+    return this.queuedMessages(ghostName, sessionId);
   }
 
   /**
@@ -512,7 +689,7 @@ export class SessionHost {
    * turn kept answering on the old one (there is no idle eviction).
    * `ModelCatalog.setChatModel` calls this right after the write.
    *
-   * A busy session is not yanked mid-turn — pi's active run keeps the model it
+   * A busy session is not yanked mid-turn — OMP's active run keeps the model it
    * started on. It is flagged instead and rebound in runTurn's `finally`, once
    * the current turn settles and before the next one begins.
    *
@@ -559,18 +736,22 @@ export class SessionHost {
    *
    * Provider-agnostic by construction: the (provider, modelId) pair comes
    * from the ghost's own `models.json`, and an unresolvable pair is a warning
-   * rather than a hard failure — pi's own default selection still applies,
+   * rather than a hard failure — OMP's own default selection still applies,
    * and the turn will report a clean error if there is nothing to run on.
    */
   private async selectModel(
     session: AgentSession,
-    modelRuntime: ModelRuntime,
+    modelRuntime: GhostOmpRuntime,
     agentDir: string,
     ghostName: string,
   ): Promise<{ provider: string; id: string } | null> {
     let ref: ReturnType<typeof resolveChatModelRef> = null;
     try {
-      ref = resolveChatModelRef(readGhostModels(agentDir));
+      const file = readGhostModels(agentDir);
+      const routing = ghostOmpModelRouting(file);
+      session.settings.override("modelRoles", routing.modelRoles);
+      session.settings.override("retry.fallbackChains", routing.fallbackChains);
+      ref = resolveChatModelRef(file);
     } catch (error) {
       this.logger.error("models.json is unusable", {
         ghost: ghostName,
@@ -578,11 +759,11 @@ export class SessionHost {
       });
     }
     if (ref) {
-      const model = modelRuntime.getModel(ref.provider, ref.modelId);
+      const model = modelRuntime.modelRegistry.find(ref.provider, ref.modelId);
       if (model) {
         // Await the bind: a fire-and-forget setModel can lose the race with
-        // the first prompt, which would then run on pi's default model.
-        await session.setModel(model);
+        // the first prompt, which would then run on OMP's default model.
+        await session.setModel(model, "default");
         return { provider: model.provider, id: model.id };
       }
       this.logger.warn("configured chat model is not available", {
@@ -659,7 +840,7 @@ export class SessionHost {
       && !hosted.session.messages.some((message) => message.role === "assistant");
 
     // A background compaction from the previous turn may still be running.
-    // pi's `session.prompt()` throws while a manual compaction is in progress,
+    // OMP's `session.prompt()` throws while a manual compaction is in progress,
     // so wait it out first. This is the only place a turn can be delayed by
     // compaction, and only when the user returns before it finished; the
     // awaited promise never rejects (errors were already routed to the log).
@@ -682,6 +863,26 @@ export class SessionHost {
 
     try {
       hosted.turnId += 1;
+      if (this.hooks.hasHandlers("before_prompt")) {
+        const result = await this.hooks.emitBeforePrompt({
+          type: "before_prompt",
+          prompt: options.prompt,
+          turn_id: hosted.turnId,
+          session_id: hosted.session.sessionId,
+          ...(hosted.session.sessionFile ? { session_file: hosted.session.sessionFile } : {}),
+          signal: options.signal ?? new AbortController().signal,
+          ghost_name: ghostName,
+          cwd: paths.home,
+          runtime: "omp",
+        });
+        if (result?.additionalContext && !options.signal?.aborted) {
+          await hosted.session.sendCustomMessage({
+            customType: "before-prompt-hook-context",
+            content: result.additionalContext,
+            display: false,
+          }, { triggerTurn: false });
+        }
+      }
       await hosted.session.prompt(options.prompt);
 
       let stopHookActive = false;
@@ -700,7 +901,7 @@ export class SessionHost {
           signal: options.signal ?? new AbortController().signal,
           ghost_name: ghostName,
           cwd: paths.home,
-          runtime: "pi",
+          runtime: "omp",
         });
         const additionalContext = ghostSessionStopContinuation(result);
         if (!additionalContext) break;
@@ -745,7 +946,7 @@ export class SessionHost {
         await this.rebindSessionModel(hosted, ghostName);
       }
       // Kick compaction AFTER unsubscribing and releasing the turn: it must run
-      // on an idle session (pi's compact() aborts any active run), and its
+      // on an idle session (OMP's compact() aborts any active run), and its
       // compaction_start/end events must not leak into this turn's stream.
       this.startBackgroundCompaction(hosted, ghostName);
       // Name the conversation from its first message, fire-and-forget. Runs
@@ -772,15 +973,16 @@ export class SessionHost {
   ): void {
     const promise = this.generateTitle({
       session: hosted.session,
+      runtime: hosted.modelRuntime,
       ghostName,
       agentDir,
       firstPrompt,
     })
-      .then((raw) => {
+      .then(async (raw) => {
         const title = raw.trim();
         // A concurrent turn may have titled it first; do not overwrite.
         if (!title || hosted.session.sessionName) return;
-        hosted.session.sessionManager.appendSessionInfo(title);
+        await hosted.session.sessionManager.setSessionName(title, "auto", "ghost-title");
         this.logger.info("named ghost conversation", {
           ghost: ghostName,
           session: hosted.session.sessionId,
@@ -848,7 +1050,7 @@ export class SessionHost {
     ]);
     const piSessions: SessionSummary[] = sessions.map((info) => ({
       id: conversationIdFromSessionFile(info.path),
-      title: info.name && info.name.trim() ? info.name : null,
+      title: info.title && info.title.trim() ? info.title : null,
       createdAt: info.created.toISOString(),
       updatedAt: info.modified.toISOString(),
       messageCount: info.messageCount,
@@ -866,7 +1068,7 @@ export class SessionHost {
   /**
    * Read one conversation's messages so the shell can rehydrate it (issue #26).
    *
-   * Reuses pi's own session read: the transcript file is opened read-only and
+   * Reuses OMP's own session read: the transcript file is opened read-only and
    * its message entries are projected to the same `{ role, content }` shape a
    * pi-messages client renders. Private reasoning (`thinking` blocks) and
    * internal `toolResult` messages are dropped — exactly what the live wire
@@ -894,11 +1096,89 @@ export class SessionHost {
     const hosted = this.sessions.get(this.keyOf(ghostName, conversationId));
     if (hosted?.title) await hosted.title.catch(() => {});
 
-    const manager = SessionManager.open(path, paths.sessionDir, paths.home);
+    const manager = await SessionManager.open(
+      path,
+      paths.sessionDir,
+      undefined,
+      { initialCwd: paths.home },
+    );
+    return this.transcriptFromManager(id, manager, options);
+  }
+
+  private transcriptFromManager(
+    id: string,
+    manager: SessionManager,
+    options: { limit?: number; offset?: number } = {},
+  ): Transcript {
+    const entries = manager.getEntries();
+    const active = manager.getBranch();
+    const children = new Map<string | null, SessionEntry[]>();
+    const order = new Map<string, number>();
+    for (const [index, entry] of entries.entries()) {
+      order.set(entry.id, index);
+      const siblings = children.get(entry.parentId) ?? [];
+      siblings.push(entry);
+      children.set(entry.parentId, siblings);
+    }
+    const deepestTarget = (entryId: string): string => {
+      let best = entryId;
+      let bestOrder = order.get(entryId) ?? -1;
+      const stack = [entryId];
+      const visited = new Set<string>();
+      while (stack.length > 0) {
+        const current = stack.pop()!;
+        if (visited.has(current)) continue;
+        visited.add(current);
+        const descendants = children.get(current) ?? [];
+        if (descendants.length === 0) {
+          const candidateOrder = order.get(current) ?? -1;
+          if (candidateOrder >= bestOrder) {
+            best = current;
+            bestOrder = candidateOrder;
+          }
+        } else {
+          for (const child of descendants) stack.push(child.id);
+        }
+      }
+      return best;
+    };
+
+    const askBranches = new Map<string, AskBranchNavigation>();
+    for (const entry of active) {
+      if (entry.type !== "message" || entry.message.role !== "toolResult"
+        || entry.message.toolName !== "ask") continue;
+      const toolCallId = entry.message.toolCallId;
+      const siblings = (children.get(entry.parentId) ?? []).filter(
+        (candidate): candidate is Extract<SessionEntry, { type: "message" }> =>
+          candidate.type === "message"
+          && candidate.message.role === "toolResult"
+          && candidate.message.toolName === "ask"
+          && candidate.message.toolCallId === toolCallId,
+      );
+      const navigation = branchNavigation(entry, siblings, deepestTarget)
+        ?? { index: 0, count: 1 };
+      askBranches.set(toolCallId, {
+        ...navigation,
+        resultEntryId: entry.id,
+      });
+    }
+
     const all: TranscriptMessage[] = [];
-    for (const entry of manager.getEntries()) {
+    for (const entry of active) {
       if (entry.type !== "message") continue;
-      const message = projectTranscriptMessage(entry.message);
+      const userSiblings = entry.message.role === "user"
+        ? (children.get(entry.parentId) ?? []).filter(
+            (candidate): candidate is Extract<SessionEntry, { type: "message" }> =>
+              candidate.type === "message" && candidate.message.role === "user",
+          )
+        : [];
+      const message = projectTranscriptMessage(
+        entry,
+        entry.message.role === "user"
+          ? branchNavigation(entry, userSiblings, deepestTarget)
+          : undefined,
+        askBranches,
+      );
       if (message) all.push(message);
     }
     const total = all.length;
@@ -914,6 +1194,175 @@ export class SessionHost {
     };
   }
 
+  private async idleHostedSession(
+    ghostName: string,
+    conversationId: string | null | undefined,
+  ): Promise<HostedSession> {
+    const hosted = (await this.open(ghostName, conversationId)) as HostedSession;
+    if (hosted.busy || hosted.session.isStreaming) {
+      throw new GhostError(
+        "session_busy",
+        "Wait for this conversation to finish before changing branches.",
+        409,
+      );
+    }
+    return hosted;
+  }
+
+  /** Rewind before one user message and return its text as an editable branch draft. */
+  async branchConversation(
+    ghostName: string,
+    conversationId: string | null | undefined,
+    entryId: string,
+  ): Promise<{ draft: string; transcript: Transcript }> {
+    const hosted = await this.idleHostedSession(ghostName, conversationId);
+    const entry = hosted.session.sessionManager.getEntry(entryId);
+    if (entry?.type !== "message" || entry.message.role !== "user") {
+      throw new GhostError("invalid_branch", "Only a persisted user message can start an editable branch.", 400);
+    }
+    hosted.busy = true;
+    try {
+      const result = await hosted.session.navigateTree(entryId);
+      if (result.cancelled) throw new GhostError("branch_cancelled", "Conversation branching was cancelled.", 409);
+      return {
+        draft: result.editorText ?? "",
+        transcript: this.transcriptFromManager(
+          conversationId || DEFAULT_SESSION_KEY,
+          hosted.session.sessionManager,
+        ),
+      };
+    } finally {
+      hosted.busy = false;
+    }
+  }
+
+  /** Switch the active leaf to an existing sibling branch. */
+  async navigateConversation(
+    ghostName: string,
+    conversationId: string | null | undefined,
+    targetId: string,
+  ): Promise<{ transcript: Transcript }> {
+    const hosted = await this.idleHostedSession(ghostName, conversationId);
+    hosted.busy = true;
+    try {
+      const result = await hosted.session.navigateTree(targetId);
+      if (result.cancelled) throw new GhostError("branch_cancelled", "Branch navigation was cancelled.", 409);
+      return {
+        transcript: this.transcriptFromManager(
+          conversationId || DEFAULT_SESSION_KEY,
+          hosted.session.sessionManager,
+        ),
+      };
+    } finally {
+      hosted.busy = false;
+    }
+  }
+
+  /**
+   * Re-open a historical OMP `ask`, commit the new answer as a sibling
+   * toolResult, rebuild the active branch, then resume the model on that branch.
+   */
+  async runAskReanswer(
+    ghostName: string,
+    options: RunAskReanswerOptions,
+  ): Promise<void> {
+    const hosted = await this.idleHostedSession(ghostName, options.sessionId);
+    hosted.busy = true;
+    const adapter = createPiMessagesAdapter(options.emit, {
+      includeThinking: options.includeThinking,
+      deferAgentEnd: true,
+    });
+    const unsubscribe = hosted.session.subscribe((event: AgentSessionEvent) => adapter.handle(event));
+    const onAbort = () => {
+      hosted.ask.close();
+      void hosted.session.abort();
+    };
+    options.signal?.addEventListener("abort", onAbort, { once: true });
+    const syntheticId = `ask-reanswer-${options.entryId}`;
+    try {
+      const probe = await hosted.session.navigateTree(options.entryId, { allowAskReopen: true });
+      if (!probe.reopenAsk) {
+        throw new GhostError(
+          "ask_not_reanswerable",
+          "That branch point is not a recoverable OMP ask result.",
+          400,
+        );
+      }
+      adapter.handle({
+        type: "tool_execution_start",
+        toolCallId: syntheticId,
+        toolName: "ask",
+        args: { questions: probe.reopenAsk.questions },
+        intent: "Re-answer an earlier question",
+      } as AgentSessionEvent);
+
+      const toolSession: ToolSession = {
+        cwd: ghostPaths(hosted.ghost.dir).home,
+        hasUI: true,
+        canPromptUser: true,
+        settings: hosted.session.settings,
+        getSessionFile: () => hosted.session.sessionFile ?? null,
+        getSessionSpawns: () => null,
+        getPlanModeState: () => hosted.session.getPlanModeState(),
+      };
+      const askTool = new AskTool(toolSession);
+      const result = await askTool.execute(
+        syntheticId,
+        { questions: probe.reopenAsk.questions },
+        options.signal,
+        undefined,
+        hosted.session.buildAskReanswerContext(hosted.ask.uiContext),
+      );
+      if (result.details?.chatRedirect) {
+        throw new GhostError(
+          "ask_chat_unavailable",
+          "Chat about this is not available while re-answering a branch; submit an answer instead.",
+          409,
+        );
+      }
+      adapter.handle({
+        type: "tool_execution_end",
+        toolCallId: syntheticId,
+        toolName: "ask",
+        result,
+        isError: result.isError === true,
+      } as AgentSessionEvent);
+
+      const committed = await hosted.session.navigateTree(options.entryId, {
+        allowAskReopen: true,
+        reanswerAskResult: result,
+      });
+      if (!committed.askReanswerCommitted) {
+        throw new GhostError("ask_reanswer_failed", "OMP did not commit the revised answer.", 409);
+      }
+      options.emit({
+        type: "branch_changed",
+        transcript: this.transcriptFromManager(
+          options.sessionId || DEFAULT_SESSION_KEY,
+          hosted.session.sessionManager,
+        ),
+      });
+
+      hosted.session.resumeAfterAskReanswer();
+      await hosted.session.waitForIdle();
+      if (!adapter.isTerminal()) {
+        if (options.signal?.aborted) adapter.finishError(new Error("Turn aborted."), true);
+        else adapter.finishDone();
+      }
+    } catch (error) {
+      if (!adapter.isTerminal()) {
+        adapter.finishError(
+          error instanceof ToolAbortError ? new Error("Ask re-answer cancelled.") : error,
+          options.signal?.aborted === true,
+        );
+      }
+    } finally {
+      options.signal?.removeEventListener("abort", onAbort);
+      unsubscribe();
+      hosted.busy = false;
+    }
+  }
+
   /** Drop one hosted session (aborting an in-flight turn). */
   async close(ghostName: string, sessionId?: string | null): Promise<void> {
     await this.claudeCode.close(ghostName, sessionId || DEFAULT_SESSION_KEY);
@@ -926,7 +1375,12 @@ export class SessionHost {
     if (!hosted) return;
     this.sessions.delete(key);
     if (hosted.busy) await hosted.session.abort();
-    hosted.session.dispose();
+    hosted.ask.close();
+    try {
+      await hosted.session.dispose();
+    } finally {
+      hosted.modelRuntime.close();
+    }
   }
 
   /** Tear down every hosted session. Idempotent. */
@@ -938,7 +1392,12 @@ export class SessionHost {
     for (const entry of hosted) {
       try {
         if (entry.busy) await entry.session.abort();
-        entry.session.dispose();
+        entry.ask.close();
+        try {
+          await entry.session.dispose();
+        } finally {
+          entry.modelRuntime.close();
+        }
       } catch (error) {
         this.logger.warn("session disposal failed", { error: (error as Error).message });
       }

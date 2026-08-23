@@ -12,14 +12,14 @@
  * - the composed extension factory (persona + memory + notes over one home
  *   and one scope), and
  * - the tool allowlist that goes with that scope, which the daemon passes to
- *   `createAgentSession` as `tools` alongside `noTools: "all"`. The daemon
- *   does not name any tool itself; a visitor session simply gets a shorter
- *   list (no note writer) because the scope says so.
+ *   `createAgentSession` as `tools` alongside `noTools: "all"`. The session
+ *   host separately adds OMP's `ask`; a visitor gets a shorter extension list
+ *   (no note writer) because the scope says so.
  *
  * Scope is fixed at session construction, never toggled at runtime: nothing
  * the model emits during a turn can widen a visitor into a creator.
  */
-import type { InlineExtension } from "@earendil-works/pi-coding-agent";
+import type { ExtensionFactory } from "@oh-my-pi/pi-coding-agent";
 import {
   createGhostExtension,
   ghostToolNamesFor,
@@ -77,7 +77,7 @@ function selectBrowserBackend(
 
 export interface ResolvedGhostExtensions {
   /** Inline factories for `DefaultResourceLoader({ extensionFactories })`. */
-  factories: InlineExtension[];
+  factories: ExtensionFactory[];
   /** Tool allowlist for `createAgentSession({ noTools: "all", tools })`. */
   toolNames: string[];
   scope: GhostScope;
@@ -110,7 +110,7 @@ export function resolveGhostExtensions(
     ...(backend === undefined ? {} : { backend }),
   };
   return {
-    factories: [{ name: "ghost", factory: createGhostExtension(extensionOptions) }],
+    factories: [createGhostExtension(extensionOptions)],
     toolNames: ghostToolNamesFor(extensionOptions),
     scope,
   };

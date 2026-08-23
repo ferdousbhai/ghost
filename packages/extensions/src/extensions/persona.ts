@@ -13,7 +13,7 @@
  * AGENTS.md and APPEND_SYSTEM.md above the ghost home leak into the persona
  * (report §6.3). That is the daemon's half of this contract.
  */
-import type { ExtensionAPI, ExtensionFactory } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionFactory } from "@oh-my-pi/pi-coding-agent";
 import { deriveNoteCatalog } from "../catalog.js";
 import { deriveMemoryIndex } from "../memory-file.js";
 import { buildGhostSystemPrompt } from "../prompt.js";
@@ -41,7 +41,7 @@ export function createPersonaExtension(
       ]);
       return {
         // Returned, not appended: this IS the system prompt.
-        systemPrompt: buildGhostSystemPrompt({
+        systemPrompt: [buildGhostSystemPrompt({
           ghostName: options.ghostName ?? home.name,
           character,
           memory: deriveMemoryIndex(memory.files),
@@ -50,7 +50,7 @@ export function createPersonaExtension(
           ...(options.extraSections === undefined
             ? {}
             : { extraSections: options.extraSections }),
-        }),
+        })],
       };
     });
   };

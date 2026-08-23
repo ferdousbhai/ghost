@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { discoverAndLoadExtensions } from "@earendil-works/pi-coding-agent";
+import { discoverAndLoadExtensions } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/loader";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   GHOST_MEMORY_LIST,
@@ -28,7 +28,7 @@ afterEach(async () => {
 });
 
 /**
- * The rest of the suite drives a scripted stand-in for pi's extension runtime.
+ * The rest of the suite drives a scripted stand-in for OMP's extension runtime.
  * This one loads the real thing: pi's own loader, jiti-compiling these files
  * from source, registering against the real ExtensionAPI. It is the check that
  * the harness elsewhere is not testing a fiction.
@@ -38,8 +38,9 @@ describe("pi's own extension loader", () => {
     const result = await discoverAndLoadExtensions(
       ["persona", "memory", "notes"].map((name) => join(SRC, `${name}.ts`)),
       fixture.dir,
-      // A directory that does not exist, so no ambient user extensions load.
-      join(fixture.root, "no-agent-dir"),
+      undefined,
+      undefined,
+      { ambient: false },
     );
     expect(result.errors).toEqual([]);
 

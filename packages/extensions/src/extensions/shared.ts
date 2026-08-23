@@ -7,7 +7,7 @@
  * process-global env var is shared by definition (report §4).
  */
 import { execFile } from "node:child_process";
-import type { AgentToolResult, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { AgentToolResult, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { GhostError } from "../errors.js";
 import { GhostHome, openGhostHome } from "../home.js";
 import { CREATOR_SCOPE, type GhostScope } from "../scope.js";

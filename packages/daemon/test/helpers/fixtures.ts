@@ -72,8 +72,8 @@ export function seedGhost(root: string, options: SeedGhostOptions = {}): string 
 }
 
 /**
- * Parse an SSE body exactly the way `@earendil-works/pi-ai`'s pi-messages
- * client does: split on a blank line, take the first `data:` line of each
+ * Parse an SSE body according to Ghost's pi-messages contract: split on a
+ * blank line, take the first `data:` line of each
  * frame, ignore `[DONE]`, ignore frames with no data line (keepalives).
  */
 export function parseSseStream(body: string): PiMessagesEvent[] {

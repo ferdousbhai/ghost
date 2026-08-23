@@ -1,12 +1,12 @@
 /**
- * The login state machine, driven through a fake `ModelRuntime.login()` that
- * simulates each pi callback path — url, device code, paste, select, failure,
+ * The login state machine, driven through a fake OMP runtime that simulates
+ * each auth callback path — URL, device code, paste, select, failure,
  * timeout — with no real provider and no network.
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import type { AuthInteraction } from "@earendil-works/pi-ai";
+import type { AuthInteraction } from "../src/auth.js";
 import {
   bindDefaultChatModelIfUnset,
   LoginManager,

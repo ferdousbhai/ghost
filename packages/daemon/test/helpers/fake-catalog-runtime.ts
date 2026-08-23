@@ -2,7 +2,7 @@
  * A fake `ModelCatalogRuntime`: an in-memory catalogue with a set of
  * credentialed providers, so the model switcher can be exercised over every
  * path (current-model resolution, available vs catalogue listing, provider/q
- * filters, the cap) without a real `ModelRuntime`, a provider, or a network
+ * filters, the cap) without a real OMP registry, a provider, or a network
  * call.
  */
 import type { CatalogModel, ModelCatalogRuntime } from "../../src/model-catalog.js";
@@ -13,7 +13,7 @@ export interface FakeCatalogModel extends CatalogModel {
 }
 
 export interface FakeCatalogOptions {
-  /** The full catalogue: every model pi would report from getModels(). */
+  /** The full catalogue: every model OMP would report from getModels(). */
   models: FakeCatalogModel[];
   /** Providers with a working credential; their models are "available". */
   credentialed?: string[];

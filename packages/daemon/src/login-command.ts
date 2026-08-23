@@ -3,28 +3,31 @@
  * a TTY, for headless setups and for anyone who would rather stay in the
  * terminal.
  *
- * It talks to pi directly rather than through `LoginManager`: the manager
+ * It talks to OMP directly rather than through `LoginManager`: the manager
  * exists to make an interactive flow *pollable* over HTTP, which a terminal
- * does not need — here `readline` supplies the same `AuthInteraction` pi's own
+ * does not need — here `readline` supplies the same `AuthInteraction` OMP's
  * `auth-command` builds from a TTY. The one thing shared with the HTTP path is
  * `bindDefaultChatModelIfUnset`, so both leave a signed-in ghost ready to chat.
  *
- * Credentials are written by `login()` to the ghost's `<home>/.pi/auth.json`
+ * Credentials are written by `login()` to the ghost's `<home>/.pi/agent.db`
  * and nowhere else. Pasted codes and keys are read straight into the flow and
  * never logged.
  */
 import { createInterface, type Interface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
-import { ModelRuntime } from "@earendil-works/pi-coding-agent";
-import type { AuthInteraction, AuthPrompt, AuthType } from "@earendil-works/pi-ai";
 import {
   ANTHROPIC_EXTRA_USAGE_NOTE,
   bindDefaultChatModelIfUnset,
+  type AuthInteraction,
+  type AuthPrompt,
+  type AuthType,
+  type LoginRuntime,
 } from "./auth.js";
 import { loadConfig, type DaemonConfigOverrides } from "./config.js";
 import { scrubProviderEnv } from "./env-scrub.js";
 import { GhostRegistry, ghostPaths, type Ghost } from "./ghosts.js";
 import { ghostAuthPath, ghostModelsPath } from "./models.js";
+import { createGhostOmpRuntime } from "./omp-runtime.js";
 
 const USAGE = `ghostd login — sign a ghost into a model provider
 
@@ -38,7 +41,7 @@ Options:
       --oauth          Force the OAuth flow (the default when both are offered).
       --ghosts-root <dir>  Directory holding one sub-directory per ghost.
       --config <file>  Config file (default ~/.config/ghost/config.json).
-      --offline        Forbid pi's own catalog network calls.
+      --offline        Forbid OMP's catalogue network calls.
   -h, --help           Show this message.
 `;
 
@@ -124,7 +127,7 @@ interface LoginProviderOption {
   billingNote?: string;
 }
 
-function loginableProviders(runtime: ModelRuntime): LoginProviderOption[] {
+function loginableProviders(runtime: LoginRuntime): LoginProviderOption[] {
   const options: LoginProviderOption[] = [];
   for (const provider of runtime.getProviders()) {
     if (provider.auth.oauth) {
@@ -149,7 +152,7 @@ function loginableProviders(runtime: ModelRuntime): LoginProviderOption[] {
 
 async function resolveProvider(
   rl: Interface,
-  runtime: ModelRuntime,
+  runtime: LoginRuntime,
   args: LoginArgs,
 ): Promise<LoginProviderOption> {
   const all = loginableProviders(runtime);
@@ -251,7 +254,7 @@ export async function loginCommand(argv: string[]): Promise<number> {
     const registry = new GhostRegistry(config.ghostsRoot);
     const ghost = await resolveGhost(rl, registry, args.ghost);
     const paths = ghostPaths(ghost.dir);
-    const runtime = await ModelRuntime.create({
+    const runtime = await createGhostOmpRuntime({
       authPath: ghostAuthPath(paths.agentDir),
       modelsPath: ghostModelsPath(paths.agentDir),
       allowModelNetwork: !config.offline,

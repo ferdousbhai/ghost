@@ -3,6 +3,7 @@ import type {
   Options as ClaudeQueryOptions,
   Query,
   SDKMessage,
+  SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import { afterEach, describe, expect, it } from "vitest";
 import { ghostPaths } from "../src/ghosts.js";
@@ -29,8 +30,10 @@ function sdkMessage(value: unknown): SDKMessage {
 function fakeQuery(
   messages: SDKMessage[],
   lifecycle: { interrupted: number; closed: number },
+  before?: () => Promise<void>,
 ): Query {
   const stream = (async function* () {
+    await before?.();
     for (const message of messages) yield message;
   })();
   return Object.assign(stream, {
@@ -113,6 +116,7 @@ function setupClaudeHost(options: {
   setChatModelRole(paths.agentDir, "claude-code", "default");
 
   const seenOptions: ClaudeQueryOptions[] = [];
+  const seenPrompts: SDKUserMessage[] = [];
   const lifecycle = { queries: 0, interrupted: 0, closed: 0 };
   host = new SessionHost({
     registry: temp.registry,
@@ -131,11 +135,13 @@ function setupClaudeHost(options: {
         seenOptions.push(input.options);
         const sessionId = input.options.sessionId ?? input.options.resume;
         if (!sessionId) throw new Error("test query received no session id");
-        return fakeQuery(responseMessages(sessionId, "Hello from the plan."), lifecycle);
+        return fakeQuery(responseMessages(sessionId, "Hello from the plan."), lifecycle, async () => {
+          for await (const message of input.prompt) seenPrompts.push(message);
+        });
       },
     },
   });
-  return { paths, seenOptions, lifecycle };
+  return { paths, seenOptions, seenPrompts, lifecycle };
 }
 
 describe("Claude Code subscription runtime", () => {
@@ -147,7 +153,6 @@ describe("Claude Code subscription runtime", () => {
       prompt: "Who are you?",
       emit: (event) => first.push(event),
     });
-
     expect(first.at(-1)?.type).toBe("done");
     expect(first.some((event) => event.type === "text_delta"
       && event.delta.includes("plan"))).toBe(true);
@@ -213,6 +218,27 @@ describe("Claude Code subscription runtime", () => {
     expect(events.filter((event) => event.type === "start")).toHaveLength(1);
     expect(events.filter((event) => event.type === "done")).toHaveLength(1);
     expect(events.at(-1)).toMatchObject({ type: "done", usage: { totalTokens: 4 } });
+  });
+
+  it("injects before_prompt guidance into one Claude query", async () => {
+    const hooks = new GhostHookRunner();
+    await hooks.register((api) => {
+      api.on("before_prompt", () => ({ additionalContext: "Avoid the prior warning." }));
+    });
+    const { seenOptions, seenPrompts, lifecycle } = setupClaudeHost({ hooks });
+
+    await host!.runTurn("casper", {
+      sessionId: "conversation-before-prompt",
+      prompt: "hello",
+      emit: () => {},
+    });
+
+    expect(lifecycle.queries).toBe(1);
+    expect(seenOptions[0]?.systemPrompt).not.toContain("Avoid the prior warning.");
+    expect(seenPrompts).toHaveLength(2);
+    expect(seenPrompts[0]).toMatchObject({ isSynthetic: true, shouldQuery: false });
+    expect(JSON.stringify(seenPrompts[0]?.message.content)).toContain("Avoid the prior warning.");
+    expect(JSON.stringify(seenPrompts[1]?.message.content)).toContain("hello");
   });
 
   it("never makes an owner subscription available to a visitor scope", async () => {

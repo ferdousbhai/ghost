@@ -1,8 +1,8 @@
 /**
  * Errors the ghost tools raise.
  *
- * pi 0.84.2 does not honour a returned `{ isError: true }` payload — the flag is
- * set by the runtime when `execute()` throws (spike report §6.6). So every
+ * OMP marks tool failures when `execute()` throws rather than from a returned
+ * `{ isError: true }` payload. So every
  * failure path here is a `throw`, and the thrown value carries a machine-readable
  * `code` plus a model-facing message, because that message is what the agent
  * reads and reacts to.

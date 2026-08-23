@@ -1,6 +1,6 @@
 /**
  * The model indicator + switcher HTTP surface, end to end over a real
- * listening loopback server, with a fake catalogue so no real `ModelRuntime`,
+ * listening loopback server, with a fake catalogue so no real OMP registry,
  * provider, or network is touched.
  *
  *   GET /api/ghosts/:name/model
@@ -15,7 +15,7 @@ import {
   ModelCatalog,
   type ModelCatalogRuntime,
 } from "../src/model-catalog.js";
-import { setChatModelRole, writeGhostModels } from "../src/models.js";
+import { readGhostModels, setChatModelRole, writeGhostModels } from "../src/models.js";
 import { startDaemonServer, type ListeningServer } from "../src/server.js";
 import { SessionHost } from "../src/session-host.js";
 import {
@@ -80,7 +80,7 @@ async function getJson(url: string): Promise<{ status: number; body: Record<stri
 }
 
 describe("GET /api/ghosts/:name/model", () => {
-  it("reports the external Claude Code runtime without asking pi to resolve it", async () => {
+  it("reports the external Claude Code runtime without asking OMP to resolve it", async () => {
     const base = await serve({ claudePlan: true });
     setChatModelRole(agentDir(), "claude-code", "default");
     const { status, body } = await getJson(`${base}/api/ghosts/casper/model`);
@@ -169,6 +169,55 @@ describe("GET /api/ghosts/:name/models?scope=available", () => {
     expect(body.models).toEqual([]);
     expect(body.total).toBe(0);
   });
+
+  it("orders models by provider priority, then newest version like OMP", async () => {
+    const models: FakeCatalogModel[] = [
+      { provider: "openai-codex", id: "gpt-5.3-codex-spark", input: ["text"] },
+      { provider: "openai-codex", id: "gpt-5.6-terra", input: ["text"] },
+      { provider: "openai-codex", id: "gpt-5.4-mini", input: ["text"] },
+      { provider: "openai-codex", id: "gpt-5.6-luna", input: ["text"] },
+      { provider: "openai-codex", id: "gpt-5.5", input: ["text"] },
+      { provider: "openai-codex", id: "gpt-5.6-sol", input: ["text"] },
+      { provider: "priority", id: "model-9", priority: 5, input: ["text"] },
+      { provider: "priority", id: "model-2", priority: 1, input: ["text"] },
+    ];
+    const base = await serve({ models, credentialed: ["openai-codex", "priority"] });
+    const { body } = await getJson(`${base}/api/ghosts/casper/models?scope=available`);
+    const ids = (body.models as Array<{ provider: string; id: string }>).map(
+      (model) => `${model.provider}/${model.id}`,
+    );
+
+    expect(ids).toEqual([
+      "openai-codex/gpt-5.6-luna",
+      "openai-codex/gpt-5.6-sol",
+      "openai-codex/gpt-5.6-terra",
+      "openai-codex/gpt-5.5",
+      "openai-codex/gpt-5.4-mini",
+      "openai-codex/gpt-5.3-codex-spark",
+      "priority/model-2",
+      "priority/model-9",
+    ]);
+  });
+
+  it("ranks dashed versions, latest aliases, and dated snapshots like OMP", async () => {
+    const models: FakeCatalogModel[] = [
+      { provider: "anthropic", id: "claude-opus-4-5", input: ["text"] },
+      { provider: "anthropic", id: "claude-opus-4-6", input: ["text"] },
+      { provider: "anthropic", id: "claude-opus-4-6-20260701", input: ["text"] },
+      { provider: "anthropic", id: "claude-opus-4-6-latest", input: ["text"] },
+      { provider: "anthropic", id: "claude-opus-4-6-20260801", input: ["text"] },
+    ];
+    const base = await serve({ models, credentialed: ["anthropic"] });
+    const { body } = await getJson(`${base}/api/ghosts/casper/models?scope=available`);
+
+    expect((body.models as Array<{ id: string }>).map((model) => model.id)).toEqual([
+      "claude-opus-4-6-latest",
+      "claude-opus-4-6-20260801",
+      "claude-opus-4-6-20260701",
+      "claude-opus-4-6",
+      "claude-opus-4-5",
+    ]);
+  });
 });
 
 describe("GET /api/ghosts/:name/models?scope=catalog", () => {
@@ -230,7 +279,7 @@ describe("GET /api/ghosts/:name/models?scope=catalog", () => {
     expect((first.body.models as unknown[]).length).toBe(DEFAULT_MODELS_LIMIT);
     expect(first.body.total).toBe(250);
     expect(first.body.limit).toBe(DEFAULT_MODELS_LIMIT);
-    expect((first.body.models as Array<{ id: string }>)[0]?.id).toBe("model-000");
+    expect((first.body.models as Array<{ id: string }>)[0]?.id).toBe("model-249");
 
     // offset pages into the sorted list.
     const paged = await getJson(
@@ -238,7 +287,7 @@ describe("GET /api/ghosts/:name/models?scope=catalog", () => {
     );
     const ids = (paged.body.models as Array<{ id: string }>).map((m) => m.id);
     expect(ids).toHaveLength(10);
-    expect(ids[0]).toBe("model-100");
+    expect(ids[0]).toBe("model-149");
 
     // limit is clamped to MAX_MODELS_LIMIT.
     const huge = await getJson(
@@ -328,6 +377,98 @@ describe("PUT /api/ghosts/:name/model", () => {
     const base = await serve();
     expect((await put(base, { id: "gpt-5-codex" })).status).toBe(400);
     expect((await put(base, { provider: "openai-codex" })).status).toBe(400);
+  });
+});
+
+describe("OMP model roles and fallback chains", () => {
+  async function putRouting(
+    base: string,
+    payload: unknown,
+  ): Promise<{ status: number; body: Record<string, unknown> }> {
+    const response = await fetch(`${base}/api/ghosts/casper/model-routing`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    return { status: response.status, body: (await response.json()) as Record<string, unknown> };
+  }
+
+  it("configures a custom role and an ordered fallback chain", async () => {
+    const base = await serve({ credentialed: ["openai-codex", "anthropic"] });
+    expect((await putRouting(base, {
+      role: "research_model",
+      target: "primary",
+      provider: "openai-codex",
+      id: "gpt-5-codex",
+    })).status).toBe(200);
+    expect((await putRouting(base, {
+      role: "research_model",
+      target: "fallback",
+      provider: "anthropic",
+      id: "claude-opus-4",
+    })).status).toBe(200);
+
+    const route = await getJson(`${base}/api/ghosts/casper/model-routing`);
+    const research = (route.body.roles as Array<Record<string, unknown>>)
+      .find((item) => item.role === "research_model") as Record<string, unknown>;
+    expect(research).toMatchObject({
+      ompRole: "research",
+      label: "Research",
+      primary: { provider: "openai-codex", id: "gpt-5-codex", resolved: true, usable: true },
+      fallbacks: [
+        { provider: "anthropic", id: "claude-opus-4", resolved: true, usable: true },
+      ],
+    });
+    expect(readGhostModels(agentDir())).toMatchObject({
+      roles: { research_model: { provider: "openai-codex", modelId: "gpt-5-codex" } },
+      fallbacks: {
+        research_model: [{ provider: "anthropic", modelId: "claude-opus-4" }],
+      },
+    });
+  });
+
+  it("enforces vision capability and excludes Claude Code from OMP fallbacks", async () => {
+    const base = await serve({ claudePlan: true });
+    const noVision = await putRouting(base, {
+      role: "vision_model",
+      target: "primary",
+      provider: "openai-codex",
+      id: "gpt-5-mini",
+    });
+    expect(noVision).toMatchObject({ status: 400, body: { error: { code: "model_has_no_vision" } } });
+    const claudeFallback = await putRouting(base, {
+      role: "chat_model",
+      target: "fallback",
+      provider: "claude-code",
+      id: "default",
+    });
+    expect(claudeFallback).toMatchObject({
+      status: 400,
+      body: { error: { code: "unsupported_model_route" } },
+    });
+  });
+
+  it("clears a role's fallbacks without changing its primary", async () => {
+    const base = await serve({ credentialed: ["openai-codex", "anthropic"] });
+    await putRouting(base, {
+      role: "chat_model",
+      target: "primary",
+      provider: "openai-codex",
+      id: "gpt-5-codex",
+    });
+    await putRouting(base, {
+      role: "chat_model",
+      target: "fallback",
+      provider: "anthropic",
+      id: "claude-opus-4",
+    });
+    const cleared = await putRouting(base, {
+      role: "chat_model",
+      target: "clear_fallbacks",
+    });
+    expect(cleared.status).toBe(200);
+    expect(readGhostModels(agentDir())?.roles?.chat_model?.modelId).toBe("gpt-5-codex");
+    expect(readGhostModels(agentDir())?.fallbacks?.chat_model).toBeUndefined();
   });
 });
 

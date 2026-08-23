@@ -1,14 +1,14 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 /**
  * `ghostd` — the Ghost daemon.
  *
  *   ghostd                    serve on the configured port (default 7717)
  *   ghostd --port 7788        serve on an explicit port
  *   ghostd --ghosts-root DIR  serve ghosts from DIR instead of ~/Ghosts
- *   ghostd --offline          forbid pi's own network calls (see README)
+ *   ghostd --offline          forbid OMP's catalogue network calls (see README)
  *   ghostd --version | --help
  *
- * The very first thing this does — before pi is touched, before a session
+ * The very first thing this does — before OMP is touched, before a session
  * exists — is scrub inherited provider credentials out of the process
  * environment. See env-scrub.ts for why.
  */
@@ -56,7 +56,7 @@ Options:
   -p, --port <port>        TCP port to bind on 127.0.0.1 (default 7717)
       --ghosts-root <dir>  Directory holding one sub-directory per ghost
       --config <file>      Config file (default ~/.config/ghost/config.json)
-      --offline            Forbid pi's own network calls (catalog refresh off)
+      --offline            Forbid OMP's catalogue network calls (refresh off)
       --log-level <level>  debug | info | warn | error (default info)
   -h, --help               Show this message
   -v, --version            Show the version
@@ -181,7 +181,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     return 1;
   }
 
-  // Before pi, before any session. Idempotent, but this is the call that
+  // Before OMP, before any session. Idempotent, but this is the call that
   // matters: everything downstream inherits this environment.
   const { removed } = scrubProviderEnv(process.env, { offline: config.offline });
   if (removed.length > 0) {
@@ -225,7 +225,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     offline: config.offline,
     // A model switch must reach any conversation that is already open, not just
     // the next freshly built session: rebind the live cached sessions.
-    onChatModelChanged: (name) => host.rebindModel(name),
+    onModelRoutingChanged: (name) => host.rebindModel(name),
   });
 
   let listening;

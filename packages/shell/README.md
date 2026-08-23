@@ -19,7 +19,7 @@ qml/
   GhostBarSurface.qml  opt-in standalone layer strip carrying the widget
   TrayBridge.qml       system-tray (StatusNotifierItem) presence, via a helper
   tray/ghost-tray.py   the SNI + DBusMenu D-Bus object Quickshell cannot expose
-  components/          Bubble, Roster, Composer, ActivityLine   → qs.components
+  components/          chat, ask, queue, tool-card, routing and orb UI
   services/            Ghostd, Theme, Notifier (singletons)     → qs.services
 contrib/               keybinds, systemd unit, Omarchy bar integration
 dev/                   mock daemon, demo script, lint
@@ -55,6 +55,31 @@ pragma, so it must live in `shell.qml`), which is the class Hyprland exposes for
 or unfocused, hide only when already focused. It replaced an earlier layer-shell
 HUD whose `HyprlandFocusGrab` and custom `moveNext` monitor-move IPC existed only
 because a layer surface is invisible to the WM's own window binds.
+
+## Harness interaction
+
+The HUD follows modern OMP's interaction model. A model selection closes the
+switcher immediately and returns focus to chat. The advanced routing view binds
+Chat, Vision, Titles, General, and Research primaries plus ordered retry
+fallbacks. Within each provider, current model families sort ahead of older
+versions.
+
+OMP's built-in `ask` appears as a structured in-chat form. It supports offered
+options, custom input, notes, multiple selection, chat-about-this, and cancel;
+it is separate from tool approval, which Ghost does not expose. While a model
+is streaming, Enter steers the active run, Ctrl+Enter queues a follow-up, and
+Shift+Enter inserts a newline. The queued state is visible below the composer.
+
+Tool calls persist as lifecycle cards with bounded summaries and error/fallback
+states. User messages expose editable branch points and sibling navigation;
+historical ask cards can be re-answered to create a sibling branch and resume
+generation from it.
+
+The activity line uses the recovered summon-ghost spectral orb and rotating,
+tool-aware summoning copy. The QML port traces to summon-ghost commit
+`be07ca78c95fe38dae105866f7543283f483443b` (the mature glow-clipping fix).
+Its aura is deliberately unclipped, the line keeps a stable height, and motion
+can be disabled with `GHOST_REDUCE_MOTION=1`.
 
 ## System tray
 
@@ -106,6 +131,7 @@ qs -c ghost ipc call ghost refresh            # re-read roster and theme
 | `GHOSTD_API_TOKEN_FILE` | `$XDG_STATE_HOME/ghost/api-token` | the `0600` file holding the API bearer token the daemon mints at startup; `Ghostd.qml` reads it and sends `Authorization: Bearer …` on every request, re-reading once on a `401` so `ghostd api-token --rotate` does not need a shell restart |
 | `GHOST_BAR_SURFACE` | unset | `1` puts up the standalone bar strip |
 | `GHOST_HUD_REPLAY` | unset | `1` replays local history in every request instead of relying on `options.sessionId` |
+| `GHOST_REDUCE_MOTION` | unset | `1`, `true`, or `yes` keeps the spectral orb and activity copy static |
 
 ## Status
 

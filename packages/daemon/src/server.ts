@@ -7,6 +7,14 @@
  *   POST /api/ghosts/:name/messages   pi-messages request → SSE of pi-messages events
  *   GET  /api/ghosts/:name/sessions   → { sessions } — conversation listing for that ghost
  *   GET  /api/ghosts/:name/sessions/:id/transcript → { id, title, messages } for resume
+ *   GET  /api/ghosts/:name/sessions/:id/ask → { ask } — current OMP ask, if any
+ *   POST /api/ghosts/:name/sessions/:id/ask → resolve that ask
+ *   GET  /api/ghosts/:name/sessions/:id/queue → OMP steering/follow-up queues
+ *   POST /api/ghosts/:name/sessions/:id/queue → enqueue a steer or follow-up
+ *   POST /api/ghosts/:name/sessions/:id/branch → rewind/navigate the OMP tree
+ *   POST /api/ghosts/:name/sessions/:id/reanswer → branch an ask result + SSE resume
+ *   GET  /api/ghosts/:name/model-routing → Ghost roles + OMP fallback chains
+ *   PUT  /api/ghosts/:name/model-routing → set a primary/fallback or clear a chain
  *   GET  /api/relay/status            → whether the creator's Chromium is paired
  *   WS   /relay                       → the MV3 extension's socket (token-gated)
  *
@@ -45,12 +53,12 @@
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import type { AuthType } from "@earendil-works/pi-ai";
 import { apiTokenMatches, readOrCreateApiToken } from "./api-token.js";
-import type { LoginManager } from "./auth.js";
+import type { AuthType, LoginManager } from "./auth.js";
 import { assertLoopback } from "./config.js";
 import type { ListModelsQuery, ModelCatalog, ModelScope } from "./model-catalog.js";
 import { GhostError, type GhostRegistry } from "./ghosts.js";
+import { GHOST_MODEL_ROLES, type GhostModelRole } from "./models.js";
 import { silentLogger, type Logger } from "./log.js";
 import {
   encodeSseEvent,
@@ -514,16 +522,73 @@ export function createDaemonServer(options: ServerOptions): Server {
     jsonResponse(response, 200, await options.catalog.setChatModel(ghostName, provider, id));
   };
 
-  const handleMessages = async (
+  const handleModelRouting = async (
     ghostName: string,
+    method: string,
     request: IncomingMessage,
     response: ServerResponse,
   ): Promise<void> => {
-    // Fail before any byte of the stream, so the client sees a real status
-    // code rather than an SSE error event it has to unwrap.
-    const ghost = options.registry.get(ghostName);
-    const parsed = parsePiMessagesRequest(await readJsonBody(request, maxBodyBytes));
+    if (!options.catalog) {
+      errorResponse(response, 404, "not_found", "Model routing is not enabled on this daemon.");
+      return;
+    }
+    if (method === "GET") {
+      jsonResponse(response, 200, await options.catalog.getModelRouting(ghostName));
+      return;
+    }
+    if (method !== "PUT") {
+      errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+      return;
+    }
+    const body = await readJsonBody(request, maxBodyBytes);
+    if (body === null || typeof body !== "object" || Array.isArray(body)) {
+      errorResponse(response, 400, "invalid_request", "Request body must be a JSON object.");
+      return;
+    }
+    const { role, target, provider, id } = body as {
+      role?: unknown;
+      target?: unknown;
+      provider?: unknown;
+      id?: unknown;
+    };
+    if (typeof role !== "string" || !GHOST_MODEL_ROLES.includes(role as GhostModelRole)) {
+      errorResponse(response, 400, "invalid_request", "\"role\" is not a supported Ghost model role.");
+      return;
+    }
+    if (target === "clear_fallbacks") {
+      jsonResponse(
+        response,
+        200,
+        await options.catalog.clearModelFallbacks(ghostName, role as GhostModelRole),
+      );
+      return;
+    }
+    if (target !== "primary" && target !== "fallback") {
+      errorResponse(response, 400, "invalid_request", "\"target\" must be primary, fallback, or clear_fallbacks.");
+      return;
+    }
+    if (typeof provider !== "string" || provider === "" || typeof id !== "string" || id === "") {
+      errorResponse(response, 400, "invalid_request", "\"provider\" and \"id\" must be non-empty strings.");
+      return;
+    }
+    jsonResponse(
+      response,
+      200,
+      await options.catalog.setModelRoute(
+        ghostName,
+        role as GhostModelRole,
+        target,
+        provider,
+        id,
+      ),
+    );
+  };
 
+  const streamSessionEvents = async (
+    request: IncomingMessage,
+    response: ServerResponse,
+    run: (emit: (event: PiMessagesEvent) => void, signal: AbortSignal) => Promise<void>,
+  ): Promise<void> => {
     const requestedTurnId = request.headers["x-ghost-turn-id"];
     const turnId = typeof requestedTurnId === "string" && TURN_ID_PATTERN.test(requestedTurnId)
       ? requestedTurnId
@@ -551,13 +616,7 @@ export function createDaemonServer(options: ServerOptions): Server {
     };
 
     try {
-      await options.host.runTurn(ghost.name, {
-        sessionId: parsed.sessionId,
-        prompt: parsed.prompt,
-        emit,
-        signal: controller.signal,
-        includeThinking: options.includeThinking,
-      });
+      await run(emit, controller.signal);
     } catch (error) {
       // runTurn guarantees a terminal event for anything that happens inside
       // the turn; this path is for the refusals it throws instead (a busy
@@ -582,6 +641,162 @@ export function createDaemonServer(options: ServerOptions): Server {
       response.off("close", onClose);
       if (!response.writableEnded) response.end();
     }
+  };
+
+  const handleMessages = async (
+    ghostName: string,
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): Promise<void> => {
+    // Fail before any byte of the stream, so the client sees a real status
+    // code rather than an SSE error event it has to unwrap.
+    const ghost = options.registry.get(ghostName);
+    const parsed = parsePiMessagesRequest(await readJsonBody(request, maxBodyBytes));
+    await streamSessionEvents(request, response, (emit, signal) =>
+      options.host.runTurn(ghost.name, {
+        sessionId: parsed.sessionId,
+        prompt: parsed.prompt,
+        emit,
+        signal,
+        includeThinking: options.includeThinking,
+      }));
+  };
+
+  const handleBranch = async (
+    ghostName: string,
+    sessionId: string,
+    method: string,
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): Promise<void> => {
+    if (method !== "POST") {
+      errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+      return;
+    }
+    const body = await readJsonBody(request, maxBodyBytes);
+    if (body === null || typeof body !== "object" || Array.isArray(body)) {
+      errorResponse(response, 400, "invalid_request", "Request body must be a JSON object.");
+      return;
+    }
+    const { action, entryId } = body as { action?: unknown; entryId?: unknown };
+    if (typeof entryId !== "string" || entryId === "") {
+      errorResponse(response, 400, "invalid_request", '"entryId" must be a non-empty string.');
+      return;
+    }
+    if (action === "rewind") {
+      jsonResponse(
+        response,
+        200,
+        await options.host.branchConversation(ghostName, sessionId, entryId),
+      );
+      return;
+    }
+    if (action === "navigate") {
+      jsonResponse(
+        response,
+        200,
+        await options.host.navigateConversation(ghostName, sessionId, entryId),
+      );
+      return;
+    }
+    errorResponse(response, 400, "invalid_request", '"action" must be "rewind" or "navigate".');
+  };
+
+  const handleAskReanswer = async (
+    ghostName: string,
+    sessionId: string,
+    method: string,
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): Promise<void> => {
+    if (method !== "POST") {
+      errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+      return;
+    }
+    const body = await readJsonBody(request, maxBodyBytes);
+    if (body === null || typeof body !== "object" || Array.isArray(body)) {
+      errorResponse(response, 400, "invalid_request", "Request body must be a JSON object.");
+      return;
+    }
+    const { entryId } = body as { entryId?: unknown };
+    if (typeof entryId !== "string" || entryId === "") {
+      errorResponse(response, 400, "invalid_request", '"entryId" must be a non-empty string.');
+      return;
+    }
+    options.registry.get(ghostName);
+    await streamSessionEvents(request, response, (emit, signal) =>
+      options.host.runAskReanswer(ghostName, {
+        sessionId,
+        entryId,
+        emit,
+        signal,
+        includeThinking: options.includeThinking,
+      }));
+  };
+
+  const handleAsk = async (
+    ghostName: string,
+    sessionId: string,
+    method: string,
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): Promise<void> => {
+    if (method === "GET") {
+      jsonResponse(response, 200, { ask: options.host.pendingAsk(ghostName, sessionId) });
+      return;
+    }
+    if (method !== "POST") {
+      errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+      return;
+    }
+    const body = await readJsonBody(request, maxBodyBytes);
+    if (body === null || typeof body !== "object" || Array.isArray(body)) {
+      errorResponse(response, 400, "invalid_request", "Request body must be a JSON object.");
+      return;
+    }
+    const { askId, ...answer } = body as Record<string, unknown>;
+    if (typeof askId !== "string" || askId === "") {
+      errorResponse(response, 400, "invalid_request", '"askId" must be a non-empty string.');
+      return;
+    }
+    options.host.answerAsk(ghostName, sessionId, askId, answer);
+    jsonResponse(response, 200, { accepted: true });
+  };
+
+  const handleQueue = async (
+    ghostName: string,
+    sessionId: string,
+    method: string,
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): Promise<void> => {
+    if (method === "GET") {
+      jsonResponse(response, 200, options.host.queuedMessages(ghostName, sessionId));
+      return;
+    }
+    if (method !== "POST") {
+      errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+      return;
+    }
+    const body = await readJsonBody(request, maxBodyBytes);
+    if (body === null || typeof body !== "object" || Array.isArray(body)) {
+      errorResponse(response, 400, "invalid_request", "Request body must be a JSON object.");
+      return;
+    }
+    const { mode, text } = body as { mode?: unknown; text?: unknown };
+    if (mode !== "steer" && mode !== "followUp") {
+      errorResponse(response, 400, "invalid_request", '"mode" must be "steer" or "followUp".');
+      return;
+    }
+    if (typeof text !== "string" || text.trim() === "") {
+      errorResponse(response, 400, "invalid_request", '"text" must be a non-empty string.');
+      return;
+    }
+    jsonResponse(
+      response,
+      200,
+      await options.host.queueMessage(ghostName, sessionId, mode, text.trim()),
+    );
   };
 
   const server = createServer((request, response) => {
@@ -653,6 +868,42 @@ export function createDaemonServer(options: ServerOptions): Server {
             response,
           );
         }
+        if (segments.length === 6 && segments[3] === "sessions" && segments[5] === "ask") {
+          return await handleAsk(
+            ghostName,
+            decodePathSegment(segments[4] ?? ""),
+            method,
+            request,
+            response,
+          );
+        }
+        if (segments.length === 6 && segments[3] === "sessions" && segments[5] === "queue") {
+          return await handleQueue(
+            ghostName,
+            decodePathSegment(segments[4] ?? ""),
+            method,
+            request,
+            response,
+          );
+        }
+        if (segments.length === 6 && segments[3] === "sessions" && segments[5] === "branch") {
+          return await handleBranch(
+            ghostName,
+            decodePathSegment(segments[4] ?? ""),
+            method,
+            request,
+            response,
+          );
+        }
+        if (segments.length === 6 && segments[3] === "sessions" && segments[5] === "reanswer") {
+          return await handleAskReanswer(
+            ghostName,
+            decodePathSegment(segments[4] ?? ""),
+            method,
+            request,
+            response,
+          );
+        }
         if (segments.length === 4 && segments[3] === "model") {
           if (method === "GET") return await handleCurrentModel(ghostName, response);
           if (method === "PUT") return await handleSetModel(ghostName, request, response);
@@ -665,6 +916,9 @@ export function createDaemonServer(options: ServerOptions): Server {
             return;
           }
           return await handleListModels(ghostName, url, response);
+        }
+        if (segments.length === 4 && segments[3] === "model-routing") {
+          return await handleModelRouting(ghostName, method, request, response);
         }
         if (segments.length === 4 && segments[3] === "providers") {
           if (method !== "GET") {

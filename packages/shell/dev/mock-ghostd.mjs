@@ -299,6 +299,22 @@ function finishLogin(session) {
 // A small stand-in for pi's ~1,270-model registry: enough providers and rows
 // to exercise available-vs-catalog, the vision badge, search, and paging.
 
+function modelVersion(id) {
+  const dotted = id.match(/(?:^|[-_])(\d+\.\d+)/);
+  if (dotted?.[1]) return Number.parseFloat(dotted[1]);
+  const dashed = id.match(/(?:^|[-_])(\d{1,2})-(\d{1,2})(?=-|$)/);
+  if (dashed?.[1] && dashed[2]) return Number.parseFloat(`${dashed[1]}.${dashed[2]}`);
+  const single = id.match(/(?:^|[-_])(\d+)/);
+  return single?.[1] ? Number.parseFloat(single[1]) : 0;
+}
+
+function compareModels(a, b) {
+  const provider = a.provider.localeCompare(b.provider);
+  if (provider !== 0) return provider;
+  const version = modelVersion(b.id) - modelVersion(a.id);
+  return version || a.id.localeCompare(b.id);
+}
+
 /** @type {{ provider: string, id: string, name: string, contextWindow: number, cost: object, hasVision: boolean }[]} */
 const CATALOG = [
   { provider: "anthropic", id: "claude-opus-4", name: "Claude Opus 4", contextWindow: 200000, cost: { input: 15, output: 75 }, hasVision: true },
@@ -313,13 +329,22 @@ const CATALOG = [
   { provider: "openai", id: "o3", name: "o3", contextWindow: 200000, cost: { input: 2, output: 8 }, hasVision: true },
   { provider: "xai", id: "grok-4", name: "Grok 4", contextWindow: 256000, cost: { input: 5, output: 15 }, hasVision: false },
   { provider: "xai", id: "grok-4-fast", name: "Grok 4 Fast", contextWindow: 256000, cost: { input: 0.2, output: 0.5 }, hasVision: false },
-].sort((a, b) => (a.provider + a.id).localeCompare(b.provider + b.id));
+].sort(compareModels);
 
 // Which providers this mock pretends to be credentialed for. `anthropic` starts
 // connected so the available list is non-empty; the rest route through login.
 const credentialed = new Set(["anthropic"]);
 /** ghost name → { provider, id } explicit chat-model role. */
 const roles = new Map();
+/** ghost name → { [ghostRole]: { primary, fallbacks } }. */
+const routing = new Map();
+const ROUTE_ROLES = [
+  ["chat_model", "default", "Chat"],
+  ["vision_model", "vision", "Vision"],
+  ["title_model", "title", "Titles"],
+  ["general_purpose_model", "general", "General purpose"],
+  ["research_model", "research", "Research"],
+];
 
 const modelRow = (m) => ({
   provider: m.provider,
@@ -375,6 +400,33 @@ function listModels(name, params) {
     return row;
   });
   return { scope, models: page, total, limit, offset, provider: provider || undefined, q: params.get("q") || undefined };
+}
+
+function routeState(name) {
+  if (!routing.has(name)) routing.set(name, {});
+  const state = routing.get(name);
+  const chat = roles.get(name) || resolveCurrent(name).current;
+  return {
+    roles: ROUTE_ROLES.map(([role, ompRole, label]) => {
+      const configured = state[role] || {};
+      const primary = role === "chat_model" ? (configured.primary || chat) : configured.primary;
+      const view = (binding) => {
+        if (!binding) return null;
+        const model = CATALOG.find((m) => m.provider === binding.provider && m.id === binding.id);
+        return Object.assign(model ? modelRow(model) : { provider: binding.provider, id: binding.id, hasVision: false }, {
+          resolved: Boolean(model),
+          usable: Boolean(model && credentialed.has(model.provider)),
+        });
+      };
+      return {
+        role,
+        ompRole,
+        label,
+        primary: view(primary),
+        fallbacks: (configured.fallbacks || []).map(view),
+      };
+    }),
+  };
 }
 
 createServer(async (req, res) => {
@@ -436,6 +488,35 @@ createServer(async (req, res) => {
     return json(res, 200, usable
       ? { ok: true, usable: true, current, source }
       : { ok: true, usable: false, warning: `${provider} is not connected; sign in to use this model`, current, source });
+  }
+  if (parts[3] === "model-routing" && parts.length === 4 && req.method === "GET") {
+    return json(res, 200, routeState(name));
+  }
+  if (parts[3] === "model-routing" && parts.length === 4 && req.method === "PUT") {
+    const body = await readBody(req).catch(() => ({}));
+    const definition = ROUTE_ROLES.find(([role]) => role === body?.role);
+    if (!definition) return json(res, 400, { error: { message: "unknown role", code: "invalid_request" } });
+    if (!routing.has(name)) routing.set(name, {});
+    const state = routing.get(name);
+    const route = state[body.role] || { primary: null, fallbacks: [] };
+    if (body.target === "clear_fallbacks") {
+      route.fallbacks = [];
+    } else {
+      const model = CATALOG.find((m) => m.provider === body.provider && m.id === body.id);
+      if (!model) return json(res, 400, { error: { message: "unknown model", code: "unknown_model" } });
+      const binding = { provider: model.provider, id: model.id };
+      if (body.target === "primary") {
+        route.primary = binding;
+        if (body.role === "chat_model") roles.set(name, binding);
+      } else if (body.target === "fallback") {
+        if (!route.fallbacks.some((item) => item.provider === binding.provider && item.id === binding.id))
+          route.fallbacks.push(binding);
+      } else {
+        return json(res, 400, { error: { message: "unknown target", code: "invalid_request" } });
+      }
+    }
+    state[body.role] = route;
+    return json(res, 200, routeState(name));
   }
 
   // ---- Login endpoints -----------------------------------------------------

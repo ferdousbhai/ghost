@@ -10,8 +10,8 @@
  * write to `memory/.visitors/<id>/` and cannot name their way out of it (phase 2
  * uses this; phase 1 always builds creator scope).
  */
-import type { ExtensionAPI, ExtensionFactory } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
+import type { ExtensionAPI, ExtensionFactory } from "@oh-my-pi/pi-coding-agent";
+import { Type } from "@oh-my-pi/pi-coding-agent/extensibility/legacy-typebox";
 import { deriveMemoryIndex, MAX_MEMORY_FILE_DESCRIPTION_LENGTH } from "../memory-file.js";
 import { describeScope } from "../scope.js";
 import {

@@ -1,5 +1,5 @@
 /**
- * A scripted stand-in for pi's extension runtime.
+ * A scripted stand-in for OMP's extension runtime.
  *
  * The tests drive tool calls and lifecycle events directly against the
  * registered handlers. No model is contacted and no session is created: the
@@ -14,9 +14,9 @@ import type {
   ToolCallEvent,
   ToolCallEventResult,
   ToolDefinition,
-} from "@earendil-works/pi-coding-agent";
+} from "@oh-my-pi/pi-coding-agent";
 
-type AnyTool = ToolDefinition<any, any, any>;
+type AnyTool = ToolDefinition<any, any>;
 type AnyHandler = (event: any, ctx: ExtensionContext) => unknown;
 
 export interface Harness {
@@ -50,7 +50,18 @@ export async function loadExtension(
 
   const api = {
     registerTool(tool: AnyTool) {
-      tools.set(tool.name, tool);
+      const parameters = tool.parameters as unknown as {
+        toJsonSchema?: () => unknown;
+      };
+      // OMP 18's TypeBox compatibility facade returns callable omptype schemas.
+      // The real harness serializes those before handing them to a provider;
+      // expose that same wire shape to these schema assertions.
+      tools.set(tool.name, {
+        ...tool,
+        parameters: typeof parameters.toJsonSchema === "function"
+          ? parameters.toJsonSchema()
+          : tool.parameters,
+      } as AnyTool);
     },
     on(event: string, handler: AnyHandler) {
       const existing = handlers.get(event) ?? [];
@@ -89,8 +100,12 @@ export async function loadExtension(
             systemPromptOptions: {},
           },
           ctx,
-        )) as { systemPrompt?: string } | undefined;
-        if (result?.systemPrompt !== undefined) systemPrompt = result.systemPrompt;
+        )) as { systemPrompt?: string | string[] } | undefined;
+        if (result?.systemPrompt !== undefined) {
+          systemPrompt = Array.isArray(result.systemPrompt)
+            ? result.systemPrompt.join("\n\n")
+            : result.systemPrompt;
+        }
       }
       return systemPrompt;
     },

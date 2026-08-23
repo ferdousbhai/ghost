@@ -97,6 +97,14 @@ FloatingWindow {
         modelLogin.open();
     }
 
+    /** Authenticate a model already selected in the switcher; completion returns to chat. */
+    function openLoginForSelectedModel(): void {
+        hud.loginFromSwitcher = false;
+        hud.switcherOpen = false;
+        hud.loginOpen = true;
+        modelLogin.open();
+    }
+
     /**
      * Launch-or-focus on a single bind (SUPER+G). Reveal+focus when hidden or
      * when open but not the focused window; hide only when it is already the
@@ -377,15 +385,21 @@ FloatingWindow {
                             required property string role
                             required property string text
                             required property string tools
+                            required property var toolActivity
                             required property string error
                             required property bool pending
+                            required property string entryId
+                            required property var branch
 
                             width: transcriptView.width
                             speaker: role
                             body: text
                             toolTrail: tools
+                            activities: toolActivity
                             failure: error
                             busy: pending
+                            sourceEntryId: entryId
+                            branchNavigation: branch
                         }
 
                         onContentYChanged: pinned = contentY >= contentHeight - height - 40
@@ -411,10 +425,31 @@ FloatingWindow {
                         Layout.fillWidth: true
                     }
 
+                    QueueLine {
+                        Layout.fillWidth: true
+                        steering: Ghostd.steeringQueue
+                        followUps: Ghostd.followUpQueue
+                        error: Ghostd.queueError
+                    }
+
+                    AskDialog {
+                        visible: Ghostd.pendingAsk !== null
+                        Layout.fillWidth: true
+                        interaction: Ghostd.pendingAsk || ({ questions: [] })
+                        submitting: Ghostd.askSubmitting
+                        error: Ghostd.askError
+                        onAnswered: answer => Ghostd.answerAsk(answer)
+                        onChatRequested: Ghostd.chatAboutAsk()
+                    }
+
                     Composer {
                         id: composer
+                        visible: Ghostd.pendingAsk === null
                         Layout.fillWidth: true
-                        onSubmitted: prompt => Ghostd.send(prompt)
+                        onSubmitted: (prompt, mode) => {
+                            if (mode === "prompt") Ghostd.send(prompt);
+                            else Ghostd.queueMessage(prompt, mode);
+                        }
                     }
                 }
             }
@@ -452,8 +487,20 @@ FloatingWindow {
         // needs a login before it resolves; route into the login flow.
         Connections {
             target: Ghostd
+            function onModelSwitchCompleted(provider: string, id: string): void {
+                hud.switcherOpen = false;
+                composer.take();
+            }
             function onModelSwitchNeedsLogin(provider: string): void {
-                hud.openLoginFromSwitcher();
+                hud.openLoginForSelectedModel();
+            }
+            function onQueueMessageRejected(text: string): void {
+                composer.text = text;
+                composer.take();
+            }
+            function onBranchDraftReady(text: string): void {
+                composer.text = text;
+                composer.take();
             }
         }
     }

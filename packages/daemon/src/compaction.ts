@@ -1,5 +1,5 @@
 /**
- * Background context compaction for a ghost's pi `AgentSession`.
+ * Background context compaction for a ghost's OMP `AgentSession`.
  *
  * A ghost's durable memory is its memory files, not its transcript — but a
  * long conversation still grows the provider-facing context until it nears the
@@ -7,8 +7,8 @@
  * summarizes the old turns into a briefing and keeps only the recent ones in
  * context, while the full JSONL transcript stays on disk untouched.
  *
- * We do NOT use pi's built-in auto-compaction. Two facts about pi 0.84.2 make
- * it unsuitable here (verified against `dist/core/agent-session.js`):
+ * We do NOT use OMP's built-in auto-compaction. Two harness properties make
+ * it unsuitable here:
  *
  *   1. Auto-compaction is awaited inline — `_checkCompaction` runs on the
  *      agent-loop's `agent_end` and again synchronously at the top of the next
@@ -17,7 +17,7 @@
  *   2. The auto path passes `customInstructions: undefined` to `compact()`, so
  *      there is no hook to inject our own summary prompt.
  *
- * So pi's auto trigger is left OFF (the session's compaction setting stays
+ * So OMP's auto trigger is left OFF (the session's compaction setting stays
  * `enabled: false`, which is exactly what gates `_checkCompaction`), and we
  * drive `session.compact(GHOST_COMPACTION_PROMPT)` ourselves after a completed
  * turn, fire-and-forget. `compact()` ignores the `enabled` flag, keeps the
@@ -25,14 +25,14 @@
  * the JSONL, and rebuilds the in-memory context from the cut point. Any turn
  * that arrives after the cut point is left intact.
  *
- * One pi constraint the caller must respect: `session.prompt()` throws while a
+ * One OMP constraint the caller must respect: `session.prompt()` throws while a
  * manual compaction is in progress, and `compact()` begins with `await
  * this.abort()`. So the caller (SessionHost) fires compaction only when the
  * session is idle, and awaits any in-flight compaction before the next prompt.
  */
 
 /**
- * The summary instructions handed to pi's compaction. Modeled on Anthropic's
+ * The summary instructions handed to OMP's compaction. Modeled on Anthropic's
  * context-compaction approach (a structured, faithful hand-off of the load-
  * bearing state of a conversation), but kept deliberately provider-neutral —
  * no Anthropic/Claude-specific tokens or formatting — because a ghost may run
@@ -57,7 +57,7 @@ export const CONTEXT_TOKEN_CAP = 100_000;
 export const DEFAULT_THRESHOLD_FRACTION = 0.8;
 
 /**
- * Fallback context window when a model reports none. pi's own model registry
+ * Fallback context window when a model reports none. OMP's model registry
  * defaults custom models to 128k (see models.ts), so this is mostly defensive.
  */
 export const DEFAULT_CONTEXT_WINDOW = 128_000;
@@ -93,7 +93,7 @@ export function compactionThreshold(
 }
 
 /**
- * The subset of pi's `ContextUsage` (from `session.getContextUsage()`) that the
+ * The subset of OMP's `ContextUsage` (from `session.getContextUsage()`) that the
  * decision consumes. `tokens` is null right after a compaction (before the next
  * LLM response re-establishes a usage number), in which case we cannot decide.
  */
@@ -115,7 +115,7 @@ export function shouldCompactNow(
   return usage.tokens >= compactionThreshold(usage.contextWindow, config);
 }
 
-/** The minimal surface of pi's `AgentSession` that the compactor drives. */
+/** The minimal surface of OMP's `AgentSession` that the compactor drives. */
 export interface CompactableSession {
   readonly isCompacting: boolean;
   getContextUsage(): ContextUsageLike | undefined;
@@ -136,7 +136,7 @@ export interface MaybeCompactHandlers {
  * Fire-and-forget: this returns the in-flight promise (or `undefined` when it
  * did not start one) WITHOUT awaiting it, so the caller is never blocked. The
  * returned promise never rejects — a failure is routed to `handlers.onError`.
- * The caller keeps the promise so it can await it before the next prompt (pi
+ * The caller keeps the promise so it can await it before the next prompt (OMP
  * forbids prompting while a manual compaction is in progress).
  */
 export function maybeCompact(
@@ -145,7 +145,7 @@ export function maybeCompact(
   handlers: MaybeCompactHandlers,
 ): Promise<void> | undefined {
   if (!config.enabled) return undefined;
-  // Guard against a second concurrent run: pi tracks one compaction at a time.
+  // Guard against a second concurrent run: OMP tracks one compaction at a time.
   if (session.isCompacting) return undefined;
   const usage = session.getContextUsage();
   if (!shouldCompactNow(usage, config)) return undefined;

@@ -1,6 +1,6 @@
 /**
  * The login HTTP surface, end to end over a real listening loopback server,
- * with a fake `ModelRuntime.login()` so no real provider is touched.
+ * with a fake OMP login runtime so no real provider is touched.
  *
  *   GET  /api/ghosts/:name/providers
  *   POST /api/ghosts/:name/login
@@ -8,7 +8,7 @@
  *   POST /api/ghosts/:name/login/:loginId/input
  */
 import { afterEach, describe, expect, it } from "vitest";
-import type { AuthInteraction } from "@earendil-works/pi-ai";
+import type { AuthInteraction } from "../src/auth.js";
 import { LoginManager } from "../src/auth.js";
 import { startDaemonServer, type ListeningServer } from "../src/server.js";
 import { SessionHost } from "../src/session-host.js";

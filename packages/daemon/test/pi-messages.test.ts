@@ -1,4 +1,4 @@
-import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
+import type { AgentSessionEvent } from "@oh-my-pi/pi-coding-agent";
 import { describe, expect, it } from "vitest";
 import {
   createPiMessagesAdapter,
@@ -145,6 +145,78 @@ describe("createPiMessagesAdapter", () => {
     expect(textStart).toMatchObject({ contentIndex: 1 });
   });
 
+  it("forwards OMP tool execution state with bounded text summaries", () => {
+    const { events, emit } = collect();
+    const adapter = createPiMessagesAdapter(emit);
+    adapter.handle({
+      type: "tool_execution_start",
+      toolCallId: "call_1",
+      toolName: "ghost_notes_read",
+      args: { path: "notes/press.md" },
+      intent: "Recall the restoration details",
+    } as AgentSessionEvent);
+    adapter.handle({
+      type: "tool_execution_update",
+      toolCallId: "call_1",
+      toolName: "ghost_notes_read",
+      args: { path: "notes/press.md" },
+      partialResult: { content: [{ type: "text", text: "Reading the note now." }] },
+    } as AgentSessionEvent);
+    adapter.handle({
+      type: "tool_execution_end",
+      toolCallId: "call_1",
+      toolName: "ghost_notes_read",
+      result: { content: [{ type: "text", text: "x".repeat(400) }] },
+      isError: false,
+    } as AgentSessionEvent);
+
+    expect(events).toEqual([
+      { type: "start" },
+      expect.objectContaining({
+        type: "tool_execution_start",
+        id: "call_1",
+        arguments: { path: "notes/press.md" },
+      }),
+      expect.objectContaining({ type: "tool_execution_update", summary: "Reading the note now." }),
+      expect.objectContaining({ type: "tool_execution_end", isError: false }),
+    ]);
+    const end = events.at(-1) as Extract<PiMessagesEvent, { type: "tool_execution_end" }>;
+    expect(end.summary?.length).toBeLessThanOrEqual(240);
+    expect(end.summary?.endsWith("…")).toBe(true);
+  });
+
+  it("surfaces OMP model fallback application and recovery", () => {
+    const { events, emit } = collect();
+    const adapter = createPiMessagesAdapter(emit);
+    adapter.handle({
+      type: "retry_fallback_applied",
+      from: "openai-codex/gpt-5.6-sol",
+      to: "anthropic/claude-sonnet-4-6",
+      role: "default",
+    } as AgentSessionEvent);
+    adapter.handle({
+      type: "retry_fallback_succeeded",
+      model: "anthropic/claude-sonnet-4-6",
+      role: "default",
+    } as AgentSessionEvent);
+    expect(events).toEqual([
+      { type: "start" },
+      {
+        type: "model_fallback",
+        phase: "applied",
+        from: "openai-codex/gpt-5.6-sol",
+        to: "anthropic/claude-sonnet-4-6",
+        role: "default",
+      },
+      {
+        type: "model_fallback",
+        phase: "succeeded",
+        model: "anthropic/claude-sonnet-4-6",
+        role: "default",
+      },
+    ]);
+  });
+
   it("suppresses thinking by default and consumes no wire index for it", () => {
     const { events, emit } = collect();
     const adapter = createPiMessagesAdapter(emit);
@@ -213,7 +285,7 @@ describe("createPiMessagesAdapter", () => {
     expect(events.at(-1)?.type).toBe("done");
   });
 
-  it("turns a failed assistant message into a terminal error", () => {
+  it("holds a failed provider step open for OMP recovery, then terminates if it stays failed", () => {
     const { events, emit } = collect();
     const adapter = createPiMessagesAdapter(emit);
     adapter.handle({ type: "agent_start" } as AgentSessionEvent);
@@ -221,13 +293,15 @@ describe("createPiMessagesAdapter", () => {
       type: "message_end",
       message: assistantMessage({ stopReason: "error", errorMessage: "provider exploded" }),
     } as AgentSessionEvent);
+    expect(adapter.isTerminal()).toBe(false);
+    adapter.finishDone();
     const terminal = events.at(-1) as Extract<PiMessagesEvent, { type: "error" }>;
     expect(terminal).toMatchObject({
       type: "error",
       reason: "error",
       errorMessage: "provider exploded",
     });
-    // Nothing after a terminal event reaches the wire.
+    // Nothing after the settled terminal event reaches the wire.
     adapter.finishDone();
     expect(events.filter((event) => event.type === "done")).toHaveLength(0);
   });

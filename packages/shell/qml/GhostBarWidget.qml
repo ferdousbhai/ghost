@@ -9,6 +9,7 @@
 // contrib/omarchy/ for the self-contained copy and the trade-off writeup.
 import QtQuick
 import qs.services
+import qs.components
 
 Item {
     id: root
@@ -33,20 +34,26 @@ Item {
         anchors.centerIn: parent
         spacing: 6
 
-        Rectangle {
+        Item {
             anchors.verticalCenter: parent.verticalCenter
-            width: 8
-            height: 8
-            radius: 4
-            color: !Ghostd.reachable
-                ? Theme.danger
-                : (Ghostd.streaming ? root.activeColor : root.idleColor)
+            width: 14
+            height: 14
+            clip: false
 
-            SequentialAnimation on opacity {
-                running: Ghostd.streaming
-                loops: Animation.Infinite
-                NumberAnimation { to: 0.3; duration: 650; easing.type: Easing.InOutQuad }
-                NumberAnimation { to: 1.0; duration: 650; easing.type: Easing.InOutQuad }
+            SpectralOrb {
+                visible: Ghostd.streaming && Ghostd.reachable
+                anchors.centerIn: parent
+                diameter: 12
+                running: visible
+            }
+
+            Rectangle {
+                visible: !Ghostd.streaming || !Ghostd.reachable
+                anchors.centerIn: parent
+                width: 8
+                height: 8
+                radius: 4
+                color: !Ghostd.reachable ? Theme.danger : root.idleColor
             }
         }
 

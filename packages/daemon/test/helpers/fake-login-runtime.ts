@@ -3,8 +3,12 @@
  * state machine can be walked through every callback path (url, device code,
  * paste, select, failure, timeout) without a real provider or a network call.
  */
-import type { AuthInteraction, AuthType, Credential } from "@earendil-works/pi-ai";
-import type { LoginRuntime } from "../../src/auth.js";
+import type {
+  AuthInteraction,
+  AuthType,
+  Credential,
+  LoginRuntime,
+} from "../../src/auth.js";
 
 export type LoginImpl = (
   providerId: string,
