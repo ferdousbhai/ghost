@@ -6,7 +6,7 @@ where `qs` looks and telling Hyprland which key summons it.
 
 Tested on Omarchy 4.0.0.alpha, Hyprland 0.56.2, Quickshell 0.3.0, Qt 6.11.2.
 
-## 1. Install the config
+## 1. Install the config and launcher
 
 `qs -c ghost` resolves `$XDG_CONFIG_HOME/quickshell/ghost/shell.qml`. Symlink
 the checkout so a `git pull` updates the running shell:
@@ -14,22 +14,32 @@ the checkout so a `git pull` updates the running shell:
 ```sh
 mkdir -p ~/.config/quickshell
 ln -sfn "$PWD/packages/shell/qml" ~/.config/quickshell/ghost
-qs -c ghost ipc call ghost status     # should print JSON
+install -Dm755 packages/shell/contrib/bin/ghost-launch ~/.local/bin/ghost-launch
+install -Dm644 packages/shell/contrib/ghost.desktop ~/.local/share/applications/ghost.desktop
+update-desktop-database ~/.local/share/applications
 ```
 
 Point it at a daemon on a non-default port with `GHOSTD_PORT` / `GHOSTD_HOST`
 (defaults `7717` / `127.0.0.1`, matching `@ghost/daemon`).
 
+`ghost-launch open` starts the shell when needed and then opens its HUD. The
+desktop entry uses that command, so Ghost appears in app launchers and still
+works when the shell was not already running.
+
 ## 2. Summon key
 
-Omarchy 4 configures Hyprland in Lua. Append the two lines from
-`hyprland/ghost.lua` to `~/.config/hypr/bindings.lua` and
+Omarchy 4 configures Hyprland in Lua. Append the binding lines from
+`hyprland/ghost.lua` to `~/.config/hypr/bindings.lua` and the layer rule to
 `~/.config/hypr/looknfeel.lua`:
 
 ```lua
-o.bind("SUPER + G", "Summon ghost", "qs -c ghost ipc call ghost toggle")
+hl.unbind("SUPER + G")
+o.bind("SUPER + G", "Summon ghost", "ghost-launch toggle")
 hl.layer_rule({ match = { namespace = "^ghost-" }, no_anim = true, animation = "none" })
 ```
+
+Omarchy normally uses `SUPER+G` for window grouping. The explicit unbind is
+required before Ghost can own the shortcut.
 
 On a plain (non-Omarchy) Hyprland, `source` `hyprland/ghost.conf` instead.
 
@@ -52,7 +62,7 @@ at a fixed size instead of tiling, add a `windowrule`/`window_rule` against
 Either systemd (survives a shell crash, restarts with the session):
 
 ```sh
-install -Dm644 systemd/ghost-shell.service ~/.config/systemd/user/ghost-shell.service
+install -Dm644 packages/shell/contrib/systemd/ghost-shell.service ~/.config/systemd/user/ghost-shell.service
 systemctl --user daemon-reload
 systemctl --user enable --now ghost-shell.service
 ```

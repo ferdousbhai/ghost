@@ -119,6 +119,7 @@ Tokyo Night values, so every surface still runs on bare Hyprland.
 ## IPC
 
 ```sh
+ghost-launch open|toggle
 qs -c ghost ipc call ghost toggle
 qs -c ghost ipc call ghost open|close
 qs -c ghost ipc call ghost summon <name>

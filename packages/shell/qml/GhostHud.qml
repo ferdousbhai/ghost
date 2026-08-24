@@ -65,7 +65,9 @@ FloatingWindow {
         // auto-focused by Hyprland; this also pulls an already-open window
         // (possibly on another workspace) to the foreground. Matches the
         // app-id set by `//@ pragma AppId ghost` in shell.qml.
-        Hyprland.dispatch("focuswindow class:ghost");
+        // Hyprland 0.55+ dispatches Lua expressions. The old
+        // `focuswindow class:ghost` spelling is parsed as invalid Lua.
+        Hyprland.dispatch('hl.dsp.focus({ window = "class:ghost" })');
         hud.loginOpen = false;
         hud.switcherOpen = false;
         Ghostd.refresh();

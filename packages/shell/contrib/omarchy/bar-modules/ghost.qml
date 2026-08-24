@@ -70,7 +70,7 @@ Item {
     MouseArea {
         anchors.fill: parent
         hoverEnabled: true
-        onClicked: if (root.bar) root.bar.run("qs -c ghost ipc call ghost toggle")
+        onClicked: if (root.bar) root.bar.run("ghost-launch toggle")
         onEntered: if (root.bar) root.bar.showTooltip(root, root.tooltip())
         onExited: if (root.bar) root.bar.hideTooltip(root)
     }
