@@ -297,4 +297,24 @@ describe("ghostErrorFromSidecar", () => {
     expect(unknown.code).toBe("invalid_format");
     expect(unknown.details["sidecarCode"]).toBe("weird");
   });
+
+  it("maps a stale ref (unknown_ref) but preserves its recovery affordance", () => {
+    // The sidecar's unknown_ref details carry the re-run-ax_query signal
+    // (reason / snapshot / current_snapshot); the mapping must not drop them.
+    const error = ghostErrorFromSidecar(
+      {
+        code: "unknown_ref",
+        message: "Element ref '1:7' is stale",
+        details: { reason: "stale", snapshot: 1, current_snapshot: 2 },
+      },
+      "ax_perform",
+    );
+    expect(error.code).toBe("invalid_format");
+    expect(error.details["sidecarCode"]).toBe("unknown_ref");
+    expect(error.details["sidecarDetails"]).toEqual({
+      reason: "stale",
+      snapshot: 1,
+      current_snapshot: 2,
+    });
+  });
 });

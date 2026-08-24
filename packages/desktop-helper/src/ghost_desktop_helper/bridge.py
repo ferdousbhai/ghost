@@ -919,6 +919,21 @@ class GhostDesktop:
             process.unlink_quietly(output)
             warnings.append(f"headless-output capture unavailable: {exc}")
             return None
+        except ImportError as exc:
+            # The headless rung crops the parked window out of a full-output
+            # PNG with Pillow, which is only an optional extra. On a stock
+            # install its `from PIL import Image` raises ImportError - neither a
+            # CapabilityError nor an OmaHarnessError - so without this it would
+            # escape the ladder and fail the whole capture instead of degrading
+            # to the focused-region rung. Treat a missing Pillow as this rung
+            # simply being unavailable.
+            process.unlink_quietly(output)
+            warnings.append(
+                "headless-output capture unavailable: Pillow (PIL) is not "
+                "installed, so a headless-output capture cannot be cropped to "
+                f"the window ({exc}); install the 'pillow' extra to enable it"
+            )
+            return None
 
     def _capture_output(self, output: str | None) -> dict[str, Any]:
         monitors = self.hyprctl.monitors()

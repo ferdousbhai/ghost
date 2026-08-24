@@ -51,6 +51,11 @@ const WORKSPACES = [
   { id: 2, name: "code", monitor: "DP-1", windows: 1 },
 ];
 
+const MONITORS = [
+  { id: 0, name: "DP-1", focused: true, width: 2560, height: 1440, scale: 1 },
+  { id: 1, name: "HDMI-A-1", focused: false, width: 1920, height: 1080, scale: 1 },
+];
+
 const ACTIVE = CLIENTS[1];
 
 /** The default sidecar answers for the read/act ops the tests exercise. */
@@ -62,7 +67,7 @@ function desktopHandler(op: string): unknown {
         workspaces: WORKSPACES,
         activeworkspace: WORKSPACES[1],
         activewindow: ACTIVE,
-        monitors: [{ name: "DP-1", focused: true }],
+        monitors: MONITORS,
       };
     case "see":
       return { windows: [CLIENTS[0]], count: 1 };
@@ -89,7 +94,7 @@ function desktopHandler(op: string): unknown {
         pid: 4242,
         elements: [
           {
-            ref: 7,
+            ref: "1:7",
             role: "push button",
             name: "Save",
             states: ["enabled", "focusable"],
@@ -141,7 +146,7 @@ async function harness(
 
 describe("condenseDesktopState", () => {
   it("keeps only what a persona can act on", () => {
-    const state = condenseDesktopState(CLIENTS, WORKSPACES, ACTIVE);
+    const state = condenseDesktopState(CLIENTS, WORKSPACES, ACTIVE, MONITORS);
     expect(state.activeWindow).toEqual({
       address: "0xbbb",
       class: "kitty",
@@ -152,6 +157,19 @@ describe("condenseDesktopState", () => {
     expect(state.windows[1]?.focused).toBe(true);
     expect(JSON.stringify(state)).not.toContain("pid");
     expect(JSON.stringify(state)).not.toContain("xwayland");
+  });
+
+  it("surfaces monitor names, focus, and resolution so the model can find them", () => {
+    const state = condenseDesktopState(CLIENTS, WORKSPACES, ACTIVE, MONITORS);
+    expect(state.monitors).toEqual([
+      { name: "DP-1", focused: true, resolution: "2560x1440" },
+      { name: "HDMI-A-1", focused: false, resolution: "1920x1080" },
+    ]);
+  });
+
+  it("defaults monitors to an empty list when the sidecar omits them", () => {
+    const state = condenseDesktopState(CLIENTS, WORKSPACES, ACTIVE);
+    expect(state.monitors).toEqual([]);
   });
 
   it("truncates long titles and caps the window list", () => {
@@ -183,6 +201,10 @@ describe("ghost_desktop read ops", () => {
     const state = JSON.parse(resultText(result));
     expect(state.activeWindow.class).toBe("kitty");
     expect(result.details.windows).toBe(2);
+    // Monitor names reach the model, which is where ghost_screen's output param
+    // says to find them.
+    expect(state.monitors.map((m: { name: string }) => m.name)).toEqual(["DP-1", "HDMI-A-1"]);
+    expect(result.details.monitors).toBe(2);
   });
 
   it("finds a window with see", async () => {
@@ -259,7 +281,8 @@ describe("ghost_desktop AT-SPI semantic flow", () => {
     const query = await extension.call(GHOST_DESKTOP, { action: "ax_query", target: "firefox" });
     const elements = JSON.parse(resultText(query).split("\n").slice(1).join("\n")).elements;
     const ref = elements[0].ref;
-    expect(ref).toBe(7);
+    // The ref is the sidecar's opaque "epoch:index" string, passed back verbatim.
+    expect(ref).toBe("1:7");
     const result = await extension.call(GHOST_DESKTOP, {
       action: "ax_perform",
       ref,
@@ -267,7 +290,7 @@ describe("ghost_desktop AT-SPI semantic flow", () => {
     });
     expect(helper.requests[1]).toEqual({
       op: "ax_perform",
-      args: { ref: 7, action: "press" },
+      args: { ref: "1:7", action: "press" },
     });
     expect(resultText(result)).toMatch(/Background-safe/);
   });
@@ -283,13 +306,13 @@ describe("ghost_desktop AT-SPI semantic flow", () => {
     const { extension, helper } = await harness();
     await extension.call(GHOST_DESKTOP, {
       action: "ax_set",
-      ref: 7,
+      ref: "1:7",
       attribute: "text",
       value: "hello",
     });
     expect(helper.requests[0]).toEqual({
       op: "ax_set",
-      args: { ref: 7, attribute: "text", value: "hello" },
+      args: { ref: "1:7", attribute: "text", value: "hello" },
     });
   });
 
@@ -310,14 +333,14 @@ describe("ghost_desktop input", () => {
 
   it("types into a ref", async () => {
     const { extension, helper } = await harness();
-    await extension.call(GHOST_DESKTOP, { action: "type", text: "hello", ref: 7 });
-    expect(helper.requests[0]).toEqual({ op: "type", args: { text: "hello", ref: 7 } });
+    await extension.call(GHOST_DESKTOP, { action: "type", text: "hello", ref: "1:7" });
+    expect(helper.requests[0]).toEqual({ op: "type", args: { text: "hello", ref: "1:7" } });
   });
 
   it("clicks a ref", async () => {
     const { extension, helper } = await harness();
-    await extension.call(GHOST_DESKTOP, { action: "click", ref: 7 });
-    expect(helper.requests[0]).toEqual({ op: "click", args: { ref: 7 } });
+    await extension.call(GHOST_DESKTOP, { action: "click", ref: "1:7" });
+    expect(helper.requests[0]).toEqual({ op: "click", args: { ref: "1:7" } });
   });
 
   it("clicks a coordinate with its space", async () => {

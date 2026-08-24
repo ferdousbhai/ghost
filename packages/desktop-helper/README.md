@@ -87,8 +87,10 @@ screenshot or an empty tree dressed up as success.
 Roles use a unified GTK3/4 vocabulary (`push button` and `button` fold to one);
 `ax_query` refuses an unknown role and lists the ones actually present.
 
-Element `ref`s are the `element_index` values returned by the most recent
-`ax_query` / `ax_roles` snapshot; take a fresh snapshot before reusing them.
+Element `ref`s are opaque `"epoch:index"` strings minted by the most recent
+`ax_query` / `ax_roles` snapshot (the epoch bumps on every new snapshot, so a
+ref from an earlier one is detectably stale rather than silently redirected).
+Pass a ref back verbatim; take a fresh snapshot before reusing them.
 
 ### Safety
 

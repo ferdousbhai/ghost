@@ -20,10 +20,12 @@
  *   disturbed the desktop.
  *
  * The model never reaches a shell: every value crosses as a JSON value inside
- * the request `args`. There is no `exec` — a ghost is documented as having no
- * `bash`, the sidecar has no process-launch op, and the one door that could
- * quietly undo that stance is simply not built. `notify` stays local
- * (`notify-send`), the one thing that is not desktop *control*.
+ * the request `args`. There is no `exec`, and deliberately so — the sidecar
+ * stays scoped to desktop control (AT-SPI, compositor dispatch, capture), not
+ * process launch. A creator OMP session already inherits OMP's native bash for
+ * arbitrary execution; the sidecar's value is the GUI/Wayland/accessibility
+ * reach a shell lacks, with honesty metadata and lock-safe routing. `notify`
+ * stays local (`notify-send`), the one thing that is not desktop *control*.
  *
  * Off Hyprland, or with a backend missing, actions degrade with a structured
  * error that names the reason and the remedy — never a stack trace.
@@ -163,6 +165,15 @@ export interface DesktopState {
     workspace: string;
     focused: boolean;
   }>;
+  /**
+   * Connected outputs, so the model can discover the monitor names `ghost_screen`
+   * asks for (e.g. DP-1). `resolution` is `WIDTHxHEIGHT` when hyprctl reports it.
+   */
+  readonly monitors: ReadonlyArray<{
+    name: string;
+    focused: boolean;
+    resolution?: string;
+  }>;
   /** Windows beyond `MAX_LISTED_WINDOWS` that were not listed. */
   readonly omitted: number;
 }
@@ -177,6 +188,7 @@ export function condenseDesktopState(
   clients: unknown,
   workspaces: unknown,
   activeWindow: unknown,
+  monitors: unknown = [],
 ): DesktopState {
   const active = asRecord(activeWindow);
   const activeAddress = typeof active?.["address"] === "string" ? active["address"] : null;
@@ -204,6 +216,25 @@ export function condenseDesktopState(
       monitor: truncate(workspace["monitor"], 40),
     }));
 
+  const monitorList = Array.isArray(monitors) ? monitors : [];
+  const condensedMonitors = monitorList
+    .map(asRecord)
+    .filter((monitor): monitor is Record<string, unknown> => monitor !== null)
+    .map((monitor) => {
+      const width = monitor["width"];
+      const height = monitor["height"];
+      const resolution =
+        typeof width === "number" && typeof height === "number"
+          ? `${width}x${height}`
+          : undefined;
+      return {
+        name: typeof monitor["name"] === "string" ? monitor["name"] : "",
+        focused: monitor["focused"] === true,
+        ...(resolution ? { resolution } : {}),
+      };
+    })
+    .filter((monitor) => monitor.name.length > 0);
+
   return {
     activeWindow: activeAddress
       ? {
@@ -215,6 +246,7 @@ export function condenseDesktopState(
       : null,
     workspaces: condensedWorkspaces,
     windows: windows.slice(0, MAX_LISTED_WINDOWS),
+    monitors: condensedMonitors,
     omitted: Math.max(windows.length - MAX_LISTED_WINDOWS, 0),
   };
 }
@@ -386,10 +418,11 @@ export function createHyprlandExtension(
         limit: Type.Optional(Type.Integer({
           description: "For ax_query: cap on elements returned. Defaults to 20.",
         })),
-        ref: Type.Optional(Type.Integer({
+        ref: Type.Optional(Type.String({
           description:
             "The element ref from a recent ax_query/ax_roles, for ax_perform, "
-            + "ax_set, click, or type. Refs are only valid until the next ax_query.",
+            + "ax_set, click, or type. An opaque handle (pass it back exactly as "
+            + "given, do not compute with it); only valid until the next ax_query.",
         })),
         ax_action: Type.Optional(Type.String({
           description:
@@ -478,15 +511,18 @@ export function createHyprlandExtension(
               clients?: unknown;
               workspaces?: unknown;
               activewindow?: unknown;
+              monitors?: unknown;
             }>("state", {}, opts);
             const condensed = condenseDesktopState(
               state.clients,
               state.workspaces,
               state.activewindow,
+              state.monitors,
             );
             return textResult(JSON.stringify(condensed), {
               windows: condensed.windows.length,
               workspaces: condensed.workspaces.length,
+              monitors: condensed.monitors.length,
               omitted: condensed.omitted,
             });
           }
@@ -571,7 +607,7 @@ export function createHyprlandExtension(
 
           case "ax_perform": {
             requireAtspi(hello, "ax_perform");
-            if (typeof params.ref !== "number") {
+            if (typeof params.ref !== "string" || params.ref.length === 0) {
               throw new GhostError(
                 "invalid_format",
                 'action "ax_perform" needs ref: an element ref from ax_query.',
@@ -593,7 +629,7 @@ export function createHyprlandExtension(
 
           case "ax_set": {
             requireAtspi(hello, "ax_set");
-            if (typeof params.ref !== "number") {
+            if (typeof params.ref !== "string" || params.ref.length === 0) {
               throw new GhostError(
                 "invalid_format",
                 'action "ax_set" needs ref: an element ref from ax_query.',
@@ -653,7 +689,9 @@ export function createHyprlandExtension(
               {
                 text: params.text,
                 ...(params.target ? { app: params.target } : {}),
-                ...(typeof params.ref === "number" ? { ref: params.ref } : {}),
+                ...(typeof params.ref === "string" && params.ref.length > 0
+                  ? { ref: params.ref }
+                  : {}),
               },
               opts,
             );
@@ -665,7 +703,7 @@ export function createHyprlandExtension(
           case "click": {
             requireYdotool(hello);
             let args: Record<string, unknown>;
-            if (typeof params.ref === "number") {
+            if (typeof params.ref === "string" && params.ref.length > 0) {
               args = { ref: params.ref };
             } else if (typeof params.x === "number" && typeof params.y === "number") {
               args = {
@@ -682,7 +720,7 @@ export function createHyprlandExtension(
               );
             }
             const meta = await helper.request<HonestyMetadata>("click", args, opts);
-            const what = typeof params.ref === "number"
+            const what = typeof params.ref === "string" && params.ref.length > 0
               ? `element ${params.ref}`
               : `(${params.x}, ${params.y})`;
             return honestyResult(`Clicked ${what}.`, meta, {});

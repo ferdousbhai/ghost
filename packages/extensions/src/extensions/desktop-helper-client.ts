@@ -15,8 +15,11 @@
  * unsolicited `hello` line first, reporting its version, the Hyprland version,
  * the detected dispatcher grammar, and which backends (hyprctl / grim / wtype /
  * ydotool / atspi / foreign-toplevel) are actually usable. Everything the model
- * emits crosses as a JSON value inside `args` — nothing is ever handed to a
- * shell, here or in the sidecar (it has no `exec` op).
+ * emits crosses as a JSON value inside `args`. The sidecar stays scoped to
+ * desktop control — AT-SPI, compositor dispatch, capture — and has no
+ * process-launch op: the creator already has OMP's native bash for arbitrary
+ * execution, so the sidecar's value is the GUI/Wayland/accessibility reach a
+ * shell lacks, not another way to run programs.
  *
  * Failures are structured: a sidecar error `{code, message, details}` becomes a
  * {@link GhostError} whose message is the sidecar's own remediation and whose
@@ -97,9 +100,14 @@ export interface HelperCaptureResult extends HonestyMetadata {
   readonly app?: string;
 }
 
-/** One AT-SPI element from `ax_query`; its `ref` drives ax_perform/ax_set/click/type. */
+/**
+ * One AT-SPI element from `ax_query`; its `ref` drives ax_perform/ax_set/click/type.
+ * The ref is an opaque `"epoch:index"` handle minted by the sidecar
+ * (bridge.py `_mint_ref`), not a number to compute with — it is only valid until
+ * the next snapshot bumps the epoch.
+ */
 export interface AxElement {
-  readonly ref: number;
+  readonly ref: string;
   readonly role?: string;
   readonly name?: string;
   readonly text?: string;
@@ -130,6 +138,7 @@ export type SidecarErrorCode =
   | "capability"
   | "ambiguous_target"
   | "state_restore"
+  | "unknown_ref"
   | "harness"
   | "invalid_args"
   | "unknown_op"
@@ -142,11 +151,15 @@ export type SidecarErrorCode =
  * `not_found` (the same code the direct-binary tools used for "not installed"),
  * a focus-restore race is a `conflict` (concurrent compositor state), and
  * everything else is `invalid_format` — the request did not work as specified.
- * The raw code always survives in `details.sidecarCode`.
+ * A stale/never-minted `ref` is one such `invalid_format`, but its details carry
+ * the sidecar's re-run-ax_query affordance (reason / snapshot / current_snapshot)
+ * so the model can recover; those survive via `sidecarDetails`. The raw code
+ * always survives in `details.sidecarCode`.
  */
 export const SIDECAR_ERROR_TO_GHOST: Readonly<Record<string, GhostErrorCode>> = {
   capability: "not_found",
   state_restore: "conflict",
+  unknown_ref: "invalid_format",
   ambiguous_target: "invalid_format",
   invalid_args: "invalid_format",
   unknown_op: "invalid_format",
