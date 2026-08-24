@@ -95,8 +95,7 @@ Item {
                 Ghostd.deletingSessionId === entry.modelData.id
 
             width: root.width
-            // Grow to fit a wrapped title instead of eliding it.
-            height: Math.max(Theme.controlHeight, titleText.implicitHeight + Theme.gap)
+            height: Theme.controlHeight
             radius: Theme.radius / 2
             // Selection reads from the row itself — a stronger film plus the
             // bright title — the way Roster.qml lights its active ghost. Amber
@@ -109,120 +108,133 @@ Item {
                 ColorAnimation { duration: Theme.durFast }
             }
 
-            Row {
+            // One line per conversation: the title takes every pixel the row
+            // can spare and elides, and the right-hand slot is shared — the age
+            // at rest, the pin and close on hover — so nothing reflows as the
+            // pointer crosses a row and the sidebar stays a list, not a stack
+            // of two-line blocks.
+            Item {
                 z: 1
-                anchors.verticalCenter: parent.verticalCenter
-                anchors.left: parent.left
+                anchors.fill: parent
                 anchors.leftMargin: Theme.gap
-                anchors.right: parent.right
                 anchors.rightMargin: Theme.gap
-                spacing: Theme.gap
 
                 Text {
                     id: titleText
+                    anchors.left: parent.left
+                    anchors.right: actions.left
+                    anchors.rightMargin: Theme.gap
                     anchors.verticalCenter: parent.verticalCenter
-                    width: parent.width - when.width - pinAction.width
-                        - deleteAction.width - Theme.gap * 3
                     text: root.titleOf(entry.modelData)
                     color: entry.active ? Theme.foregroundBright
                         : (entryArea.containsMouse ? Theme.foreground : Theme.foregroundDim)
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.fontSize
-                    wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+                    elide: Text.ElideRight
                 }
 
-                Text {
-                    id: when
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: implicitWidth
-                    text: entry.deleting ? "" : root.whenOf(entry.modelData)
-                    color: Theme.foregroundFaint
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeSmall
-                }
+                Item {
+                    id: actions
 
-                Rectangle {
-                    id: pinAction
+                    // Two 16px glyphs and the gap between them. The age is
+                    // narrower and rides the same slot, right-aligned.
+                    readonly property bool showActions: (entryArea.containsMouse
+                        || pinArea.containsMouse || deleteArea.containsMouse
+                        || entry.deleting)
+
+                    anchors.right: parent.right
                     anchors.verticalCenter: parent.verticalCenter
-                    // Reserved like the close affordance below: the width is
-                    // spent whether or not the glyph is painted, so a long
-                    // wrapped title does not reflow as the pointer enters.
-                    width: 16
+                    width: 16 * 2 + Theme.gap / 2
                     height: Theme.controlHeight
-                    // Pinned state reads from which section the row sits in, the
-                    // way Notes does it, so this is a hover action and never a
-                    // permanent badge.
-                    visible: (entryArea.containsMouse || pinArea.containsMouse
-                        || deleteArea.containsMouse)
-                        && !entry.deleting
-                    z: 2
-                    radius: Theme.radius / 2
-                    color: pinArea.containsMouse ? Theme.film(0.10) : "transparent"
-
-                    Behavior on color {
-                        enabled: !Theme.reducedMotion
-                        ColorAnimation { duration: Theme.durFast }
-                    }
 
                     Text {
-                        anchors.centerIn: parent
-                        text: "⚲"
-                        color: entry.pinned
-                            ? (pinArea.containsMouse ? Theme.ghostAmberBright : Theme.ghostAmber)
-                            : (pinArea.containsMouse ? Theme.foreground : Theme.foregroundFaint)
+                        id: when
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        visible: !actions.showActions
+                        text: root.whenOf(entry.modelData)
+                        color: Theme.foregroundFaint
                         font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSize
+                        font.pixelSize: Theme.fontSizeSmall
                     }
 
-                    MouseArea {
-                        id: pinArea
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        // Pinning is reversible in one click, so it asks nothing.
-                        onClicked: Ghostd.pinConversation(entry.modelData.id, !entry.pinned)
+                    Rectangle {
+                        id: pinAction
+                        anchors.left: parent.left
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 16
+                        height: Theme.controlHeight
+                        // Pinned state reads from which section the row sits in,
+                        // the way Notes does it, so this is a hover action and
+                        // never a permanent badge.
+                        visible: actions.showActions && !entry.deleting
+                        z: 2
+                        radius: Theme.radius / 2
+                        color: pinArea.containsMouse ? Theme.film(0.10) : "transparent"
+
+                        Behavior on color {
+                            enabled: !Theme.reducedMotion
+                            ColorAnimation { duration: Theme.durFast }
+                        }
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "⚲"
+                            color: entry.pinned
+                                ? (pinArea.containsMouse ? Theme.ghostAmberBright : Theme.ghostAmber)
+                                : (pinArea.containsMouse ? Theme.foreground : Theme.foregroundFaint)
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSize
+                        }
+
+                        MouseArea {
+                            id: pinArea
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            // Pinning is reversible in one click, so it asks nothing.
+                            onClicked: Ghostd.pinConversation(entry.modelData.id, !entry.pinned)
+                        }
                     }
-                }
 
-                Rectangle {
-                    id: deleteAction
-                    anchors.verticalCenter: parent.verticalCenter
-                    // Reserve the close affordance even before hover so a
-                    // long wrapped title does not jump as the pointer enters.
-                    width: 16
-                    height: Theme.controlHeight
-                    visible: (entryArea.containsMouse || deleteArea.containsMouse
-                        || pinArea.containsMouse || entry.deleting)
-                        && !(entry.active && Ghostd.streaming)
-                    z: 2
-                    radius: Theme.radius / 2
-                    color: deleteArea.containsMouse || entry.deleting
-                        ? Theme.rose(0.10)
-                        : "transparent"
-
-                    Behavior on color {
-                        enabled: !Theme.reducedMotion
-                        ColorAnimation { duration: Theme.durFast }
-                    }
-
-                    Text {
-                        anchors.centerIn: parent
-                        text: entry.deleting ? "…" : "×"
+                    Rectangle {
+                        id: deleteAction
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 16
+                        height: Theme.controlHeight
+                        visible: actions.showActions
+                            && !(entry.active && Ghostd.streaming)
+                        z: 2
+                        radius: Theme.radius / 2
                         color: deleteArea.containsMouse || entry.deleting
-                            ? Theme.ghostRose
-                            : Theme.foregroundFaint
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSize
-                    }
+                            ? Theme.rose(0.10)
+                            : "transparent"
 
-                    MouseArea {
-                        id: deleteArea
-                        anchors.fill: parent
-                        enabled: !entry.deleting
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: root.deleteRequested(entry.modelData.id,
-                            root.titleOf(entry.modelData))
+                        Behavior on color {
+                            enabled: !Theme.reducedMotion
+                            ColorAnimation { duration: Theme.durFast }
+                        }
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: entry.deleting ? "…" : "×"
+                            color: deleteArea.containsMouse || entry.deleting
+                                ? Theme.ghostRose
+                                : Theme.foregroundFaint
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSize
+                        }
+
+                        MouseArea {
+                            id: deleteArea
+                            anchors.fill: parent
+                            enabled: !entry.deleting
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.deleteRequested(entry.modelData.id,
+                                root.titleOf(entry.modelData))
+                        }
                     }
                 }
             }

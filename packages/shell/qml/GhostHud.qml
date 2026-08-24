@@ -59,12 +59,20 @@ FloatingWindow {
     property string pendingDeleteSessionId: ""
     /** Its title, held for the dialog's wording after the row is gone. */
     property string pendingDeleteTitle: ""
+    /** The ghost awaiting a confirmed banish, or "". */
+    property string pendingDeleteGhost: ""
 
     /** Drop the pending delete and hand the keyboard back to the composer. */
     function dismissDelete(): void {
         hud.pendingDeleteSessionId = "";
         hud.pendingDeleteTitle = "";
         Ghostd.sessionsError = "";
+        composer.take();
+    }
+
+    function dismissBanish(): void {
+        hud.pendingDeleteGhost = "";
+        Ghostd.ghostDeleteError = "";
         composer.take();
     }
 
@@ -214,6 +222,9 @@ FloatingWindow {
         Keys.onEscapePressed: event => {
             if (hud.pendingDeleteSessionId !== "") {
                 hud.dismissDelete();
+                event.accepted = true;
+            } else if (hud.pendingDeleteGhost !== "") {
+                hud.dismissBanish();
                 event.accepted = true;
             } else if (Ghostd.streaming) {
                 Ghostd.cancel();
@@ -488,6 +499,11 @@ FloatingWindow {
                                 Workbench.close();
                                 composer.take();
                             }
+                            onDeleteRequested: name => {
+                                Ghostd.ghostDeleteError = "";
+                                hud.pendingDeleteSessionId = "";
+                                hud.pendingDeleteGhost = name;
+                            }
                         }
                     }
 
@@ -510,6 +526,7 @@ FloatingWindow {
                             }
                             onDeleteRequested: (sessionId, title) => {
                                 Ghostd.sessionsError = "";
+                                hud.pendingDeleteGhost = "";
                                 hud.pendingDeleteSessionId = sessionId;
                                 hud.pendingDeleteTitle = title;
                             }
@@ -974,6 +991,25 @@ FloatingWindow {
             onDismissed: hud.dismissDelete()
         }
 
+        // Banishing a ghost is the same question one notch louder: the daemon
+        // wants the name echoed back byte for byte, so the dialog collects it.
+        ConfirmDialog {
+            id: banishDialog
+
+            anchors.fill: parent
+            open: hud.pendingDeleteGhost !== ""
+            title: "Banish " + hud.pendingDeleteGhost + "?"
+            body: "Its memories, docs, and conversations move to the trash. "
+                + "Type “" + hud.pendingDeleteGhost + "” to confirm."
+            challenge: hud.pendingDeleteGhost
+            confirmText: "Banish"
+            busy: Ghostd.deletingGhost === hud.pendingDeleteGhost
+                && hud.pendingDeleteGhost !== ""
+            error: hud.pendingDeleteGhost !== "" ? Ghostd.ghostDeleteError : ""
+            onConfirmed: Ghostd.deleteGhost(hud.pendingDeleteGhost)
+            onDismissed: hud.dismissBanish()
+        }
+
         // The delete answered: close on success, stay up with the daemon's
         // reason on failure (a conversation still streaming, an unreachable
         // daemon) so the dialog never dismisses into a no-op.
@@ -983,6 +1019,22 @@ FloatingWindow {
                 if (hud.pendingDeleteSessionId === "") return;
                 if (Ghostd.deletingSessionId !== "") return;
                 if (Ghostd.sessionsError === "") hud.dismissDelete();
+            }
+
+            function onDeletingGhostChanged(): void {
+                if (hud.pendingDeleteGhost === "") return;
+                if (Ghostd.deletingGhost !== "") return;
+                if (Ghostd.ghostDeleteError === "") hud.dismissBanish();
+            }
+
+            // A name that left the listing (banished here, or from another
+            // shell) has nothing left to confirm.
+            function onGhostsChanged(): void {
+                if (hud.pendingDeleteGhost === "" || Ghostd.deletingGhost !== "") return;
+                const alive = Ghostd.ghosts.some(function (ghost) {
+                    return ghost.name === hud.pendingDeleteGhost;
+                });
+                if (!alive) hud.dismissBanish();
             }
         }
 
