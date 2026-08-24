@@ -105,4 +105,6 @@ export {
   type GhostSystemPromptInput,
 } from "./prompt.js";
 
+export * from "./untrusted.js";
+
 export * from "./extensions/index.js";
