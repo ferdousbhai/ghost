@@ -71,7 +71,7 @@ describe("GhostHookRunner", () => {
     const result = await runner.emitSessionStop(event());
     expect(calls).toEqual(["first", "second"]);
     expect(ghostSessionStopContinuation(result)).toBe("Revise this answer.");
-    expect(GHOST_SESSION_STOP_CONTINUATION_CAP).toBe(8);
+    expect(GHOST_SESSION_STOP_CONTINUATION_CAP).toBe(2);
   });
 
   it("combines nonblocking before_prompt context without starting a continuation", async () => {

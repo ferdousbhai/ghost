@@ -6,7 +6,7 @@ import type { Logger } from "./log.js";
 import { silentLogger } from "./log.js";
 
 export const GHOST_HOOK_HANDLER_TIMEOUT_MS = 30_000;
-export const GHOST_SESSION_STOP_CONTINUATION_CAP = 8;
+export const GHOST_SESSION_STOP_CONTINUATION_CAP = 2;
 const MAX_HOOK_OUTPUT_BYTES = 1024 * 1024;
 
 export function defaultGhostHooksPath(

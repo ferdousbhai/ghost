@@ -1349,7 +1349,9 @@ export class SessionHost {
         const lastAssistant = [...messages].reverse().find((message) => message.role === "assistant");
         const result = await this.hooks.emitSessionStop({
           type: "session_stop",
-          messages,
+          // Stop hooks review this pass, not the screenshot/tool-heavy session
+          // history. This also matches the Claude Code runtime's payload.
+          messages: lastAssistant ? [lastAssistant] : [],
           turn_id: hosted.turnId,
           ...(lastAssistant ? { last_assistant_message: lastAssistant } : {}),
           session_id: hosted.session.sessionId,

@@ -88,12 +88,17 @@ runtime it is a synthetic, non-querying message paired with the real user prompt
 
 ## `session_stop` protocol
 
-A command receives JSON on stdin:
+A command receives JSON on stdin. `messages` contains only the current assistant
+pass, not the session history or prior tool results; `last_assistant_message`
+contains the same message directly:
 
 ```json
 {
   "type": "session_stop",
-  "messages": [],
+  "messages": [{
+    "role": "assistant",
+    "content": [{ "type": "text", "text": "The answer." }]
+  }],
   "turn_id": 3,
   "last_assistant_message": {
     "role": "assistant",
@@ -108,8 +113,8 @@ A command receives JSON on stdin:
 }
 ```
 
-`runtime` is `omp` or `claude-code`. Claude Code exposes the current assistant
-pass in `messages`; its full transcript remains owned by Claude Code.
+`runtime` is `omp` or `claude-code`. Both runtimes expose only the current
+assistant pass in `messages`; conversation history remains owned by the runtime.
 
 Exit 0 with no output or `{}` accepts the pass. Either response below requests a
 hidden continuation:
@@ -128,7 +133,7 @@ and timeouts are logged and fail open, matching OMP's `session_stop` policy.
 Handlers are cancelled when the client aborts the turn.
 
 Ghost sets `stop_hook_active: true` on continuation passes and permits at most
-eight consecutive hidden continuations. Hook authors should normally stop after
+two consecutive hidden continuations. Hook authors should normally stop after
 one revision. A continuation reason is in model context; an informational
 notification alone is not.
 

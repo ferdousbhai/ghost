@@ -493,12 +493,14 @@ describe("SessionHost.runTurn", () => {
     expect(host!.queuedMessages("casper", "conv-queue").count).toBe(0);
   });
 
-  it("awaits session_stop and keeps a blocked revision inside one streamed turn", async () => {
+  it("awaits session_stop and sends only the current assistant pass", async () => {
     const hooks = new GhostHookRunner();
     const active: boolean[] = [];
+    const passes: unknown[][] = [];
     await hooks.register((api) => {
       api.on("session_stop", (event) => {
         active.push(event.stop_hook_active);
+        passes.push(event.messages);
         if (!event.stop_hook_active) {
           return { decision: "block", reason: "Rewrite the answer without canned phrasing." };
         }
@@ -517,6 +519,13 @@ describe("SessionHost.runTurn", () => {
     });
 
     expect(active).toEqual([false, true]);
+    expect(passes).toHaveLength(2);
+    expect(passes.every((messages) => messages.length === 1)).toBe(true);
+    expect(passes.map((messages) => JSON.stringify(messages))).toEqual([
+      expect.stringContaining("Great question!"),
+      expect.stringContaining("Here is the direct answer."),
+    ]);
+    expect(JSON.stringify(passes)).not.toContain("Answer me.");
     expect(events.filter((event) => event.type === "start")).toHaveLength(1);
     expect(events.filter((event) => event.type === "done")).toHaveLength(1);
     expect(events.at(-1)?.type).toBe("done");
