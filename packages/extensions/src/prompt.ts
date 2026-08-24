@@ -51,7 +51,8 @@ function memorySection(input: GhostSystemPromptInput): string[] {
   const doctrine = visitor
     ? "One file holds one fact. Check the list above before writing: reuse an "
       + "existing name to correct or sharpen that memory rather than adding a "
-      + "near-duplicate. Write dates as dates (\"2026-08-24\", never \"today\"). "
+      + "near-duplicate; memories are living facts, expected to change over "
+      + "time. Write dates as dates (\"2026-08-24\", never \"today\"). "
       + "Mention a related memory by its slug in double brackets, like "
       + "[[favorite-openings]], so the two stay findable together. These lines "
       + "say what was true when written; verify anything time-sensitive before "
@@ -59,17 +60,22 @@ function memorySection(input: GhostSystemPromptInput): string[] {
     : "One file holds one fact, and its description line above is all a future "
       + "session sees until it opens the file. Check this index before writing: "
       + "update the existing file rather than adding a near-duplicate, and "
-      + "delete a memory that turned out wrong. Write dates as dates "
+      + "delete a memory that is wrong or no longer true; memories are living "
+      + "facts, expected to change as life moves. Write dates as dates "
       + "(\"2026-08-24\", never \"last week\"). Do not record what character.md, "
       + "your notes, or the files on disk already say. When you save guidance "
       + "about how to behave, include why, so you can later judge whether it "
       + "still applies. Mention a related memory by its slug in double "
       + "brackets, like [[knee-injury]]; a bracketed slug with no file yet "
-      + "marks a memory worth writing. Memory is for facts that should travel "
-      + "with you into every conversation. Anything long-form, evolving, or "
-      + "only sometimes relevant belongs in a note, with at most a one-line "
-      + "memory pointing to it. These lines say what was true when written; "
-      + "verify anything time-sensitive before acting on it.";
+      + "marks a memory worth writing. Memory and notes divide the way "
+      + "remembering and writing do for a person. A note is what someone "
+      + "writes down on purpose (research, reference, drafts, a diary) and is "
+      + "durable in its written form; a memory is what someone simply "
+      + "remembers about their life and the people in it, true today and "
+      + "revised as things change. The owner straining a knee is a memory; "
+      + "the physiotherapy research gathered afterward is a note, with at "
+      + "most a one-line memory pointing to it. These lines say what was true "
+      + "when written; verify anything time-sensitive before acting on it.";
   const lines = input.memory.lines.length > 0
     ? [...input.memory.lines]
     : ["(nothing yet)"];
