@@ -307,11 +307,13 @@ Item {
 
                             Text {
                                 width: parent.width
-                                text: entry.deleting ? "Deleting…" : "Type the name to delete"
+                                text: entry.deleting
+                                    ? "Deleting…"
+                                    : "Name this ghost to banish it. Its memories, docs, and conversations will be moved to the trash."
                                 color: Theme.foregroundDim
                                 font.family: Theme.fontFamily
                                 font.pixelSize: Theme.fontSizeSmall
-                                elide: Text.ElideRight
+                                wrapMode: Text.Wrap
                             }
 
                             Item {

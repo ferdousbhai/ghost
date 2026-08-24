@@ -19,6 +19,7 @@ pragma ComponentBehavior: Bound
 // 2px tail corner. A ghost's reply stays unboxed and full width — the reading
 // column is the ghost's, not a bubble in it.
 import QtQuick
+import Quickshell
 import qs.services
 
 Item {
@@ -161,17 +162,33 @@ Item {
                 }
             }
 
+            // Settled messages keep their actions quiet and icon-sized. User
+            // prompts can branch; every message with body text can be copied.
             Row {
-                visible: root.mine && root.sourceEntryId !== "" && !root.busy
+                visible: !root.busy && root.body !== ""
                 spacing: Theme.gap
 
-                Text {
-                    text: "Branch"
-                    color: Theme.ghostAmber
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeSmall
-                    MouseArea {
+                Item {
+                    id: branchAction
+
+                    visible: root.mine && root.sourceEntryId !== ""
+                    width: 16
+                    height: 16
+                    Accessible.role: Accessible.Button
+                    Accessible.name: "Branch from this message"
+
+                    BranchGlyph {
                         anchors.fill: parent
+                        size: branchAction.width
+                        tint: branchArea.containsMouse
+                            ? Theme.ghostAmberBright : Theme.foregroundFaint
+                    }
+
+                    MouseArea {
+                        id: branchArea
+                        anchors.fill: parent
+                        anchors.margins: -Theme.gap / 2
+                        hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
                         onClicked: Ghostd.branchFrom(root.sourceEntryId)
                     }
@@ -215,6 +232,31 @@ Item {
                         cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
                         onClicked: if (root.branchNavigation)
                             Ghostd.navigateBranch(root.branchNavigation.nextTargetId)
+                    }
+                }
+
+                Item {
+                    id: copyAction
+
+                    width: 16
+                    height: 16
+                    Accessible.role: Accessible.Button
+                    Accessible.name: "Copy message"
+
+                    CopyGlyph {
+                        anchors.fill: parent
+                        size: copyAction.width
+                        tint: copyArea.containsMouse
+                            ? Theme.foreground : Theme.foregroundFaint
+                    }
+
+                    MouseArea {
+                        id: copyArea
+                        anchors.fill: parent
+                        anchors.margins: -Theme.gap / 2
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: Quickshell.clipboardText = root.body
                     }
                 }
             }

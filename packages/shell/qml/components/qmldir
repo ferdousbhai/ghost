@@ -2,10 +2,12 @@ module qs.components
 
 ActivityLine 1.0 ActivityLine.qml
 AskDialog 1.0 AskDialog.qml
+BranchGlyph 1.0 BranchGlyph.qml
 Bubble 1.0 Bubble.qml
 CodeView 1.0 CodeView.qml
 Composer 1.0 Composer.qml
 Conversations 1.0 Conversations.qml
+CopyGlyph 1.0 CopyGlyph.qml
 FilePane 1.0 FilePane.qml
 GhostGlyph 1.0 GhostGlyph.qml
 MarkdownEditor 1.0 MarkdownEditor.qml
