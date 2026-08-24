@@ -370,8 +370,9 @@ Singleton {
     /**
      * Delete a ghost home. The daemon wants the name echoed back in `confirm`
      * byte-for-byte and answers 400 confirmation_required otherwise, so the UI
-     * types it and we only carry it; the home is moved to ~/Ghosts/.trash/
-     * rather than unlinked, which is what makes this recoverable by hand.
+     * types it and we only carry it; the home is moved to the XDG trash
+     * (~/.local/share/Trash/files/) rather than unlinked, which is what makes
+     * this recoverable from the desktop.
      *
      * A refusal (409 ghost_busy, most often) leaves the selection untouched and
      * lands in `ghostDeleteError` for the row that asked. One at a time: the

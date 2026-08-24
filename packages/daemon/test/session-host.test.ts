@@ -841,6 +841,9 @@ describe("SessionHost.deleteGhost", () => {
 
     expect(existsSync(dir)).toBe(false);
     expect(temp!.registry.list()).toEqual([]);
+    // The system trash, with the .trashinfo that makes it restorable.
+    expect(trash).toBe(join(temp!.trashDir, "files", "casper"));
+    expect(existsSync(join(temp!.trashDir, "info", "casper.trashinfo"))).toBe(true);
     // The conversation moved with the ghost; nothing was erased.
     expect(existsSync(join(ghostPaths(trash).sessionDir, transcript))).toBe(true);
     expect(existsSync(ghostPaths(trash).characterFile)).toBe(true);
@@ -863,7 +866,7 @@ describe("SessionHost.deleteGhost", () => {
     });
     await turn;
     await expect(host!.deleteGhost("casper")).resolves.toMatchObject({
-      trash: expect.stringContaining("casper-"),
+      trash: join(temp!.trashDir, "files", "casper"),
     });
   });
 

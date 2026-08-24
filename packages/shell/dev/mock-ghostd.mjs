@@ -48,6 +48,7 @@ const PORT = Number(opt("--port", process.env.GHOSTD_PORT ?? "7717"));
 const HOST = "127.0.0.1";
 const DELTA_MS = flag("--slow") ? 30 : 12;
 const GHOSTS_ROOT = join(homedir(), "Ghosts");
+const TRASH_ROOT = join(process.env.XDG_DATA_HOME || join(homedir(), ".local", "share"), "Trash", "files");
 
 /** @type {{ name: string, dir: string, createdAt: string }[]} */
 const ghosts = ["casper", "moaning-myrtle"].map((name) => ({
@@ -508,9 +509,9 @@ createServer(async (req, res) => {
   const ghost = ghosts.find((g) => g.name === name);
   if (!ghost) return json(res, 404, { error: { message: `no ghost named ${name}`, code: "not_found" } });
 
-  // Banishing a ghost. The real daemon moves the home to ~/Ghosts/.trash/ so it
-  // is recoverable by hand; the mock just drops it from memory, and answers the
-  // same `trash` path so the surfaces see the contract's shape.
+  // Banishing a ghost. The real daemon moves the home to the XDG trash so it is
+  // recoverable from the desktop; the mock just drops it from memory, and
+  // answers the same `trash` path so the surfaces see the contract's shape.
   if (parts.length === 3 && req.method === "DELETE") {
     if (url.searchParams.get("confirm") !== name) {
       return json(res, 400, {
@@ -526,7 +527,7 @@ createServer(async (req, res) => {
     sessionStore.delete(name);
     roles.delete(name);
     routing.delete(name);
-    return json(res, 200, { ok: true, trash: join(GHOSTS_ROOT, ".trash", name) });
+    return json(res, 200, { ok: true, trash: join(TRASH_ROOT, name) });
   }
 
   if (parts[3] === "messages" && req.method === "POST") {

@@ -449,7 +449,7 @@ describe("DELETE /api/ghosts/:name/sessions/:id", () => {
 });
 
 describe("DELETE /api/ghosts/:name", () => {
-  it("moves the ghost home into .trash once the name is confirmed", async () => {
+  it("moves the ghost home into the XDG trash once the name is confirmed", async () => {
     const base = await serve();
     await postTurn(base, TURN_BODY);
     const dir = join(temp!.root, "casper");
@@ -458,7 +458,8 @@ describe("DELETE /api/ghosts/:name", () => {
     expect(deleted.status).toBe(200);
     const body = await deleted.json() as { ok: boolean; trash: string };
     expect(body.ok).toBe(true);
-    expect(body.trash).toMatch(/casper-\d{8}-\d{6}$/);
+    expect(body.trash).toBe(join(temp!.trashDir, "files", "casper"));
+    expect(existsSync(join(temp!.trashDir, "info", "casper.trashinfo"))).toBe(true);
     // A move, never an rm: the persona is still readable where it went.
     expect(existsSync(dir)).toBe(false);
     expect(existsSync(join(body.trash, "character.md"))).toBe(true);

@@ -16,10 +16,14 @@ RestartSec=2
 Environment=GHOSTD_HOST=127.0.0.1
 
 # Local-only service; nothing here should reach outside the user's own files.
+# %h is ONE writable bind mount, not per-directory carve-outs: ghost deletion
+# renames %h/Ghosts/<name> into %h/.local/share/Trash, and rename(2) across
+# two bind mounts fails EXDEV even on the same filesystem. (ProtectHome has no
+# "read-write" value — systemd ignores it with a warning; system directories
+# stay read-only via ProtectSystem=strict.)
 PrivateTmp=yes
 NoNewPrivileges=yes
 ProtectSystem=strict
-ProtectHome=read-write
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectControlGroups=yes
@@ -27,7 +31,7 @@ RestrictSUIDSGID=yes
 RestrictNamespaces=yes
 LockPersonality=yes
 MemoryDenyWriteExecute=no
-ReadWritePaths=%h/Ghosts %h/.config/ghost
+ReadWritePaths=%h
 
 [Install]
 WantedBy=default.target

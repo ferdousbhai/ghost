@@ -11,16 +11,43 @@ import type { PiMessagesEvent } from "../../src/pi-messages.js";
 
 export interface TempGhosts {
   root: string;
+  /** The `XDG_DATA_HOME` this fixture points the process at. */
+  xdgDataHome: string;
+  /** The freedesktop home trash under it — where a deleted ghost lands. */
+  trashDir: string;
   registry: GhostRegistry;
   cleanup(): void;
 }
 
+/**
+ * A temp ghosts root, plus a temp `XDG_DATA_HOME` for the duration.
+ *
+ * Deleting a ghost moves it into the freedesktop home trash, so every test
+ * that can reach `trash()` must have `XDG_DATA_HOME` pointed somewhere
+ * disposable: a leak here would put test ghosts in the developer's own
+ * `~/.local/share/Trash`. `cleanup()` restores the previous value.
+ */
 export function makeTempGhosts(): TempGhosts {
   const root = mkdtempSync(join(tmpdir(), "ghostd-test-"));
+  const xdgDataHome = mkdtempSync(join(tmpdir(), "ghostd-test-xdg-"));
+  const previousXdg = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = xdgDataHome;
+  let restored = false;
   return {
     root,
+    xdgDataHome,
+    trashDir: join(xdgDataHome, "Trash"),
     registry: new GhostRegistry(root),
-    cleanup: () => rmSync(root, { recursive: true, force: true }),
+    cleanup: () => {
+      // Idempotent: a test may clean up early and the afterEach hook again.
+      if (!restored) {
+        restored = true;
+        if (previousXdg === undefined) delete process.env.XDG_DATA_HOME;
+        else process.env.XDG_DATA_HOME = previousXdg;
+      }
+      rmSync(root, { recursive: true, force: true });
+      rmSync(xdgDataHome, { recursive: true, force: true });
+    },
   };
 }
 

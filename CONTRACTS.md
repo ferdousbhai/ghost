@@ -28,17 +28,8 @@ catalog) is derived per session and never stored.
                                notIncluded
 ```
 
-One directory beside the ghosts, not inside one:
-
-```
-~/Ghosts/.trash/<name>-<YYYYMMDD-HHMMSS>[-<n>]/   a deleted ghost home, moved
-                                                  whole; `-<n>` on collision
-```
-
-Deleting a ghost renames its home into `.trash/`. Nothing removes a trashed
-ghost — not the daemon, not on a schedule; emptying it is the owner's `rm`.
-Ghost listing skips dot-directories, so a trashed ghost is gone from the API
-and comes back with a plain `mv`.
+A deleted ghost home leaves the root entirely, for the system trash; see the
+`DELETE` route.
 
 Terminology: **visitors**, never "callers".
 
@@ -130,15 +121,24 @@ one must not be a leak of both.
 - `POST /api/ghosts` `{ name }` → creates `~/Ghosts/<name>/` with a seeded
   `character.md`
 - `DELETE /api/ghosts/:name?confirm=<name>` → `{ ok: true, trash: "<abs path>" }`
-  — moves `<root>/<name>/` to `<root>/.trash/<name>-<stamp>/`. Checked in this
-  order: `confirm` must be present and byte-equal to `:name`
+  — moves `<root>/<name>/` to the freedesktop home trash
+  (`$XDG_DATA_HOME/Trash`, default `~/.local/share/Trash`): the home becomes
+  `Trash/files/<name>` with a matching `Trash/info/<name>.trashinfo`
+  (`Path=` the original absolute path, percent-encoded; local `DeletionDate=`),
+  `<name>.2`, `<name>.3`, … on collision. A deleted ghost is therefore an
+  ordinary trashed directory, restorable with `gio trash --restore` or any file
+  manager. The move is a same-filesystem rename; `EXDEV` falls back to
+  `<root>/.trash/<name>-<YYYYMMDD-HHMMSS>[-<n>]/`, still a move, recovered with
+  a plain `mv`. Nothing removes a trashed ghost — not the daemon, not on a
+  schedule; emptying the trash is the owner's. Checked in this order:
+  `confirm` must be present and byte-equal to `:name`
   (`400 confirmation_required`); an unknown ghost is `404 not_found`; a ghost
   with any conversation busy, opening, or mid-delete — pi or Claude Code — is
   `409 ghost_busy`, as is a second concurrent delete of the same ghost. Idle
   hosted sessions are closed (disposed, not deleted) and pending
   title/compaction work is awaited first. **Deletion is a move, never an `rm`**:
   the ghost home holds the only copy of a persona, its memory, and its notes, so
-  nothing follows the rename with a recursive removal. Recovery is a plain `mv`.
+  nothing on any path follows the rename with a recursive removal.
 - `POST /api/ghosts/:name/messages` — the **pi-messages wire protocol** over
   OMP's `AgentSession` (request `{ model, context, options }` → SSE stream).
   The pinned client in the summon-ghost repo is the normative spec

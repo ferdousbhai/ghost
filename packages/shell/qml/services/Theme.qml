@@ -164,6 +164,8 @@ Singleton {
     readonly property string fontFamilyMono: root.shell["font.family"] || "monospace"
     readonly property int fontSize: Number(root.shell["font.body"]) || 14
     readonly property int fontSizeSmall: Number(root.shell["font.body-small"]) || 12
+    /** Proportional line height for reading copy; chrome labels stay at 1.0. */
+    readonly property real lineHeight: 1.35
 
     // ---- TOML ------------------------------------------------------------
     // A deliberately small parser. Omarchy's theme files are generated from

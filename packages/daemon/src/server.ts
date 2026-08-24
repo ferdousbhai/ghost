@@ -4,7 +4,7 @@
  *
  *   GET  /api/ghosts                  → [{ name, dir, createdAt }]
  *   POST /api/ghosts                  { name } → creates ~/Ghosts/<name>/
- *   DELETE /api/ghosts/:name?confirm=<name> → moves the home into .trash/
+ *   DELETE /api/ghosts/:name?confirm=<name> → moves the home into the XDG trash
  *   POST /api/ghosts/:name/messages   pi-messages request → SSE of pi-messages events
  *   POST /api/ghosts/:name/greeting   → { greeting, onboarding } — the empty-chat opener
  *   GET  /api/ghosts/:name/sessions   → { sessions } — conversation listing for that ghost
@@ -342,8 +342,8 @@ export function createDaemonServer(options: ServerOptions): Server {
    * Trash one ghost. `?confirm=<name>` must repeat the name exactly: a DELETE
    * is one path segment away from every other ghost route, and this is the
    * API-level guard against an accidental or scripted one taking a persona,
-   * its memory, and its notes with it. The deletion itself is a move into
-   * `.trash/`, never an erase.
+   * its memory, and its notes with it. The deletion itself is a move into the
+   * system trash, never an erase.
    */
   const handleDeleteGhost = async (
     ghostName: string,

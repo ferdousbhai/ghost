@@ -18,9 +18,11 @@ import {
   readFileSync,
   renameSync,
   statSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { join, resolve } from "node:path";
+import { homedir } from "node:os";
+import { isAbsolute, join, resolve } from "node:path";
 
 /** One discovered ghost, as served by `GET /api/ghosts`. */
 export interface Ghost {
@@ -35,9 +37,10 @@ export const GHOST_AGENT_DIRNAME = ".pi";
 export const GHOST_CHARACTER_FILENAME = "character.md";
 
 /**
- * Where a deleted ghost goes, inside the ghosts root. A dot-directory, so
- * `list()` skips it and a trashed ghost is gone from the API while its files
- * are still on disk.
+ * Where a deleted ghost goes when the freedesktop home trash is on another
+ * filesystem (`EXDEV`) — a dot-directory inside the ghosts root, so `list()`
+ * skips it and a trashed ghost is gone from the API while its files are still
+ * on disk. The ordinary path is the home trash; see `GhostRegistry.trash`.
  */
 export const GHOST_TRASH_DIRNAME = ".trash";
 
@@ -102,11 +105,39 @@ export function isGhostHome(dir: string): boolean {
   return isDirectory(dir) && isFile(join(dir, GHOST_CHARACTER_FILENAME));
 }
 
+const pad2 = (value: number) => String(value).padStart(2, "0");
+
 /** `20260824-153000` — local time, sortable, and safe in a directory name. */
 function trashStamp(now: Date): string {
-  const pad = (value: number) => String(value).padStart(2, "0");
-  return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`
-    + `-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+  return `${now.getFullYear()}${pad2(now.getMonth() + 1)}${pad2(now.getDate())}`
+    + `-${pad2(now.getHours())}${pad2(now.getMinutes())}${pad2(now.getSeconds())}`;
+}
+
+/**
+ * The freedesktop "home trash": `$XDG_DATA_HOME/Trash`, defaulting to
+ * `~/.local/share/Trash`. Read at call time, not at import, so a test (or a
+ * user changing their XDG layout) is honoured by the next deletion.
+ */
+export function homeTrashDir(env: NodeJS.ProcessEnv = process.env, home: string = homedir()): string {
+  const xdg = env.XDG_DATA_HOME?.trim();
+  const base = xdg && isAbsolute(xdg) ? xdg : join(home, ".local", "share");
+  return join(base, "Trash");
+}
+
+/**
+ * `.trashinfo` `Path=` is a URI path: percent-encode everything a URI path may
+ * not carry raw, keep `/` as the separator. `encodeURIComponent` gives UTF-8
+ * percent-encoding for non-ASCII and control characters; putting the slashes
+ * back is what makes it a path rather than one escaped segment.
+ */
+function encodeTrashInfoPath(path: string): string {
+  return encodeURIComponent(path).replaceAll("%2F", "/");
+}
+
+/** `2026-08-24T15:30:00` — local time with no zone suffix, per the spec. */
+function deletionDate(now: Date): string {
+  return `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`
+    + `T${pad2(now.getHours())}:${pad2(now.getMinutes())}:${pad2(now.getSeconds())}`;
 }
 
 function createdAtOf(dir: string): string {
@@ -274,19 +305,79 @@ export class GhostRegistry {
   }
 
   /**
-   * Move `<root>/<name>/` to `<root>/.trash/<name>-<stamp>/` and return where it
-   * went.
+   * Move `<root>/<name>/` into the freedesktop home trash and return where it
+   * went — `<trash>/files/<name>`, with a `<trash>/info/<name>.trashinfo`
+   * recording where it came from. A deleted ghost is therefore an ordinary
+   * trashed directory: `gio trash --list`, `gio trash --restore`, and every
+   * file manager's Trash see it and can put it back.
    *
    * Deleting a ghost is a rename, never a recursive removal: the ghost home
    * holds the only copy of a persona, its memory, and its notes, and no HTTP
-   * route may be one bug away from erasing that. `list()` skips dot-directories,
-   * so the ghost disappears from the API and a plain `mv` brings it back.
+   * route may be one bug away from erasing that. That also fixes the failure
+   * mode when the trash is on another filesystem — a cross-device `rename`
+   * raises `EXDEV`, and rather than degrade into copy-then-delete we fall back
+   * to `<root>/.trash/<name>-<stamp>/`, still a move.
    */
   trash(name: string, now: Date = new Date()): { trash: string } {
     const ghost = this.get(name);
+    const trashDir = homeTrashDir();
+    const filesDir = join(trashDir, "files");
+    const infoDir = join(trashDir, "info");
+    // 0700: a trash holds whatever the deleted files held.
+    for (const dir of [trashDir, filesDir, infoDir]) mkdirSync(dir, { recursive: true, mode: 0o700 });
+
+    const info = `[Trash Info]\nPath=${encodeTrashInfoPath(ghost.dir)}\n`
+      + `DeletionDate=${deletionDate(now)}\n`;
+    // Creating the .trashinfo with "wx" IS the claim on the trash name: it is
+    // the one atomic step, so two deletions racing for `<name>` cannot both
+    // win. `<name>.2`, `<name>.3`, … on collision, gio's convention.
+    let trashName = name;
+    let infoPath = join(infoDir, `${trashName}.trashinfo`);
+    let target = join(filesDir, trashName);
+    for (let suffix = 2; ; suffix += 1) {
+      try {
+        writeFileSync(infoPath, info, { encoding: "utf8", flag: "wx", mode: 0o600 });
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+        trashName = `${name}.${suffix}`;
+        infoPath = join(infoDir, `${trashName}.trashinfo`);
+        target = join(filesDir, trashName);
+        continue;
+      }
+      // An orphaned `files/` entry with no `.trashinfo` is somebody else's
+      // mess, but renaming onto it would still lose their data. Step past it.
+      if (!existsSync(target)) break;
+      unlinkSync(infoPath);
+      trashName = `${name}.${suffix}`;
+      infoPath = join(infoDir, `${trashName}.trashinfo`);
+      target = join(filesDir, trashName);
+    }
+
+    try {
+      renameSync(ghost.dir, target);
+    } catch (error) {
+      // Never leave a .trashinfo describing a file that is not in the trash.
+      try {
+        unlinkSync(infoPath);
+      } catch {
+        // Nothing to do about it; the rename's error is the one that matters.
+      }
+      if ((error as NodeJS.ErrnoException).code === "EXDEV") return this.trashInRoot(ghost, now);
+      throw error;
+    }
+    return { trash: target };
+  }
+
+  /**
+   * The `EXDEV` fallback: `<root>/.trash/<name>-<stamp>/`, beside the ghosts
+   * rather than in the home trash. Invisible to trash tools, but still a move,
+   * and `list()` skips dot-directories so the ghost is gone from the API and a
+   * plain `mv` brings it back.
+   */
+  private trashInRoot(ghost: Ghost, now: Date): { trash: string } {
     const trashRoot = join(this.root, GHOST_TRASH_DIRNAME);
     mkdirSync(trashRoot, { recursive: true });
-    const base = join(trashRoot, `${name}-${trashStamp(now)}`);
+    const base = join(trashRoot, `${ghost.name}-${trashStamp(now)}`);
     let target = base;
     // The stamp has second resolution; a name deleted, re-created, and deleted
     // again inside one second must not overwrite its own earlier copy.

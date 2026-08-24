@@ -7,6 +7,14 @@ pragma ComponentBehavior: Bound
 // lists, headings) without shipping a parser. User text renders plain so a
 // prompt containing backticks or underscores survives verbatim.
 //
+// Qt's markdown renderer owns the parts of the type scale we cannot reach from
+// QML: heading sizes are hard-coded multiples of font.pixelSize (h1 2.0, h2
+// 1.5, h3 1.2), code spans take the system fixed font rather than
+// Theme.fontFamilyMono, and links are underlined with no property to undo it.
+// The reading pass is therefore confined to what Text exposes — family, size,
+// lineHeight, colour, linkColor — and must not grow a markdown post-processor
+// to reach the rest.
+//
 // Only the user's prompt gets a surface: the warm capsule, 16px round with one
 // 2px tail corner. A ghost's reply stays unboxed and full width — the reading
 // column is the ghost's, not a bubble in it.
@@ -133,14 +141,24 @@ Item {
                 text: root.body
                 textFormat: root.mine ? Text.PlainText : Text.MarkdownText
                 color: root.mine ? Theme.foregroundBright : Theme.foreground
-                // Monochrome links: the markdown renderer underlines them, so
-                // link-ness reads from the underline, not a saturated colour
-                // (the palette accent is blue). Restrained, per the design system.
-                linkColor: Theme.foregroundBright
+                // Links wear the ghost's own amber, never Theme.accent — the
+                // inherited Omarchy accent is blue in most themes, and reading
+                // copy is not a web page.
+                linkColor: Theme.ghostAmber
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontSize
+                lineHeight: Theme.lineHeight
                 wrapMode: Text.Wrap
                 onLinkActivated: link => ExternalLinks.openModelUrl(link)
+
+                // Hover affordance only: Qt.NoButton lets the press fall
+                // through to the Text so link activation still fires.
+                MouseArea {
+                    anchors.fill: parent
+                    acceptedButtons: Qt.NoButton
+                    cursorShape: bodyText.hoveredLink !== ""
+                        ? Qt.PointingHandCursor : Qt.ArrowCursor
+                }
             }
 
             Row {
@@ -238,6 +256,7 @@ Item {
                     color: Theme.ghostRose
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.fontSizeSmall
+                    lineHeight: Theme.lineHeight
                     wrapMode: Text.Wrap
                 }
             }

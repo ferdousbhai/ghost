@@ -1997,8 +1997,9 @@ export class SessionHost {
   /**
    * Trash one whole ghost: close its conversations, then move its home aside.
    *
-   * The move is the registry's (`trash`), and it is a move rather than a
-   * removal — the ghost home holds the only copy of a persona, its memory, and
+   * The move is the registry's (`trash`) — into the system trash, where a
+   * trash tool or file manager can restore it — and it is a move rather than a
+   * removal: the ghost home holds the only copy of a persona, its memory, and
    * its notes. Nothing here follows up with a recursive delete.
    */
   async deleteGhost(ghostName: string): Promise<{ trash: string }> {
