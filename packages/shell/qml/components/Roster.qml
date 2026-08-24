@@ -26,14 +26,67 @@ Item {
         width: root.width
         spacing: Theme.gap
 
-        Text {
-            text: "Ghosts"
-            color: Theme.foregroundDim
-            font.family: Theme.fontFamily
-            font.pixelSize: Theme.fontSizeSmall - 1
-            font.weight: Font.DemiBold
-            font.capitalization: Font.AllUppercase
-            font.letterSpacing: 1
+        Item {
+            width: root.width
+            height: summonButton.height
+
+            Text {
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
+                text: "Ghosts"
+                color: Theme.foregroundDim
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeSmall - 1
+                font.weight: Font.DemiBold
+                font.capitalization: Font.AllUppercase
+                font.letterSpacing: 1
+            }
+
+            // Summoning is rare, so it lives in the header corner the way
+            // Notes tucks away New Folder: faint at rest, amber on hover, and
+            // the naming row below only exists while a name is being typed.
+            // A second click while naming cancels, like Escape.
+            Rectangle {
+                id: summonButton
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                width: 18
+                height: 18
+                radius: Theme.radius / 2
+                color: summonArea.containsMouse ? Theme.amber(0.15) : "transparent"
+
+                Behavior on color {
+                    enabled: !Theme.reducedMotion
+                    ColorAnimation { duration: Theme.durFast }
+                }
+
+                Text {
+                    anchors.centerIn: parent
+                    text: "+"
+                    color: summonArea.containsMouse || root.naming
+                        ? Theme.ghostAmberBright
+                        : Theme.foregroundFaint
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSize
+                }
+
+                MouseArea {
+                    id: summonArea
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: {
+                        if (root.naming) {
+                            nameField.text = "";
+                            root.naming = false;
+                            root.picked();
+                        } else {
+                            root.naming = true;
+                            nameField.forceActiveFocus();
+                        }
+                    }
+                }
+            }
         }
 
         Repeater {
@@ -143,37 +196,21 @@ Item {
             wrapMode: Text.Wrap
         }
 
-        // ---- New ghost ----------------------------------------------------
+        // ---- Naming a new ghost -------------------------------------------
+        // Exists only while the header's + is armed; the roster carries no
+        // standing summon row.
 
         Rectangle {
+            visible: root.naming
             width: root.width
             height: Theme.controlHeight
             radius: Theme.radius
-            color: root.naming ? Theme.film(0.05)
-                : (newGhostArea.containsMouse ? Theme.amber(0.15) : Theme.amber(0.10))
+            color: Theme.film(0.05)
             border.width: 1
-            border.color: root.naming ? Theme.amber(0.50)
-                : (newGhostArea.containsMouse ? Theme.amber(0.30) : Theme.amber(0.20))
-
-            Behavior on color {
-                enabled: !Theme.reducedMotion
-                ColorAnimation { duration: Theme.durFast }
-            }
-
-            Text {
-                visible: !root.naming
-                anchors.left: parent.left
-                anchors.leftMargin: Theme.gap
-                anchors.verticalCenter: parent.verticalCenter
-                text: "+ Summon a ghost"
-                color: Theme.ghostAmberBright
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSizeSmall
-            }
+            border.color: Theme.amber(0.50)
 
             TextInput {
                 id: nameField
-                visible: root.naming
                 anchors.fill: parent
                 anchors.margins: Theme.gap
                 verticalAlignment: TextInput.AlignVCenter
@@ -192,18 +229,6 @@ Item {
                     nameField.text = "";
                     root.naming = false;
                     root.picked();
-                }
-            }
-
-            MouseArea {
-                id: newGhostArea
-                anchors.fill: parent
-                visible: !root.naming
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: {
-                    root.naming = true;
-                    nameField.forceActiveFocus();
                 }
             }
         }
