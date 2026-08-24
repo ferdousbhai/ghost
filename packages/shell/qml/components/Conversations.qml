@@ -6,10 +6,11 @@ pragma ComponentBehavior: Bound
 // GET /api/ghosts/:name/sessions; opening one loads its transcript (#26), the
 // sidebar footer below mints a new session id like "+ new ghost" mints a ghost.
 //
-// The list is shaped like Apple Notes' sidebar: a search field on top, then a
-// "Pinned" group that disappears when it is empty, then the rest. Pinned state
-// lives on the daemon row (`pinned`), which also owns the ordering; the HUD only
-// splits the already-sorted listing into the two groups.
+// The list is shaped like Apple Notes' sidebar: its section heading and search
+// field sit on top, then a "Pinned" group that disappears when it is empty,
+// then the rest. Pinned state lives on the daemon row (`pinned`), which also
+// owns the ordering; the HUD only splits the already-sorted listing into the
+// two groups.
 import QtQuick
 import qs.services
 
@@ -271,9 +272,19 @@ Item {
         width: root.width
         spacing: Theme.gap
 
+        Text {
+            text: "Conversations"
+            color: Theme.foregroundDim
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontSizeSmall - 1
+            font.weight: Font.DemiBold
+            font.capitalization: Font.AllUppercase
+            font.letterSpacing: 1
+        }
+
         // ---- Search ------------------------------------------------------
-        // Above everything, Notes-style, and only once there is something to
-        // search — an empty ghost gets its empty state, not a dead field.
+        // Only shown once there is something to search — an empty ghost gets
+        // its empty state, not a dead field.
         Rectangle {
             visible: Ghostd.sessions.length > 0
             width: root.width
@@ -376,22 +387,6 @@ Item {
         Repeater {
             model: root.pinnedSessions
             delegate: conversationRow
-        }
-
-        // ---- Conversations -----------------------------------------------
-        Text {
-            // Hidden when the group is empty, except in the one case where it is
-            // the label above the "no conversations yet" empty state.
-            visible: root.otherSessions.length > 0
-                || (root.pinnedSessions.length === 0 && root.query === "")
-            topPadding: root.pinnedSessions.length > 0 ? Theme.gap : 0
-            text: "Conversations"
-            color: Theme.foregroundDim
-            font.family: Theme.fontFamily
-            font.pixelSize: Theme.fontSizeSmall - 1
-            font.weight: Font.DemiBold
-            font.capitalization: Font.AllUppercase
-            font.letterSpacing: 1
         }
 
         Repeater {
