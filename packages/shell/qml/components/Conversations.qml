@@ -21,8 +21,9 @@ Item {
         HUD can return focus to the composer. */
     signal picked()
 
-    /** A destructive action takes two clicks; only one row can be armed. */
-    property string confirmingSessionId: ""
+    /** The × was clicked: the HUD raises the modal confirmation. Deleting is
+        never one click, and the question is worth more room than a list row. */
+    signal deleteRequested(string sessionId, string title)
 
     /** The live filter. Empty shows every conversation in both groups. */
     readonly property string query: searchInput.text.trim()
@@ -36,11 +37,10 @@ Item {
     implicitWidth: 190
     implicitHeight: column.implicitHeight
 
-    /** Drop the filter and disarm any pending delete — what a caller outside the
-        list (the sidebar footer's compose button) needs before the view jumps to
-        a brand-new conversation. */
+    /** Drop the filter — what a caller outside the list (the sidebar footer's
+        compose button) needs before the view jumps to a brand-new
+        conversation. */
     function reset(): void {
-        root.confirmingSessionId = "";
         searchInput.text = "";
     }
 
@@ -91,8 +91,6 @@ Item {
 
             readonly property bool active: entry.modelData.id === Ghostd.currentSessionId
             readonly property bool pinned: entry.modelData.pinned === true
-            readonly property bool confirmingDelete:
-                root.confirmingSessionId === entry.modelData.id
             readonly property bool deleting:
                 Ghostd.deletingSessionId === entry.modelData.id
 
@@ -100,7 +98,10 @@ Item {
             // Grow to fit a wrapped title instead of eliding it.
             height: Math.max(Theme.controlHeight, titleText.implicitHeight + Theme.gap)
             radius: Theme.radius / 2
-            color: entry.active ? Theme.film(0.10)
+            // Selection reads from the row itself — a stronger film plus the
+            // bright title — the way Roster.qml lights its active ghost. Amber
+            // stays reserved for state that is not "you are looking at this".
+            color: entry.active ? Theme.film(0.14)
                 : (entryArea.containsMouse ? Theme.film(0.06) : "transparent")
 
             Behavior on color {
@@ -117,20 +118,11 @@ Item {
                 anchors.rightMargin: Theme.gap
                 spacing: Theme.gap
 
-                Rectangle {
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: 2
-                    height: 18
-                    radius: 1
-                    visible: entry.active
-                    color: Theme.ghostAmber
-                }
-
                 Text {
                     id: titleText
                     anchors.verticalCenter: parent.verticalCenter
-                    width: parent.width - 2 - when.width - pinAction.width
-                        - deleteAction.width - Theme.gap * 4
+                    width: parent.width - when.width - pinAction.width
+                        - deleteAction.width - Theme.gap * 3
                     text: root.titleOf(entry.modelData)
                     color: entry.active ? Theme.foregroundBright
                         : (entryArea.containsMouse ? Theme.foreground : Theme.foregroundDim)
@@ -143,9 +135,7 @@ Item {
                     id: when
                     anchors.verticalCenter: parent.verticalCenter
                     width: implicitWidth
-                    text: entry.confirmingDelete || entry.deleting
-                        ? ""
-                        : root.whenOf(entry.modelData)
+                    text: entry.deleting ? "" : root.whenOf(entry.modelData)
                     color: Theme.foregroundFaint
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.fontSizeSmall
@@ -161,11 +151,10 @@ Item {
                     height: Theme.controlHeight
                     // Pinned state reads from which section the row sits in, the
                     // way Notes does it, so this is a hover action and never a
-                    // permanent badge. It hides while the row is armed for
-                    // deletion — that is a different, louder question.
+                    // permanent badge.
                     visible: (entryArea.containsMouse || pinArea.containsMouse
                         || deleteArea.containsMouse)
-                        && !entry.confirmingDelete && !entry.deleting
+                        && !entry.deleting
                     z: 2
                     radius: Theme.radius / 2
                     color: pinArea.containsMouse ? Theme.film(0.10) : "transparent"
@@ -191,10 +180,7 @@ Item {
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
                         // Pinning is reversible in one click, so it asks nothing.
-                        onClicked: {
-                            root.confirmingSessionId = "";
-                            Ghostd.pinConversation(entry.modelData.id, !entry.pinned);
-                        }
+                        onClicked: Ghostd.pinConversation(entry.modelData.id, !entry.pinned)
                     }
                 }
 
@@ -203,15 +189,14 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
                     // Reserve the close affordance even before hover so a
                     // long wrapped title does not jump as the pointer enters.
-                    width: entry.confirmingDelete || entry.deleting ? 42 : 16
+                    width: 16
                     height: Theme.controlHeight
                     visible: (entryArea.containsMouse || deleteArea.containsMouse
-                        || pinArea.containsMouse
-                        || entry.confirmingDelete || entry.deleting)
+                        || pinArea.containsMouse || entry.deleting)
                         && !(entry.active && Ghostd.streaming)
                     z: 2
                     radius: Theme.radius / 2
-                    color: deleteArea.containsMouse || entry.confirmingDelete || entry.deleting
+                    color: deleteArea.containsMouse || entry.deleting
                         ? Theme.rose(0.10)
                         : "transparent"
 
@@ -222,17 +207,12 @@ Item {
 
                     Text {
                         anchors.centerIn: parent
-                        text: entry.deleting ? "…"
-                            : (entry.confirmingDelete ? "Delete" : "×")
-                        color: deleteArea.containsMouse || entry.confirmingDelete
-                            || entry.deleting
+                        text: entry.deleting ? "…" : "×"
+                        color: deleteArea.containsMouse || entry.deleting
                             ? Theme.ghostRose
                             : Theme.foregroundFaint
                         font.family: Theme.fontFamily
-                        font.pixelSize: entry.confirmingDelete
-                            ? Theme.fontSizeSmall
-                            : Theme.fontSize
-                        font.weight: entry.confirmingDelete ? Font.DemiBold : Font.Normal
+                        font.pixelSize: Theme.fontSize
                     }
 
                     MouseArea {
@@ -241,14 +221,8 @@ Item {
                         enabled: !entry.deleting
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
-                        onClicked: {
-                            if (entry.confirmingDelete) {
-                                root.confirmingSessionId = "";
-                                Ghostd.deleteConversation(entry.modelData.id);
-                            } else {
-                                root.confirmingSessionId = entry.modelData.id;
-                            }
-                        }
+                        onClicked: root.deleteRequested(entry.modelData.id,
+                            root.titleOf(entry.modelData))
                     }
                 }
             }
@@ -259,7 +233,6 @@ Item {
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
                 onClicked: {
-                    root.confirmingSessionId = "";
                     Ghostd.openConversation(entry.modelData.id);
                     root.picked();
                 }

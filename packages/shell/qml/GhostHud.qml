@@ -49,6 +49,25 @@ FloatingWindow {
     /** True when login was reached from the switcher, so closing returns there. */
     property bool loginFromSwitcher: false
 
+    // ---- Pending confirmation ----------------------------------------------
+    // Deleting a conversation is asked in a modal over the whole window rather
+    // than in the row itself: the row is 16px of a scrolling sidebar, and a
+    // question that erases a transcript deserves the middle of the screen. The
+    // id lives here, not in Conversations, because the dialog outlives the
+    // delegate that raised it (a refresh rebuilds every row).
+    /** The conversation awaiting a confirmed delete, or "". */
+    property string pendingDeleteSessionId: ""
+    /** Its title, held for the dialog's wording after the row is gone. */
+    property string pendingDeleteTitle: ""
+
+    /** Drop the pending delete and hand the keyboard back to the composer. */
+    function dismissDelete(): void {
+        hud.pendingDeleteSessionId = "";
+        hud.pendingDeleteTitle = "";
+        Ghostd.sessionsError = "";
+        composer.take();
+    }
+
     // ---- Workbench geometry ------------------------------------------------
     // The file pane sits beside the chat when both columns can still be read,
     // and takes the chat's place when they cannot. The test is on the width
@@ -193,7 +212,10 @@ FloatingWindow {
         // or the tray. Left unhandled once there is nothing of ours left to
         // dismiss, so it never swallows a compositor bind.
         Keys.onEscapePressed: event => {
-            if (Ghostd.streaming) {
+            if (hud.pendingDeleteSessionId !== "") {
+                hud.dismissDelete();
+                event.accepted = true;
+            } else if (Ghostd.streaming) {
                 Ghostd.cancel();
                 event.accepted = true;
             } else if (hud.workbenchOpen) {
@@ -485,6 +507,11 @@ FloatingWindow {
                             onPicked: {
                                 hud.loginOpen = false;
                                 composer.take();
+                            }
+                            onDeleteRequested: (sessionId, title) => {
+                                Ghostd.sessionsError = "";
+                                hud.pendingDeleteSessionId = sessionId;
+                                hud.pendingDeleteTitle = title;
                             }
                         }
                     }
@@ -925,6 +952,37 @@ FloatingWindow {
                         hud.openSwitcher();
                     }
                 }
+            }
+        }
+
+        // ---- Destructive confirmation ------------------------------------
+        // Sits over the whole card, above the layout, so the scrim dims the
+        // sidebar and transcript alike.
+        ConfirmDialog {
+            id: deleteDialog
+
+            anchors.fill: parent
+            open: hud.pendingDeleteSessionId !== ""
+            title: "Delete conversation?"
+            body: "“" + hud.pendingDeleteTitle + "” and its transcript will be "
+                + "moved to the trash. This cannot be undone from the HUD."
+            confirmText: "Delete"
+            busy: Ghostd.deletingSessionId === hud.pendingDeleteSessionId
+                && hud.pendingDeleteSessionId !== ""
+            error: hud.pendingDeleteSessionId !== "" ? Ghostd.sessionsError : ""
+            onConfirmed: Ghostd.deleteConversation(hud.pendingDeleteSessionId)
+            onDismissed: hud.dismissDelete()
+        }
+
+        // The delete answered: close on success, stay up with the daemon's
+        // reason on failure (a conversation still streaming, an unreachable
+        // daemon) so the dialog never dismisses into a no-op.
+        Connections {
+            target: Ghostd
+            function onDeletingSessionIdChanged(): void {
+                if (hud.pendingDeleteSessionId === "") return;
+                if (Ghostd.deletingSessionId !== "") return;
+                if (Ghostd.sessionsError === "") hud.dismissDelete();
             }
         }
 
