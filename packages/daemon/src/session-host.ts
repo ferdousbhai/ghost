@@ -22,9 +22,12 @@
  *    per-ghost encryption depend on.
  *
  * 2. **Creator sessions use the native OMP runtime.** Its prompt, filesystem,
- *    Bash, skills, rules, project context, plugins, MCP, web search, task/hub,
- *    and background-job machinery stay enabled. Ghost appends its persona and
- *    adds the capabilities that are genuinely Ghost-specific.
+ *    Bash, skills, rules, project context, plugins, project MCP, web search,
+ *    task/hub, and background-job machinery stay enabled. Ghost appends its
+ *    persona and adds the capabilities that are genuinely Ghost-specific.
+ *    MCP is deliberately narrower than OMP's default discovery: only the
+ *    ghost home's own `.omp/mcp.json` (or `.omp/.mcp.json`) is loaded, never
+ *    user/global config belonging to OMP or another coding agent.
  *
  * 3. **Visitor sessions are still a security boundary.** They disable native
  *    discovery and use only Ghost's scope-aware tools. Otherwise native read
@@ -51,6 +54,11 @@ import type { SessionEntry } from "@oh-my-pi/pi-coding-agent/session/session-ent
 import { visitEntriesFromFile } from "@oh-my-pi/pi-coding-agent/session/session-loader";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { SettingPath } from "@oh-my-pi/pi-coding-agent/config/settings";
+import type { SourceMeta } from "@oh-my-pi/pi-coding-agent/capability/types";
+import { expandEnvVarsDeep } from "@oh-my-pi/pi-coding-agent/discovery/helpers";
+import { readMCPConfigFile } from "@oh-my-pi/pi-coding-agent/mcp/config-writer";
+import { MCPManager } from "@oh-my-pi/pi-coding-agent/mcp/manager";
+import type { MCPServerConfig } from "@oh-my-pi/pi-coding-agent/mcp/types";
 import {
   buildSkillPromptMessage,
   parseSkillInvocation,
@@ -347,6 +355,12 @@ export interface QueuedMessages {
 
 export type QueueMode = "steer" | "followUp";
 
+interface HostedMCP {
+  manager: MCPManager;
+  /** Serialized dynamic MCP tool refreshes; never rejects. */
+  refresh?: Promise<void>;
+}
+
 interface HostedSession extends GhostSessionHandle {
   busy: boolean;
   /** HTTP-backed implementation of OMP's built-in `ask` UI contract. */
@@ -377,6 +391,8 @@ interface HostedSession extends GhostSessionHandle {
   title?: Promise<void>;
   /** Monotonic external turn id used by the Ghost session_stop contract. */
   turnId: number;
+  /** Creator-only MCP lifecycle, populated strictly from this ghost home's `.omp/`. */
+  mcp?: HostedMCP;
 }
 
 const DEFAULT_SESSION_KEY = "default";
@@ -598,6 +614,85 @@ export async function migrateLegacySessionTitle(
   return changed ? title : null;
 }
 
+/**
+ * Connect only the native project MCP files contained by one ghost home.
+ *
+ * OMP's ordinary discovery intentionally merges user-level OMP configuration
+ * with Codex, Claude, Copilot, and other coding-agent sources. A sovereign
+ * ghost must not even scan those sources. Reading the two native project files
+ * directly, then injecting the resulting manager into the SDK, preserves the
+ * ghost's own MCP without consulting anything outside its home.
+ */
+async function connectGhostProjectMCP(
+  manager: MCPManager,
+  ghostHome: string,
+  logger: Logger,
+): Promise<void> {
+  const configs: Record<string, MCPServerConfig> = {};
+  const sources: Record<string, SourceMeta> = {};
+  const configPaths = [
+    join(ghostHome, ".omp", "mcp.json"),
+    join(ghostHome, ".omp", ".mcp.json"),
+  ];
+
+  // Match OMP's native provider precedence: mcp.json wins over the legacy
+  // .mcp.json when both declare the same server name.
+  for (const configPath of configPaths) {
+    try {
+      const document = await readMCPConfigFile(configPath);
+      const servers = document.mcpServers;
+      if (!servers || typeof servers !== "object" || Array.isArray(servers)) continue;
+      for (const [name, rawConfig] of Object.entries(servers)) {
+        if (Object.hasOwn(configs, name) || rawConfig.enabled === false) continue;
+        configs[name] = expandEnvVarsDeep(rawConfig);
+        sources[name] = {
+          provider: "native",
+          providerName: "OMP",
+          path: configPath,
+          level: "project",
+        };
+      }
+    } catch (error) {
+      logger.error("ghost project MCP config failed to load", {
+        path: configPath,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  if (Object.keys(configs).length === 0) return;
+  try {
+    const result = await manager.connectServers(configs, sources);
+    for (const [name, error] of result.errors) {
+      logger.error("ghost project MCP server failed to load", {
+        path: sources[name]?.path ?? `mcp:${name}`,
+        server: name,
+        error,
+      });
+    }
+  } catch (error) {
+    logger.error("ghost project MCP failed to load", {
+      path: join(ghostHome, ".omp"),
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+/**
+ * Hide the two CustomTool fields that OMP 18.0.3's reflective adapter proxies
+ * before assigning its own readonly copies under Bun. Ordinary property reads
+ * still see the original values, so `strict: false`, load-mode selection,
+ * rendering, execution, and MCP provenance are preserved. Remove this bridge
+ * when the upstream RegisteredToolAdapter/CustomToolAdapter Bun bug is fixed.
+ */
+function mcpToolsForBunAdapter(manager: MCPManager): ReturnType<MCPManager["getTools"]> {
+  return manager.getTools().map((tool) => new Proxy(tool, {
+    ownKeys(target) {
+      return Reflect.ownKeys(target).filter((key) => key !== "strict" && key !== "loadMode");
+    },
+  }));
+}
+
 export class SessionHost {
   private readonly registry: GhostRegistry;
   private readonly logger: Logger;
@@ -793,6 +888,19 @@ export class SessionHost {
       settings,
     });
 
+    // Supplying an MCPManager is OMP's SDK lever for skipping its ambient MCP
+    // discovery. Populate it ourselves from the ghost home only. Creator MCP
+    // remains enabled (and propagates to task/hub children); visitors still
+    // take the explicit enableMCP:false path below.
+    const mcp: HostedMCP | undefined = visitor
+      ? undefined
+      : { manager: new MCPManager(paths.home, null) };
+    if (mcp) {
+      mcp.manager.setAuthStorage(modelRuntime.authStorage);
+      if (settings.get("mcp.notifications")) mcp.manager.setNotificationsEnabled(true);
+      await connectGhostProjectMCP(mcp.manager, paths.home, this.logger);
+    }
+
     const sessionManager = await SessionManager.open(
       join(paths.sessionDir, sessionFileNameFor(sessionKey)),
       paths.sessionDir,
@@ -821,27 +929,58 @@ export class SessionHost {
           toolNames: [...extensions.toolNames, "ask"],
         }
       : {};
-    const { session, extensionsResult, setToolUIContext } = await createAgentSession({
-      cwd: paths.home,
-      agentDir: paths.agentDir,
-      settings,
-      authStorage: modelRuntime.authStorage,
-      modelRegistry: modelRuntime.modelRegistry,
-      extensions: extensions.factories,
-      hasUI: false,
-      // `ask` is a human-input bridge, not a tool-approval surface. OMP keeps
-      // those concerns separate: interactivePrompts exposes AskTool while the
-      // yolo approval mode above still auto-accepts the explicit capability set.
-      interactivePrompts: true,
-      autoApprove: true,
-      agentRegistry: new AgentRegistry(),
-      // See decision 1: sessions live under the ghost home. `open` on a path
-      // that does not exist yet creates it, so a conversation id maps to a
-      // stable transcript across daemon restarts.
-      sessionManager,
-      ...visitorRestrictions,
-    });
+    let created: Awaited<ReturnType<typeof createAgentSession>>;
+    try {
+      created = await createAgentSession({
+        cwd: paths.home,
+        agentDir: paths.agentDir,
+        settings,
+        authStorage: modelRuntime.authStorage,
+        modelRegistry: modelRuntime.modelRegistry,
+        extensions: extensions.factories,
+        hasUI: false,
+        // `ask` is a human-input bridge, not a tool-approval surface. OMP keeps
+        // those concerns separate: interactivePrompts exposes AskTool while the
+        // yolo approval mode above still auto-accepts the explicit capability set.
+        interactivePrompts: true,
+        autoApprove: true,
+        agentRegistry: new AgentRegistry(),
+        // See decision 1: sessions live under the ghost home. `open` on a path
+        // that does not exist yet creates it, so a conversation id maps to a
+        // stable transcript across daemon restarts.
+        sessionManager,
+        ...(mcp ? { mcpManager: mcp.manager } : {}),
+        ...visitorRestrictions,
+      });
+    } catch (error) {
+      await mcp?.manager.disconnectAll().catch(() => {});
+      if (mcp && MCPManager.instance() === mcp.manager) MCPManager.setInstance(undefined);
+      modelRuntime.close();
+      throw error;
+    }
+    const { session, extensionsResult, setToolUIContext } = created;
     setToolUIContext(ask.uiContext, true);
+
+    if (mcp && mcp.manager.getAllServerNames().length > 0) {
+      // Injected managers are borrowed in OMP's ownership model, so Ghost must
+      // bridge initial and notification-driven tool catalogs into this session.
+      const refreshMCPTools = (): Promise<void> => {
+        const run = (mcp.refresh ?? Promise.resolve()).then(async () => {
+          if (!session.isDisposed) {
+            await session.refreshMCPTools(mcpToolsForBunAdapter(mcp.manager));
+          }
+        });
+        mcp.refresh = run.catch((error) => {
+          this.logger.warn("ghost project MCP tool refresh failed", {
+            ghost: ghostName,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+        return run;
+      };
+      mcp.manager.setOnToolsChanged(() => refreshMCPTools());
+      await refreshMCPTools().catch(() => {});
+    }
 
     for (const error of extensionsResult.errors ?? []) {
       this.logger.error("extension failed to load", {
@@ -872,6 +1011,7 @@ export class SessionHost {
       busy: false,
       ask,
       turnId: 0,
+      ...(mcp ? { mcp } : {}),
     };
   }
 
@@ -2159,15 +2299,31 @@ export class SessionHost {
     const hosted = this.sessions.get(key);
     if (!hosted) return;
     this.sessions.delete(key);
+    await this.disposePiSession(hosted);
+  }
+
+  /** Dispose one OMP session and the project-only MCP manager Ghost injected. */
+  private async disposePiSession(hosted: HostedSession): Promise<void> {
     if (hosted.busy) {
       hosted.session.abortBash();
       await hosted.session.abort();
     }
     hosted.ask.close();
     try {
-      await hosted.session.dispose();
+      if (hosted.mcp) {
+        try {
+          await hosted.mcp.manager.disconnectAll();
+        } finally {
+          await hosted.mcp.refresh;
+          if (MCPManager.instance() === hosted.mcp.manager) MCPManager.setInstance(undefined);
+        }
+      }
     } finally {
-      hosted.modelRuntime.close();
+      try {
+        await hosted.session.dispose();
+      } finally {
+        hosted.modelRuntime.close();
+      }
     }
   }
 
@@ -2179,16 +2335,7 @@ export class SessionHost {
     this.sessions.clear();
     for (const entry of hosted) {
       try {
-        if (entry.busy) {
-          entry.session.abortBash();
-          await entry.session.abort();
-        }
-        entry.ask.close();
-        try {
-          await entry.session.dispose();
-        } finally {
-          entry.modelRuntime.close();
-        }
+        await this.disposePiSession(entry);
       } catch (error) {
         this.logger.warn("session disposal failed", { error: (error as Error).message });
       }

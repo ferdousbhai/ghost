@@ -57,11 +57,15 @@ A creator session is OMP-native. Ghost preserves OMP's system prompt and
 discovery, then appends the Ghost persona and derived memory/doc sections.
 Native filesystem and search (`read`, `glob`, `grep`), mutation (`write`,
 `edit`), Bash, web search, task/hub subagents, background jobs, skills, rules,
-project context, extensions/plugins, commands, and MCP remain available under
-OMP's normal configuration and xd:// presentation. Ghost disables only the
-overlapping OMP browser and computer tools because `ghost_browser`,
-`ghost_desktop`, and `ghost_screen` own those surfaces, and OMP's
-memory/autolearn backends because ghost memory is plain files in the ghost
+project context, extensions/plugins, commands, and the ghost home's own project
+MCP remain available under OMP's normal xd:// presentation. MCP is a deliberate
+sovereignty exception to OMP's normal multi-source discovery: an OMP creator
+session loads only `<ghost>/.omp/mcp.json` (or the legacy `.omp/.mcp.json`) and
+never discovers or loads user/global OMP config or another coding agent's MCP
+config (`~/.codex`, `~/.claude`, `~/.copilot`, and similar). Ghost otherwise
+disables only the overlapping OMP browser and computer tools because
+`ghost_browser`, `ghost_desktop`, and `ghost_screen` own those surfaces, and
+OMP's memory/autolearn backends because ghost memory is plain files in the ghost
 home (see the harness invariants). Image inspection is OMP-native:
 `inspect_image` in its default auto mode, resolving the `vision` role that the
 daemon projects from models.json's `vision_model`.
@@ -428,9 +432,13 @@ whole model before any non-local exposure.
   (e.g. `GEMINI_API_KEY`) silently add cloud models to a sovereign ghost.
 - Parallel tool calls: wrap shared-file mutations in a file mutation queue.
 - Tools should throw structured errors, not return `isError` payloads.
-- Creator sessions omit discovery/tool restrictions and load read-only effective
-  OMP settings for the ghost cwd/agent directory. Visitor sessions explicitly
-  disable discovery, context, skills, MCP/LSP/IRC, and native tools.
+- Creator sessions omit non-MCP discovery/tool restrictions and load read-only
+  effective OMP settings for the ghost cwd/agent directory. Their MCP manager is
+  injected from that ghost's `.omp/mcp.json`/`.omp/.mcp.json` only; machine-level
+  OMP, Codex, Claude, Copilot, and other user/global MCP sources are never
+  discovered. This is a sovereignty invariant like env scrubbing. Visitor
+  sessions explicitly disable discovery, context, skills, MCP/LSP/IRC, and
+  native tools.
 - OMP may mount non-core tools under xd://; absence from
   `getActiveToolNames()` does not mean absence from its tool registry.
 - Force `memory.backend: "off"` (plus the legacy `memories.enabled` and
