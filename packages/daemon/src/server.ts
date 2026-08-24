@@ -8,6 +8,7 @@
  *   POST /api/ghosts/:name/greeting   → { greeting, onboarding } — the empty-chat opener
  *   GET  /api/ghosts/:name/sessions   → { sessions } — conversation listing for that ghost
  *   DELETE /api/ghosts/:name/sessions/:id → permanently delete one conversation
+ *   PUT  /api/ghosts/:name/sessions/:id/pin → { pinned } — pin or unpin it
  *   GET  /api/ghosts/:name/sessions/:id/transcript → { id, title, messages } for resume
  *   GET  /api/ghosts/:name/sessions/:id/ask → { ask } — current OMP ask, if any
  *   POST /api/ghosts/:name/sessions/:id/ask → resolve that ask
@@ -371,6 +372,30 @@ export function createDaemonServer(options: ServerOptions): Server {
   ): Promise<void> => {
     await options.host.deleteSession(ghostName, conversationId);
     jsonResponse(response, 200, { ok: true });
+  };
+
+  /**
+   * Pin or unpin one conversation. Idempotent, so the shell may send the state
+   * it wants rather than a toggle it has to compute from a stale listing.
+   */
+  const handleSetSessionPin = async (
+    ghostName: string,
+    conversationId: string,
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): Promise<void> => {
+    const body = await readJsonBody(request, maxBodyBytes);
+    if (body === null || typeof body !== "object" || Array.isArray(body)) {
+      errorResponse(response, 400, "invalid_request", "Request body must be a JSON object.");
+      return;
+    }
+    const { pinned } = body as { pinned?: unknown };
+    if (typeof pinned !== "boolean") {
+      errorResponse(response, 400, "invalid_request", "\"pinned\" must be a boolean.");
+      return;
+    }
+    await options.host.setPinned(ghostName, conversationId, pinned);
+    jsonResponse(response, 200, { ok: true, pinned });
   };
 
   const handleTranscript = async (
@@ -903,6 +928,18 @@ export function createDaemonServer(options: ServerOptions): Server {
           return await handleDeleteSession(
             ghostName,
             decodePathSegment(segments[4] ?? ""),
+            response,
+          );
+        }
+        if (segments.length === 6 && segments[3] === "sessions" && segments[5] === "pin") {
+          if (method !== "PUT") {
+            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+            return;
+          }
+          return await handleSetSessionPin(
+            ghostName,
+            decodePathSegment(segments[4] ?? ""),
+            request,
             response,
           );
         }

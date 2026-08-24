@@ -452,6 +452,68 @@ FloatingWindow {
                             }
                         }
                     }
+
+                    // Sidebar footer, Notes-style: what the list holds, and the
+                    // one button that adds to it. It lives outside convoScroll so
+                    // it stays put at the bottom while the list scrolls behind.
+                    Item {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: Theme.controlHeight
+                        visible: Ghostd.activeGhost !== ""
+
+                        Text {
+                            anchors.centerIn: parent
+                            // The ghost's whole thread count, not the filtered
+                            // view — the footer reports the archive, not the list.
+                            text: Ghostd.sessions.length === 1
+                                ? "1 conversation"
+                                : Ghostd.sessions.length + " conversations"
+                            color: Theme.foregroundFaint
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSizeSmall
+                        }
+
+                        Rectangle {
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: Theme.controlHeight
+                            height: Theme.controlHeight
+                            radius: Theme.radius
+                            color: composeArea.containsMouse ? Theme.amber(0.15) : Theme.amber(0.10)
+                            border.width: 1
+                            border.color: composeArea.containsMouse
+                                ? Theme.amber(0.30)
+                                : Theme.amber(0.20)
+
+                            Behavior on color {
+                                enabled: !Theme.reducedMotion
+                                ColorAnimation { duration: Theme.durFast }
+                            }
+
+                            Text {
+                                anchors.centerIn: parent
+                                // "+" over a compose glyph: it is in every
+                                // sans-serif, so it never falls back to tofu.
+                                text: "+"
+                                color: Theme.ghostAmberBright
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSize + 4
+                            }
+
+                            MouseArea {
+                                id: composeArea
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    conversations.reset();
+                                    Ghostd.newConversation();
+                                    hud.loginOpen = false;
+                                    composer.take();
+                                }
+                            }
+                        }
+                    }
                 }
 
                 ColumnLayout {

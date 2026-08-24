@@ -190,6 +190,7 @@ export {
   type PiMessagesEvent,
   type PiMessagesRequest,
 } from "./pi-messages.js";
+export { PINS_FILENAME, pinsPath, readPins, writePins } from "./pins.js";
 export {
   attachRelay,
   createRelayHub,

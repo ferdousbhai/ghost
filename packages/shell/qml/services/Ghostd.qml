@@ -65,7 +65,7 @@ Singleton {
     // the HUD lists them per ghost, resumes one by loading its transcript, and
     // starts a fresh one on demand. This fixes #26 — a restart no longer loses
     // history, because a conversation lives in the daemon keyed by session id.
-    /** Session listing for the active ghost: [{ id, title, createdAt, updatedAt, messageCount }], newest first. */
+    /** Session listing for the active ghost: [{ id, title, createdAt, updatedAt, messageCount, pinned }], pinned first then newest. */
     property var sessions: []
     /** The active ghost's current conversation id. "" until one is minted or opened. */
     property string currentSessionId: ""
@@ -167,6 +167,7 @@ Singleton {
     property var greetingRequest: null
     property var transcriptRequest: null
     property var deleteSessionRequest: null
+    property var pinSessionRequest: null
     property var askRequest: null
     property var askSubmitRequest: null
     property var queueRequest: null
@@ -538,6 +539,52 @@ Singleton {
         };
         root.dispatch(xhr, "DELETE", "/api/ghosts/" + encodeURIComponent(ghost)
             + "/sessions/" + encodeURIComponent(id), ({}), null);
+    }
+
+    /**
+     * Pin or unpin one conversation. The daemon owns the listing order (pinned
+     * first, newest-updated first inside each group); we reproduce it here so the
+     * row jumps sections on click instead of after a round trip, and re-list from
+     * the server if the write turns out to have failed.
+     */
+    function pinConversation(id: string, pinned: bool): void {
+        const ghost = root.activeGhost;
+        if (ghost === "" || id === "") return;
+        root.sessionsError = "";
+        // A fresh row object per change: mutating the existing one in place would
+        // not re-evaluate the bindings reading it.
+        root.sessions = root.orderSessions(root.sessions.map(function (session) {
+            return session.id === id
+                ? Object.assign({}, session, { pinned: pinned })
+                : session;
+        }));
+        const xhr = new XMLHttpRequest();
+        root.pinSessionRequest = xhr;
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || xhr !== root.pinSessionRequest) return;
+            if (ghost !== root.activeGhost) return;
+            if (xhr.status !== 200) {
+                root.sessionsError = root.describeError(xhr, "PUT pin conversation");
+                // The optimistic reorder is now a lie; take the server's truth.
+                root.fetchSessions(ghost);
+            }
+        };
+        root.dispatch(xhr, "PUT", "/api/ghosts/" + encodeURIComponent(ghost)
+            + "/sessions/" + encodeURIComponent(id) + "/pin",
+            ({ "Content-Type": "application/json" }),
+            JSON.stringify({ pinned: pinned }));
+    }
+
+    /** The listing order GET sessions returns, applied to a local edit. */
+    function orderSessions(list: var): var {
+        return list.slice().sort(function (a, b) {
+            const pinnedA = a.pinned === true ? 1 : 0;
+            const pinnedB = b.pinned === true ? 1 : 0;
+            if (pinnedA !== pinnedB) return pinnedB - pinnedA;
+            const whenA = Date.parse(a.updatedAt || a.createdAt || "") || 0;
+            const whenB = Date.parse(b.updatedAt || b.createdAt || "") || 0;
+            return whenB - whenA;
+        });
     }
 
     /**

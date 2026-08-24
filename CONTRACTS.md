@@ -21,6 +21,7 @@ catalog) is derived per session and never stored.
                                extensions, plugins, prompts, and MCP configuration
   .pi/                         per-ghost OMP settings, model roles, and credentials
   .sessions/                   daemon-owned OMP transcripts and runtime sidecars
+  .sessions/pins.json          pinned-conversation ids: { "pinned": ["<id>", …] }
   conversations/*.json         transcripts (import fixture from the hosted export;
                                the daemon's own sessions live in pi session storage)
   export-manifest.json         present in imported archives; counts, pathRewrites,
@@ -121,12 +122,20 @@ one must not be a leak of both.
   The pinned client in the summon-ghost repo is the normative spec
   (`~/github.com/ferdousbhai/summon-ghost`, read-only reference).
 - `GET  /api/ghosts/:name/sessions` → `{ sessions: [{ id, title, createdAt,
-  updatedAt, messageCount }] }` — the ghost's conversations, **newest-updated
-  first**. `id` is the conversation id used to resume it (the pi-messages
-  `options.sessionId`); `title` is a short auto-generated name or `null` until
-  one is generated (see "Conversation titles" below). OMP transcripts and Claude
-  Code resume sidecars share this shape (a Claude conversation's `title` is
-  `"Claude Code"`).
+  updatedAt, messageCount, pinned }] }` — the ghost's conversations, **pinned
+  first, then newest-updated first within each group**. `id` is the
+  conversation id used to resume it (the pi-messages `options.sessionId`);
+  `title` is a short auto-generated name or `null` until one is generated (see
+  "Conversation titles" below). OMP transcripts and Claude Code resume sidecars
+  share this shape (a Claude conversation's `title` is `"Claude Code"`).
+- `PUT  /api/ghosts/:name/sessions/:id/pin` `{ pinned: boolean }` →
+  `{ ok: true, pinned }` — pin or unpin one conversation, idempotently. Pin
+  state lives in `.sessions/pins.json` (atomic replace, never partial), works
+  for OMP and Claude Code conversations alike, and is user state, not derivable
+  — the one deliberate exception in the daemon-owned dir. A non-boolean
+  `pinned` is `400 invalid_request`; an unknown conversation id is `404 not_found`.
+  Deleting a conversation drops its pin; a stale id (conversation gone) is
+  ignored on read and pruned on the next write.
 - `DELETE /api/ghosts/:name/sessions/:id` → `{ ok: true }` — permanently deletes
   the conversation's OMP transcript and/or Claude Code resume sidecar. An active
   conversation must finish or be cancelled first (`409 session_busy`); an

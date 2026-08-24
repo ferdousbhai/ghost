@@ -4,7 +4,12 @@ pragma ComponentBehavior: Bound
 // is open, and a way to start a fresh one. Mirrors Roster.qml's shape and
 // interaction, one rung down the left panel. Rows come from
 // GET /api/ghosts/:name/sessions; opening one loads its transcript (#26), the
-// button below mints a new session id like "+ new ghost" mints a ghost.
+// sidebar footer below mints a new session id like "+ new ghost" mints a ghost.
+//
+// The list is shaped like Apple Notes' sidebar: a search field on top, then a
+// "Pinned" group that disappears when it is empty, then the rest. Pinned state
+// lives on the daemon row (`pinned`), which also owns the ordering; the HUD only
+// splits the already-sorted listing into the two groups.
 import QtQuick
 import qs.services
 
@@ -18,8 +23,25 @@ Item {
     /** A destructive action takes two clicks; only one row can be armed. */
     property string confirmingSessionId: ""
 
+    /** The live filter. Empty shows every conversation in both groups. */
+    readonly property string query: searchInput.text.trim()
+
+    /** The two groups, already filtered. The daemon sorts the listing (pinned
+        first, newest-updated first inside each group), so filtering in place
+        keeps that order without re-sorting here. */
+    readonly property var pinnedSessions: root.group(true)
+    readonly property var otherSessions: root.group(false)
+
     implicitWidth: 190
     implicitHeight: column.implicitHeight
+
+    /** Drop the filter and disarm any pending delete — what a caller outside the
+        list (the sidebar footer's compose button) needs before the view jumps to
+        a brand-new conversation. */
+    function reset(): void {
+        root.confirmingSessionId = "";
+        searchInput.text = "";
+    }
 
     // A row's display title: the daemon-generated title, or a graceful fallback
     // (an unstarted/just-created thread is "New conversation").
@@ -43,12 +65,326 @@ Item {
         return Math.floor(secs / 86400) + "d";
     }
 
+    // Case-insensitive substring match against what the row actually shows, so
+    // the "New conversation" fallback title is searchable too.
+    function matches(session: var): bool {
+        if (root.query === "") return true;
+        return root.titleOf(session).toLowerCase().indexOf(root.query.toLowerCase()) !== -1;
+    }
+
+    function group(pinned: bool): var {
+        return Ghostd.sessions.filter(function (session) {
+            return (session && session.pinned === true) === pinned && root.matches(session);
+        });
+    }
+
+    // One row shape, instantiated by both group Repeaters. Duplicating it per
+    // section would be the same delegate twice with a different model.
+    Component {
+        id: conversationRow
+
+        Rectangle {
+            id: entry
+
+            required property var modelData
+
+            readonly property bool active: entry.modelData.id === Ghostd.currentSessionId
+            readonly property bool pinned: entry.modelData.pinned === true
+            readonly property bool confirmingDelete:
+                root.confirmingSessionId === entry.modelData.id
+            readonly property bool deleting:
+                Ghostd.deletingSessionId === entry.modelData.id
+
+            width: root.width
+            // Grow to fit a wrapped title instead of eliding it.
+            height: Math.max(Theme.controlHeight, titleText.implicitHeight + Theme.gap)
+            radius: Theme.radius / 2
+            color: entry.active ? Theme.film(0.10)
+                : (entryArea.containsMouse ? Theme.film(0.06) : "transparent")
+
+            Behavior on color {
+                enabled: !Theme.reducedMotion
+                ColorAnimation { duration: Theme.durFast }
+            }
+
+            Row {
+                z: 1
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.left: parent.left
+                anchors.leftMargin: Theme.gap
+                anchors.right: parent.right
+                anchors.rightMargin: Theme.gap
+                spacing: Theme.gap
+
+                Rectangle {
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 2
+                    height: 18
+                    radius: 1
+                    visible: entry.active
+                    color: Theme.ghostAmber
+                }
+
+                Text {
+                    id: titleText
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: parent.width - 2 - when.width - pinAction.width
+                        - deleteAction.width - Theme.gap * 4
+                    text: root.titleOf(entry.modelData)
+                    color: entry.active ? Theme.foregroundBright
+                        : (entryArea.containsMouse ? Theme.foreground : Theme.foregroundDim)
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSize
+                    wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+                }
+
+                Text {
+                    id: when
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: implicitWidth
+                    text: entry.confirmingDelete || entry.deleting
+                        ? ""
+                        : root.whenOf(entry.modelData)
+                    color: Theme.foregroundFaint
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSizeSmall
+                }
+
+                Rectangle {
+                    id: pinAction
+                    anchors.verticalCenter: parent.verticalCenter
+                    // Reserved like the close affordance below: the width is
+                    // spent whether or not the glyph is painted, so a long
+                    // wrapped title does not reflow as the pointer enters.
+                    width: 16
+                    height: Theme.controlHeight
+                    // Pinned state reads from which section the row sits in, the
+                    // way Notes does it, so this is a hover action and never a
+                    // permanent badge. It hides while the row is armed for
+                    // deletion — that is a different, louder question.
+                    visible: (entryArea.containsMouse || pinArea.containsMouse
+                        || deleteArea.containsMouse)
+                        && !entry.confirmingDelete && !entry.deleting
+                    z: 2
+                    radius: Theme.radius / 2
+                    color: pinArea.containsMouse ? Theme.film(0.10) : "transparent"
+
+                    Behavior on color {
+                        enabled: !Theme.reducedMotion
+                        ColorAnimation { duration: Theme.durFast }
+                    }
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "⚲"
+                        color: entry.pinned
+                            ? (pinArea.containsMouse ? Theme.ghostAmberBright : Theme.ghostAmber)
+                            : (pinArea.containsMouse ? Theme.foreground : Theme.foregroundFaint)
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSize
+                    }
+
+                    MouseArea {
+                        id: pinArea
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        // Pinning is reversible in one click, so it asks nothing.
+                        onClicked: {
+                            root.confirmingSessionId = "";
+                            Ghostd.pinConversation(entry.modelData.id, !entry.pinned);
+                        }
+                    }
+                }
+
+                Rectangle {
+                    id: deleteAction
+                    anchors.verticalCenter: parent.verticalCenter
+                    // Reserve the close affordance even before hover so a
+                    // long wrapped title does not jump as the pointer enters.
+                    width: entry.confirmingDelete || entry.deleting ? 42 : 16
+                    height: Theme.controlHeight
+                    visible: (entryArea.containsMouse || deleteArea.containsMouse
+                        || pinArea.containsMouse
+                        || entry.confirmingDelete || entry.deleting)
+                        && !(entry.active && Ghostd.streaming)
+                    z: 2
+                    radius: Theme.radius / 2
+                    color: deleteArea.containsMouse || entry.confirmingDelete || entry.deleting
+                        ? Theme.rose(0.10)
+                        : "transparent"
+
+                    Behavior on color {
+                        enabled: !Theme.reducedMotion
+                        ColorAnimation { duration: Theme.durFast }
+                    }
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: entry.deleting ? "…"
+                            : (entry.confirmingDelete ? "Delete" : "×")
+                        color: deleteArea.containsMouse || entry.confirmingDelete
+                            || entry.deleting
+                            ? Theme.ghostRose
+                            : Theme.foregroundFaint
+                        font.family: Theme.fontFamily
+                        font.pixelSize: entry.confirmingDelete
+                            ? Theme.fontSizeSmall
+                            : Theme.fontSize
+                        font.weight: entry.confirmingDelete ? Font.DemiBold : Font.Normal
+                    }
+
+                    MouseArea {
+                        id: deleteArea
+                        anchors.fill: parent
+                        enabled: !entry.deleting
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            if (entry.confirmingDelete) {
+                                root.confirmingSessionId = "";
+                                Ghostd.deleteConversation(entry.modelData.id);
+                            } else {
+                                root.confirmingSessionId = entry.modelData.id;
+                            }
+                        }
+                    }
+                }
+            }
+
+            MouseArea {
+                id: entryArea
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: {
+                    root.confirmingSessionId = "";
+                    Ghostd.openConversation(entry.modelData.id);
+                    root.picked();
+                }
+            }
+        }
+    }
+
     Column {
         id: column
         width: root.width
         spacing: Theme.gap
 
+        // ---- Search ------------------------------------------------------
+        // Above everything, Notes-style, and only once there is something to
+        // search — an empty ghost gets its empty state, not a dead field.
+        Rectangle {
+            visible: Ghostd.sessions.length > 0
+            width: root.width
+            height: Theme.controlHeight
+            radius: Theme.radius / 2
+            color: searchInput.activeFocus ? Theme.film(0.10) : Theme.film(0.06)
+
+            Behavior on color {
+                enabled: !Theme.reducedMotion
+                ColorAnimation { duration: Theme.durFast }
+            }
+
+            Text {
+                id: magnifier
+                anchors.left: parent.left
+                anchors.leftMargin: Theme.gap
+                anchors.verticalCenter: parent.verticalCenter
+                text: "⌕"
+                color: Theme.foregroundFaint
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSize
+            }
+
+            // Plain TextInput rather than QtQuick.Controls TextField, for the
+            // reason Composer.qml spells out: Controls drags a whole style stack
+            // into a shell that themes itself from Omarchy.
+            TextInput {
+                id: searchInput
+                anchors.left: magnifier.right
+                anchors.leftMargin: Theme.gap / 2
+                anchors.right: clearSearch.left
+                anchors.rightMargin: Theme.gap / 2
+                anchors.verticalCenter: parent.verticalCenter
+                color: Theme.foregroundBright
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeSmall
+                selectByMouse: true
+                selectionColor: Theme.selection
+                clip: true
+
+                // Esc empties the field. An already-empty field is not the
+                // user's target, so the key travels on to the HUD.
+                Keys.onEscapePressed: event => {
+                    event.accepted = searchInput.text !== "";
+                    searchInput.text = "";
+                }
+
+                Text {
+                    anchors.left: parent.left
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: searchInput.text === ""
+                    text: "Search"
+                    color: Theme.foregroundDim
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSizeSmall
+                }
+            }
+
+            Item {
+                id: clearSearch
+                anchors.right: parent.right
+                anchors.rightMargin: Theme.gap / 2
+                anchors.verticalCenter: parent.verticalCenter
+                width: searchInput.text === "" ? 0 : 20
+                height: parent.height
+                visible: searchInput.text !== ""
+
+                Text {
+                    anchors.centerIn: parent
+                    text: "×"
+                    color: clearArea.containsMouse ? Theme.foreground : Theme.foregroundFaint
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSize
+                }
+
+                MouseArea {
+                    id: clearArea
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: searchInput.text = ""
+                }
+            }
+        }
+
+        // ---- Pinned ------------------------------------------------------
+        // Header and rows vanish together when nothing pinned survives the
+        // filter; Notes never shows an empty group.
         Text {
+            visible: root.pinnedSessions.length > 0
+            text: "Pinned"
+            color: Theme.foregroundDim
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontSizeSmall - 1
+            font.weight: Font.DemiBold
+            font.capitalization: Font.AllUppercase
+            font.letterSpacing: 1
+        }
+
+        Repeater {
+            model: root.pinnedSessions
+            delegate: conversationRow
+        }
+
+        // ---- Conversations -----------------------------------------------
+        Text {
+            // Hidden when the group is empty, except in the one case where it is
+            // the label above the "no conversations yet" empty state.
+            visible: root.otherSessions.length > 0
+                || (root.pinnedSessions.length === 0 && root.query === "")
+            topPadding: root.pinnedSessions.length > 0 ? Theme.gap : 0
             text: "Conversations"
             color: Theme.foregroundDim
             font.family: Theme.fontFamily
@@ -59,139 +395,19 @@ Item {
         }
 
         Repeater {
-            model: Ghostd.sessions
+            model: root.otherSessions
+            delegate: conversationRow
+        }
 
-            Rectangle {
-                id: entry
-
-                required property var modelData
-
-                readonly property bool active: entry.modelData.id === Ghostd.currentSessionId
-                readonly property bool confirmingDelete:
-                    root.confirmingSessionId === entry.modelData.id
-                readonly property bool deleting:
-                    Ghostd.deletingSessionId === entry.modelData.id
-
-                width: root.width
-                // Grow to fit a wrapped title instead of eliding it.
-                height: Math.max(Theme.controlHeight, titleText.implicitHeight + Theme.gap)
-                radius: Theme.radius / 2
-                color: entry.active ? Theme.film(0.10)
-                    : (entryArea.containsMouse ? Theme.film(0.06) : "transparent")
-
-                Behavior on color {
-                    enabled: !Theme.reducedMotion
-                    ColorAnimation { duration: Theme.durFast }
-                }
-
-                Row {
-                    z: 1
-                    anchors.verticalCenter: parent.verticalCenter
-                    anchors.left: parent.left
-                    anchors.leftMargin: Theme.gap
-                    anchors.right: parent.right
-                    anchors.rightMargin: Theme.gap
-                    spacing: Theme.gap
-
-                    Rectangle {
-                        anchors.verticalCenter: parent.verticalCenter
-                        width: 2
-                        height: 18
-                        radius: 1
-                        visible: entry.active
-                        color: Theme.ghostAmber
-                    }
-
-                    Text {
-                        id: titleText
-                        anchors.verticalCenter: parent.verticalCenter
-                        width: parent.width - 2 - when.width - deleteAction.width - Theme.gap * 3
-                        text: root.titleOf(entry.modelData)
-                        color: entry.active ? Theme.foregroundBright
-                            : (entryArea.containsMouse ? Theme.foreground : Theme.foregroundDim)
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSize
-                        wrapMode: Text.WrapAtWordBoundaryOrAnywhere
-                    }
-
-                    Text {
-                        id: when
-                        anchors.verticalCenter: parent.verticalCenter
-                        width: implicitWidth
-                        text: entry.confirmingDelete || entry.deleting
-                            ? ""
-                            : root.whenOf(entry.modelData)
-                        color: Theme.foregroundFaint
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSizeSmall
-                    }
-
-                    Rectangle {
-                        id: deleteAction
-                        anchors.verticalCenter: parent.verticalCenter
-                        // Reserve the close affordance even before hover so a
-                        // long wrapped title does not jump as the pointer enters.
-                        width: entry.confirmingDelete || entry.deleting ? 42 : 16
-                        height: Theme.controlHeight
-                        visible: (entryArea.containsMouse || deleteArea.containsMouse
-                            || entry.confirmingDelete || entry.deleting)
-                            && !(entry.active && Ghostd.streaming)
-                        z: 2
-                        radius: Theme.radius / 2
-                        color: deleteArea.containsMouse || entry.confirmingDelete || entry.deleting
-                            ? Theme.rose(0.10)
-                            : "transparent"
-
-                        Behavior on color {
-                            enabled: !Theme.reducedMotion
-                            ColorAnimation { duration: Theme.durFast }
-                        }
-
-                        Text {
-                            anchors.centerIn: parent
-                            text: entry.deleting ? "…"
-                                : (entry.confirmingDelete ? "Delete" : "×")
-                            color: deleteArea.containsMouse || entry.confirmingDelete
-                                || entry.deleting
-                                ? Theme.ghostRose
-                                : Theme.foregroundFaint
-                            font.family: Theme.fontFamily
-                            font.pixelSize: entry.confirmingDelete
-                                ? Theme.fontSizeSmall
-                                : Theme.fontSize
-                            font.weight: entry.confirmingDelete ? Font.DemiBold : Font.Normal
-                        }
-
-                        MouseArea {
-                            id: deleteArea
-                            anchors.fill: parent
-                            enabled: !entry.deleting
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                if (entry.confirmingDelete) {
-                                    root.confirmingSessionId = "";
-                                    Ghostd.deleteConversation(entry.modelData.id);
-                                } else {
-                                    root.confirmingSessionId = entry.modelData.id;
-                                }
-                            }
-                        }
-                    }
-                }
-
-                MouseArea {
-                    id: entryArea
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: {
-                        root.confirmingSessionId = "";
-                        Ghostd.openConversation(entry.modelData.id);
-                        root.picked();
-                    }
-                }
-            }
+        Text {
+            visible: root.query !== "" && Ghostd.sessions.length > 0
+                && root.pinnedSessions.length === 0 && root.otherSessions.length === 0
+            width: root.width
+            text: "No matches"
+            color: Theme.foregroundDim
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontSizeSmall
+            wrapMode: Text.Wrap
         }
 
         Text {
@@ -214,47 +430,6 @@ Item {
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontSizeSmall
             wrapMode: Text.Wrap
-        }
-
-        // ---- New conversation --------------------------------------------
-
-        Rectangle {
-            width: root.width
-            height: Theme.controlHeight
-            radius: Theme.radius
-            color: newConversationArea.containsMouse ? Theme.amber(0.15) : Theme.amber(0.10)
-            border.width: 1
-            border.color: newConversationArea.containsMouse
-                ? Theme.amber(0.30)
-                : Theme.amber(0.20)
-            visible: Ghostd.activeGhost !== ""
-
-            Behavior on color {
-                enabled: !Theme.reducedMotion
-                ColorAnimation { duration: Theme.durFast }
-            }
-
-            Text {
-                anchors.left: parent.left
-                anchors.leftMargin: Theme.gap
-                anchors.verticalCenter: parent.verticalCenter
-                text: "+ New conversation"
-                color: Theme.ghostAmberBright
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSizeSmall
-            }
-
-            MouseArea {
-                id: newConversationArea
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: {
-                    root.confirmingSessionId = "";
-                    Ghostd.newConversation();
-                    root.picked();
-                }
-            }
         }
     }
 }

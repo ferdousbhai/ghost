@@ -6,7 +6,7 @@
  * Ghost persona layered onto the harness, and two ghosts staying separate
  * while answering at the same time in one process.
  */
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, sep } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { ghostPaths } from "../src/ghosts.js";
@@ -25,6 +25,7 @@ import {
   sessionKeyOf,
 } from "../src/session-host.js";
 import type { PiMessagesEvent } from "../src/pi-messages.js";
+import { readPins, writePins } from "../src/pins.js";
 import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
 import { startMockProvider, type MockProvider } from "./helpers/mock-provider.js";
 
@@ -826,6 +827,88 @@ describe("session listing", () => {
 
     await host!.runTurn("casper", { sessionId: "conv-delete", prompt: "fresh", emit: () => {} });
     expect((await host!.listSessions("casper"))[0]?.messageCount).toBe(2);
+  });
+});
+
+describe("pinned conversations", () => {
+  /** Two conversations, `older` first, so ordering is unambiguous. */
+  async function twoConversations() {
+    const fixture = await setup([{ kind: "text", text: "hello" }]);
+    await host!.runTurn("casper", { sessionId: "older", prompt: "one", emit: () => {} });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await host!.runTurn("casper", { sessionId: "newer", prompt: "two", emit: () => {} });
+    return fixture;
+  }
+
+  it("lists every conversation with a pin flag, unpinned by default", async () => {
+    await twoConversations();
+    expect((await host!.listSessions("casper")).map((session) => session.pinned))
+      .toEqual([false, false]);
+  });
+
+  it("puts a pinned conversation first, newest-updated within each group", async () => {
+    const { dir } = await twoConversations();
+    await host!.setPinned("casper", "older", true);
+
+    expect((await host!.listSessions("casper")).map((s) => [s.id, s.pinned]))
+      .toEqual([["older", true], ["newer", false]]);
+    expect(await readPins(ghostPaths(dir).sessionDir)).toEqual(["older"]);
+
+    // Pinning is idempotent, and pinning both falls back to recency.
+    await host!.setPinned("casper", "older", true);
+    await host!.setPinned("casper", "newer", true);
+    expect((await host!.listSessions("casper")).map((session) => session.id))
+      .toEqual(["newer", "older"]);
+  });
+
+  it("unpins, idempotently", async () => {
+    const { dir } = await twoConversations();
+    await host!.setPinned("casper", "older", true);
+    await host!.setPinned("casper", "older", false);
+    await host!.setPinned("casper", "older", false);
+    expect((await host!.listSessions("casper")).map((session) => session.id))
+      .toEqual(["newer", "older"]);
+    expect(await readPins(ghostPaths(dir).sessionDir)).toEqual([]);
+  });
+
+  it("refuses to pin a conversation that does not exist", async () => {
+    await twoConversations();
+    await expect(host!.setPinned("casper", "nope", true)).rejects.toMatchObject({
+      code: "not_found",
+      status: 404,
+    });
+  });
+
+  it("drops the pin when the conversation is deleted", async () => {
+    const { dir } = await twoConversations();
+    await host!.setPinned("casper", "older", true);
+    await host!.deleteSession("casper", "older");
+    expect(await readPins(ghostPaths(dir).sessionDir)).toEqual([]);
+    expect((await host!.listSessions("casper")).map((session) => session.id)).toEqual(["newer"]);
+  });
+
+  it("ignores a stale id on read and prunes it on the next write", async () => {
+    const { dir } = await twoConversations();
+    const sessionDir = ghostPaths(dir).sessionDir;
+    await writePins(sessionDir, ["ghost-of-a-conversation", "older"]);
+
+    expect((await host!.listSessions("casper")).map((s) => [s.id, s.pinned]))
+      .toEqual([["older", true], ["newer", false]]);
+
+    await host!.setPinned("casper", "newer", true);
+    expect((await readPins(sessionDir)).sort()).toEqual(["newer", "older"]);
+  });
+
+  it("treats a malformed pins.json as nothing pinned", async () => {
+    const { dir } = await twoConversations();
+    const sessionDir = ghostPaths(dir).sessionDir;
+    writeFileSync(join(sessionDir, "pins.json"), "{ not json at all", "utf8");
+
+    expect((await host!.listSessions("casper")).map((session) => session.pinned))
+      .toEqual([false, false]);
+    // And a pin still lands, replacing the unreadable file wholesale.
+    await host!.setPinned("casper", "older", true);
+    expect(await readPins(sessionDir)).toEqual(["older"]);
   });
 });
 

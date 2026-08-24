@@ -5,7 +5,7 @@
  * pi-messages client uses (see `parseSseStream`), so a framing change that
  * would break the real UI breaks these tests.
  */
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { PiMessagesEvent } from "../src/pi-messages.js";
@@ -352,6 +352,76 @@ describe("GET /api/ghosts/:name/sessions", () => {
     expect(sessions[0]?.messageCount).toBeGreaterThan(0);
     expect(sessions[0]?.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     expect("title" in sessions[0]!).toBe(true);
+  });
+});
+
+describe("PUT /api/ghosts/:name/sessions/:id/pin", () => {
+  const setPin = (base: string, id: string, body: unknown) => fetch(
+    `${base}/api/ghosts/casper/sessions/${encodeURIComponent(id)}/pin`,
+    {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    },
+  );
+
+  const listSessions = async (base: string) => (
+    await (await fetch(`${base}/api/ghosts/casper/sessions`)).json() as {
+      sessions: Array<{ id: string; pinned: boolean }>;
+    }
+  ).sessions;
+
+  it("pins a conversation, lists it first, and unpins it again", async () => {
+    const base = await serve();
+    await postTurn(base, TURN_BODY);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await postTurn(base, { ...TURN_BODY, options: { sessionId: "conv-2" } });
+    expect((await listSessions(base)).map((session) => [session.id, session.pinned]))
+      .toEqual([["conv-2", false], ["conv-1", false]]);
+
+    const pinned = await setPin(base, "conv-1", { pinned: true });
+    expect(pinned.status).toBe(200);
+    expect(await pinned.json()).toEqual({ ok: true, pinned: true });
+    expect(existsSync(join(temp!.root, "casper", ".sessions", "pins.json"))).toBe(true);
+    expect((await listSessions(base)).map((session) => [session.id, session.pinned]))
+      .toEqual([["conv-1", true], ["conv-2", false]]);
+
+    // Idempotent both ways.
+    expect((await setPin(base, "conv-1", { pinned: true })).status).toBe(200);
+    const unpinned = await setPin(base, "conv-1", { pinned: false });
+    expect(await unpinned.json()).toEqual({ ok: true, pinned: false });
+    expect((await listSessions(base)).map((session) => session.id)).toEqual(["conv-2", "conv-1"]);
+  });
+
+  it("rejects a non-boolean or missing pinned", async () => {
+    const base = await serve();
+    await postTurn(base, TURN_BODY);
+    for (const body of [{}, { pinned: "true" }, { pinned: 1 }, { pinned: null }, []]) {
+      const response = await setPin(base, "conv-1", body);
+      expect(response.status, JSON.stringify(body)).toBe(400);
+      expect(await response.json()).toMatchObject({ error: { code: "invalid_request" } });
+    }
+  });
+
+  it("404s an unknown conversation and 405s a non-PUT", async () => {
+    const base = await serve();
+    await postTurn(base, TURN_BODY);
+    const missing = await setPin(base, "nope", { pinned: true });
+    expect(missing.status).toBe(404);
+    expect(await missing.json()).toMatchObject({ error: { code: "not_found" } });
+
+    const wrongMethod = await fetch(`${base}/api/ghosts/casper/sessions/conv-1/pin`);
+    expect(wrongMethod.status).toBe(405);
+  });
+
+  it("drops the pin when the conversation is deleted", async () => {
+    const base = await serve();
+    await postTurn(base, TURN_BODY);
+    expect((await setPin(base, "conv-1", { pinned: true })).status).toBe(200);
+
+    await fetch(`${base}/api/ghosts/casper/sessions/conv-1`, { method: "DELETE" });
+    expect(JSON.parse(readFileSync(join(temp!.root, "casper", ".sessions", "pins.json"), "utf8")))
+      .toEqual({ pinned: [] });
   });
 });
 
