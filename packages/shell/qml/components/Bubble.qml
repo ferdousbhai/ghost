@@ -2,10 +2,12 @@ pragma ComponentBehavior: Bound
 
 // One transcript row: a user prompt, or a ghost's reply plus its tool trail.
 //
-// Assistant text renders as Text.MarkdownText — Qt 6 parses CommonMark
-// natively, which covers everything a v1 reply needs (emphasis, code spans,
-// lists, headings) without shipping a parser. User text renders plain so a
-// prompt containing backticks or underscores survives verbatim.
+// Both sides render as Text.MarkdownText — Qt 6 parses CommonMark natively,
+// which covers everything a v1 transcript needs (emphasis, code spans, lists,
+// headings) without shipping a parser. The known cost on the user's side: a
+// prompt with literal markdown characters (`*.md`, snake_case around
+// asterisks) displays styled rather than verbatim. The owner chose that
+// trade-off; what was SENT to the model is untouched either way.
 //
 // Qt's markdown renderer owns the parts of the type scale we cannot reach from
 // QML: heading sizes are hard-coded multiples of font.pixelSize (h1 2.0, h2
@@ -139,7 +141,7 @@ Item {
                 width: parent.width
                 visible: root.body !== ""
                 text: root.body
-                textFormat: root.mine ? Text.PlainText : Text.MarkdownText
+                textFormat: Text.MarkdownText
                 color: root.mine ? Theme.foregroundBright : Theme.foreground
                 // Links wear the ghost's own amber, never Theme.accent — the
                 // inherited Omarchy accent is blue in most themes, and reading
