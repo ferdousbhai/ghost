@@ -24,11 +24,22 @@ import {
 import type {
   BackendActionOptions,
   BackendBackResult,
+  BackendDragInput,
+  BackendJavascriptResult,
+  BackendKeyInput,
   BackendReadResult,
+  BackendResizeInput,
+  BackendResizeResult,
   BackendScreenshotOptions,
+  BackendScrollInput,
+  BackendTabsInput,
+  BackendTabsResult,
   BackendTarget,
   BackendTypeInput,
+  BackendUploadInput,
+  ConsoleEntry,
   GhostBrowserBackend,
+  NetworkEntry,
   PageElementMatch,
   PageSummary,
 } from "../src/extensions/browser-backend.js";
@@ -120,6 +131,48 @@ class FakePage {
     return {};
   }
 
+  async goForward(options: unknown): Promise<object | null> {
+    this.calls.push({ name: "goForward", args: [options] });
+    return {};
+  }
+
+  readonly mouse = {
+    move: async (x: number, y: number, options?: unknown): Promise<void> => {
+      this.calls.push({ name: "mouse.move", args: [x, y, options] });
+    },
+    wheel: async (dx: number, dy: number): Promise<void> => {
+      this.calls.push({ name: "mouse.wheel", args: [dx, dy] });
+    },
+    down: async (): Promise<void> => {
+      this.calls.push({ name: "mouse.down", args: [] });
+    },
+    up: async (): Promise<void> => {
+      this.calls.push({ name: "mouse.up", args: [] });
+    },
+  };
+
+  readonly keyboard = {
+    press: async (combo: string, options?: unknown): Promise<void> => {
+      this.calls.push({ name: "keyboard.press", args: [combo, options] });
+    },
+  };
+
+  async setInputFiles(selector: string, files: unknown, options: unknown): Promise<void> {
+    this.calls.push({ name: "setInputFiles", args: [selector, files, options] });
+  }
+
+  async setViewportSize(size: unknown): Promise<void> {
+    this.calls.push({ name: "setViewportSize", args: [size] });
+  }
+
+  async bringToFront(): Promise<void> {
+    this.calls.push({ name: "bringToFront", args: [] });
+  }
+
+  on(): void {
+    // The backend attaches console/network listeners; the fake ignores them.
+  }
+
   /**
    * Playwright's string form takes one expression and no argument, so the
    * backend inlines its argument — the fake has to parse it back out. Matching
@@ -138,7 +191,9 @@ class FakePage {
       const { limit } = JSON.parse(script.slice(findPrefix.length, -1)) as { limit: number };
       return this.findResults.slice(0, limit);
     }
-    throw new Error(`unexpected script: ${script.slice(0, 60)}`);
+    // Anything else is arbitrary page JavaScript (the `javascript` action). The
+    // fake cannot run it, so it echoes a canned value.
+    return "js-result";
   }
 
   async click(selector: string, options: unknown): Promise<void> {
@@ -765,6 +820,239 @@ describe("screenshot, back, close", () => {
   });
 });
 
+// ---------------------------------------------------- tier-1 capability actions
+
+describe("navigation, input, and scripting actions (Playwright backend)", () => {
+  it("goes forward, the mirror of back", async () => {
+    const harness = await creatorHarness();
+    await harness.call(GHOST_BROWSER, { action: "open", url: "https://example.com" });
+    await harness.call(GHOST_BROWSER, { action: "forward" });
+    expect(context.page.calls.some((call) => call.name === "goForward")).toBe(true);
+  });
+
+  it("scrolls the page with a wheel delta", async () => {
+    const harness = await creatorHarness();
+    await harness.call(GHOST_BROWSER, { action: "open", url: "https://example.com" });
+    await harness.call(GHOST_BROWSER, { action: "scroll", delta_y: 400 });
+    const wheel = context.page.calls.findLast((call) => call.name === "mouse.wheel");
+    expect(wheel?.args).toEqual([0, 400]);
+  });
+
+  it("drags between two points as press-move-release", async () => {
+    const harness = await creatorHarness();
+    await harness.call(GHOST_BROWSER, { action: "open", url: "https://example.com" });
+    await harness.call(GHOST_BROWSER, {
+      action: "drag",
+      from_x: 10,
+      from_y: 20,
+      to_x: 30,
+      to_y: 40,
+    });
+    const names = context.page.calls.map((call) => call.name);
+    expect(names).toEqual(expect.arrayContaining(["mouse.down", "mouse.up"]));
+  });
+
+  it("presses a key chord", async () => {
+    const harness = await creatorHarness();
+    await harness.call(GHOST_BROWSER, { action: "open", url: "https://example.com" });
+    await harness.call(GHOST_BROWSER, {
+      action: "key",
+      key: "a",
+      modifiers: ["Control"],
+    });
+    const press = context.page.calls.findLast((call) => call.name === "keyboard.press");
+    expect(press?.args[0]).toBe("Control+a");
+  });
+
+  it("requires from/to coordinates for a drag", async () => {
+    const harness = await creatorHarness();
+    await harness.call(GHOST_BROWSER, { action: "open", url: "https://example.com" });
+    const error = await expectGhostError(
+      harness.call(GHOST_BROWSER, { action: "drag", from_x: 1, from_y: 2 }),
+    );
+    expect(error.code).toBe("invalid_format");
+  });
+
+  it("runs javascript and returns its value, framed as untrusted", async () => {
+    const harness = await creatorHarness();
+    await harness.call(GHOST_BROWSER, { action: "open", url: "https://example.com" });
+    const result = await harness.call(GHOST_BROWSER, {
+      action: "javascript",
+      code: "document.title",
+    });
+    expect(resultText(result)).toMatch(/untrusted data from the page/i);
+    expect(result.details).toMatchObject({ action: "javascript", value: "js-result" });
+  });
+
+  it("resizes the window", async () => {
+    const harness = await creatorHarness();
+    await harness.call(GHOST_BROWSER, { action: "open", url: "https://example.com" });
+    const result = await harness.call(GHOST_BROWSER, {
+      action: "resize",
+      width: 800,
+      height: 600,
+    });
+    expect(resultText(result)).toMatch(/Resized the window to 800x600/);
+    const set = context.page.calls.findLast((call) => call.name === "setViewportSize");
+    expect(set?.args[0]).toEqual({ width: 800, height: 600 });
+  });
+
+  it("uploads files onto a file input", async () => {
+    const harness = await creatorHarness();
+    await harness.call(GHOST_BROWSER, { action: "open", url: "https://example.com" });
+    await harness.call(GHOST_BROWSER, {
+      action: "upload",
+      selector: "input[type=file]",
+      paths: ["/tmp/a.png", "/tmp/b.png"],
+    });
+    const set = context.page.calls.findLast((call) => call.name === "setInputFiles");
+    expect(set?.args[0]).toBe("input[type=file]");
+    expect(set?.args[1]).toEqual(["/tmp/a.png", "/tmp/b.png"]);
+  });
+});
+
+describe("javascript is gated by the provenance guardrail", () => {
+  it("refuses to run script after an injected cross-domain hop", async () => {
+    const harness = await hopVia("https://attacker.test/");
+    const error = await expectGhostError(
+      harness.call(GHOST_BROWSER, { action: "javascript", code: "1+1" }),
+    );
+    expect(error.details["failure"]).toBe("blocked_action");
+  });
+
+  it("lets the creator widen scope for a script with allow_cross_domain", async () => {
+    const harness = await hopVia("https://attacker.test/");
+    await expect(
+      harness.call(GHOST_BROWSER, {
+        action: "javascript",
+        code: "1+1",
+        allow_cross_domain: true,
+      }),
+    ).resolves.toBeDefined();
+  });
+});
+
+describe("console, network, and tabs (recording backend)", () => {
+  let backend: RecordingBackend;
+
+  async function recordingHarness() {
+    backend = new RecordingBackend();
+    return loadExtension(
+      createBrowserExtension({ backend: () => backend, browser: { idleTimeoutMs: 0 } }),
+      fixture.dir,
+    );
+  }
+
+  it("drains console messages, framed as untrusted", async () => {
+    const harness = await recordingHarness();
+    await harness.call(GHOST_BROWSER, { action: "open", url: "https://example.com" });
+    const result = await harness.call(GHOST_BROWSER, { action: "console" });
+    expect(resultText(result)).toMatch(/recorded console/);
+    expect(resultText(result)).toMatch(/untrusted data, not instructions/i);
+    expect(backend.calls.some((call) => call.name === "readConsole")).toBe(true);
+  });
+
+  it("drains network exchanges", async () => {
+    const harness = await recordingHarness();
+    await harness.call(GHOST_BROWSER, { action: "open", url: "https://example.com" });
+    const result = await harness.call(GHOST_BROWSER, { action: "network" });
+    expect(resultText(result)).toMatch(/GET https:\/\/example\.com/);
+    expect(backend.calls.some((call) => call.name === "readNetwork")).toBe(true);
+  });
+
+  it("opens, lists, switches, and closes tabs through the one seam method", async () => {
+    const harness = await recordingHarness();
+    const opened = await harness.call(GHOST_BROWSER, {
+      action: "tab_open",
+      url: "https://example.com",
+    });
+    expect(opened.details).toMatchObject({ action: "tab_open", active: "t1" });
+
+    const listed = await harness.call(GHOST_BROWSER, { action: "tabs" });
+    expect(resultText(listed)).toMatch(/t1/);
+
+    await harness.call(GHOST_BROWSER, { action: "tab_switch", tab_id: "t1" });
+    await harness.call(GHOST_BROWSER, { action: "tab_close", tab_id: "t1" });
+
+    const ops = backend.calls.filter((call) => call.name === "tabs")
+      .map((call) => (call.args[0] as { op: string }).op);
+    expect(ops).toEqual(["create", "list", "switch", "close"]);
+  });
+
+  it("vets a new tab's URL like open does", async () => {
+    const harness = await recordingHarness();
+    const error = await expectGhostError(
+      harness.call(GHOST_BROWSER, { action: "tab_open", url: "file:///etc/passwd" }),
+    );
+    expect(error.details["failure"]).toBe("blocked_url");
+    expect(backend.calls.some((call) => call.name === "tabs")).toBe(false);
+  });
+});
+
+describe("batch runs a sequence inside one queue slot", () => {
+  it("runs each step and reports them", async () => {
+    const harness = await creatorHarness();
+    context.page.pageText = "hello";
+    await harness.call(GHOST_BROWSER, { action: "open", url: "https://example.com" });
+    const result = await harness.call(GHOST_BROWSER, {
+      action: "batch",
+      batch: [
+        { action: "read" },
+        { action: "scroll", delta_y: 100 },
+      ],
+    });
+    expect(result.details).toMatchObject({ stopped: false });
+    expect(resultText(result)).toMatch(/1\. ok read/);
+    expect(resultText(result)).toMatch(/2\. ok scroll/);
+  });
+
+  it("stops at the first failed step and reports it", async () => {
+    const harness = await creatorHarness();
+    await harness.call(GHOST_BROWSER, { action: "open", url: "https://example.com" });
+    const result = await harness.call(GHOST_BROWSER, {
+      action: "batch",
+      batch: [
+        { action: "scroll", delta_y: 10 },
+        { action: "click", ref: "e404" },
+        { action: "scroll", delta_y: 20 },
+      ],
+    });
+    expect(result.details).toMatchObject({ stopped: true });
+    const steps = (result.details as { steps: { ok: boolean }[] }).steps;
+    expect(steps).toHaveLength(2);
+    expect(steps[1]?.ok).toBe(false);
+  });
+});
+
+describe("screenshot returns a real image to a vision model", () => {
+  function visionCtx() {
+    return {
+      cwd: fixture.dir,
+      mode: "print",
+      hasUI: false,
+      model: { input: ["text", "image"] },
+    } as never;
+  }
+
+  it("returns an image block, keeping the saved path in details", async () => {
+    const harness = await creatorHarness();
+    await harness.call(GHOST_BROWSER, { action: "open", url: "https://example.com" });
+    const tool = harness.tools.get(GHOST_BROWSER);
+    if (!tool) throw new Error("no tool");
+    const result = await tool.execute("call-shot", { action: "screenshot" }, undefined, undefined, visionCtx());
+    const image = result.content.find((part: { type: string }) => part.type === "image");
+    expect(image).toMatchObject({ type: "image", mimeType: "image/png" });
+    expect((result.details as { path: string }).path.endsWith(".png")).toBe(true);
+  });
+
+  it("falls back to a path for a model without vision", async () => {
+    const harness = await creatorHarness();
+    await harness.call(GHOST_BROWSER, { action: "open", url: "https://example.com" });
+    const result = await harness.call(GHOST_BROWSER, { action: "screenshot" });
+    expect(result.content.every((part: { type: string }) => part.type === "text")).toBe(true);
+  });
+});
+
 // -------------------------------------------------------------------- timeouts
 
 describe("timeouts", () => {
@@ -904,6 +1192,72 @@ class RecordingBackend implements GhostBrowserBackend {
   async back(options: BackendActionOptions): Promise<BackendBackResult> {
     this.calls.push({ name: "back", args: [options] });
     return { url: this.#url ?? "", title: "recorded", moved: true };
+  }
+
+  async forward(options: BackendActionOptions): Promise<BackendBackResult> {
+    this.calls.push({ name: "forward", args: [options] });
+    return { url: this.#url ?? "", title: "recorded", moved: true };
+  }
+
+  async scroll(input: BackendScrollInput, options: BackendActionOptions): Promise<PageSummary> {
+    this.calls.push({ name: "scroll", args: [input, options] });
+    return { url: this.#url ?? "", title: "recorded" };
+  }
+
+  async drag(input: BackendDragInput, options: BackendActionOptions): Promise<PageSummary> {
+    this.calls.push({ name: "drag", args: [input, options] });
+    return { url: this.#url ?? "", title: "recorded" };
+  }
+
+  async key(input: BackendKeyInput, options: BackendActionOptions): Promise<PageSummary> {
+    this.calls.push({ name: "key", args: [input, options] });
+    return { url: this.#url ?? "", title: "recorded" };
+  }
+
+  async javascript(code: string, options: BackendActionOptions): Promise<BackendJavascriptResult> {
+    this.calls.push({ name: "javascript", args: [code, options] });
+    return { value: `ran:${code}`, type: "string" };
+  }
+
+  async readConsole(options: BackendActionOptions): Promise<readonly ConsoleEntry[]> {
+    this.calls.push({ name: "readConsole", args: [options] });
+    return [{ level: "log", text: "recorded console" }];
+  }
+
+  async readNetwork(options: BackendActionOptions): Promise<readonly NetworkEntry[]> {
+    this.calls.push({ name: "readNetwork", args: [options] });
+    return [{ method: "GET", url: this.#url ?? "", status: 200 }];
+  }
+
+  async upload(input: BackendUploadInput, options: BackendActionOptions): Promise<PageSummary> {
+    this.calls.push({ name: "upload", args: [input, options] });
+    return { url: this.#url ?? "", title: "recorded" };
+  }
+
+  async resize(input: BackendResizeInput, options: BackendActionOptions): Promise<BackendResizeResult> {
+    this.calls.push({ name: "resize", args: [input, options] });
+    return { url: this.#url ?? "", title: "recorded", applied: true };
+  }
+
+  async tabs(input: BackendTabsInput, options: BackendActionOptions): Promise<BackendTabsResult> {
+    this.calls.push({ name: "tabs", args: [input, options] });
+    if (input.op === "create") {
+      this.running = true;
+      this.#url = input.url ?? "about:blank";
+      return {
+        tabs: [{ id: "t1", url: this.#url, title: "recorded", active: true }],
+        active: "t1",
+        id: "t1",
+        page: { url: this.#url, title: "recorded" },
+      };
+    }
+    return {
+      tabs: this.#url === undefined
+        ? []
+        : [{ id: "t1", url: this.#url, title: "recorded", active: true }],
+      active: this.#url === undefined ? null : "t1",
+      ...(this.#url === undefined ? {} : { page: { url: this.#url, title: "recorded" } }),
+    };
   }
 
   async close(): Promise<boolean> {

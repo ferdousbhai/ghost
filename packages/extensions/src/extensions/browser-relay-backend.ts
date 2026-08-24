@@ -44,14 +44,26 @@ import {
   identifiedBrowserBackendFactory,
   type BackendActionOptions,
   type BackendBackResult,
+  type BackendDragInput,
+  type BackendJavascriptResult,
+  type BackendKeyInput,
   type BackendReadResult,
+  type BackendResizeInput,
+  type BackendResizeResult,
   type BackendScreenshotOptions,
+  type BackendScrollInput,
+  type BackendTabInfo,
+  type BackendTabsInput,
+  type BackendTabsResult,
   type BackendTarget,
   type BackendTypeInput,
+  type BackendUploadInput,
   type BrowserBackendContext,
   type BrowserBackendFactory,
   type BrowserFailure,
+  type ConsoleEntry,
   type GhostBrowserBackend,
+  type NetworkEntry,
   type PageElementMatch,
   type PageSummary,
 } from "./browser-backend.js";
@@ -73,10 +85,17 @@ export const RELAY_TOKEN_SUBPROTOCOL_PREFIX = "ghost-token.";
 export const RELAY_PATH = "/relay";
 
 /**
- * Every operation the relay understands — a closed set, deliberately. There is no
- * `eval` op and there will not be one: the daemon must not be able to run
- * arbitrary script in the creator's authenticated browser just because it can
- * reach the socket. The extension implements each verb itself.
+ * Every operation the relay understands — a closed enum, kept in lockstep with the
+ * extension's `OPS` (`chromium-extension/extension/protocol.js`) and its handlers
+ * (`ops.js`) by `packages/daemon/test/relay-extension.test.ts`.
+ *
+ * The set includes `javascript`, which runs page script through CDP
+ * `Runtime.evaluate`. That is a real capability, granted to the *creator's own*
+ * ghost on the creator's own machine — never to a visitor (the four scope locks
+ * still hold) — and the page and the value it returns are untrusted data, which
+ * the tool description says out loud. There is deliberately no way for the daemon
+ * to smuggle script through any *other* op: each verb is implemented by the
+ * extension itself, and only `javascript` carries a code string.
  */
 export const RELAY_OPS = [
   "status",
@@ -89,6 +108,16 @@ export const RELAY_OPS = [
   "screenshot",
   "back",
   "close",
+  "forward",
+  "scroll",
+  "drag",
+  "key",
+  "javascript",
+  "console",
+  "network",
+  "upload",
+  "resize",
+  "tabs",
 ] as const;
 
 export type RelayOp = (typeof RELAY_OPS)[number];
@@ -186,6 +215,63 @@ function readMatch(op: RelayOp, value: unknown, index: number): PageElementMatch
   };
 }
 
+function readConsoleEntries(value: unknown): readonly ConsoleEntry[] {
+  if (!Array.isArray(value)) return [];
+  const out: ConsoleEntry[] = [];
+  for (const raw of value) {
+    if (!isRecord(raw)) continue;
+    const level = typeof raw["level"] === "string" ? (raw["level"] as string) : "log";
+    const text = typeof raw["text"] === "string" ? (raw["text"] as string) : "";
+    const url = typeof raw["url"] === "string" && raw["url"] !== "" ? (raw["url"] as string) : undefined;
+    const line = typeof raw["line"] === "number" ? (raw["line"] as number) : undefined;
+    out.push({
+      level,
+      text,
+      ...(url === undefined ? {} : { url }),
+      ...(line === undefined ? {} : { line }),
+    });
+  }
+  return out;
+}
+
+function readNetworkEntries(value: unknown): readonly NetworkEntry[] {
+  if (!Array.isArray(value)) return [];
+  const out: NetworkEntry[] = [];
+  for (const raw of value) {
+    if (!isRecord(raw)) continue;
+    const method = typeof raw["method"] === "string" ? (raw["method"] as string) : "GET";
+    const url = typeof raw["url"] === "string" ? (raw["url"] as string) : "";
+    const status = typeof raw["status"] === "number" ? (raw["status"] as number) : undefined;
+    const type = typeof raw["type"] === "string" && raw["type"] !== "" ? (raw["type"] as string) : undefined;
+    const bodyBytes = typeof raw["bodyBytes"] === "number" ? (raw["bodyBytes"] as number) : undefined;
+    out.push({
+      method,
+      url,
+      ...(status === undefined ? {} : { status }),
+      ...(type === undefined ? {} : { type }),
+      ...(bodyBytes === undefined ? {} : { bodyBytes }),
+    });
+  }
+  return out;
+}
+
+function readTabInfos(value: unknown): readonly BackendTabInfo[] {
+  if (!Array.isArray(value)) return [];
+  const out: BackendTabInfo[] = [];
+  for (const raw of value) {
+    if (!isRecord(raw)) continue;
+    const id = raw["id"];
+    if (typeof id !== "string" || id === "") continue;
+    out.push({
+      id,
+      url: typeof raw["url"] === "string" ? (raw["url"] as string) : "",
+      title: typeof raw["title"] === "string" ? (raw["title"] as string) : "",
+      active: raw["active"] === true,
+    });
+  }
+  return out;
+}
+
 // ------------------------------------------------------------------ the backend
 
 export interface RelayBackendOptions {
@@ -204,8 +290,14 @@ export class RelayBrowserBackend implements GhostBrowserBackend {
   readonly headless = false;
 
   readonly #transport: RelayTransport;
-  /** Whether the extension is holding a tab for this ghost right now. */
-  #hasTab = false;
+  /**
+   * The ids of the tabs the extension is holding for this ghost. A set, not a
+   * boolean: the one-tab invariant is relaxed, so the ghost may own several. It
+   * stays a cheap local mirror — enough to answer `current`/`running` without a
+   * round-trip when nothing was ever opened — and the extension remains the
+   * authority, correcting it on every reply.
+   */
+  #tabs = new Set<string>();
 
   constructor(options: RelayBackendOptions) {
     if (options.scope && isVisitorScope(options.scope)) {
@@ -217,7 +309,7 @@ export class RelayBrowserBackend implements GhostBrowserBackend {
   }
 
   get running(): boolean {
-    return this.#transport.connected && this.#hasTab;
+    return this.#transport.connected && this.#tabs.size > 0;
   }
 
   /**
@@ -237,7 +329,7 @@ export class RelayBrowserBackend implements GhostBrowserBackend {
     options: BackendActionOptions,
   ): Promise<Record<string, unknown>> {
     if (!this.#transport.connected) {
-      this.#hasTab = false;
+      this.#tabs.clear();
       throw new GhostBrowserError("browser_unavailable", RELAY_DISCONNECTED_MESSAGE, { op });
     }
     const reply = await this.#transport.request(op, args, { timeoutMs: options.timeoutMs });
@@ -245,7 +337,7 @@ export class RelayBrowserBackend implements GhostBrowserBackend {
       // The extension telling us the tab is gone is the one failure that also
       // changes our own state: there is nothing to act on until the next `open`.
       if (reply.failure === "no_page" || reply.failure === "browser_unavailable") {
-        this.#hasTab = false;
+        this.#tabs.clear();
       }
       throw new GhostBrowserError(reply.failure, reply.message, {
         op,
@@ -262,11 +354,11 @@ export class RelayBrowserBackend implements GhostBrowserBackend {
     // Cheap and non-committal when no tab has ever been opened: do not start or
     // contact anything merely to confirm absence. Once a tab is believed to
     // exist, however, a disconnected relay is a real failure and #call reports it.
-    if (!this.#hasTab) return undefined;
+    if (this.#tabs.size === 0) return undefined;
     const result = await this.#call("current", {}, { timeoutMs: 5_000 });
     const page = result["page"];
     if (page === null || page === undefined) {
-      this.#hasTab = false;
+      this.#tabs.clear();
       return undefined;
     }
     return readPage("current", page);
@@ -274,7 +366,11 @@ export class RelayBrowserBackend implements GhostBrowserBackend {
 
   async open(url: string, options: BackendActionOptions): Promise<PageSummary> {
     const result = await this.#call("open", { url }, options);
-    this.#hasTab = true;
+    // The extension names the tab it opened; remember it so `running`/`current`
+    // can answer without a round-trip. A missing id (older extension) still means
+    // there is a tab, so fall back to a sentinel rather than reporting none.
+    const id = result["id"];
+    this.#tabs.add(typeof id === "string" && id !== "" ? id : "active");
     return readPage("open", result["page"]);
   }
 
@@ -326,20 +422,139 @@ export class RelayBrowserBackend implements GhostBrowserBackend {
     return { ...readPage("back", result["page"]), moved: result["moved"] === true };
   }
 
+  async forward(options: BackendActionOptions): Promise<BackendBackResult> {
+    const result = await this.#call("forward", {}, options);
+    return { ...readPage("forward", result["page"]), moved: result["moved"] === true };
+  }
+
+  async scroll(input: BackendScrollInput, options: BackendActionOptions): Promise<PageSummary> {
+    const result = await this.#call(
+      "scroll",
+      {
+        deltaX: input.deltaX,
+        deltaY: input.deltaY,
+        ...(input.x === undefined ? {} : { x: input.x }),
+        ...(input.y === undefined ? {} : { y: input.y }),
+      },
+      options,
+    );
+    return readPage("scroll", result["page"]);
+  }
+
+  async drag(input: BackendDragInput, options: BackendActionOptions): Promise<PageSummary> {
+    const result = await this.#call(
+      "drag",
+      {
+        fromX: input.fromX,
+        fromY: input.fromY,
+        toX: input.toX,
+        toY: input.toY,
+        ...(input.steps === undefined ? {} : { steps: input.steps }),
+      },
+      options,
+    );
+    return readPage("drag", result["page"]);
+  }
+
+  async key(input: BackendKeyInput, options: BackendActionOptions): Promise<PageSummary> {
+    const result = await this.#call(
+      "key",
+      {
+        key: input.key,
+        ...(input.code === undefined ? {} : { code: input.code }),
+        ...(input.modifiers === undefined ? {} : { modifiers: [...input.modifiers] }),
+        ...(input.text === undefined ? {} : { text: input.text }),
+      },
+      options,
+    );
+    return readPage("key", result["page"]);
+  }
+
+  async javascript(
+    code: string,
+    options: BackendActionOptions,
+  ): Promise<BackendJavascriptResult> {
+    const result = await this.#call("javascript", { code }, options);
+    return {
+      value: result["value"],
+      type: typeof result["type"] === "string" ? (result["type"] as string) : typeof result["value"],
+    };
+  }
+
+  async readConsole(options: BackendActionOptions): Promise<readonly ConsoleEntry[]> {
+    const result = await this.#call("console", {}, options);
+    return readConsoleEntries(result["entries"]);
+  }
+
+  async readNetwork(options: BackendActionOptions): Promise<readonly NetworkEntry[]> {
+    const result = await this.#call("network", {}, options);
+    return readNetworkEntries(result["entries"]);
+  }
+
+  async upload(input: BackendUploadInput, options: BackendActionOptions): Promise<PageSummary> {
+    const result = await this.#call(
+      "upload",
+      { ...targetArgs(input), paths: [...input.paths] },
+      options,
+    );
+    return readPage("upload", result["page"]);
+  }
+
+  async resize(
+    input: BackendResizeInput,
+    options: BackendActionOptions,
+  ): Promise<BackendResizeResult> {
+    const result = await this.#call(
+      "resize",
+      { width: input.width, height: input.height },
+      options,
+    );
+    return { ...readPage("resize", result["page"]), applied: result["applied"] !== false };
+  }
+
+  async tabs(input: BackendTabsInput, options: BackendActionOptions): Promise<BackendTabsResult> {
+    const result = await this.#call(
+      "tabs",
+      {
+        op: input.op,
+        ...(input.id === undefined ? {} : { id: input.id }),
+        ...(input.url === undefined ? {} : { url: input.url }),
+      },
+      options,
+    );
+    const tabs = readTabInfos(result["tabs"]);
+    // The extension is authoritative on which tabs exist: rebuild the local mirror
+    // from its answer so `running` and `current` stay honest across create/close.
+    this.#tabs = new Set(tabs.map((tab) => tab.id));
+    const active = typeof result["active"] === "string" ? (result["active"] as string) : null;
+    const id = typeof result["id"] === "string" ? (result["id"] as string) : undefined;
+    const page = result["page"];
+    return {
+      tabs,
+      active,
+      ...(id === undefined ? {} : { id }),
+      ...(page === null || page === undefined ? {} : { page: readPage("tabs", page) }),
+    };
+  }
+
   /**
    * Close the ghost's tab and let the extension drop its debugger attachment. The
    * *browser* is emphatically not closed — it is the creator's, with the rest of
    * their day open in it.
    */
   async close(): Promise<boolean> {
-    if (!this.#hasTab) return false;
+    if (this.#tabs.size === 0) return false;
     const result = await this.#call("close", {}, { timeoutMs: 10_000 });
     const closed = result["closed"];
     if (typeof closed !== "boolean") malformed("close", "closed is not a boolean");
-    // `false` means the extension authoritatively found no tab, not that the
-    // close request failed. Failures throw above and preserve state unless the
-    // failure itself says the tab/browser disappeared.
-    this.#hasTab = false;
+    // The `close` op shuts the *active* tab; the extension reports the tabs that
+    // remain so the mirror stays truthful when several were open. An older
+    // extension that returns no such list leaves the ghost with one tab, so
+    // clearing is the safe default there.
+    const tabs = result["tabs"];
+    this.#tabs = Array.isArray(tabs)
+      ? new Set(readTabInfos(tabs).map((tab) => tab.id))
+      : new Set();
     return closed;
   }
 }

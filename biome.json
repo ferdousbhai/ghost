@@ -12,7 +12,8 @@
       "!.agents",
       "!packages/shell/qml/**/*.js",
       "!skills-lock.json",
-      "!vendor"
+      "!vendor",
+      "!.claude"
     ]
   },
   "formatter": {

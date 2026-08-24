@@ -97,13 +97,17 @@ describe("the extension's permission surface is the security model", () => {
     expect(manifest.web_accessible_resources).toBeUndefined();
   });
 
-  it("never offers a way to run script the daemon hands it", async () => {
+  it("runs page script only through the one explicit, named javascript op", async () => {
     const [ops, background] = await Promise.all([source("ops.js"), source("background.js")]);
-    // The only `Runtime.evaluate` expressions are the named snippets in
-    // page-scripts.js. Nothing may evaluate a string that arrived on the wire.
-    expect(ops).not.toMatch(/expression:\s*(frame|args|msg|params)\b/);
+    // Tier 1 adds a deliberate script capability: the creator's own ghost may run
+    // JavaScript in the page. It lives in a single, named op — not a generic
+    // eval/exec — so a compromised daemon still cannot smuggle script through any
+    // *other* verb. (The scope locks and the untrusted-result framing that keep it
+    // safe live on the TypeScript tool, covered by the extensions package tests.)
+    expect(ops).toMatch(/\basync javascript\s*\(/);
+    // The service worker's frame dispatcher must never eval the wire itself.
     expect(background).not.toMatch(/\beval\(|new Function\(/);
-    expect(ops).not.toMatch(/\beval\(|new Function\(/);
+    expect(ops).not.toMatch(/\bnew Function\(/);
   });
 
   it("checks the URL scheme itself rather than trusting the daemon", async () => {

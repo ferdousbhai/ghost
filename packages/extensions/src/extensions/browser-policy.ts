@@ -247,11 +247,30 @@ export const OBSERVING_ACTIONS = new Set([
   "find",
   "screenshot",
   "back",
+  "forward",
+  "scroll",
+  "console",
+  "network",
+  "resize",
+  "tabs",
   "close",
 ]);
 
-/** Operations that mutate: click a control, type into / submit a field. */
-export const ACTING_ACTIONS = new Set(["click", "type"]);
+/**
+ * Operations that mutate the page with the creator's authority: click a control,
+ * type into / submit a field, drag, press keys, upload a file, or run script.
+ * `javascript` is here because a page script can click, submit, and read
+ * credentials all at once — it is the sharpest of them, and the provenance gate
+ * governs it exactly like a click.
+ */
+export const ACTING_ACTIONS = new Set([
+  "click",
+  "type",
+  "drag",
+  "key",
+  "upload",
+  "javascript",
+]);
 
 /** True for the sharp edge — the operations the provenance gate governs. */
 export function isActingAction(action: string): boolean {

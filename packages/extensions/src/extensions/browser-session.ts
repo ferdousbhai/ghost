@@ -27,9 +27,15 @@ import { GhostError } from "../errors.js";
 import {
   GhostBrowserError,
   type BackendBackResult,
+  type BackendJavascriptResult,
+  type BackendResizeResult,
+  type BackendTabsInput,
+  type BackendTabsResult,
   type BackendTarget,
   type BrowserBackendFactory,
+  type ConsoleEntry,
   type GhostBrowserBackend,
+  type NetworkEntry,
   type PageElementMatch,
   type PageSummary,
 } from "./browser-backend.js";
@@ -92,6 +98,52 @@ export interface SessionTypeResult extends PageSummary {
 
 export interface SessionScreenshotResult extends PageSummary {
   readonly path: string;
+}
+
+/**
+ * One step of a {@link GhostBrowserSession.batch}. It mirrors the browser tool's
+ * own parameters so a batch is just a list of the same actions, run without
+ * anything interleaving between them.
+ */
+export interface BatchStep {
+  readonly action: string;
+  readonly url?: string;
+  readonly query?: string;
+  readonly ref?: string;
+  readonly selector?: string;
+  readonly text?: string;
+  readonly submit?: boolean;
+  readonly allowCrossDomain?: boolean;
+  readonly allowLocal?: boolean;
+  readonly maxChars?: number;
+  readonly limit?: number;
+  readonly deltaX?: number;
+  readonly deltaY?: number;
+  readonly x?: number;
+  readonly y?: number;
+  readonly fromX?: number;
+  readonly fromY?: number;
+  readonly toX?: number;
+  readonly toY?: number;
+  readonly steps?: number;
+  readonly key?: string;
+  readonly modifiers?: readonly string[];
+  readonly code?: string;
+  readonly paths?: readonly string[];
+}
+
+export interface BatchStepResult {
+  readonly action: string;
+  readonly ok: boolean;
+  /** A short human-readable line, or the failure message when `ok` is false. */
+  readonly summary: string;
+  readonly failure?: string;
+}
+
+export interface BatchResult {
+  readonly steps: readonly BatchStepResult[];
+  /** True when a step failed and the rest were not attempted. */
+  readonly stopped: boolean;
 }
 
 export class GhostBrowserSession {
@@ -271,82 +323,100 @@ export class GhostBrowserSession {
   // -------------------------------------------------------------------- actions
 
   open(url: string, options: UrlPolicyOptions & { timeoutMs?: number } = {}) {
-    return this.#serial(async (): Promise<PageSummary> => {
-      // The one place a URL is vetted. Backends never see an unchecked one.
-      const checked = checkUrl(url, options);
-      if (!checked.ok) {
-        throw new GhostBrowserError("blocked_url", checked.rejection.reason, {
-          url: checked.rejection.url,
-        });
-      }
-      this.#invalidateRefs();
-      const page = await this.backend.open(checked.url, this.#timeout(options.timeoutMs));
-      // This is the creator's own navigation: re-anchor the trusted origin to
-      // where it actually landed, reset the hop count, and refill the budget.
-      this.#originUrl = page.url;
-      this.#originHops = 0;
-      this.#actingRemaining = this.#actingBudget;
-      this.#touchIdleTimer();
-      return page;
-    });
+    return this.#serial(() => this.#openImpl(url, options));
+  }
+
+  async #openImpl(
+    url: string,
+    options: UrlPolicyOptions & { timeoutMs?: number },
+  ): Promise<PageSummary> {
+    // The one place a URL is vetted. Backends never see an unchecked one.
+    const checked = checkUrl(url, options);
+    if (!checked.ok) {
+      throw new GhostBrowserError("blocked_url", checked.rejection.reason, {
+        url: checked.rejection.url,
+      });
+    }
+    this.#invalidateRefs();
+    const page = await this.backend.open(checked.url, this.#timeout(options.timeoutMs));
+    // This is the creator's own navigation: re-anchor the trusted origin to
+    // where it actually landed, reset the hop count, and refill the budget.
+    this.#originUrl = page.url;
+    this.#originHops = 0;
+    this.#actingRemaining = this.#actingBudget;
+    this.#touchIdleTimer();
+    return page;
   }
 
   read(options: { maxChars?: number; timeoutMs?: number } = {}) {
-    return this.#serial(async (): Promise<SessionReadResult> => {
-      const maxChars = Math.max(
-        MIN_READ_BUDGET_CHARS,
-        options.maxChars ?? DEFAULT_READ_BUDGET_CHARS,
-      );
-      await this.#requirePage();
-      const result = await this.backend.read(this.#timeout(options.timeoutMs));
-      this.#touchIdleTimer();
-      return {
-        url: result.url,
-        title: result.title,
-        text: result.text.slice(0, maxChars),
-        totalLength: result.text.length,
-      };
-    });
+    return this.#serial(() => this.#readImpl(options));
+  }
+
+  async #readImpl(
+    options: { maxChars?: number; timeoutMs?: number },
+  ): Promise<SessionReadResult> {
+    const maxChars = Math.max(
+      MIN_READ_BUDGET_CHARS,
+      options.maxChars ?? DEFAULT_READ_BUDGET_CHARS,
+    );
+    await this.#requirePage();
+    const result = await this.backend.read(this.#timeout(options.timeoutMs));
+    this.#touchIdleTimer();
+    return {
+      url: result.url,
+      title: result.title,
+      text: result.text.slice(0, maxChars),
+      totalLength: result.text.length,
+    };
   }
 
   find(query: string, options: { limit?: number; timeoutMs?: number } = {}) {
-    return this.#serial(async (): Promise<readonly PageElementMatch[]> => {
-      const trimmed = query.trim();
-      if (trimmed === "") {
-        throw new GhostBrowserError("invalid_input", "A find needs a query.");
-      }
-      const limit = Math.min(
-        MAX_FIND_LIMIT,
-        Math.max(1, options.limit ?? DEFAULT_FIND_LIMIT),
-      );
-      const page = await this.#requirePage();
-      const matches = await this.backend.find(trimmed, {
-        ...this.#timeout(options.timeoutMs),
-        limit,
-      });
-      this.#refs = new Map(matches.map((match) => [match.ref, match]));
-      this.#refPageUrl = page.url;
-      this.#touchIdleTimer();
-      return matches;
+    return this.#serial(() => this.#findImpl(query, options));
+  }
+
+  async #findImpl(
+    query: string,
+    options: { limit?: number; timeoutMs?: number },
+  ): Promise<readonly PageElementMatch[]> {
+    const trimmed = query.trim();
+    if (trimmed === "") {
+      throw new GhostBrowserError("invalid_input", "A find needs a query.");
+    }
+    const limit = Math.min(
+      MAX_FIND_LIMIT,
+      Math.max(1, options.limit ?? DEFAULT_FIND_LIMIT),
+    );
+    const page = await this.#requirePage();
+    const matches = await this.backend.find(trimmed, {
+      ...this.#timeout(options.timeoutMs),
+      limit,
     });
+    this.#refs = new Map(matches.map((match) => [match.ref, match]));
+    this.#refPageUrl = page.url;
+    this.#touchIdleTimer();
+    return matches;
   }
 
   click(target: BackendTarget & { timeoutMs?: number; allowCrossDomain?: boolean }) {
-    return this.#serial(async (): Promise<PageSummary> => {
-      const checked = this.#checkTarget(target);
-      const before = await this.#requirePage();
-      // Clicking is consequential: gate it against the trusted origin first.
-      this.#gateActing(before.url, target.allowCrossDomain === true);
-      const page = await this.backend.click(checked, this.#timeout(target.timeoutMs));
-      // A click that navigated invalidates every ref minted on the old page and
-      // counts as one more hop the page — not the creator — drove.
-      if (page.url !== before.url) {
-        this.#invalidateRefs();
-        this.#originHops += 1;
-      }
-      this.#touchIdleTimer();
-      return page;
-    });
+    return this.#serial(() => this.#clickImpl(target));
+  }
+
+  async #clickImpl(
+    target: BackendTarget & { timeoutMs?: number; allowCrossDomain?: boolean },
+  ): Promise<PageSummary> {
+    const checked = this.#checkTarget(target);
+    const before = await this.#requirePage();
+    // Clicking is consequential: gate it against the trusted origin first.
+    this.#gateActing(before.url, target.allowCrossDomain === true);
+    const page = await this.backend.click(checked, this.#timeout(target.timeoutMs));
+    // A click that navigated invalidates every ref minted on the old page and
+    // counts as one more hop the page — not the creator — drove.
+    if (page.url !== before.url) {
+      this.#invalidateRefs();
+      this.#originHops += 1;
+    }
+    this.#touchIdleTimer();
+    return page;
   }
 
   type(input: BackendTarget & {
@@ -355,55 +425,482 @@ export class GhostBrowserSession {
     timeoutMs?: number;
     allowCrossDomain?: boolean;
   }) {
-    return this.#serial(async (): Promise<SessionTypeResult> => {
-      const checked = this.#checkTarget(input);
-      const before = await this.#requirePage();
-      // Typing into and submitting someone's form is consequential too.
-      this.#gateActing(before.url, input.allowCrossDomain === true);
-      // Submitting is a separate, explicit act: filling a field is reversible,
-      // pressing Enter on someone's form is not.
-      const submit = input.submit === true;
-      const page = await this.backend.type(
-        { ...checked, text: input.text, submit },
-        this.#timeout(input.timeoutMs),
-      );
-      if (submit) {
-        this.#invalidateRefs();
-        if (page.url !== before.url) this.#originHops += 1;
-      }
-      this.#touchIdleTimer();
-      return { ...page, submitted: submit };
-    });
+    return this.#serial(() => this.#typeImpl(input));
+  }
+
+  async #typeImpl(input: BackendTarget & {
+    text: string;
+    submit?: boolean;
+    timeoutMs?: number;
+    allowCrossDomain?: boolean;
+  }): Promise<SessionTypeResult> {
+    const checked = this.#checkTarget(input);
+    const before = await this.#requirePage();
+    // Typing into and submitting someone's form is consequential too.
+    this.#gateActing(before.url, input.allowCrossDomain === true);
+    // Submitting is a separate, explicit act: filling a field is reversible,
+    // pressing Enter on someone's form is not.
+    const submit = input.submit === true;
+    const page = await this.backend.type(
+      { ...checked, text: input.text, submit },
+      this.#timeout(input.timeoutMs),
+    );
+    if (submit) {
+      this.#invalidateRefs();
+      if (page.url !== before.url) this.#originHops += 1;
+    }
+    this.#touchIdleTimer();
+    return { ...page, submitted: submit };
   }
 
   screenshot(options: { fullPage?: boolean; timeoutMs?: number } = {}) {
-    return this.#serial(async (): Promise<SessionScreenshotResult> => {
-      await this.#requirePage();
-      await mkdir(this.screenshotDir, { recursive: true });
-      this.#screenshotCount += 1;
-      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-      const path = join(this.screenshotDir, `${stamp}-${this.#screenshotCount}.png`);
-      const page = await this.backend.screenshot({
-        ...this.#timeout(options.timeoutMs),
-        path,
-        fullPage: options.fullPage === true,
-      });
-      this.#touchIdleTimer();
-      return { ...page, path };
+    return this.#serial(() => this.#screenshotImpl(options));
+  }
+
+  async #screenshotImpl(
+    options: { fullPage?: boolean; timeoutMs?: number },
+  ): Promise<SessionScreenshotResult> {
+    await this.#requirePage();
+    await mkdir(this.screenshotDir, { recursive: true });
+    this.#screenshotCount += 1;
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const path = join(this.screenshotDir, `${stamp}-${this.#screenshotCount}.png`);
+    const page = await this.backend.screenshot({
+      ...this.#timeout(options.timeoutMs),
+      path,
+      fullPage: options.fullPage === true,
     });
+    this.#touchIdleTimer();
+    return { ...page, path };
   }
 
   back(options: { timeoutMs?: number } = {}) {
-    return this.#serial(async (): Promise<BackendBackResult> => {
-      await this.#requirePage();
-      const page = await this.backend.back(this.#timeout(options.timeoutMs));
-      // Going back steps toward the origin, so it undoes a hop rather than adding
-      // one. Observing only — no gate — but the hop count has to stay honest.
-      if (page.moved && this.#originHops > 0) this.#originHops -= 1;
+    return this.#serial(() => this.#backImpl(options));
+  }
+
+  async #backImpl(options: { timeoutMs?: number }): Promise<BackendBackResult> {
+    await this.#requirePage();
+    const page = await this.backend.back(this.#timeout(options.timeoutMs));
+    // Going back steps toward the origin, so it undoes a hop rather than adding
+    // one. Observing only — no gate — but the hop count has to stay honest.
+    if (page.moved && this.#originHops > 0) this.#originHops -= 1;
+    this.#invalidateRefs();
+    this.#touchIdleTimer();
+    return page;
+  }
+
+  forward(options: { timeoutMs?: number } = {}) {
+    return this.#serial(() => this.#forwardImpl(options));
+  }
+
+  async #forwardImpl(options: { timeoutMs?: number }): Promise<BackendBackResult> {
+    await this.#requirePage();
+    const page = await this.backend.forward(this.#timeout(options.timeoutMs));
+    // Forward is the inverse of back: it re-takes a step the page — not the
+    // creator — had walked, so it re-adds a hop rather than undoing one.
+    if (page.moved) this.#originHops += 1;
+    this.#invalidateRefs();
+    this.#touchIdleTimer();
+    return page;
+  }
+
+  scroll(input: {
+    deltaX: number;
+    deltaY: number;
+    x?: number;
+    y?: number;
+    timeoutMs?: number;
+  }) {
+    return this.#serial(() => this.#scrollImpl(input));
+  }
+
+  async #scrollImpl(input: {
+    deltaX: number;
+    deltaY: number;
+    x?: number;
+    y?: number;
+    timeoutMs?: number;
+  }): Promise<PageSummary> {
+    await this.#requirePage();
+    // Scrolling only moves the viewport; it is observing, never gated.
+    const page = await this.backend.scroll(
+      {
+        deltaX: input.deltaX,
+        deltaY: input.deltaY,
+        ...(input.x === undefined ? {} : { x: input.x }),
+        ...(input.y === undefined ? {} : { y: input.y }),
+      },
+      this.#timeout(input.timeoutMs),
+    );
+    this.#touchIdleTimer();
+    return page;
+  }
+
+  drag(input: {
+    fromX: number;
+    fromY: number;
+    toX: number;
+    toY: number;
+    steps?: number;
+    allowCrossDomain?: boolean;
+    timeoutMs?: number;
+  }) {
+    return this.#serial(() => this.#dragImpl(input));
+  }
+
+  async #dragImpl(input: {
+    fromX: number;
+    fromY: number;
+    toX: number;
+    toY: number;
+    steps?: number;
+    allowCrossDomain?: boolean;
+    timeoutMs?: number;
+  }): Promise<PageSummary> {
+    const before = await this.#requirePage();
+    // Dragging can reorder, move, or drop things: consequential, so it is gated.
+    this.#gateActing(before.url, input.allowCrossDomain === true);
+    const page = await this.backend.drag(
+      {
+        fromX: input.fromX,
+        fromY: input.fromY,
+        toX: input.toX,
+        toY: input.toY,
+        ...(input.steps === undefined ? {} : { steps: input.steps }),
+      },
+      this.#timeout(input.timeoutMs),
+    );
+    if (page.url !== before.url) {
       this.#invalidateRefs();
-      this.#touchIdleTimer();
-      return page;
-    });
+      this.#originHops += 1;
+    }
+    this.#touchIdleTimer();
+    return page;
+  }
+
+  key(input: {
+    key: string;
+    modifiers?: readonly string[];
+    text?: string;
+    allowCrossDomain?: boolean;
+    timeoutMs?: number;
+  }) {
+    return this.#serial(() => this.#keyImpl(input));
+  }
+
+  async #keyImpl(input: {
+    key: string;
+    modifiers?: readonly string[];
+    text?: string;
+    allowCrossDomain?: boolean;
+    timeoutMs?: number;
+  }): Promise<PageSummary> {
+    const key = input.key.trim();
+    if (key === "") {
+      throw new GhostBrowserError("invalid_input", "A key press needs a key name.");
+    }
+    const before = await this.#requirePage();
+    // Pressing keys drives the focused control: consequential, so it is gated.
+    this.#gateActing(before.url, input.allowCrossDomain === true);
+    const page = await this.backend.key(
+      {
+        key,
+        ...(input.modifiers === undefined ? {} : { modifiers: [...input.modifiers] }),
+        ...(input.text === undefined ? {} : { text: input.text }),
+      },
+      this.#timeout(input.timeoutMs),
+    );
+    if (page.url !== before.url) {
+      this.#invalidateRefs();
+      this.#originHops += 1;
+    }
+    this.#touchIdleTimer();
+    return page;
+  }
+
+  javascript(code: string, options: { allowCrossDomain?: boolean; timeoutMs?: number } = {}) {
+    return this.#serial(() => this.#javascriptImpl(code, options));
+  }
+
+  async #javascriptImpl(
+    code: string,
+    options: { allowCrossDomain?: boolean; timeoutMs?: number },
+  ): Promise<BackendJavascriptResult> {
+    if (code.trim() === "") {
+      throw new GhostBrowserError("invalid_input", "There is no code to run.");
+    }
+    const before = await this.#requirePage();
+    // Running script is the sharpest consequential action: gate it exactly like a
+    // click, and spend a unit of the acting budget.
+    this.#gateActing(before.url, options.allowCrossDomain === true);
+    const result = await this.backend.javascript(code, this.#timeout(options.timeoutMs));
+    // Script can rewrite the page under our refs; the honest move is to drop them.
+    this.#invalidateRefs();
+    this.#touchIdleTimer();
+    return result;
+  }
+
+  readConsole(options: { timeoutMs?: number } = {}) {
+    return this.#serial(() => this.#readConsoleImpl(options));
+  }
+
+  async #readConsoleImpl(
+    options: { timeoutMs?: number },
+  ): Promise<readonly ConsoleEntry[]> {
+    await this.#requirePage();
+    const entries = await this.backend.readConsole(this.#timeout(options.timeoutMs));
+    this.#touchIdleTimer();
+    return entries;
+  }
+
+  readNetwork(options: { timeoutMs?: number } = {}) {
+    return this.#serial(() => this.#readNetworkImpl(options));
+  }
+
+  async #readNetworkImpl(
+    options: { timeoutMs?: number },
+  ): Promise<readonly NetworkEntry[]> {
+    await this.#requirePage();
+    const entries = await this.backend.readNetwork(this.#timeout(options.timeoutMs));
+    this.#touchIdleTimer();
+    return entries;
+  }
+
+  upload(input: BackendTarget & {
+    paths: readonly string[];
+    allowCrossDomain?: boolean;
+    timeoutMs?: number;
+  }) {
+    return this.#serial(() => this.#uploadImpl(input));
+  }
+
+  async #uploadImpl(input: BackendTarget & {
+    paths: readonly string[];
+    allowCrossDomain?: boolean;
+    timeoutMs?: number;
+  }): Promise<PageSummary> {
+    if (input.paths.length === 0) {
+      throw new GhostBrowserError("invalid_input", "Give at least one file path to upload.");
+    }
+    const checked = this.#checkTarget(input);
+    const before = await this.#requirePage();
+    // Handing a file to a form is consequential — gate it against the origin.
+    this.#gateActing(before.url, input.allowCrossDomain === true);
+    const page = await this.backend.upload(
+      { ...checked, paths: [...input.paths] },
+      this.#timeout(input.timeoutMs),
+    );
+    this.#touchIdleTimer();
+    return page;
+  }
+
+  resize(input: { width: number; height: number; timeoutMs?: number }) {
+    return this.#serial(() => this.#resizeImpl(input));
+  }
+
+  async #resizeImpl(input: {
+    width: number;
+    height: number;
+    timeoutMs?: number;
+  }): Promise<BackendResizeResult> {
+    await this.#requirePage();
+    const result = await this.backend.resize(
+      { width: input.width, height: input.height },
+      this.#timeout(input.timeoutMs),
+    );
+    this.#touchIdleTimer();
+    return result;
+  }
+
+  tabs(input: {
+    op: BackendTabsInput["op"];
+    id?: string;
+    url?: string;
+    allowLocal?: boolean;
+    timeoutMs?: number;
+  }) {
+    return this.#serial(() => this.#tabsImpl(input));
+  }
+
+  async #tabsImpl(input: {
+    op: BackendTabsInput["op"];
+    id?: string;
+    url?: string;
+    allowLocal?: boolean;
+    timeoutMs?: number;
+  }): Promise<BackendTabsResult> {
+    let url: string | undefined;
+    if (input.op === "create" && input.url !== undefined && input.url.trim() !== "") {
+      // A new tab with a URL is a creator-directed navigation: vet it like open,
+      // then re-anchor the trusted origin to it.
+      const checked = checkUrl(input.url, {
+        ...(input.allowLocal === undefined ? {} : { allowLocal: input.allowLocal }),
+      });
+      if (!checked.ok) {
+        throw new GhostBrowserError("blocked_url", checked.rejection.reason, {
+          url: checked.rejection.url,
+        });
+      }
+      url = checked.url;
+    }
+    const result = await this.backend.tabs(
+      {
+        op: input.op,
+        ...(input.id === undefined ? {} : { id: input.id }),
+        ...(url === undefined ? {} : { url }),
+      },
+      this.#timeout(input.timeoutMs),
+    );
+    // Switching or creating a tab lands the ghost on a different page; the refs
+    // minted on the old one no longer mean anything.
+    this.#invalidateRefs();
+    if (input.op === "create" && result.page) {
+      this.#originUrl = result.page.url;
+      this.#originHops = 0;
+      this.#actingRemaining = this.#actingBudget;
+    }
+    this.#touchIdleTimer();
+    return result;
+  }
+
+  batch(steps: readonly BatchStep[], options: { timeoutMs?: number } = {}) {
+    return this.#serial(() => this.#batchImpl(steps, options));
+  }
+
+  /**
+   * Run a sequence of steps as one queue slot, so nothing else interleaves
+   * between them — the whole point of batching over separate tool calls. Each
+   * step reuses the same non-serialized impls the public methods do, so the
+   * guardrails (URL policy, provenance gate, acting budget, ref checks) apply
+   * identically. A step that fails stops the batch and is reported, rather than
+   * throwing the whole thing away.
+   */
+  async #batchImpl(
+    steps: readonly BatchStep[],
+    options: { timeoutMs?: number },
+  ): Promise<BatchResult> {
+    const results: BatchStepResult[] = [];
+    for (const step of steps) {
+      try {
+        const summary = await this.#runStep(step, options.timeoutMs);
+        results.push({ action: step.action, ok: true, summary });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const failure = error instanceof GhostBrowserError ? error.failure : "navigation_failed";
+        results.push({ action: step.action, ok: false, summary: message, failure });
+        return { steps: results, stopped: true };
+      }
+    }
+    return { steps: results, stopped: false };
+  }
+
+  /** Dispatch one batch step to a non-serialized impl. Returns a short summary. */
+  async #runStep(step: BatchStep, timeoutMs?: number): Promise<string> {
+    const t = timeoutMs === undefined ? {} : { timeoutMs };
+    switch (step.action) {
+      case "open": {
+        const page = await this.#openImpl(step.url ?? "", {
+          ...t,
+          ...(step.allowLocal === undefined ? {} : { allowLocal: step.allowLocal }),
+        });
+        return `open → ${page.url}`;
+      }
+      case "read": {
+        const r = await this.#readImpl({ ...t, ...(step.maxChars === undefined ? {} : { maxChars: step.maxChars }) });
+        return `read ${r.text.length} of ${r.totalLength} chars`;
+      }
+      case "find": {
+        const matches = await this.#findImpl(step.query ?? "", {
+          ...t,
+          ...(step.limit === undefined ? {} : { limit: step.limit }),
+        });
+        return `find "${step.query ?? ""}" → ${matches.length} match(es)`;
+      }
+      case "click": {
+        const page = await this.#clickImpl({
+          ...t,
+          ...(step.ref === undefined ? {} : { ref: step.ref }),
+          ...(step.selector === undefined ? {} : { selector: step.selector }),
+          ...(step.allowCrossDomain === undefined ? {} : { allowCrossDomain: step.allowCrossDomain }),
+        });
+        return `click → ${page.url}`;
+      }
+      case "type": {
+        const page = await this.#typeImpl({
+          text: step.text ?? "",
+          ...t,
+          ...(step.ref === undefined ? {} : { ref: step.ref }),
+          ...(step.selector === undefined ? {} : { selector: step.selector }),
+          ...(step.submit === undefined ? {} : { submit: step.submit }),
+          ...(step.allowCrossDomain === undefined ? {} : { allowCrossDomain: step.allowCrossDomain }),
+        });
+        return `type → ${page.submitted ? "submitted" : "filled"}`;
+      }
+      case "scroll": {
+        await this.#scrollImpl({
+          deltaX: step.deltaX ?? 0,
+          deltaY: step.deltaY ?? 0,
+          ...t,
+          ...(step.x === undefined ? {} : { x: step.x }),
+          ...(step.y === undefined ? {} : { y: step.y }),
+        });
+        return "scroll";
+      }
+      case "drag": {
+        await this.#dragImpl({
+          fromX: step.fromX ?? 0,
+          fromY: step.fromY ?? 0,
+          toX: step.toX ?? 0,
+          toY: step.toY ?? 0,
+          ...t,
+          ...(step.steps === undefined ? {} : { steps: step.steps }),
+          ...(step.allowCrossDomain === undefined ? {} : { allowCrossDomain: step.allowCrossDomain }),
+        });
+        return "drag";
+      }
+      case "key": {
+        await this.#keyImpl({
+          key: step.key ?? "",
+          ...t,
+          ...(step.modifiers === undefined ? {} : { modifiers: step.modifiers }),
+          ...(step.text === undefined ? {} : { text: step.text }),
+          ...(step.allowCrossDomain === undefined ? {} : { allowCrossDomain: step.allowCrossDomain }),
+        });
+        return `key ${step.key ?? ""}`;
+      }
+      case "javascript": {
+        const r = await this.#javascriptImpl(step.code ?? "", {
+          ...t,
+          ...(step.allowCrossDomain === undefined ? {} : { allowCrossDomain: step.allowCrossDomain }),
+        });
+        return `javascript → ${r.type}`;
+      }
+      case "back": {
+        const page = await this.#backImpl(t);
+        return page.moved ? `back → ${page.url}` : "back → nowhere";
+      }
+      case "forward": {
+        const page = await this.#forwardImpl(t);
+        return page.moved ? `forward → ${page.url}` : "forward → nowhere";
+      }
+      case "upload": {
+        const page = await this.#uploadImpl({
+          paths: step.paths ?? [],
+          ...t,
+          ...(step.ref === undefined ? {} : { ref: step.ref }),
+          ...(step.selector === undefined ? {} : { selector: step.selector }),
+          ...(step.allowCrossDomain === undefined ? {} : { allowCrossDomain: step.allowCrossDomain }),
+        });
+        return `upload → ${page.url}`;
+      }
+      default:
+        throw new GhostBrowserError(
+          "invalid_input",
+          `Batch does not support the step "${step.action}". Batchable steps are `
+          + "open, read, find, click, type, scroll, drag, key, javascript, back, "
+          + "forward, and upload.",
+        );
+    }
   }
 
   /** Close the browser. Safe to call when it was never started. */

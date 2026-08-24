@@ -112,13 +112,42 @@ describe("the protocol constants are a contract", () => {
     expect([...RELAY_OPS]).toEqual([
       "status", "current", "open", "read", "find",
       "click", "type", "screenshot", "back", "close",
+      "forward", "scroll", "drag", "key", "javascript",
+      "console", "network", "upload", "resize", "tabs",
     ]);
   });
 
-  it("has no escape hatch that would run arbitrary script in the creator's browser", () => {
+  it("has exactly one op that runs page script, and it is the named `javascript` one", () => {
+    // The closed-set claim changed with Tier 1: the creator's own ghost, on the
+    // creator's own machine, may run script in the page. That capability lives in
+    // a single, explicit op — `javascript` — and there is still no *other* verb
+    // (a generic eval/exec/cdp/raw) that would smuggle script through a different
+    // channel.
+    expect(RELAY_OPS as readonly string[]).toContain("javascript");
     for (const forbidden of ["eval", "evaluate", "exec", "script", "cdp", "raw"]) {
       expect(RELAY_OPS as readonly string[]).not.toContain(forbidden);
     }
+  });
+
+  it("keeps the javascript capability creator-only, like every other browser op", () => {
+    const transport = transportWithPage();
+    // The scope locks are on the backend, not the op: a visitor can never even
+    // build one, so it can never reach `javascript`.
+    expect(() => new RelayBrowserBackend({ transport, scope: visitorScope("v") }))
+      .toThrow(/never available in a visitor conversation/i);
+  });
+
+  it("frames the javascript result as untrusted in the tool description", async () => {
+    // The untrusted-result warning is the surviving defense; it lives on the tool
+    // the model actually reads.
+    const { createBrowserExtension, GHOST_BROWSER } = await import("../src/extensions/browser.js");
+    const { loadExtension } = await import("./support/harness.js");
+    const { mkdtemp } = await import("node:fs/promises");
+    const home = await mkdtemp(join(tmpdir(), "ghost-relay-desc-"));
+    const harness = await loadExtension(createBrowserExtension({ browser: { idleTimeoutMs: 0 } }), home);
+    const description = harness.tools.get(GHOST_BROWSER)?.description ?? "";
+    expect(description).toMatch(/javascript/i);
+    expect(description).toMatch(/returns .* untrusted|untrusted DATA/i);
   });
 
   it("pins the version and subprotocol the extension has to agree with", () => {
@@ -242,6 +271,133 @@ describe("driving the relay", () => {
     expect(await backend.close()).toBe(true);
     expect(backend.running).toBe(false);
     expect(transport.lastFor("close")).toBeDefined();
+  });
+});
+
+// ---------------------------------------------------------- tier-1 relay ops
+
+describe("the Tier-1 relay ops translate the seam to the wire", () => {
+  it("forwards, mirroring back", async () => {
+    const transport = transportWithPage();
+    transport.answer("forward", { page: PAGE, moved: true });
+    const backend = await opened(transport);
+    expect(await backend.forward({ timeoutMs: 5_000 })).toMatchObject({ moved: true });
+  });
+
+  it("scrolls with a wheel delta and an optional anchor", async () => {
+    const transport = transportWithPage();
+    transport.answer("scroll", { page: PAGE });
+    const backend = await opened(transport);
+    await backend.scroll({ deltaX: 0, deltaY: 300, x: 10, y: 20 }, { timeoutMs: 5_000 });
+    expect(transport.lastFor("scroll")?.args).toEqual({ deltaX: 0, deltaY: 300, x: 10, y: 20 });
+  });
+
+  it("drags from one point to another", async () => {
+    const transport = transportWithPage();
+    transport.answer("drag", { page: PAGE });
+    const backend = await opened(transport);
+    await backend.drag({ fromX: 1, fromY: 2, toX: 3, toY: 4, steps: 5 }, { timeoutMs: 5_000 });
+    expect(transport.lastFor("drag")?.args).toEqual({ fromX: 1, fromY: 2, toX: 3, toY: 4, steps: 5 });
+  });
+
+  it("sends a key with its modifiers", async () => {
+    const transport = transportWithPage();
+    transport.answer("key", { page: PAGE });
+    const backend = await opened(transport);
+    await backend.key({ key: "a", modifiers: ["Control"] }, { timeoutMs: 5_000 });
+    expect(transport.lastFor("key")?.args).toMatchObject({ key: "a", modifiers: ["Control"] });
+  });
+
+  it("runs javascript and returns the value and its type", async () => {
+    const transport = transportWithPage();
+    transport.answer("javascript", { value: 42, type: "number" });
+    const backend = await opened(transport);
+    const result = await backend.javascript("40+2", { timeoutMs: 5_000 });
+    expect(transport.lastFor("javascript")?.args).toEqual({ code: "40+2" });
+    expect(result).toEqual({ value: 42, type: "number" });
+  });
+
+  it("drains console and network buffers, tolerating a stray shape", async () => {
+    const transport = transportWithPage();
+    transport.answer("console", {
+      entries: [{ level: "warn", text: "hi", url: "https://x", line: 3 }, "junk"],
+    });
+    transport.answer("network", {
+      entries: [{ method: "GET", url: "https://x", status: 200, type: "document", bodyBytes: 12 }],
+    });
+    const backend = await opened(transport);
+    expect(await backend.readConsole({ timeoutMs: 5_000 })).toEqual([
+      { level: "warn", text: "hi", url: "https://x", line: 3 },
+    ]);
+    expect(await backend.readNetwork({ timeoutMs: 5_000 })).toEqual([
+      { method: "GET", url: "https://x", status: 200, type: "document", bodyBytes: 12 },
+    ]);
+  });
+
+  it("sends upload paths with the target", async () => {
+    const transport = transportWithPage();
+    transport.answer("upload", { page: PAGE });
+    const backend = await opened(transport);
+    await backend.upload({ ref: "e1", paths: ["/tmp/a"] }, { timeoutMs: 5_000 });
+    expect(transport.lastFor("upload")?.args).toEqual({ ref: "e1", paths: ["/tmp/a"] });
+  });
+
+  it("resizes and reports whether it applied", async () => {
+    const transport = transportWithPage();
+    transport.answer("resize", { page: PAGE, applied: true });
+    const backend = await opened(transport);
+    expect(await backend.resize({ width: 800, height: 600 }, { timeoutMs: 5_000 }))
+      .toMatchObject({ applied: true });
+    expect(transport.lastFor("resize")?.args).toEqual({ width: 800, height: 600 });
+  });
+});
+
+describe("the relaxed one-tab invariant, on the relay backend", () => {
+  it("tracks several tabs as a set and stays running while any remain", async () => {
+    const transport = transportWithPage();
+    transport.replies.set("tabs", (args) => {
+      if (args["op"] === "create") {
+        return {
+          ok: true,
+          result: {
+            tabs: [
+              { id: "t1", url: PAGE.url, title: PAGE.title, active: false },
+              { id: "t2", url: "https://example.com/second", title: "Second", active: true },
+            ],
+            active: "t2",
+            id: "t2",
+            page: { url: "https://example.com/second", title: "Second" },
+          },
+        };
+      }
+      // close t2 → t1 remains
+      return {
+        ok: true,
+        result: {
+          tabs: [{ id: "t1", url: PAGE.url, title: PAGE.title, active: true }],
+          active: "t1",
+        },
+      };
+    });
+    const backend = await opened(transport);
+    expect(backend.running).toBe(true);
+
+    const created = await backend.tabs({ op: "create", url: "https://example.com/second" }, { timeoutMs: 5_000 });
+    expect(created.tabs.map((tab) => tab.id)).toEqual(["t1", "t2"]);
+    expect(created.active).toBe("t2");
+    expect(backend.running).toBe(true);
+
+    const closed = await backend.tabs({ op: "close", id: "t2" }, { timeoutMs: 5_000 });
+    expect(closed.tabs.map((tab) => tab.id)).toEqual(["t1"]);
+    expect(backend.running).toBe(true);
+  });
+
+  it("records the tab id the extension names on open", async () => {
+    const transport = transportWithPage();
+    transport.answer("open", { page: PAGE, id: "t9" });
+    const backend = new RelayBrowserBackend({ transport });
+    await backend.open(PAGE.url, { timeoutMs: 5_000 });
+    expect(backend.running).toBe(true);
   });
 });
 
