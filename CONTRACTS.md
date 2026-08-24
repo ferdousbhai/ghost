@@ -38,7 +38,9 @@ Native filesystem and search (`read`, `glob`, `grep`), mutation (`write`,
 project context, extensions/plugins, commands, and MCP remain available under
 OMP's normal configuration and xd:// presentation. Ghost disables only the
 overlapping OMP browser/computer/image tools because `ghost_browser`,
-`ghost_desktop`, `ghost_screen`, and `look_at_image` own those surfaces.
+`ghost_desktop`, `ghost_screen`, and `look_at_image` own those surfaces, and
+OMP's memory/autolearn backends because ghost memory is plain files in the
+ghost home (see the harness invariants).
 
 Creator notes and memory retrieval use those native filesystem tools directly.
 Ghost registers no duplicate creator note list/read/search/write tools, and
@@ -377,6 +379,11 @@ whole model before any non-local exposure.
   disable discovery, context, skills, MCP/LSP/IRC, and native tools.
 - OMP may mount non-core tools under xd://; absence from
   `getActiveToolNames()` does not mean absence from its tool registry.
+- Force `memory.backend: "off"` (plus the legacy `memories.enabled` and
+  `autolearn.enabled`) in the session settings overrides: ghost memory is plain
+  files in the ghost home, and a stray memory key in read-only-loaded ghost
+  settings would silently mount OMP's retain/recall/reflect tools and grow a
+  second memory store outside the ghost home.
 - Set `PI_NO_TITLE=1`: Ghost's smol lane owns the single persisted conversation
   title, so OMP's otherwise-native automatic title completion would duplicate
   work and race the same session-name slot.

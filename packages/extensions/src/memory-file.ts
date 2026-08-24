@@ -7,6 +7,12 @@
  *
  * One file, one fact. The index over them is derived per session and never
  * written to disk.
+ *
+ * There is deliberately no type/category field in the frontmatter. A taxonomy
+ * (owner/feedback/project/reference and the like) was considered and rejected:
+ * the owner's testing found model-assigned type labels unreliable, so nothing
+ * downstream may depend on one. Whatever classification matters goes in the
+ * description line, in words. Do not reintroduce a type field.
  */
 import { MemoryFileFormatError } from "./errors.js";
 import { parseYamlStringScalar, yamlScalar } from "./frontmatter.js";

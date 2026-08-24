@@ -661,6 +661,15 @@ export class SessionHost {
       "inspect_image.mode": "off",
       "browser.enabled": false,
       "computer.enabled": false,
+      // Ghost memory is plain files in the ghost home. OMP's memory lanes
+      // (retain/recall/reflect on the mnemopi/hindsight backends, autolearn's
+      // managed skills) would grow a second store outside it, and settings
+      // load read-only from the ghost home, so one stray key there would
+      // mount them silently. Force the whole system off. `memories.enabled`
+      // is the legacy flag OMP migrates into `memory.backend`; pin it too.
+      "memory.backend": "off",
+      "memories.enabled": false,
+      "autolearn.enabled": false,
       // Ghost has no approval surface. Creator sessions are explicitly local
       // and unrestricted; visitor sessions have a narrow tool allowlist below.
       "tools.approvalMode": "yolo",

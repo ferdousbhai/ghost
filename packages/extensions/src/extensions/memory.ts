@@ -104,7 +104,8 @@ export function createMemoryExtension(
         "Write one memory file: a single fact worth keeping, with a one-line "
         + "description for the index. Writing a name that already exists replaces "
         + "that file, which is how you correct or update a memory. Keep unrelated "
-        + "facts in separate files.",
+        + "facts in separate files, and mention a related memory in the content "
+        + "by its slug in double brackets, like [[preferred-tone]].",
       parameters: Type.Object({
         description: Type.String({
           description:

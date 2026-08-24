@@ -44,6 +44,26 @@ describe("persona extension", () => {
     expect(prompt).toContain("(private)");
   });
 
+  it("carries the memory hygiene doctrine, scoped to what the session can do", async () => {
+    const creator = await loadExtension(createPersonaExtension(), fixture.dir);
+    const creatorPrompt = (await creator.beforeAgentStart()) ?? "";
+    // Creator doctrine: dedupe, delete, absolute dates, links, memory-vs-notes.
+    expect(creatorPrompt).toContain("delete a memory that turned out wrong");
+    expect(creatorPrompt).toContain("[[knee-injury]]");
+    expect(creatorPrompt).toContain("belongs in a note");
+
+    const visitor = await loadExtension(
+      createPersonaExtension({ scope: visitorScope("visitor-1") }),
+      fixture.dir,
+    );
+    const visitorPrompt = (await visitor.beforeAgentStart()) ?? "";
+    // Visitors cannot delete files or write notes; their doctrine omits both.
+    expect(visitorPrompt).toContain("near-duplicate");
+    expect(visitorPrompt).toContain("[[favorite-openings]]");
+    expect(visitorPrompt).not.toContain("delete a memory");
+    expect(visitorPrompt).not.toContain("belongs in a note");
+  });
+
   it("rebuilds the prompt on every agent start", async () => {
     const harness = await loadExtension(createPersonaExtension(), fixture.dir);
     expect(await harness.beforeAgentStart()).not.toContain("freshly-written");
