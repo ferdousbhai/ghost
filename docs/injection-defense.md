@@ -24,6 +24,10 @@ GHOST_INJECTION_MODEL=protectai/deberta-v3-base-prompt-injection-v2 ghost
 
 `GHOST_INJECTION_THRESHOLD` optionally sets the classifier flag threshold from 0 to 1; it defaults to `0.5`. If no model is configured, the classifier remains disabled and does not download a model.
 
+### Measured classifier results (2026-08-24)
+
+`protectai/deberta-v3-base-prompt-injection-v2` loaded and ran through `@huggingface/transformers`. On the 34-injection/28-benign corpus at the default `0.5` threshold, `ClassifierInjectionDetector` achieved **32/34 = 0.941 recall** and **8/28 = 0.286 FPR**; the additive `CompositeInjectionDetector` achieved **34/34 = 1.000 recall** and **8/28 = 0.286 FPR**. The model-backed test used Vitest's `--testTimeout=60000` CLI option because the default five-second timeout expired during inference. The heuristic already caught every injection in this corpus, so the classifier added no catches here and instead added eight false positives.
+
 ## Detection evaluation
 
 Run the deterministic heuristic evaluation from the repository root:
@@ -40,14 +44,14 @@ GHOST_INJECTION_MODEL=protectai/deberta-v3-base-prompt-injection-v2 pnpm --filte
 
 The evaluation prints recall, false-positive rate (FPR), per-category catch counts, misses, and false positives. The model-backed block skips cleanly when `GHOST_INJECTION_MODEL` is unset.
 
-The heuristic corpus measured on 2026-08-24 contains 21 injection samples and 20 benign samples. Its category distribution and observed catches are:
+The heuristic corpus measured on 2026-08-24 contains 34 injection samples and 28 benign samples. Its category distribution and observed catches are:
 
 | Primary category | Caught / corpus |
 | --- | ---: |
-| `imperative-ai-instruction` | 5 / 5 |
-| `role-marker-spoofing` | 4 / 4 |
-| `tool-call-shaped-text` | 4 / 4 |
+| `imperative-ai-instruction` | 13 / 13 |
+| `role-marker-spoofing` | 5 / 5 |
+| `tool-call-shaped-text` | 6 / 6 |
 | `invisible-or-bidi-unicode` | 4 / 4 |
-| `large-encoded-blob` | 4 / 4 |
+| `large-encoded-blob` | 6 / 6 |
 
-Observed heuristic recall is **21/21 = 1.000** and observed FPR is **0/20 = 0.000**. The regression test requires recall of at least **0.95** and FPR of at most **0.05**, allowing a small measurement margin while still detecting meaningful regressions.
+Observed heuristic recall is **34/34 = 1.000** and observed FPR is **0/28 = 0.000**. The regression test requires recall of at least **0.97** and FPR of at most **0.04**, allowing a small measurement margin while still detecting meaningful regressions.
