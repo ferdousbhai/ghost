@@ -61,6 +61,12 @@ _DRAG_STEPS = 16
 #: Ceiling on drag waypoints, so a hostile ``steps`` cannot wedge the single
 #: request line under an arbitrarily long sequence of ydotool moves.
 _MAX_DRAG_STEPS = 200
+#: The warning both mouse_move branches append: unlike click/drag, the pointer is
+#: deliberately left where it moved, so the honesty metadata says so.
+_HOVER_WARNING = (
+    "the pointer was left where it moved (a hover); the next input op, or the "
+    "user, will move it from here"
+)
 
 
 class UnknownRefError(OmaHarnessError):
@@ -1058,11 +1064,7 @@ class GhostDesktop:
                 "ydotool",
                 background_safe=report["background_safe"],
                 interference=report["interference"],
-                warnings=[
-                    *report["warnings"],
-                    "the pointer was left where it moved (a hover); the next "
-                    "input op, or the user, will move it from here",
-                ],
+                warnings=[*report["warnings"], _HOVER_WARNING],
                 x=float(x),
                 y=float(y),
             )
@@ -1081,11 +1083,7 @@ class GhostDesktop:
             "ydotool",
             background_safe=report["background_safe"],
             interference=report["interference"],
-            warnings=[
-                *report["warnings"],
-                "the pointer was left where it moved (a hover); the next input "
-                "op, or the user, will move it from here",
-            ],
+            warnings=[*report["warnings"], _HOVER_WARNING],
             target=window["address"],
         )
 

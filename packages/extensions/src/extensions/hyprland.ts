@@ -529,14 +529,29 @@ export function createHyprlandExtension(
       execute: async (_toolCallId, params, signal, _onUpdate, _ctx) => {
         const opts = { signal: signal ?? undefined } as const;
 
+        // Shared shapes: an invalid_format error tagged with the current action,
+        // the optional {app} fragment every windowed op accepts, and the ref (if
+        // any) the model passed for a semantic target.
+        const invalidFormat = (message: string): GhostError =>
+          new GhostError("invalid_format", message, { action: params.action });
+        const appArg: Record<string, unknown> = params.target ? { app: params.target } : {};
+        const refValue =
+          typeof params.ref === "string" && params.ref.length > 0 ? params.ref : undefined;
+        const requireRef = (): string => {
+          if (refValue === undefined) {
+            throw invalidFormat(
+              `action "${params.action}" needs ref: an element ref from ax_query.`,
+            );
+          }
+          return refValue;
+        };
+
         // notify is the one local action: a notification is not desktop control.
         if (params.action === "notify") {
           const message = params.message?.trim();
           if (!message) {
-            throw new GhostError(
-              "invalid_format",
+            throw invalidFormat(
               'action "notify" needs message: what the notification should say.',
-              { action: params.action },
             );
           }
           const title = params.title?.trim() || "Ghost";
@@ -608,11 +623,9 @@ export function createHyprlandExtension(
           case "focus": {
             const window = params.target?.trim();
             if (!window) {
-              throw new GhostError(
-                "invalid_format",
+              throw invalidFormat(
                 'action "focus" needs target: an address from state (0x…), a window '
                 + "class, or a title fragment.",
-                { action: params.action },
               );
             }
             const args = ADDRESS_PATTERN.test(window)
@@ -625,10 +638,8 @@ export function createHyprlandExtension(
           case "workspace": {
             const workspace = params.workspace?.trim();
             if (!workspace) {
-              throw new GhostError(
-                "invalid_format",
+              throw invalidFormat(
                 'action "workspace" needs workspace, such as 3, +1, or name:web.',
-                { action: params.action },
               );
             }
             const meta = await helper.request<HonestyMetadata>(
@@ -661,84 +672,60 @@ export function createHyprlandExtension(
 
           case "ax_roles": {
             requireAtspi(hello, "ax_roles");
-            const result = await helper.request(
-              "ax_roles",
-              { ...(params.target ? { app: params.target } : {}) },
-              opts,
-            );
+            const result = await helper.request("ax_roles", { ...appArg }, opts);
             return textResult(JSON.stringify(result), {});
           }
 
           case "ax_perform": {
             requireAtspi(hello, "ax_perform");
-            if (typeof params.ref !== "string" || params.ref.length === 0) {
-              throw new GhostError(
-                "invalid_format",
-                'action "ax_perform" needs ref: an element ref from ax_query.',
-                { action: params.action },
-              );
-            }
+            const ref = requireRef();
             const axAction = params.ax_action?.trim() || "click";
             const meta = await helper.request<HonestyMetadata>(
               "ax_perform",
-              { ref: params.ref, action: axAction },
+              { ref, action: axAction },
               opts,
             );
             return honestyResult(
-              `Performed ${axAction} on element ${params.ref}.`,
+              `Performed ${axAction} on element ${ref}.`,
               meta,
-              { ref: params.ref, ax_action: axAction },
+              { ref, ax_action: axAction },
             );
           }
 
           case "ax_set": {
             requireAtspi(hello, "ax_set");
-            if (typeof params.ref !== "string" || params.ref.length === 0) {
-              throw new GhostError(
-                "invalid_format",
-                'action "ax_set" needs ref: an element ref from ax_query.',
-                { action: params.action },
-              );
-            }
+            const ref = requireRef();
             if (!params.attribute) {
-              throw new GhostError(
-                "invalid_format",
+              throw invalidFormat(
                 'action "ax_set" needs attribute: text, value, or focused.',
-                { action: params.action },
               );
             }
             const meta = await helper.request<HonestyMetadata>(
               "ax_set",
               {
-                ref: params.ref,
+                ref,
                 attribute: params.attribute,
                 ...(params.value === undefined ? {} : { value: params.value }),
               },
               opts,
             );
             return honestyResult(
-              `Set ${params.attribute} on element ${params.ref}.`,
+              `Set ${params.attribute} on element ${ref}.`,
               meta,
-              { ref: params.ref, attribute: params.attribute },
+              { ref, attribute: params.attribute },
             );
           }
 
           case "hit_test": {
             requireAtspi(hello, "hit_test");
             if (typeof params.x !== "number" || typeof params.y !== "number") {
-              throw new GhostError(
-                "invalid_format",
+              throw invalidFormat(
                 'action "hit_test" needs both x and y (screen coordinates).',
-                { action: params.action },
               );
             }
             const result = await helper.request<AxHitTestResult>(
               "hit_test",
-              {
-                x: params.x,
-                y: params.y,
-                ...(params.target ? { app: params.target } : {}),
-              },
+              { x: params.x, y: params.y, ...appArg },
               opts,
             );
             const hint =
@@ -753,15 +740,13 @@ export function createHyprlandExtension(
           case "key": {
             const chord = params.chord?.trim();
             if (!chord) {
-              throw new GhostError(
-                "invalid_format",
+              throw invalidFormat(
                 'action "key" needs chord, such as ctrl+s or alt+Tab.',
-                { action: params.action },
               );
             }
             const meta = await helper.request<HonestyMetadata>(
               "key",
-              { chord, ...(params.target ? { app: params.target } : {}) },
+              { chord, ...appArg },
               opts,
             );
             return honestyResult(`Sent ${chord}.`, meta, { chord });
@@ -769,20 +754,14 @@ export function createHyprlandExtension(
 
           case "type": {
             if (typeof params.text !== "string" || params.text.length === 0) {
-              throw new GhostError(
-                "invalid_format",
-                'action "type" needs text: what to type.',
-                { action: params.action },
-              );
+              throw invalidFormat('action "type" needs text: what to type.');
             }
             const meta = await helper.request<HonestyMetadata>(
               "type",
               {
                 text: params.text,
-                ...(params.target ? { app: params.target } : {}),
-                ...(typeof params.ref === "string" && params.ref.length > 0
-                  ? { ref: params.ref }
-                  : {}),
+                ...appArg,
+                ...(refValue ? { ref: refValue } : {}),
                 ...(params.replace === true ? { replace: true } : {}),
               },
               opts,
@@ -804,26 +783,24 @@ export function createHyprlandExtension(
               ...(clicks !== 1 ? { clicks } : {}),
             };
             let args: Record<string, unknown>;
-            if (typeof params.ref === "string" && params.ref.length > 0) {
-              args = { ref: params.ref, ...buttonArgs };
+            if (refValue !== undefined) {
+              args = { ref: refValue, ...buttonArgs };
             } else if (typeof params.x === "number" && typeof params.y === "number") {
               args = {
                 x: params.x,
                 y: params.y,
                 coordinate_space: params.coordinate_space ?? "screen",
-                ...(params.target ? { app: params.target } : {}),
+                ...appArg,
                 ...buttonArgs,
               };
             } else {
-              throw new GhostError(
-                "invalid_format",
+              throw invalidFormat(
                 'action "click" needs either ref (from ax_query) or both x and y.',
-                { action: params.action },
               );
             }
             const meta = await helper.request<HonestyMetadata>("click", args, opts);
-            const target = typeof params.ref === "string" && params.ref.length > 0
-              ? `element ${params.ref}`
+            const target = refValue !== undefined
+              ? `element ${refValue}`
               : `(${params.x}, ${params.y})`;
             const how = `${clicks > 1 ? `${clicks}× ` : ""}${button}`;
             return honestyResult(`Clicked ${target} (${how}).`, meta, { button, clicks });
@@ -835,10 +812,8 @@ export function createHyprlandExtension(
               typeof params.x !== "number" || typeof params.y !== "number"
               || typeof params.x2 !== "number" || typeof params.y2 !== "number"
             ) {
-              throw new GhostError(
-                "invalid_format",
+              throw invalidFormat(
                 'action "drag" needs x, y (the start) and x2, y2 (the release).',
-                { action: params.action },
               );
             }
             const button: MouseButton = params.button ?? "left";
@@ -851,7 +826,7 @@ export function createHyprlandExtension(
                 y2: params.y2,
                 coordinate_space: params.coordinate_space ?? "screen",
                 ...(button !== "left" ? { button } : {}),
-                ...(params.target ? { app: params.target } : {}),
+                ...appArg,
               },
               opts,
             );
@@ -867,16 +842,14 @@ export function createHyprlandExtension(
             const deltaY = typeof params.delta_y === "number" ? params.delta_y : 0;
             const deltaX = typeof params.delta_x === "number" ? params.delta_x : 0;
             if (deltaY === 0 && deltaX === 0) {
-              throw new GhostError(
-                "invalid_format",
+              throw invalidFormat(
                 'action "scroll" needs a non-zero delta_y (or delta_x).',
-                { action: params.action },
               );
             }
             const args: Record<string, unknown> = {
               delta_y: deltaY,
               delta_x: deltaX,
-              ...(params.target ? { app: params.target } : {}),
+              ...appArg,
             };
             if (typeof params.x === "number" && typeof params.y === "number") {
               args["x"] = params.x;
@@ -894,11 +867,7 @@ export function createHyprlandExtension(
           case "mouse_move": {
             requireYdotool(hello);
             if (typeof params.x !== "number" || typeof params.y !== "number") {
-              throw new GhostError(
-                "invalid_format",
-                'action "mouse_move" needs both x and y.',
-                { action: params.action },
-              );
+              throw invalidFormat('action "mouse_move" needs both x and y.');
             }
             const meta = await helper.request<HonestyMetadata>(
               "mouse_move",
@@ -906,7 +875,7 @@ export function createHyprlandExtension(
                 x: params.x,
                 y: params.y,
                 coordinate_space: params.coordinate_space ?? "screen",
-                ...(params.target ? { app: params.target } : {}),
+                ...appArg,
               },
               opts,
             );

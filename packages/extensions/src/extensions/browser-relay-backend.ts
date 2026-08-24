@@ -172,6 +172,39 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/** A wire string, or the fallback when the field is missing or the wrong type. */
+function readString(value: unknown, fallback: string): string {
+  return typeof value === "string" ? value : fallback;
+}
+
+/** A non-empty wire string, or undefined — the shape optional fields want. */
+function readNonEmpty(value: unknown): string | undefined {
+  return typeof value === "string" && value !== "" ? value : undefined;
+}
+
+/** A wire number, or undefined. */
+function readNumber(value: unknown): number | undefined {
+  return typeof value === "number" ? value : undefined;
+}
+
+/**
+ * Map an array of wire records, dropping anything that is not an object or that
+ * the reader rejects (by returning undefined). Non-arrays read as empty.
+ */
+function mapRecords<T>(
+  value: unknown,
+  read: (raw: Record<string, unknown>) => T | undefined,
+): T[] {
+  if (!Array.isArray(value)) return [];
+  const out: T[] = [];
+  for (const raw of value) {
+    if (!isRecord(raw)) continue;
+    const entry = read(raw);
+    if (entry !== undefined) out.push(entry);
+  }
+  return out;
+}
+
 function malformed(op: RelayOp, detail: string): never {
   throw new GhostBrowserError(
     "browser_unavailable",
@@ -184,92 +217,70 @@ function malformed(op: RelayOp, detail: string): never {
 function readPage(op: RelayOp, value: unknown): PageSummary {
   if (!isRecord(value)) malformed(op, "no page");
   const url = value["url"];
-  const title = value["title"];
   if (typeof url !== "string") malformed(op, "the page has no url");
-  return { url, title: typeof title === "string" ? title : "" };
+  return { url, title: readString(value["title"], "") };
 }
 
 function readMatch(op: RelayOp, value: unknown, index: number): PageElementMatch {
   if (!isRecord(value)) malformed(op, `match ${index} is not an object`);
   const ref = value["ref"];
-  const tag = value["tag"];
   if (typeof ref !== "string" || ref === "") malformed(op, `match ${index} has no ref`);
-  const optional = (key: string): string | undefined => {
-    const raw = value[key];
-    return typeof raw === "string" && raw !== "" ? raw : undefined;
-  };
-  const role = optional("role");
-  const name = optional("name");
-  const href = optional("href");
-  const fieldValue = optional("value");
+  const role = readNonEmpty(value["role"]);
+  const name = readNonEmpty(value["name"]);
+  const href = readNonEmpty(value["href"]);
+  const fieldValue = readNonEmpty(value["value"]);
   return {
     ref,
-    tag: typeof tag === "string" ? tag : "",
+    tag: readString(value["tag"], ""),
     ...(role === undefined ? {} : { role }),
     ...(name === undefined ? {} : { name }),
     ...(href === undefined ? {} : { href }),
     ...(fieldValue === undefined ? {} : { value: fieldValue }),
-    text: typeof value["text"] === "string" ? (value["text"] as string) : "",
+    text: readString(value["text"], ""),
     visible: value["visible"] !== false,
     disabled: value["disabled"] === true,
   };
 }
 
 function readConsoleEntries(value: unknown): readonly ConsoleEntry[] {
-  if (!Array.isArray(value)) return [];
-  const out: ConsoleEntry[] = [];
-  for (const raw of value) {
-    if (!isRecord(raw)) continue;
-    const level = typeof raw["level"] === "string" ? (raw["level"] as string) : "log";
-    const text = typeof raw["text"] === "string" ? (raw["text"] as string) : "";
-    const url = typeof raw["url"] === "string" && raw["url"] !== "" ? (raw["url"] as string) : undefined;
-    const line = typeof raw["line"] === "number" ? (raw["line"] as number) : undefined;
-    out.push({
-      level,
-      text,
+  return mapRecords(value, (raw) => {
+    const url = readNonEmpty(raw["url"]);
+    const line = readNumber(raw["line"]);
+    return {
+      level: readString(raw["level"], "log"),
+      text: readString(raw["text"], ""),
       ...(url === undefined ? {} : { url }),
       ...(line === undefined ? {} : { line }),
-    });
-  }
-  return out;
+    };
+  });
 }
 
 function readNetworkEntries(value: unknown): readonly NetworkEntry[] {
-  if (!Array.isArray(value)) return [];
-  const out: NetworkEntry[] = [];
-  for (const raw of value) {
-    if (!isRecord(raw)) continue;
-    const method = typeof raw["method"] === "string" ? (raw["method"] as string) : "GET";
-    const url = typeof raw["url"] === "string" ? (raw["url"] as string) : "";
-    const status = typeof raw["status"] === "number" ? (raw["status"] as number) : undefined;
-    const type = typeof raw["type"] === "string" && raw["type"] !== "" ? (raw["type"] as string) : undefined;
-    const bodyBytes = typeof raw["bodyBytes"] === "number" ? (raw["bodyBytes"] as number) : undefined;
-    out.push({
-      method,
-      url,
+  return mapRecords(value, (raw) => {
+    const status = readNumber(raw["status"]);
+    const type = readNonEmpty(raw["type"]);
+    const bodyBytes = readNumber(raw["bodyBytes"]);
+    return {
+      method: readString(raw["method"], "GET"),
+      url: readString(raw["url"], ""),
       ...(status === undefined ? {} : { status }),
       ...(type === undefined ? {} : { type }),
       ...(bodyBytes === undefined ? {} : { bodyBytes }),
-    });
-  }
-  return out;
+    };
+  });
 }
 
 function readTabInfos(value: unknown): readonly BackendTabInfo[] {
-  if (!Array.isArray(value)) return [];
-  const out: BackendTabInfo[] = [];
-  for (const raw of value) {
-    if (!isRecord(raw)) continue;
-    const id = raw["id"];
-    if (typeof id !== "string" || id === "") continue;
-    out.push({
+  return mapRecords(value, (raw) => {
+    const id = readNonEmpty(raw["id"]);
+    if (id === undefined) return undefined;
+    return {
       id,
-      url: typeof raw["url"] === "string" ? (raw["url"] as string) : "",
-      title: typeof raw["title"] === "string" ? (raw["title"] as string) : "",
+      url: readString(raw["url"], ""),
+      title: readString(raw["title"], ""),
       active: raw["active"] === true,
-    });
-  }
-  return out;
+    };
+  });
 }
 
 // ------------------------------------------------------------------ the backend
@@ -377,8 +388,7 @@ export class RelayBrowserBackend implements GhostBrowserBackend {
   async read(options: BackendActionOptions): Promise<BackendReadResult> {
     const result = await this.#call("read", {}, options);
     const page = readPage("read", result["page"]);
-    const text = result["text"];
-    return { ...page, text: typeof text === "string" ? text : "" };
+    return { ...page, text: readString(result["text"], "") };
   }
 
   async find(
@@ -477,7 +487,7 @@ export class RelayBrowserBackend implements GhostBrowserBackend {
     const result = await this.#call("javascript", { code }, options);
     return {
       value: result["value"],
-      type: typeof result["type"] === "string" ? (result["type"] as string) : typeof result["value"],
+      type: readString(result["type"], typeof result["value"]),
     };
   }
 

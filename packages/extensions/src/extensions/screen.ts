@@ -617,24 +617,7 @@ export function createScreenExtension(
       ...({ concurrency: "exclusive" as const }),
       execute: async (_toolCallId, params, signal, _onUpdate, ctx) => {
         const home = resolveHome(options, ctx);
-
-        if (params.mode === "watch") {
-          const captures = await watchViaHelper({
-            helper,
-            home,
-            target: params.target ?? "screen",
-            window: params.window,
-            region: params.region,
-            output: params.output,
-            retention: options.retention,
-            frames: params.frames,
-            intervalMs: params.interval,
-            signal: signal ?? undefined,
-          });
-          return buildWatchResult(home, params, captures, hasVision(ctx.model));
-        }
-
-        const capture = await captureViaHelper({
+        const captureOptions: CaptureViaHelperOptions = {
           helper,
           home,
           target: params.target ?? "screen",
@@ -643,7 +626,18 @@ export function createScreenExtension(
           output: params.output,
           retention: options.retention,
           signal: signal ?? undefined,
-        });
+        };
+
+        if (params.mode === "watch") {
+          const captures = await watchViaHelper({
+            ...captureOptions,
+            frames: params.frames,
+            intervalMs: params.interval,
+          });
+          return buildWatchResult(home, params, captures, hasVision(ctx.model));
+        }
+
+        const capture = await captureViaHelper(captureOptions);
         const relative = home.relative(capture.path);
         const note = captureNote(capture.meta);
 

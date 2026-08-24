@@ -131,6 +131,11 @@ export function createBrowserScopeGate(
   };
 }
 
+/** `" — Title"` when the page has a title, else `""`. */
+function titleSuffix(title: string): string {
+  return title ? ` — ${title}` : "";
+}
+
 function describeMatch(match: PageElementMatch): string {
   const bits: string[] = [`${match.ref}  <${match.tag}>`];
   if (match.name) bits.push(JSON.stringify(match.name));
@@ -466,7 +471,7 @@ export function createBrowserExtension(
             });
             return textResult(
               `Clicked ${params.ref ?? params.selector}. Now at ${page.url}`
-              + `${page.title ? ` — ${page.title}` : ""}`,
+              + titleSuffix(page.title),
               { action: "click", ...page },
             );
           }
@@ -540,7 +545,7 @@ export function createBrowserExtension(
             const page = await session.back(timeout);
             return textResult(
               page.moved
-                ? `Went back. Now at ${page.url}${page.title ? ` — ${page.title}` : ""}`
+                ? `Went back. Now at ${page.url}${titleSuffix(page.title)}`
                 : `There was nothing to go back to; still at ${page.url}`,
               { action: "back", ...page },
             );
@@ -550,7 +555,7 @@ export function createBrowserExtension(
             const page = await session.forward(timeout);
             return textResult(
               page.moved
-                ? `Went forward. Now at ${page.url}${page.title ? ` — ${page.title}` : ""}`
+                ? `Went forward. Now at ${page.url}${titleSuffix(page.title)}`
                 : `There was nothing to go forward to; still at ${page.url}`,
               { action: "forward", ...page },
             );
