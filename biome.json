@@ -11,7 +11,8 @@
       "**",
       "!.agents",
       "!packages/shell/qml/**/*.js",
-      "!skills-lock.json"
+      "!skills-lock.json",
+      "!vendor"
     ]
   },
   "formatter": {

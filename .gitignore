@@ -8,6 +8,10 @@ dist/
 !.env.example
 !.dev.vars.example
 
+# Vendored upstream packages ship prebuilt type declarations; they are source
+# here, not build output. See vendor/pi-catalog/GHOST-VENDOR.md.
+!vendor/*/dist/
+
 # Machine-local Quickshell per-run symlink (points into /run/user VFS)
 packages/shell/qml/.qmlls.ini
 # Python bytecode (tray helper)

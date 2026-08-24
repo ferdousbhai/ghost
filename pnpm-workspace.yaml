@@ -1,2 +1,9 @@
 packages:
   - packages/*
+  - vendor/pi-catalog
+
+# Every consumer of the model catalog (pi-coding-agent, pi-ai, pi-agent-core, and
+# ghost's own packages) resolves the in-tree vendored copy. See issue #3 and
+# vendor/pi-catalog/GHOST-VENDOR.md.
+overrides:
+  "@oh-my-pi/pi-catalog": "workspace:*"

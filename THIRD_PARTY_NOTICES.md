@@ -36,6 +36,12 @@ steering/follow-up, fallback chains, and session-tree branching—were
 implemented against modern Oh My Pi commit
 `160ed439ac0df594347e7d7018b813a7ffdb5e81` and the pinned 18.0.3 packages.
 
+`@oh-my-pi/pi-catalog` 18.0.3 is additionally **vendored in-tree** at
+[`vendor/pi-catalog`](vendor/pi-catalog), with its upstream `LICENSE` and
+`THIRD-PARTY-NOTICES.txt` preserved verbatim. The only change to upstream sources
+is a provider tree-shake of `src/models.json`; see
+[`vendor/pi-catalog/GHOST-VENDOR.md`](vendor/pi-catalog/GHOST-VENDOR.md).
+
 MIT License
 
 Copyright (c) 2025 Mario Zechner
