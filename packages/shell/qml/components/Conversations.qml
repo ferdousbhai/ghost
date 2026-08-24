@@ -52,20 +52,6 @@ Item {
             : "New conversation";
     }
 
-    // Compact "when": a relative age from updatedAt (or createdAt), for the dim
-    // right-hand hint. Empty when we have no timestamp to show.
-    function whenOf(session: var): string {
-        const stamp = session ? (session.updatedAt || session.createdAt || "") : "";
-        if (stamp === "") return "";
-        const then = Date.parse(stamp);
-        if (isNaN(then)) return "";
-        const secs = Math.max(0, Math.floor((Date.now() - then) / 1000));
-        if (secs < 60) return "now";
-        if (secs < 3600) return Math.floor(secs / 60) + "m";
-        if (secs < 86400) return Math.floor(secs / 3600) + "h";
-        return Math.floor(secs / 86400) + "d";
-    }
-
     // Case-insensitive substring match against what the row actually shows, so
     // the "New conversation" fallback title is searchable too.
     function matches(session: var): bool {
@@ -108,11 +94,11 @@ Item {
                 ColorAnimation { duration: Theme.durFast }
             }
 
-            // One line per conversation: the title takes every pixel the row
-            // can spare and elides, and the right-hand slot is shared — the age
-            // at rest, the pin and close on hover — so nothing reflows as the
-            // pointer crosses a row and the sidebar stays a list, not a stack
-            // of two-line blocks.
+            // One line per conversation, and the whole line is the title: no
+            // age, no badge, nothing standing between a name and the edge of
+            // the sidebar. The pin and close only take their width while the
+            // pointer is on the row, and take it back smoothly, so a title
+            // gives up its tail to them and gets it back on the way out.
             Item {
                 z: 1
                 anchors.fill: parent
@@ -136,26 +122,21 @@ Item {
                 Item {
                     id: actions
 
-                    // Two 16px glyphs and the gap between them. The age is
-                    // narrower and rides the same slot, right-aligned.
                     readonly property bool showActions: (entryArea.containsMouse
                         || pinArea.containsMouse || deleteArea.containsMouse
                         || entry.deleting)
 
                     anchors.right: parent.right
                     anchors.verticalCenter: parent.verticalCenter
-                    width: 16 * 2 + Theme.gap / 2
+                    // Two 16px glyphs and the gap between them, claimed on
+                    // hover and given back on the way out.
+                    width: actions.showActions ? 16 * 2 + Theme.gap / 2 : 0
                     height: Theme.controlHeight
+                    clip: true
 
-                    Text {
-                        id: when
-                        anchors.right: parent.right
-                        anchors.verticalCenter: parent.verticalCenter
-                        visible: !actions.showActions
-                        text: root.whenOf(entry.modelData)
-                        color: Theme.foregroundFaint
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSizeSmall
+                    Behavior on width {
+                        enabled: !Theme.reducedMotion
+                        NumberAnimation { duration: Theme.durFast; easing.type: Easing.OutCubic }
                     }
 
                     Rectangle {
