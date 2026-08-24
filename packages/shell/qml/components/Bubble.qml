@@ -36,6 +36,9 @@ Item {
     /** Position in the transcript model; gates entrances to freshly arrived rows. */
     required property int rowIndex
 
+    /** The branch glyph was clicked. The HUD decides what it costs. */
+    signal branchRequested(string entryId)
+
     readonly property bool mine: root.speaker === "user"
     readonly property int contentInset: root.mine ? 12 : 0
 
@@ -174,6 +177,10 @@ Item {
                     id: branchAction
 
                     visible: root.mine && root.sourceEntryId !== ""
+                    // A running turn owns the session tree. Dimmed rather than
+                    // hidden: the click still answers, in the line above the
+                    // composer, instead of vanishing under the pointer.
+                    opacity: Ghostd.streaming ? 0.4 : 1
                     width: 16
                     height: 16
                     Accessible.role: Accessible.Button
@@ -192,7 +199,10 @@ Item {
                         anchors.margins: -Theme.gap / 2
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
-                        onClicked: Ghostd.branchFrom(root.sourceEntryId)
+                        // The HUD owns what happens next: rewinding hands this
+                        // message's text back to the composer, which may already
+                        // hold something worth asking about first.
+                        onClicked: root.branchRequested(root.sourceEntryId)
                     }
                 }
 

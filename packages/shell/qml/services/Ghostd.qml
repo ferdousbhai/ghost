@@ -77,6 +77,10 @@ Singleton {
     property string sessionsError: ""
     /** Conversation currently being deleted, or "" when idle. */
     property string deletingSessionId: ""
+    /** Why the last branch action refused, or "". Kept apart from
+        `sessionsError`: that one renders in the conversation list, and a branch
+        is asked for from a message, half a window away from it. */
+    property string branchError: ""
 
     // ---- Greeting ---------------------------------------------------------
     // The ghost's opening line for an empty chat. Pure upside: the HUD paints
@@ -458,6 +462,7 @@ Singleton {
         root.followUpQueue = [];
         root.queueSubmitting = false;
         root.queueError = "";
+        root.branchError = "";
     }
 
     // ---- Greeting ---------------------------------------------------------
@@ -766,7 +771,13 @@ Singleton {
     function branchFrom(entryId: string): void {
         const ghost = root.activeGhost;
         const sessionId = root.currentSessionId;
-        if (root.streaming || ghost === "" || sessionId === "" || entryId === "") return;
+        if (ghost === "" || sessionId === "" || entryId === "") return;
+        // A running turn owns the tree. Say so rather than swallowing the click.
+        if (root.streaming) {
+            root.branchError = "Wait for this answer to finish before branching.";
+            return;
+        }
+        root.branchError = "";
         const xhr = new XMLHttpRequest();
         root.branchRequest = xhr;
         xhr.onreadystatechange = function () {
@@ -776,13 +787,13 @@ Singleton {
                     const body = JSON.parse(xhr.responseText);
                     root.rehydrate(body.transcript && Array.isArray(body.transcript.messages)
                         ? body.transcript.messages : []);
-                    root.sessionsError = "";
+                    root.branchError = "";
                     root.branchDraftReady(typeof body.draft === "string" ? body.draft : "");
                 } catch (error) {
-                    root.sessionsError = "ghostd sent malformed branch state";
+                    root.branchError = "ghostd sent malformed branch state";
                 }
             } else {
-                root.sessionsError = root.describeError(xhr, "branch conversation");
+                root.branchError = root.describeError(xhr, "branch conversation");
             }
         };
         root.dispatch(xhr, "POST", "/api/ghosts/" + encodeURIComponent(ghost)
@@ -795,7 +806,12 @@ Singleton {
     function navigateBranch(targetId: string): void {
         const ghost = root.activeGhost;
         const sessionId = root.currentSessionId;
-        if (root.streaming || ghost === "" || sessionId === "" || targetId === "") return;
+        if (ghost === "" || sessionId === "" || targetId === "") return;
+        if (root.streaming) {
+            root.branchError = "Wait for this answer to finish before changing branches.";
+            return;
+        }
+        root.branchError = "";
         const xhr = new XMLHttpRequest();
         root.branchRequest = xhr;
         xhr.onreadystatechange = function () {
@@ -805,12 +821,12 @@ Singleton {
                     const body = JSON.parse(xhr.responseText);
                     root.rehydrate(body.transcript && Array.isArray(body.transcript.messages)
                         ? body.transcript.messages : []);
-                    root.sessionsError = "";
+                    root.branchError = "";
                 } catch (error) {
-                    root.sessionsError = "ghostd sent malformed branch state";
+                    root.branchError = "ghostd sent malformed branch state";
                 }
             } else {
-                root.sessionsError = root.describeError(xhr, "navigate branch");
+                root.branchError = root.describeError(xhr, "navigate branch");
             }
         };
         root.dispatch(xhr, "POST", "/api/ghosts/" + encodeURIComponent(ghost)
