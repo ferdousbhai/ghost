@@ -5,7 +5,7 @@ Omarchy-native desktop surfaces for `ghostd`, built with
 
 The chat HUD is a normal application window — a Quickshell `FloatingWindow`
 (xdg-toplevel), app-id `ghost` — so Hyprland tiles it, resizes it, and moves it
-between workspaces with its own binds, exactly like any app. `SUPER+G` is
+between workspaces with its own binds, exactly like any app. `SUPER+CTRL+G` is
 launch-or-focus, not an overlay toggle. The persistent chrome around it stays in
 the layer/tray world: the bar widget is a wlr-layer surface and the tray icon is
 a StatusNotifierItem, both alive for as long as the shell runs and wearing
@@ -51,7 +51,7 @@ is a real xdg-toplevel: `hyprctl clients` lists it, the WM tiles and resizes it,
 and `SHIFT+SUPER+<n>` moves it between workspaces — no custom screen-move code.
 Its app-id is set process-wide by `//@ pragma AppId ghost` (an *instance*
 pragma, so it must live in `shell.qml`), which is the class Hyprland exposes for
-`windowrule`s. `SUPER+G` (`toggle`) is launch-or-focus: reveal+focus when hidden
+`windowrule`s. `SUPER+CTRL+G` (`toggle`) is launch-or-focus: reveal+focus when hidden
 or unfocused, hide only when already focused. It replaced an earlier layer-shell
 HUD whose `HyprlandFocusGrab` and custom `moveNext` monitor-move IPC existed only
 because a layer surface is invisible to the WM's own window binds.

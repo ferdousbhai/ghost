@@ -40,14 +40,14 @@ qs -p qml/shell.qml kill
   layout like any app. The HUD uses a neutral reading canvas with the current
   Omarchy accent and semantic status colours. Roster on the
   left (`casper`, `moaning-myrtle`, `+ new ghost`), transcript in the middle,
-  composer at the bottom. `SUPER+G` is launch-or-focus: reveal+focus when
+  composer at the bottom. `SUPER+CTRL+G` is launch-or-focus: reveal+focus when
   hidden/unfocused, hide only when already focused.
 - On `ask`: the spectral summoning orb, then a `read_memory` lifecycle card,
   then the reply arriving word by word with `**bold**` rendered as bold.
 - With the HUD closed, a finished turn raises a `notify-send` notification
   instead.
 - `Esc` cancels a running turn (nothing when idle — a normal window is not
-  dismissed with Esc; use `SUPER+G` or the tray).
+  dismissed with Esc; use `SUPER+CTRL+G` or the tray).
 - `hyprctl clients -j` lists it as a real toplevel with `class: "ghost"` — it is
   NOT in `hyprctl layers`. `SHIFT+SUPER+<n>` moves it between workspaces.
 

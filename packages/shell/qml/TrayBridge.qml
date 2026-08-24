@@ -12,7 +12,7 @@ pragma ComponentBehavior: Bound
 // reaps it when the shell exits, so the tray icon is present exactly when the
 // shell is running — no watcher, no stale icon. State flows one way down the
 // helper's stdin (a JSON line whenever Ghostd/Theme change) and intents flow
-// the other way up its stdout, where they become the same calls SUPER+G or a
+// the other way up its stdout, where they become the same calls SUPER+CTRL+G or a
 // menu click would make. The helper never talks to ghostd; all ghost state
 // stays in the one Ghostd singleton the HUD already drives.
 import Quickshell

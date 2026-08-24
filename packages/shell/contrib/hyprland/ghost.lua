@@ -9,13 +9,11 @@
 -- is what `omarchy menu keybindings` shows, so give it a real one.
 
 -- ---- Summon (launch-or-focus) ---------------------------------------------
--- The chat HUD is a normal toplevel window (app-id `ghost`), so SUPER+G is
+-- The chat HUD is a normal toplevel window (app-id `ghost`), so SUPER+CTRL+G is
 -- launch-or-focus: it reveals and focuses the window (pulling it to the front
 -- if already open elsewhere) and hides it only when it is already focused.
--- Omarchy binds SUPER+G to window grouping by default, so remove that binding
--- before assigning the key to Ghost.
-hl.unbind("SUPER + G")
-o.bind("SUPER + G", "Summon ghost", "ghost-launch toggle")
+-- Leave Omarchy's SUPER+G window-grouping shortcut intact.
+o.bind("SUPER + CTRL + G", "Summon ghost", "ghost-launch toggle")
 
 -- Summon a named ghost directly.
 -- o.bind("SUPER + SHIFT + G", "Summon casper", "qs -c ghost ipc call ghost summon casper")

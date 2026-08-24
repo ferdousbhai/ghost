@@ -25,7 +25,7 @@ pragma ComponentBehavior: Bound
 //
 // Summon is launch-or-focus, not overlay-toggle: `open`/`summon` reveal the
 // window and focus it (Hyprland auto-focuses a freshly mapped toplevel, and
-// `focuswindow` handles the already-open case); the SUPER+G `toggle` hides it
+// `focuswindow` handles the already-open case); the SUPER+CTRL+G `toggle` hides it
 // only when it is already the focused window, otherwise it reveals+focuses.
 import Quickshell
 import Quickshell.Hyprland
@@ -109,7 +109,7 @@ FloatingWindow {
     }
 
     /**
-     * Launch-or-focus on a single bind (SUPER+G). Reveal+focus when hidden or
+     * Launch-or-focus on a single bind (SUPER+CTRL+G). Reveal+focus when hidden or
      * when open but not the focused window; hide only when it is already the
      * focused window. Hyprland's own move/tile/workspace binds handle placement,
      * so there is no screen-move code here — the WM owns it.
@@ -163,7 +163,7 @@ FloatingWindow {
 
         focus: true
         // Esc-to-close is unusual for a normal app window, so Esc only cancels a
-        // running turn; dismiss with SUPER+G or the tray. Left unhandled when
+        // running turn; dismiss with SUPER+CTRL+G or the tray. Left unhandled when
         // idle so it never swallows a compositor bind.
         Keys.onEscapePressed: event => {
             event.accepted = Ghostd.streaming;

@@ -33,17 +33,15 @@ Omarchy 4 configures Hyprland in Lua. Append the binding lines from
 `~/.config/hypr/looknfeel.lua`:
 
 ```lua
-hl.unbind("SUPER + G")
-o.bind("SUPER + G", "Summon ghost", "ghost-launch toggle")
+o.bind("SUPER + CTRL + G", "Summon ghost", "ghost-launch toggle")
 hl.layer_rule({ match = { namespace = "^ghost-" }, no_anim = true, animation = "none" })
 ```
 
-Omarchy normally uses `SUPER+G` for window grouping. The explicit unbind is
-required before Ghost can own the shortcut.
+This deliberately leaves Omarchy's `SUPER+G` window-grouping shortcut intact.
 
 On a plain (non-Omarchy) Hyprland, `source` `hyprland/ghost.conf` instead.
 
-`SUPER+G` is **launch-or-focus**: the chat HUD is a normal toplevel window
+`SUPER+CTRL+G` is **launch-or-focus**: the chat HUD is a normal toplevel window
 (app-id `ghost`), so the key reveals and focuses it, pulls it to the front if it
 is already open on another workspace, and hides it only when it is already the
 focused window. Because it is a real window, Hyprland's own binds move it —
