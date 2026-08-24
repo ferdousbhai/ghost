@@ -162,10 +162,12 @@ Item {
                 }
             }
 
-            // Settled messages keep their actions quiet and icon-sized. User
-            // prompts can branch; every message with body text can be copied.
+            // Settled messages keep their actions quiet and icon-sized. Human
+            // prompts can branch; ghost replies can be copied.
             Row {
                 visible: !root.busy && root.body !== ""
+                    && (!root.mine || root.sourceEntryId !== ""
+                        || Boolean(root.branchNavigation && root.branchNavigation.count > 1))
                 spacing: Theme.gap
 
                 Item {
@@ -195,7 +197,8 @@ Item {
                 }
 
                 Text {
-                    visible: Boolean(root.branchNavigation && root.branchNavigation.count > 1)
+                    visible: root.mine
+                        && Boolean(root.branchNavigation && root.branchNavigation.count > 1)
                     text: root.branchNavigation && root.branchNavigation.previousTargetId ? "‹" : "·"
                     color: root.branchNavigation && root.branchNavigation.previousTargetId
                         ? Theme.ghostAmber : Theme.foregroundDim
@@ -211,7 +214,8 @@ Item {
                 }
 
                 Text {
-                    visible: Boolean(root.branchNavigation && root.branchNavigation.count > 1)
+                    visible: root.mine
+                        && Boolean(root.branchNavigation && root.branchNavigation.count > 1)
                     text: root.branchNavigation
                         ? (root.branchNavigation.index + 1) + "/" + root.branchNavigation.count : ""
                     color: Theme.foregroundDim
@@ -220,7 +224,8 @@ Item {
                 }
 
                 Text {
-                    visible: Boolean(root.branchNavigation && root.branchNavigation.count > 1)
+                    visible: root.mine
+                        && Boolean(root.branchNavigation && root.branchNavigation.count > 1)
                     text: root.branchNavigation && root.branchNavigation.nextTargetId ? "›" : "·"
                     color: root.branchNavigation && root.branchNavigation.nextTargetId
                         ? Theme.ghostAmber : Theme.foregroundDim
@@ -238,6 +243,7 @@ Item {
                 Item {
                     id: copyAction
 
+                    visible: !root.mine
                     width: 16
                     height: 16
                     Accessible.role: Accessible.Button
