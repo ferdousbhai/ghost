@@ -100,6 +100,57 @@ describe("GhostRegistry.create", () => {
   });
 });
 
+describe("GhostRegistry.trash", () => {
+  it("moves the home into .trash and takes the ghost out of the listing", () => {
+    temp = makeTempGhosts();
+    const dir = seedGhost(temp.root, { name: "casper" });
+    seedGhost(temp.root, { name: "mina" });
+    writeFileSync(join(dir, "memory", "keepsake.md"), "remember this\n", "utf8");
+
+    const { trash } = temp.registry.trash("casper");
+
+    expect(existsSync(dir)).toBe(false);
+    expect(trash.startsWith(join(temp.root, ".trash"))).toBe(true);
+    expect(trash).toMatch(/casper-\d{8}-\d{6}$/);
+    // A move, never an rm: everything the ghost owned is still on disk.
+    expect(readFileSync(join(trash, "memory", "keepsake.md"), "utf8")).toBe("remember this\n");
+    expect(isGhostHome(trash)).toBe(true);
+    expect(temp.registry.list().map((ghost) => ghost.name)).toEqual(["mina"]);
+  });
+
+  it("suffixes a collision rather than overwriting an earlier copy", () => {
+    temp = makeTempGhosts();
+    const stamp = new Date(2026, 7, 24, 15, 30, 0);
+    seedGhost(temp.root, { name: "casper" });
+    const first = temp.registry.trash("casper", stamp);
+    seedGhost(temp.root, { name: "casper" });
+    const second = temp.registry.trash("casper", stamp);
+
+    expect(first.trash).toBe(join(temp.root, ".trash", "casper-20260824-153000"));
+    expect(second.trash).toBe(join(temp.root, ".trash", "casper-20260824-153000-2"));
+    expect(existsSync(first.trash)).toBe(true);
+  });
+
+  it("refuses an unknown ghost and a name that would escape the root", () => {
+    temp = makeTempGhosts();
+    temp.registry.ensureRoot();
+    try {
+      temp.registry.trash("nobody");
+      expect.unreachable("trash should have thrown");
+    } catch (error) {
+      expect((error as GhostError).code).toBe("not_found");
+      expect((error as GhostError).status).toBe(404);
+    }
+    try {
+      temp.registry.trash("../escape");
+      expect.unreachable("trash should have thrown");
+    } catch (error) {
+      expect((error as GhostError).code).toBe("invalid_name");
+      expect((error as GhostError).status).toBe(400);
+    }
+  });
+});
+
 describe("GhostRegistry.get", () => {
   it("throws a 404-shaped error for an unknown ghost", () => {
     temp = makeTempGhosts();

@@ -830,6 +830,61 @@ describe("session listing", () => {
   });
 });
 
+describe("SessionHost.deleteGhost", () => {
+  it("closes the ghost's conversations and moves the whole home into the trash", async () => {
+    const { dir } = await setup([{ kind: "text", text: "hello" }]);
+    await host!.runTurn("casper", { sessionId: "conv-1", prompt: "one", emit: () => {} });
+    const transcript = sessionFileNameFor("conv-1");
+    expect(existsSync(join(ghostPaths(dir).sessionDir, transcript))).toBe(true);
+
+    const { trash } = await host!.deleteGhost("casper");
+
+    expect(existsSync(dir)).toBe(false);
+    expect(temp!.registry.list()).toEqual([]);
+    // The conversation moved with the ghost; nothing was erased.
+    expect(existsSync(join(ghostPaths(trash).sessionDir, transcript))).toBe(true);
+    expect(existsSync(ghostPaths(trash).characterFile)).toBe(true);
+    await expect(host!.listSessions("casper")).rejects.toMatchObject({
+      code: "not_found",
+      status: 404,
+    });
+  });
+
+  it("refuses while one of the ghost's conversations is answering", async () => {
+    await setup([{ kind: "text", text: "hello" }]);
+    const turn = host!.runTurn("casper", {
+      sessionId: "conv-busy",
+      prompt: "one",
+      emit: () => {},
+    });
+    await expect(host!.deleteGhost("casper")).rejects.toMatchObject({
+      code: "ghost_busy",
+      status: 409,
+    });
+    await turn;
+    await expect(host!.deleteGhost("casper")).resolves.toMatchObject({
+      trash: expect.stringContaining("casper-"),
+    });
+  });
+
+  it("leaves other ghosts alone and refuses an unknown one", async () => {
+    await setup([{ kind: "text", text: "hello" }]);
+    const mina = seedGhost(temp!.root, {
+      name: "mina",
+      provider: { baseUrl: provider!.url, modelId: provider!.modelId },
+    });
+
+    await host!.deleteGhost("casper");
+    expect(temp!.registry.list().map((ghost) => ghost.name)).toEqual(["mina"]);
+    expect(existsSync(mina)).toBe(true);
+
+    await expect(host!.deleteGhost("casper")).rejects.toMatchObject({
+      code: "not_found",
+      status: 404,
+    });
+  });
+});
+
 describe("pinned conversations", () => {
   /** Two conversations, `older` first, so ordering is unambiguous. */
   async function twoConversations() {

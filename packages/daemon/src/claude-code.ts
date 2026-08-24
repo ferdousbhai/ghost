@@ -658,6 +658,11 @@ function runQueryEffect(input: {
   }));
 }
 
+/** The ghost half of a `JSON.stringify([ghostName, conversationId])` key. */
+function runtimeKeyGhost(key: string): string {
+  return (JSON.parse(key) as [string, string])[0];
+}
+
 export class ClaudeCodeRuntime {
   private readonly logger: Logger;
   private readonly extensionOptions: GhostExtensionOptions;
@@ -687,6 +692,14 @@ export class ClaudeCodeRuntime {
 
   isBusy(ghostName: string, conversationId: string): boolean {
     return this.busy.has(JSON.stringify([ghostName, conversationId]));
+  }
+
+  /** True while ANY conversation of this ghost is mid-turn. */
+  isGhostBusy(ghostName: string): boolean {
+    for (const key of this.busy) {
+      if (runtimeKeyGhost(key) === ghostName) return true;
+    }
+    return false;
   }
 
   async runTurn(
@@ -898,6 +911,15 @@ export class ClaudeCodeRuntime {
       result.push(parseMetadata(path, await readFile(path, "utf8")));
     }
     return result.sort((a, b) => b.modified.localeCompare(a.modified));
+  }
+
+  /** Close every live query of one ghost, across its conversations. */
+  async closeGhost(ghostName: string): Promise<void> {
+    for (const key of [...this.active.keys()]) {
+      const [keyGhost, conversationId] = JSON.parse(key) as [string, string];
+      if (keyGhost !== ghostName) continue;
+      await this.close(ghostName, conversationId);
+    }
   }
 
   async close(ghostName: string, conversationId: string): Promise<void> {

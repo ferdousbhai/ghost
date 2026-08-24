@@ -28,6 +28,18 @@ catalog) is derived per session and never stored.
                                notIncluded
 ```
 
+One directory beside the ghosts, not inside one:
+
+```
+~/Ghosts/.trash/<name>-<YYYYMMDD-HHMMSS>[-<n>]/   a deleted ghost home, moved
+                                                  whole; `-<n>` on collision
+```
+
+Deleting a ghost renames its home into `.trash/`. Nothing removes a trashed
+ghost — not the daemon, not on a schedule; emptying it is the owner's `rm`.
+Ghost listing skips dot-directories, so a trashed ghost is gone from the API
+and comes back with a plain `mv`.
+
 Terminology: **visitors**, never "callers".
 
 ### Creator and visitor capability boundary
@@ -117,6 +129,16 @@ one must not be a leak of both.
 - `GET  /api/ghosts` → `[{ name, dir, createdAt }]`
 - `POST /api/ghosts` `{ name }` → creates `~/Ghosts/<name>/` with a seeded
   `character.md`
+- `DELETE /api/ghosts/:name?confirm=<name>` → `{ ok: true, trash: "<abs path>" }`
+  — moves `<root>/<name>/` to `<root>/.trash/<name>-<stamp>/`. Checked in this
+  order: `confirm` must be present and byte-equal to `:name`
+  (`400 confirmation_required`); an unknown ghost is `404 not_found`; a ghost
+  with any conversation busy, opening, or mid-delete — pi or Claude Code — is
+  `409 ghost_busy`, as is a second concurrent delete of the same ghost. Idle
+  hosted sessions are closed (disposed, not deleted) and pending
+  title/compaction work is awaited first. **Deletion is a move, never an `rm`**:
+  the ghost home holds the only copy of a persona, its memory, and its notes, so
+  nothing follows the rename with a recursive removal. Recovery is a plain `mv`.
 - `POST /api/ghosts/:name/messages` — the **pi-messages wire protocol** over
   OMP's `AgentSession` (request `{ model, context, options }` → SSE stream).
   The pinned client in the summon-ghost repo is the normative spec

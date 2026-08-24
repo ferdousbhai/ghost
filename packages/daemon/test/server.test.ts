@@ -448,6 +448,81 @@ describe("DELETE /api/ghosts/:name/sessions/:id", () => {
   });
 });
 
+describe("DELETE /api/ghosts/:name", () => {
+  it("moves the ghost home into .trash once the name is confirmed", async () => {
+    const base = await serve();
+    await postTurn(base, TURN_BODY);
+    const dir = join(temp!.root, "casper");
+
+    const deleted = await fetch(`${base}/api/ghosts/casper?confirm=casper`, { method: "DELETE" });
+    expect(deleted.status).toBe(200);
+    const body = await deleted.json() as { ok: boolean; trash: string };
+    expect(body.ok).toBe(true);
+    expect(body.trash).toMatch(/casper-\d{8}-\d{6}$/);
+    // A move, never an rm: the persona is still readable where it went.
+    expect(existsSync(dir)).toBe(false);
+    expect(existsSync(join(body.trash, "character.md"))).toBe(true);
+
+    expect(await (await fetch(`${base}/api/ghosts`)).json()).toEqual([]);
+  });
+
+  it("refuses a missing or mismatched confirmation without touching the home", async () => {
+    const base = await serve();
+    const dir = join(temp!.root, "casper");
+
+    for (const path of ["/api/ghosts/casper", "/api/ghosts/casper?confirm=Casper"]) {
+      const response = await fetch(`${base}${path}`, { method: "DELETE" });
+      expect(response.status, path).toBe(400);
+      expect(await response.json(), path)
+        .toMatchObject({ error: { code: "confirmation_required" } });
+    }
+    expect(existsSync(dir)).toBe(true);
+  });
+
+  it("404s an unknown ghost", async () => {
+    const base = await serve();
+    const response = await fetch(`${base}/api/ghosts/nobody?confirm=nobody`, { method: "DELETE" });
+    expect(response.status).toBe(404);
+    expect(await response.json()).toMatchObject({ error: { code: "not_found" } });
+  });
+
+  it("409s while any of the ghost's conversations is answering", async () => {
+    // A blocking `ask` holds the turn open, so "busy" is a state the test owns
+    // rather than a race it has to win.
+    const base = await serve([
+      {
+        kind: "tool",
+        name: "ask",
+        args: {
+          questions: [{
+            id: "paper",
+            question: "Which paper stock?",
+            options: [{ label: "Cream" }, { label: "White" }],
+          }],
+        },
+      },
+      { kind: "text", text: "Cream stock selected." },
+    ]);
+    const turn = postTurn(base, { ...TURN_BODY, options: { sessionId: "conv-ask" } });
+    const ask = await waitForAsk(base, "conv-ask");
+
+    const busy = await fetch(`${base}/api/ghosts/casper?confirm=casper`, { method: "DELETE" });
+    expect(busy.status).toBe(409);
+    expect(await busy.json()).toMatchObject({ error: { code: "ghost_busy" } });
+    expect(existsSync(join(temp!.root, "casper"))).toBe(true);
+
+    await fetch(`${base}/api/ghosts/casper/sessions/conv-ask/ask`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ askId: ask.id, kind: "cancel" }),
+    });
+    await turn;
+
+    const deleted = await fetch(`${base}/api/ghosts/casper?confirm=casper`, { method: "DELETE" });
+    expect(deleted.status).toBe(200);
+  });
+});
+
 describe("GET /api/ghosts/:name/sessions/:id/transcript", () => {
   it("returns the conversation's renderable messages", async () => {
     const base = await serve([{ kind: "text", text: "I set type for a living." }]);

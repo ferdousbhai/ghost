@@ -59,6 +59,10 @@ Singleton {
     property bool reachable: false
     /** Human-readable last failure, or "". */
     property string lastError: ""
+    /** Ghost currently being deleted, or "" when idle. */
+    property string deletingGhost: ""
+    /** Why the last ghost deletion was refused, or "". Presentable as-is. */
+    property string ghostDeleteError: ""
 
     // ---- Conversations ----------------------------------------------------
     // A ghost owns many conversations (pi sessions). The daemon persists them;
@@ -157,6 +161,7 @@ Singleton {
     // closure it installed on itself is eligible for collection mid-flight.
     property var request: null
     property var listRequest: null
+    property var deleteGhostRequest: null
     property var loginRequest: null
     property var modelRequest: null
     property var availRequest: null
@@ -360,6 +365,61 @@ Singleton {
         root.dispatch(xhr, "POST", "/api/ghosts",
             ({ "Content-Type": "application/json" }),
             JSON.stringify({ name: trimmed }));
+    }
+
+    /**
+     * Delete a ghost home. The daemon wants the name echoed back in `confirm`
+     * byte-for-byte and answers 400 confirmation_required otherwise, so the UI
+     * types it and we only carry it; the home is moved to ~/Ghosts/.trash/
+     * rather than unlinked, which is what makes this recoverable by hand.
+     *
+     * A refusal (409 ghost_busy, most often) leaves the selection untouched and
+     * lands in `ghostDeleteError` for the row that asked. One at a time: the
+     * confirmation is per row and a second in-flight delete would have no row.
+     */
+    function deleteGhost(name: string): void {
+        if (name === "" || root.deletingGhost !== "") return;
+        root.deletingGhost = name;
+        root.ghostDeleteError = "";
+        const xhr = new XMLHttpRequest();
+        root.deleteGhostRequest = xhr;
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || xhr !== root.deleteGhostRequest) return;
+            root.deletingGhost = "";
+            if (xhr.status === 200) {
+                root.ghostDeleteError = "";
+                root.forgetGhost(name);
+                // activeGhost is "" now if this was the active one, so the
+                // listing picks the next ghost the way the first one does.
+                root.refresh();
+            } else {
+                const detail = root.errorDetail(xhr);
+                root.ghostDeleteError = detail !== ""
+                    ? detail
+                    : root.describeError(xhr, "DELETE ghost");
+            }
+        };
+        root.dispatch(xhr, "DELETE", "/api/ghosts/" + encodeURIComponent(name)
+            + "?confirm=" + encodeURIComponent(name), ({}), null);
+    }
+
+    /** Drop every trace of a ghost that is no longer there. */
+    function forgetGhost(name: string): void {
+        delete root.sessionIds[name];
+        if (name !== root.activeGhost) return;
+        root.cancel();
+        root.activeGhost = "";
+        root.currentSessionId = "";
+        root.sessions = [];
+        root.sessionsError = "";
+        root.clearTranscript();
+        root.currentModel = null;
+        root.modelSource = "none";
+        root.availableModels = [];
+        root.modelRouting = [];
+        root.modelRoutingLoading = false;
+        root.modelWarning = "";
+        root.clearGreeting();
     }
 
     function selectGhost(name: string): void {
@@ -1659,19 +1719,26 @@ Singleton {
 
     // ---- Errors -----------------------------------------------------------
 
+    /** The daemon's own presentable message for a failure, or "". */
+    function errorDetail(xhr: var): string {
+        try {
+            const body = JSON.parse(xhr.responseText);
+            const detail = body.error && body.error.message
+                ? body.error.message
+                : (body.error || body.message || "");
+            return typeof detail === "string" ? detail : "";
+        } catch (error) {
+            return "";
+        }
+    }
+
     function describeError(xhr: var, what: string): string {
         if (xhr.status === 0) return "ghostd is not answering on " + root.baseUrl;
         // dispatch() already re-read the file and retried once, so a 401 that
         // reaches here means the token on disk is not the one ghostd wants.
         if (xhr.status === 401)
             return what + " → 401: ghostd rejected the API token in " + root.tokenPath;
-        let detail = "";
-        try {
-            const body = JSON.parse(xhr.responseText);
-            detail = body.error && body.error.message ? body.error.message : (body.error || "");
-        } catch (error) {
-            detail = "";
-        }
+        const detail = root.errorDetail(xhr);
         return what + " → " + xhr.status + (detail ? ": " + detail : "");
     }
 

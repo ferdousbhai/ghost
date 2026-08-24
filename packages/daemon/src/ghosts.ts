@@ -11,7 +11,15 @@
  * own ghost stays the plain files they wrote — the same precedent as
  * `memory/.visitors/`.
  */
-import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { join, resolve } from "node:path";
 
 /** One discovered ghost, as served by `GET /api/ghosts`. */
@@ -25,6 +33,13 @@ export interface Ghost {
 export const GHOST_SESSIONS_DIRNAME = ".sessions";
 export const GHOST_AGENT_DIRNAME = ".pi";
 export const GHOST_CHARACTER_FILENAME = "character.md";
+
+/**
+ * Where a deleted ghost goes, inside the ghosts root. A dot-directory, so
+ * `list()` skips it and a trashed ghost is gone from the API while its files
+ * are still on disk.
+ */
+export const GHOST_TRASH_DIRNAME = ".trash";
 
 /**
  * Ghost names are both URL path segments and directory names, so the
@@ -85,6 +100,13 @@ function isFile(path: string): boolean {
  */
 export function isGhostHome(dir: string): boolean {
   return isDirectory(dir) && isFile(join(dir, GHOST_CHARACTER_FILENAME));
+}
+
+/** `20260824-153000` — local time, sortable, and safe in a directory name. */
+function trashStamp(now: Date): string {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`
+    + `-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
 }
 
 function createdAtOf(dir: string): string {
@@ -249,5 +271,27 @@ export class GhostRegistry {
       flag: "wx",
     });
     return { name, dir, createdAt: createdAtOf(dir) };
+  }
+
+  /**
+   * Move `<root>/<name>/` to `<root>/.trash/<name>-<stamp>/` and return where it
+   * went.
+   *
+   * Deleting a ghost is a rename, never a recursive removal: the ghost home
+   * holds the only copy of a persona, its memory, and its notes, and no HTTP
+   * route may be one bug away from erasing that. `list()` skips dot-directories,
+   * so the ghost disappears from the API and a plain `mv` brings it back.
+   */
+  trash(name: string, now: Date = new Date()): { trash: string } {
+    const ghost = this.get(name);
+    const trashRoot = join(this.root, GHOST_TRASH_DIRNAME);
+    mkdirSync(trashRoot, { recursive: true });
+    const base = join(trashRoot, `${name}-${trashStamp(now)}`);
+    let target = base;
+    // The stamp has second resolution; a name deleted, re-created, and deleted
+    // again inside one second must not overwrite its own earlier copy.
+    for (let suffix = 2; existsSync(target); suffix += 1) target = `${base}-${suffix}`;
+    renameSync(ghost.dir, target);
+    return { trash: target };
   }
 }

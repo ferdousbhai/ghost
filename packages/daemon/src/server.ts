@@ -4,6 +4,7 @@
  *
  *   GET  /api/ghosts                  → [{ name, dir, createdAt }]
  *   POST /api/ghosts                  { name } → creates ~/Ghosts/<name>/
+ *   DELETE /api/ghosts/:name?confirm=<name> → moves the home into .trash/
  *   POST /api/ghosts/:name/messages   pi-messages request → SSE of pi-messages events
  *   POST /api/ghosts/:name/greeting   → { greeting, onboarding } — the empty-chat opener
  *   GET  /api/ghosts/:name/sessions   → { sessions } — conversation listing for that ghost
@@ -335,6 +336,32 @@ export function createDaemonServer(options: ServerOptions): Server {
     const ghost = options.registry.create(name);
     logger.info("ghost created", { ghost: ghost.name });
     jsonResponse(response, 201, ghost);
+  };
+
+  /**
+   * Trash one ghost. `?confirm=<name>` must repeat the name exactly: a DELETE
+   * is one path segment away from every other ghost route, and this is the
+   * API-level guard against an accidental or scripted one taking a persona,
+   * its memory, and its notes with it. The deletion itself is a move into
+   * `.trash/`, never an erase.
+   */
+  const handleDeleteGhost = async (
+    ghostName: string,
+    url: URL,
+    response: ServerResponse,
+  ): Promise<void> => {
+    if (url.searchParams.get("confirm") !== ghostName) {
+      errorResponse(
+        response,
+        400,
+        "confirmation_required",
+        `Deleting a ghost needs its name repeated: ?confirm=${encodeURIComponent(ghostName)}.`,
+      );
+      return;
+    }
+    const { trash } = await options.host.deleteGhost(ghostName);
+    logger.info("ghost deleted", { ghost: ghostName, trash });
+    jsonResponse(response, 200, { ok: true, trash });
   };
 
   const handleListSessions = async (
@@ -899,6 +926,9 @@ export function createDaemonServer(options: ServerOptions): Server {
           return;
         }
         const ghostName = decodePathSegment(segments[2] ?? "");
+        if (segments.length === 3 && method === "DELETE") {
+          return await handleDeleteGhost(ghostName, url, response);
+        }
         if (segments.length === 4 && segments[3] === "messages") {
           if (method !== "POST") {
             errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);

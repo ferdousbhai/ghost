@@ -396,6 +396,11 @@ export function sessionKeyOf(
   return JSON.stringify([ghostName, sessionId || DEFAULT_SESSION_KEY]);
 }
 
+/** The (ghost, conversation) halves back out of a `sessionKeyOf` key. */
+function sessionKeyParts(key: string): [string, string] {
+  return JSON.parse(key) as [string, string];
+}
+
 /**
  * Map a conversation id onto a session filename. Ids come from a client and
  * may contain anything; a hash suffix keeps two ids that sanitize alike from
@@ -563,6 +568,8 @@ export class SessionHost {
   private readonly opening = new Map<string, Promise<HostedSession>>();
   /** Conversation ids reserved by a destructive delete operation. */
   private readonly deleting = new Set<string>();
+  /** Ghost names reserved by an in-flight `deleteGhost`. */
+  private readonly deletingGhosts = new Set<string>();
   private disposed = false;
 
   constructor(options: SessionHostOptions) {
@@ -1985,6 +1992,59 @@ export class SessionHost {
     } finally {
       this.deleting.delete(key);
     }
+  }
+
+  /**
+   * Trash one whole ghost: close its conversations, then move its home aside.
+   *
+   * The move is the registry's (`trash`), and it is a move rather than a
+   * removal — the ghost home holds the only copy of a persona, its memory, and
+   * its notes. Nothing here follows up with a recursive delete.
+   */
+  async deleteGhost(ghostName: string): Promise<{ trash: string }> {
+    const ghost = this.registry.get(ghostName);
+    if (this.deletingGhosts.has(ghost.name) || this.ghostBusy(ghost.name)) {
+      throw new GhostError(
+        "ghost_busy",
+        "Wait for this ghost's conversations to finish before deleting it.",
+        409,
+      );
+    }
+
+    this.deletingGhosts.add(ghost.name);
+    try {
+      const hosted = [...this.sessions].filter(([key]) =>
+        sessionKeyParts(key)[0] === ghost.name);
+      // Title generation and compaction can still append to an otherwise-idle
+      // transcript. Let them settle before the home moves out from under them.
+      const background = hosted
+        .flatMap(([, entry]) => [entry.title, entry.compaction])
+        .filter((task): task is Promise<void> => task !== undefined);
+      if (background.length > 0) await Promise.allSettled(background);
+
+      for (const [key] of hosted) await this.closePi(ghost.name, sessionKeyParts(key)[1]);
+      await this.claudeCode.closeGhost(ghost.name);
+
+      const trashed = this.registry.trash(ghost.name);
+      // A ghost re-summoned under this name must not inherit the old one's
+      // opening line.
+      this.greetings.clear(ghost.name);
+      this.logger.info("trashed ghost", { ghost: ghost.name, trash: trashed.trash });
+      return trashed;
+    } finally {
+      this.deletingGhosts.delete(ghost.name);
+    }
+  }
+
+  /** True while any conversation of this ghost is busy, opening, or mid-delete. */
+  private ghostBusy(ghostName: string): boolean {
+    for (const [key, hosted] of this.sessions) {
+      if (hosted.busy && sessionKeyParts(key)[0] === ghostName) return true;
+    }
+    for (const key of [...this.opening.keys(), ...this.deleting]) {
+      if (sessionKeyParts(key)[0] === ghostName) return true;
+    }
+    return this.claudeCode.isGhostBusy(ghostName);
   }
 
   private async closePi(ghostName: string, sessionId?: string | null): Promise<void> {

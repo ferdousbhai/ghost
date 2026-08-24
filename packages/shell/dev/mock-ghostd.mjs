@@ -6,6 +6,7 @@
  * Implements:
  *   GET  /api/ghosts                          → [{ name, dir, createdAt }]
  *   POST /api/ghosts { name }                 → 201 + the new ghost
+ *   DELETE /api/ghosts/:name?confirm=:name    → 200 { ok, trash } | 400 | 404 | 409
  *   POST /api/ghosts/:name/messages           → pi-messages SSE (canned reply)
  *   POST /api/ghosts/:name/greeting           → { greeting, onboarding }, ~800ms late
  *   GET  /api/ghosts/:name/sessions           → { sessions: [...] }, newest first
@@ -223,6 +224,9 @@ function* script(name, prompt) {
     : { type: "done", reason: "stop", usage };
 }
 
+/** Ghosts with a turn in flight; a delete against one of these is 409 ghost_busy. */
+const answering = new Set();
+
 async function streamTurn(req, res, name, body) {
   const prompt = extractPrompt(body);
   const sessionId = body?.options?.sessionId;
@@ -236,11 +240,16 @@ async function streamTurn(req, res, name, body) {
   let closed = false;
   let assistantText = "";
   res.on("close", () => (closed = true));
-  for (const event of events) {
-    if (closed) return;
-    if (event.type === "text_end") assistantText = event.content;
-    res.write(`data: ${JSON.stringify(event)}\n\n`);
-    await new Promise((r) => setTimeout(r, event.type === "text_delta" ? DELTA_MS : 220));
+  answering.add(name);
+  try {
+    for (const event of events) {
+      if (closed) return;
+      if (event.type === "text_end") assistantText = event.content;
+      res.write(`data: ${JSON.stringify(event)}\n\n`);
+      await new Promise((r) => setTimeout(r, event.type === "text_delta" ? DELTA_MS : 220));
+    }
+  } finally {
+    answering.delete(name);
   }
   res.end();
   // Persist the completed turn so the session listing + transcript reflect it,
@@ -497,7 +506,28 @@ createServer(async (req, res) => {
 
   const name = parts[2] ? decodeURIComponent(parts[2]) : "";
   const ghost = ghosts.find((g) => g.name === name);
-  if (!ghost) return json(res, 404, { error: `no ghost named ${name}` });
+  if (!ghost) return json(res, 404, { error: { message: `no ghost named ${name}`, code: "not_found" } });
+
+  // Banishing a ghost. The real daemon moves the home to ~/Ghosts/.trash/ so it
+  // is recoverable by hand; the mock just drops it from memory, and answers the
+  // same `trash` path so the surfaces see the contract's shape.
+  if (parts.length === 3 && req.method === "DELETE") {
+    if (url.searchParams.get("confirm") !== name) {
+      return json(res, 400, {
+        error: { message: "type the ghost's name to confirm", code: "confirmation_required" },
+      });
+    }
+    if (answering.has(name)) {
+      return json(res, 409, {
+        error: { message: `${name} is still answering — stop the turn first`, code: "ghost_busy" },
+      });
+    }
+    ghosts.splice(ghosts.indexOf(ghost), 1);
+    sessionStore.delete(name);
+    roles.delete(name);
+    routing.delete(name);
+    return json(res, 200, { ok: true, trash: join(GHOSTS_ROOT, ".trash", name) });
+  }
 
   if (parts[3] === "messages" && req.method === "POST") {
     const body = await readBody(req).catch(() => ({}));
