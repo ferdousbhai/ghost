@@ -44,15 +44,15 @@
  *   they are re-mapped to first-seen ordinals `#1`, `#2`, … which still pins
  *   the parent/child *shape* of the branch tree.
  * - **Absolute paths**: the temp ghosts root is a fresh mkdtemp every run.
- * - **Tools a *creator* session discovered from the developer's own machine.**
- *   A creator session keeps OMP's native discovery on (`Settings.loadReadOnly`
- *   walks the developer's global OMP config, and MCP stays enabled), so its raw
- *   tool list is not portable: a maintainer with a global MCP server would see
- *   names nobody else does. The creator fixture therefore records a *presence
- *   table* over a named universe of tools (`toolSurfaceTable`) rather than the
- *   raw list — a strip that drops or renames a tool still fails, an unrelated
- *   local MCP server does not. A visitor session runs with discovery off and an
- *   explicit allowlist, so its fixture pins the raw list exactly.
+ * - **Creator tool presentation.** OMP can move non-core capabilities between
+ *   the top-level surface and xd:// as load-mode policy evolves. The creator
+ *   fixture therefore records a *presence table* over a named universe of tools
+ *   (`toolSurfaceTable`) rather than the raw list, so a strip that drops or
+ *   renames a tool still fails without pinning presentation internals. Ambient
+ *   machine MCP is no longer a source of variation: a focused session-host test
+ *   pins that only the ghost home's project MCP loads. A visitor session runs
+ *   with discovery off and an explicit allowlist, so its fixture pins the raw
+ *   list exactly.
  *
  * Tool-call ids (`call_1`, …) and token usage are NOT normalised: the mock
  * provider mints both deterministically, so a change there is a real change.

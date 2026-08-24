@@ -183,6 +183,66 @@ describe("SessionHost.open", () => {
     expect(handle.session.getToolByName("project_tool")).toBeDefined();
   });
 
+  it("loads only the ghost home's project MCP, never ambient coding-agent MCP", async () => {
+    const { dir } = await setup([{ kind: "text", text: "hello" }]);
+    const { mkdirSync } = await import("node:fs");
+    const ompDir = join(dir, ".omp");
+    const serverPath = join(dir, "project-mcp.mjs");
+    mkdirSync(ompDir, { recursive: true });
+    writeFileSync(
+      serverPath,
+      `import { createInterface } from "node:readline";
+const lines = createInterface({ input: process.stdin });
+const send = (id, result) => process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id, result }) + "\\n");
+lines.on("line", (line) => {
+  const request = JSON.parse(line);
+  if (request.id === undefined) return;
+  if (request.method === "initialize") {
+    send(request.id, {
+      protocolVersion: "2025-11-25",
+      capabilities: { tools: {}, resources: {}, prompts: {} },
+      serverInfo: { name: "ghost-project-fixture", version: "1.0.0" },
+    });
+  } else if (request.method === "tools/list") {
+    send(request.id, { tools: [{
+      name: "project_echo",
+      description: "Echo from the ghost home's project MCP.",
+      inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    }] });
+  } else if (request.method === "resources/list") {
+    send(request.id, { resources: [] });
+  } else if (request.method === "resources/templates/list") {
+    send(request.id, { resourceTemplates: [] });
+  } else if (request.method === "prompts/list") {
+    send(request.id, { prompts: [] });
+  } else {
+    send(request.id, {});
+  }
+});
+`,
+      "utf8",
+    );
+    writeFileSync(
+      join(ompDir, "mcp.json"),
+      JSON.stringify({
+        mcpServers: {
+          ghost_project: {
+            command: process.execPath,
+            args: [serverPath],
+          },
+        },
+      }),
+      "utf8",
+    );
+
+    const handle = await host!.open("casper", "conv-mcp");
+    const toolNames = handle.session.getAllToolInfos().map((tool) => tool.name);
+    expect(toolNames).toContain("mcp__ghost_project_project_echo");
+    // This machine deliberately has `node_repl` in ~/.codex/config.toml. Its
+    // absence here is the live sovereignty regression, not a mocked condition.
+    expect(toolNames.some((name) => name.startsWith("mcp__node_repl_"))).toBe(false);
+  });
+
   it("discovers OMP project context and supports /skill:name invocation", async () => {
     const { dir } = await setup([{ kind: "text", text: "skill applied" }]);
     const { mkdirSync, writeFileSync } = await import("node:fs");
@@ -507,7 +567,9 @@ describe("SessionHost.runTurn", () => {
       });
     });
     await setup([
-      { kind: "text", text: "Great question!" },
+      // Avoid OMP's own canned-phrasing retry: this test owns the retry via
+      // Ghost's session_stop hook and must observe both passes itself.
+      { kind: "text", text: "The first answer circles around the point." },
       { kind: "text", text: "Here is the direct answer." },
     ], hooks);
 
@@ -522,7 +584,7 @@ describe("SessionHost.runTurn", () => {
     expect(passes).toHaveLength(2);
     expect(passes.every((messages) => messages.length === 1)).toBe(true);
     expect(passes.map((messages) => JSON.stringify(messages))).toEqual([
-      expect.stringContaining("Great question!"),
+      expect.stringContaining("The first answer circles around the point."),
       expect.stringContaining("Here is the direct answer."),
     ]);
     expect(JSON.stringify(passes)).not.toContain("Answer me.");
