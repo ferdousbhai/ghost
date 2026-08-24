@@ -48,6 +48,7 @@ import type {
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import type { SessionEntry } from "@oh-my-pi/pi-coding-agent/session/session-entries";
+import { visitEntriesFromFile } from "@oh-my-pi/pi-coding-agent/session/session-loader";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { SettingPath } from "@oh-my-pi/pi-coding-agent/config/settings";
 import {
@@ -548,6 +549,55 @@ function branchNavigation(
   };
 }
 
+/**
+ * pi 0.84 stored a display name as an append-only `session_info` entry. OMP 18
+ * replaced that record with a fixed title slot, but does not migrate the old
+ * entry itself. Keep this reader until every pre-OMP transcript has had a
+ * writable open and can be promoted through `SessionManager.setSessionName`.
+ */
+function legacySessionTitle(entries: readonly unknown[]): string | null {
+  let title: string | null = null;
+  for (const entry of entries) {
+    const record = entry as { type?: unknown; name?: unknown } | null;
+    if (record?.type !== "session_info") continue;
+    if (typeof record.name !== "string") {
+      title = null;
+      continue;
+    }
+    const normalized = Array.from(record.name, (character) => {
+      const codePoint = character.codePointAt(0) ?? 0;
+      return codePoint <= 0x1f || (codePoint >= 0x7f && codePoint <= 0x9f)
+        ? " "
+        : character;
+    }).join("").replace(/ +/g, " ").trim();
+    title = normalized || null;
+  }
+  return title;
+}
+
+async function readLegacySessionTitle(sessionFile: string): Promise<string | null> {
+  const entries: unknown[] = [];
+  await visitEntriesFromFile(sessionFile, (entry) => {
+    if ((entry as { type?: unknown }).type === "session_info") entries.push(entry);
+  });
+  return legacySessionTitle(entries);
+}
+
+/** Upgrade one loaded pi 0.84 title to OMP 18's durable native title slot. */
+export async function migrateLegacySessionTitle(
+  manager: SessionManager,
+): Promise<string | null> {
+  if (manager.getSessionName()) return null;
+  const title = legacySessionTitle(manager.getEntries());
+  if (!title) return null;
+  const changed = await manager.setSessionName(
+    title,
+    "auto",
+    "ghost-legacy-session-info",
+  );
+  return changed ? title : null;
+}
+
 export class SessionHost {
   private readonly registry: GhostRegistry;
   private readonly logger: Logger;
@@ -570,6 +620,11 @@ export class SessionHost {
   private readonly deleting = new Set<string>();
   /** Ghost names reserved by an in-flight `deleteGhost`. */
   private readonly deletingGhosts = new Set<string>();
+  /** Read-through cache for legacy titles that have not had a writable open yet. */
+  private readonly legacyTitles = new Map<
+    string,
+    { modifiedMs: number; size: number; title: string | null }
+  >();
   private disposed = false;
 
   constructor(options: SessionHostOptions) {
@@ -744,6 +799,7 @@ export class SessionHost {
       undefined,
       { initialCwd: paths.home },
     );
+    await this.promoteLegacySessionTitle(sessionManager, ghostName, sessionKey);
 
     const ask = new AskBroker();
     const visitorRestrictions = visitor
@@ -817,6 +873,32 @@ export class SessionHost {
       ask,
       turnId: 0,
     };
+  }
+
+  /** Promote a pi 0.84 display name into OMP 18's native title slot on resume. */
+  private async promoteLegacySessionTitle(
+    manager: SessionManager,
+    ghostName: string,
+    conversationId: string,
+  ): Promise<void> {
+    try {
+      const title = await migrateLegacySessionTitle(manager);
+      if (title) {
+        this.logger.info("migrated legacy conversation title", {
+          ghost: ghostName,
+          session: conversationId,
+          title,
+        });
+      }
+    } catch (error) {
+      // Title recovery must never make an otherwise healthy conversation
+      // impossible to resume. Listing still has the read-only fallback below.
+      this.logger.warn("legacy conversation title migration failed", {
+        ghost: ghostName,
+        session: conversationId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   /** The currently blocked OMP `ask`, if this live conversation has one. */
@@ -1338,7 +1420,7 @@ export class SessionHost {
    * reading titles, but this method never awaits and never throws — a failure
    * is logged and the conversation simply stays untitled. Generation is a
    * single completion on the smol_model (see title.ts); the result is stored
-   * as a pi `session_info` entry, which never enters the model's context.
+   * through OMP's native title slot, which never enters the model's context.
    */
   private startBackgroundTitle(
     hosted: HostedSession,
@@ -1620,14 +1702,35 @@ export class SessionHost {
       SessionManager.list(paths.home, paths.sessionDir),
       this.claudeCode.listSessions(ghost),
     ]);
-    return [
-      ...sessions.map((info) => ({
+    const ompSessions = await Promise.all(sessions.map(async (info) => {
+      const nativeTitle = info.title?.trim() ? info.title : null;
+      let title = nativeTitle;
+      if (!title) {
+        const modifiedMs = info.modified.getTime();
+        const cached = this.legacyTitles.get(info.path);
+        if (cached?.modifiedMs === modifiedMs && cached.size === info.size) {
+          title = cached.title;
+        } else {
+          try {
+            title = await readLegacySessionTitle(info.path);
+          } catch {
+            // A concurrent delete or malformed transcript should not make the
+            // entire conversation list fail.
+            title = null;
+          }
+          this.legacyTitles.set(info.path, { modifiedMs, size: info.size, title });
+        }
+      }
+      return {
         id: conversationIdFromSessionFile(info.path),
-        title: info.title?.trim() ? info.title : null,
+        title,
         createdAt: info.created.toISOString(),
         updatedAt: info.modified.toISOString(),
         messageCount: info.messageCount,
-      })),
+      };
+    }));
+    return [
+      ...ompSessions,
       ...claudeSessions.map((info) => ({
         id: info.conversationId,
         title: "Claude Code",
@@ -1761,7 +1864,7 @@ export class SessionHost {
     const messages = all.slice(offset, offset + limit);
     return {
       id,
-      title: manager.getSessionName() ?? null,
+      title: manager.getSessionName() ?? legacySessionTitle(entries),
       messages,
       total,
       truncated: offset > 0 || offset + messages.length < total,
@@ -1973,6 +2076,7 @@ export class SessionHost {
       let deleted = await this.claudeCode.deleteSession(ghost, id);
       try {
         await unlink(piPath);
+        this.legacyTitles.delete(piPath);
         deleted = true;
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;

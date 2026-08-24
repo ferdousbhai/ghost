@@ -211,11 +211,14 @@ a reply or bill like a chat turn. The role name adopts OMP's own convention
 daemon generates a 3-6 word title from the first user message with one smol
 completion, fire-and-forget (mirroring background compaction): it never blocks
 the reply and a failure is logged, never fatal. A conversation is titled once
-and never re-titled. The title is stored as an OMP **`session_info` entry**
-inside the conversation's own `.sessions/*.jsonl` transcript (OMP's native
-display-name mechanism, which never enters the model's context), so it needs
-no sidecar and rides the same per-ghost storage backup and future encryption
-cover. `GET …/sessions` surfaces it as `title`.
+and never re-titled. The title is stored through OMP's native fixed-width
+**`title` slot** at the start of the conversation's own `.sessions/*.jsonl`
+transcript, with its append-only `title_change` audit entry. It never enters the
+model's context, needs no sidecar, and rides the same per-ghost storage backup
+and future encryption cover. `GET …/sessions` surfaces it as `title`. A
+pre-OMP-18 transcript instead carries pi 0.84's appended `session_info.name`;
+the daemon reads that title immediately and promotes it to the native OMP slot
+on the conversation's next writable open, without generating a replacement.
 
 **Greetings.** `POST …/greeting` (above) writes the empty-chat opener with one
 smol completion: 1-3 sentences in the ghost's own voice, at most one timely
