@@ -12,10 +12,14 @@ pragma ComponentBehavior: Bound
 // The conflict rule, stated once: when the file changes underneath a buffer the
 // user has been typing into, neither side wins automatically. Adopting disk
 // would throw away typing that was never anywhere else; writing the buffer
-// would throw away whatever the ghost just wrote. So the buffer stays on
-// screen, autosave suspends, and the pane says so in one line with the two
-// resolutions next to it. A clean buffer has nothing to lose and simply
-// follows the file.
+// would throw away whatever the ghost just wrote. But the two are usually
+// nowhere near each other, so the pane tries a line-based three-way merge first
+// (Merge.js) against the text it last read or wrote, and when that comes out
+// clean it says *nothing*: the merged text is in the buffer, autosave writes it
+// a moment later, and the user never learns there was a race. Only when both
+// sides moved the same lines does the old behaviour apply — buffer stays on
+// screen, autosave suspends, one line with the two resolutions next to it. A
+// clean buffer has nothing to lose and simply follows the file.
 //
 // A pane is bound to one path *for the life of the binding*: if the owner
 // repoints `filePath`, unsaved text is flushed to the old path before the new
@@ -25,6 +29,7 @@ import QtQuick
 import Quickshell.Io
 import qs.services
 import "Highlighter.js" as Highlighter
+import "Merge.js" as Merge
 
 Item {
     id: root
@@ -41,7 +46,9 @@ Item {
     readonly property bool code: !root.markdown
         && Highlighter.languageOf(root.filePath) !== ""
 
-    /** The file's text as we last read or wrote it. */
+    /** The file's text as we last read or wrote it. Doubles as the merge base:
+        it is the last point at which the buffer and the file were the same
+        text, which is exactly what a three-way merge needs. */
     property string diskText: ""
     /** Set while a write is in flight, so a failure can put the dot back. */
     property string preWriteDisk: ""
@@ -70,6 +77,22 @@ Item {
             root.diskText = incoming;
             return;
         }
+        // Merge first. `diskText` is still the common ancestor here — the
+        // dirty path never advances it — so the three texts are the real
+        // three-way inputs.
+        const merged = Merge.merge(root.diskText, notes.buffer, incoming);
+        if (merged.ok) {
+            // The base moves to what is on disk *now*, which leaves the merged
+            // buffer dirty against it by exactly the user's own edits, so the
+            // ordinary debounced autosave carries them back to the file. adopt()
+            // is deliberately silent, so the timer is ours to start.
+            root.diskText = incoming;
+            notes.adoptMerged(merged.text);
+            root.conflictText = "";
+            root.notice = "";
+            autosave.restart();
+            return;
+        }
         root.conflictText = incoming;
         root.notice = "Changed on disk while you were editing.";
     }
@@ -92,6 +115,11 @@ Item {
         root.save();
         file.waitForJob();
     }
+
+    // Both resolutions end with buffer and file holding the same text and
+    // `diskText` naming it, which is what leaves a correct base behind for the
+    // *next* external change: keepMine() through save(), which sets diskText to
+    // what it wrote, takeTheirs() by adopting outright.
 
     function keepMine(): void {
         root.conflictText = "";

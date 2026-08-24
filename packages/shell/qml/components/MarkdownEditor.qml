@@ -63,6 +63,27 @@ Item {
         root.adopting = false;
     }
 
+    /** Take text that already contains the user's own edits — the result of a
+        three-way merge — without counting as an edit and without throwing the
+        caret to the top of the note. */
+    function adoptMerged(text: string): void {
+        const caret = field.cursorPosition;
+        const before = field.text;
+        root.adopt(text);
+        // The heuristic, and it is only a heuristic: an offset means the same
+        // thing in both texts exactly as far as the two agree, so a caret
+        // inside the common prefix is still pointing at the character it was
+        // pointing at. Past that point there is no honest mapping without a
+        // character-level diff of a line-level merge, so the caret clamps into
+        // the new text and lands near where it was rather than nowhere.
+        let common = 0;
+        const limit = Math.min(before.length, text.length);
+        while (common < limit
+            && before.charCodeAt(common) === text.charCodeAt(common)) common++;
+        field.cursorPosition = caret <= common
+            ? caret : Math.min(caret, text.length);
+    }
+
     function take(): void {
         field.forceActiveFocus();
     }
