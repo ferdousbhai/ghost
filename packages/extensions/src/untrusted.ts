@@ -9,11 +9,7 @@ export interface InjectionDetection {
   readonly reasons: string[];
 }
 
-/**
- * The seam for prompt-injection detection. Increment 1 is synchronous and
- * heuristic-only; a later local classifier can return a promise here without
- * changing tool callers.
- */
+/** The seam for synchronous heuristics and asynchronous local classifiers. */
 export interface InjectionDetector {
   detect(
     content: string,
@@ -126,9 +122,207 @@ export class HeuristicInjectionDetector implements InjectionDetector {
   }
 }
 
-/** The increment-1 detector used by tools unless a later implementation replaces it. */
+const DEFAULT_INJECTION_THRESHOLD = 0.5;
+const TRANSFORMERS_PACKAGE = "@huggingface/transformers";
+
+type TextClassificationPipeline = (
+  content: string,
+) => MaybePromise<unknown>;
+
+const classifierPipelines = new Map<
+  string,
+  Promise<TextClassificationPipeline | undefined>
+>();
+
+function unavailableDetection(): InjectionDetection {
+  return { flagged: false, score: 0, reasons: [] };
+}
+
+function configuredModel(env: NodeJS.ProcessEnv): string | undefined {
+  const model = env.GHOST_INJECTION_MODEL?.trim();
+  return model === "" ? undefined : model;
+}
+
+function configuredThreshold(env: NodeJS.ProcessEnv): number {
+  const rawThreshold = env.GHOST_INJECTION_THRESHOLD?.trim();
+  if (!rawThreshold) return DEFAULT_INJECTION_THRESHOLD;
+
+  const threshold = Number(rawThreshold);
+  return Number.isFinite(threshold) && threshold >= 0 && threshold <= 1
+    ? threshold
+    : DEFAULT_INJECTION_THRESHOLD;
+}
+
+async function loadClassifierPipeline(
+  model: string,
+): Promise<TextClassificationPipeline | undefined> {
+  try {
+    // Keep the specifier indirect so TypeScript does not require this opt-in
+    // package to be installed while compiling @ghost/extensions.
+    const transformers: unknown = await import(TRANSFORMERS_PACKAGE);
+    const pipelineFactory = (
+      transformers as { readonly pipeline?: unknown }
+    ).pipeline;
+    if (typeof pipelineFactory !== "function") return undefined;
+
+    const pipeline: unknown = await (
+      pipelineFactory as (
+        task: string,
+        modelId: string,
+      ) => MaybePromise<unknown>
+    )("text-classification", model);
+    return typeof pipeline === "function"
+      ? pipeline as TextClassificationPipeline
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function getClassifierPipeline(
+  model: string,
+): Promise<TextClassificationPipeline | undefined> {
+  const cached = classifierPipelines.get(model);
+  if (cached !== undefined) return cached;
+
+  const loading = loadClassifierPipeline(model);
+  classifierPipelines.set(model, loading);
+  return loading;
+}
+
+function readClassifierPrediction(
+  output: unknown,
+): { readonly label: string; readonly score: number } | undefined {
+  const prediction = Array.isArray(output) ? output[0] : output;
+  if (typeof prediction !== "object" || prediction === null) return undefined;
+
+  const { label, score } = prediction as {
+    readonly label?: unknown;
+    readonly score?: unknown;
+  };
+  if (typeof label !== "string" || label.trim() === "") return undefined;
+  if (typeof score !== "number" || !Number.isFinite(score)) return undefined;
+  if (score < 0 || score > 1) return undefined;
+  return { label: label.trim(), score };
+}
+
+function isInjectionClassifierLabel(label: string): boolean {
+  const normalized = label.toLowerCase();
+  return /(?:^|[^a-z])(?:injection|jailbreak|malicious)(?:$|[^a-z])/.test(
+    normalized,
+  ) || /^label[_ -]?1$/.test(normalized);
+}
+
+/** Options are primarily exposed so tests and embedders can supply an environment. */
+export interface ClassifierInjectionDetectorOptions {
+  readonly env?: NodeJS.ProcessEnv;
+}
+
+/**
+ * Optional, local text-classification detector. It is unavailable (and causes
+ * no model download) unless `GHOST_INJECTION_MODEL` names a Hugging Face model
+ * or local directory. `GHOST_INJECTION_THRESHOLD` sets the flag threshold and
+ * defaults to 0.5. Enable the runtime from this package with
+ * `pnpm add @huggingface/transformers`; it remains intentionally undeclared.
+ * Meta Prompt Guard 2 (with Transformers.js-compatible weights) or
+ * `protectai/deberta-v3-base-prompt-injection-v2` are recommended models.
+ * Import, load, and inference failures resolve to an empty, unflagged result.
+ * A pipeline is lazily cached once per configured model across all instances.
+ */
+export class ClassifierInjectionDetector implements InjectionDetector {
+  readonly #model: string | undefined;
+  readonly #threshold: number;
+
+  constructor(options: ClassifierInjectionDetectorOptions = {}) {
+    const env = options.env ?? process.env;
+    this.#model = configuredModel(env);
+    this.#threshold = configuredThreshold(env);
+  }
+
+  async detect(
+    content: string,
+    _ctx?: { source?: string },
+  ): Promise<InjectionDetection> {
+    if (this.#model === undefined) return unavailableDetection();
+
+    try {
+      const classifier = await getClassifierPipeline(this.#model);
+      if (classifier === undefined) return unavailableDetection();
+
+      const prediction = readClassifierPrediction(await classifier(content));
+      if (
+        prediction === undefined
+        || !isInjectionClassifierLabel(prediction.label)
+      ) {
+        return unavailableDetection();
+      }
+
+      return {
+        flagged: prediction.score >= this.#threshold,
+        score: prediction.score,
+        reasons: [`classifier:${prediction.label}`],
+      };
+    } catch {
+      return unavailableDetection();
+    }
+  }
+}
+
+/** Combine independent detector signals without weighting either detector. */
+export function combineInjectionDetections(
+  first: InjectionDetection,
+  second: InjectionDetection,
+): InjectionDetection {
+  return {
+    flagged: first.flagged || second.flagged,
+    score: Math.max(first.score, second.score),
+    reasons: [...new Set([...first.reasons, ...second.reasons])],
+  };
+}
+
+/**
+ * Runs the heuristic and an optional classifier together. With no classifier,
+ * the original result (and synchronous MaybePromise behavior) is preserved.
+ */
+export class CompositeInjectionDetector implements InjectionDetector {
+  constructor(
+    readonly heuristic: InjectionDetector = new HeuristicInjectionDetector(),
+    readonly classifier?: InjectionDetector,
+  ) {}
+
+  detect(
+    content: string,
+    ctx?: { source?: string },
+  ): MaybePromise<InjectionDetection> {
+    const heuristicResult = this.heuristic.detect(content, ctx);
+    if (this.classifier === undefined) return heuristicResult;
+
+    let classifierResult: MaybePromise<InjectionDetection>;
+    try {
+      classifierResult = this.classifier.detect(content, ctx);
+    } catch {
+      classifierResult = unavailableDetection();
+    }
+
+    return Promise.all([
+      heuristicResult,
+      Promise.resolve(classifierResult).catch(unavailableDetection),
+    ]).then(([heuristic, classifier]) => (
+      combineInjectionDetections(heuristic, classifier)
+    ));
+  }
+}
+
+const defaultHeuristicInjectionDetector = new HeuristicInjectionDetector();
+
+/** Heuristic-only by default; opt-in classifier signals are additive. */
 export const defaultInjectionDetector: InjectionDetector =
-  new HeuristicInjectionDetector();
+  configuredModel(process.env) === undefined
+    ? defaultHeuristicInjectionDetector
+    : new CompositeInjectionDetector(
+      defaultHeuristicInjectionDetector,
+      new ClassifierInjectionDetector(),
+    );
 
 /** Detect prompt injection with the default detector. */
 export function detectInjection(
