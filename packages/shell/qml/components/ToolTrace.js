@@ -15,6 +15,32 @@ function quoted(value) {
     return "“" + compact(value, 80) + "”";
 }
 
+/**
+ * The file a call wrote, named the way the tool named it: absolute, or relative
+ * to the session cwd, which OMP sets to the ghost home. Writers only — a read
+ * changed nothing worth opening. Resolving this to an absolute path (and
+ * deciding whether anything can render it) belongs to the caller.
+ */
+function fileTarget(activity) {
+    switch (String(activity.name || "")) {
+    case "write":
+    case "edit":
+        // OMP's native file tools take `path`; some providers emit `file_path`.
+        return argument(activity, "path") || argument(activity, "file_path");
+    case "ghost_notes_write": {
+        // A note path is relative to the notes directory, not to the home.
+        const note = argument(activity, "path");
+        return note === "" ? "" : "notes/" + note;
+    }
+    case "ghost_character":
+        // Only the write action changes the file; the path is fixed by the
+        // ghost-home layout rather than carried in the arguments.
+        return argument(activity, "action") === "write" ? "character.md" : "";
+    default:
+        return "";
+    }
+}
+
 // A trace describes the purpose of the work, never the mechanism used to do
 // it. These fallbacks also keep restored transcripts useful: persisted tool
 // calls retain their arguments, while live intent/result summaries do not.
@@ -22,6 +48,7 @@ function fallback(activity, completed) {
     const name = String(activity.name || "");
     const query = argument(activity, "query");
     const path = argument(activity, "path");
+    const written = fileTarget(activity);
     const memoryName = argument(activity, "name");
     const action = argument(activity, "action");
     const url = argument(activity, "url");
@@ -44,6 +71,17 @@ function fallback(activity, completed) {
         return path !== ""
             ? (completed ? "Updated " : "Updating ") + path
             : (completed ? "Saved a note" : "Saving a note");
+    // OMP's own file tools. A creator session writes notes and memory through
+    // these rather than the ghost_* ones, so without them a restored transcript
+    // shows nothing where the ghost changed a file.
+    case "write":
+        return written !== ""
+            ? (completed ? "Wrote " : "Writing ") + written
+            : (completed ? "Wrote a file" : "Writing a file");
+    case "edit":
+        return written !== ""
+            ? (completed ? "Edited " : "Editing ") + written
+            : (completed ? "Edited a file" : "Editing a file");
     case "ghost_memory_list":
     case "list_memory":
         return completed

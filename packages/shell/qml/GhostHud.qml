@@ -49,6 +49,32 @@ FloatingWindow {
     /** True when login was reached from the switcher, so closing returns there. */
     property bool loginFromSwitcher: false
 
+    // ---- Workbench geometry ------------------------------------------------
+    // The file pane sits beside the chat when both columns can still be read,
+    // and takes the chat's place when they cannot. The test is on the width
+    // actually left for the two of them, not on the window: an open sidebar
+    // costs a fixed 244px that a raw window-width threshold would ignore.
+    /** The fixed sidebar column. */
+    readonly property int sidebarWidth: 220
+    /** The narrowest chat that still reads as a conversation. */
+    readonly property int chatMinimumWidth: 380
+    /** The narrowest file pane worth splitting the window for. */
+    readonly property int paneMinimumWidth: 320
+    /** Width left for chat + file pane once padding and the sidebar are taken. */
+    readonly property int bodyWidth: hud.width - Theme.pad * 2
+        - (hud.sidebarOpen ? hud.sidebarWidth + Theme.sectionGap : 0)
+    /** A file is open in the workbench. */
+    readonly property bool workbenchOpen: Workbench.filePath !== ""
+    /** …and there is room for it beside the chat rather than over it. */
+    readonly property bool workbenchSplit: hud.workbenchOpen
+        && hud.bodyWidth >= hud.chatMinimumWidth + hud.paneMinimumWidth + Theme.sectionGap
+    /** The pane's share while split: the larger half, never at the chat's cost. */
+    readonly property int workbenchWidth: {
+        const region = hud.bodyWidth - Theme.sectionGap;
+        return Math.max(hud.paneMinimumWidth,
+            Math.min(Math.round(region * 0.55), region - hud.chatMinimumWidth));
+    }
+
     visible: hud.shown
     color: Theme.background
     title: Ghostd.activeGhost === "" ? "Ghost" : "Ghost — " + Ghostd.activeGhost
@@ -163,11 +189,19 @@ FloatingWindow {
 
         focus: true
         // Esc-to-close is unusual for a normal app window, so Esc only cancels a
-        // running turn; dismiss with SUPER+CTRL+G or the tray. Left unhandled when
-        // idle so it never swallows a compositor bind.
+        // running turn and then closes the workbench; dismiss with SUPER+CTRL+G
+        // or the tray. Left unhandled once there is nothing of ours left to
+        // dismiss, so it never swallows a compositor bind.
         Keys.onEscapePressed: event => {
-            event.accepted = Ghostd.streaming;
-            if (Ghostd.streaming) Ghostd.cancel();
+            if (Ghostd.streaming) {
+                Ghostd.cancel();
+                event.accepted = true;
+            } else if (hud.workbenchOpen) {
+                Workbench.close();
+                event.accepted = true;
+            } else {
+                event.accepted = false;
+            }
         }
         // Ctrl+B toggles the whole left sidebar, editor-style. This reaches the
         // card by focus-chain propagation even while the composer holds focus,
@@ -401,9 +435,9 @@ FloatingWindow {
                     // would let the sidebar swallow the whole row and crush the
                     // transcript; pin it to a fixed column instead.
                     Layout.fillWidth: false
-                    Layout.preferredWidth: 220
-                    Layout.minimumWidth: 220
-                    Layout.maximumWidth: 220
+                    Layout.preferredWidth: hud.sidebarWidth
+                    Layout.minimumWidth: hud.sidebarWidth
+                    Layout.maximumWidth: hud.sidebarWidth
                     Layout.fillHeight: true
                     spacing: Theme.sectionGap
 
@@ -428,6 +462,8 @@ FloatingWindow {
                             width: rosterScroll.width
                             onPicked: {
                                 hud.loginOpen = false;
+                                // The open file lives in the ghost we just left.
+                                Workbench.close();
                                 composer.take();
                             }
                         }
@@ -505,6 +541,11 @@ FloatingWindow {
                 }
 
                 ColumnLayout {
+                    id: chatColumn
+
+                    // A narrow window has room for one column, so the file pane
+                    // takes this one's place until it closes.
+                    visible: !hud.workbenchOpen || hud.workbenchSplit
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     spacing: Theme.gap
@@ -834,6 +875,26 @@ FloatingWindow {
                             if (mode === "prompt") Ghostd.send(prompt);
                             else Ghostd.queueMessage(prompt, mode);
                         }
+                    }
+                }
+
+                // The workbench: a file the ghost wrote, opened from its tool
+                // card. Nothing is instantiated while it is closed, and while
+                // it is open it either takes the larger half of the body or,
+                // on a narrow window, the whole of it.
+                Loader {
+                    id: workbenchPane
+
+                    active: hud.workbenchOpen
+                    visible: hud.workbenchOpen
+                    Layout.fillHeight: true
+                    Layout.fillWidth: !hud.workbenchSplit
+                    Layout.preferredWidth: hud.workbenchSplit ? hud.workbenchWidth : 0
+                    Layout.minimumWidth: hud.workbenchSplit ? hud.paneMinimumWidth : 0
+
+                    sourceComponent: FilePane {
+                        filePath: Workbench.filePath
+                        onClosed: Workbench.close()
                     }
                 }
             }

@@ -26,6 +26,15 @@ Rectangle {
     readonly property var askBranch: activity.askBranch || null
     readonly property bool hasDiagnostics: ToolTrace.hasDiagnostics(root.activity)
 
+    // The file this call wrote, ready for the workbench. Relative tool
+    // arguments resolve against the active ghost's home (the session cwd), so
+    // this is "" — and no affordance is offered — while that home is unknown or
+    // when nothing here can render the file.
+    readonly property string workbenchPath: root.completed || root.running
+        ? Workbench.absolute(ToolTrace.fileTarget(root.activity)) : ""
+    readonly property bool openable: root.workbenchPath !== ""
+        && Workbench.kindOf(root.workbenchPath) !== ""
+
     // #fde68a at 90% — the old card's amber-100 label. On paper that wash is
     // unreadable, so light mode keeps the amber fills and takes a plain ink.
     readonly property color labelColor: Theme.light
@@ -134,6 +143,54 @@ Rectangle {
                 font.letterSpacing: 0.5
                 wrapMode: root.expanded ? Text.Wrap : Text.NoWrap
                 elide: root.expanded ? Text.ElideNone : Text.ElideRight
+            }
+        }
+
+        // Open-the-file affordance, indented under the trace line rather than
+        // beside it: the trace is a full-width elided line, so a sibling in
+        // that Row would be the thing that gets elided away.
+        Rectangle {
+            id: fileChip
+
+            /** This card's file is the one already showing in the workbench. */
+            readonly property bool current: Workbench.filePath === root.workbenchPath
+
+            visible: root.openable
+            // 16 glyph + the trace Row's own spacing, so the chip starts where
+            // the words above it do.
+            x: 16 + Theme.gap / 2
+            width: Math.min(parent.width - x, chipLabel.implicitWidth + Theme.gap * 1.5)
+            height: visible ? chipLabel.implicitHeight + 6 : 0
+            radius: Theme.radius / 2
+            color: fileChip.current || chipArea.containsMouse
+                ? Theme.amber(0.16) : Theme.amber(0.08)
+            border.width: 1
+            border.color: fileChip.current ? Theme.amber(0.35) : Theme.amber(0.18)
+
+            Behavior on color {
+                enabled: !Theme.reducedMotion
+                ColorAnimation { duration: Theme.durFast; easing.type: Easing.OutQuad }
+            }
+
+            Text {
+                id: chipLabel
+                anchors.centerIn: parent
+                width: parent.width - Theme.gap
+                text: Workbench.baseName(root.workbenchPath)
+                color: Theme.ghostAmber
+                font.family: Theme.fontFamilyMono
+                font.pixelSize: Theme.fontSizeSmall
+                elide: Text.ElideMiddle
+            }
+
+            // Smaller than cardHover and declared after it, so a click here
+            // opens the file instead of toggling the diagnostics.
+            MouseArea {
+                id: chipArea
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: Workbench.open(root.workbenchPath)
             }
         }
 

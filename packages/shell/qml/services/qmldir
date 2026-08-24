@@ -4,3 +4,4 @@ singleton Theme 1.0 Theme.qml
 singleton Ghostd 1.0 Ghostd.qml
 singleton Notifier 1.0 Notifier.qml
 singleton ExternalLinks 1.0 ExternalLinks.qml
+singleton Workbench 1.0 Workbench.qml
