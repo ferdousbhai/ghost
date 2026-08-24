@@ -5,8 +5,8 @@
  * already-extracted directory): character file, every document public and private,
  * memory, per-visitor memory, and conversations, all as plain files. Importing
  * preserves file bytes while translating the hosted archive's legacy `notes/`
- * directory to canonical `docs/`, so the migration path off the platform is a
- * single command.
+ * directory to canonical `docs/`. Hosted conversation fixtures are then copied
+ * into native, resumable OMP sessions; the source JSON is retained unchanged.
  *
  * The heavy lifting is `importGhostArchive` in `@ghost/extensions`, which
  * validates the manifest, guards against zip-slip, and never overwrites a
@@ -16,6 +16,7 @@
  */
 import { importGhostArchive, GhostError } from "@ghost/extensions";
 import { loadConfig, type DaemonConfigOverrides } from "./config.js";
+import { migrateHostedConversations } from "./hosted-conversation-import.js";
 
 const USAGE = `ghostd import — import a ghost from a "Download my ghost" archive
 
@@ -121,12 +122,22 @@ export async function importCommand(
       overwrite: args.overwrite,
       ...(args.name === undefined ? {} : { name: args.name }),
     });
+    const conversations = await migrateHostedConversations(result.dir);
     write(
       `Imported "${result.ghostName}" into ${result.dir}\n`
       + `  ${result.filesWritten} file${result.filesWritten === 1 ? "" : "s"} written`
       + `${result.ignored.length > 0 ? `, ${result.ignored.length} ignored` : ""}.\n`
+      + `  ${conversations.imported} hosted conversation`
+      + `${conversations.imported === 1 ? "" : "s"} activated as native sessions`
+      + `${conversations.existing > 0 ? `, ${conversations.existing} already native` : ""}`
+      + `${conversations.failures.length > 0
+        ? `, ${conversations.failures.length} could not be activated`
+        : ""}.\n`
       + `\nStart the daemon (ghostd) and summon it with Super+G.\n`,
     );
+    for (const failure of conversations.failures) {
+      fail(`import: kept ${failure.source} unchanged: ${failure.error}\n`);
+    }
     return 0;
   } catch (error) {
     if (error instanceof GhostError && error.code === "conflict") {

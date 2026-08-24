@@ -69,6 +69,40 @@ describe("importCommand", () => {
     expect(readFileSync(join(ghostsRoot, "mildred", "character.md"), "utf8")).toContain("I am a ghost.");
   });
 
+  it("activates hosted conversations while preserving their source JSON", async () => {
+    const archive = makeArchiveDir(root, "casper");
+    const conversations = join(archive, "conversations");
+    mkdirSync(conversations, { recursive: true });
+    const source = JSON.stringify({
+      id: "old-chat",
+      catalog: {
+        id: "old-chat",
+        title: "Old chat title",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-02T00:00:00.000Z",
+      },
+      messages: [
+        { id: "old-user", role: "user", parts: [{ type: "text", text: "hello" }] },
+        {
+          id: "old-assistant",
+          role: "assistant",
+          parts: [{ type: "step-start" }, { type: "text", text: "hi" }],
+        },
+      ],
+    });
+    writeFileSync(join(conversations, "old-chat.json"), source);
+    const ghostsRoot = join(root, "Ghosts");
+
+    const code = await importCommand([archive, "--ghosts-root", ghostsRoot], io());
+
+    expect(code).toBe(0);
+    expect(out.join("")).toMatch(/1 hosted conversation activated/);
+    expect(readFileSync(join(ghostsRoot, "casper", "conversations", "old-chat.json"), "utf8"))
+      .toBe(source);
+    expect(readFileSync(join(ghostsRoot, "casper", ".sessions", "old-chat.jsonl"), "utf8"))
+      .toContain('"title":"Old chat title"');
+  });
+
   it("refuses a non-empty home without --overwrite, then accepts it with", async () => {
     const archive = makeArchiveDir(root, "casper");
     const ghostsRoot = join(root, "Ghosts");

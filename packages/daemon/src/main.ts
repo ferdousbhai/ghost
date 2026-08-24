@@ -22,6 +22,7 @@ import { scrubProviderEnv } from "./env-scrub.js";
 import { ensureGhostHomeLayout } from "./extensions.js";
 import { GhostRegistry } from "./ghosts.js";
 import { GhostHookRunner } from "./hooks.js";
+import { migrateHostedConversations } from "./hosted-conversation-import.js";
 import { createLogger, type LogLevel } from "./log.js";
 import { ModelCatalog } from "./model-catalog.js";
 import { createRelayHub } from "./relay.js";
@@ -204,9 +205,26 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   const registry = new GhostRegistry(config.ghostsRoot);
   registry.ensureRoot();
   try {
-    await Promise.all(registry.list().map((ghost) => ensureGhostHomeLayout(ghost.dir)));
+    await Promise.all(registry.list().map(async (ghost) => {
+      await ensureGhostHomeLayout(ghost.dir);
+      const conversations = await migrateHostedConversations(ghost.dir);
+      if (conversations.imported > 0) {
+        logger.info("activated hosted conversations as native sessions", {
+          ghost: ghost.name,
+          imported: conversations.imported,
+          existing: conversations.existing,
+        });
+      }
+      for (const failure of conversations.failures) {
+        logger.warn("could not activate hosted conversation; source left unchanged", {
+          ghost: ghost.name,
+          source: failure.source,
+          error: failure.error,
+        });
+      }
+    }));
   } catch (error) {
-    logger.error("could not migrate a ghost home to the docs layout", {
+    logger.error("could not migrate a ghost home layout", {
       error: (error as Error).message,
     });
     return 1;

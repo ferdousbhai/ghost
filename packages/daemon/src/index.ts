@@ -229,6 +229,11 @@ export {
   type RelayTokenStoreOptions,
 } from "./relay-token.js";
 export {
+  migrateHostedConversations,
+  type HostedConversationImportFailure,
+  type HostedConversationImportResult,
+} from "./hosted-conversation-import.js";
+export {
   createDaemonServer,
   relayHubOf,
   startDaemonServer,

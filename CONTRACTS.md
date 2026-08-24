@@ -22,8 +22,8 @@ catalog) is derived per session and never stored.
   .pi/                         per-ghost OMP settings, model roles, and credentials
   .sessions/                   daemon-owned OMP transcripts and runtime sidecars
   .sessions/pins.json          pinned-conversation ids: { "pinned": ["<id>", …] }
-  conversations/*.json         transcripts (import fixture from the hosted export;
-                               the daemon's own sessions live in pi session storage)
+  conversations/*.json         lossless source transcripts from the hosted export;
+                               retained unchanged after native activation
   export-manifest.json         present in imported archives; counts, pathRewrites,
                                notIncluded
 ```
@@ -34,6 +34,17 @@ rewriting file bytes. The live-home migration is atomic when only `notes/`
 exists; if both directories exist, startup fails with a conflict instead of
 guessing which files win. Import rejects archive entries that collide after
 translation. New homes and all new writes use only `docs/`.
+
+Hosted conversation JSON is also a migration fixture, not the daemon's live
+session store. `ghostd import` and daemon startup idempotently project each valid
+`conversations/*.json` file into a native OMP transcript in `.sessions/`, keeping
+the conversation and message ids, roles, title, available message timestamps,
+conversation created/updated times, readable text and attachments, and paired
+tool calls/results. A missing message timestamp is placed deterministically
+between the conversation timestamps; the export did not contain a value to
+preserve. The source JSON is never rewritten or deleted. An existing native
+target always wins and is never overwritten; malformed fixtures remain in place
+and are reported without preventing the ghost from starting.
 
 A deleted ghost home leaves the root entirely, for the system trash; see the
 `DELETE` route.
