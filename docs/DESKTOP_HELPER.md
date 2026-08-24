@@ -12,9 +12,10 @@ extensions shell to this sidecar — the same shape as `TrayBridge.qml` →
 `ghost-tray.py`.
 
 Vision is NOT in the helper. Semantic (AT-SPI) access is preferred where it
-exists (GTK); the ghost's `look_at_image`/vision routing (in the extensions
-package) is the universal fallback for canvas/Qt-without-a11y/web/games. The
-strongest path uses both: try semantic, fall back to a screenshot + vision.
+exists (GTK); OMP's native `inspect_image` — which resolves the `vision` role
+Ghost binds from `models.json` — is the universal fallback for
+canvas/Qt-without-a11y/web/games. The strongest path uses both: try semantic,
+fall back to a screenshot + vision.
 
 ## Transport
 
@@ -74,7 +75,8 @@ path; `key/type/click` the coordinate path. Structured errors; execFile arg
 arrays; no shell interpolation of model input. Still visitor-scope OFF.
 
 `ghost_screen`: uses `capture` (ladder + honesty), returns the image natively
-to a vision model or routes through `look_at_image`, and surfaces
+to a vision-capable model — a text-only model reaches it through OMP's
+`inspect_image` or its attachment describe-fallback instead — and surfaces
 `background_safe`/`warnings` to the model so it knows whether the shot
 disturbed the desktop.
 

@@ -1,8 +1,8 @@
 /**
  * Smol-model resolution, against fixtures — no real model.
  *
- * The resolution rules mirror the vision resolver's shape but add the one thing
- * a throwaway completion cares about: a subscription (OAuth / included plan)
+ * The resolution rules turn on the one thing a throwaway completion cares
+ * about: a subscription (OAuth / included plan)
  * model is zero marginal cost, so it beats a cheaper metered model. These tests
  * pin that preference and the explicit-role and empty-catalogue error paths;
  * `title.test.ts` and `greeting.test.ts` cover what rides on the lane.

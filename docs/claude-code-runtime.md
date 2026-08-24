@@ -91,8 +91,8 @@ The query is deliberately unrestricted for its local creator:
 - inherited provider credential variables are still scrubbed from the child
   environment, including Anthropic API and OAuth token variables.
 
-`look_at_image` is omitted because Claude can consume image content directly.
-`ghost_screen` still returns the actual image block. No OMP `ModelRegistry` is
+The ghost tool set contains no vision tool at all. `ghost_screen` returns the
+actual image block and Claude consumes it directly. No OMP `ModelRegistry` is
 fabricated as a fallback.
 
 The backend is owner-local by construction. If a session is resolved with a

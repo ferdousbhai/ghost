@@ -1,7 +1,7 @@
 /**
  * The ghost extensions, and the composition the daemon actually wants: one
  * factory that installs persona, character, memory, notes, and the computer-use
- * set (vision, screen, desktop, browser) over the same ghost home and scope,
+ * set (screen, desktop, browser) over the same ghost home and scope,
  * plus the visitor-only tool allowlist that goes with it.
  */
 import type { ExtensionFactory } from "@oh-my-pi/pi-coding-agent";
@@ -27,12 +27,10 @@ import {
 } from "./notes.js";
 import { createPersonaExtension, type PersonaExtensionOptions } from "./persona.js";
 import { createScreenExtension, screenToolNames, type ScreenExtensionOptions } from "./screen.js";
-import { createVisionExtension, visionToolNames, type VisionExtensionOptions } from "./vision.js";
 import { resolveScope } from "./shared.js";
 
 export type GhostExtensionSetOptions = PersonaExtensionOptions
   & CharacterExtensionOptions
-  & VisionExtensionOptions
   & ScreenExtensionOptions
   & HyprlandExtensionOptions
   & BrowserExtensionOptions;
@@ -62,7 +60,6 @@ export function ghostToolNames(
   names.push(...characterToolNames(scoped));
   // Computer-use tools: every one of these returns [] in visitor scope.
   names.push(
-    ...visionToolNames(scoped),
     ...screenToolNames(scoped),
     ...desktopToolNames(scoped),
     ...browserToolNames(scope),
@@ -71,8 +68,8 @@ export function ghostToolNames(
 }
 
 /**
- * Persona + character + memory + notes + computer use (vision fallback, screen,
- * desktop, browser), sharing one home and one scope. The character and
+ * Persona + character + memory + notes + computer use (screen, desktop,
+ * browser), sharing one home and one scope. The character and
  * computer-use factories each register nothing in visitor scope, so composing
  * them unconditionally is safe.
  */
@@ -83,7 +80,6 @@ export function createGhostExtension(
   const character = createCharacterExtension(options);
   const memory = createMemoryExtension(options);
   const notes = createNotesExtension(options);
-  const vision = createVisionExtension(options);
   const screen = createScreenExtension(options);
   const desktop = createHyprlandExtension(options);
   const browser = createBrowserExtension(options);
@@ -92,7 +88,6 @@ export function createGhostExtension(
     await character(pi);
     await memory(pi);
     await notes(pi);
-    await vision(pi);
     await screen(pi);
     await desktop(pi);
     await browser(pi);
@@ -129,4 +124,3 @@ export * from "./notes.js";
 export * from "./persona.js";
 export * from "./screen.js";
 export * from "./shared.js";
-export * from "./vision.js";

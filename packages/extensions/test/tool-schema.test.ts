@@ -14,7 +14,6 @@ import {
   GHOST_SCREEN,
   SCREEN_TARGETS,
 } from "../src/extensions/screen.js";
-import { GHOST_LOOK_AT_IMAGE } from "../src/extensions/vision.js";
 import { stringEnum } from "../src/tool-schema.js";
 import { loadExtension } from "./support/harness.js";
 
@@ -38,7 +37,7 @@ describe("stringEnum", () => {
 
   it("keeps every registered string enum strict-provider compatible", async () => {
     const harness = await loadExtension(
-      createGhostExtension({ mode: "on" }),
+      createGhostExtension(),
       "/tmp/ghost-tool-schema-test",
     );
     const expected = [
@@ -48,7 +47,6 @@ describe("stringEnum", () => {
       [GHOST_DESKTOP, "coordinate_space", ["screen", "window"]],
       [GHOST_DESKTOP, "urgency", NOTIFY_URGENCIES],
       [GHOST_SCREEN, "target", SCREEN_TARGETS],
-      [GHOST_LOOK_AT_IMAGE, "source", ["path", "latest_screenshot"]],
     ] as const;
 
     for (const [toolName, fieldName, values] of expected) {

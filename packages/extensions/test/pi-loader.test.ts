@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   GHOST_MEMORY_WRITE,
 } from "../src/extensions/memory.js";
+import { GHOST_SCREEN } from "../src/extensions/screen.js";
+import { GHOST_DESKTOP } from "../src/extensions/hyprland.js";
 import { createGhostFixture, type GhostFixture } from "./support/fixture.js";
 
 const SRC = fileURLToPath(new URL("../src/extensions", import.meta.url));
@@ -45,5 +47,25 @@ describe("pi's own extension loader", () => {
     expect([...byFile.get("persona.ts")!.handlers.keys()]).toEqual(["before_agent_start"]);
     expect([...byFile.get("memory.ts")!.tools.keys()]).toEqual([GHOST_MEMORY_WRITE]);
     expect([...byFile.get("notes.ts")!.tools.keys()]).toEqual([]);
+  });
+
+  it("loads the computer-use extension files with no errors", async () => {
+    const result = await discoverAndLoadExtensions(
+      ["screen", "hyprland"].map((name) => join(SRC, `${name}.ts`)),
+      fixture.dir,
+      undefined,
+      undefined,
+      { ambient: false },
+    );
+    expect(result.errors).toEqual([]);
+
+    const byFile = new Map(
+      result.extensions.map((extension) => [
+        extension.path.split("/").at(-1),
+        extension,
+      ]),
+    );
+    expect([...byFile.get("screen.ts")!.tools.keys()]).toEqual([GHOST_SCREEN]);
+    expect([...byFile.get("hyprland.ts")!.tools.keys()]).toEqual([GHOST_DESKTOP]);
   });
 });

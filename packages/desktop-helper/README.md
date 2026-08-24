@@ -19,9 +19,10 @@ by Fabio Pauli:
   0.56+ `hl.dsp.*` Lua grammar (see below).
 
 Vision is **not** here: semantic (AT-SPI) access is preferred where it exists;
-the ghost's `look_at_image` vision routing (in the extensions package) is the
-universal fallback for canvas / Qt-without-a11y / web / games. The strongest
-path uses both — try semantic, fall back to a screenshot + vision.
+OMP's native `inspect_image` — resolving the `vision` role the ghost binds in
+`models.json` — is the universal fallback for canvas / Qt-without-a11y / web /
+games. The strongest path uses both — try semantic, fall back to a screenshot +
+vision.
 
 There is deliberately **no `exec` op**: this is desktop control only. The ghost
 has pi's own bash creator-side.

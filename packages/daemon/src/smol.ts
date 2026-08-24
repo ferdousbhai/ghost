@@ -10,10 +10,11 @@
  *
  * ## The smol_model role and its resolution
  *
- * This is the daemon analog of `@ghost/extensions`' vision resolver
- * (`vision.ts`), with one deliberate difference: cost is **subscription-aware**
- * (issue #484). Smol work is a throwaway nicety, so the cheapest EFFECTIVE cost
- * wins — and a capable model on an already-authenticated subscription (OAuth or
+ * `smol_model` is the one role Ghost still resolves itself, and it resolves on
+ * cost — but cost that is **subscription-aware** (issue #484), which is the
+ * deliberate difference from a plain price ranking. Smol work is a throwaway
+ * nicety, so the cheapest EFFECTIVE cost wins — and a capable model on an
+ * already-authenticated subscription (OAuth or
  * an included plan) has zero marginal cost, so it is preferred over a cheaper
  * metered model. "Cheapest effective cost, subscription = free."
  *
@@ -136,9 +137,9 @@ export function rankSmolModels(catalog: SmolModelCatalog): readonly SmolCandidat
 }
 
 /**
- * Resolve the smol model. Mirrors the vision resolver's structure: an explicit
- * ref is honoured or errors loudly; otherwise the cheapest usable model; a
- * genuinely empty catalogue is a loud error.
+ * Resolve the smol model: an explicit ref is honoured or errors loudly;
+ * otherwise the cheapest usable model; a genuinely empty catalogue is a loud
+ * error.
  */
 export function resolveSmolModel(
   catalog: SmolModelCatalog,

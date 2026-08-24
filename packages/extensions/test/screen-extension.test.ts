@@ -5,9 +5,10 @@
  * {@link fakeHelper} — no `grim`, no process, no desktop. The assertions are:
  * the op + args the tool sends for each target, that the PNG the sidecar returns
  * is saved under the ghost home with retention, that a vision-capable chat model
- * gets the pixels while a text-only model is routed through the vision fallback
- * with its own question, and that the capture's honesty metadata (which backend,
- * background-safe or not, warnings) reaches the model.
+ * gets the pixels while a text-only model gets text that names the saved file
+ * and tells it to call `inspect_image` (a tool-result image block would be
+ * silently dropped for such a model), and that the capture's honesty metadata
+ * (which backend, background-safe or not, warnings) reaches the model.
  */
 import { readdir, mkdir, stat, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -19,15 +20,14 @@ import {
   GHOST_SCREEN,
   parseRegion,
   pruneScreenshots,
+  SCREENSHOTS_DIRNAME,
   screenToolNames,
   screenshotFileName,
 } from "../src/extensions/screen.js";
-import { SCREENSHOTS_DIRNAME, type VisionModel } from "../src/extensions/vision.js";
 import { openGhostHome } from "../src/home.js";
 import { createGhostFixture, type GhostFixture } from "./support/fixture.js";
 import {
   fixtureModel,
-  fixtureRegistry,
   fakeHelper,
   loadExtensionWith,
   makeContext,
@@ -35,15 +35,10 @@ import {
   resultText,
   TINY_PNG_BASE64,
   type FakeHelper,
+  type FixtureModel,
 } from "./support/desktop-harness.js";
 
 const TEXT_ONLY = fixtureModel({ provider: "local", id: "text-only", input: ["text"] });
-const FREE_VISION = fixtureModel({
-  provider: "openrouter",
-  id: "free-eyes:free",
-  input: ["text", "image"],
-  costInput: 0,
-});
 const VISION_CHAT = fixtureModel({
   provider: "openrouter",
   id: "sees-things",
@@ -227,53 +222,67 @@ describe("ghost_screen tool", () => {
   afterEach(() => fixture.cleanup());
 
   async function harnessFor(
-    chatModel: VisionModel,
-    models: readonly VisionModel[],
+    chatModel: FixtureModel,
     helper: FakeHelper = captureHelper(),
   ) {
-    const { registry, completions } = fixtureRegistry({
-      models: [...models],
-      completion: "a settings window with the Save button greyed out",
-    });
-    const ctx = makeContext({ cwd: fixture.dir, model: chatModel, modelRegistry: registry });
-    const harness = await loadExtensionWith(
-      createScreenExtension({ helper, resize: false }),
-      ctx,
-    );
-    return { harness, helper, completions };
+    const ctx = makeContext({ cwd: fixture.dir, model: chatModel });
+    const harness = await loadExtensionWith(createScreenExtension({ helper }), ctx);
+    return { harness, helper };
   }
 
   it("returns the image itself when the chat model can see", async () => {
-    const { harness, helper, completions } = await harnessFor(VISION_CHAT, [VISION_CHAT, FREE_VISION]);
+    const { harness, helper } = await harnessFor(VISION_CHAT);
     const result = await harness.call(GHOST_SCREEN, { prompt: "What is on screen?" });
     expect(helper.requests).toEqual([{ op: "capture", args: { target: "screen" } }]);
     const images = resultImages(result);
     expect(images).toHaveLength(1);
     expect(images[0]?.data).toBe(TINY_PNG_BASE64);
-    expect(result.details.routedThroughVisionModel).toBe(false);
     expect(result.details.backend).toBe("grim-foreign-toplevel");
-    expect(completions).toHaveLength(0);
+    expect(result.details.mimeType).toBe("image/png");
     expect(resultText(result)).toContain("untrusted");
   });
 
-  it("routes through the vision model, with the caller's question, when it cannot", async () => {
-    const { harness, completions } = await harnessFor(TEXT_ONLY, [TEXT_ONLY, FREE_VISION]);
+  it("gives a text-only model the file and an inspect_image instruction", async () => {
+    const { harness } = await harnessFor(TEXT_ONLY);
     const result = await harness.call(GHOST_SCREEN, {
       prompt: "Why is the Save button disabled?",
+      target: "window",
+      window: "firefox",
     });
+    // A tool-result image block would be replaced by a placeholder at the
+    // provider layer for this model, so there must not be one.
     expect(resultImages(result)).toHaveLength(0);
-    expect(resultText(result)).toContain("a settings window with the Save button greyed out");
-    expect(result.details.routedThroughVisionModel).toBe(true);
-    expect(result.details.visionModel).toBe("openrouter/free-eyes:free");
-    expect(completions).toHaveLength(1);
-    expect(completions[0]?.prompt).toBe("Why is the Save button disabled?");
+
+    const saved = String(result.details.savedTo);
+    expect(saved.startsWith(join(fixture.dir, SCREENSHOTS_DIRNAME))).toBe(true);
+    await expect(stat(saved)).resolves.toBeTruthy();
+    const text = resultText(result);
+    expect(text).toContain(`saved to ${saved}`);
+    expect(text).toContain('window "firefox"');
+    expect(text).toContain("image/png");
+    expect(text).toContain(`${result.details.bytes} bytes`);
+    expect(text).toContain(`call inspect_image with path="${saved}"`);
+    expect(text).toContain("Why is the Save button disabled?");
+    expect(text).toContain("untrusted");
+    expect(result.details.routedThroughVisionModel).toBeUndefined();
   });
 
-  it("names the fix when the ghost has no vision model at all", async () => {
-    const { harness } = await harnessFor(TEXT_ONLY, [TEXT_ONLY]);
-    await expect(
-      harness.call(GHOST_SCREEN, { prompt: "What is on screen?" }),
-    ).rejects.toThrowError(/roles\.vision_model/);
+  it("still reports honesty metadata to a text-only model", async () => {
+    const { harness } = await harnessFor(
+      TEXT_ONLY,
+      captureHelper({
+        backend: "grim-region",
+        background_safe: false,
+        warnings: ["region capture reads only currently-composited pixels"],
+      }),
+    );
+    const result = await harness.call(GHOST_SCREEN, {
+      prompt: "?",
+      target: "region",
+      region: "0,0 10x10",
+    });
+    expect(resultText(result)).toMatch(/changed what the user sees/);
+    expect(result.details.background_safe).toBe(false);
   });
 
   it("surfaces honesty metadata when the shot disturbed the desktop", async () => {
@@ -283,7 +292,7 @@ describe("ghost_screen tool", () => {
       warnings: ["region capture reads only currently-composited pixels"],
       interference: ["focus-region"],
     });
-    const { harness } = await harnessFor(VISION_CHAT, [VISION_CHAT], helper);
+    const { harness } = await harnessFor(VISION_CHAT, helper);
     const result = await harness.call(GHOST_SCREEN, { prompt: "?", target: "region", region: "0,0 10x10" });
     expect(resultText(result)).toMatch(/changed what the user sees/);
     expect(result.details.background_safe).toBe(false);
@@ -293,7 +302,7 @@ describe("ghost_screen tool", () => {
   });
 
   it("passes a window target and window through to the sidecar", async () => {
-    const { harness, helper } = await harnessFor(VISION_CHAT, [VISION_CHAT]);
+    const { harness, helper } = await harnessFor(VISION_CHAT);
     await harness.call(GHOST_SCREEN, { prompt: "?", target: "window", window: "firefox" });
     expect(helper.requests[0]).toEqual({
       op: "capture",
@@ -302,7 +311,7 @@ describe("ghost_screen tool", () => {
   });
 
   it("saves the capture under the ghost home", async () => {
-    const { harness } = await harnessFor(VISION_CHAT, [VISION_CHAT]);
+    const { harness } = await harnessFor(VISION_CHAT);
     const result = await harness.call(GHOST_SCREEN, { prompt: "?" });
     expect(String(result.details.path).startsWith(`${SCREENSHOTS_DIRNAME}/`)).toBe(true);
     await expect(stat(join(fixture.dir, String(result.details.path)))).resolves.toBeTruthy();
@@ -310,10 +319,9 @@ describe("ghost_screen tool", () => {
 
   it("gives a visitor no tool and blocks the name outright", async () => {
     const scope = visitorScope("visitor-1");
-    const { registry } = fixtureRegistry({ models: [VISION_CHAT] });
     const harness = await loadExtensionWith(
       createScreenExtension({ scope, helper: captureHelper() }),
-      makeContext({ cwd: fixture.dir, model: VISION_CHAT, modelRegistry: registry }),
+      makeContext({ cwd: fixture.dir, model: VISION_CHAT }),
     );
     expect(harness.toolNames()).toEqual([]);
     expect(screenToolNames({ scope })).toEqual([]);
@@ -323,7 +331,7 @@ describe("ghost_screen tool", () => {
   });
 
   it("offers exactly one tool to a creator", async () => {
-    const { harness } = await harnessFor(VISION_CHAT, [VISION_CHAT]);
+    const { harness } = await harnessFor(VISION_CHAT);
     expect(harness.toolNames()).toEqual([GHOST_SCREEN]);
     expect(screenToolNames()).toEqual([GHOST_SCREEN]);
   });

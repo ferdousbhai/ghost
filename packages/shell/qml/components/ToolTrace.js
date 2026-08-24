@@ -67,6 +67,9 @@ function fallback(activity, completed) {
         if (action === "write")
             return completed ? "Wrote its character" : "Writing its character";
         return completed ? "Read its own character" : "Reading its own character";
+    // `look_at_image` was ghost's own tool before OMP's native `inspect_image`
+    // took the job. Historical transcripts still replay the old name.
+    case "inspect_image":
     case "look_at_image":
         return completed ? "Looked closely at the image" : "Looking closely at the image";
     case "ghost_screen":

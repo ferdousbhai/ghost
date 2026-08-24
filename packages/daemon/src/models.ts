@@ -97,10 +97,14 @@ export interface GhostModelRoleBinding {
  *
  * - `chat_model` — answers the turn.
  * - `vision_model` — reads images when `chat_model` cannot; must be a model
- *   whose `input` includes `"image"`. Unbound, `@ghost/extensions` falls back
- *   to the cheapest credentialed vision-capable model in the ghost's own
- *   catalogue, ranked by `cost.input`. With none available it raises a loud,
- *   actionable error rather than letting the image be dropped in silence.
+ *   whose `input` includes `"image"`. The role is consumed natively: it
+ *   projects onto OMP's `modelRoles.vision`, OMP's `inspect_image` resolves
+ *   `@vision` first, and OMP's attachment describe-fallback prefers it too.
+ *   When the resolved model cannot accept images, OMP raises its own
+ *   actionable error rather than dropping the image in silence. Unbound, there
+ *   is no ghost-side cheapest-model default — that was removed deliberately:
+ *   reading an image is quality work, not throwaway work, so the owner
+ *   configures the role instead of inheriting the cheapest thing with eyes.
  * - `smol_model` — the cheap, fast lane for a ghost's throwaway completions:
  *   the name of a new conversation (`title.ts`) and the opening line of an empty
  *   chat (`greeting.ts`). Unbound, the daemon falls back to the cheapest USABLE

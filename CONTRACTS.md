@@ -37,10 +37,12 @@ Native filesystem and search (`read`, `glob`, `grep`), mutation (`write`,
 `edit`), Bash, web search, task/hub subagents, background jobs, skills, rules,
 project context, extensions/plugins, commands, and MCP remain available under
 OMP's normal configuration and xd:// presentation. Ghost disables only the
-overlapping OMP browser/computer/image tools because `ghost_browser`,
-`ghost_desktop`, `ghost_screen`, and `look_at_image` own those surfaces, and
-OMP's memory/autolearn backends because ghost memory is plain files in the
-ghost home (see the harness invariants).
+overlapping OMP browser and computer tools because `ghost_browser`,
+`ghost_desktop`, and `ghost_screen` own those surfaces, and OMP's
+memory/autolearn backends because ghost memory is plain files in the ghost
+home (see the harness invariants). Image inspection is OMP-native:
+`inspect_image` in its default auto mode, resolving the `vision` role that the
+daemon projects from models.json's `vision_model`.
 
 Creator notes and memory retrieval use those native filesystem tools directly.
 Ghost registers no duplicate creator note list/read/search/write tools, and

@@ -49,7 +49,6 @@ import {
   buildGhostSystemPrompt,
   deriveMemoryIndex,
   deriveNoteCatalog,
-  GHOST_LOOK_AT_IMAGE,
   openGhostHome,
 } from "@ghost/extensions";
 import * as Effect from "effect/Effect";
@@ -405,9 +404,10 @@ function extensionContext(
   systemPrompt: string,
   signal: AbortSignal | undefined,
 ): ExtensionContext {
-  // Ghost's screen tool checks only the image input capability. The standalone
-  // look_at_image fallback is removed below because Claude can consume the
-  // image block directly; no pi ModelRegistry is synthesized.
+  // Ghost's screen tool checks only the image input capability, and on this
+  // runtime the model behind it is Claude, which reads image blocks directly.
+  // Declaring image input here is what makes ghost_screen return the raw image
+  // block instead of degrading to text; no pi ModelRegistry is synthesized.
   const visionModel = { input: ["text", "image"] } as ExtensionContext["model"];
   return {
     cwd,
@@ -502,10 +502,7 @@ async function buildMcpTools(
     );
   }
   const definitions = await captureToolDefinitions(resolved.factories);
-  // Claude is vision-capable. Keeping the pi fallback would either make a
-  // second paid provider call or require inventing a ModelRegistry.
-  const names = resolved.toolNames.filter((name) => name !== GHOST_LOOK_AT_IMAGE);
-  const tools = names.map((name): SdkMcpToolDefinition => {
+  const tools = resolved.toolNames.map((name): SdkMcpToolDefinition => {
     const definition = definitions.get(name);
     if (!definition) {
       throw new ClaudeCodeProcessError(
@@ -539,7 +536,7 @@ async function buildMcpTools(
       { alwaysLoad: true },
     );
   });
-  return { tools, names };
+  return { tools, names: resolved.toolNames };
 }
 
 async function* promptMessages(

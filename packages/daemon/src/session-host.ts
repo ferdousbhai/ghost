@@ -123,6 +123,7 @@ import {
   type PiMessagesEvent,
   zeroUsage,
 } from "./pi-messages.js";
+import { readPins, writePins } from "./pins.js";
 import { generateTitle } from "./title.js";
 import { createGhostOmpRuntime, type GhostOmpRuntime } from "./omp-runtime.js";
 import { AskBroker, AskBrokerError, type PendingAsk } from "./ask-broker.js";
@@ -426,6 +427,7 @@ export interface SessionSummary {
   createdAt: string;
   updatedAt: string;
   messageCount: number;
+  pinned: boolean;
 }
 
 /** A renderable transcript message: OMP's message shape, reasoning removed. */
@@ -655,10 +657,15 @@ export class SessionHost {
       // chains from models.json.
       "retry.modelFallback": true,
       "retry.fallbackRevertPolicy": "cooldown-expiry",
-      // Ghost supplies its own scoped `look_at_image` extension. Keep OMP's
-      // overlapping image/browser/computer built-ins out of the creator slate.
-      // Everything else remains governed by the user's native OMP setup.
-      "inspect_image.mode": "off",
+      // `ghost_browser`, `ghost_desktop`, and `ghost_screen` own those surfaces,
+      // so OMP's overlapping browser/computer built-ins stay off. Image
+      // inspection is the opposite call: it is OMP-native now — `inspect_image`
+      // runs in its default `auto` mode, registering only when the active chat
+      // model cannot see, and resolving the `vision` role Ghost projects from
+      // `models.json`'s `vision_model`. OMP's `images.describeForTextModels`
+      // attachment fallback is deliberately left at its default (on) for the
+      // same reason. Everything else remains governed by the user's native OMP
+      // setup.
       "browser.enabled": false,
       "computer.enabled": false,
       // Ghost memory is plain files in the ghost home. OMP's memory lanes
@@ -1462,9 +1469,14 @@ export class SessionHost {
 
     let daysSinceLastConversation: number | null = null;
     try {
-      // listSessions is newest-updated first, so the head is the last time the
-      // owner and this ghost actually spoke.
-      const newest = (await this.listSessions(ghost.name))[0]?.updatedAt;
+      // The most recent conversation is the last time the owner and this ghost
+      // actually spoke. Taken as a max rather than off the head of the
+      // listing, which is ordered pinned-first.
+      const newest = (await this.collectSessions(ghost))
+        .reduce<string | null>(
+          (latest, row) => (latest === null || row.updatedAt > latest ? row.updatedAt : latest),
+          null,
+        );
       if (newest) daysSinceLastConversation = wholeDaysSince(newest);
     } catch (error) {
       this.logger.warn("could not read conversations for a greeting", {
@@ -1532,8 +1544,9 @@ export class SessionHost {
   }
 
   /**
-   * The ghost's conversations, newest-updated first — pi transcripts plus
-   * Claude Code resume sidecars, in one shape.
+   * The ghost's conversations, pinned first and newest-updated first within
+   * each group — pi transcripts plus Claude Code resume sidecars, in one
+   * shape.
    *
    * `id` is the conversation id the shell uses to resume (the pi-messages
    * `options.sessionId`), recovered from the transcript filename; `title` is
@@ -1549,26 +1562,73 @@ export class SessionHost {
 
     const ghost = this.registry.get(ghostName);
     const paths = ghostPaths(ghost.dir);
+    const [rows, pins] = await Promise.all([
+      this.collectSessions(ghost),
+      readPins(paths.sessionDir),
+    ]);
+    // A pin whose conversation is gone is simply not seen here; the next write
+    // prunes it.
+    const pinned = new Set(pins);
+    return rows
+      .map((row) => ({ ...row, pinned: pinned.has(row.id) }))
+      .sort((a, b) => (a.pinned === b.pinned
+        ? b.updatedAt.localeCompare(a.updatedAt)
+        : (a.pinned ? -1 : 1)));
+  }
+
+  /**
+   * Pin or unpin one conversation. Idempotent, and unknown ids are a 404
+   * rather than a pin nothing will ever match.
+   *
+   * The file is rewritten even when the pin state did not change, because that
+   * write is also what prunes ids whose conversations have since been deleted
+   * by something other than `deleteSession`.
+   */
+  async setPinned(
+    ghostName: string,
+    sessionId: string | null | undefined,
+    pinned: boolean,
+  ): Promise<void> {
+    const ghost = this.registry.get(ghostName);
+    const id = sessionId || DEFAULT_SESSION_KEY;
+    const paths = ghostPaths(ghost.dir);
+    const existing = new Set((await this.collectSessions(ghost)).map((row) => row.id));
+    if (!existing.has(id)) {
+      throw new GhostError(
+        "not_found",
+        `This ghost has no conversation ${JSON.stringify(id)}.`,
+        404,
+      );
+    }
+    const kept = (await readPins(paths.sessionDir))
+      .filter((pin) => pin !== id && existing.has(pin));
+    await writePins(paths.sessionDir, pinned ? [...kept, id] : kept);
+  }
+
+  /** Every stored conversation for one ghost, before pin state is applied. */
+  private async collectSessions(ghost: Ghost): Promise<Omit<SessionSummary, "pinned">[]> {
+    const paths = ghostPaths(ghost.dir);
     mkdirSync(paths.sessionDir, { recursive: true });
     const [sessions, claudeSessions] = await Promise.all([
       SessionManager.list(paths.home, paths.sessionDir),
       this.claudeCode.listSessions(ghost),
     ]);
-    const piSessions: SessionSummary[] = sessions.map((info) => ({
-      id: conversationIdFromSessionFile(info.path),
-      title: info.title?.trim() ? info.title : null,
-      createdAt: info.created.toISOString(),
-      updatedAt: info.modified.toISOString(),
-      messageCount: info.messageCount,
-    }));
-    const claude: SessionSummary[] = claudeSessions.map((info) => ({
-      id: info.conversationId,
-      title: "Claude Code",
-      createdAt: info.created,
-      updatedAt: info.modified,
-      messageCount: info.messageCount,
-    }));
-    return [...piSessions, ...claude].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    return [
+      ...sessions.map((info) => ({
+        id: conversationIdFromSessionFile(info.path),
+        title: info.title?.trim() ? info.title : null,
+        createdAt: info.created.toISOString(),
+        updatedAt: info.modified.toISOString(),
+        messageCount: info.messageCount,
+      })),
+      ...claudeSessions.map((info) => ({
+        id: info.conversationId,
+        title: "Claude Code",
+        createdAt: info.created,
+        updatedAt: info.modified,
+        messageCount: info.messageCount,
+      })),
+    ];
   }
 
   /**
@@ -1916,6 +1976,10 @@ export class SessionHost {
           `This ghost has no conversation ${JSON.stringify(id)}.`,
           404,
         );
+      }
+      const pins = await readPins(paths.sessionDir);
+      if (pins.includes(id)) {
+        await writePins(paths.sessionDir, pins.filter((pin) => pin !== id));
       }
       this.logger.info("deleted ghost conversation", { ghost: ghostName, session: id });
     } finally {

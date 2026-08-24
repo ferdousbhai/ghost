@@ -73,6 +73,12 @@ Item {
                 "Saving the spectral echo", "Binding a ghost memory",
                 "Keeping the haunted thread"
             ],
+            inspect_image: [
+                "Peering through the spectral lens", "Reading the haunted image",
+                "Tracing shapes beyond the veil"
+            ],
+            // Ghost's own pre-OMP name for the same work; kept so historical
+            // transcripts still replay with flavour.
             look_at_image: [
                 "Peering through the spectral lens", "Reading the haunted image",
                 "Tracing shapes beyond the veil"

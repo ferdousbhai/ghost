@@ -1,17 +1,17 @@
 /**
  * A scripted runtime for the extensions that reach outside the ghost home —
- * vision, screen, and desktop.
+ * screen and desktop.
  *
  * `support/harness.ts` gives every extension a context with nothing but `cwd`,
- * which is all persona/memory/notes ever read. These three read `ctx.model` and
- * `ctx.modelRegistry` as well, and they run programs. So this harness adds:
+ * which is all persona/memory/notes ever read. These two read `ctx.model` — the
+ * screen tool branches on whether the chat model can be handed an image — and
+ * they run programs. So this harness adds:
  *
- * - a **fixture model catalogue** with real `input` and `cost` values, so the
- *   "cheapest credentialed vision model" rule is tested against data rather
- *   than against a mock that agrees with it;
+ * - a **fixture model** with real `input` and `cost` values, so that branch is
+ *   tested against model-shaped data rather than a mock that agrees with it;
  * - a **recording command runner**, so `grim`/`hyprctl`/`notify-send` are never
  *   actually invoked and every argv the extensions build is inspectable;
- * - the `context` and `session_start` events the vision fallback hangs off.
+ * - a fake `DesktopHelper`, so no sidecar process is spawned.
  *
  * No model is contacted and no desktop is touched.
  */
@@ -24,7 +24,6 @@ import type {
   ToolCallEventResult,
   ToolDefinition,
 } from "@oh-my-pi/pi-coding-agent";
-import type { VisionModel } from "../../src/extensions/vision.js";
 import type { CommandResult, CommandRunner, RunCommandOptions } from "../../src/extensions/shared.js";
 import { CommandError } from "../../src/extensions/shared.js";
 import type {
@@ -50,8 +49,11 @@ export interface FixtureModelInput {
   costOutput?: number;
 }
 
+/** OMP's `Model`, taken structurally off the context the extensions receive. */
+export type FixtureModel = NonNullable<ExtensionContext["model"]>;
+
 /** A `Model` shaped exactly enough for the rules under test. */
-export function fixtureModel(input: FixtureModelInput): VisionModel {
+export function fixtureModel(input: FixtureModelInput): FixtureModel {
   const model: Record<string, unknown> = {
     id: input.id,
     name: input.id,
@@ -69,60 +71,7 @@ export function fixtureModel(input: FixtureModelInput): VisionModel {
     maxTokens: 8_192,
   };
   if (input.input !== undefined) model["input"] = input.input;
-  return model as unknown as VisionModel;
-}
-
-export interface FixtureRegistryOptions {
-  readonly models: readonly VisionModel[];
-  /** Providers with credentials. Defaults to every provider in `models`. */
-  readonly credentialed?: readonly string[];
-  /** What `complete()` answers with. Defaults to a fixed description. */
-  readonly completion?: string;
-}
-
-export interface FixtureRegistry {
-  readonly registry: ExtensionContext["modelRegistry"];
-  /** Every `complete()` call, in order. */
-  readonly completions: Array<{ model: string; prompt: string; systemPrompt: string }>;
-}
-
-export function fixtureRegistry(options: FixtureRegistryOptions): FixtureRegistry {
-  const credentialed = new Set(
-    options.credentialed ?? options.models.map((model) => model.provider),
-  );
-  const completions: FixtureRegistry["completions"] = [];
-
-  const registry = {
-    getAll: () => [...options.models],
-    getAvailable: () => options.models.filter((model) => credentialed.has(model.provider)),
-    find: (provider: string, modelId: string) =>
-      options.models.find((model) => model.provider === provider && model.id === modelId),
-    hasConfiguredAuth: (model: VisionModel) => credentialed.has(model.provider),
-    complete: async (model: VisionModel, context: { systemPrompt?: string; messages: any[] }) => {
-      const last = context.messages[context.messages.length - 1];
-      const text = (last?.content ?? [])
-        .filter((part: { type?: string }) => part.type === "text")
-        .map((part: { text: string }) => part.text)
-        .join("\n");
-      completions.push({
-        model: `${model.provider}/${model.id}`,
-        prompt: text,
-        systemPrompt: context.systemPrompt ?? "",
-      });
-      return {
-        role: "assistant" as const,
-        content: [{ type: "text" as const, text: options.completion ?? "a red square" }],
-        api: "openai-completions",
-        provider: model.provider,
-        model: model.id,
-        usage: {},
-        stopReason: "stop" as const,
-        timestamp: Date.now(),
-      };
-    },
-  };
-
-  return { registry: registry as unknown as ExtensionContext["modelRegistry"], completions };
+  return model as unknown as FixtureModel;
 }
 
 // ---------------------------------------------------------------------------
@@ -240,8 +189,7 @@ export function fakeHelper(options: FakeHelperOptions = {}): FakeHelper {
 
 export interface ContextOptions {
   readonly cwd: string;
-  readonly model?: VisionModel | undefined;
-  readonly modelRegistry?: ExtensionContext["modelRegistry"];
+  readonly model?: FixtureModel | undefined;
 }
 
 export function makeContext(options: ContextOptions): ExtensionContext {
@@ -250,7 +198,6 @@ export function makeContext(options: ContextOptions): ExtensionContext {
     mode: "print",
     hasUI: false,
     model: options.model,
-    modelRegistry: options.modelRegistry,
   } as unknown as ExtensionContext;
 }
 
