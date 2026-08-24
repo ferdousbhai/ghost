@@ -49,7 +49,7 @@ TestCase {
             },
             {
                 tag: "no .git under the ghost home",
-                file: "/home/u/.local/share/ghost/casper/notes/idea.md",
+                file: "/home/u/.local/share/ghost/casper/docs/idea.md",
                 files: [],
                 root: ghost
             },
@@ -67,9 +67,9 @@ TestCase {
             },
             {
                 tag: "a repo beats the ghost home",
-                file: "/home/u/.local/share/ghost/casper/notes/idea.md",
-                files: ["/home/u/.local/share/ghost/casper/notes/.git/HEAD"],
-                root: "/home/u/.local/share/ghost/casper/notes"
+                file: "/home/u/.local/share/ghost/casper/docs/idea.md",
+                files: ["/home/u/.local/share/ghost/casper/docs/.git/HEAD"],
+                root: "/home/u/.local/share/ghost/casper/docs"
             },
             {
                 tag: "stops at $HOME",

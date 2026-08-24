@@ -13,11 +13,11 @@
  * Two things differ from a title, and both come from what a greeting is *for*.
  *
  * 1. **It is spoken in the ghost's voice, so it is built from the ghost.** The
- *    context carries the character sketch, the memory index, the note catalog,
+ *    context carries the character sketch, the memory index, the doc catalog,
  *    and the clock — the same material the persona prompt is assembled from,
  *    on a tighter budget because this is one throwaway sentence rather than a
  *    whole session. All of it is fenced as DATA, never instructions, the same
- *    trust boundary `screen.ts` and `browser.ts` draw around a web page: a note
+ *    trust boundary `screen.ts` and `browser.ts` draw around a web page: a document
  *    the owner imported from somewhere must not be able to rewrite the greeting
  *    into something else.
  *
@@ -58,7 +58,7 @@ import {
  * enough of the ghost to sound like it.
  */
 export const GREETING_MEMORY_BUDGET_CHARS = 1_200;
-export const GREETING_NOTES_BUDGET_CHARS = 1_200;
+export const GREETING_DOCS_BUDGET_CHARS = 1_200;
 export const GREETING_CHARACTER_BUDGET_CHARS = 2_000;
 
 /** Hard cap on a greeting, applied after cleaning. Over it, the result is rejected. */
@@ -74,10 +74,12 @@ export const MAX_GREETING_SENTENCE_ENDERS = 4;
  */
 export const GREETING_LEAK_MARKERS: readonly string[] = [
   "system note",
+  "system doc",
   "instructions",
   "character.md",
   "memory index",
   "note catalog",
+  "doc catalog",
   "as an ai",
 ];
 
@@ -98,8 +100,8 @@ export interface GreetingContextInput {
   readonly character: string | null;
   /** `deriveMemoryIndex(...).lines` for this ghost. */
   readonly memoryLines: readonly string[];
-  /** `deriveNoteCatalog(...).lines` for this ghost. */
-  readonly noteLines: readonly string[];
+  /** `deriveDocCatalog(...).lines` for this ghost. */
+  readonly docLines: readonly string[];
   /** Weekday, date, time, timezone — in the daemon's local zone. */
   readonly localTime: string;
   /** Whole days since the ghost's most recent conversation, or null for none. */
@@ -183,8 +185,8 @@ function greetingData(input: GreetingContextInput): string[] {
   const memory = budgetedLines(input.memoryLines, GREETING_MEMORY_BUDGET_CHARS);
   lines.push("", "What you remember:", ...(memory.length > 0 ? memory : ["(nothing yet)"]));
 
-  const notes = budgetedLines(input.noteLines, GREETING_NOTES_BUDGET_CHARS);
-  lines.push("", "Your notes:", ...(notes.length > 0 ? notes : ["(no notes yet)"]));
+  const docs = budgetedLines(input.docLines, GREETING_DOCS_BUDGET_CHARS);
+  lines.push("", "Your docs:", ...(docs.length > 0 ? docs : ["(no docs yet)"]));
 
   return lines;
 }
@@ -443,7 +445,7 @@ export const FIRST_MEETING_SECTION = [
   "- Keep what lasts. Save durable facts about them with your memory tool, written as plain "
   + "declarative statements (\"Owner prefers short answers\", \"Owner is restoring a 1962 "
   + "Vandercook\"), never as instructions to yourself. When something is an ongoing project "
-  + "or interest, offer to start a note for it.",
+  + "or interest, offer to start a document for it.",
   "- When you know enough, draft your character in the conversation — who you are, how you "
   + "speak, what you care about — ask them whether it feels right, and then write it with "
   + "the `ghost_character` tool.",

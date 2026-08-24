@@ -1,16 +1,16 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { deriveNoteCatalog } from "../src/catalog.js";
+import { deriveDocCatalog } from "../src/catalog.js";
 import { GhostError, MemoryFileFormatError } from "../src/errors.js";
 import { type GhostHome, openGhostHome } from "../src/home.js";
 import { deriveMemoryIndex } from "../src/memory-file.js";
 import { CREATOR_SCOPE, visitorScope } from "../src/scope.js";
 import {
-  ARCHIVED_NOTE_PATH,
+  ARCHIVED_DOC_PATH,
   createGhostFixture,
-  PRIVATE_NOTE_PATH,
-  PUBLIC_NOTE_PATH,
+  PRIVATE_DOC_PATH,
+  PUBLIC_DOC_PATH,
   type GhostFixture,
 } from "./support/fixture.js";
 
@@ -46,6 +46,41 @@ describe("layout", () => {
     expect(deriveMemoryIndex(listing.files).lines.length).toBeGreaterThan(0);
     await expect(readFile(join(fixture.dir, "MEMORY.md"), "utf8")).rejects.toThrow();
   });
+
+  it("atomically migrates an unambiguous legacy notes directory", async () => {
+    const legacy = await createGhostFixture("legacy", {
+      "character.md": "# Legacy\n",
+      "notes/project.md": "legacy bytes\n",
+    });
+    try {
+      const legacyHome = openGhostHome(legacy.dir);
+      await legacyHome.ensure();
+      expect(await readFile(join(legacyHome.docsDir, "project.md"), "utf8"))
+        .toBe("legacy bytes\n");
+      await expect(readFile(join(legacy.dir, "notes", "project.md"), "utf8"))
+        .rejects.toThrow();
+    } finally {
+      await legacy.cleanup();
+    }
+  });
+
+  it("refuses to guess when legacy notes and canonical docs both exist", async () => {
+    const ambiguous = await createGhostFixture("ambiguous", {
+      "character.md": "# Ambiguous\n",
+      "notes/project.md": "legacy\n",
+      "docs/project.md": "canonical\n",
+    });
+    try {
+      await expect(openGhostHome(ambiguous.dir).ensure())
+        .rejects.toMatchObject({ code: "conflict" });
+      expect(await readFile(join(ambiguous.dir, "notes", "project.md"), "utf8"))
+        .toBe("legacy\n");
+      expect(await readFile(join(ambiguous.dir, "docs", "project.md"), "utf8"))
+        .toBe("canonical\n");
+    } finally {
+      await ambiguous.cleanup();
+    }
+  });
 });
 
 describe("character", () => {
@@ -61,87 +96,87 @@ describe("character", () => {
   });
 });
 
-describe("notes", () => {
-  it("lists every note with its frontmatter", async () => {
-    const { notes, skipped } = await home.listNotes();
+describe("docs", () => {
+  it("lists every doc with its frontmatter", async () => {
+    const { docs, skipped } = await home.listDocs();
     expect(skipped).toEqual([]);
-    expect(notes.map((note) => note.path)).toEqual([
-      PUBLIC_NOTE_PATH,
-      PRIVATE_NOTE_PATH,
-      ARCHIVED_NOTE_PATH,
+    expect(docs.map((doc) => doc.path)).toEqual([
+      PUBLIC_DOC_PATH,
+      PRIVATE_DOC_PATH,
+      ARCHIVED_DOC_PATH,
       "press-restoration.md",
     ].sort((a, b) => a.localeCompare(b)));
 
-    const paper = notes.find((note) => note.path === PUBLIC_NOTE_PATH);
+    const paper = docs.find((doc) => doc.path === PUBLIC_DOC_PATH);
     expect(paper?.public).toBe(true);
     expect(paper?.tags).toEqual(["paper", "press"]);
-    const finances = notes.find((note) => note.path === PRIVATE_NOTE_PATH);
+    const finances = docs.find((doc) => doc.path === PRIVATE_DOC_PATH);
     expect(finances?.public).toBe(false);
-    const archived = notes.find((note) => note.path === ARCHIVED_NOTE_PATH);
+    const archived = docs.find((doc) => doc.path === ARCHIVED_DOC_PATH);
     expect(archived?.archived).toBe(true);
   });
 
-  it("treats a note without frontmatter as private", async () => {
-    await home.writeNote("scratch.md", { body: "unmarked" });
-    const note = await home.readNote("scratch");
-    expect(note.meta.public).toBe(false);
+  it("treats a doc without frontmatter as private", async () => {
+    await home.writeDoc("scratch.md", { body: "unmarked" });
+    const doc = await home.readDoc("scratch");
+    expect(doc.meta.public).toBe(false);
   });
 
   it("keeps the body byte-identical across a read/write round trip", async () => {
-    const before = await readFile(join(home.notesDir, PUBLIC_NOTE_PATH), "utf8");
-    const note = await home.readNote(PUBLIC_NOTE_PATH);
-    await home.writeNote(PUBLIC_NOTE_PATH, {
-      body: note.body,
-      public: note.meta.public,
-      ...(note.meta.title === undefined ? {} : { title: note.meta.title }),
-      tags: note.meta.tags,
+    const before = await readFile(join(home.docsDir, PUBLIC_DOC_PATH), "utf8");
+    const doc = await home.readDoc(PUBLIC_DOC_PATH);
+    await home.writeDoc(PUBLIC_DOC_PATH, {
+      body: doc.body,
+      public: doc.meta.public,
+      ...(doc.meta.title === undefined ? {} : { title: doc.meta.title }),
+      tags: doc.meta.tags,
     });
-    expect(await readFile(join(home.notesDir, PUBLIC_NOTE_PATH), "utf8")).toBe(before);
+    expect(await readFile(join(home.docsDir, PUBLIC_DOC_PATH), "utf8")).toBe(before);
   });
 
   it("preserves unspecified frontmatter when rewriting a body", async () => {
-    await home.writeNote(PUBLIC_NOTE_PATH, { body: "new body" });
-    const note = await home.readNote(PUBLIC_NOTE_PATH);
-    expect(note.body).toBe("new body");
-    expect(note.meta.public).toBe(true);
-    expect(note.meta.tags).toEqual(["paper", "press"]);
+    await home.writeDoc(PUBLIC_DOC_PATH, { body: "new body" });
+    const doc = await home.readDoc(PUBLIC_DOC_PATH);
+    expect(doc.body).toBe("new body");
+    expect(doc.meta.public).toBe(true);
+    expect(doc.meta.tags).toEqual(["paper", "press"]);
   });
 
-  it("refuses paths that escape the notes directory", async () => {
-    await expect(home.readNote("../../etc/passwd")).rejects.toThrow(GhostError);
-    await expect(home.writeNote("../outside.md", { body: "x" })).rejects.toThrow(GhostError);
+  it("refuses paths that escape the docs directory", async () => {
+    await expect(home.readDoc("../../etc/passwd")).rejects.toThrow(GhostError);
+    await expect(home.writeDoc("../outside.md", { body: "x" })).rejects.toThrow(GhostError);
   });
 
   it("throws not_found rather than returning an error payload", async () => {
-    await expect(home.readNote("missing.md")).rejects.toMatchObject({ code: "not_found" });
+    await expect(home.readDoc("missing.md")).rejects.toMatchObject({ code: "not_found" });
   });
 
   it("searches bodies and reports line numbers", async () => {
-    const result = await home.searchNotes("carriage");
+    const result = await home.searchDocs("carriage");
     expect(result.matches).toHaveLength(1);
     expect(result.matches[0]?.path).toBe("press-restoration.md");
     expect(result.matches[0]?.line).toBe(1);
   });
 
-  it("keeps private and archived notes out of a visitor search", async () => {
+  it("keeps private and archived docs out of a visitor search", async () => {
     const scope = visitorScope("visitor-1");
-    expect((await home.searchNotes("lease", { scope })).matches).toEqual([]);
-    expect((await home.searchNotes("Superseded", { scope })).matches).toEqual([]);
-    expect((await home.searchNotes("Damp", { scope })).matches).toHaveLength(1);
+    expect((await home.searchDocs("lease", { scope })).matches).toEqual([]);
+    expect((await home.searchDocs("Superseded", { scope })).matches).toEqual([]);
+    expect((await home.searchDocs("Damp", { scope })).matches).toHaveLength(1);
   });
 
   it("refuses a catastrophic-backtracking regex fast instead of hanging", async () => {
     const started = Date.now();
-    await expect(home.searchNotes("(a+)+$", { regex: true }))
+    await expect(home.searchDocs("(a+)+$", { regex: true }))
       .rejects.toMatchObject({ code: "invalid_format" });
-    await expect(home.searchNotes("(.*a){30}", { regex: true }))
+    await expect(home.searchDocs("(.*a){30}", { regex: true }))
       .rejects.toMatchObject({ code: "invalid_format" });
     // The whole guard, analysis included, is bounded well under a second.
     expect(Date.now() - started).toBeLessThan(2_000);
   });
 
   it("still runs an ordinary regex search", async () => {
-    const result = await home.searchNotes("carr[a-z]+", { regex: true });
+    const result = await home.searchDocs("carr[a-z]+", { regex: true });
     expect(result.matches.length).toBeGreaterThan(0);
     expect(result.matches[0]?.path).toBe("press-restoration.md");
   });
@@ -149,19 +184,19 @@ describe("notes", () => {
   it("leaves the literal (non-regex) path untouched by the ReDoS guard", async () => {
     // The same string that is refused as a regex is a fine literal query: it is
     // escaped, so it can never backtrack, and it simply matches nothing here.
-    const result = await home.searchNotes("(a+)+$");
+    const result = await home.searchDocs("(a+)+$");
     expect(result.matches).toEqual([]);
-    expect(result.notesSearched).toBeGreaterThan(0);
+    expect(result.docsSearched).toBeGreaterThan(0);
   });
 
   it("caps title matches at max_results and reports truncation", async () => {
     for (let index = 0; index < 10; index += 1) {
-      await home.writeNote(`widgets/w${index}.md`, {
+      await home.writeDoc(`widgets/w${index}.md`, {
         body: "nothing to match in the body",
         title: `Widget number ${index}`,
       });
     }
-    const result = await home.searchNotes("Widget number", { maxResults: 3 });
+    const result = await home.searchDocs("Widget number", { maxResults: 3 });
     expect(result.matches).toHaveLength(3);
     expect(result.truncated).toBe(true);
     // Every returned match is a title hit (line 0), the path that used to overrun.
@@ -169,16 +204,16 @@ describe("notes", () => {
   });
 });
 
-describe("note catalog", () => {
-  it("marks visibility for the creator and hides private notes from a visitor", async () => {
-    const { notes } = await home.listNotes();
-    const creator = deriveNoteCatalog(notes, CREATOR_SCOPE);
+describe("doc catalog", () => {
+  it("marks visibility for the creator and hides private docs from a visitor", async () => {
+    const { docs } = await home.listDocs();
+    const creator = deriveDocCatalog(docs, CREATOR_SCOPE);
     expect(creator.total).toBe(4);
-    expect(creator.lines.join("\n")).toContain(`${PRIVATE_NOTE_PATH}: Estate and finances (private)`);
+    expect(creator.lines.join("\n")).toContain(`${PRIVATE_DOC_PATH}: Estate and finances (private)`);
 
-    const visitor = deriveNoteCatalog(notes, visitorScope("visitor-1"));
-    expect(visitor.lines.join("\n")).not.toContain(PRIVATE_NOTE_PATH);
-    expect(visitor.lines.join("\n")).not.toContain(ARCHIVED_NOTE_PATH);
+    const visitor = deriveDocCatalog(docs, visitorScope("visitor-1"));
+    expect(visitor.lines.join("\n")).not.toContain(PRIVATE_DOC_PATH);
+    expect(visitor.lines.join("\n")).not.toContain(ARCHIVED_DOC_PATH);
     expect(visitor.total).toBe(2);
   });
 });

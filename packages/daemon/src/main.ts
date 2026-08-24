@@ -19,6 +19,7 @@ import { importCommand } from "./import-command.js";
 import { loginCommand } from "./login-command.js";
 import { loadConfig, type DaemonConfig, type DaemonConfigOverrides } from "./config.js";
 import { scrubProviderEnv } from "./env-scrub.js";
+import { ensureGhostHomeLayout } from "./extensions.js";
 import { GhostRegistry } from "./ghosts.js";
 import { GhostHookRunner } from "./hooks.js";
 import { createLogger, type LogLevel } from "./log.js";
@@ -202,6 +203,14 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 
   const registry = new GhostRegistry(config.ghostsRoot);
   registry.ensureRoot();
+  try {
+    await Promise.all(registry.list().map((ghost) => ensureGhostHomeLayout(ghost.dir)));
+  } catch (error) {
+    logger.error("could not migrate a ghost home to the docs layout", {
+      error: (error as Error).message,
+    });
+    return 1;
+  }
 
   // One relay hub, shared: the server exposes /relay over it and the session
   // host uses it as the browser backend's transport, so a ghost drives the

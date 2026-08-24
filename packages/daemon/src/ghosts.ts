@@ -3,7 +3,7 @@
  *
  * A ghost is one directory under the ghosts root (default `~/Ghosts/`), laid
  * out per `ghost-home/v1` in CONTRACTS.md. The registry owns only the shape
- * of that directory; reading its *contents* (character, notes, memory) is
+ * of that directory; reading its *contents* (character, docs, memory) is
  * `@ghost/extensions`' job.
  *
  * Everything the daemon adds for itself lives in dot-directories inside the
@@ -98,7 +98,7 @@ function isFile(path: string): boolean {
 
 /**
  * A directory is a ghost home when it exists and holds a `character.md`.
- * The persona file is the one thing a ghost cannot be without — notes,
+ * The persona file is the one thing a ghost cannot be without — docs,
  * memory, and conversations are all optional and may be empty.
  */
 export function isGhostHome(dir: string): boolean {
@@ -181,7 +181,7 @@ actually remember over a general statement you could have made about anything.
 
 ## What you know
 
-Your notes and memory files are yours. Read them before you answer a question
+Your docs and memory files are yours. Read them before you answer a question
 they cover, and write a memory file when you learn something about a visitor
 that you would want to remember the next time they come back.
 `;
@@ -292,7 +292,7 @@ export class GhostRegistry {
       throw new GhostError("already_exists", `A ghost named ${JSON.stringify(name)} already exists.`, 409);
     }
     mkdirSync(dir, { recursive: true });
-    for (const sub of ["notes", "memory", join("memory", ".visitors"), "conversations"]) {
+    for (const sub of ["docs", "memory", join("memory", ".visitors"), "conversations"]) {
       mkdirSync(join(dir, sub), { recursive: true });
     }
     writeFileSync(join(dir, GHOST_CHARACTER_FILENAME), SEEDED_CHARACTER(name), {
@@ -312,7 +312,7 @@ export class GhostRegistry {
    * file manager's Trash see it and can put it back.
    *
    * Deleting a ghost is a rename, never a recursive removal: the ghost home
-   * holds the only copy of a persona, its memory, and its notes, and no HTTP
+   * holds the only copy of a persona, its memory, and its docs, and no HTTP
    * route may be one bug away from erasing that. That also fixes the failure
    * mode when the trash is on another filesystem — a cross-device `rename`
    * raises `EXDEV`, and rather than degrade into copy-then-delete we fall back

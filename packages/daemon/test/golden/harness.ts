@@ -231,7 +231,7 @@ export function personaOf(systemPrompt: string, anchor: string): string {
  * sessions and agent state live inside the ghost home.
  *
  * What remains is the whole of Ghost's own storage contract: character.md,
- * notes/, memory/ — plain files, which is exactly the invariant a strip could
+ * docs/, memory/ — plain files, which is exactly the invariant a strip could
  * break without any unit test noticing.
  */
 export function ghostHomeSnapshot(

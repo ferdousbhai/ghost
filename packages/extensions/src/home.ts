@@ -5,7 +5,7 @@
  *
  *     <ghostsRoot>/<name>/
  *       character.md
- *       notes/**\/*.md
+ *       docs/**\/*.md
  *       memory/*.md
  *       memory/.visitors/<id>/*.md
  *       conversations/*.json
@@ -13,20 +13,20 @@
  *
  * Two rules run through everything here:
  *
- * 1. **Bodies are bytes.** A note read and written back unchanged is
+ * 1. **Bodies are bytes.** A doc read and written back unchanged is
  *    byte-identical. No trimming, no newline normalization, no "tidying".
- * 2. **Nothing derived is stored.** The memory index and the note catalog are
- *    computed per session (`deriveMemoryIndex`, `deriveNoteCatalog`). There is no
+ * 2. **Nothing derived is stored.** The memory index and the doc catalog are
+ *    computed per session (`deriveMemoryIndex`, `deriveDocCatalog`). There is no
  *    MEMORY.md and no catalog file, by contract.
  *
  * Every mutation goes through a path-keyed queue: OMP runs tool calls in
  * parallel by default, so two `ghost_memory_write` calls in one batch can
  * otherwise interleave on the same file.
  */
-import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { isSafe } from "redos-detector";
-import { isNoteVisible } from "./catalog.js";
+import { isDocVisible } from "./catalog.js";
 import { GhostError } from "./errors.js";
 import {
   parseDocument,
@@ -50,12 +50,13 @@ import { CREATOR_SCOPE, isVisitorScope, type GhostScope } from "./scope.js";
 import type {
   CharacterFile,
   MemoryRecord,
-  NoteFile,
-  NoteFrontmatter,
-  NoteMeta,
+  DocFile,
+  DocFrontmatter,
+  DocMeta,
 } from "./types.js";
 
-export const NOTES_DIRNAME = "notes";
+export const DOCS_DIRNAME = "docs";
+const LEGACY_NOTES_DIRNAME = "notes";
 export const MEMORY_DIRNAME = "memory";
 /** Dot-folder: out of the creator's default view, but inspectable. */
 export const VISITORS_DIRNAME = ".visitors";
@@ -69,10 +70,10 @@ export interface SkippedFile {
   readonly reason: string;
 }
 
-export interface NoteListing {
-  readonly notes: readonly NoteMeta[];
+export interface DocListing {
+  readonly docs: readonly DocMeta[];
   /**
-   * Files under `notes/` that could not be parsed. They are excluded from the
+   * Files under `docs/` that could not be parsed. They are excluded from the
    * catalog — and therefore invisible to visitors — rather than guessed at, but
    * they are reported rather than dropped silently.
    */
@@ -84,9 +85,9 @@ export interface MemoryListing {
   readonly skipped: readonly SkippedFile[];
 }
 
-export interface NoteWriteInput {
+export interface DocWriteInput {
   readonly body: string;
-  /** Omitted on an existing note keeps its current value; new notes default to private. */
+  /** Omitted on an existing doc keeps its current value; new docs default to private. */
   readonly public?: boolean;
   readonly title?: string;
   readonly tags?: readonly string[];
@@ -110,7 +111,7 @@ export interface MemoryWriteResult {
   readonly created: boolean;
 }
 
-export interface NoteSearchOptions {
+export interface DocSearchOptions {
   readonly scope?: GhostScope;
   /** Treat the query as a JavaScript regular expression. */
   readonly regex?: boolean;
@@ -119,16 +120,16 @@ export interface NoteSearchOptions {
   readonly includeArchived?: boolean;
 }
 
-export interface NoteSearchMatch {
+export interface DocSearchMatch {
   readonly path: string;
   readonly line: number;
   readonly text: string;
 }
 
-export interface NoteSearchResult {
-  readonly matches: readonly NoteSearchMatch[];
+export interface DocSearchResult {
+  readonly matches: readonly DocSearchMatch[];
   readonly truncated: boolean;
-  readonly notesSearched: number;
+  readonly docsSearched: number;
 }
 
 const DEFAULT_SEARCH_RESULTS = 50;
@@ -148,7 +149,7 @@ async function withFileMutationQueue<T>(path: string, mutate: () => Promise<T>):
 }
 
 /**
- * ReDoS defence for `searchNotes` with `regex: true`. The query is model- or
+ * ReDoS defence for `searchDocs` with `regex: true`. The query is model- or
  * page-supplied (a ghost greps text it just read off the web), and it is compiled
  * and `.test()`ed against every line. Without a guard, a pattern like `(a+)+$`
  * against one long line backtracks catastrophically and pins the daemon's single
@@ -205,19 +206,19 @@ function resolveWithin(base: string, relativePath: string, label: string): strin
 }
 
 /** `craft/paper` and `craft/paper.md` both mean `craft/paper.md`. */
-export function normalizeNotePath(input: string): string {
+export function normalizeDocPath(input: string): string {
   const segments = input
     .trim()
     .replace(/\\/g, "/")
     .split("/")
     .filter((segment) => segment.length > 0 && segment !== ".");
   if (segments.length === 0) {
-    throw new GhostError("invalid_path", "A note path is required.");
+    throw new GhostError("invalid_path", "A document path is required.");
   }
   if (segments.some((segment) => segment === "..")) {
     throw new GhostError(
       "invalid_path",
-      `Note path ${JSON.stringify(input)} escapes the notes directory.`,
+      `Document path ${JSON.stringify(input)} escapes the docs directory.`,
       { path: input },
     );
   }
@@ -226,7 +227,7 @@ export function normalizeNotePath(input: string): string {
   return segments.join("/");
 }
 
-function noteFrontmatterFrom(text: string): { meta: NoteFrontmatter; body: string } {
+function docFrontmatterFrom(text: string): { meta: DocFrontmatter; body: string } {
   const parsed = parseDocument(text);
   return {
     meta: {
@@ -241,7 +242,7 @@ function noteFrontmatterFrom(text: string): { meta: NoteFrontmatter; body: strin
 }
 
 /** Frontmatter lines in the order the hosted export writes them. */
-function noteFrontmatterLines(meta: NoteFrontmatter, path: string): string[] {
+function docFrontmatterLines(meta: DocFrontmatter, path: string): string[] {
   const lines = [`public: ${meta.public}`];
   const filename = basename(path, ".md");
   if (meta.title !== undefined && meta.title !== filename) {
@@ -268,8 +269,8 @@ export class GhostHome {
     return join(this.dir, CHARACTER_FILENAME);
   }
 
-  get notesDir(): string {
-    return join(this.dir, NOTES_DIRNAME);
+  get docsDir(): string {
+    return join(this.dir, DOCS_DIRNAME);
   }
 
   get memoryDir(): string {
@@ -302,7 +303,21 @@ export class GhostHome {
 
   /** Create the directory skeleton. Safe to call repeatedly. */
   async ensure(): Promise<void> {
-    await mkdir(this.notesDir, { recursive: true });
+    const legacyNotesDir = join(this.dir, LEGACY_NOTES_DIRNAME);
+    const [hasDocs, hasLegacyNotes] = await Promise.all([
+      exists(this.docsDir),
+      exists(legacyNotesDir),
+    ]);
+    if (hasDocs && hasLegacyNotes) {
+      throw new GhostError(
+        "conflict",
+        `Both ${DOCS_DIRNAME}/ and the legacy ${LEGACY_NOTES_DIRNAME}/ directory exist in `
+        + `${this.dir}. Merge them into ${DOCS_DIRNAME}/ before opening this ghost.`,
+        { docs: this.docsDir, legacyNotes: legacyNotesDir },
+      );
+    }
+    if (hasLegacyNotes) await rename(legacyNotesDir, this.docsDir);
+    await mkdir(this.docsDir, { recursive: true });
     await mkdir(this.memoryDir, { recursive: true });
     await mkdir(this.conversationsDir, { recursive: true });
   }
@@ -340,11 +355,11 @@ export class GhostHome {
     });
   }
 
-  // -------------------------------------------------------------------- notes
+  // -------------------------------------------------------------------- docs
 
-  /** Every `.md` under `notes/`, recursively. Hidden files and dirs are skipped. */
-  async listNotes(): Promise<NoteListing> {
-    const notes: NoteMeta[] = [];
+  /** Every `.md` under `docs/`, recursively. Hidden files and dirs are skipped. */
+  async listDocs(): Promise<DocListing> {
+    const docs: DocMeta[] = [];
     const skipped: SkippedFile[] = [];
 
     const walk = async (dir: string, prefix: string): Promise<void> => {
@@ -358,60 +373,60 @@ export class GhostHome {
         if (!entry.name.endsWith(".md")) continue;
         try {
           const text = await readFile(join(dir, entry.name), "utf8");
-          notes.push({ ...noteFrontmatterFrom(text).meta, path: childPath });
+          docs.push({ ...docFrontmatterFrom(text).meta, path: childPath });
         } catch (error) {
           skipped.push({
-            path: `${NOTES_DIRNAME}/${childPath}`,
+            path: `${DOCS_DIRNAME}/${childPath}`,
             reason: message(error),
           });
         }
       }
     };
 
-    await walk(this.notesDir, "");
-    notes.sort((left, right) => left.path.localeCompare(right.path));
-    return { notes, skipped };
+    await walk(this.docsDir, "");
+    docs.sort((left, right) => left.path.localeCompare(right.path));
+    return { docs, skipped };
   }
 
-  async readNote(path: string): Promise<NoteFile> {
-    const notePath = normalizeNotePath(path);
-    const full = resolveWithin(this.notesDir, notePath, "Note path");
+  async readDoc(path: string): Promise<DocFile> {
+    const docPath = normalizeDocPath(path);
+    const full = resolveWithin(this.docsDir, docPath, "Document path");
     let text: string;
     try {
       text = await readFile(full, "utf8");
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        throw new GhostError("not_found", `No note at ${notePath}.`, { path: notePath });
+        throw new GhostError("not_found", `No document at ${docPath}.`, { path: docPath });
       }
       throw error;
     }
-    const parsed = noteFrontmatterFrom(text);
-    return { meta: { ...parsed.meta, path: notePath }, body: parsed.body };
+    const parsed = docFrontmatterFrom(text);
+    return { meta: { ...parsed.meta, path: docPath }, body: parsed.body };
   }
 
-  /** Metadata for one note, or null when it does not exist. */
-  async findNote(path: string): Promise<NoteMeta | null> {
+  /** Metadata for one doc, or null when it does not exist. */
+  async findDoc(path: string): Promise<DocMeta | null> {
     try {
-      return (await this.readNote(path)).meta;
+      return (await this.readDoc(path)).meta;
     } catch (error) {
       if (error instanceof GhostError && error.code === "not_found") return null;
       throw error;
     }
   }
 
-  async writeNote(path: string, input: NoteWriteInput): Promise<NoteMeta> {
-    const notePath = normalizeNotePath(path);
-    const full = resolveWithin(this.notesDir, notePath, "Note path");
-    const existing = await this.findNote(notePath);
-    const meta: NoteMeta = {
-      path: notePath,
+  async writeDoc(path: string, input: DocWriteInput): Promise<DocMeta> {
+    const docPath = normalizeDocPath(path);
+    const full = resolveWithin(this.docsDir, docPath, "Document path");
+    const existing = await this.findDoc(docPath);
+    const meta: DocMeta = {
+      path: docPath,
       public: input.public ?? existing?.public ?? false,
       title: input.title ?? existing?.title,
       tags: input.tags ?? existing?.tags ?? [],
       archived: input.archived ?? existing?.archived ?? false,
       appPath: input.appPath ?? existing?.appPath,
     };
-    const text = renderDocument(noteFrontmatterLines(meta, notePath), input.body);
+    const text = renderDocument(docFrontmatterLines(meta, docPath), input.body);
     await withFileMutationQueue(full, async () => {
       await mkdir(dirname(full), { recursive: true });
       await writeFile(full, text, "utf8");
@@ -419,11 +434,11 @@ export class GhostHome {
     return meta;
   }
 
-  /** Plain substring or regex search over note bodies and titles. */
-  async searchNotes(
+  /** Plain substring or regex search over doc bodies and titles. */
+  async searchDocs(
     query: string,
-    options: NoteSearchOptions = {},
-  ): Promise<NoteSearchResult> {
+    options: DocSearchOptions = {},
+  ): Promise<DocSearchResult> {
     const scope = options.scope ?? CREATOR_SCOPE;
     const maxResults = Math.max(1, options.maxResults ?? DEFAULT_SEARCH_RESULTS);
     const flags = options.caseSensitive ? "" : "i";
@@ -458,21 +473,21 @@ export class GhostHome {
       );
     }
 
-    const { notes } = await this.listNotes();
-    // Archived notes are out of the working set by default; a visitor never sees
+    const { docs } = await this.listDocs();
+    // Archived docs are out of the working set by default; a visitor never sees
     // them at all, so `includeArchived` only ever widens a creator search.
-    const candidates = notes.filter((note) =>
-      isNoteVisible(note, scope) && (options.includeArchived === true || !note.archived)
+    const candidates = docs.filter((doc) =>
+      isDocVisible(doc, scope) && (options.includeArchived === true || !doc.archived)
     );
-    const matches: NoteSearchMatch[] = [];
+    const matches: DocSearchMatch[] = [];
     let truncated = false;
-    let notesSearched = 0;
+    let docsSearched = 0;
 
     // One collector for title and body matches alike. The title push used to
     // bypass maxResults entirely and never set `truncated`, so a corpus of
-    // title-matching notes could overrun the cap silently; now every match is
+    // title-matching docs could overrun the cap silently; now every match is
     // gated the same way. Returns false once the cap is reached.
-    const collect = (match: NoteSearchMatch): boolean => {
+    const collect = (match: DocSearchMatch): boolean => {
       if (matches.length >= maxResults) {
         truncated = true;
         return false;
@@ -481,11 +496,11 @@ export class GhostHome {
       return true;
     };
 
-    for (const note of candidates) {
-      notesSearched += 1;
-      const { body, meta } = await this.readNote(note.path);
+    for (const doc of candidates) {
+      docsSearched += 1;
+      const { body, meta } = await this.readDoc(doc.path);
       if (meta.title !== undefined && pattern.test(meta.title)) {
-        if (!collect({ path: note.path, line: 0, text: `title: ${meta.title}` })) break;
+        if (!collect({ path: doc.path, line: 0, text: `title: ${meta.title}` })) break;
       }
       const lines = body.split("\n");
       let overflowed = false;
@@ -495,7 +510,7 @@ export class GhostHome {
           ? line.slice(0, MAX_GREP_LINE_SCAN_CHARS)
           : line;
         if (!pattern.test(scanned)) continue;
-        if (!collect({ path: note.path, line: index + 1, text: line.trim() })) {
+        if (!collect({ path: doc.path, line: index + 1, text: line.trim() })) {
           overflowed = true;
           break;
         }
@@ -503,7 +518,7 @@ export class GhostHome {
       if (overflowed) break;
     }
 
-    return { matches, truncated, notesSearched };
+    return { matches, truncated, docsSearched };
   }
 
   // ------------------------------------------------------------------- memory

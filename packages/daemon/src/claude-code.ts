@@ -8,7 +8,7 @@
  * licensed Claude adapter (`apps/server/src/provider/Layers/ClaudeAdapter.ts`).
  *
  * Ghost deliberately opens one scoped query per turn instead of keeping T3's
- * query process alive forever. Our persona, memory index, and note catalogue
+ * query process alive forever. Our persona, memory index, and doc catalogue
  * are rebuilt on every turn; a long-lived query would freeze those system
  * instructions at session creation. Claude's opaque session id supplies
  * continuity when the next scoped query resumes.
@@ -48,7 +48,7 @@ import type {
 import {
   buildGhostSystemPrompt,
   deriveMemoryIndex,
-  deriveNoteCatalog,
+  deriveDocCatalog,
   openGhostHome,
 } from "@ghost/extensions";
 import * as Effect from "effect/Effect";
@@ -349,16 +349,16 @@ async function writeMetadata(
 
 async function buildPersona(homeDir: string, ghostName: string): Promise<string> {
   const home = openGhostHome(homeDir);
-  const [character, memory, notes] = await Promise.all([
+  const [character, memory, docs] = await Promise.all([
     home.readCharacter(),
     home.listMemory(CREATOR_SCOPE),
-    home.listNotes(),
+    home.listDocs(),
   ]);
   return buildGhostSystemPrompt({
     ghostName,
     character,
     memory: deriveMemoryIndex(memory.files),
-    notes: deriveNoteCatalog(notes.notes, CREATOR_SCOPE),
+    docs: deriveDocCatalog(docs.docs, CREATOR_SCOPE),
     scope: CREATOR_SCOPE,
     // This runtime is creator-only (a visitor scope is refused before we get
     // here), so a seeded character.md means the same thing it means on the OMP

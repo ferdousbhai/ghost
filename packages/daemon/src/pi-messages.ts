@@ -242,7 +242,7 @@ export function parsePiMessagesRequest(body: unknown): PiMessagesRequest {
 export interface PiMessagesAdapterOptions {
   /**
    * Forward `thinking_*` blocks. Off by default: reasoning quotes the ghost's
-   * private memory and notes verbatim, and the hosted UI never showed it to
+   * private memory and docs verbatim, and the hosted UI never showed it to
    * visitors either. Suppressed blocks consume no wire index.
    */
   includeThinking?: boolean;

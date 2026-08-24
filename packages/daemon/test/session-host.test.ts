@@ -42,7 +42,7 @@ afterEach(async () => {
   temp = null;
 });
 
-const PUBLIC_NOTE = `---
+const PUBLIC_DOC = `---
 public: true
 title: Restoring the Vandercook
 ---
@@ -58,7 +58,7 @@ async function setup(
   provider = await startMockProvider({ script });
   const dir = seedGhost(temp.root, {
     name: "casper",
-    notes: { "press.md": PUBLIC_NOTE },
+    docs: { "press.md": PUBLIC_DOC },
     provider: { baseUrl: provider.url, modelId: provider.modelId },
   });
   host = new SessionHost({
@@ -302,7 +302,7 @@ describe("SessionHost.runTurn", () => {
 
   it("runs a tool-using turn and streams a well-formed pi-messages sequence", async () => {
     await setup([
-      { kind: "tool", name: "ghost_notes_list", args: {} },
+      { kind: "tool", name: "ghost_docs_list", args: {} },
       { kind: "text", text: "Pull the roller bearings first." },
     ]);
     const events: PiMessagesEvent[] = [];
@@ -331,7 +331,7 @@ describe("SessionHost.runTurn", () => {
     expect(new Set(indices)).toEqual(new Set([0, 1]));
 
     const toolStart = events.find((event) => event.type === "toolcall_start");
-    expect(toolStart).toMatchObject({ toolName: "ghost_notes_list" });
+    expect(toolStart).toMatchObject({ toolName: "ghost_docs_list" });
 
     const text = events
       .filter((event): event is Extract<PiMessagesEvent, { type: "text_delta" }> =>
@@ -607,11 +607,11 @@ describe("SessionHost.runTurn", () => {
     const { dir } = await setup([{ kind: "text", text: "still Casper" }]);
     await host!.runTurn("casper", {
       sessionId: "conv-cd",
-      prompt: "!cd notes",
+      prompt: "!cd docs",
       emit: () => {},
     });
     const handle = await host!.open("casper", "conv-cd");
-    expect(handle.session.sessionManager.getCwd()).toBe(join(dir, "notes"));
+    expect(handle.session.sessionManager.getCwd()).toBe(join(dir, "docs"));
     expect(handle.sessionFile?.startsWith(ghostPaths(dir).sessionDir + sep)).toBe(true);
 
     await host!.runTurn("casper", {
@@ -1226,8 +1226,8 @@ describe("the first meeting", () => {
     const handle = await host!.open("wisp", "conv-visitor-tools");
     const names = handle.session.getActiveToolNames();
     expect(names).toEqual(expect.arrayContaining([
-      "ghost_notes_list",
-      "ghost_notes_read",
+      "ghost_docs_list",
+      "ghost_docs_read",
       "ghost_memory_write",
       "ask",
     ]));

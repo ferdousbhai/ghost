@@ -3,9 +3,9 @@ import type { GhostScope } from "./scope.js";
 
 export const GHOST_HOME_FORMAT = "ghost-home/v1";
 
-/** Frontmatter a note carries. `public` absent or false means private. */
-export interface NoteFrontmatter {
-  /** `public: true` is the only thing that publishes a note. */
+/** Frontmatter a doc carries. `public` absent or false means private. */
+export interface DocFrontmatter {
+  /** `public: true` is the only thing that publishes a doc. */
   readonly public: boolean;
   readonly title: string | undefined;
   readonly tags: readonly string[];
@@ -14,14 +14,14 @@ export interface NoteFrontmatter {
   readonly appPath: string | undefined;
 }
 
-export interface NoteMeta extends NoteFrontmatter {
-  /** Path relative to `notes/`, always ending in `.md`, always `/`-separated. */
+export interface DocMeta extends DocFrontmatter {
+  /** Path relative to `docs/`, always ending in `.md`, always `/`-separated. */
   readonly path: string;
 }
 
-export interface NoteFile {
-  readonly meta: NoteMeta;
-  /** The note body, exactly as stored. */
+export interface DocFile {
+  readonly meta: DocMeta;
+  /** The doc body, exactly as stored. */
   readonly body: string;
 }
 
@@ -40,12 +40,12 @@ export interface MemoryRecord {
   readonly scope: GhostScope;
 }
 
-export interface NoteCatalog {
+export interface DocCatalog {
   /** Budgeted catalog lines, a contiguous prefix of the path-sorted catalog. */
   readonly lines: readonly string[];
   readonly chars: number;
   readonly omitted: number;
-  /** Notes visible in this scope. */
+  /** Docs visible in this scope. */
   readonly total: number;
   readonly publicCount: number;
 }

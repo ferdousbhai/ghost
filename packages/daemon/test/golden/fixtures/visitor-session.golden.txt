@@ -28,19 +28,19 @@ One file holds one fact. Check the list above before writing: reuse an existing 
 
 - prefers-the-long-version.md: This visitor likes the long version
 
-## Notes you can draw on
-The notes published to visitors, by path. Read one with ghost_notes_read or search them with ghost_notes_grep. This list is everything you have; there is nothing else you can open.
+## Docs you can draw on
+The docs published to visitors, by path. Read one with ghost_docs_read or search them with ghost_docs_grep. This list is everything you have; there is nothing else you can open.
 
 - press.md: Restoring the Vandercook
 
 ## This conversation
-You are talking to a visitor, not to the person whose ghost you are. Speak as yourself. Anything outside the notes and memory listed above is not available to you, and guessing at it would be a lie.
+You are talking to a visitor, not to the person whose ghost you are. Speak as yourself. Anything outside the docs and memory listed above is not available to you, and guessing at it would be a lie.
 
 ------------------------------------------------------------------------------
 [turn 1: provider round-trips and tools advertised on the wire]
 ------------------------------------------------------------------------------
-round-trip 1: model=mock-ghost-1 tools=[ghost_notes_list, ghost_notes_read, ghost_notes_grep, ghost_memory_list, ghost_memory_read, ghost_memory_write, ask, inspect_image]
-round-trip 2: model=mock-ghost-1 tools=[ghost_notes_list, ghost_notes_read, ghost_notes_grep, ghost_memory_list, ghost_memory_read, ghost_memory_write, ask, inspect_image]
+round-trip 1: model=mock-ghost-1 tools=[ghost_docs_list, ghost_docs_read, ghost_docs_grep, ghost_memory_list, ghost_memory_read, ghost_memory_write, ask, inspect_image]
+round-trip 2: model=mock-ghost-1 tools=[ghost_docs_list, ghost_docs_read, ghost_docs_grep, ghost_memory_list, ghost_memory_read, ghost_memory_write, ask, inspect_image]
 
 ------------------------------------------------------------------------------
 [turn 1: pi-messages events]
@@ -77,12 +77,12 @@ round-trip 2: model=mock-ghost-1 tools=[ghost_notes_list, ghost_notes_read, ghos
 [session tool registry (active names, sorted)]
 ------------------------------------------------------------------------------
 ask
+ghost_docs_grep
+ghost_docs_list
+ghost_docs_read
 ghost_memory_list
 ghost_memory_read
 ghost_memory_write
-ghost_notes_grep
-ghost_notes_list
-ghost_notes_read
 inspect_image
 
 ------------------------------------------------------------------------------
@@ -181,6 +181,22 @@ title: casper
 
 You are casper, a letterpress printer. You answer in short sentences.
 
+--- docs/ledger.md ---
+---
+public: false
+title: Ledger
+---
+
+The Heidelberg cost more than it should have.
+
+--- docs/press.md ---
+---
+public: true
+title: Restoring the Vandercook
+---
+
+Pull the roller bearings before you soak anything.
+
 --- memory/.visitors/visitor-inge/asked-about-the-vandercook.md ---
 ---
 description: This visitor is restoring a Vandercook
@@ -212,19 +228,3 @@ updated: 2026-01-15
 ---
 
 Keep replies to a line or two.
-
---- notes/ledger.md ---
----
-public: false
-title: Ledger
----
-
-The Heidelberg cost more than it should have.
-
---- notes/press.md ---
----
-public: true
-title: Restoring the Vandercook
----
-
-Pull the roller bearings before you soak anything.

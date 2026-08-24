@@ -27,10 +27,12 @@ function fileTarget(activity) {
     case "edit":
         // OMP's native file tools take `path`; some providers emit `file_path`.
         return argument(activity, "path") || argument(activity, "file_path");
+    // Historical transcripts keep the old tool name, but the home migration
+    // moved their targets into docs/ too.
     case "ghost_notes_write": {
-        // A note path is relative to the notes directory, not to the home.
-        const note = argument(activity, "path");
-        return note === "" ? "" : "notes/" + note;
+        // A doc path is relative to the docs directory, not to the home.
+        const doc = argument(activity, "path");
+        return doc === "" ? "" : "docs/" + doc;
     }
     case "ghost_character":
         // Only the write action changes the file; the path is fixed by the
@@ -57,21 +59,24 @@ function fallback(activity, completed) {
     case "ask":
         return completed ? "Received your answer" : "Waiting for your answer";
     case "ghost_notes_list":
-        return completed ? "Looked through your notes" : "Looking through your notes";
+    case "ghost_docs_list":
+        return completed ? "Looked through your docs" : "Looking through your docs";
     case "ghost_notes_read":
+    case "ghost_docs_read":
         return path !== ""
             ? (completed ? "Read " : "Reading ") + path
-            : (completed ? "Read a note" : "Reading a note");
+            : (completed ? "Read a document" : "Reading a document");
     case "ghost_notes_grep":
+    case "ghost_docs_grep":
         return query !== ""
             ? (completed ? "Looked for " : "Looking for ")
-                + quoted(query) + " in your notes"
-            : (completed ? "Searched your notes" : "Searching your notes");
+                + quoted(query) + " in your docs"
+            : (completed ? "Searched your docs" : "Searching your docs");
     case "ghost_notes_write":
         return path !== ""
             ? (completed ? "Updated " : "Updating ") + path
-            : (completed ? "Saved a note" : "Saving a note");
-    // OMP's own file tools. A creator session writes notes and memory through
+            : (completed ? "Saved a document" : "Saving a document");
+    // OMP's own file tools. A creator session writes docs and memory through
     // these rather than the ghost_* ones, so without them a restored transcript
     // shows nothing where the ghost changed a file.
     case "write":

@@ -10,8 +10,8 @@
  *
  * **Creator scope only.** A visitor is someone else talking to the ghost over
  * the network; handing that conversation a browser on the creator's machine
- * would be the whole trust model inverted. Like `ghost_notes_write`, the tool is
- * simply not registered for a visitor — and, like the notes visibility gate, a
+ * would be the whole trust model inverted. The tool is not registered for a
+ * visitor and, like the docs visibility gate, a
  * `tool_call` handler blocks it anyway, so a browser tool registered by some
  * *other* extension in a visitor session still cannot fire. Two locks, one door.
  *
@@ -118,7 +118,7 @@ const MAX_TIMEOUT_MS = 120_000;
 
 /**
  * The `tool_call` gate. Exported on its own so a daemon can register it over a
- * tool surface this package did not build — the same shape as the notes gate.
+ * tool surface this package did not build — the same shape as the docs gate.
  */
 export function createBrowserScopeGate(
   options: BrowserExtensionOptions = {},

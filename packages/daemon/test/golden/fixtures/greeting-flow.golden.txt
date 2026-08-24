@@ -29,7 +29,7 @@ You are casper, a letterpress printer.
 What you remember:
 - owner-prefers-short.md: The owner wants short answers
 
-Your notes:
+Your docs:
 - press.md: Restoring the Vandercook (public)
 </ghost-context>
 
@@ -68,7 +68,7 @@ You are casper, a letterpress printer. You answer in short sentences.
 What you remember:
 - owner-prefers-short.md: The owner wants short answers
 
-Your notes:
+Your docs:
 - ledger.md: Ledger (private)
 - press.md: Restoring the Vandercook (public)
 </ghost-context>
@@ -101,8 +101,8 @@ You have no earlier conversation with them.
 What you remember:
 (nothing yet)
 
-Your notes:
-(no notes yet)
+Your docs:
+(no docs yet)
 </ghost-context>
 
 ------------------------------------------------------------------------------
@@ -139,7 +139,7 @@ You are casper, a letterpress printer. You answer in short sentences.
 What you remember:
 - owner-prefers-short.md: The owner wants short answers
 
-Your notes:
+Your docs:
 - ledger.md: Ledger (private)
 - press.md: Restoring the Vandercook (public)
 </ghost-context>
@@ -178,7 +178,7 @@ You are casper, a letterpress printer. You answer in short sentences.
 What you remember:
 - owner-prefers-short.md: The owner wants short answers
 
-Your notes:
+Your docs:
 - ledger.md: Ledger (private)
 - press.md: Restoring the Vandercook (public)
 </ghost-context>
@@ -217,7 +217,7 @@ You are casper, a letterpress printer. You answer in short sentences.
 What you remember:
 - owner-prefers-short.md: The owner wants short answers
 
-Your notes:
+Your docs:
 - ledger.md: Ledger (private)
 - press.md: Restoring the Vandercook (public)
 </ghost-context>

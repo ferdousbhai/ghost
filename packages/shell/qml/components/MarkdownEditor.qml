@@ -1,6 +1,6 @@
 pragma ComponentBehavior: Bound
 
-// The notes surface: a markdown file, edited.
+// The docs surface: a markdown file, edited.
 //
 // This began as `TextEdit { textFormat: TextEdit.MarkdownText }` — Qt 6 does
 // parse CommonMark into an editable document and can serialise it back through
@@ -15,10 +15,10 @@ pragma ComponentBehavior: Bound
 //   - Table alignment markers ("|:---|---:|") are dropped.
 //   - Backslash escapes are consumed ("\*" -> "*"), and markdown *typed* into
 //     the widget is escaped instead of parsed, so "# Hi" is written out as
-//     "\# Hi" — a person typing markdown corrupts their own note.
+//     "\# Hi" — a person typing markdown corrupts their own document.
 //   - Worst: YAML front matter is stored on the QTextDocument out of band and
-//     is never cleared. Load one note with front matter and every subsequent
-//     document set on that same TextEdit is serialised with the *first* note's
+//     is never cleared. Load one document with front matter and every subsequent
+//     document set on that same TextEdit is serialised with the *first* document's
 //     front matter prepended. `clear()` and `text = ""` do not reset it.
 //   - There is no way to apply formatting anyway: Ctrl+B / Ctrl+I are not
 //     bound, and a toolbar is not the Notes-quiet brief.
@@ -65,7 +65,7 @@ Item {
 
     /** Take text that already contains the user's own edits — the result of a
         three-way merge — without counting as an edit and without throwing the
-        caret to the top of the note. */
+        caret to the top of the document. */
     function adoptMerged(text: string): void {
         const caret = field.cursorPosition;
         const before = field.text;
@@ -103,7 +103,7 @@ Item {
         text: "0".repeat(root.reading ? 68 : 72)
     }
 
-    // Paper: one step off the chat canvas in both themes, so an open note reads
+    // Paper: one step off the chat canvas in both themes, so an open document reads
     // as a sheet laid on the surface rather than as more transcript.
     Rectangle {
         anchors.fill: parent
@@ -121,7 +121,7 @@ Item {
         boundsBehavior: Flickable.StopAtBounds
         interactive: contentHeight > height
 
-        // Typing at the bottom of a long note must not scroll the caret away.
+        // Typing at the bottom of a long document must not scroll the caret away.
         // Flickable does not follow a TextEdit cursor on its own.
         function ensureVisible(caret: rect): void {
             const top = field.y + caret.y - Theme.gap;
@@ -184,11 +184,11 @@ Item {
         }
     }
 
-    // An empty note says so rather than showing a bare cursor in a white field.
+    // An empty document says so rather than showing a bare cursor in a white field.
     Text {
         anchors.centerIn: parent
         visible: field.text === ""
-        text: "Empty note"
+        text: "Empty document"
         color: Theme.foregroundFaint
         font.family: Theme.fontFamily
         font.pixelSize: Theme.fontSize

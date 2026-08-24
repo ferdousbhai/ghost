@@ -89,11 +89,11 @@ export async function untrustedTextResult<TDetails extends object>(
 // ---------------------------------------------------------------------------
 
 /**
- * Default cap on a single note body handed to the model, in characters. One
- * imported note with no size ceiling can blow the context window in a single
- * `ghost_notes_read`; this mirrors the browser tool's `DEFAULT_READ_BUDGET_CHARS`.
+ * Default cap on a single doc body handed to the model, in characters. One
+ * imported doc with no size ceiling can blow the context window in a single
+ * `ghost_docs_read`; this mirrors the browser tool's `DEFAULT_READ_BUDGET_CHARS`.
  */
-export const DEFAULT_NOTE_READ_BUDGET_CHARS = 8_000;
+export const DEFAULT_DOC_READ_BUDGET_CHARS = 8_000;
 
 /** Cap on a single grep match line handed to the model, in characters. */
 export const MAX_GREP_LINE_CHARS = 200;
@@ -109,7 +109,7 @@ export interface BudgetedText {
 
 /**
  * Cap a string to `maxChars`. Every string a ghost tool sends to the model —
- * a note body, a search match line — passes through here, so no single call can
+ * a doc body, a search match line — passes through here, so no single call can
  * return an unbounded amount of text. Mirrors the browser tool's read budget.
  */
 export function budgeted(text: string, maxChars: number): BudgetedText {

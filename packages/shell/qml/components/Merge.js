@@ -4,12 +4,12 @@
 //
 // The workbench keeps a file open while the ghost is writing to it. Most of the
 // time the two of you are nowhere near each other — you are typing at the
-// bottom of a note while a tool rewrites a section at the top — and asking
+// bottom of a document while a tool rewrites a section at the top — and asking
 // "keep mine or take theirs?" for that is asking the user to arbitrate a fight
 // that never happened. So the pane merges first and only asks when the same
 // lines genuinely moved on both sides.
 //
-// The unit is a line, not a character: notes and code files are line-shaped,
+// The unit is a line, not a character: documents and code files are line-shaped,
 // and a character-level merge would silently interleave two rewrites of one
 // sentence into something neither side wrote. Lines carry their own "\n", so a
 // file with no trailing newline differs from one with it *on that line* and
@@ -188,7 +188,7 @@ function sameRange(a, aFrom, aTo, b, bFrom, bTo) {
  * change on both sides collapses to one; anything else that overlaps is a
  * conflict for the whole merge, not just for that region — there is no
  * conflict-marker output here, because the pane's fallback is to show the user
- * both files and ask, not to paste "<<<<<<<" into a note.
+ * both files and ask, not to paste "<<<<<<<" into a document.
  */
 function merge(base, mine, theirs) {
     const baseText = text(base);

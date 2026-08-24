@@ -54,18 +54,18 @@ export function makeTempGhosts(): TempGhosts {
 export interface SeedGhostOptions {
   name?: string;
   character?: string;
-  notes?: Record<string, string>;
+  docs?: Record<string, string>;
   memory?: Record<string, string>;
   /** Wire the ghost to a mock provider. */
   provider?: { baseUrl: string; modelId: string; providerId?: string };
 }
 
-/** A ghost home with a persona, optional notes/memory, and a models.json. */
+/** A ghost home with a persona, optional docs/memory, and a models.json. */
 export function seedGhost(root: string, options: SeedGhostOptions = {}): string {
   const name = options.name ?? "casper";
   const dir = join(root, name);
   const paths = ghostPaths(dir);
-  mkdirSync(join(dir, "notes"), { recursive: true });
+  mkdirSync(join(dir, "docs"), { recursive: true });
   mkdirSync(join(dir, "memory"), { recursive: true });
   mkdirSync(join(dir, "conversations"), { recursive: true });
   writeFileSync(
@@ -74,8 +74,8 @@ export function seedGhost(root: string, options: SeedGhostOptions = {}): string 
       ?? `---\npublic: true\ntitle: ${name}\n---\n\n# ${name}\n\nYou are ${name}, a letterpress printer.\n`,
     "utf8",
   );
-  for (const [path, content] of Object.entries(options.notes ?? {})) {
-    const full = join(dir, "notes", path);
+  for (const [path, content] of Object.entries(options.docs ?? {})) {
+    const full = join(dir, "docs", path);
     mkdirSync(join(full, ".."), { recursive: true });
     writeFileSync(full, content, "utf8");
   }

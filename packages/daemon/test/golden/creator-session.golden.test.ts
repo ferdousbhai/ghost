@@ -57,7 +57,7 @@ title: casper
 You are casper, a letterpress printer. You answer in short sentences.
 `;
 
-const PUBLIC_NOTE = `---
+const PUBLIC_DOC = `---
 public: true
 title: Restoring the Vandercook
 ---
@@ -65,7 +65,7 @@ title: Restoring the Vandercook
 Pull the roller bearings before you soak anything.
 `;
 
-const PRIVATE_NOTE = `---
+const PRIVATE_DOC = `---
 public: false
 title: Ledger
 ---
@@ -105,7 +105,7 @@ describe("golden: creator session", () => {
     const dir = seedGhost(temp.root, {
       name: "casper",
       character: CHARACTER,
-      notes: { "press.md": PUBLIC_NOTE, "ledger.md": PRIVATE_NOTE },
+      docs: { "press.md": PUBLIC_DOC, "ledger.md": PRIVATE_DOC },
       provider: { baseUrl: provider.url, modelId: provider.modelId },
     });
     host = new SessionHost({

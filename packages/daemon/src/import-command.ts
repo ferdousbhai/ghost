@@ -2,10 +2,11 @@
  * `ghostd import` — turn a `ghost-home/v1` archive into a ghost.
  *
  * The archive is the zip the hosted app's "Download my ghost" produces (or an
- * already-extracted directory): character note, every note public and private,
+ * already-extracted directory): character file, every document public and private,
  * memory, per-visitor memory, and conversations, all as plain files. Importing
- * copies it verbatim into `<ghostsRoot>/<name>/`, so the migration path off the
- * platform is a single command.
+ * preserves file bytes while translating the hosted archive's legacy `notes/`
+ * directory to canonical `docs/`, so the migration path off the platform is a
+ * single command.
  *
  * The heavy lifting is `importGhostArchive` in `@ghost/extensions`, which
  * validates the manifest, guards against zip-slip, and never overwrites a

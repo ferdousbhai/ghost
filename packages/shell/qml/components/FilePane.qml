@@ -1,6 +1,6 @@
 pragma ComponentBehavior: Bound
 
-// One open file in the workbench: a slim header over a body that is a notes
+// One open file in the workbench: a slim header over a body that is a Markdown
 // editor, a code reader, or plain text, chosen by extension.
 //
 // The pane owns the only FileView, and with it the whole save/reload policy,
@@ -57,7 +57,7 @@ Item {
     /** One quiet line under the header. Empty when there is nothing to say. */
     property string notice: ""
 
-    readonly property bool dirty: root.markdown && notes.dirty
+    readonly property bool dirty: root.markdown && editor.dirty
 
     implicitWidth: 480
     implicitHeight: 320
@@ -66,28 +66,28 @@ Item {
 
     function absorb(incoming: string): void {
         if (incoming === root.diskText) return;
-        if (!root.markdown || !notes.dirty) {
+        if (!root.markdown || !editor.dirty) {
             root.diskText = incoming;
-            if (root.markdown) notes.adopt(incoming);
+            if (root.markdown) editor.adopt(incoming);
             root.conflictText = "";
             root.notice = "";
             return;
         }
-        if (incoming === notes.buffer) {
+        if (incoming === editor.buffer) {
             root.diskText = incoming;
             return;
         }
         // Merge first. `diskText` is still the common ancestor here — the
         // dirty path never advances it — so the three texts are the real
         // three-way inputs.
-        const merged = Merge.merge(root.diskText, notes.buffer, incoming);
+        const merged = Merge.merge(root.diskText, editor.buffer, incoming);
         if (merged.ok) {
             // The base moves to what is on disk *now*, which leaves the merged
             // buffer dirty against it by exactly the user's own edits, so the
             // ordinary debounced autosave carries them back to the file. adopt()
             // is deliberately silent, so the timer is ours to start.
             root.diskText = incoming;
-            notes.adoptMerged(merged.text);
+            editor.adoptMerged(merged.text);
             root.conflictText = "";
             root.notice = "";
             autosave.restart();
@@ -101,17 +101,17 @@ Item {
         // Three reasons not to write, all of them cheap to check: nothing to
         // save, nothing changed, or a conflict we have not been told how to
         // settle.
-        if (!root.markdown || !notes.dirty || root.conflictText !== "") return;
+        if (!root.markdown || !editor.dirty || root.conflictText !== "") return;
         autosave.stop();
         root.preWriteDisk = root.diskText;
-        root.diskText = notes.buffer;
-        file.setText(notes.buffer);
+        root.diskText = editor.buffer;
+        file.setText(editor.buffer);
     }
 
     /** Save now and wait for it — for closing, hiding, and rebinding, where
         the pane may not be around when an async write would have landed. */
     function flush(): void {
-        if (!root.markdown || !notes.dirty || root.conflictText !== "") return;
+        if (!root.markdown || !editor.dirty || root.conflictText !== "") return;
         root.save();
         file.waitForJob();
     }
@@ -132,7 +132,7 @@ Item {
         root.conflictText = "";
         root.notice = "";
         root.diskText = incoming;
-        notes.adopt(incoming);
+        editor.adopt(incoming);
     }
 
     Component.onCompleted: file.path = root.filePath
@@ -147,7 +147,7 @@ Item {
         root.diskText = "";
         root.conflictText = "";
         root.notice = "";
-        notes.adopt("");
+        editor.adopt("");
         file.path = root.filePath;
     }
 
@@ -245,14 +245,14 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             spacing: Theme.gap
 
-            // For a note this is the view switch; for anything else it just
+            // For markdown this is the view switch; for anything else it just
             // names what you are looking at.
             Text {
                 id: mode
 
                 anchors.verticalCenter: parent.verticalCenter
                 text: root.markdown
-                    ? (notes.reading ? "reading" : "source")
+                    ? (editor.reading ? "reading" : "source")
                     : Highlighter.languageLabel(root.filePath)
                 color: root.markdown && modeArea.containsMouse
                     ? Theme.ghostAmber : Theme.foregroundFaint
@@ -266,7 +266,7 @@ Item {
                     enabled: root.markdown
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
-                    onClicked: notes.reading = !notes.reading
+                    onClicked: editor.reading = !editor.reading
                 }
             }
 
@@ -394,7 +394,7 @@ Item {
     //
     // All three bodies exist for the pane's lifetime and one is shown. A
     // Loader would hand back an untyped item, and the header and the save
-    // policy both need the notes editor's `dirty` and `buffer` by name.
+    // policy both need the markdown editor's `dirty` and `buffer` by name.
 
     Item {
         id: body
@@ -406,12 +406,12 @@ Item {
         clip: true
 
         MarkdownEditor {
-            id: notes
+            id: editor
 
             anchors.fill: parent
             visible: root.markdown
             enabled: root.markdown
-            // Empty for a non-note, so an idle editor can never look dirty
+            // Empty for a non-markdown file, so an idle editor can never look dirty
             // against a code file's text.
             source: root.markdown ? root.diskText : ""
 

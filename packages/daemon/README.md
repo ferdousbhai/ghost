@@ -59,7 +59,7 @@ Creator sessions are trusted local OMP projects. They keep native filesystem,
 Bash, skills, rules, project context, plugins, MCP, LSP, task/hub, web search,
 and background jobs, then add Ghost's scoped extensions. Visitor sessions
 disable that native discovery/tool surface and expose only publication-aware
-note/memory tools plus OMP's `ask`. Tool approval UI is disabled
+docs/memory tools plus OMP's `ask`. Tool approval UI is disabled
 (`approvalMode: yolo`, `autoApprove: true`); `ask` is not an approval prompt.
 
 ## Models and routing

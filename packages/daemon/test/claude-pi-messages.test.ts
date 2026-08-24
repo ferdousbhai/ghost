@@ -102,7 +102,7 @@ describe("Claude Agent SDK -> pi-messages", () => {
         content_block: {
           type: "mcp_tool_use",
           id: "tool-1",
-          name: "mcp__ghost__ghost_notes_read",
+          name: "mcp__ghost__ghost_docs_read",
           server_name: "ghost",
           input: {},
         },
@@ -131,7 +131,7 @@ describe("Claude Agent SDK -> pi-messages", () => {
       type: "toolcall_start",
       contentIndex: 0,
       id: "tool-1",
-      toolName: "ghost_notes_read",
+      toolName: "ghost_docs_read",
     });
     expect(events).toContainEqual({
       type: "toolcall_end",
@@ -139,7 +139,7 @@ describe("Claude Agent SDK -> pi-messages", () => {
       toolCall: {
         type: "toolCall",
         id: "tool-1",
-        name: "ghost_notes_read",
+        name: "ghost_docs_read",
         arguments: { path: "a.md" },
       },
     });

@@ -18,7 +18,7 @@
  * with `localTimeString()`, which is the machine's zone and the current minute;
  * the generator below swaps in a pinned string before building the prompt, so
  * the prompt text in the fixture is the real one with a stable clock rather than
- * a redacted one. Everything else — the memory budget, the note index, the
+ * a redacted one. Everything else — the memory budget, the doc index, the
  * "days since your last conversation" line — is what the route actually
  * assembled. See ./harness.ts for the shared normalisation rules.
  */
@@ -218,7 +218,7 @@ describe("golden: greeting flow", () => {
       ghostName: "casper",
       character: "You are casper, a letterpress printer.",
       memoryLines: ["- owner-prefers-short.md: The owner wants short answers"],
-      noteLines: ["- press.md: Restoring the Vandercook (public)"],
+      docLines: ["- press.md: Restoring the Vandercook (public)"],
       localTime: LOCAL_TIME,
       daysSinceLastConversation: 12,
       onboarding: false,
@@ -238,7 +238,7 @@ describe("golden: greeting flow", () => {
         seedGhost(temp.root, {
           name: "casper",
           character: CHARACTER,
-          notes: {
+          docs: {
             "press.md": "---\npublic: true\ntitle: Restoring the Vandercook\n---\n\nRollers first.\n",
             "ledger.md": "---\npublic: false\ntitle: Ledger\n---\n\nToo much.\n",
           },

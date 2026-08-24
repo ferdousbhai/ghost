@@ -10,13 +10,13 @@
  */
 import type { MemoryIndex } from "./memory-file.js";
 import { isVisitorScope, type GhostScope } from "./scope.js";
-import type { CharacterFile, NoteCatalog } from "./types.js";
+import type { CharacterFile, DocCatalog } from "./types.js";
 
 export interface GhostSystemPromptInput {
   readonly ghostName: string;
   readonly character: CharacterFile | null;
   readonly memory: MemoryIndex;
-  readonly notes: NoteCatalog;
+  readonly docs: DocCatalog;
   readonly scope: GhostScope;
   /** Sections appended after the derived ones, e.g. daemon-supplied context. */
   readonly extraSections?: readonly string[];
@@ -47,7 +47,7 @@ function memorySection(input: GhostSystemPromptInput): string[] {
       + "atomic memory with the ghost_memory_write capability when you learn something "
       + "worth keeping; OMP may expose that capability through its xd:// registry.";
   // The hygiene doctrine. Shared spine, two divergences: visitors cannot
-  // delete files or write notes, so their version drops both instructions.
+  // delete files or write docs, so their version drops both instructions.
   const doctrine = visitor
     ? "One file holds one fact. Check the list above before writing: reuse an "
       + "existing name to correct or sharpen that memory rather than adding a "
@@ -63,17 +63,17 @@ function memorySection(input: GhostSystemPromptInput): string[] {
       + "delete a memory that is wrong or no longer true; memories are living "
       + "facts, expected to change as life moves. Write dates as dates "
       + "(\"2026-08-24\", never \"last week\"). Do not record what character.md, "
-      + "your notes, or the files on disk already say. When you save guidance "
+      + "your docs, or the files on disk already say. When you save guidance "
       + "about how to behave, include why, so you can later judge whether it "
       + "still applies. Mention a related memory by its slug in double "
       + "brackets, like [[knee-injury]]; a bracketed slug with no file yet "
-      + "marks a memory worth writing. Memory and notes divide the way "
-      + "remembering and writing do for a person. A note is what someone "
+      + "marks a memory worth writing. Memory and docs divide the way "
+      + "remembering and writing do for a person. A document is what someone "
       + "writes down on purpose (research, reference, drafts, a diary) and is "
       + "durable in its written form; a memory is what someone simply "
       + "remembers about their life and the people in it, true today and "
       + "revised as things change. The owner straining a knee is a memory; "
-      + "the physiotherapy research gathered afterward is a note, with at "
+      + "the physiotherapy research gathered afterward is a document, with at "
       + "most a one-line memory pointing to it. These lines say what was true "
       + "when written; verify anything time-sensitive before acting on it.";
   const lines = input.memory.lines.length > 0
@@ -85,21 +85,21 @@ function memorySection(input: GhostSystemPromptInput): string[] {
   return [heading, lead, "", doctrine, "", ...lines];
 }
 
-function notesSection(input: GhostSystemPromptInput): string[] {
+function docsSection(input: GhostSystemPromptInput): string[] {
   const visitor = isVisitorScope(input.scope);
-  const heading = visitor ? "## Notes you can draw on" : "## Your notes";
+  const heading = visitor ? "## Docs you can draw on" : "## Your docs";
   const lead = visitor
-    ? "The notes published to visitors, by path. Read one with ghost_notes_read or "
-      + "search them with ghost_notes_grep. This list is everything you have; there "
+    ? "The docs published to visitors, by path. Read one with ghost_docs_read or "
+      + "search them with ghost_docs_grep. This list is everything you have; there "
       + "is nothing else you can open."
-    : "Your notes, by path under notes/. Use read to open them, grep or glob to "
-      + "search them, and write or edit to maintain them. Notes marked private are "
+    : "Your docs, by path under docs/. Use read to open them, grep or glob to "
+      + "search them, and write or edit to maintain them. Docs marked private are "
       + "yours alone; do not treat them as something a visitor knows.";
-  const lines = input.notes.lines.length > 0
-    ? [...input.notes.lines]
-    : ["(no notes yet)"];
-  if (input.notes.omitted > 0) {
-    lines.push(`(+${input.notes.omitted} more not listed here; search to find them.)`);
+  const lines = input.docs.lines.length > 0
+    ? [...input.docs.lines]
+    : ["(no docs yet)"];
+  if (input.docs.omitted > 0) {
+    lines.push(`(+${input.docs.omitted} more not listed here; search to find them.)`);
   }
   return [heading, lead, "", ...lines];
 }
@@ -108,14 +108,14 @@ export function buildGhostSystemPrompt(input: GhostSystemPromptInput): string {
   const sections: string[] = [
     characterSection(input),
     memorySection(input).join("\n"),
-    notesSection(input).join("\n"),
+    docsSection(input).join("\n"),
   ];
   if (isVisitorScope(input.scope)) {
     sections.push(
       [
         "## This conversation",
         "You are talking to a visitor, not to the person whose ghost you are. Speak "
-        + "as yourself. Anything outside the notes and memory listed above is not "
+        + "as yourself. Anything outside the docs and memory listed above is not "
         + "available to you, and guessing at it would be a lie.",
       ].join("\n"),
     );

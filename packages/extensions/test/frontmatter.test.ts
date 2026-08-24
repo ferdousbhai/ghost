@@ -77,7 +77,7 @@ describe("parseFrontmatterLines", () => {
     });
   });
 
-  it("keeps unknown keys so a newer app's notes round-trip", () => {
+  it("keeps unknown keys so a newer app's documents round-trip", () => {
     expect(parseFrontmatterLines(["future: 7"])["future"]).toBe(7);
   });
 

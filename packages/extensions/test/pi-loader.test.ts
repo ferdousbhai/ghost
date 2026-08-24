@@ -30,7 +30,7 @@ afterEach(async () => {
 describe("pi's own extension loader", () => {
   it("loads the three extension files with no errors", async () => {
     const result = await discoverAndLoadExtensions(
-      ["persona", "memory", "notes"].map((name) => join(SRC, `${name}.ts`)),
+      ["persona", "memory", "docs"].map((name) => join(SRC, `${name}.ts`)),
       fixture.dir,
       undefined,
       undefined,
@@ -46,7 +46,7 @@ describe("pi's own extension loader", () => {
     );
     expect([...byFile.get("persona.ts")!.handlers.keys()]).toEqual(["before_agent_start"]);
     expect([...byFile.get("memory.ts")!.tools.keys()]).toEqual([GHOST_MEMORY_WRITE]);
-    expect([...byFile.get("notes.ts")!.tools.keys()]).toEqual([]);
+    expect([...byFile.get("docs.ts")!.tools.keys()]).toEqual([]);
   });
 
   it("loads the computer-use extension files with no errors", async () => {

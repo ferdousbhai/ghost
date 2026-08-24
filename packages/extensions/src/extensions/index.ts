@@ -1,6 +1,6 @@
 /**
  * The ghost extensions, and the composition the daemon actually wants: one
- * factory that installs persona, character, memory, notes, and the computer-use
+ * factory that installs persona, character, memory, docs, and the computer-use
  * set (screen, desktop, browser) over the same ghost home and scope,
  * plus the visitor-only tool allowlist that goes with it.
  */
@@ -20,11 +20,11 @@ import {
   GHOST_MEMORY_WRITE,
 } from "./memory.js";
 import {
-  createNotesExtension,
-  GHOST_NOTES_GREP,
-  GHOST_NOTES_LIST,
-  GHOST_NOTES_READ,
-} from "./notes.js";
+  createDocsExtension,
+  GHOST_DOCS_GREP,
+  GHOST_DOCS_LIST,
+  GHOST_DOCS_READ,
+} from "./docs.js";
 import { createPersonaExtension, type PersonaExtensionOptions } from "./persona.js";
 import { createScreenExtension, screenToolNames, type ScreenExtensionOptions } from "./screen.js";
 import { resolveScope } from "./shared.js";
@@ -38,7 +38,7 @@ export type GhostExtensionSetOptions = PersonaExtensionOptions
 /**
  * Every Ghost-specific tool this package registers for a scope. Creator OMP
  * sessions layer these onto the native tool set; visitor sessions use this as
- * their complete allowlist because native filesystem access would bypass note
+ * their complete allowlist because native filesystem access would bypass doc
  * publication and visitor memory scoping.
  */
 export function ghostToolNames(
@@ -47,9 +47,9 @@ export function ghostToolNames(
 ): string[] {
   const names = isVisitorScope(scope)
     ? [
-        GHOST_NOTES_LIST,
-        GHOST_NOTES_READ,
-        GHOST_NOTES_GREP,
+        GHOST_DOCS_LIST,
+        GHOST_DOCS_READ,
+        GHOST_DOCS_GREP,
         GHOST_MEMORY_LIST,
         GHOST_MEMORY_READ,
         GHOST_MEMORY_WRITE,
@@ -68,7 +68,7 @@ export function ghostToolNames(
 }
 
 /**
- * Persona + character + memory + notes + computer use (screen, desktop,
+ * Persona + character + memory + docs + computer use (screen, desktop,
  * browser), sharing one home and one scope. The character and
  * computer-use factories each register nothing in visitor scope, so composing
  * them unconditionally is safe.
@@ -79,7 +79,7 @@ export function createGhostExtension(
   const persona = createPersonaExtension(options);
   const character = createCharacterExtension(options);
   const memory = createMemoryExtension(options);
-  const notes = createNotesExtension(options);
+  const docs = createDocsExtension(options);
   const screen = createScreenExtension(options);
   const desktop = createHyprlandExtension(options);
   const browser = createBrowserExtension(options);
@@ -87,7 +87,7 @@ export function createGhostExtension(
     await persona(pi);
     await character(pi);
     await memory(pi);
-    await notes(pi);
+    await docs(pi);
     await screen(pi);
     await desktop(pi);
     await browser(pi);
@@ -120,7 +120,7 @@ export {
 export * from "./character.js";
 export * from "./hyprland.js";
 export * from "./memory.js";
-export * from "./notes.js";
+export * from "./docs.js";
 export * from "./persona.js";
 export * from "./screen.js";
 export * from "./shared.js";

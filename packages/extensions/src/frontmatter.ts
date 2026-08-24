@@ -1,12 +1,12 @@
 /**
- * The note frontmatter dialect, hand-rolled on purpose.
+ * The doc frontmatter dialect, hand-rolled on purpose.
  *
  * The hosted export (`src/lib/export/ghost-home-archive.ts` in the summon-ghost
  * repo) hand-writes frontmatter from a fixed vocabulary — booleans, quoted or
- * plain scalars, and flow lists — and copies note bodies verbatim. A general
+ * plain scalars, and flow lists — and copies doc bodies verbatim. A general
  * YAML library would read those files back correctly but would not write them
  * back identically, and pi's own `parseFrontmatter` trims the body. Both break
- * the property this layout is built on: **a note that is read and written
+ * the property this layout is built on: **a doc that is read and written
  * unchanged is byte-identical**. So the writer here is the export's writer, and
  * the reader is its exact inverse.
  */
@@ -188,7 +188,7 @@ function parseValue(raw: string): FrontmatterValue {
 }
 
 /**
- * Parse frontmatter lines into a record. Unknown keys are kept: a note written
+ * Parse frontmatter lines into a record. Unknown keys are kept: a doc written
  * by a newer version of the app must survive a round trip through an older one.
  */
 export function parseFrontmatterLines(lines: readonly string[]): FrontmatterRecord {

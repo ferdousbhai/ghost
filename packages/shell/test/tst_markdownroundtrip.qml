@@ -5,7 +5,7 @@ import QtTest
 //
 // `TextEdit { textFormat: TextEdit.MarkdownText }` is editable and round-trips
 // back through `text`, which reads like WYSIWYG markdown for free. It is not:
-// on Qt 6.11 the return trip loses data, and a notes pane that quietly eats a
+// on Qt 6.11 the return trip loses data, and a document pane that quietly eats a
 // paragraph is worse than one that shows you your own source.
 //
 // This test pins the *broken* behaviour deliberately. Every compare() below
@@ -87,7 +87,7 @@ TestCase {
     }
 
     function test_typedMarkdownIsEscapedNotParsed(): void {
-        // Someone typing "# Hi" into their note gets "\# Hi" written to disk.
+        // Someone typing "# Hi" into their document gets "\# Hi" written to disk.
         ed.text = "";
         ed.forceActiveFocus();
         keyClick(Qt.Key_NumberSign);
@@ -109,9 +109,9 @@ TestCase {
 
     function test_frontMatterLeaksIntoTheNextDocument(): void {
         // The decisive one. Front matter is kept on the QTextDocument out of
-        // band and is never cleared, so one note with front matter poisons
-        // every later note shown in the same TextEdit — a pane that reuses its
-        // editor would write note A's front matter into note B.
+        // band and is never cleared, so one document with front matter poisons
+        // every later document shown in the same TextEdit — a pane that reuses
+        // its editor would write document A's front matter into document B.
         compare(fresh.text, "");
         fresh.text = "---\ntitle: A\n---\n\nbody A\n";
         compare(fresh.text, "---\ntitle: A\n---\nbody A\n\n");

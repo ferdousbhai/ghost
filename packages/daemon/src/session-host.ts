@@ -28,7 +28,7 @@
  *
  * 3. **Visitor sessions are still a security boundary.** They disable native
  *    discovery and use only Ghost's scope-aware tools. Otherwise native read
- *    or Bash could bypass the published-note and visitor-memory contracts.
+ *    or Bash could bypass the published-doc and visitor-memory contracts.
  *
  * 4. **Ghost has no approval UI.** Creator sessions are deliberately local and
  *    unrestricted; visitor sessions rely on their explicit tool allowlist.
@@ -1548,7 +1548,7 @@ export class SessionHost {
     onboarding: boolean,
   ): Promise<GreetingContextInput> {
     const paths = ghostPaths(ghost.dir);
-    let digest: GhostHomeDigest = { character: null, memoryLines: [], noteLines: [] };
+    let digest: GhostHomeDigest = { character: null, memoryLines: [], docLines: [] };
     try {
       digest = await readGhostHomeDigest(paths.home);
     } catch (error) {
@@ -1580,7 +1580,7 @@ export class SessionHost {
       ghostName: ghost.name,
       character: digest.character,
       memoryLines: digest.memoryLines,
-      noteLines: digest.noteLines,
+      docLines: digest.docLines,
       localTime: localTimeString(),
       daysSinceLastConversation,
       onboarding,
@@ -2106,7 +2106,7 @@ export class SessionHost {
    * The move is the registry's (`trash`) — into the system trash, where a
    * trash tool or file manager can restore it — and it is a move rather than a
    * removal: the ghost home holds the only copy of a persona, its memory, and
-   * its notes. Nothing here follows up with a recursive delete.
+   * its docs. Nothing here follows up with a recursive delete.
    */
   async deleteGhost(ghostName: string): Promise<{ trash: string }> {
     const ghost = this.registry.get(ghostName);

@@ -56,10 +56,10 @@ export {
 } from "./scope.js";
 
 export {
-  deriveNoteCatalog,
-  isNoteVisible,
-  NOTE_CATALOG_BUDGET_CHARS,
-  visibleNotes,
+  deriveDocCatalog,
+  isDocVisible,
+  DOC_CATALOG_BUDGET_CHARS,
+  visibleDocs,
 } from "./catalog.js";
 
 export {
@@ -68,18 +68,18 @@ export {
   EXPORT_MANIFEST_FILENAME,
   GhostHome,
   MEMORY_DIRNAME,
-  normalizeNotePath,
-  NOTES_DIRNAME,
+  normalizeDocPath,
+  DOCS_DIRNAME,
   openGhostHome,
   VISITORS_DIRNAME,
   type MemoryListing,
   type MemoryWriteInput,
   type MemoryWriteResult,
-  type NoteListing,
-  type NoteSearchMatch,
-  type NoteSearchOptions,
-  type NoteSearchResult,
-  type NoteWriteInput,
+  type DocListing,
+  type DocSearchMatch,
+  type DocSearchOptions,
+  type DocSearchResult,
+  type DocWriteInput,
   type SkippedFile,
 } from "./home.js";
 
@@ -87,10 +87,10 @@ export {
   GHOST_HOME_FORMAT,
   type CharacterFile,
   type MemoryRecord,
-  type NoteCatalog,
-  type NoteFile,
-  type NoteFrontmatter,
-  type NoteMeta,
+  type DocCatalog,
+  type DocFile,
+  type DocFrontmatter,
+  type DocMeta,
 } from "./types.js";
 
 export {

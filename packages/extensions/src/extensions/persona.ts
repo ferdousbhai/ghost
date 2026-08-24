@@ -3,11 +3,11 @@
  *
  * The Ghost persona is appended to OMP's assembled prompt, preserving the
  * harness's native tool, skill, rule, and project-context guidance. The Ghost
- * section is rebuilt before every agent start, so a note or memory written
+ * section is rebuilt before every agent start, so a doc or memory written
  * mid-session is reflected on the next turn without a session restart.
  */
 import type { ExtensionAPI, ExtensionFactory } from "@oh-my-pi/pi-coding-agent";
-import { deriveNoteCatalog } from "../catalog.js";
+import { deriveDocCatalog } from "../catalog.js";
 import { deriveMemoryIndex } from "../memory-file.js";
 import { buildGhostSystemPrompt } from "../prompt.js";
 import { resolveHome, resolveScope, type GhostExtensionOptions } from "./shared.js";
@@ -27,17 +27,17 @@ export function createPersonaExtension(
   return (pi: ExtensionAPI) => {
     pi.on("before_agent_start", async (event, ctx) => {
       const home = resolveHome(options, ctx);
-      const [character, memory, notes] = await Promise.all([
+      const [character, memory, docs] = await Promise.all([
         home.readCharacter(),
         home.listMemory(scope),
-        home.listNotes(),
+        home.listDocs(),
       ]);
       return {
         systemPrompt: [...event.systemPrompt, buildGhostSystemPrompt({
           ghostName: options.ghostName ?? home.name,
           character,
           memory: deriveMemoryIndex(memory.files),
-          notes: deriveNoteCatalog(notes.notes, scope),
+          docs: deriveDocCatalog(docs.docs, scope),
           scope,
           ...(options.extraSections === undefined
             ? {}

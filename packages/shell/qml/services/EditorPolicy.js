@@ -62,7 +62,7 @@ function isUnder(path, dir) {
  * a dotfiles repo works. A file outside `$HOME` walks up to the top-level
  * directories but never offers `/` itself.
  *
- * With no repository anywhere: the ghost home when the file is inside it (notes
+ * With no repository anywhere: the ghost home when the file is inside it (docs
  * and memory are one project), otherwise the file's own directory.
  */
 function projectRoot(filePath, ghostHome, userHome, exists) {

@@ -2,14 +2,14 @@
  * The daemon's seam onto `@ghost/extensions`.
  *
  * `packages/extensions` owns what a ghost *is* — the persona, memory, and
- * notes extensions plus the `ghost-home/v1` reader. The daemon owns how one
+ * docs extensions plus the `ghost-home/v1` reader. The daemon owns how one
  * *runs*. This module is the whole of the boundary between them: the rest of
  * the daemon never imports the extensions package directly, so a change in
  * its shape is a change in one file here.
  *
  * Two things come across the seam per session:
  *
- * - the composed extension factory (persona + memory + notes over one home
+ * - the composed extension factory (persona + memory + docs over one home
  *   and one scope), and
  * - the scope-specific Ghost tool names. They are additive metadata for a
  *   creator session and the complete allowlist for a restricted visitor.
@@ -21,7 +21,7 @@ import type { ExtensionFactory } from "@oh-my-pi/pi-coding-agent";
 import {
   createGhostExtension,
   deriveMemoryIndex,
-  deriveNoteCatalog,
+  deriveDocCatalog,
   ghostToolNamesFor,
   isVisitorScope,
   openGhostHome,
@@ -36,10 +36,19 @@ import {
 export type { GhostScope, RelayTransport };
 export { CREATOR_SCOPE, isVisitorScope, visitorScope };
 
+/**
+ * Ensure one discovered home uses the canonical layout. This also performs the
+ * one supported legacy migration: an unambiguous `notes/` directory is renamed
+ * atomically to `docs/` before any session can see the home.
+ */
+export async function ensureGhostHomeLayout(homeDir: string): Promise<void> {
+  await openGhostHome(homeDir).ensure();
+}
+
 /** How the daemon asks for a session's extension set. */
 export interface GhostExtensionOptions {
   /**
-   * When set, the session is a visitor's: private notes are structurally
+   * When set, the session is a visitor's: private docs are structurally
    * unreadable and memory writes land in `memory/.visitors/<id>/`. Omitted,
    * the session is the creator's and sees the whole home.
    */
@@ -94,7 +103,7 @@ export interface ResolvedGhostExtensions {
  * Turn a visitor id into a scope. An invalid id throws (the extensions
  * package refuses ids that would not survive as a path segment) rather than
  * silently degrading to creator scope — failing open here would hand a
- * visitor the creator's private notes.
+ * visitor the creator's private docs.
  */
 export function resolveGhostScope(visitorId?: string | null): GhostScope {
   return visitorId ? visitorScope(visitorId) : CREATOR_SCOPE;
@@ -141,19 +150,19 @@ export interface GhostHomeDigest {
   /** The character body, or null when there is no character file. */
   character: string | null;
   memoryLines: readonly string[];
-  noteLines: readonly string[];
+  docLines: readonly string[];
 }
 
 export async function readGhostHomeDigest(homeDir: string): Promise<GhostHomeDigest> {
   const home = openGhostHome(homeDir);
-  const [character, memory, notes] = await Promise.all([
+  const [character, memory, docs] = await Promise.all([
     home.readCharacter(),
     home.listMemory(CREATOR_SCOPE),
-    home.listNotes(),
+    home.listDocs(),
   ]);
   return {
     character: character?.body ?? null,
     memoryLines: deriveMemoryIndex(memory.files).lines,
-    noteLines: deriveNoteCatalog(notes.notes, CREATOR_SCOPE).lines,
+    docLines: deriveDocCatalog(docs.docs, CREATOR_SCOPE).lines,
   };
 }

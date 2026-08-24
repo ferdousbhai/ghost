@@ -20,14 +20,14 @@ You are Casper, the ghost of a working typographer and letterpress printer.
 - Dry, unhurried, specific. You notice materials before ideas.
 `;
 
-export const PRIVATE_NOTE_PATH = "estate-finances.md";
-export const PUBLIC_NOTE_PATH = "craft/paper-notes.md";
-export const ARCHIVED_NOTE_PATH = "old-plan.md";
+export const PRIVATE_DOC_PATH = "estate-finances.md";
+export const PUBLIC_DOC_PATH = "craft/paper-guide.md";
+export const ARCHIVED_DOC_PATH = "old-plan.md";
 
 const FILES: Record<string, string> = {
   "character.md": CHARACTER_MD,
 
-  [`notes/${PUBLIC_NOTE_PATH}`]: `---
+  [`docs/${PUBLIC_DOC_PATH}`]: `---
 public: true
 title: Paper that takes a deep impression
 tags: [paper, press]
@@ -36,9 +36,9 @@ tags: [paper, press]
 Damp the sheet the night before. Cotton rag at 240gsm holds the bite.
 `,
 
-  "notes/press-restoration.md": `---
+  "docs/press-restoration.md": `---
 public: true
-title: "Restoring the Vandercook 4: notes"
+title: "Restoring the Vandercook 4"
 tags: [press]
 ---
 
@@ -46,7 +46,7 @@ The carriage was frozen. Kerosene, patience, and a week of turning it by hand.
 `,
 
   // The adversarial target: private, and named plainly enough to guess.
-  [`notes/${PRIVATE_NOTE_PATH}`]: `---
+  [`docs/${PRIVATE_DOC_PATH}`]: `---
 public: false
 title: Estate and finances
 ---
@@ -54,7 +54,7 @@ title: Estate and finances
 The studio lease is held under my sister's name until 2031.
 `,
 
-  [`notes/${ARCHIVED_NOTE_PATH}`]: `---
+  [`docs/${ARCHIVED_DOC_PATH}`]: `---
 public: true
 title: Old plan
 archived: true

@@ -342,7 +342,7 @@ export function createDaemonServer(options: ServerOptions): Server {
    * Trash one ghost. `?confirm=<name>` must repeat the name exactly: a DELETE
    * is one path segment away from every other ghost route, and this is the
    * API-level guard against an accidental or scripted one taking a persona,
-   * its memory, and its notes with it. The deletion itself is a move into the
+   * its memory, and its docs with it. The deletion itself is a move into the
    * system trash, never an erase.
    */
   const handleDeleteGhost = async (

@@ -327,7 +327,7 @@ describe("registration and scope", () => {
   it("leaves other tools and creator sessions alone", async () => {
     const visitorGate = createBrowserScopeGate({ scope: visitorScope("visitor-1") });
     const creatorGate = createBrowserScopeGate({ scope: CREATOR_SCOPE });
-    const event = { toolName: "ghost_notes_read", input: {} };
+    const event = { toolName: "ghost_docs_read", input: {} };
     expect(await visitorGate(event as never, {} as never)).toBeUndefined();
     expect(
       await creatorGate({ toolName: GHOST_BROWSER, input: {} } as never, {} as never),

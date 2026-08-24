@@ -3,7 +3,7 @@
  * screen and desktop.
  *
  * `support/harness.ts` gives every extension a context with nothing but `cwd`,
- * which is all persona/memory/notes ever read. These two read `ctx.model` — the
+ * which is all persona/memory/docs ever read. These two read `ctx.model` — the
  * screen tool branches on whether the chat model can be handed an image — and
  * they run programs. So this harness adds:
  *

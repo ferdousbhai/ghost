@@ -69,7 +69,7 @@ For each turn Ghost:
    `claude auth status --json` preflight;
 2. requires Claude.ai plan auth rather than accepting an API-key-backed
    status;
-3. rebuilds the persona, memory index, and note catalogue from the ghost home;
+3. rebuilds the persona, memory index, and doc catalogue from the ghost home;
 4. captures the Ghost-specific `@ghost/extensions` tool definitions and
    exposes them as one in-process SDK MCP server;
 5. starts an Effect-scoped Agent SDK query and maps the SDK's async message
@@ -104,7 +104,7 @@ The creator's plan is never shared, proxied, or resold.
 
 T3 Code keeps a long-lived query fed by an Effect queue. That is correct for a
 coding session whose system instructions are stable. A Ghost system prompt is
-not stable: memory files and note visibility are derived again before every
+not stable: memory files and doc visibility are derived again before every
 turn. Keeping one query alive would freeze those indexes.
 
 Ghost therefore retains T3's important lifecycle—typed startup/stream

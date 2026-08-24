@@ -2,7 +2,7 @@
 
 ## Vision
 
-A ghost is an AI persona — character, memory, notes, tools — that lives
+A ghost is an AI persona — character, memory, docs, tools — that lives
 entirely on its creator's machine as an Omarchy-native desktop app: an OMP
 engine over a folder of plain markdown files, summoned with a keystroke,
 extended with OMP extensions and skills, and (later) shared with visitors on
@@ -37,7 +37,7 @@ pooling and no cloud custody.
 ## Phases
 
 - **Phase 1 — creator-local (IN PROGRESS).** Feature-complete creator ghost:
-  multi-ghost plain-file homes, persona/memory/notes pi extensions, `ghostd`
+  multi-ghost plain-file homes, persona/memory/docs pi extensions, `ghostd`
   daemon, Quickshell HUD (Super+G) + bar widget + notifications, import of
   the hosted export, optional owner-local Claude Code plan runtime, AUR
   packaging. Current status: workspace scaffolded;
@@ -48,7 +48,7 @@ pooling and no cloud custody.
   presence-before-contact, offline mailbox (encrypted DMs; our libsodium
   crypto stays authoritative). Streaming data plane: the GhostRelay Durable
   Object (already built in the predecessor repo — relays measurably cannot
-  carry streamed answers). Visitor sessions: public-notes-only, per-visitor
+  carry streamed answers). Visitor sessions: public-docs-only, per-visitor
   memory scopes, bash/browser default-OFF. Paid-call envelope: our own
   microstandard (NIP-90 is dead — measured; NIP-AE PR #2220 is the
   owner↔ghost key-binding template).
@@ -84,9 +84,9 @@ pooling and no cloud custody.
 - **Files, not a database** — plain markdown + YAML frontmatter is the
   store; owner-readable, greppable, git-friendly; the sync machinery a
   server required simply disappears.
-- **No stored indexes** — memory index and note catalog are derived per
+- **No stored indexes** — memory index and doc catalog are derived per
   session; files edited out-of-band can never go stale against an index.
-- **Notes and skills coexist** — notes are durable ghost-owned knowledge;
+- **Docs and skills coexist** — docs are durable ghost-owned knowledge;
   OMP-native skills are reusable procedural instructions. Creator sessions
   discover both, including explicit `/skill:<name>` invocation, while visitor
   sessions keep discovery off to preserve their visibility boundary.

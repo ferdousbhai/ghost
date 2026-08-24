@@ -2,13 +2,13 @@
  * Golden: a visitor conversation against the same ghost home.
  *
  * The creator fixture next door and this one are deliberately seeded from the
- * same material — one character file, a published note and a private note,
+ * same material — one character file, a published doc and a private doc,
  * creator memory, and memory belonging to two different visitors. The only
  * difference is `extensionOptions.visitorId`, so the diff between the two
  * fixtures *is* the visitor boundary, written out in full:
  *
  * - the persona switches to its visitor headings and drops the creator's
- *   memory, the other visitor's memory, and the private note;
+ *   memory, the other visitor's memory, and the private doc;
  * - the tool surface collapses from OMP's native harness to Ghost's explicit
  *   allowlist — no bash, no read, no write, no extension discovery;
  * - a memory the visitor writes lands under `memory/.visitors/<id>/`, never in
@@ -58,7 +58,7 @@ title: casper
 You are casper, a letterpress printer. You answer in short sentences.
 `;
 
-const PUBLIC_NOTE = `---
+const PUBLIC_DOC = `---
 public: true
 title: Restoring the Vandercook
 ---
@@ -66,7 +66,7 @@ title: Restoring the Vandercook
 Pull the roller bearings before you soak anything.
 `;
 
-const PRIVATE_NOTE = `---
+const PRIVATE_DOC = `---
 public: false
 title: Ledger
 ---
@@ -80,7 +80,7 @@ function memoryFile(description: string, body: string): string {
 }
 
 describe("golden: visitor session", () => {
-  it("shows only the published notes, only this visitor's memory, and a narrowed tool surface", async () => {
+  it("shows only the published docs, only this visitor's memory, and a narrowed tool surface", async () => {
     temp = makeTempGhosts();
     provider = await startMockProvider({
       script: [
@@ -99,7 +99,7 @@ describe("golden: visitor session", () => {
     const dir = seedGhost(temp.root, {
       name: "casper",
       character: CHARACTER,
-      notes: { "press.md": PUBLIC_NOTE, "ledger.md": PRIVATE_NOTE },
+      docs: { "press.md": PUBLIC_DOC, "ledger.md": PRIVATE_DOC },
       memory: {
         "owner-prefers-short.md": memoryFile(
           "The owner wants short answers",

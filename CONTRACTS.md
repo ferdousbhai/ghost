@@ -5,13 +5,13 @@ commit, with every consumer updated.
 
 ## Ghost home (`ghost-home/v1`)
 
-One directory per ghost. Plain files; anything derivable (memory index, note
+One directory per ghost. Plain files; anything derivable (memory index, doc
 catalog) is derived per session and never stored.
 
 ```
 ~/Ghosts/<name>/
   character.md                 persona → system prompt (frontmatter: public: true, title)
-  notes/**/*.md                YAML frontmatter: public: false by default; optional
+  docs/**/*.md                 YAML frontmatter: public: false by default; optional
                                title, tags, archived, path (pre-sanitization app path)
   memory/*.md                  atomic memory files: frontmatter description + updated,
                                body = the fact
@@ -28,6 +28,13 @@ catalog) is derived per session and never stored.
                                notIncluded
 ```
 
+`docs/` is canonical. A legacy home or hosted `ghost-home/v1` archive may carry
+`notes/`; daemon startup and import migrate that directory to `docs/` without
+rewriting file bytes. The live-home migration is atomic when only `notes/`
+exists; if both directories exist, startup fails with a conflict instead of
+guessing which files win. Import rejects archive entries that collide after
+translation. New homes and all new writes use only `docs/`.
+
 A deleted ghost home leaves the root entirely, for the system trash; see the
 `DELETE` route.
 
@@ -36,7 +43,7 @@ Terminology: **visitors**, never "callers".
 ### Creator and visitor capability boundary
 
 A creator session is OMP-native. Ghost preserves OMP's system prompt and
-discovery, then appends the Ghost persona and derived memory/note sections.
+discovery, then appends the Ghost persona and derived memory/doc sections.
 Native filesystem and search (`read`, `glob`, `grep`), mutation (`write`,
 `edit`), Bash, web search, task/hub subagents, background jobs, skills, rules,
 project context, extensions/plugins, commands, and MCP remain available under
@@ -48,10 +55,10 @@ home (see the harness invariants). Image inspection is OMP-native:
 `inspect_image` in its default auto mode, resolving the `vision` role that the
 daemon projects from models.json's `vision_model`.
 
-Creator notes and memory retrieval use those native filesystem tools directly.
-Ghost registers no duplicate creator note list/read/search/write tools, and
+Creator docs and memory retrieval use those native filesystem tools directly.
+Ghost registers no duplicate creator doc list/read/search/write tools, and
 keeps only `ghost_memory_write` for validated, atomic memory-file writes. The
-memory index and note catalog are derived from disk before each model turn and
+memory index and doc catalog are derived from disk before each model turn and
 are never stored. `/skill:<name> [args]` is explicit force-invocation of a
 discovered skill; native `read` remains the model-driven discovery path.
 
@@ -64,7 +71,7 @@ conversation working directory without relocating that transcript.
 A visitor session remains deliberately restricted to Ghost's scope-aware
 extension tools and `ask`. Native filesystem, Bash, discovery, MCP, LSP, IRC,
 and project context stay disabled because any of them could bypass published
-note visibility or per-visitor memory isolation.
+doc visibility or per-visitor memory isolation.
 
 ## Daemon HTTP API (localhost only)
 
@@ -137,7 +144,7 @@ one must not be a leak of both.
   `409 ghost_busy`, as is a second concurrent delete of the same ghost. Idle
   hosted sessions are closed (disposed, not deleted) and pending
   title/compaction work is awaited first. **Deletion is a move, never an `rm`**:
-  the ghost home holds the only copy of a persona, its memory, and its notes, so
+  the ghost home holds the only copy of a persona, its memory, and its docs, so
   nothing on any path follows the rename with a recursive removal.
 - `POST /api/ghosts/:name/messages` — the **pi-messages wire protocol** over
   OMP's `AgentSession` (request `{ model, context, options }` → SSE stream).
@@ -193,7 +200,7 @@ one must not be a leak of both.
 - `POST /api/ghosts/:name/greeting` `{}` → `{ greeting: string | null,
   onboarding: boolean }` — one smol-lane completion (see below) writes a short
   in-persona opener for an empty chat from the character file, memory index,
-  note catalog, and the current time. `greeting` is `null` on ANY generation
+  doc catalog, and the current time. `greeting` is `null` on ANY generation
   failure (no usable model, provider error, timeout, output rejected by
   validation) — never a 5xx; the shell keeps its static invitation and the
   greeting is pure upside. `onboarding` is true while `character.md` is
@@ -223,7 +230,7 @@ on the conversation's next writable open, without generating a replacement.
 **Greetings.** `POST …/greeting` (above) writes the empty-chat opener with one
 smol completion: 1-3 sentences in the ghost's own voice, at most one timely
 detail (time of day, a gap since the last conversation, something from memory),
-ending with an invitation to talk. Character, memory-index, and note-catalog
+ending with an invitation to talk. Character, memory-index, and doc-catalog
 inputs are fenced as untrusted data; output that answers instead of greeting is
 rejected outright, never truncated.
 
@@ -249,7 +256,7 @@ While `character.md` is missing, blank, or byte-equal to the seed, creator
 sessions — OMP and Claude Code runtimes alike, never visitor scopes — get a
 "first meeting" system-prompt section: interview the owner with genuine
 curiosity (one question at a time, the owner's request always first), save
-durable facts as declarative memories, offer notes for ongoing projects, and
+durable facts as declarative memories, offer docs for ongoing projects, and
 eventually draft and write the character with the creator-only
 `ghost_character` tool (read/write `character.md`). The populated character
 file IS the completion latch — there is no separate onboarding state — and the

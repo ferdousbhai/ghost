@@ -233,7 +233,7 @@ TestCase {
 
     function test_largeFileWithSmallEditsStillMerges(): void {
         // The same size the previous test refuses, but with the edits where
-        // they actually land in a note: prefix and suffix trimming keeps the
+        // they actually land in a document: prefix and suffix trimming keeps the
         // table tiny, and this is the case that must not fall back.
         const base = tc.lines(5000, "line");
         const mine = base.replace("line 10\n", "MINE\n");

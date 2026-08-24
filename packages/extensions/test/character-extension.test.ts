@@ -28,7 +28,7 @@ actually remember over a general statement you could have made about anything.
 
 ## What you know
 
-Your notes and memory files are yours. Read them before you answer a question
+Your docs and memory files are yours. Read them before you answer a question
 they cover, and write a memory file when you learn something about a visitor
 that you would want to remember the next time they come back.
 `;

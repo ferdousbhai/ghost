@@ -2,18 +2,17 @@
  * Import a hosted "Download my ghost" archive into a local ghost home.
  *
  * The hosted export (`src/lib/export/ghost-home-archive.ts`) already writes
- * ghost-home/v1 — the same layout this package reads — so the import is
- * deliberately a **verbatim copy**, not a transformation. Rewriting bytes on the
- * way in would mean two definitions of the format that could drift apart; the
- * only things this module does are validate the manifest, refuse to write
- * outside the target directory, and place the tree.
+ * ghost-home/v1. Older exports used `notes/`; the canonical local layout now
+ * uses `docs/`, so import translates that one directory prefix while preserving
+ * every file's bytes. Everything else is placed verbatim after validating the
+ * manifest and refusing paths outside the target directory.
  */
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
 import { unzipSync } from "fflate";
 import { GhostError } from "./errors.js";
 import { sanitizePathSegment } from "./frontmatter.js";
-import { EXPORT_MANIFEST_FILENAME, GhostHome } from "./home.js";
+import { DOCS_DIRNAME, EXPORT_MANIFEST_FILENAME, GhostHome } from "./home.js";
 import { GHOST_HOME_FORMAT } from "./types.js";
 
 export interface GhostArchiveManifest {
@@ -53,6 +52,14 @@ function isArchiveNoise(path: string): boolean {
 }
 
 type ArchiveEntries = Map<string, Uint8Array>;
+
+const LEGACY_NOTES_PREFIX = "notes/";
+
+function canonicalArchivePath(path: string): string {
+  return path.startsWith(LEGACY_NOTES_PREFIX)
+    ? `${DOCS_DIRNAME}/${path.slice(LEGACY_NOTES_PREFIX.length)}`
+    : path;
+}
 
 async function readDirectoryEntries(dir: string): Promise<ArchiveEntries> {
   const entries: ArchiveEntries = new Map();
@@ -189,17 +196,27 @@ export async function importGhostArchive(
   }
 
   const ignored: string[] = [];
+  const targets = new Set<string>();
   let filesWritten = 0;
   for (const [path, content] of entries) {
     if (root !== "" && !path.startsWith(prefix)) {
       ignored.push(path);
       continue;
     }
-    const relativePath = path.slice(prefix.length);
-    if (!relativePath || isArchiveNoise(relativePath)) {
+    const archivePath = path.slice(prefix.length);
+    if (!archivePath || isArchiveNoise(archivePath)) {
       ignored.push(path);
       continue;
     }
+    const relativePath = canonicalArchivePath(archivePath);
+    if (targets.has(relativePath)) {
+      throw new GhostError(
+        "invalid_format",
+        `Archive entries collide at canonical path ${JSON.stringify(relativePath)}.`,
+        { entry: path, path: relativePath },
+      );
+    }
+    targets.add(relativePath);
     // Zip-slip guard: an archive is untrusted input even when we wrote it.
     const target = resolve(dir, relativePath);
     if (target !== dir && !target.startsWith(dir + sep)) {

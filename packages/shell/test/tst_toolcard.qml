@@ -19,7 +19,7 @@ TestCase {
 
     function test_liveSummaryBecomesOutcome(): void {
         const activity = {
-            name: "ghost_notes_grep",
+            name: "ghost_docs_grep",
             status: "complete",
             arguments: { query: "launch" },
             intent: "Find the launch plan",
@@ -30,13 +30,24 @@ TestCase {
 
     function test_restoredCallUsesHumanFallback(): void {
         const activity = {
-            name: "ghost_notes_read",
+            name: "ghost_docs_read",
             status: "complete",
             arguments: { path: "projects/roadmap.md" },
             intent: "",
             summary: ""
         };
         compare(ToolTrace.text(activity, true, false, false), "Read projects/roadmap.md");
+    }
+
+    function test_legacyNoteCallPointsAtMigratedDoc(): void {
+        const activity = {
+            name: "ghost_notes_write",
+            status: "complete",
+            arguments: { path: "projects/roadmap.md" },
+            intent: "",
+            summary: ""
+        };
+        compare(ToolTrace.fileTarget(activity), "docs/projects/roadmap.md");
     }
 
     function test_failureKeepsPurpose(): void {
