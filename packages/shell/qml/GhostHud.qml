@@ -55,7 +55,7 @@ FloatingWindow {
 
     // A reasonable default; the WM resizes/tiles from here. minimumSize keeps a
     // tiled slice from collapsing the composer and roster into nothing.
-    implicitWidth: 880
+    implicitWidth: 910
     implicitHeight: 620
     minimumSize: Qt.size(480, 360)
 
@@ -401,9 +401,9 @@ FloatingWindow {
                     // would let the sidebar swallow the whole row and crush the
                     // transcript; pin it to a fixed column instead.
                     Layout.fillWidth: false
-                    Layout.preferredWidth: 190
-                    Layout.minimumWidth: 190
-                    Layout.maximumWidth: 190
+                    Layout.preferredWidth: 220
+                    Layout.minimumWidth: 220
+                    Layout.maximumWidth: 220
                     Layout.fillHeight: true
                     spacing: Theme.sectionGap
 
