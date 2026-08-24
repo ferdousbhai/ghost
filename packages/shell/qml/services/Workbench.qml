@@ -2,18 +2,25 @@ pragma Singleton
 
 // Workbench — which file the HUD has open beside the chat.
 //
-// State only: the pane that renders it is qs.components/FilePane, and nothing
-// here reads the disk. `filePath` is always absolute once set, so every
-// consumer can treat it as a real path rather than re-deriving a base.
+// The pane that renders it is qs.components/FilePane, and that pane owns the
+// file's *contents* — every read and write of the open file is its FileView,
+// not ours. `filePath` is always absolute once set, so every consumer can treat
+// it as a real path rather than re-deriving a base.
 //
 // Tool arguments are the main source of paths, and OMP hands the ghost a
 // session cwd of the ghost home (CONTRACTS.md), so a relative argument is
 // resolved against that home. When the home is unknown — no active ghost, or a
 // roster that has not landed yet — a relative path resolves to "" and the
 // caller is expected to offer nothing rather than guess a base.
+//
+// The one thing here that does touch the disk is "open this in a real editor",
+// at the bottom: answering it means asking the filesystem where the project
+// starts. It is click-driven and reads nothing but tiny files.
 import Quickshell
+import Quickshell.Io
 import QtQuick
 import qs.services
+import "EditorPolicy.js" as Editor
 
 Singleton {
     id: root
@@ -120,5 +127,117 @@ Singleton {
         const ext = dot > 0 ? name.slice(dot + 1).toLowerCase() : "";
         if (ext === "md" || ext === "markdown") return "markdown";
         return root.codeExtensions.indexOf(ext) >= 0 ? "code" : "";
+    }
+
+    // ---- Open in an editor -------------------------------------------------
+    //
+    // Three constraints, all measured against Quickshell 0.3.0 rather than
+    // assumed, because every one of them is silent when you get it wrong:
+    //
+    //  1. There is no stat in the QML API. FileView is the only filesystem
+    //     primitive and it reads *files*, so "exists" here can only ever mean
+    //     "a readable regular file" — a directory fails the read. EditorPolicy's
+    //     `.git` walk is written around that.
+    //  2. A FileView will not re-read on a plain `path` assignment once it holds
+    //     a file: it hands back the *previous* file's text. Clearing `path`
+    //     first makes each probe a real read.
+    //  3. The `loaded` property is no answer either — it stays true from the
+    //     last successful read, including when the new path is a directory. The
+    //     loaded/loadFailed signals are the answer, and with `blockLoading` they
+    //     fire inside the `text()` call rather than an event loop later.
+
+    /** Whether the last `read()` found a readable file. */
+    property bool readOk: false
+
+    /** How the PATH answered, once: -1 unknown, 0 no, 1 yes. A machine does
+        not gain or lose Omarchy between two clicks. */
+    property int launcherFound: -1
+    property int codeFound: -1
+
+    /**
+     * The text of `path`, or "" when it cannot be read — `readOk` tells an
+     * empty file from a missing one. Blocking, so only ever call it from a
+     * click, and only on files small enough that nobody notices.
+     */
+    function read(path: string): string {
+        root.readOk = false;
+        if (path === "" || !path.startsWith("/")) return "";
+        probe.path = "";
+        probe.path = path;
+        return probe.text();
+    }
+
+    /** True when `path` is a readable regular file. Directories are false. */
+    function exists(path: string): bool {
+        root.read(path);
+        return root.readOk;
+    }
+
+    /** The project directory `path` belongs to. See EditorPolicy.js. */
+    function projectRoot(path: string): string {
+        const file = root.absolute(path);
+        if (file === "") return "";
+        return Editor.projectRoot(file, root.home, Quickshell.env("HOME") || "",
+            probed => root.exists(probed));
+    }
+
+    /**
+     * Open `path` in the user's editor with its project as the workspace.
+     *
+     * The workbench pane is deliberately left as it is: this is a second window
+     * onto the same file, not a handoff, and FilePane's own FileView keeps the
+     * two in step from here.
+     */
+    function openInEditor(path: string): void {
+        const file = root.absolute(path);
+        if (file === "") return;
+        const project = root.projectRoot(file);
+        // Re-read per click rather than cached: the user can change their
+        // editor from Omarchy's menu between one click and the next. The path
+        // is $HOME-relative and not XDG_STATE_HOME-relative because that is
+        // what omarchy-launch-editor itself reads.
+        const defaults = root.read(root.absolute("~/.local/state/omarchy/defaults/editor"));
+        const plan = Editor.launchPlan(defaults, root.hasLauncher(), root.hasCode(),
+            project, file);
+        if (plan.command.length === 0) {
+            // Nothing here can open a file at a line. The desktop's own handler
+            // for the project directory still beats doing nothing.
+            ExternalLinks.openPath(project);
+            return;
+        }
+        // Detached, so a HUD that outlives the editor never reaps it and an
+        // editor that outlives the HUD is not killed with it.
+        Quickshell.execDetached(plan.workingDirectory === ""
+            ? ({ command: plan.command })
+            : ({ command: plan.command, workingDirectory: plan.workingDirectory }));
+    }
+
+    function hasLauncher(): bool {
+        if (root.launcherFound < 0) {
+            root.launcherFound = Editor.onPath(Quickshell.env("PATH") || "",
+                Editor.LAUNCHER, probed => root.exists(probed)) ? 1 : 0;
+        }
+        return root.launcherFound === 1;
+    }
+
+    // Probing PATH reads the candidate file, which is only reasonable because
+    // every distribution's `code` on PATH is a small wrapper script, and because
+    // the answer is kept for the life of the shell.
+    function hasCode(): bool {
+        if (root.codeFound < 0) {
+            root.codeFound = Editor.onPath(Quickshell.env("PATH") || "", "code",
+                probed => root.exists(probed)) ? 1 : 0;
+        }
+        return root.codeFound === 1;
+    }
+
+    FileView {
+        id: probe
+
+        blockLoading: true
+        printErrors: false
+
+        onLoaded: root.readOk = true
+        onLoadFailed: root.readOk = false
     }
 }

@@ -48,4 +48,30 @@ TestCase {
     function test_loginUrls(data) {
         compare(Policy.isLoginUrl(data.url), data.allowed);
     }
+
+    function test_localPaths_data() {
+        return [
+            { tag: "a directory", path: "/home/u/work/app", allowed: true },
+            { tag: "a file", path: "/home/u/work/app/src/main.js", allowed: true },
+            { tag: "spaces are ordinary in a name", path: "/home/u/My Notes/idea.md", allowed: true },
+            { tag: "so is a percent", path: "/home/u/100%/report.md", allowed: true },
+            { tag: "so is a backslash", path: "/home/u/a\\b", allowed: true },
+            { tag: "relative", path: "work/app", allowed: false },
+            { tag: "option-looking", path: "--help", allowed: false },
+            { tag: "a URL is not a path", path: "https://example.com", allowed: false },
+            { tag: "empty", path: "", allowed: false }
+        ];
+    }
+
+    function test_localPaths(data) {
+        compare(Policy.isLocalPath(data.path), data.allowed);
+    }
+
+    // Built rather than written: a literal control character in this file would
+    // be invisible in review and easy to "tidy" away.
+    function test_localPathRejectsControlCharacters() {
+        compare(Policy.isLocalPath("/home/u/a" + String.fromCharCode(10) + "b"), false);
+        compare(Policy.isLocalPath("/home/u/a" + String.fromCharCode(0) + "b"), false);
+        compare(Policy.isLocalPath("/home/u/a" + String.fromCharCode(127) + "b"), false);
+    }
 }

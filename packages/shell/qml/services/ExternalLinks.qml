@@ -26,4 +26,19 @@ Singleton {
         Quickshell.execDetached(["xdg-open", url]);
         return true;
     }
+
+    /**
+     * Hand an absolute local path — a file or a directory — to whatever the
+     * desktop has registered for it. The last resort behind Workbench's "open
+     * in editor", and the only reason this shell ever opens a local path: no
+     * model-authored or daemon-issued string reaches here.
+     */
+    function openPath(path: string): bool {
+        if (!Policy.isLocalPath(path)) {
+            console.warn("ghost shell rejected an unopenable local path");
+            return false;
+        }
+        Quickshell.execDetached(["xdg-open", path]);
+        return true;
+    }
 }

@@ -270,6 +270,35 @@ Item {
                 }
             }
 
+            // The same file in a real editor: the project folder as the
+            // workspace, this file focused. A glyph rather than a word, because
+            // the label beside it names a *mode* and this is an action.
+            //
+            // The pane is left exactly as it is — this is a second window onto
+            // the file, not a handoff, and `watchChanges` keeps the two in
+            // step. Unsaved text is flushed first all the same, so the editor
+            // opens what the user has actually typed rather than the last
+            // autosave.
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                text: "↗"
+                color: editorArea.containsMouse ? Theme.foreground : Theme.foregroundFaint
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSize
+
+                MouseArea {
+                    id: editorArea
+                    anchors.fill: parent
+                    anchors.margins: -Theme.gap / 2
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: {
+                        root.flush();
+                        Workbench.openInEditor(root.filePath);
+                    }
+                }
+            }
+
             Text {
                 anchors.verticalCenter: parent.verticalCenter
                 text: "×"
