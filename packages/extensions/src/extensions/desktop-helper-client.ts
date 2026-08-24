@@ -129,6 +129,17 @@ export interface AxQueryResult {
   readonly warnings?: string[];
 }
 
+/**
+ * `hit_test` result: the single AT-SPI element under a screen coordinate, with a
+ * fresh `ref`. This closes the screenshot → coordinate → semantic-ref loop, so a
+ * pixel a vision pass named becomes a handle ax_perform/ax_set/click/type drive.
+ */
+export interface AxHitTestResult {
+  readonly app?: string;
+  readonly pid?: number;
+  readonly element: AxElement;
+}
+
 // ---------------------------------------------------------------------------
 // Error mapping
 // ---------------------------------------------------------------------------

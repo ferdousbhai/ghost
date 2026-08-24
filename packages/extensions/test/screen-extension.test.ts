@@ -18,6 +18,7 @@ import {
   captureViaHelper,
   createScreenExtension,
   GHOST_SCREEN,
+  MAX_WATCH_FRAMES,
   parseRegion,
   pruneScreenshots,
   SCREENSHOTS_DIRNAME,
@@ -334,5 +335,67 @@ describe("ghost_screen tool", () => {
     const { harness } = await harnessFor(VISION_CHAT);
     expect(harness.toolNames()).toEqual([GHOST_SCREEN]);
     expect(screenToolNames()).toEqual([GHOST_SCREEN]);
+  });
+
+  it("watch hands a vision model a sequence of frames", async () => {
+    const { harness, helper } = await harnessFor(VISION_CHAT);
+    const result = await harness.call(GHOST_SCREEN, {
+      prompt: "Did the spinner finish?",
+      mode: "watch",
+      frames: 3,
+      interval: 0,
+    });
+    // three capture ops, one per frame
+    expect(helper.requests.filter((r) => r.op === "capture")).toHaveLength(3);
+    const images = resultImages(result);
+    expect(images).toHaveLength(3);
+    expect(result.details.mode).toBe("watch");
+    expect(result.details.frames).toBe(3);
+    expect(Array.isArray(result.details.savedTo)).toBe(true);
+    expect((result.details.savedTo as string[])).toHaveLength(3);
+    expect(resultText(result)).toContain("untrusted");
+  });
+
+  it("watch saves every frame under the ghost home", async () => {
+    const { harness } = await harnessFor(VISION_CHAT);
+    const result = await harness.call(GHOST_SCREEN, {
+      prompt: "?",
+      mode: "watch",
+      frames: 3,
+      interval: 0,
+    });
+    for (const saved of result.details.savedTo as string[]) {
+      await expect(stat(saved)).resolves.toBeTruthy();
+    }
+  });
+
+  it("watch gives a text-only model the paths and an inspect_image instruction", async () => {
+    const { harness } = await harnessFor(TEXT_ONLY);
+    const result = await harness.call(GHOST_SCREEN, {
+      prompt: "What changed?",
+      mode: "watch",
+      frames: 2,
+      interval: 0,
+    });
+    expect(resultImages(result)).toHaveLength(0);
+    const text = resultText(result);
+    expect(text).toContain("inspect_image");
+    expect(text).toContain("What changed?");
+    expect(text).toContain("untrusted");
+    for (const saved of result.details.savedTo as string[]) {
+      expect(text).toContain(saved);
+    }
+  });
+
+  it("watch clamps the frame count to the ceiling", async () => {
+    const { harness, helper } = await harnessFor(VISION_CHAT);
+    const result = await harness.call(GHOST_SCREEN, {
+      prompt: "?",
+      mode: "watch",
+      frames: 999,
+      interval: 0,
+    });
+    expect(helper.requests.filter((r) => r.op === "capture")).toHaveLength(MAX_WATCH_FRAMES);
+    expect(result.details.frames).toBe(MAX_WATCH_FRAMES);
   });
 });

@@ -48,11 +48,15 @@ Accessibility (the big gap we're closing — AT-SPI)
 - `ax_roles` `{ app }` → available roles for an app.
 - `ax_perform` `{ ref, action }` → invoke a semantic action (press, click, expand, …). Returns honesty metadata.
 - `ax_set` `{ ref, attribute, value }` → set an attribute (e.g. text value).
+- `hit_test` `{ x, y, app? }` → resolve a screen coordinate to the AT-SPI element under it, minting a fresh `ref`. Closes the screenshot→coordinate→semantic-ref loop; refuses (rather than guesses) when no node offers trustworthy bounds.
 
 Input (layout-safe)
 - `key` `{ chord }` → keyboard chord. Prefer AT-SPI action / `hyprctl sendshortcut`; fall back to `ydotool` (flag layout-unsafe in warnings).
-- `type` `{ text }` → text via `wtype` (layout-safe).
-- `click` `{ x, y } | { ref }` → pointer click (ref resolves via AT-SPI bounds).
+- `type` `{ text, ref?, replace? }` → text via AT-SPI insert or `wtype` (layout-safe). `replace: true` overwrites the field instead of inserting.
+- `click` `{ x, y } | { ref }`, `{ button?, clicks? }` → pointer click (ref resolves via AT-SPI bounds). `button` is left/right/middle; `clicks` ≥ 2 is a multi-click.
+- `drag` `{ x1, y1, x2, y2, app?, button?, coordinate_space?, steps? }` → press at the start, move through interpolated waypoints (so canvas / drag-and-drop targets see the motion events), release at the end, inside one transaction.
+- `scroll` `{ delta_y, delta_x?, x?, y?, app?, coordinate_space? }` → wheel the focused window (positive `delta_y` scrolls up); optionally park the pointer over `{x, y}` first. Never background-safe — it moves on-screen content.
+- `mouse_move` `{ x, y, app?, coordinate_space? }` → park the pointer at a coordinate (a hover). Unlike click/drag the pointer is **left there**, not restored; it rides a no-cursor-restore transaction that keeps every other guardrail (lock, focus/workspace restore).
 
 Capture (the ladder + honesty)
 - `capture` `{ target: "window"|"screen"|"region", name?, address?, region?, output? }` → PNG bytes (base64) via the 3-tier ladder: grim foreign-toplevel (background-safe) → headless-output → focused-region (visible, background_safe=false). Report which rung + full honesty metadata. Refuse rather than return blank.
@@ -70,15 +74,22 @@ Safety
 
 `ghost_desktop` (packages/extensions/src/extensions/hyprland.ts, renamed/expanded):
 one enum-action tool — `state | see | layers | focus | workspace | key | type
-| click | ax_query | ax_roles | ax_perform | ax_set | notify`. `ax_*` are the
-semantic path; `key/type/click` the coordinate path. Structured errors; execFile
-arg arrays; no shell interpolation of model input. Still visitor-scope OFF.
+| click | drag | scroll | mouse_move | ax_query | ax_roles | ax_perform |
+ax_set | hit_test | notify`. `ax_*` + `hit_test` are the semantic path;
+`key/type/click/drag/scroll/mouse_move` the coordinate path. Structured errors;
+execFile arg arrays; no shell interpolation of model input. Still visitor-scope
+OFF.
 
 `ghost_screen`: uses `capture` (ladder + honesty), returns the image natively
 to a vision-capable model — a text-only model reaches it through OMP's
 `inspect_image` or its attachment describe-fallback instead — and surfaces
 `background_safe`/`warnings` to the model so it knows whether the shot
-disturbed the desktop.
+disturbed the desktop. `mode: "watch"` loops the same `capture` op N times over
+an interval and returns the frames as an **image sequence** (multiple image
+blocks to a vision model; the saved paths + an `inspect_image` instruction to a
+text-only one) — the ghost's "video understanding", since models have no native
+video input. Zero new dependency; bounded by a frame cap and a wall-clock
+budget, still exclusive-concurrency serialized.
 
 Helper discovery: the daemon locates/starts the sidecar (like it does nothing
 today — the extension spawns it lazily, one per daemon, reused); if PyGObject

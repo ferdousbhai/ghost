@@ -76,9 +76,13 @@ screenshot or an empty tree dressed up as success.
 | `ax_roles` | `{app?}` | role → count for an app's tree |
 | `ax_perform` | `{ref, action}` | invoke a semantic action; honesty metadata |
 | `ax_set` | `{ref, attribute, value}` | set `text` / `value` / `focused`; honesty metadata |
+| `hit_test` | `{x, y, app?}` | resolve a screen coordinate to the AT-SPI element under it, minting a fresh `ref`; refuses when no node has trustworthy bounds |
 | `key` | `{chord, app?, prefer_dispatch?}` | keyboard chord (sendshortcut, else ydotool); honesty metadata |
-| `type` | `{text, app?, ref?, replace?}` | text via AT-SPI insert or `wtype`; honesty metadata |
-| `click` | `{x, y, coordinate_space?} \| {ref}` | pointer click (ref resolves via AT-SPI bounds); honesty metadata |
+| `type` | `{text, app?, ref?, replace?}` | text via AT-SPI insert or `wtype`; `replace` overwrites; honesty metadata |
+| `click` | `{x, y, coordinate_space?} \| {ref}`, `{button?, clicks?}` | pointer click (ref resolves via AT-SPI bounds); `button` left/right/middle, `clicks` for multi-click; honesty metadata |
+| `drag` | `{x1, y1, x2, y2, app?, button?, coordinate_space?, steps?}` | press → move through interpolated waypoints → release (canvas / drag-and-drop); honesty metadata |
+| `scroll` | `{delta_y, delta_x?, x?, y?, app?, coordinate_space?}` | wheel the focused window (positive `delta_y` up), optionally over `{x, y}`; never background-safe; honesty metadata |
+| `mouse_move` | `{x, y, app?, coordinate_space?}` | park the pointer at a coordinate (a hover); left there, not restored; honesty metadata |
 | `capture` | `{target:"window"\|"screen"\|"region", name?, address?, region?, output?}` | base64 PNG via the 3-tier ladder; honesty metadata |
 | `focus` | `{address \| name}` | focus a window; honesty metadata |
 | `workspace` | `{id \| name}` | switch workspace; honesty metadata |
@@ -95,8 +99,9 @@ Pass a ref back verbatim; take a fresh snapshot before reusing them.
 ### Safety
 
 - **Session lock, fail closed.** Every mutating op (`key`, `type`, `click`,
-  `ax_perform`, `ax_set`, `focus`, `workspace`) refuses when the session is
-  locked — or when neither Hyprland nor logind can say whether it is.
+  `drag`, `scroll`, `mouse_move`, `ax_perform`, `ax_set`, `focus`, `workspace`)
+  refuses when the session is locked — or when neither Hyprland nor logind can
+  say whether it is. (`hit_test` is a read, like `ax_query`.)
 - **`fcntl` transaction locking.** The one path that must temporarily change
   compositor state (focused-region capture, injected input) takes a
   single-writer lock under `$XDG_RUNTIME_DIR`, snapshots focus/workspace/cursor,

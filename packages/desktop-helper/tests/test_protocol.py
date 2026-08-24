@@ -31,8 +31,8 @@ def test_hello_reports_required_fields():
     assert "available-backends" in payload
     # every contract op is advertised
     for op in ("see", "state", "layers", "toplevels", "ax_query", "ax_roles",
-               "ax_perform", "ax_set", "key", "type", "click", "capture",
-               "focus", "workspace"):
+               "ax_perform", "ax_set", "hit_test", "key", "type", "click",
+               "drag", "scroll", "mouse_move", "capture", "focus", "workspace"):
         assert op in payload["ops"]
     assert set(OPS) >= set(payload["ops"])
 

@@ -74,6 +74,7 @@ _HANDLERS: dict[str, Callable[[GhostDesktop, dict[str, Any]], Any]] = {
     "ax_set": lambda d, a: d.ax_set(
         ref=a["ref"], attribute=a["attribute"], value=a.get("value")
     ),
+    "hit_test": lambda d, a: d.hit_test(x=a["x"], y=a["y"], app=a.get("app")),
     "key": lambda d, a: d.key(
         a["chord"], app=a.get("app"), prefer_dispatch=a.get("prefer_dispatch", True)
     ),
@@ -91,6 +92,30 @@ _HANDLERS: dict[str, Callable[[GhostDesktop, dict[str, Any]], Any]] = {
         app=a.get("app"),
         button=a.get("button", "left"),
         clicks=int(a.get("clicks", 1)),
+        coordinate_space=a.get("coordinate_space", "screen"),
+    ),
+    "scroll": lambda d, a: d.scroll(
+        delta_y=int(a.get("delta_y", 0)),
+        delta_x=int(a.get("delta_x", 0)),
+        x=a.get("x"),
+        y=a.get("y"),
+        app=a.get("app"),
+        coordinate_space=a.get("coordinate_space", "screen"),
+    ),
+    "drag": lambda d, a: d.drag(
+        x1=a["x1"],
+        y1=a["y1"],
+        x2=a["x2"],
+        y2=a["y2"],
+        app=a.get("app"),
+        button=a.get("button", "left"),
+        coordinate_space=a.get("coordinate_space", "screen"),
+        steps=int(a.get("steps", 16)),
+    ),
+    "mouse_move": lambda d, a: d.mouse_move(
+        x=a["x"],
+        y=a["y"],
+        app=a.get("app"),
         coordinate_space=a.get("coordinate_space", "screen"),
     ),
     "capture": lambda d, a: d.capture(

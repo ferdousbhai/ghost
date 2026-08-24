@@ -127,6 +127,38 @@ function desktopHandler(op: string): unknown {
         interference: ["pointer-move"],
         warnings: [],
       };
+    case "drag":
+      return {
+        backend: "ydotool",
+        background_safe: false,
+        interference: ["pointer-move"],
+        warnings: [],
+      };
+    case "scroll":
+      return {
+        backend: "ydotool",
+        background_safe: false,
+        interference: ["pointer-move", "scroll"],
+        warnings: [],
+      };
+    case "mouse_move":
+      return {
+        backend: "ydotool",
+        background_safe: false,
+        interference: ["pointer-move"],
+        warnings: ["the pointer was left where it moved (a hover)"],
+      };
+    case "hit_test":
+      return {
+        app: "firefox",
+        pid: 4242,
+        element: {
+          ref: "3:5",
+          role: "push button",
+          name: "Save",
+          bounds: { x: 110, y: 110, width: 100, height: 30 },
+        },
+      };
     default:
       return {};
   }
@@ -358,11 +390,190 @@ describe("ghost_desktop input", () => {
     });
   });
 
+  it("passes button and clicks for a right/double click", async () => {
+    const { extension, helper } = await harness();
+    const result = await extension.call(GHOST_DESKTOP, {
+      action: "click",
+      x: 100,
+      y: 200,
+      button: "right",
+      clicks: 2,
+    });
+    expect(helper.requests[0]).toEqual({
+      op: "click",
+      args: { x: 100, y: 200, coordinate_space: "screen", button: "right", clicks: 2 },
+    });
+    expect(result.details.button).toBe("right");
+    expect(result.details.clicks).toBe(2);
+  });
+
+  it("omits button/clicks from the args when they are the defaults", async () => {
+    const { extension, helper } = await harness();
+    await extension.call(GHOST_DESKTOP, { action: "click", ref: "1:7" });
+    expect(helper.requests[0]).toEqual({ op: "click", args: { ref: "1:7" } });
+  });
+
   it("needs a ref or coordinates to click", async () => {
     const { extension } = await harness();
     await expect(
       extension.call(GHOST_DESKTOP, { action: "click" }),
     ).rejects.toThrowError(/needs either ref/);
+  });
+
+  it("types with replace when asked to overwrite the field", async () => {
+    const { extension, helper } = await harness();
+    const result = await extension.call(GHOST_DESKTOP, {
+      action: "type",
+      text: "hello",
+      ref: "1:7",
+      replace: true,
+    });
+    expect(helper.requests[0]).toEqual({
+      op: "type",
+      args: { text: "hello", ref: "1:7", replace: true },
+    });
+    expect(result.details.replace).toBe(true);
+  });
+
+  it("defaults type to insert (no replace in the args)", async () => {
+    const { extension, helper } = await harness();
+    await extension.call(GHOST_DESKTOP, { action: "type", text: "hi" });
+    expect(helper.requests[0]).toEqual({ op: "type", args: { text: "hi" } });
+  });
+
+  it("drags between two coordinates", async () => {
+    const { extension, helper } = await harness();
+    const result = await extension.call(GHOST_DESKTOP, {
+      action: "drag",
+      x: 10,
+      y: 20,
+      x2: 300,
+      y2: 400,
+      button: "left",
+      target: "firefox",
+    });
+    expect(helper.requests[0]).toEqual({
+      op: "drag",
+      args: { x1: 10, y1: 20, x2: 300, y2: 400, coordinate_space: "screen", app: "firefox" },
+    });
+    expect(resultText(result)).toMatch(/Dragged/);
+    expect(result.details.interference).toContain("pointer-move");
+  });
+
+  it("needs all four coordinates to drag", async () => {
+    const { extension } = await harness();
+    await expect(
+      extension.call(GHOST_DESKTOP, { action: "drag", x: 1, y: 2 }),
+    ).rejects.toThrowError(/needs x, y .* and x2, y2/);
+  });
+
+  it("scrolls a window", async () => {
+    const { extension, helper } = await harness();
+    const result = await extension.call(GHOST_DESKTOP, {
+      action: "scroll",
+      delta_y: -3,
+      target: "firefox",
+    });
+    expect(helper.requests[0]).toEqual({
+      op: "scroll",
+      args: { delta_y: -3, delta_x: 0, app: "firefox" },
+    });
+    expect(result.details.interference).toContain("scroll");
+  });
+
+  it("scrolls at a coordinate when one is given", async () => {
+    const { extension, helper } = await harness();
+    await extension.call(GHOST_DESKTOP, {
+      action: "scroll",
+      delta_y: 5,
+      x: 640,
+      y: 360,
+    });
+    expect(helper.requests[0]).toEqual({
+      op: "scroll",
+      args: { delta_y: 5, delta_x: 0, x: 640, y: 360, coordinate_space: "screen" },
+    });
+  });
+
+  it("needs a non-zero delta to scroll", async () => {
+    const { extension } = await harness();
+    await expect(
+      extension.call(GHOST_DESKTOP, { action: "scroll", delta_y: 0 }),
+    ).rejects.toThrowError(/non-zero delta/);
+  });
+
+  it("moves (hovers) the pointer to a coordinate", async () => {
+    const { extension, helper } = await harness();
+    const result = await extension.call(GHOST_DESKTOP, {
+      action: "mouse_move",
+      x: 640,
+      y: 360,
+    });
+    expect(helper.requests[0]).toEqual({
+      op: "mouse_move",
+      args: { x: 640, y: 360, coordinate_space: "screen" },
+    });
+    expect(resultText(result)).toMatch(/Moved the pointer/);
+  });
+
+  it("needs both coordinates to mouse_move", async () => {
+    const { extension } = await harness();
+    await expect(
+      extension.call(GHOST_DESKTOP, { action: "mouse_move", x: 1 }),
+    ).rejects.toThrowError(/needs both x and y/);
+  });
+
+  it("refuses drag/scroll/mouse_move when ydotool is unusable", async () => {
+    const helper = fakeHelper({
+      handle: desktopHandler,
+      backends: {
+        ydotool: { available: false, usable: false, socket: { problem: "socket missing" } },
+      },
+    });
+    const { extension } = await harness(helper);
+    await expect(
+      extension.call(GHOST_DESKTOP, { action: "scroll", delta_y: 1 }),
+    ).rejects.toThrowError(/ax_perform/);
+    expect(helper.requests).toHaveLength(0);
+  });
+});
+
+describe("ghost_desktop hit_test", () => {
+  it("resolves a screen coordinate to an element ref", async () => {
+    const { extension, helper } = await harness();
+    const result = await extension.call(GHOST_DESKTOP, {
+      action: "hit_test",
+      x: 120,
+      y: 120,
+      target: "firefox",
+    });
+    expect(helper.requests[0]).toEqual({
+      op: "hit_test",
+      args: { x: 120, y: 120, app: "firefox" },
+    });
+    expect(result.details.ref).toBe("3:5");
+    expect(resultText(result)).toMatch(/ax_perform/);
+  });
+
+  it("needs both coordinates", async () => {
+    const { extension } = await harness();
+    await expect(
+      extension.call(GHOST_DESKTOP, { action: "hit_test", x: 1 }),
+    ).rejects.toThrowError(/needs both x and y/);
+  });
+
+  it("refuses when AT-SPI is unavailable", async () => {
+    const helper = fakeHelper({
+      handle: desktopHandler,
+      backends: {
+        atspi: { available: false, reason: "no bus", remediation: [] },
+      },
+    });
+    const { extension } = await harness(helper);
+    await expect(
+      extension.call(GHOST_DESKTOP, { action: "hit_test", x: 1, y: 2 }),
+    ).rejects.toThrowError(/ghost_screen/);
+    expect(helper.requests).toHaveLength(0);
   });
 });
 

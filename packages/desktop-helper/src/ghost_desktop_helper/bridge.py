@@ -54,6 +54,13 @@ _MAX_TIMEOUT_CAP = 5.0
 #: Wall-clock budget for a single snapshot walk, independent of node/depth caps:
 #: a small tree of pathologically slow nodes must still terminate.
 _SNAPSHOT_BUDGET_S = 5.0
+#: Default interpolated waypoints for a drag, endpoints included. A canvas or
+#: drag-and-drop target needs the intermediate pointer-motion events, not just a
+#: teleport from start to end, or it registers nothing between the two.
+_DRAG_STEPS = 16
+#: Ceiling on drag waypoints, so a hostile ``steps`` cannot wedge the single
+#: request line under an arbitrarily long sequence of ydotool moves.
+_MAX_DRAG_STEPS = 200
 
 
 class UnknownRefError(OmaHarnessError):
@@ -133,6 +140,23 @@ def _honesty(
         "warnings": list(warnings or []),
         **extra,
     }
+
+
+class _NoCursorRestoreTransaction(CompositorTransaction):
+    """A transaction that leaves the physical pointer where the op put it.
+
+    Every other guardrail is inherited unchanged - the single-writer lock, the
+    fail-closed session check, and focus/workspace restore. Only cursor restore
+    is dropped, because ``mouse_move`` exists precisely to park the pointer (a
+    hover). Restoring it on exit would snap it straight back and undo the one
+    thing the op does, so a persistent move needs a transaction that does not
+    pull the cursor home. The vendored ``CompositorTransaction`` is subclassed
+    rather than edited, the same way ``_BudgetedTree`` layers a deadline over
+    the vendored ``AccessibleTree``.
+    """
+
+    def _restore_cursor(self) -> list[str]:
+        return []
 
 
 class GhostDesktop:
@@ -613,6 +637,44 @@ class GhostDesktop:
             "'text', 'value', and 'focused'"
         )
 
+    def hit_test(
+        self,
+        *,
+        x: float,
+        y: float,
+        app: str | int | None = None,
+        max_depth: int = 25,
+        max_nodes: int = 3000,
+    ) -> dict[str, Any]:
+        """Resolve a screen coordinate to the AT-SPI element under it.
+
+        This closes the screenshot -> coordinate -> semantic-ref loop: a vision
+        pass names a pixel, hit_test turns that pixel into a live element ``ref``
+        the model can then drive with ax_perform / ax_set / click / type. The
+        returned ref is minted against a freshly published snapshot, so it is
+        current exactly like a ref from ax_query, and stale the moment a later
+        snapshot bumps the epoch. Coordinates are screen-space (the space the
+        element bounds normalise to); the vendored walk refuses rather than
+        guesses when no node offers bounds it can trust.
+        """
+        max_depth = self._clamp_depth(max_depth)
+        max_nodes = self._clamp_nodes(max_nodes)
+        window = self._resolve_window(app)
+        tree = self._ax_tree(window)
+        node = tree.hit_test(
+            self._ax_root(window),
+            float(x),
+            float(y),
+            max_depth=max_depth,
+            max_nodes=max_nodes,
+        )
+        epoch = self._publish_snapshot(tree, window)
+        return {
+            "app": window["class"] or window["initial_class"],
+            "pid": window["pid"],
+            "element": {**node, "ref": self._mint_ref(epoch, node["element_index"])},
+        }
+
     # --- ops: input ------------------------------------------------------
 
     def key(
@@ -863,6 +925,169 @@ class GhostDesktop:
         rel_x = point[0] - float(o_bounds["x"])
         rel_y = point[1] - float(o_bounds["y"])
         return float(f_bounds["x"]) + rel_x, float(f_bounds["y"]) + rel_y
+
+    @staticmethod
+    def _interpolate(
+        start: tuple[float, float], end: tuple[float, float], steps: int
+    ) -> list[tuple[float, float]]:
+        """Waypoints from ``start`` to ``end``, endpoints included."""
+        steps = max(1, min(int(steps), _MAX_DRAG_STEPS))
+        (x1, y1), (x2, y2) = start, end
+        return [
+            (x1 + (x2 - x1) * (i / steps), y1 + (y2 - y1) * (i / steps))
+            for i in range(steps + 1)
+        ]
+
+    def scroll(
+        self,
+        *,
+        delta_y: int = 0,
+        delta_x: int = 0,
+        x: float | None = None,
+        y: float | None = None,
+        app: str | int | None = None,
+        coordinate_space: str = "screen",
+    ) -> dict[str, Any]:
+        """Wheel the pointer over a window; positive ``delta_y`` scrolls up.
+
+        The target is focused (and the pointer parked over ``{x, y}`` when
+        given) before the wheel event, because a scroll lands wherever the
+        compositor currently points. Scrolling always moves on-screen content,
+        so it is never background_safe.
+        """
+        window = self._resolve_window(app)
+        self._require_input_allowed("scroll")
+        self.ydotool.require()
+        transaction = self._transaction("scroll")
+        with transaction:
+            focused = transaction.focus_target(window)
+            if x is not None and y is not None:
+                point = self._screen_point(
+                    float(x), float(y), coordinate_space, window
+                )
+                transaction.move_pointer(*self._reproject(point, window, focused))
+            self.ydotool.scroll(int(delta_y), int(delta_x))
+        report = transaction.report()
+        return _honesty(
+            "ydotool",
+            background_safe=False,
+            interference=[*report["interference"], "scroll"],
+            warnings=report["warnings"],
+            target=window["address"],
+            delta_x=int(delta_x),
+            delta_y=int(delta_y),
+        )
+
+    def drag(
+        self,
+        *,
+        x1: float,
+        y1: float,
+        x2: float,
+        y2: float,
+        app: str | int | None = None,
+        button: str = "left",
+        coordinate_space: str = "screen",
+        steps: int = _DRAG_STEPS,
+    ) -> dict[str, Any]:
+        """Press at ``{x1, y1}``, move through waypoints to ``{x2, y2}``, release.
+
+        The intermediate waypoints matter: a drag that teleports the pointer
+        emits no motion events, and canvas / drag-and-drop targets need those to
+        register anything. ``transaction.move_pointer`` records each waypoint as
+        the expected cursor, so the transaction's cursor-restore sees the drag's
+        own last position rather than a false user-race.
+        """
+        window = self._resolve_window(app)
+        self._require_input_allowed("drag")
+        self.ydotool.require()
+        start = self._screen_point(float(x1), float(y1), coordinate_space, window)
+        end = self._screen_point(float(x2), float(y2), coordinate_space, window)
+        transaction = self._transaction("drag")
+        with transaction:
+            focused = transaction.focus_target(window)
+            waypoints = self._interpolate(start, end, steps)
+            transaction.move_pointer(*self._reproject(waypoints[0], window, focused))
+            self.ydotool.button_down(button)
+            try:
+                for waypoint in waypoints[1:]:
+                    transaction.move_pointer(
+                        *self._reproject(waypoint, window, focused)
+                    )
+            finally:
+                # Release the button even if a move mid-drag raises, or the
+                # pointer stays stuck down for every later op.
+                self.ydotool.button_up(button)
+        report = transaction.report()
+        return _honesty(
+            "ydotool",
+            background_safe=report["background_safe"],
+            interference=report["interference"],
+            warnings=report["warnings"],
+            target=window["address"],
+            button=button,
+        )
+
+    def mouse_move(
+        self,
+        *,
+        x: float,
+        y: float,
+        app: str | int | None = None,
+        coordinate_space: str = "screen",
+    ) -> dict[str, Any]:
+        """Park the pointer at a coordinate and leave it there (a hover).
+
+        Unlike click/drag, the pointer is *not* restored: a hover the caller
+        cannot see would be pointless. It rides a no-cursor-restore transaction
+        that still takes the lock, refuses on a locked session, and restores
+        focus/workspace - only the cursor is left where it was moved. A bare
+        screen-space move needs no window at all; a window-space move (or an
+        explicit ``app``) focuses the target so the local coordinate resolves.
+        """
+        if app is None and coordinate_space == "screen":
+            transaction = _NoCursorRestoreTransaction(
+                self.hyprctl, self.ydotool, operation="mouse_move", runner=self._runner
+            )
+            self._require_input_allowed("mouse_move")
+            self.ydotool.require()
+            with transaction:
+                transaction.move_pointer(float(x), float(y))
+            report = transaction.report()
+            return _honesty(
+                "ydotool",
+                background_safe=report["background_safe"],
+                interference=report["interference"],
+                warnings=[
+                    *report["warnings"],
+                    "the pointer was left where it moved (a hover); the next "
+                    "input op, or the user, will move it from here",
+                ],
+                x=float(x),
+                y=float(y),
+            )
+        window = self._resolve_window(app)
+        self._require_input_allowed("mouse_move")
+        self.ydotool.require()
+        point = self._screen_point(float(x), float(y), coordinate_space, window)
+        transaction = _NoCursorRestoreTransaction(
+            self.hyprctl, self.ydotool, operation="mouse_move", runner=self._runner
+        )
+        with transaction:
+            focused = transaction.focus_target(window)
+            transaction.move_pointer(*self._reproject(point, window, focused))
+        report = transaction.report()
+        return _honesty(
+            "ydotool",
+            background_safe=report["background_safe"],
+            interference=report["interference"],
+            warnings=[
+                *report["warnings"],
+                "the pointer was left where it moved (a hover); the next input "
+                "op, or the user, will move it from here",
+            ],
+            target=window["address"],
+        )
 
     # --- ops: capture ----------------------------------------------------
 

@@ -272,3 +272,44 @@ def test_type_via_atspi_uses_focused_editable():
     assert result["backend"] == "atspi"
     assert result["background_safe"] is True
     assert result["characters"] == 5
+
+
+class HitAtspi(FakeAtspi):
+    """FakeAtspi with window-relative extents, so nodes have trustworthy bounds."""
+
+    def __init__(self, root, rects):
+        super().__init__(root)
+        self._rects = rects  # id(node) -> (x, y, w, h) window-relative
+
+    def extents(self, n, *, relative_to_window):
+        # Only the window-relative extent yields a WINDOW_TRANSLATED (trustworthy)
+        # rectangle once the window bounds are added; the screen extent is left
+        # unavailable, mirroring how Wayland clients usually report.
+        return self._rects.get(id(n)) if relative_to_window else None
+
+
+def test_hit_test_resolves_coordinate_to_element_ref():
+    frame = Node("frame", name="win")
+    button = Node("push button", name="Save", actions=["click"], states=["focusable"])
+    frame.children = [button]
+    # window bounds start at (100, 100); button rel (10, 10) => screen (110, 110)
+    rects = {id(frame): (0, 0, 800, 600), id(button): (10, 10, 100, 30)}
+    hyprctl = FakeHyprctl(_clients=[sample_window(pid=4242)])
+    d = GhostDesktop(
+        hyprctl=hyprctl, runner=unlocked_runner, atspi_backend=HitAtspi(frame, rects)
+    )
+    result = d.hit_test(x=120, y=120, app="0xaaaa")
+    el = result["element"]
+    # the deepest trustworthy node containing the point wins (button over frame)
+    assert el["role"] == "push button"
+    assert ":" in el["ref"]  # a fresh "epoch:index" ref
+    # and it resolves to the live node, closing the coordinate -> ref loop
+    assert d._ax_element(el["ref"]) is not None
+
+
+def test_hit_test_refuses_when_no_trustworthy_bounds():
+    # The plain FakeAtspi reports no extents, so nothing has bounds to trust.
+    d = _desktop(_tree())
+    with pytest.raises(Exception) as exc:
+        d.hit_test(x=120, y=120, app="0xaaaa")
+    assert "bounds" in str(exc.value).casefold()
