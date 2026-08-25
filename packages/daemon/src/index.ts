@@ -133,6 +133,10 @@ export {
 } from "./hooks.js";
 export { createLogger, silentLogger, type Logger, type LogLevel } from "./log.js";
 export {
+  HomeOperationCoordinator,
+  homeOperationsFor,
+} from "./home-operations.js";
+export {
   DEFAULT_MODELS_LIMIT,
   MAX_MODELS_LIMIT,
   ModelCatalog,
@@ -224,10 +228,46 @@ export {
   type RelayTokenStoreOptions,
 } from "./relay-token.js";
 export {
+  hostedConversationSourcePaths,
   migrateHostedConversations,
   type HostedConversationImportFailure,
   type HostedConversationImportResult,
 } from "./hosted-conversation-import.js";
+export {
+  homeTrashDir,
+  trashPath,
+  type TrashPathOptions,
+  type TrashPathResult,
+} from "./trash.js";
+export {
+  trashGhostContextFile,
+  type TrashedContextFile,
+  type TrashableContextSection,
+} from "./context-files.js";
+export {
+  LiveVoiceManager,
+  type LiveTranscriptRow,
+  type LiveVoiceManagerOptions,
+  type LiveVoiceStatus,
+} from "./live-voice.js";
+export {
+  CollaborationManager,
+  type CollaborationManagerOptions,
+  type CollaborationParticipant,
+  type CollaborationStatus,
+  type StartCollaborationInput,
+} from "./collaboration.js";
+export {
+  McpCatalog,
+  sanitizeMcpServerConfig,
+  type McpCatalogOptions,
+  type McpCatalogWriter,
+  type McpCatalogSkipped,
+  type McpCatalogSnapshot,
+  type McpConnectionTest,
+  type McpServerConfigView,
+  type McpServerView,
+} from "./mcp-catalog.js";
 export {
   createDaemonServer,
   relayHubOf,
@@ -248,6 +288,8 @@ export {
   type RunTurnOptions,
   type SessionHostOptions,
   type SessionSummary,
+  type TrashedConversation,
+  type TrashedConversationArtifact,
   type TitleConfig,
   type TitleGenerator,
   type Transcript,

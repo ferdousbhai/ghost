@@ -21,6 +21,8 @@ import {
   openGhostHome,
   relayBackend,
   type BrowserBackendFactory,
+  type GhostToolCapabilitiesSource,
+  type GhostToolCapabilitiesResolver,
   type RelayTransport,
 } from "@ghost/extensions";
 
@@ -77,6 +79,11 @@ export interface ResolvedGhostExtensions {
   toolNames: string[];
 }
 
+/** Preserve OMP's existing per-call model capability behavior exactly. */
+export const ompToolCapabilities: GhostToolCapabilitiesResolver = (context) => ({
+  vision: context.model?.input?.includes("image") ?? false,
+});
+
 /**
  * Build the extension set for one session. `homeDir` pins Ghost-owned files to
  * the ghost home even when OMP's native `!cd` changes the conversation cwd.
@@ -84,8 +91,9 @@ export interface ResolvedGhostExtensions {
  * ghosts cannot race or share a home.
  */
 export function resolveGhostExtensions(
-  options: GhostExtensionOptions = {},
-  homeDir?: string,
+  options: GhostExtensionOptions,
+  homeDir: string | undefined,
+  capabilities: GhostToolCapabilitiesSource,
 ): ResolvedGhostExtensions {
   const backend = selectBrowserBackend(options);
   const extensionOptions = {
@@ -93,6 +101,7 @@ export function resolveGhostExtensions(
     ...(options.ghostName === undefined ? {} : { ghostName: options.ghostName }),
     ...(backend === undefined ? {} : { backend }),
     ...(options.extraSections === undefined ? {} : { extraSections: options.extraSections }),
+    capabilities,
   };
   return {
     factories: [createGhostExtension(extensionOptions)],

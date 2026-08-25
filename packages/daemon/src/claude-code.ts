@@ -50,6 +50,7 @@ import {
   deriveMemoryIndex,
   deriveDocCatalog,
   openGhostHome,
+  type GhostToolCapabilities,
 } from "@ghost/extensions";
 import * as Effect from "effect/Effect";
 import * as Stream from "effect/Stream";
@@ -84,6 +85,7 @@ export const CLAUDE_CODE_BINARY_ENV = "GHOST_CLAUDE_BINARY";
 const CLAUDE_SESSION_PREFIX = "claude-";
 const CLAUDE_SESSION_SUFFIX = ".json";
 const AUTH_STATUS_TIMEOUT_MS = 10_000;
+export const CLAUDE_CODE_TOOL_CAPABILITIES: GhostToolCapabilities = { vision: true };
 const execFileAsync = promisify(execFile);
 
 export interface ClaudeCodeAuthStatus {
@@ -365,20 +367,100 @@ async function buildPersona(homeDir: string, ghostName: string): Promise<string>
   });
 }
 
+function unavailableDependency(name: string): never {
+  throw new ClaudeCodeProcessError(
+    `Ghost tool requested pi runtime dependency ${JSON.stringify(name)} through the Claude Code bridge.`,
+  );
+}
+
+function unsupportedExtensionApiMethod(name: string): () => never {
+  return () => unavailableDependency(`ExtensionAPI.${name}`);
+}
+
+interface CapturedToolDefinition {
+  name: string;
+  description: string;
+  parameters: ToolDefinition["parameters"];
+  execute: (
+    toolCallId: string,
+    params: never,
+    signal: AbortSignal | undefined,
+    onUpdate: undefined,
+    context: ExtensionContext,
+  ) => Promise<AgentToolResult<unknown>>;
+}
+
 function captureToolDefinitions(
   factories: ReturnType<typeof resolveGhostExtensions>["factories"],
-): Promise<Map<string, ToolDefinition>> {
-  const definitions = new Map<string, ToolDefinition>();
+): Promise<Map<string, CapturedToolDefinition>> {
+  const definitions = new Map<string, CapturedToolDefinition>();
+  const onExtensionEvent: ExtensionAPI["on"] = (event) => {
+    // buildPersona adapts Ghost's only model hook outside OMP; this bridge
+    // captures tools and rejects any other lifecycle dependency explicitly.
+    if (event === "before_agent_start") return;
+    unavailableDependency(`ExtensionAPI.on(${JSON.stringify(event)})`);
+  };
+  const registerTool: ExtensionAPI["registerTool"] = (definition) => {
+    definitions.set(definition.name, {
+      name: definition.name,
+      description: definition.description,
+      parameters: definition.parameters,
+      execute: definition.execute,
+    });
+  };
   const api = {
-    registerTool(definition: ToolDefinition) {
-      definitions.set(definition.name, definition);
+    get logger(): ExtensionAPI["logger"] {
+      return unavailableDependency("ExtensionAPI.logger");
     },
-    on() {},
+    get typebox(): ExtensionAPI["typebox"] {
+      return unavailableDependency("ExtensionAPI.typebox");
+    },
+    get arktype(): ExtensionAPI["arktype"] {
+      return unavailableDependency("ExtensionAPI.arktype");
+    },
+    get zod(): ExtensionAPI["zod"] {
+      return unavailableDependency("ExtensionAPI.zod");
+    },
+    get pi(): ExtensionAPI["pi"] {
+      return unavailableDependency("ExtensionAPI.pi");
+    },
+    on: onExtensionEvent,
+    registerTool,
+    registerFileWriteFallback: unsupportedExtensionApiMethod("registerFileWriteFallback"),
+    registerFileDeleteFallback: unsupportedExtensionApiMethod("registerFileDeleteFallback"),
+    registerCommand: unsupportedExtensionApiMethod("registerCommand"),
+    registerShortcut: unsupportedExtensionApiMethod("registerShortcut"),
+    registerFlag: unsupportedExtensionApiMethod("registerFlag"),
+    setLabel: unsupportedExtensionApiMethod("setLabel"),
+    getFlag: unsupportedExtensionApiMethod("getFlag"),
+    registerMessageRenderer: unsupportedExtensionApiMethod("registerMessageRenderer"),
+    registerAssistantThinkingRenderer: unsupportedExtensionApiMethod(
+      "registerAssistantThinkingRenderer",
+    ),
+    registerComposerShape: unsupportedExtensionApiMethod("registerComposerShape"),
+    sendMessage: unsupportedExtensionApiMethod("sendMessage"),
+    sendUserMessage: unsupportedExtensionApiMethod("sendUserMessage"),
+    appendEntry: unsupportedExtensionApiMethod("appendEntry"),
+    exec: unsupportedExtensionApiMethod("exec"),
     getActiveTools() {
       return [...definitions.keys()];
     },
-    setActiveTools() {},
-  } as unknown as ExtensionAPI;
+    getAllTools: unsupportedExtensionApiMethod("getAllTools"),
+    setActiveTools: unsupportedExtensionApiMethod("setActiveTools"),
+    getCommands: unsupportedExtensionApiMethod("getCommands"),
+    setModel: unsupportedExtensionApiMethod("setModel"),
+    getThinkingLevel: unsupportedExtensionApiMethod("getThinkingLevel"),
+    setThinkingLevel: unsupportedExtensionApiMethod("setThinkingLevel"),
+    getServiceTiers: unsupportedExtensionApiMethod("getServiceTiers"),
+    setServiceTier: unsupportedExtensionApiMethod("setServiceTier"),
+    getSessionName: unsupportedExtensionApiMethod("getSessionName"),
+    setSessionName: unsupportedExtensionApiMethod("setSessionName"),
+    registerProvider: unsupportedExtensionApiMethod("registerProvider"),
+    unregisterProvider: unsupportedExtensionApiMethod("unregisterProvider"),
+    get events(): ExtensionAPI["events"] {
+      return unavailableDependency("ExtensionAPI.events");
+    },
+  } satisfies ExtensionAPI;
   return Promise.all(factories.map(async (factory) => {
     await factory(api);
   })).then(() => definitions);
@@ -389,41 +471,45 @@ function signalFromToolExtra(extra: unknown): AbortSignal | undefined {
   return signal instanceof AbortSignal ? signal : undefined;
 }
 
-function unavailableDependency(name: string): never {
-  throw new ClaudeCodeProcessError(
-    `Ghost tool requested pi runtime dependency ${JSON.stringify(name)} through the Claude Code bridge.`,
-  );
-}
-
 function extensionContext(
   cwd: string,
   systemPrompt: string,
-  signal: AbortSignal | undefined,
 ): ExtensionContext {
-  // Ghost's screen tool checks only the image input capability, and on this
-  // runtime the model behind it is Claude, which reads image blocks directly.
-  // Declaring image input here is what makes ghost_screen return the raw image
-  // block instead of degrading to text; no pi ModelRegistry is synthesized.
-  const visionModel = { input: ["text", "image"] } as ExtensionContext["model"];
   return {
-    cwd,
+    get ui(): ExtensionContext["ui"] {
+      return unavailableDependency("ExtensionContext.ui");
+    },
     mode: "rpc",
-    hasUI: false,
-    ui: new Proxy({}, { get: () => () => unavailableDependency("ui") }),
-    sessionManager: new Proxy({}, { get: () => unavailableDependency("sessionManager") }),
-    modelRegistry: new Proxy({}, { get: () => unavailableDependency("modelRegistry") }),
-    model: visionModel,
-    scopedModels: [],
-    signal,
-    isIdle: () => false,
-    isProjectTrusted: () => false,
-    abort: () => unavailableDependency("abort"),
-    hasPendingMessages: () => false,
-    shutdown: () => unavailableDependency("shutdown"),
     getContextUsage: () => undefined,
-    compact: () => unavailableDependency("compact"),
-    getSystemPrompt: () => systemPrompt,
-  } as unknown as ExtensionContext;
+    getAsyncJobSnapshot: () => null,
+    compact: () => unavailableDependency("ExtensionContext.compact"),
+    hasUI: false,
+    cwd,
+    get sessionManager(): ExtensionContext["sessionManager"] {
+      return unavailableDependency("ExtensionContext.sessionManager");
+    },
+    get modelRegistry(): ExtensionContext["modelRegistry"] {
+      return unavailableDependency("ExtensionContext.modelRegistry");
+    },
+    // Claude Code has no OMP Model instance. Keep that absence explicit so the
+    // bridge never invents registry metadata just to advertise capabilities.
+    model: undefined,
+    get models(): ExtensionContext["models"] {
+      return unavailableDependency("ExtensionContext.models");
+    },
+    isIdle: () => false,
+    abort: () => unavailableDependency("ExtensionContext.abort"),
+    hasPendingMessages: () => false,
+    shutdown: () => unavailableDependency("ExtensionContext.shutdown"),
+    getSystemPrompt: () => [systemPrompt],
+    setInterval: () => unavailableDependency("ExtensionContext.setInterval"),
+    setTimeout: () => unavailableDependency("ExtensionContext.setTimeout"),
+    clearTimer: () => unavailableDependency("ExtensionContext.clearTimer"),
+    // OMP's compatibility contract always reports true because project-local
+    // inputs have already been loaded unconditionally by the runtime; see OMP
+    // 18.0.3 src/extensibility/extensions/types.ts (`isProjectTrusted`).
+    isProjectTrusted: () => true,
+  } satisfies ExtensionContext;
 }
 
 function mcpContent(result: AgentToolResult<unknown>): Array<
@@ -454,7 +540,7 @@ function mcpContent(result: AgentToolResult<unknown>): Array<
   return content;
 }
 
-function zodShapeFor(definition: ToolDefinition): Record<string, z.ZodType> {
+function zodShapeFor(definition: CapturedToolDefinition): Record<string, z.ZodType> {
   const parameters = definition.parameters as unknown as {
     toJsonSchema?: () => unknown;
   };
@@ -489,9 +575,24 @@ async function buildMcpTools(
       ...(relayTransport ? { relayTransport } : {}),
     },
     homeDir,
+    CLAUDE_CODE_TOOL_CAPABILITIES,
   );
+  const tools = await bridgeClaudeCodeTools(
+    resolved,
+    homeDir,
+    systemPrompt,
+  );
+  return { tools, names: resolved.toolNames };
+}
+
+/** Adapt Ghost's OMP-neutral extension tools to in-process Claude SDK MCP tools. */
+export async function bridgeClaudeCodeTools(
+  resolved: ReturnType<typeof resolveGhostExtensions>,
+  homeDir: string,
+  systemPrompt: string,
+): Promise<SdkMcpToolDefinition[]> {
   const definitions = await captureToolDefinitions(resolved.factories);
-  const tools = resolved.toolNames.map((name): SdkMcpToolDefinition => {
+  return resolved.toolNames.map((name): SdkMcpToolDefinition => {
     const definition = definitions.get(name);
     if (!definition) {
       throw new ClaudeCodeProcessError(
@@ -506,10 +607,10 @@ async function buildMcpTools(
         try {
           const result = await definition.execute(
             randomUUID(),
-            args,
+            args as never,
             signalFromToolExtra(extra),
             undefined,
-            extensionContext(homeDir, systemPrompt, signalFromToolExtra(extra)),
+            extensionContext(homeDir, systemPrompt),
           );
           return { content: mcpContent(result) };
         } catch (cause) {
@@ -525,7 +626,6 @@ async function buildMcpTools(
       { alwaysLoad: true },
     );
   });
-  return { tools, names: resolved.toolNames };
 }
 
 async function* promptMessages(

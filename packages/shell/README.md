@@ -60,9 +60,17 @@ because a layer surface is invisible to the WM's own window binds.
 
 The HUD follows modern OMP's interaction model. A model selection closes the
 switcher immediately and returns focus to chat. The advanced routing view binds
-Chat, Vision, Titles, General, and Research primaries plus ordered retry
-fallbacks. Within each provider, current model families sort ahead of older
-versions.
+all of OMP's built-in roles, shows whether each primary is explicit or which
+effective model Auto resolves, and edits the complete ordered retry chain.
+General and Research remain available only for older homes that configured
+them. Within each provider, current model families sort ahead of older versions.
+
+`Connect a model` opens the provider login panel rather than changing routing
+silently. The panel offers each provider's supported OAuth or API-key path:
+OAuth may open an authorization URL, accept the returned code, and ask for a
+provider choice; API-key login accepts the pasted key. Completion returns to
+chat, while login opened from the switcher returns there. The switcher itself
+closes on a model selection and restores chat focus.
 
 OMP's built-in `ask` appears as a structured in-chat form, taking the composer's
 place while a question stands. It supports offered options, custom input, notes,
@@ -117,24 +125,70 @@ so a reload does not resurrect what streaming set aside.
 
 The restored 64px rail at the right edge is the successor to summon-ghost's
 final `AppSideNav` (`4852804cf4e09ca50c16e08e6106c06df82e2a94`): Chat,
-Docs, Memory, Helpers, and Character stay reachable without covering the
+Docs, Memory, Helpers, Commands, MCP, Remote, and Character stay reachable without covering the
 content. Docs follows that version's Train layout — a document index on the
 left and the existing lossless markdown editor on the right — but deliberately
 omits Train's adjacent chat panel and Ghost's roster/conversation sidebar.
 
-The daemon derives one authenticated context snapshot from the live ghost home
-and OMP agent discovery when the surface opens. Docs and character remain plain
-editable files; memory is shown read-only as atomic facts so the browser cannot
-produce invalid memory frontmatter; helpers expose their system prompts and
-capability metadata but not their source paths. The snapshot is never persisted,
-so an external file or helper edit becomes visible on refresh without an index
-to repair.
+The daemon derives one authenticated context response from the live ghost home
+and OMP agent discovery whenever the surface opens or refreshes. It is never
+persisted. Docs and character remain real editable files; memory is shown
+read-only as atomic facts; helpers expose capability metadata but not their
+source paths. Documents and memory facts can be deleted only through explicit
+confirmation, and the daemon moves the underlying file to system Trash. An
+open document editor is synchronously flushed and closed before deletion, so a
+late autosave cannot recreate the file. Character and helper deletion are not
+offered.
 
-A v2 doc starts with a first-line H1 and may end with lowercase hashtags; it
-never has YAML frontmatter. The source editor shows and saves that complete
-Markdown, while Reading renders it. External edits still use the existing
-three-way merge/conflict policy. Daemon startup performs the one-time v1-to-v2
-migration before this surface lists any docs.
+Docs are `docs/**/*.md` in canonical `ghost-home/v2` form: byte 0 is a
+non-empty `# Title`, and the optional final nonblank line is only lowercase
+hyphenated hashtag slugs (`#[a-z0-9]+(?:-[a-z0-9]+)*`). `#archived` removes a
+document from the default working set. The heading and tags stay in the raw
+Markdown; documents have no YAML frontmatter. The one-time migration first
+renames an unambiguous `notes/` directory to `docs/`, then atomically rewrites
+legacy files (first H1, then legacy `title`, then filename; slugified legacy
+tags; `archived: true` as `#archived`; merged trailing tags; discarded import
+`path`). It is idempotent after a partial run and keeps no marker or dual-format
+reader. New writes are v2 only.
+The document pane edits Markdown source in a monospace `TextEdit`, preserving
+exactly the bytes typed. Its `Reading` view is a read-only Markdown rendering;
+links open externally and rendering never serializes back into the file. Edits
+autosave atomically after an 800ms debounce, and closing, hiding, or switching
+files flushes first.
+If the file changes underneath a dirty buffer, the shell
+tries a line-based three-way merge; a clean merge autosaves silently, while a
+real conflict pauses autosave until the owner keeps either side. The daemon
+writer validates the complete v2 body and writes exactly that body.
+
+Commands is the effective, conversation-scoped OMP slash-command catalog:
+built-ins, extension/plugin commands, project commands, and explicit
+`/skill:<name>` entries use the same discovery and precedence as the harness.
+It is searchable by name, alias, description, input, and source. Choosing a row
+returns to chat with `/name ` staged in the composer; it never runs on selection.
+Typing `/` in the composer opens the same catalog as a compact autocomplete.
+Commands that OMP exposes but Ghost supports only partially (or not at all)
+remain discoverable with an availability badge and reason; selecting one still
+only stages text, so the palette never suggests that staging proved support.
+
+MCP manages only the selected ghost's project-owned `.omp/mcp.json` (and the
+legacy `.omp/.mcp.json` when it owns an existing row): list, add, replace,
+enable/disable, and delete. The daemon's catalog is sanitized before it reaches
+QML. Command arguments, environment/header values, authentication references,
+OAuth settings, and URL query values are never displayed. Safe placement and
+policy fields (`cwd`, `envPolicy`, and `headerPolicy`) remain visible so a
+replacement edit can preserve them. Add and edit use a full JSON configuration
+editor; replacing a server that has hidden fields is blocked until the owner
+confirms those values were re-entered. Deletion always uses a modal confirmation.
+
+Remote collects only the capabilities which cross the local machine boundary.
+Live voice is scoped to the active conversation, uses the machine microphone
+and OpenAI Codex Realtime with the ghost's Codex OAuth, and shows the current
+phase, mute state, audio levels, and any transcript returned by the daemon.
+Collaboration is conversation-scoped encrypted relay collaboration with
+visibly distinct read-only and writable URLs. Read-only can start directly;
+writable access requires typing `WRITABLE` after a warning that its holder can
+steer the ghost and exercise local tools. A structured `not_supported` response
+renders as a neutral product-status explanation.
 
 ## System tray
 
@@ -181,7 +235,7 @@ qs -c ghost ipc call ghost ask "<prompt>"     # reply arrives as a notification
 qs -c ghost ipc call ghost login              # open "Connect a model"
 qs -c ghost ipc call ghost loginTo <id> <oauth|api_key>   # and start one
 qs -c ghost ipc call ghost switcher           # open the model switcher
-qs -c ghost ipc call ghost section docs       # chat|docs|memory|agents|character
+qs -c ghost ipc call ghost section docs       # chat|docs|memory|agents|commands|mcp|connect|character
 qs -c ghost ipc call ghost status             # JSON
 qs -c ghost ipc call ghost refresh            # re-read roster and theme
 ```

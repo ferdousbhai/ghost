@@ -1046,21 +1046,10 @@ describe("batch runs a sequence inside one queue slot", () => {
 });
 
 describe("screenshot returns a real image to a vision model", () => {
-  function visionCtx() {
-    return {
-      cwd: fixture.dir,
-      mode: "print",
-      hasUI: false,
-      model: { input: ["text", "image"] },
-    } as never;
-  }
-
   it("returns an image block, keeping the saved path in details", async () => {
-    const harness = await browserHarness();
+    const harness = await browserHarness({ capabilities: { vision: true } });
     await harness.call(GHOST_BROWSER, { action: "open", url: "https://example.com" });
-    const tool = harness.tools.get(GHOST_BROWSER);
-    if (!tool) throw new Error("no tool");
-    const result = await tool.execute("call-shot", { action: "screenshot" }, undefined, undefined, visionCtx());
+    const result = await harness.call(GHOST_BROWSER, { action: "screenshot" });
     const image = result.content.find((part: { type: string }) => part.type === "image");
     expect(image).toMatchObject({ type: "image", mimeType: "image/png" });
     expect((result.details as { path: string }).path.endsWith(".png")).toBe(true);

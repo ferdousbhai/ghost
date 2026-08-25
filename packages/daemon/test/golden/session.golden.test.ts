@@ -155,7 +155,7 @@ describe("golden: session", () => {
     const universe = [
       ...OMP_NATIVE_TOOL_NAMES,
       ...OTHER_OMP_NATIVES,
-      ...resolveGhostExtensions({}, dir).toolNames,
+      ...resolveGhostExtensions({}, dir, { vision: false }).toolNames,
     ];
     sections.push({
       title: "tool surface",

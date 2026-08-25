@@ -21,7 +21,7 @@ catalog) is derived per session and never stored.
   .sessions/                   daemon-owned OMP transcripts and runtime sidecars
   .sessions/pins.json          pinned-conversation ids: { "pinned": ["<id>", …] }
   conversations/*.json         lossless source transcripts from the hosted export;
-                               retained unchanged after native activation
+                               retained unchanged until that conversation is trashed
   export-manifest.json         present in imported archives; counts, pathRewrites,
                                notIncluded
 ```
@@ -54,10 +54,10 @@ field is discarded. A trailing hashtag line already in the body is merged and
 deduplicated. An imported home's `export-manifest.json` is atomically promoted
 from `ghost-home/v1` to `ghost-home/v2` with every other field preserved.
 Each converted file is immediately valid v2, so a crash is recovered by
-rerunning the scan; no marker or dual-format reader is kept. If both `notes/`
-and `docs/` exist, startup still fails instead of guessing which files win.
-Import rejects entries that collide after directory translation. New homes and
-all writes produce only v2 docs.
+rerunning the scan; no marker or dual-format reader is kept. If
+both `notes/` and `docs/` exist, startup still fails instead of guessing which
+files win. Import rejects entries that collide after directory translation.
+New homes and all writes produce only v2 docs.
 
 Hosted conversation JSON is also a migration fixture, not the daemon's live
 session store. `ghostd import` and daemon startup idempotently project each valid
@@ -66,9 +66,12 @@ the conversation and message ids, roles, title, available message timestamps,
 conversation created/updated times, readable text and attachments, and paired
 tool calls/results. A missing message timestamp is placed deterministically
 between the conversation timestamps; the export did not contain a value to
-preserve. The source JSON is never rewritten or deleted. An existing native
+preserve. The source JSON is never rewritten during activation. An existing native
 target always wins and is never overwritten; malformed fixtures remain in place
-and are reported without preventing the ghost from starting.
+and are reported without preventing the ghost from starting. User-triggered
+conversation deletion moves every valid source fixture for that conversation
+to Trash before moving its native projection, so daemon restart cannot recreate
+a conversation the owner removed.
 
 `.pi/` holds live provider credentials, and OMP stores them unencrypted: the
 `auth_credentials` row in `agent.db` is plain JSON behind nothing but 0600. That
@@ -84,8 +87,11 @@ A deleted ghost home leaves the root entirely, for the system trash; see the
 
 ### Session capabilities
 
-Ghost is a single-caller product: the owner is the only user, and every
-session uses the same home, memory, docs, tools, and route behavior.
+Ghost is owner-local by default: the owner is the only local caller, and every
+session uses the same home, memory, docs, tools, and route behavior. The
+session-scoped Remote voice and collaboration routes below are the only
+deliberate exceptions. They are explicitly initiated off-machine capabilities
+and never broaden another ghost or conversation.
 
 A session is OMP-native. Ghost preserves OMP's system prompt and
 discovery, then appends the Ghost persona and derived memory/doc sections.
@@ -111,11 +117,35 @@ memory index and doc catalog are derived from disk before each model turn and
 are never stored. `/skill:<name> [args]` is explicit force-invocation of a
 discovered skill; native `read` remains the model-driven discovery path.
 
+Slash-command discovery is session-scoped and comes from OMP's
+`buildAvailableSlashCommands`, including builtins, skills, extensions, custom
+commands, MCP prompts, and project file commands. Ghost annotates each result
+as `available`, `partial`, or `unsupported`: only explicitly admitted
+informational builtin forms execute through OMP's headless handlers. Every
+known but unsupported builtin — including TUI-only commands and commands that
+conflict with Ghost's memory, browser/computer, MCP, conversation, or fixed-home
+contracts — is consumed before `AgentSession.prompt()` and reported as
+`command_output`. It is never sent to a model as ordinary slash-prefixed text.
+
 `!command` executes immediately through OMP's session-aware Bash runner without
 a model turn. `!!command` does the same but excludes the result from future
 model context. Both appear in the live event stream and are
 persisted in an OMP transcript; a successful standalone `cd` changes the
 conversation working directory without relocating that transcript.
+
+Long-context maintenance is OMP-native. The daemon projects its owner-facing
+`compaction.enabled`, `thresholdTokens`, and `thresholdFraction` settings onto
+OMP's enablement and fixed/percentage thresholds, always enabling OMP's
+asynchronous speculation. A fixed token threshold takes precedence; otherwise
+the default is 80% of the active model's window. This deliberately replaces the
+former `min(80% of window, 100k)` threshold with a model-relative policy that
+continues to fit when OMP changes models. Ghost no longer caps the trigger, so
+on a very large context window a conversation now runs further before it
+compacts than it did under the 100k ceiling; that is OMP's policy and Ghost
+does not re-create the cap. Ghost contributes only the summary
+instructions through `session.compacting`; OMP owns speculative and mid-turn
+maintenance, keep-recent/reserve behavior, history estimates and pruning, and
+overflow compact-and-retry.
 
 ## Daemon HTTP API (localhost only)
 
@@ -187,16 +217,37 @@ one must not be a leak of both.
   with any conversation busy, opening, or mid-delete — pi or Claude Code — is
   `409 ghost_busy`, as is a second concurrent delete of the same ghost. Idle
   hosted sessions are closed (disposed, not deleted) and pending
-  title/compaction work is awaited first. **Deletion is a move, never an `rm`**:
+  title work is awaited first. **Deletion is a move, never an `rm`**:
   the ghost home holds the only copy of a persona, its memory, and its docs, so
   nothing on any path follows the rename with a recursive removal.
+- `PUT  /api/ghosts/:name/name` `{ name: "<new>" }` → `{ ok: true, name }` — the
+  ghost's name IS its home directory's name, so renaming one is anchored by a
+  same-filesystem rename of `<root>/<old>/` to `<root>/<new>/`. Persona, memory,
+  docs, conversations, pins, and credentials are inside the directory that
+  moved; every conversation id (a transcript filename within it) stays valid,
+  and every other route's `:name` changes with it. `character.md` is the ghost's
+  own words and its body is never touched — the one exception is a frontmatter
+  `title` byte-equal to the old name, which is the seed's and becomes the new
+  name. That one-line replacement is staged beside the character file before
+  the home moves and published atomically afterwards; a staging failure moves
+  nothing, and a publish failure rolls the home move back. Checked in this
+  order: the new name gets the same validation
+  `POST /api/ghosts` applies (`400`); an unknown ghost is `404 not_found`;
+  renaming to the ghost's current name is a no-op `200`; a name already taken in
+  the root — by a ghost or by anything else — is `409 already_exists`; a ghost
+  with any conversation busy, opening, or mid-delete is `409 ghost_busy`, the
+  same gate `DELETE` uses, as is a second concurrent rename or delete. Idle
+  hosted sessions are closed and pending title work awaited first, so nothing
+  holds a path under the old name across the rename. A Claude Code conversation
+  keeps its resume sidecar, but that runtime stores the transcript itself under
+  its own `~/.claude/projects/<cwd>` path, which does not move with the home.
 - `GET  /api/ghosts/:name/context` → `{ character, docs, memory, agents,
   skipped }` — the owner's browseable ghost context and OMP capabilities,
   derived from disk for each request and never stored. `character` is
   `{ path: "character.md", title }`. `docs` contains
   `{ path: "docs/<relative>.md", relativePath, title, tags, archived }`, derived
-  from the document's first H1 and optional final hashtag line. `memory` contains
-  `{ path: "memory/<slug>.md", slug, description, content, updated }`.
+  from the document's first H1 and optional final hashtag line. `memory`
+  contains `{ path: "memory/<slug>.md", slug, description, content, updated }`.
   `agents` contains the OMP task helpers available under the same project,
   user, extension, bundled, precedence, and `task.disabledAgents` rules as a
   live session, normalized to `{ name, description, source, tools, model,
@@ -208,6 +259,47 @@ one must not be a leak of both.
   malformed doc or memory files as `{ section, path, reason }` without
   hiding the valid siblings. The returned file paths are ghost-home-relative;
   a client already gets that home's absolute `dir` from `GET /api/ghosts`.
+- `DELETE /api/ghosts/:name/context`
+  `{ section: "docs"|"memory", path, confirm: path }` →
+  `{ ok: true, path, trash, kind }` — moves exactly one Markdown file under the
+  named section to recoverable Trash. `confirm` must byte-match `path`; absolute
+  paths, traversal, non-Markdown paths, directories, `character.md`, and helper
+  definitions are refused. A symlink is moved as a symlink and never followed.
+  The ordinary destination is the freedesktop home Trash; cross-filesystem
+  moves fall back to `<ghost>/.trash/`, still by rename rather than copy/unlink.
+- `GET  /api/ghosts/:name/mcp` → `{ servers, skipped }` — the effective
+  project-only MCP configuration from `<ghost>/.omp/mcp.json` followed by the
+  legacy `.omp/.mcp.json`, with canonical same-name precedence: a canonical
+  name shadows its legacy duplicate even when disabled or malformed. It never
+  scans ambient OMP, Codex, Claude, Copilot, or other agent configuration. Each
+  valid server is `{ name, enabled, source, path, config, connectionStatus }`.
+  `config` is deliberately lossy: header/environment key names and counts may
+  be shown, but their values, command arguments, OAuth/auth credentials, URL
+  userinfo, and query values never cross HTTP. Non-secret placement/policy
+  fields (`cwd`, `envPolicy`, and `headerPolicy`) do cross so replacement edits
+  preserve the server's execution semantics. `connectionStatus` is
+  `connected`, `connecting`, `disconnected`, `mixed`, `disabled`, or
+  `not_loaded`; GET only inspects already-open OMP conversations and never
+  opens one. Malformed files/rows appear in `skipped` without hiding valid
+  siblings.
+- MCP mutations use OMP's locked atomic project-config writer and return the
+  refreshed sanitized snapshot: `POST /api/ghosts/:name/mcp`
+  `{ name, config }` adds to canonical config; `PUT|DELETE
+  /api/ghosts/:name/mcp/:server` replaces/removes the owning effective entry;
+  `PUT …/:server/enabled` `{ enabled }` toggles it. Every mutation reloads all
+  open OMP conversations for the ghost. An idle session reconnects and replaces
+  its mounted MCP tools immediately; a busy session coalesces changes into one
+  reload after the turn settles. Thus adding the first server mounts tools, and
+  updating, disabling, or removing one cannot leave stale tools selected.
+  Model and MCP mutations take a filesystem-identity operation lease before
+  resolving any home path. Whole-home rename/delete first block new leases and
+  drain admitted mutations before sessions are quiesced and the directory
+  moves, so an awaited runtime or config writer cannot recreate the old name.
+- `POST …/mcp/:server/test` runs an isolated no-session connection probe and
+  returns a sanitized `result` with status/tool count; transport error text is
+  not returned because it may echo secrets. `POST …/mcp/:server/reconnect`
+  manually retries already-loaded live managers without opening a conversation;
+  it reports `not_loaded` when none exists and `deferred` when one is busy.
 - `POST /api/ghosts/:name/messages` — the **pi-messages wire protocol** over
   OMP's `AgentSession` (request `{ model, context, options }` → SSE stream).
   The pinned client in the summon-ghost repo is the normative spec
@@ -227,10 +319,72 @@ one must not be a leak of both.
   `pinned` is `400 invalid_request`; an unknown conversation id is `404 not_found`.
   Deleting a conversation drops its pin; a stale id (conversation gone) is
   ignored on read and pruned on the next write.
-- `DELETE /api/ghosts/:name/sessions/:id` → `{ ok: true }` — permanently deletes
-  the conversation's OMP transcript and/or Claude Code resume sidecar. An active
-  conversation must finish or be cancelled first (`409 session_busy`); an
-  unknown conversation returns `404 not_found`.
+- `PUT  /api/ghosts/:name/sessions/:id/title` `{ title: string }` →
+  `{ ok: true, title }` — rename one conversation. The title is trimmed and
+  written through the same native title slot the smol lane uses, with source
+  `"user"`: OMP refuses an automatic title over a name a person chose, so a
+  rename is never undone by the background titler. `title` in the response is
+  the name as stored — OMP collapses control characters and runs of spaces. A
+  non-string title, a title that is empty after trimming or contains nothing
+  printable, or one over 120 characters is `400 invalid_request`; an unknown
+  conversation id is `404 not_found`; a Claude Code conversation is
+  `409 not_supported`, because that runtime owns its own conversation's name.
+  Renaming works while a turn is streaming — the title slot is not part of the
+  conversation tree.
+- `GET  /api/ghosts/:name/sessions/:id/commands` → `{ commands }` — OMP's live
+  command catalog for that conversation, rebuilt with
+  `buildAvailableSlashCommands` so cwd-scoped file commands, skills,
+  extensions, custom commands, and MCP prompts remain current, then augmented
+  from OMP's unified registry with TUI-only builtins marked `unsupported`.
+  Rows preserve
+  OMP's `name`, `aliases`, `description`, `input`, `subcommands`, and `source`,
+  plus Ghost's `availability` and optional `unavailableReason`. A busy
+  conversation returns `409 session_busy`; a ghost currently routed through
+  Claude Code returns `409 not_supported`, because opening an unrelated OMP
+  session just to discover commands would lie about the active runtime;
+  non-GET methods return `405`.
+- A standalone builtin sent through `POST …/messages` produces exactly
+  `start`, one or more `command_output` events, then `done` with zero usage.
+  Unsupported and failed commands set `isError` and `code` on their output but
+  still use `done`: the command completed without a transport or model error.
+  Command output is not an assistant message and is not persisted as one.
+- `DELETE /api/ghosts/:name/sessions/:id` →
+  `{ ok: true, trash: [{ artifact, source, trash, kind }, …] }` — moves every
+  Ghost-owned artifact for the conversation to recoverable Trash. Hosted-import
+  source fixtures move first, followed by the OMP transcript and/or Claude Code
+  resume sidecar; this order prevents startup from resurrecting a removed
+  projection. `artifact` is `hosted-source`, `omp-transcript`, or
+  `claude-sidecar`. Claude Code's actual transcript remains in that runtime's
+  external `~/.claude` storage; Ghost does not claim to delete it. An active
+  turn or live-voice session must finish or be stopped first
+  (`409 session_busy`); an unknown conversation returns `404 not_found`.
+  Failed fork rollback is the sole permanent-unlink path: the fork was never
+  published to the owner and must not pollute Trash.
+- `GET|POST /api/ghosts/:name/sessions/:id/live` owns OMP realtime voice for
+  one conversation. GET returns `{ supported, active, phase, muted, inputLevel,
+  outputLevel, transcript, error? }` without opening a session. POST accepts
+  `{ action: "start"|"mute"|"unmute"|"stop" }`. Start uses the machine's
+  microphone and OMP's Codex Realtime transport with the ghost's Codex OAuth;
+  audio and live transcript therefore leave the machine for OpenAI. Delegated
+  work still runs through that conversation's ordinary AgentSession and tools.
+  A separate chat or direct Bash turn is refused from the moment voice startup
+  claims the conversation until voice has fully stopped. Model rebinds and MCP
+  reloads/reconnects defer across that same boundary and apply after voice
+  releases the session. Claude Code returns `409 not_supported`.
+- `GET|POST /api/ghosts/:name/sessions/:id/collab` owns one OMP encrypted relay
+  host. GET returns `{ supported, active, readOnlyUrl?, writableUrl?,
+  participants }` without opening a session. Start is
+  `{ action: "start", relayUrl?, writable, confirmed }`; stop is
+  `{ action: "stop" }`. The room key is fragment-carried and session frames are
+  AES-GCM encrypted. A read-only start never returns the write-token URL. A
+  writable start requires `confirmed: true` and returns a distinct capability:
+  its holder may prompt or interrupt the model and thereby run the host ghost's
+  tools with the host's local authority. Links are never logged or copied
+  automatically. At most one host startup is admitted per conversation;
+  concurrent starts coalesce, while stop, conversation close, and daemon
+  shutdown wait for an admitted startup before stopping it. The host is
+  conversation-scoped and is stopped when that session closes. Claude Code
+  returns `409 not_supported`.
 - `GET  /api/ghosts/:name/sessions/:id/transcript` → `{ id, title, messages,
   total, truncated }` — a past conversation's history so the shell can rehydrate
   it (issue #26). `messages` are OMP's `{ role, content }` messages (user and
@@ -245,6 +399,11 @@ one must not be a leak of both.
   plus `settled: "submitted" | "cancelled" | "timedOut" | "chat"`,
   always present and derived from the persisted tool result, so a restored ask
   card states how that question actually closed rather than assuming an answer.
+  A tool call whose persisted result was an error also carries `failed: true`;
+  the result messages themselves are dropped here, and without that bit a
+  rehydrated transcript would show every recovered call as having succeeded.
+  Its absence means "not known to have failed" — a call with no result at all
+  (an abandoned turn) carries nothing.
   `404 not_found` for an unknown conversation id. Only OMP
   conversations are readable here; a Claude Code conversation's transcript lives
   in that runtime's own storage.
@@ -256,18 +415,28 @@ one must not be a leak of both.
   `{ askId, kind: "cancel" }`. The first valid response wins; stale ids return
   a conflict. `ask` is human input, not tool approval.
 - **A pending ask can also resolve with no client involved.** The daemon arms a
-  deadline (`askTimeoutSeconds`, default 120; `0` waits forever), and on expiry
-  submits the question's recommended option and lets the turn continue, which is
-  what keeps a conversation from stalling on a question nobody is there to
-  answer. A question that names its own `timeout` keeps it. A client can
-  therefore find an ask gone that it never answered: `GET` returns `null` and
-  `POST` is `409 ask_not_pending`, which means settled rather than broken. The
-  clock starts when the question is presented, not when the model asked it, so a
-  slow turn does not spend the budget before anyone can see it.
+  deadline (`askTimeoutSeconds`, default 120; `0` waits forever) and on expiry
+  settles the question so the turn can continue, which is what keeps a
+  conversation from stalling on a question nobody is there to answer. What it
+  settles as depends on the question: one that named a `recommended` option
+  submits that option, because it is the asking model's own pre-committed
+  default. One that named none submits **no selection at all** — an answer
+  picked by list position would reach the model as a decision the owner never
+  made — leaving the model to take the careful branch or park the task. Either
+  way the result is marked as a timeout, which is what
+  `settled: "timedOut"` on the restored ask card is derived from, so an expiry
+  is never mistaken for an owner's answer. A client can therefore find an ask
+  gone that it never answered: `GET` returns `null` and `POST` is
+  `409 ask_not_pending`, which means settled rather than broken. The clock
+  starts when the question is presented, not when the model asked it, so a slow
+  turn does not spend the budget before anyone can see it.
 
   The deadline is daemon-wide rather than per-ghost: how long a dialog waits is
   a property of the person at the keyboard, not of the persona asking, and a
-  ghost home holds only what makes that ghost that ghost.
+  ghost home holds only what makes that ghost that ghost. Sessions carry it as
+  OMP's own `ask.timeout` setting, so OMP resolves it once, above a ghost home's
+  own settings and beneath the two things only it knows: a question that names
+  its own `timeout` keeps it, and plan mode suspends auto-answering entirely.
 - `GET|POST /api/ghosts/:name/sessions/:id/queue` reads or enqueues OMP's
   native mid-turn queues. POST is `{ mode: "steer"|"followUp", text }`:
   steering enters the active run, while follow-up runs after it.
@@ -304,8 +473,8 @@ a reply or bill like a chat turn. The role name adopts OMP's own convention
 
 **Conversation titles.** After the first turn of a conversation completes, the
 daemon generates a 3-6 word title from the first user message with one smol
-completion, fire-and-forget (mirroring background compaction): it never blocks
-the reply and a failure is logged, never fatal. A conversation is titled once
+completion, fire-and-forget: it never blocks the reply and a failure is logged,
+never fatal. A conversation is titled once
 and never re-titled. A fork is named at fork time instead, the way a file
 manager names a copy: `<source title> (n)` for the smallest free `n` from 2 up,
 with any trailing ` (k)` stripped from the base first, so a fork of a fork does
@@ -317,6 +486,11 @@ and future encryption cover. `GET …/sessions` surfaces it as `title`. A
 pre-OMP-18 transcript instead carries pi 0.84's appended `session_info.name`;
 the daemon reads that title immediately and promotes it to the native OMP slot
 on the conversation's next writable open, without generating a replacement.
+
+The owner's own name for a conversation goes into the same slot, with the
+source set to `user` (`PUT …/title`). That source is the whole arbitration: the
+generated title and the pi 0.84 promotion are both automatic writes, and OMP
+refuses an automatic title over a name a person chose.
 
 **Greetings.** `POST …/greeting` (above) writes the empty-chat opener with one
 smol completion: 1-3 sentences in the ghost's own voice, at most one timely
@@ -366,9 +540,11 @@ response.
 - `GET  /api/ghosts/:name/model` → the current selection:
   `{ current: { provider, id, name?, contextWindow?, hasVision } | null,
   source: "role" | "default" | "none" }`. `role` — `roles.chat_model` is set
-  and resolves; `default` — Ghost/OMP's fallback (a hand-declared provider's first
-  model, then the first available model); `none` — nothing usable, `current` is
-  null. Resolved with the same logic session-host uses.
+  and resolves among usable models; `default` — OMP's fallback: resolve the
+  projected default role, then choose the first provider-declared default in
+  availability order, then the first available model; `none` — nothing usable,
+  `current` is null. This is the same initial resolution
+  `createAgentSession` performs for a fresh conversation.
 - `GET  /api/ghosts/:name/models?scope=available|catalog&provider=<id>&q=<search>&limit=<n>&offset=<n>`
   → `{ scope, models: [...], total, limit, offset, provider?, q? }`.
   - `scope=available` (default): models the ghost can use right now (from
@@ -397,16 +573,24 @@ Requires `PUT` in the loopback CORS allow-list.
 
 ### Model roles and fallback chains
 
-`GET /api/ghosts/:name/model-routing` returns `{ roles }` for `chat_model`,
-`vision_model`, `smol_model`, `general_purpose_model`, and `research_model`.
-Each row contains the OMP role name, its primary model, and its ordered
-fallbacks with resolved/usable status.
+`GET /api/ghosts/:name/model-routing` returns `{ roles }` for every OMP built-in:
+`chat_model` (`default`), `smol_model`, `slow_model`, `vision_model`,
+`plan_model`, `designer_model`, `commit_model`, `tiny_model`, `task_model`, and
+`advisor_model`. The older custom `general_purpose_model` and `research_model`
+rows remain visible only when an existing home has configured a primary or
+fallback for them. Each row is `{ role, ompRole, label, primary, effective,
+source, fallbacks }`: `primary` is the configured model, `effective` includes
+OMP's automatic role resolution, and `source` is `explicit`, `auto`, or
+`unavailable`. Models and fallbacks carry resolved/usable status.
 
-`PUT /api/ghosts/:name/model-routing` accepts `{ role, target, provider, id }`,
-where `target` is `primary` or `fallback`; `{ role, target:
-"clear_fallbacks" }` clears a chain. Vision primaries/fallbacks must accept
-images. `claude-code/default` is valid only as the primary chat runtime because
-it is not an OMP provider model.
+`PUT /api/ghosts/:name/model-routing` accepts `{ role, target, provider, id }`
+with `target: "primary" | "fallback"`; `{ role, target: "clear_primary" }`
+removes an explicit primary, revealing automatic resolution; and `{ role,
+target: "replace_fallbacks", fallbacks: [{ provider, id }, …] }` atomically
+replaces, removes, or reorders the complete retry chain. The older
+`clear_fallbacks` target remains accepted as an empty-chain compatibility form.
+Vision primaries/fallbacks must accept images. `claude-code/default` is valid
+only as the primary chat runtime because it is not an OMP provider model.
 
 Ghost persists this in `.pi/models.json` under `roles` and `fallbacks`, then
 projects it onto OMP's `modelRoles` and `retry.fallbackChains`. OMP owns retry
@@ -443,6 +627,14 @@ message, placeholder?, secret, options? }`. A callback-server flow carries an
 `authUrl` AND a paste `prompt` at once (open the URL, or paste the code). On
 `succeeded`, `modelBound` is set when the ghost had no chat model and one was
 bound. Abandoned logins time out and are cleaned up server-side.
+
+A live login belongs to the ghost home's filesystem identity, not to the
+directory name captured when it started. Renaming the ghost therefore changes
+the login routes to the new `:name` without interrupting the provider flow;
+OMP's already-open credential store follows the same home move, so the
+credential and any default model binding land in the renamed home. Deleting a
+ghost cancels and forgets its live logins; reusing the deleted name cannot adopt
+one because it is a different home.
 
 The same flow runs in the terminal as `ghostd login [<ghost>] [--provider <id>]
 [--api-key]`.

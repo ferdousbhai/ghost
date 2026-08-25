@@ -1,4 +1,13 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -97,6 +106,83 @@ describe("GhostRegistry.create", () => {
     temp.registry.ensureRoot();
     expect(() => temp!.registry.create("../escape")).toThrowError(/Ghost names/);
     expect(existsSync(join(temp.root, "..", "escape"))).toBe(false);
+  });
+});
+
+describe("GhostRegistry.rename", () => {
+  it("moves the home and follows the rename into a seeded frontmatter title", () => {
+    temp = makeTempGhosts();
+    const dir = seedGhost(temp.root, {
+      name: "casper",
+      character: "---\ntitle: casper\ntags: [press]\n---\n\n# casper\n\nYou are casper.\n",
+    });
+
+    const renamed = temp.registry.rename("casper", "wisp");
+
+    expect(renamed).toMatchObject({ name: "wisp", dir: join(temp.root, "wisp") });
+    expect(existsSync(dir)).toBe(false);
+    expect(temp.registry.list().map((ghost) => ghost.name)).toEqual(["wisp"]);
+    // Only the title line; the body is the ghost's own words either way.
+    expect(readFileSync(ghostPaths(renamed.dir).characterFile, "utf8"))
+      .toBe("---\ntitle: wisp\ntags: [press]\n---\n\n# casper\n\nYou are casper.\n");
+  });
+
+  it("leaves a title the owner wrote, and a body-only character file, alone", () => {
+    temp = makeTempGhosts();
+    seedGhost(temp.root, { name: "casper", character: "---\ntitle: The Archivist\n---\n\nHello.\n" });
+    seedGhost(temp.root, { name: "mina", character: "# mina\n\nNo frontmatter here.\n" });
+
+    expect(readFileSync(ghostPaths(temp.registry.rename("casper", "wisp").dir).characterFile, "utf8"))
+      .toContain("title: The Archivist");
+    expect(readFileSync(ghostPaths(temp.registry.rename("mina", "vera").dir).characterFile, "utf8"))
+      .toBe("# mina\n\nNo frontmatter here.\n");
+  });
+
+  it("preserves every other byte, including CRLF line endings", () => {
+    temp = makeTempGhosts();
+    const dir = seedGhost(temp.root, {
+      name: "casper",
+      character: "---\r\ntitle: casper\r\ntags: [press]\r\n---\r\n\r\nKeep  two spaces.\r\n",
+    });
+    chmodSync(ghostPaths(dir).characterFile, 0o640);
+
+    const renamed = temp.registry.rename("casper", "wisp");
+
+    expect(readFileSync(ghostPaths(renamed.dir).characterFile, "utf8"))
+      .toBe("---\r\ntitle: wisp\r\ntags: [press]\r\n---\r\n\r\nKeep  two spaces.\r\n");
+    expect(statSync(ghostPaths(renamed.dir).characterFile).mode & 0o777).toBe(0o640);
+  });
+
+  it("leaves the old home and character untouched when the retitle cannot be prepared", () => {
+    temp = makeTempGhosts();
+    const dir = seedGhost(temp.root, {
+      name: "casper",
+      character: "---\ntitle: casper\n---\n\nOwner-authored body.\n",
+    });
+    const before = readFileSync(ghostPaths(dir).characterFile, "utf8");
+    chmodSync(dir, 0o500);
+
+    try {
+      expect(() => temp!.registry.rename("casper", "wisp")).toThrow();
+      expect(existsSync(dir)).toBe(true);
+      expect(existsSync(join(temp.root, "wisp"))).toBe(false);
+      expect(readFileSync(ghostPaths(dir).characterFile, "utf8")).toBe(before);
+    } finally {
+      chmodSync(dir, 0o700);
+    }
+  });
+
+  it("refuses an unknown ghost, an invalid name, and any occupied target", () => {
+    temp = makeTempGhosts();
+    const dir = seedGhost(temp.root, { name: "casper" });
+    // Not a ghost home, but the owner's directory all the same.
+    mkdirSync(join(temp.root, "notes"), { recursive: true });
+
+    expect(() => temp!.registry.rename("nobody", "wisp")).toThrowError(GhostError);
+    expect(() => temp!.registry.rename("casper", "../escape")).toThrowError(/Ghost names/);
+    expect(() => temp!.registry.rename("casper", "notes"))
+      .toThrowError(/already taken/);
+    expect(existsSync(dir)).toBe(true);
   });
 });
 

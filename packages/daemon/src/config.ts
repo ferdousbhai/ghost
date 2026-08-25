@@ -45,20 +45,21 @@ export interface DaemonConfig {
    */
   browserMode: "relay" | "profile";
   /**
-   * Background context-compaction policy. Enabled by default, triggering at
-   * `min(0.8 × contextWindow, 100_000)` tokens. See compaction.ts. Turn it off
-   * (or retune the threshold) to change how a ghost handles a long transcript.
+   * OMP-native context-compaction policy. Enabled by default at 80% of the
+   * active model's window; an absolute token threshold takes precedence.
    */
   compaction: CompactionConfig;
   /**
-   * Seconds a question waits before it answers itself with the option its
-   * asker marked recommended, letting the turn carry on. `0` waits forever.
+   * Seconds a question waits before it settles itself and lets the turn carry
+   * on. `0` waits forever.
    *
    * This is daemon-wide rather than per-ghost on purpose. How long a dialog
    * sits before giving up is a property of the person at the keyboard, not of
    * the persona asking; a ghost home holds what makes that ghost that ghost.
-   * It is also ghost's own setting rather than OMP's `ask.timeout`, so it
-   * survives the move off OMP's config namespace (issue #14).
+   * Ghost keeps the setting in its own config, so it survives the move off
+   * OMP's config namespace (issue #14), and projects it onto OMP's
+   * `ask.timeout` per session — which is what puts it above a ghost home's own
+   * settings and still beneath plan mode.
    */
   askTimeoutSeconds: number;
   /** Where the config was read from, or null when defaults/env only. */

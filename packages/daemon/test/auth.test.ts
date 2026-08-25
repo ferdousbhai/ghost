@@ -27,6 +27,7 @@ import {
   oauthCredential,
   type LoginImpl,
 } from "./helpers/fake-login-runtime.js";
+import { fakeOmpModel } from "./helpers/fake-catalog-runtime.js";
 
 let temp: TempGhosts | null = null;
 const managers: LoginManager[] = [];
@@ -209,7 +210,7 @@ describe("default model binding", () => {
     const dir = seedGhost(temp.root, { name: "casper" });
     const agentDir = ghostPaths(dir).agentDir;
     const discoveryStarted = deferred();
-    const finishDiscovery = deferred<readonly { id: string }[]>();
+    const finishDiscovery = deferred<readonly ReturnType<typeof fakeOmpModel>[]>();
     const binding = bindDefaultChatModelIfUnset(
       agentDir,
       {
@@ -226,7 +227,7 @@ describe("default model binding", () => {
     await discoveryStarted.promise;
 
     setChatModelRole(agentDir, "openai-codex", "gpt-5-codex");
-    finishDiscovery.resolve([{ id: "login-default" }]);
+    finishDiscovery.resolve([fakeOmpModel({ provider: "openrouter", id: "login-default" })]);
 
     await expect(binding).resolves.toBeNull();
     expect(readGhostModels(agentDir)?.roles?.chat_model).toEqual({

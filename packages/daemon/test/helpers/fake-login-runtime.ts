@@ -9,6 +9,7 @@ import type {
   Credential,
   LoginRuntime,
 } from "../../src/auth.js";
+import { fakeOmpModel } from "./fake-catalog-runtime.js";
 
 export type LoginImpl = (
   providerId: string,
@@ -67,10 +68,16 @@ export function makeFakeRuntime(options: FakeRuntimeOptions): LoginRuntime {
       return providers.find((p) => p.id === providerId)?.usingOAuth ?? false;
     },
     getModels(providerId) {
-      return (models[providerId ?? ""] ?? []).map((id) => ({ id }));
+      return (models[providerId ?? ""] ?? []).map((id) => fakeOmpModel({
+        provider: providerId ?? "",
+        id,
+      }));
     },
     async getAvailable(providerId) {
-      return (models[providerId ?? ""] ?? []).map((id) => ({ id }));
+      return (models[providerId ?? ""] ?? []).map((id) => fakeOmpModel({
+        provider: providerId ?? "",
+        id,
+      }));
     },
     login: options.login,
   };

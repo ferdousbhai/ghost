@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { AskBroker, AskBrokerError } from "../src/ask-broker.js";
+import {
+  AskBroker,
+  AskBrokerError,
+  HeadlessUIUnavailableError,
+} from "../src/ask-broker.js";
 
 const QUESTIONS = [{
   id: "shape",
@@ -13,6 +17,35 @@ const QUESTIONS = [{
 }];
 
 describe("AskBroker", () => {
+  it("implements OMP's full UI contract and refuses surfaces the daemon does not have", async () => {
+    const warn = vi.fn();
+    const broker = new AskBroker({
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn,
+      error: vi.fn(),
+    });
+    const ui = broker.uiContext;
+
+    await expect(ui.select("Choose", [{ label: "One" }]))
+      .rejects.toBeInstanceOf(HeadlessUIUnavailableError);
+    await expect(ui.confirm("Confirm", "Continue?"))
+      .rejects.toBeInstanceOf(HeadlessUIUnavailableError);
+    await expect(ui.input("Input"))
+      .rejects.toBeInstanceOf(HeadlessUIUnavailableError);
+    const factory = vi.fn();
+    await expect(ui.custom(factory))
+      .rejects.toThrow("cannot show a custom interactive UI");
+    expect(factory).not.toHaveBeenCalled();
+    expect(() => ui.setEditorText("unreachable"))
+      .toThrow(HeadlessUIUnavailableError);
+    ui.notify("A warning the owner should see", "warning");
+    expect(warn).toHaveBeenCalledWith("OMP UI notification", {
+      type: "warning",
+      message: "A warning the owner should see",
+    });
+  });
+
   it("publishes a pending dialog and resolves the exact OMP result shape", async () => {
     const broker = new AskBroker();
     const result = broker.uiContext.askDialog!(QUESTIONS);
@@ -71,40 +104,30 @@ describe("AskBroker", () => {
     }
   });
 
-  it("applies the daemon's default timeout when the asker names none", async () => {
+  it("submits nothing when a timed-out question recommended nothing", async () => {
     vi.useFakeTimers();
     try {
-      const broker = new AskBroker(2);
-      const result = broker.uiContext.askDialog!(QUESTIONS);
-      expect(broker.pending?.timeoutAt).toBeTruthy();
-      await vi.advanceTimersByTimeAsync(2000);
-      // The recommended option, submitted on the user's behalf, is what lets
-      // the turn carry on instead of holding a question nobody can answer.
+      const broker = new AskBroker();
+      const { recommended: _recommended, ...open } = QUESTIONS[0]!;
+      const result = broker.uiContext.askDialog!([open], { timeout: 500 });
+      await vi.advanceTimersByTimeAsync(500);
+      // The first option is an answer nobody gave; an empty selection is the
+      // truthful report of a question that expired, and the model can act on it.
       await expect(result).resolves.toMatchObject({
         kind: "submit",
-        results: [{ timedOut: true }],
+        results: [{ selectedOptions: [], timedOut: true }],
       });
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it("lets a question with its own deadline keep it", async () => {
+  it("waits forever when OMP resolved no deadline for the question", async () => {
     vi.useFakeTimers();
     try {
-      const broker = new AskBroker(600);
-      const result = broker.uiContext.askDialog!(QUESTIONS, { timeout: 500 });
-      await vi.advanceTimersByTimeAsync(500);
-      await expect(result).resolves.toMatchObject({ kind: "submit" });
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("waits forever at zero, which is what shipped before a default existed", async () => {
-    vi.useFakeTimers();
-    try {
-      const broker = new AskBroker(0);
+      // Unset, `ask.timeout: 0`, and plan mode all reach the broker as one
+      // absent timeout, so this is the only honest reading of all three.
+      const broker = new AskBroker();
       const result = broker.uiContext.askDialog!(QUESTIONS);
       expect(broker.pending?.timeoutAt).toBeUndefined();
       await vi.advanceTimersByTimeAsync(3_600_000);

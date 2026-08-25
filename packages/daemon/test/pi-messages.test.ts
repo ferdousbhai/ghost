@@ -32,6 +32,31 @@ function assistantMessage(fields: Record<string, unknown> = {}): never {
   } as never;
 }
 
+function ownerMessage(text: string): AgentSessionEvent {
+  return {
+    type: "message_start",
+    message: {
+      role: "user",
+      content: [{ type: "text", text }],
+      timestamp: 0,
+    },
+  } as AgentSessionEvent;
+}
+
+function ownerCustomMessage(text: string): AgentSessionEvent {
+  return {
+    type: "message_start",
+    message: {
+      role: "custom",
+      customType: "skill-prompt",
+      content: text,
+      display: true,
+      attribution: "user",
+      timestamp: 0,
+    },
+  } as unknown as AgentSessionEvent;
+}
+
 function collect(): { events: PiMessagesEvent[]; emit: (e: PiMessagesEvent) => void } {
   const events: PiMessagesEvent[] = [];
   return { events, emit: (event) => events.push(event) };
@@ -104,6 +129,49 @@ function toolStep(id: string, name: string, args: string): AgentSessionEvent[] {
 }
 
 describe("createPiMessagesAdapter", () => {
+  it("surfaces dequeued owner messages but not the prompt the shell already rendered", () => {
+    const { events, emit } = collect();
+    const adapter = createPiMessagesAdapter(emit, { skipOwnerMessages: 1 });
+
+    adapter.handle(ownerMessage("Start the turn."));
+    for (const event of toolStep("call_1", "read", '{"path":"notes.md"}')) {
+      adapter.handle(event);
+    }
+    adapter.handle(ownerMessage("Use the shorter version."));
+    for (const event of textStep("Short answer.")) adapter.handle(event);
+    adapter.finishDone();
+
+    expect(events.filter((event) => event.type === "owner_message")).toEqual([
+      { type: "owner_message", text: "Use the shorter version." },
+    ]);
+    expect(events.map((event) => event.type)).toEqual([
+      "start",
+      "toolcall_start",
+      "toolcall_delta",
+      "toolcall_end",
+      "owner_message",
+      "text_start",
+      "text_delta",
+      "text_end",
+      "done",
+    ]);
+  });
+
+  it("counts a forced skill prompt as the already-rendered owner message", () => {
+    const { events, emit } = collect();
+    const adapter = createPiMessagesAdapter(emit, { skipOwnerMessages: 1 });
+
+    adapter.handle(ownerCustomMessage("Forced skill instructions"));
+    adapter.handle(ownerMessage("Steer after the skill starts."));
+    adapter.finishDone();
+
+    expect(events).toEqual([
+      { type: "start" },
+      { type: "owner_message", text: "Steer after the skill starts." },
+      expect.objectContaining({ type: "done" }),
+    ]);
+  });
+
   it("emits exactly one start and one terminal done", () => {
     const { events, emit } = collect();
     const adapter = createPiMessagesAdapter(emit);

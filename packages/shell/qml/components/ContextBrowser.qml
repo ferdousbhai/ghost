@@ -5,6 +5,7 @@ pragma ComponentBehavior: Bound
 // definitions are deliberately rendered as read-only snapshot data.
 import QtQuick
 import qs.services
+import "ContextDelete.js" as ContextDelete
 
 Rectangle {
     id: root
@@ -17,6 +18,10 @@ Rectangle {
     property string selectedAgentName: ""
     property bool narrowDetailOpen: false
     property bool characterPaneOpen: true
+    property string pendingDeleteSection: ""
+    property string pendingDeletePath: ""
+    property string pendingDeleteTitle: ""
+    property bool deleteClosedDoc: false
     property alias docSearchText: searchInput.text
 
     readonly property bool validSection: ["docs", "memory", "agents", "character"]
@@ -109,7 +114,7 @@ Rectangle {
     }
 
     function spawnValue(value: var): string {
-        if (value === "*") return "Any available wisp";
+        if (value === "*") return "Any available helper";
         if (!Array.isArray(value)) return "No one";
         return value.length === 0 ? "None" : value.join(", ");
     }
@@ -125,7 +130,7 @@ Rectangle {
     function sectionTitle(): string {
         if (root.section === "docs") return "Docs";
         if (root.section === "memory") return "Memory";
-        if (root.section === "agents") return "Wisps";
+        if (root.section === "agents") return "Helpers";
         if (root.section === "character") return "Character";
         return "Context";
     }
@@ -142,7 +147,7 @@ Rectangle {
     function rowTitle(row: var): string {
         if (root.section === "docs") return root.docTitle(row);
         if (root.section === "memory") return root.memoryTitle(row);
-        if (root.section === "agents") return root.valueOr(row ? row.name : "", "Unnamed wisp");
+        if (root.section === "agents") return root.valueOr(row ? row.name : "", "Unnamed helper");
         return "";
     }
 
@@ -205,6 +210,10 @@ Rectangle {
         root.selectedAgentName = "";
         root.narrowDetailOpen = false;
         root.characterPaneOpen = true;
+        root.pendingDeleteSection = "";
+        root.pendingDeletePath = "";
+        root.pendingDeleteTitle = "";
+        root.deleteClosedDoc = false;
     }
 
     function resetForSection(): void {
@@ -221,20 +230,78 @@ Rectangle {
         if (root.section === "docs" && root.docQuery !== "") return "No matching documents";
         if (root.section === "docs") return "No documents found";
         if (root.section === "memory") return "No memories recorded";
-        if (root.section === "agents") return "No wisps available";
+        if (root.section === "agents") return "No helpers available";
         return "Context unavailable";
     }
 
     function sectionEmptyBody(): string {
         if (Ghostd.activeGhost === "") return "Choose a ghost before browsing its context.";
-        if (Ghostd.contextLoading) return "Reading the ghost home and available wisps.";
+        if (Ghostd.contextLoading) return "Reading the ghost home and available helpers.";
         if (Ghostd.contextError !== "") return "Refresh to try reading the snapshot again.";
         if (root.section === "docs" && root.docQuery !== "")
             return "Try another title, path, or tag.";
         if (root.section === "docs") return "Markdown files under docs/ will appear here.";
         if (root.section === "memory") return "Recorded memories will appear here with their update time.";
-        if (root.section === "agents") return "Wisps available from this ghost's directory will appear here.";
+        if (root.section === "agents") return "Helpers available from this ghost's directory will appear here.";
         return "This section could not be shown.";
+    }
+
+    function requestDelete(row: var): void {
+        const target = ContextDelete.target(root.section, row);
+        if (!target || Ghostd.contextDeletingPath !== "") return;
+        Ghostd.contextDeleteError = "";
+        root.pendingDeleteSection = target.section;
+        root.pendingDeletePath = target.path;
+        root.pendingDeleteTitle = target.title;
+        root.deleteClosedDoc = false;
+    }
+
+    function confirmDelete(): void {
+        if (root.pendingDeletePath === "" || Ghostd.contextDeletingPath !== "") return;
+        if (root.pendingDeleteSection === "docs"
+                && root.selectedDocPath === root.pendingDeletePath) {
+            // FilePane.flush() waits for its atomic write. Only after the
+            // buffer and disk agree do we hide/rebind the pane; otherwise a
+            // pending autosave could recreate the file after it reached Trash.
+            fileEditor.flush();
+            if (fileEditor.dirty || fileEditor.conflictText !== "") {
+                Ghostd.contextDeleteError = fileEditor.conflictText !== ""
+                    ? "Resolve the file conflict before moving this document to Trash."
+                    : "The document could not be saved. It was not moved to Trash.";
+                return;
+            }
+            root.deleteClosedDoc = true;
+            root.selectedDocPath = "";
+            if (root.narrow) root.narrowDetailOpen = false;
+        }
+        Ghostd.deleteContextFile(root.pendingDeleteSection, root.pendingDeletePath);
+    }
+
+    function dismissDelete(): void {
+        if (Ghostd.contextDeletingPath !== "") return;
+        if (root.deleteClosedDoc && root.pendingDeleteSection === "docs"
+                && root.findBy(root.docs, "path", root.pendingDeletePath)) {
+            root.selectedDocPath = root.pendingDeletePath;
+            if (root.narrow) root.narrowDetailOpen = true;
+        }
+        root.pendingDeleteSection = "";
+        root.pendingDeletePath = "";
+        root.pendingDeleteTitle = "";
+        root.deleteClosedDoc = false;
+        Ghostd.contextDeleteError = "";
+    }
+
+    function settleDeleteSelection(section: string, path: string): void {
+        if (section === "docs" && (root.selectedDocPath === path || root.deleteClosedDoc))
+            root.selectedDocPath = ContextDelete.nextValue(root.docs, path, "path");
+        else if (section === "memory" && root.selectedMemory
+                && root.textOf(root.selectedMemory.path) === path)
+            root.selectedMemorySlug = ContextDelete.nextValue(root.memory, path, "slug");
+        root.pendingDeleteSection = "";
+        root.pendingDeletePath = "";
+        root.pendingDeleteTitle = "";
+        root.deleteClosedDoc = false;
+        Ghostd.contextDeleteError = "";
     }
 
     onSectionChanged: Qt.callLater(root.resetForSection)
@@ -257,6 +324,11 @@ Rectangle {
 
         function onContextLoadingChanged(): void {
             if (!Ghostd.contextLoading) root.ensureSelection();
+        }
+
+        function onContextDeleteFinished(section: string, path: string, ok: bool): void {
+            if (ok && root.pendingDeletePath === path)
+                root.settleDeleteSelection(section, path);
         }
     }
 
@@ -578,7 +650,7 @@ Rectangle {
                                 id: rowCopy
                                 anchors.left: parent.left
                                 anchors.leftMargin: Theme.gap
-                                anchors.right: parent.right
+                                anchors.right: deleteButton.left
                                 anchors.rightMargin: Theme.gap
                                 anchors.verticalCenter: parent.verticalCenter
                                 spacing: Theme.gap / 2
@@ -615,6 +687,52 @@ Rectangle {
                                     font.family: Theme.fontFamilyMono
                                     font.pixelSize: Theme.fontSizeSmall - 1
                                     elide: Text.ElideRight
+                                }
+                            }
+
+                            Rectangle {
+                                id: deleteButton
+                                anchors.right: parent.right
+                                anchors.rightMargin: Theme.gap / 2
+                                anchors.verticalCenter: parent.verticalCenter
+                                visible: root.section === "docs" || root.section === "memory"
+                                width: visible ? Theme.controlHeight - Theme.gap : 0
+                                height: width
+                                radius: Theme.radius / 2
+                                color: deleteArea.containsMouse ? Theme.rose(0.12) : "transparent"
+                                border.width: activeFocus ? 1 : 0
+                                border.color: Theme.rose(0.42)
+                                activeFocusOnTab: visible
+                                z: 2
+
+                                Accessible.role: Accessible.Button
+                                Accessible.name: "Delete " + root.rowTitle(contextRow.modelData)
+                                Accessible.description: "Move this file to Trash"
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "×"
+                                    color: deleteArea.containsMouse ? Theme.danger : Theme.foregroundFaint
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: Theme.fontSize + 1
+                                }
+
+                                MouseArea {
+                                    id: deleteArea
+                                    anchors.fill: parent
+                                    enabled: Ghostd.contextDeletingPath === ""
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: root.requestDelete(contextRow.modelData)
+                                }
+
+                                Keys.onPressed: event => {
+                                    if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter
+                                            || event.key === Qt.Key_Space)
+                                            && Ghostd.contextDeletingPath === "") {
+                                        root.requestDelete(contextRow.modelData);
+                                        event.accepted = true;
+                                    }
                                 }
                             }
 
@@ -949,7 +1067,7 @@ Rectangle {
                             Text {
                                 width: parent.width
                                 text: root.selectedAgent
-                                    ? root.valueOr(root.selectedAgent.name, "Unnamed wisp") : ""
+                                    ? root.valueOr(root.selectedAgent.name, "Unnamed helper") : ""
                                 color: Theme.foregroundBright
                                 font.family: Theme.fontFamily
                                 font.pixelSize: Theme.fontSize + 1
@@ -1027,7 +1145,7 @@ Rectangle {
                                 if (root.section === "character") return "Character unavailable";
                                 if (root.section === "docs") return "Choose a document";
                                 if (root.section === "memory") return "Choose a memory";
-                                if (root.section === "agents") return "Choose a wisp";
+                                if (root.section === "agents") return "Choose a helper";
                                 return "Context unavailable";
                             }
                             color: Ghostd.contextError !== "" ? Theme.danger : Theme.foreground
@@ -1041,7 +1159,7 @@ Rectangle {
                         Text {
                             width: parent.width
                             text: {
-                                if (!root.validSection) return "Use Docs, Memory, Wisps, or Character.";
+                                if (!root.validSection) return "Use Docs, Memory, Helpers, or Character.";
                                 if (Ghostd.activeGhost === "")
                                     return "Choose a ghost before browsing its context.";
                                 if (Ghostd.contextLoading) return "Reading the ghost home.";
@@ -1106,5 +1224,19 @@ Rectangle {
                 }
             }
         }
+    }
+
+    ConfirmDialog {
+        anchors.fill: parent
+        open: root.pendingDeletePath !== ""
+        title: root.pendingDeleteSection === "memory"
+            ? "Delete memory?" : "Delete document?"
+        body: "“" + root.pendingDeleteTitle + "” moves to system Trash and can be restored from your file manager."
+        confirmText: "Move to Trash"
+        busy: Ghostd.contextDeletingPath === root.pendingDeletePath
+            && root.pendingDeletePath !== ""
+        error: root.pendingDeletePath !== "" ? Ghostd.contextDeleteError : ""
+        onConfirmed: root.confirmDelete()
+        onDismissed: root.dismissDelete()
     }
 }

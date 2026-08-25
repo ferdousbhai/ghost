@@ -22,7 +22,11 @@ FocusScope {
             label: "Chat",
             icon: "M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"
         },
-        { id: "character", label: "Character", icon: "" },
+        {
+            id: "character",
+            label: "Character",
+            icon: "M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zM16 9h3M16 13h3M10 12a2 2 0 1 0 0-4 2 2 0 0 0 0 4M6 17a4 4 0 0 1 8 0"
+        },
         {
             id: "docs",
             label: "Docs",
@@ -42,8 +46,23 @@ FocusScope {
             id: "commands",
             label: "Commands",
             icon: "M4 3h16a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zM6 9l4 3-4 3M12 15h4"
+        },
+        {
+            id: "mcp",
+            label: "MCP",
+            icon: "M12 7a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM5 22a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM19 22a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM12 7v5M7.5 17.5l3-5M16.5 17.5l-3-5"
+        },
+        {
+            id: "connect",
+            label: "Remote",
+            icon: "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"
         }
     ]
+    readonly property real destinationHeight: Math.max(34, Math.min(
+        Theme.controlHeight + Theme.gap,
+        (root.height - Theme.pad - (root.destinations.length - 1) * Theme.gap / 2)
+            / root.destinations.length
+    ))
 
     implicitWidth: 64
     implicitHeight: Theme.pad * 30
@@ -97,7 +116,7 @@ FocusScope {
                     : (pointer.containsMouse ? Theme.foreground : Theme.foregroundDim)
 
                 width: Theme.controlHeight + Theme.gap
-                height: Theme.controlHeight + Theme.gap
+                height: root.destinationHeight
                 radius: Theme.radius
                 color: destinationButton.active
                     ? Theme.amber(0.14)
@@ -136,16 +155,9 @@ FocusScope {
                     color: Theme.amber(0.06)
                 }
 
-                GhostGlyph {
-                    anchors.centerIn: parent
-                    visible: destinationButton.destination.id === "character"
-                    size: 22
-                    tint: destinationButton.glyphColor
-                }
 
                 Shape {
                     anchors.centerIn: parent
-                    visible: destinationButton.destination.id !== "character"
                     width: 24
                     height: 24
                     antialiasing: true

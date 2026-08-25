@@ -1,0 +1,308 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { ghostPaths } from "../src/ghosts.js";
+import {
+  ModelCatalog,
+  type ModelCatalogRuntime,
+  type ModelRouteView,
+} from "../src/model-catalog.js";
+import {
+  GHOST_MODEL_ROLES,
+  readGhostModels,
+  writeGhostModels,
+} from "../src/models.js";
+import {
+  makeFakeCatalogRuntime,
+  type FakeCatalogModel,
+} from "./helpers/fake-catalog-runtime.js";
+import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
+
+let temp: TempGhosts | null = null;
+
+afterEach(() => {
+  temp?.cleanup();
+  temp = null;
+});
+
+const models: FakeCatalogModel[] = [
+  {
+    provider: "anthropic",
+    id: "claude-sonnet-4-6",
+    input: ["text", "image"],
+  },
+  {
+    provider: "anthropic",
+    id: "claude-haiku-4-5",
+    input: ["text", "image"],
+  },
+  {
+    provider: "openai-codex",
+    id: "gpt-5.4",
+    input: ["text", "image"],
+  },
+  {
+    provider: "openai-codex",
+    id: "text-only-mini",
+    input: ["text"],
+  },
+];
+
+function setup(): { catalog: ModelCatalog; agentDir: string; notified: string[] } {
+  temp = makeTempGhosts();
+  temp.registry.ensureRoot();
+  const home = seedGhost(temp.root, { name: "casper" });
+  const runtime = makeFakeCatalogRuntime({
+    models,
+    credentialed: ["anthropic", "openai-codex"],
+  });
+  const notified: string[] = [];
+  return {
+    agentDir: ghostPaths(home).agentDir,
+    notified,
+    catalog: new ModelCatalog({
+      registry: temp.registry,
+      offline: true,
+      createRuntime: async () => runtime,
+      claudeCodePlanStatus: async () => false,
+      onModelRoutingChanged: (ghostName) => {
+        notified.push(ghostName);
+      },
+    }),
+  };
+}
+
+function byRole(roles: ModelRouteView[], role: ModelRouteView["role"]): ModelRouteView {
+  const found = roles.find((candidate) => candidate.role === role);
+  if (!found) throw new Error(`missing ${role}`);
+  return found;
+}
+
+describe("ModelCatalog OMP role inventory and effective routing", () => {
+  it("exposes every OMP built-in without empty legacy custom roles and reports automatic sources", async () => {
+    const { catalog, agentDir } = setup();
+    writeGhostModels(agentDir, {
+      providers: {},
+      roles: {
+        chat_model: { provider: "anthropic", modelId: "claude-sonnet-4-6" },
+      },
+    });
+
+    const routing = await catalog.getModelRouting("casper");
+
+    expect(routing.roles.map((role) => role.role)).toEqual(
+      GHOST_MODEL_ROLES.filter((role) =>
+        role !== "general_purpose_model" && role !== "research_model"),
+    );
+    expect(routing.roles.map(({ ompRole, label }) => ({ ompRole, label }))).toEqual([
+      { ompRole: "default", label: "Chat" },
+      { ompRole: "smol", label: "Fast" },
+      { ompRole: "slow", label: "Thinking" },
+      { ompRole: "vision", label: "Vision" },
+      { ompRole: "plan", label: "Architect" },
+      { ompRole: "designer", label: "Designer" },
+      { ompRole: "commit", label: "Commit" },
+      { ompRole: "tiny", label: "Tiny" },
+      { ompRole: "task", label: "Subtask" },
+      { ompRole: "advisor", label: "Advisor" },
+    ]);
+    expect(byRole(routing.roles, "chat_model")).toMatchObject({
+      source: "explicit",
+      primary: { provider: "anthropic", id: "claude-sonnet-4-6" },
+      effective: { provider: "anthropic", id: "claude-sonnet-4-6" },
+    });
+    // OMP's fast/slow/designer roles inherit a configured default before their
+    // own priority lists; @task inherits the active model in the task executor.
+    for (const role of ["smol_model", "slow_model", "designer_model", "task_model"] as const) {
+      expect(byRole(routing.roles, role)).toMatchObject({
+        source: "auto",
+        primary: null,
+        effective: { provider: "anthropic", id: "claude-sonnet-4-6", usable: true },
+      });
+    }
+    // Tiny and advisor use OMP's built-in priority semantics without any Ghost
+    // model ids. They resolve against whatever the current OMP catalog offers.
+    expect(byRole(routing.roles, "tiny_model")).toMatchObject({
+      source: "auto",
+      effective: { provider: "anthropic", id: "claude-haiku-4-5" },
+    });
+    expect(byRole(routing.roles, "advisor_model")).toMatchObject({
+      source: "auto",
+      effective: { provider: "openai-codex", id: "gpt-5.4" },
+    });
+    for (const role of [
+      "vision_model",
+      "plan_model",
+      "commit_model",
+    ] as const) {
+      expect(byRole(routing.roles, role)).toMatchObject({
+        source: "unavailable",
+        primary: null,
+        effective: null,
+      });
+    }
+  });
+
+  it("keeps General and Research bindings as explicit custom OMP roles", async () => {
+    const { catalog, agentDir } = setup();
+    writeGhostModels(agentDir, {
+      providers: {},
+      roles: {
+        general_purpose_model: { provider: "anthropic", modelId: "claude-sonnet-4-6" },
+        research_model: { provider: "openai-codex", modelId: "gpt-5.4" },
+      },
+    });
+
+    const routing = await catalog.getModelRouting("casper");
+
+    expect(byRole(routing.roles, "general_purpose_model")).toMatchObject({
+      ompRole: "general",
+      source: "explicit",
+      effective: { provider: "anthropic", id: "claude-sonnet-4-6" },
+    });
+    expect(byRole(routing.roles, "research_model")).toMatchObject({
+      ompRole: "research",
+      source: "explicit",
+      effective: { provider: "openai-codex", id: "gpt-5.4" },
+    });
+  });
+});
+
+describe("ModelCatalog primary and full-chain mutations", () => {
+  it("clears an explicit primary and returns to automatic/unavailable resolution", async () => {
+    const { catalog, agentDir, notified } = setup();
+    await catalog.setModelRoute(
+      "casper",
+      "plan_model",
+      "primary",
+      "openai-codex",
+      "gpt-5.4",
+    );
+
+    const cleared = await catalog.clearModelPrimary("casper", "plan_model");
+
+    expect(byRole(cleared.roles, "plan_model")).toMatchObject({
+      source: "unavailable",
+      primary: null,
+      effective: null,
+    });
+    expect(readGhostModels(agentDir)?.roles?.plan_model).toBeUndefined();
+    expect(notified).toEqual(["casper", "casper"]);
+  });
+
+  it("replaces and reorders a complete fallback chain atomically", async () => {
+    const { catalog, agentDir } = setup();
+    await catalog.setModelRoute(
+      "casper",
+      "slow_model",
+      "primary",
+      "openai-codex",
+      "gpt-5.4",
+    );
+    await catalog.replaceModelFallbacks("casper", "slow_model", [
+      { provider: "anthropic", id: "claude-sonnet-4-6" },
+      { provider: "anthropic", id: "claude-haiku-4-5" },
+    ]);
+    const reordered = await catalog.replaceModelFallbacks("casper", "slow_model", [
+      { provider: "anthropic", id: "claude-haiku-4-5" },
+      { provider: "anthropic", id: "claude-sonnet-4-6" },
+    ]);
+
+    expect(byRole(reordered.roles, "slow_model").fallbacks.map(({ provider, id }) => ({ provider, id })))
+      .toEqual([
+        { provider: "anthropic", id: "claude-haiku-4-5" },
+        { provider: "anthropic", id: "claude-sonnet-4-6" },
+      ]);
+    expect(readGhostModels(agentDir)?.fallbacks?.slow_model).toEqual([
+      { provider: "anthropic", modelId: "claude-haiku-4-5" },
+      { provider: "anthropic", modelId: "claude-sonnet-4-6" },
+    ]);
+
+    await expect(catalog.replaceModelFallbacks("casper", "slow_model", [
+      { provider: "anthropic", id: "claude-sonnet-4-6" },
+      { provider: "anthropic", id: "claude-sonnet-4-6" },
+    ])).rejects.toMatchObject({ code: "duplicate_route_model", status: 400 });
+    await expect(catalog.replaceModelFallbacks("casper", "slow_model", [
+      { provider: "openai-codex", id: "gpt-5.4" },
+    ])).rejects.toMatchObject({ code: "duplicate_route_model", status: 400 });
+  });
+
+  it("enforces vision capability and keeps Claude Code out of every OMP role/chain", async () => {
+    const { catalog } = setup();
+
+    await expect(catalog.setModelRoute(
+      "casper",
+      "vision_model",
+      "primary",
+      "openai-codex",
+      "text-only-mini",
+    )).rejects.toMatchObject({ code: "model_has_no_vision", status: 400 });
+    await expect(catalog.replaceModelFallbacks("casper", "vision_model", [
+      { provider: "openai-codex", id: "text-only-mini" },
+    ])).rejects.toMatchObject({ code: "model_has_no_vision", status: 400 });
+    await expect(catalog.setModelRoute(
+      "casper",
+      "advisor_model",
+      "primary",
+      "claude-code",
+      "default",
+    )).rejects.toMatchObject({ code: "unsupported_model_route", status: 400 });
+    await expect(catalog.replaceModelFallbacks("casper", "chat_model", [
+      { provider: "claude-code", id: "default" },
+    ])).rejects.toMatchObject({ code: "unsupported_model_route", status: 400 });
+  });
+});
+
+describe("ModelCatalog runtime lifecycle", () => {
+  function setupLifecycle() {
+    temp = makeTempGhosts();
+    temp.registry.ensureRoot();
+    seedGhost(temp.root, { name: "casper" });
+    const close = vi.fn();
+    const runtime: ModelCatalogRuntime = {
+      ...makeFakeCatalogRuntime({
+        models,
+        credentialed: ["anthropic", "openai-codex"],
+      }),
+      close,
+    };
+    const createRuntime = vi.fn(async () => runtime);
+    return {
+      close,
+      createRuntime,
+      catalog: new ModelCatalog({
+        registry: temp.registry,
+        offline: true,
+        createRuntime,
+        claudeCodePlanStatus: async () => false,
+      }),
+    };
+  }
+
+  it("reuses and closes one runtime for a successful mutation and response", async () => {
+    const { catalog, close, createRuntime } = setupLifecycle();
+
+    const routing = await catalog.setModelRoute(
+      "casper",
+      "plan_model",
+      "primary",
+      "openai-codex",
+      "gpt-5.4",
+    );
+
+    expect(byRole(routing.roles, "plan_model").primary).toMatchObject({
+      provider: "openai-codex",
+      id: "gpt-5.4",
+    });
+    expect(createRuntime).toHaveBeenCalledTimes(1);
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes the runtime when an operation throws", async () => {
+    const { catalog, close, createRuntime } = setupLifecycle();
+
+    await expect(catalog.setChatModel("casper", "missing", "unknown"))
+      .rejects.toMatchObject({ code: "unknown_model", status: 400 });
+
+    expect(createRuntime).toHaveBeenCalledTimes(1);
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+});

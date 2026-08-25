@@ -11,10 +11,18 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 
-export type MockStep =
+interface MockStepOptions {
+  /** Hold this request after capture, so tests can exercise overlapping work. */
+  gate?: Promise<void>;
+  /** Override the usage frame when a test needs an exact context boundary. */
+  usage?: { promptTokens: number; completionTokens?: number };
+}
+
+export type MockStep = (
   | { kind: "text"; text: string }
   | { kind: "tool"; name: string; args: Record<string, unknown> }
-  | { kind: "error"; status: number; body: string };
+  | { kind: "error"; status: number; body: string }
+) & MockStepOptions;
 
 export interface CapturedRequest {
   system: string;
@@ -43,6 +51,8 @@ export interface MockProviderOptions {
   modelId?: string;
   /** Milliseconds between streamed chunks. Keep tiny; tests are serial. */
   chunkDelayMs?: number;
+  /** Consume the script per request, including side requests such as compaction. */
+  sequential?: boolean;
 }
 
 /** Where in the script this conversation is: one step per assistant turn. */
@@ -86,13 +96,14 @@ export async function startMockProvider(
         model: typeof body.model === "string" ? body.model : "",
       });
 
-      const turn = stepIndexFor(body.messages ?? []);
+      const turn = options.sequential ? step : stepIndexFor(body.messages ?? []);
       const action = options.script[Math.min(turn, options.script.length - 1)];
       step += 1;
       if (!action) {
         response.writeHead(500).end("mock provider has no script step");
         return;
       }
+      if (action.gate) await action.gate;
       if (action.kind === "error") {
         response.writeHead(action.status, { "content-type": "application/json" });
         response.end(action.body);
@@ -169,7 +180,12 @@ export async function startMockProvider(
       sse(response, {
         ...base,
         choices: [],
-        usage: { prompt_tokens: 200, completion_tokens: 30, total_tokens: 230 },
+        usage: {
+          prompt_tokens: action.usage?.promptTokens ?? 200,
+          completion_tokens: action.usage?.completionTokens ?? 30,
+          total_tokens: (action.usage?.promptTokens ?? 200)
+            + (action.usage?.completionTokens ?? 30),
+        },
       });
       response.write("data: [DONE]\n\n");
       response.end();

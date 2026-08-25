@@ -111,7 +111,7 @@ describe("GET /api/ghosts/:name/model", () => {
   });
 
   it("reports source=default from a hand-declared provider model when no role is set", async () => {
-    const base = await serve({ credentialed: [] });
+    const base = await serve({ credentialed: ["openai-codex"] });
     // A providers block with a model but no roles.chat_model: pi's fallback.
     writeGhostModels(agentDir(), {
       providers: { "openai-codex": { models: [{ id: "gpt-5-mini" }] } },
@@ -126,6 +126,22 @@ describe("GET /api/ghosts/:name/model", () => {
     const { body } = await getJson(`${base}/api/ghosts/casper/model`);
     expect(body.source).toBe("default");
     expect(body.current).toMatchObject({ provider: "anthropic", id: "claude-opus-4" });
+  });
+
+  it("matches the provider-aware default OMP gives a fresh session", async () => {
+    const base = await serve({
+      models: [
+        { provider: "anthropic", id: "claude-sonnet-4-6", input: ["text"] },
+        { provider: "anthropic", id: "claude-opus-4-8", input: ["text"] },
+      ],
+      credentialed: ["anthropic"],
+    });
+
+    const { body } = await getJson(`${base}/api/ghosts/casper/model`);
+    expect(body).toMatchObject({
+      source: "default",
+      current: { provider: "anthropic", id: "claude-opus-4-8" },
+    });
   });
 
   it("reports source=none when nothing is usable", async () => {
@@ -216,6 +232,22 @@ describe("GET /api/ghosts/:name/models?scope=available", () => {
       "claude-opus-4-6-20260701",
       "claude-opus-4-6",
       "claude-opus-4-5",
+    ]);
+  });
+
+  it("keeps providers in catalogue order while using OMP order within each provider", async () => {
+    const base = await serve({
+      models: [
+        { provider: "z-provider", id: "model-1", input: ["text"] },
+        { provider: "a-provider", id: "model-2", input: ["text"] },
+      ],
+      credentialed: ["z-provider", "a-provider"],
+    });
+    const { body } = await getJson(`${base}/api/ghosts/casper/models?scope=available`);
+
+    expect((body.models as Array<{ provider: string }>).map((model) => model.provider)).toEqual([
+      "z-provider",
+      "a-provider",
     ]);
   });
 });
@@ -361,9 +393,9 @@ describe("PUT /api/ghosts/:name/model", () => {
     expect(set.status).toBe(200);
     expect(set.body).toMatchObject({ ok: true, usable: false });
     expect(typeof set.body.warning).toBe("string");
-    // The selection was written even though it cannot answer yet.
+    // The role was written, but it is not current until its provider is usable.
     const after = await getJson(`${base}/api/ghosts/casper/model`);
-    expect(after.body.current).toMatchObject({ provider: "anthropic", id: "claude-opus-4" });
+    expect(after.body).toEqual({ current: null, source: "none" });
   });
 
   it("400s a model not in the catalogue", async () => {
@@ -392,6 +424,28 @@ describe("OMP model roles and fallback chains", () => {
     });
     return { status: response.status, body: (await response.json()) as Record<string, unknown> };
   }
+
+  it("lists every OMP built-in with effective source metadata and hides empty legacy roles", async () => {
+    const base = await serve({ credentialed: ["openai-codex", "anthropic"] });
+    const route = await getJson(`${base}/api/ghosts/casper/model-routing`);
+    const roles = route.body.roles as Array<Record<string, unknown>>;
+
+    expect(roles.map((role) => role.role)).toEqual([
+      "chat_model",
+      "smol_model",
+      "slow_model",
+      "vision_model",
+      "plan_model",
+      "designer_model",
+      "commit_model",
+      "tiny_model",
+      "task_model",
+      "advisor_model",
+    ]);
+    expect(roles.every((role) => "effective" in role && "source" in role)).toBe(true);
+    expect(roles.some((role) => role.role === "general_purpose_model")).toBe(false);
+    expect(roles.some((role) => role.role === "research_model")).toBe(false);
+  });
 
   it("configures a custom role and an ordered fallback chain", async () => {
     const base = await serve({ credentialed: ["openai-codex", "anthropic"] });
@@ -498,6 +552,74 @@ describe("OMP model roles and fallback chains", () => {
     });
     expect(cleared.status).toBe(200);
     expect(readGhostModels(agentDir())?.roles?.chat_model?.modelId).toBe("gpt-5-codex");
+    expect(readGhostModels(agentDir())?.fallbacks?.chat_model).toBeUndefined();
+  });
+
+  it("clears an explicit primary and atomically replaces, reorders, and removes fallbacks", async () => {
+    const base = await serve({ credentialed: ["openai-codex", "anthropic"] });
+    await putRouting(base, {
+      role: "slow_model",
+      target: "primary",
+      provider: "openai-codex",
+      id: "gpt-5-codex",
+    });
+
+    const replaced = await putRouting(base, {
+      role: "slow_model",
+      target: "replace_fallbacks",
+      fallbacks: [
+        { provider: "anthropic", id: "claude-opus-4" },
+        { provider: "openai-codex", id: "gpt-5-mini" },
+      ],
+    });
+    expect(replaced.status).toBe(200);
+    const reordered = await putRouting(base, {
+      role: "slow_model",
+      target: "replace_fallbacks",
+      fallbacks: [
+        { provider: "openai-codex", id: "gpt-5-mini" },
+        { provider: "anthropic", id: "claude-opus-4" },
+      ],
+    });
+    expect(reordered.status).toBe(200);
+    expect(readGhostModels(agentDir())?.fallbacks?.slow_model).toEqual([
+      { provider: "openai-codex", modelId: "gpt-5-mini" },
+      { provider: "anthropic", modelId: "claude-opus-4" },
+    ]);
+
+    const removed = await putRouting(base, {
+      role: "slow_model",
+      target: "replace_fallbacks",
+      fallbacks: [{ provider: "anthropic", id: "claude-opus-4" }],
+    });
+    expect(removed.status).toBe(200);
+    expect(readGhostModels(agentDir())?.fallbacks?.slow_model).toEqual([
+      { provider: "anthropic", modelId: "claude-opus-4" },
+    ]);
+
+    const clearedPrimary = await putRouting(base, {
+      role: "slow_model",
+      target: "clear_primary",
+    });
+    expect(clearedPrimary.status).toBe(200);
+    expect(readGhostModels(agentDir())?.roles?.slow_model).toBeUndefined();
+    const slow = (clearedPrimary.body.roles as Array<Record<string, unknown>>)
+      .find((role) => role.role === "slow_model") as Record<string, unknown>;
+    expect(slow).toMatchObject({ primary: null, source: "auto" });
+  });
+
+  it("validates full fallback replacement bodies before mutation", async () => {
+    const base = await serve({ credentialed: ["openai-codex"] });
+    expect(await putRouting(base, {
+      role: "chat_model",
+      target: "replace_fallbacks",
+      fallbacks: "not-an-array",
+    })).toMatchObject({ status: 400, body: { error: { code: "invalid_request" } } });
+    expect(await putRouting(base, {
+      role: "chat_model",
+      target: "replace_fallbacks",
+      fallbacks: [{ provider: "openai-codex" }],
+    })).toMatchObject({ status: 400, body: { error: { code: "invalid_request" } } });
     expect(readGhostModels(agentDir())?.fallbacks?.chat_model).toBeUndefined();
   });
 });

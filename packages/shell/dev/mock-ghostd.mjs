@@ -7,13 +7,25 @@
  *   GET  /api/ghosts                          → [{ name, dir, createdAt }]
  *   POST /api/ghosts { name }                 → 201 + the new ghost
  *   DELETE /api/ghosts/:name?confirm=:name    → 200 { ok, trash } | 400 | 404 | 409
- *   GET  /api/ghosts/:name/context            → docs, memory, character, helpers
+ *   GET  /api/ghosts/:name/context            → docs, memory, character, agents
+ *   DELETE /api/ghosts/:name/context          → move one doc/memory file to mock Trash
+ *   GET  /api/ghosts/:name/mcp                → sanitized project MCP catalog
+ *   POST/PUT/DELETE /api/ghosts/:name/mcp/... → manage project MCP servers
+ *   GET/POST /api/ghosts/:name/sessions/:id/live   → remote live-voice status/actions
+ *   GET/POST /api/ghosts/:name/sessions/:id/collab → relay collaboration status/actions
  *   POST /api/ghosts/:name/messages           → pi-messages SSE (canned reply)
  *   POST /api/ghosts/:name/greeting           → { greeting, onboarding }, ~800ms late
+ *   PUT  /api/ghosts/:name/name { name }      → { ok, name } | 400 | 404 | 409
  *   GET  /api/ghosts/:name/sessions           → { sessions: [...] }, newest first
+ *   GET  /api/ghosts/:name/sessions/:id/commands → effective OMP slash commands
  *   DELETE /api/ghosts/:name/sessions/:id     → delete one conversation
  *   GET  /api/ghosts/:name/sessions/:id/transcript → { id, title, messages, … }
+ *   PUT  /api/ghosts/:name/sessions/:id/title → { ok, title } | 400 | 404 | 409
  *   POST /api/ghosts/:name/sessions/:id/branch → { action: "fork", entryId }
+ *   GET  /api/ghosts/:name/sessions/:id/ask   → { ask } while a turn is paused
+ *   POST /api/ghosts/:name/sessions/:id/ask   → resolve it | 409 ask_not_pending
+ *   POST /api/ghosts/:name/sessions/:id/reanswer → SSE: branch_changed, then the
+ *                                               same question asked live again
  *   GET  /api/ghosts/:name/providers          → loginable providers
  *   POST /api/ghosts/:name/login              → start a login → { loginId, status }
  *   GET  /api/ghosts/:name/login/:loginId     → current login step
@@ -25,6 +37,11 @@
  * and logins live in memory; only an owned temporary markdown fixture touches
  * disk so the context editors have real files. It vanishes on exit.
  *
+ * A turn stops to ask a question when the prompt contains the word "ask" —
+ * the dialog has no other way to open with no model in the loop, and a word
+ * the demoer types on purpose beats a random one in ten turns. Every other
+ * prompt runs the plain scripted turn.
+ *
  * Auth: none. The real daemon requires `Authorization: Bearer <token>` on
  * every /api route (CONTRACTS.md); the mock accepts and ignores the header so
  * the surfaces can be driven on a machine where `ghostd` has never run and no
@@ -33,10 +50,20 @@
  * daemon, not here.
  *
  * Usage:  node dev/mock-ghostd.mjs [--port 7717] [--slow] [--fail]
- *   --slow   30ms between text deltas instead of 12ms
- *   --fail   terminate the next turn with a pi-messages `error` event
+ *                                  [--ask-timeout 120] [--tool-steps 1]
+ *                                  [--omit-terminal] [--stall-stream]
+ *   --slow         30ms between text deltas instead of 12ms
+ *   --fail         terminate the next turn with a pi-messages `error` event
+ *   --ask-timeout  seconds a pending ask waits before answering itself; 0 waits
+ *                  forever. The dialog keeps a static line until 30s remain and
+ *                  only counts down inside that, so 40 is the demo value.
+ *   --tool-steps    tool-call steps before the answer; 14 mirrors the owner's
+ *                  reported long-turn shape and leaves time to steer it.
+ *   --omit-terminal end the HTTP response without `done`/`error`.
+ *   --stall-stream  leave the response open after the script, without a terminal
+ *                  event or keepalive; the shell watchdog must settle it.
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -51,6 +78,9 @@ const opt = (name, fallback) => {
 const PORT = Number(opt("--port", process.env.GHOSTD_PORT ?? "7717"));
 const HOST = "127.0.0.1";
 const DELTA_MS = flag("--slow") ? 30 : 12;
+const TOOL_STEPS = Math.max(1, Math.min(100, Number(opt("--tool-steps", "1")) || 1));
+/** The contract's `askTimeoutSeconds` default; 0 means no deadline is armed. */
+const ASK_TIMEOUT_S = Math.max(0, Number(opt("--ask-timeout", "120")) || 0);
 const OWNS_GHOSTS_ROOT = !process.env.GHOSTS_ROOT;
 const GHOSTS_ROOT = process.env.GHOSTS_ROOT
   || mkdtempSync(join(tmpdir(), "ghost-shell-mock-"));
@@ -64,6 +94,8 @@ const ghosts = ["casper", "moaning-myrtle"].map((name) => ({
 }));
 
 // ---- Browsable ghost context ----------------------------------------------
+// Metadata stays in memory. The default root gets matching temporary files so
+// FilePane exercises real atomic reads/writes without touching ~/Ghosts.
 const MOCK_DOCS = [
   {
     path: "docs/launch-notes.md",
@@ -99,27 +131,277 @@ const MOCK_MEMORY = [
 ];
 
 const MOCK_AGENTS = [
-  ["designer", "UI/UX implementation and visual refinement.", ["read", "grep", "glob"], ["@designer"], null],
-  ["librarian", "Source-verified external library research.", ["read", "grep", "glob", "web_search"], ["@smol"], null],
-  ["reviewer", "Correctness and quality review.", ["read", "grep", "glob"], ["@slow"], ["scout"]],
-  ["scout", "Fast read-only codebase investigation.", ["read", "grep", "glob"], ["@smol"], null],
-  ["security-reviewer", "Evidence-backed vulnerability discovery.", ["read", "grep", "glob"], [], null],
-  ["sonic", "Strictly mechanical updates and collection.", null, ["@smol"], null],
-  ["task", "General-purpose delegated implementation.", null, ["@task"], "*"],
-].map(([name, description, tools, model, spawns]) => ({
-  name,
-  description,
-  source: "bundled",
-  tools,
-  model,
-  spawns,
-}));
+  {
+    name: "designer",
+    description: "UI/UX implementation and visual refinement.",
+    systemPrompt: "Implement and review interfaces with close attention to hierarchy, accessibility, and the existing design system.",
+    tools: ["read", "grep", "glob"],
+    model: ["@designer"],
+    spawns: null,
+  },
+  {
+    name: "librarian",
+    description: "Source-verified external library research.",
+    systemPrompt: "Research external libraries and APIs from source code and official documentation. Ground every answer in evidence.",
+    tools: ["read", "grep", "glob", "web_search"],
+    model: ["@smol"],
+    spawns: null,
+  },
+  {
+    name: "reviewer",
+    description: "Correctness and quality review.",
+    systemPrompt: "Review changes for concrete, actionable defects and return an evidence-backed verdict.",
+    tools: ["read", "grep", "glob"],
+    model: ["@slow"],
+    spawns: ["scout"],
+  },
+  {
+    name: "scout",
+    description: "Fast read-only codebase investigation.",
+    systemPrompt: "Investigate the codebase rapidly and return compressed findings for handoff.",
+    tools: ["read", "grep", "glob"],
+    model: ["@smol"],
+    spawns: null,
+  },
+  {
+    name: "security-reviewer",
+    description: "Evidence-backed vulnerability discovery.",
+    systemPrompt: "Trace attacker-controlled input to dangerous sinks and report only demonstrated vulnerabilities.",
+    tools: ["read", "grep", "glob"],
+    model: [],
+    spawns: null,
+  },
+  {
+    name: "sonic",
+    description: "Strictly mechanical updates and collection.",
+    systemPrompt: "Perform only the assigned mechanical update or data-collection task.",
+    tools: null,
+    model: ["@smol"],
+    spawns: null,
+  },
+  {
+    name: "task",
+    description: "General-purpose delegated implementation.",
+    systemPrompt: "Complete the delegated task with full access to the available tools.",
+    tools: null,
+    model: ["@task"],
+    spawns: "*",
+  },
+].map(agent => ({ ...agent, source: "bundled" }));
+
+// Effective command discovery is session-scoped in the real daemon. These
+// exercise built-ins, aliases, input hints, subcommands, skills, and a project
+// command so both the full browser and slash completion have meaningful data.
+const MOCK_COMMANDS = [
+  {
+    name: "help",
+    aliases: ["?"],
+    description: "Show OMP's command help and keyboard shortcuts.",
+    input: null,
+    subcommands: [],
+    source: "built-in",
+  },
+  {
+    name: "tree",
+    aliases: ["branch", "branches"],
+    description: "Inspect and move through the current conversation tree.",
+    input: "[entry]",
+    subcommands: [{ name: "show" }, { name: "list" }],
+    source: "built-in",
+    availability: "unsupported",
+    unavailableReason: "Ghost forks conversations instead of rewinding an in-place tree.",
+  },
+  {
+    name: "settings",
+    aliases: ["config"],
+    description: "Open OMP settings for this ghost.",
+    input: null,
+    subcommands: [],
+    source: "built-in",
+    availability: "partial",
+    unavailableReason: "Model routing is available in Ghost's model switcher; other OMP settings remain file-backed.",
+  },
+  {
+    name: "skill:research",
+    aliases: [],
+    description: "Force-invoke the research skill with optional arguments.",
+    input: "[topic]",
+    subcommands: [],
+    source: "skill",
+  },
+  {
+    name: "release-notes",
+    aliases: ["release"],
+    description: "Draft release notes from the current project history.",
+    input: { usage: "<version>" },
+    subcommands: [],
+    source: "project",
+  },
+];
+
+// Raw values stay only in the mock's in-memory store. `mcpSnapshot` mirrors the
+// real daemon's sanitized GET response, including names/counts but never the
+// argument, environment, header, OAuth, or URL-query values themselves.
+const mcpStore = new Map();
+
+function ghostMcp(name) {
+  if (!mcpStore.has(name)) {
+    mcpStore.set(name, new Map([
+      ["local-files", {
+        type: "stdio",
+        command: "npx",
+        args: ["-y", "@modelcontextprotocol/server-filesystem", "/tmp/demo"],
+        env: { MCP_DEMO_TOKEN: "never-return-this-value" },
+        envPolicy: "literal",
+        cwd: "/tmp/demo",
+      }],
+      ["project-api", {
+        type: "http",
+        url: "https://example.com/mcp?token=never-return-this-query",
+        headers: { Authorization: "Bearer never-return-this-header" },
+        headerPolicy: "origin-locked",
+      }],
+      ["legacy-events", {
+        type: "sse",
+        url: "https://example.com/events",
+        enabled: false,
+      }],
+    ]));
+  }
+  return mcpStore.get(name);
+}
+
+function configuredKeys(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const keys = Object.keys(value).sort();
+  return keys.length > 0 ? { keys, configured: true } : undefined;
+}
+
+function sanitizeRemoteUrl(value) {
+  try {
+    const url = new URL(String(value));
+    url.username = "";
+    url.password = "";
+    for (const key of new Set(url.searchParams.keys())) {
+      url.searchParams.delete(key);
+      url.searchParams.append(key, "[configured]");
+    }
+    return url.toString();
+  } catch {
+    return String(value || "").replace(/[?#].*$/, "?[configured]");
+  }
+}
+
+function sanitizeMcpConfig(config) {
+  const type = config?.type === "http" || config?.type === "sse" ? config.type : "stdio";
+  const shared = {};
+  if (typeof config?.timeout === "number") shared.timeout = config.timeout;
+  if (config?.requestIdFormat === "string" || config?.requestIdFormat === "number")
+    shared.requestIdFormat = config.requestIdFormat;
+  if (config?.auth) shared.auth = { type: config.auth.type || "oauth", configured: Boolean(config.auth.credentialId) };
+  if (config?.oauth) {
+    shared.oauth = {
+      configured: Object.keys(config.oauth).length > 0,
+      clientIdConfigured: Boolean(config.oauth.clientId),
+      clientSecretConfigured: Boolean(config.oauth.clientSecret),
+    };
+  }
+  if (type === "http" || type === "sse") {
+    const headers = configuredKeys(config.headers);
+    return {
+      ...shared,
+      type,
+      url: sanitizeRemoteUrl(config.url),
+      ...(config.headerPolicy === "origin-locked" ? { headerPolicy: config.headerPolicy } : {}),
+      ...(headers ? { headers } : {}),
+    };
+  }
+  const environment = configuredKeys(config.env);
+  return {
+    ...shared,
+    type: "stdio",
+    command: String(config.command || ""),
+    ...(typeof config.cwd === "string" ? { cwd: config.cwd } : {}),
+    ...(config.envPolicy === "literal" ? { envPolicy: config.envPolicy } : {}),
+    argumentCount: Array.isArray(config.args) ? config.args.length : 0,
+    ...(environment ? { environment } : {}),
+  };
+}
+
+function mcpSnapshot(name) {
+  return {
+    servers: [...ghostMcp(name)].map(([serverName, config]) => ({
+      name: serverName,
+      enabled: config.enabled !== false,
+      source: "canonical",
+      path: ".omp/mcp.json",
+      config: sanitizeMcpConfig(config),
+    })).sort((a, b) => a.name.localeCompare(b.name)),
+    skipped: [],
+  };
+}
+
+function validMcpConfig(config) {
+  if (!config || typeof config !== "object" || Array.isArray(config)) return false;
+  const type = config.type || "stdio";
+  if (type === "stdio") return typeof config.command === "string" && config.command.trim() !== "";
+  if (type === "http" || type === "sse") return typeof config.url === "string" && config.url.trim() !== "";
+  return false;
+}
+
+// ---- Connect fixtures ----------------------------------------------------
+const liveStates = new Map();
+const collabStates = new Map();
+let collabSeq = 0;
+
+function ghostLive(name, sessionId) {
+  if (!liveStates.has(name)) liveStates.set(name, new Map());
+  const sessions = liveStates.get(name);
+  if (!sessions.has(sessionId)) {
+    sessions.set(sessionId, {
+      phase: "idle",
+      muted: false,
+      inputLevel: 0,
+      transcript: [],
+      provider: "openai-codex",
+      remote: true,
+    });
+  }
+  return sessions.get(sessionId);
+}
+
+function setGhostLive(name, sessionId, state) {
+  if (!liveStates.has(name)) liveStates.set(name, new Map());
+  liveStates.get(name).set(sessionId, state);
+  return state;
+}
+
+function ghostCollab(name, sessionId) {
+  if (!collabStates.has(name)) collabStates.set(name, new Map());
+  const sessions = collabStates.get(name);
+  if (!sessions.has(sessionId)) sessions.set(sessionId, { active: false, phase: "idle" });
+  return sessions.get(sessionId);
+}
+
+function setGhostCollab(name, sessionId, state) {
+  if (!collabStates.has(name)) collabStates.set(name, new Map());
+  collabStates.get(name).set(sessionId, state);
+  return state;
+}
+
+const deletedContext = new Map();
+
+function contextDeletedFor(name) {
+  if (!deletedContext.has(name)) deletedContext.set(name, new Set());
+  return deletedContext.get(name);
+}
 
 function contextSnapshot(name) {
+  const deleted = contextDeletedFor(name);
   return {
     character: { path: "character.md", title: name },
-    docs: MOCK_DOCS,
-    memory: MOCK_MEMORY,
+    docs: MOCK_DOCS.filter((item) => !deleted.has(item.path)),
+    memory: MOCK_MEMORY.filter((item) => !deleted.has(item.path)),
     agents: MOCK_AGENTS,
     skipped: [],
   };
@@ -178,12 +460,68 @@ const sessionStore = new Map();
 // demoed at all. Opaque and monotonic here, as it is in a real transcript.
 let entrySeq = 0;
 let forkSeq = 0;
-const entry = (message) => ({ ...message, entryId: `entry-${++entrySeq}` });
+const nextEntryId = () => `entry-${++entrySeq}`;
+const entry = (message) => ({ ...message, entryId: nextEntryId() });
+
+/**
+ * The two questions the seeded transcript timed out on. They are the live ask
+ * again when that card is re-answered, so they live where both readers reach
+ * them. The first recommends an option; the second recommends nothing, which is
+ * the other thing a restored card has to be able to say.
+ */
+const SEEDED_QUESTIONS = {
+  notes: {
+    id: "q-notes",
+    header: "Launch notes",
+    question: "Three sections in roadmap.md are unfinished. Which do you want me to draft first?",
+    recommended: 1,
+    options: [
+      { label: "The roadmap section", description: "Six bullets, mostly written. I'd tidy and finish it." },
+      {
+        label: "The pricing page copy",
+        description: "Nothing written yet; I'd draft it from your docs and memory.",
+        preview: "Three tiers, no annual discount, one sentence each.",
+      },
+      { label: "The changelog", description: "Mechanical — I can generate it from the git log." },
+      { label: "None of them; just tell me what's left", description: "No writing. One paragraph back." },
+    ],
+  },
+  archive: {
+    id: "q-archive",
+    header: "Old exports",
+    question: "The archive holds 340 files from the hosted export. What should I do with them?",
+    options: [
+      { label: "Leave them exactly as they are" },
+      { label: "Index them into memory", description: "Slow, and it rewrites nothing on disk." },
+      { label: "Move them to the trash", description: "Recoverable from the file manager." },
+    ],
+  },
+};
 
 function ghostSessions(name) {
   if (!sessionStore.has(name)) {
     const now = Date.now();
     const seed = new Map();
+    // A failed tool call and a timed-out ask are rehydrate-only surfaces: no
+    // turn produces them on demand, so unless they are in the seed there is
+    // nothing to open. `content` as an ordered part list is the stored shape
+    // that can carry them (TurnBlocks.partsOf); a plain string cannot.
+    const notesResult = nextEntryId();
+    const archiveResult = nextEntryId();
+    const notesAsk = {
+      type: "toolCall",
+      id: "call-seed-ask-notes",
+      name: "ask",
+      arguments: { questions: [SEEDED_QUESTIONS.notes] },
+      ghostAsk: { resultEntryId: notesResult, settled: "timedOut" },
+    };
+    const archiveAsk = {
+      type: "toolCall",
+      id: "call-seed-ask-archive",
+      name: "ask",
+      arguments: { questions: [SEEDED_QUESTIONS.archive] },
+      ghostAsk: { resultEntryId: archiveResult, settled: "timedOut" },
+    };
     const titled = {
       id: `sess-${name}-1`,
       title: "first contact",
@@ -193,8 +531,45 @@ function ghostSessions(name) {
         entry({ role: "user", content: "hello, who lives here?", timestamp: now - 7_200_000 }),
         entry({ role: "assistant", content: `I'm **${name}**. This thread was seeded by the mock so resume has history to show.`, timestamp: now - 7_195_000 }),
         entry({ role: "user", content: "and what do you remember about me?", timestamp: now - 3_610_000 }),
-        entry({ role: "assistant", content: "Nothing yet — but branch that question and you get a second thread to ask it differently.", timestamp: now - 3_600_000 }),
+        entry({ role: "assistant", content: "Nothing yet — but branch that question and you get a second thread to ask it differently.", timestamp: now - 3_609_000 }),
+        entry({ role: "user", content: "open the launch notes and tell me what's left", timestamp: now - 3_608_000 }),
+        entry({
+          role: "assistant",
+          timestamp: now - 3_607_000,
+          content: [
+            { type: "text", text: "Opening the notes" },
+            // A restored call has no live intent and no summary, so the card
+            // falls back to the arguments: they have to say what it was for.
+            {
+              type: "toolCall",
+              id: "call-seed-browser",
+              name: "ghost_browser",
+              arguments: { action: "open", url: "https://example.com/launch-notes" },
+              failed: true,
+            },
+            notesAsk,
+          ],
+        }),
+        entry({ role: "assistant", content: "I never got an answer, so I stopped at the roadmap section and left the rest alone.", timestamp: now - 3_606_000 }),
+        entry({ role: "user", content: "and the old export archive?", timestamp: now - 3_605_000 }),
+        entry({
+          role: "assistant",
+          timestamp: now - 3_604_000,
+          content: [
+            { type: "text", text: "One thing before I touch the archive" },
+            archiveAsk,
+          ],
+        }),
+        entry({ role: "assistant", content: "Nothing was chosen for me either, so the archive is exactly where it was.", timestamp: now - 3_600_000 }),
       ],
+      // The ask *results* are entries of this conversation that no renderable
+      // message carries — the transcript route drops tool-result messages — so
+      // the mock keeps them here, which is also what makes an unknown
+      // re-answer entryId a 400 rather than a guess.
+      askResults: new Map([
+        [notesResult, { call: notesAsk }],
+        [archiveResult, { call: archiveAsk }],
+      ]),
     };
     const untitled = {
       id: `sess-${name}-2`,
@@ -206,8 +581,23 @@ function ghostSessions(name) {
         entry({ role: "assistant", content: "Ask away — this is the untitled seed conversation.", timestamp: now - 595_000 }),
       ],
     };
+    // The Claude Code resume sidecar. It lists like any other conversation, but
+    // that runtime owns both its title and its transcript, so the mock holds
+    // neither: renaming it is 409 and reading it is 404. Its `messageCount` is
+    // a number the sidecar reports rather than one derived from messages the
+    // daemon has, so it is stored instead of counted.
+    const sidecar = {
+      id: `sess-${name}-claude`,
+      title: "Claude Code",
+      runtime: "claude-code",
+      createdAt: new Date(now - 1_800_000).toISOString(),
+      updatedAt: new Date(now - 1_500_000).toISOString(),
+      messageCount: 18,
+      messages: [],
+    };
     seed.set(titled.id, titled);
     seed.set(untitled.id, untitled);
+    seed.set(sidecar.id, sidecar);
     sessionStore.set(name, seed);
   }
   return sessionStore.get(name);
@@ -268,10 +658,13 @@ const sessionSummary = (s) => ({
   title: s.title ?? null,
   createdAt: s.createdAt,
   updatedAt: s.updatedAt,
-  messageCount: s.messages.length,
+  messageCount: s.messageCount ?? s.messages.length,
+  // Pin state is in the listing shape; the pin route itself is not mocked, so
+  // nothing here ever flips it and the listing order is plain newest-first.
+  pinned: s.pinned === true,
 });
 
-function recordTurn(name, sessionId, prompt, assistantText) {
+function recordTurn(name, sessionId, prompt, assistantText, ownerMessages = []) {
   if (!sessionId) return;
   const store = ghostSessions(name);
   const now = Date.now();
@@ -282,6 +675,9 @@ function recordTurn(name, sessionId, prompt, assistantText) {
     store.set(sessionId, s);
   }
   s.messages.push(entry({ role: "user", content: prompt, timestamp: now }));
+  for (const text of ownerMessages) {
+    s.messages.push(entry({ role: "user", content: text, timestamp: now }));
+  }
   s.messages.push(entry({ role: "assistant", content: assistantText, timestamp: now }));
   s.updatedAt = new Date(now).toISOString();
   // Background titling after the first turn: derive a title from the prompt.
@@ -336,11 +732,104 @@ const readBody = (req) =>
     req.on("error", reject);
   });
 
+// ---- Pending asks ----------------------------------------------------------
+// OMP's ask tool pauses the turn while the SSE stream stays open, so the mock
+// pauses the same way: the turn script awaits a promise and the HTTP routes
+// settle it. One ask per conversation, which is all OMP allows.
+
+/** "<ghost> <conversation>" → the ask a paused turn is waiting on. */
+const pendingAsks = new Map();
+const askKey = (name, sessionId) => JSON.stringify([name, sessionId]);
+let askSeq = 0;
+
+/** Yielded by a script where a real turn blocks inside the ask tool. */
+const ASK_WAIT = Symbol("ask-wait");
+
+/** What the clock submits on expiry: the recommended option, or nothing. */
+function timedOutResults(questions) {
+  return questions.map((question) => {
+    const options = question.options ?? [];
+    const recommended = typeof question.recommended === "number"
+      ? options[question.recommended] : undefined;
+    return { id: question.id, selectedOptions: recommended ? [recommended.label] : [] };
+  });
+}
+
+/**
+ * Present a question and hand back the promise the turn blocks on. It resolves
+ * with whichever got there first — a valid POST, or the deadline.
+ */
+function openAsk(name, sessionId, questions) {
+  const key = askKey(name, sessionId);
+  const { promise, resolve } = Promise.withResolvers();
+  const armed = ASK_TIMEOUT_S > 0;
+  const pending = {
+    view: {
+      id: `ask-${++askSeq}`,
+      questions,
+      ...(armed ? { timeoutAt: new Date(Date.now() + ASK_TIMEOUT_S * 1000).toISOString() } : {}),
+    },
+    timer: null,
+    settle(answer) {
+      if (pendingAsks.get(key) !== pending) return false;
+      pendingAsks.delete(key);
+      clearTimeout(pending.timer);
+      resolve(answer);
+      return true;
+    },
+  };
+  pendingAsks.set(key, pending);
+  // On expiry the daemon answers with the question's own recommendation and
+  // lets the turn carry on, so a question nobody is there for never stalls one.
+  if (armed) {
+    pending.timer = setTimeout(
+      () => pending.settle({ kind: "submit", timedOut: true, results: timedOutResults(questions) }),
+      ASK_TIMEOUT_S * 1000,
+    );
+  }
+  return promise;
+}
+
+/** How the question closed, for the tool card's summary line. */
+function askSummary(answer) {
+  if (answer.kind === "chat") return "Moved to chat";
+  if (answer.kind !== "submit") return "Dismissed without an answer";
+  const chosen = (answer.results ?? []).flatMap((result) => result.selectedOptions ?? []);
+  const picked = chosen.length > 0 ? chosen.join(", ") : "nothing";
+  return answer.timedOut ? `Timed out — answered with ${picked}` : `Answered with ${picked}`;
+}
+
+/** The persisted `ghostAsk.settled` a live answer becomes on a re-answer. */
+const settledFrom = (answer) => {
+  if (answer.kind === "chat") return "chat";
+  if (answer.kind !== "submit") return "cancelled";
+  return answer.timedOut ? "timedOut" : "submitted";
+};
+
+/** The question a scripted turn stops on. */
+const LIVE_QUESTION = {
+  id: "q-live",
+  header: "Before I write anything",
+  question: "I can take this three ways. Which do you want?",
+  recommended: 1,
+  options: [
+    { label: "Answer here and stop", description: "One paragraph back, nothing written to disk." },
+    {
+      label: "Answer and keep it as a memory",
+      description: "One memory file, described and dated.",
+      preview: "memory/what-the-owner-asked-for.md",
+    },
+    { label: "Answer and draft a doc", description: "A new file under docs/, yours to edit after." },
+    { label: "Neither — forget I asked", description: "No answer, no files." },
+  ],
+};
+
 /**
  * A scripted turn: the ghost narrating itself, one tool call — two for a ghost
- * still being written — then a two-paragraph answer.
+ * still being written, and one more when the prompt asks for a question —
+ * then a two-paragraph answer.
  */
-function* script(name, prompt) {
+function* script(name, prompt, sessionId) {
   let contentIndex = 0;
   yield { type: "start" };
   // The preamble a real model emits before reaching for a tool. It belongs
@@ -362,6 +851,47 @@ function* script(name, prompt) {
     contentIndex: memory,
     toolCall: { type: "toolCall", id: "call_1", name: "read_memory", arguments: { query: prompt.slice(0, 24) } },
   };
+  yield {
+    type: "tool_execution_start",
+    id: "call_1",
+    toolName: "read_memory",
+    arguments: { query: prompt.slice(0, 24) },
+    intent: "Read the relevant memory",
+  };
+  yield {
+    type: "tool_execution_end",
+    id: "call_1",
+    toolName: "read_memory",
+    isError: false,
+    summary: "Memory checked",
+  };
+  for (let step = 1; step < TOOL_STEPS; step++) {
+    const index = contentIndex++;
+    const id = `call_long_${step}`;
+    const toolName = step % 3 === 0 ? "grep" : (step % 3 === 1 ? "read" : "glob");
+    const args = { step: step + 1, path: `docs/step-${step + 1}.md` };
+    yield { type: "toolcall_start", contentIndex: index, id, toolName };
+    yield { type: "toolcall_delta", contentIndex: index, delta: JSON.stringify(args) };
+    yield {
+      type: "toolcall_end",
+      contentIndex: index,
+      toolCall: { type: "toolCall", id, name: toolName, arguments: args },
+    };
+    yield {
+      type: "tool_execution_start",
+      id,
+      toolName,
+      arguments: args,
+      intent: `Run tool-heavy step ${step + 1}`,
+    };
+    yield {
+      type: "tool_execution_end",
+      id,
+      toolName,
+      isError: false,
+      summary: `Completed step ${step + 1}`,
+    };
+  }
   // A ghost whose greeting said it has no character writes one during the turn,
   // which is what puts a `ghost_character` card in the trace to look at.
   if (GREETINGS[name]?.onboarding) {
@@ -376,10 +906,34 @@ function* script(name, prompt) {
       toolCall: { type: "toolCall", id: "call_2", name: "ghost_character", arguments: { action: "write", content } },
     };
   }
+  // The ask surface, on the documented trigger word. `toolcall_end` clears the
+  // HUD's pending ask, so the question opens after it — on the
+  // `tool_execution_start` the client answers by starting its ask poll.
+  let asked = "";
+  if (/ask/iu.test(prompt)) {
+    const index = contentIndex++;
+    const questions = [LIVE_QUESTION];
+    const call = { type: "toolCall", id: "call_ask", name: "ask", arguments: { questions } };
+    yield { type: "toolcall_start", contentIndex: index, id: call.id, toolName: "ask" };
+    yield { type: "toolcall_delta", contentIndex: index, delta: JSON.stringify(call.arguments) };
+    yield { type: "toolcall_end", contentIndex: index, toolCall: call };
+    const wait = openAsk(name, sessionId, questions);
+    yield {
+      type: "tool_execution_start",
+      id: call.id,
+      toolName: "ask",
+      arguments: call.arguments,
+      intent: "Ask before writing anything",
+    };
+    const answered = yield { sentinel: ASK_WAIT, wait };
+    asked = askSummary(answered);
+    yield { type: "tool_execution_end", id: call.id, toolName: "ask", isError: false, summary: asked };
+  }
   const answer = contentIndex++;
   yield { type: "text_start", contentIndex: answer };
   const reply =
     `You said: **${prompt}**\n\n`
+    + (asked ? `On the question: **${asked}**.\n\n` : "")
     + `I am ${name}, a mock ghost. I live entirely in this dev harness — no pi session, `
     + `no model, no memory files. The real daemon streams the same pi-messages events, `
     + `so whatever renders here renders there.`;
@@ -395,43 +949,167 @@ function* script(name, prompt) {
     totalTokens: 812 + (reply.length >> 2),
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
   };
-  yield flag("--fail")
-    ? { type: "error", reason: "error", usage, errorMessage: "mock-ghostd --fail" }
-    : { type: "done", reason: "stop", usage };
+  if (!flag("--omit-terminal") && !flag("--stall-stream")) {
+    yield flag("--fail")
+      ? { type: "error", reason: "error", usage, errorMessage: "mock-ghostd --fail" }
+      : { type: "done", reason: "stop", usage };
+  }
 }
 
 /** Ghosts with a turn in flight; a delete against one of these is 409 ghost_busy. */
 const answering = new Set();
+/** Active turn queues, keyed exactly like the daemon's session routes. */
+const activeTurns = new Map();
+const turnKey = (name, sessionId) => JSON.stringify([name, sessionId]);
 
-async function streamTurn(req, res, name, body) {
-  const prompt = extractPrompt(body);
-  const sessionId = body?.options?.sessionId;
+/** Open an SSE response, and free a paused turn if the client walks away. */
+function openStream(req, res, name, sessionId) {
   res.writeHead(200, {
     "content-type": "text/event-stream; charset=utf-8",
     "cache-control": "no-store",
     connection: "keep-alive",
     "x-ghost-turn-id": req.headers["x-ghost-turn-id"] ?? crypto.randomUUID(),
   });
-  const events = script(name, prompt);
-  let closed = false;
+  const keepalive = flag("--stall-stream") ? null : setInterval(() => {
+    if (!res.writableEnded) res.write(": keepalive\n\n");
+  }, 15_000);
+  const stream = { closed: false };
+  res.on("close", () => {
+    stream.closed = true;
+    clearInterval(keepalive);
+    // Nobody is left to answer, and the ask holds `answering` open until it is
+    // settled — which would leave the ghost busy for the whole timeout.
+    pendingAsks.get(askKey(name, sessionId))?.settle({ kind: "cancel" });
+  });
+  return stream;
+}
+
+/**
+ * Drive a scripted generator onto an SSE response. Events go out as they are
+ * yielded; the ASK_WAIT sentinel is awaited instead and its answer fed back in,
+ * which is how a turn pauses on a question. Returns the last completed
+ * assistant text, or null if the client left mid-stream.
+ */
+async function pump(res, events, stream, turn) {
   let assistantText = "";
-  res.on("close", () => (closed = true));
-  answering.add(name);
-  try {
-    for (const event of events) {
-      if (closed) return;
-      if (event.type === "text_end") assistantText = event.content;
-      res.write(`data: ${JSON.stringify(event)}\n\n`);
-      await new Promise((r) => setTimeout(r, event.type === "text_delta" ? DELTA_MS : 220));
+  let resumeWith;
+  for (;;) {
+    const step = events.next(resumeWith);
+    resumeWith = undefined;
+    if (step.done) return assistantText;
+    if (stream.closed) return null;
+    const event = step.value;
+    if (event.sentinel === ASK_WAIT) {
+      resumeWith = await event.wait;
+      continue;
     }
+    if (event.type === "text_end") assistantText = event.content;
+    res.write(`data: ${JSON.stringify(event)}\n\n`);
+    // OMP injects accepted steering at the next provider boundary and emits a
+    // user message before the following assistant step. QueueLine owns it until
+    // this point; owner_message moves it into transcript order.
+    if (event.type === "tool_execution_end" && turn.steering.length > 0) {
+      for (const text of turn.steering.splice(0)) {
+        turn.consumedOwners.push(text);
+        res.write(`data: ${JSON.stringify({ type: "owner_message", text })}\n\n`);
+      }
+    }
+    await new Promise((r) => setTimeout(r, event.type === "text_delta" ? DELTA_MS : 220));
+  }
+}
+
+async function streamTurn(req, res, name, body) {
+  const prompt = extractPrompt(body);
+  const sessionId = body?.options?.sessionId;
+  const stream = openStream(req, res, name, sessionId);
+  const key = turnKey(name, sessionId);
+  const turn = { streaming: true, steering: [], followUp: [], consumedOwners: [] };
+  activeTurns.set(key, turn);
+  answering.add(name);
+  let assistantText;
+  try {
+    assistantText = await pump(res, script(name, prompt, sessionId), stream, turn);
   } finally {
     answering.delete(name);
+    turn.streaming = false;
+    activeTurns.delete(key);
+  }
+  if (assistantText === null) return;
+  if (flag("--stall-stream")) {
+    await new Promise((resolve) => res.once("close", resolve));
+    return;
   }
   res.end();
   // Persist the completed turn so the session listing + transcript reflect it,
   // matching the daemon's lazy-create-and-title behaviour. A --fail turn wrote
   // no reply, so nothing is recorded.
-  if (!flag("--fail")) recordTurn(name, sessionId, prompt, assistantText);
+  if (!flag("--fail")) {
+    recordTurn(name, sessionId, prompt, assistantText, turn.consumedOwners);
+  }
+}
+
+/** Where the message carrying an ask sits, or -1 once a branch discarded it. */
+const askCallIndex = (session, call) =>
+  session.messages.findIndex((m) => Array.isArray(m.content) && m.content.includes(call));
+
+/**
+ * Re-answering a persisted ask: rewind to the message that carried it, put the
+ * same question back on screen, then answer from there. The real daemon reopens
+ * the ask first and commits the branch after; the mock commits first so the
+ * dialog opens over history that already reads as rewound.
+ */
+function* reanswerScript(name, sessionId, session, entryId, record) {
+  const call = record.call;
+  const questions = call.arguments.questions;
+  const rewound = session.messages.slice(0, askCallIndex(session, call) + 1);
+  yield { type: "branch_changed", transcript: transcriptOf({ ...session, messages: rewound }) };
+  const id = `ask-reanswer-${entryId}`;
+  const wait = openAsk(name, sessionId, questions);
+  yield {
+    type: "tool_execution_start",
+    id,
+    toolName: "ask",
+    arguments: { questions },
+    intent: "Re-answer an earlier question",
+  };
+  const answered = yield { sentinel: ASK_WAIT, wait };
+  const settled = askSummary(answered);
+  yield { type: "tool_execution_end", id, toolName: "ask", isError: false, summary: settled };
+  // The branch is a commit, not a preview: the old result is overwritten and
+  // everything after it is gone, so a second re-answer starts from what this
+  // one decided rather than from the seed.
+  call.ghostAsk.settled = settledFrom(answered);
+  const reply = `**${settled}** — and everything that came after the question went with the branch.`;
+  yield { type: "text_start", contentIndex: 0 };
+  for (const chunk of reply.match(/\s*\S+/gu) ?? []) {
+    yield { type: "text_delta", contentIndex: 0, delta: chunk };
+  }
+  yield { type: "text_end", contentIndex: 0, content: reply };
+  session.messages = [...rewound, entry({ role: "assistant", content: reply, timestamp: Date.now() })];
+  session.updatedAt = new Date().toISOString();
+  const usage = {
+    input: 640,
+    output: reply.length >> 2,
+    cacheRead: 0,
+    cacheWrite: 0,
+    totalTokens: 640 + (reply.length >> 2),
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+  };
+  yield { type: "done", reason: "stop", usage };
+}
+
+async function streamReanswer(req, res, name, sessionId, session, entryId, record) {
+  const stream = openStream(req, res, name, sessionId);
+  answering.add(name);
+  try {
+    await pump(res, reanswerScript(name, sessionId, session, entryId, record), stream, {
+      steering: [],
+      consumedOwners: [],
+    });
+  } finally {
+    answering.delete(name);
+  }
+  res.end();
 }
 
 /** Pull the last user message's text out of a pi-messages `context`. */
@@ -572,11 +1250,23 @@ const roles = new Map();
 const routing = new Map();
 const ROUTE_ROLES = [
   ["chat_model", "default", "Chat"],
+  ["smol_model", "smol", "Fast"],
+  ["slow_model", "slow", "Thinking"],
   ["vision_model", "vision", "Vision"],
-  ["smol_model", "smol", "Smol"],
+  ["plan_model", "plan", "Architect"],
+  ["designer_model", "designer", "Designer"],
+  ["commit_model", "commit", "Commit"],
+  ["tiny_model", "tiny", "Tiny"],
+  ["task_model", "task", "Subtask"],
+  ["advisor_model", "advisor", "Advisor"],
   ["general_purpose_model", "general", "General purpose"],
   ["research_model", "research", "Research"],
 ];
+const AUTO_ROUTE_ROLES = new Set([
+  "chat_model", "smol_model", "slow_model", "designer_model",
+  "tiny_model", "task_model", "advisor_model",
+]);
+const COMPAT_ROUTE_ROLES = new Set(["general_purpose_model", "research_model"]);
 
 const modelRow = (m) => ({
   provider: m.provider,
@@ -637,11 +1327,13 @@ function listModels(name, params) {
 function routeState(name) {
   if (!routing.has(name)) routing.set(name, {});
   const state = routing.get(name);
-  const chat = roles.get(name) || resolveCurrent(name).current;
+  const automatic = resolveCurrent(name).current;
   return {
-    roles: ROUTE_ROLES.map(([role, ompRole, label]) => {
+    roles: ROUTE_ROLES.filter(([role]) => !COMPAT_ROUTE_ROLES.has(role) || state[role])
+      .map(([role, ompRole, label]) => {
       const configured = state[role] || {};
-      const primary = role === "chat_model" ? (configured.primary || chat) : configured.primary;
+      const primary = role === "chat_model"
+        ? (configured.primary || roles.get(name)) : configured.primary;
       const view = (binding) => {
         if (!binding) return null;
         const model = CATALOG.find((m) => m.provider === binding.provider && m.id === binding.id);
@@ -655,6 +1347,9 @@ function routeState(name) {
         ompRole,
         label,
         primary: view(primary),
+        effective: view(primary || (AUTO_ROUTE_ROLES.has(role) ? automatic : null)),
+        source: primary ? "explicit" : (AUTO_ROUTE_ROLES.has(role) && automatic
+          ? "auto" : "unavailable"),
         fallbacks: (configured.fallbacks || []).map(view),
       };
     }),
@@ -685,10 +1380,37 @@ createServer(async (req, res) => {
   const ghost = ghosts.find((g) => g.name === name);
   if (!ghost) return json(res, 404, { error: { message: `no ghost named ${name}`, code: "not_found" } });
 
+
   if (parts.length === 4 && parts[3] === "context" && req.method === "GET") {
     return json(res, 200, contextSnapshot(name));
   }
-
+  if (parts.length === 4 && parts[3] === "context" && req.method === "DELETE") {
+    const body = await readBody(req).catch(() => ({}));
+    const section = body?.section;
+    const path = typeof body?.path === "string" ? body.path : "";
+    if ((section !== "docs" && section !== "memory") || path === ""
+        || body?.confirm !== path) {
+      return json(res, 400, {
+        error: {
+          message: "Context deletion requires an exact path confirmation",
+          code: "confirmation_required",
+        },
+      });
+    }
+    const catalog = section === "docs" ? MOCK_DOCS : MOCK_MEMORY;
+    if (!catalog.some((item) => item.path === path) || contextDeletedFor(name).has(path)) {
+      return json(res, 404, {
+        error: { message: "No such context file", code: "not_found" },
+      });
+    }
+    const trash = join(GHOSTS_ROOT, ".mock-trash", name, path.replace(/\//gu, "--"));
+    if (OWNS_GHOSTS_ROOT) {
+      mkdirSync(join(GHOSTS_ROOT, ".mock-trash", name), { recursive: true });
+      renameSync(join(ghost.dir, path), trash);
+    }
+    contextDeletedFor(name).add(path);
+    return json(res, 200, { ok: true, path, trash });
+  }
   // Banishing a ghost. The real daemon moves the home to the XDG trash so it is
   // recoverable from the desktop; the mock just drops it from memory, and
   // answers the same `trash` path so the surfaces see the contract's shape.
@@ -706,14 +1428,182 @@ createServer(async (req, res) => {
     if (OWNS_GHOSTS_ROOT) rmSync(ghost.dir, { recursive: true, force: true });
     ghosts.splice(ghosts.indexOf(ghost), 1);
     sessionStore.delete(name);
+    deletedContext.delete(name);
+    mcpStore.delete(name);
+    liveStates.delete(name);
+    collabStates.delete(name);
     roles.delete(name);
     routing.delete(name);
     return json(res, 200, { ok: true, trash: join(TRASH_ROOT, name) });
   }
 
+  // Renaming a ghost moves its home directory; conversation ids survive it
+  // untouched, so the mock re-keys the ghost's state under the new name rather
+  // than rebuilding any of it. A pending ask is keyed by ghost name too, but
+  // one only exists mid-turn and `ghost_busy` already refuses that.
+  if (parts.length === 4 && parts[3] === "name" && req.method === "PUT") {
+    const body = await readBody(req).catch(() => ({}));
+    const next = typeof body?.name === "string" ? body.name.trim() : "";
+    if (!/^[a-z0-9][a-z0-9-]*$/iu.test(next)) {
+      return json(res, 400, { error: { message: `${next || "that"} is not a usable ghost name`, code: "invalid_request" } });
+    }
+    if (next === name) return json(res, 200, { ok: true, name });
+    if (ghosts.some((g) => g.name === next)) {
+      return json(res, 409, { error: { message: `there is already a ghost called ${next}`, code: "already_exists" } });
+    }
+    if (answering.has(name)) {
+      return json(res, 409, {
+        error: { message: `${name} is still answering — stop the turn first`, code: "ghost_busy" },
+      });
+    }
+    for (const store of [sessionStore, deletedContext, mcpStore, liveStates, collabStates, roles, routing]) {
+      if (store.has(name)) {
+        store.set(next, store.get(name));
+        store.delete(name);
+      }
+    }
+    if (OWNS_GHOSTS_ROOT) renameSync(ghost.dir, join(GHOSTS_ROOT, next));
+    ghost.name = next;
+    ghost.dir = join(GHOSTS_ROOT, next);
+    return json(res, 200, { ok: true, name: next });
+  }
+
   if (parts[3] === "messages" && req.method === "POST") {
     const body = await readBody(req).catch(() => ({}));
     return streamTurn(req, res, name, body);
+  }
+  if (parts[3] === "mcp" && parts.length === 4 && req.method === "GET") {
+    return json(res, 200, mcpSnapshot(name));
+  }
+  if (parts[3] === "mcp" && parts.length === 4 && req.method === "POST") {
+    const body = await readBody(req).catch(() => ({}));
+    const serverName = typeof body?.name === "string" ? body.name.trim() : "";
+    if (!/^[A-Za-z0-9_.-]+$/u.test(serverName) || !validMcpConfig(body?.config)) {
+      return json(res, 400, {
+        error: { message: "MCP server name or configuration is invalid", code: "invalid_mcp_server" },
+      });
+    }
+    if (ghostMcp(name).has(serverName)) {
+      return json(res, 409, {
+        error: { message: `MCP server ${serverName} already exists`, code: "mcp_server_exists" },
+      });
+    }
+    ghostMcp(name).set(serverName, structuredClone(body.config));
+    return json(res, 201, mcpSnapshot(name));
+  }
+  if (parts[3] === "mcp" && parts.length >= 5) {
+    const serverName = decodeURIComponent(parts[4]);
+    const servers = ghostMcp(name);
+    if (!servers.has(serverName)) {
+      return json(res, 404, {
+        error: { message: `No MCP server named ${serverName}`, code: "mcp_server_not_found" },
+      });
+    }
+    if (parts.length === 5 && req.method === "PUT") {
+      const body = await readBody(req).catch(() => ({}));
+      if (!validMcpConfig(body?.config)) {
+        return json(res, 400, {
+          error: { message: "MCP server configuration is invalid", code: "invalid_mcp_server" },
+        });
+      }
+      servers.set(serverName, structuredClone(body.config));
+      return json(res, 200, mcpSnapshot(name));
+    }
+    if (parts.length === 6 && parts[5] === "enabled" && req.method === "PUT") {
+      const body = await readBody(req).catch(() => ({}));
+      if (typeof body?.enabled !== "boolean") {
+        return json(res, 400, {
+          error: { message: '"enabled" must be a boolean', code: "invalid_request" },
+        });
+      }
+      servers.set(serverName, { ...servers.get(serverName), enabled: body.enabled });
+      return json(res, 200, mcpSnapshot(name));
+    }
+    if (parts.length === 5 && req.method === "DELETE") {
+      servers.delete(serverName);
+      return json(res, 200, mcpSnapshot(name));
+    }
+  }
+  if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "live"
+      && req.method === "GET") {
+    return json(res, 200, ghostLive(name, decodeURIComponent(parts[4])));
+  }
+  if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "live"
+      && req.method === "POST") {
+    const sessionId = decodeURIComponent(parts[4]);
+    const body = await readBody(req).catch(() => ({}));
+    const action = body?.action;
+    const current = ghostLive(name, sessionId);
+    if (!["start", "mute", "unmute", "stop"].includes(action)) {
+      return json(res, 400, {
+        error: { message: "Unknown live-voice action", code: "invalid_request" },
+      });
+    }
+    if (action === "start") {
+      return json(res, 200, setGhostLive(name, sessionId, {
+        phase: "listening",
+        muted: false,
+        inputLevel: 0.42,
+        transcript: [
+          { role: "you", text: "Can you hear me?" },
+          { role: "ghost", text: "Clearly." },
+        ],
+        provider: "openai-codex",
+        remote: true,
+      }));
+    }
+    if (action === "stop") {
+      return json(res, 200, setGhostLive(name, sessionId, {
+        ...current,
+        phase: "stopped",
+        muted: false,
+        inputLevel: 0,
+      }));
+    }
+    return json(res, 200, setGhostLive(name, sessionId, {
+      ...current,
+      phase: action === "mute" ? "muted" : "listening",
+      muted: action === "mute",
+      inputLevel: action === "mute" ? 0 : 0.36,
+    }));
+  }
+  if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "collab") {
+    const sessionId = decodeURIComponent(parts[4]);
+    // One seeded ghost demonstrates a daemon that deliberately defers the
+    // feature. The UI should render this as product status, not a red HTTP dump.
+    if (name === "moaning-myrtle") {
+      return json(res, 501, {
+        error: {
+          message: "Remote collaboration is deferred in this daemon build.",
+          code: "not_supported",
+        },
+      });
+    }
+    if (req.method === "GET") return json(res, 200, ghostCollab(name, sessionId));
+    if (req.method === "POST") {
+      const body = await readBody(req).catch(() => ({}));
+      if (body?.action === "stop") {
+        return json(res, 200, setGhostCollab(name, sessionId,
+          { active: false, phase: "stopped" }));
+      }
+      if (body?.action !== "start" || body.confirmed !== true
+          || (body.writable !== true && body.writable !== false)) {
+        return json(res, 400, {
+          error: { message: "Unknown collaboration action", code: "invalid_request" },
+        });
+      }
+      const token = ++collabSeq;
+      const relay = typeof body.relayUrl === "string" && body.relayUrl.trim() !== ""
+        ? body.relayUrl.replace(/\/$/u, "") : "https://relay.example.test";
+      return json(res, 200, setGhostCollab(name, sessionId, {
+        active: true,
+        phase: "connected",
+        writable: body.writable,
+        relayUrl: relay,
+        readOnlyUrl: `${relay}/read/demo-${token}`,
+        ...(body.writable ? { writableUrl: `${relay}/write/demo-${token}` } : {}),
+      }));
+    }
   }
   if (parts[3] === "greeting" && parts.length === 4 && req.method === "POST") {
     await readBody(req).catch(() => ({}));
@@ -734,10 +1624,72 @@ createServer(async (req, res) => {
       ? json(res, 200, { ok: true })
       : json(res, 404, { error: { message: "no such session", code: "not_found" } });
   }
+  if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "commands" && req.method === "GET") {
+    return json(res, 200, { commands: MOCK_COMMANDS });
+  }
   if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "transcript" && req.method === "GET") {
     const s = ghostSessions(name).get(decodeURIComponent(parts[4]));
-    if (!s) return json(res, 404, { error: { message: "no such session", code: "session_not_found" } });
+    // A Claude Code conversation's transcript lives in that runtime's storage,
+    // so there is nothing here to read even though the row is in the listing.
+    if (!s || s.runtime === "claude-code") {
+      return json(res, 404, { error: { message: "no such session", code: "session_not_found" } });
+    }
     return json(res, 200, transcriptOf(s));
+  }
+  if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "queue") {
+    const sessionId = decodeURIComponent(parts[4]);
+    const turn = activeTurns.get(turnKey(name, sessionId));
+    const snapshot = () => ({
+      streaming: turn?.streaming === true,
+      count: (turn?.steering.length ?? 0) + (turn?.followUp.length ?? 0),
+      steering: turn?.steering ?? [],
+      followUp: turn?.followUp ?? [],
+    });
+    if (req.method === "GET") return json(res, 200, snapshot());
+    if (req.method === "POST") {
+      const body = await readBody(req).catch(() => ({}));
+      const text = typeof body?.text === "string" ? body.text.trim() : "";
+      if (body?.mode !== "steer" && body?.mode !== "followUp") {
+        return json(res, 400, {
+          error: { message: 'mode must be "steer" or "followUp"', code: "invalid_request" },
+        });
+      }
+      if (text === "") {
+        return json(res, 400, {
+          error: { message: "text must not be empty", code: "invalid_request" },
+        });
+      }
+      if (!turn?.streaming) {
+        return json(res, 409, {
+          error: { message: "this conversation is not streaming", code: "session_not_streaming" },
+        });
+      }
+      const queue = body.mode === "steer" ? turn.steering : turn.followUp;
+      queue.push(text);
+      return json(res, 200, snapshot());
+    }
+  }
+  // Renaming one conversation. An empty title is how the HUD clears it back to
+  // its own "New conversation" label, so it stores as null rather than "".
+  if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "title" && req.method === "PUT") {
+    const body = await readBody(req).catch(() => ({}));
+    const raw = body?.title;
+    // A conversation is renamed, never un-named: there is no "clear it" here,
+    // so an emptied field is a refusal rather than a reset to untitled.
+    const title = typeof raw === "string" ? raw.trim() : "";
+    if (typeof raw !== "string" || title === "") {
+      return json(res, 400, { error: { message: '"title" must be a non-empty string', code: "invalid_request" } });
+    }
+    if (title.length > 120) {
+      return json(res, 400, { error: { message: "a title is at most 120 characters", code: "invalid_request" } });
+    }
+    const s = ghostSessions(name).get(decodeURIComponent(parts[4]));
+    if (!s) return json(res, 404, { error: { message: "no such session", code: "not_found" } });
+    if (s.runtime === "claude-code") {
+      return json(res, 409, { error: { message: "Claude Code owns this conversation's title", code: "not_supported" } });
+    }
+    s.title = title;
+    return json(res, 200, { ok: true, title: s.title });
   }
   if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "branch" && req.method === "POST") {
     const s = ghostSessions(name).get(decodeURIComponent(parts[4]));
@@ -755,6 +1707,51 @@ createServer(async (req, res) => {
     return forked
       ? json(res, 200, forked)
       : json(res, 400, { error: { message: "no user message with that entryId", code: "invalid_branch" } });
+  }
+
+  // ---- The ask a paused turn is waiting on ---------------------------------
+  if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "ask" && req.method === "GET") {
+    const pending = pendingAsks.get(askKey(name, decodeURIComponent(parts[4])));
+    return json(res, 200, { ask: pending ? pending.view : null });
+  }
+  if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "ask" && req.method === "POST") {
+    const body = await readBody(req).catch(() => ({}));
+    const pending = pendingAsks.get(askKey(name, decodeURIComponent(parts[4])));
+    // Settled or superseded reads the same from here: the question this client
+    // is holding is not the one being waited on.
+    if (!pending || pending.view.id !== body?.askId) {
+      return json(res, 409, {
+        error: { message: "this conversation is not waiting for that answer", code: "ask_not_pending" },
+      });
+    }
+    if (body?.kind !== "submit" && body?.kind !== "chat" && body?.kind !== "cancel") {
+      return json(res, 400, { error: { message: 'kind must be "submit", "chat", or "cancel"', code: "invalid_request" } });
+    }
+    // The daemon validates every result against the question that was asked;
+    // the mock takes the shape on trust — the dialog is what is under test here.
+    pending.settle({ kind: body.kind, results: Array.isArray(body.results) ? body.results : [] });
+    return json(res, 200, { ok: true });
+  }
+  if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "reanswer" && req.method === "POST") {
+    const sessionId = decodeURIComponent(parts[4]);
+    const s = ghostSessions(name).get(sessionId);
+    if (!s) return json(res, 404, { error: { message: "no such session", code: "not_found" } });
+    if (answering.has(name)) {
+      return json(res, 409, {
+        error: { message: `${name} is still answering — stop the turn first`, code: "session_busy" },
+      });
+    }
+    const body = await readBody(req).catch(() => ({}));
+    const entryId = typeof body?.entryId === "string" ? body.entryId : "";
+    const record = s.askResults?.get(entryId);
+    // An ask an earlier branch discarded is no longer re-answerable: the
+    // message that carried it went with everything after that branch point.
+    if (!record || askCallIndex(s, record.call) < 0) {
+      return json(res, 400, {
+        error: { message: "no ask result with that entryId", code: "ask_not_reanswerable" },
+      });
+    }
+    return streamReanswer(req, res, name, sessionId, s, entryId, record);
   }
 
   // ---- Model indicator + switcher ------------------------------------------
@@ -790,6 +1787,20 @@ createServer(async (req, res) => {
     const route = state[body.role] || { primary: null, fallbacks: [] };
     if (body.target === "clear_fallbacks") {
       route.fallbacks = [];
+    } else if (body.target === "clear_primary") {
+      route.primary = null;
+      if (body.role === "chat_model") roles.delete(name);
+    } else if (body.target === "replace_fallbacks") {
+      if (!Array.isArray(body.fallbacks))
+        return json(res, 400, { error: { message: "fallbacks must be an array", code: "invalid_request" } });
+      const replacement = [];
+      for (const candidate of body.fallbacks) {
+        const model = CATALOG.find((m) => m.provider === candidate?.provider && m.id === candidate?.id);
+        if (!model)
+          return json(res, 400, { error: { message: "unknown model", code: "unknown_model" } });
+        replacement.push({ provider: model.provider, id: model.id });
+      }
+      route.fallbacks = replacement;
     } else {
       const model = CATALOG.find((m) => m.provider === body.provider && m.id === body.id);
       if (!model) return json(res, 400, { error: { message: "unknown model", code: "unknown_model" } });

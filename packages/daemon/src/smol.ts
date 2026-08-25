@@ -29,8 +29,9 @@
  * The claude-code runtime is never a smol candidate: it is not reachable
  * through a plain `complete()` call, and `getModels()` never lists it.
  */
-import type { AssistantMessage, Context, Model } from "@oh-my-pi/pi-ai";
+import type { Api, AssistantMessage, Model } from "@oh-my-pi/pi-ai";
 import type { GhostModelRoleBinding } from "./models.js";
+import type { GhostOmpRuntime } from "./omp-runtime.js";
 
 /** The role name in `<home>/.pi/models.json`. Mirrors `GhostModelRole`. */
 export const SMOL_MODEL_ROLE = "smol_model";
@@ -39,13 +40,9 @@ export const SMOL_MODEL_ROLE = "smol_model";
 // Resolution
 // ---------------------------------------------------------------------------
 
-/** The subset of a model the resolver ranks. `Model<Api>` is assignable. */
-export interface SmolModel {
-  provider: string;
-  id: string;
-  name?: string;
-  cost?: { input: number; output: number; cacheRead: number; cacheWrite: number };
-}
+/** OMP model fields the smol resolver ranks. */
+export type SmolModel = Pick<Model<Api>, "provider" | "id">
+  & Partial<Pick<Model<Api>, "name" | "cost">>;
 
 /** A candidate model plus the one fact ranking needs beyond cost. */
 export interface SmolCandidate {
@@ -188,18 +185,15 @@ export function resolveSmolModel(
  * the static catalogue synchronously (no availability network call), and the
  * subscription/OAuth/credential predicates are the ones `ModelCatalog` reads.
  */
-export interface SmolRuntime {
-  getModels(providerId?: string): readonly Model<never>[] | readonly SmolModel[];
-  getModel(providerId: string, modelId: string): SmolModel | undefined;
-  hasConfiguredAuth(providerId: string): boolean;
-  isUsingSubscription(providerId: string): boolean;
-  isUsingOAuth(providerId: string): boolean;
-  complete(
-    model: Model<never>,
-    context: Context,
-    options?: { signal?: AbortSignal },
-  ): Promise<AssistantMessage>;
-}
+export type SmolRuntime = Pick<
+  GhostOmpRuntime,
+  | "getModels"
+  | "getModel"
+  | "hasConfiguredAuth"
+  | "isUsingSubscription"
+  | "isUsingOAuth"
+  | "complete"
+>;
 
 /** Whether a provider's credential is a zero-marginal-cost subscription. */
 function isSubscriptionProvider(runtime: SmolRuntime, provider: string): boolean {
@@ -219,7 +213,7 @@ function toCandidate(runtime: SmolRuntime, model: SmolModel): SmolCandidate {
 export function smolCatalogFromRuntime(runtime: SmolRuntime): SmolModelCatalog {
   return {
     usable: () =>
-      (runtime.getModels() as readonly SmolModel[])
+      runtime.getModels()
         .filter((model) => runtime.hasConfiguredAuth(model.provider))
         .map((model) => toCandidate(runtime, model)),
     find: (provider, modelId) => {

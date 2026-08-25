@@ -32,22 +32,35 @@ Rectangle {
     readonly property var questions: root.interaction
         && Array.isArray(root.interaction.questions) ? root.interaction.questions : []
 
+    /**
+     * A question's options, however QML handed them over. A Repeater delivers
+     * its `modelData` as a variant map, whose nested arrays index and measure
+     * like arrays but fail `Array.isArray` — and every delegate here reads its
+     * question that way, while the keyboard paths read the JS original. One
+     * accessor, or the two halves of this form disagree about what is selected:
+     * the screen shows nothing chosen while Enter submits the recommendation.
+     */
+    function optionsOf(question: var): var {
+        const options = question ? question.options : undefined;
+        const count = options && typeof options.length === "number" ? options.length : 0;
+        const out = [];
+        for (let i = 0; i < count; i++) out.push(options[i]);
+        return out;
+    }
+
     // Every option in the interaction, flattened to one sequence, so Up/Down
     // run past the end of a question into the next one instead of stopping at
     // a boundary the reader cannot see.
     readonly property var rows: {
         const out = [];
         for (let q = 0; q < root.questions.length; q++) {
-            const options = Array.isArray(root.questions[q].options)
-                ? root.questions[q].options : [];
-            for (let o = 0; o < options.length; o++) out.push({ question: q, option: o });
+            const count = root.optionsOf(root.questions[q]).length;
+            for (let o = 0; o < count; o++) out.push({ question: q, option: o });
         }
         return out;
     }
 
     property int cursor: 0
-    /** The form itself holds the keyboard — not one of its text fields. */
-    readonly property bool keyboardOnForm: root.activeFocus
     /** Which field wants the caret next; the delegates watch it and answer. */
     property var focusTarget: ({ question: -1, field: "" })
 
@@ -61,10 +74,21 @@ Rectangle {
 
     readonly property string timeoutAt: root.interaction
         && typeof root.interaction.timeoutAt === "string" ? root.interaction.timeoutAt : ""
+    // `Date.parse` of anything unparseable is NaN, and NaN fails `> 0`.
     readonly property real deadline: root.timeoutAt === "" ? 0 : Date.parse(root.timeoutAt)
-    readonly property bool timed: root.deadline > 0 && Number.isFinite(root.deadline)
+    readonly property bool timed: root.deadline > 0
     property real clock: Date.now()
     readonly property real remaining: (root.deadline - root.clock) / 1000
+
+    // A two-minute deadline counted down from 2:00 is a clock the owner has to
+    // watch, and for most of that wait the number says nothing they can act on.
+    // So the line stays a sentence until `lead` seconds are left, becomes a
+    // count only then, and only goes amber inside `urgent`. The tick timer
+    // follows the same rule: running it for the whole wait is 120 wakeups spent
+    // redrawing a number nobody needed.
+    readonly property int lead: 30
+    readonly property int urgent: 10
+    readonly property bool counting: root.timed && root.remaining <= root.lead
 
     implicitHeight: askLayout.implicitHeight + Theme.pad * 2
     radius: Theme.radius
@@ -83,6 +107,10 @@ Rectangle {
         if (root.questions.length > 0) Qt.callLater(root.take);
     }
 
+    // Both timers below stop while this is hidden, so the clock it comes back
+    // with is as old as the time spent away.
+    onVisibleChanged: if (root.visible) root.clock = Date.now();
+
     function take(): void {
         if (root.questions.length > 0) root.forceActiveFocus();
     }
@@ -96,7 +124,7 @@ Rectangle {
         // `destructive` flag on the question to hold it back for — reading one
         // out of the option text would be a guess — so this preselects
         // whatever the model recommended, including a recommended "delete".
-        const options = Array.isArray(question.options) ? question.options : [];
+        const options = root.optionsOf(question);
         const recommended = typeof question.recommended === "number"
             ? options[question.recommended] : undefined;
         return {
@@ -155,14 +183,14 @@ Rectangle {
 
     // ---- Keyboard ---------------------------------------------------------
 
+    /** `rows` opens with question 0's options in order, so the recommended
+        option's index is already the row index — nothing to search for. */
     function defaultCursor(): int {
-        for (let i = 0; i < root.rows.length; i++) {
-            if (root.rows[i].question !== 0) break;
-            const recommended = root.questions[0].recommended;
-            const wanted = typeof recommended === "number" ? recommended : 0;
-            if (root.rows[i].option === wanted) return i;
-        }
-        return 0;
+        const first = root.questions.length > 0 ? root.questions[0] : undefined;
+        if (first === undefined) return 0;
+        const count = root.optionsOf(first).length;
+        const wanted = typeof first.recommended === "number" ? first.recommended : 0;
+        return wanted >= 0 && wanted < count ? wanted : 0;
     }
 
     function isCursor(questionIndex: int, optionIndex: int): bool {
@@ -185,8 +213,10 @@ Rectangle {
     function toggleCursor(): void {
         const row = root.rows[root.cursor];
         if (row === undefined) return;
-        root.toggle(root.questions[row.question],
-            root.questions[row.question].options[row.option].label);
+        const question = root.questions[row.question];
+        const option = root.optionsOf(question)[row.option];
+        if (option === undefined) return;
+        root.toggle(question, option.label);
     }
 
     /** 1–9 answer the question the cursor is in, not the first one on screen. */
@@ -248,8 +278,7 @@ Rectangle {
     }
 
     function countdown(seconds: real): string {
-        const total = Math.max(0, Math.round(seconds));
-        return total >= 60 ? Math.floor(total / 60) + "m " + (total % 60) + "s" : total + "s";
+        return Math.max(0, Math.round(seconds)) + "s";
     }
 
     // Esc gives up from anywhere inside the form, including mid-sentence in a
@@ -302,11 +331,154 @@ Rectangle {
         onClicked: root.forceActiveFocus()
     }
 
+    // Only ever running behind a number that is on screen and still moving.
     Timer {
         interval: 1000
         repeat: true
-        running: root.timed && root.visible
+        running: root.visible && root.counting && root.remaining > 0
         onTriggered: root.clock = Date.now()
+    }
+
+    // The quiet part of the wait costs one wakeup. It moves the clock, which is
+    // what turns the sentence into a count and starts the ticker above.
+    Timer {
+        interval: Math.max(0, root.deadline - root.clock - root.lead * 1000)
+        running: root.visible && root.timed && !root.counting
+        onTriggered: root.clock = Date.now()
+    }
+
+    // ---- Parts ------------------------------------------------------------
+    // An inline component sees nothing of the file around it, so each of these
+    // takes what it needs as properties and reports back as signals.
+
+    // Two fields, one shape: a wrapping answer field and, under it, the note.
+    // Enter answers from either — Shift+Enter breaks the line, as in the
+    // composer — and Tab/Backtab hand the caret back to whoever owns the order.
+    // `quiet` is the whole of the difference between them.
+    component Field: Rectangle {
+        id: fieldRoot
+
+        required property string placeholder
+        property string value: ""
+        /** The note is the quieter of the two: smaller type, no fill. */
+        property bool quiet: false
+
+        signal edited(string text)
+        signal accepted()
+        signal tabbed()
+        signal backtabbed()
+
+        function take(): void {
+            fieldEdit.forceActiveFocus();
+        }
+
+        height: Math.max(fieldEdit.implicitHeight + Theme.gap, fieldRoot.quiet ? 30 : 34)
+        radius: Theme.radius / 2
+        color: fieldRoot.quiet ? "transparent" : Theme.surfaceDeep
+        border.width: 1
+        border.color: fieldEdit.activeFocus ? Theme.accent : Theme.border
+
+        TextEdit {
+            id: fieldEdit
+            anchors.fill: parent
+            anchors.margins: Theme.gap / 2
+            text: fieldRoot.value
+            color: fieldRoot.quiet ? Theme.foreground : Theme.foregroundBright
+            font.family: Theme.fontFamily
+            font.pixelSize: fieldRoot.quiet ? Theme.fontSizeSmall : Theme.fontSize
+            wrapMode: TextEdit.Wrap
+            selectByMouse: true
+            selectionColor: Theme.selection
+            selectedTextColor: Theme.foregroundBright
+            onTextChanged: fieldRoot.edited(text)
+
+            Keys.onPressed: event => {
+                const enter = event.key === Qt.Key_Return || event.key === Qt.Key_Enter;
+                if (enter && !(event.modifiers & Qt.ShiftModifier)) {
+                    event.accepted = true;
+                    fieldRoot.accepted();
+                } else if (event.key === Qt.Key_Tab) {
+                    event.accepted = true;
+                    fieldRoot.tabbed();
+                } else if (event.key === Qt.Key_Backtab) {
+                    event.accepted = true;
+                    fieldRoot.backtabbed();
+                }
+            }
+
+            Text {
+                anchors.fill: parent
+                visible: fieldEdit.text === ""
+                text: fieldRoot.placeholder
+                color: Theme.foregroundDim
+                font: fieldEdit.font
+                wrapMode: Text.Wrap
+            }
+        }
+    }
+
+    // The way in to a folded-away field. Deliberately not a button: it is an
+    // offer, and a bordered control would read louder than the field it hides.
+    component Reveal: Text {
+        id: revealRoot
+
+        signal picked()
+
+        color: revealArea.containsMouse ? Theme.foreground : Theme.foregroundDim
+        font.family: Theme.fontFamily
+        font.pixelSize: Theme.fontSizeSmall
+
+        MouseArea {
+            id: revealArea
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: revealRoot.picked()
+        }
+    }
+
+    // One control, three settings. Only the primary one wears the accent, and
+    // only while there is something to send; `armed` decides both the fill and
+    // whether the pointer is offered at all, `faded` says a send is in flight.
+    component ActionButton: Rectangle {
+        id: buttonRoot
+
+        required property string label
+        property color ink: Theme.foreground
+        property bool primary: false
+        property bool armed: true
+        property bool faded: false
+
+        signal activated()
+
+        implicitWidth: buttonLabel.implicitWidth + Theme.pad
+        implicitHeight: 30
+        radius: Theme.radius / 2
+        color: buttonRoot.primary
+            ? (buttonRoot.armed ? Theme.accent : Theme.borderStrong)
+            : (buttonArea.containsMouse ? Theme.hover : "transparent")
+        opacity: buttonRoot.faded ? 0.5 : 1
+
+        Text {
+            id: buttonLabel
+            anchors.centerIn: parent
+            text: buttonRoot.label
+            color: buttonRoot.primary
+                ? (buttonRoot.armed ? Theme.onAccent : Theme.foregroundDim)
+                : buttonRoot.ink
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontSizeSmall
+            font.weight: buttonRoot.primary ? Font.DemiBold : Font.Normal
+        }
+
+        MouseArea {
+            id: buttonArea
+            anchors.fill: parent
+            hoverEnabled: true
+            enabled: buttonRoot.armed && !buttonRoot.faded
+            cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+            onClicked: buttonRoot.activated()
+        }
     }
 
     ColumnLayout {
@@ -334,6 +506,11 @@ Rectangle {
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontSize + 1
                 font.weight: Font.DemiBold
+                // fillWidth without this is a floor, not a ceiling: in a narrow
+                // HUD the title keeps its whole implicit width and runs under
+                // the deadline beside it. The deadline is the line that has to
+                // stay whole — it is the one saying the clock is running.
+                elide: Text.ElideRight
             }
 
             Text {
@@ -346,13 +523,14 @@ Rectangle {
 
             // The deadline the daemon is already keeping. It answers with the
             // recommended option when this runs out, so saying so is a warning
-            // and not decoration.
+            // and not decoration — but a warning is only information near the
+            // end, which is where the number appears.
             Text {
                 visible: root.timed
-                text: root.remaining > 0
-                    ? "auto-answers in " + root.countdown(root.remaining)
-                    : "out of time"
-                color: root.remaining <= 20 ? Theme.warn : Theme.foregroundDim
+                text: root.remaining <= 0 ? "out of time"
+                    : root.counting ? "auto-answers in " + root.countdown(root.remaining)
+                    : "answers itself if nobody replies"
+                color: root.remaining <= root.urgent ? Theme.warn : Theme.foregroundDim
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontSizeSmall
             }
@@ -383,8 +561,8 @@ Rectangle {
                         required property var modelData
                         required property int index
                         readonly property var question: modelData
-                        readonly property bool hasOptions: Array.isArray(modelData.options)
-                            && modelData.options.length > 0
+                        readonly property var options: root.optionsOf(modelData)
+                        readonly property bool hasOptions: options.length > 0
                         // A question with nothing to pick from *is* a text
                         // question, so its field is open from the start.
                         // Answers reset with the interaction, so these two
@@ -402,10 +580,10 @@ Rectangle {
                                 if (root.focusTarget.question !== questionBlock.index) return;
                                 if (root.focusTarget.field === "custom") {
                                     questionBlock.customOpen = true;
-                                    customField.forceActiveFocus();
+                                    customField.take();
                                 } else if (root.focusTarget.field === "note") {
                                     questionBlock.noteOpen = true;
-                                    noteField.forceActiveFocus();
+                                    noteField.take();
                                 }
                             }
                         }
@@ -415,8 +593,10 @@ Rectangle {
                             spacing: Theme.gap
 
                             Rectangle {
-                                visible: questionBlock.question.header
-                                    && questionBlock.question.header.trim() !== ""
+                                // Absent fields arrive as `undefined`, which is
+                                // not a bool: coerced here, or every render
+                                // costs a QML warning for a field nobody sent.
+                                visible: (questionBlock.question.header || "").trim() !== ""
                                 width: headerText.implicitWidth + Theme.gap
                                 height: 20
                                 radius: Theme.radius / 2
@@ -444,7 +624,7 @@ Rectangle {
                         }
 
                         Repeater {
-                            model: questionBlock.hasOptions ? questionBlock.question.options : []
+                            model: questionBlock.options
 
                             delegate: Rectangle {
                                 id: optionRow
@@ -463,7 +643,7 @@ Rectangle {
                                 // The keyboard cursor, drawn only while the form
                                 // holds the keyboard: a ring under the caret in
                                 // a text field would point at the wrong thing.
-                                border.width: optionRow.atCursor && root.keyboardOnForm ? 1 : 0
+                                border.width: optionRow.atCursor && root.activeFocus ? 1 : 0
                                 border.color: Theme.accent
 
                                 Connections {
@@ -523,8 +703,8 @@ Rectangle {
                                         }
 
                                         Text {
-                                            visible: optionRow.modelData.description
-                                                && optionRow.modelData.description.trim() !== ""
+                                            visible: (optionRow.modelData.description
+                                                || "").trim() !== ""
                                             width: parent.width
                                             text: optionRow.modelData.description || ""
                                             color: Theme.foregroundDim
@@ -534,8 +714,8 @@ Rectangle {
                                         }
 
                                         Text {
-                                            visible: optionRow.chosen && optionRow.modelData.preview
-                                                && optionRow.modelData.preview.trim() !== ""
+                                            visible: optionRow.chosen
+                                                && (optionRow.modelData.preview || "").trim() !== ""
                                             width: parent.width
                                             text: optionRow.modelData.preview || ""
                                             color: Theme.foregroundDim
@@ -553,7 +733,7 @@ Rectangle {
                                         anchors.top: parent.top
                                         visible: optionRow.index < 9
                                         text: String(optionRow.index + 1)
-                                        color: optionRow.atCursor && root.keyboardOnForm
+                                        color: optionRow.atCursor && root.activeFocus
                                             ? Theme.foreground : Theme.foregroundFaint
                                         font.family: Theme.fontFamilyMono
                                         font.pixelSize: Theme.fontSizeSmall
@@ -576,108 +756,39 @@ Rectangle {
                             }
                         }
 
-                        // Wrapping, not a single line: "type your own" is where
-                        // the answer nobody anticipated goes, and it is the only
-                        // field a text-only question has. Enter still answers —
-                        // Shift+Enter breaks the line, as in the composer.
-                        Rectangle {
+                        // "Type your own" is where the answer nobody anticipated
+                        // goes, and it is the only field a text-only question
+                        // has. Tab from it reaches the note; Backtab gives the
+                        // keyboard back to the form.
+                        Field {
+                            id: customField
                             width: questionBlock.width
-                            height: Math.max(customField.implicitHeight + Theme.gap, 34)
                             visible: questionBlock.customOpen
-                            radius: Theme.radius / 2
-                            color: Theme.surfaceDeep
-                            border.width: 1
-                            border.color: customField.activeFocus ? Theme.accent : Theme.border
-
-                            TextEdit {
-                                id: customField
-                                anchors.fill: parent
-                                anchors.margins: Theme.gap / 2
-                                text: root.answerState(questionBlock.question).customInput
-                                color: Theme.foregroundBright
-                                font.family: Theme.fontFamily
-                                font.pixelSize: Theme.fontSize
-                                wrapMode: TextEdit.Wrap
-                                selectByMouse: true
-                                selectionColor: Theme.selection
-                                selectedTextColor: Theme.foregroundBright
-                                onTextChanged: root.setCustom(questionBlock.question, text)
-
-                                Keys.onPressed: event => {
-                                    const enter = event.key === Qt.Key_Return
-                                        || event.key === Qt.Key_Enter;
-                                    if (enter && !(event.modifiers & Qt.ShiftModifier)) {
-                                        event.accepted = true;
-                                        root.submit();
-                                    } else if (event.key === Qt.Key_Tab) {
-                                        event.accepted = true;
-                                        questionBlock.noteOpen = true;
-                                        noteField.forceActiveFocus();
-                                    } else if (event.key === Qt.Key_Backtab) {
-                                        event.accepted = true;
-                                        root.forceActiveFocus();
-                                    }
-                                }
-
-                                Text {
-                                    anchors.fill: parent
-                                    visible: customField.text === ""
-                                    text: questionBlock.hasOptions
-                                        ? "Type your own answer" : "Type your answer"
-                                    color: Theme.foregroundDim
-                                    font: customField.font
-                                    wrapMode: Text.Wrap
-                                }
+                            placeholder: questionBlock.hasOptions
+                                ? "Type your own answer" : "Type your answer"
+                            value: root.answerState(questionBlock.question).customInput
+                            onEdited: written => root.setCustom(questionBlock.question, written)
+                            onAccepted: root.submit()
+                            onTabbed: {
+                                questionBlock.noteOpen = true;
+                                noteField.take();
                             }
+                            onBacktabbed: root.forceActiveFocus()
                         }
 
-                        Rectangle {
+                        Field {
+                            id: noteField
                             width: questionBlock.width
-                            height: Math.max(noteField.implicitHeight + Theme.gap, 30)
                             visible: questionBlock.noteOpen
-                            radius: Theme.radius / 2
-                            color: "transparent"
-                            border.width: 1
-                            border.color: noteField.activeFocus ? Theme.accent : Theme.border
-
-                            TextEdit {
-                                id: noteField
-                                anchors.fill: parent
-                                anchors.margins: Theme.gap / 2
-                                text: root.answerState(questionBlock.question).note
-                                color: Theme.foreground
-                                font.family: Theme.fontFamily
-                                font.pixelSize: Theme.fontSizeSmall
-                                wrapMode: TextEdit.Wrap
-                                selectByMouse: true
-                                selectionColor: Theme.selection
-                                selectedTextColor: Theme.foregroundBright
-                                onTextChanged: root.setNote(questionBlock.question, text)
-
-                                Keys.onPressed: event => {
-                                    const enter = event.key === Qt.Key_Return
-                                        || event.key === Qt.Key_Enter;
-                                    if (enter && !(event.modifiers & Qt.ShiftModifier)) {
-                                        event.accepted = true;
-                                        root.submit();
-                                    } else if (event.key === Qt.Key_Tab) {
-                                        event.accepted = true;
-                                        root.forceActiveFocus();
-                                    } else if (event.key === Qt.Key_Backtab) {
-                                        event.accepted = true;
-                                        questionBlock.customOpen = true;
-                                        customField.forceActiveFocus();
-                                    }
-                                }
-
-                                Text {
-                                    anchors.fill: parent
-                                    visible: noteField.text === ""
-                                    text: "A note for the ghost (optional)"
-                                    color: Theme.foregroundDim
-                                    font: noteField.font
-                                    wrapMode: Text.Wrap
-                                }
+                            quiet: true
+                            placeholder: "A note for the ghost (optional)"
+                            value: root.answerState(questionBlock.question).note
+                            onEdited: written => root.setNote(questionBlock.question, written)
+                            onAccepted: root.submit()
+                            onTabbed: root.forceActiveFocus()
+                            onBacktabbed: {
+                                questionBlock.customOpen = true;
+                                customField.take();
                             }
                         }
 
@@ -689,43 +800,21 @@ Rectangle {
                             spacing: Theme.pad
                             visible: !questionBlock.customOpen || !questionBlock.noteOpen
 
-                            Text {
+                            Reveal {
                                 visible: !questionBlock.customOpen
                                 text: "Something else…  Tab"
-                                color: customReveal.containsMouse
-                                    ? Theme.foreground : Theme.foregroundDim
-                                font.family: Theme.fontFamily
-                                font.pixelSize: Theme.fontSizeSmall
-
-                                MouseArea {
-                                    id: customReveal
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: {
-                                        questionBlock.customOpen = true;
-                                        customField.forceActiveFocus();
-                                    }
+                                onPicked: {
+                                    questionBlock.customOpen = true;
+                                    customField.take();
                                 }
                             }
 
-                            Text {
+                            Reveal {
                                 visible: !questionBlock.noteOpen
                                 text: "Add a note"
-                                color: noteReveal.containsMouse
-                                    ? Theme.foreground : Theme.foregroundDim
-                                font.family: Theme.fontFamily
-                                font.pixelSize: Theme.fontSizeSmall
-
-                                MouseArea {
-                                    id: noteReveal
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: {
-                                        questionBlock.noteOpen = true;
-                                        noteField.forceActiveFocus();
-                                    }
+                                onPicked: {
+                                    questionBlock.noteOpen = true;
+                                    noteField.take();
                                 }
                             }
                         }
@@ -753,83 +842,27 @@ Rectangle {
             // Cancel, which the daemon has always accepted and nothing here
             // ever sent: a question you do not want to answer was a dead end
             // with the composer gone.
-            Rectangle {
-                implicitWidth: dismissLabel.implicitWidth + Theme.pad
-                implicitHeight: 30
-                radius: Theme.radius / 2
-                color: dismissArea.containsMouse ? Theme.hover : "transparent"
-                opacity: root.submitting ? 0.5 : 1
-
-                Text {
-                    id: dismissLabel
-                    anchors.centerIn: parent
-                    text: "Dismiss  Esc"
-                    color: Theme.foregroundDim
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeSmall
-                }
-
-                MouseArea {
-                    id: dismissArea
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    enabled: !root.submitting
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: root.dismiss()
-                }
+            ActionButton {
+                label: "Dismiss  Esc"
+                ink: Theme.foregroundDim
+                faded: root.submitting
+                onActivated: root.dismiss()
             }
 
-            Rectangle {
-                implicitWidth: chatLabel.implicitWidth + Theme.pad
-                implicitHeight: 30
-                radius: Theme.radius / 2
-                color: chatArea.containsMouse ? Theme.hover : "transparent"
-                opacity: root.submitting ? 0.5 : 1
-
-                Text {
-                    id: chatLabel
-                    anchors.centerIn: parent
-                    text: "Chat about this"
-                    color: Theme.foreground
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeSmall
-                }
-
-                MouseArea {
-                    id: chatArea
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    enabled: !root.submitting
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: root.chatRequested()
-                }
+            ActionButton {
+                label: "Chat about this"
+                faded: root.submitting
+                onActivated: root.chatRequested()
             }
 
             Item { Layout.fillWidth: true }
 
-            Rectangle {
-                implicitWidth: submitLabel.implicitWidth + Theme.pad
-                implicitHeight: 30
-                radius: Theme.radius / 2
-                color: root.canSubmit() ? Theme.accent : Theme.borderStrong
-                opacity: root.submitting ? 0.5 : 1
-
-                Text {
-                    id: submitLabel
-                    anchors.centerIn: parent
-                    text: root.submitting ? "Sending…" : "Answer  ↵"
-                    color: root.canSubmit() ? Theme.onAccent : Theme.foregroundDim
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeSmall
-                    font.weight: Font.DemiBold
-                }
-
-                MouseArea {
-                    anchors.fill: parent
-                    enabled: root.canSubmit() && !root.submitting
-                    cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-                    onClicked: root.submit()
-                }
+            ActionButton {
+                primary: true
+                label: root.submitting ? "Sending…" : "Answer  ↵"
+                armed: root.canSubmit()
+                faded: root.submitting
+                onActivated: root.submit()
             }
         }
     }

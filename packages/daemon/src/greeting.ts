@@ -393,11 +393,16 @@ export class GreetingCache {
 
     const promise = produce()
       .then((result) => {
-        this.entries.set(key, { result, fingerprint, generatedAt: this.now() });
+        // clear(key) can invalidate this producer while it is still running
+        // (a ghost rename/delete does exactly that). Only the producer that is
+        // still registered for the key may repopulate the old-name cache.
+        if (this.inflight.get(key) === promise) {
+          this.entries.set(key, { result, fingerprint, generatedAt: this.now() });
+        }
         return result;
       })
       .finally(() => {
-        this.inflight.delete(key);
+        if (this.inflight.get(key) === promise) this.inflight.delete(key);
       });
     this.inflight.set(key, promise);
     return promise;
@@ -405,8 +410,13 @@ export class GreetingCache {
 
   /** Drop one ghost's entry, or every entry. */
   clear(key?: string): void {
-    if (key === undefined) this.entries.clear();
-    else this.entries.delete(key);
+    if (key === undefined) {
+      this.entries.clear();
+      this.inflight.clear();
+    } else {
+      this.entries.delete(key);
+      this.inflight.delete(key);
+    }
   }
 }
 

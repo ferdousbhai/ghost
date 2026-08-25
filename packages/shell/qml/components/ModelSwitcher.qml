@@ -18,6 +18,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Layouts
 import qs.services
+import "ModelRouting.js" as Routing
 
 Rectangle {
     id: root
@@ -33,6 +34,7 @@ Rectangle {
     property string routeLabel: ""
     property string routeTarget: "primary"
     readonly property bool pickingRoute: routeRole !== ""
+    readonly property var routingRows: Routing.rows(Ghostd.modelRouting)
 
     /** True once the user has typed a search: show catalog instead of available. */
     readonly property bool searching: searchField.text.trim() !== ""
@@ -68,8 +70,7 @@ Rectangle {
     }
 
     function routeModelName(model: var): string {
-        if (!model) return "not assigned";
-        return model.provider + "/" + model.id;
+        return Routing.modelName(model);
     }
 
     function beginRoutePick(role: string, label: string, target: string): void {
@@ -266,7 +267,7 @@ Rectangle {
                     width: parent.width
                     text: Ghostd.modelRoutingLoading
                         ? "Loading OMP routes…"
-                        : "Each role has one primary model and an ordered retry chain."
+                        : "Auto follows OMP's role defaults. Set a primary only when you want to override it."
                     color: Theme.foregroundDim
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.fontSizeSmall
@@ -274,103 +275,221 @@ Rectangle {
                 }
 
                 Repeater {
-                    model: Ghostd.modelRouting
+                    model: root.routingRows
 
-                    Rectangle {
-                        id: routeRow
+                    Item {
+                        id: routeEntry
                         required property var modelData
-                        readonly property var chain: Array.isArray(routeRow.modelData.fallbacks)
-                            ? routeRow.modelData.fallbacks : []
+                        readonly property var route: routeEntry.modelData.route
+                        readonly property var chain: routeEntry.route
+                            && Array.isArray(routeEntry.route.fallbacks)
+                            ? routeEntry.route.fallbacks : []
 
                         width: routingColumn.width
-                        implicitHeight: 92
-                        radius: Theme.radius / 2
-                        color: Theme.surface
-                        border.width: 0
-                        border.color: Theme.border
+                        implicitHeight: routeEntry.modelData.header
+                            ? 26 : routeCard.implicitHeight
 
-                        ColumnLayout {
-                            anchors.fill: parent
-                            anchors.margins: Theme.pad
-                            spacing: 2
+                        Text {
+                            visible: routeEntry.modelData.header
+                            anchors.left: parent.left
+                            anchors.bottom: parent.bottom
+                            anchors.bottomMargin: 2
+                            text: routeEntry.modelData.label || ""
+                            color: Theme.foreground
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSizeSmall
+                            font.weight: Font.DemiBold
+                        }
 
-                            RowLayout {
-                                Layout.fillWidth: true
-                                Text {
-                                    text: routeRow.modelData.label || routeRow.modelData.role
-                                    color: Theme.foregroundBright
-                                    font.family: Theme.fontFamily
-                                    font.pixelSize: Theme.fontSize
-                                    font.weight: Font.DemiBold
-                                }
-                                Text {
-                                    text: "OMP @" + routeRow.modelData.ompRole
-                                    color: Theme.foregroundDim
-                                    font.family: Theme.fontFamily
-                                    font.pixelSize: Theme.fontSizeSmall - 1
-                                }
-                                Item { Layout.fillWidth: true }
-                                Text {
-                                    text: routeRow.modelData.primary ? "Change" : "Set primary"
-                                    color: Theme.accent
-                                    font.family: Theme.fontFamily
-                                    font.pixelSize: Theme.fontSizeSmall
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: root.beginRoutePick(
-                                            routeRow.modelData.role,
-                                            routeRow.modelData.label,
-                                            "primary")
+                        Rectangle {
+                            id: routeCard
+                            visible: !routeEntry.modelData.header
+                            width: parent.width
+                            implicitHeight: routeContent.implicitHeight + Theme.pad * 2
+                            radius: Theme.radius / 2
+                            color: Theme.surface
+                            border.width: 0
+                            border.color: Theme.border
+
+                            ColumnLayout {
+                                id: routeContent
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.top: parent.top
+                                anchors.margins: Theme.pad
+                                spacing: 3
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Text {
+                                        text: routeEntry.route
+                                            ? (routeEntry.route.label || routeEntry.route.role) : ""
+                                        color: Theme.foregroundBright
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: Theme.fontSize
+                                        font.weight: Font.DemiBold
+                                    }
+                                    Text {
+                                        text: routeEntry.route ? "OMP @" + routeEntry.route.ompRole : ""
+                                        color: Theme.foregroundDim
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: Theme.fontSizeSmall - 1
+                                    }
+                                    Item { Layout.fillWidth: true }
+                                    Text {
+                                        text: routeEntry.route && routeEntry.route.source === "explicit"
+                                            ? "Change" : "Set primary"
+                                        color: Theme.accent
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: Theme.fontSizeSmall
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: {
+                                                if (routeEntry.route) root.beginRoutePick(
+                                                    routeEntry.route.role,
+                                                    routeEntry.route.label,
+                                                    "primary");
+                                            }
+                                        }
+                                    }
+                                    Text {
+                                        visible: routeEntry.route
+                                            && routeEntry.route.source === "explicit"
+                                        text: "Use Auto"
+                                        color: Theme.foregroundDim
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: Theme.fontSizeSmall
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: {
+                                                if (routeEntry.route)
+                                                    Ghostd.clearModelPrimary(routeEntry.route.role);
+                                            }
+                                        }
+                                    }
+                                    Text {
+                                        text: "+ Fallback"
+                                        color: Theme.accent
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: Theme.fontSizeSmall
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: {
+                                                if (routeEntry.route) root.beginRoutePick(
+                                                    routeEntry.route.role,
+                                                    routeEntry.route.label,
+                                                    "fallback");
+                                            }
+                                        }
                                     }
                                 }
+
                                 Text {
-                                    text: "+ Fallback"
-                                    color: Theme.accent
+                                    Layout.fillWidth: true
+                                    text: Routing.sourceLine(routeEntry.route)
+                                    color: routeEntry.route && routeEntry.route.source === "explicit"
+                                        ? Theme.foreground : Theme.foregroundDim
                                     font.family: Theme.fontFamily
                                     font.pixelSize: Theme.fontSizeSmall
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: root.beginRoutePick(
-                                            routeRow.modelData.role,
-                                            routeRow.modelData.label,
-                                            "fallback")
+                                    elide: Text.ElideRight
+                                }
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Text {
+                                        text: routeEntry.chain.length === 0
+                                            ? "Fallbacks · none" : "Fallbacks · retry order"
+                                        color: Theme.foregroundDim
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: Theme.fontSizeSmall
+                                    }
+                                    Item { Layout.fillWidth: true }
+                                    Text {
+                                        visible: routeEntry.chain.length > 0
+                                        text: "Clear chain"
+                                        color: Theme.foregroundDim
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: Theme.fontSizeSmall
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: {
+                                                if (routeEntry.route)
+                                                    Ghostd.replaceModelFallbacks(routeEntry.route.role, []);
+                                            }
+                                        }
                                     }
                                 }
-                                Text {
-                                    visible: routeRow.chain.length > 0
-                                    text: "Clear"
-                                    color: Theme.foregroundDim
-                                    font.family: Theme.fontFamily
-                                    font.pixelSize: Theme.fontSizeSmall
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: Ghostd.clearModelFallbacks(routeRow.modelData.role)
+
+                                Repeater {
+                                    model: routeEntry.chain
+
+                                    RowLayout {
+                                        id: fallbackRow
+                                        required property var modelData
+                                        required property int index
+
+                                        Layout.fillWidth: true
+                                        spacing: Theme.gap
+
+                                        Text {
+                                            Layout.fillWidth: true
+                                            text: (fallbackRow.index + 1) + "  "
+                                                + root.routeModelName(fallbackRow.modelData)
+                                            color: Theme.foreground
+                                            font.family: Theme.fontFamily
+                                            font.pixelSize: Theme.fontSizeSmall
+                                            elide: Text.ElideRight
+                                        }
+                                        Text {
+                                            visible: fallbackRow.index > 0
+                                            text: "↑"
+                                            color: Theme.accent
+                                            font.family: Theme.fontFamily
+                                            font.pixelSize: Theme.fontSizeSmall
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                cursorShape: Qt.PointingHandCursor
+                                                onClicked: Ghostd.replaceModelFallbacks(
+                                                    routeEntry.route.role,
+                                                    Routing.moveFallback(
+                                                        routeEntry.chain, fallbackRow.index, -1))
+                                            }
+                                        }
+                                        Text {
+                                            visible: fallbackRow.index + 1 < routeEntry.chain.length
+                                            text: "↓"
+                                            color: Theme.accent
+                                            font.family: Theme.fontFamily
+                                            font.pixelSize: Theme.fontSizeSmall
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                cursorShape: Qt.PointingHandCursor
+                                                onClicked: Ghostd.replaceModelFallbacks(
+                                                    routeEntry.route.role,
+                                                    Routing.moveFallback(
+                                                        routeEntry.chain, fallbackRow.index, 1))
+                                            }
+                                        }
+                                        Text {
+                                            text: "Remove"
+                                            color: Theme.foregroundDim
+                                            font.family: Theme.fontFamily
+                                            font.pixelSize: Theme.fontSizeSmall
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                cursorShape: Qt.PointingHandCursor
+                                                onClicked: Ghostd.replaceModelFallbacks(
+                                                    routeEntry.route.role,
+                                                    Routing.removeFallback(
+                                                        routeEntry.chain, fallbackRow.index))
+                                            }
+                                        }
                                     }
                                 }
-                            }
-
-                            Text {
-                                Layout.fillWidth: true
-                                text: "Primary  " + root.routeModelName(routeRow.modelData.primary)
-                                color: routeRow.modelData.primary ? Theme.foreground : Theme.foregroundDim
-                                font.family: Theme.fontFamily
-                                font.pixelSize: Theme.fontSizeSmall
-                                elide: Text.ElideRight
-                            }
-
-                            Text {
-                                Layout.fillWidth: true
-                                text: routeRow.chain.length === 0
-                                    ? "Fallbacks  none"
-                                    : "Fallbacks  " + routeRow.chain.map((model, index) =>
-                                        (index + 1) + " " + root.routeModelName(model)).join("  →  ")
-                                color: Theme.foregroundDim
-                                font.family: Theme.fontFamily
-                                font.pixelSize: Theme.fontSizeSmall
-                                elide: Text.ElideRight
                             }
                         }
                     }

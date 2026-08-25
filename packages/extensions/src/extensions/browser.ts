@@ -14,7 +14,6 @@
 import { readFile } from "node:fs/promises";
 import type {
   ExtensionAPI,
-  ExtensionContext,
   ExtensionFactory,
 } from "@oh-my-pi/pi-coding-agent";
 import { Type } from "@oh-my-pi/pi-coding-agent/extensibility/legacy-typebox";
@@ -34,6 +33,7 @@ import {
 } from "./browser-session.js";
 import {
   resolveHome,
+  resolveToolCapabilities,
   textResult,
   untrustedTextResult,
   type CwdContext,
@@ -74,16 +74,6 @@ export const BROWSER_ACTIONS = [
 ] as const;
 
 export type BrowserAction = (typeof BROWSER_ACTIONS)[number];
-
-/**
- * Can this model be handed an image? Defined locally rather than imported from
- * `screen.ts` so the two desktop tools stay decoupled. `input` is optional in
- * OMP's models.json schema, so a missing value is read as text-only — handing a
- * blind model an image block a provider would silently drop.
- */
-function hasVision(model: ExtensionContext["model"] | null | undefined): boolean {
-  return model?.input?.includes("image") ?? false;
-}
 
 export interface BrowserExtensionOptions extends GhostExtensionOptions {
   /**
@@ -464,7 +454,7 @@ export function createBrowserExtension(
             // image block in a tool result is silently dropped for text-only
             // models (the same reason ghost_screen points at a file). Either way
             // the saved path stays in details.
-            if (hasVision(ctx.model)) {
+            if (resolveToolCapabilities(options, ctx).vision) {
               let data: string | undefined;
               try {
                 data = (await readFile(shot.path)).toString("base64");

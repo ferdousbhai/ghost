@@ -5,6 +5,7 @@
  * filters, the cap) without a real OMP registry, a provider, or a network
  * call.
  */
+import type { Api, Model } from "@oh-my-pi/pi-ai";
 import type { CatalogModel, ModelCatalogRuntime } from "../../src/model-catalog.js";
 
 export interface FakeCatalogModel extends CatalogModel {
@@ -21,8 +22,26 @@ export interface FakeCatalogOptions {
   oauth?: string[];
 }
 
+/** Materialize a complete OMP model while keeping catalogue fixtures concise. */
+export function fakeOmpModel(model: FakeCatalogModel): Model<Api> {
+  return {
+    id: model.id,
+    name: model.name ?? model.id,
+    api: "google-generative-ai",
+    provider: model.provider,
+    baseUrl: "https://models.invalid",
+    reasoning: false,
+    input: [...(model.input ?? ["text"])],
+    cost: model.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: model.contextWindow ?? null,
+    maxTokens: null,
+    ...(model.priority === undefined ? {} : { priority: model.priority }),
+    compat: undefined,
+  };
+}
+
 export function makeFakeCatalogRuntime(options: FakeCatalogOptions): ModelCatalogRuntime {
-  const models = options.models;
+  const models = options.models.map(fakeOmpModel);
   const credentialed = new Set(options.credentialed ?? []);
   const oauth = new Set(options.oauth ?? []);
   const scoped = (providerId?: string) =>
@@ -43,6 +62,7 @@ export function makeFakeCatalogRuntime(options: FakeCatalogOptions): ModelCatalo
     isUsingOAuth(providerId) {
       return oauth.has(providerId);
     },
+    close() {},
   };
 }
 

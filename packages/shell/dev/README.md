@@ -3,6 +3,23 @@
 No daemon, no OMP, no models needed. `mock-ghostd.mjs` implements enough of the
 CONTRACTS.md API to build and demo every surface.
 
+## Files and document contract
+
+The mock fixtures use `ghost-home/v2`: each `docs/**/*.md` starts at byte 0
+with a non-empty `# Title`, and may end with one nonblank line containing only
+lowercase hashtag slugs matching `#[a-z0-9]+(?:-[a-z0-9]+)*`. `#archived` is
+reserved and removes a document from the default working set. Title and tags
+are raw Markdown, not YAML frontmatter.
+
+Import and daemon startup run the one-time migration from `ghost-home/v1` after
+renaming an unambiguous `notes/` directory to `docs/`. The migration chooses a
+legacy title by first H1, then frontmatter `title`, then filename; slugifies
+legacy tags, turns `archived: true` into `#archived`, merges and deduplicates
+trailing hashtags, discards the import-only `path`, and atomically rewrites each
+file. It is safe to rerun after interruption, keeps no marker, and leaves no
+dual-format reader. This mock starts with v2 fixtures and does not emulate the
+legacy format.
+
 ## Demo script
 
 Four terminals' worth of commands, in order. Nothing here touches your running
@@ -28,6 +45,9 @@ qs -p qml/shell.qml ipc call ghost open
 qs -p qml/shell.qml ipc call ghost section docs
 qs -p qml/shell.qml ipc call ghost section memory
 qs -p qml/shell.qml ipc call ghost section agents
+qs -p qml/shell.qml ipc call ghost section commands
+qs -p qml/shell.qml ipc call ghost section mcp
+qs -p qml/shell.qml ipc call ghost section connect
 qs -p qml/shell.qml ipc call ghost section character
 qs -p qml/shell.qml ipc call ghost ask "who lives here?"
 qs -p qml/shell.qml ipc call ghost close
@@ -45,14 +65,29 @@ qs -p qml/shell.qml kill
   layout like any app. The HUD uses a neutral reading canvas with the current
   Omarchy accent and semantic status colours. Roster on the left (`casper`,
   `moaning-myrtle`, `+ new ghost`), transcript in the middle, composer at the
-  bottom, and the permanent Chat / Docs / Memory / Helpers / Character rail at
+bottom, and the permanent Chat / Docs / Memory / Helpers / Commands / MCP / Remote / Character rail at
   the right edge. `SUPER+CTRL+G` is launch-or-focus: reveal+focus when
   hidden/unfocused, hide only when already focused.
-  `section docs` shows the Train-style file index and lossless markdown editor;
-  memory is read-only, Helpers describes OMP subagents, and Character edits
-  `character.md`. Mock docs use the strict v2 shape: first-line H1, no YAML,
-  optional final hashtags. The temporary fixture makes every pane live without
-  touching `~/Ghosts`; production startup migrates v1 docs before listing them.
+  `section docs` shows the Train-style file index and v2 documents. The editor
+  has a lossless monospace source view and a read-only Markdown Reading view;
+  switching views never rewrites the document. Typing autosaves the complete
+  body atomically, while closing or switching files flushes first. An external
+  change is merged line-by-line when safe and otherwise pauses autosave for an
+  explicit keep-mine/take-theirs choice. The daemon's writer validates and
+  writes exactly the complete v2 body. Memory is read-only, Helpers describes
+  OMP subagents, and Character edits `character.md`. Docs and memory rows offer
+  confirmed, recoverable deletion; the mock moves its owned fixture into a
+  temporary mock Trash. Commands shows the session's searchable OMP catalog and
+  stages a chosen slash command in chat; typing `/` opens its compact
+  autocomplete, including clear partial/unsupported labels. MCP lists
+  sanitized stdio, HTTP, and SSE fixtures and exercises add, full replacement,
+  enable/disable, and confirmed deletion without ever returning the seeded
+  secret values. Remote exercises the OpenAI live-voice lifecycle and
+  encrypted collaboration with distinct read-only/writable relay links.
+  `moaning-myrtle` deliberately returns structured `not_supported` for
+  collaboration so that state is demoable too.
+  The mock's temporary fixture makes every pane live without
+  touching `~/Ghosts`.
 - On `ask`: the spectral summoning orb saying "Checking what I remember about
   that" in the ghost's own words rather than a spectral phrase, then the reply
   arriving word by word with `**bold**` rendered as bold. The narration never

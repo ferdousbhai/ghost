@@ -22,8 +22,10 @@ import { scrubProviderEnv } from "./env-scrub.js";
 import { ensureGhostHomeLayout } from "./extensions.js";
 import { GhostRegistry } from "./ghosts.js";
 import { GhostHookRunner } from "./hooks.js";
+import { HomeOperationCoordinator } from "./home-operations.js";
 import { migrateHostedConversations } from "./hosted-conversation-import.js";
 import { createLogger, type LogLevel } from "./log.js";
+import { McpCatalog } from "./mcp-catalog.js";
 import { ModelCatalog } from "./model-catalog.js";
 import { createRelayHub } from "./relay.js";
 import { relayTokenCommand } from "./relay-token.js";
@@ -236,6 +238,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   // is off, which also disables the relay browser mode (sessions fall back to
   // the per-ghost profile).
   const relay = createRelayHub({ logger });
+  const homeOperations = new HomeOperationCoordinator(registry);
   const host = new SessionHost({
     registry,
     logger,
@@ -249,20 +252,24 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   const login = new LoginManager({ registry, logger, offline: config.offline });
   const catalog = new ModelCatalog({
     registry,
+    homeOperations,
     logger,
     offline: config.offline,
     // A model switch must reach any conversation that is already open, not just
     // the next freshly built session: rebind the live cached sessions.
     onModelRoutingChanged: (name) => host.rebindModel(name),
   });
+  const mcp = new McpCatalog({ registry, homeOperations });
 
   let listening: ListeningServer;
   try {
     listening = await startDaemonServer({
       registry,
       host,
+      homeOperations,
       login,
       catalog,
+      mcp,
       logger,
       port: config.port,
       address: config.host,

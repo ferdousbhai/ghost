@@ -39,6 +39,7 @@ Item {
     signal branchRequested(string entryId)
 
     readonly property bool mine: root.speaker === "user"
+    readonly property bool commandOutput: root.speaker === "command"
     readonly property int contentInset: root.mine ? 12 : 0
 
     /**
@@ -170,13 +171,15 @@ Item {
                 width: parent.width
                 visible: root.body !== ""
                 text: root.body
-                textFormat: root.mine ? Text.PlainText : Text.MarkdownText
+                textFormat: root.mine || root.commandOutput
+                    ? Text.PlainText : Text.MarkdownText
                 color: root.mine ? Theme.foregroundBright : Theme.foreground
                 // Links wear the ghost's own amber, never Theme.accent — the
                 // inherited Omarchy accent is blue in most themes, and reading
                 // copy is not a web page.
                 linkColor: Theme.ghostAmber
-                font.family: Theme.fontFamily
+                font.family: root.commandOutput
+                    ? Theme.fontFamilyMono : Theme.fontFamily
                 font.pixelSize: Theme.fontSize
                 lineHeight: Theme.lineHeight
                 wrapMode: Text.Wrap

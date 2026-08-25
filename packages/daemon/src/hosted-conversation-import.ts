@@ -1,7 +1,8 @@
 /**
  * Materialize the hosted export's `conversations/*.json` fixtures as native
- * OMP sessions. The fixture remains untouched: it is the lossless copy of the
- * hosted wire shape, while `.sessions/` is the resumable local projection.
+ * OMP sessions. The fixture remains the lossless hosted wire shape while its
+ * `.sessions/` projection exists; user-triggered conversation deletion moves
+ * both artifacts to trash so the fixture cannot recreate a deleted chat.
  */
 import { randomUUID } from "node:crypto";
 import {
@@ -25,16 +26,17 @@ import type {
   Usage,
   UserMessage,
 } from "@oh-my-pi/pi-ai";
-import type {
-  CustomEntry,
-  SessionEntry,
-  SessionHeader,
-  SessionMessageEntry,
-  TitleChangeEntry,
+import {
+  CURRENT_SESSION_VERSION,
+  type CustomEntry,
+  type SessionEntry,
+  type SessionHeader,
+  type SessionMessageEntry,
+  type TitleChangeEntry,
 } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { serializeTitleSlot } from "@oh-my-pi/pi-coding-agent/session/session-title-slot";
-import { sessionFileNameFor } from "./session-host.js";
+import { sessionFileNameFor } from "./session-files.js";
 
 const HOSTED_CONVERSATIONS_DIRNAME = "conversations";
 const NATIVE_SESSIONS_DIRNAME = ".sessions";
@@ -87,6 +89,46 @@ export interface HostedConversationImportResult {
   existing: number;
   /** Fixtures that could not be projected; each source file remains untouched. */
   failures: HostedConversationImportFailure[];
+}
+
+/**
+ * Find every valid hosted fixture capable of recreating one native session.
+ * Malformed siblings are migration diagnostics, not deletion targets.
+ */
+export async function hostedConversationSourcePaths(
+  ghostHome: string,
+  conversationId: string,
+): Promise<string[]> {
+  const conversationsDir = join(ghostHome, HOSTED_CONVERSATIONS_DIRNAME);
+  let sourceNames: string[];
+  try {
+    sourceNames = (await readdir(conversationsDir, { withFileTypes: true }))
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
+      .map((entry) => entry.name)
+      .sort();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
+
+  const matches: string[] = [];
+  for (const sourceName of sourceNames) {
+    const sourcePath = join(conversationsDir, sourceName);
+    let raw: string;
+    try {
+      raw = await readFile(sourcePath, "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+      throw error;
+    }
+    try {
+      const source = parseHostedConversation(JSON.parse(raw));
+      if (source.id === conversationId) matches.push(sourcePath);
+    } catch {
+      // A malformed fixture could not have produced the native projection.
+    }
+  }
+  return matches;
 }
 
 const ZERO_COST = {
@@ -313,9 +355,12 @@ function buildNativeSession(
   const created = isoTimestamp(source.catalog.createdAt, "catalog.createdAt");
   const updated = isoTimestamp(source.catalog.updatedAt, "catalog.updatedAt");
   const { title, slot } = fitTitle(source.catalog.title, updated.iso);
+  // OMP's public foreign-session importer only supports Claude/Codex and
+  // persists a copy under a fresh identity. This manual tree and JSONL write
+  // preserve the hosted conversation/message ids and source timestamps.
   const header: SessionHeader = {
     type: "session",
-    version: 3,
+    version: CURRENT_SESSION_VERSION,
     id: source.id,
     timestamp: created.iso,
     cwd: ghostHome,

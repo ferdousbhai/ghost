@@ -6,6 +6,7 @@ import type {
   ExtensionUIDialogOptions,
   ExtensionUIContext,
 } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/types";
+import { silentLogger, type Logger } from "./log.js";
 
 export interface PendingAsk {
   id: string;
@@ -21,6 +22,13 @@ export class AskBrokerError extends Error {
   ) {
     super(message);
     this.name = "AskBrokerError";
+  }
+}
+
+export class HeadlessUIUnavailableError extends Error {
+  constructor(operation: string) {
+    super(`Ghost's headless daemon cannot ${operation}.`);
+    this.name = "HeadlessUIUnavailableError";
   }
 }
 
@@ -61,31 +69,66 @@ function stringField(
  * Turns OMP's synchronous ExtensionUIContext.askDialog contract into a small,
  * pollable HTTP interaction. The provider turn remains paused in the harness;
  * the shell may reconnect to the same daemon and the first valid response wins.
+ *
+ * The deadline is entirely OMP's to decide. `askDialog` is handed a `timeout`
+ * only when OMP resolved one from `ask.timeout` — which the daemon projects its
+ * own `askTimeoutSeconds` onto (see session-host's settings overrides) — and no
+ * timeout at all when the owner disabled auto-answering or plan mode suspended
+ * it. Those three states arrive here as one `undefined`, so a default of the
+ * broker's own could only override decisions it cannot see.
  */
 export class AskBroker {
   #active: ActiveAsk | null = null;
 
-  /**
-   * Milliseconds a question waits when its asker names no deadline of its own.
-   * Ghost's setting, not OMP's: the tool may still pass a shorter or longer
-   * `timeout` for a question it knows the shape of, and that always wins.
-   * `0` waits forever, which is what shipped before this had a default.
-   */
-  readonly #defaultTimeout: number;
+  readonly uiContext: ExtensionUIContext;
 
-  constructor(defaultTimeoutSeconds = 0) {
-    this.#defaultTimeout = Number.isFinite(defaultTimeoutSeconds) && defaultTimeoutSeconds > 0
-      ? defaultTimeoutSeconds * 1000
-      : 0;
+  constructor(logger: Logger = silentLogger) {
+    // OMP exposes one UI context to every tool. Ask needs that context and
+    // `hasUI: true`, so the daemon must honestly implement the whole surface:
+    // passive display state is a headless no-op, while anything that would
+    // require an owner's interactive answer rejects explicitly.
+    const unavailable = (operation: string): never => {
+      throw new HeadlessUIUnavailableError(operation);
+    };
+    this.uiContext = {
+      timeoutStartsOnPresentation: true,
+      select: async () => unavailable("show a selection dialog"),
+      confirm: async () => unavailable("show a confirmation dialog"),
+      input: async () => unavailable("show a text input dialog"),
+      askDialog: (
+        questions: ExtensionAskDialogQuestion[],
+        options?: ExtensionUIDialogOptions,
+      ) => this.#open(questions, options),
+      notify: (message, type = "info") => {
+        const fields = { type, message };
+        if (type === "error") logger.error("OMP UI notification", fields);
+        else if (type === "warning") logger.warn("OMP UI notification", fields);
+        else logger.info("OMP UI notification", fields);
+      },
+      onTerminalInput: () => () => {},
+      setStatus: () => {},
+      setWorkingMessage: () => {},
+      setWidget: () => {},
+      setFooter: () => {},
+      setHeader: () => {},
+      setTitle: () => {},
+      custom: async <T>(): Promise<T> => unavailable("show a custom interactive UI"),
+      setEditorText: () => unavailable("set text in an interactive editor"),
+      pasteToEditor: () => unavailable("paste text into an interactive editor"),
+      getEditorText: () => unavailable("read text from an interactive editor"),
+      editor: async () => unavailable("show a text editor"),
+      addAutocompleteProvider: () => {},
+      setEditorComponent: () => {},
+      get theme() {
+        return unavailable("read an interactive UI theme");
+      },
+      getAllThemes: async () => [],
+      getTheme: async () => undefined,
+      setTheme: async () => ({ success: false, error: "UI not available in Ghost's daemon" }),
+      getToolsExpanded: () => false,
+      setToolsExpanded: () => {},
+    };
   }
-
-  readonly uiContext = {
-    timeoutStartsOnPresentation: true,
-    askDialog: (
-      questions: ExtensionAskDialogQuestion[],
-      options?: ExtensionUIDialogOptions,
-    ) => this.#open(questions, options),
-  } as unknown as ExtensionUIContext;
 
   get pending(): PendingAsk | null {
     const active = this.#active;
@@ -148,8 +191,7 @@ export class AskBroker {
     // manages to overlap two dialogs instead of orphaning the first promise.
     this.close();
     const now = Date.now();
-    const asked = options?.timeout && options.timeout > 0 ? options.timeout : undefined;
-    const timeout = asked ?? (this.#defaultTimeout > 0 ? this.#defaultTimeout : undefined);
+    const timeout = options?.timeout && options.timeout > 0 ? options.timeout : undefined;
     const { promise, resolve } = Promise.withResolvers<ExtensionAskDialogResult | undefined>();
     const active: ActiveAsk = {
       id: randomUUID(),
@@ -237,17 +279,29 @@ export class AskBroker {
     };
   }
 
+  /**
+   * What a question settles as when the deadline passes and nobody answered.
+   *
+   * `recommended` is the asking model's own pre-committed default, so
+   * submitting it is submitting the model's answer, not the owner's. Without
+   * one there is nothing to submit: an answer chosen by list position would
+   * reach the model as a decision the owner never made, on a question whose
+   * options it wrote in whatever order it happened to write them. An empty
+   * selection says exactly what happened — the question expired unanswered —
+   * and leaves the model free to take the careful branch or park the task.
+   * (The timeout path bypasses #validateResult, which would otherwise insist a
+   * single-select question carry an answer.)
+   */
   #timedOutResult(question: ExtensionAskDialogQuestion): ExtensionAskDialogResultItem {
     const recommended = typeof question.recommended === "number"
       ? question.options[question.recommended]
       : undefined;
-    const selected = recommended ?? question.options[0];
     return {
       id: question.id,
       question: question.question,
       options: question.options.map((option) => option.label),
       multi: question.multi ?? false,
-      selectedOptions: selected ? [selected.label] : [],
+      selectedOptions: recommended ? [recommended.label] : [],
       timedOut: true,
     };
   }

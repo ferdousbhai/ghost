@@ -8,9 +8,14 @@
  */
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, sep } from "node:path";
+import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
+import type { LiveSessionControllerOptions } from "@oh-my-pi/pi-coding-agent/live/controller";
 import { afterEach, describe, expect, it } from "vitest";
+import { claudeSessionMetadataPath } from "../src/claude-code.js";
+import { GHOST_COMPACTION_PROMPT } from "../src/compaction.js";
 import { ghostPaths } from "../src/ghosts.js";
 import {
+  clearGhostModelRole,
   openAiCompatiblePreset,
   setChatModelRole,
   writeGhostModels,
@@ -18,12 +23,15 @@ import {
   type GhostModelsFile,
 } from "../src/models.js";
 import { GhostHookRunner } from "../src/hooks.js";
+import { migrateHostedConversations } from "../src/hosted-conversation-import.js";
+import { LiveVoiceManager, type LiveVoiceStatus } from "../src/live-voice.js";
 import {
   SessionHost,
   forkConversationTitle,
   parseUserBashCommand,
   sessionFileNameFor,
   sessionKeyOf,
+  type SessionHostOptions,
 } from "../src/session-host.js";
 import type { PiMessagesEvent } from "../src/pi-messages.js";
 import { readPins, writePins } from "../src/pins.js";
@@ -48,12 +56,62 @@ const TEST_DOC = `# Restoring the Vandercook
 Pull the roller bearings before you soak anything.
 `;
 
+function writeMcpFixture(
+  dir: string,
+  options: { enabled?: boolean; empty?: boolean } = {},
+): void {
+  const ompDir = join(dir, ".omp");
+  mkdirSync(ompDir, { recursive: true });
+  const serverPath = join(dir, "reload-mcp.mjs");
+  if (!existsSync(serverPath)) {
+    writeFileSync(
+      serverPath,
+      `import { createInterface } from "node:readline";
+const lines = createInterface({ input: process.stdin });
+const send = (id, result) => process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id, result }) + "\\n");
+lines.on("line", (line) => {
+  const request = JSON.parse(line);
+  if (request.id === undefined) return;
+  if (request.method === "initialize") send(request.id, {
+    protocolVersion: "2025-11-25", capabilities: { tools: {} },
+    serverInfo: { name: "reload-fixture", version: "1.0.0" }
+  });
+  else if (request.method === "tools/list") send(request.id, { tools: [{
+    name: "reload_echo", description: "Reload fixture",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false }
+  }] });
+  else send(request.id, {});
+});
+`,
+      "utf8",
+    );
+  }
+  writeFileSync(
+    join(ompDir, "mcp.json"),
+    JSON.stringify({
+      mcpServers: options.empty ? {} : {
+        reload_fixture: {
+          type: "stdio",
+          command: process.execPath,
+          args: [serverPath],
+          ...(options.enabled === false ? { enabled: false } : {}),
+        },
+      },
+    }),
+    "utf8",
+  );
+}
+
 async function setup(
   script: Parameters<typeof startMockProvider>[0]["script"],
-  hooks?: GhostHookRunner,
+  options: Pick<
+    SessionHostOptions,
+    "hooks" | "askTimeoutSeconds" | "liveVoice" | "compaction" | "title"
+  > = {},
+  providerOptions: Omit<Parameters<typeof startMockProvider>[0], "script"> = {},
 ) {
   temp = makeTempGhosts();
-  provider = await startMockProvider({ script });
+  provider = await startMockProvider({ script, ...providerOptions });
   const dir = seedGhost(temp.root, {
     name: "casper",
     docs: { "press.md": TEST_DOC },
@@ -62,9 +120,52 @@ async function setup(
   host = new SessionHost({
     registry: temp.registry,
     offline: true,
-    ...(hooks ? { hooks } : {}),
+    ...options,
   });
   return { dir, host, provider, temp };
+}
+
+function testLiveVoice(startGate?: Promise<void>, startError?: Error): {
+  manager: LiveVoiceManager;
+  startEntered: Promise<void>;
+} {
+  let callbacks: LiveSessionControllerOptions["callbacks"] | undefined;
+  let entered!: () => void;
+  const startEntered = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  class TestLiveVoiceManager extends LiveVoiceManager {
+    override async start(sessionKey: string, session: AgentSession): Promise<LiveVoiceStatus> {
+      entered();
+      if (startGate) await startGate;
+      return super.start(sessionKey, session);
+    }
+  }
+  const manager = new TestLiveVoiceManager({
+    createController: (options) => {
+      callbacks = options.callbacks;
+      let muted = false;
+      return {
+        get phase() {
+          return muted ? "muted" as const : "listening" as const;
+        },
+        get muted() {
+          return muted;
+        },
+        async start() {
+          if (startError) throw startError;
+          callbacks?.onPhase("listening");
+        },
+        toggleMute() {
+          muted = !muted;
+        },
+        async stop() {
+          callbacks?.onTerminal();
+        },
+      };
+    },
+  });
+  return { manager, startEntered };
 }
 
 async function waitFor<T>(read: () => T | null, timeoutMs = 2_000): Promise<T> {
@@ -108,6 +209,76 @@ describe("parseUserBashCommand", () => {
   });
 });
 
+describe("OMP slash commands", () => {
+  it("discovers the live OMP catalog and annotates Ghost's execution policy", async () => {
+    await setup([{ kind: "text", text: "unused" }]);
+    const commands = await host!.availableCommands("casper", "conv-commands");
+
+    expect(commands).toContainEqual(expect.objectContaining({
+      name: "tools",
+      source: "builtin",
+      availability: "available",
+    }));
+    expect(commands).toContainEqual(expect.objectContaining({
+      name: "memory",
+      source: "builtin",
+      availability: "unsupported",
+    }));
+    // Ghost augments OMP's headless builder result with the unified registry so
+    // an OMP user's familiar TUI-only commands remain discoverable but honest.
+    expect(commands).toContainEqual(expect.objectContaining({
+      name: "plan",
+      source: "builtin",
+      availability: "unsupported",
+      unavailableReason: expect.stringContaining("interactive terminal UI"),
+    }));
+  });
+
+  it("reports that an active Claude Code runtime has no OMP command catalog", async () => {
+    const { dir } = await setup([{ kind: "text", text: "unused" }]);
+    setChatModelRole(ghostPaths(dir).agentDir, "claude-code", "default");
+
+    await expect(host!.availableCommands("casper", "conv-claude"))
+      .rejects.toMatchObject({ code: "not_supported", status: 409 });
+  });
+
+  it("runs admitted builtins without a model and rejects unsafe or TUI-only ones", async () => {
+    await setup([{ kind: "text", text: "must not be requested" }]);
+
+    const run = async (sessionId: string, prompt: string) => {
+      const events: PiMessagesEvent[] = [];
+      await host!.runTurn("casper", { sessionId, prompt, emit: (event) => events.push(event) });
+      return events;
+    };
+
+    const tools = await run("conv-tools", "/tools");
+    expect(tools[0]).toEqual({ type: "start" });
+    expect(tools).toContainEqual(expect.objectContaining({
+      type: "command_output",
+      command: "/tools",
+      output: expect.stringContaining("read"),
+    }));
+    expect(tools.at(-1)).toMatchObject({ type: "done", usage: { totalTokens: 0 } });
+
+    for (const [sessionId, prompt, command] of [
+      ["conv-memory", "/memory stats", "/memory"],
+      ["conv-plan", "/plan make a plan", "/plan"],
+      ["conv-delete", "/session delete", "/session"],
+    ] as const) {
+      const events = await run(sessionId, prompt);
+      expect(events).toContainEqual(expect.objectContaining({
+        type: "command_output",
+        command,
+        isError: true,
+        code: "unsupported_command",
+      }));
+      expect(events.at(-1)).toMatchObject({ type: "done", usage: { totalTokens: 0 } });
+    }
+
+    expect(provider!.requests).toHaveLength(0);
+  });
+});
+
 describe("SessionHost.open", () => {
   it("keeps sessions, settings, and models inside the ghost home", async () => {
     const { dir } = await setup([{ kind: "text", text: "hello" }]);
@@ -120,10 +291,24 @@ describe("SessionHost.open", () => {
     expect(handle.model).toEqual({ provider: "ghost-local", id: provider!.modelId });
   });
 
+  it("leaves OMP retry behavior under the ghost home's own settings", async () => {
+    const { dir } = await setup([{ kind: "text", text: "hello" }]);
+    const ompDir = join(dir, ".omp");
+    mkdirSync(ompDir, { recursive: true });
+    writeFileSync(
+      join(ompDir, "config.yml"),
+      "retry:\n  modelFallback: false\n  fallbackRevertPolicy: never\n",
+      "utf8",
+    );
+
+    const handle = await host!.open("casper", "conv-owner-retry");
+    expect(handle.session.settings.get("retry.modelFallback")).toBe(false);
+    expect(handle.session.settings.get("retry.fallbackRevertPolicy")).toBe("never");
+  });
+
   it("binds the configured model before open() resolves", async () => {
-    // The model bind is awaited (not fire-and-forget), so by the time open()
-    // returns the session already reports the configured model — a first
-    // prompt cannot race ahead of the bind onto pi's default.
+    // createAgentSession owns and awaits initial selection, so open() returns
+    // with the configured model already visible to the first prompt.
     await setup([{ kind: "text", text: "hello" }]);
     const handle = await host!.open("casper", "conv-1");
     expect(handle.session.model?.id).toBe(provider!.modelId);
@@ -283,7 +468,296 @@ lines.on("line", (line) => {
   });
 });
 
+describe("SessionHost live voice ownership", () => {
+  it("reserves a conversation before a delayed voice manager reports active", async () => {
+    let releaseStart!: () => void;
+    const startGate = new Promise<void>((resolve) => {
+      releaseStart = resolve;
+    });
+    const voice = testLiveVoice(startGate);
+    await setup([{ kind: "text", text: "must not run" }], { liveVoice: voice.manager });
+    await host!.open("casper", "conv-voice-race");
+
+    const starting = host!.liveVoiceAction("casper", "conv-voice-race", "start");
+    await voice.startEntered;
+
+    await expect(host!.runTurn("casper", {
+      sessionId: "conv-voice-race",
+      prompt: "race the microphone",
+      emit: () => {},
+    })).rejects.toMatchObject({ code: "session_busy", status: 409 });
+    await expect(host!.runTurn("casper", {
+      sessionId: "conv-voice-race",
+      prompt: "!printf should-not-run",
+      emit: () => {},
+    })).rejects.toMatchObject({ code: "session_busy", status: 409 });
+    expect(provider!.requests).toHaveLength(0);
+
+    const stopping = host!.liveVoiceAction("casper", "conv-voice-race", "stop");
+    releaseStart();
+    await expect(starting).resolves.toMatchObject({ active: true, phase: "listening" });
+    await expect(stopping).resolves.toMatchObject({ active: false, phase: "stopped" });
+    expect(host!.liveVoiceStatus("casper", "conv-voice-race").active).toBe(false);
+  });
+});
+
+describe("SessionHost.reloadMcp", () => {
+  it("lets a disabled canonical server shadow an enabled legacy duplicate on open and reload", async () => {
+    const { dir } = await setup([{ kind: "text", text: "unused" }]);
+    writeMcpFixture(dir, { enabled: false });
+    const serverPath = join(dir, "reload-mcp.mjs");
+    writeFileSync(
+      join(dir, ".omp", ".mcp.json"),
+      JSON.stringify({
+        mcpServers: {
+          reload_fixture: {
+            type: "stdio",
+            command: process.execPath,
+            args: [serverPath],
+          },
+        },
+      }),
+      "utf8",
+    );
+
+    const handle = await host!.open("casper", "conv-mcp-shadow");
+    const toolName = "mcp__reload_fixture_reload_echo";
+    expect(handle.session.getToolByName(toolName)).toBeUndefined();
+
+    writeMcpFixture(dir, { empty: true });
+    await host!.reloadMcp("casper");
+    expect(handle.session.getToolByName(toolName)).toBeDefined();
+
+    writeMcpFixture(dir, { enabled: false });
+    await host!.reloadMcp("casper");
+    expect(handle.session.getToolByName(toolName)).toBeUndefined();
+  });
+
+  it("mounts the first server across open conversations and unmounts disabled or removed tools", async () => {
+    const { dir } = await setup([{ kind: "text", text: "unused" }]);
+    const first = await host!.open("casper", "conv-mcp-first");
+    const second = await host!.open("casper", "conv-mcp-second");
+    const toolName = "mcp__reload_fixture_reload_echo";
+    expect(first.session.getToolByName(toolName)).toBeUndefined();
+    expect(second.session.getToolByName(toolName)).toBeUndefined();
+
+    writeMcpFixture(dir);
+    await host!.reloadMcp("casper");
+    expect(first.session.getToolByName(toolName)).toBeDefined();
+    expect(second.session.getToolByName(toolName)).toBeDefined();
+    expect(host!.mcpConnectionStatus("casper", "reload_fixture")).toBe("connected");
+
+    writeMcpFixture(dir, { enabled: false });
+    await host!.reloadMcp("casper");
+    expect(first.session.getToolByName(toolName)).toBeUndefined();
+    expect(second.session.getToolByName(toolName)).toBeUndefined();
+
+    writeMcpFixture(dir);
+    await host!.reloadMcp("casper");
+    expect(first.session.getToolByName(toolName)).toBeDefined();
+    writeMcpFixture(dir, { empty: true });
+    await host!.reloadMcp("casper");
+    expect(first.session.getToolByName(toolName)).toBeUndefined();
+    expect(second.session.getToolByName(toolName)).toBeUndefined();
+  });
+
+  it("defers a busy conversation's reload until its turn settles", async () => {
+    const { dir } = await setup([
+      {
+        kind: "tool",
+        name: "ask",
+        args: {
+          questions: [{
+            id: "ready",
+            question: "Ready?",
+            options: [{ label: "Yes" }, { label: "No" }],
+          }],
+        },
+      },
+      { kind: "text", text: "Done." },
+    ]);
+    const handle = await host!.open("casper", "conv-mcp-busy");
+    const toolName = "mcp__reload_fixture_reload_echo";
+    const turn = host!.runTurn("casper", {
+      sessionId: "conv-mcp-busy",
+      prompt: "Ask me first.",
+      emit: () => {},
+    });
+    const pending = await waitFor(() => host!.pendingAsk("casper", "conv-mcp-busy"));
+
+    writeMcpFixture(dir);
+    await host!.reloadMcp("casper");
+    expect(handle.session.getToolByName(toolName)).toBeUndefined();
+    host!.answerAsk("casper", "conv-mcp-busy", pending.id, {
+      kind: "submit",
+      results: [{ id: "ready", selectedOptions: ["Yes"] }],
+    });
+    await turn;
+
+    expect(handle.session.getToolByName(toolName)).toBeDefined();
+  });
+
+  it("defers reload and reconnect across a raw collaboration-style turn", async () => {
+    const { dir } = await setup([
+      {
+        kind: "tool",
+        name: "ask",
+        args: {
+          questions: [{
+            id: "remote-ready",
+            question: "Ready?",
+            options: [{ label: "Yes" }, { label: "No" }],
+          }],
+        },
+      },
+      { kind: "text", text: "Remote turn done." },
+    ]);
+    const handle = await host!.open("casper", "conv-mcp-remote");
+    const toolName = "mcp__reload_fixture_reload_echo";
+
+    // CollabHost calls AgentSession directly, bypassing SessionHost.runTurn()
+    // and therefore never setting HostedSession.busy.
+    const remoteTurn = handle.session.prompt("Ask from the writable room.");
+    const pending = await waitFor(() => host!.pendingAsk("casper", "conv-mcp-remote"));
+    expect(handle.session.isStreaming).toBe(true);
+
+    writeMcpFixture(dir);
+    await host!.reloadMcp("casper");
+    expect(handle.session.getToolByName(toolName)).toBeUndefined();
+    await expect(host!.reconnectMcp("casper", "reload_fixture")).resolves.toBe("deferred");
+
+    host!.answerAsk("casper", "conv-mcp-remote", pending.id, {
+      kind: "submit",
+      results: [{ id: "remote-ready", selectedOptions: ["Yes"] }],
+    });
+    await remoteTurn;
+    await waitFor(() => handle.session.getToolByName(toolName) ? true : null);
+    expect(host!.mcpConnectionStatus("casper", "reload_fixture")).toBe("connected");
+  });
+
+  it("defers reload and reconnect while voice owns the session, then applies them on stop", async () => {
+    const voice = testLiveVoice();
+    const { dir } = await setup([{ kind: "text", text: "unused" }], {
+      liveVoice: voice.manager,
+    });
+    const handle = await host!.open("casper", "conv-mcp-voice");
+    const toolName = "mcp__reload_fixture_reload_echo";
+    await host!.liveVoiceAction("casper", "conv-mcp-voice", "start");
+
+    writeMcpFixture(dir);
+    await host!.reloadMcp("casper");
+    expect(handle.session.getToolByName(toolName)).toBeUndefined();
+    await expect(host!.reconnectMcp("casper", "reload_fixture")).resolves.toBe("deferred");
+
+    await host!.liveVoiceAction("casper", "conv-mcp-voice", "stop");
+    expect(handle.session.getToolByName(toolName)).toBeDefined();
+    expect(host!.mcpConnectionStatus("casper", "reload_fixture")).toBe("connected");
+  });
+});
+
 describe("SessionHost.runTurn", () => {
+  it("lets OMP compact and retry a context overflow with Ghost's summary prompt", async () => {
+    await setup([
+      { kind: "text", text: "First context recorded." },
+      { kind: "text", text: "Second context recorded." },
+      {
+        kind: "error",
+        status: 400,
+        body: JSON.stringify({
+          error: {
+            message: "maximum context length is 128000 tokens",
+            type: "invalid_request_error",
+            code: "context_length_exceeded",
+          },
+        }),
+      },
+      { kind: "text", text: "A faithful compacted briefing." },
+      { kind: "text", text: "Recovered after compaction." },
+    ], {
+      title: { enabled: false },
+    }, {
+      sequential: true,
+    });
+    const opened = await host!.open("casper", "conv-overflow");
+    opened.session.settings.override("compaction.keepRecentTokens", 100);
+    opened.session.settings.override("compaction.methodOrder", ["soft"]);
+
+    const run = (prompt: string, emit: (event: PiMessagesEvent) => void = () => {}) =>
+      host!.runTurn("casper", { sessionId: "conv-overflow", prompt, emit });
+    await run(`Keep this first block. ${"letterpress context ".repeat(500)}`);
+    await run(`Keep this second block. ${"workshop state ".repeat(500)}`);
+
+    const events: PiMessagesEvent[] = [];
+    await run("Continue despite the provider overflow.", (event) => events.push(event));
+
+    expect(events.at(-1)?.type).toBe("done");
+    expect(events
+      .filter((event): event is Extract<PiMessagesEvent, { type: "text_delta" }> =>
+        event.type === "text_delta")
+      .map((event) => event.delta)
+      .join(""))
+      .toContain("Recovered after compaction");
+    expect(provider!.requests.some((request) =>
+      JSON.stringify(request.messages).includes(GHOST_COMPACTION_PROMPT.slice(0, 80))))
+      .toBe(true);
+    expect(readFileSync(opened.sessionFile!, "utf8")).toContain('"type":"compaction"');
+  }, 15_000);
+
+  it("does not hold the next turn behind OMP speculative compaction", async () => {
+    let releaseCompaction!: () => void;
+    const compactionGate = new Promise<void>((resolve) => {
+      releaseCompaction = resolve;
+    });
+    await setup([
+      {
+        kind: "text",
+        text: "First context recorded.",
+        usage: { promptTokens: 10_000 },
+      },
+      {
+        kind: "text",
+        text: "Second context recorded.",
+        usage: { promptTokens: 45_000 },
+      },
+      { kind: "text", text: "Speculative briefing.", gate: compactionGate },
+      { kind: "text", text: "The next turn stayed responsive." },
+    ], {
+      compaction: { enabled: true, thresholdTokens: 50_000 },
+      title: { enabled: false },
+    }, {
+      sequential: true,
+    });
+    const opened = await host!.open("casper", "conv-speculation");
+    opened.session.settings.override("compaction.keepRecentTokens", 100);
+    opened.session.settings.override("compaction.methodOrder", ["soft"]);
+
+    const run = (prompt: string, emit: (event: PiMessagesEvent) => void = () => {}) =>
+      host!.runTurn("casper", { sessionId: "conv-speculation", prompt, emit });
+    await run(`Keep this first block. ${"letterpress context ".repeat(500)}`);
+    await run(`Keep this second block. ${"workshop state ".repeat(500)}`);
+    await waitFor(() => provider!.requests.length >= 3 ? true : null);
+    expect(JSON.stringify(provider!.requests[2]?.messages))
+      .toContain(GHOST_COMPACTION_PROMPT.slice(0, 80));
+
+    const events: PiMessagesEvent[] = [];
+    const nextTurn = run("Answer while the summary is still running.", (event) => events.push(event));
+    const completedBeforeCompaction = await Promise.race([
+      nextTurn.then(() => true),
+      new Promise<false>((resolve) => setTimeout(() => resolve(false), 1_000)),
+    ]);
+    releaseCompaction();
+    await nextTurn;
+
+    expect(completedBeforeCompaction).toBe(true);
+    expect(events.at(-1)?.type).toBe("done");
+    expect(events
+      .filter((event): event is Extract<PiMessagesEvent, { type: "text_delta" }> =>
+        event.type === "text_delta")
+      .map((event) => event.delta)
+      .join(""))
+      .toContain("stayed responsive");
+  }, 15_000);
+
   it("hands a failed primary turn to its ordered OMP fallback", async () => {
     temp = makeTempGhosts();
     provider = await startMockProvider({
@@ -573,11 +1047,9 @@ describe("SessionHost.runTurn", () => {
     });
 
     it("reports an ask nobody answered in time as timedOut", async () => {
-      const { dir } = await setup([ASK_STEP, { kind: "text", text: "Matte it is." }]);
-      // OMP reads `ask.timeout` (seconds) from the ghost home's own config, the
-      // only lever a test has on the auto-select deadline.
-      mkdirSync(join(dir, ".omp"), { recursive: true });
-      writeFileSync(join(dir, ".omp", "config.yml"), "ask:\n  timeout: 1\n", "utf8");
+      await setup([ASK_STEP, { kind: "text", text: "Matte it is." }], {
+        askTimeoutSeconds: 1,
+      });
       const turn = host!.runTurn("casper", {
         sessionId: "conv-timedout",
         prompt: "Choose a finish.",
@@ -587,6 +1059,29 @@ describe("SessionHost.runTurn", () => {
       await turn;
 
       expect(await settledOf("conv-timedout")).toBe("timedOut");
+    }, 15_000);
+
+    it("answers a timed-out question with nothing when it recommended nothing", async () => {
+      const { questions } = ASK_STEP.args;
+      const [question] = questions;
+      const { recommended: _recommended, ...open } = question!;
+      await setup([
+        { ...ASK_STEP, args: { questions: [open] } },
+        { kind: "text", text: "Nobody chose; I will hold." },
+      ], { askTimeoutSeconds: 1 });
+      const turn = host!.runTurn("casper", {
+        sessionId: "conv-timedout-open",
+        prompt: "Choose a finish.",
+        emit: () => {},
+      });
+      await waitFor(() => host!.pendingAsk("casper", "conv-timedout-open"));
+      await turn;
+
+      // Still a timeout rather than an answer, and the model was told the
+      // question expired instead of being handed the first option as a choice.
+      expect(await settledOf("conv-timedout-open")).toBe("timedOut");
+      const asked = JSON.stringify(provider!.requests.map((request) => request.messages));
+      expect(asked).not.toContain("User selected: Matte");
     }, 15_000);
   });
 
@@ -650,7 +1145,7 @@ describe("SessionHost.runTurn", () => {
       // Ghost's session_stop hook and must observe both passes itself.
       { kind: "text", text: "The first answer circles around the point." },
       { kind: "text", text: "Here is the direct answer." },
-    ], hooks);
+    ], { hooks });
 
     const events: PiMessagesEvent[] = [];
     await host!.runTurn("casper", {
@@ -679,7 +1174,7 @@ describe("SessionHost.runTurn", () => {
         additionalContext: "Avoid the warning from the previous reply.",
       }));
     });
-    await setup([{ kind: "text", text: "Direct answer." }], hooks);
+    await setup([{ kind: "text", text: "Direct answer." }], { hooks });
 
     await host!.runTurn("casper", {
       sessionId: "conv-before-prompt",
@@ -728,6 +1223,34 @@ describe("SessionHost.runTurn", () => {
       && event.delta.includes("ghost-bash"))).toBe(true);
     const transcript = await host!.readTranscript("casper", "conv-bash");
     expect(JSON.stringify(transcript.messages)).toContain("ghost-bash");
+  });
+
+  it("refuses a model-requested interactive PTY without running its command", async () => {
+    const marker = "pty-command-must-not-run";
+    const { dir } = await setup([
+      {
+        kind: "tool",
+        name: "bash",
+        args: { command: `touch ${marker}`, pty: true },
+      },
+      { kind: "text", text: "The interactive terminal was unavailable." },
+    ]);
+    const events: PiMessagesEvent[] = [];
+
+    await host!.runTurn("casper", {
+      sessionId: "conv-pty",
+      prompt: "Run this in an interactive terminal.",
+      emit: (event) => events.push(event),
+    });
+
+    expect(existsSync(join(dir, marker))).toBe(false);
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "tool_execution_end",
+      toolName: "bash",
+      isError: true,
+      summary: expect.stringContaining("headless daemon"),
+    }));
+    expect(events.at(-1)?.type).toBe("done");
   });
 
   it("keeps !!command out of model context", async () => {
@@ -813,7 +1336,47 @@ describe("SessionHost.runTurn", () => {
       status: 409,
     });
     await turn;
-    await expect(host!.deleteSession("casper", "conv-busy-delete")).resolves.toBeUndefined();
+    await expect(host!.deleteSession("casper", "conv-busy-delete")).resolves.toMatchObject({
+      artifacts: [{ artifact: "omp-transcript", kind: "freedesktop" }],
+    });
+  });
+
+  it("refuses conversation and whole-home moves during a raw collaboration-style turn", async () => {
+    await setup([
+      {
+        kind: "tool",
+        name: "ask",
+        args: {
+          questions: [{
+            id: "remote-delete",
+            question: "Can the remote turn finish?",
+            options: [{ label: "Yes" }, { label: "No" }],
+          }],
+        },
+      },
+      { kind: "text", text: "Finished remotely." },
+    ]);
+    const handle = await host!.open("casper", "conv-remote-delete");
+    const remoteTurn = handle.session.prompt("Writable collaboration prompt.");
+    const pending = await waitFor(() => host!.pendingAsk("casper", "conv-remote-delete"));
+    expect(handle.session.isStreaming).toBe(true);
+
+    await expect(host!.deleteSession("casper", "conv-remote-delete"))
+      .rejects.toMatchObject({ code: "session_busy", status: 409 });
+    await expect(host!.deleteGhost("casper"))
+      .rejects.toMatchObject({ code: "ghost_busy", status: 409 });
+    await expect(host!.renameGhost("casper", "wisp"))
+      .rejects.toMatchObject({ code: "ghost_busy", status: 409 });
+
+    host!.answerAsk("casper", "conv-remote-delete", pending.id, {
+      kind: "submit",
+      results: [{ id: "remote-delete", selectedOptions: ["Yes"] }],
+    });
+    await remoteTurn;
+    await expect(host!.deleteSession("casper", "conv-remote-delete"))
+      .resolves.toMatchObject({
+        artifacts: [{ artifact: "omp-transcript", kind: "freedesktop" }],
+      });
   });
 
   it("terminates with an error event when the provider fails", async () => {
@@ -1053,14 +1616,18 @@ describe("session listing", () => {
     expect(sessions.map((session) => session.id)).toEqual(["newer", "older"]);
   });
 
-  it("deletes a stored conversation and lets the id start fresh", async () => {
+  it("trashes a stored conversation and lets the id start fresh", async () => {
     const { dir } = await setup([{ kind: "text", text: "hello" }]);
     await host!.runTurn("casper", { sessionId: "conv-delete", prompt: "one", emit: () => {} });
     const path = join(ghostPaths(dir).sessionDir, sessionFileNameFor("conv-delete"));
     expect(existsSync(path)).toBe(true);
 
-    await host!.deleteSession("casper", "conv-delete");
+    const trashed = await host!.deleteSession("casper", "conv-delete");
     expect(existsSync(path)).toBe(false);
+    expect(trashed.artifacts).toMatchObject([
+      { artifact: "omp-transcript", source: path, kind: "freedesktop" },
+    ]);
+    expect(existsSync(trashed.artifacts[0]!.trash)).toBe(true);
     expect(await host!.listSessions("casper")).toEqual([]);
     await expect(host!.readTranscript("casper", "conv-delete")).rejects.toMatchObject({
       code: "not_found",
@@ -1073,6 +1640,36 @@ describe("session listing", () => {
 
     await host!.runTurn("casper", { sessionId: "conv-delete", prompt: "fresh", emit: () => {} });
     expect((await host!.listSessions("casper"))[0]?.messageCount).toBe(2);
+  });
+
+  it("trashes a hosted fixture with its projection so startup cannot resurrect it", async () => {
+    const { dir } = await setup([{ kind: "text", text: "hello" }]);
+    const conversations = join(dir, "conversations");
+    const source = join(conversations, "imported.json");
+    writeFileSync(source, JSON.stringify({
+      id: "imported",
+      catalog: {
+        id: "imported",
+        title: "Imported chat",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-02T00:00:00.000Z",
+      },
+      messages: [],
+    }));
+    expect(await migrateHostedConversations(dir)).toMatchObject({ imported: 1 });
+
+    const trashed = await host!.deleteSession("casper", "imported");
+
+    expect(trashed.artifacts.map((entry) => entry.artifact))
+      .toEqual(["hosted-source", "omp-transcript"]);
+    expect(existsSync(source)).toBe(false);
+    expect(await migrateHostedConversations(dir)).toEqual({
+      found: 0,
+      imported: 0,
+      existing: 0,
+      failures: [],
+    });
+    expect(await host!.listSessions("casper")).toEqual([]);
   });
 });
 
@@ -1116,6 +1713,24 @@ describe("SessionHost.deleteGhost", () => {
     });
   });
 
+  it("blocks a new conversation while the ghost home is moving to trash", async () => {
+    await setup([{ kind: "text", text: "hello" }]);
+    await host!.open("casper", "existing");
+    const background = Promise.withResolvers<void>();
+    const hosted = (host as unknown as {
+      sessions: Map<string, { title?: Promise<void> }>;
+    }).sessions.get(sessionKeyOf("casper", "existing"));
+    expect(hosted).toBeDefined();
+    hosted!.title = background.promise;
+
+    const deleting = host!.deleteGhost("casper");
+    await expect(host!.open("casper", "late"))
+      .rejects.toMatchObject({ code: "ghost_busy", status: 409 });
+
+    background.resolve();
+    await deleting;
+  });
+
   it("leaves other ghosts alone and refuses an unknown one", async () => {
     await setup([{ kind: "text", text: "hello" }]);
     const mina = seedGhost(temp!.root, {
@@ -1131,6 +1746,93 @@ describe("SessionHost.deleteGhost", () => {
       code: "not_found",
       status: 404,
     });
+  });
+});
+
+describe("SessionHost.renameGhost", () => {
+  it("moves the home and keeps every conversation, pin, and memory with it", async () => {
+    const { dir } = await setup([{ kind: "text", text: "hello" }]);
+    await host!.runTurn("casper", { sessionId: "conv-1", prompt: "one", emit: () => {} });
+    await host!.renameConversation("casper", "conv-1", "First light");
+    await host!.setPinned("casper", "conv-1", true);
+    writeFileSync(join(dir, "memory", "press.md"), "The Vandercook is a proof press.\n", "utf8");
+
+    const renamed = await host!.renameGhost("casper", "wisp");
+
+    expect(renamed).toMatchObject({ name: "wisp", dir: join(temp!.root, "wisp") });
+    expect(existsSync(dir)).toBe(false);
+    expect(temp!.registry.list().map((ghost) => ghost.name)).toEqual(["wisp"]);
+    // The conversation id is the transcript filename, so it travelled intact.
+    const sessions = await host!.listSessions("wisp");
+    expect(sessions).toMatchObject([{ id: "conv-1", title: "First light", pinned: true }]);
+    expect(readFileSync(join(renamed.dir, "memory", "press.md"), "utf8"))
+      .toContain("Vandercook");
+    // The old name is gone from the API, and the renamed ghost still answers.
+    await expect(host!.listSessions("casper"))
+      .rejects.toMatchObject({ code: "not_found", status: 404 });
+    await host!.runTurn("wisp", { sessionId: "conv-1", prompt: "two", emit: () => {} });
+    expect((await host!.readTranscript("wisp", "conv-1")).messages.length)
+      .toBeGreaterThanOrEqual(4);
+  });
+
+  it("follows the rename into a seeded character title and leaves a written one alone", async () => {
+    await setup([{ kind: "text", text: "hello" }]);
+    const written = seedGhost(temp!.root, {
+      name: "mina",
+      character: "---\ntitle: The Archivist\n---\n\n# mina\n\nYou are mina.\n",
+    });
+
+    const wisp = await host!.renameGhost("casper", "wisp");
+    expect(readFileSync(ghostPaths(wisp.dir).characterFile, "utf8"))
+      .toContain("title: wisp");
+    // The rest of the persona is the ghost's own words and is untouched.
+    expect(readFileSync(ghostPaths(wisp.dir).characterFile, "utf8"))
+      .toContain("letterpress printer");
+
+    const renamedMina = await host!.renameGhost("mina", "vera");
+    expect(readFileSync(ghostPaths(renamedMina.dir).characterFile, "utf8"))
+      .toContain("title: The Archivist");
+    expect(existsSync(written)).toBe(false);
+  });
+
+  it("checks the new name, the old ghost, the collision, and the turn in that order", async () => {
+    await setup([{ kind: "text", text: "hello" }]);
+    seedGhost(temp!.root, { name: "mina" });
+
+    await expect(host!.renameGhost("casper", "../escape"))
+      .rejects.toMatchObject({ code: "invalid_name", status: 400 });
+    await expect(host!.renameGhost("nobody", "wisp"))
+      .rejects.toMatchObject({ code: "not_found", status: 404 });
+    await expect(host!.renameGhost("casper", "mina"))
+      .rejects.toMatchObject({ code: "already_exists", status: 409 });
+    // Its own name changes nothing and is not a collision with itself.
+    await expect(host!.renameGhost("casper", "casper")).resolves.toMatchObject({ name: "casper" });
+
+    const turn = host!.runTurn("casper", { sessionId: "conv-busy", prompt: "one", emit: () => {} });
+    await expect(host!.renameGhost("casper", "wisp"))
+      .rejects.toMatchObject({ code: "ghost_busy", status: 409 });
+    await turn;
+    await expect(host!.renameGhost("casper", "wisp")).resolves.toMatchObject({ name: "wisp" });
+  });
+
+  it("blocks both names while the ghost home is being renamed", async () => {
+    await setup([{ kind: "text", text: "hello" }]);
+    await host!.open("casper", "existing");
+    const background = Promise.withResolvers<void>();
+    const hosted = (host as unknown as {
+      sessions: Map<string, { title?: Promise<void> }>;
+    }).sessions.get(sessionKeyOf("casper", "existing"));
+    expect(hosted).toBeDefined();
+    hosted!.title = background.promise;
+
+    const renaming = host!.renameGhost("casper", "wisp");
+    await expect(host!.open("casper", "late-old"))
+      .rejects.toMatchObject({ code: "ghost_busy", status: 409 });
+    await expect(host!.open("wisp", "late-new"))
+      .rejects.toMatchObject({ code: "ghost_busy", status: 409 });
+
+    background.resolve();
+    await renaming;
   });
 });
 
@@ -1283,6 +1985,112 @@ describe("conversation titles", () => {
   });
 });
 
+describe("renaming a conversation", () => {
+  async function titleOf(sessionId = "conv-1"): Promise<string | null> {
+    const sessions = await host!.listSessions("casper");
+    return sessions.find((session) => session.id === sessionId)?.title ?? null;
+  }
+
+  it("names a conversation and keeps the titler from overwriting it", async () => {
+    temp = makeTempGhosts();
+    provider = await startMockProvider({ script: [{ kind: "text", text: "ok" }] });
+    seedGhost(temp.root, {
+      name: "casper",
+      provider: { baseUrl: provider.url, modelId: provider.modelId },
+    });
+    // A conversation renamed before it is ever titled is the sharp case: the
+    // background titler runs after the first turn and must lose.
+    host = new SessionHost({
+      registry: temp.registry,
+      offline: true,
+      title: { generate: async () => "Generated Title" },
+    });
+    await host.open("casper", "conv-1");
+
+    expect(await host.renameConversation("casper", "conv-1", "The Vandercook")).toBe("The Vandercook");
+    await host.runTurn("casper", { sessionId: "conv-1", prompt: "hello", emit: () => {} });
+    expect(await titleOf()).toBe("The Vandercook");
+    expect((await host.readTranscript("casper", "conv-1")).title).toBe("The Vandercook");
+  });
+
+  it("renames an idle conversation the daemon has no session open for", async () => {
+    await setup([{ kind: "text", text: "ok" }]);
+    await host!.runTurn("casper", { sessionId: "conv-1", prompt: "hello", emit: () => {} });
+    await host!.close("casper", "conv-1");
+
+    expect(await host!.renameConversation("casper", "conv-1", "  Press day  ")).toBe("Press day");
+    expect(await titleOf()).toBe("Press day");
+    // The reopened conversation still resumes, with the new name on it.
+    const handle = await host!.open("casper", "conv-1");
+    expect(handle.session.sessionName).toBe("Press day");
+  });
+
+  it("renames a conversation that is mid-turn", async () => {
+    await setup([
+      {
+        kind: "tool",
+        name: "ask",
+        args: {
+          questions: [{
+            id: "ready",
+            question: "Ready?",
+            options: [{ label: "Yes" }, { label: "No" }],
+          }],
+        },
+      },
+      { kind: "text", text: "Done." },
+    ]);
+    const turn = host!.runTurn("casper", {
+      sessionId: "conv-live",
+      prompt: "Start.",
+      emit: () => {},
+    });
+    const pending = await waitFor(() => host!.pendingAsk("casper", "conv-live"));
+    // A title write touches the title slot, not the turn: the answer the owner
+    // is about to give still lands on a running conversation.
+    expect(await host!.renameConversation("casper", "conv-live", "Watching it work"))
+      .toBe("Watching it work");
+    host!.answerAsk("casper", "conv-live", pending.id, {
+      kind: "submit",
+      results: [{ id: "ready", selectedOptions: ["Yes"] }],
+    });
+    await turn;
+    expect(await titleOf("conv-live")).toBe("Watching it work");
+  });
+
+  it("refuses a Claude Code conversation, whose name that runtime owns", async () => {
+    const { dir } = await setup([{ kind: "text", text: "ok" }]);
+    const sessionDir = ghostPaths(dir).sessionDir;
+    mkdirSync(sessionDir, { recursive: true });
+    writeFileSync(
+      claudeSessionMetadataPath(sessionDir, "claude-conv"),
+      JSON.stringify({
+        version: 1,
+        runtime: "claude-code",
+        conversationId: "claude-conv",
+        sessionId: "8f0a1c1e-0000-4000-8000-000000000000",
+        created: new Date().toISOString(),
+        modified: new Date().toISOString(),
+        messageCount: 2,
+      }),
+      "utf8",
+    );
+    expect((await host!.listSessions("casper")).map((session) => session.id))
+      .toContain("claude-conv");
+    await expect(host!.renameConversation("casper", "claude-conv", "Mine now"))
+      .rejects.toMatchObject({ code: "not_supported", status: 409 });
+  });
+
+  it("404s an unknown conversation and refuses a title with nothing in it", async () => {
+    await setup([{ kind: "text", text: "ok" }]);
+    await host!.runTurn("casper", { sessionId: "conv-1", prompt: "hello", emit: () => {} });
+    await expect(host!.renameConversation("casper", "no-such-conversation", "Anything"))
+      .rejects.toMatchObject({ code: "not_found", status: 404 });
+    await expect(host!.renameConversation("casper", "conv-1", ""))
+      .rejects.toMatchObject({ code: "invalid_request", status: 400 });
+  });
+});
+
 describe("model switch reaches a live cached session", () => {
   // A ghost home whose local provider declares two models, chat bound to
   // model-a. Both models exist in the catalogue when the session is built, so a
@@ -1335,6 +2143,25 @@ describe("model switch reaches a live cached session", () => {
     expect(provider.requests.at(-1)?.model).toBe("model-b");
   });
 
+  it("rebinds a cleared chat role through the same OMP default resolver", async () => {
+    temp = makeTempGhosts();
+    provider = await startMockProvider({ script: [{ kind: "text", text: "unused" }] });
+    const dir = seedGhost(temp.root, { name: "casper" });
+    const paths = ghostPaths(dir);
+    const models = twoModelFile(provider.url);
+    models.roles = { chat_model: { provider: "ghost-local", modelId: "model-b" } };
+    writeGhostModels(paths.agentDir, models);
+    host = new SessionHost({ registry: temp.registry, offline: true });
+
+    const handle = await host.open("casper", "conv-default-rebind");
+    expect(handle.model).toEqual({ provider: "ghost-local", id: "model-b" });
+
+    clearGhostModelRole(paths.agentDir, "chat_model");
+    await host.rebindModel("casper");
+
+    expect(handle.model).toEqual({ provider: "ghost-local", id: "model-a" });
+  });
+
   it("defers a switch that lands mid-turn, then applies it to the next turn", async () => {
     temp = makeTempGhosts();
     // Stream slowly so a turn is still in flight when the switch lands.
@@ -1372,6 +2199,101 @@ describe("model switch reaches a live cached session", () => {
     await host.runTurn("casper", { sessionId: "conv-1", prompt: "two", emit: () => {} });
     expect(provider.requests.at(-1)?.model).toBe("model-b");
   });
+
+  it("defers a model rebind until a raw collaboration-style turn settles", async () => {
+    temp = makeTempGhosts();
+    provider = await startMockProvider({
+      script: [
+        {
+          kind: "tool",
+          name: "ask",
+          args: {
+            questions: [{
+              id: "remote-model",
+              question: "Keep this model for the current turn?",
+              options: [{ label: "Yes" }, { label: "No" }],
+            }],
+          },
+        },
+        { kind: "text", text: "Remote model turn done." },
+      ],
+    });
+    const dir = seedGhost(temp.root, { name: "casper" });
+    const paths = ghostPaths(dir);
+    writeGhostModels(paths.agentDir, twoModelFile(provider.url));
+    host = new SessionHost({ registry: temp.registry, offline: true });
+    const handle = await host.open("casper", "conv-remote-model");
+
+    const remoteTurn = handle.session.prompt("Remote prompt.");
+    const pending = await waitFor(() => host!.pendingAsk("casper", "conv-remote-model"));
+    setChatModelRole(paths.agentDir, "ghost-local", "model-b");
+    await host.rebindModel("casper");
+    expect(handle.model).toEqual({ provider: "ghost-local", id: "model-a" });
+
+    host.answerAsk("casper", "conv-remote-model", pending.id, {
+      kind: "submit",
+      results: [{ id: "remote-model", selectedOptions: ["Yes"] }],
+    });
+    await remoteTurn;
+    await waitFor(() => handle.model?.id === "model-b" ? true : null);
+    expect(handle.model).toEqual({ provider: "ghost-local", id: "model-b" });
+  });
+
+  it("defers a switch while voice is active and applies it when voice stops", async () => {
+    temp = makeTempGhosts();
+    provider = await startMockProvider({ script: [{ kind: "text", text: "unused" }] });
+    const dir = seedGhost(temp.root, { name: "casper" });
+    const paths = ghostPaths(dir);
+    writeGhostModels(paths.agentDir, twoModelFile(provider.url));
+    const voice = testLiveVoice();
+    host = new SessionHost({
+      registry: temp.registry,
+      offline: true,
+      liveVoice: voice.manager,
+    });
+    const handle = await host.open("casper", "conv-voice-model");
+    await host.liveVoiceAction("casper", "conv-voice-model", "start");
+
+    setChatModelRole(paths.agentDir, "ghost-local", "model-b");
+    await host.rebindModel("casper");
+    expect(handle.model).toEqual({ provider: "ghost-local", id: "model-a" });
+
+    await host.liveVoiceAction("casper", "conv-voice-model", "stop");
+    expect(handle.model).toEqual({ provider: "ghost-local", id: "model-b" });
+  });
+
+  it("applies a deferred switch after voice startup fails", async () => {
+    let releaseStart!: () => void;
+    const startGate = new Promise<void>((resolve) => {
+      releaseStart = resolve;
+    });
+    temp = makeTempGhosts();
+    provider = await startMockProvider({ script: [{ kind: "text", text: "unused" }] });
+    const dir = seedGhost(temp.root, { name: "casper" });
+    const paths = ghostPaths(dir);
+    writeGhostModels(paths.agentDir, twoModelFile(provider.url));
+    const voice = testLiveVoice(startGate, new Error("microphone unavailable"));
+    host = new SessionHost({
+      registry: temp.registry,
+      offline: true,
+      liveVoice: voice.manager,
+    });
+    const handle = await host.open("casper", "conv-voice-start-failure");
+    const starting = host.liveVoiceAction("casper", "conv-voice-start-failure", "start");
+    await voice.startEntered;
+
+    setChatModelRole(paths.agentDir, "ghost-local", "model-b");
+    await host.rebindModel("casper");
+    releaseStart();
+    await expect(starting).rejects.toMatchObject({ code: "live_start_failed", status: 502 });
+
+    expect(host.liveVoiceStatus("casper", "conv-voice-start-failure")).toMatchObject({
+      active: false,
+      phase: "error",
+      error: "microphone unavailable",
+    });
+    expect(handle.model).toEqual({ provider: "ghost-local", id: "model-b" });
+  });
 });
 
 describe("transcript resume", () => {
@@ -1396,6 +2318,35 @@ describe("transcript resume", () => {
         }
       }
     }
+  });
+
+  it("marks a restored tool call that failed, and leaves a successful one unmarked", async () => {
+    await setup([
+      { kind: "tool", name: "read", args: { file_path: "/nonexistent/never-written.md" } },
+      { kind: "tool", name: "ghost_character", args: { action: "read" } },
+      { kind: "text", text: "One of those worked." },
+    ]);
+    const events: PiMessagesEvent[] = [];
+    await host!.runTurn("casper", {
+      sessionId: "conv-1",
+      prompt: "Read two things.",
+      emit: (event) => events.push(event),
+    });
+    // What the live stream said, so the two cannot drift.
+    const live = events
+      .filter((event): event is Extract<PiMessagesEvent, { type: "tool_execution_end" }> =>
+        event.type === "tool_execution_end")
+      .map((event) => [event.toolName, event.isError]);
+    expect(live).toEqual([["read", true], ["ghost_character", false]]);
+
+    const calls = (await host!.readTranscript("casper", "conv-1")).messages
+      .flatMap((message) => Array.isArray(message.content) ? message.content : [])
+      .filter((part) => (part as { type?: unknown }).type === "toolCall") as Array<{
+        name: string;
+        failed?: boolean;
+      }>;
+    expect(calls.map((call) => [call.name, call.failed === true]))
+      .toEqual([["read", true], ["ghost_character", false]]);
   });
 
   it("404s an unknown conversation id", async () => {

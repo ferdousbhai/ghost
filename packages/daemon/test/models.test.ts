@@ -15,6 +15,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   builtinProviderPreset,
   appendGhostModelFallback,
+  clearGhostModelRole,
   clearGhostModelFallbacks,
   ghostAuthPath,
   ghostOmpModelRouting,
@@ -26,6 +27,7 @@ import {
   OPENROUTER_BASE_URL,
   OPENROUTER_DEFAULT_FREE_MODEL,
   readGhostModels,
+  replaceGhostModelFallbacks,
   resolveChatModelRef,
   resolveSmolModelRef,
   setChatModelRole,
@@ -227,8 +229,16 @@ describe("OMP model routing projection", () => {
       providers: {},
       roles: {
         chat_model: { provider: "openai-codex", modelId: "gpt-5.6-sol" },
-        vision_model: { provider: "openai-codex", modelId: "gpt-5.6" },
         smol_model: { provider: "anthropic", modelId: "claude-haiku-4-5" },
+        slow_model: { provider: "anthropic", modelId: "claude-opus-4-6" },
+        vision_model: { provider: "openai-codex", modelId: "gpt-5.6" },
+        plan_model: { provider: "openai-codex", modelId: "gpt-5.6-sol" },
+        designer_model: { provider: "google-gemini-cli", modelId: "gemini-3.1-pro" },
+        commit_model: { provider: "anthropic", modelId: "claude-haiku-4-5" },
+        tiny_model: { provider: "anthropic", modelId: "claude-haiku-4-5" },
+        task_model: { provider: "openai-codex", modelId: "gpt-5.6-sol" },
+        advisor_model: { provider: "anthropic", modelId: "claude-opus-4-6" },
+        general_purpose_model: { provider: "openai-codex", modelId: "gpt-5.6-sol" },
         research_model: { provider: "anthropic", modelId: "claude-opus-4-6" },
       },
       fallbacks: {
@@ -240,14 +250,61 @@ describe("OMP model routing projection", () => {
     })).toEqual({
       modelRoles: {
         default: "openai-codex/gpt-5.6-sol",
-        vision: "openai-codex/gpt-5.6",
         smol: "anthropic/claude-haiku-4-5",
+        slow: "anthropic/claude-opus-4-6",
+        vision: "openai-codex/gpt-5.6",
+        plan: "openai-codex/gpt-5.6-sol",
+        designer: "google-gemini-cli/gemini-3.1-pro",
+        commit: "anthropic/claude-haiku-4-5",
+        tiny: "anthropic/claude-haiku-4-5",
+        task: "openai-codex/gpt-5.6-sol",
+        advisor: "anthropic/claude-opus-4-6",
+        general: "openai-codex/gpt-5.6-sol",
         research: "anthropic/claude-opus-4-6",
       },
       fallbackChains: {
         default: ["anthropic/claude-sonnet-4-6", "xai/grok-code-fast-1"],
       },
     });
+  });
+
+  it("clears primaries and replaces complete fallback chains atomically", () => {
+    const agentDir = makeAgentDir();
+    writeGhostModels(agentDir, {
+      providers: {},
+      roles: {
+        slow_model: { provider: "anthropic", modelId: "strong" },
+        research_model: { provider: "legacy", modelId: "research" },
+      },
+      fallbacks: {
+        slow_model: [{ provider: "old", modelId: "one" }],
+        research_model: [{ provider: "legacy", modelId: "fallback" }],
+      },
+      futureSetting: { preserved: true },
+    });
+
+    replaceGhostModelFallbacks(agentDir, "slow_model", [
+      { provider: "new", modelId: "second" },
+      { provider: "new", modelId: "first" },
+    ]);
+    clearGhostModelRole(agentDir, "slow_model");
+
+    expect(readGhostModels(agentDir)).toMatchObject({
+      roles: {
+        research_model: { provider: "legacy", modelId: "research" },
+      },
+      fallbacks: {
+        slow_model: [
+          { provider: "new", modelId: "second" },
+          { provider: "new", modelId: "first" },
+        ],
+        research_model: [{ provider: "legacy", modelId: "fallback" }],
+      },
+      futureSetting: { preserved: true },
+    });
+
+    replaceGhostModelFallbacks(agentDir, "slow_model", []);
+    expect(readGhostModels(agentDir)?.fallbacks?.slow_model).toBeUndefined();
   });
 });
 

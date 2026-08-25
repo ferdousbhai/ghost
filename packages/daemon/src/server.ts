@@ -5,12 +5,19 @@
  *   GET  /api/ghosts                  → [{ name, dir, createdAt }]
  *   POST /api/ghosts                  { name } → creates ~/Ghosts/<name>/
  *   DELETE /api/ghosts/:name?confirm=<name> → moves the home into the XDG trash
+ *   PUT  /api/ghosts/:name/name       { name } → renames the ghost (and its home)
  *   POST /api/ghosts/:name/messages   pi-messages request → SSE of pi-messages events
  *   POST /api/ghosts/:name/greeting   → { greeting, onboarding } — the empty-chat opener
- *   GET  /api/ghosts/:name/context    → derived docs, memory, character, and subagent catalog
+ *   GET|DELETE /api/ghosts/:name/context → browse or trash one docs/memory file
+ *   GET|POST /api/ghosts/:name/mcp    → list or add project MCP servers
+ *   PUT|DELETE /api/ghosts/:name/mcp/:server → replace or remove one server
  *   GET  /api/ghosts/:name/sessions   → { sessions } — conversation listing for that ghost
- *   DELETE /api/ghosts/:name/sessions/:id → permanently delete one conversation
+ *   DELETE /api/ghosts/:name/sessions/:id → trash Ghost-owned conversation artifacts
  *   PUT  /api/ghosts/:name/sessions/:id/pin → { pinned } — pin or unpin it
+ *   PUT  /api/ghosts/:name/sessions/:id/title → { title } — rename it
+ *   GET  /api/ghosts/:name/sessions/:id/commands → OMP's session command catalog
+ *   GET|POST /api/ghosts/:name/sessions/:id/live → realtime voice lifecycle
+ *   GET|POST /api/ghosts/:name/sessions/:id/collab → encrypted relay collaboration
  *   GET  /api/ghosts/:name/sessions/:id/transcript → { id, title, messages } for resume
  *   GET  /api/ghosts/:name/sessions/:id/ask → { ask } — current OMP ask, if any
  *   POST /api/ghosts/:name/sessions/:id/ask → resolve that ask
@@ -19,7 +26,7 @@
  *   POST /api/ghosts/:name/sessions/:id/branch → branch off into a new conversation
  *   POST /api/ghosts/:name/sessions/:id/reanswer → branch an ask result + SSE resume
  *   GET  /api/ghosts/:name/model-routing → Ghost roles + OMP fallback chains
- *   PUT  /api/ghosts/:name/model-routing → set a primary/fallback or clear a chain
+ *   PUT  /api/ghosts/:name/model-routing → set/clear a primary or replace a retry chain
  *   GET  /api/relay/status            → whether the owner's Chromium is paired
  *   WS   /relay                       → the MV3 extension's socket (token-gated)
  *
@@ -62,8 +69,21 @@ import { apiTokenMatches, readOrCreateApiToken } from "./api-token.js";
 import type { AuthType, LoginManager } from "./auth.js";
 import { assertLoopback } from "./config.js";
 import { readGhostContext } from "./context-catalog.js";
+import {
+  trashGhostContextFile,
+  type TrashableContextSection,
+} from "./context-files.js";
+import type {
+  McpCatalog,
+  McpCatalogSnapshot,
+  McpConnectionTest,
+} from "./mcp-catalog.js";
 import type { ListModelsQuery, ModelCatalog, ModelScope } from "./model-catalog.js";
-import { GhostError, type GhostRegistry } from "./ghosts.js";
+import {
+  homeOperationsFor,
+  type HomeOperationCoordinator,
+} from "./home-operations.js";
+import { assertValidGhostName, GhostError, type GhostRegistry } from "./ghosts.js";
 import { GHOST_MODEL_ROLES, type GhostModelRole } from "./models.js";
 import { silentLogger, type Logger } from "./log.js";
 import {
@@ -73,6 +93,7 @@ import {
   SSE_HEADERS,
   SSE_KEEPALIVE_COMMENT,
   SSE_KEEPALIVE_INTERVAL_MS,
+  zeroUsage,
   type PiMessagesEvent,
 } from "./pi-messages.js";
 import { attachRelay, createRelayHub, type RelayHub } from "./relay.js";
@@ -81,6 +102,8 @@ import type { SessionHost } from "./session-host.js";
 export interface ServerOptions {
   registry: GhostRegistry;
   host: SessionHost;
+  /** Shared gate for path-bound catalog writes and whole-home moves. */
+  homeOperations?: HomeOperationCoordinator;
   /**
    * Provider login orchestration. Omit to leave the `/providers` and `/login`
    * routes out entirely (they 404) — a server that only ever runs turns needs
@@ -93,6 +116,8 @@ export interface ServerOptions {
    * needs no switcher surface.
    */
   catalog?: ModelCatalog;
+  /** Project-only MCP management. Omit to leave the MCP routes out. */
+  mcp?: McpCatalog;
   logger?: Logger;
   /** Max request body. A turn is a few KB; this is a sanity bound. */
   maxBodyBytes?: number;
@@ -130,6 +155,12 @@ export interface ListeningServer {
 }
 
 const DEFAULT_MAX_BODY_BYTES = 1_048_576;
+/**
+ * A conversation name is a label in a sidebar, not a description. The cap is
+ * generous for a sentence and short enough that OMP's fixed-width title slot
+ * still holds it.
+ */
+const MAX_CONVERSATION_TITLE_LENGTH = 120;
 const TURN_ID_PATTERN = /^[A-Za-z0-9_.:-]{1,64}$/;
 /** Live SSE responses, stashed on the server so close() can end them. */
 const LIVE_STREAMS = Symbol.for("ghostd.liveStreams");
@@ -266,6 +297,7 @@ function resolveApiToken(
 export function createDaemonServer(options: ServerOptions): Server {
   const logger = options.logger ?? silentLogger;
   const maxBodyBytes = options.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
+  const homeOperations = options.homeOperations ?? homeOperationsFor(options.registry);
   const liveStreams = new Set<ServerResponse>();
   // `undefined` means "decide for me"; `null` means "no relay on this server".
   const relay = options.relay === undefined
@@ -361,9 +393,18 @@ export function createDaemonServer(options: ServerOptions): Server {
       );
       return;
     }
-    const { trash } = await options.host.deleteGhost(ghostName);
-    logger.info("ghost deleted", { ghost: ghostName, trash });
-    jsonResponse(response, 200, { ok: true, trash });
+    const releaseLoginMove = await options.login?.reserveGhostMove(ghostName);
+    let releaseHomeMove: (() => void) | undefined;
+    try {
+      releaseHomeMove = await homeOperations.reserveMove(ghostName);
+      const { trash } = await options.host.deleteGhost(ghostName);
+      options.login?.forgetGhost(ghostName);
+      logger.info("ghost deleted", { ghost: ghostName, trash });
+      jsonResponse(response, 200, { ok: true, trash });
+    } finally {
+      releaseHomeMove?.();
+      releaseLoginMove?.();
+    }
   };
 
   const handleListSessions = async (
@@ -384,6 +425,47 @@ export function createDaemonServer(options: ServerOptions): Server {
   ): Promise<void> => {
     const ghost = options.registry.get(ghostName);
     jsonResponse(response, 200, await readGhostContext(ghost.dir));
+  };
+
+  const handleTrashGhostContext = async (
+    ghostName: string,
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): Promise<void> => {
+    const body = await readJsonBody(request, maxBodyBytes);
+    if (body === null || typeof body !== "object" || Array.isArray(body)) {
+      errorResponse(response, 400, "invalid_request", "Request body must be a JSON object.");
+      return;
+    }
+    const { section, path, confirm } = body as {
+      section?: unknown;
+      path?: unknown;
+      confirm?: unknown;
+    };
+    if (section !== "docs" && section !== "memory") {
+      errorResponse(response, 400, "invalid_request", '"section" must be "docs" or "memory".');
+      return;
+    }
+    if (typeof path !== "string" || path === "") {
+      errorResponse(response, 400, "invalid_request", '"path" must be a non-empty string.');
+      return;
+    }
+    if (confirm !== path) {
+      errorResponse(
+        response,
+        400,
+        "confirmation_required",
+        '"confirm" must exactly repeat the context file path.',
+      );
+      return;
+    }
+    const ghost = options.registry.get(ghostName);
+    const trashed = trashGhostContextFile(
+      ghost.dir,
+      section as TrashableContextSection,
+      path,
+    );
+    jsonResponse(response, 200, { ok: true, ...trashed });
   };
 
   /**
@@ -412,8 +494,95 @@ export function createDaemonServer(options: ServerOptions): Server {
     conversationId: string,
     response: ServerResponse,
   ): Promise<void> => {
-    await options.host.deleteSession(ghostName, conversationId);
-    jsonResponse(response, 200, { ok: true });
+    const { artifacts } = await options.host.deleteSession(ghostName, conversationId);
+    jsonResponse(response, 200, { ok: true, trash: artifacts });
+  };
+
+  const handleLiveVoice = async (
+    ghostName: string,
+    conversationId: string,
+    method: string,
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): Promise<void> => {
+    if (method === "GET") {
+      jsonResponse(response, 200, options.host.liveVoiceStatus(ghostName, conversationId));
+      return;
+    }
+    if (method !== "POST") {
+      errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+      return;
+    }
+    const body = await readJsonBody(request, maxBodyBytes);
+    if (body === null || typeof body !== "object" || Array.isArray(body)) {
+      errorResponse(response, 400, "invalid_request", "Request body must be a JSON object.");
+      return;
+    }
+    const action = (body as { action?: unknown }).action;
+    if (action !== "start" && action !== "mute" && action !== "unmute" && action !== "stop") {
+      errorResponse(
+        response,
+        400,
+        "invalid_request",
+        '"action" must be "start", "mute", "unmute", or "stop".',
+      );
+      return;
+    }
+    jsonResponse(
+      response,
+      action === "start" ? 201 : 200,
+      await options.host.liveVoiceAction(ghostName, conversationId, action),
+    );
+  };
+
+  const handleCollaboration = async (
+    ghostName: string,
+    conversationId: string,
+    method: string,
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): Promise<void> => {
+    if (method === "GET") {
+      jsonResponse(response, 200, options.host.collaborationStatus(ghostName, conversationId));
+      return;
+    }
+    if (method !== "POST") {
+      errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+      return;
+    }
+    const body = await readJsonBody(request, maxBodyBytes);
+    if (body === null || typeof body !== "object" || Array.isArray(body)) {
+      errorResponse(response, 400, "invalid_request", "Request body must be a JSON object.");
+      return;
+    }
+    const { action, relayUrl, writable, confirmed } = body as {
+      action?: unknown;
+      relayUrl?: unknown;
+      writable?: unknown;
+      confirmed?: unknown;
+    };
+    if (action !== "start" && action !== "stop") {
+      errorResponse(response, 400, "invalid_request", '"action" must be "start" or "stop".');
+      return;
+    }
+    if (action === "start" && typeof writable !== "boolean") {
+      errorResponse(response, 400, "invalid_request", '"writable" must be a boolean.');
+      return;
+    }
+    if (relayUrl !== undefined && typeof relayUrl !== "string") {
+      errorResponse(response, 400, "invalid_request", '"relayUrl" must be a string.');
+      return;
+    }
+    jsonResponse(
+      response,
+      action === "start" ? 201 : 200,
+      await options.host.collaborationAction(ghostName, conversationId, {
+        action,
+        ...(typeof relayUrl === "string" ? { relayUrl } : {}),
+        ...(typeof writable === "boolean" ? { writable } : {}),
+        confirmed: confirmed === true,
+      }),
+    );
   };
 
   /**
@@ -438,6 +607,267 @@ export function createDaemonServer(options: ServerOptions): Server {
     }
     await options.host.setPinned(ghostName, conversationId, pinned);
     jsonResponse(response, 200, { ok: true, pinned });
+  };
+
+  /** Rename one conversation. A conversation name cannot be unset. */
+  const handleRenameSession = async (
+    ghostName: string,
+    conversationId: string,
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): Promise<void> => {
+    const body = await readJsonBody(request, maxBodyBytes);
+    if (body === null || typeof body !== "object" || Array.isArray(body)) {
+      errorResponse(response, 400, "invalid_request", "Request body must be a JSON object.");
+      return;
+    }
+    const { title } = body as { title?: unknown };
+    if (typeof title !== "string") {
+      errorResponse(response, 400, "invalid_request", "\"title\" must be a string.");
+      return;
+    }
+    const trimmed = title.trim();
+    if (trimmed.length === 0) {
+      errorResponse(response, 400, "invalid_request", "\"title\" must not be empty.");
+      return;
+    }
+    if (trimmed.length > MAX_CONVERSATION_TITLE_LENGTH) {
+      errorResponse(
+        response,
+        400,
+        "invalid_request",
+        `"title" must be at most ${MAX_CONVERSATION_TITLE_LENGTH} characters.`,
+      );
+      return;
+    }
+    const stored = await options.host.renameConversation(ghostName, conversationId, trimmed);
+    jsonResponse(response, 200, { ok: true, title: stored });
+  };
+
+  const handleSessionCommands = async (
+    ghostName: string,
+    conversationId: string,
+    response: ServerResponse,
+  ): Promise<void> => {
+    jsonResponse(response, 200, {
+      commands: await options.host.availableCommands(ghostName, conversationId),
+    });
+  };
+
+  const decorateMcpSnapshot = (
+    ghostName: string,
+    snapshot: McpCatalogSnapshot,
+    extra: Record<string, unknown> = {},
+  ): Record<string, unknown> => ({
+    ...snapshot,
+    servers: snapshot.servers.map((server) => ({
+      ...server,
+      connectionStatus: server.enabled
+        ? options.host.mcpConnectionStatus(ghostName, server.name)
+        : "disabled",
+    })),
+    ...extra,
+  });
+
+  const mcpSnapshot = async (
+    ghostName: string,
+    extra: Record<string, unknown> = {},
+  ): Promise<Record<string, unknown>> => {
+    if (!options.mcp) {
+      throw new GhostError("not_found", "MCP management is not enabled on this daemon.", 404);
+    }
+    return decorateMcpSnapshot(ghostName, await options.mcp.list(ghostName), extra);
+  };
+
+  /** Keep a project-config write and every live-session reload under one lease. */
+  const mutateMcp = (
+    ghostName: string,
+    mutation: () => Promise<McpCatalogSnapshot>,
+  ): Promise<Record<string, unknown>> => homeOperations.withLease(ghostName, async () => {
+    // Catalog mutations already return the freshly read durable view. Reuse it
+    // after reconnecting sessions instead of reading the same config again.
+    const snapshot = await mutation();
+    await options.host.reloadMcp(ghostName);
+    return decorateMcpSnapshot(ghostName, snapshot);
+  });
+
+  const handleMcpCollection = async (
+    ghostName: string,
+    method: string,
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): Promise<void> => {
+    const mcp = options.mcp;
+    if (!mcp) {
+      errorResponse(response, 404, "not_found", "MCP management is not enabled on this daemon.");
+      return;
+    }
+    if (method === "GET") {
+      jsonResponse(response, 200, await mcpSnapshot(ghostName));
+      return;
+    }
+    if (method !== "POST") {
+      errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+      return;
+    }
+    const body = await readJsonBody(request, maxBodyBytes);
+    if (body === null || typeof body !== "object" || Array.isArray(body)) {
+      errorResponse(response, 400, "invalid_request", "Request body must be a JSON object.");
+      return;
+    }
+    const { name, config } = body as { name?: unknown; config?: unknown };
+    if (typeof name !== "string") {
+      errorResponse(response, 400, "invalid_request", '"name" must be a string.');
+      return;
+    }
+    const snapshot = await mutateMcp(ghostName, () => mcp.add(ghostName, name, config));
+    jsonResponse(response, 201, snapshot);
+  };
+
+  const handleMcpServer = async (
+    ghostName: string,
+    serverName: string,
+    method: string,
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): Promise<void> => {
+    const mcp = options.mcp;
+    if (!mcp) {
+      errorResponse(response, 404, "not_found", "MCP management is not enabled on this daemon.");
+      return;
+    }
+    if (method === "DELETE") {
+      const snapshot = await mutateMcp(
+        ghostName,
+        () => mcp.remove(ghostName, serverName),
+      );
+      jsonResponse(response, 200, snapshot);
+      return;
+    }
+    if (method !== "PUT") {
+      errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+      return;
+    }
+    const body = await readJsonBody(request, maxBodyBytes);
+    if (body === null || typeof body !== "object" || Array.isArray(body)) {
+      errorResponse(response, 400, "invalid_request", "Request body must be a JSON object.");
+      return;
+    }
+    const snapshot = await mutateMcp(
+      ghostName,
+      () => mcp.update(ghostName, serverName, (body as { config?: unknown }).config),
+    );
+    jsonResponse(response, 200, snapshot);
+  };
+
+  const handleMcpEnabled = async (
+    ghostName: string,
+    serverName: string,
+    method: string,
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): Promise<void> => {
+    const mcp = options.mcp;
+    if (!mcp) {
+      errorResponse(response, 404, "not_found", "MCP management is not enabled on this daemon.");
+      return;
+    }
+    if (method !== "PUT") {
+      errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+      return;
+    }
+    const body = await readJsonBody(request, maxBodyBytes);
+    if (body === null || typeof body !== "object" || Array.isArray(body)) {
+      errorResponse(response, 400, "invalid_request", "Request body must be a JSON object.");
+      return;
+    }
+    const snapshot = await mutateMcp(
+      ghostName,
+      () => mcp.setEnabled(
+        ghostName,
+        serverName,
+        (body as { enabled?: unknown }).enabled as boolean,
+      ),
+    );
+    jsonResponse(response, 200, snapshot);
+  };
+
+  const handleMcpAction = async (
+    ghostName: string,
+    serverName: string,
+    action: "test" | "reconnect",
+    method: string,
+    response: ServerResponse,
+  ): Promise<void> => {
+    if (!options.mcp) {
+      errorResponse(response, 404, "not_found", "MCP management is not enabled on this daemon.");
+      return;
+    }
+    if (method !== "POST") {
+      errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+      return;
+    }
+    let result: McpConnectionTest | { name: string; status: string; ok: boolean };
+    if (action === "test") {
+      result = await options.mcp.test(ghostName, serverName);
+    } else {
+      const exists = (await options.mcp.list(ghostName)).servers.some(
+        (server) => server.name === serverName,
+      );
+      if (!exists) {
+        throw new GhostError(
+          "mcp_server_not_found",
+          `No MCP server named ${JSON.stringify(serverName)}.`,
+          404,
+        );
+      }
+      const status = await options.host.reconnectMcp(ghostName, serverName);
+      result = { name: serverName, status, ok: status === "connected" };
+    }
+    jsonResponse(response, 200, await mcpSnapshot(ghostName, { result }));
+  };
+
+  /**
+   * Rename one ghost. The name is the home directory's name, so this moves the
+   * whole home and every other route's `:name` changes with it — which is why
+   * it is the same body shape `POST /api/ghosts` takes, validated the same way.
+   */
+  const handleRenameGhost = async (
+    ghostName: string,
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): Promise<void> => {
+    const body = await readJsonBody(request, maxBodyBytes);
+    if (body === null || typeof body !== "object" || Array.isArray(body)) {
+      errorResponse(response, 400, "invalid_request", "Request body must be a JSON object.");
+      return;
+    }
+    const name = (body as { name?: unknown }).name;
+    if (typeof name !== "string") {
+      errorResponse(response, 400, "invalid_request", "\"name\" must be a string.");
+      return;
+    }
+    // Keep the route's contract ordering: validate the destination before the
+    // login coordinator resolves the source home.
+    assertValidGhostName(name);
+    if (name === ghostName) {
+      const renamed = await options.host.renameGhost(ghostName, name);
+      logger.info("ghost renamed", { ghost: ghostName, name: renamed.name });
+      jsonResponse(response, 200, { ok: true, name: renamed.name });
+      return;
+    }
+    const releaseLoginMove = await options.login?.reserveGhostMove(ghostName);
+    let releaseHomeMove: (() => void) | undefined;
+    try {
+      releaseHomeMove = await homeOperations.reserveMove(ghostName);
+      const renamed = await options.host.renameGhost(ghostName, name);
+      options.login?.renameGhost(renamed);
+      logger.info("ghost renamed", { ghost: ghostName, name: renamed.name });
+      jsonResponse(response, 200, { ok: true, name: renamed.name });
+    } finally {
+      releaseHomeMove?.();
+      releaseLoginMove?.();
+    }
   };
 
   const handleTranscript = async (
@@ -644,11 +1074,12 @@ export function createDaemonServer(options: ServerOptions): Server {
       errorResponse(response, 400, "invalid_request", "Request body must be a JSON object.");
       return;
     }
-    const { role, target, provider, id } = body as {
+    const { role, target, provider, id, fallbacks } = body as {
       role?: unknown;
       target?: unknown;
       provider?: unknown;
       id?: unknown;
+      fallbacks?: unknown;
     };
     if (typeof role !== "string" || !GHOST_MODEL_ROLES.includes(role as GhostModelRole)) {
       errorResponse(response, 400, "invalid_request", "\"role\" is not a supported Ghost model role.");
@@ -662,8 +1093,61 @@ export function createDaemonServer(options: ServerOptions): Server {
       );
       return;
     }
+    if (target === "clear_primary") {
+      jsonResponse(
+        response,
+        200,
+        await options.catalog.clearModelPrimary(ghostName, role as GhostModelRole),
+      );
+      return;
+    }
+    if (target === "replace_fallbacks") {
+      if (!Array.isArray(fallbacks)) {
+        errorResponse(response, 400, "invalid_request", '"fallbacks" must be an array.');
+        return;
+      }
+      const selections: Array<{ provider: string; id: string }> = [];
+      for (const fallback of fallbacks) {
+        if (fallback === null || typeof fallback !== "object" || Array.isArray(fallback)) {
+          errorResponse(
+            response,
+            400,
+            "invalid_request",
+            'Every "fallbacks" entry must be an object with non-empty "provider" and "id" strings.',
+          );
+          return;
+        }
+        const selection = fallback as { provider?: unknown; id?: unknown };
+        if (typeof selection.provider !== "string" || selection.provider === ""
+          || typeof selection.id !== "string" || selection.id === "") {
+          errorResponse(
+            response,
+            400,
+            "invalid_request",
+            'Every "fallbacks" entry must be an object with non-empty "provider" and "id" strings.',
+          );
+          return;
+        }
+        selections.push({ provider: selection.provider, id: selection.id });
+      }
+      jsonResponse(
+        response,
+        200,
+        await options.catalog.replaceModelFallbacks(
+          ghostName,
+          role as GhostModelRole,
+          selections,
+        ),
+      );
+      return;
+    }
     if (target !== "primary" && target !== "fallback") {
-      errorResponse(response, 400, "invalid_request", "\"target\" must be primary, fallback, or clear_fallbacks.");
+      errorResponse(
+        response,
+        400,
+        "invalid_request",
+        '"target" must be primary, fallback, clear_primary, replace_fallbacks, or clear_fallbacks.',
+      );
       return;
     }
     if (typeof provider !== "string" || provider === "" || typeof id !== "string" || id === "") {
@@ -709,13 +1193,26 @@ export function createDaemonServer(options: ServerOptions): Server {
     };
     response.on("close", onClose);
 
+    let terminal = false;
     const emit = (event: PiMessagesEvent): void => {
-      if (response.writableEnded) return;
+      if (response.writableEnded || terminal) return;
+      if (event.type === "done" || event.type === "error") terminal = true;
       response.write(encodeSseEvent(event));
     };
 
     try {
       await run(emit, controller.signal);
+      // Keep the HTTP seam honest even if a runtime regresses. The shell also
+      // treats EOF without a terminal frame as failure, but emitting the error
+      // here preserves one protocol invariant for every client and runtime.
+      if (!terminal && !controller.signal.aborted) {
+        emit({
+          type: "error",
+          reason: "error",
+          usage: zeroUsage(),
+          errorMessage: "The turn ended without a terminal event.",
+        });
+      }
     } catch (error) {
       // runTurn guarantees a terminal event for anything that happens inside
       // the turn; this path is for the refusals it throws instead (a busy
@@ -724,14 +1221,7 @@ export function createDaemonServer(options: ServerOptions): Server {
       emit({
         type: "error",
         reason: "error",
-        usage: {
-          input: 0,
-          output: 0,
-          cacheRead: 0,
-          cacheWrite: 0,
-          totalTokens: 0,
-          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-        },
+        usage: zeroUsage(),
         errorMessage: error instanceof Error ? error.message : String(error),
       });
     } finally {
@@ -937,11 +1427,12 @@ export function createDaemonServer(options: ServerOptions): Server {
           return await handleDeleteGhost(ghostName, url, response);
         }
         if (segments.length === 4 && segments[3] === "context") {
-          if (method !== "GET") {
-            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-            return;
+          if (method === "GET") return await handleGhostContext(ghostName, response);
+          if (method === "DELETE") {
+            return await handleTrashGhostContext(ghostName, request, response);
           }
-          return await handleGhostContext(ghostName, response);
+          errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+          return;
         }
         if (segments.length === 4 && segments[3] === "messages") {
           if (method !== "POST") {
@@ -949,6 +1440,13 @@ export function createDaemonServer(options: ServerOptions): Server {
             return;
           }
           return await handleMessages(ghostName, request, response);
+        }
+        if (segments.length === 4 && segments[3] === "name") {
+          if (method !== "PUT") {
+            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+            return;
+          }
+          return await handleRenameGhost(ghostName, request, response);
         }
         if (segments.length === 4 && segments[3] === "greeting") {
           if (method !== "POST") {
@@ -983,6 +1481,47 @@ export function createDaemonServer(options: ServerOptions): Server {
           return await handleSetSessionPin(
             ghostName,
             decodePathSegment(segments[4] ?? ""),
+            request,
+            response,
+          );
+        }
+        if (segments.length === 6 && segments[3] === "sessions" && segments[5] === "title") {
+          if (method !== "PUT") {
+            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+            return;
+          }
+          return await handleRenameSession(
+            ghostName,
+            decodePathSegment(segments[4] ?? ""),
+            request,
+            response,
+          );
+        }
+        if (segments.length === 6 && segments[3] === "sessions" && segments[5] === "commands") {
+          if (method !== "GET") {
+            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+            return;
+          }
+          return await handleSessionCommands(
+            ghostName,
+            decodePathSegment(segments[4] ?? ""),
+            response,
+          );
+        }
+        if (segments.length === 6 && segments[3] === "sessions" && segments[5] === "live") {
+          return await handleLiveVoice(
+            ghostName,
+            decodePathSegment(segments[4] ?? ""),
+            method,
+            request,
+            response,
+          );
+        }
+        if (segments.length === 6 && segments[3] === "sessions" && segments[5] === "collab") {
+          return await handleCollaboration(
+            ghostName,
+            decodePathSegment(segments[4] ?? ""),
+            method,
             request,
             response,
           );
@@ -1032,6 +1571,40 @@ export function createDaemonServer(options: ServerOptions): Server {
             decodePathSegment(segments[4] ?? ""),
             method,
             request,
+            response,
+          );
+        }
+        if (segments.length === 4 && segments[3] === "mcp") {
+          return await handleMcpCollection(ghostName, method, request, response);
+        }
+        if (segments.length === 5 && segments[3] === "mcp") {
+          return await handleMcpServer(
+            ghostName,
+            decodePathSegment(segments[4] ?? ""),
+            method,
+            request,
+            response,
+          );
+        }
+        if (segments.length === 6 && segments[3] === "mcp" && segments[5] === "enabled") {
+          return await handleMcpEnabled(
+            ghostName,
+            decodePathSegment(segments[4] ?? ""),
+            method,
+            request,
+            response,
+          );
+        }
+        if (
+          segments.length === 6
+          && segments[3] === "mcp"
+          && (segments[5] === "test" || segments[5] === "reconnect")
+        ) {
+          return await handleMcpAction(
+            ghostName,
+            decodePathSegment(segments[4] ?? ""),
+            segments[5],
+            method,
             response,
           );
         }

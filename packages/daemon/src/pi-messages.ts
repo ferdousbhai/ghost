@@ -27,6 +27,19 @@ import type { AgentSessionEvent } from "@oh-my-pi/pi-coding-agent";
 
 export type PiMessagesEvent =
   | { type: "start" }
+  | {
+      /** Owner-authored input dequeued into this still-running turn. */
+      type: "owner_message";
+      text: string;
+    }
+  | {
+      /** Standalone slash-command output; it is not an assistant/model block. */
+      type: "command_output";
+      command: string;
+      output: string;
+      isError?: boolean;
+      code?: "unsupported_command" | "command_failed";
+    }
   | { type: "text_start"; contentIndex: number }
   | { type: "text_delta"; contentIndex: number; delta: string }
   | { type: "text_end"; contentIndex: number; content: string }
@@ -246,6 +259,11 @@ export interface PiMessagesAdapterOptions {
    * users either. Suppressed blocks consume no wire index.
    */
   includeThinking?: boolean;
+  /**
+   * Owner messages already rendered before this adapter subscribed. A normal
+   * prompt skips one; later dequeued steering/follow-ups still cross the wire.
+   */
+  skipOwnerMessages?: number;
   /** Let the harness hold `done` across hidden session-stop continuations. */
   deferAgentEnd?: boolean;
 }
@@ -311,6 +329,7 @@ export function createPiMessagesAdapter(
 ): PiMessagesAdapter {
   const includeThinking = options.includeThinking === true;
   const deferAgentEnd = options.deferAgentEnd === true;
+  let ownerMessagesToSkip = Math.max(0, options.skipOwnerMessages ?? 0);
   const usage = zeroUsage();
   let started = false;
   let terminal = false;
@@ -422,12 +441,35 @@ export function createPiMessagesAdapter(
         case "agent_start":
           ensureStarted();
           return;
-        case "message_start":
+        case "message_start": {
+          const message = event.message as typeof event.message & {
+            attribution?: string;
+            display?: boolean;
+          };
+          // Forced /skill prompts are persisted as displayable custom messages
+          // attributed to the owner. Count that as the POST's already-rendered
+          // input too, or the first later steer would consume the skip instead.
+          const ownerAuthored = message.role === "user"
+            || (message.role === "custom"
+              && message.attribution === "user"
+              && message.display !== false);
+          if (ownerAuthored) {
+            const text = textFromParts(message.content).trim();
+            if (!text) return;
+            if (ownerMessagesToSkip > 0) {
+              ownerMessagesToSkip -= 1;
+              return;
+            }
+            ensureStarted();
+            send({ type: "owner_message", text });
+            return;
+          }
           if (event.message.role !== "assistant") return;
           // A new provider step: its contentIndex numbering restarts at 0.
           wireIndexByStepIndex = new Map();
           ensureStarted();
           return;
+        }
         case "message_update": {
           if (event.message.role !== "assistant") return;
           handleAssistantMessageEvent(

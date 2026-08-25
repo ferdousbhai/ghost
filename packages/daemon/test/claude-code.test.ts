@@ -1,11 +1,21 @@
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import type {
   Options as ClaudeQueryOptions,
   Query,
   SDKMessage,
   SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
+import {
+  createBrowserExtension,
+  createScreenExtension,
+  GHOST_BROWSER,
+  GHOST_SCREEN,
+} from "@ghost/extensions";
 import { afterEach, describe, expect, it } from "vitest";
+import {
+  bridgeClaudeCodeTools,
+  CLAUDE_CODE_TOOL_CAPABILITIES,
+} from "../src/claude-code.js";
 import { ghostPaths } from "../src/ghosts.js";
 import { GhostHookRunner } from "../src/hooks.js";
 import { setChatModelRole } from "../src/models.js";
@@ -101,6 +111,9 @@ function responseMessages(sessionId: string, text: string): SDKMessage[] {
   ];
 }
 
+const TINY_PNG_BASE64 =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+
 function setupClaudeHost(options: {
   authStatus?: { loggedIn: boolean; authMethod?: string; subscriptionType?: string };
   hooks?: GhostHookRunner;
@@ -143,6 +156,77 @@ function setupClaudeHost(options: {
 }
 
 describe("Claude Code subscription runtime", () => {
+  it("returns image blocks from screen and browser screenshots across the tool bridge", async () => {
+    const { paths } = setupClaudeHost();
+    let browserPage: { url: string; title: string } | undefined;
+    const browser = {
+      name: "claude-bridge-test",
+      setHeadless: () => ({ applied: true }),
+      current: async () => browserPage,
+      open: async (url: string) => {
+        browserPage = { url, title: "Bridge fixture" };
+        return browserPage;
+      },
+      screenshot: async (options: { path: string }) => {
+        writeFileSync(options.path, Buffer.from(TINY_PNG_BASE64, "base64"));
+        return browserPage ?? { url: "about:blank", title: "" };
+      },
+      close: async () => {
+        browserPage = undefined;
+        return true;
+      },
+    } as never;
+    const helper = {
+      hello: async () => ({}),
+      capabilities: async () => ({}),
+      request: async () => ({
+        png_base64: TINY_PNG_BASE64,
+        width: 1,
+        height: 1,
+        backend: "bridge-fixture",
+        background_safe: true,
+      }),
+      dispose: async () => {},
+    } as never;
+    const tools = await bridgeClaudeCodeTools({
+      factories: [
+        createScreenExtension({
+          home: paths.home,
+          helper,
+          capabilities: CLAUDE_CODE_TOOL_CAPABILITIES,
+        }),
+        createBrowserExtension({
+          home: paths.home,
+          backend: () => browser,
+          browser: { idleTimeoutMs: 0 },
+          capabilities: CLAUDE_CODE_TOOL_CAPABILITIES,
+        }),
+      ],
+      toolNames: [GHOST_SCREEN, GHOST_BROWSER],
+    }, paths.home, "Ghost bridge test");
+    const call = async (name: string, args: Record<string, unknown>) => {
+      const definition = tools.find((candidate) => candidate.name === name);
+      if (!definition) throw new Error(`Missing bridged tool ${name}`);
+      return definition.handler(args as never, {});
+    };
+
+    const screen = await call(GHOST_SCREEN, { prompt: "What is visible?" });
+    await call(GHOST_BROWSER, { action: "open", url: "https://example.com" });
+    const browserShot = await call(GHOST_BROWSER, { action: "screenshot" });
+    await call(GHOST_BROWSER, { action: "close" });
+
+    expect(screen.content).toContainEqual({
+      type: "image",
+      data: TINY_PNG_BASE64,
+      mimeType: "image/png",
+    });
+    expect(browserShot.content).toContainEqual({
+      type: "image",
+      data: TINY_PNG_BASE64,
+      mimeType: "image/png",
+    });
+  });
+
   it("routes an explicit claude-code role through the isolated SDK harness and resumes it", async () => {
     const { seenOptions, lifecycle } = setupClaudeHost();
     const first: PiMessagesEvent[] = [];

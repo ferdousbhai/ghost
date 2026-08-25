@@ -168,7 +168,11 @@ describe("readGhostContext", () => {
     expect(snapshot.agents.map((agent) => agent.name)).toEqual(
       [...snapshot.agents.map((agent) => agent.name)].sort((left, right) => left.localeCompare(right)),
     );
-    expect(Object.keys(scout ?? {})).not.toContain("filePath");
-    expect(Object.keys(scout ?? {})).not.toContain("systemPrompt");
+    const serializedAgents = JSON.stringify(snapshot.agents);
+    expect(snapshot.agents.every((agent) => !("filePath" in agent))).toBe(true);
+    expect(snapshot.agents.every((agent) => !("systemPrompt" in agent))).toBe(true);
+    expect(serializedAgents).not.toContain(home);
+    expect(serializedAgents).not.toContain("Project-only investigation instructions.");
+    expect(serializedAgents).not.toContain("Project helper instructions.");
   });
 });

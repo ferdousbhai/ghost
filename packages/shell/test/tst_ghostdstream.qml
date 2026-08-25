@@ -1,0 +1,225 @@
+import QtQuick
+import QtTest
+import qs.services
+
+TestCase {
+    name: "GhostdStream"
+
+    function init(): void {
+        Ghostd.cancel();
+        Ghostd.activeGhost = "casper";
+        Ghostd.currentSessionId = "stream-test";
+        Ghostd.sessionIds = ({ casper: "stream-test" });
+        Ghostd.clearTranscript();
+        Ghostd.lastError = "";
+        Ghostd.reachable = true;
+    }
+
+    function cleanup(): void {
+        Ghostd.cancel();
+        Ghostd.clearTranscript();
+    }
+
+    function openTurn(): void {
+        Ghostd.beginTurn();
+        Ghostd.transcript.append({
+            role: "user", text: "Start", tools: "", toolActivity: [],
+            error: "", pending: false, entryId: ""
+        });
+        Ghostd.transcript.append({
+            role: "assistant", text: "", tools: "", toolActivity: [],
+            error: "", pending: true, entryId: ""
+        });
+        Ghostd.assistantRow = 1;
+    }
+
+    function makeInteractionDirty(): void {
+        Ghostd.activity = "read";
+        Ghostd.statusText = "Still reading";
+        Ghostd.pendingAsk = ({ id: "ask-1" });
+        Ghostd.askSubmitting = true;
+        Ghostd.askError = "old ask error";
+        Ghostd.steeringQueue = ["steer"];
+        Ghostd.followUpQueue = ["later"];
+        Ghostd.queueSubmitting = true;
+        Ghostd.queueError = "old queue error";
+    }
+
+    function verifyInteractionSettled(): void {
+        verify(!Ghostd.streaming);
+        compare(Ghostd.activity, "");
+        compare(Ghostd.statusText, "");
+        compare(Ghostd.pendingAsk, null);
+        verify(!Ghostd.askSubmitting);
+        compare(Ghostd.askError, "");
+        compare(Ghostd.steeringQueue.length, 0);
+        compare(Ghostd.followUpQueue.length, 0);
+        verify(!Ghostd.queueSubmitting);
+        compare(Ghostd.queueError, "");
+    }
+
+    function test_dequeuedSteerBecomesTranscriptRowWithoutReload(): void {
+        openTurn();
+        Ghostd.steeringQueue = ["Use the shorter version."];
+        Ghostd.handleEvent({ type: "text_end", contentIndex: 0, content: "First pass" });
+        Ghostd.handleEvent({ type: "owner_message", text: "Use the shorter version." });
+
+        compare(Ghostd.transcript.count, 4);
+        compare(Ghostd.transcript.get(1).text, "First pass");
+        verify(!Ghostd.transcript.get(1).pending);
+        compare(Ghostd.transcript.get(2).role, "user");
+        compare(Ghostd.transcript.get(2).text, "Use the shorter version.");
+        compare(Ghostd.transcript.get(3).role, "assistant");
+        verify(Ghostd.transcript.get(3).pending);
+        compare(Ghostd.steeringQueue.length, 0);
+        verify(Ghostd.streaming);
+    }
+
+    function test_consecutiveSteersDoNotCreateEmptyAssistantRows(): void {
+        openTurn();
+
+        Ghostd.handleEvent({ type: "owner_message", text: "First steer" });
+        Ghostd.handleEvent({ type: "owner_message", text: "Second steer" });
+
+        compare(Ghostd.transcript.count, 4);
+        compare(Ghostd.transcript.get(0).role, "user");
+        compare(Ghostd.transcript.get(1).text, "First steer");
+        compare(Ghostd.transcript.get(2).text, "Second steer");
+        compare(Ghostd.transcript.get(3).role, "assistant");
+        verify(Ghostd.transcript.get(3).pending);
+    }
+
+    function test_eofWithoutTerminalSettlesEveryTurnField(): void {
+        openTurn();
+        makeInteractionDirty();
+        const xhr = { readyState: 4, status: 200, responseText: "data: {\"type\":\"start\"}\n\n" };
+        Ghostd.request = xhr;
+        Ghostd.currentSessionId = "";
+
+        Ghostd.readStream(xhr, "casper", "turn", "missing terminal");
+
+        verifyInteractionSettled();
+        compare(Ghostd.lastError, "missing terminal");
+        verify(!Ghostd.transcript.get(1).pending);
+    }
+
+    function test_doneAndErrorBothSettleEveryTurnField(): void {
+        for (const terminal of [
+            { type: "done", expected: "" },
+            { type: "error", errorMessage: "provider failed", expected: "provider failed" }
+        ]) {
+            openTurn();
+            makeInteractionDirty();
+            Ghostd.currentSessionId = "";
+            Ghostd.handleEvent(terminal);
+
+            verifyInteractionSettled();
+            compare(Ghostd.lastError, terminal.expected);
+            verify(!Ghostd.transcript.get(Ghostd.transcript.count - 1).pending);
+            Ghostd.clearTranscript();
+        }
+    }
+
+    function test_reanswerBranchUsesTheSameTerminalCleanup(): void {
+        Ghostd.beginTurn();
+        Ghostd.handleEvent({
+            type: "branch_changed",
+            transcript: {
+                messages: [{ role: "user", content: "Earlier question", entryId: "entry-1" }]
+            }
+        });
+        makeInteractionDirty();
+        Ghostd.currentSessionId = "";
+        Ghostd.handleEvent({ type: "done" });
+
+        verifyInteractionSettled();
+        compare(Ghostd.transcript.get(0).text, "Earlier question");
+        verify(!Ghostd.transcript.get(1).pending);
+    }
+
+    function test_watchdogSettlesAndRetiresThePartialStream(): void {
+        openTurn();
+        makeInteractionDirty();
+        let aborts = 0;
+        const xhr = {
+            readyState: 3,
+            status: 200,
+            responseText: "",
+            abort: function () { aborts += 1; }
+        };
+        Ghostd.request = xhr;
+        Ghostd.currentSessionId = "";
+
+        Ghostd.expireStream();
+
+        compare(aborts, 1);
+        compare(Ghostd.request, null);
+        verify(!Ghostd.reachable);
+        compare(Ghostd.lastError, "the stream stopped responding");
+        verifyInteractionSettled();
+    }
+
+    function test_askExecutionEndClearsTimedOutDialogBeforeTurnEnds(): void {
+        // The production singleton probes its roster on construction. The
+        // test import deliberately points at an unused non-owner port.
+        ignoreWarning(new RegExp("ghostd is not answering on http://127.0.0.1:17717"));
+        wait(20);
+        openTurn();
+        Ghostd.pendingAsk = ({ id: "ask-timeout" });
+        Ghostd.askSubmitting = true;
+        Ghostd.askError = "old error";
+
+        Ghostd.handleEvent({
+            type: "tool_execution_end",
+            id: "call-ask",
+            toolName: "ask",
+            isError: false,
+            summary: "Timed out"
+        });
+
+        compare(Ghostd.pendingAsk, null);
+        verify(!Ghostd.askSubmitting);
+        compare(Ghostd.askError, "");
+        verify(Ghostd.streaming);
+    }
+
+    function test_cancelRetiresXhrBeforeItsSynchronousAbortCallback(): void {
+        openTurn();
+        let aborts = 0;
+        const xhr = {
+            readyState: 3,
+            status: 0,
+            responseText: "",
+            abort: function () {
+                aborts += 1;
+                Ghostd.readStream(xhr, "casper", "turn", "missing terminal");
+            }
+        };
+        Ghostd.request = xhr;
+
+        Ghostd.cancel();
+
+        compare(aborts, 1);
+        verify(Ghostd.reachable);
+        compare(Ghostd.lastError, "");
+        verify(!Ghostd.streaming);
+    }
+
+    function test_clickingActiveTitleDoesNotInterruptItsTurn(): void {
+        openTurn();
+        let aborts = 0;
+        const xhr = {
+            readyState: 3,
+            status: 200,
+            responseText: "",
+            abort: function () { aborts += 1; }
+        };
+        Ghostd.request = xhr;
+
+        Ghostd.openConversation("stream-test");
+
+        verify(Ghostd.streaming);
+        compare(Ghostd.request, xhr);
+        compare(aborts, 0);
+    }
+}

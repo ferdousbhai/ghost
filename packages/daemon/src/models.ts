@@ -56,6 +56,11 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import type { Api, Model } from "@oh-my-pi/pi-ai";
+import {
+  pickDefaultAvailableModel,
+  resolveModelRoleValue,
+} from "@oh-my-pi/pi-coding-agent/config/model-resolver";
 
 /** One model entry, a subset of OMP's models-file model. */
 export interface GhostModelDefinition {
@@ -112,33 +117,58 @@ export interface GhostModelRoleBinding {
  *   subscription (OAuth / included plan → zero marginal cost) is preferred over
  *   a cheaper metered model. Every use is a single, fire-and-forget completion;
  *   a failure never affects the conversation.
- * - `general_purpose_model`, `research_model` — reserved.
+ * - `slow_model`, `plan_model`, `designer_model`, `commit_model`,
+ *   `tiny_model`, `task_model`, `advisor_model` — OMP's remaining built-in
+ *   roles. Keeping their native role identities lets bundled agents and modes
+ *   resolve the same `@role` aliases they do in the terminal client.
+ * - `general_purpose_model`, `research_model` — older Ghost custom roles,
+ *   retained so an existing home keeps its routing.
  */
 export type GhostModelRole =
   | "chat_model"
-  | "vision_model"
   | "smol_model"
+  | "slow_model"
+  | "vision_model"
+  | "plan_model"
+  | "designer_model"
+  | "commit_model"
+  | "tiny_model"
+  | "task_model"
+  | "advisor_model"
   | "general_purpose_model"
   | "research_model";
 
 export const GHOST_MODEL_ROLES: readonly GhostModelRole[] = [
   "chat_model",
-  "vision_model",
   "smol_model",
+  "slow_model",
+  "vision_model",
+  "plan_model",
+  "designer_model",
+  "commit_model",
+  "tiny_model",
+  "task_model",
+  "advisor_model",
   "general_purpose_model",
   "research_model",
 ];
 
 /**
- * OMP has first-class `default`, `vision`, and `smol` roles and permits custom
- * ones. Keep Ghost's public role vocabulary stable and translate only at the
- * harness boundary; `general` and `research` are intentionally custom OMP roles
- * rather than misleading aliases for its coding-specific roles.
+ * Keep Ghost's public role vocabulary stable and translate only at the harness
+ * boundary. Every OMP built-in retains its native id; `general` and `research`
+ * remain custom roles solely for compatibility with earlier Ghost homes.
  */
 export const GHOST_TO_OMP_MODEL_ROLE: Readonly<Record<GhostModelRole, string>> = {
   chat_model: "default",
-  vision_model: "vision",
   smol_model: "smol",
+  slow_model: "slow",
+  vision_model: "vision",
+  plan_model: "plan",
+  designer_model: "designer",
+  commit_model: "commit",
+  tiny_model: "tiny",
+  task_model: "task",
+  advisor_model: "advisor",
   general_purpose_model: "general",
   research_model: "research",
 };
@@ -167,6 +197,23 @@ export interface GhostOmpModelRouting {
 /** OMP's unambiguous provider-qualified selector. */
 export function ghostModelSelector(binding: GhostModelRoleBinding): string {
   return `${binding.provider}/${binding.modelId}`;
+}
+
+/**
+ * Resolve OMP's initial chat/default choice from Ghost's projected role.
+ *
+ * This is the shared daemon-side mirror of `createAgentSession`: a usable
+ * configured default role wins, otherwise OMP's provider-default-aware picker
+ * chooses from the same availability-ordered candidates.
+ */
+export function resolveOmpChatModel(
+  binding: GhostModelRoleBinding | null | undefined,
+  availableModels: readonly Model<Api>[],
+): Model<Api> | undefined {
+  const candidates = [...availableModels];
+  const roleValue = binding ? ghostModelSelector(binding) : undefined;
+  return resolveModelRoleValue(roleValue, candidates).model
+    ?? pickDefaultAvailableModel(candidates);
 }
 
 /**
@@ -530,6 +577,23 @@ export function setGhostModelRole(
   });
 }
 
+/** Clear one explicit primary while preserving its retry chain and every sibling role. */
+export function clearGhostModelRole(
+  agentDir: string,
+  role: GhostModelRole,
+): GhostModelsFile {
+  mkdirSync(agentDir, { recursive: true });
+  const path = ghostModelsPath(agentDir);
+  return withSerializedModelsWrite(path, () => {
+    const file: GhostModelsFile = readGhostModels(agentDir) ?? { providers: {} };
+    const roles = { ...(file.roles ?? {}) };
+    delete roles[role];
+    file.roles = roles;
+    persistGhostModels(path, file);
+    return file;
+  });
+}
+
 /** Append one retry choice unless the same provider/model is already present. */
 export function appendGhostModelFallback(
   agentDir: string,
@@ -546,6 +610,28 @@ export function appendGhostModelFallback(
       current.push({ provider, modelId });
     }
     file.fallbacks = { ...(file.fallbacks ?? {}), [role]: current };
+    persistGhostModels(path, file);
+    return file;
+  });
+}
+
+/**
+ * Replace a role's complete retry chain in one serialized models.json write.
+ * Ordering is significant. An empty list has the same durable shape as clear.
+ */
+export function replaceGhostModelFallbacks(
+  agentDir: string,
+  role: GhostModelRole,
+  bindings: readonly GhostModelRoleBinding[],
+): GhostModelsFile {
+  mkdirSync(agentDir, { recursive: true });
+  const path = ghostModelsPath(agentDir);
+  return withSerializedModelsWrite(path, () => {
+    const file: GhostModelsFile = readGhostModels(agentDir) ?? { providers: {} };
+    const fallbacks = { ...(file.fallbacks ?? {}) };
+    if (bindings.length === 0) delete fallbacks[role];
+    else fallbacks[role] = bindings.map((binding) => ({ ...binding }));
+    file.fallbacks = fallbacks;
     persistGhostModels(path, file);
     return file;
   });

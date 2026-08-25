@@ -18,9 +18,35 @@ export interface GhostExtensionOptions {
    * Omitted, each call resolves the home from the session's own `cwd`.
    */
   readonly home?: GhostHome | string;
+  /** Runtime capabilities supplied by the harness, resolved for each tool call. */
+  readonly capabilities?: GhostToolCapabilitiesSource;
 }
 
 export type CwdContext = Pick<ExtensionContext, "cwd">;
+
+/** Harness capabilities Ghost tools consume without depending on a provider model shape. */
+export interface GhostToolCapabilities {
+  readonly vision: boolean;
+}
+
+export type GhostToolCapabilitiesResolver = (
+  context: Pick<ExtensionContext, "cwd" | "model">,
+) => GhostToolCapabilities;
+
+export type GhostToolCapabilitiesSource =
+  | GhostToolCapabilities
+  | GhostToolCapabilitiesResolver;
+
+const NO_TOOL_CAPABILITIES: GhostToolCapabilities = { vision: false };
+
+export function resolveToolCapabilities(
+  options: GhostExtensionOptions,
+  context: Pick<ExtensionContext, "cwd" | "model">,
+): GhostToolCapabilities {
+  const source = options.capabilities;
+  if (typeof source === "function") return source(context);
+  return source ?? NO_TOOL_CAPABILITIES;
+}
 
 export function resolveHome(
   options: GhostExtensionOptions,

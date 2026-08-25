@@ -18,7 +18,68 @@ Item {
         is the loudest question the HUD asks — never a row-sized one. */
     signal deleteRequested(string name)
 
+    /** The keyboard has nowhere to be, but nothing about the view changed —
+        a rename that ended, or a click on the ghost already selected. */
+    signal refocused()
+
     property bool naming: false
+
+    // ---- Renaming a ghost -------------------------------------------------
+    // Held on the list, not the row: the roster is replaced wholesale on every
+    // refresh, which rebuilds every delegate underneath a half-typed name.
+    /** The ghost being renamed in place, under its current name, or "". */
+    property string editingName: ""
+    /** The name as it stands in the field. */
+    property string editDraft: ""
+    /** The field currently up, or null. A reference rather than a flag:
+        a rebuilt row can take the keyboard before the row it replaced
+        reports losing it, and only the object itself knows the truth. */
+    property var editor: null
+
+    function beginRename(name: string): void {
+        if (name === "") return;
+        // One name being typed at a time; the summon row is the other.
+        root.naming = false;
+        Ghostd.ghostRenameError = "";
+        root.editDraft = name;
+        root.editingName = name;
+    }
+
+    function commitRename(): void {
+        const from = root.editingName;
+        if (from === "") return;
+        const draft = root.editDraft.trim();
+        // An emptied field is not a request for a nameless ghost — there is no
+        // such thing — so it means the same as Esc: keep the name it has.
+        if (draft === "") {
+            root.cancelRename();
+            return;
+        }
+        root.editingName = "";
+        root.editDraft = "";
+        // A renamed ghost is not a new one. Without this the row would rise
+        // into place again, as if it had just been summoned.
+        root.summoned[draft] = true;
+        Ghostd.renameGhost(from, draft);
+        root.refocused();
+    }
+
+    function cancelRename(): void {
+        if (root.editingName === "") return;
+        root.editingName = "";
+        root.editDraft = "";
+        root.refocused();
+    }
+
+    /**
+     * Losing the keyboard commits — but a roster refresh destroys the field and
+     * builds a new one, and that is not the owner clicking away. So ask a tick
+     * later: if nothing has taken the keyboard back by then, they really did.
+     */
+    function commitOnBlur(): void {
+        if (root.editingName === "" || (root.editor && root.editor.activeFocus)) return;
+        root.commitRename();
+    }
 
     // Names that have already made their entrance. Ghostd.ghosts is replaced
     // wholesale on every poll, which rebuilds every delegate; without this the
@@ -107,12 +168,22 @@ Item {
 
                 readonly property bool active: entry.modelData.name === Ghostd.activeGhost
                 readonly property bool deleting: Ghostd.deletingGhost === entry.modelData.name
+                readonly property bool editing: root.editingName === entry.modelData.name
 
                 width: root.width
                 height: Theme.controlHeight
                 radius: Theme.radius / 2
                 color: entry.active ? Theme.film(0.10)
                     : (entryArea.containsMouse ? Theme.film(0.06) : "transparent")
+                // The same amber ring the summon row wears: this is the roster's
+                // one signal that a name is being typed rather than read.
+                border.width: entry.editing ? 1 : 0
+                border.color: Theme.amber(0.50)
+
+                // A row that already exists when the rename starts. The other
+                // path — a refresh rebuilding it mid-edit — is picked up in
+                // Component.onCompleted below.
+                onEditingChanged: if (entry.editing) renameField.begin(root.editDraft)
 
                 Behavior on color {
                     enabled: !Theme.reducedMotion
@@ -124,6 +195,8 @@ Item {
                 transform: Translate { id: rise }
 
                 Component.onCompleted: {
+                    // A refresh rebuilt the row this rename is running on.
+                    if (entry.editing) renameField.begin(root.editDraft);
                     const seen = root.summoned[entry.modelData.name] === true;
                     root.summoned[entry.modelData.name] = true;
                     if (seen || Theme.reducedMotion)
@@ -178,12 +251,32 @@ Item {
 
                         Text {
                             anchors.verticalCenter: parent.verticalCenter
+                            visible: !entry.editing
                             width: parent.width - 14 - banish.width - Theme.gap * 2
                             text: entry.modelData.name
                             color: entry.active ? Theme.foregroundBright : Theme.foreground
                             font.family: Theme.fontFamily
                             font.pixelSize: Theme.fontSize
                             elide: Text.ElideRight
+                        }
+
+                        // The name becomes a field where it is read, and takes
+                        // the × with it: a ghost you are renaming is not one
+                        // you are about to banish.
+                        InlineRename {
+                            id: renameField
+                            anchors.verticalCenter: parent.verticalCenter
+                            visible: entry.editing
+                            width: parent.width - 14 - Theme.gap
+                            placeholder: "Name this ghost"
+                            // Every row carries one of these, and an idle one
+                            // reports its own empty text on creation; only the
+                            // live one speaks.
+                            onEdited: value => { if (entry.editing) root.editDraft = value; }
+                            onCommitted: root.commitRename()
+                            onCancelled: root.cancelRename()
+                            onFocusGained: root.editor = renameField
+                            onFocusLost: Qt.callLater(root.commitOnBlur)
                         }
 
                         Rectangle {
@@ -193,8 +286,9 @@ Item {
                             // painted, so the name does not shift on hover.
                             width: 16
                             height: Theme.controlHeight
-                            visible: entryArea.containsMouse || banishArea.containsMouse
-                                || entry.deleting
+                            visible: !entry.editing
+                                && (entryArea.containsMouse || banishArea.containsMouse
+                                || entry.deleting)
                             z: 2
                             radius: Theme.radius / 2
                             color: banishArea.containsMouse || entry.deleting
@@ -231,14 +325,47 @@ Item {
                     MouseArea {
                         id: entryArea
                         anchors.fill: parent
+                        // While the field is up the row is the field; a stray
+                        // click on the padding around it must not re-select.
+                        enabled: !entry.editing
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
                         onClicked: {
+                            // `picked` tears down what belonged to the ghost
+                            // that was left — the open file most of all — and
+                            // clicking the one already selected leaves none.
+                            if (entry.modelData.name === Ghostd.activeGhost) {
+                                root.refocused();
+                                return;
+                            }
                             Ghostd.selectGhost(entry.modelData.name);
                             root.picked();
                         }
+                        // The first click of the pair still selects the ghost.
+                        // That is what a single click there does anyway, and it
+                        // is the one you are about to rename.
+                        onDoubleClicked: root.beginRename(entry.modelData.name)
                     }
                 }
+            }
+        }
+
+        // A rename the daemon refused — "still answering", most often. It
+        // belongs under the row it was typed into rather than in a modal: the
+        // name is already back to what it was, and this says why.
+        Text {
+            visible: Ghostd.ghostRenameError !== ""
+            width: root.width
+            text: Ghostd.ghostRenameError
+            color: Theme.ghostRose
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontSizeSmall
+            wrapMode: Text.Wrap
+
+            MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: Ghostd.ghostRenameError = ""
             }
         }
 

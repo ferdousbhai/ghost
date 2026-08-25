@@ -345,4 +345,25 @@ describe("GreetingCache", () => {
     cache.clear("casper");
     expect((await cache.get("casper", "fp", produce)).greeting).toBe("greeting 2");
   });
+
+  it("does not let an invalidated in-flight greeting repopulate an old name", async () => {
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolvePromise) => {
+      release = resolvePromise;
+    });
+    const cache = new GreetingCache({ now: () => 1_000 });
+    const stale = cache.get("casper", "fp", async () => {
+      await gate;
+      return result("stale");
+    });
+
+    cache.clear("casper");
+    const fresh = cache.get("casper", "fp", async () => result("fresh"));
+    release?.();
+
+    expect((await stale).greeting).toBe("stale");
+    expect((await fresh).greeting).toBe("fresh");
+    expect((await cache.get("casper", "fp", async () => result("wrong"))).greeting)
+      .toBe("fresh");
+  });
 });

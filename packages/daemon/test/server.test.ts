@@ -8,6 +8,9 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { ghostPaths } from "../src/ghosts.js";
+import { McpCatalog } from "../src/mcp-catalog.js";
+import { setChatModelRole } from "../src/models.js";
 import type { PiMessagesEvent } from "../src/pi-messages.js";
 import { startDaemonServer, type ListeningServer } from "../src/server.js";
 import { SessionHost } from "../src/session-host.js";
@@ -34,7 +37,10 @@ async function serve(
   script: Parameters<typeof startMockProvider>[0]["script"] = [
     { kind: "text", text: "hello there" },
   ],
-  serverOptions: { maxBodyBytes?: number; apiToken?: string | null } = {},
+  serverOptions: {
+    maxBodyBytes?: number;
+    apiToken?: string | null;
+  } = {},
 ) {
   temp = makeTempGhosts();
   temp.registry.ensureRoot();
@@ -44,13 +50,18 @@ async function serve(
     provider: { baseUrl: provider.url, modelId: provider.modelId },
   });
   host = new SessionHost({ registry: temp.registry, offline: true });
+  const mcp = new McpCatalog({ registry: temp.registry });
   listening = await startDaemonServer({
     registry: temp.registry,
     host,
+    mcp,
     port: 0,
     // Routing and streaming are the subject here; auth has its own file.
     apiToken: null,
-    ...serverOptions,
+    ...(serverOptions.maxBodyBytes === undefined
+      ? {}
+      : { maxBodyBytes: serverOptions.maxBodyBytes }),
+    ...(serverOptions.apiToken === undefined ? {} : { apiToken: serverOptions.apiToken }),
   });
   return `http://127.0.0.1:${listening.port}`;
 }
@@ -165,6 +176,250 @@ describe("GET /api/ghosts/:name/context", () => {
       body: "{}",
     })).status).toBe(405);
     expect((await fetch(`${base}/api/ghosts/missing/context`)).status).toBe(404);
+  });
+
+  it("moves confirmed docs and memory files to Trash", async () => {
+    const base = await serve();
+    const ghostDir = join(temp!.root, "casper");
+    const doc = join(ghostDir, "docs", "delete-me.md");
+    const memory = join(ghostDir, "memory", "delete-me-too.md");
+    writeFileSync(doc, "doc\n", "utf8");
+    writeFileSync(memory, "---\ndescription: temporary\n---\n\nmemory\n", "utf8");
+    const remove = (body: unknown) => fetch(`${base}/api/ghosts/casper/context`, {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    const unconfirmed = await remove({
+      section: "docs",
+      path: "docs/delete-me.md",
+      confirm: "docs/something-else.md",
+    });
+    expect(unconfirmed.status).toBe(400);
+    expect(existsSync(doc)).toBe(true);
+
+    const docResponse = await remove({
+      section: "docs",
+      path: "docs/delete-me.md",
+      confirm: "docs/delete-me.md",
+    });
+    expect(docResponse.status).toBe(200);
+    const docBody = await docResponse.json() as { ok: boolean; path: string; trash: string };
+    expect(docBody).toMatchObject({ ok: true, path: "docs/delete-me.md" });
+    expect(readFileSync(docBody.trash, "utf8")).toBe("doc\n");
+    expect(existsSync(doc)).toBe(false);
+
+    expect((await remove({
+      section: "memory",
+      path: "memory/delete-me-too.md",
+      confirm: "memory/delete-me-too.md",
+    })).status).toBe(200);
+    expect(existsSync(memory)).toBe(false);
+    expect((await remove({
+      section: "character",
+      path: "character.md",
+      confirm: "character.md",
+    })).status).toBe(400);
+    expect(existsSync(join(ghostDir, "character.md"))).toBe(true);
+  });
+});
+
+describe("GET /api/ghosts/:name/sessions/:id/commands", () => {
+  it("serves OMP's session command catalog and enforces GET", async () => {
+    const base = await serve();
+    const url = `${base}/api/ghosts/casper/sessions/conv-commands/commands`;
+
+    const response = await fetch(url);
+    expect(response.status).toBe(200);
+    const body = await response.json() as {
+      commands: Array<{ name: string; source: string; availability: string }>;
+    };
+    expect(body.commands).toContainEqual(expect.objectContaining({
+      name: "tools",
+      source: "builtin",
+      availability: "available",
+    }));
+    expect(body.commands).toContainEqual(expect.objectContaining({
+      name: "mcp",
+      source: "builtin",
+      availability: "unsupported",
+    }));
+
+    expect((await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    })).status).toBe(405);
+    expect((await fetch(
+      `${base}/api/ghosts/missing/sessions/conv-commands/commands`,
+    )).status).toBe(404);
+
+    setChatModelRole(ghostPaths(join(temp!.root, "casper")).agentDir, "claude-code", "default");
+    const claude = await fetch(url);
+    expect(claude.status).toBe(409);
+    expect(await claude.json()).toMatchObject({
+      error: { code: "not_supported", message: expect.stringContaining("Claude Code") },
+    });
+  });
+
+  it("streams standalone command output instead of an assistant message", async () => {
+    const base = await serve();
+    const result = await postTurn(base, {
+      ...TURN_BODY,
+      context: { messages: [{ role: "user", content: "/tools" }] },
+      options: { sessionId: "conv-tools" },
+    });
+
+    expect(result.status).toBe(200);
+    expect(result.events).toContainEqual(expect.objectContaining({
+      type: "command_output",
+      command: "/tools",
+      output: expect.stringContaining("read"),
+    }));
+    expect(result.events.some((event) => event.type === "text_start")).toBe(false);
+    expect(provider!.requests).toHaveLength(0);
+  });
+});
+
+describe("session Connect routes", () => {
+  it("does not expose encrypted snapshot sharing", async () => {
+    const base = await serve();
+    const response = await fetch(`${base}/api/ghosts/casper/sessions/conv-1/share`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({
+      error: { message: "Not found.", code: "not_found" },
+    });
+  });
+
+  it("reports session-scoped live and collaboration state without starting either", async () => {
+    const base = await serve();
+    const live = `${base}/api/ghosts/casper/sessions/conv-connect/live`;
+    const collab = `${base}/api/ghosts/casper/sessions/conv-connect/collab`;
+
+    expect(await (await fetch(live)).json()).toMatchObject({
+      supported: true,
+      active: false,
+      phase: "idle",
+    });
+    expect(await (await fetch(collab)).json()).toEqual({
+      supported: true,
+      active: false,
+      participants: [],
+    });
+
+    const invalidLive = await fetch(live, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "listen harder" }),
+    });
+    expect(invalidLive.status).toBe(400);
+    const inactiveMute = await fetch(live, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "mute" }),
+    });
+    expect(inactiveMute.status).toBe(409);
+
+    const missingWritable = await fetch(collab, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "start", relayUrl: "wss://relay.example" }),
+    });
+    expect(missingWritable.status).toBe(400);
+    const stopped = await fetch(collab, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "stop" }),
+    });
+    expect(stopped.status).toBe(200);
+    expect(await stopped.json()).toMatchObject({ active: false });
+  });
+});
+
+describe("project MCP routes", () => {
+  const jsonRequest = (url: string, method: string, body?: unknown) => fetch(url, {
+    method,
+    ...(body === undefined ? {} : {
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  });
+
+  it("lists without opening a session and manages the project-owned config", async () => {
+    const base = await serve();
+    const collection = `${base}/api/ghosts/casper/mcp`;
+
+    const empty = await fetch(collection);
+    expect(empty.status).toBe(200);
+    expect(await empty.json()).toEqual({ servers: [], skipped: [] });
+    const sessions = await (await fetch(`${base}/api/ghosts/casper/sessions`)).json() as {
+      sessions: unknown[];
+    };
+    expect(sessions.sessions).toEqual([]);
+
+    const added = await jsonRequest(collection, "POST", {
+      name: "probe",
+      config: {
+        type: "stdio",
+        command: process.execPath,
+        args: ["-e", "process.exit(1)", "secret-argument"],
+        env: { SECRET_TOKEN: "secret-environment" },
+      },
+    });
+    expect(added.status).toBe(201);
+    const addedBody = await added.json() as {
+      servers: Array<Record<string, unknown>>;
+    };
+    expect(addedBody.servers).toContainEqual(expect.objectContaining({
+      name: "probe",
+      enabled: true,
+      source: "canonical",
+      connectionStatus: "not_loaded",
+      config: expect.objectContaining({ command: process.execPath, argumentCount: 3 }),
+    }));
+    expect(JSON.stringify(addedBody)).not.toContain("secret-argument");
+    expect(JSON.stringify(addedBody)).not.toContain("secret-environment");
+
+    const reconnect = await jsonRequest(`${collection}/probe/reconnect`, "POST", {});
+    expect(reconnect.status).toBe(200);
+    expect(await reconnect.json()).toMatchObject({
+      result: { name: "probe", status: "not_loaded", ok: false },
+    });
+
+    const tested = await jsonRequest(`${collection}/probe/test`, "POST", {});
+    expect(tested.status).toBe(200);
+    expect(await tested.json()).toMatchObject({
+      result: { name: "probe", status: "failed", ok: false, toolCount: 0 },
+    });
+
+    const disabled = await jsonRequest(`${collection}/probe/enabled`, "PUT", { enabled: false });
+    expect(disabled.status).toBe(200);
+    expect(await disabled.json()).toMatchObject({
+      servers: [expect.objectContaining({ name: "probe", connectionStatus: "disabled" })],
+    });
+
+    const updated = await jsonRequest(`${collection}/probe`, "PUT", {
+      config: { type: "stdio", command: "replacement", enabled: false },
+    });
+    expect(updated.status).toBe(200);
+    expect(await updated.json()).toMatchObject({
+      servers: [expect.objectContaining({
+        name: "probe",
+        config: expect.objectContaining({ command: "replacement" }),
+      })],
+    });
+
+    const removed = await jsonRequest(`${collection}/probe`, "DELETE");
+    expect(removed.status).toBe(200);
+    expect(await removed.json()).toMatchObject({ servers: [] });
+    expect((await jsonRequest(`${collection}/missing/test`, "POST", {})).status).toBe(404);
+    expect((await jsonRequest(collection, "PUT", {})).status).toBe(405);
   });
 });
 
@@ -480,8 +735,116 @@ describe("PUT /api/ghosts/:name/sessions/:id/pin", () => {
   });
 });
 
+describe("PUT /api/ghosts/:name/sessions/:id/title", () => {
+  const rename = (base: string, id: string, body: unknown) => fetch(
+    `${base}/api/ghosts/casper/sessions/${encodeURIComponent(id)}/title`,
+    {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    },
+  );
+
+  const titleOf = async (base: string, id: string) => (
+    await (await fetch(`${base}/api/ghosts/casper/sessions`)).json() as {
+      sessions: Array<{ id: string; title: string | null }>;
+    }
+  ).sessions.find((session) => session.id === id)?.title ?? null;
+
+  it("names a conversation and trims it", async () => {
+    const base = await serve();
+    await postTurn(base, TURN_BODY);
+
+    const named = await rename(base, "conv-1", { title: "  The Vandercook  " });
+    expect(named.status).toBe(200);
+    expect(await named.json()).toEqual({ ok: true, title: "The Vandercook" });
+    expect(await titleOf(base, "conv-1")).toBe("The Vandercook");
+  });
+
+  it("rejects an empty, non-string, non-printable, or overlong title", async () => {
+    const base = await serve();
+    await postTurn(base, TURN_BODY);
+    for (const body of [
+      {},
+      { title: null },
+      { title: 7 },
+      { title: ["a"] },
+      { title: "" },
+      { title: "   " },
+      { title: "\u0001\u007f" },
+      { title: "x".repeat(121) },
+      [],
+    ]) {
+      const response = await rename(base, "conv-1", body);
+      expect(response.status, JSON.stringify(body)).toBe(400);
+      expect(await response.json()).toMatchObject({ error: { code: "invalid_request" } });
+    }
+    // Exactly at the cap is fine.
+    expect((await rename(base, "conv-1", { title: "x".repeat(120) })).status).toBe(200);
+  });
+
+  it("404s an unknown conversation and 405s a non-PUT", async () => {
+    const base = await serve();
+    await postTurn(base, TURN_BODY);
+    const missing = await rename(base, "nope", { title: "Anything" });
+    expect(missing.status).toBe(404);
+    expect(await missing.json()).toMatchObject({ error: { code: "not_found" } });
+    expect((await fetch(`${base}/api/ghosts/casper/sessions/conv-1/title`)).status).toBe(405);
+  });
+});
+
+describe("PUT /api/ghosts/:name/name", () => {
+  const rename = (base: string, name: string, body: unknown) => fetch(
+    `${base}/api/ghosts/${encodeURIComponent(name)}/name`,
+    {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    },
+  );
+
+  it("renames the ghost, moves its home, and keeps the conversation id valid", async () => {
+    const base = await serve();
+    await postTurn(base, TURN_BODY);
+
+    const renamed = await rename(base, "casper", { name: "wisp" });
+    expect(renamed.status).toBe(200);
+    expect(await renamed.json()).toEqual({ ok: true, name: "wisp" });
+    expect(existsSync(join(temp!.root, "casper"))).toBe(false);
+    expect(existsSync(join(temp!.root, "wisp"))).toBe(true);
+
+    const { sessions } = await (await fetch(`${base}/api/ghosts/wisp/sessions`)).json() as {
+      sessions: Array<{ id: string }>;
+    };
+    expect(sessions.map((session) => session.id)).toEqual(["conv-1"]);
+    expect((await fetch(`${base}/api/ghosts/wisp/sessions/conv-1/transcript`)).status).toBe(200);
+    expect((await fetch(`${base}/api/ghosts/casper/sessions`)).status).toBe(404);
+  });
+
+  it("refuses a bad name, an unknown ghost, and a taken name", async () => {
+    const base = await serve();
+    await (await fetch(`${base}/api/ghosts`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "mina" }),
+    })).json();
+
+    for (const body of [{}, { name: 7 }, { name: ".hidden" }, { name: "with/slash" }]) {
+      const response = await rename(base, "casper", body);
+      expect(response.status, JSON.stringify(body)).toBe(400);
+    }
+    expect((await rename(base, "nobody", { name: "wisp" })).status).toBe(404);
+    const taken = await rename(base, "casper", { name: "mina" });
+    expect(taken.status).toBe(409);
+    expect(await taken.json()).toMatchObject({ error: { code: "already_exists" } });
+    // Its own name is a no-op, not a collision.
+    expect((await rename(base, "casper", { name: "casper" })).status).toBe(200);
+    expect((await fetch(`${base}/api/ghosts/casper/name`)).status).toBe(405);
+  });
+});
+
 describe("DELETE /api/ghosts/:name/sessions/:id", () => {
-  it("permanently deletes a stored conversation", async () => {
+  it("moves a stored conversation to recoverable Trash", async () => {
     const base = await serve();
     await postTurn(base, TURN_BODY);
 
@@ -489,7 +852,16 @@ describe("DELETE /api/ghosts/:name/sessions/:id", () => {
       method: "DELETE",
     });
     expect(deleted.status).toBe(200);
-    expect(await deleted.json()).toEqual({ ok: true });
+    const body = await deleted.json() as {
+      ok: boolean;
+      trash: Array<{ artifact: string; source: string; trash: string; kind: string }>;
+    };
+    expect(body).toMatchObject({
+      ok: true,
+      trash: [{ artifact: "omp-transcript", kind: "freedesktop" }],
+    });
+    expect(existsSync(body.trash[0]!.source)).toBe(false);
+    expect(existsSync(body.trash[0]!.trash)).toBe(true);
     expect(await (await fetch(`${base}/api/ghosts/casper/sessions`)).json())
       .toEqual({ sessions: [] });
     expect((await fetch(`${base}/api/ghosts/casper/sessions/conv-1/transcript`)).status)

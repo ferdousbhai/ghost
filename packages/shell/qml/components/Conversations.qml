@@ -25,6 +25,23 @@ Item {
         never one click, and the question is worth more room than a list row. */
     signal deleteRequested(string sessionId, string title)
 
+    /** A rename ended, one way or the other. Nothing about the view changed —
+        the keyboard just has nowhere to be. */
+    signal refocused()
+
+    // ---- Renaming a conversation ------------------------------------------
+    // Both of these live on the list rather than on the row, and have to: the
+    // listing is replaced wholesale on every re-list (a finished turn does one),
+    // which rebuilds every delegate underneath a half-typed name.
+    /** The conversation being renamed in place, or "". */
+    property string editingId: ""
+    /** The name as it stands in the field. */
+    property string editDraft: ""
+    /** The field currently up, or null. A reference rather than a flag:
+        a rebuilt row can take the keyboard before the row it replaced
+        reports losing it, and only the object itself knows the truth. */
+    property var editor: null
+
     /** The live filter. Empty shows every conversation in both groups. */
     readonly property string query: searchInput.text.trim()
 
@@ -42,6 +59,57 @@ Item {
         conversation. */
     function reset(): void {
         searchInput.text = "";
+    }
+
+    /** Open the field on a row, seeded with the name it actually has — never
+        with the "New conversation" placeholder, which is not a name and must
+        not become one just because the owner pressed Enter. */
+    function beginRename(session: var): void {
+        if (!session) return;
+        root.editDraft = typeof session.title === "string" ? session.title : "";
+        root.editingId = session.id;
+    }
+
+    function commitRename(): void {
+        const id = root.editingId;
+        if (id === "") return;
+        const draft = root.editDraft.trim();
+        // An emptied field is not a request to have no name — a conversation
+        // cannot be un-named — so it means the same as Esc: keep what was there.
+        if (draft === "") {
+            root.cancelRename();
+            return;
+        }
+        root.editingId = "";
+        root.editDraft = "";
+        Ghostd.renameConversation(id, draft);
+        root.refocused();
+    }
+
+    function cancelRename(): void {
+        if (root.editingId === "") return;
+        root.editingId = "";
+        root.editDraft = "";
+        root.refocused();
+    }
+
+    /**
+     * Losing the keyboard commits — but a re-list destroys the field and builds
+     * a new one, and that is not the owner clicking away. So ask a tick later:
+     * if nothing has taken the keyboard back by then, they really did leave.
+     */
+    function commitOnBlur(): void {
+        if (root.editingId === "" || (root.editor && root.editor.activeFocus)) return;
+        root.commitRename();
+    }
+
+    Connections {
+        target: Ghostd
+
+        // A name typed into one ghost's list has no meaning in another's.
+        function onActiveGhostChanged(): void {
+            root.cancelRename();
+        }
     }
 
     // A row's display title: the daemon-generated title, or a graceful fallback
@@ -79,6 +147,7 @@ Item {
             readonly property bool pinned: entry.modelData.pinned === true
             readonly property bool deleting:
                 Ghostd.deletingSessionId === entry.modelData.id
+            readonly property bool editing: root.editingId === entry.modelData.id
 
             width: root.width
             height: Theme.controlHeight
@@ -88,6 +157,14 @@ Item {
             // stays reserved for state that is not "you are looking at this".
             color: entry.active ? Theme.film(0.14)
                 : (entryArea.containsMouse ? Theme.film(0.06) : "transparent")
+            // The amber ring is the roster's own "you are typing a name here".
+            border.width: entry.editing ? 1 : 0
+            border.color: Theme.amber(0.50)
+
+            // Both paths matter: the row may already exist when the rename
+            // starts, or be rebuilt by a re-list while it is running.
+            onEditingChanged: if (entry.editing) titleEdit.begin(root.editDraft)
+            Component.onCompleted: if (entry.editing) titleEdit.begin(root.editDraft)
 
             Behavior on color {
                 enabled: !Theme.reducedMotion
@@ -107,6 +184,7 @@ Item {
 
                 Text {
                     id: titleText
+                    visible: !entry.editing
                     anchors.left: parent.left
                     anchors.right: actions.left
                     anchors.rightMargin: Theme.gap
@@ -119,10 +197,30 @@ Item {
                     elide: Text.ElideRight
                 }
 
+                // The name becomes a field where it is read. It takes the pin
+                // and the × with it: a row being renamed is not a row you are
+                // about to pin or delete.
+                InlineRename {
+                    id: titleEdit
+                    visible: entry.editing
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    placeholder: "Name this conversation"
+                    // Every row carries one of these, and an idle one reports
+                    // its own empty text on creation; only the live one speaks.
+                    onEdited: value => { if (entry.editing) root.editDraft = value; }
+                    onCommitted: root.commitRename()
+                    onCancelled: root.cancelRename()
+                    onFocusGained: root.editor = titleEdit
+                    onFocusLost: Qt.callLater(root.commitOnBlur)
+                }
+
                 Item {
                     id: actions
 
-                    readonly property bool showActions: (entryArea.containsMouse
+                    readonly property bool showActions: !entry.editing
+                        && (entryArea.containsMouse
                         || pinArea.containsMouse || deleteArea.containsMouse
                         || entry.deleting)
 
@@ -223,12 +321,19 @@ Item {
             MouseArea {
                 id: entryArea
                 anchors.fill: parent
+                // While the field is up the row is the field; a stray click on
+                // the padding around it must not reopen the conversation.
+                enabled: !entry.editing
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
                 onClicked: {
                     Ghostd.openConversation(entry.modelData.id);
                     root.picked();
                 }
+                // The first click of the pair still opens the conversation.
+                // That is what a single click there does anyway, and it is the
+                // one you are about to rename.
+                onDoubleClicked: root.beginRename(entry.modelData)
             }
         }
     }

@@ -143,13 +143,20 @@ FloatingWindow {
 
     /** Move between the ghost's chat, context, and capability surfaces. */
     function showSection(section: string): void {
-        if (["chat", "docs", "memory", "agents", "character"].indexOf(section) < 0)
+        if (["chat", "docs", "memory", "agents", "commands", "mcp", "connect", "character"]
+                .indexOf(section) < 0)
             return;
         hud.loginOpen = false;
         hud.switcherOpen = false;
         hud.currentSection = section;
         if (section === "chat") {
             composer.take();
+        } else if (section === "commands") {
+            Ghostd.fetchCommands(false);
+        } else if (section === "mcp") {
+            Ghostd.fetchMcp(false);
+        } else if (section === "connect") {
+            Ghostd.fetchConnect(false);
         } else {
             Ghostd.fetchContext(false);
         }
@@ -554,6 +561,13 @@ FloatingWindow {
                                 Workbench.close();
                                 composer.take();
                             }
+                            // Same ghost, so the workbench still holds a file
+                            // from the home we are looking at; only the
+                            // keyboard has come loose.
+                            onRefocused: {
+                                hud.loginOpen = false;
+                                composer.take();
+                            }
                             onDeleteRequested: name => {
                                 Ghostd.ghostDeleteError = "";
                                 hud.pendingDeleteSessionId = "";
@@ -579,6 +593,7 @@ FloatingWindow {
                                 hud.loginOpen = false;
                                 composer.take();
                             }
+                            onRefocused: composer.take()
                             onDeleteRequested: (sessionId, title) => {
                                 Ghostd.sessionsError = "";
                                 hud.pendingDeleteGhost = "";
@@ -1035,11 +1050,42 @@ FloatingWindow {
             // nesting its roster/conversation sidebar inside their own index.
             ContextBrowser {
                 id: contextBrowser
-                visible: hud.currentSection !== "chat"
+                visible: ["docs", "memory", "agents", "character"]
+                    .indexOf(hud.currentSection) >= 0
                     && !hud.loginOpen && !hud.switcherOpen
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 section: hud.currentSection
+            }
+
+            // The effective OMP command palette is conversation-scoped. A pick
+            // returns to chat with the command staged, never already running.
+            CommandsBrowser {
+                id: commandsBrowser
+                visible: hud.currentSection === "commands"
+                    && !hud.loginOpen && !hud.switcherOpen
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                onCommandPicked: invocation => {
+                    hud.currentSection = "chat";
+                    composer.stageCommand(invocation);
+                }
+            }
+
+            McpBrowser {
+                id: mcpBrowser
+                visible: hud.currentSection === "mcp"
+                    && !hud.loginOpen && !hud.switcherOpen
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+            }
+
+            ConnectBrowser {
+                id: connectBrowser
+                visible: hud.currentSection === "connect"
+                    && !hud.loginOpen && !hud.switcherOpen
+                Layout.fillWidth: true
+                Layout.fillHeight: true
             }
 
             // Model switcher: swaps in over the transcript body.
@@ -1090,10 +1136,10 @@ FloatingWindow {
 
             anchors.fill: parent
             open: hud.pendingDeleteSessionId !== ""
-            title: "Delete conversation?"
+            title: "Move conversation to Trash?"
             body: "“" + hud.pendingDeleteTitle + "” and its transcript will be "
                 + "moved to the trash. This cannot be undone from the HUD."
-            confirmText: "Delete"
+            confirmText: "Move to Trash"
             busy: Ghostd.deletingSessionId === hud.pendingDeleteSessionId
                 && hud.pendingDeleteSessionId !== ""
             error: hud.pendingDeleteSessionId !== "" ? Ghostd.sessionsError : ""

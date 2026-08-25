@@ -28,6 +28,12 @@
  * The runtime is injected (`createRuntime`) so tests drive a fake catalogue
  * without a real provider or a network call, exactly as `LoginManager` does.
  */
+import type { Api, Model } from "@oh-my-pi/pi-ai";
+import { resolveModelRoleValue } from "@oh-my-pi/pi-coding-agent/config/model-resolver";
+import {
+  buildBrowserItems,
+  sortModelItems,
+} from "@oh-my-pi/pi-coding-agent/modes/components/model-browser";
 import {
   CLAUDE_CODE_BINARY_ENV,
   CLAUDE_CODE_DEFAULT_MODEL_ID,
@@ -37,16 +43,24 @@ import {
   resolveClaudeCodeExecutable,
 } from "./claude-code.js";
 import { GhostError, ghostPaths, type GhostRegistry } from "./ghosts.js";
+import {
+  homeOperationsFor,
+  type HomeOperationCoordinator,
+} from "./home-operations.js";
 import { silentLogger, type Logger } from "./log.js";
 import {
   appendGhostModelFallback,
+  clearGhostModelRole,
   clearGhostModelFallbacks,
   GHOST_MODEL_ROLES,
   GHOST_TO_OMP_MODEL_ROLE,
   ghostAuthPath,
+  ghostModelSelector,
   ghostModelsPath,
   readGhostModels,
+  replaceGhostModelFallbacks,
   resolveChatModelRef,
+  resolveOmpChatModel,
   setChatModelRole,
   setGhostModelRole,
   type GhostModelRole,
@@ -61,28 +75,22 @@ import { createGhostOmpRuntime, type GhostOmpRuntime } from "./omp-runtime.js";
  */
 export interface ModelCatalogRuntime {
   /** The full catalogue, synchronous. Optionally scoped to one provider. */
-  getModels(providerId?: string): readonly CatalogModel[];
+  getModels(providerId?: string): readonly Model<Api>[];
   /** One model, or undefined when the pair is not in the catalogue. */
-  getModel(providerId: string, modelId: string): CatalogModel | undefined;
+  getModel(providerId: string, modelId: string): Model<Api> | undefined;
   /** Models a credentialed provider can serve now. Optionally scoped. */
-  getAvailable(providerId?: string): Promise<readonly CatalogModel[]>;
+  getAvailable(providerId?: string): Promise<readonly Model<Api>[]>;
   /** Whether the ghost has a working credential for this provider. */
   getProviderAuthStatus(providerId: string): { configured: boolean };
   /** Whether a configured provider is backed by OAuth (vs an api key). */
   isUsingOAuth(providerId: string): boolean;
+  /** Release the per-operation credential and catalogue handles. */
+  close(): void;
 }
 
-/** The subset of a pi `Model` this module reads. `Model<Api>` is assignable. */
-export interface CatalogModel {
-  provider: string;
-  id: string;
-  name?: string;
-  /** Provider-assigned display priority, when the catalogue exposes one. Lower is better. */
-  priority?: number | null;
-  input?: readonly ("text" | "image")[];
-  contextWindow?: number | null;
-  cost?: { input: number; output: number; cacheRead: number; cacheWrite: number };
-}
+/** OMP model fields exposed through Ghost's catalogue views. */
+export type CatalogModel = Pick<Model<Api>, "provider" | "id">
+  & Partial<Pick<Model<Api>, "name" | "priority" | "input" | "contextWindow" | "cost">>;
 
 /** How a model is shown as the current selection: no cost, no credential. */
 export interface ModelView {
@@ -100,8 +108,8 @@ export interface CurrentModel {
   current: ModelView | null;
   /**
    * How it was chosen. `role` — `roles.chat_model` is set and resolves.
-   * `default` — Ghost/OMP's fallback (a hand-declared provider's first model, then the
-   * first available model). `none` — nothing usable, `current` is null.
+   * `default` — OMP's provider-default-aware fallback. `none` — nothing usable,
+   * `current` is null.
    */
   source: CurrentModelSource;
 }
@@ -166,11 +174,17 @@ export interface ModelRouteModel extends ModelView {
   usable: boolean;
 }
 
+export type ModelRouteSource = "explicit" | "auto" | "unavailable";
+
 export interface ModelRouteView {
   role: GhostModelRole;
   ompRole: string;
   label: string;
+  /** Configured primary. Chat keeps its legacy implicit-provider primary here. */
   primary: ModelRouteModel | null;
+  /** The model the role currently resolves to, including OMP automatic roles. */
+  effective: ModelRouteModel | null;
+  source: ModelRouteSource;
   fallbacks: ModelRouteModel[];
 }
 
@@ -180,11 +194,28 @@ export interface ModelRoutingView {
 
 const MODEL_ROLE_LABELS: Readonly<Record<GhostModelRole, string>> = {
   chat_model: "Chat",
+  smol_model: "Fast",
+  slow_model: "Thinking",
   vision_model: "Vision",
-  smol_model: "Smol",
+  plan_model: "Architect",
+  designer_model: "Designer",
+  commit_model: "Commit",
+  tiny_model: "Tiny",
+  task_model: "Subtask",
+  advisor_model: "Advisor",
   general_purpose_model: "General purpose",
   research_model: "Research",
 };
+
+const LEGACY_COMPATIBILITY_ROLES: ReadonlySet<GhostModelRole> = new Set([
+  "general_purpose_model",
+  "research_model",
+]);
+
+export interface ModelRouteSelection {
+  provider: string;
+  id: string;
+}
 
 /**
  * The catalogue holds ~1,270 models. A listing is therefore always paginated:
@@ -196,6 +227,8 @@ export const MAX_MODELS_LIMIT = 500;
 
 export interface ModelCatalogOptions {
   registry: GhostRegistry;
+  /** Shared gate for path-bound mutations and whole-home moves. */
+  homeOperations?: HomeOperationCoordinator;
   logger?: Logger;
   /** OMP's offline posture; forbids catalogue network refresh when true. */
   offline?: boolean;
@@ -267,52 +300,22 @@ function clampLimit(limit: number | undefined): number {
 }
 
 /**
- * Extract the first model-family version from an id. This follows OMP's model
- * browser convention: dotted versions first (`gpt-5.6`), then short dashed
- * versions (`claude-opus-4-6`), then a single numeric generation (`gpt-4o`).
- * Kept in sync with packages/coding-agent/src/modes/components/model-browser.ts
- * at modern Oh My Pi commit 160ed439ac0df594347e7d7018b813a7ffdb5e81 (MIT).
+ * Keep registry provider order while delegating every within-provider ranking
+ * rule to OMP's model browser.
  */
-function modelVersion(id: string): number {
-  const dotted = id.match(/(?:^|[-_])(\d+\.\d+)/);
-  if (dotted?.[1]) return Number.parseFloat(dotted[1]);
+function sortCatalogModels(models: readonly Model<Api>[]): Model<Api>[] {
+  const byProvider = new Map<string, Model<Api>[]>();
+  for (const model of models) {
+    const group = byProvider.get(model.provider);
+    if (group) group.push(model);
+    else byProvider.set(model.provider, [model]);
+  }
 
-  const dashed = id.match(/(?:^|[-_])(\d{1,2})-(\d{1,2})(?=-|$)/);
-  if (dashed?.[1] && dashed[2]) return Number.parseFloat(`${dashed[1]}.${dashed[2]}`);
-
-  const single = id.match(/(?:^|[-_])(\d+)/);
-  if (single?.[1]) return Number.parseFloat(single[1]);
-  return 0;
-}
-
-/**
- * OMP-style display order: provider, provider priority, newest model version,
- * then alias/date recency. Id is the deterministic final tie-breaker required
- * for stable offset pagination.
- */
-function compareCatalogModels(a: CatalogModel, b: CatalogModel): number {
-  const provider = a.provider.localeCompare(b.provider);
-  if (provider !== 0) return provider;
-
-  const aPriority = a.priority ?? Number.MAX_SAFE_INTEGER;
-  const bPriority = b.priority ?? Number.MAX_SAFE_INTEGER;
-  if (aPriority !== bPriority) return aPriority - bPriority;
-
-  const version = modelVersion(b.id) - modelVersion(a.id);
-  if (version !== 0) return version;
-
-  const datePattern = /-(\d{8})$/;
-  const aLatest = a.id.endsWith("-latest");
-  const bLatest = b.id.endsWith("-latest");
-  const aDate = a.id.match(datePattern)?.[1] ?? "";
-  const bDate = b.id.match(datePattern)?.[1] ?? "";
-  const aHasRecency = aLatest || aDate !== "";
-  const bHasRecency = bLatest || bDate !== "";
-
-  if (aHasRecency !== bHasRecency) return aHasRecency ? -1 : 1;
-  if (aLatest !== bLatest) return aLatest ? -1 : 1;
-  if (aDate !== bDate) return bDate.localeCompare(aDate);
-  return a.id.localeCompare(b.id);
+  return [...byProvider.values()].flatMap((group) => {
+    const items = buildBrowserItems(group);
+    sortModelItems(items);
+    return items.map((item) => item.model);
+  });
 }
 
 function clampOffset(offset: number | undefined): number {
@@ -334,9 +337,11 @@ export class ModelCatalog {
     ModelCatalogOptions["claudeCodePlanStatus"]
   >;
   private readonly onModelRoutingChanged: ModelCatalogOptions["onModelRoutingChanged"];
+  private readonly homeOperations: HomeOperationCoordinator;
 
   constructor(options: ModelCatalogOptions) {
     this.registry = options.registry;
+    this.homeOperations = options.homeOperations ?? homeOperationsFor(options.registry);
     this.logger = options.logger ?? silentLogger;
     this.offline = options.offline ?? false;
     this.createRuntime = options.createRuntime ?? defaultCreateRuntime;
@@ -360,11 +365,11 @@ export class ModelCatalog {
     }
   }
 
-  private async routeModelView(
+  private routeModelView(
     runtime: ModelCatalogRuntime,
     binding: GhostModelRoleBinding,
     claudePlan: boolean,
-  ): Promise<ModelRouteModel> {
+  ): ModelRouteModel {
     if (binding.provider === CLAUDE_CODE_PROVIDER_ID) {
       return {
         ...modelView({
@@ -395,27 +400,105 @@ export class ModelCatalog {
     };
   }
 
-  /** All durable Ghost roles and their ordered OMP retry chains. */
-  async getModelRouting(ghostName: string): Promise<ModelRoutingView> {
-    const { runtime, agentDir } = await this.prepare(ghostName);
+  /** The effective chat/default selection without treating it as explicit. */
+  private automaticDefaultView(
+    file: GhostModelsFile | null,
+    available: readonly Model<Api>[],
+  ): ModelRouteModel | null {
+    const ref = resolveChatModelRef(file);
+    const model = resolveOmpChatModel(ref, available);
+    return model
+      ? { ...modelView(model), resolved: true, usable: true }
+      : null;
+  }
+
+  /**
+   * Resolve an unassigned role using OMP's own `@role` expansion and priority
+   * rules. `@task` is special in OMP's agent executor: it inherits the active
+   * session model, so mirror that functional behavior in the routing view.
+   */
+  private automaticRoleView(
+    file: GhostModelsFile | null,
+    role: GhostModelRole,
+    available: readonly Model<Api>[],
+  ): ModelRouteModel | null {
+    if (role === "chat_model" || role === "task_model") {
+      const effectiveDefault = this.automaticDefaultView(file, available);
+      // Claude Code is a separate harness, not an OMP model a task role can invoke.
+      if (role === "task_model" && effectiveDefault?.provider === CLAUDE_CODE_PROVIDER_ID) return null;
+      return effectiveDefault;
+    }
+
+    const ompRole = GHOST_TO_OMP_MODEL_ROLE[role];
+    const roleLookup = {
+      getModelRole: (candidate: string): string | undefined => {
+        const ghostRole = GHOST_MODEL_ROLES.find(
+          (known) => GHOST_TO_OMP_MODEL_ROLE[known] === candidate,
+        );
+        if (!ghostRole) return undefined;
+        const binding = ghostRole === "chat_model"
+          ? resolveChatModelRef(file)
+          : file?.roles?.[ghostRole] ?? null;
+        return binding ? ghostModelSelector(binding) : undefined;
+      },
+    };
+    const resolved = resolveModelRoleValue(
+      `@${ompRole}`,
+      [...available],
+      { roleLookup },
+    );
+    const model = resolved.model;
+    return model
+      ? { ...modelView(model), resolved: true, usable: true }
+      : null;
+  }
+
+  private async resolveModelRouting(
+    ghostName: string,
+    runtime: ModelCatalogRuntime,
+    agentDir: string,
+  ): Promise<ModelRoutingView> {
     const file = this.readModelsFile(agentDir, ghostName);
-    const claudePlan = await this.claudeCodePlanStatus();
+    // Availability is ghost-wide, not role-wide. Resolve it once alongside
+    // the independent harness check, then reuse it for every automatic role.
+    const [claudePlan, available] = await Promise.all([
+      this.claudeCodePlanStatus(),
+      runtime.getAvailable(),
+    ]);
     const roles: ModelRouteView[] = [];
     for (const role of GHOST_MODEL_ROLES) {
+      // General/Research predate OMP's complete built-in role set. Keep an
+      // existing binding editable without presenting empty custom roles to a
+      // new owner as if OMP itself required them.
+      if (LEGACY_COMPATIBILITY_ROLES.has(role)
+        && !file?.roles?.[role]
+        && !(file?.fallbacks?.[role]?.length)) {
+        continue;
+      }
       const explicit = file?.roles?.[role];
       const primary = role === "chat_model" ? resolveChatModelRef(file) : explicit ?? null;
+      const primaryView = primary ? this.routeModelView(runtime, primary, claudePlan) : null;
+      const effective = explicit
+        ? primaryView
+        : this.automaticRoleView(file, role, available);
       roles.push({
         role,
         ompRole: GHOST_TO_OMP_MODEL_ROLE[role],
         label: MODEL_ROLE_LABELS[role],
-        primary: primary ? await this.routeModelView(runtime, primary, claudePlan) : null,
-        fallbacks: await Promise.all(
-          (file?.fallbacks?.[role] ?? []).map((binding) =>
-            this.routeModelView(runtime, binding, claudePlan)),
-        ),
+        primary: primaryView,
+        effective,
+        source: explicit ? "explicit" : effective ? "auto" : "unavailable",
+        fallbacks: (file?.fallbacks?.[role] ?? []).map((binding) =>
+          this.routeModelView(runtime, binding, claudePlan)),
       });
     }
     return { roles };
+  }
+
+  /** All durable Ghost roles and their ordered OMP retry chains. */
+  async getModelRouting(ghostName: string): Promise<ModelRoutingView> {
+    return this.withRuntime(ghostName, ({ runtime, agentDir }) =>
+      this.resolveModelRouting(ghostName, runtime, agentDir));
   }
 
   private validateRoutingModel(
@@ -446,7 +529,7 @@ export class ModelCatalog {
     if (role === "vision_model" && !hasVision(model)) {
       throw new GhostError(
         "model_has_no_vision",
-        `${JSON.stringify(provider + "/" + id)} cannot be assigned to the vision role.`,
+        `${JSON.stringify(`${provider}/${id}`)} cannot be assigned to the vision role.`,
         400,
       );
     }
@@ -461,24 +544,25 @@ export class ModelCatalog {
     provider: string,
     id: string,
   ): Promise<ModelRoutingView> {
-    const { runtime, agentDir } = await this.prepare(ghostName);
-    const model = this.validateRoutingModel(runtime, role, target, provider, id);
-    if (target === "primary") {
-      setGhostModelRole(agentDir, role, model.provider, model.id);
-    } else {
-      const file = this.readModelsFile(agentDir, ghostName);
-      const primary = role === "chat_model" ? resolveChatModelRef(file) : file?.roles?.[role];
-      if (primary?.provider === model.provider && primary.modelId === model.id) {
-        throw new GhostError(
-          "duplicate_route_model",
-          "A role's primary model cannot also be its fallback.",
-          400,
-        );
+    return this.withMutationRuntime(ghostName, async ({ runtime, agentDir }) => {
+      const model = this.validateRoutingModel(runtime, role, target, provider, id);
+      if (target === "primary") {
+        setGhostModelRole(agentDir, role, model.provider, model.id);
+      } else {
+        const file = this.readModelsFile(agentDir, ghostName);
+        const primary = role === "chat_model" ? resolveChatModelRef(file) : file?.roles?.[role];
+        if (primary?.provider === model.provider && primary.modelId === model.id) {
+          throw new GhostError(
+            "duplicate_route_model",
+            "A role's primary model cannot also be its fallback.",
+            400,
+          );
+        }
+        appendGhostModelFallback(agentDir, role, model.provider, model.id);
       }
-      appendGhostModelFallback(agentDir, role, model.provider, model.id);
-    }
-    await this.notifyModelRoutingChanged(ghostName);
-    return this.getModelRouting(ghostName);
+      await this.notifyModelRoutingChanged(ghostName);
+      return this.resolveModelRouting(ghostName, runtime, agentDir);
+    });
   }
 
   /** Remove every retry fallback for one role. */
@@ -486,10 +570,93 @@ export class ModelCatalog {
     ghostName: string,
     role: GhostModelRole,
   ): Promise<ModelRoutingView> {
-    const { agentDir } = await this.prepare(ghostName);
-    clearGhostModelFallbacks(agentDir, role);
-    await this.notifyModelRoutingChanged(ghostName);
-    return this.getModelRouting(ghostName);
+    return this.withMutationRuntime(ghostName, async ({ runtime, agentDir }) => {
+      clearGhostModelFallbacks(agentDir, role);
+      await this.notifyModelRoutingChanged(ghostName);
+      return this.resolveModelRouting(ghostName, runtime, agentDir);
+    });
+  }
+
+  /** Clear one explicit role primary; automatic OMP resolution becomes visible immediately. */
+  async clearModelPrimary(
+    ghostName: string,
+    role: GhostModelRole,
+  ): Promise<ModelRoutingView> {
+    return this.withMutationRuntime(ghostName, async ({ runtime, agentDir }) => {
+      clearGhostModelRole(agentDir, role);
+      await this.notifyModelRoutingChanged(ghostName);
+      return this.resolveModelRouting(ghostName, runtime, agentDir);
+    });
+  }
+
+  /**
+   * Validate and replace a complete ordered retry chain in one models.json
+   * mutation. The same operation supports removal and reordering without a
+   * sequence of observable intermediate states.
+   */
+  async replaceModelFallbacks(
+    ghostName: string,
+    role: GhostModelRole,
+    selections: readonly ModelRouteSelection[],
+  ): Promise<ModelRoutingView> {
+    return this.withMutationRuntime(ghostName, async ({ runtime, agentDir }) => {
+      const file = this.readModelsFile(agentDir, ghostName);
+      const primary = role === "chat_model" ? resolveChatModelRef(file) : file?.roles?.[role];
+      const bindings: GhostModelRoleBinding[] = [];
+      const seen = new Set<string>();
+      for (const selection of selections) {
+        if (!selection || typeof selection.provider !== "string" || selection.provider === ""
+          || typeof selection.id !== "string" || selection.id === "") {
+          throw new GhostError(
+            "invalid_request",
+            "Every fallback must have non-empty provider and id strings.",
+            400,
+          );
+        }
+        const model = this.validateRoutingModel(
+          runtime,
+          role,
+          "fallback",
+          selection.provider,
+          selection.id,
+        );
+        const key = `${model.provider}\0${model.id}`;
+        if (seen.has(key)) {
+          throw new GhostError("duplicate_route_model", "A fallback chain cannot contain duplicates.", 400);
+        }
+        if (primary?.provider === model.provider && primary.modelId === model.id) {
+          throw new GhostError(
+            "duplicate_route_model",
+            "A role's primary model cannot also be its fallback.",
+            400,
+          );
+        }
+        seen.add(key);
+        bindings.push({ provider: model.provider, modelId: model.id });
+      }
+      replaceGhostModelFallbacks(agentDir, role, bindings);
+      await this.notifyModelRoutingChanged(ghostName);
+      return this.resolveModelRouting(ghostName, runtime, agentDir);
+    });
+  }
+
+  private async withRuntime<T>(
+    ghostName: string,
+    operation: (prepared: { runtime: ModelCatalogRuntime; agentDir: string }) => T | Promise<T>,
+  ): Promise<T> {
+    const prepared = await this.prepare(ghostName);
+    try {
+      return await operation(prepared);
+    } finally {
+      prepared.runtime.close();
+    }
+  }
+
+  private withMutationRuntime<T>(
+    ghostName: string,
+    operation: (prepared: { runtime: ModelCatalogRuntime; agentDir: string }) => T | Promise<T>,
+  ): Promise<T> {
+    return this.homeOperations.withLease(ghostName, () => this.withRuntime(ghostName, operation));
   }
 
   private async prepare(ghostName: string): Promise<{ runtime: ModelCatalogRuntime; agentDir: string }> {
@@ -519,13 +686,14 @@ export class ModelCatalog {
 
   /** Which model answers this ghost's turns, and why. Mirrors session-host. */
   async getCurrent(ghostName: string): Promise<CurrentModel> {
-    const { runtime, agentDir } = await this.prepare(ghostName);
-    return this.resolveCurrent(runtime, this.readModelsFile(agentDir, ghostName));
+    return this.withRuntime(ghostName, ({ runtime, agentDir }) =>
+      this.resolveCurrent(runtime, this.readModelsFile(agentDir, ghostName)));
   }
 
   private async resolveCurrent(
     runtime: ModelCatalogRuntime,
     file: GhostModelsFile | null,
+    availableModels?: readonly Model<Api>[],
   ): Promise<CurrentModel> {
     const role = file?.roles?.chat_model;
     if (role?.provider && role.modelId) {
@@ -541,18 +709,17 @@ export class ModelCatalog {
           source: "role",
         };
       }
-      const model = runtime.getModel(role.provider, role.modelId);
-      if (model) return { current: modelView(model), source: "role" };
-    }
-    // Ghost/OMP fallback: a hand-declared provider's first model (resolveChatModelRef),
-    // then the first model any credentialed provider can serve.
-    const ref = resolveChatModelRef(file);
-    if (ref) {
-      const model = runtime.getModel(ref.provider, ref.modelId);
+      const available = availableModels ?? await runtime.getAvailable();
+      const model = resolveOmpChatModel(role, available);
+      if (model?.provider === role.provider && model.id === role.modelId) {
+        return { current: modelView(model), source: "role" };
+      }
       if (model) return { current: modelView(model), source: "default" };
+      return { current: null, source: "none" };
     }
-    const available = await runtime.getAvailable();
-    if (available[0]) return { current: modelView(available[0]), source: "default" };
+    const available = availableModels ?? await runtime.getAvailable();
+    const model = resolveOmpChatModel(resolveChatModelRef(file), available);
+    if (model) return { current: modelView(model), source: "default" };
     return { current: null, source: "none" };
   }
 
@@ -562,26 +729,40 @@ export class ModelCatalog {
    * current selection is flagged, and `catalog` rows carry `usable`.
    */
   async listModels(ghostName: string, query: ListModelsQuery = {}): Promise<ListModelsResult> {
+    return this.withRuntime(ghostName, ({ runtime, agentDir }) =>
+      this.listModelsWithRuntime(ghostName, runtime, agentDir, query));
+  }
+
+  private async listModelsWithRuntime(
+    ghostName: string,
+    runtime: ModelCatalogRuntime,
+    agentDir: string,
+    query: ListModelsQuery,
+  ): Promise<ListModelsResult> {
     const scope: ModelScope = query.scope === "catalog" ? "catalog" : "available";
-    const { runtime, agentDir } = await this.prepare(ghostName);
-    const current = await this.resolveCurrent(runtime, this.readModelsFile(agentDir, ghostName));
+    const file = this.readModelsFile(agentDir, ghostName);
     const providerFilter = query.provider && query.provider !== "" ? query.provider : undefined;
     const needle = query.q?.trim().toLowerCase();
 
     const includesClaudeProvider = providerFilter === undefined
       || providerFilter === CLAUDE_CODE_PROVIDER_ID;
-    const claudePlan = includesClaudeProvider
-      ? await this.claudeCodePlanStatus()
-      : false;
+    const configured = file?.roles?.chat_model;
+    const needsAvailable = scope === "available"
+      || configured?.provider !== CLAUDE_CODE_PROVIDER_ID;
+    const [available, claudePlan] = await Promise.all([
+      needsAvailable
+        ? runtime.getAvailable()
+        : Promise.resolve([] as readonly Model<Api>[]),
+      includesClaudeProvider
+        ? this.claudeCodePlanStatus()
+        : Promise.resolve(false),
+    ]);
+    const current = await this.resolveCurrent(runtime, file, available);
     const piSource = scope === "catalog"
       ? runtime.getModels(providerFilter)
-      : await runtime.getAvailable(providerFilter);
-    const source = [
-      ...piSource,
-      ...(includesClaudeProvider && (scope === "catalog" || claudePlan)
-        ? [CLAUDE_CODE_MODEL]
-        : []),
-    ];
+      : providerFilter
+        ? available.filter((model) => model.provider === providerFilter)
+        : available;
 
     // Cache per-provider credential facts: getAvailable/getProviderAuthStatus
     // are not free, and a catalogue page revisits the same providers often.
@@ -606,13 +787,21 @@ export class ModelCatalog {
       return connectedVia.get(provider);
     };
 
-    const filtered = source.filter((model) => {
+    const filteredPi = piSource.filter((model) => {
       if (!needle) return true;
       return model.id.toLowerCase().includes(needle)
         || (model.name ?? "").toLowerCase().includes(needle);
     });
-    // Rank before slicing so every page shares the same semantic model order.
-    const sorted = [...filtered].sort(compareCatalogModels);
+    const sorted: CatalogModel[] = sortCatalogModels(filteredPi);
+    if (
+      includesClaudeProvider
+      && (scope === "catalog" || claudePlan)
+      && (!needle
+        || CLAUDE_CODE_MODEL.id.toLowerCase().includes(needle)
+        || (CLAUDE_CODE_MODEL.name ?? "").toLowerCase().includes(needle))
+    ) {
+      sorted.push(CLAUDE_CODE_MODEL);
+    }
 
     const total = sorted.length;
     const limit = clampLimit(query.limit);
@@ -661,7 +850,17 @@ export class ModelCatalog {
    * shell can prompt a login rather than the switch silently failing.
    */
   async setChatModel(ghostName: string, provider: string, id: string): Promise<SetModelResult> {
-    const { runtime, agentDir } = await this.prepare(ghostName);
+    return this.withMutationRuntime(ghostName, ({ runtime, agentDir }) =>
+      this.setChatModelWithRuntime(ghostName, runtime, agentDir, provider, id));
+  }
+
+  private async setChatModelWithRuntime(
+    ghostName: string,
+    runtime: ModelCatalogRuntime,
+    agentDir: string,
+    provider: string,
+    id: string,
+  ): Promise<SetModelResult> {
     if (provider === CLAUDE_CODE_PROVIDER_ID) {
       if (id !== CLAUDE_CODE_DEFAULT_MODEL_ID) {
         throw new GhostError(

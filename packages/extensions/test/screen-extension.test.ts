@@ -226,7 +226,11 @@ describe("ghost_screen tool", () => {
     helper: FakeHelper = captureHelper(),
   ) {
     const ctx = makeContext({ cwd: fixture.dir, model: chatModel });
-    const harness = await loadExtensionWith(createScreenExtension({ helper }), ctx);
+    const capabilities = { vision: chatModel.input?.includes("image") ?? false };
+    const harness = await loadExtensionWith(
+      createScreenExtension({ helper, capabilities }),
+      ctx,
+    );
     return { harness, helper };
   }
 

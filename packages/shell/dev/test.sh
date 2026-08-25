@@ -14,7 +14,10 @@ if [[ -z ${QMLTESTRUNNER:-} ]]; then
   exit 1
 fi
 
-QT_QPA_PLATFORM=offscreen "$QMLTESTRUNNER" -input test -import qml -o -,txt
+# Loading qs.services materializes the Ghostd singleton, whose startup refresh
+# is real I/O. Tests must never probe the owner's production daemon on 7717.
+GHOSTD_PORT="${GHOSTD_PORT:-17717}" QT_QPA_PLATFORM=offscreen \
+  "$QMLTESTRUNNER" -input test -import test/imports -import qml -import .qmllint -o -,txt
 
 mapfile -t xdg_open_owners < <(rg -l '"xdg-open"' qml | sort)
 if [[ ${#xdg_open_owners[@]} -ne 1 || ${xdg_open_owners[0]} != qml/services/ExternalLinks.qml ]]; then

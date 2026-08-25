@@ -10,18 +10,22 @@
  * ghost home (`.sessions/`, `.pi/`) so the owner's default view of their
  * own ghost stays the plain files they wrote.
  */
+import { randomUUID } from "node:crypto";
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   readdirSync,
   readFileSync,
   renameSync,
+  rmSync,
   statSync,
-  unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { homedir } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
+import { trashPath } from "./trash.js";
+
+export { homeTrashDir } from "./trash.js";
 
 /** One discovered ghost, as served by `GET /api/ghosts`. */
 export interface Ghost {
@@ -102,41 +106,6 @@ function isFile(path: string): boolean {
  */
 export function isGhostHome(dir: string): boolean {
   return isDirectory(dir) && isFile(join(dir, GHOST_CHARACTER_FILENAME));
-}
-
-const pad2 = (value: number) => String(value).padStart(2, "0");
-
-/** `20260824-153000` — local time, sortable, and safe in a directory name. */
-function trashStamp(now: Date): string {
-  return `${now.getFullYear()}${pad2(now.getMonth() + 1)}${pad2(now.getDate())}`
-    + `-${pad2(now.getHours())}${pad2(now.getMinutes())}${pad2(now.getSeconds())}`;
-}
-
-/**
- * The freedesktop "home trash": `$XDG_DATA_HOME/Trash`, defaulting to
- * `~/.local/share/Trash`. Read at call time, not at import, so a test (or a
- * user changing their XDG layout) is honoured by the next deletion.
- */
-export function homeTrashDir(env: NodeJS.ProcessEnv = process.env, home: string = homedir()): string {
-  const xdg = env.XDG_DATA_HOME?.trim();
-  const base = xdg && isAbsolute(xdg) ? xdg : join(home, ".local", "share");
-  return join(base, "Trash");
-}
-
-/**
- * `.trashinfo` `Path=` is a URI path: percent-encode everything a URI path may
- * not carry raw, keep `/` as the separator. `encodeURIComponent` gives UTF-8
- * percent-encoding for non-ASCII and control characters; putting the slashes
- * back is what makes it a path rather than one escaped segment.
- */
-function encodeTrashInfoPath(path: string): string {
-  return encodeURIComponent(path).replaceAll("%2F", "/");
-}
-
-/** `2026-08-24T15:30:00` — local time with no zone suffix, per the spec. */
-function deletionDate(now: Date): string {
-  return `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`
-    + `T${pad2(now.getHours())}:${pad2(now.getMinutes())}:${pad2(now.getSeconds())}`;
 }
 
 function createdAtOf(dir: string): string {
@@ -223,6 +192,84 @@ export function isSeededCharacter(name: string, text: string | null | undefined)
   return text === SEEDED_CHARACTER(name);
 }
 
+/**
+ * Follow a rename into the persona file's frontmatter `title`, but only when
+ * that title is the old name.
+ *
+ * `character.md` is the ghost's own words. A title that says something other
+ * than the directory name is one of them — the owner wrote it, and a rename is
+ * not a licence to rewrite it. A title that IS the old name is the seed's, and
+ * leaving it behind would introduce the ghost by a name nothing else uses.
+ * Only that one line is rewritten; every other byte of the file is preserved.
+ */
+function retitledCharacter(text: string, previous: string, next: string): string | null {
+  const firstBreak = text.indexOf("\n");
+  const firstLine = text.slice(0, firstBreak < 0 ? text.length : firstBreak);
+  if (firstLine.trim() !== "---" || firstBreak < 0) return null;
+
+  let start = firstBreak + 1;
+  while (start <= text.length) {
+    const nextBreak = text.indexOf("\n", start);
+    const end = nextBreak < 0 ? text.length : nextBreak;
+    const rawLine = text.slice(start, end);
+    const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+    const fence = line.trim();
+    if (fence === "---" || fence === "...") return null;
+    if (line.startsWith("title:")) {
+      if (line.slice("title:".length).trim() !== previous) return null;
+      const carriageReturn = rawLine.endsWith("\r") ? "\r" : "";
+      return `${text.slice(0, start)}title: ${next}${carriageReturn}${text.slice(end)}`;
+    }
+    if (nextBreak < 0) return null;
+    start = nextBreak + 1;
+  }
+  return null;
+}
+
+/**
+ * Stage a complete replacement beside `character.md`, without changing the
+ * live file. The staging path travels with the home rename, so publishing it
+ * afterwards is another same-filesystem rename and cannot expose a partial
+ * character file.
+ */
+function prepareCharacterRetitle(dir: string, previous: string, next: string): string | null {
+  const file = ghostPaths(dir).characterFile;
+  let text: string;
+  try {
+    text = readFileSync(file, "utf8");
+  } catch {
+    // A ghost home with no readable persona is not a rename failure; the
+    // directory moved, which is what the rename was.
+    return null;
+  }
+  const replacement = retitledCharacter(text, previous, next);
+  if (replacement === null) return null;
+
+  const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
+  const mode = statSync(file).mode & 0o777;
+  try {
+    writeFileSync(temporary, replacement, {
+      encoding: "utf8",
+      flag: "wx",
+      mode,
+    });
+    // Creation mode is filtered through umask; the atomic replacement should
+    // not quietly change the permissions of an owner-managed character file.
+    chmodSync(temporary, mode);
+  } catch (error) {
+    try {
+      rmSync(temporary, { force: true });
+    } catch (cleanupError) {
+      throw new AggregateError(
+        [error, cleanupError],
+        `${file} could not be prepared for rename and its temporary file could not be removed.`,
+      );
+    }
+    throw error;
+  }
+  return temporary;
+}
+
 export class GhostRegistry {
   readonly root: string;
 
@@ -302,6 +349,74 @@ export class GhostRegistry {
   }
 
   /**
+   * Rename `<root>/<name>/` to `<root>/<nextName>/` — which renames the ghost,
+   * because the directory name is the name. One same-filesystem rename carries
+   * the persona, memory, docs, conversations, pins, and credentials across
+   * together, and leaves every conversation id (a transcript filename inside
+   * the home) valid.
+   *
+   * The target must not exist at all, not merely "not be a ghost": renaming
+   * onto an occupied path would either fail deep in `rename` or bury whatever
+   * the owner had put there.
+   */
+  rename(name: string, nextName: string): Ghost {
+    const ghost = this.get(name);
+    assertValidGhostName(nextName);
+    const target = join(this.root, nextName);
+    if (existsSync(target)) {
+      throw new GhostError(
+        "already_exists",
+        `${JSON.stringify(nextName)} is already taken in the ghosts root.`,
+        409,
+      );
+    }
+    const preparedCharacter = prepareCharacterRetitle(ghost.dir, name, nextName);
+    try {
+      renameSync(ghost.dir, target);
+    } catch (error) {
+      if (preparedCharacter !== null) {
+        try {
+          rmSync(preparedCharacter, { force: true });
+        } catch (cleanupError) {
+          throw new AggregateError(
+            [error, cleanupError],
+            `Ghost ${JSON.stringify(name)} was not moved, but its staged character file could not be removed.`,
+          );
+        }
+      }
+      throw error;
+    }
+    if (preparedCharacter !== null) {
+      const preparedName = basename(preparedCharacter);
+      const movedTemporary = join(target, preparedName);
+      try {
+        renameSync(movedTemporary, ghostPaths(target).characterFile);
+      } catch (error) {
+        try {
+          renameSync(target, ghost.dir);
+        } catch (rollbackError) {
+          throw new AggregateError(
+            [error, rollbackError],
+            `Ghost ${JSON.stringify(name)} moved to ${JSON.stringify(nextName)}, `
+              + "but its character title could not be published and the home move could not be rolled back.",
+          );
+        }
+        try {
+          rmSync(join(ghost.dir, preparedName), { force: true });
+        } catch (cleanupError) {
+          throw new AggregateError(
+            [error, cleanupError],
+            `Ghost ${JSON.stringify(name)} was moved back after its character title could not be published, `
+              + "but the staged character file could not be removed.",
+          );
+        }
+        throw error;
+      }
+    }
+    return { name: nextName, dir: target, createdAt: createdAtOf(target) };
+  }
+
+  /**
    * Move `<root>/<name>/` into the freedesktop home trash and return where it
    * went — `<trash>/files/<name>`, with a `<trash>/info/<name>.trashinfo`
    * recording where it came from. A deleted ghost is therefore an ordinary
@@ -317,69 +432,10 @@ export class GhostRegistry {
    */
   trash(name: string, now: Date = new Date()): { trash: string } {
     const ghost = this.get(name);
-    const trashDir = homeTrashDir();
-    const filesDir = join(trashDir, "files");
-    const infoDir = join(trashDir, "info");
-    // 0700: a trash holds whatever the deleted files held.
-    for (const dir of [trashDir, filesDir, infoDir]) mkdirSync(dir, { recursive: true, mode: 0o700 });
-
-    const info = `[Trash Info]\nPath=${encodeTrashInfoPath(ghost.dir)}\n`
-      + `DeletionDate=${deletionDate(now)}\n`;
-    // Creating the .trashinfo with "wx" IS the claim on the trash name: it is
-    // the one atomic step, so two deletions racing for `<name>` cannot both
-    // win. `<name>.2`, `<name>.3`, … on collision, gio's convention.
-    let trashName = name;
-    let infoPath = join(infoDir, `${trashName}.trashinfo`);
-    let target = join(filesDir, trashName);
-    for (let suffix = 2; ; suffix += 1) {
-      try {
-        writeFileSync(infoPath, info, { encoding: "utf8", flag: "wx", mode: 0o600 });
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-        trashName = `${name}.${suffix}`;
-        infoPath = join(infoDir, `${trashName}.trashinfo`);
-        target = join(filesDir, trashName);
-        continue;
-      }
-      // An orphaned `files/` entry with no `.trashinfo` is somebody else's
-      // mess, but renaming onto it would still lose their data. Step past it.
-      if (!existsSync(target)) break;
-      unlinkSync(infoPath);
-      trashName = `${name}.${suffix}`;
-      infoPath = join(infoDir, `${trashName}.trashinfo`);
-      target = join(filesDir, trashName);
-    }
-
-    try {
-      renameSync(ghost.dir, target);
-    } catch (error) {
-      // Never leave a .trashinfo describing a file that is not in the trash.
-      try {
-        unlinkSync(infoPath);
-      } catch {
-        // Nothing to do about it; the rename's error is the one that matters.
-      }
-      if ((error as NodeJS.ErrnoException).code === "EXDEV") return this.trashInRoot(ghost, now);
-      throw error;
-    }
-    return { trash: target };
-  }
-
-  /**
-   * The `EXDEV` fallback: `<root>/.trash/<name>-<stamp>/`, beside the ghosts
-   * rather than in the home trash. Invisible to trash tools, but still a move,
-   * and `list()` skips dot-directories so the ghost is gone from the API and a
-   * plain `mv` brings it back.
-   */
-  private trashInRoot(ghost: Ghost, now: Date): { trash: string } {
-    const trashRoot = join(this.root, GHOST_TRASH_DIRNAME);
-    mkdirSync(trashRoot, { recursive: true });
-    const base = join(trashRoot, `${ghost.name}-${trashStamp(now)}`);
-    let target = base;
-    // The stamp has second resolution; a name deleted, re-created, and deleted
-    // again inside one second must not overwrite its own earlier copy.
-    for (let suffix = 2; existsSync(target); suffix += 1) target = `${base}-${suffix}`;
-    renameSync(ghost.dir, target);
-    return { trash: target };
+    const trashed = trashPath(ghost.dir, {
+      now,
+      fallbackRoot: join(this.root, GHOST_TRASH_DIRNAME),
+    });
+    return { trash: trashed.trash };
   }
 }

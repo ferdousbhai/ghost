@@ -42,13 +42,16 @@
  * through every callback path without touching a real provider.
  */
 import { randomUUID } from "node:crypto";
-import { GhostError, ghostPaths, type GhostRegistry } from "./ghosts.js";
+import { statSync } from "node:fs";
+import type { Api, Model } from "@oh-my-pi/pi-ai";
+import { GhostError, ghostPaths, type Ghost, type GhostRegistry } from "./ghosts.js";
 import { silentLogger, type Logger } from "./log.js";
 import {
   ghostAuthPath,
   ghostModelsPath,
   readGhostModels,
   resolveChatModelRef,
+  resolveOmpChatModel,
   setChatModelRoleIfUnset,
 } from "./models.js";
 import { createGhostOmpRuntime } from "./omp-runtime.js";
@@ -107,9 +110,11 @@ export interface LoginRuntime {
   }[];
   getProviderAuthStatus(providerId: string): { configured: boolean };
   isUsingOAuth(providerId: string): boolean;
-  getModels(providerId?: string): readonly { id: string }[];
-  getAvailable(providerId?: string): Promise<readonly { id: string }[]>;
+  getModels(providerId?: string): readonly Model<Api>[];
+  getAvailable(providerId?: string): Promise<readonly Model<Api>[]>;
   login(providerId: string, type: AuthType, interaction: AuthInteraction): Promise<Credential>;
+  /** Release OMP's open SQLite/model-catalog handles once the flow settles. */
+  close?(): void;
 }
 
 export type LoginStatus =
@@ -178,13 +183,47 @@ interface PendingPrompt {
 
 interface LoginSession {
   ghostName: string;
+  /** Stable across the same-filesystem directory rename that changes a ghost's name. */
+  ghostHome: GhostHomeIdentity;
   view: LoginView;
   controller: AbortController;
   runtime: LoginRuntime;
+  runtimeClosed: boolean;
   pending: PendingPrompt | null;
   settledAt: number | null;
   /** TTL timer for an unfinished login; retention timer once settled. */
   timer: ReturnType<typeof setTimeout> | null;
+}
+
+interface GhostHomeIdentity {
+  device: bigint;
+  inode: bigint;
+}
+
+interface StartingLogin {
+  ghostName: string;
+  ghostHome: GhostHomeIdentity;
+  deleted: boolean;
+  /** Settles after runtime construction has either become a LoginSession or failed. */
+  finished: Promise<void>;
+  finish: () => void;
+}
+
+function ghostHomeIdentity(dir: string): GhostHomeIdentity {
+  const stats = statSync(dir, { bigint: true });
+  return { device: stats.dev, inode: stats.ino };
+}
+
+function sameGhostHome(left: GhostHomeIdentity, right: GhostHomeIdentity): boolean {
+  return left.device === right.device && left.inode === right.inode;
+}
+
+function startingLogin(ghostName: string, ghostHome: GhostHomeIdentity): StartingLogin {
+  let finish!: () => void;
+  const finished = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  return { ghostName, ghostHome, deleted: false, finished, finish };
 }
 
 export interface LoginManagerOptions {
@@ -242,11 +281,11 @@ async function defaultCreateRuntime(input: {
 }
 
 /**
- * Bind `roles.chat_model` if the ghost has none, choosing the provider's first
- * available (then first known) model. Provider-agnostic; returns null and
- * writes nothing when a model is already bound or none can be resolved
- * (offline, empty catalog). Shared by the HTTP login and the `ghostd login`
- * CLI so both leave a freshly-signed-in ghost ready to chat.
+ * Bind `roles.chat_model` if the ghost has none, using OMP's provider-default
+ * rule over the provider's available (then known) models. Provider-agnostic;
+ * returns null and writes nothing when a model is already bound or none can be
+ * resolved (offline, empty catalog). Shared by the HTTP login and the `ghostd
+ * login` CLI so both leave a freshly-signed-in ghost ready to chat.
  */
 export async function bindDefaultChatModelIfUnset(
   agentDir: string,
@@ -256,16 +295,17 @@ export async function bindDefaultChatModelIfUnset(
   const existing = readGhostModels(agentDir);
   if (resolveChatModelRef(existing)) return null;
 
-  let modelId: string | undefined;
+  let candidates: readonly Model<Api>[];
   try {
-    modelId = (await runtime.getAvailable(providerId))[0]?.id;
+    candidates = await runtime.getAvailable(providerId);
   } catch {
-    modelId = undefined;
+    candidates = [];
   }
-  if (!modelId) modelId = runtime.getModels(providerId)[0]?.id;
-  if (!modelId) return null;
+  if (candidates.length === 0) candidates = runtime.getModels(providerId);
+  const model = resolveOmpChatModel(null, candidates);
+  if (!model) return null;
 
-  return setChatModelRoleIfUnset(agentDir, providerId, modelId);
+  return setChatModelRoleIfUnset(agentDir, model.provider, model.id);
 }
 
 export class LoginManager {
@@ -277,6 +317,10 @@ export class LoginManager {
   private readonly createRuntime: NonNullable<LoginManagerOptions["createRuntime"]>;
   private readonly now: () => number;
   private readonly sessions = new Map<string, LoginSession>();
+  /** Runtime construction has started, but no pollable login session exists yet. */
+  private readonly starting = new Set<StartingLogin>();
+  /** Whole-home moves admitted by the server but not yet completed or cancelled. */
+  private readonly moving = new Set<GhostHomeIdentity>();
   private disposed = false;
 
   constructor(options: LoginManagerOptions) {
@@ -302,8 +346,12 @@ export class LoginManager {
   async listProviders(ghostName: string): Promise<ProviderInfo[]> {
     const ghost = this.registry.get(ghostName);
     const runtime = await this.buildRuntime(ghost.dir);
-    const infos = this.providersFrom(runtime);
-    return infos.length > 0 ? infos : [...FALLBACK_PROVIDERS];
+    try {
+      const infos = this.providersFrom(runtime);
+      return infos.length > 0 ? infos : [...FALLBACK_PROVIDERS];
+    } finally {
+      runtime.close?.();
+    }
   }
 
   private providersFrom(runtime: LoginRuntime): ProviderInfo[] {
@@ -358,74 +406,102 @@ export class LoginManager {
     if (!AUTH_TYPES.includes(authType)) {
       throw new GhostError("invalid_request", '"authType" must be "oauth" or "api_key".', 400);
     }
-    const runtime = await this.buildRuntime(ghost.dir);
-    const offered = this.providersFrom(runtime).find((p) => p.id === providerId);
-    if (!offered) {
-      throw new GhostError("unknown_provider", `No provider ${JSON.stringify(providerId)} to log into.`, 400);
-    }
-    if (!offered.authTypes.includes(authType)) {
+    const ghostHome = ghostHomeIdentity(ghost.dir);
+    if ([...this.moving].some((movingHome) => sameGhostHome(movingHome, ghostHome))) {
       throw new GhostError(
-        "unsupported_auth_type",
-        `Provider ${JSON.stringify(providerId)} does not offer ${authType} login.`,
-        400,
+        "ghost_busy",
+        "Wait for this ghost's home move to finish before starting a login.",
+        409,
       );
     }
+    const starting = startingLogin(ghost.name, ghostHome);
+    this.starting.add(starting);
+    let runtime: LoginRuntime | undefined;
+    let session: LoginSession | undefined;
+    try {
+      runtime = await this.buildRuntime(ghost.dir);
+      if (this.disposed) {
+        throw new GhostError("shutting_down", "The daemon is shutting down.", 503);
+      }
+      if (starting.deleted) {
+        throw new GhostError("not_found", "This ghost was deleted while login was starting.", 404);
+      }
+      const offered = this.providersFrom(runtime).find((p) => p.id === providerId);
+      if (!offered) {
+        throw new GhostError(
+          "unknown_provider",
+          `No provider ${JSON.stringify(providerId)} to log into.`,
+          400,
+        );
+      }
+      if (!offered.authTypes.includes(authType)) {
+        throw new GhostError(
+          "unsupported_auth_type",
+          `Provider ${JSON.stringify(providerId)} does not offer ${authType} login.`,
+          400,
+        );
+      }
 
-    const loginId = randomUUID();
-    const controller = new AbortController();
-    const session: LoginSession = {
-      ghostName: ghost.name,
-      view: { loginId, providerId, authType, status: "starting" },
-      controller,
-      runtime,
-      pending: null,
-      settledAt: null,
-      timer: null,
-    };
-    session.timer = setTimeout(() => this.abandon(loginId), this.loginTtlMs);
-    // A daemon can restart between a session's turns; timers must not keep it
-    // alive.
-    session.timer.unref?.();
-    this.sessions.set(loginId, session);
+      const loginId = randomUUID();
+      const controller = new AbortController();
+      const ownedSession: LoginSession = {
+        ghostName: starting.ghostName,
+        ghostHome: starting.ghostHome,
+        view: { loginId, providerId, authType, status: "starting" },
+        controller,
+        runtime,
+        runtimeClosed: false,
+        pending: null,
+        settledAt: null,
+        timer: null,
+      };
+      session = ownedSession;
+      ownedSession.timer = setTimeout(() => this.abandon(loginId), this.loginTtlMs);
+      // A daemon can restart between a session's turns; timers must not keep it
+      // alive.
+      ownedSession.timer.unref?.();
+      this.sessions.set(loginId, ownedSession);
 
-    const interaction: AuthInteraction = {
-      signal: controller.signal,
-      notify: (event) => this.onNotify(session, event),
-      prompt: (prompt) => this.onPrompt(session, prompt),
-    };
-    // Reject the pending prompt if the whole flow is aborted (timeout/dispose).
-    controller.signal.addEventListener(
-      "abort",
-      () => session.pending?.reject(new Error(CANCELLED_MESSAGE)),
-      { once: true },
-    );
+      const interaction: AuthInteraction = {
+        signal: controller.signal,
+        notify: (event) => this.onNotify(ownedSession, event),
+        prompt: (prompt) => this.onPrompt(ownedSession, prompt),
+      };
+      // Reject the pending prompt if the whole flow is aborted (timeout/dispose).
+      controller.signal.addEventListener(
+        "abort",
+        () => ownedSession.pending?.reject(new Error(CANCELLED_MESSAGE)),
+        { once: true },
+      );
 
-    void runtime
-      .login(providerId, authType, interaction)
-      .then((credential) => this.onSuccess(session, credential))
-      .catch((error: unknown) => this.onFailure(session, error));
+      void runtime
+        .login(providerId, authType, interaction)
+        .then((credential) => this.onSuccess(ownedSession, credential))
+        .catch((error: unknown) => this.onFailure(ownedSession, error));
 
-    this.logger.info("ghost login started", { ghost: ghost.name, provider: providerId, authType });
-    return this.publicView(session);
+      this.logger.info("ghost login started", {
+        ghost: ownedSession.ghostName,
+        provider: providerId,
+        authType,
+      });
+      return this.publicView(ownedSession);
+    } finally {
+      this.starting.delete(starting);
+      // Once a LoginSession exists it owns the runtime through settlement.
+      if (!session) runtime?.close?.();
+      starting.finish();
+    }
   }
 
   /** The current step to show, or a structured 404 for an unknown login. */
   view(ghostName: string, loginId: string): LoginView {
-    this.registry.get(ghostName);
-    const session = this.sessions.get(loginId);
-    if (!session || session.ghostName !== ghostName) {
-      throw new GhostError("login_not_found", `No login ${JSON.stringify(loginId)} for this ghost.`, 404);
-    }
+    const session = this.sessionForGhost(ghostName, loginId);
     return this.publicView(session);
   }
 
   /** Satisfy an awaiting prompt with a pasted code, api key, or selected id. */
   submitInput(ghostName: string, loginId: string, value: string): LoginView {
-    this.registry.get(ghostName);
-    const session = this.sessions.get(loginId);
-    if (!session || session.ghostName !== ghostName) {
-      throw new GhostError("login_not_found", `No login ${JSON.stringify(loginId)} for this ghost.`, 404);
-    }
+    const session = this.sessionForGhost(ghostName, loginId);
     if (session.view.status === "succeeded" || session.view.status === "failed") {
       throw new GhostError("login_settled", `This login has already ${session.view.status}.`, 409);
     }
@@ -545,11 +621,25 @@ export class LoginManager {
   }
 
   private async onSuccess(session: LoginSession, _credential: Credential): Promise<void> {
-    if (this.isSettled(session)) return;
+    if (this.sessions.get(session.view.loginId) !== session || this.isSettled(session)) return;
+    const ghost = this.currentGhost(session);
+    if (!ghost) {
+      session.pending = null;
+      session.view.prompt = undefined;
+      session.view.status = "failed";
+      session.view.error = "The ghost was deleted before login finished.";
+      this.settle(session);
+      this.logger.warn("ghost login target was deleted", {
+        ghost: session.ghostName,
+        provider: session.view.providerId,
+      });
+      return;
+    }
+    session.ghostName = ghost.name;
     session.pending = null;
     session.view.prompt = undefined;
-    session.view.status = "succeeded";
-    session.view.message = "Signed in.";
+    session.view.status = "working";
+    session.view.message = "Finishing sign-in.";
     // Best-effort: give a freshly-signed-in ghost a chat model so the owner
     // lands ready to talk. Never fatal to the login itself.
     try {
@@ -561,6 +651,11 @@ export class LoginManager {
         error: (error as Error).message,
       });
     }
+    // Deletion/disposal can cancel the flow while the best-effort binding is
+    // awaiting its model lookup. Do not resurrect the discarded session.
+    if (this.sessions.get(session.view.loginId) !== session) return;
+    session.view.status = "succeeded";
+    session.view.message = "Signed in.";
     this.settle(session);
     this.logger.info("ghost login succeeded", {
       ghost: session.ghostName,
@@ -571,6 +666,7 @@ export class LoginManager {
   }
 
   private onFailure(session: LoginSession, error: unknown): void {
+    if (this.sessions.get(session.view.loginId) !== session) return;
     if (this.isSettled(session)) {
       // A late rejection after a timeout already settled the session.
       this.settle(session);
@@ -593,8 +689,9 @@ export class LoginManager {
   }
 
   private async bindDefaultModel(session: LoginSession): Promise<void> {
-    const ghost = this.registry.find(session.ghostName);
+    const ghost = this.currentGhost(session);
     if (!ghost) return;
+    session.ghostName = ghost.name;
     const bound = await bindDefaultChatModelIfUnset(
       ghostPaths(ghost.dir).agentDir,
       session.runtime,
@@ -612,6 +709,7 @@ export class LoginManager {
   private settle(session: LoginSession): void {
     session.settledAt ??= this.now();
     if (session.timer) clearTimeout(session.timer);
+    this.closeRuntime(session);
     // Keep the terminal state readable for one more poll cycle, then drop it.
     session.timer = setTimeout(() => this.sessions.delete(session.view.loginId), this.retainSettledMs);
     session.timer.unref?.();
@@ -654,14 +752,146 @@ export class LoginManager {
     return this.sessions.size;
   }
 
+  /** How many whole-home moves are currently gated. Diagnostics/tests. */
+  get moveReservationCount(): number {
+    return this.moving.size;
+  }
+
+  /**
+   * Stop new login starts for one filesystem identity and wait until every
+   * runtime construction already admitted for it has settled. The caller must
+   * hold the returned reservation through `renameGhost`/`forgetGhost`, then
+   * release it in a `finally` block if the home move fails.
+   */
+  async reserveGhostMove(ghostName: string): Promise<() => void> {
+    const ghost = this.registry.get(ghostName);
+    const ghostHome = ghostHomeIdentity(ghost.dir);
+    if ([...this.moving].some((movingHome) => sameGhostHome(movingHome, ghostHome))) {
+      throw new GhostError("ghost_busy", "Another whole-home move is already in progress.", 409);
+    }
+
+    this.moving.add(ghostHome);
+    try {
+      const admitted = [...this.starting]
+        .filter((candidate) => sameGhostHome(candidate.ghostHome, ghostHome))
+        .map((candidate) => candidate.finished);
+      if (admitted.length > 0) await Promise.all(admitted);
+    } catch (error) {
+      this.moving.delete(ghostHome);
+      throw error;
+    }
+    return () => {
+      this.moving.delete(ghostHome);
+    };
+  }
+
+  /**
+   * Follow a successful home rename in diagnostics and deletion bookkeeping.
+   * Filesystem identity is still authoritative: a newly-created ghost reusing
+   * the old spelling must never inherit the earlier home's login.
+   */
+  renameGhost(renamed: Ghost): void {
+    let renamedHome: GhostHomeIdentity;
+    try {
+      renamedHome = ghostHomeIdentity(renamed.dir);
+    } catch {
+      // The identity-based route lookup below is still authoritative. A
+      // best-effort lifecycle notification must not turn a completed home move
+      // into a failed HTTP response.
+      return;
+    }
+    for (const starting of this.starting) {
+      if (sameGhostHome(starting.ghostHome, renamedHome)) starting.ghostName = renamed.name;
+    }
+    for (const session of this.sessions.values()) {
+      if (sameGhostHome(session.ghostHome, renamedHome)) session.ghostName = renamed.name;
+    }
+  }
+
+  /** Abort and discard every login belonging to a home that just left the registry. */
+  forgetGhost(ghostName: string): void {
+    for (const starting of this.starting) {
+      if (starting.ghostName === ghostName) starting.deleted = true;
+    }
+    for (const session of [...this.sessions.values()]) {
+      if (session.ghostName !== ghostName) continue;
+      session.view.status = "failed";
+      session.view.error = "The ghost was deleted during login.";
+      session.view.prompt = undefined;
+      session.pending?.reject(new Error(CANCELLED_MESSAGE));
+      session.pending = null;
+      if (!session.controller.signal.aborted) session.controller.abort();
+      if (session.timer) clearTimeout(session.timer);
+      this.sessions.delete(session.view.loginId);
+      this.closeRuntime(session);
+    }
+  }
+
   /** Abort every in-flight login and drop all state. Idempotent. */
   dispose(): void {
     this.disposed = true;
+    for (const starting of this.starting) starting.deleted = true;
     for (const session of this.sessions.values()) {
       if (session.timer) clearTimeout(session.timer);
       if (!session.controller.signal.aborted) session.controller.abort();
+      this.closeRuntime(session);
     }
     this.sessions.clear();
+  }
+
+  private sessionForGhost(ghostName: string, loginId: string): LoginSession {
+    const ghost = this.registry.get(ghostName);
+    const session = this.sessions.get(loginId);
+    let matches = false;
+    if (session) {
+      try {
+        matches = sameGhostHome(session.ghostHome, ghostHomeIdentity(ghost.dir));
+      } catch {
+        matches = false;
+      }
+    }
+    if (!session || !matches) {
+      throw new GhostError(
+        "login_not_found",
+        `No login ${JSON.stringify(loginId)} for this ghost.`,
+        404,
+      );
+    }
+    // A rename changes only the spelling/path. Remember the route's current
+    // spelling for logs and for a later delete notification.
+    session.ghostName = ghost.name;
+    return session;
+  }
+
+  private currentGhost(session: LoginSession): Ghost | null {
+    let ghosts: Ghost[];
+    try {
+      ghosts = this.registry.list();
+    } catch {
+      return null;
+    }
+    for (const ghost of ghosts) {
+      try {
+        if (sameGhostHome(session.ghostHome, ghostHomeIdentity(ghost.dir))) return ghost;
+      } catch {
+        // The directory moved between list() and stat(); another poll can retry.
+      }
+    }
+    return null;
+  }
+
+  private closeRuntime(session: LoginSession): void {
+    if (session.runtimeClosed) return;
+    session.runtimeClosed = true;
+    try {
+      session.runtime.close?.();
+    } catch (error) {
+      this.logger.warn("could not close ghost login runtime", {
+        ghost: session.ghostName,
+        provider: session.view.providerId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   private publicView(session: LoginSession): LoginView {

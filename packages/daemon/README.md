@@ -29,12 +29,19 @@ ghostd [options]
 ```
 
 `config.json` carries the same settings plus `browserMode`, `compaction`, and
-`askTimeoutSeconds`. The last is how long a question waits before answering
-itself with the option its asker marked recommended, so that a turn nobody is
-watching resumes instead of stalling; `0` waits forever. It is daemon-wide
-rather than per-ghost because how long a dialog sits is a property of the person
-at the keyboard, not of the persona asking. Every setting also has an
-environment override (`GHOSTD_ASK_TIMEOUT` here); see `loadConfig`.
+`askTimeoutSeconds`. Compaction is OMP-native and asynchronously speculative:
+`enabled` defaults to true, `thresholdFraction` defaults to `0.8` and maps to
+OMP's percentage threshold, and `thresholdTokens` selects a fixed native
+threshold and takes precedence when both are present. The last setting is how
+long a question waits before it settles
+itself — with the option its asker marked recommended, or with no selection
+when it marked none — so that a turn nobody is watching resumes instead of
+stalling; `0` waits forever. It is daemon-wide rather than per-ghost because how
+long a dialog sits is a property of the person at the keyboard, not of the
+persona asking, and each session carries it as OMP's own `ask.timeout` so plan
+mode and a per-question deadline still win. Every setting also has an
+environment override (`GHOSTD_ASK_TIMEOUT` here); see `loadConfig` for the
+compaction overrides as well.
 
 The systemd user unit is in `contrib/ghostd.service`. `SIGINT` and `SIGTERM`
 stop new requests, end live streams, dispose hosted sessions, and exit cleanly.
@@ -44,24 +51,72 @@ stop new requests, end live streams, dispose hosted sessions, and exit cleanly.
 Everything Ghost owns for an OMP conversation stays inside the ghost home:
 
 ```text
-~/Ghosts/<name>/.pi/
-  models.json              providers plus Ghost roles/fallbacks
-  models.omp.json          generated OMP-compatible provider projection
-  models.db                derived OMP catalogue cache
-  agent.db                 canonical OMP credential store
-  auth.json                optional legacy import source; retained after import
-  .auth-json-imported-v18  one-time import marker
-~/Ghosts/<name>/.sessions/
-  <conversation>.jsonl     OMP session tree
-  claude-<sha256>.json     Claude resume metadata, when selected
+~/Ghosts/<name>/
+  docs/**/*.md             canonical v2 Markdown documents
+  .pi/
+    models.json            providers plus Ghost roles/fallbacks
+    models.omp.json        generated OMP-compatible provider projection
+    models.db              derived OMP catalogue cache
+    agent.db               canonical OMP credential store
+    auth.json              optional legacy import source; retained after import
+    .auth-json-imported-v18 one-time import marker
+  .sessions/
+    <conversation>.jsonl   OMP session tree
+    claude-<sha256>.json   Claude resume metadata, when selected
 ```
 
-Docs use ghost-home/v2 Markdown. Each file starts at byte 0 with `# Title` and
-may end with a line of lowercase hashtag slugs such as `#launch #product`;
-reserved `#archived` removes it from the default working set. Startup/import
-atomically migrate v1 frontmatter docs and manifests once. After that migration,
-readers reject legacy docs and `writeDoc(path, { body })` validates and writes
-the complete canonical Markdown exactly as supplied.
+### Documents (`ghost-home/v2`)
+
+`docs/**/*.md` is the canonical document tree. Every document starts at byte 0
+with a non-empty level-one ATX heading (`# Title`). Its optional final nonblank
+line is a space-separated list made only of lowercase hashtag slugs matching
+`#[a-z0-9]+(?:-[a-z0-9]+)*`; `#archived` is reserved and excludes that document
+from the default working set. The heading and tag line are ordinary Markdown
+and remain in `DocFile.body`. Documents never use YAML frontmatter.
+
+Import and daemon startup perform the one-time `ghost-home/v1` migration after
+renaming an unambiguous `notes/` directory to `docs/`. For each legacy file,
+the first H1 supplies the title, then legacy frontmatter `title`, then the
+filename. Legacy tags become lowercase hyphenated hashtag slugs,
+`archived: true` becomes `#archived`, and the import-only `path` field is
+discarded. Existing trailing hashtags are merged and deduplicated. Each file
+is rewritten atomically and is valid v2 immediately, so a failed scan can be
+rerun safely. There is no migration marker and no dual-format reader: after
+migration, readers and writers accept v2 only. If both `notes/` and `docs/`
+exist, startup fails rather than guessing.
+
+`writeDoc(path, { body })` validates the complete canonical Markdown body and
+writes exactly that body; there are no separate title, tag, archived, or
+application-path write options. Context listings are derived from disk for each
+request, report malformed siblings instead of guessing, and never persist a
+catalog.
+
+### Project MCP
+
+Ghost deliberately narrows OMP's MCP discovery to the selected home’s
+`.omp/mcp.json` and legacy `.omp/.mcp.json`. The management API reads and writes
+only those files. Its list response redacts every credential-bearing value and
+does not open a conversation merely to report connection status.
+
+Config mutations are live: every idle OMP conversation reconnects from the two
+project files and replaces its mounted MCP tools; a busy conversation defers one
+coalesced reload until it settles. An explicit test uses an isolated MCP manager
+without creating an AgentSession, while reconnect only targets managers that
+are already loaded.
+
+### Connect and recoverable deletion
+
+The session-scoped live-voice and collaboration routes deliberately cross the
+owner-local boundary. Live voice uses the local microphone and OpenAI Codex
+Realtime with the ghost's Codex OAuth. Collaboration exposes distinct encrypted
+read-only and confirmed writable relay links; the latter can drive the host
+session and its local tools. Links are never logged.
+
+Every user-visible file deletion is a move to freedesktop Trash. This covers
+whole ghosts, OMP transcripts, Claude resume sidecars, hosted import sources,
+documents, and memory files. Cross-filesystem moves fall back to a hidden
+same-filesystem Trash directory. Only rollback of a fork that was never shown
+to the owner remains a permanent unlink.
 
 `SessionManager.open` receives the explicit per-ghost session directory;
 `createAgentSession({ agentDir })` alone does not redirect transcripts.
@@ -74,6 +129,7 @@ Sessions are trusted local OMP projects. They keep native filesystem,
 Bash, skills, rules, project context, plugins, MCP, LSP, task/hub, web search,
 and background jobs, then add Ghost's extensions. Tool approval UI is disabled
 (`approvalMode: yolo`, `autoApprove: true`); `ask` is not an approval prompt.
+
 
 ## Models and routing
 
@@ -100,8 +156,15 @@ Ghost maps its roles to OMP as follows:
 | Ghost | OMP |
 |---|---|
 | `chat_model` | `default` |
-| `vision_model` | `vision` |
 | `smol_model` | `smol` |
+| `slow_model` | `slow` |
+| `vision_model` | `vision` |
+| `plan_model` | `plan` |
+| `designer_model` | `designer` |
+| `commit_model` | `commit` |
+| `tiny_model` | `tiny` |
+| `task_model` | `task` |
+| `advisor_model` | `advisor` |
 | `general_purpose_model` | `general` |
 | `research_model` | `research` |
 
@@ -110,6 +173,8 @@ retry classification, cooldowns, and fallback execution. The switcher orders a
 provider's models using OMP's priority and then descending semantic
 version/date, so the newest family appears first. `claude-code/default` can be
 the primary chat runtime but cannot be an OMP fallback or a non-chat role.
+General and Research are compatibility-only rows and appear only when an older
+home has configured them.
 
 Interactive provider login is a pollable wrapper around OMP's registry login.
 The same flow is available in the shell and in a TTY:
@@ -149,8 +214,18 @@ The authoritative route and payload contract is
 
 | method | path | purpose |
 |---|---|---|
-| GET | `/api/ghosts/:name/context` | derive browsable docs, memory, character, and available helpers |
-| DELETE | `/api/ghosts/:name/sessions/:id` | permanently delete an idle conversation |
+| PUT | `/api/ghosts/:name/name` | rename the ghost, moving its whole home |
+| GET | `/api/ghosts/:name/context` | derive browsable docs, memory, character, and available task helpers |
+| DELETE | `/api/ghosts/:name/context` | move one confirmed docs/memory file to Trash |
+| GET/POST | `/api/ghosts/:name/mcp` | list or add project-owned MCP servers |
+| PUT/DELETE | `/api/ghosts/:name/mcp/:server` | replace or remove one MCP server |
+| PUT | `/api/ghosts/:name/mcp/:server/enabled` | enable or disable one MCP server |
+| POST | `/api/ghosts/:name/mcp/:server/test` | isolated sanitized connection probe |
+| POST | `/api/ghosts/:name/mcp/:server/reconnect` | retry already-loaded live managers |
+| PUT | `/api/ghosts/:name/sessions/:id/title` | rename one conversation |
+| DELETE | `/api/ghosts/:name/sessions/:id` | move every owned conversation artifact to Trash |
+| GET/POST | `/api/ghosts/:name/sessions/:id/live` | inspect or control realtime voice |
+| GET/POST | `/api/ghosts/:name/sessions/:id/collab` | inspect or control encrypted relay collaboration |
 | GET/POST | `/api/ghosts/:name/sessions/:id/ask` | poll or resolve the active ask |
 | GET/POST | `/api/ghosts/:name/sessions/:id/queue` | inspect or enqueue steer/follow-up |
 | POST | `/api/ghosts/:name/sessions/:id/branch` | fork the conversation at a message |

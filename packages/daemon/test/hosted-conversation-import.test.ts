@@ -8,9 +8,13 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { CURRENT_SESSION_VERSION } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { migrateHostedConversations } from "../src/hosted-conversation-import.js";
+import {
+  hostedConversationSourcePaths,
+  migrateHostedConversations,
+} from "../src/hosted-conversation-import.js";
 import { sessionFileNameFor } from "../src/session-host.js";
 
 const CREATED = "2026-01-01T00:00:00.000Z";
@@ -109,6 +113,12 @@ describe("migrateHostedConversations", () => {
 
     const sessionDir = join(home, ".sessions");
     const target = join(sessionDir, sessionFileNameFor("hosted-one"));
+    const header = readFileSync(target, "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line))
+      .find((entry) => entry.type === "session");
+    expect(header?.version).toBe(CURRENT_SESSION_VERSION);
     const manager = await SessionManager.open(target, sessionDir, undefined, { initialCwd: home });
     try {
       expect(manager.getSessionId()).toBe("hosted-one");
@@ -190,6 +200,18 @@ describe("migrateHostedConversations", () => {
     expect(second).toEqual({ found: 1, imported: 0, existing: 1, failures: [] });
     expect(readFileSync(target, "utf8")).toBe(original);
     expect(statSync(target).mtimeMs).toBe(originalMtime);
+  });
+
+  it("finds every valid source that could recreate a conversation", async () => {
+    const first = join(conversationsDir, "first.json");
+    const duplicate = join(conversationsDir, "second.json");
+    writeFileSync(first, JSON.stringify(hostedConversation("same")));
+    writeFileSync(duplicate, JSON.stringify(hostedConversation("same")));
+    writeFileSync(join(conversationsDir, "other.json"), JSON.stringify(hostedConversation("other")));
+    writeFileSync(join(conversationsDir, "broken.json"), "{not json");
+
+    await expect(hostedConversationSourcePaths(home, "same"))
+      .resolves.toEqual([first, duplicate]);
   });
 
   it("reports a malformed fixture and continues activating valid ones", async () => {

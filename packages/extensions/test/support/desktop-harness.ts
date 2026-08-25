@@ -3,9 +3,9 @@
  * screen and desktop.
  *
  * `support/harness.ts` gives every extension a context with nothing but `cwd`,
- * which is all persona/memory/docs ever read. These two read `ctx.model` — the
- * screen tool branches on whether the chat model can be handed an image — and
- * they run programs. So this harness adds:
+ * which is all persona/memory/docs ever read. The desktop tools also run local
+ * programs, and screen tests derive the explicit vision capability from a
+ * realistic fixture model. So this harness adds:
  *
  * - a **fixture model** with real `input` and `cost` values, so that branch is
  *   tested against model-shaped data rather than a mock that agrees with it;

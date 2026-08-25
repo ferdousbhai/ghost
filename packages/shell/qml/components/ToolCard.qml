@@ -16,29 +16,37 @@ Rectangle {
     required property var activity
     property bool expanded: false
 
-    readonly property bool running: activity.status === "running"
-        || activity.status === "preparing" || activity.status === "queued"
-    readonly property bool completed: activity.status === "complete"
-    readonly property bool failed: activity.status === "failed"
-    readonly property string trace: ToolTrace.text(
-        root.activity, root.completed, root.failed, root.expanded)
-    readonly property string diagnosticInput: ToolTrace.input(root.activity)
-    readonly property var askBranch: activity.askBranch || null
-    readonly property bool hasDiagnostics: ToolTrace.hasDiagnostics(root.activity)
+    // Every read below goes through this rather than through `activity`. A
+    // Repeater re-evaluates a delegate's bindings while it is tearing it down,
+    // with `modelData` already gone, and the trace helpers reach straight into
+    // the object — so the moment a row's tool list changes, the card spends its
+    // last frame throwing TypeErrors at the log.
+    readonly property var call: root.activity || ({})
+
+    readonly property bool running: root.call.status === "running"
+        || root.call.status === "preparing" || root.call.status === "queued"
+    readonly property bool completed: root.call.status === "complete"
+    readonly property bool failed: root.call.status === "failed"
+    readonly property var presentation: ToolTrace.view(
+        root.call, root.completed, root.failed, root.expanded)
+    readonly property string trace: root.presentation.trace
+    readonly property string diagnosticInput: root.presentation.diagnosticInput
+    readonly property var askBranch: root.call.askBranch || null
+    readonly property bool hasDiagnostics: root.presentation.hasDiagnostics
 
     // A question the ghost is still holding, or one that closed without an
     // answer. It is not the same event as "read a file", so it stops wearing
     // the same amber.
-    readonly property bool askAwaiting: ToolTrace.askAwaiting(root.activity, root.completed)
-    readonly property string askPrompt: ToolTrace.askPrompt(root.activity)
-    readonly property string askDetail: ToolTrace.askDetail(root.activity)
+    readonly property bool askAwaiting: root.presentation.askAwaiting
+    readonly property string askPrompt: root.presentation.askPrompt
+    readonly property string askDetail: root.presentation.askDetail
 
     // The file this call wrote, ready for the workbench. Relative tool
     // arguments resolve against the active ghost's home (the session cwd), so
     // this is "" — and no affordance is offered — while that home is unknown or
     // when nothing here can render the file.
     readonly property string workbenchPath: root.completed || root.running
-        ? Workbench.absolute(ToolTrace.fileTarget(root.activity)) : ""
+        ? Workbench.absolute(root.presentation.fileTarget) : ""
     readonly property bool openable: root.workbenchPath !== ""
         && Workbench.kindOf(root.workbenchPath) !== ""
 
@@ -243,9 +251,9 @@ Rectangle {
         }
 
         Text {
-            visible: root.expanded && root.activity.summary && root.activity.intent
+            visible: root.expanded && root.call.summary && root.call.intent
             width: parent.width
-            text: "Intent · " + ToolTrace.compact(root.activity.intent, 1200)
+            text: "Intent · " + ToolTrace.compact(root.call.intent, 1200)
             color: root.detailColor
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontSizeSmall
@@ -265,9 +273,9 @@ Rectangle {
         }
 
         Text {
-            visible: root.expanded && root.activity.name !== ""
+            visible: root.expanded && root.call.name !== undefined && root.call.name !== ""
             width: parent.width
-            text: "Tool · " + root.activity.name
+            text: "Tool · " + root.call.name
             color: root.detailColor
             font.family: Theme.fontFamilyMono
             font.pixelSize: Theme.fontSizeSmall
@@ -296,7 +304,7 @@ Rectangle {
             // read as an empty object rather than a TypeError per property.
             readonly property var nav: root.askBranch || ({})
 
-            visible: root.activity.name === "ask" && root.askBranch !== null
+            visible: root.call.name === "ask" && root.askBranch !== null
             x: 16 + Theme.gap / 2
             width: Math.min(parent.width - x, askLabel.implicitWidth + Theme.gap * 1.5)
             height: visible ? askLabel.implicitHeight + 6 : 0
@@ -313,7 +321,7 @@ Rectangle {
             Text {
                 id: askLabel
                 anchors.centerIn: parent
-                text: ToolTrace.askAction(root.activity)
+                text: root.presentation.askAction
                 color: Theme.ghostAmber
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontSizeSmall

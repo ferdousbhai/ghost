@@ -1,7 +1,9 @@
+import QtQuick
 import QtTest
 import "../qml/components/ToolTrace.js" as ToolTrace
 
 TestCase {
+    id: tc
     name: "ToolTrace"
 
     function test_liveIntentWinsOverMechanism(): void {
@@ -134,10 +136,51 @@ TestCase {
         verify(!trace.includes("Received"));
     }
 
-    function test_timedOutAskSaysTheGhostStoppedWaiting(): void {
+    // A deadline the owner missed left a decision standing. The card is the
+    // only place they will ever find out which one, so it names it.
+    function test_timedOutAskNamesWhatWasChosenForTheOwner(): void {
         compare(
             ToolTrace.text(askActivity("timedOut"), true, false, false),
-            "Stopped waiting for an answer"
+            "Time ran out — answered “Leave it alone” for you"
+        );
+        compare(ToolTrace.askAutoAnswer(askActivity("timedOut")), "Leave it alone");
+    }
+
+    // Nothing recommended, nothing submitted. Naming an option here would
+    // invent the very decision the owner is being told about.
+    function test_timedOutAskWithNoRecommendationNamesNoOption(): void {
+        const activity = {
+            name: "ask",
+            status: "complete",
+            askSettled: "timedOut",
+            arguments: {
+                questions: [{
+                    id: "q1",
+                    question: "Which branch should I start from?",
+                    options: [{ label: "master" }, { label: "the release tag" }]
+                }]
+            },
+            intent: "",
+            summary: ""
+        };
+        compare(
+            ToolTrace.text(activity, true, false, false),
+            "Time ran out — nothing was answered"
+        );
+        compare(ToolTrace.askAutoAnswer(activity), "");
+    }
+
+    // The undo. A standing decision is corrected, not answered for the first
+    // time — but only when the clock actually took one.
+    function test_timedOutAskOffersTheChangeRatherThanAFirstAnswer(): void {
+        compare(ToolTrace.askAction(askActivity("timedOut")), "Change it");
+        compare(
+            ToolTrace.askAction({
+                name: "ask",
+                askSettled: "timedOut",
+                arguments: { questions: [{ id: "q", question: "Which?", options: [] }] }
+            }),
+            "Answer it"
         );
     }
 
@@ -228,6 +271,13 @@ TestCase {
         compare(ToolTrace.askAction(askActivity("")), "Answer it");
     }
 
+    // The clock's answer is not the owner's answer, so a timed-out card keeps
+    // the rose an answered one drops.
+    function test_theClocksAnswerIsStillNotTheOwners(): void {
+        verify(ToolTrace.askAwaiting(askActivity("timedOut"), true));
+        verify(!ToolTrace.askAwaiting(askActivity("submitted"), true));
+    }
+
     // The rose temperature is for a question with no answer — including one
     // still standing open — and never for one that was answered. Not knowing
     // how a finished ask settled is not the same as knowing it went unanswered.
@@ -262,6 +312,64 @@ TestCase {
             ToolTrace.input({ name: "survey", arguments: { questions: [1, 2] } }),
             "2 questions"
         );
+    }
+
+    // ---- The model boundaries a card is rendered through -------------------
+    // Nothing above proves anything about the real thing on its own: an
+    // activity reaches a ToolCard across a ListModel role AND a Repeater's
+    // `modelData`, and each of those hands a JS array back as a variant list —
+    // it indexes and measures like an array and fails `Array.isArray` flat.
+    // Asking the wrong question there is silent, and it rendered restored ask
+    // cards with no question and no options on them at all.
+
+    ListModel { id: restoredTranscript }
+
+    /** The activity list after both crossings, as a ToolCard receives it. */
+    property var throughTheModels: null
+    property var crossed: []
+
+    Item {
+        Repeater {
+            model: tc.crossed
+            delegate: Item {
+                required property var modelData
+                Component.onCompleted: tc.throughTheModels = modelData
+            }
+        }
+    }
+
+    function test_anAskSurvivesEveryModelItIsRenderedThrough(): void {
+        restoredTranscript.append({
+            role: "assistant",
+            toolActivity: [tc.askActivity("timedOut")]
+        });
+        // Bubble's own recovery of the role into a real array.
+        const raw = restoredTranscript.get(0).toolActivity;
+        const list = [];
+        for (let i = 0; i < raw.count; i++) list.push(raw.get(i));
+        tc.crossed = list;
+        wait(50);
+
+        const activity = tc.throughTheModels;
+        verify(activity !== null);
+        // The premise: this is exactly the shape that used to read as empty.
+        verify(!Array.isArray(activity.arguments.questions));
+
+        compare(ToolTrace.askAutoAnswer(activity), "Leave it alone");
+        compare(
+            ToolTrace.text(activity, true, false, false),
+            "Time ran out — answered “Leave it alone” for you"
+        );
+        compare(
+            ToolTrace.askPrompt(activity),
+            "Danger · Delete /home/dous/verygoodplugins and everything inside it?"
+        );
+        compare(
+            ToolTrace.askDetail(activity),
+            "Options · Delete it · Leave it alone (recommended)"
+        );
+        compare(ToolTrace.askAction(activity), "Change it");
+        compare(ToolTrace.input(activity), "");
     }
 
     function test_unknownCallStaysOutOfTheTranscript(): void {
