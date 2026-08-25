@@ -214,7 +214,7 @@ Item {
                     width: 16
                     height: 16
                     Accessible.role: Accessible.Button
-                    Accessible.name: "Branch from this message"
+                    Accessible.name: "Start new conversation from here"
 
                     BranchGlyph {
                         anchors.fill: parent
