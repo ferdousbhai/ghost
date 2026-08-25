@@ -6,11 +6,12 @@
  * Node and can simply be compared, constant for constant.
  *
  * The manifest assertions are the other half of the point. The relay's whole
- * security claim rests on the extension having *no standing access to any page* —
- * no host permissions, no content scripts, no `chrome.scripting`, only
- * `chrome.debugger`, which Chrome cannot attach without drawing its own banner.
- * That is a property a future convenience commit could quietly delete, so it is
- * pinned here rather than only in a README.
+ * security claim rests on the extension having no host grants, content scripts,
+ * or `chrome.scripting`. The required `chrome.debugger` grant can enumerate
+ * target URL/title metadata before attachment; page-content reads and DOM/input
+ * actions require an attached session, which Chrome brands with its own banner.
+ * That boundary is a property a future convenience commit could quietly delete,
+ * so it is pinned here rather than only in a README.
  */
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -79,7 +80,7 @@ describe("the extension agrees with the daemon about the protocol", () => {
 });
 
 describe("the extension's permission surface is the security model", () => {
-  it("asks for nothing that grants standing access to a page", async () => {
+  it("keeps page content and DOM/input actions behind visible debugger attachment", async () => {
     const manifest = JSON.parse(await source("manifest.json")) as {
       manifest_version: number;
       permissions: string[];
@@ -88,8 +89,8 @@ describe("the extension's permission surface is the security model", () => {
       web_accessible_resources?: unknown[];
     };
     expect(manifest.manifest_version).toBe(3);
-    // `debugger` is the only way in, and Chrome brands any tab it touches.
-    expect(manifest.permissions.sort()).toEqual(["alarms", "debugger", "storage", "tabs"]);
+    // `debugger` exposes target metadata, but content and DOM/input need its branded attachment.
+    expect(manifest.permissions.sort()).toEqual(["alarms", "debugger", "storage"]);
     expect(manifest.permissions).not.toContain("scripting");
     expect(manifest.permissions).not.toContain("<all_urls>");
     expect(manifest.host_permissions).toBeUndefined();
