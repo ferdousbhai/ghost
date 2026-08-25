@@ -65,6 +65,19 @@ Singleton {
     /** Why the last ghost deletion was refused, or "". Presentable as-is. */
     property string ghostDeleteError: ""
 
+    // ---- Browsable context -----------------------------------------------
+    // Plain files stay canonical. This is only the latest derived daemon
+    // snapshot used by the right-hand Docs/Memory/Helpers/Character surfaces.
+    property var contextCharacter: ({ path: "character.md", title: null })
+    property var contextDocs: []
+    property var contextMemory: []
+    property var contextAgents: []
+    property var contextSkipped: []
+    property bool contextLoading: false
+    property string contextError: ""
+    /** The ghost the current snapshot belongs to; "" means none is cached. */
+    property string contextGhost: ""
+
     // ---- Conversations ----------------------------------------------------
     // A ghost owns many conversations (pi sessions). The daemon persists them;
     // the HUD lists them per ghost, resumes one by loading its transcript, and
@@ -181,6 +194,7 @@ Singleton {
     property var setModelRequest: null
     property var modelRoutingRequest: null
     property var sessionsRequest: null
+    property var contextRequest: null
     property var greetingRequest: null
     property var transcriptRequest: null
     property var deleteSessionRequest: null
@@ -433,6 +447,7 @@ Singleton {
         root.modelRoutingLoading = false;
         root.modelWarning = "";
         root.clearGreeting();
+        root.clearContext();
     }
 
     function selectGhost(name: string): void {
@@ -455,6 +470,7 @@ Singleton {
         root.modelWarning = "";
         // The greeting is this ghost's own voice, so it never carries over.
         root.clearGreeting();
+        root.clearContext();
         root.fetchCurrentModel();
         root.fetchSessions(name);
         root.fetchGreeting();
@@ -481,6 +497,71 @@ Singleton {
         root.greeting = "";
         root.greetingOnboarding = false;
         root.greetingGhost = "";
+    }
+
+    // ---- Browsable context -----------------------------------------------
+
+    /** Drop a snapshot that belongs to a ghost the owner has left. */
+    function clearContext(): void {
+        if (root.contextRequest && root.contextRequest.readyState !== 4)
+            root.contextRequest.abort();
+        root.contextRequest = null;
+        root.contextCharacter = ({ path: "character.md", title: null });
+        root.contextDocs = [];
+        root.contextMemory = [];
+        root.contextAgents = [];
+        root.contextSkipped = [];
+        root.contextLoading = false;
+        root.contextError = "";
+        root.contextGhost = "";
+    }
+
+    /**
+     * Rebuild the active ghost's context catalog. `force` bypasses the
+     * per-ghost cache for the visible refresh affordance after external edits.
+     */
+    function fetchContext(force: bool): void {
+        const ghost = root.activeGhost;
+        if (ghost === "") {
+            root.clearContext();
+            return;
+        }
+        if (!force && root.contextGhost === ghost) return;
+        if (root.contextRequest && root.contextRequest.readyState !== 4) {
+            if (!force) return;
+            root.contextRequest.abort();
+        }
+
+        const xhr = new XMLHttpRequest();
+        root.contextRequest = xhr;
+        root.contextLoading = true;
+        root.contextError = "";
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || xhr !== root.contextRequest) return;
+            root.contextLoading = false;
+            if (ghost !== root.activeGhost) return;
+            if (xhr.status === 200) {
+                try {
+                    const body = JSON.parse(xhr.responseText);
+                    root.contextCharacter = body.character
+                        && typeof body.character === "object"
+                        ? body.character : ({ path: "character.md", title: null });
+                    root.contextDocs = Array.isArray(body.docs) ? body.docs : [];
+                    root.contextMemory = Array.isArray(body.memory) ? body.memory : [];
+                    root.contextAgents = Array.isArray(body.agents) ? body.agents : [];
+                    root.contextSkipped = Array.isArray(body.skipped) ? body.skipped : [];
+                    root.contextGhost = ghost;
+                    root.contextError = "";
+                    root.reachable = true;
+                } catch (error) {
+                    root.contextError = "ghostd sent malformed context";
+                }
+            } else {
+                root.contextError = root.describeError(xhr, "GET context");
+            }
+        };
+        root.dispatch(xhr, "GET",
+            "/api/ghosts/" + encodeURIComponent(ghost) + "/context", ({}), null);
     }
 
     /**

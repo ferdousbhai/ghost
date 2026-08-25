@@ -12,9 +12,10 @@ path.
 ```sh
 cd packages/shell
 
-# 1. The fake daemon. Two ghosts, a canned streamed reply with one tool call.
+# 1. The fake daemon. Two ghosts, canned context files in an owned temporary
+#    root, and a streamed reply with one tool call.
 node dev/mock-ghostd.mjs            # add --slow to watch deltas land
-                                    #     --fail to end the turn in an error
+                                    #     --fail to end the next turn in an error
 
 # 2. The shell, isolated. Never `qs` with no arguments — that would load the
 #    user's default config.
@@ -24,6 +25,10 @@ quickshell -p qml/shell.qml
 qs -p qml/shell.qml ipc show                      # the IPC surface
 qs -p qml/shell.qml ipc call ghost status         # JSON state
 qs -p qml/shell.qml ipc call ghost open
+qs -p qml/shell.qml ipc call ghost section docs
+qs -p qml/shell.qml ipc call ghost section memory
+qs -p qml/shell.qml ipc call ghost section agents
+qs -p qml/shell.qml ipc call ghost section character
 qs -p qml/shell.qml ipc call ghost ask "who lives here?"
 qs -p qml/shell.qml ipc call ghost close
 
@@ -36,12 +41,17 @@ qs -p qml/shell.qml kill
 - **Nothing on screen until `open`.** The HUD is a `FloatingWindow` bound to
   `visible: false`; loading the config maps no window. This makes almost all of
   the shell testable without putting anything over the developer's desktop.
-- On `open`: an 880×620 window (app-id `ghost`) that Hyprland tiles into the
+- On `open`: a 998×620 window (app-id `ghost`) that Hyprland tiles into the
   layout like any app. The HUD uses a neutral reading canvas with the current
-  Omarchy accent and semantic status colours. Roster on the
-  left (`casper`, `moaning-myrtle`, `+ new ghost`), transcript in the middle,
-  composer at the bottom. `SUPER+CTRL+G` is launch-or-focus: reveal+focus when
+  Omarchy accent and semantic status colours. Roster on the left (`casper`,
+  `moaning-myrtle`, `+ new ghost`), transcript in the middle, composer at the
+  bottom, and the permanent Chat / Docs / Memory / Helpers / Character rail at
+  the right edge. `SUPER+CTRL+G` is launch-or-focus: reveal+focus when
   hidden/unfocused, hide only when already focused.
+  `section docs` shows the Train-style file index and lossless markdown editor;
+  memory is read-only, Helpers describes OMP subagents, and Character edits
+  `character.md`. The mock's temporary fixture makes every pane live without
+  touching `~/Ghosts`.
 - On `ask`: the spectral summoning orb saying "Checking what I remember about
   that" in the ghost's own words rather than a spectral phrase, then the reply
   arriving word by word with `**bold**` rendered as bold. The narration never

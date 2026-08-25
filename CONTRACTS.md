@@ -164,6 +164,24 @@ one must not be a leak of both.
   title/compaction work is awaited first. **Deletion is a move, never an `rm`**:
   the ghost home holds the only copy of a persona, its memory, and its docs, so
   nothing on any path follows the rename with a recursive removal.
+- `GET  /api/ghosts/:name/context` → `{ character, docs, memory, agents,
+  skipped }` — the owner's browseable ghost context and OMP capabilities,
+  derived from disk for each request and never stored. `character` is
+  `{ path: "character.md", title }`. `docs` contains
+  `{ path: "docs/<relative>.md", relativePath, title, tags, archived }`, with a
+  filename-derived title when frontmatter omits one. `memory` contains
+  `{ path: "memory/<slug>.md", slug, description, content, updated }`.
+  `agents` contains the OMP task helpers available under the same project,
+  user, extension, bundled, precedence, and `task.disabledAgents` rules as a
+  live session, normalized to `{ name, description, source, tools, model,
+  spawns }`. `tools: null` means the helper keeps the available session toolset,
+  and a list restricts it to those tools. An empty `model` list means the helper
+  inherits the active model. `spawns: null` means it cannot delegate further,
+  `"*"` allows any available helper, and a list allows only those named helpers.
+  System prompts and agent file paths are never returned. `skipped` reports
+  malformed doc or memory files as `{ section, path, reason }` without
+  hiding the valid siblings. The returned file paths are ghost-home-relative;
+  a client already gets that home's absolute `dir` from `GET /api/ghosts`.
 - `POST /api/ghosts/:name/messages` — the **pi-messages wire protocol** over
   OMP's `AgentSession` (request `{ model, context, options }` → SSE stream).
   The pinned client in the summon-ghost repo is the normative spec

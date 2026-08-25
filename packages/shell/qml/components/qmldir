@@ -7,10 +7,12 @@ Bubble 1.0 Bubble.qml
 CodeView 1.0 CodeView.qml
 Composer 1.0 Composer.qml
 ConfirmDialog 1.0 ConfirmDialog.qml
+ContextBrowser 1.0 ContextBrowser.qml
 Conversations 1.0 Conversations.qml
 CopyGlyph 1.0 CopyGlyph.qml
 FilePane 1.0 FilePane.qml
 GhostGlyph 1.0 GhostGlyph.qml
+GhostNavigation 1.0 GhostNavigation.qml
 MarkdownEditor 1.0 MarkdownEditor.qml
 ModelLogin 1.0 ModelLogin.qml
 ModelSwitcher 1.0 ModelSwitcher.qml

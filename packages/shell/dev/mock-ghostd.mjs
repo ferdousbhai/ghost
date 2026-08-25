@@ -7,6 +7,7 @@
  *   GET  /api/ghosts                          → [{ name, dir, createdAt }]
  *   POST /api/ghosts { name }                 → 201 + the new ghost
  *   DELETE /api/ghosts/:name?confirm=:name    → 200 { ok, trash } | 400 | 404 | 409
+ *   GET  /api/ghosts/:name/context            → docs, memory, character, helpers
  *   POST /api/ghosts/:name/messages           → pi-messages SSE (canned reply)
  *   POST /api/ghosts/:name/greeting           → { greeting, onboarding }, ~800ms late
  *   GET  /api/ghosts/:name/sessions           → { sessions: [...] }, newest first
@@ -20,8 +21,9 @@
  *
  * The login flows are scripted (no real provider): openai-codex OAuth offers a
  * select (browser callback vs device code), openrouter OAuth shows an auth URL
- * plus a paste field, and api-key flows ask for a masked key. Nothing touches
- * the filesystem: ghosts and logins live in memory and vanish on exit.
+ * plus a paste field, and api-key flows ask for a masked key. Ghosts, sessions,
+ * and logins live in memory; only an owned temporary markdown fixture touches
+ * disk so the context editors have real files. It vanishes on exit.
  *
  * Auth: none. The real daemon requires `Authorization: Bearer <token>` on
  * every /api route (CONTRACTS.md); the mock accepts and ignores the header so
@@ -34,8 +36,9 @@
  *   --slow   30ms between text deltas instead of 12ms
  *   --fail   terminate the next turn with a pi-messages `error` event
  */
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
 const argv = process.argv.slice(2);
@@ -48,7 +51,9 @@ const opt = (name, fallback) => {
 const PORT = Number(opt("--port", process.env.GHOSTD_PORT ?? "7717"));
 const HOST = "127.0.0.1";
 const DELTA_MS = flag("--slow") ? 30 : 12;
-const GHOSTS_ROOT = join(homedir(), "Ghosts");
+const OWNS_GHOSTS_ROOT = !process.env.GHOSTS_ROOT;
+const GHOSTS_ROOT = process.env.GHOSTS_ROOT
+  || mkdtempSync(join(tmpdir(), "ghost-shell-mock-"));
 const TRASH_ROOT = join(process.env.XDG_DATA_HOME || join(homedir(), ".local", "share"), "Trash", "files");
 
 /** @type {{ name: string, dir: string, createdAt: string }[]} */
@@ -57,6 +62,107 @@ const ghosts = ["casper", "moaning-myrtle"].map((name) => ({
   dir: join(GHOSTS_ROOT, name),
   createdAt: new Date(Date.now() - 86_400_000).toISOString(),
 }));
+
+// ---- Browsable ghost context ----------------------------------------------
+const MOCK_DOCS = [
+  {
+    path: "docs/launch-notes.md",
+    relativePath: "launch-notes.md",
+    title: "Launch notes",
+    tags: ["launch", "product"],
+    archived: false,
+  },
+  {
+    path: "docs/reference/working-agreement.md",
+    relativePath: "reference/working-agreement.md",
+    title: "Working agreement",
+    tags: ["reference"],
+    archived: false,
+  },
+];
+
+const MOCK_MEMORY = [
+  {
+    path: "memory/preferred-tone.md",
+    slug: "preferred-tone",
+    description: "The owner prefers direct, evidence-first answers.",
+    content: "Use terse, concrete language. Lead with the decision and evidence.",
+    updated: "2026-08-24",
+  },
+  {
+    path: "memory/current-project.md",
+    slug: "current-project",
+    description: "Ghost is the owner's local sovereign assistant.",
+    content: "Keep context in plain files and keep cloud credentials out of exports.",
+    updated: "2026-08-25",
+  },
+];
+
+const MOCK_AGENTS = [
+  ["designer", "UI/UX implementation and visual refinement.", ["read", "grep", "glob"], ["@designer"], null],
+  ["librarian", "Source-verified external library research.", ["read", "grep", "glob", "web_search"], ["@smol"], null],
+  ["reviewer", "Correctness and quality review.", ["read", "grep", "glob"], ["@slow"], ["scout"]],
+  ["scout", "Fast read-only codebase investigation.", ["read", "grep", "glob"], ["@smol"], null],
+  ["security-reviewer", "Evidence-backed vulnerability discovery.", ["read", "grep", "glob"], [], null],
+  ["sonic", "Strictly mechanical updates and collection.", null, ["@smol"], null],
+  ["task", "General-purpose delegated implementation.", null, ["@task"], "*"],
+].map(([name, description, tools, model, spawns]) => ({
+  name,
+  description,
+  source: "bundled",
+  tools,
+  model,
+  spawns,
+}));
+
+function contextSnapshot(name) {
+  return {
+    character: { path: "character.md", title: name },
+    docs: MOCK_DOCS,
+    memory: MOCK_MEMORY,
+    agents: MOCK_AGENTS,
+    skipped: [],
+  };
+}
+
+function seedMockHome(name) {
+  const dir = join(GHOSTS_ROOT, name);
+  mkdirSync(join(dir, "docs", "reference"), { recursive: true });
+  mkdirSync(join(dir, "memory"), { recursive: true });
+  writeFileSync(
+    join(dir, "character.md"),
+    `---\ntitle: ${name}\n---\n\n# Character\n\nI am ${name}, a quiet local ghost who answers directly.\n`,
+    "utf8",
+  );
+  writeFileSync(
+    join(dir, "docs", "launch-notes.md"),
+    "---\ntitle: Launch notes\ntags: [launch, product]\n---\n\n# Launch notes\n\nShip the context navigator with the right rail, a document index, and a lossless editor.\n",
+    "utf8",
+  );
+  writeFileSync(
+    join(dir, "docs", "reference", "working-agreement.md"),
+    "---\ntitle: Working agreement\ntags: [reference]\n---\n\n# Working agreement\n\nDecisions first. Evidence next. No second source of truth.\n",
+    "utf8",
+  );
+  writeFileSync(
+    join(dir, "memory", "preferred-tone.md"),
+    "---\ndescription: The owner prefers direct, evidence-first answers.\nupdated: 2026-08-24\n---\n\nUse terse, concrete language. Lead with the decision and evidence.\n",
+    "utf8",
+  );
+  writeFileSync(
+    join(dir, "memory", "current-project.md"),
+    "---\ndescription: Ghost is the owner's local sovereign assistant.\nupdated: 2026-08-25\n---\n\nKeep context in plain files and keep cloud credentials out of exports.\n",
+    "utf8",
+  );
+}
+
+if (OWNS_GHOSTS_ROOT) {
+  for (const ghost of ghosts) seedMockHome(ghost.name);
+  process.once("exit", () => rmSync(GHOSTS_ROOT, { recursive: true, force: true }));
+  const stop = () => process.exit(0);
+  process.once("SIGINT", stop);
+  process.once("SIGTERM", stop);
+}
 
 // ---- Conversation store ----------------------------------------------------
 // The daemon persists a ghost's conversations (pi sessions); the mock keeps
@@ -571,12 +677,17 @@ createServer(async (req, res) => {
     if (ghosts.some((g) => g.name === name)) return json(res, 409, { error: "already exists" });
     const ghost = { name, dir: join(GHOSTS_ROOT, name), createdAt: new Date().toISOString() };
     ghosts.push(ghost);
+    if (OWNS_GHOSTS_ROOT) seedMockHome(name);
     return json(res, 201, ghost);
   }
 
   const name = parts[2] ? decodeURIComponent(parts[2]) : "";
   const ghost = ghosts.find((g) => g.name === name);
   if (!ghost) return json(res, 404, { error: { message: `no ghost named ${name}`, code: "not_found" } });
+
+  if (parts.length === 4 && parts[3] === "context" && req.method === "GET") {
+    return json(res, 200, contextSnapshot(name));
+  }
 
   // Banishing a ghost. The real daemon moves the home to the XDG trash so it is
   // recoverable from the desktop; the mock just drops it from memory, and
@@ -592,6 +703,7 @@ createServer(async (req, res) => {
         error: { message: `${name} is still answering — stop the turn first`, code: "ghost_busy" },
       });
     }
+    if (OWNS_GHOSTS_ROOT) rmSync(ghost.dir, { recursive: true, force: true });
     ghosts.splice(ghosts.indexOf(ghost), 1);
     sessionStore.delete(name);
     roles.delete(name);

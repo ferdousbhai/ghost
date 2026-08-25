@@ -7,6 +7,7 @@
  *   DELETE /api/ghosts/:name?confirm=<name> → moves the home into the XDG trash
  *   POST /api/ghosts/:name/messages   pi-messages request → SSE of pi-messages events
  *   POST /api/ghosts/:name/greeting   → { greeting, onboarding } — the empty-chat opener
+ *   GET  /api/ghosts/:name/context    → derived docs, memory, character, and subagent catalog
  *   GET  /api/ghosts/:name/sessions   → { sessions } — conversation listing for that ghost
  *   DELETE /api/ghosts/:name/sessions/:id → permanently delete one conversation
  *   PUT  /api/ghosts/:name/sessions/:id/pin → { pinned } — pin or unpin it
@@ -60,6 +61,7 @@ import type { AddressInfo } from "node:net";
 import { apiTokenMatches, readOrCreateApiToken } from "./api-token.js";
 import type { AuthType, LoginManager } from "./auth.js";
 import { assertLoopback } from "./config.js";
+import { readGhostContext } from "./context-catalog.js";
 import type { ListModelsQuery, ModelCatalog, ModelScope } from "./model-catalog.js";
 import { GhostError, type GhostRegistry } from "./ghosts.js";
 import { GHOST_MODEL_ROLES, type GhostModelRole } from "./models.js";
@@ -369,6 +371,19 @@ export function createDaemonServer(options: ServerOptions): Server {
     response: ServerResponse,
   ): Promise<void> => {
     jsonResponse(response, 200, { sessions: await options.host.listSessions(ghostName) });
+  };
+
+  /**
+   * Everything the owner's right-hand context rail can browse. The catalog is
+   * rebuilt from the ghost home and OMP discovery on every request; no second
+   * index is stored beside the plain files.
+   */
+  const handleGhostContext = async (
+    ghostName: string,
+    response: ServerResponse,
+  ): Promise<void> => {
+    const ghost = options.registry.get(ghostName);
+    jsonResponse(response, 200, await readGhostContext(ghost.dir));
   };
 
   /**
@@ -920,6 +935,13 @@ export function createDaemonServer(options: ServerOptions): Server {
         const ghostName = decodePathSegment(segments[2] ?? "");
         if (segments.length === 3 && method === "DELETE") {
           return await handleDeleteGhost(ghostName, url, response);
+        }
+        if (segments.length === 4 && segments[3] === "context") {
+          if (method !== "GET") {
+            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+            return;
+          }
+          return await handleGhostContext(ghostName, response);
         }
         if (segments.length === 4 && segments[3] === "messages") {
           if (method !== "POST") {

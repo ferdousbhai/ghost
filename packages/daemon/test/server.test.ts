@@ -5,7 +5,7 @@
  * pi-messages client uses (see `parseSseStream`), so a framing change that
  * would break the real UI breaks these tests.
  */
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { PiMessagesEvent } from "../src/pi-messages.js";
@@ -110,6 +110,61 @@ describe("GET /api/ghosts", () => {
     expect(ghosts).toHaveLength(1);
     expect(ghosts[0]).toMatchObject({ name: "casper", dir: join(temp!.root, "casper") });
     expect(ghosts[0]?.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  });
+});
+
+describe("GET /api/ghosts/:name/context", () => {
+  it("serves the derived context catalog and rejects other methods", async () => {
+    const base = await serve();
+    const ghostDir = join(temp!.root, "casper");
+    mkdirSync(join(ghostDir, "docs", "guides"), { recursive: true });
+    mkdirSync(join(ghostDir, ".omp", "agents"), { recursive: true });
+    writeFileSync(join(ghostDir, ".omp", "config.yml"), "task:\n  disabledAgents: []\n", "utf8");
+    writeFileSync(
+      join(ghostDir, ".omp", "agents", "route-probe.md"),
+      "---\nname: route-probe\ndescription: HTTP route fixture\n---\nPrivate fixture prompt.\n",
+      "utf8",
+    );
+    writeFileSync(
+      join(ghostDir, "docs", "guides", "launch.md"),
+      "---\ntitle: Launch guide\ntags: [product, launch]\n---\n\nShip deliberately.\n",
+      "utf8",
+    );
+    writeFileSync(
+      join(ghostDir, "memory", "preferred-tone.md"),
+      "---\ndescription: The owner prefers direct answers.\nupdated: 2026-08-25\n---\n\nLead with the decision.\n",
+      "utf8",
+    );
+
+    const response = await fetch(`${base}/api/ghosts/casper/context`);
+    expect(response.status).toBe(200);
+    const body = await response.json() as {
+      character: { path: string };
+      docs: Array<{ path: string; title: string }>;
+      memory: Array<{ path: string; description: string; content: string }>;
+      agents: Array<{ name: string; source: string }>;
+    };
+    expect(body.character.path).toBe("character.md");
+    expect(body.docs).toContainEqual(expect.objectContaining({
+      path: "docs/guides/launch.md",
+      title: "Launch guide",
+    }));
+    expect(body.memory).toContainEqual(expect.objectContaining({
+      path: "memory/preferred-tone.md",
+      description: "The owner prefers direct answers.",
+      content: "Lead with the decision.",
+    }));
+    expect(body.agents).toContainEqual(expect.objectContaining({
+      name: "route-probe",
+      source: "project",
+    }));
+
+    expect((await fetch(`${base}/api/ghosts/casper/context`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    })).status).toBe(405);
+    expect((await fetch(`${base}/api/ghosts/missing/context`)).status).toBe(404);
   });
 });
 

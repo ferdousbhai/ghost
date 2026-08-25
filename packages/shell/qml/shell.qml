@@ -94,6 +94,12 @@ ShellRoot {
             hud.openSwitcher();
         }
 
+        /** Open one destination from the permanent right-hand navigation. */
+        function section(name: string): void {
+            hud.open();
+            hud.showSection(name);
+        }
+
         /** Open the panel and begin a specific login straight away. */
         function loginTo(provider: string, authType: string): void {
             hud.open();
@@ -105,6 +111,7 @@ ShellRoot {
             return JSON.stringify({
                 ghost: Ghostd.activeGhost,
                 shown: hud.shown,
+                section: hud.currentSection,
                 streaming: Ghostd.streaming,
                 reachable: Ghostd.reachable,
                 activity: Ghostd.activity,

@@ -142,6 +142,7 @@ The authoritative route and payload contract is
 
 | method | path | purpose |
 |---|---|---|
+| GET | `/api/ghosts/:name/context` | derive browsable docs, memory, character, and available helpers |
 | DELETE | `/api/ghosts/:name/sessions/:id` | permanently delete an idle conversation |
 | GET/POST | `/api/ghosts/:name/sessions/:id/ask` | poll or resolve the active ask |
 | GET/POST | `/api/ghosts/:name/sessions/:id/queue` | inspect or enqueue steer/follow-up |

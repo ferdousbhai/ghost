@@ -48,6 +48,9 @@ FloatingWindow {
     property bool switcherOpen: false
     /** True when login was reached from the switcher, so closing returns there. */
     property bool loginFromSwitcher: false
+    /** Global destination selected by the restored right-hand navigation. */
+    property string currentSection: "chat"
+    readonly property int navigationWidth: 64
 
     // ---- Pending confirmation ----------------------------------------------
     // Deleting a conversation is asked in a modal over the whole window rather
@@ -112,8 +115,9 @@ FloatingWindow {
     readonly property int chatMinimumWidth: 380
     /** The narrowest file pane worth splitting the window for. */
     readonly property int paneMinimumWidth: 320
-    /** Width left for chat + file pane once padding and the sidebar are taken. */
+    /** Width left for chat + file pane once padding, navigation, and sidebar are taken. */
     readonly property int bodyWidth: hud.width - Theme.pad * 2
+        - hud.navigationWidth - Theme.sectionGap
         - (hud.sidebarOpen ? hud.sidebarWidth + Theme.sectionGap : 0)
     /** A file is open in the workbench. */
     readonly property bool workbenchOpen: Workbench.filePath !== ""
@@ -133,9 +137,23 @@ FloatingWindow {
 
     // A reasonable default; the WM resizes/tiles from here. minimumSize keeps a
     // tiled slice from collapsing the composer and roster into nothing.
-    implicitWidth: 910
+    implicitWidth: 998
     implicitHeight: 620
-    minimumSize: Qt.size(480, 360)
+    minimumSize: Qt.size(568, 360)
+
+    /** Move between the ghost's chat, context, and capability surfaces. */
+    function showSection(section: string): void {
+        if (["chat", "docs", "memory", "agents", "character"].indexOf(section) < 0)
+            return;
+        hud.loginOpen = false;
+        hud.switcherOpen = false;
+        hud.currentSection = section;
+        if (section === "chat") {
+            composer.take();
+        } else {
+            Ghostd.fetchContext(false);
+        }
+    }
 
     function open(): void {
         hud.shown = true;
@@ -148,6 +166,7 @@ FloatingWindow {
         Hyprland.dispatch('hl.dsp.focus({ window = "class:ghost" })');
         hud.loginOpen = false;
         hud.switcherOpen = false;
+        hud.currentSection = "chat";
         Ghostd.refresh();
         composer.take();
     }
@@ -157,6 +176,7 @@ FloatingWindow {
     }
 
     function openLogin(): void {
+        hud.currentSection = "chat";
         hud.loginFromSwitcher = false;
         hud.switcherOpen = false;
         hud.loginOpen = true;
@@ -165,6 +185,7 @@ FloatingWindow {
 
     /** Open the model switcher over the transcript. */
     function openSwitcher(): void {
+        hud.currentSection = "chat";
         hud.loginOpen = false;
         hud.switcherOpen = true;
         modelSwitcher.open();
@@ -172,6 +193,7 @@ FloatingWindow {
 
     /** Reach the provider login from the switcher; closing it returns to the switcher. */
     function openLoginFromSwitcher(): void {
+        hud.currentSection = "chat";
         hud.loginFromSwitcher = true;
         hud.switcherOpen = false;
         hud.loginOpen = true;
@@ -180,6 +202,7 @@ FloatingWindow {
 
     /** Authenticate a model already selected in the switcher; completion returns to chat. */
     function openLoginForSelectedModel(): void {
+        hud.currentSection = "chat";
         hud.loginFromSwitcher = false;
         hud.switcherOpen = false;
         hud.loginOpen = true;
@@ -268,7 +291,9 @@ FloatingWindow {
         // card by focus-chain propagation even while the composer holds focus,
         // since a plain TextEdit does not consume Ctrl+B.
         Keys.onPressed: event => {
-            if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_B) {
+            if (hud.currentSection === "chat"
+                    && (event.modifiers & Qt.ControlModifier)
+                    && event.key === Qt.Key_B) {
                 hud.sidebarOpen = !hud.sidebarOpen;
                 event.accepted = true;
             }
@@ -331,6 +356,7 @@ FloatingWindow {
         ColumnLayout {
             anchors.fill: parent
             anchors.margins: Theme.pad
+            anchors.rightMargin: Theme.pad + hud.navigationWidth + Theme.sectionGap
             spacing: Theme.gap
 
             // ---- Header ---------------------------------------------------
@@ -481,7 +507,8 @@ FloatingWindow {
 
             // ---- Body -----------------------------------------------------
             RowLayout {
-                visible: !hud.loginOpen && !hud.switcherOpen
+                visible: hud.currentSection === "chat"
+                    && !hud.loginOpen && !hud.switcherOpen
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 spacing: Theme.sectionGap
@@ -1004,6 +1031,17 @@ FloatingWindow {
                 }
             }
 
+            // Docs, memory, OMP helpers, and character replace chat rather than
+            // nesting its roster/conversation sidebar inside their own index.
+            ContextBrowser {
+                id: contextBrowser
+                visible: hud.currentSection !== "chat"
+                    && !hud.loginOpen && !hud.switcherOpen
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                section: hud.currentSection
+            }
+
             // Model switcher: swaps in over the transcript body.
             ModelSwitcher {
                 id: modelSwitcher
@@ -1031,6 +1069,17 @@ FloatingWindow {
                     }
                 }
             }
+        }
+
+        // summon-ghost's final desktop navigation: a permanent 64px rail at
+        // the far right, reserving its width instead of covering the content.
+        GhostNavigation {
+            anchors.top: parent.top
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            width: hud.navigationWidth
+            currentSection: hud.currentSection
+            onSelected: section => hud.showSection(section)
         }
 
         // ---- Destructive confirmation ------------------------------------

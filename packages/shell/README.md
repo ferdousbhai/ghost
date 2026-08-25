@@ -109,6 +109,23 @@ structural. A block long enough to be a section of a multi-step answer stays in
 the reply whatever follows it. Live and restored transcripts run the same split,
 so a reload does not resurrect what streaming set aside.
 
+## Context navigation
+
+The restored 64px rail at the right edge is the successor to summon-ghost's
+final `AppSideNav` (`4852804cf4e09ca50c16e08e6106c06df82e2a94`): Chat,
+Docs, Memory, Helpers, and Character stay reachable without covering the
+content. Docs follows that version's Train layout — a document index on the
+left and the existing lossless markdown editor on the right — but deliberately
+omits Train's adjacent chat panel and Ghost's roster/conversation sidebar.
+
+The daemon derives one authenticated context snapshot from the live ghost home
+and OMP agent discovery when the surface opens. Docs and character remain plain
+editable files; memory is shown read-only as atomic facts so the browser cannot
+produce invalid memory frontmatter; helpers expose their system prompts and
+capability metadata but not their source paths. The snapshot is never persisted,
+so an external file or helper edit becomes visible on refresh without an index
+to repair.
+
 ## System tray
 
 The ghost also shows up as a system-tray icon — a StatusNotifierItem — for as
@@ -154,6 +171,7 @@ qs -c ghost ipc call ghost ask "<prompt>"     # reply arrives as a notification
 qs -c ghost ipc call ghost login              # open "Connect a model"
 qs -c ghost ipc call ghost loginTo <id> <oauth|api_key>   # and start one
 qs -c ghost ipc call ghost switcher           # open the model switcher
+qs -c ghost ipc call ghost section docs       # chat|docs|memory|agents|character
 qs -c ghost ipc call ghost status             # JSON
 qs -c ghost ipc call ghost refresh            # re-read roster and theme
 ```
