@@ -202,11 +202,25 @@ one must not be a leak of both.
   conversations are readable here; a Claude Code conversation's transcript lives
   in that runtime's own storage.
 - `GET /api/ghosts/:name/sessions/:id/ask` → `{ ask }`, where `ask` is the
-  currently pending OMP interaction or `null`.
+  currently pending OMP interaction or `null`. A pending ask carries `timeoutAt`
+  when one is armed.
 - `POST /api/ghosts/:name/sessions/:id/ask` resolves it. The body is
   `{ askId, kind: "submit", results }`, `{ askId, kind: "chat" }`, or
   `{ askId, kind: "cancel" }`. The first valid response wins; stale ids return
   a conflict. `ask` is human input, not tool approval.
+- **A pending ask can also resolve with no client involved.** The daemon arms a
+  deadline (`askTimeoutSeconds`, default 120; `0` waits forever), and on expiry
+  submits the question's recommended option and lets the turn continue, which is
+  what keeps a conversation from stalling on a question nobody is there to
+  answer. A question that names its own `timeout` keeps it. A client can
+  therefore find an ask gone that it never answered: `GET` returns `null` and
+  `POST` is `409 ask_not_pending`, which means settled rather than broken. The
+  clock starts when the question is presented, not when the model asked it, so a
+  slow turn does not spend the budget before anyone can see it.
+
+  The deadline is daemon-wide rather than per-ghost: how long a dialog waits is
+  a property of the person at the keyboard, not of the persona asking, and a
+  ghost home holds only what makes that ghost that ghost.
 - `GET|POST /api/ghosts/:name/sessions/:id/queue` reads or enqueues OMP's
   native mid-turn queues. POST is `{ mode: "steer"|"followUp", text }`:
   steering enters the active run, while follow-up runs after it.
