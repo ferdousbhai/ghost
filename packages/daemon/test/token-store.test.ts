@@ -79,6 +79,106 @@ describe("shared token-store persistence", () => {
     expect(results.filter((result) => result.created)).toHaveLength(1);
   });
 
+  it("reads a concurrent winner that appears between read and symlink inspection", async () => {
+    await mkdir(join(dir, "state"));
+    const token = "b".repeat(64);
+    const moduleUrl = new URL("../src/token-store.ts", import.meta.url).href;
+    const script = `
+      import fs from "node:fs";
+      import { syncBuiltinESMExports } from "node:module";
+
+      const tokenPath = ${JSON.stringify(path)};
+      const token = ${JSON.stringify(token)};
+      const originalReadFileSync = fs.readFileSync;
+      let intercepted = false;
+      let readAttempts = 0;
+      fs.readFileSync = function (candidate, options) {
+        if (candidate === tokenPath) readAttempts += 1;
+        if (!intercepted && candidate === tokenPath) {
+          intercepted = true;
+          fs.writeFileSync(tokenPath, token + "\\n", { mode: 0o600 });
+          const missing = new Error("simulated stale missing read");
+          missing.code = "ENOENT";
+          throw missing;
+        }
+        return originalReadFileSync.call(this, candidate, options);
+      };
+      syncBuiltinESMExports();
+
+      const { createTokenStore } = await import(${JSON.stringify(moduleUrl)});
+      const store = createTokenStore({
+        filename: "test-token",
+        envVar: "GHOSTD_TEST_TOKEN_FILE",
+        command: "test-token",
+        purpose: "Test token.",
+      });
+      const result = store.readOrCreate({ path: tokenPath });
+      process.stdout.write(JSON.stringify({
+        intercepted,
+        readAttempts,
+        result,
+      }));
+    `;
+
+    // Bun does not currently synchronize monkey-patched builtin exports, so
+    // use the Node runtime already required by this workspace for this seam.
+    const { stdout } = await execFileAsync("node", ["--eval", script]);
+    expect(JSON.parse(stdout)).toEqual({
+      intercepted: true,
+      readAttempts: 2,
+      result: { token, path, created: false },
+    });
+  });
+
+  it("rejects a FIFO revealed after ENOENT without retrying a blocking read", async () => {
+    await mkdir(join(dir, "state"));
+    const moduleUrl = new URL("../src/token-store.ts", import.meta.url).href;
+    const script = `
+      import { execFileSync } from "node:child_process";
+      import fs from "node:fs";
+      import { syncBuiltinESMExports } from "node:module";
+
+      const tokenPath = ${JSON.stringify(path)};
+      const originalReadFileSync = fs.readFileSync;
+      let readAttempts = 0;
+      fs.readFileSync = function (candidate, options) {
+        if (candidate === tokenPath) {
+          readAttempts += 1;
+          if (readAttempts === 1) {
+            execFileSync("mkfifo", [tokenPath]);
+            const missing = new Error("simulated stale missing read");
+            missing.code = "ENOENT";
+            throw missing;
+          }
+        }
+        return originalReadFileSync.call(this, candidate, options);
+      };
+      syncBuiltinESMExports();
+
+      const { createTokenStore } = await import(${JSON.stringify(moduleUrl)});
+      const store = createTokenStore({
+        filename: "test-token",
+        envVar: "GHOSTD_TEST_TOKEN_FILE",
+        command: "test-token",
+        purpose: "Test token.",
+      });
+      try {
+        store.readOrCreate({ path: tokenPath });
+      } catch (error) {
+        process.stdout.write(JSON.stringify({
+          readAttempts,
+          message: error instanceof Error ? error.message : String(error),
+        }));
+      }
+    `;
+
+    const { stdout } = await execFileAsync("node", ["--eval", script], { timeout: 1_000 });
+    expect(JSON.parse(stdout)).toEqual({
+      readAttempts: 1,
+      message: `Token file ${path} is not a regular file.`,
+    });
+  });
+
   it("rejects a dangling token symlink without retrying forever", async () => {
     await mkdir(join(dir, "state"));
     await symlink("missing-token", path);

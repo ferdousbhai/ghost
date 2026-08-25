@@ -110,12 +110,23 @@ function readToken(path: string): string | undefined {
             `Token file ${path} is a dangling symlink; rotate it explicitly to replace it.`,
           );
         }
+        if (!entry.isFile()) {
+          throw new Error(`Token file ${path} is not a regular file.`);
+        }
       } catch (entryError) {
         if (isErrno(entryError, "ENOENT")) return undefined;
         throw entryError;
       }
+
+      // Another process can exclusively create the token after readFileSync
+      // reports ENOENT but before lstatSync checks for a dangling symlink. A
+      // regular entry means that first ENOENT is stale, so read the winner
+      // once. Do not recurse or spin: if the entry changes again, surface that
+      // second read exactly as any other concurrent filesystem mutation.
+      text = readFileSync(path, "utf8");
+    } else {
+      throw error;
     }
-    throw error;
   }
   const token = text.trim();
   if (!TOKEN_PATTERN.test(token)) {
