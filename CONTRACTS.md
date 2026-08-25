@@ -3,7 +3,7 @@
 The interfaces the packages build against. Change these deliberately, in one
 commit, with every consumer updated.
 
-## Ghost home (`ghost-home/v1`)
+## Ghost home (`ghost-home/v2`)
 
 One directory per ghost. Plain files; anything derivable (memory index, doc
 catalog) is derived per session and never stored.
@@ -11,8 +11,8 @@ catalog) is derived per session and never stored.
 ```
 ~/Ghosts/<name>/
   character.md                 persona → system prompt (optional title frontmatter)
-  docs/**/*.md                 optional YAML frontmatter: title, tags, archived,
-                               path (pre-sanitization app path)
+  docs/**/*.md                 first line `# Title`; optional final hashtag line
+                               such as `#launch #product`
   memory/*.md                  atomic memory files: frontmatter description + updated,
                                body = the fact
   .omp/                        OMP-native project skills, rules, tools, commands,
@@ -26,12 +26,38 @@ catalog) is derived per session and never stored.
                                notIncluded
 ```
 
-`docs/` is canonical. A legacy home or hosted `ghost-home/v1` archive may carry
-`notes/`; daemon startup and import migrate that directory to `docs/` without
-rewriting file bytes. The live-home migration is atomic when only `notes/`
-exists; if both directories exist, startup fails with a conflict instead of
-guessing which files win. Import rejects archive entries that collide after
-translation. New homes and all new writes use only `docs/`.
+Every document is ordinary Markdown in one canonical form:
+
+```md
+# Launch notes
+
+The document body.
+
+#launch #product
+```
+
+The first line is a non-empty level-one ATX heading and is the catalog title.
+The optional final nonblank line is a space-separated list of lowercase tag
+slugs matching `#[a-z0-9]+(?:-[a-z0-9]+)*`; `#archived` is reserved and removes
+the document from the default working set. Derived `tags` exclude that reserved
+status and deduplicate repeated slugs. The title and tag line remain part of the
+Markdown file. Docs never use YAML frontmatter, and readers reject anything
+outside this form after migration.
+
+`docs/` is canonical. On import and daemon startup, the one-time `ghost-home/v1`
+to `ghost-home/v2` migration first renames an unambiguous legacy `notes/`
+directory to `docs/`, then rewrites every legacy document atomically. A
+document's existing first H1 wins as its title, followed by legacy frontmatter
+`title`, then its filename. Legacy tags become lowercase hyphenated hashtag
+slugs, `archived: true` becomes `#archived`, and the import-only legacy `path`
+field is discarded. A trailing hashtag line already in the body is merged and
+deduplicated. An imported home's `export-manifest.json` is atomically promoted
+from `ghost-home/v1` to `ghost-home/v2` with every other field preserved.
+Each converted file is immediately valid v2, so a crash is recovered by
+rerunning the scan; no marker or dual-format reader is kept. If both `notes/`
+and `docs/` exist, startup still fails instead of guessing which files win.
+Import rejects entries that collide after directory translation. New homes and
+all writes produce only v2 docs.
 
 Hosted conversation JSON is also a migration fixture, not the daemon's live
 session store. `ghostd import` and daemon startup idempotently project each valid
@@ -168,8 +194,8 @@ one must not be a leak of both.
   skipped }` — the owner's browseable ghost context and OMP capabilities,
   derived from disk for each request and never stored. `character` is
   `{ path: "character.md", title }`. `docs` contains
-  `{ path: "docs/<relative>.md", relativePath, title, tags, archived }`, with a
-  filename-derived title when frontmatter omits one. `memory` contains
+  `{ path: "docs/<relative>.md", relativePath, title, tags, archived }`, derived
+  from the document's first H1 and optional final hashtag line. `memory` contains
   `{ path: "memory/<slug>.md", slug, description, content, updated }`.
   `agents` contains the OMP task helpers available under the same project,
   user, extension, bundled, precedence, and `task.disabledAgents` rules as a

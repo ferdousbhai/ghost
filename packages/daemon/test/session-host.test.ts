@@ -43,9 +43,7 @@ afterEach(async () => {
   temp = null;
 });
 
-const TEST_DOC = `---
-title: Restoring the Vandercook
----
+const TEST_DOC = `# Restoring the Vandercook
 
 Pull the roller bearings before you soak anything.
 `;

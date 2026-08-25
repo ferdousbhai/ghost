@@ -130,6 +130,12 @@ capability metadata but not their source paths. The snapshot is never persisted,
 so an external file or helper edit becomes visible on refresh without an index
 to repair.
 
+A v2 doc starts with a first-line H1 and may end with lowercase hashtags; it
+never has YAML frontmatter. The source editor shows and saves that complete
+Markdown, while Reading renders it. External edits still use the existing
+three-way merge/conflict policy. Daemon startup performs the one-time v1-to-v2
+migration before this surface lists any docs.
+
 ## System tray
 
 The ghost also shows up as a system-tray icon — a StatusNotifierItem — for as

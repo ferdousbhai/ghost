@@ -1,7 +1,7 @@
 /**
  * A ghost home on disk, written as raw bytes rather than through this package's
  * writers. The fixture is the format's independent witness: if the reader and
- * the writer drift together, these files still say what ghost-home/v1 is.
+ * writer drift together, these files still say what ghost-home/v2 is.
  */
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -26,35 +26,30 @@ export const ARCHIVED_DOC_PATH = "old-plan.md";
 const FILES: Record<string, string> = {
   "character.md": CHARACTER_MD,
 
-  [`docs/${PAPER_DOC_PATH}`]: `---
-title: Paper that takes a deep impression
-tags: [paper, press]
----
+  [`docs/${PAPER_DOC_PATH}`]: `# Paper that takes a deep impression
 
 Damp the sheet the night before. Cotton rag at 240gsm holds the bite.
+
+#paper #press
 `,
 
-  "docs/press-restoration.md": `---
-title: "Restoring the Vandercook 4"
-tags: [press]
----
+  "docs/press-restoration.md": `# Restoring the Vandercook 4
 
 The carriage was frozen. Kerosene, patience, and a week of turning it by hand.
+
+#press
 `,
 
-  [`docs/${FINANCE_DOC_PATH}`]: `---
-title: Estate and finances
----
+  [`docs/${FINANCE_DOC_PATH}`]: `# Estate and finances
 
 The studio lease is held under my sister's name until 2031.
 `,
 
-  [`docs/${ARCHIVED_DOC_PATH}`]: `---
-title: Old plan
-archived: true
----
+  [`docs/${ARCHIVED_DOC_PATH}`]: `# Old plan
 
 Superseded. Kept for the record.
+
+#archived
 `,
 
   "memory/apprentice-question.md": `---

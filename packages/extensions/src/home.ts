@@ -1,5 +1,5 @@
 /**
- * The ghost-home/v1 reader/writer.
+ * The ghost-home/v2 reader/writer and one-time v1 document migrator.
  *
  * A ghost is a directory (CONTRACTS.md):
  *
@@ -22,17 +22,24 @@
  * parallel by default, so two `ghost_memory_write` calls in one batch can
  * otherwise interleave on the same file.
  */
-import { mkdir, readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  readdir,
+  readFile,
+  rename,
+  stat,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { isSafe } from "redos-detector";
+import { migrateDoc, parseDoc } from "./doc-format.js";
 import { GhostError } from "./errors.js";
 import {
   parseDocument,
-  readBoolean,
   readString,
-  readStringList,
   renderDocument,
-  yamlFlowList,
   yamlScalar,
 } from "./frontmatter.js";
 import {
@@ -44,16 +51,17 @@ import {
   parseMemoryFile,
   serializeMemoryFile,
 } from "./memory-file.js";
+import { GHOST_HOME_FORMAT } from "./types.js";
 import type {
   CharacterFile,
   MemoryRecord,
   DocFile,
-  DocFrontmatter,
   DocMeta,
 } from "./types.js";
 
 export const DOCS_DIRNAME = "docs";
 const LEGACY_NOTES_DIRNAME = "notes";
+const LEGACY_GHOST_HOME_FORMAT = "ghost-home/v1";
 export const MEMORY_DIRNAME = "memory";
 export const CONVERSATIONS_DIRNAME = "conversations";
 export const CHARACTER_FILENAME = "character.md";
@@ -80,12 +88,8 @@ export interface MemoryListing {
 }
 
 export interface DocWriteInput {
+  /** Complete canonical ghost-home/v2 Markdown, written byte-for-byte. */
   readonly body: string;
-  readonly title?: string;
-  readonly tags?: readonly string[];
-  readonly archived?: boolean;
-  /** Pre-sanitization app path, preserved from an imported archive. */
-  readonly appPath?: string;
 }
 
 export interface MemoryWriteInput {
@@ -218,30 +222,96 @@ export function normalizeDocPath(input: string): string {
   return segments.join("/");
 }
 
-function docFrontmatterFrom(text: string): { meta: DocFrontmatter; body: string } {
-  const parsed = parseDocument(text);
-  return {
-    meta: {
-      title: readString(parsed.frontmatter, "title"),
-      tags: readStringList(parsed.frontmatter, "tags"),
-      archived: readBoolean(parsed.frontmatter, "archived"),
-      appPath: readString(parsed.frontmatter, "path"),
-    },
-    body: parsed.body,
-  };
+async function migrateDocFile(fullPath: string, docPath: string): Promise<void> {
+  await withFileMutationQueue(fullPath, async () => {
+    const text = await readFile(fullPath, "utf8");
+    const migrated = migrateDoc(text, docPath);
+    if (migrated === text) return;
+
+    const temporary = join(
+      dirname(fullPath),
+      `.${basename(fullPath)}.migrate-${process.pid}-${randomUUID()}`,
+    );
+    try {
+      await writeFile(temporary, migrated, { encoding: "utf8", flag: "wx" });
+      await rename(temporary, fullPath);
+    } catch (error) {
+      await unlink(temporary).catch(() => undefined);
+      throw error;
+    }
+  });
 }
 
-/** Frontmatter lines in the order the hosted export writes them. */
-function docFrontmatterLines(meta: DocFrontmatter, path: string): string[] {
-  const lines: string[] = [];
-  const filename = basename(path, ".md");
-  if (meta.title !== undefined && meta.title !== filename) {
-    lines.push(`title: ${yamlScalar(meta.title)}`);
+async function migrateDocTree(dir: string, prefix = ""): Promise<void> {
+  for (const entry of await readDirEntries(dir)) {
+    if (entry.name.startsWith(".")) continue;
+    const docPath = prefix ? `${prefix}/${entry.name}` : entry.name;
+    const fullPath = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      await migrateDocTree(fullPath, docPath);
+    } else if (entry.isFile() && entry.name.endsWith(".md")) {
+      await migrateDocFile(fullPath, docPath);
+    }
   }
-  if (meta.tags.length > 0) lines.push(`tags: ${yamlFlowList([...meta.tags])}`);
-  if (meta.archived) lines.push("archived: true");
-  if (meta.appPath !== undefined) lines.push(`path: ${yamlScalar(meta.appPath)}`);
-  return lines;
+}
+
+function parseExportManifest(text: string): Record<string, unknown> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text) as unknown;
+  } catch (error) {
+    throw new GhostError(
+      "invalid_format",
+      `${EXPORT_MANIFEST_FILENAME} is not readable JSON: ${message(error)}`,
+    );
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new GhostError(
+      "invalid_format",
+      `${EXPORT_MANIFEST_FILENAME} must contain a JSON object.`,
+    );
+  }
+  return parsed as Record<string, unknown>;
+}
+
+async function migrateExportManifest(dir: string): Promise<void> {
+  const fullPath = join(dir, EXPORT_MANIFEST_FILENAME);
+  await withFileMutationQueue(fullPath, async () => {
+    let text: string;
+    try {
+      text = await readFile(fullPath, "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw error;
+    }
+
+    const manifest = parseExportManifest(text);
+    if (manifest.format === GHOST_HOME_FORMAT) return;
+    if (manifest.format !== LEGACY_GHOST_HOME_FORMAT) {
+      throw new GhostError(
+        "invalid_format",
+        `Unsupported home format ${JSON.stringify(manifest.format)}; expected `
+        + `${JSON.stringify(GHOST_HOME_FORMAT)}.`,
+        { format: manifest.format },
+      );
+    }
+
+    const temporary = join(
+      dir,
+      `.${EXPORT_MANIFEST_FILENAME}.migrate-${process.pid}-${randomUUID()}`,
+    );
+    try {
+      await writeFile(
+        temporary,
+        `${JSON.stringify({ ...manifest, format: GHOST_HOME_FORMAT }, null, 2)}\n`,
+        { encoding: "utf8", flag: "wx" },
+      );
+      await rename(temporary, fullPath);
+    } catch (error) {
+      await unlink(temporary).catch(() => undefined);
+      throw error;
+    }
+  });
 }
 
 export class GhostHome {
@@ -299,6 +369,8 @@ export class GhostHome {
     }
     if (hasLegacyNotes) await rename(legacyNotesDir, this.docsDir);
     await mkdir(this.docsDir, { recursive: true });
+    await migrateDocTree(this.docsDir);
+    await migrateExportManifest(this.dir);
     await mkdir(this.memoryDir, { recursive: true });
     await mkdir(this.conversationsDir, { recursive: true });
   }
@@ -351,7 +423,7 @@ export class GhostHome {
         if (!entry.name.endsWith(".md")) continue;
         try {
           const text = await readFile(join(dir, entry.name), "utf8");
-          docs.push({ ...docFrontmatterFrom(text).meta, path: childPath });
+          docs.push({ ...parseDoc(text), path: childPath });
         } catch (error) {
           skipped.push({
             path: `${DOCS_DIRNAME}/${childPath}`,
@@ -378,8 +450,8 @@ export class GhostHome {
       }
       throw error;
     }
-    const parsed = docFrontmatterFrom(text);
-    return { meta: { ...parsed.meta, path: docPath }, body: parsed.body };
+    const parsed = parseDoc(text);
+    return { meta: { ...parsed, path: docPath }, body: text };
   }
 
   /** Metadata for one doc, or null when it does not exist. */
@@ -395,20 +467,12 @@ export class GhostHome {
   async writeDoc(path: string, input: DocWriteInput): Promise<DocMeta> {
     const docPath = normalizeDocPath(path);
     const full = resolveWithin(this.docsDir, docPath, "Document path");
-    const existing = await this.findDoc(docPath);
-    const meta: DocMeta = {
-      path: docPath,
-      title: input.title ?? existing?.title,
-      tags: input.tags ?? existing?.tags ?? [],
-      archived: input.archived ?? existing?.archived ?? false,
-      appPath: input.appPath ?? existing?.appPath,
-    };
-    const text = renderDocument(docFrontmatterLines(meta, docPath), input.body);
+    const parsed = parseDoc(input.body);
     await withFileMutationQueue(full, async () => {
       await mkdir(dirname(full), { recursive: true });
-      await writeFile(full, text, "utf8");
+      await writeFile(full, input.body, "utf8");
     });
-    return meta;
+    return { ...parsed, path: docPath };
   }
 
   /** Plain substring or regex search over doc bodies and titles. */
@@ -474,12 +538,14 @@ export class GhostHome {
     for (const doc of candidates) {
       docsSearched += 1;
       const { body, meta } = await this.readDoc(doc.path);
-      if (meta.title !== undefined && pattern.test(meta.title)) {
+      if (pattern.test(meta.title)) {
         if (!collect({ path: doc.path, line: 0, text: `title: ${meta.title}` })) break;
       }
       const lines = body.split("\n");
       let overflowed = false;
-      for (let index = 0; index < lines.length; index += 1) {
+      // The complete v2 body includes the title heading; it was already
+      // represented by the stable synthetic line 0 above.
+      for (let index = 1; index < lines.length; index += 1) {
         const line = lines[index] as string;
         const scanned = line.length > MAX_GREP_LINE_SCAN_CHARS
           ? line.slice(0, MAX_GREP_LINE_SCAN_CHARS)
@@ -595,19 +661,25 @@ export class GhostHome {
       .sort((left, right) => left.localeCompare(right));
   }
 
-  /** The `export-manifest.json` of the archive this home was imported from. */
+  /** The v2 `export-manifest.json` of the archive this home was imported from. */
   async readExportManifest(): Promise<Record<string, unknown> | null> {
+    let text: string;
     try {
-      return JSON.parse(
-        await readFile(join(this.dir, EXPORT_MANIFEST_FILENAME), "utf8"),
-      ) as Record<string, unknown>;
+      text = await readFile(join(this.dir, EXPORT_MANIFEST_FILENAME), "utf8");
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
+    }
+    const manifest = parseExportManifest(text);
+    if (manifest.format !== GHOST_HOME_FORMAT) {
       throw new GhostError(
         "invalid_format",
-        `${EXPORT_MANIFEST_FILENAME} is not readable JSON: ${message(error)}`,
+        `Unsupported home format ${JSON.stringify(manifest.format)}; expected `
+        + `${JSON.stringify(GHOST_HOME_FORMAT)}.`,
+        { format: manifest.format },
       );
     }
+    return manifest;
   }
 }
 

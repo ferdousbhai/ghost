@@ -127,7 +127,7 @@ describe("GET /api/ghosts/:name/context", () => {
     );
     writeFileSync(
       join(ghostDir, "docs", "guides", "launch.md"),
-      "---\ntitle: Launch guide\ntags: [product, launch]\n---\n\nShip deliberately.\n",
+      "# Launch guide\n\nShip deliberately.\n\n#product #launch\n",
       "utf8",
     );
     writeFileSync(

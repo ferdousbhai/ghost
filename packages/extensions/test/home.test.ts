@@ -1,4 +1,4 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { deriveDocCatalog } from "../src/catalog.js";
@@ -38,21 +38,115 @@ describe("layout", () => {
     await expect(readFile(join(fixture.dir, "MEMORY.md"), "utf8")).rejects.toThrow();
   });
 
-  it("atomically migrates an unambiguous legacy notes directory", async () => {
+  it("migrates nested legacy docs to strict v2 and is idempotent", async () => {
     const legacy = await createGhostFixture("legacy", {
       "character.md": "# Legacy\n",
-      "notes/project.md": "legacy bytes\n",
+      "notes/nested/h1-wins.md": `---
+title: Frontmatter loses
+tags: [Route Planning, route-planning, Café, "!!!"]
+archived: true
+path: Discard me
+---
+
+An introduction.
+# Body Wins
+The details.
+#Existing #route-planning
+`,
+      "notes/nested/frontmatter-title.md": "---\ntitle: Frontmatter Wins\n---\n\nText.\n",
+      "notes/deeper/plain-name.md": "No heading here.\n",
+      "notes/.hidden.md": "hidden legacy bytes\n",
+      "notes/.private/ignored.md": "hidden directory bytes\n",
     });
     try {
       const legacyHome = openGhostHome(legacy.dir);
       await legacyHome.ensure();
-      expect(await readFile(join(legacyHome.docsDir, "project.md"), "utf8"))
-        .toBe("legacy bytes\n");
-      await expect(readFile(join(legacy.dir, "notes", "project.md"), "utf8"))
+      expect(await readFile(join(legacyHome.docsDir, "nested/h1-wins.md"), "utf8"))
+        .toBe(
+          "# Body Wins\n\nAn introduction.\nThe details.\n\n"
+          + "#route-planning #cafe #existing #archived\n",
+        );
+      expect(await readFile(
+        join(legacyHome.docsDir, "nested/frontmatter-title.md"),
+        "utf8",
+      )).toBe("# Frontmatter Wins\n\nText.\n");
+      expect(await readFile(join(legacyHome.docsDir, "deeper/plain-name.md"), "utf8"))
+        .toBe("# plain-name\n\nNo heading here.\n");
+      expect(await readFile(join(legacyHome.docsDir, ".hidden.md"), "utf8"))
+        .toBe("hidden legacy bytes\n");
+      expect(await readFile(join(legacyHome.docsDir, ".private/ignored.md"), "utf8"))
+        .toBe("hidden directory bytes\n");
+
+      const migrated = await readFile(join(legacyHome.docsDir, "nested/h1-wins.md"), "utf8");
+      await legacyHome.ensure();
+      expect(await readFile(join(legacyHome.docsDir, "nested/h1-wins.md"), "utf8"))
+        .toBe(migrated);
+      await expect(readFile(join(legacy.dir, "notes/nested/h1-wins.md"), "utf8"))
         .rejects.toThrow();
     } finally {
       await legacy.cleanup();
     }
+  });
+
+  it("does not rewrite canonical docs during a partial migration rerun", async () => {
+    const partial = await createGhostFixture("partial", {
+      "docs/already.md": "# Already canonical\n\nBytes stay put.\n\n#kept\n",
+      "docs/legacy.md": "---\ntitle: Legacy\n---\n\nNeeds migration.\n",
+    });
+    try {
+      const partialHome = openGhostHome(partial.dir);
+      const canonicalPath = join(partialHome.docsDir, "already.md");
+      const inode = (await stat(canonicalPath)).ino;
+      await partialHome.ensure();
+      expect((await stat(canonicalPath)).ino).toBe(inode);
+      expect(await readFile(canonicalPath, "utf8"))
+        .toBe("# Already canonical\n\nBytes stay put.\n\n#kept\n");
+      expect(await readFile(join(partialHome.docsDir, "legacy.md"), "utf8"))
+        .toBe("# Legacy\n\nNeeds migration.\n");
+    } finally {
+      await partial.cleanup();
+    }
+  });
+
+  it("atomically migrates a v1 export manifest and leaves v2 untouched on rerun", async () => {
+    const manifestHome = await createGhostFixture("manifest", {
+      "docs/doc.md": "# Doc\n",
+      "export-manifest.json": JSON.stringify({
+        format: "ghost-home/v1",
+        ghostname: "manifest",
+        counts: { notes: 1 },
+        custom: ["preserved"],
+      }),
+    });
+    try {
+      const opened = openGhostHome(manifestHome.dir);
+      await expect(opened.readExportManifest())
+        .rejects.toMatchObject({ code: "invalid_format" });
+      await opened.ensure();
+      expect(await opened.readExportManifest()).toEqual({
+        format: "ghost-home/v2",
+        ghostname: "manifest",
+        counts: { notes: 1 },
+        custom: ["preserved"],
+      });
+      const manifestPath = join(manifestHome.dir, "export-manifest.json");
+      const inode = (await stat(manifestPath)).ino;
+      await opened.ensure();
+      expect((await stat(manifestPath)).ino).toBe(inode);
+    } finally {
+      await manifestHome.cleanup();
+    }
+  });
+
+  it("rejects non-object and non-v2 live manifests", async () => {
+    const manifestPath = join(fixture.dir, "export-manifest.json");
+    await writeFile(manifestPath, '{"format":"ghost-home/v3"}');
+    await expect(home.readExportManifest())
+      .rejects.toMatchObject({ code: "invalid_format" });
+    await expect(home.ensure()).rejects.toMatchObject({ code: "invalid_format" });
+    await writeFile(manifestPath, "[]");
+    await expect(home.readExportManifest())
+      .rejects.toMatchObject({ code: "invalid_format" });
   });
 
   it("refuses to guess when legacy notes and canonical docs both exist", async () => {
@@ -87,7 +181,7 @@ describe("character", () => {
 });
 
 describe("docs", () => {
-  it("lists every doc with its frontmatter", async () => {
+  it("lists strict v2 metadata derived from the raw Markdown", async () => {
     const { docs, skipped } = await home.listDocs();
     expect(skipped).toEqual([]);
     expect(docs.map((doc) => doc.path)).toEqual([
@@ -98,38 +192,58 @@ describe("docs", () => {
     ].sort((a, b) => a.localeCompare(b)));
 
     const paper = docs.find((doc) => doc.path === PAPER_DOC_PATH);
-    expect(paper?.tags).toEqual(["paper", "press"]);
+    expect(paper).toMatchObject({
+      title: "Paper that takes a deep impression",
+      tags: ["paper", "press"],
+      archived: false,
+    });
     const archived = docs.find((doc) => doc.path === ARCHIVED_DOC_PATH);
-    expect(archived?.archived).toBe(true);
+    expect(archived).toMatchObject({ tags: [], archived: true });
   });
 
-  it("reads a doc without frontmatter", async () => {
-    await home.writeDoc("scratch.md", { body: "unmarked" });
-    const doc = await home.readDoc("scratch");
-    expect(doc.body).toBe("unmarked");
+  it("returns the complete canonical Markdown body", async () => {
+    const bytes = await readFile(join(home.docsDir, PAPER_DOC_PATH), "utf8");
+    const doc = await home.readDoc(PAPER_DOC_PATH);
+    expect(doc.body).toBe(bytes);
+    expect(doc.body.startsWith("# Paper that takes a deep impression")).toBe(true);
+    expect(doc.body.endsWith("#paper #press\n")).toBe(true);
   });
 
-  it("keeps the body byte-identical across a read/write round trip", async () => {
+  it("validates then writes exactly the supplied canonical bytes", async () => {
+    const exact = "# Exact bytes\r\n\r\nKeep trailing spaces  \r\n\r\n#one\r\n";
+    const meta = await home.writeDoc("nested/exact.md", { body: exact });
+    expect(meta).toMatchObject({ title: "Exact bytes", tags: ["one"], archived: false });
+    expect(await readFile(join(home.docsDir, "nested/exact.md"), "utf8")).toBe(exact);
+    expect((await home.readDoc("nested/exact")).body).toBe(exact);
+  });
+
+  it("rejects non-v2 bytes on every live read and write path", async () => {
+    const invalidPath = join(home.docsDir, "invalid.md");
+    await writeFile(invalidPath, "---\ntitle: Legacy\n---\n\nbody\n");
+    await expect(home.readDoc("invalid")).rejects.toMatchObject({ code: "invalid_format" });
+    const listing = await home.listDocs();
+    expect(listing.docs.some((doc) => doc.path === "invalid.md")).toBe(false);
+    expect(listing.skipped).toEqual([
+      expect.objectContaining({ path: "docs/invalid.md" }),
+    ]);
+    await expect(home.writeDoc("plain.md", { body: "plain bytes" }))
+      .rejects.toMatchObject({ code: "invalid_format" });
+    await expect(home.writeDoc("uppercase-tag.md", {
+      body: "# Valid title\n\n#Not-Canonical\n",
+    })).rejects.toMatchObject({ code: "invalid_format" });
+    await expect(readFile(join(home.docsDir, "plain.md"), "utf8")).rejects.toThrow();
+  });
+
+  it("keeps canonical bytes identical across a read/write round trip", async () => {
     const before = await readFile(join(home.docsDir, PAPER_DOC_PATH), "utf8");
     const doc = await home.readDoc(PAPER_DOC_PATH);
-    await home.writeDoc(PAPER_DOC_PATH, {
-      body: doc.body,
-      ...(doc.meta.title === undefined ? {} : { title: doc.meta.title }),
-      tags: doc.meta.tags,
-    });
+    await home.writeDoc(PAPER_DOC_PATH, { body: doc.body });
     expect(await readFile(join(home.docsDir, PAPER_DOC_PATH), "utf8")).toBe(before);
-  });
-
-  it("preserves unspecified frontmatter when rewriting a body", async () => {
-    await home.writeDoc(PAPER_DOC_PATH, { body: "new body" });
-    const doc = await home.readDoc(PAPER_DOC_PATH);
-    expect(doc.body).toBe("new body");
-    expect(doc.meta.tags).toEqual(["paper", "press"]);
   });
 
   it("refuses paths that escape the docs directory", async () => {
     await expect(home.readDoc("../../etc/passwd")).rejects.toThrow(GhostError);
-    await expect(home.writeDoc("../outside.md", { body: "x" })).rejects.toThrow(GhostError);
+    await expect(home.writeDoc("../outside.md", { body: "# X\n" })).rejects.toThrow(GhostError);
   });
 
   it("throws not_found rather than returning an error payload", async () => {
@@ -140,7 +254,15 @@ describe("docs", () => {
     const result = await home.searchDocs("carriage");
     expect(result.matches).toHaveLength(1);
     expect(result.matches[0]?.path).toBe("press-restoration.md");
-    expect(result.matches[0]?.line).toBe(1);
+    expect(result.matches[0]?.line).toBe(3);
+  });
+
+  it("excludes #archived docs from search unless explicitly activated", async () => {
+    expect((await home.searchDocs("Superseded")).matches).toEqual([]);
+    const active = await home.searchDocs("Superseded", { includeArchived: true });
+    expect(active.matches).toEqual([
+      expect.objectContaining({ path: ARCHIVED_DOC_PATH, line: 3 }),
+    ]);
   });
 
   it("refuses a catastrophic-backtracking regex fast instead of hanging", async () => {
@@ -170,8 +292,7 @@ describe("docs", () => {
   it("caps title matches at max_results and reports truncation", async () => {
     for (let index = 0; index < 10; index += 1) {
       await home.writeDoc(`widgets/w${index}.md`, {
-        body: "nothing to match in the body",
-        title: `Widget number ${index}`,
+        body: `# Widget number ${index}\n\nNothing to match in the body.\n`,
       });
     }
     const result = await home.searchDocs("Widget number", { maxResults: 3 });

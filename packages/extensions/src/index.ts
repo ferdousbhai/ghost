@@ -28,6 +28,15 @@ export {
 } from "./frontmatter.js";
 
 export {
+  migrateDoc,
+  parseDoc,
+  renderDoc,
+  slugifyDocTag,
+  type DocRenderInput,
+  type ParsedDoc,
+} from "./doc-format.js";
+
+export {
   assertWritableMemory,
   coerceMemorySlug,
   deriveMemoryIndex,
@@ -78,7 +87,6 @@ export {
   type MemoryRecord,
   type DocCatalog,
   type DocFile,
-  type DocFrontmatter,
   type DocMeta,
 } from "./types.js";
 

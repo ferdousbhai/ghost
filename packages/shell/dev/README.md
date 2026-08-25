@@ -50,8 +50,9 @@ qs -p qml/shell.qml kill
   hidden/unfocused, hide only when already focused.
   `section docs` shows the Train-style file index and lossless markdown editor;
   memory is read-only, Helpers describes OMP subagents, and Character edits
-  `character.md`. The mock's temporary fixture makes every pane live without
-  touching `~/Ghosts`.
+  `character.md`. Mock docs use the strict v2 shape: first-line H1, no YAML,
+  optional final hashtags. The temporary fixture makes every pane live without
+  touching `~/Ghosts`; production startup migrates v1 docs before listing them.
 - On `ask`: the spectral summoning orb saying "Checking what I remember about
   that" in the ghost's own words rather than a spectral phrase, then the reply
   arriving word by word with `**bold**` rendered as bold. The narration never

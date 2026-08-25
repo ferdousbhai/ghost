@@ -3,7 +3,7 @@
   "version": "0.0.1",
   "private": true,
   "license": "Apache-2.0",
-  "description": "Oh My Pi extensions that turn a plain-file ghost home into an AI persona, plus the ghost-home/v1 reader/writer.",
+  "description": "Oh My Pi extensions that turn a plain-file ghost home into an AI persona, plus the ghost-home/v2 reader/writer.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

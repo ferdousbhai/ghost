@@ -68,7 +68,11 @@ function memorySection(input: GhostSystemPromptInput): string[] {
 function docsSection(input: GhostSystemPromptInput): string[] {
   const heading = "## Your docs";
   const lead = "Your docs, by path under docs/. Use read to open them, grep or glob to "
-    + "search them, and write or edit to maintain them.";
+    + "search them, and write or edit to maintain them. Every doc is ghost-home/v2 "
+    + "Markdown and must start at byte 0 with a non-empty first-line H1 (`# Title`). It may have "
+    + "one optional final nonblank line containing only space-separated lowercase "
+    + "hashtags matching `#[a-z0-9]+(?:-[a-z0-9]+)*`; keep that line final when editing. "
+    + "The reserved `#archived` tag archives the doc. Never use YAML frontmatter.";
   const lines = input.docs.lines.length > 0
     ? [...input.docs.lines]
     : ["(no docs yet)"];

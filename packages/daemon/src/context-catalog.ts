@@ -1,4 +1,4 @@
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import { openGhostHome } from "@ghost/extensions";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { discoverAgents } from "@oh-my-pi/pi-coding-agent/task/discovery";
@@ -63,7 +63,7 @@ export async function readGhostContext(dir: string): Promise<GhostContextSnapsho
     .map<GhostContextDoc>((doc) => ({
       path: `docs/${doc.path}`,
       relativePath: doc.path,
-      title: doc.title ?? basename(doc.path, ".md"),
+      title: doc.title,
       tags: [...doc.tags],
       archived: doc.archived,
     }))

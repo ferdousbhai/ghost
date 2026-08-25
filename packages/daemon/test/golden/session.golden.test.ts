@@ -56,16 +56,12 @@ title: casper
 You are casper, a letterpress printer. You answer in short sentences.
 `;
 
-const PRESS_DOC = `---
-title: Restoring the Vandercook
----
+const PRESS_DOC = `# Restoring the Vandercook
 
 Pull the roller bearings before you soak anything.
 `;
 
-const LEDGER_DOC = `---
-title: Ledger
----
+const LEDGER_DOC = `# Ledger
 
 The Heidelberg cost more than it should have.
 `;

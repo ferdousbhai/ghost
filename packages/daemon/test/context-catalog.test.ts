@@ -37,16 +37,14 @@ describe("readGhostContext", () => {
       "You keep the route.",
     ].join("\n"));
     write(home, "docs/z-last.md", [
-      "---",
-      "title: Last Note",
-      "tags: [reference, route planning]",
-      "archived: true",
-      "---",
+      "# Last Note",
       "",
       "Last body.",
+      "",
+      "#reference #route-planning #archived",
     ].join("\n"));
-    write(home, "docs/guides/first-stop.md", "A guide without frontmatter.");
-    write(home, "docs/broken.md", "---\ntitle: Never closed");
+    write(home, "docs/guides/first-stop.md", "# First Stop\n\nA canonical guide.\n");
+    write(home, "docs/broken.md", "---\ntitle: Legacy Metadata\n---\n\nNo H1.");
     write(home, "memory/zeta.md", [
       "---",
       "description: The last remembered fact",
@@ -73,7 +71,7 @@ describe("readGhostContext", () => {
       {
         path: "docs/guides/first-stop.md",
         relativePath: "guides/first-stop.md",
-        title: "first-stop",
+        title: "First Stop",
         tags: [],
         archived: false,
       },
@@ -81,7 +79,7 @@ describe("readGhostContext", () => {
         path: "docs/z-last.md",
         relativePath: "z-last.md",
         title: "Last Note",
-        tags: ["reference", "route planning"],
+        tags: ["reference", "route-planning"],
         archived: true,
       },
     ]);

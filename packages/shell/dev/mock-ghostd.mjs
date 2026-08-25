@@ -77,7 +77,7 @@ const MOCK_DOCS = [
     relativePath: "reference/working-agreement.md",
     title: "Working agreement",
     tags: ["reference"],
-    archived: false,
+    archived: true,
   },
 ];
 
@@ -136,12 +136,12 @@ function seedMockHome(name) {
   );
   writeFileSync(
     join(dir, "docs", "launch-notes.md"),
-    "---\ntitle: Launch notes\ntags: [launch, product]\n---\n\n# Launch notes\n\nShip the context navigator with the right rail, a document index, and a lossless editor.\n",
+    "# Launch notes\n\nShip the context navigator with the right rail, a document index, and a lossless editor.\n\n#launch #product\n",
     "utf8",
   );
   writeFileSync(
     join(dir, "docs", "reference", "working-agreement.md"),
-    "---\ntitle: Working agreement\ntags: [reference]\n---\n\n# Working agreement\n\nDecisions first. Evidence next. No second source of truth.\n",
+    "# Working agreement\n\nDecisions first. Evidence next. No second source of truth.\n\n#reference #archived\n",
     "utf8",
   );
   writeFileSync(

@@ -9,9 +9,7 @@ import { createTempDir, writeFileTree } from "./support/fixture.js";
 
 /**
  * A hand-built ghost-home/v1 archive in the exact shape the hosted exporter
- * writes (`buildGhostHomeArchive` + `withExportManifest`): one root directory,
- * legacy `notes/` files with `title`/`tags`, memory files with
- * `description`/`updated`, transcripts in `conversations/`, and the manifest last.
+ * wrote. Import is the only boundary that still admits it.
  */
 const ROOT = "casper";
 const ARCHIVE: Record<string, string> = {
@@ -69,7 +67,7 @@ describe("importGhostArchive", () => {
 
     expect(result.ghostName).toBe("casper");
     expect(result.dir).toBe(join(ghostsRoot, "casper"));
-    expect(result.manifest.format).toBe("ghost-home/v1");
+    expect(result.manifest.format).toBe("ghost-home/v2");
     expect(result.filesWritten).toBe(Object.keys(ARCHIVE).length);
 
     const home = result.home;
@@ -78,26 +76,31 @@ describe("importGhostArchive", () => {
     const { docs } = await home.listDocs();
     expect(docs.map((doc) => doc.path))
       .toEqual(["craft/paper-notes.md", "estate-finances.md"]);
-    // The pre-sanitization app path survives the round trip.
-    expect(docs.find((doc) => doc.path === "estate-finances.md")?.appPath)
-      .toBe("Estate & finances");
+    expect(docs.find((doc) => doc.path === "estate-finances.md"))
+      .toMatchObject({ title: "Estate and finances", tags: [], archived: false });
 
     const memory = await home.listMemory();
     expect(deriveMemoryIndex(memory.files).lines)
       .toEqual(["- working-habit.md: I work in the morning"]);
 
     expect(await home.listConversations()).toEqual(["conv-1"]);
-    expect((await home.readExportManifest())?.["ghostname"]).toBe("casper");
+    expect(await home.readExportManifest())
+      .toMatchObject({ format: "ghost-home/v2", ghostname: "casper" });
   });
 
-  it("preserves file bytes while translating legacy notes paths to docs", async () => {
+  it("migrates v1 docs and manifest while preserving unrelated archive bytes", async () => {
     const ghostsRoot = join(workspace.dir, "Ghosts");
     const { dir } = await importGhostArchive(zipPath, ghostsRoot);
-    for (const [path, text] of Object.entries(ARCHIVE)) {
-      const relative = path.slice(`${ROOT}/`.length).replace(/^notes\//, "docs/");
-      const landed = join(dir, relative);
-      expect(await readFile(landed, "utf8"), path).toBe(text);
-    }
+    expect(await readFile(join(dir, "docs/craft/paper-notes.md"), "utf8"))
+      .toBe("# Paper notes\n\nDamp the sheet.\n\n#paper\n");
+    expect(await readFile(join(dir, "docs/estate-finances.md"), "utf8"))
+      .toBe("# Estate and finances\n\nThe lease.\n");
+    expect(JSON.parse(await readFile(join(dir, "export-manifest.json"), "utf8")))
+      .toMatchObject({ format: "ghost-home/v2", ghostname: "casper" });
+    expect(await readFile(join(dir, "memory/working-habit.md"), "utf8"))
+      .toBe(ARCHIVE[`${ROOT}/memory/working-habit.md`]);
+    expect(await readFile(join(dir, "conversations/conv-1.json"), "utf8"))
+      .toBe(ARCHIVE[`${ROOT}/conversations/conv-1.json`]);
   });
 
   it("rejects an archive where legacy notes and canonical docs collide", async () => {
@@ -144,10 +147,23 @@ describe("importGhostArchive", () => {
       .resolves.toMatchObject({ ghostName: "casper" });
   });
 
-  it("rejects an archive that is not ghost-home/v1", async () => {
+  it("admits current v2 archives without rewriting canonical docs", async () => {
+    const current = join(workspace.dir, "current.zip");
+    const canonical = "# Current\n\nExact bytes.  \n\n#current\n";
+    await writeFile(current, zipArchive({
+      [`${ROOT}/docs/current.md`]: canonical,
+      [`${ROOT}/export-manifest.json`]:
+        '{"format":"ghost-home/v2","ghostname":"casper"}\n',
+    }));
+    const result = await importGhostArchive(current, join(workspace.dir, "CurrentGhosts"));
+    expect(result.manifest.format).toBe("ghost-home/v2");
+    expect(await readFile(join(result.dir, "docs/current.md"), "utf8")).toBe(canonical);
+  });
+
+  it("rejects an archive outside the current and migratable formats", async () => {
     const wrong = join(workspace.dir, "wrong.zip");
     await writeFile(wrong, zipArchive({
-      [`${ROOT}/export-manifest.json`]: '{"format":"ghost-home/v2"}',
+      [`${ROOT}/export-manifest.json`]: '{"format":"ghost-home/v3"}',
     }));
     await expect(importGhostArchive(wrong, join(workspace.dir, "Ghosts")))
       .rejects.toMatchObject({ code: "invalid_format" });

@@ -40,6 +40,22 @@ describe("persona extension", () => {
     expect(prompt).toContain(FINANCE_DOC_PATH);
   });
 
+  it("teaches the model the exact v2 doc format on every session", async () => {
+    const harness = await loadExtension(createPersonaExtension(), fixture.dir);
+    const prompt = (await harness.beforeAgentStart()) ?? "";
+
+    expect(prompt).toContain(
+      "Use read to open them, grep or glob to search them, and write or edit to maintain them.",
+    );
+    expect(prompt).toContain("ghost-home/v2 Markdown");
+    expect(prompt).toContain("start at byte 0 with a non-empty first-line H1 (`# Title`)");
+    expect(prompt).toContain("optional final nonblank line");
+    expect(prompt).toContain("`#[a-z0-9]+(?:-[a-z0-9]+)*`");
+    expect(prompt).toContain("reserved `#archived` tag archives the doc");
+    expect(prompt).toContain("Never use YAML frontmatter");
+    expect(prompt).not.toContain(fixture.dir);
+  });
+
   it("carries the memory hygiene doctrine", async () => {
     const harness = await loadExtension(createPersonaExtension(), fixture.dir);
     const prompt = (await harness.beforeAgentStart()) ?? "";
@@ -67,6 +83,7 @@ describe("persona extension", () => {
       expect(prompt).toContain("You are mina.");
       expect(prompt).toContain("character.md");
       expect(prompt).toContain("(no docs yet)");
+      expect(prompt).toContain("ghost-home/v2 Markdown");
     } finally {
       await empty.cleanup();
     }

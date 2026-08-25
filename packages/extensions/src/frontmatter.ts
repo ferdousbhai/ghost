@@ -1,14 +1,10 @@
 /**
- * The doc frontmatter dialect, hand-rolled on purpose.
+ * YAML frontmatter for character/memory support and one-time v1 doc migration.
  *
- * The hosted export (`src/lib/export/ghost-home-archive.ts` in the summon-ghost
- * repo) hand-writes frontmatter from a fixed vocabulary — booleans, quoted or
- * plain scalars, and flow lists — and copies doc bodies verbatim. A general
- * YAML library would read those files back correctly but would not write them
- * back identically, and pi's own `parseFrontmatter` trims the body. Both break
- * the property this layout is built on: **a doc that is read and written
- * unchanged is byte-identical**. So the writer here is the export's writer, and
- * the reader is its exact inverse.
+ * Live ghost-home/v2 docs never enter through this parser. Hosted v1 exports
+ * used a fixed scalar/list vocabulary, while character.md and memory files
+ * retain their own frontmatter contracts. The hand-rolled reader keeps those
+ * migrations byte-predictable without introducing a general YAML writer.
  */
 import { GhostError } from "./errors.js";
 

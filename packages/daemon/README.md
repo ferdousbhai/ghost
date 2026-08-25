@@ -56,6 +56,13 @@ Everything Ghost owns for an OMP conversation stays inside the ghost home:
   claude-<sha256>.json     Claude resume metadata, when selected
 ```
 
+Docs use ghost-home/v2 Markdown. Each file starts at byte 0 with `# Title` and
+may end with a line of lowercase hashtag slugs such as `#launch #product`;
+reserved `#archived` removes it from the default working set. Startup/import
+atomically migrate v1 frontmatter docs and manifests once. After that migration,
+readers reject legacy docs and `writeDoc(path, { body })` validates and writes
+the complete canonical Markdown exactly as supplied.
+
 `SessionManager.open` receives the explicit per-ghost session directory;
 `createAgentSession({ agentDir })` alone does not redirect transcripts.
 Credentials are never inherited from the daemon environment: `env-scrub.ts`

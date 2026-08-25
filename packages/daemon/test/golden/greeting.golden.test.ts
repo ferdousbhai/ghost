@@ -238,8 +238,8 @@ describe("golden: greeting flow", () => {
           name: "casper",
           character: CHARACTER,
           docs: {
-            "press.md": "---\ntitle: Restoring the Vandercook\n---\n\nRollers first.\n",
-            "ledger.md": "---\ntitle: Ledger\n---\n\nToo much.\n",
+            "press.md": "# Restoring the Vandercook\n\nRollers first.\n",
+            "ledger.md": "# Ledger\n\nToo much.\n",
           },
           memory: {
             "owner-prefers-short.md": memoryFile(

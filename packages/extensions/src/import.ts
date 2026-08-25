@@ -1,11 +1,9 @@
 /**
- * Import a hosted "Download my ghost" archive into a local ghost home.
+ * Import a hosted ghost-home archive into a local ghost home.
  *
- * The hosted export (`src/lib/export/ghost-home-archive.ts`) already writes
- * ghost-home/v1. Older exports used `notes/`; the canonical local layout now
- * uses `docs/`, so import translates that one directory prefix while preserving
- * every file's bytes. Everything else is placed verbatim after validating the
- * manifest and refusing paths outside the target directory.
+ * Legacy ghost-home/v1 archives are admitted only at this boundary. Their
+ * `notes/` paths and documents are migrated before the returned home becomes
+ * live; the landed manifest always records ghost-home/v2.
  */
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
@@ -14,6 +12,8 @@ import { GhostError } from "./errors.js";
 import { sanitizePathSegment } from "./frontmatter.js";
 import { DOCS_DIRNAME, EXPORT_MANIFEST_FILENAME, GhostHome } from "./home.js";
 import { GHOST_HOME_FORMAT } from "./types.js";
+
+const LEGACY_GHOST_HOME_FORMAT = "ghost-home/v1";
 
 export interface GhostArchiveManifest {
   readonly format: string;
@@ -129,15 +129,19 @@ function parseManifest(bytes: Uint8Array): GhostArchiveManifest {
       + (error instanceof Error ? error.message : String(error)),
     );
   }
-  if (typeof parsed !== "object" || parsed === null) {
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
     throw new GhostError("invalid_format", `${EXPORT_MANIFEST_FILENAME} must be an object.`);
   }
   const manifest = parsed as GhostArchiveManifest;
-  if (manifest.format !== GHOST_HOME_FORMAT) {
+  if (
+    manifest.format !== GHOST_HOME_FORMAT
+    && manifest.format !== LEGACY_GHOST_HOME_FORMAT
+  ) {
     throw new GhostError(
       "invalid_format",
-      `Unsupported archive format ${JSON.stringify(manifest.format)}; `
-      + `expected ${JSON.stringify(GHOST_HOME_FORMAT)}.`,
+      `Unsupported archive format ${JSON.stringify(manifest.format)}; expected `
+      + `${JSON.stringify(GHOST_HOME_FORMAT)} or legacy `
+      + `${JSON.stringify(LEGACY_GHOST_HOME_FORMAT)}.`,
       { format: manifest.format },
     );
   }
@@ -155,8 +159,7 @@ async function isNonEmptyDirectory(dir: string): Promise<boolean> {
 }
 
 /**
- * Import a `ghost-home/v1` archive — a `.zip` from the hosted app or an already
- * extracted directory — into `<ghostsRoot>/<name>/`.
+ * Import a current or legacy archive into `<ghostsRoot>/<name>/`.
  */
 export async function importGhostArchive(
   source: string,
@@ -181,7 +184,14 @@ export async function importGhostArchive(
   if (!manifestBytes) {
     throw new GhostError("invalid_format", `Missing ${EXPORT_MANIFEST_FILENAME}.`);
   }
-  const manifest = parseManifest(manifestBytes);
+  const sourceManifest = parseManifest(manifestBytes);
+  const manifest: GhostArchiveManifest = {
+    ...sourceManifest,
+    format: GHOST_HOME_FORMAT,
+  };
+  const migratedManifestBytes = new TextEncoder().encode(
+    `${JSON.stringify(manifest, null, 2)}\n`,
+  );
 
   const ghostName = sanitizePathSegment(
     options.name ?? manifest.ghostname ?? root ?? "ghost",
@@ -227,7 +237,10 @@ export async function importGhostArchive(
       );
     }
     await mkdir(dirname(target), { recursive: true });
-    await writeFile(target, content);
+    await writeFile(
+      target,
+      archivePath === EXPORT_MANIFEST_FILENAME ? migratedManifestBytes : content,
+    );
     filesWritten += 1;
   }
 

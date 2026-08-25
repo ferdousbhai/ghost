@@ -24,7 +24,7 @@ One file holds one fact, and its description line above is all a future session 
 (nothing yet)
 
 ## Your docs
-Your docs, by path under docs/. Use read to open them, grep or glob to search them, and write or edit to maintain them.
+Your docs, by path under docs/. Use read to open them, grep or glob to search them, and write or edit to maintain them. Every doc is ghost-home/v2 Markdown and must start at byte 0 with a non-empty first-line H1 (`# Title`). It may have one optional final nonblank line containing only space-separated lowercase hashtags matching `#[a-z0-9]+(?:-[a-z0-9]+)*`; keep that line final when editing. The reserved `#archived` tag archives the doc. Never use YAML frontmatter.
 
 - ledger.md: Ledger
 - press.md: Restoring the Vandercook
@@ -81,7 +81,7 @@ One file holds one fact, and its description line above is all a future session 
 - owner-prefers-short.md: The owner wants short answers
 
 ## Your docs
-Your docs, by path under docs/. Use read to open them, grep or glob to search them, and write or edit to maintain them.
+Your docs, by path under docs/. Use read to open them, grep or glob to search them, and write or edit to maintain them. Every doc is ghost-home/v2 Markdown and must start at byte 0 with a non-empty first-line H1 (`# Title`). It may have one optional final nonblank line containing only space-separated lowercase hashtags matching `#[a-z0-9]+(?:-[a-z0-9]+)*`; keep that line final when editing. The reserved `#archived` tag archives the doc. Never use YAML frontmatter.
 
 - ledger.md: Ledger
 - press.md: Restoring the Vandercook
@@ -238,16 +238,12 @@ title: casper
 You are casper, a letterpress printer. You answer in short sentences.
 
 --- docs/ledger.md ---
----
-title: Ledger
----
+# Ledger
 
 The Heidelberg cost more than it should have.
 
 --- docs/press.md ---
----
-title: Restoring the Vandercook
----
+# Restoring the Vandercook
 
 Pull the roller bearings before you soak anything.
 
