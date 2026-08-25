@@ -85,6 +85,17 @@ rerun safely. There is no migration marker and no dual-format reader: after
 migration, readers and writers accept v2 only. If both `notes/` and `docs/`
 exist, startup fails rather than guessing.
 
+`ghostd import` requires the daemon to be stopped. The command and daemon take
+the same root-keyed filesystem reservation before accessing a ghost home. The
+daemon holds it until shutdown; the import holds it through archive publication
+and conversation activation. This refuses a live daemon, a daemon startup
+racing the import, and concurrent imports even when their host or port settings
+differ. Stop the packaged service with
+`systemctl --user stop ghostd.service`, run the import, then start it again.
+The import's `--host` and `--port` options retain a listener check for older
+daemon versions that do not take the root reservation; they must match that
+older daemon's effective loopback listener.
+
 `writeDoc(path, { body })` validates the complete canonical Markdown body and
 writes exactly that body; there are no separate title, tag, archived, or
 application-path write options. Context listings are derived from disk for each
@@ -183,6 +194,10 @@ The same flow is available in the shell and in a TTY:
 ghostd login <ghost> --provider openai-codex
 ghostd login <ghost> --provider openrouter --api-key
 ```
+
+The TTY form writes credentials directly into the ghost home, so it also
+requires the daemon to be stopped and holds the same root reservation for the
+complete login. The shell's login flow already runs inside the serving daemon.
 
 A pasted code or key is resolved directly into the pending login interaction;
 it is not logged or returned from a GET response.

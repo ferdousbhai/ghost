@@ -26,6 +26,11 @@ import {
 import { loadConfig, type DaemonConfigOverrides } from "./config.js";
 import { scrubProviderEnv } from "./env-scrub.js";
 import { GhostRegistry, ghostPaths, type Ghost } from "./ghosts.js";
+import {
+  acquireHomeReservation,
+  HomeReservationBusyError,
+  type HomeReservation,
+} from "./home-reservation.js";
 import { ghostAuthPath, ghostModelsPath } from "./models.js";
 import { createGhostOmpRuntime } from "./omp-runtime.js";
 
@@ -233,7 +238,15 @@ function terminalInteraction(rl: Interface): AuthInteraction {
   };
 }
 
-export async function loginCommand(argv: string[]): Promise<number> {
+export interface LoginCommandRuntime {
+  /** Test observer called after reservation and before any ghost-home access. */
+  afterHomeReservationAcquired?: () => Promise<void>;
+}
+
+export async function loginCommand(
+  argv: string[],
+  runtimeOptions: LoginCommandRuntime = {},
+): Promise<number> {
   let args: LoginArgs;
   try {
     args = parseLoginArgs(argv);
@@ -251,9 +264,22 @@ export async function loginCommand(argv: string[]): Promise<number> {
   scrubProviderEnv(process.env, { offline: args.offline });
 
   const rl = createInterface({ input: stdin, output: stdout });
+  let homeReservation: HomeReservation | undefined;
   try {
     const config = loadConfig(args.overrides);
-    const registry = new GhostRegistry(config.ghostsRoot);
+    try {
+      homeReservation = await acquireHomeReservation(config.ghostsRoot);
+    } catch (error) {
+      if (error instanceof HomeReservationBusyError) {
+        throw new Error(
+          "ghostd is running or another login/import is active. "
+          + "Stop it with `systemctl --user stop ghostd.service`, retry the login, then restart ghostd.",
+        );
+      }
+      throw error;
+    }
+    await runtimeOptions.afterHomeReservationAcquired?.();
+    const registry = new GhostRegistry(homeReservation.ghostsRoot);
     const ghost = await resolveGhost(rl, registry, args.ghost);
     const paths = ghostPaths(ghost.dir);
     const runtime = await createGhostOmpRuntime({
@@ -276,6 +302,10 @@ export async function loginCommand(argv: string[]): Promise<number> {
     stdout.write(`ghostd login: ${message}\n`);
     return 1;
   } finally {
-    rl.close();
+    try {
+      rl.close();
+    } finally {
+      await homeReservation?.close();
+    }
   }
 }

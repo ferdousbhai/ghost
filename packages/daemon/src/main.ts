@@ -22,6 +22,7 @@ import { scrubProviderEnv } from "./env-scrub.js";
 import { ensureGhostHomeLayout } from "./extensions.js";
 import { GhostRegistry } from "./ghosts.js";
 import { GhostHookRunner } from "./hooks.js";
+import { acquireHomeReservation, HomeReservationBusyError, type HomeReservation } from "./home-reservation.js";
 import { HomeOperationCoordinator } from "./home-operations.js";
 import { migrateHostedConversations } from "./hosted-conversation-import.js";
 import { createLogger, type LogLevel } from "./log.js";
@@ -76,6 +77,11 @@ export interface ParsedArgs {
   logLevel: LogLevel;
   help: boolean;
   version: boolean;
+}
+
+export interface MainRuntime {
+  /** Test observer called after the root reservation and before home access. */
+  afterHomeReservationAcquired?: () => Promise<void>;
 }
 
 class UsageError extends Error {}
@@ -152,9 +158,9 @@ async function readVersion(): Promise<string> {
   return (JSON.parse(text) as { version?: string }).version ?? "0.0.0";
 }
 
-export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
-  // Subcommands that touch no config and start no server, handled before
-  // anything else so they work while a daemon is already running.
+export async function main(argv: string[] = process.argv.slice(2), runtime: MainRuntime = {}): Promise<number> {
+  // Subcommands own their narrower persistence lifecycle. Token commands touch
+  // only XDG state; login and import take the home reservation themselves.
   if (argv[0] === "relay-token") return relayTokenCommand(argv.slice(1));
   if (argv[0] === "api-token") return apiTokenCommand(argv.slice(1));
   if (argv[0] === "login") return loginCommand(argv.slice(1));
@@ -204,6 +210,40 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     return 1;
   }
 
+  let homeReservation: HomeReservation;
+  try {
+    homeReservation = await acquireHomeReservation(config.ghostsRoot);
+  } catch (error) {
+    const detail =
+      error instanceof HomeReservationBusyError
+        ? "another ghostd is running or an import/login is in progress"
+        : (error as Error).message;
+    logger.error("could not reserve the ghost home", {
+      ghostsRoot: config.ghostsRoot,
+      error: detail,
+    });
+    return 1;
+  }
+
+  try {
+    await runtime.afterHomeReservationAcquired?.();
+    return await serveDaemon(
+      { ...config, ghostsRoot: homeReservation.ghostsRoot },
+      logger,
+      hooks,
+      hooksPath,
+    );
+  } finally {
+    await homeReservation.close();
+  }
+}
+
+async function serveDaemon(
+  config: DaemonConfig,
+  logger: ReturnType<typeof createLogger>,
+  hooks: GhostHookRunner,
+  hooksPath: string,
+): Promise<number> {
   const registry = new GhostRegistry(config.ghostsRoot);
   registry.ensureRoot();
   try {
