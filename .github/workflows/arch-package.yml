@@ -19,9 +19,9 @@ jobs:
       - name: Update package database and install build dependencies
         run: >-
           pacman -Syu --needed --noconfirm
-          at-spi2-core bun chromium desktop-file-utils git grim hyprland libnotify
-          nodejs pnpm python python-dbus python-gobject qt6-5compat quickshell uv wtype
-          xdg-utils ydotool
+          at-spi2-core bun chromium curl desktop-file-utils git grim hyprland libnotify
+          nodejs pnpm python python-dbus python-gobject python-pillow qt6-5compat
+          quickshell uv wtype xdg-utils ydotool
 
       - uses: actions/checkout@v4
         with:
@@ -40,14 +40,113 @@ jobs:
             GHOST_SOURCE_REF="$GHOST_SOURCE_REF" \
             makepkg --cleanbuild --noconfirm
 
-      - name: Verify the archive with the source checkout hidden
+      - name: Build and verify stable release sources offline
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
         run: |
-          archive="$(find packaging/arch -maxdepth 1 -name '*.pkg.tar.zst' -print -quit)"
-          isolated_root="$(mktemp -d)"
-          smoke_copy="$(mktemp)"
+          source_tree="$GITHUB_WORKSPACE/packaging/arch/src/ghost"
+          release_out="$GITHUB_WORKSPACE/packaging/release/out"
+          release_work="$GITHUB_WORKSPACE/packaging/release/work"
+          version="$(bun -e 'const p = await Bun.file(process.argv[1]).json(); process.stdout.write(p.version)' "$source_tree/package.json")"
+          commit="$(git -C "$source_tree" rev-parse HEAD)"
+          epoch="$(git -C "$source_tree" show -s --format=%ct "$commit")"
+          runtime="ghost-runtime-$version-linux-x86_64.tar.zst"
+          source_archive="$release_out/ghost-$version.tar.gz"
+
+          install -d -o builder -g builder "$release_out" "$release_work"
+          runuser -u builder -- pnpm --dir "$source_tree" fetch --frozen-lockfile
+          runuser -u builder -- env \
+            GHOST_RELEASE_WORK_ROOT="$release_work" \
+            SOURCE_DATE_EPOCH="$epoch" \
+            bash "$source_tree/packaging/release/build-runtime-source.sh" \
+              "$source_tree" "$release_out" "$version" x86_64 "$commit"
+
+          expected_tag="v$version"
+          event_tag="$REF_NAME"
+          if [[ "$EVENT_NAME" == release ]]; then
+            event_tag="$RELEASE_TAG"
+          fi
+          if [[ "$REF_TYPE" == tag || "$EVENT_NAME" == release ]]; then
+            if [[ "$event_tag" != "$expected_tag" ]]; then
+              printf 'release ref %s does not match package.json version %s\n' \
+                "$event_tag" "$version" >&2
+              exit 1
+            fi
+            curl --fail --location --retry 3 \
+              --output "$source_archive" \
+              "https://github.com/$GITHUB_REPOSITORY/archive/refs/tags/$expected_tag.tar.gz"
+            chown builder:builder "$source_archive"
+          else
+            runuser -u builder -- env SOURCE_DATE_EPOCH="$epoch" \
+              bash "$source_tree/packaging/release/make-source-archive.sh" \
+                "$source_tree" "$source_archive" "$version" HEAD
+          fi
+
+          runuser -u builder -- env GHOST_RELEASE_WORK_ROOT="$release_work" \
+            bash "$source_tree/packaging/release/smoke-runtime-source.sh" \
+              "$release_out/$runtime" "$source_tree" "$version" x86_64 "$commit"
+
+          source_sha="$(sha256sum "$source_archive" | cut -d' ' -f1)"
+          runtime_sha="$(sha256sum "$release_out/$runtime" | cut -d' ' -f1)"
+          aur_dir="$release_work/ghost-ai-$version-aur"
+          runuser -u builder -- bash "$source_tree/packaging/release/render-arch-package.sh" \
+            "$aur_dir" "$version" "$commit" "$epoch" "$source_sha" "$runtime_sha"
+
+          install -d -o builder -g builder \
+            "$release_work/makepkg-build" "$release_work/makepkg-sources"
+          runuser -u builder -- env \
+            ALL_PROXY=http://127.0.0.1:9 \
+            FTP_PROXY=http://127.0.0.1:9 \
+            HTTPS_PROXY=http://127.0.0.1:9 \
+            HTTP_PROXY=http://127.0.0.1:9 \
+            NO_PROXY= \
+            GHOST_RELEASE_SOURCE_URL="file://$source_archive" \
+            GHOST_RELEASE_RUNTIME_URL="file://$release_out/$runtime" \
+            GHOST_RELEASE_WORK_ROOT="$release_work" \
+            BUILDDIR="$release_work/makepkg-build" \
+            SRCDEST="$release_work/makepkg-sources" \
+            PKGDEST="$release_out" \
+            makepkg --dir "$aur_dir" --cleanbuild --noconfirm
+
+          runuser -u builder -- bash -c '
+            set -euo pipefail
+            cd "$1"
+            makepkg --printsrcinfo > .SRCINFO.rendered
+            cmp .SRCINFO .SRCINFO.rendered
+            rm .SRCINFO.rendered
+          ' _ "$aur_dir"
+
+          aur_bundle="$release_out/ghost-ai-$version-aur.tar.zst"
+          tar --sort=name --format=gnu --mtime="@$epoch" --owner=0 --group=0 \
+            --numeric-owner -C "$release_work" -cf - "ghost-ai-$version-aur" \
+            | zstd -19 -T1 --no-progress -o "$aur_bundle"
+          (
+            cd "$release_out"
+            find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%P\0' \
+              | LC_ALL=C sort -z | xargs -0 sha256sum > SHA256SUMS
+          )
+
+      - name: Verify package archives with the source checkout hidden
+        run: |
+          isolation_parent="$(mktemp -d -p /var/tmp ghost-package-isolation.XXXXXX)"
+          smoke_copy="$isolation_parent/smoke.sh"
           cp packaging/arch/smoke.sh "$smoke_copy"
-          bsdtar -xf "$archive" -C "$isolated_root"
-          hidden_checkout="$(mktemp -d)"
+          mapfile -t archives < <(
+            find packaging/arch packaging/release/out -maxdepth 1 \
+              -name '*.pkg.tar.zst' -print | sort
+          )
+          [[ "${#archives[@]}" -eq 2 ]]
+          roots=()
+          for index in "${!archives[@]}"; do
+            root="$isolation_parent/root-$index"
+            mkdir "$root"
+            bsdtar -xf "${archives[$index]}" -C "$root"
+            roots+=("$root")
+          done
+          hidden_checkout="$(mktemp -d -p /var/tmp ghost-hidden-checkout.XXXXXX)"
           restore_checkout() {
             if [[ -d "$hidden_checkout" ]]; then
               find "$hidden_checkout" -mindepth 1 -maxdepth 1 \
@@ -59,7 +158,9 @@ jobs:
           cd /tmp
           find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 1 \
             -exec mv -t "$hidden_checkout" -- {} +
-          bash "$smoke_copy" "$isolated_root"
+          for root in "${roots[@]}"; do
+            bash "$smoke_copy" "$root"
+          done
           restore_checkout
           trap - EXIT
 
@@ -67,7 +168,21 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ghost-ai-arch-${{ github.sha }}
-          path: packaging/arch/*.pkg.tar.zst
+          path: |
+            packaging/arch/*.pkg.tar.zst
+            packaging/release/out/ghost-ai-*.pkg.tar.zst
+          if-no-files-found: error
+
+      - name: Upload stable release-source artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ghost-ai-release-source-${{ github.sha }}
+          path: |
+            packaging/release/out/SHA256SUMS
+            packaging/release/out/ghost-*.tar.gz
+            packaging/release/out/ghost-ai-*-aur.tar.zst
+            packaging/release/out/ghost-runtime-*.tar.zst
+            packaging/release/out/ghost-runtime-*.tar.zst.sha256
           if-no-files-found: error
 
   release:
@@ -82,8 +197,13 @@ jobs:
           name: ghost-ai-arch-${{ github.sha }}
           path: release-artifacts
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: ghost-ai-release-source-${{ github.sha }}
+          path: release-artifacts
+
       - name: Attach package to published release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-        run: gh release upload "${{ github.event.release.tag_name }}" release-artifacts/*.pkg.tar.zst --clobber
+        run: gh release upload "${{ github.event.release.tag_name }}" release-artifacts/* --clobber

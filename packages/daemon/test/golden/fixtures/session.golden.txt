@@ -137,6 +137,7 @@ write               registry=yes  wire=yes  invokable=yes
     "messageCount": 6,
     "pinned": false,
     "title": "Remembering how you like answers",
+    "unread": true,
     "updatedAt": "<time>"
   }
 ]

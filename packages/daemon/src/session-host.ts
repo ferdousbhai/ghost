@@ -137,6 +137,7 @@ import {
   zeroUsage,
 } from "./pi-messages.js";
 import { readPins, writePins } from "./pins.js";
+import { readReads, writeReads } from "./reads.js";
 import { generateTitle } from "./title.js";
 import { hostedConversationSourcePaths } from "./hosted-conversation-import.js";
 import { trashPath, type TrashPathResult } from "./trash.js";
@@ -477,7 +478,16 @@ export interface SessionSummary {
   updatedAt: string;
   messageCount: number;
   pinned: boolean;
+  unread: boolean;
 }
+
+export interface ConversationUpdatedEvent {
+  type: "conversation-updated";
+  id: string;
+  updatedAt: string;
+}
+
+export type ConversationEventListener = (event: ConversationUpdatedEvent) => void;
 
 /** A renderable transcript message: OMP's message shape, reasoning removed. */
 export interface TranscriptMessage {
@@ -785,6 +795,8 @@ export class SessionHost {
   private readonly liveVoice: LiveVoiceManager;
   private readonly collaboration: CollaborationManager;
   private readonly sessions = new Map<string, HostedSession>();
+  /** Passive listing invalidation listeners; they never own or open a session. */
+  private readonly conversationListeners = new Map<string, Set<ConversationEventListener>>();
   /** In-flight opens, so two concurrent turns never build two sessions. */
   private readonly opening = new Map<string, Promise<HostedSession>>();
   /** Conversation ids reserved by a destructive delete operation. */
@@ -849,6 +861,47 @@ export class SessionHost {
 
   private keyOf(ghostName: string, sessionId: string | null | undefined): string {
     return sessionKeyOf(ghostName, sessionId);
+  }
+
+  /** Subscribe to small conversation-list invalidations for one ghost. */
+  subscribeConversationEvents(
+    ghostName: string,
+    listener: ConversationEventListener,
+  ): () => void {
+    this.registry.get(ghostName);
+    const listeners = this.conversationListeners.get(ghostName) ?? new Set();
+    listeners.add(listener);
+    this.conversationListeners.set(ghostName, listeners);
+    return () => {
+      listeners.delete(listener);
+      if (listeners.size === 0) this.conversationListeners.delete(ghostName);
+    };
+  }
+
+  /** Publish after storage settles; a deletion uses its mutation time. */
+  private async announceConversationUpdated(ghostName: string, id: string): Promise<void> {
+    const listeners = this.conversationListeners.get(ghostName);
+    if (!listeners || listeners.size === 0) return;
+    let updatedAt = new Date().toISOString();
+    try {
+      const ghost = this.registry.get(ghostName);
+      const row = (await this.collectSessions(ghost)).find((session) => session.id === id);
+      if (row) updatedAt = row.updatedAt;
+    } catch {
+      // Whole-home deletion can remove the ghost before the final invalidation.
+    }
+    const event: ConversationUpdatedEvent = { type: "conversation-updated", id, updatedAt };
+    for (const listener of [...listeners]) {
+      try {
+        listener(event);
+      } catch (error) {
+        this.logger.warn("conversation event listener failed", {
+          ghost: ghostName,
+          conversation: id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
   }
 
   /** Open (or reuse) the pi session for one ghost + conversation. */
@@ -1235,6 +1288,10 @@ export class SessionHost {
     // unwound; that is the safe boundary for deferred model/MCP ownership.
     hosted.unsubscribeOwnership = session.subscribe((event) => {
       if (event.type !== "agent_end" || event.isTerminal === false) return;
+      if (!hosted.busy) {
+        const [, conversationId] = sessionKeyParts(key);
+        void this.announceConversationUpdated(ghostName, conversationId);
+      }
       void this.settleDeferredSession(hosted).catch((error) => {
         this.logger.warn("deferred session update after external turn failed", {
           session: key,
@@ -1787,6 +1844,10 @@ export class SessionHost {
         throw new GhostError("invalid_request", "Write a command after ! or !!.", 400);
       }
       await this.runUserBash(ghostName, bashCommand, options);
+      await this.announceConversationUpdated(
+        ghostName,
+        options.sessionId || DEFAULT_SESSION_KEY,
+      );
       return;
     }
     let configured: ReturnType<typeof resolveChatModelRef> = null;
@@ -1820,6 +1881,7 @@ export class SessionHost {
         );
       }
       await this.claudeCode.runTurn(ghost, conversationId, configured.modelId, options);
+      await this.announceConversationUpdated(ghostName, conversationId);
       return;
     }
 
@@ -1857,6 +1919,7 @@ export class SessionHost {
       } finally {
         await this.releaseSessionClaim(hosted, ghostName);
       }
+      await this.announceConversationUpdated(ghostName, conversationId);
       return;
     }
 
@@ -1974,6 +2037,7 @@ export class SessionHost {
       if (shouldTitle) {
         this.startBackgroundTitle(hosted, ghostName, paths.agentDir, options.prompt);
       }
+      await this.announceConversationUpdated(ghostName, conversationId);
     }
   }
 
@@ -2008,6 +2072,8 @@ export class SessionHost {
           session: hosted.session.sessionId,
           title,
         });
+        const [, conversationId] = sessionKeyParts(hosted.sessionKey);
+        await this.announceConversationUpdated(ghostName, conversationId);
       })
       .catch((error: unknown) => {
         this.logger.warn("conversation title generation failed", {
@@ -2189,15 +2255,23 @@ export class SessionHost {
 
     const ghost = this.registry.get(ghostName);
     const paths = ghostPaths(ghost.dir);
-    const [rows, pins] = await Promise.all([
+    const [rows, pins, reads] = await Promise.all([
       this.collectSessions(ghost),
       readPins(paths.sessionDir),
+      readReads(paths.sessionDir),
     ]);
     // A pin whose conversation is gone is simply not seen here; the next write
     // prunes it.
     const pinned = new Set(pins);
     return rows
-      .map((row) => ({ ...row, pinned: pinned.has(row.id) }))
+      .map((row) => {
+        const readAt = reads[row.id];
+        return {
+          ...row,
+          pinned: pinned.has(row.id),
+          unread: readAt === undefined || row.updatedAt > readAt,
+        };
+      })
       .sort((a, b) => (a.pinned === b.pinned
         ? b.updatedAt.localeCompare(a.updatedAt)
         : (a.pinned ? -1 : 1)));
@@ -2230,6 +2304,37 @@ export class SessionHost {
     const kept = (await readPins(paths.sessionDir))
       .filter((pin) => pin !== id && existing.has(pin));
     await writePins(paths.sessionDir, pinned ? [...kept, id] : kept);
+    await this.announceConversationUpdated(ghostName, id);
+  }
+
+  /**
+   * Record that the owner opened one stored conversation. Rewriting the whole
+   * validated map also prunes ids whose conversations disappeared elsewhere.
+   */
+  async markRead(
+    ghostName: string,
+    sessionId: string | null | undefined,
+    openedAt = new Date(),
+  ): Promise<string> {
+    const ghost = this.registry.get(ghostName);
+    const id = sessionId || DEFAULT_SESSION_KEY;
+    const paths = ghostPaths(ghost.dir);
+    const existing = new Set((await this.collectSessions(ghost)).map((row) => row.id));
+    if (!existing.has(id)) {
+      throw new GhostError(
+        "not_found",
+        `This ghost has no conversation ${JSON.stringify(id)}.`,
+        404,
+      );
+    }
+    const reads = await readReads(paths.sessionDir);
+    const kept = Object.fromEntries(
+      Object.entries(reads).filter(([conversationId]) => existing.has(conversationId)),
+    );
+    const readAt = openedAt.toISOString();
+    await writeReads(paths.sessionDir, { ...kept, [id]: readAt });
+    await this.announceConversationUpdated(ghostName, id);
+    return readAt;
   }
 
   /**
@@ -2294,6 +2399,7 @@ export class SessionHost {
         session: id,
         title: stored,
       });
+      await this.announceConversationUpdated(ghostName, id);
       return stored;
     } finally {
       // Release a manager opened for this write alone; the live session keeps
@@ -2325,7 +2431,9 @@ export class SessionHost {
   }
 
   /** Every stored conversation for one ghost, before pin state is applied. */
-  private async collectSessions(ghost: Ghost): Promise<Omit<SessionSummary, "pinned">[]> {
+  private async collectSessions(
+    ghost: Ghost,
+  ): Promise<Omit<SessionSummary, "pinned" | "unread">[]> {
     const paths = ghostPaths(ghost.dir);
     mkdirSync(paths.sessionDir, { recursive: true });
     const [sessions, claudeSessions] = await Promise.all([
@@ -2585,12 +2693,14 @@ export class SessionHost {
       try {
         const result = await hosted.session.navigateTree(entryId);
         if (result.cancelled) throw new GhostError("branch_cancelled", "Conversation branching was cancelled.", 409);
-        return {
+        const fork = {
           sessionId: forkId,
           title: hosted.session.sessionManager.getSessionName() ?? null,
           draft: result.editorText ?? "",
           transcript: this.transcriptFromManager(forkId, hosted.session.sessionManager),
         };
+        await this.announceConversationUpdated(ghostName, forkId);
+        return fork;
       } finally {
         await this.releaseSessionClaim(hosted, ghostName);
       }
@@ -2616,6 +2726,11 @@ export class SessionHost {
       const pins = await readPins(paths.sessionDir);
       if (pins.includes(forkId)) {
         await writePins(paths.sessionDir, pins.filter((pin) => pin !== forkId));
+      }
+      const reads = await readReads(paths.sessionDir);
+      if (reads[forkId]) {
+        delete reads[forkId];
+        await writeReads(paths.sessionDir, reads);
       }
     } catch (error) {
       this.logger.warn("could not discard an abandoned branch copy", {
@@ -2736,6 +2851,10 @@ export class SessionHost {
       options.signal?.removeEventListener("abort", onAbort);
       unsubscribe?.();
       await this.releaseSessionClaim(hosted, ghostName);
+      await this.announceConversationUpdated(
+        ghostName,
+        options.sessionId || DEFAULT_SESSION_KEY,
+      );
     }
   }
 
@@ -2808,11 +2927,17 @@ export class SessionHost {
       if (pins.includes(id)) {
         await writePins(paths.sessionDir, pins.filter((pin) => pin !== id));
       }
+      const reads = await readReads(paths.sessionDir);
+      if (reads[id]) {
+        delete reads[id];
+        await writeReads(paths.sessionDir, reads);
+      }
       this.logger.info("trashed ghost conversation", {
         ghost: ghostName,
         session: id,
         artifacts: artifacts.map((entry) => entry.artifact),
       });
+      await this.announceConversationUpdated(ghostName, id);
       return { artifacts };
     } finally {
       this.deleting.delete(key);

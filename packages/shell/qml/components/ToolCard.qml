@@ -16,22 +16,21 @@ Rectangle {
     required property var activity
     property bool expanded: false
 
-    // Every read below goes through this rather than through `activity`. A
-    // Repeater re-evaluates a delegate's bindings while it is tearing it down,
-    // with `modelData` already gone, and the trace helpers reach straight into
-    // the object — so the moment a row's tool list changes, the card spends its
-    // last frame throwing TypeErrors at the log.
-    readonly property var call: root.activity || ({})
+    // Delegate destruction clears stored value properties before retiring all
+    // bindings that read them. Normalise from the required property on every
+    // read: caching this object in another `var` leaves that cache briefly null
+    // while the remaining bindings are still taking their final evaluation.
+    function call(): var { return root.activity || ({}) }
 
-    readonly property bool running: root.call.status === "running"
-        || root.call.status === "preparing" || root.call.status === "queued"
-    readonly property bool completed: root.call.status === "complete"
-    readonly property bool failed: root.call.status === "failed"
+    readonly property bool running: root.call().status === "running"
+        || root.call().status === "preparing" || root.call().status === "queued"
+    readonly property bool completed: root.call().status === "complete"
+    readonly property bool failed: root.call().status === "failed"
     readonly property var presentation: ToolTrace.view(
-        root.call, root.completed, root.failed, root.expanded)
+        root.call(), root.completed, root.failed, root.expanded)
     readonly property string trace: root.presentation.trace
     readonly property string diagnosticInput: root.presentation.diagnosticInput
-    readonly property var askBranch: root.call.askBranch || null
+    readonly property var askBranch: root.call().askBranch || null
     readonly property bool hasDiagnostics: root.presentation.hasDiagnostics
 
     // A question the ghost is still holding, or one that closed without an
@@ -251,9 +250,9 @@ Rectangle {
         }
 
         Text {
-            visible: root.expanded && root.call.summary && root.call.intent
+            visible: root.expanded && root.call().summary && root.call().intent
             width: parent.width
-            text: "Intent · " + ToolTrace.compact(root.call.intent, 1200)
+            text: "Intent · " + ToolTrace.compact(root.call().intent, 1200)
             color: root.detailColor
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontSizeSmall
@@ -273,9 +272,9 @@ Rectangle {
         }
 
         Text {
-            visible: root.expanded && root.call.name !== undefined && root.call.name !== ""
+            visible: root.expanded && root.call().name !== undefined && root.call().name !== ""
             width: parent.width
-            text: "Tool · " + root.call.name
+            text: "Tool · " + root.call().name
             color: root.detailColor
             font.family: Theme.fontFamilyMono
             font.pixelSize: Theme.fontSizeSmall
@@ -304,7 +303,7 @@ Rectangle {
             // read as an empty object rather than a TypeError per property.
             readonly property var nav: root.askBranch || ({})
 
-            visible: root.call.name === "ask" && root.askBranch !== null
+            visible: root.call().name === "ask" && root.askBranch !== null
             x: 16 + Theme.gap / 2
             width: Math.min(parent.width - x, askLabel.implicitWidth + Theme.gap * 1.5)
             height: visible ? askLabel.implicitHeight + 6 : 0

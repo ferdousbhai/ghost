@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+template_root="$(CDPATH= cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+output="${1:?usage: render-arch-package.sh <output-dir> <version> <commit> <epoch> <source-sha256> <runtime-sha256>}"
+version="${2:?usage: render-arch-package.sh <output-dir> <version> <commit> <epoch> <source-sha256> <runtime-sha256>}"
+commit="${3:?usage: render-arch-package.sh <output-dir> <version> <commit> <epoch> <source-sha256> <runtime-sha256>}"
+epoch="${4:?usage: render-arch-package.sh <output-dir> <version> <commit> <epoch> <source-sha256> <runtime-sha256>}"
+source_sha="${5:?usage: render-arch-package.sh <output-dir> <version> <commit> <epoch> <source-sha256> <runtime-sha256>}"
+runtime_sha="${6:?usage: render-arch-package.sh <output-dir> <version> <commit> <epoch> <source-sha256> <runtime-sha256>}"
+
+[[ "$version" =~ ^[0-9]+([.][0-9]+){2}([.][a-z0-9]+)*$ ]]
+[[ "$commit" =~ ^[0-9a-f]{40}$ ]]
+[[ "$epoch" =~ ^[0-9]+$ ]]
+[[ "$source_sha" =~ ^[0-9a-f]{64}$ ]]
+[[ "$runtime_sha" =~ ^[0-9a-f]{64}$ ]]
+
+mkdir -p "$output"
+output="$(realpath "$output")"
+sed \
+  -e "s/@@VERSION@@/$version/g" \
+  -e "s/@@SOURCE_COMMIT@@/$commit/g" \
+  -e "s/@@SOURCE_DATE_EPOCH@@/$epoch/g" \
+  -e "s/@@SOURCE_SHA256@@/$source_sha/g" \
+  -e "s/@@RUNTIME_SHA256@@/$runtime_sha/g" \
+  "$template_root/PKGBUILD.in" > "$output/PKGBUILD"
+install -m644 "$template_root/ghost-ai.install" "$output/ghost-ai.install"
+
+if grep -En '@@[A-Z0-9_]+@@' "$output/PKGBUILD"; then
+  printf 'unrendered PKGBUILD token remains\n' >&2
+  exit 1
+fi
+(
+  cd "$output"
+  makepkg --printsrcinfo > .SRCINFO
+)

@@ -20,47 +20,89 @@ file. It is safe to rerun after interruption, keeps no marker, and leaves no
 dual-format reader. This mock starts with v2 fixtures and does not emulate the
 legacy format.
 
-## Demo script
+## Isolated HUD preview — the required verification path
 
-Four terminals' worth of commands, in order. Nothing here touches your running
-Omarchy shell — the ghost config is a *separate* Quickshell process launched by
-path.
+Development previews must **not** run directly on the owner's desktop. A plain
+`quickshell -p …` joins the live session bus, registers a second tray icon, and
+puts a mock-backed ghost beside the real one. The duplicate tray item and mock
+ghost are easy to mistake for owner state.
+
+The isolation stops at the runtime boundary, not the source tree. `preview.sh`
+resolves the supplied config path and loads that QML in place; it does not copy
+the tree. Independently, `~/.config/quickshell/ghost` is a symlink to this
+checkout's `packages/shell/qml/`, so the nested preview isolates what the
+preview displays but cannot isolate the owner's running shell from edits to the
+QML that shell loads. An agent editing `packages/shell/qml/` during a
+verification run hot-reloads the owner's HUD underneath the run and
+re-registers its tray helper. A crash or syntax error in that QML takes the
+owner's live shell down with it. Know that boundary before editing; prefer
+passing `preview.sh` a scratch copy when a change is experimental. Copying by
+default would make the preview stop following the source it is meant to verify
+without removing the separate hazard created by the owner's symlink.
+
+Start the mock on any non-7717 port, then give that already-running port to
+`preview.sh`:
 
 ```sh
 cd packages/shell
 
-# 1. The fake daemon. Two ghosts, canned context files in an owned temporary
-#    root, and a streamed reply with one tool call.
-node dev/mock-ghostd.mjs            # add --slow to watch deltas land
-                                    #     --fail to end the next turn in an error
+# Terminal 1: two ghosts, owned temporary context, and canned streamed replies.
+node dev/mock-ghostd.mjs --port 17717
 
-# 2. The shell, isolated. Never `qs` with no arguments — that would load the
-#    user's default config.
-quickshell -p qml/shell.qml
+# Terminal 2: the one supported HUD preview command.
+bash dev/preview.sh qml/shell.qml 17717
+# Equivalently: GHOSTD_PORT=17717 bash dev/preview.sh qml/shell.qml
+```
 
-# 3. Drive it.
-qs -p qml/shell.qml ipc show                      # the IPC surface
-qs -p qml/shell.qml ipc call ghost status         # JSON state
-qs -p qml/shell.qml ipc call ghost open
+The script rejects port 7717 explicitly and refuses a daemon roster beneath the
+owner's real ghost root. It gives the preview a private HOME, XDG tree, Wayland
+runtime, Hyprland instance, and D-Bus session, launches Quickshell inside the
+nested compositor, then opens the HUD. `EXIT`, `INT`, and `TERM` all run the same
+cleanup: Quickshell and nested-Hyprland process groups, their helpers, the
+private bus, IPC sockets, Wayland socket, and temporary files are removed. The
+already-running mock is intentionally not owned by the preview script.
+
+The ready message prints `XDG_RUNTIME_DIR`, `WAYLAND_DISPLAY`, and
+`HYPRLAND_INSTANCE_SIGNATURE`. Export those three values in another terminal to
+drive that exact nested instance:
+
+```sh
 qs -p qml/shell.qml ipc call ghost section docs
 qs -p qml/shell.qml ipc call ghost section memory
-qs -p qml/shell.qml ipc call ghost section agents
-qs -p qml/shell.qml ipc call ghost section commands
-qs -p qml/shell.qml ipc call ghost section mcp
-qs -p qml/shell.qml ipc call ghost section connect
-qs -p qml/shell.qml ipc call ghost section character
 qs -p qml/shell.qml ipc call ghost ask "who lives here?"
-qs -p qml/shell.qml ipc call ghost close
 
-# 4. Stop.
-qs -p qml/shell.qml kill
+# Hyprland 0.56 requires Lua dispatcher expressions.
+hyprctl dispatch 'hl.dsp.focus({ window = "class:ghost" })'
+hyprctl dispatch 'hl.dsp.exec_cmd("notify-send preview")'
 ```
+
+The expensive trap: on Hyprland 0.56, legacy plain-syntax calls such as
+`hyprctl dispatch exec …` are silent no-ops. Use the quoted `hl.dsp.…`
+expression form above (and the printed instance signature), which does execute
+inside the nested compositor.
+
+Capture screenshots with `grim` under those same exported nested variables:
+
+```sh
+grim /tmp/ghost-hud.png
+```
+
+For a single reproducible capture, the supervisor can run `grim` itself after
+the HUD settles:
+
+```sh
+GHOST_PREVIEW_SCREENSHOT=/tmp/ghost-hud.png \
+  bash dev/preview.sh qml/shell.qml 17717
+```
+
+Press Ctrl-C in the preview terminal to tear down everything it started, then
+stop the mock separately.
 
 ### What you should see
 
-- **Nothing on screen until `open`.** The HUD is a `FloatingWindow` bound to
-  `visible: false`; loading the config maps no window. This makes almost all of
-  the shell testable without putting anything over the developer's desktop.
+- **The component maps nothing until `open`.** The HUD is a `FloatingWindow`
+  bound to `visible: false`; `preview.sh` calls the IPC `open` method after the
+  isolated shell is ready.
 - On `open`: a 998×620 window (app-id `ghost`) that Hyprland tiles into the
   layout like any app. The HUD uses a neutral reading canvas with the current
   Omarchy accent and semantic status colours. Roster on the left (`casper`,
@@ -160,7 +202,8 @@ Verified on this machine (Omarchy 4.0.0.alpha, Hyprland 0.56.2, Quickshell
   `RegisteredStatusNotifierItems`; `org.kde.StatusNotifierItem` `GetAll` returns
   `Id=ghost`, `Status=Active`, `ItemIsMenu=false`, `Menu=/MenuBar`, and a
   status-tinted `IconPixmap`; `com.canonical.dbusmenu` `GetLayout` returns the
-  Summon / per-ghost radio / Choose-a-model / Quit tree; a synthesised
+  conditional ghost radio list / five recent conversations / New conversation /
+  Choose-a-model / Quit-ghost-shell tree; a synthesised
   `Activate` emitted `{"action":"toggle"}` and, end to end, opened the ghost HUD
   window (against the layer-shell HUD of the time; the seam is unchanged). The
   three status glyphs the helper draws

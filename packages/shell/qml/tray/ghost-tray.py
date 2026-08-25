@@ -24,10 +24,15 @@
 #   stdin  (shell -> here): {"reachable":bool,"streaming":bool,
 #                            "activeGhost":str,"activity":str,
 #                            "ghosts":[{"name":str},...],
+#                            "sessions":[{"id":str,"title":str|null,
+#                                         "unread":bool},...],
 #                            "colors":{"idle":"#rrggbb","streaming":"#rrggbb",
 #                                      "danger":"#rrggbb"}}
 #   stdout (here -> shell): {"action":"toggle"}            left click
-#                           {"action":"summon","name":..}  ghost menu entry
+#                           {"action":"ghost","name":..} ghost menu entry
+#                           {"action":"conversation","name":..,
+#                            "sessionId":..}               conversation entry
+#                           {"action":"new","name":..}  new conversation
 #                           {"action":"switcher"}          choose a model
 #                           {"action":"quit"}              quit
 #
@@ -150,29 +155,39 @@ class Menu(dbus.service.Object):
         self._items = []          # ordered [(id, props, action)]
         self._ghosts = []
         self._active = ""
-        self.rebuild([], "")
+        self.rebuild([], "", [])
 
     # ---- layout construction ----
-    def rebuild(self, ghosts, active):
+    def rebuild(self, ghosts, active, sessions):
         self._ghosts = ghosts
         self._active = active
         items = []
-        items.append((1, {"label": "Summon"}, ("open", None)))
-        items.append((2, {"type": "separator"}, None))
-        if ghosts:
-            for i, ghost in enumerate(ghosts):
+        named_ghosts = [ghost for ghost in ghosts if ghost.get("name")]
+        if len(named_ghosts) > 1:
+            for i, ghost in enumerate(named_ghosts):
                 name = ghost.get("name", "")
-                if not name:
-                    continue
                 items.append((100 + i, {
                     "label": name,
                     "toggle-type": "radio",
                     "toggle-state": 1 if name == active else 0,
-                }, ("summon", name)))
-            items.append((3, {"type": "separator"}, None))
+                }, ("ghost", {"name": name})))
+            items.append((2, {"type": "separator"}, None))
+        for i, session in enumerate(sessions[:5]):
+            session_id = session.get("id", "")
+            if not session_id:
+                continue
+            title = session.get("title") or "New conversation"
+            if session.get("unread"):
+                title = "• " + title
+            items.append((200 + i, {"label": title}, ("conversation", {
+                "name": active,
+                "sessionId": session_id,
+            })))
+        items.append((7, {"label": "New conversation"}, ("new", {"name": active})))
+        items.append((3, {"type": "separator"}, None))
         items.append((4, {"label": "Choose a model…"}, ("switcher", None)))
         items.append((5, {"type": "separator"}, None))
-        items.append((6, {"label": "Quit"}, ("quit", None)))
+        items.append((6, {"label": "Quit ghost shell"}, ("quit", None)))
         self._items = items
         self._revision += 1
         self.LayoutUpdated(dbus.UInt32(self._revision), dbus.Int32(0))
@@ -422,7 +437,9 @@ class Tray:
     def _emit(self, action):
         verb, arg = action
         msg = {"action": verb}
-        if arg is not None:
+        if isinstance(arg, dict):
+            msg.update(arg)
+        elif arg is not None:
             msg["name"] = arg
         try:
             sys.stdout.write(json.dumps(msg) + "\n")
@@ -438,6 +455,7 @@ class Tray:
         active = state.get("activeGhost") or ""
         activity = state.get("activity") or ""
         ghosts = state.get("ghosts") or []
+        sessions = state.get("sessions") or []
 
         if not reachable:
             rgb = _rgb(self._colors.get("danger"), (0xf7, 0x76, 0x8e))
@@ -455,7 +473,7 @@ class Tray:
         else:
             desc = "%s — idle" % (active or "no ghost")
         self.item.set_tooltip(title, desc)
-        self.menu.rebuild(ghosts, active)
+        self.menu.rebuild(ghosts, active, sessions)
         if not self._registered:
             self.register()
 

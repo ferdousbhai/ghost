@@ -4,7 +4,9 @@
 owner-local beta. The `ghost-git` AUR name already belongs to an unrelated
 screenshot utility, hence the collision-free package name. JavaScript runtime
 dependencies come from the repository's frozen `pnpm-lock.yaml`; minimum system
-runtime versions are declared in the package metadata.
+runtime versions are declared in the package metadata. The stable `ghost-ai`
+template and release-source machinery live under `packaging/release/` and are
+installed for reference as `RELEASE-SOURCE.md`.
 
 Build and install from this directory:
 
@@ -13,15 +15,14 @@ makepkg -si
 systemctl --user enable --now ghostd.service ghost-shell.service
 ```
 
-This is intentionally still a development package, not the final reproducible
-`ghost-ai` AUR release. `pnpm install` populates its store from the network in
-`build()`, which Arch package builds should not do. Closing issue #17 requires a
-tagged, architecture-specific runtime source artifact generated from the frozen
-lockfile, attached to the GitHub release, and listed beside the source archive
-with fixed SHA-256 sums in a stable `ghost-ai` PKGBUILD. That package can then
-construct the payload fully offline. The current `package()` is already offline
-and the CI artifact is installable, but `ghost-ai-git` must not be submitted to
-the AUR as reproducible packaging until that release input exists.
+This remains the rolling development package: `pnpm install` may populate its
+store during `build()`, so it is not the AUR release recipe. Release CI now
+constructs a deterministic, architecture-specific runtime source from the
+frozen lock/vendor inputs, pairs it with the exact tagged source archive, and
+renders a fixed-checksum stable `ghost-ai` PKGBUILD whose package phases are
+fully offline. Nothing is published automatically. Issue #17 still requires an
+actual version tag and GitHub release, inspection of those attached artifacts,
+and a human upload of the rendered bundle to the `ghost-ai` AUR package.
 
 The shell is installed at `/usr/share/ghost/quickshell` and exposed as the
 system Quickshell config `ghost`, so the existing `qs -c ghost` integration and
@@ -59,12 +60,14 @@ roll back or delete user data. Ghost-home format changes must remain
 forward/restart-safe under `CONTRACTS.md`; packaging does not invent a second
 migration path.
 
-Before uninstalling, stop and disable both user units:
+Before uninstalling either package, stop and disable both user units:
 
 ```sh
 systemctl --user disable --now ghost-shell.service ghostd.service
 sudo pacman -Rns ghost-ai-git
 ```
+
+For the stable package, the final command is `sudo pacman -Rns ghost-ai`.
 
 That removes package-owned files only. It deliberately leaves `~/Ghosts`,
 provider credentials, API/relay tokens, and browser profiles untouched.

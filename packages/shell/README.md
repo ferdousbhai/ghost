@@ -195,8 +195,10 @@ renders as a neutral product-status explanation.
 The ghost also shows up as a system-tray icon — a StatusNotifierItem — for as
 long as the shell is running: a ghost glyph tinted to the theme (dim when idle,
 accent while streaming, red when `ghostd` is unreachable), tooltip'd with the
-active ghost's name, left-click to toggle the HUD, and a DBusMenu with Summon,
-a radio entry per ghost in the roster, "Choose a model", and Quit.
+active ghost's name, left-click to toggle the HUD, and a DBusMenu with a ghost
+radio list when there is more than one, the active ghost's five most recent
+conversations (unread ones lead with `•`), "New conversation", "Choose a
+model", and "Quit ghost shell".
 
 Quickshell 0.3.0 can *consume* an SNI (`Quickshell.Services.SystemTray`) but
 exposes nothing to *produce* one — no generic D-Bus object or bus-name API

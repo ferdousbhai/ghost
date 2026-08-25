@@ -48,6 +48,14 @@ FloatingWindow {
     property bool switcherOpen: false
     /** True when login was reached from the switcher, so closing returns there. */
     property bool loginFromSwitcher: false
+
+    // Leaving login abandons any client-only model intent and restores the
+    // daemon's effective selection. This catches Close, Done, navigation, and
+    // picking another ghost or conversation through the shared panel state.
+    onLoginOpenChanged: {
+        if (!hud.loginOpen && modelSwitcher.hasPendingModel)
+            modelSwitcher.clearPendingModel();
+    }
     /** Global destination selected by the restored right-hand navigation. */
     property string currentSection: "chat"
     readonly property int navigationWidth: 64
@@ -239,6 +247,8 @@ FloatingWindow {
     // instead of cutting in. Content-level, because the compositor owns the
     // surface itself; Hyprland's own open animation composes with it.
     onShownChanged: {
+        Ghostd.hudVisible = hud.shown;
+        if (hud.shown) Ghostd.markCurrentConversationRead();
         if (hud.shown && !Theme.reducedMotion)
             materialize.restart();
     }
@@ -576,30 +586,20 @@ FloatingWindow {
                         }
                     }
 
-                    Flickable {
-                        id: convoScroll
+                    Conversations {
+                        id: conversations
                         Layout.fillWidth: true
                         Layout.fillHeight: true
-                        contentWidth: width
-                        contentHeight: conversations.implicitHeight
-                        clip: true
-                        interactive: contentHeight > height
-                        boundsBehavior: Flickable.StopAtBounds
-
-                        Conversations {
-                            id: conversations
-                            width: convoScroll.width
-                            onPicked: {
-                                hud.loginOpen = false;
-                                composer.take();
-                            }
-                            onRefocused: composer.take()
-                            onDeleteRequested: (sessionId, title) => {
-                                Ghostd.sessionsError = "";
-                                hud.pendingDeleteGhost = "";
-                                hud.pendingDeleteSessionId = sessionId;
-                                hud.pendingDeleteTitle = title;
-                            }
+                        onPicked: {
+                            hud.loginOpen = false;
+                            composer.take();
+                        }
+                        onRefocused: composer.take()
+                        onDeleteRequested: (sessionId, title) => {
+                            Ghostd.sessionsError = "";
+                            hud.pendingDeleteGhost = "";
+                            hud.pendingDeleteSessionId = sessionId;
+                            hud.pendingDeleteTitle = title;
                         }
                     }
 
@@ -1220,6 +1220,7 @@ FloatingWindow {
         Connections {
             target: Ghostd
             function onModelSwitchCompleted(provider: string, id: string): void {
+                modelSwitcher.clearPendingModel();
                 hud.switcherOpen = false;
                 composer.take();
             }

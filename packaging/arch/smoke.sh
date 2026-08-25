@@ -69,10 +69,17 @@ fi
 
 desktop-file-validate "$root/usr/share/applications/ghost.desktop"
 python -m json.tool "$root/usr/share/ghost/chromium-extension/manifest.json" >/dev/null
+PYTHONDONTWRITEBYTECODE=1 \
 PYTHONPATH="$root/usr/lib/ghost/desktop-helper" \
   python -c 'import PIL; import ghost_desktop_helper._vendor.omaharness'
 if [[ -e "$root/usr/lib/ghost/desktop-helper/omaharness" ]]; then
   printf 'package payload exposes the private harness as top-level omaharness\n' >&2
+  exit 1
+fi
+if find "$root/usr/lib/ghost/desktop-helper" \
+  \( -type d -name __pycache__ -o -type f \( -name '*.pyc' -o -name '*.pyo' \) \) \
+  -print -quit | grep -q .; then
+  printf 'package payload contains generated Python bytecode\n' >&2
   exit 1
 fi
 bun "$root/usr/lib/ghost/daemon/dist/main.js" --version | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'

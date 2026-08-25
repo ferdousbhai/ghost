@@ -36,6 +36,14 @@ Rectangle {
     readonly property bool pickingRoute: routeRole !== ""
     readonly property var routingRows: Routing.rows(Ghostd.modelRouting)
 
+    /** A catalog choice that cannot become effective until its provider login finishes. */
+    property var pendingModel: null
+    readonly property bool hasPendingModel: pendingModel !== null
+    readonly property string pendingModelName: {
+        if (!root.pendingModel) return "";
+        return root.pendingModel.name || root.pendingModel.id;
+    }
+
     /** True once the user has typed a search: show catalog instead of available. */
     readonly property bool searching: searchField.text.trim() !== ""
 
@@ -82,11 +90,31 @@ Rectangle {
         Ghostd.fetchAvailableModels();
     }
 
-    function chooseModel(provider: string, id: string): void {
-        if (root.pickingRoute)
-            Ghostd.setModelRoute(root.routeRole, root.routeTarget, provider, id);
-        else
-            Ghostd.setModel(provider, id);
+    function rememberPendingModel(model: var): void {
+        if (!model || !model.provider || !model.id) return;
+        root.pendingModel = {
+            provider: String(model.provider),
+            id: String(model.id),
+            name: model.name ? String(model.name) : ""
+        };
+    }
+
+    /** Drop client intent and refresh the effective daemon-reported selection. */
+    function clearPendingModel(): void {
+        root.pendingModel = null;
+        Ghostd.fetchCurrentModel();
+        Ghostd.fetchAvailableModels();
+    }
+
+    function chooseModel(model: var): void {
+        if (!model || !model.provider || !model.id) return;
+        if (root.pickingRoute) {
+            Ghostd.setModelRoute(root.routeRole, root.routeTarget, model.provider, model.id);
+        } else {
+            if (model.usable === false) root.rememberPendingModel(model);
+            else root.pendingModel = null;
+            Ghostd.setModel(model.provider, model.id);
+        }
     }
 
     /** (Re)run the catalog search from the box, debounced. */
@@ -246,6 +274,59 @@ Rectangle {
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontSizeSmall
             elide: Text.ElideRight
+        }
+
+        // Client intent is deliberately separate from the effective selection:
+        // no accent rail, no selection fill, and a dimmed login annotation.
+        Rectangle {
+            objectName: "pendingModelState"
+            visible: root.hasPendingModel && !root.routingView
+            Layout.fillWidth: true
+            implicitHeight: 46
+            radius: Theme.radius / 2
+            color: "transparent"
+            border.width: 1
+            border.color: Theme.warn
+            opacity: 0.58
+
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: Theme.pad
+                anchors.rightMargin: Theme.pad
+                spacing: Theme.gap
+
+                ColumnLayout {
+                    spacing: 0
+                    Layout.fillWidth: true
+
+                    Text {
+                        text: root.pendingModelName
+                        color: Theme.foreground
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSize
+                        elide: Text.ElideRight
+                        Layout.fillWidth: true
+                    }
+
+                    Text {
+                        text: root.pendingModel
+                            ? root.pendingModel.provider + "/" + root.pendingModel.id : ""
+                        color: Theme.foregroundDim
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSizeSmall
+                        elide: Text.ElideRight
+                        Layout.fillWidth: true
+                    }
+                }
+
+                Text {
+                    objectName: "pendingModelAnnotation"
+                    text: "waiting for login"
+                    color: Theme.warn
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSizeSmall
+                }
+            }
         }
 
         // ---- OMP role + fallback routing ---------------------------------
@@ -656,8 +737,7 @@ Rectangle {
                                 cursorShape: Qt.PointingHandCursor
                                 onClicked: {
                                     if (availRow.modelData.model)
-                                        root.chooseModel(availRow.modelData.model.provider,
-                                            availRow.modelData.model.id);
+                                        root.chooseModel(availRow.modelData.model);
                                 }
                             }
                         }
@@ -771,7 +851,7 @@ Rectangle {
                             // Both paths PUT the role. Ghostd opens in-app login
                             // for providers and leaves Claude's external command
                             // as an inline setup warning.
-                            onClicked: root.chooseModel(catRow.modelData.provider, catRow.modelData.id)
+                            onClicked: root.chooseModel(catRow.modelData)
                         }
                     }
                 }

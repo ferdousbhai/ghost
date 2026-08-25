@@ -12,6 +12,7 @@
  *   GET|POST /api/ghosts/:name/mcp    → list or add project MCP servers
  *   PUT|DELETE /api/ghosts/:name/mcp/:server → replace or remove one server
  *   GET  /api/ghosts/:name/sessions   → { sessions } — conversation listing for that ghost
+ *   GET  /api/ghosts/:name/events     → SSE conversation-list invalidations
  *   DELETE /api/ghosts/:name/sessions/:id → trash Ghost-owned conversation artifacts
  *   PUT  /api/ghosts/:name/sessions/:id/pin → { pinned } — pin or unpin it
  *   PUT  /api/ghosts/:name/sessions/:id/title → { title } — rename it
@@ -415,6 +416,41 @@ export function createDaemonServer(options: ServerOptions): Server {
   };
 
   /**
+   * Passive conversation-list invalidations. This subscription never opens a
+   * hosted session; disconnect cleanup drops both its listener and keepalive.
+   */
+  const handleConversationEvents = (
+    ghostName: string,
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): void => {
+    options.registry.get(ghostName);
+    let closed = false;
+    const unsubscribe = options.host.subscribeConversationEvents(ghostName, (event) => {
+      if (!closed && !response.writableEnded) {
+        response.write(`data: ${JSON.stringify(event)}\n\n`);
+      }
+    });
+    response.writeHead(200, SSE_HEADERS);
+    response.write(SSE_KEEPALIVE_COMMENT);
+    liveStreams.add(response);
+    const keepalive = setInterval(() => {
+      if (!closed && !response.writableEnded) response.write(SSE_KEEPALIVE_COMMENT);
+    }, SSE_KEEPALIVE_INTERVAL_MS);
+    const cleanup = () => {
+      if (closed) return;
+      closed = true;
+      clearInterval(keepalive);
+      unsubscribe();
+      liveStreams.delete(response);
+      request.off("aborted", cleanup);
+      response.off("close", cleanup);
+    };
+    request.on("aborted", cleanup);
+    response.on("close", cleanup);
+  };
+
+  /**
    * Everything the owner's right-hand context rail can browse. The catalog is
    * rebuilt from the ghost home and OMP discovery on every request; no second
    * index is stored beside the plain files.
@@ -607,6 +643,22 @@ export function createDaemonServer(options: ServerOptions): Server {
     }
     await options.host.setPinned(ghostName, conversationId, pinned);
     jsonResponse(response, 200, { ok: true, pinned });
+  };
+
+  /** Mark one conversation opened using the daemon's clock. */
+  const handleMarkSessionRead = async (
+    ghostName: string,
+    conversationId: string,
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): Promise<void> => {
+    const body = await readJsonBody(request, maxBodyBytes);
+    if (body === null || typeof body !== "object" || Array.isArray(body)) {
+      errorResponse(response, 400, "invalid_request", "Request body must be a JSON object.");
+      return;
+    }
+    const readAt = await options.host.markRead(ghostName, conversationId);
+    jsonResponse(response, 200, { ok: true, readAt });
   };
 
   /** Rename one conversation. A conversation name cannot be unset. */
@@ -1441,6 +1493,13 @@ export function createDaemonServer(options: ServerOptions): Server {
           }
           return await handleMessages(ghostName, request, response);
         }
+        if (segments.length === 4 && segments[3] === "events") {
+          if (method !== "GET") {
+            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+            return;
+          }
+          return handleConversationEvents(ghostName, request, response);
+        }
         if (segments.length === 4 && segments[3] === "name") {
           if (method !== "PUT") {
             errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
@@ -1479,6 +1538,18 @@ export function createDaemonServer(options: ServerOptions): Server {
             return;
           }
           return await handleSetSessionPin(
+            ghostName,
+            decodePathSegment(segments[4] ?? ""),
+            request,
+            response,
+          );
+        }
+        if (segments.length === 6 && segments[3] === "sessions" && segments[5] === "read") {
+          if (method !== "PUT") {
+            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+            return;
+          }
+          return await handleMarkSessionRead(
             ghostName,
             decodePathSegment(segments[4] ?? ""),
             request,

@@ -19,6 +19,7 @@ import Quickshell
 import Quickshell.Io
 import QtQuick
 import qs.services
+import "TrayActions.js" as TrayActions
 
 Item {
     id: bridge
@@ -30,10 +31,11 @@ Item {
     // Theme colours ride along so the icon is tinted to whatever Omarchy wears.
     readonly property string payload: JSON.stringify({
         reachable: Ghostd.reachable,
-        streaming: Ghostd.streaming,
+        streaming: Ghostd.anyStreaming,
         activeGhost: Ghostd.activeGhost,
         activity: Ghostd.activity,
         ghosts: bridge.roster(),
+        sessions: bridge.recentSessions(),
         colors: {
             idle: String(Theme.foreground),
             streaming: String(Theme.accent),
@@ -48,6 +50,19 @@ Item {
         for (const ghost of Ghostd.ghosts)
             if (ghost && ghost.name) out.push({ name: ghost.name });
         return out;
+    }
+
+    function recentSessions(): var {
+        return Ghostd.sessions.slice().sort(function (a, b) {
+            return (Date.parse(b.updatedAt || b.createdAt || "") || 0)
+                - (Date.parse(a.updatedAt || a.createdAt || "") || 0);
+        }).slice(0, 5).map(function (session) {
+            return {
+                id: session.id,
+                title: session.title,
+                unread: session.unread === true
+            };
+        });
     }
 
     function push(): void {
@@ -85,30 +100,7 @@ Item {
             console.warn("ghost: unparseable tray action:", text);
             return;
         }
-        switch (message.action) {
-        case "toggle":
-            bridge.hud.toggle();
-            break;
-        case "open":
-            bridge.hud.open();
-            break;
-        case "summon":
-            if (message.name) Ghostd.selectGhost(message.name);
-            bridge.hud.open();
-            break;
-        case "switcher":
-            bridge.hud.open();
-            bridge.hud.openSwitcher();
-            break;
-        case "login":
-            bridge.hud.open();
-            bridge.hud.openLogin();
-            break;
-        case "quit":
-            Qt.quit();
-            break;
-        default:
+        if (!TrayActions.dispatch(message, Ghostd, bridge.hud, function () { Qt.quit(); }))
             console.warn("ghost: unknown tray action:", message.action);
-        }
     }
 }

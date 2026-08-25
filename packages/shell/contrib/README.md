@@ -110,8 +110,9 @@ zone). It is off by default for the reason above.
 Nothing to install: whenever the shell runs, `TrayBridge.qml` spawns
 `qml/tray/ghost-tray.py`, which puts a ghost StatusNotifierItem in any SNI tray
 (Omarchy's bar included) — left-click toggles the HUD, right-click opens a menu
-of Summon / per-ghost switch / Connect a model / Quit. It needs the two Python
-D-Bus bindings, both stock on Arch/Omarchy:
+with a ghost switcher when needed, five recent conversations, New conversation,
+Choose a model, and Quit ghost shell. It needs the two Python D-Bus bindings,
+both stock on Arch/Omarchy:
 
 ```sh
 sudo pacman -S --needed python-dbus python-gobject

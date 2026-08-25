@@ -14,8 +14,69 @@ import type { AddressInfo } from "node:net";
 interface MockStepOptions {
   /** Hold this request after capture, so tests can exercise overlapping work. */
   gate?: Promise<void>;
+  /**
+   * An observable gate: tests can await the exact provider boundary before
+   * acting, then release every request held there without polling or sleeping.
+   */
+  barrier?: MockProviderBarrier;
   /** Override the usage frame when a test needs an exact context boundary. */
   usage?: { promptTokens: number; completionTokens?: number };
+}
+
+export interface MockProviderBarrier {
+  /** Number of provider requests currently known to have reached this gate. */
+  readonly arrivals: number;
+  /** Resolve once at least `count` requests have reached the gate. */
+  waitForArrivals(count?: number): Promise<void>;
+  /** Release every current and future request at this gate. Idempotent. */
+  release(): void;
+  /** Provider-side half of the barrier. Tests normally use the other methods. */
+  hold(): Promise<void>;
+}
+
+/** A reusable provider boundary with observable arrivals and explicit release. */
+export function createMockProviderBarrier(): MockProviderBarrier {
+  let arrivals = 0;
+  let released = false;
+  let release!: () => void;
+  const releasedPromise = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const waiters: Array<{ count: number; resolve: () => void }> = [];
+
+  const notifyArrivals = (): void => {
+    for (let index = waiters.length - 1; index >= 0; index -= 1) {
+      const waiter = waiters[index];
+      if (!waiter || waiter.count > arrivals) continue;
+      waiters.splice(index, 1);
+      waiter.resolve();
+    }
+  };
+
+  return {
+    get arrivals() {
+      return arrivals;
+    },
+    waitForArrivals(count = 1) {
+      if (!Number.isInteger(count) || count < 1) {
+        return Promise.reject(new Error("Provider barrier arrival count must be a positive integer."));
+      }
+      if (arrivals >= count) return Promise.resolve();
+      return new Promise<void>((resolve) => {
+        waiters.push({ count, resolve });
+      });
+    },
+    release() {
+      if (released) return;
+      released = true;
+      release();
+    },
+    async hold() {
+      arrivals += 1;
+      notifyArrivals();
+      if (!released) await releasedPromise;
+    },
+  };
 }
 
 export type MockStep = (
@@ -71,6 +132,11 @@ export async function startMockProvider(
   const delay = options.chunkDelayMs ?? 0;
   const requests: CapturedRequest[] = [];
   let step = 0;
+  const barriers = new Set(
+    options.script
+      .map((action) => action.barrier)
+      .filter((barrier): barrier is MockProviderBarrier => barrier !== undefined),
+  );
 
   const server: Server = createServer((request, response) => {
     void (async () => {
@@ -96,6 +162,7 @@ export async function startMockProvider(
         model: typeof body.model === "string" ? body.model : "",
       });
 
+      const requestNumber = step + 1;
       const turn = options.sequential ? step : stepIndexFor(body.messages ?? []);
       const action = options.script[Math.min(turn, options.script.length - 1)];
       step += 1;
@@ -103,6 +170,7 @@ export async function startMockProvider(
         response.writeHead(500).end("mock provider has no script step");
         return;
       }
+      if (action.barrier) await action.barrier.hold();
       if (action.gate) await action.gate;
       if (action.kind === "error") {
         response.writeHead(action.status, { "content-type": "application/json" });
@@ -110,7 +178,7 @@ export async function startMockProvider(
         return;
       }
 
-      const id = `chatcmpl-mock-${step}`;
+      const id = `chatcmpl-mock-${requestNumber}`;
       const base = {
         id,
         object: "chat.completion.chunk",
@@ -138,7 +206,7 @@ export async function startMockProvider(
         }
         sse(response, { ...base, choices: [{ index: 0, delta: {}, finish_reason: "stop" }] });
       } else {
-        const callId = `call_${step}`;
+        const callId = `call_${requestNumber}`;
         sse(response, {
           ...base,
           choices: [{
@@ -189,7 +257,11 @@ export async function startMockProvider(
       });
       response.write("data: [DONE]\n\n");
       response.end();
-    })();
+    })().catch((error: unknown) => {
+      if (response.destroyed || response.writableEnded) return;
+      response.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
+      response.end(error instanceof Error ? error.message : String(error));
+    });
   });
 
   await new Promise<void>((resolvePromise) => {
@@ -201,6 +273,7 @@ export async function startMockProvider(
     modelId,
     requests,
     close: () => {
+      for (const barrier of barriers) barrier.release();
       if (!server.listening) return Promise.resolve();
       return new Promise<void>((resolvePromise, rejectPromise) => {
         server.closeAllConnections();

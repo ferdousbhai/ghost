@@ -17,8 +17,10 @@
  *   POST /api/ghosts/:name/greeting           → { greeting, onboarding }, ~800ms late
  *   PUT  /api/ghosts/:name/name { name }      → { ok, name } | 400 | 404 | 409
  *   GET  /api/ghosts/:name/sessions           → { sessions: [...] }, newest first
+ *   GET  /api/ghosts/:name/events             → conversation invalidation SSE
  *   GET  /api/ghosts/:name/sessions/:id/commands → effective OMP slash commands
  *   DELETE /api/ghosts/:name/sessions/:id     → delete one conversation
+ *   PUT  /api/ghosts/:name/sessions/:id/read  → mark one conversation read
  *   GET  /api/ghosts/:name/sessions/:id/transcript → { id, title, messages, … }
  *   PUT  /api/ghosts/:name/sessions/:id/title → { ok, title } | 400 | 404 | 409
  *   POST /api/ghosts/:name/sessions/:id/branch → { action: "fork", entryId }
@@ -92,6 +94,15 @@ const ghosts = ["casper", "moaning-myrtle"].map((name) => ({
   dir: join(GHOSTS_ROOT, name),
   createdAt: new Date(Date.now() - 86_400_000).toISOString(),
 }));
+
+const conversationEventClients = new Map();
+
+function publishConversationUpdated(name, id, updatedAt = new Date().toISOString()) {
+  const event = `data: ${JSON.stringify({ type: "conversation-updated", id, updatedAt })}\n\n`;
+  for (const response of conversationEventClients.get(name) ?? []) {
+    if (!response.writableEnded) response.write(event);
+  }
+}
 
 // ---- Browsable ghost context ----------------------------------------------
 // Metadata stays in memory. The default root gets matching temporary files so
@@ -662,6 +673,7 @@ const sessionSummary = (s) => ({
   // Pin state is in the listing shape; the pin route itself is not mocked, so
   // nothing here ever flips it and the listing order is plain newest-first.
   pinned: s.pinned === true,
+  unread: !s.readAt || s.updatedAt > s.readAt,
 });
 
 function recordTurn(name, sessionId, prompt, assistantText, ownerMessages = []) {
@@ -682,6 +694,7 @@ function recordTurn(name, sessionId, prompt, assistantText, ownerMessages = []) 
   s.updatedAt = new Date(now).toISOString();
   // Background titling after the first turn: derive a title from the prompt.
   if (!s.title) s.title = prompt.slice(0, 40) || "New conversation";
+  publishConversationUpdated(name, sessionId, s.updatedAt);
 }
 
 // ---- Greetings -------------------------------------------------------------
@@ -956,11 +969,18 @@ function* script(name, prompt, sessionId) {
   }
 }
 
-/** Ghosts with a turn in flight; a delete against one of these is 409 ghost_busy. */
+/** Conversation keys with a turn in flight; the real daemon's busy gate is per conversation. */
 const answering = new Set();
 /** Active turn queues, keyed exactly like the daemon's session routes. */
 const activeTurns = new Map();
 const turnKey = (name, sessionId) => JSON.stringify([name, sessionId]);
+const ghostIsAnswering = (name) => [...answering].some((key) => {
+  try {
+    return JSON.parse(key)[0] === name;
+  } catch {
+    return false;
+  }
+});
 
 /** Open an SSE response, and free a paused turn if the client walks away. */
 function openStream(req, res, name, sessionId) {
@@ -1025,12 +1045,12 @@ async function streamTurn(req, res, name, body) {
   const key = turnKey(name, sessionId);
   const turn = { streaming: true, steering: [], followUp: [], consumedOwners: [] };
   activeTurns.set(key, turn);
-  answering.add(name);
+  answering.add(key);
   let assistantText;
   try {
     assistantText = await pump(res, script(name, prompt, sessionId), stream, turn);
   } finally {
-    answering.delete(name);
+    answering.delete(key);
     turn.streaming = false;
     activeTurns.delete(key);
   }
@@ -1100,14 +1120,15 @@ function* reanswerScript(name, sessionId, session, entryId, record) {
 
 async function streamReanswer(req, res, name, sessionId, session, entryId, record) {
   const stream = openStream(req, res, name, sessionId);
-  answering.add(name);
+  const key = turnKey(name, sessionId);
+  answering.add(key);
   try {
     await pump(res, reanswerScript(name, sessionId, session, entryId, record), stream, {
       steering: [],
       consumedOwners: [],
     });
   } finally {
-    answering.delete(name);
+    answering.delete(key);
   }
   res.end();
 }
@@ -1380,6 +1401,27 @@ createServer(async (req, res) => {
   const ghost = ghosts.find((g) => g.name === name);
   if (!ghost) return json(res, 404, { error: { message: `no ghost named ${name}`, code: "not_found" } });
 
+  if (parts[3] === "events" && parts.length === 4 && req.method === "GET") {
+    res.writeHead(200, {
+      "content-type": "text/event-stream",
+      "cache-control": "no-cache",
+      connection: "keep-alive",
+    });
+    res.write(": keepalive\n\n");
+    const clients = conversationEventClients.get(name) ?? new Set();
+    clients.add(res);
+    conversationEventClients.set(name, clients);
+    const keepalive = setInterval(() => {
+      if (!res.writableEnded) res.write(": keepalive\n\n");
+    }, 15_000);
+    res.on("close", () => {
+      clearInterval(keepalive);
+      clients.delete(res);
+      if (clients.size === 0) conversationEventClients.delete(name);
+    });
+    return;
+  }
+
 
   if (parts.length === 4 && parts[3] === "context" && req.method === "GET") {
     return json(res, 200, contextSnapshot(name));
@@ -1420,7 +1462,7 @@ createServer(async (req, res) => {
         error: { message: "type the ghost's name to confirm", code: "confirmation_required" },
       });
     }
-    if (answering.has(name)) {
+    if (ghostIsAnswering(name)) {
       return json(res, 409, {
         error: { message: `${name} is still answering — stop the turn first`, code: "ghost_busy" },
       });
@@ -1451,7 +1493,7 @@ createServer(async (req, res) => {
     if (ghosts.some((g) => g.name === next)) {
       return json(res, 409, { error: { message: `there is already a ghost called ${next}`, code: "already_exists" } });
     }
-    if (answering.has(name)) {
+    if (ghostIsAnswering(name)) {
       return json(res, 409, {
         error: { message: `${name} is still answering — stop the turn first`, code: "ghost_busy" },
       });
@@ -1470,6 +1512,15 @@ createServer(async (req, res) => {
 
   if (parts[3] === "messages" && req.method === "POST") {
     const body = await readBody(req).catch(() => ({}));
+    const sessionId = body?.options?.sessionId;
+    if (answering.has(turnKey(name, sessionId))) {
+      return json(res, 409, {
+        error: {
+          message: "This ghost is already answering in this conversation",
+          code: "session_busy",
+        },
+      });
+    }
     return streamTurn(req, res, name, body);
   }
   if (parts[3] === "mcp" && parts.length === 4 && req.method === "GET") {
@@ -1619,10 +1670,20 @@ createServer(async (req, res) => {
     return json(res, 200, { sessions: list });
   }
   if (parts[3] === "sessions" && parts.length === 5 && req.method === "DELETE") {
-    const deleted = ghostSessions(name).delete(decodeURIComponent(parts[4]));
+    const sessionId = decodeURIComponent(parts[4]);
+    const deleted = ghostSessions(name).delete(sessionId);
+    if (deleted) publishConversationUpdated(name, sessionId);
     return deleted
       ? json(res, 200, { ok: true })
       : json(res, 404, { error: { message: "no such session", code: "not_found" } });
+  }
+  if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "read" && req.method === "PUT") {
+    await readBody(req).catch(() => ({}));
+    const s = ghostSessions(name).get(decodeURIComponent(parts[4]));
+    if (!s) return json(res, 404, { error: { message: "no such session", code: "not_found" } });
+    s.readAt = new Date().toISOString();
+    publishConversationUpdated(name, s.id, s.updatedAt);
+    return json(res, 200, { ok: true, readAt: s.readAt });
   }
   if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "commands" && req.method === "GET") {
     return json(res, 200, { commands: MOCK_COMMANDS });
@@ -1689,12 +1750,14 @@ createServer(async (req, res) => {
       return json(res, 409, { error: { message: "Claude Code owns this conversation's title", code: "not_supported" } });
     }
     s.title = title;
+    publishConversationUpdated(name, s.id, s.updatedAt);
     return json(res, 200, { ok: true, title: s.title });
   }
   if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "branch" && req.method === "POST") {
-    const s = ghostSessions(name).get(decodeURIComponent(parts[4]));
+    const sessionId = decodeURIComponent(parts[4]);
+    const s = ghostSessions(name).get(sessionId);
     if (!s) return json(res, 404, { error: { message: "no such session", code: "not_found" } });
-    if (answering.has(name)) {
+    if (answering.has(turnKey(name, sessionId))) {
       return json(res, 409, {
         error: { message: `${name} is still answering — stop the turn first`, code: "session_busy" },
       });
@@ -1736,7 +1799,7 @@ createServer(async (req, res) => {
     const sessionId = decodeURIComponent(parts[4]);
     const s = ghostSessions(name).get(sessionId);
     if (!s) return json(res, 404, { error: { message: "no such session", code: "not_found" } });
-    if (answering.has(name)) {
+    if (answering.has(turnKey(name, sessionId))) {
       return json(res, 409, {
         error: { message: `${name} is still answering — stop the turn first`, code: "session_busy" },
       });

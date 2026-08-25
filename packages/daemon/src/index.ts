@@ -191,6 +191,13 @@ export {
 } from "./pi-messages.js";
 export { PINS_FILENAME, pinsPath, readPins, writePins } from "./pins.js";
 export {
+  READS_FILENAME,
+  readsPath,
+  readReads,
+  writeReads,
+  type ConversationReads,
+} from "./reads.js";
+export {
   attachRelay,
   createRelayHub,
   RELAY_CLOSE_GOING_AWAY,
@@ -282,6 +289,8 @@ export {
   OMP_NATIVE_TOOL_NAMES,
   SessionHost,
   sessionFileNameFor,
+  type ConversationEventListener,
+  type ConversationUpdatedEvent,
   type GhostSessionHandle,
   type GreetingConfig,
   type GreetingGenerator,

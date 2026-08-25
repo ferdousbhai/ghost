@@ -20,6 +20,7 @@ catalog) is derived per session and never stored.
   .pi/                         per-ghost OMP settings, model roles, and credentials
   .sessions/                   daemon-owned OMP transcripts and runtime sidecars
   .sessions/pins.json          pinned-conversation ids: { "pinned": ["<id>", …] }
+  .sessions/reads.json         owner read state: { "reads": { "<id>": "<ISO timestamp>" } }
   conversations/*.json         lossless source transcripts from the hosted export;
                                retained unchanged until that conversation is trashed
   export-manifest.json         present in imported archives; counts, pathRewrites,
@@ -72,6 +73,12 @@ and are reported without preventing the ghost from starting. User-triggered
 conversation deletion moves every valid source fixture for that conversation
 to Trash before moving its native projection, so daemon restart cannot recreate
 a conversation the owner removed.
+
+`packages/daemon/src/hosted-conversation-import.ts` is therefore a second writer
+of the OMP session format. Round-trip validation of its exact staged bytes
+through `SessionManager.open` is the invariant that licenses this exception.
+`CURRENT_SESSION_VERSION` comes from OMP's own exports, so a format bump breaks
+loudly at import time.
 
 `.pi/` holds live provider credentials, and OMP stores them unencrypted: the
 `auth_credentials` row in `agent.db` is plain JSON behind nothing but 0600. That
@@ -305,20 +312,37 @@ one must not be a leak of both.
   The pinned client in the summon-ghost repo is the normative spec
   (`~/github.com/ferdousbhai/summon-ghost`, read-only reference).
 - `GET  /api/ghosts/:name/sessions` → `{ sessions: [{ id, title, createdAt,
-  updatedAt, messageCount, pinned }] }` — the ghost's conversations, **pinned
+  updatedAt, messageCount, pinned, unread }] }` — the ghost's conversations, **pinned
   first, then newest-updated first within each group**. `id` is the
   conversation id used to resume it (the pi-messages `options.sessionId`);
   `title` is a short auto-generated name or `null` until one is generated (see
   "Conversation titles" below). OMP transcripts and Claude Code resume sidecars
   share this shape (a Claude conversation's `title` is `"Claude Code"`).
+- `GET  /api/ghosts/:name/events` → an SSE stream of
+  `{ type: "conversation-updated", id, updatedAt }` invalidations. The daemon
+  emits one after persisted conversation or read-state changes; clients refetch
+  `GET …/sessions` rather than receiving a duplicated listing on this stream.
+  It uses the same SSE headers and 15-second comment keepalive as turn streams.
+  Disconnect or abort unregisters the listener and keepalive immediately, and
+  subscribing never opens or retains an agent session.
 - `PUT  /api/ghosts/:name/sessions/:id/pin` `{ pinned: boolean }` →
   `{ ok: true, pinned }` — pin or unpin one conversation, idempotently. Pin
   state lives in `.sessions/pins.json` (atomic replace, never partial), works
-  for OMP and Claude Code conversations alike, and is user state, not derivable
-  — the one deliberate exception in the daemon-owned dir. A non-boolean
+  for OMP and Claude Code conversations alike, and is owner state, not derivable
+  — one of the two deliberate owner-state exceptions in the daemon-owned dir.
+  A non-boolean
   `pinned` is `400 invalid_request`; an unknown conversation id is `404 not_found`.
   Deleting a conversation drops its pin; a stale id (conversation gone) is
   ignored on read and pruned on the next write.
+- `PUT  /api/ghosts/:name/sessions/:id/read` `{}` →
+  `{ ok: true, readAt }` — mark a stored conversation opened using the daemon's
+  clock. Read state lives in `.sessions/reads.json` as conversation id to
+  last-opened ISO timestamp (atomic replace, never partial), works for OMP and
+  Claude Code conversations alike, and is owner state rather than something a
+  transcript can derive. A row is unread when it has never been opened or its
+  `updatedAt` is later than `readAt`. An unknown conversation id is
+  `404 not_found`; deletion drops its read entry, and stale ids are pruned on
+  the next write.
 - `PUT  /api/ghosts/:name/sessions/:id/title` `{ title: string }` →
   `{ ok: true, title }` — rename one conversation. The title is trimmed and
   written through the same native title slot the smol lane uses, with source

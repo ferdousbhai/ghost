@@ -355,9 +355,8 @@ function buildNativeSession(
   const created = isoTimestamp(source.catalog.createdAt, "catalog.createdAt");
   const updated = isoTimestamp(source.catalog.updatedAt, "catalog.updatedAt");
   const { title, slot } = fitTitle(source.catalog.title, updated.iso);
-  // OMP's public foreign-session importer only supports Claude/Codex and
-  // persists a copy under a fresh identity. This manual tree and JSONL write
-  // preserve the hosted conversation/message ids and source timestamps.
+  // See CONTRACTS.md's ghost-home section for the reviewed OMP session-format
+  // writer exception and the invariant required before publication.
   const header: SessionHeader = {
     type: "session",
     version: CURRENT_SESSION_VERSION,

@@ -12,6 +12,7 @@ pragma ComponentBehavior: Bound
 // owns the ordering; the HUD only splits the already-sorted listing into the
 // two groups.
 import QtQuick
+import QtQuick.Layouts
 import qs.services
 
 Item {
@@ -45,14 +46,12 @@ Item {
     /** The live filter. Empty shows every conversation in both groups. */
     readonly property string query: searchInput.text.trim()
 
-    /** The two groups, already filtered. The daemon sorts the listing (pinned
-        first, newest-updated first inside each group), so filtering in place
-        keeps that order without re-sorting here. */
+    /** Filtered daemon order: pinned first, then newest inside each group. */
     readonly property var pinnedSessions: root.group(true)
-    readonly property var otherSessions: root.group(false)
+    readonly property var filteredSessions: Ghostd.sessions.filter(root.matches)
 
     implicitWidth: 190
-    implicitHeight: column.implicitHeight
+    implicitHeight: 240
 
     /** Drop the filter — what a caller outside the list (the sidebar footer's
         compose button) needs before the view jumps to a brand-new
@@ -110,7 +109,14 @@ Item {
         function onActiveGhostChanged(): void {
             root.cancelRename();
         }
+
+        function onSessionsChanged(): void {
+            root.syncRows();
+        }
     }
+
+    onQueryChanged: root.syncRows()
+    Component.onCompleted: root.syncRows()
 
     // A row's display title: the daemon-generated title, or a graceful fallback
     // (an unstarted/just-created thread is "New conversation").
@@ -133,21 +139,58 @@ Item {
         });
     }
 
-    // One row shape, instantiated by both group Repeaters. Duplicating it per
-    // section would be the same delegate twice with a different model.
+    /**
+     * Reconcile by id so ListView observes true moves instead of a model reset.
+     * That is what lets remote turn completions visibly climb the list.
+     */
+    function syncRows(): void {
+        const wanted = root.filteredSessions;
+        for (let index = conversationModel.count - 1; index >= 0; index--) {
+            const id = conversationModel.get(index).sessionId;
+            if (!wanted.some(session => session.id === id)) conversationModel.remove(index);
+        }
+        for (let target = 0; target < wanted.length; target++) {
+            const session = wanted[target];
+            let current = -1;
+            for (let index = target; index < conversationModel.count; index++) {
+                if (conversationModel.get(index).sessionId === session.id) {
+                    current = index;
+                    break;
+                }
+            }
+            if (current < 0) conversationModel.insert(target, {
+                sessionId: session.id,
+                sessionData: session
+            });
+            else {
+                if (current !== target) conversationModel.move(current, target, 1);
+                conversationModel.set(target, {
+                    sessionId: session.id,
+                    sessionData: session
+                });
+            }
+        }
+    }
+
+    ListModel { id: conversationModel }
+
+    // One stable row shape; ListModel.move keeps it alive during reorder.
     Component {
         id: conversationRow
 
         Rectangle {
             id: entry
 
-            required property var modelData
+            required property var sessionData
 
-            readonly property bool active: entry.modelData.id === Ghostd.currentSessionId
-            readonly property bool pinned: entry.modelData.pinned === true
+            readonly property bool active: entry.sessionData.id === Ghostd.currentSessionId
+            readonly property bool pinned: entry.sessionData.pinned === true
+            readonly property bool unread: entry.sessionData.unread === true && !entry.active
+            readonly property bool live: Ghostd.isConversationStreaming(
+                Ghostd.activeGhost, entry.sessionData.id)
             readonly property bool deleting:
-                Ghostd.deletingSessionId === entry.modelData.id
-            readonly property bool editing: root.editingId === entry.modelData.id
+                Ghostd.deletingSessionId === entry.sessionData.id
+            readonly property bool editing: root.editingId === entry.sessionData.id
 
             width: root.width
             height: Theme.controlHeight
@@ -189,7 +232,7 @@ Item {
                     anchors.right: actions.left
                     anchors.rightMargin: Theme.gap
                     anchors.verticalCenter: parent.verticalCenter
-                    text: root.titleOf(entry.modelData)
+                    text: root.titleOf(entry.sessionData)
                     color: entry.active ? Theme.foregroundBright
                         : (entryArea.containsMouse ? Theme.foreground : Theme.foregroundDim)
                     font.family: Theme.fontFamily
@@ -226,15 +269,33 @@ Item {
 
                     anchors.right: parent.right
                     anchors.verticalCenter: parent.verticalCenter
-                    // Two 16px glyphs and the gap between them, claimed on
-                    // hover and given back on the way out.
-                    width: actions.showActions ? 16 * 2 + Theme.gap / 2 : 0
+                    // At rest this is one status slot. Hover expands the same
+                    // right edge into pin/delete actions and hides the marker.
+                    width: actions.showActions ? 16 * 2 + Theme.gap / 2 : 16
                     height: Theme.controlHeight
                     clip: true
 
                     Behavior on width {
                         enabled: !Theme.reducedMotion
                         NumberAnimation { duration: Theme.durFast; easing.type: Easing.OutCubic }
+                    }
+
+                    Rectangle {
+                        id: stateMarker
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 6
+                        height: 6
+                        radius: 3
+                        visible: !actions.showActions && (entry.live || entry.unread)
+                        color: Theme.ghostAmber
+
+                        SequentialAnimation on opacity {
+                            running: stateMarker.visible && entry.live && !Theme.reducedMotion
+                            loops: Animation.Infinite
+                            NumberAnimation { to: 0.28; duration: 650; easing.type: Easing.InOutSine }
+                            NumberAnimation { to: 1; duration: 650; easing.type: Easing.InOutSine }
+                        }
                     }
 
                     Rectangle {
@@ -272,7 +333,7 @@ Item {
                             hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
                             // Pinning is reversible in one click, so it asks nothing.
-                            onClicked: Ghostd.pinConversation(entry.modelData.id, !entry.pinned)
+                            onClicked: Ghostd.pinConversation(entry.sessionData.id, !entry.pinned)
                         }
                     }
 
@@ -283,7 +344,7 @@ Item {
                         width: 16
                         height: Theme.controlHeight
                         visible: actions.showActions
-                            && !(entry.active && Ghostd.streaming)
+                            && !entry.live
                         z: 2
                         radius: Theme.radius / 2
                         color: deleteArea.containsMouse || entry.deleting
@@ -311,8 +372,8 @@ Item {
                             enabled: !entry.deleting
                             hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
-                            onClicked: root.deleteRequested(entry.modelData.id,
-                                root.titleOf(entry.modelData))
+                            onClicked: root.deleteRequested(entry.sessionData.id,
+                                root.titleOf(entry.sessionData))
                         }
                     }
                 }
@@ -327,23 +388,24 @@ Item {
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
                 onClicked: {
-                    Ghostd.openConversation(entry.modelData.id);
+                    Ghostd.openConversation(entry.sessionData.id);
                     root.picked();
                 }
                 // The first click of the pair still opens the conversation.
                 // That is what a single click there does anyway, and it is the
                 // one you are about to rename.
-                onDoubleClicked: root.beginRename(entry.modelData)
+                onDoubleClicked: root.beginRename(entry.sessionData)
             }
         }
     }
 
-    Column {
+    ColumnLayout {
         id: column
-        width: root.width
+        anchors.fill: parent
         spacing: Theme.gap
 
         Text {
+            Layout.fillWidth: true
             text: "Conversations"
             color: Theme.foregroundDim
             font.family: Theme.fontFamily
@@ -358,8 +420,8 @@ Item {
         // its empty state, not a dead field.
         Rectangle {
             visible: Ghostd.sessions.length > 0
-            width: root.width
-            height: Theme.controlHeight
+            Layout.fillWidth: true
+            Layout.preferredHeight: Theme.controlHeight
             radius: Theme.radius / 2
             color: searchInput.activeFocus ? Theme.film(0.10) : Theme.film(0.06)
 
@@ -446,6 +508,7 @@ Item {
         // filter; Notes never shows an empty group.
         Text {
             visible: root.pinnedSessions.length > 0
+            Layout.fillWidth: true
             text: "Pinned"
             color: Theme.foregroundDim
             font.family: Theme.fontFamily
@@ -455,20 +518,37 @@ Item {
             font.letterSpacing: 1
         }
 
-        Repeater {
-            model: root.pinnedSessions
+        ListView {
+            id: conversationList
+            visible: count > 0
+            Layout.fillWidth: true
+            Layout.fillHeight: visible
+            Layout.minimumHeight: visible ? Theme.controlHeight : 0
+            clip: true
+            spacing: 0
+            model: conversationModel
             delegate: conversationRow
-        }
 
-        Repeater {
-            model: root.otherSessions
-            delegate: conversationRow
+            move: Transition {
+                NumberAnimation {
+                    properties: "x,y"
+                    duration: Theme.reducedMotion ? 0 : 220
+                    easing.type: Easing.OutCubic
+                }
+            }
+            displaced: Transition {
+                NumberAnimation {
+                    properties: "x,y"
+                    duration: Theme.reducedMotion ? 0 : 220
+                    easing.type: Easing.OutCubic
+                }
+            }
         }
 
         Text {
             visible: root.query !== "" && Ghostd.sessions.length > 0
-                && root.pinnedSessions.length === 0 && root.otherSessions.length === 0
-            width: root.width
+                && root.filteredSessions.length === 0
+            Layout.fillWidth: true
             text: "No matches"
             color: Theme.foregroundDim
             font.family: Theme.fontFamily
@@ -478,7 +558,7 @@ Item {
 
         Text {
             visible: Ghostd.sessionsError !== "" && Ghostd.sessions.length > 0
-            width: root.width
+            Layout.fillWidth: true
             text: Ghostd.sessionsError
             color: Theme.danger
             font.family: Theme.fontFamily
@@ -488,7 +568,7 @@ Item {
 
         Text {
             visible: Ghostd.sessions.length === 0
-            width: root.width
+            Layout.fillWidth: true
             text: Ghostd.activeGhost === ""
                 ? "No ghost selected"
                 : (Ghostd.sessionsError !== "" ? "Conversations unavailable" : "No conversations yet")

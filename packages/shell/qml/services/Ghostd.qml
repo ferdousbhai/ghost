@@ -131,7 +131,7 @@ Singleton {
     // the HUD lists them per ghost, resumes one by loading its transcript, and
     // starts a fresh one on demand. This fixes #26 — a restart no longer loses
     // history, because a conversation lives in the daemon keyed by session id.
-    /** Session listing for the active ghost: [{ id, title, createdAt, updatedAt, messageCount, pinned }], pinned first then newest. */
+    /** Session listing for the active ghost: [{ id, title, createdAt, updatedAt, messageCount, pinned, unread }], pinned first then newest. */
     property var sessions: []
     /** The active ghost's current conversation id. "" until one is minted or opened. */
     property string currentSessionId: ""
@@ -143,6 +143,8 @@ Singleton {
         that one renders in the conversation list, and a branch is asked for
         from a message, half a window away from it. */
     property string branchError: ""
+    /** Whether the owner can currently see the HUD. */
+    property bool hudVisible: false
 
     // ---- Greeting ---------------------------------------------------------
     // The ghost's opening line for an empty chat. Pure upside: the HUD paints
@@ -256,6 +258,11 @@ Singleton {
     property var setModelRequest: null
     property var modelRoutingRequest: null
     property var sessionsRequest: null
+    /** Long-lived passive invalidation stream for the active ghost. */
+    property var eventsRequest: null
+    property string eventsGhost: ""
+    property int eventsConsumed: 0
+    property string eventsFrameBuffer: ""
     property var contextRequest: null
     property var contextDeleteRequest: null
     property var commandsRequest: null
@@ -267,6 +274,7 @@ Singleton {
     property var transcriptRequest: null
     property var deleteSessionRequest: null
     property var pinSessionRequest: null
+    property var readSessionRequests: ({})
     property var askRequest: null
     property var askSubmitRequest: null
     property var queueRequest: null
@@ -274,6 +282,11 @@ Singleton {
     property var branchRequest: null
 
     property var sessionIds: ({})     // ghost name -> active pi session id
+    /** Full live/presentation state keyed by JSON.stringify([ghost, sessionId]). */
+    property var turnStates: ({})
+    /** Keys whose HTTP turn is still open; replacing this array wakes bindings. */
+    property var liveConversationKeys: []
+    readonly property bool anyStreaming: root.liveConversationKeys.length > 0
     property var blocks: ({})         // contentIndex -> { kind, text }
     property var toolNames: []        // tool names seen this turn, in order
     property var toolActivities: []   // stateful cards for the current assistant row
@@ -307,7 +320,8 @@ Singleton {
         id: flushTimer
         interval: 50
         repeat: true
-        onTriggered: root.flush(false, false)
+        running: root.anyStreaming
+        onTriggered: root.flushLiveTurns()
     }
 
     // ghostd writes an SSE keepalive every 15s. Three missed beats means this
@@ -315,9 +329,25 @@ Singleton {
     // XHR to DONE (a half-open socket otherwise leaves the HUD spinning forever).
     Timer {
         id: streamWatchdog
+        interval: 1000
+        repeat: true
+        running: root.anyStreaming
+        onTriggered: root.expireStaleStreams()
+    }
+
+    // The conversation event stream uses the daemon's same 15s keepalive.
+    Timer {
+        id: eventsWatchdog
         interval: 45000
         repeat: false
-        onTriggered: root.expireStream()
+        onTriggered: root.expireConversationEvents()
+    }
+
+    Timer {
+        id: eventsReconnect
+        interval: 1000
+        repeat: false
+        onTriggered: root.connectConversationEvents(root.activeGhost)
     }
 
     // A login is interactive and multi-step; the daemon models it as a pollable
@@ -338,20 +368,20 @@ Singleton {
         id: askPoll
         interval: 200
         repeat: true
-        running: root.streaming && root.activity === "ask"
-            && root.pendingAsk === null && !root.askSubmitting
-        onTriggered: root.fetchPendingAsk()
+        running: root.anyStreaming
+        onTriggered: root.pollPendingAsks()
     }
 
     Timer {
         id: queuePoll
         interval: 350
         repeat: true
-        running: root.streaming && root.pendingAsk === null
-        onTriggered: root.fetchQueue()
+        running: root.anyStreaming
+        onTriggered: root.pollQueues()
     }
 
     Component.onCompleted: root.refresh()
+    onActiveGhostChanged: root.connectConversationEvents(root.activeGhost)
 
     // ---- Authenticated requests -------------------------------------------
 
@@ -418,7 +448,7 @@ Singleton {
         const xhr = new XMLHttpRequest();
         root.listRequest = xhr;
         xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4) return;
+            if (xhr.readyState !== 4 || xhr !== root.listRequest) return;
             if (xhr.status === 200) {
                 try {
                     const list = JSON.parse(xhr.responseText);
@@ -428,6 +458,7 @@ Singleton {
                     if (root.activeGhost === "" && root.ghosts.length > 0)
                         root.activeGhost = root.ghosts[0].name;
                     if (root.activeGhost !== "") {
+                        root.connectConversationEvents(root.activeGhost);
                         root.fetchCurrentModel();
                         root.fetchSessions(root.activeGhost);
                         root.fetchGreeting();
@@ -538,6 +569,7 @@ Singleton {
         root.ghostRenameError = "";
         root.renameGhostSnapshot = transaction.before;
         root.installGhostRenameState(transaction.after);
+        root.moveTurnStates(from, next);
         const xhr = new XMLHttpRequest();
         root.renameGhostRequest = xhr;
         xhr.onreadystatechange = function () {
@@ -558,10 +590,12 @@ Singleton {
                 if (settled !== next) root.applyGhostRename(next, settled);
                 root.refresh();
             } else {
-                if (root.renameGhostSnapshot)
+                if (root.renameGhostSnapshot) {
+                    root.moveTurnStates(next, from);
                     root.installGhostRenameState(GhostRename.rollback({
                         before: root.renameGhostSnapshot
                     }));
+                }
                 root.renameGhostSnapshot = null;
                 const detail = root.errorDetail(xhr);
                 root.ghostRenameError = detail !== ""
@@ -611,19 +645,43 @@ Singleton {
     /** Move everything the shell keys by a ghost's name onto the new one. */
     function applyGhostRename(from: string, to: string): void {
         root.installGhostRenameState(GhostRename.move(root.ghostRenameState(), from, to));
+        root.moveTurnStates(from, to);
+    }
+
+    function moveTurnStates(from: string, to: string): void {
+        if (from === to) return;
+        const next = ({});
+        for (const key of Object.keys(root.turnStates)) {
+            const state = root.turnStates[key];
+            if (state && state.ghost === from) {
+                state.ghost = to;
+                state.key = root.conversationKey(to, state.sessionId);
+                next[state.key] = state;
+            } else {
+                next[key] = state;
+            }
+        }
+        root.turnStates = next;
+        root.updateLiveConversationKeys();
     }
 
     /** Drop every trace of a ghost that is no longer there. */
     function forgetGhost(name: string): void {
         delete root.sessionIds[name];
         root.dropCommandTranscripts(name, "");
+        const kept = ({});
+        for (const key of Object.keys(root.turnStates)) {
+            const state = root.turnStates[key];
+            if (state && state.ghost !== name) kept[key] = state;
+        }
+        root.turnStates = kept;
+        root.updateLiveConversationKeys();
         if (name !== root.activeGhost) return;
-        root.cancel();
         root.activeGhost = "";
         root.currentSessionId = "";
         root.sessions = [];
         root.sessionsError = "";
-        root.clearTranscript();
+        root.clearTurnProjection();
         root.clearModelState();
         root.clearGreeting();
         root.clearContext();
@@ -634,13 +692,14 @@ Singleton {
 
     function selectGhost(name: string): void {
         if (name === root.activeGhost) return;
-        root.cancel();
+        const previous = root.activeTurnState(false);
+        if (previous) root.captureActiveTurn(previous);
         root.activeGhost = name;
-        root.clearTranscript();
         // Conversations are per ghost; restore this ghost's last-active session
         // id (if any) and list its conversations. The transcript view stays
         // empty until the user opens one — a switch shows the list, not a body.
         root.currentSessionId = root.sessionIds[name] || "";
+        root.showTurnState(name, root.currentSessionId);
         root.sessions = [];
         root.sessionsError = "";
         // Model selection is per ghost; drop the old one and fetch the new.
@@ -656,16 +715,290 @@ Singleton {
         root.fetchGreeting();
     }
 
-    function clearTranscript(): void {
+    function conversationKey(ghost: string, sessionId: string): string {
+        return JSON.stringify([ghost, sessionId]);
+    }
+
+    function isActiveTurn(state: var): bool {
+        return !!state && state.ghost === root.activeGhost
+            && state.sessionId === root.currentSessionId;
+    }
+
+    function cloneTranscriptRow(row: var): var {
+        return {
+            role: String(row.role || ""),
+            text: String(row.text || ""),
+            tools: String(row.tools || ""),
+            toolActivity: Array.isArray(row.toolActivity) ? row.toolActivity.slice() : [],
+            error: String(row.error || ""),
+            pending: row.pending === true,
+            entryId: String(row.entryId || "")
+        };
+    }
+
+    function visibleTranscriptRows(): var {
+        const rows = [];
+        for (let index = 0; index < transcriptModel.count; index++)
+            rows.push(root.cloneTranscriptRow(transcriptModel.get(index)));
+        return rows;
+    }
+
+    function newTurnState(ghost: string, sessionId: string): var {
+        return {
+            key: root.conversationKey(ghost, sessionId),
+            ghost: ghost,
+            sessionId: sessionId,
+            rows: [],
+            hydratedRowCount: 0,
+            commandTurnKey: "",
+            commandTurnIndex: -1,
+            commandTurnAnchor: 0,
+            streaming: false,
+            request: null,
+            lastStreamActivity: 0,
+            activity: "",
+            statusText: "",
+            lastError: "",
+            pendingAsk: null,
+            askSubmitting: false,
+            askError: "",
+            steeringQueue: [],
+            followUpQueue: [],
+            queueSubmitting: false,
+            queueError: "",
+            blocks: ({}),
+            toolNames: [],
+            toolActivities: [],
+            toolIdsByContent: ({}),
+            assistantRow: -1,
+            consumed: 0,
+            frameBuffer: "",
+            presentationDirty: false,
+            askRequest: null,
+            askSubmitRequest: null,
+            queueRequest: null,
+            queueStatusRequest: null,
+            transcriptRequest: null
+        };
+    }
+
+    function ensureTurnState(ghost: string, sessionId: string): var {
+        if (ghost === "" || sessionId === "") return null;
+        const key = root.conversationKey(ghost, sessionId);
+        let state = root.turnStates[key];
+        if (!state) {
+            state = root.newTurnState(ghost, sessionId);
+            const next = Object.assign({}, root.turnStates);
+            next[key] = state;
+            root.turnStates = next;
+        }
+        return state;
+    }
+
+    function activeTurnState(create: bool): var {
+        if (root.activeGhost === "" || root.currentSessionId === "") return null;
+        const key = root.conversationKey(root.activeGhost, root.currentSessionId);
+        return root.turnStates[key]
+            || (create ? root.ensureTurnState(root.activeGhost, root.currentSessionId) : null);
+    }
+
+    /** Tests and QML controls still write the active projection directly. */
+    function captureActiveTurn(state: var): void {
+        if (!root.isActiveTurn(state)) return;
+        root.captureTurnProjection(state);
+    }
+
+    function captureTurnProjection(state: var): void {
+        state.rows = root.visibleTranscriptRows();
+        state.hydratedRowCount = root.hydratedRowCount;
+        state.commandTurnKey = root.commandTurnKey;
+        state.commandTurnIndex = root.commandTurnIndex;
+        state.commandTurnAnchor = root.commandTurnAnchor;
+        state.streaming = root.streaming;
+        state.request = root.request;
+        state.activity = root.activity;
+        state.statusText = root.statusText;
+        state.lastError = root.lastError;
+        state.pendingAsk = root.pendingAsk;
+        state.askSubmitting = root.askSubmitting;
+        state.askError = root.askError;
+        state.steeringQueue = root.steeringQueue.slice();
+        state.followUpQueue = root.followUpQueue.slice();
+        state.queueSubmitting = root.queueSubmitting;
+        state.queueError = root.queueError;
+        state.blocks = root.blocks;
+        state.toolNames = root.toolNames.slice();
+        state.toolActivities = root.toolActivities.slice();
+        state.toolIdsByContent = root.toolIdsByContent;
+        state.assistantRow = root.assistantRow;
+        state.consumed = root.consumed;
+        state.frameBuffer = root.frameBuffer;
+        state.presentationDirty = root.presentationDirty;
+    }
+
+    /** Legacy direct stream helpers have no key; a single live turn is unambiguous. */
+    function compatibilityTurnState(): var {
+        const active = root.activeTurnState(false);
+        if (active) return active;
+        if (root.liveConversationKeys.length !== 1) return null;
+        return root.turnStates[root.liveConversationKeys[0]] || null;
+    }
+
+    function projectTurnFields(state: var): void {
+        if (!root.isActiveTurn(state)) return;
+        root.projectTurnProjection(state);
+    }
+
+    function projectTurnProjection(state: var): void {
+        root.hydratedRowCount = state.hydratedRowCount;
+        root.commandTurnKey = state.commandTurnKey;
+        root.commandTurnIndex = state.commandTurnIndex;
+        root.commandTurnAnchor = state.commandTurnAnchor;
+        root.streaming = state.streaming;
+        root.request = state.request;
+        root.activity = state.activity;
+        root.statusText = state.statusText;
+        root.lastError = state.lastError;
+        root.pendingAsk = state.pendingAsk;
+        root.askSubmitting = state.askSubmitting;
+        root.askError = state.askError;
+        root.steeringQueue = state.steeringQueue;
+        root.followUpQueue = state.followUpQueue;
+        root.queueSubmitting = state.queueSubmitting;
+        root.queueError = state.queueError;
+        root.blocks = state.blocks;
+        root.toolNames = state.toolNames;
+        root.toolActivities = state.toolActivities;
+        root.toolIdsByContent = state.toolIdsByContent;
+        root.assistantRow = state.assistantRow;
+        root.consumed = state.consumed;
+        root.frameBuffer = state.frameBuffer;
+        root.presentationDirty = state.presentationDirty;
+    }
+
+    function clearTurnProjection(): void {
         transcriptModel.clear();
         root.hydratedRowCount = 0;
         root.commandTurnKey = "";
         root.commandTurnIndex = -1;
         root.commandTurnAnchor = 0;
+        root.streaming = false;
+        root.request = null;
+        root.activity = "";
+        root.statusText = "";
+        root.pendingAsk = null;
+        root.askSubmitting = false;
+        root.askError = "";
+        root.steeringQueue = [];
+        root.followUpQueue = [];
+        root.queueSubmitting = false;
+        root.queueError = "";
+        root.blocks = ({});
+        root.toolNames = [];
+        root.toolActivities = [];
+        root.toolIdsByContent = ({});
         root.assistantRow = -1;
-        root.resetAssistantSegment();
-        root.resetInteractionState();
+        root.consumed = 0;
+        root.frameBuffer = "";
+        root.presentationDirty = false;
+    }
+
+    function showTurnState(ghost: string, sessionId: string): void {
+        const state = sessionId === "" ? null
+            : root.turnStates[root.conversationKey(ghost, sessionId)];
+        root.clearTurnProjection();
+        if (!state) return;
+        root.projectTurnRows(state);
+        root.projectTurnFields(state);
+    }
+
+    function projectTurnRows(state: var): void {
+        transcriptModel.clear();
+        for (const row of state.rows) transcriptModel.append(root.cloneTranscriptRow(row));
+    }
+
+    function appendTurnRow(state: var, row: var): void {
+        const copy = root.cloneTranscriptRow(row);
+        state.rows.push(copy);
+        if (root.isActiveTurn(state)) transcriptModel.append(root.cloneTranscriptRow(copy));
+    }
+
+    function removeTurnRow(state: var, index: int): void {
+        if (index < 0 || index >= state.rows.length) return;
+        state.rows.splice(index, 1);
+        if (root.isActiveTurn(state)) transcriptModel.remove(index);
+    }
+
+    function setTurnRow(state: var, index: int, propertyName: string, value: var): void {
+        if (index < 0 || index >= state.rows.length) return;
+        state.rows[index] = Object.assign({}, state.rows[index], ({ [propertyName]: value }));
+        if (root.isActiveTurn(state)) transcriptModel.setProperty(index, propertyName, value);
+    }
+
+    function replaceTurnRows(state: var, rows: var): void {
+        state.rows = rows.map(root.cloneTranscriptRow);
+        if (!root.isActiveTurn(state)) return;
+        transcriptModel.clear();
+        for (const row of state.rows) transcriptModel.append(root.cloneTranscriptRow(row));
+    }
+
+    function updateLiveConversationKeys(): void {
+        root.liveConversationKeys = Object.keys(root.turnStates).filter(function (key) {
+            return root.turnStates[key] && root.turnStates[key].streaming === true;
+        });
+    }
+
+    function isConversationStreaming(ghost: string, id: string): bool {
+        return root.liveConversationKeys.indexOf(root.conversationKey(ghost, id)) >= 0;
+    }
+
+    function clearTranscript(): void {
+        const state = root.activeTurnState(false);
+        if (state && state.streaming) return;
+        if (state) {
+            state.rows = [];
+            state.hydratedRowCount = 0;
+            state.commandTurnKey = "";
+            state.commandTurnIndex = -1;
+            state.commandTurnAnchor = 0;
+            state.assistantRow = -1;
+            root.resetAssistantSegmentFor(state);
+            root.resetInteractionStateFor(state);
+        }
+        root.clearTurnProjection();
         root.branchError = "";
+    }
+
+    function flushLiveTurns(): void {
+        for (const key of root.liveConversationKeys) {
+            const state = root.turnStates[key];
+            if (state) root.flushTurn(state, false, false);
+        }
+    }
+
+    function expireStaleStreams(): void {
+        const now = Date.now();
+        for (const key of root.liveConversationKeys) {
+            const state = root.turnStates[key];
+            if (state && now - state.lastStreamActivity >= 45000)
+                root.expireTurnStream(state);
+        }
+    }
+
+    function pollPendingAsks(): void {
+        for (const key of root.liveConversationKeys) {
+            const state = root.turnStates[key];
+            if (state && state.activity === "ask" && state.pendingAsk === null
+                    && !state.askSubmitting)
+                root.fetchPendingAskFor(state);
+        }
+    }
+
+    function pollQueues(): void {
+        for (const key of root.liveConversationKeys) {
+            const state = root.turnStates[key];
+            if (state && state.pendingAsk === null) root.fetchQueueFor(state);
+        }
     }
 
     /** Drop model data that belongs to the previously selected ghost. */
@@ -1284,6 +1617,90 @@ Singleton {
 
     // ---- Conversations ----------------------------------------------------
 
+    /** Keep one authenticated SSE invalidation stream attached to the active ghost. */
+    function connectConversationEvents(ghost: string): void {
+        const previous = root.eventsRequest;
+        if (previous && previous.readyState !== 4) {
+            if (root.eventsGhost === ghost) return;
+            root.eventsRequest = null;
+            previous.onreadystatechange = function () {};
+            previous.abort();
+        }
+        eventsWatchdog.stop();
+        eventsReconnect.stop();
+        root.eventsGhost = ghost;
+        root.eventsConsumed = 0;
+        root.eventsFrameBuffer = "";
+        if (ghost === "") return;
+        const xhr = new XMLHttpRequest();
+        root.eventsRequest = xhr;
+        xhr.onreadystatechange = function () {
+            root.readConversationEvents(xhr, ghost);
+        };
+        eventsWatchdog.restart();
+        root.dispatch(xhr, "GET", "/api/ghosts/" + encodeURIComponent(ghost)
+            + "/events", ({ "Accept": "text/event-stream" }), null);
+    }
+
+    function readConversationEvents(xhr: var, ghost: string): void {
+        if (xhr !== root.eventsRequest) return;
+        if (xhr.readyState >= 3 && xhr.status === 200) {
+            const whole = xhr.responseText;
+            if (whole.length > root.eventsConsumed) {
+                const connected = root.eventsConsumed === 0;
+                eventsWatchdog.restart();
+                root.reachable = true;
+                root.ingestConversationEvents(whole.substring(root.eventsConsumed), ghost);
+                root.eventsConsumed = whole.length;
+                // The stream carries invalidations rather than history. A
+                // reconnect closes the only possible missed-event window.
+                if (connected && ghost === root.activeGhost) root.fetchSessions(ghost);
+            }
+        }
+        if (xhr.readyState !== 4 || xhr !== root.eventsRequest) return;
+        root.eventsRequest = null;
+        eventsWatchdog.stop();
+        if (ghost === root.activeGhost) eventsReconnect.restart();
+    }
+
+    function ingestConversationEvents(chunk: string, ghost: string): void {
+        root.eventsFrameBuffer += chunk.replace(/\r\n/gu, "\n");
+        const frames = root.eventsFrameBuffer.split("\n\n");
+        root.eventsFrameBuffer = frames.pop();
+        for (const frame of frames) {
+            const line = frame.split("\n").find(value => value.startsWith("data:"));
+            if (!line) continue;
+            try {
+                const event = JSON.parse(line.slice(5).trim());
+                if (event.type === "conversation-updated" && typeof event.id === "string"
+                        && ghost === root.activeGhost)
+                    root.fetchSessions(ghost);
+            } catch (error) {
+                console.warn("ghost: unparseable conversation event:", line);
+            }
+        }
+    }
+
+    function expireConversationEvents(): void {
+        const xhr = root.eventsRequest;
+        root.eventsRequest = null;
+        eventsWatchdog.stop();
+        if (xhr && xhr.readyState !== 4) {
+            xhr.onreadystatechange = function () {};
+            xhr.abort();
+        }
+        if (root.activeGhost !== "") eventsReconnect.restart();
+    }
+
+    function mergeSessionListing(ghost: string, list: var): var {
+        const ids = new Set(list.map(function (session) { return session.id; }));
+        const localLive = root.sessions.filter(function (session) {
+            return session && session.localOnly === true && !ids.has(session.id)
+                && root.isConversationStreaming(ghost, session.id);
+        });
+        return root.orderSessions(list.concat(localLive));
+    }
+
     /** GET the active ghost's conversation listing. Newest-updated first. */
     function fetchSessions(ghost: string): void {
         const g = ghost || root.activeGhost;
@@ -1294,7 +1711,7 @@ Singleton {
         const xhr = new XMLHttpRequest();
         root.sessionsRequest = xhr;
         xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4) return;
+            if (xhr.readyState !== 4 || xhr !== root.sessionsRequest) return;
             // A reply for a ghost the user has since switched away from is stale.
             if (g !== root.activeGhost) return;
             if (xhr.status === 200) {
@@ -1303,8 +1720,13 @@ Singleton {
                     // Contract is { sessions: [...] }; tolerate a bare array too.
                     const list = Array.isArray(body) ? body
                         : (Array.isArray(body.sessions) ? body.sessions : []);
-                    root.sessions = list;
+                    root.sessions = root.mergeSessionListing(g, list);
                     root.sessionsError = "";
+                    const current = root.sessions.find(function (session) {
+                        return session && session.id === root.currentSessionId;
+                    });
+                    if (root.hudVisible && current && current.unread === true)
+                        root.markConversationRead(g, current.id);
                 } catch (error) {
                     root.sessions = [];
                     root.sessionsError = "ghostd sent a malformed session list";
@@ -1327,25 +1749,44 @@ Singleton {
     function newConversation(): void {
         const ghost = root.activeGhost;
         if (ghost === "") return;
-        root.cancel();
+        const previous = root.activeTurnState(false);
+        if (previous) root.captureActiveTurn(previous);
         const id = "hud-" + Date.now().toString(36)
             + "-" + Math.floor(Math.random() * 0xffffff).toString(36);
         root.sessionIds[ghost] = id;
         root.currentSessionId = id;
-        root.clearTranscript();
+        root.ensureTurnState(ghost, id);
+        root.showTurnState(ghost, id);
         root.clearCommands();
         root.clearConnect();
         // A blank chat is back on screen, so it earns a fresh opening line.
         root.clearGreeting();
         root.fetchGreeting();
-        root.fetchSessions(ghost);
+    }
+
+    /** Keep a lazily-created live conversation navigable until ghostd lists it. */
+    function ensureOptimisticSessionRow(ghost: string, id: string): void {
+        if (ghost !== root.activeGhost || root.sessions.some(function (session) {
+            return session && session.id === id;
+        })) return;
+        const now = new Date().toISOString();
+        root.sessions = root.orderSessions(root.sessions.concat([{
+            id: id,
+            title: null,
+            createdAt: now,
+            updatedAt: now,
+            messageCount: 1,
+            pinned: false,
+            unread: false,
+            localOnly: true
+        }]));
     }
 
     /** Move one stored conversation's Ghost-owned artifacts to Trash. */
     function deleteConversation(id: string): void {
         const ghost = root.activeGhost;
         if (ghost === "" || id === "" || root.deletingSessionId !== "") return;
-        if (id === root.currentSessionId && root.streaming) {
+        if (root.isConversationStreaming(ghost, id)) {
             root.sessionsError = "Cancel the current answer before deleting this conversation";
             return;
         }
@@ -1358,6 +1799,11 @@ Singleton {
             root.deletingSessionId = "";
             if (xhr.status === 200) {
                 root.dropCommandTranscripts(ghost, id);
+                const key = root.conversationKey(ghost, id);
+                const kept = Object.assign({}, root.turnStates);
+                delete kept[key];
+                root.turnStates = kept;
+                root.updateLiveConversationKeys();
                 if (ghost === root.activeGhost) {
                     root.sessions = root.sessions.filter(function (session) {
                         return session.id !== id;
@@ -1365,7 +1811,7 @@ Singleton {
                     if (root.currentSessionId === id) {
                         root.sessionIds[ghost] = "";
                         root.currentSessionId = "";
-                        root.clearTranscript();
+                        root.clearTurnProjection();
                         root.clearCommands();
                         root.clearConnect();
                         root.clearGreeting();
@@ -1496,9 +1942,11 @@ Singleton {
      * errors would follow them into a conversation that never had them.
      */
     function adoptConversation(ghost: string, id: string): void {
+        const previous = root.activeTurnState(false);
+        if (previous) root.captureActiveTurn(previous);
         root.sessionIds[ghost] = id;
         root.currentSessionId = id;
-        root.clearTranscript();
+        root.showTurnState(ghost, id);
         root.clearCommands();
         root.clearConnect();
         // A conversation with its own history needs no opening line; a greeting
@@ -1518,27 +1966,30 @@ Singleton {
         // In particular it must not abort the XHR and then report that
         // client-initiated abort as ghostd becoming unreachable.
         if (id === root.currentSessionId && root.streaming) return;
-        root.cancel();
         root.adoptConversation(ghost, id);
+        root.markConversationRead(ghost, id);
+        const state = root.ensureTurnState(ghost, id);
+        if (state.streaming) return;
         const xhr = new XMLHttpRequest();
+        state.transcriptRequest = xhr;
         root.transcriptRequest = xhr;
         xhr.onreadystatechange = function () {
             if (xhr.readyState !== 4) return;
-            // Ignore a transcript that arrives after the user moved on.
-            if (ghost !== root.activeGhost || id !== root.currentSessionId) return;
             if (xhr.status === 200) {
                 try {
                     const body = JSON.parse(xhr.responseText);
-                    root.rehydrate(Array.isArray(body.messages) ? body.messages : []);
+                    if (!state.streaming)
+                        root.rehydrateTurn(state, Array.isArray(body.messages) ? body.messages : []);
                     root.reachable = true;
-                    root.sessionsError = "";
+                    if (root.isActiveTurn(state)) root.sessionsError = "";
                 } catch (error) {
-                    root.sessionsError = "ghostd sent a malformed transcript";
+                    if (root.isActiveTurn(state))
+                        root.sessionsError = "ghostd sent a malformed transcript";
                 }
             } else if (xhr.status === 404) {
                 // An unstarted conversation has no transcript yet; that is fine.
-                root.sessionsError = "";
-            } else {
+                if (root.isActiveTurn(state)) root.sessionsError = "";
+            } else if (root.isActiveTurn(state)) {
                 root.sessionsError = root.describeError(xhr, "GET transcript");
                 if (xhr.status === 0) root.fail(root.sessionsError);
             }
@@ -1547,23 +1998,68 @@ Singleton {
             + "/sessions/" + encodeURIComponent(id) + "/transcript", ({}), null);
     }
 
+    /** Persist that the owner opened a stored conversation. */
+    function markConversationRead(ghost: string, id: string): void {
+        if (ghost === "" || id === "") return;
+        const local = ghost === root.activeGhost ? root.sessions.find(function (session) {
+            return session && session.id === id;
+        }) : null;
+        if (ghost === root.activeGhost) {
+            root.sessions = root.sessions.map(function (session) {
+                return session && session.id === id
+                    ? Object.assign({}, session, { unread: false }) : session;
+            });
+        }
+        // The daemon creates a new conversation lazily inside its first turn.
+        // The completion path marks it again after the persisted row arrives.
+        if (local && local.localOnly === true) return;
+        const key = root.commandTranscriptKey(ghost, id);
+        const xhr = new XMLHttpRequest();
+        const held = Object.assign({}, root.readSessionRequests);
+        held[key] = xhr;
+        root.readSessionRequests = held;
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || root.readSessionRequests[key] !== xhr) return;
+            const remaining = Object.assign({}, root.readSessionRequests);
+            delete remaining[key];
+            root.readSessionRequests = remaining;
+            if (ghost !== root.activeGhost) return;
+            if (xhr.status !== 200) root.fetchSessions(ghost);
+        };
+        root.dispatch(xhr, "PUT", "/api/ghosts/" + encodeURIComponent(ghost)
+            + "/sessions/" + encodeURIComponent(id) + "/read",
+            ({ "Content-Type": "application/json" }), JSON.stringify({}));
+    }
+
+    function markCurrentConversationRead(): void {
+        if (!root.hudVisible || root.activeGhost === "" || root.currentSessionId === "") return;
+        root.markConversationRead(root.activeGhost, root.currentSessionId);
+    }
+
     /** Refresh the persisted entry ids a live turn could not know yet. */
     function refreshCurrentTranscript(): void {
-        const ghost = root.activeGhost;
-        const id = root.currentSessionId;
-        if (ghost === "" || id === "" || root.streaming) return;
+        const state = root.activeTurnState(false);
+        if (!state || state.streaming) return;
+        root.refreshConversationTranscript(state);
+    }
+
+    function refreshConversationTranscript(state: var): void {
+        if (!state || state.streaming) return;
+        const ghost = state.ghost;
+        const id = state.sessionId;
         const xhr = new XMLHttpRequest();
-        root.transcriptRequest = xhr;
+        state.transcriptRequest = xhr;
+        if (root.isActiveTurn(state)) root.transcriptRequest = xhr;
         xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.transcriptRequest) return;
-            if (ghost !== root.activeGhost || id !== root.currentSessionId || root.streaming) return;
+            if (xhr.readyState !== 4 || xhr !== state.transcriptRequest || state.streaming) return;
             if (xhr.status === 200) {
                 try {
                     const body = JSON.parse(xhr.responseText);
-                    root.rehydrate(Array.isArray(body.messages) ? body.messages : []);
+                    root.rehydrateTurn(state, Array.isArray(body.messages) ? body.messages : []);
                     root.reachable = true;
                 } catch (error) {
-                    root.sessionsError = "ghostd sent a malformed transcript";
+                    if (root.isActiveTurn(state))
+                        root.sessionsError = "ghostd sent a malformed transcript";
                 }
             } else if (xhr.status === 0) {
                 root.fail(root.describeError(xhr, "GET transcript"));
@@ -1589,14 +2085,19 @@ Singleton {
      * card's re-answer branch with it and the question can never be answered.
      */
     function rehydrate(messages: var): void {
-        transcriptModel.clear();
-        root.activity = "";
-        root.statusText = "";
+        const state = root.activeTurnState(true);
+        if (state) root.rehydrateTurn(state, messages);
+    }
+
+    function rehydrateTurn(state: var, messages: var): void {
+        state.activity = "";
+        state.statusText = "";
         const storedRows = TurnBlocks.rows(messages);
-        root.hydratedRowCount = storedRows.length;
-        const rows = CommandTranscript.merge(storedRows, root.currentCommandExchanges());
+        state.hydratedRowCount = storedRows.length;
+        const rows = CommandTranscript.merge(storedRows, root.commandExchangesFor(state));
+        const hydrated = [];
         for (const row of rows) {
-            transcriptModel.append({
+            hydrated.push({
                 role: row.role,
                 text: row.text,
                 tools: "",
@@ -1607,6 +2108,8 @@ Singleton {
                 entryId: row.entryId
             });
         }
+        root.replaceTurnRows(state, hydrated);
+        root.projectTurnFields(state);
     }
 
     function commandTranscriptKey(ghost: string, sessionId: string): string {
@@ -1625,41 +2128,52 @@ Singleton {
     }
 
     function currentCommandExchanges(): var {
-        if (root.activeGhost === "" || root.currentSessionId === "") return [];
-        const key = root.commandTranscriptKey(root.activeGhost, root.currentSessionId);
+        const state = root.activeTurnState(false);
+        return state ? root.commandExchangesFor(state) : [];
+    }
+
+    function commandExchangesFor(state: var): var {
+        const key = root.commandTranscriptKey(state.ghost, state.sessionId);
         return Array.isArray(root.commandExchanges[key]) ? root.commandExchanges[key] : [];
     }
 
     /** Keep every command_output frame in the current presentation exchange. */
     function receiveCommandOutput(event: var): void {
-        if (root.assistantRow < 0 || root.assistantRow >= transcriptModel.count) return;
-        const key = root.commandTranscriptKey(root.activeGhost, root.currentSessionId);
+        const state = root.activeTurnState(false);
+        if (!state) return;
+        root.captureActiveTurn(state);
+        root.receiveCommandOutputFor(state, event);
+    }
+
+    function receiveCommandOutputFor(state: var, event: var): void {
+        if (state.assistantRow < 0 || state.assistantRow >= state.rows.length) return;
+        const key = root.commandTranscriptKey(state.ghost, state.sessionId);
         if (key === "\n") return;
         let exchanges = Array.isArray(root.commandExchanges[key])
             ? root.commandExchanges[key].slice() : [];
         let previous = null;
-        if (root.commandTurnKey === key && root.commandTurnIndex >= 0
-                && root.commandTurnIndex < exchanges.length)
-            previous = exchanges[root.commandTurnIndex];
+        if (state.commandTurnKey === key && state.commandTurnIndex >= 0
+                && state.commandTurnIndex < exchanges.length)
+            previous = exchanges[state.commandTurnIndex];
         else {
-            root.commandTurnKey = key;
-            root.commandTurnIndex = exchanges.length;
+            state.commandTurnKey = key;
+            state.commandTurnIndex = exchanges.length;
         }
-        const promptRow = root.assistantRow > 0
-            ? transcriptModel.get(root.assistantRow - 1) : null;
+        const promptRow = state.assistantRow > 0
+            ? state.rows[state.assistantRow - 1] : null;
         const prompt = promptRow && promptRow.role === "user" ? promptRow.text : event.command;
         const exchange = CommandTranscript.append(
-            previous, event, prompt, root.commandTurnAnchor);
-        if (root.commandTurnIndex === exchanges.length) exchanges.push(exchange);
-        else exchanges[root.commandTurnIndex] = exchange;
+            previous, event, prompt, state.commandTurnAnchor);
+        if (state.commandTurnIndex === exchanges.length) exchanges.push(exchange);
+        else exchanges[state.commandTurnIndex] = exchange;
         const next = Object.assign({}, root.commandExchanges);
         next[key] = exchanges;
         root.commandExchanges = next;
 
-        transcriptModel.setProperty(root.assistantRow, "role", "command");
-        transcriptModel.setProperty(root.assistantRow, "text", exchange.output);
-        transcriptModel.setProperty(root.assistantRow, "error",
-            CommandTranscript.failure(exchange));
+        root.setTurnRow(state, state.assistantRow, "role", "command");
+        root.setTurnRow(state, state.assistantRow, "text", exchange.output);
+        root.setTurnRow(state, state.assistantRow, "error", CommandTranscript.failure(exchange));
+        root.projectTurnFields(state);
     }
 
     /**
@@ -1763,13 +2277,16 @@ Singleton {
         const ghost = root.activeGhost;
         const sessionId = root.currentSessionId;
         if (root.streaming || ghost === "" || sessionId === "" || entryId === "") return;
-
-        root.beginTurn();
+        const state = root.ensureTurnState(ghost, sessionId);
+        root.captureActiveTurn(state);
+        root.beginTurnFor(state);
 
         const xhr = new XMLHttpRequest();
-        root.request = xhr;
+        state.request = xhr;
+        root.projectTurnFields(state);
         xhr.onreadystatechange = function () {
-            root.readStream(xhr, ghost, "re-answer ask", "the re-answer stream ended mid-turn");
+            root.readTurnStream(xhr, state.key,
+                "re-answer ask", "the re-answer stream ended mid-turn");
         };
         root.dispatch(xhr, "POST", "/api/ghosts/" + encodeURIComponent(ghost)
             + "/sessions/" + encodeURIComponent(sessionId) + "/reanswer",
@@ -1782,138 +2299,200 @@ Singleton {
     function send(text: string): void {
         const prompt = text.trim();
         if (prompt === "" || root.streaming || root.activeGhost === "") return;
+        const ghost = root.activeGhost;
+        const sessionId = root.ensureSession(ghost);
+        root.ensureOptimisticSessionRow(ghost, sessionId);
+        const state = root.ensureTurnState(ghost, sessionId);
+        root.captureActiveTurn(state);
         // A completed model turn can be visible a tick before its transcript
         // refresh lands. Count that live pair too, while excluding the
         // presentation-only command pairs already in the model.
-        const commandAnchor = Math.max(root.hydratedRowCount,
-            transcriptModel.count - root.currentCommandExchanges().length * 2);
+        const commandAnchor = Math.max(state.hydratedRowCount,
+            state.rows.length - root.commandExchangesFor(state).length * 2);
 
-        root.beginTurn();
-        transcriptModel.append({
+        root.beginTurnFor(state);
+        root.appendTurnRow(state, {
             role: "user", text: prompt, tools: "", toolActivity: [], error: "", pending: false,
             entryId: ""
         });
-        transcriptModel.append({
+        root.appendTurnRow(state, {
             role: "assistant", text: "", tools: "", toolActivity: [], error: "", pending: true,
             entryId: ""
         });
-        root.assistantRow = transcriptModel.count - 1;
-        root.commandTurnKey = "";
-        root.commandTurnIndex = -1;
-        root.commandTurnAnchor = commandAnchor;
+        state.assistantRow = state.rows.length - 1;
+        state.commandTurnKey = "";
+        state.commandTurnIndex = -1;
+        state.commandTurnAnchor = commandAnchor;
+        root.projectTurnFields(state);
         // The conversation has messages now; the opening line has been answered.
         root.clearGreeting();
 
-        const ghost = root.activeGhost;
         const xhr = new XMLHttpRequest();
-        root.request = xhr;
+        state.request = xhr;
+        root.projectTurnFields(state);
         xhr.onreadystatechange = function () {
-            root.readStream(xhr, ghost,
+            root.readTurnStream(xhr, state.key,
                 "POST /api/ghosts/" + ghost + "/messages",
                 "the stream ended mid-turn");
         };
         root.dispatch(xhr, "POST",
             "/api/ghosts/" + encodeURIComponent(ghost) + "/messages",
             ({ "Content-Type": "application/json", "Accept": "text/event-stream" }),
-            JSON.stringify(root.buildBody(ghost, prompt)));
+            JSON.stringify(root.buildBody(ghost, prompt, state)));
     }
 
     function cancel(): void {
-        const xhr = root.request;
+        const state = root.activeTurnState(false);
+        if (!state) return;
+        root.captureActiveTurn(state);
+        root.cancelTurn(state);
+    }
+
+    function cancelTurn(state: var): void {
+        const xhr = state.request;
         // Retire the callback before abort(), because Qt may synchronously run
         // readyState 4 from inside abort(). That is our cancellation, not a
         // transport failure and not evidence that ghostd is unreachable.
-        root.request = null;
-        flushTimer.stop();
-        streamWatchdog.stop();
-        root.streaming = false;
-        root.settleToolActivity(true);
-        root.flush(true, false);
-        root.resetInteractionState();
-        if (root.assistantRow >= 0 && root.assistantRow < transcriptModel.count) {
-            transcriptModel.setProperty(root.assistantRow, "pending", false);
-            if (transcriptModel.get(root.assistantRow).text === "")
-                transcriptModel.setProperty(root.assistantRow, "error", "cancelled");
+        state.request = null;
+        state.streaming = false;
+        root.settleToolActivityFor(state, true);
+        root.flushTurn(state, true, false);
+        root.resetInteractionStateFor(state);
+        if (state.assistantRow >= 0 && state.assistantRow < state.rows.length) {
+            root.setTurnRow(state, state.assistantRow, "pending", false);
+            if (state.rows[state.assistantRow].text === "")
+                root.setTurnRow(state, state.assistantRow, "error", "cancelled");
         }
-        root.assistantRow = -1;
+        state.assistantRow = -1;
+        root.updateLiveConversationKeys();
+        root.projectTurnFields(state);
         if (xhr && xhr.readyState !== 4) xhr.abort();
     }
 
     /** Shared initialization for ordinary turns and streamed ask re-answers. */
     function beginTurn(): void {
-        root.resetAssistantSegment();
-        root.assistantRow = -1;
-        root.consumed = 0;
-        root.frameBuffer = "";
-        root.resetInteractionState();
-        root.activity = "waiting for ghostd";
-        root.streaming = true;
-        flushTimer.start();
-        streamWatchdog.restart();
+        const ghost = root.activeGhost;
+        if (ghost === "") return;
+        const state = root.ensureTurnState(ghost, root.ensureSession(ghost));
+        root.captureActiveTurn(state);
+        root.beginTurnFor(state);
+    }
+
+    function beginTurnFor(state: var): void {
+        root.resetAssistantSegmentFor(state);
+        state.assistantRow = -1;
+        state.consumed = 0;
+        state.frameBuffer = "";
+        root.resetInteractionStateFor(state);
+        state.activity = "waiting for ghostd";
+        state.lastError = "";
+        state.streaming = true;
+        state.lastStreamActivity = Date.now();
+        root.updateLiveConversationKeys();
+        root.projectTurnFields(state);
     }
 
     /** Fields scoped to the assistant segment between two owner messages. */
     function resetAssistantSegment(): void {
-        root.blocks = ({});
-        root.toolNames = [];
-        root.toolActivities = [];
-        root.toolIdsByContent = ({});
-        root.presentationDirty = true;
+        const state = root.activeTurnState(true);
+        if (state) root.resetAssistantSegmentFor(state);
+    }
+
+    function resetAssistantSegmentFor(state: var): void {
+        state.blocks = ({});
+        state.toolNames = [];
+        state.toolActivities = [];
+        state.toolIdsByContent = ({});
+        state.presentationDirty = true;
+        root.projectTurnFields(state);
     }
 
     /** The dialog and submission state belonging to one OMP ask interaction. */
     function resetAskState(): void {
-        root.pendingAsk = null;
-        root.askSubmitting = false;
-        root.askError = "";
+        const state = root.activeTurnState(true);
+        if (state) root.resetAskStateFor(state);
+    }
+
+    function resetAskStateFor(state: var): void {
+        state.pendingAsk = null;
+        state.askSubmitting = false;
+        state.askError = "";
+        root.projectTurnFields(state);
     }
 
     /** The interaction fields every terminal/cancel path must clear together. */
     function resetInteractionState(): void {
-        root.statusText = "";
-        root.activity = "";
-        root.resetAskState();
-        root.steeringQueue = [];
-        root.followUpQueue = [];
-        root.queueSubmitting = false;
-        root.queueError = "";
+        const state = root.activeTurnState(true);
+        if (state) root.resetInteractionStateFor(state);
+    }
+
+    function resetInteractionStateFor(state: var): void {
+        state.statusText = "";
+        state.activity = "";
+        root.resetAskStateFor(state);
+        state.steeringQueue = [];
+        state.followUpQueue = [];
+        state.queueSubmitting = false;
+        state.queueError = "";
+        root.projectTurnFields(state);
     }
 
     /** Consume the cumulative Qt XHR body and settle every readyState-4 path. */
     function readStream(xhr: var, ghost: string, requestName: string,
             missingTerminal: string): void {
-        if (xhr !== root.request) return;
+        const state = root.compatibilityTurnState();
+        if (!state || state.ghost !== ghost) return;
+        root.captureTurnProjection(state);
+        root.readTurnStream(xhr, state.key, requestName, missingTerminal);
+        root.projectTurnRows(state);
+        root.projectTurnProjection(state);
+    }
+
+    function readTurnStream(xhr: var, key: string, requestName: string,
+            missingTerminal: string): void {
+        const state = root.turnStates[key];
+        if (!state || xhr !== state.request) return;
         if (xhr.readyState >= 3 && xhr.status === 200) {
             const whole = xhr.responseText;
-            if (whole.length > root.consumed) {
+            if (whole.length > state.consumed) {
                 // Events and keepalive comments both prove this connection is live.
-                streamWatchdog.restart();
+                state.lastStreamActivity = Date.now();
                 root.reachable = true;
-                root.lastError = "";
-                root.ingest(whole.substring(root.consumed));
-                root.consumed = whole.length;
+                state.lastError = "";
+                root.ingestTurn(state, whole.substring(state.consumed));
+                state.consumed = whole.length;
             }
         }
-        if (xhr.readyState !== 4 || xhr !== root.request) return;
-        flushTimer.stop();
-        streamWatchdog.stop();
+        if (xhr.readyState !== 4 || xhr !== state.request) {
+            root.projectTurnFields(state);
+            return;
+        }
         if (xhr.status !== 200) {
             if (xhr.status === 0) root.reachable = false;
-            root.endTurn(ghost, root.describeError(xhr, requestName));
-        } else if (root.streaming) {
-            root.endTurn(ghost, missingTerminal);
+            root.endTurnState(state, root.describeError(xhr, requestName));
+        } else if (state.streaming) {
+            root.endTurnState(state, missingTerminal);
         }
-        if (xhr === root.request) root.request = null;
+        if (xhr === state.request) state.request = null;
+        root.projectTurnFields(state);
     }
 
     /** A half-open SSE response missed three daemon keepalives. */
     function expireStream(): void {
-        if (!root.streaming) return;
-        const ghost = root.activeGhost;
-        const xhr = root.request;
-        root.request = null;
+        const state = root.compatibilityTurnState();
+        if (!state) return;
+        root.captureTurnProjection(state);
+        root.expireTurnStream(state);
+        root.projectTurnRows(state);
+        root.projectTurnProjection(state);
+    }
+
+    function expireTurnStream(state: var): void {
+        if (!state.streaming) return;
+        const xhr = state.request;
+        state.request = null;
         root.reachable = false;
-        root.endTurn(ghost, "the stream stopped responding");
+        root.endTurnState(state, "the stream stopped responding");
         if (xhr && xhr.readyState !== 4) xhr.abort();
     }
 
@@ -1926,14 +2505,14 @@ Singleton {
      * turns out to be stateless per request, set GHOST_HUD_REPLAY=1 and we
      * replay the local transcript instead.
      */
-    function buildBody(ghost: string, prompt: string): var {
-        const sessionId = root.ensureSession(ghost);
+    function buildBody(ghost: string, prompt: string, turnState: var): var {
+        const sessionId = turnState ? turnState.sessionId : root.ensureSession(ghost);
+        const state = turnState || root.ensureTurnState(ghost, sessionId);
         const messages = [];
         if (Quickshell.env("GHOST_HUD_REPLAY")) {
-            for (let i = 0; i < transcriptModel.count - 1; i++) {
-                const row = transcriptModel.get(i);
-                const next = i + 1 < transcriptModel.count
-                    ? transcriptModel.get(i + 1) : null;
+            for (let i = 0; i < state.rows.length - 1; i++) {
+                const row = state.rows[i];
+                const next = i + 1 < state.rows.length ? state.rows[i + 1] : null;
                 // Presentation-only builtins must not come back as ordinary
                 // user/assistant context when the diagnostic replay mode is on.
                 if (row.role === "command"
@@ -1963,6 +2542,7 @@ Singleton {
                 + "-" + Math.floor(Math.random() * 0xffffff).toString(36);
         }
         if (ghost === root.activeGhost) root.currentSessionId = root.sessionIds[ghost];
+        root.ensureTurnState(ghost, root.sessionIds[ghost]);
         return root.sessionIds[ghost];
     }
 
@@ -1974,10 +2554,17 @@ Singleton {
      * carried over to the next call.
      */
     function ingest(chunk: string): void {
+        const state = root.activeTurnState(false);
+        if (!state) return;
+        root.captureActiveTurn(state);
+        root.ingestTurn(state, chunk);
+    }
+
+    function ingestTurn(state: var, chunk: string): void {
         if (chunk === "") return;
-        root.frameBuffer += chunk.replace(/\r\n/gu, "\n");
-        const frames = root.frameBuffer.split("\n\n");
-        root.frameBuffer = frames.pop();
+        state.frameBuffer += chunk.replace(/\r\n/gu, "\n");
+        const frames = state.frameBuffer.split("\n\n");
+        state.frameBuffer = frames.pop();
         for (const frame of frames) {
             // Keepalives are bare `: comment` frames with no data line.
             const line = frame.split("\n").find(l => l.startsWith("data:"));
@@ -1985,7 +2572,7 @@ Singleton {
             const payload = line.slice(5).trim();
             if (payload === "" || payload === "[DONE]") continue;
             try {
-                root.handleEvent(JSON.parse(payload));
+                root.handleTurnEvent(state, JSON.parse(payload));
             } catch (error) {
                 console.warn("ghost: unparseable SSE frame:", payload);
             }
@@ -1993,33 +2580,42 @@ Singleton {
     }
 
     function handleEvent(event: var): void {
+        const state = root.compatibilityTurnState();
+        if (!state) return;
+        root.captureTurnProjection(state);
+        root.handleTurnEvent(state, event);
+        root.projectTurnRows(state);
+        root.projectTurnProjection(state);
+    }
+
+    function handleTurnEvent(state: var, event: var): void {
         switch (event.type) {
         case "start":
-            root.activity = "";
+            state.activity = "";
             break;
         case "command_output":
-            root.receiveCommandOutput(event);
+            root.receiveCommandOutputFor(state, event);
             break;
         case "text_start":
-            root.blocks[event.contentIndex] = { kind: "text", text: "" };
-            root.presentationDirty = true;
-            root.activity = "";
+            state.blocks[event.contentIndex] = { kind: "text", text: "" };
+            state.presentationDirty = true;
+            state.activity = "";
             break;
         case "text_delta":
-            if (!root.blocks[event.contentIndex])
-                root.blocks[event.contentIndex] = { kind: "text", text: "" };
-            root.blocks[event.contentIndex].text += event.delta;
-            root.presentationDirty = true;
+            if (!state.blocks[event.contentIndex])
+                state.blocks[event.contentIndex] = { kind: "text", text: "" };
+            state.blocks[event.contentIndex].text += event.delta;
+            state.presentationDirty = true;
             break;
         case "text_end":
-            root.blocks[event.contentIndex] = { kind: "text", text: event.content };
-            root.presentationDirty = true;
+            state.blocks[event.contentIndex] = { kind: "text", text: event.content };
+            state.presentationDirty = true;
             break;
         case "owner_message":
-            root.receiveOwnerMessage(event.text || "");
+            root.receiveOwnerMessageFor(state, event.text || "");
             break;
         case "thinking_start":
-            root.activity = "thinking";
+            state.activity = "thinking";
             break;
         case "thinking_delta":
         case "thinking_end":
@@ -2027,52 +2623,56 @@ Singleton {
             // is the only signal that it happened.
             break;
         case "toolcall_start":
-            root.activity = event.toolName;
-            root.toolNames = root.toolNames.concat([event.toolName]);
-            root.presentationDirty = true;
-            root.toolIdsByContent[event.contentIndex] = event.id;
-            root.updateTool(event.id, {
+            state.activity = event.toolName;
+            state.toolNames = state.toolNames.concat([event.toolName]);
+            state.presentationDirty = true;
+            state.toolIdsByContent[event.contentIndex] = event.id;
+            root.updateToolFor(state, event.id, {
                 name: event.toolName,
                 status: "preparing",
                 arguments: ({}),
                 summary: "",
                 intent: ""
             });
-            if (event.toolName === "ask") Qt.callLater(root.fetchPendingAsk);
+            if (event.toolName === "ask") Qt.callLater(function () {
+                root.fetchPendingAskFor(state);
+            });
             break;
         case "toolcall_delta":
             break;
         case "toolcall_end":
-            root.activity = "";
-            root.updateTool(event.toolCall.id, {
+            state.activity = "";
+            root.updateToolFor(state, event.toolCall.id, {
                 name: event.toolCall.name,
                 status: "queued",
                 arguments: event.toolCall.arguments || ({}),
                 summary: "",
                 intent: ""
             });
-            root.resetAskState();
+            root.resetAskStateFor(state);
             break;
         case "tool_execution_start":
-            root.activity = event.toolName;
-            root.updateTool(event.id, {
+            state.activity = event.toolName;
+            root.updateToolFor(state, event.id, {
                 name: event.toolName,
                 status: "running",
                 arguments: event.arguments || ({}),
                 intent: event.intent || ""
             });
-            if (event.toolName === "ask") Qt.callLater(root.fetchPendingAsk);
+            if (event.toolName === "ask") Qt.callLater(function () {
+                root.fetchPendingAskFor(state);
+            });
             break;
         case "tool_execution_update":
-            root.updateTool(event.id, {
+            root.updateToolFor(state, event.id, {
                 name: event.toolName,
                 status: "running",
                 summary: event.summary || ""
             });
             break;
         case "tool_execution_end":
-            root.activity = "";
-            root.updateTool(event.id, {
+            state.activity = "";
+            root.updateToolFor(state, event.id, {
                 name: event.toolName,
                 status: event.isError ? "failed" : "complete",
                 summary: event.summary || ""
@@ -2081,41 +2681,50 @@ Singleton {
             // The SSE event is authoritative in both cases; do not leave a
             // stale dialog over the resumed assistant response until `done`.
             if (event.toolName === "ask") {
-                root.resetAskState();
+                root.resetAskStateFor(state);
             }
             break;
         case "model_fallback":
-            root.activity = event.phase === "applied"
+            state.activity = event.phase === "applied"
                 ? "switching model · " + event.to
                 : "using fallback · " + event.model;
             break;
         case "branch_changed":
-            root.rehydrate(event.transcript && Array.isArray(event.transcript.messages)
+            root.rehydrateTurn(state, event.transcript && Array.isArray(event.transcript.messages)
                 ? event.transcript.messages : []);
-            transcriptModel.append({
+            root.appendTurnRow(state, {
                 role: "assistant", text: "", tools: "", toolActivity: [], error: "", pending: true,
                 entryId: ""
             });
-            root.assistantRow = transcriptModel.count - 1;
-            root.resetAssistantSegment();
-            root.activity = "";
-            root.statusText = "";
+            state.assistantRow = state.rows.length - 1;
+            root.resetAssistantSegmentFor(state);
+            state.activity = "";
+            state.statusText = "";
             break;
         case "done":
-            root.finishTurn("");
+            root.endTurnState(state, "");
             break;
         case "error":
-            root.finishTurn(event.errorMessage || ("the ghost stopped: " + event.reason));
+            root.endTurnState(state,
+                event.errorMessage || ("the ghost stopped: " + event.reason));
             break;
         default:
             console.warn("ghost: unknown pi-messages event:", event.type);
         }
+        root.projectTurnFields(state);
     }
 
     function updateTool(id: string, patch: var): void {
+        const state = root.activeTurnState(false);
+        if (!state) return;
+        root.captureActiveTurn(state);
+        root.updateToolFor(state, id, patch);
+    }
+
+    function updateToolFor(state: var, id: string, patch: var): void {
         const next = [];
         let found = false;
-        for (const item of root.toolActivities) {
+        for (const item of state.toolActivities) {
             if (item.id === id) {
                 next.push(Object.assign({}, item, patch));
                 found = true;
@@ -2134,194 +2743,250 @@ Singleton {
             // says nothing about an outcome rather than inventing one.
             askSettled: ""
         }, patch));
-        root.toolActivities = next;
-        root.syncToolActivity();
+        state.toolActivities = next;
+        root.syncToolActivityFor(state);
     }
 
     function syncToolActivity(): void {
-        if (root.assistantRow < 0 || root.assistantRow >= transcriptModel.count) return;
-        transcriptModel.setProperty(root.assistantRow, "toolActivity", root.toolActivities);
+        const state = root.activeTurnState(false);
+        if (!state) return;
+        root.captureActiveTurn(state);
+        root.syncToolActivityFor(state);
+    }
+
+    function syncToolActivityFor(state: var): void {
+        if (state.assistantRow < 0 || state.assistantRow >= state.rows.length) return;
+        root.setTurnRow(state, state.assistantRow, "toolActivity", state.toolActivities);
+        root.projectTurnFields(state);
     }
 
     function settleToolActivity(cancelled: bool): void {
+        const state = root.activeTurnState(false);
+        if (!state) return;
+        root.captureActiveTurn(state);
+        root.settleToolActivityFor(state, cancelled);
+    }
+
+    function settleToolActivityFor(state: var, cancelled: bool): void {
         const next = [];
-        for (const item of root.toolActivities) {
+        for (const item of state.toolActivities) {
             next.push(item.status === "failed" || item.status === "complete"
                 ? item : Object.assign({}, item, cancelled
                     ? { status: "failed", summary: item.summary || "Cancelled" }
                     : { status: "complete" }));
         }
-        root.toolActivities = next;
-        root.syncToolActivity();
+        state.toolActivities = next;
+        root.syncToolActivityFor(state);
     }
 
     /** Push buffered block text into the model. Cheap when nothing changed. */
     function flush(force: bool, segmentClosed: bool): void {
-        if (root.assistantRow < 0 || root.assistantRow >= transcriptModel.count) return;
+        const state = root.activeTurnState(false);
+        if (!state) return;
+        root.captureActiveTurn(state);
+        root.flushTurn(state, force, segmentClosed);
+    }
+
+    function flushTurn(state: var, force: bool, segmentClosed: bool): void {
+        if (state.assistantRow < 0 || state.assistantRow >= state.rows.length) return;
         // A builtin has no model blocks. Re-splitting an empty block buffer at
         // `done` must not erase the command_output row we just rendered.
-        if (transcriptModel.get(root.assistantRow).role === "command") return;
-        if (!force && !root.presentationDirty) return;
+        if (state.rows[state.assistantRow].role === "command") return;
+        if (!force && !state.presentationDirty) return;
         const turn = TurnBlocks.split(
-            root.blocks, Object.keys(root.toolIdsByContent),
-            root.streaming && !segmentClosed);
-        const row = transcriptModel.get(root.assistantRow);
-        if (row.text !== turn.body) transcriptModel.setProperty(root.assistantRow, "text", turn.body);
-        if (root.statusText !== turn.status) root.statusText = turn.status;
-        const tools = root.toolNames.join(", ");
-        if (row.tools !== tools) transcriptModel.setProperty(root.assistantRow, "tools", tools);
-        root.presentationDirty = false;
+            state.blocks, Object.keys(state.toolIdsByContent),
+            state.streaming && !segmentClosed);
+        const row = state.rows[state.assistantRow];
+        if (row.text !== turn.body)
+            root.setTurnRow(state, state.assistantRow, "text", turn.body);
+        if (state.statusText !== turn.status) state.statusText = turn.status;
+        const tools = state.toolNames.join(", ");
+        if (row.tools !== tools)
+            root.setTurnRow(state, state.assistantRow, "tools", tools);
+        state.presentationDirty = false;
+        root.projectTurnFields(state);
     }
 
     function finishTurn(errorMessage: string): void {
-        root.endTurn(root.activeGhost, errorMessage);
+        const state = root.activeTurnState(false);
+        if (!state) return;
+        root.captureActiveTurn(state);
+        root.endTurnState(state, errorMessage);
     }
 
     function endTurn(ghost: string, errorMessage: string): void {
-        if (!root.streaming) return;
-        root.settleToolActivity(false);
-        root.streaming = false;
+        const state = root.activeTurnState(false);
+        if (!state || state.ghost !== ghost) return;
+        root.captureActiveTurn(state);
+        root.endTurnState(state, errorMessage);
+    }
+
+    function endTurnState(state: var, errorMessage: string): void {
+        // The terminal event, EOF fallback, watchdog and abort can race. Only
+        // the first one owns settlement and emits a terminal shell signal.
+        if (!state.streaming) return;
+        root.settleToolActivityFor(state, false);
+        state.streaming = false;
         // Re-split now the turn is closed: a trailing block held beside the orb
         // while it might still have been a preamble is the reply after all.
-        root.flush(true, false);
-        root.resetInteractionState();
-        flushTimer.stop();
-        streamWatchdog.stop();
+        root.flushTurn(state, true, false);
+        root.resetInteractionStateFor(state);
         let text = "";
-        if (root.assistantRow >= 0 && root.assistantRow < transcriptModel.count) {
-            transcriptModel.setProperty(root.assistantRow, "pending", false);
-            if (errorMessage !== "") transcriptModel.setProperty(root.assistantRow, "error", errorMessage);
-            text = transcriptModel.get(root.assistantRow).text;
+        if (state.assistantRow >= 0 && state.assistantRow < state.rows.length) {
+            root.setTurnRow(state, state.assistantRow, "pending", false);
+            if (errorMessage !== "")
+                root.setTurnRow(state, state.assistantRow, "error", errorMessage);
+            text = state.rows[state.assistantRow].text;
         }
-        root.assistantRow = -1;
-        // The turn may have created this conversation or triggered background
-        // titling; re-list so the sidebar reflects it. Only for the active ghost.
-        if (ghost === root.activeGhost) root.fetchSessions(ghost);
+        state.assistantRow = -1;
+        root.updateLiveConversationKeys();
         if (errorMessage !== "") {
-            root.lastError = errorMessage;
-            root.turnFailed(ghost, errorMessage);
+            state.lastError = errorMessage;
+            root.turnFailed(state.ghost, errorMessage);
+            if (state.ghost === root.activeGhost) Qt.callLater(function () {
+                root.fetchSessions(state.ghost);
+            });
         } else {
             // A turn that completed is proof the daemon answered; drop any stale
             // error banner so it does not linger under a good reply.
-            root.lastError = "";
-            root.turnFinished(ghost, text);
+            state.lastError = "";
+            root.turnFinished(state.ghost, text);
         }
-        if (ghost === root.activeGhost && root.currentSessionId !== "")
-            Qt.callLater(root.refreshCurrentTranscript);
+        root.projectTurnFields(state);
+        Qt.callLater(function () {
+            root.refreshConversationTranscript(state);
+        });
+        if (errorMessage === "" && root.hudVisible && root.isActiveTurn(state))
+            root.markConversationRead(state.ghost, state.sessionId);
     }
 
     /** Move a dequeued steer/follow-up from QueueLine into transcript order. */
     function receiveOwnerMessage(text: string): void {
+        const state = root.activeTurnState(false);
+        if (!state) return;
+        root.captureActiveTurn(state);
+        root.receiveOwnerMessageFor(state, text);
+    }
+
+    function receiveOwnerMessageFor(state: var, text: string): void {
         const message = text.trim();
-        if (!root.streaming || message === "") return;
+        if (!state.streaming || message === "") return;
         // The SSE event is the dequeue boundary. Move one matching chip now;
         // the 350ms queue poll remains the authority for unusual duplicates or
         // non-owner queue entries, but the ordinary row never renders twice.
-        const steering = root.steeringQueue.slice();
+        const steering = state.steeringQueue.slice();
         const steerIndex = steering.indexOf(message);
         if (steerIndex >= 0) {
             steering.splice(steerIndex, 1);
-            root.steeringQueue = steering;
+            state.steeringQueue = steering;
         } else {
-            const followUp = root.followUpQueue.slice();
+            const followUp = state.followUpQueue.slice();
             const followIndex = followUp.indexOf(message);
             if (followIndex >= 0) {
                 followUp.splice(followIndex, 1);
-                root.followUpQueue = followUp;
+                state.followUpQueue = followUp;
             }
         }
-        const hasAssistant = root.assistantRow >= 0
-            && root.assistantRow < transcriptModel.count;
+        const hasAssistant = state.assistantRow >= 0
+            && state.assistantRow < state.rows.length;
         const emptyPlaceholder = hasAssistant
-            && root.assistantRow === transcriptModel.count - 1
-            && transcriptModel.get(root.assistantRow).text === ""
-            && root.toolActivities.length === 0
-            && Object.keys(root.blocks).length === 0;
+            && state.assistantRow === state.rows.length - 1
+            && state.rows[state.assistantRow].text === ""
+            && state.toolActivities.length === 0
+            && Object.keys(state.blocks).length === 0;
         if (emptyPlaceholder) {
             // OMP can dequeue a batch of owner messages before starting the
             // next provider step. Keep those as consecutive owner rows rather
             // than manufacturing a blank assistant row between each pair.
-            transcriptModel.remove(root.assistantRow);
-            root.assistantRow = -1;
+            root.removeTurnRow(state, state.assistantRow);
+            state.assistantRow = -1;
         } else {
-            root.settleToolActivity(false);
+            root.settleToolActivityFor(state, false);
             // The HTTP turn continues, but this assistant segment ends where
             // the dequeued owner message enters. Its trailing prose is a reply,
             // not an in-progress status line.
-            root.flush(true, true);
+            root.flushTurn(state, true, true);
             if (hasAssistant)
-                transcriptModel.setProperty(root.assistantRow, "pending", false);
+                root.setTurnRow(state, state.assistantRow, "pending", false);
         }
-        root.statusText = "";
-        root.activity = "";
+        state.statusText = "";
+        state.activity = "";
 
-        transcriptModel.append({
+        root.appendTurnRow(state, {
             role: "user", text: message, tools: "", toolActivity: [], error: "", pending: false,
             entryId: ""
         });
-        transcriptModel.append({
+        root.appendTurnRow(state, {
             role: "assistant", text: "", tools: "", toolActivity: [], error: "", pending: true,
             entryId: ""
         });
-        root.assistantRow = transcriptModel.count - 1;
-        root.resetAssistantSegment();
+        state.assistantRow = state.rows.length - 1;
+        root.resetAssistantSegmentFor(state);
+        root.projectTurnFields(state);
     }
 
     // ---- OMP ask ---------------------------------------------------------
 
     /** Fetch the ask payload surfaced by the live conversation, if ready. */
     function fetchPendingAsk(): void {
-        const ghost = root.activeGhost;
-        const sessionId = root.currentSessionId;
-        if (!root.streaming || root.activity !== "ask" || ghost === "" || sessionId === "") return;
-        if (root.askRequest && root.askRequest.readyState !== 4) return;
+        const state = root.activeTurnState(false);
+        if (state) root.fetchPendingAskFor(state);
+    }
+
+    function fetchPendingAskFor(state: var): void {
+        if (!state.streaming || state.activity !== "ask") return;
+        if (state.askRequest && state.askRequest.readyState !== 4) return;
         const xhr = new XMLHttpRequest();
-        root.askRequest = xhr;
+        state.askRequest = xhr;
+        if (root.isActiveTurn(state)) root.askRequest = xhr;
         xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4) return;
-            if (ghost !== root.activeGhost || sessionId !== root.currentSessionId || !root.streaming) return;
+            if (xhr.readyState !== 4 || xhr !== state.askRequest || !state.streaming) return;
             if (xhr.status === 200) {
                 try {
                     const body = JSON.parse(xhr.responseText);
-                    root.pendingAsk = body.ask || null;
-                    root.askError = "";
+                    state.pendingAsk = body.ask || null;
+                    state.askError = "";
                 } catch (error) {
-                    root.askError = "ghostd sent a malformed ask interaction";
+                    state.askError = "ghostd sent a malformed ask interaction";
                 }
             } else {
-                root.askError = root.describeError(xhr, "GET ask");
+                state.askError = root.describeError(xhr, "GET ask");
             }
+            root.projectTurnFields(state);
         };
-        root.dispatch(xhr, "GET", "/api/ghosts/" + encodeURIComponent(ghost)
-            + "/sessions/" + encodeURIComponent(sessionId) + "/ask", ({}), null);
+        root.dispatch(xhr, "GET", "/api/ghosts/" + encodeURIComponent(state.ghost)
+            + "/sessions/" + encodeURIComponent(state.sessionId) + "/ask", ({}), null);
     }
 
     /** Submit an OMP ask result. `answer` is { kind, results? }. */
     function answerAsk(answer: var): void {
-        const ask = root.pendingAsk;
-        const ghost = root.activeGhost;
-        const sessionId = root.currentSessionId;
-        if (!ask || root.askSubmitting || ghost === "" || sessionId === "") return;
-        root.askSubmitting = true;
-        root.askError = "";
+        const state = root.activeTurnState(false);
+        if (!state) return;
+        root.captureActiveTurn(state);
+        const ask = state.pendingAsk;
+        if (!ask || state.askSubmitting) return;
+        state.askSubmitting = true;
+        state.askError = "";
         const xhr = new XMLHttpRequest();
+        state.askSubmitRequest = xhr;
         root.askSubmitRequest = xhr;
+        root.projectTurnFields(state);
         xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4) return;
-            if (ghost !== root.activeGhost || sessionId !== root.currentSessionId) return;
+            if (xhr.readyState !== 4 || xhr !== state.askSubmitRequest) return;
             if (xhr.status === 200) {
-                root.resetAskState();
+                root.resetAskStateFor(state);
             } else {
-                root.askSubmitting = false;
-                root.askError = root.describeError(xhr, "POST ask");
+                state.askSubmitting = false;
+                state.askError = root.describeError(xhr, "POST ask");
                 // A stale interaction may already have advanced. Refresh once
                 // so the card never remains stuck on an answer nobody can take.
-                if (xhr.status === 409) root.fetchPendingAsk();
+                if (xhr.status === 409) root.fetchPendingAskFor(state);
             }
+            root.projectTurnFields(state);
         };
         const body = Object.assign({ askId: ask.id }, answer);
-        root.dispatch(xhr, "POST", "/api/ghosts/" + encodeURIComponent(ghost)
-            + "/sessions/" + encodeURIComponent(sessionId) + "/ask",
+        root.dispatch(xhr, "POST", "/api/ghosts/" + encodeURIComponent(state.ghost)
+            + "/sessions/" + encodeURIComponent(state.sessionId) + "/ask",
             ({ "Content-Type": "application/json" }), JSON.stringify(body));
     }
 
@@ -2342,66 +3007,78 @@ Singleton {
     // ---- OMP steering + follow-up queues --------------------------------
 
     function applyQueue(body: var): void {
-        root.steeringQueue = Array.isArray(body.steering) ? body.steering : [];
-        root.followUpQueue = Array.isArray(body.followUp) ? body.followUp : [];
+        const state = root.activeTurnState(false);
+        if (state) root.applyQueueFor(state, body);
+    }
+
+    function applyQueueFor(state: var, body: var): void {
+        state.steeringQueue = Array.isArray(body.steering) ? body.steering : [];
+        state.followUpQueue = Array.isArray(body.followUp) ? body.followUp : [];
+        root.projectTurnFields(state);
     }
 
     function fetchQueue(): void {
-        const ghost = root.activeGhost;
-        const sessionId = root.currentSessionId;
-        if (!root.streaming || ghost === "" || sessionId === "") return;
-        if (root.queueStatusRequest && root.queueStatusRequest.readyState !== 4) return;
+        const state = root.activeTurnState(false);
+        if (state) root.fetchQueueFor(state);
+    }
+
+    function fetchQueueFor(state: var): void {
+        if (!state.streaming) return;
+        if (state.queueStatusRequest && state.queueStatusRequest.readyState !== 4) return;
         const xhr = new XMLHttpRequest();
-        root.queueStatusRequest = xhr;
+        state.queueStatusRequest = xhr;
+        if (root.isActiveTurn(state)) root.queueStatusRequest = xhr;
         xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4) return;
-            if (ghost !== root.activeGhost || sessionId !== root.currentSessionId || !root.streaming) return;
+            if (xhr.readyState !== 4 || xhr !== state.queueStatusRequest || !state.streaming) return;
             if (xhr.status === 200) {
                 try {
-                    root.applyQueue(JSON.parse(xhr.responseText));
+                    root.applyQueueFor(state, JSON.parse(xhr.responseText));
                 } catch (error) {
-                    root.queueError = "ghostd sent malformed queue state";
+                    state.queueError = "ghostd sent malformed queue state";
                 }
             }
+            root.projectTurnFields(state);
         };
-        root.dispatch(xhr, "GET", "/api/ghosts/" + encodeURIComponent(ghost)
-            + "/sessions/" + encodeURIComponent(sessionId) + "/queue", ({}), null);
+        root.dispatch(xhr, "GET", "/api/ghosts/" + encodeURIComponent(state.ghost)
+            + "/sessions/" + encodeURIComponent(state.sessionId) + "/queue", ({}), null);
     }
 
     function queueMessage(text: string, mode: string): void {
         const prompt = text.trim();
-        const ghost = root.activeGhost;
-        const sessionId = root.currentSessionId;
-        if (prompt === "" || root.queueSubmitting || !root.streaming
-                || ghost === "" || sessionId === "") return;
-        root.queueSubmitting = true;
-        root.queueError = "";
+        const state = root.activeTurnState(false);
+        if (!state) return;
+        root.captureActiveTurn(state);
+        if (prompt === "" || state.queueSubmitting || !state.streaming) return;
+        state.queueSubmitting = true;
+        state.queueError = "";
         // Show the chip immediately; the authoritative GET will remove it once
         // OMP consumes it into the next provider boundary.
-        if (mode === "followUp") root.followUpQueue = root.followUpQueue.concat([prompt]);
-        else root.steeringQueue = root.steeringQueue.concat([prompt]);
+        if (mode === "followUp") state.followUpQueue = state.followUpQueue.concat([prompt]);
+        else state.steeringQueue = state.steeringQueue.concat([prompt]);
 
         const xhr = new XMLHttpRequest();
+        state.queueRequest = xhr;
         root.queueRequest = xhr;
+        root.projectTurnFields(state);
         xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4) return;
-            if (ghost !== root.activeGhost || sessionId !== root.currentSessionId) return;
-            root.queueSubmitting = false;
+            if (xhr.readyState !== 4 || xhr !== state.queueRequest) return;
+            state.queueSubmitting = false;
             if (xhr.status === 200) {
                 try {
-                    root.applyQueue(JSON.parse(xhr.responseText));
-                    root.queueError = "";
+                    root.applyQueueFor(state, JSON.parse(xhr.responseText));
+                    state.queueError = "";
                 } catch (error) {
-                    root.queueError = "ghostd sent malformed queue state";
+                    state.queueError = "ghostd sent malformed queue state";
                 }
             } else {
-                root.queueError = root.describeError(xhr, "POST queue");
-                root.fetchQueue();
+                state.queueError = root.describeError(xhr, "POST queue");
+                root.fetchQueueFor(state);
                 root.queueMessageRejected(prompt);
             }
+            root.projectTurnFields(state);
         };
-        root.dispatch(xhr, "POST", "/api/ghosts/" + encodeURIComponent(ghost)
-            + "/sessions/" + encodeURIComponent(sessionId) + "/queue",
+        root.dispatch(xhr, "POST", "/api/ghosts/" + encodeURIComponent(state.ghost)
+            + "/sessions/" + encodeURIComponent(state.sessionId) + "/queue",
             ({ "Content-Type": "application/json" }),
             JSON.stringify({ mode: mode, text: prompt }));
     }
