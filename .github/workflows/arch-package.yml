@@ -27,17 +27,22 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Verify container-local source resolution
+        shell: bash
+        run: bash packaging/arch/test-ci-source-repo.sh
+
       - name: Build and smoke-test the package
-        env:
-          GHOST_SOURCE_REPO: file://${{ github.workspace }}
-          GHOST_SOURCE_REF: commit=${{ github.sha }}
+        shell: bash
         run: |
+          set -euo pipefail
+          source_repo="$(bash packaging/arch/resolve-ci-source-repo.sh "$GITHUB_SHA")"
+          source_commit="$GITHUB_SHA"
           useradd --create-home builder
           chown -R builder:builder "$GITHUB_WORKSPACE"
-          cd packaging/arch
+          cd "$GITHUB_WORKSPACE/packaging/arch"
           runuser -u builder -- env \
-            GHOST_SOURCE_REPO="$GHOST_SOURCE_REPO" \
-            GHOST_SOURCE_REF="$GHOST_SOURCE_REF" \
+            GHOST_SOURCE_REPO="$source_repo" \
+            GHOST_SOURCE_REF="commit=$source_commit" \
             makepkg --cleanbuild --noconfirm
 
       - name: Build and verify stable release sources offline
