@@ -15,8 +15,10 @@ if [[ -z ${QMLTESTRUNNER:-} ]]; then
 fi
 
 # Loading qs.services materializes the Ghostd singleton, whose startup refresh
-# is real I/O. Tests must never probe the owner's production daemon on 7717.
-GHOSTD_PORT="${GHOSTD_PORT:-17717}" QT_QPA_PLATFORM=offscreen \
+# is real I/O. The test-only Quickshell import maps GHOSTD_PORT to destination
+# port 0, which cannot have a listener and therefore cannot reach an owner or
+# unrelated process.
+QT_QPA_PLATFORM=offscreen \
   "$QMLTESTRUNNER" -input test -import test/imports -import qml -import .qmllint -o -,txt
 
 mapfile -t xdg_open_owners < <(rg -l '"xdg-open"' qml | sort)

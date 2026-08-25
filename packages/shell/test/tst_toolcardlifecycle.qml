@@ -51,7 +51,6 @@ TestCase {
     }
 
     function test_listModelRoleReplacementDoesNotWarnDuringDelegateTeardown(): void {
-        ignoreWarning(new RegExp("ghostd is not answering on http://127.0.0.1:17717"));
         failOnWarning(/ToolCard\.qml:[0-9]+: TypeError/);
 
         transcript.append({ toolActivity: [tc.call("first", "running")] });
