@@ -332,7 +332,7 @@ export function resolveHelperCommand(
 
 /** The minimal child-process surface the client drives. `node:child_process` fits. */
 export interface HelperProcess {
-  readonly stdin: {
+  readonly stdin: NodeJS.EventEmitter & {
     write(chunk: string): boolean;
     writable?: boolean;
     end(): void;
@@ -361,6 +361,8 @@ export interface DesktopHelperClientOptions {
   readonly requestTimeoutMs?: number;
   /** Reap the process after this long with no requests. Defaults to 5min. 0 disables. */
   readonly idleTimeoutMs?: number;
+  /** Grace after SIGTERM before escalating to SIGKILL. Defaults to 1s. */
+  readonly stopTimeoutMs?: number;
   /** Sink for the sidecar's stderr log lines. */
   readonly onLog?: (line: string) => void;
 }
@@ -368,6 +370,7 @@ export interface DesktopHelperClientOptions {
 export const DEFAULT_START_TIMEOUT_MS = 20_000;
 export const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 export const DEFAULT_IDLE_TIMEOUT_MS = 5 * 60_000;
+export const DEFAULT_STOP_TIMEOUT_MS = 1_000;
 
 interface Pending {
   resolve(value: unknown): void;
@@ -385,11 +388,14 @@ export class DesktopHelperClient implements DesktopHelper {
   private readonly options: DesktopHelperClientOptions;
   private child: HelperProcess | null = null;
   private ready: Promise<HelloPayload> | null = null;
+  private rejectReady: ((error: unknown) => void) | null = null;
+  private stopping: Promise<void> | null = null;
   private helloPayload: HelloPayload | null = null;
   private nextId = 1;
   private readonly pending = new Map<number, Pending>();
   private stdoutBuffer = "";
   private stderrBuffer = "";
+  private startTimer: ReturnType<typeof setTimeout> | undefined;
   private idleTimer: ReturnType<typeof setTimeout> | undefined;
   private disposed = false;
 
@@ -413,79 +419,103 @@ export class DesktopHelperClient implements DesktopHelper {
       );
     }
     if (this.ready) return this.ready;
+    if (this.stopping) return this.stopping.then(() => this.start());
 
-    this.ready = new Promise<HelloPayload>((resolve, reject) => {
-      let child: HelperProcess;
-      try {
-        child = this.launch();
-      } catch (error) {
-        reject(error);
-        return;
-      }
-      this.child = child;
+    let child: HelperProcess;
+    try {
+      child = this.launch();
+    } catch (error) {
+      // Do not cache a synchronous resolution/spawn failure. The helper may be
+      // installed or its override repaired while the daemon remains running.
+      return Promise.reject(error);
+    }
+    this.child = child;
 
-      const startTimer = setTimeout(() => {
-        reject(
-          new GhostError(
-            "not_found",
-            `The desktop helper did not send its hello handshake within `
-            + `${Math.round((this.options.startTimeoutMs ?? DEFAULT_START_TIMEOUT_MS) / 1000)}s. `
-            + (this.stderrBuffer.trim()
-              ? `It logged: ${this.stderrBuffer.trim().slice(-500)}`
-              : "It produced no output."),
-            {},
-          ),
-        );
-        this.teardown();
-      }, this.options.startTimeoutMs ?? DEFAULT_START_TIMEOUT_MS);
+    let resolveReady!: (hello: HelloPayload) => void;
+    let rejectReady!: (error: unknown) => void;
+    const ready = new Promise<HelloPayload>((resolve, reject) => {
+      resolveReady = resolve;
+      rejectReady = reject;
+    });
+    this.ready = ready;
+    this.rejectReady = rejectReady;
 
-      child.stdout.setEncoding("utf8");
-      child.stdout.on("data", (chunk: string) => {
-        this.onStdout(chunk, (hello) => {
-          clearTimeout(startTimer);
-          this.helloPayload = hello;
-          this.armIdleTimer();
-          resolve(hello);
-        });
-      });
+    this.startTimer = setTimeout(() => {
+      const error = new GhostError(
+        "not_found",
+        `The desktop helper did not send its hello handshake within `
+        + `${Math.round((this.options.startTimeoutMs ?? DEFAULT_START_TIMEOUT_MS) / 1000)}s. `
+        + (this.stderrBuffer.trim()
+          ? `It logged: ${this.stderrBuffer.trim().slice(-500)}`
+          : "It produced no output."),
+        {},
+      );
+      void this.teardown(error);
+    }, this.options.startTimeoutMs ?? DEFAULT_START_TIMEOUT_MS);
 
-      if (child.stderr) {
-        child.stderr.setEncoding("utf8");
-        child.stderr.on("data", (chunk: string) => this.onStderr(chunk));
-      }
-
-      child.on("error", (error: Error) => {
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      if (this.child !== child) return;
+      this.onStdout(chunk, (hello) => {
         if (this.child !== child) return;
-        clearTimeout(startTimer);
-        const wrapped = new GhostError(
-          "not_found",
-          `The desktop helper could not be started: ${error.message}. Install `
-          + `${HELPER_BINARY} or point ${HELPER_COMMAND_ENV} at it.`,
-          { cause: error.message },
-        );
-        reject(wrapped);
-        this.failAll(wrapped);
-        this.teardown();
-      });
-
-      child.on("exit", (code, signal) => {
-        if (this.child !== child) return;
-        clearTimeout(startTimer);
-        const detail = this.stderrBuffer.trim().slice(-500);
-        const exited = new GhostError(
-          "not_found",
-          `The desktop helper exited (code ${code ?? "null"}, signal ${signal ?? "null"})`
-          + (detail ? `: ${detail}` : "."),
-          { code, signal },
-        );
-        // If it died before the hello, the start promise is still pending.
-        reject(exited);
-        this.failAll(exited);
-        this.teardown();
+        this.clearStartTimer();
+        this.helloPayload = hello;
+        this.rejectReady = null;
+        this.armIdleTimer();
+        resolveReady(hello);
       });
     });
 
-    return this.ready;
+    if (child.stderr) {
+      child.stderr.setEncoding("utf8");
+      child.stderr.on("data", (chunk: string) => {
+        if (this.child === child) this.onStderr(chunk);
+      });
+    }
+
+    // Writable-stream failures (notably EPIPE) arrive asynchronously even when
+    // write() returned normally. Always observe them so Node cannot turn a
+    // closed helper pipe into an unhandled `error` event.
+    child.stdin.on("error", (error: Error) => {
+      if (this.child !== child) return;
+      this.clearStartTimer();
+      const wrapped = new GhostError(
+        "not_found",
+        `The desktop helper input pipe failed: ${error.message}.`,
+        { cause: error.message },
+      );
+      this.failAll(wrapped);
+      void this.teardown(wrapped);
+    });
+
+    child.on("error", (error: Error) => {
+      if (this.child !== child) return;
+      this.clearStartTimer();
+      const wrapped = new GhostError(
+        "not_found",
+        `The desktop helper could not be started: ${error.message}. Install `
+        + `${HELPER_BINARY} or point ${HELPER_COMMAND_ENV} at it.`,
+        { cause: error.message },
+      );
+      this.failAll(wrapped);
+      void this.teardown(wrapped);
+    });
+
+    child.on("exit", (code, signal) => {
+      if (this.child !== child) return;
+      this.clearStartTimer();
+      const detail = this.stderrBuffer.trim().slice(-500);
+      const exited = new GhostError(
+        "not_found",
+        `The desktop helper exited (code ${code ?? "null"}, signal ${signal ?? "null"})`
+        + (detail ? `: ${detail}` : "."),
+        { code, signal },
+      );
+      this.failAll(exited);
+      void this.teardown(exited, true);
+    });
+
+    return ready;
   }
 
   private launch(): HelperProcess {
@@ -620,15 +650,16 @@ export class DesktopHelperClient implements DesktopHelper {
       try {
         child.stdin.write(`${JSON.stringify({ id, op, args })}\n`);
       } catch (error) {
-        this.pending.delete(id);
-        if (pending.timer) clearTimeout(pending.timer);
-        pending.detachAbort?.();
-        reject(
-          new GhostError("not_found", `Could not send ${op} to the desktop helper.`, {
+        const failure = new GhostError(
+          "not_found",
+          `Could not send ${op} to the desktop helper.`,
+          {
             op,
             cause: error instanceof Error ? error.message : String(error),
-          }),
+          },
         );
+        this.failAll(failure);
+        void this.teardown(failure);
       }
     });
   }
@@ -652,6 +683,13 @@ export class DesktopHelperClient implements DesktopHelper {
     }
   }
 
+  private clearStartTimer(): void {
+    if (this.startTimer) {
+      clearTimeout(this.startTimer);
+      this.startTimer = undefined;
+    }
+  }
+
   private failAll(error: GhostError): void {
     for (const [id, pending] of this.pending) {
       if (pending.timer) clearTimeout(pending.timer);
@@ -661,32 +699,83 @@ export class DesktopHelperClient implements DesktopHelper {
     }
   }
 
-  /** Drop the process handle and reset so the next request re-spawns. */
-  private teardown(): void {
+  /** Drop the process handle, then conclusively reap it before allowing a respawn. */
+  private teardown(error?: GhostError, alreadyExited = false): Promise<void> {
+    this.clearStartTimer();
     this.clearIdleTimer();
     const child = this.child;
+    if (!child) return this.stopping ?? Promise.resolve();
     this.child = null;
+    this.rejectReady?.(
+      error ?? new GhostError("not_found", "The desktop helper was stopped.", {}),
+    );
+    this.rejectReady = null;
     this.ready = null;
     this.helloPayload = null;
     this.stdoutBuffer = "";
-    if (child) {
-      try {
-        child.stdin.end();
-      } catch {
-        // stdin may already be closed.
-      }
-      try {
-        child.kill("SIGTERM");
-      } catch {
-        // Already gone.
-      }
-    }
+    this.stderrBuffer = "";
+
+    if (alreadyExited) return Promise.resolve();
+    const stopping = stopHelperProcess(
+      child,
+      this.options.stopTimeoutMs ?? DEFAULT_STOP_TIMEOUT_MS,
+    );
+    const barrier = stopping.finally(() => {
+      if (this.stopping === barrier) this.stopping = null;
+    });
+    this.stopping = barrier;
+    return barrier;
   }
 
   async dispose(): Promise<void> {
     this.disposed = true;
-    this.failAll(new GhostError("not_found", "The desktop helper client was disposed.", {}));
-    this.teardown();
+    const error = new GhostError("not_found", "The desktop helper client was disposed.", {});
+    this.failAll(error);
+    await this.teardown(error);
+  }
+}
+
+async function stopHelperProcess(child: HelperProcess, timeoutMs: number): Promise<void> {
+  let exited = false;
+  const exit = new Promise<void>((resolve) => {
+    child.on("exit", () => {
+      exited = true;
+      resolve();
+    });
+  });
+  try {
+    child.stdin.end();
+  } catch {
+    // stdin may already be closed.
+  }
+
+  let termSent = false;
+  try {
+    termSent = child.kill("SIGTERM");
+  } catch {
+    // A process that is already gone needs no signal.
+  }
+  if (exited || !termSent || await exitsWithin(exit, timeoutMs)) return;
+
+  try {
+    child.kill("SIGKILL");
+  } catch {
+    // The process may have exited between the grace period and escalation.
+  }
+  await exitsWithin(exit, timeoutMs);
+}
+
+async function exitsWithin(exit: Promise<void>, timeoutMs: number): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      exit.then(() => true),
+      new Promise<false>((resolve) => {
+        timer = setTimeout(() => resolve(false), Math.max(0, timeoutMs));
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 

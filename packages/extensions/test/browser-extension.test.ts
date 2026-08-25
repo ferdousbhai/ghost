@@ -330,6 +330,70 @@ describe("launching", () => {
     expect(launch?.userDataDir).toBe(join(fixture.dir, BROWSER_PROFILE_DIRNAME));
     expect(launch?.options["executablePath"]).toBe(FAKE_CHROMIUM);
     expect(launch?.options["headless"]).toBe(false);
+    expect(launch?.options["chromiumSandbox"]).toBe(true);
+  });
+
+  it("delegates launch timeout cancellation to Playwright", async () => {
+    const harness = await loadExtension(
+      createBrowserExtension({
+        backend: playwrightBackend({
+          executablePath: FAKE_CHROMIUM,
+          headless: true,
+          launchTimeoutMs: 1_234,
+        }),
+        browser: { idleTimeoutMs: 0 },
+      }),
+      fixture.dir,
+    );
+    await harness.call(GHOST_BROWSER, { action: "open", url: "https://example.com" });
+
+    // Playwright owns the child process, so its native timeout must own
+    // cancellation too; an outer Promise.race would orphan a late Chromium.
+    expect(shared.launches[0]?.options["timeout"]).toBe(1_234);
+  });
+
+  it("maps Playwright's native launch timeout to the browser timeout failure", async () => {
+    shared.makeContext = () => {
+      const error = new Error("browserType.launchPersistentContext: Timeout 25ms exceeded");
+      error.name = "TimeoutError";
+      throw error;
+    };
+    const harness = await loadExtension(
+      createBrowserExtension({
+        backend: playwrightBackend({
+          executablePath: FAKE_CHROMIUM,
+          headless: true,
+          launchTimeoutMs: 25,
+        }),
+        browser: { idleTimeoutMs: 0 },
+      }),
+      fixture.dir,
+    );
+
+    const error = await expectGhostError(
+      harness.call(GHOST_BROWSER, { action: "open", url: "https://example.com" }),
+    );
+    expect(error.details["failure"]).toBe("timeout");
+    expect(error.details["action"]).toBe("starting the browser");
+  });
+
+  it("closes a context that arrives after shutdown claimed its launch", async () => {
+    let finishLaunch!: (context: FakeContext) => void;
+    shared.makeContext = () => new Promise<FakeContext>((resolve) => {
+      finishLaunch = resolve;
+    });
+    const harness = await browserHarness();
+    const opening = harness.call(GHOST_BROWSER, {
+      action: "open",
+      url: "https://example.com",
+    });
+    await vi.waitFor(() => expect(shared.launches).toHaveLength(1));
+    const rejected = expect(opening).rejects.toThrowError(/closed while it was starting/i);
+
+    const closing = closeAllBrowserSessions();
+    finishLaunch(context);
+    await Promise.all([closing, rejected]);
+    expect(context.closed).toBe(true);
   });
 
   it("creates the profile directory under the ghost home, nowhere else", async () => {

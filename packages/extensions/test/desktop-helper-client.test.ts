@@ -43,19 +43,35 @@ function makeStream(): EventEmitter & { setEncoding(encoding: string): unknown }
 class FakeProcess extends EventEmitter {
   readonly stdout = makeStream();
   readonly stderr = makeStream();
+  readonly stdin: EventEmitter & {
+    writable: boolean;
+    write(chunk: string): boolean;
+    end(): void;
+  };
   readonly writes: string[] = [];
+  readonly killSignals: NodeJS.Signals[] = [];
   killed = false;
+  exitOnKill = true;
+  writeError: Error | null = null;
   pid = 4321;
-  readonly stdin = {
-    writable: true,
-    write: (chunk: string): boolean => {
+
+  constructor() {
+    super();
+    const stdin = new EventEmitter() as FakeProcess["stdin"];
+    stdin.writable = true;
+    stdin.write = (chunk: string): boolean => {
+      if (this.writeError) throw this.writeError;
       this.writes.push(chunk);
       return true;
-    },
-    end: (): void => {},
-  };
-  kill = (): boolean => {
+    };
+    stdin.end = (): void => {};
+    this.stdin = stdin;
+  }
+
+  kill = (signal: NodeJS.Signals = "SIGTERM"): boolean => {
     this.killed = true;
+    this.killSignals.push(signal);
+    if (this.exitOnKill) queueMicrotask(() => this.emit("exit", null, signal));
     return true;
   };
 
@@ -108,6 +124,25 @@ describe("hello handshake", () => {
     const pending = client.hello();
     proc.emit("exit", 1, null);
     await expect(pending).rejects.toThrowError(/exited/);
+  });
+
+  it("retries after a synchronous launch failure instead of caching the rejection", async () => {
+    const proc = new FakeProcess();
+    let attempts = 0;
+    const client = new DesktopHelperClient({
+      spawn: () => {
+        attempts += 1;
+        if (attempts === 1) throw new Error("not installed yet");
+        return proc as unknown as HelperProcess;
+      },
+    });
+
+    await expect(client.hello()).rejects.toThrowError(/not installed yet/);
+    const ready = client.hello();
+    proc.line(HELLO);
+    await expect(ready).resolves.toMatchObject({ type: "hello" });
+    expect(attempts).toBe(2);
+    await client.dispose();
   });
 });
 
@@ -205,6 +240,99 @@ describe("lifecycle", () => {
     await expect(client.hello()).rejects.toThrowError(/disposed/);
   });
 
+  it("dispose promptly rejects a pending hello and is idempotent", async () => {
+    const proc = new FakeProcess();
+    const client = clientFor(proc);
+    const pending = client.hello();
+    await Promise.all([
+      expect(pending).rejects.toThrowError(/disposed/),
+      client.dispose(),
+      client.dispose(),
+    ]);
+    expect(proc.killSignals).toEqual(["SIGTERM"]);
+  });
+
+  it("escalates to SIGKILL when the helper ignores SIGTERM", async () => {
+    const proc = new FakeProcess();
+    proc.exitOnKill = false;
+    const client = clientFor(proc, { stopTimeoutMs: 5 });
+    const ready = client.hello();
+    proc.line(HELLO);
+    await ready;
+
+    await client.dispose();
+    expect(proc.killSignals).toEqual(["SIGTERM", "SIGKILL"]);
+  });
+
+  it("reaps a helper whose stdin write fails", async () => {
+    const proc = new FakeProcess();
+    const client = clientFor(proc);
+    const ready = client.hello();
+    proc.line(HELLO);
+    await ready;
+    proc.writeError = new Error("broken pipe");
+
+    await expect(client.request("state", {})).rejects.toThrowError(/Could not send state/);
+    await tick();
+    expect(proc.killSignals).toEqual(["SIGTERM"]);
+    await client.dispose();
+  });
+
+  it("handles an asynchronous stdin EPIPE and retries with a fresh helper", async () => {
+    const first = new FakeProcess();
+    const replacement = new FakeProcess();
+    const processes = [first, replacement];
+    let spawnIndex = 0;
+    const client = new DesktopHelperClient({
+      spawn: () => processes[spawnIndex++] as unknown as HelperProcess,
+    });
+    const firstReady = client.hello();
+    first.line(HELLO);
+    await firstReady;
+
+    const rejected = client.request("state", {});
+    await tick();
+    const pipeError = Object.assign(new Error("write EPIPE"), { code: "EPIPE" });
+    first.stdin.emit("error", pipeError);
+    await expect(rejected).rejects.toThrowError(/input pipe failed: write EPIPE/);
+    expect(first.killSignals).toEqual(["SIGTERM"]);
+
+    const replacementReady = client.hello();
+    await tick();
+    replacement.line(HELLO);
+    await replacementReady;
+    first.stdin.emit("error", new Error("late stale EPIPE"));
+    expect(replacement.killed).toBe(false);
+    const surviving = client.request<{ recovered: boolean }>("state", {});
+    await tick();
+    replacement.line({
+      id: replacement.requestId(0),
+      ok: true,
+      result: { recovered: true },
+    });
+    await expect(surviving).resolves.toEqual({ recovered: true });
+    await client.dispose();
+  });
+
+  it("does not carry stderr from a failed child into its replacement", async () => {
+    const first = new FakeProcess();
+    const second = new FakeProcess();
+    const processes = [first, second];
+    let spawnIndex = 0;
+    const client = new DesktopHelperClient({
+      spawn: () => processes[spawnIndex++] as unknown as HelperProcess,
+      startTimeoutMs: 5,
+    });
+    const firstReady = client.hello();
+    first.stderr.emit("data", "first-child-only\n");
+    await expect(firstReady).rejects.toThrowError(/first-child-only/);
+    first.stderr.emit("data", "late-first-child-output\n");
+
+    const secondReady = client.hello();
+    await expect(secondReady).rejects.toThrowError(/It produced no output/);
+    await client.dispose();
+  });
+
   it("fails in-flight requests when the process exits", async () => {
     const proc = new FakeProcess();
     const client = clientFor(proc);
@@ -232,9 +360,10 @@ describe("lifecycle", () => {
       first.line(HELLO);
       await firstReady;
       emitLifecycleEvent(first, event);
-      expect(first.killed).toBe(true);
+      expect(first.killed).toBe(event === "error");
 
       const replacementReady = client.hello();
+      await tick();
       replacement.line(HELLO);
       await replacementReady;
 
@@ -255,7 +384,7 @@ describe("lifecycle", () => {
       await expect(rejected).rejects.toThrowError(
         event === "error" ? /could not be started/ : /exited/,
       );
-      expect(replacement.killed).toBe(true);
+      expect(replacement.killed).toBe(event === "error");
       await client.dispose();
     },
   );

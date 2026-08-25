@@ -31,6 +31,7 @@ import {
   GhostBrowserError,
   identifiedBrowserBackendFactory,
   rethrowBackendError,
+  timeoutError,
   withTimeout,
   type BackendActionOptions,
   type BackendBackResult,
@@ -165,6 +166,8 @@ export class PlaywrightBrowserBackend implements GhostBrowserBackend {
 
   #context: BrowserContext | undefined;
   #launching: Promise<BrowserContext> | undefined;
+  #closing: Promise<boolean> | undefined;
+  #generation = 0;
   #headless: boolean;
   #refs = new Set<string>();
 
@@ -203,16 +206,19 @@ export class PlaywrightBrowserBackend implements GhostBrowserBackend {
 
   /** Launch on first use, and only once even under parallel tool calls. */
   async #contextOrLaunch(): Promise<BrowserContext> {
+    if (this.#closing) await this.#closing;
     if (this.#context) return this.#context;
     if (!this.#launching) {
-      this.#launching = this.#launch().finally(() => {
-        this.#launching = undefined;
+      const generation = this.#generation;
+      const launching = this.#launch(generation).finally(() => {
+        if (this.#launching === launching) this.#launching = undefined;
       });
+      this.#launching = launching;
     }
     return this.#launching;
   }
 
-  async #launch(): Promise<BrowserContext> {
+  async #launch(generation: number): Promise<BrowserContext> {
     const executablePath = this.#executablePath ?? (await findChromiumExecutable());
     if (!executablePath) {
       throw new GhostBrowserError("browser_unavailable", NO_BROWSER_MESSAGE);
@@ -231,22 +237,41 @@ export class PlaywrightBrowserBackend implements GhostBrowserBackend {
 
     let context: BrowserContext;
     try {
-      context = await withTimeout(
-        chromium.launchPersistentContext(this.profileDir, {
-          executablePath,
-          headless: this.#headless,
-          args: LAUNCH_ARGS,
-          viewport: { width: 1280, height: 900 },
-        }),
-        this.#launchTimeoutMs,
-        "starting the browser",
-      );
+      // Playwright must own the launch timeout: its timeout cancellation also
+      // reaps the Chromium process it spawned. A Promise.race here would only
+      // abandon the context promise and leave the profile lock behind.
+      context = await chromium.launchPersistentContext(this.profileDir, {
+        executablePath,
+        headless: this.#headless,
+        // Playwright otherwise adds --no-sandbox for system Chromium.
+        chromiumSandbox: true,
+        args: LAUNCH_ARGS,
+        viewport: { width: 1280, height: 900 },
+        timeout: this.#launchTimeoutMs,
+      });
     } catch (error) {
       if (error instanceof GhostError) throw error;
+      if (/timeout .* exceeded|TimeoutError/i.test(errorMessage(error))) {
+        throw timeoutError("starting the browser", this.#launchTimeoutMs);
+      }
       throw new GhostBrowserError(
         "browser_unavailable",
         `The browser failed to start: ${errorMessage(error)}`,
         { executablePath },
+      );
+    }
+
+    // Shutdown can race a launch. Never publish a context from an obsolete
+    // generation; close it while we still own the only handle.
+    if (generation !== this.#generation) {
+      try {
+        await context.close();
+      } catch {
+        // A context that died during startup is closed enough.
+      }
+      throw new GhostBrowserError(
+        "browser_unavailable",
+        "The browser was closed while it was starting.",
       );
     }
 
@@ -318,18 +343,40 @@ export class PlaywrightBrowserBackend implements GhostBrowserBackend {
   }
 
   async close(): Promise<boolean> {
+    if (this.#closing) return this.#closing;
     const context = this.#context;
+    const launching = this.#launching;
+    const wasOpen = context !== undefined || launching !== undefined;
+    this.#generation += 1;
     this.#context = undefined;
     this.#refs.clear();
     this.#console = [];
     this.#network = [];
-    if (!context) return false;
-    try {
-      await context.close();
-    } catch {
-      // A browser that already died is closed enough.
-    }
-    return true;
+    if (!wasOpen) return false;
+
+    const closing = (async () => {
+      let owned = context;
+      if (!owned && launching) {
+        try {
+          owned = await launching;
+        } catch {
+          // Failed and cancelled launches have no live context to close here.
+        }
+      }
+      if (owned) {
+        if (this.#context === owned) this.#context = undefined;
+        try {
+          await owned.close();
+        } catch {
+          // A browser that already died is closed enough.
+        }
+      }
+      return true;
+    })().finally(() => {
+      if (this.#closing === closing) this.#closing = undefined;
+    });
+    this.#closing = closing;
+    return closing;
   }
 
   // -------------------------------------------------------------------- helpers
