@@ -207,6 +207,11 @@ Singleton {
     property var loginState: ({})
     /** Which ghost the running login belongs to (a login is per ghost). */
     property string loginGhost: ""
+    /** The daemon route that currently owns loginId. During an optimistic ghost
+        rename this remains the old name until the rename XHR succeeds. */
+    property string loginRouteGhost: ""
+    /** No login request may cross the daemon's atomic rename publication. */
+    property bool loginRoutePaused: false
     /** Non-empty while a login request is in flight or has failed to reach ghostd. */
     property string loginError: ""
 
@@ -249,9 +254,23 @@ Singleton {
     property var listRequest: null
     property var deleteGhostRequest: null
     property var renameGhostRequest: null
+    /** Test seam; production always constructs the native rename XHR. */
+    property var renameGhostRequestFactory: null
     property var renameGhostSnapshot: null
     property var renameSessionRequest: null
-    property var loginRequest: null
+    /** Login requests have distinct owners so a poll cannot evict an input or
+        provider fetch from the GC root, and every one can be retired on close. */
+    property var providersRequest: null
+    property var loginStartRequest: null
+    property var loginPollRequest: null
+    property var loginInputRequest: null
+    /** Invalidates callbacks from a closed, switched, or superseded flow. */
+    property int loginGeneration: 0
+    /** Test seam; production always constructs the native QML XHR. */
+    property var loginRequestFactory: null
+    /** Test seam for a changed token between a request and its first 401. */
+    property var tokenReloadOverride: null
+    readonly property bool loginPolling: loginPoll.running
     property var modelRequest: null
     /** Invalidates current-model GETs started before a ghost/model transition. */
     property int modelGeneration: 0
@@ -383,9 +402,14 @@ Singleton {
     }
 
     Component.onCompleted: root.refresh()
+    Component.onDestruction: root.cancelLogin()
     onActiveGhostChanged: {
         root.modelGeneration += 1;
         root.modelRequest = null;
+        // A rename moves loginGhost before activeGhost, preserving a live flow.
+        // Any other selection change makes the old ghost's requests stale.
+        if (root.loginGhost === "" || root.loginGhost !== root.activeGhost)
+            root.cancelLogin();
         root.connectConversationEvents(root.activeGhost);
     }
 
@@ -402,6 +426,11 @@ Singleton {
 
     /** Re-read the token file. Returns the token, which may be unchanged. */
     function reloadToken(): string {
+        if (root.tokenReloadOverride) {
+            const overridden = root.tokenReloadOverride();
+            root.apiToken = overridden ? String(overridden).trim() : "";
+            return root.apiToken;
+        }
         apiTokenFile.reload();
         const text = apiTokenFile.text();
         root.apiToken = text ? text.trim() : "";
@@ -419,16 +448,21 @@ Singleton {
      * caller's handler see it. The replay is deferred with callLater rather
      * than reopening the XHR from inside its own callback.
      */
-    function dispatch(xhr: var, method: string, path: string, headers: var, body: var): void {
+    function dispatch(xhr: var, method: string, path: string, headers: var, body: var,
+            stillCurrent: var): void {
         const url = root.baseUrl + path;
         const inner = xhr.onreadystatechange;
         let retried = false;
         xhr.onreadystatechange = function () {
+            if (typeof stillCurrent === "function" && !stillCurrent()) return;
             if (xhr.readyState === 4 && xhr.status === 401 && !retried) {
                 retried = true;
                 const before = root.apiToken;
                 if (root.reloadToken() !== "" && root.apiToken !== before) {
                     Qt.callLater(function () {
+                        // DONE requests cannot be aborted. Re-check ownership here
+                        // so closing/switching a flow retires a deferred replay too.
+                        if (typeof stillCurrent === "function" && !stillCurrent()) return;
                         root.deliver(xhr, method, url, headers, body);
                     });
                     return;
@@ -564,6 +598,12 @@ Singleton {
         const next = to.trim();
         if (from === "" || next === "" || next === from) return false;
         if (root.renamingGhost !== "" || root.deletingGhost !== "") return false;
+        // A start has no login id to recover after the route moves. Established
+        // flows are safe to rebind; this short window must settle first.
+        if (root.loginStartRequest !== null && root.loginRouteGhost === from) {
+            root.ghostRenameError = "Wait for the model login to start before renaming this ghost.";
+            return false;
+        }
         const transaction = GhostRename.prepare(root.ghostRenameState(), from, next);
         if (!transaction.ok) {
             root.ghostRenameError = transaction.code === "already_exists"
@@ -574,9 +614,11 @@ Singleton {
         root.renamingGhost = from;
         root.ghostRenameError = "";
         root.renameGhostSnapshot = transaction.before;
+        root.pauseLoginRoute(from);
         root.installGhostRenameState(transaction.after);
         root.moveTurnStates(from, next);
-        const xhr = new XMLHttpRequest();
+        const xhr = root.renameGhostRequestFactory
+            ? root.renameGhostRequestFactory() : new XMLHttpRequest();
         root.renameGhostRequest = xhr;
         xhr.onreadystatechange = function () {
             if (xhr.readyState !== 4 || xhr !== root.renameGhostRequest) return;
@@ -594,6 +636,7 @@ Singleton {
                     settled = next;
                 }
                 if (settled !== next) root.applyGhostRename(next, settled);
+                root.moveLoginRoute(from, settled);
                 root.refresh();
             } else {
                 if (root.renameGhostSnapshot) {
@@ -607,6 +650,7 @@ Singleton {
                 root.ghostRenameError = detail !== ""
                     ? detail
                     : root.describeError(xhr, "PUT ghost name");
+                root.resumeLoginRoute(from);
             }
         };
         root.dispatch(xhr, "PUT",
@@ -3207,129 +3251,257 @@ Singleton {
 
     // ---- Model login ------------------------------------------------------
 
+    function newLoginRequest(): var {
+        return root.loginRequestFactory ? root.loginRequestFactory() : new XMLHttpRequest();
+    }
+
+    function abortLoginRequest(xhr: var): void {
+        if (xhr && xhr.readyState !== 4 && typeof xhr.abort === "function") xhr.abort();
+    }
+
+    /** Detach first: Qt may synchronously deliver DONE from abort(). */
+    function abortLoginRequests(): void {
+        const providers = root.providersRequest;
+        const start = root.loginStartRequest;
+        const poll = root.loginPollRequest;
+        const input = root.loginInputRequest;
+        root.providersRequest = null;
+        root.loginStartRequest = null;
+        root.loginPollRequest = null;
+        root.loginInputRequest = null;
+        root.abortLoginRequest(providers);
+        root.abortLoginRequest(start);
+        root.abortLoginRequest(poll);
+        root.abortLoginRequest(input);
+    }
+
+    function providersRequestCurrent(xhr: var, generation: int, ghost: string): bool {
+        return xhr === root.providersRequest && generation === root.loginGeneration
+            && ghost === root.activeGhost;
+    }
+
+    function loginStartRequestCurrent(xhr: var, generation: int,
+            routeGhost: string): bool {
+        return xhr === root.loginStartRequest && generation === root.loginGeneration
+            && routeGhost !== "" && routeGhost === root.loginRouteGhost;
+    }
+
+    function loginPollRequestCurrent(xhr: var, generation: int,
+            routeGhost: string, loginId: string): bool {
+        return xhr === root.loginPollRequest && generation === root.loginGeneration
+            && routeGhost !== "" && routeGhost === root.loginRouteGhost
+            && loginId !== "" && loginId === root.loginId;
+    }
+
+    function loginInputRequestCurrent(xhr: var, generation: int,
+            routeGhost: string, loginId: string): bool {
+        return xhr === root.loginInputRequest && generation === root.loginGeneration
+            && routeGhost !== "" && routeGhost === root.loginRouteGhost
+            && loginId !== "" && loginId === root.loginId;
+    }
+
+    function applyProvidersResponse(xhr: var, generation: int, ghost: string): bool {
+        if (xhr.readyState !== 4
+                || !root.providersRequestCurrent(xhr, generation, ghost))
+            return false;
+        root.providersRequest = null;
+        if (xhr.status === 200) {
+            try {
+                const body = JSON.parse(xhr.responseText);
+                root.providers = Array.isArray(body.providers) ? body.providers : [];
+                root.loginError = "";
+            } catch (error) {
+                root.loginError = "ghostd sent a malformed provider list";
+            }
+        } else {
+            root.loginError = root.describeError(xhr, "GET providers");
+        }
+        return true;
+    }
+
     /** GET the providers this ghost can log into. Call when the panel opens. */
     function fetchProviders(): void {
         const ghost = root.activeGhost;
         if (ghost === "") return;
-        const xhr = new XMLHttpRequest();
-        root.loginRequest = xhr;
+        if (root.renamingGhost !== "") {
+            root.loginError = "Wait for the ghost rename to finish before starting a login.";
+            return;
+        }
+        const xhr = root.newLoginRequest();
+        const previous = root.providersRequest;
+        const generation = root.loginGeneration;
+        root.providersRequest = xhr;
+        root.abortLoginRequest(previous);
         xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4) return;
-            if (xhr.status === 200) {
-                try {
-                    const body = JSON.parse(xhr.responseText);
-                    root.providers = Array.isArray(body.providers) ? body.providers : [];
-                    root.loginError = "";
-                } catch (error) {
-                    root.loginError = "ghostd sent a malformed provider list";
-                }
-            } else {
-                root.loginError = root.describeError(xhr, "GET providers");
-            }
+            root.applyProvidersResponse(xhr, generation, ghost);
         };
         root.dispatch(xhr, "GET",
-            "/api/ghosts/" + encodeURIComponent(ghost) + "/providers", ({}), null);
+            "/api/ghosts/" + encodeURIComponent(ghost) + "/providers", ({}), null,
+            function () { return root.providersRequestCurrent(xhr, generation, ghost); });
+    }
+
+    function refreshAfterLoginSuccess(): void {
+        root.refresh();
+        root.fetchCurrentModel();
+        root.fetchAvailableModels();
+    }
+
+    function applyLoginStartResponse(xhr: var, generation: int,
+            routeGhost: string): bool {
+        if (xhr.readyState !== 4
+                || !root.loginStartRequestCurrent(xhr, generation, routeGhost))
+            return false;
+        root.loginStartRequest = null;
+        if (xhr.status === 200 || xhr.status === 201) {
+            try {
+                const view = JSON.parse(xhr.responseText);
+                if (!view || typeof view.loginId !== "string" || view.loginId === "")
+                    throw new Error("missing login id");
+                root.loginId = view.loginId;
+                root.loginState = view;
+                root.loginError = "";
+                if (root.isLoginTerminal()) {
+                    loginPoll.stop();
+                    if (root.loginState.status === "succeeded") root.refreshAfterLoginSuccess();
+                } else {
+                    loginPoll.start();
+                }
+            } catch (error) {
+                root.loginError = "ghostd sent a malformed login response";
+            }
+        } else {
+            root.loginError = root.describeError(xhr, "POST login");
+        }
+        return true;
     }
 
     /** Begin a login for the active ghost. authType is "oauth" or "api_key". */
     function startLogin(providerId: string, authType: string): void {
         const ghost = root.activeGhost;
         if (ghost === "") return;
+        if (root.renamingGhost !== "") {
+            root.loginError = "Wait for the ghost rename to finish before starting a login.";
+            return;
+        }
         root.resetLogin();
         root.loginGhost = ghost;
-        const xhr = new XMLHttpRequest();
-        root.loginRequest = xhr;
+        root.loginRouteGhost = ghost;
+        const generation = root.loginGeneration;
+        const routeGhost = root.loginRouteGhost;
+        const xhr = root.newLoginRequest();
+        root.loginStartRequest = xhr;
         xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4) return;
-            if (xhr.status === 200 || xhr.status === 201) {
-                try {
-                    const view = JSON.parse(xhr.responseText);
-                    root.loginId = view.loginId;
-                    root.loginState = view;
-                    root.loginError = "";
-                    if (!root.isLoginTerminal()) loginPoll.start();
-                } catch (error) {
-                    root.loginError = "ghostd sent a malformed login response";
-                }
-            } else {
-                root.loginError = root.describeError(xhr, "POST login");
-            }
+            root.applyLoginStartResponse(xhr, generation, routeGhost);
         };
         root.dispatch(xhr, "POST",
-            "/api/ghosts/" + encodeURIComponent(ghost) + "/login",
+            "/api/ghosts/" + encodeURIComponent(routeGhost) + "/login",
             ({ "Content-Type": "application/json" }),
-            JSON.stringify({ providerId: providerId, authType: authType }));
+            JSON.stringify({ providerId: providerId, authType: authType }),
+            function () {
+                return root.loginStartRequestCurrent(xhr, generation, routeGhost);
+            });
+    }
+
+    function applyLoginPollResponse(xhr: var, generation: int,
+            routeGhost: string, loginId: string): bool {
+        if (xhr.readyState !== 4
+                || !root.loginPollRequestCurrent(xhr, generation, routeGhost, loginId))
+            return false;
+        root.loginPollRequest = null;
+        if (xhr.status === 200) {
+            try {
+                const view = JSON.parse(xhr.responseText);
+                if (!view || view.loginId !== loginId) throw new Error("mismatched login id");
+                root.loginState = view;
+                root.loginError = "";
+                if (root.isLoginTerminal()) {
+                    loginPoll.stop();
+                    if (root.loginState.status === "succeeded") root.refreshAfterLoginSuccess();
+                }
+            } catch (error) {
+                root.loginError = "ghostd sent a malformed login step";
+            }
+        } else {
+            loginPoll.stop();
+            root.loginError = root.describeError(xhr, "GET login");
+        }
+        return true;
     }
 
     /** Poll the running login's current step. */
     function pollLogin(): void {
-        if (root.loginId === "" || root.loginGhost === "") return;
-        const xhr = new XMLHttpRequest();
+        if (root.loginId === "" || root.loginRouteGhost === ""
+                || root.loginRoutePaused) return;
+        // Keep one poll in flight, and never race an authoritative input reply.
+        if (root.loginPollRequest !== null || root.loginInputRequest !== null) return;
+        const routeGhost = root.loginRouteGhost;
+        const loginId = root.loginId;
+        const generation = root.loginGeneration;
+        const xhr = root.newLoginRequest();
+        root.loginPollRequest = xhr;
         xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4) return;
-            if (xhr.status === 200) {
-                try {
-                    root.loginState = JSON.parse(xhr.responseText);
-                    root.loginError = "";
-                    if (root.isLoginTerminal()) {
-                        loginPoll.stop();
-                        // A finished login may have set the ghost's chat model
-                        // and always changes which models are usable; refresh both
-                        // the roster and the model indicator/available list.
-                        if (root.loginState.status === "succeeded") {
-                            root.refresh();
-                            root.fetchCurrentModel();
-                            root.fetchAvailableModels();
-                        }
-                    }
-                } catch (error) {
-                    root.loginError = "ghostd sent a malformed login step";
-                }
-            } else {
-                loginPoll.stop();
-                root.loginError = root.describeError(xhr, "GET login");
-            }
+            root.applyLoginPollResponse(xhr, generation, routeGhost, loginId);
         };
         root.dispatch(xhr, "GET", "/api/ghosts/"
-            + encodeURIComponent(root.loginGhost) + "/login/" + encodeURIComponent(root.loginId),
-            ({}), null);
+            + encodeURIComponent(routeGhost) + "/login/" + encodeURIComponent(loginId),
+            ({}), null, function () {
+                return root.loginPollRequestCurrent(
+                    xhr, generation, routeGhost, loginId);
+            });
+    }
+
+    function applyLoginInputResponse(xhr: var, generation: int,
+            routeGhost: string, loginId: string): bool {
+        if (xhr.readyState !== 4
+                || !root.loginInputRequestCurrent(xhr, generation, routeGhost, loginId))
+            return false;
+        root.loginInputRequest = null;
+        if (xhr.status === 200) {
+            try {
+                const view = JSON.parse(xhr.responseText);
+                if (!view || view.loginId !== loginId) throw new Error("mismatched login id");
+                root.loginState = view;
+                root.loginError = "";
+                if (root.isLoginTerminal()) {
+                    loginPoll.stop();
+                    if (root.loginState.status === "succeeded") root.refreshAfterLoginSuccess();
+                } else {
+                    loginPoll.start();
+                }
+            } catch (error) {
+                root.loginError = "ghostd sent a malformed login step";
+            }
+        } else {
+            root.loginError = root.describeError(xhr, "POST login input");
+        }
+        return true;
     }
 
     /** Satisfy an awaiting prompt with a pasted code, API key, or selected id. */
-    function submitLoginInput(value: string): void {
-        if (root.loginId === "" || root.loginGhost === "") return;
-        const xhr = new XMLHttpRequest();
-        root.loginRequest = xhr;
+    function submitLoginInput(value: string): bool {
+        if (root.loginId === "" || root.loginRouteGhost === ""
+                || root.loginRoutePaused) return false;
+        if (root.loginInputRequest !== null) return false;
+        const routeGhost = root.loginRouteGhost;
+        const loginId = root.loginId;
+        const generation = root.loginGeneration;
+        const stalePoll = root.loginPollRequest;
+        root.loginPollRequest = null;
+        root.abortLoginRequest(stalePoll);
+        const xhr = root.newLoginRequest();
+        root.loginInputRequest = xhr;
         xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4) return;
-            if (xhr.status === 200) {
-                try {
-                    root.loginState = JSON.parse(xhr.responseText);
-                    root.loginError = "";
-                    if (root.isLoginTerminal()) {
-                        loginPoll.stop();
-                        // A paste/api-key flow can settle here without a poll;
-                        // reflect the new credentials in the model surfaces.
-                        if (root.loginState.status === "succeeded") {
-                            root.refresh();
-                            root.fetchCurrentModel();
-                            root.fetchAvailableModels();
-                        }
-                    } else {
-                        loginPoll.start();
-                    }
-                } catch (error) {
-                    root.loginError = "ghostd sent a malformed login step";
-                }
-            } else {
-                root.loginError = root.describeError(xhr, "POST login input");
-            }
+            root.applyLoginInputResponse(xhr, generation, routeGhost, loginId);
         };
         root.dispatch(xhr, "POST", "/api/ghosts/"
-            + encodeURIComponent(root.loginGhost) + "/login/"
-            + encodeURIComponent(root.loginId) + "/input",
+            + encodeURIComponent(routeGhost) + "/login/"
+            + encodeURIComponent(loginId) + "/input",
             ({ "Content-Type": "application/json" }),
-            JSON.stringify({ value: value }));
+            JSON.stringify({ value: value }), function () {
+                return root.loginInputRequestCurrent(
+                    xhr, generation, routeGhost, loginId);
+            });
+        return true;
     }
 
     /** Open the current auth URL in the owner's browser. */
@@ -3342,13 +3514,61 @@ Singleton {
         return status === "succeeded" || status === "failed";
     }
 
-    /** Clear login state and stop polling. Leaves the provider list intact. */
-    function resetLogin(): void {
+    /** Stop login traffic for the whole interval in which either daemon route
+        could be wrong. Existing input/poll work is replaced by a later poll. */
+    function pauseLoginRoute(routeGhost: string): void {
+        if (routeGhost === "" || root.loginRouteGhost !== routeGhost) return;
         loginPoll.stop();
+        root.loginRoutePaused = true;
+        const poll = root.loginPollRequest;
+        const input = root.loginInputRequest;
+        root.loginPollRequest = null;
+        root.loginInputRequest = null;
+        root.abortLoginRequest(poll);
+        root.abortLoginRequest(input);
+    }
+
+    /** A refused rename leaves the old daemon route authoritative. */
+    function resumeLoginRoute(routeGhost: string): void {
+        if (root.loginRouteGhost !== routeGhost) return;
+        root.loginRoutePaused = false;
+        if (root.loginId !== "" && !root.isLoginTerminal()) loginPoll.start();
+    }
+
+    /** Publish the daemon's post-rename route. The login id/state survive; the
+        next poll is authoritative after traffic was paused across publication. */
+    function moveLoginRoute(from: string, to: string): void {
+        if (from === to || root.loginRouteGhost !== from) return;
+        const start = root.loginStartRequest;
+        const poll = root.loginPollRequest;
+        const input = root.loginInputRequest;
+        root.loginStartRequest = null;
+        root.loginPollRequest = null;
+        root.loginInputRequest = null;
+        root.loginRouteGhost = to;
+        root.loginRoutePaused = false;
+        root.abortLoginRequest(start);
+        root.abortLoginRequest(poll);
+        root.abortLoginRequest(input);
+        if (root.loginId !== "" && !root.isLoginTerminal()) loginPoll.start();
+    }
+
+    /** Cancel every client-side part of the current flow. */
+    function cancelLogin(): void {
+        loginPoll.stop();
+        root.loginGeneration += 1;
+        root.abortLoginRequests();
         root.loginId = "";
         root.loginState = ({});
         root.loginGhost = "";
+        root.loginRouteGhost = "";
+        root.loginRoutePaused = false;
         root.loginError = "";
+    }
+
+    /** Clear login state and stop polling. Leaves the provider list intact. */
+    function resetLogin(): void {
+        root.cancelLogin();
     }
 
     // ---- Model selection --------------------------------------------------

@@ -38,15 +38,37 @@ Rectangle {
 
     /** Open the panel for the active ghost: fresh provider list, no stale login. */
     function open(): void {
+        codeField.text = "";
         Ghostd.resetLogin();
         Ghostd.fetchProviders();
+    }
+
+    /** Retire client requests before the parent changes panels. */
+    function close(): void {
+        codeField.text = "";
+        Ghostd.cancelLogin();
+        root.closeRequested();
+    }
+
+    onVisibleChanged: if (!visible) {
+        codeField.text = "";
+        Ghostd.cancelLogin();
+    }
+    Component.onDestruction: Ghostd.cancelLogin()
+
+    // A provider restart, ghost switch, or external reset can end the flow
+    // without changing this persistent component's visibility. The generation
+    // deliberately stays stable during a same-flow rename pause, so a rejected
+    // submit may remain editable there but never cross into a different flow.
+    Connections {
+        target: Ghostd
+        function onLoginGenerationChanged(): void { codeField.text = ""; }
     }
 
     function submitCurrentInput(): void {
         const value = codeField.text;
         if (value === "") return;
-        Ghostd.submitLoginInput(value);
-        codeField.text = "";
+        if (Ghostd.submitLoginInput(value)) codeField.text = "";
     }
 
     ColumnLayout {
@@ -84,7 +106,7 @@ Rectangle {
                 MouseArea {
                     anchors.fill: parent
                     cursorShape: Qt.PointingHandCursor
-                    onClicked: root.closeRequested()
+                    onClicked: root.close()
                 }
             }
         }
@@ -408,6 +430,7 @@ Rectangle {
 
                         TextInput {
                             id: codeField
+                            objectName: "loginCodeField"
                             anchors.fill: parent
                             anchors.leftMargin: Theme.pad
                             anchors.rightMargin: Theme.pad
@@ -542,7 +565,7 @@ Rectangle {
                             hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
                             onClicked: {
-                                if (root.status === "succeeded") root.closeRequested();
+                                if (root.status === "succeeded") root.close();
                                 else Ghostd.resetLogin();
                             }
                         }

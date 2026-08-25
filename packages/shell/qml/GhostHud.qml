@@ -53,8 +53,10 @@ FloatingWindow {
     // daemon's effective selection. This catches Close, Done, navigation, and
     // picking another ghost or conversation through the shared panel state.
     onLoginOpenChanged: {
-        if (!hud.loginOpen && modelSwitcher.hasPendingModel)
-            modelSwitcher.clearPendingModel();
+        if (!hud.loginOpen) {
+            Ghostd.cancelLogin();
+            if (modelSwitcher.hasPendingModel) modelSwitcher.clearPendingModel();
+        }
     }
     /** Global destination selected by the restored right-hand navigation. */
     property string currentSection: "chat"
@@ -187,6 +189,7 @@ FloatingWindow {
     }
 
     function close(): void {
+        hud.loginOpen = false;
         hud.shown = false;
     }
 
