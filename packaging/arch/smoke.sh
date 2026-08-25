@@ -33,6 +33,7 @@ require_executable /usr/bin/ghostd
 require_executable /usr/bin/ghost-desktop-helper
 require_executable /usr/bin/ghost-launch
 require_executable /usr/lib/ghost/package-smoke/service-browser-smoke.sh
+require_executable /usr/lib/ghost/package-smoke/native-runtime-smoke.sh
 
 if find "$root" -xdev \( ! -uid 0 -o ! -gid 0 \) -print -quit | grep -q .; then
   printf 'package payload contains a non-root owner\n' >&2
@@ -116,6 +117,18 @@ while IFS= read -r -d '' link; do
     exit 1
   fi
 done < <(find "$root" -type l -print0)
+
+smoke_parent="${GHOST_PACKAGE_SMOKE_WORK_ROOT:-${TMPDIR:-/tmp}}"
+mkdir -p "$smoke_parent"
+native_scratch="$(mktemp -d "$smoke_parent/ghost-native-smoke.XXXXXX")"
+cleanup() {
+  find "$native_scratch" -depth -delete
+}
+trap cleanup EXIT
+bash "$root/usr/lib/ghost/package-smoke/native-runtime-smoke.sh" \
+  "$root/usr/lib/ghost/daemon" "$native_scratch"
+cleanup
+trap - EXIT
 
 if find "$root" -path '*/Ghosts/*' -print -quit | grep -q .; then
   printf 'package payload must not own a user Ghosts directory\n' >&2

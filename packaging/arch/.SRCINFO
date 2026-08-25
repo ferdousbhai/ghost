@@ -29,6 +29,7 @@ pkgbase = ghost-ai-git
 	provides = ghost-ai
 	conflicts = ghost-ai
 	options = !debug
+	options = !strip
 	source = ghost::git+https://github.com/ferdousbhai/ghost.git#branch=master
 	sha256sums = SKIP
 

@@ -19,7 +19,7 @@ jobs:
       - name: Update package database and install build dependencies
         run: >-
           pacman -Syu --needed --noconfirm
-          at-spi2-core bun chromium curl desktop-file-utils git grim hyprland libnotify
+          at-spi2-core bun chromium desktop-file-utils git grim hyprland libnotify
           nodejs pnpm python python-dbus python-gobject python-pillow qt6-5compat
           quickshell uv wtype xdg-utils ydotool
 
@@ -55,14 +55,13 @@ jobs:
           epoch="$(git -C "$source_tree" show -s --format=%ct "$commit")"
           runtime="ghost-runtime-$version-linux-x86_64.tar.zst"
           source_archive="$release_out/ghost-$version.tar.gz"
+          checkout_commit="$(git -C "$GITHUB_WORKSPACE" rev-parse 'HEAD^{commit}')"
 
-          install -d -o builder -g builder "$release_out" "$release_work"
-          runuser -u builder -- pnpm --dir "$source_tree" fetch --frozen-lockfile
-          runuser -u builder -- env \
-            GHOST_RELEASE_WORK_ROOT="$release_work" \
-            SOURCE_DATE_EPOCH="$epoch" \
-            bash "$source_tree/packaging/release/build-runtime-source.sh" \
-              "$source_tree" "$release_out" "$version" x86_64 "$commit"
+          if [[ "$checkout_commit" != "$commit" ]]; then
+            printf 'package source commit %s does not match checkout %s\n' \
+              "$commit" "$checkout_commit" >&2
+            exit 1
+          fi
 
           expected_tag="v$version"
           event_tag="$REF_NAME"
@@ -75,22 +74,41 @@ jobs:
                 "$event_tag" "$version" >&2
               exit 1
             fi
-            curl --fail --location --retry 3 \
-              --output "$source_archive" \
-              "https://github.com/$GITHUB_REPOSITORY/archive/refs/tags/$expected_tag.tar.gz"
-            chown builder:builder "$source_archive"
-          else
-            runuser -u builder -- env SOURCE_DATE_EPOCH="$epoch" \
-              bash "$source_tree/packaging/release/make-source-archive.sh" \
-                "$source_tree" "$source_archive" "$version" HEAD
+            tag_commit="$(git -C "$GITHUB_WORKSPACE" rev-parse --verify "$expected_tag^{commit}")"
+            if [[ "$tag_commit" != "$commit" ]]; then
+              printf 'tag %s resolves to %s, not checked-out commit %s\n' \
+                "$expected_tag" "$tag_commit" "$commit" >&2
+              exit 1
+            fi
           fi
+
+          install -d -o builder -g builder "$release_out" "$release_work"
+          runuser -u builder -- env SOURCE_DATE_EPOCH="$epoch" \
+            bash "$source_tree/packaging/release/make-source-archive.sh" \
+              "$source_tree" "$source_archive" "$version" HEAD
+          runuser -u builder -- pnpm --dir "$source_tree" fetch --frozen-lockfile
+          runuser -u builder -- env \
+            ALL_PROXY=http://127.0.0.1:9 \
+            FTP_PROXY=http://127.0.0.1:9 \
+            GLOBAL_AGENT_HTTPS_PROXY=http://127.0.0.1:9 \
+            HTTPS_PROXY=http://127.0.0.1:9 \
+            HTTP_PROXY=http://127.0.0.1:9 \
+            NO_PROXY= \
+            GHOST_RELEASE_WORK_ROOT="$release_work" \
+            SOURCE_DATE_EPOCH="$epoch" \
+            bash "$source_tree/packaging/release/build-runtime-source.sh" \
+              "$source_tree" "$release_out" "$version" x86_64 "$commit"
 
           runuser -u builder -- env GHOST_RELEASE_WORK_ROOT="$release_work" \
             bash "$source_tree/packaging/release/smoke-runtime-source.sh" \
-              "$release_out/$runtime" "$source_tree" "$version" x86_64 "$commit"
+              "$release_out/$runtime" "$source_tree" "$version" x86_64 \
+                "$commit" "$epoch"
 
           source_sha="$(sha256sum "$source_archive" | cut -d' ' -f1)"
           runtime_sha="$(sha256sum "$release_out/$runtime" | cut -d' ' -f1)"
+          runuser -u builder -- env GHOST_RELEASE_WORK_ROOT="$release_work" \
+            bash "$source_tree/packaging/release/smoke-rendered-package.sh" \
+              "$version" "$commit" "$epoch" "$source_sha" "$runtime_sha"
           aur_dir="$release_work/ghost-ai-$version-aur"
           runuser -u builder -- bash "$source_tree/packaging/release/render-arch-package.sh" \
             "$aur_dir" "$version" "$commit" "$epoch" "$source_sha" "$runtime_sha"
@@ -100,6 +118,7 @@ jobs:
           runuser -u builder -- env \
             ALL_PROXY=http://127.0.0.1:9 \
             FTP_PROXY=http://127.0.0.1:9 \
+            GLOBAL_AGENT_HTTPS_PROXY=http://127.0.0.1:9 \
             HTTPS_PROXY=http://127.0.0.1:9 \
             HTTP_PROXY=http://127.0.0.1:9 \
             NO_PROXY= \
@@ -120,9 +139,8 @@ jobs:
           ' _ "$aur_dir"
 
           aur_bundle="$release_out/ghost-ai-$version-aur.tar.zst"
-          tar --sort=name --format=gnu --mtime="@$epoch" --owner=0 --group=0 \
-            --numeric-owner -C "$release_work" -cf - "ghost-ai-$version-aur" \
-            | zstd -19 -T1 --no-progress -o "$aur_bundle"
+          runuser -u builder -- bash "$source_tree/packaging/release/pack-aur-source.sh" \
+            "$aur_dir" "$aur_bundle" "$epoch"
           (
             cd "$release_out"
             find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%P\0' \

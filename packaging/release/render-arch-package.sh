@@ -15,8 +15,19 @@ runtime_sha="${6:?usage: render-arch-package.sh <output-dir> <version> <commit> 
 [[ "$source_sha" =~ ^[0-9a-f]{64}$ ]]
 [[ "$runtime_sha" =~ ^[0-9a-f]{64}$ ]]
 
-mkdir -p "$output"
-output="$(realpath "$output")"
+output_parent="$(realpath "$(dirname "$output")")"
+output="$output_parent/$(basename "$output")"
+[[ "$output" != / && "$output" != "$output_parent" && ! -L "$output" ]]
+if [[ -e "$output" ]]; then
+  [[ -d "$output" ]]
+  if find "$output" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
+    printf 'refusing to render into nonempty directory: %s\n' "$output" >&2
+    exit 1
+  fi
+else
+  mkdir -m755 "$output"
+fi
+chmod 755 "$output"
 sed \
   -e "s/@@VERSION@@/$version/g" \
   -e "s/@@SOURCE_COMMIT@@/$commit/g" \
@@ -24,6 +35,7 @@ sed \
   -e "s/@@SOURCE_SHA256@@/$source_sha/g" \
   -e "s/@@RUNTIME_SHA256@@/$runtime_sha/g" \
   "$template_root/PKGBUILD.in" > "$output/PKGBUILD"
+chmod 644 "$output/PKGBUILD"
 install -m644 "$template_root/ghost-ai.install" "$output/ghost-ai.install"
 
 if grep -En '@@[A-Z0-9_]+@@' "$output/PKGBUILD"; then
@@ -33,4 +45,5 @@ fi
 (
   cd "$output"
   makepkg --printsrcinfo > .SRCINFO
+  chmod 644 .SRCINFO
 )

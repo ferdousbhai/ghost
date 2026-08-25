@@ -36,7 +36,7 @@ _source_commit=@@SOURCE_COMMIT@@
 _source_date_epoch=@@SOURCE_DATE_EPOCH@@
 export SOURCE_DATE_EPOCH="$_source_date_epoch"
 _runtime="ghost-runtime-${pkgver}-linux-${CARCH}.tar.zst"
-_source_url="${GHOST_RELEASE_SOURCE_URL:-https://github.com/ferdousbhai/ghost/archive/refs/tags/v${pkgver}.tar.gz}"
+_source_url="${GHOST_RELEASE_SOURCE_URL:-https://github.com/ferdousbhai/ghost/releases/download/v${pkgver}/ghost-${pkgver}.tar.gz}"
 _runtime_url="${GHOST_RELEASE_RUNTIME_URL:-https://github.com/ferdousbhai/ghost/releases/download/v${pkgver}/${_runtime}}"
 source=(
   "ghost-${pkgver}.tar.gz::${_source_url}"
@@ -49,13 +49,17 @@ sha256sums=(
 )
 
 prepare() {
+  local source_root="$srcdir/ghost-${pkgver}"
   local runtime_parent="$srcdir/runtime"
   local runtime_root="$runtime_parent/ghost-runtime-${pkgver}-linux-${CARCH}"
+  bash "$source_root/packaging/release/verify-release-source.sh" \
+    "$source_root" "$pkgver" "$_source_commit" "$_source_date_epoch"
   install -d -m755 "$runtime_parent"
   find "$runtime_parent" -mindepth 1 -delete
   bsdtar -xf "$srcdir/$_runtime" -C "$runtime_parent"
   bash "$srcdir/ghost-${pkgver}/packaging/release/verify-runtime-source.sh" \
-    "$runtime_root" "$srcdir/ghost-${pkgver}" "$pkgver" "$CARCH" "$_source_commit"
+    "$runtime_root" "$source_root" "$pkgver" "$CARCH" "$_source_commit" \
+      "$_source_date_epoch"
 }
 
 build() {
@@ -68,7 +72,8 @@ check() {
   local source_root="$srcdir/ghost-${pkgver}"
   local runtime_root="$srcdir/runtime/ghost-runtime-${pkgver}-linux-${CARCH}"
   bash "$source_root/packaging/release/verify-runtime-source.sh" \
-    "$runtime_root" "$source_root" "$pkgver" "$CARCH" "$_source_commit"
+    "$runtime_root" "$source_root" "$pkgver" "$CARCH" "$_source_commit" \
+      "$_source_date_epoch"
   desktop-file-validate "$source_root/packages/shell/contrib/ghost.desktop"
   python -m json.tool \
     "$source_root/packages/chromium-extension/extension/manifest.json" >/dev/null

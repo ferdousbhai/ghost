@@ -64,9 +64,15 @@ prune_optional_package() {
 
 (
   cd "$source_root"
-  pnpm install --offline --frozen-lockfile
+  # Dependency lifecycle scripts are deliberately disabled: onnxruntime-node,
+  # for example, otherwise downloads optional CUDA provider libraries from
+  # NuGet. The bundled CPU runtime is the portable release baseline. Force a
+  # reconstruction from the pre-seeded pnpm store so a preceding development
+  # install cannot mask an undeclared input.
+  export ONNXRUNTIME_NODE_INSTALL=skip
+  pnpm install --ignore-scripts --offline --frozen-lockfile --force
   pnpm build
-  pnpm --config.package-import-method=copy --offline \
+  pnpm --config.ignore-scripts=true --config.package-import-method=copy --offline \
     --filter @ghost/daemon --prod deploy --legacy "$destination"
 )
 
@@ -104,12 +110,20 @@ prune_optional_package "$destination" '@img+sharp-libvips-linuxmusl-x64@*'
 prune_optional_package "$destination" '@img+sharp-linuxmusl-x64@*'
 prune_optional_package "$destination" 'lightningcss-linux-x64-musl@*'
 for foreign_dir in \
+  "$destination/node_modules/.pnpm/onnxruntime-node@"*/node_modules/onnxruntime-node/bin/napi-v6/linux/arm64 \
   "$destination/node_modules/.pnpm/onnxruntime-node@"*/node_modules/onnxruntime-node/bin/napi-v6/darwin \
   "$destination/node_modules/.pnpm/onnxruntime-node@"*/node_modules/onnxruntime-node/bin/napi-v6/win32; do
   [[ -e "$foreign_dir" ]] || continue
   unlink_references_to "$destination" "$foreign_dir"
   remove_tree "$foreign_dir"
 done
+
+if find "$destination/node_modules/.pnpm" -path \
+  '*/onnxruntime-node/bin/napi-v6/linux/x64/libonnxruntime_providers_*.so' \
+  -print -quit | grep -q .; then
+  printf 'runtime contains non-frozen optional ONNX CUDA provider libraries\n' >&2
+  exit 1
+fi
 
 # A release source must remain closed after its checkout disappears.
 while IFS= read -r -d '' link; do
@@ -132,4 +146,3 @@ while IFS= read -r -d '' link; do
     exit 1
   fi
 done < <(find "$destination" -type l -print0)
-

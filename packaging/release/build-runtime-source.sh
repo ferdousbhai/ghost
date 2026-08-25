@@ -53,7 +53,7 @@ if [[ "${GHOST_ALLOW_DIRTY_SOURCE:-0}" != 1 ]]; then
     exit 1
   fi
 fi
-epoch="${SOURCE_DATE_EPOCH:-$(git -C "$source_root" show -s --format=%ct "$commit")}" 
+epoch="${SOURCE_DATE_EPOCH:-$(git -C "$source_root" show -s --format=%ct "$commit")}"
 [[ "$epoch" =~ ^[0-9]+$ ]] || {
   printf 'invalid SOURCE_DATE_EPOCH: %s\n' "$epoch" >&2
   exit 1
@@ -73,6 +73,12 @@ daemon="$runtime_root/daemon"
 mkdir -p "$daemon"
 
 bash "$source_root/packaging/release/runtime-tree.sh" "$source_root" "$daemon"
+
+if find "$daemon" ! \( -type f -o -type d -o -type l \) \
+  -print -quit | grep -q .; then
+  printf 'runtime payload contains a special filesystem entry\n' >&2
+  exit 1
+fi
 
 # Bind the runtime to every frozen dependency input, including the in-tree
 # catalog override. The tagged source rechecks these before packaging.

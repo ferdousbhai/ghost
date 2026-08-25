@@ -8,21 +8,51 @@ ref="${4:-HEAD}"
 
 source_root="$(realpath "$source_root")"
 mkdir -p "$(dirname "$output")"
+output="$(realpath "$(dirname "$output")")/$(basename "$output")"
 temporary="${output}.tmp.$$"
-trap 'rm -f "$temporary"' EXIT
+temporary_tar="${output}.tar.tmp.$$"
+manifest_parent="$(mktemp -d "$(dirname "$output")/source-manifest.XXXXXX")"
+cleanup() {
+  rm -f "$temporary" "$temporary_tar"
+  find "$manifest_parent" -depth -delete
+}
+trap cleanup EXIT
+
+if [[ "$ref" == --worktree ]]; then
+  commit="$(git -C "$source_root" rev-parse 'HEAD^{commit}')"
+else
+  commit="$(git -C "$source_root" rev-parse "$ref^{commit}")"
+fi
+epoch="${SOURCE_DATE_EPOCH:-$(git -C "$source_root" show -s --format=%ct "$commit")}"
+[[ "$commit" =~ ^[0-9a-f]{40}$ && "$epoch" =~ ^[0-9]+$ ]]
+
+manifest_dir="$manifest_parent/ghost-$version"
+mkdir -p "$manifest_dir"
+cat > "$manifest_dir/RELEASE-SOURCE.MANIFEST" <<EOF
+format=ghost-release-source/v1
+version=$version
+source_commit=$commit
+source_date_epoch=$epoch
+EOF
+chmod 644 "$manifest_dir/RELEASE-SOURCE.MANIFEST"
+touch -d "@$epoch" "$manifest_dir/RELEASE-SOURCE.MANIFEST"
 
 if [[ "$ref" == --worktree ]]; then
   (
     cd "$source_root"
     git ls-files -co --exclude-standard -z \
       | tar --null --files-from=- --sort=name --format=gnu \
-          --mtime="@${SOURCE_DATE_EPOCH:-0}" --owner=0 --group=0 --numeric-owner \
-          --transform="s|^|ghost-${version}/|" -cf -
-  ) | gzip -n -9 > "$temporary"
+          --mtime="@$epoch" --owner=0 --group=0 --numeric-owner \
+          --transform="s|^|ghost-${version}/|" -cf "$temporary_tar"
+  )
 else
   git -C "$source_root" archive --format=tar --prefix="ghost-${version}/" "$ref" \
-    | gzip -n -9 > "$temporary"
+    > "$temporary_tar"
 fi
+tar --append --file="$temporary_tar" --mtime="@$epoch" --owner=0 --group=0 \
+  --numeric-owner -C "$manifest_parent" "ghost-$version/RELEASE-SOURCE.MANIFEST"
+gzip -n -9 < "$temporary_tar" > "$temporary"
 mv "$temporary" "$output"
+rm -f "$temporary_tar"
+find "$manifest_parent" -depth -delete
 trap - EXIT
-

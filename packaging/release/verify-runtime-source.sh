@@ -1,15 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-runtime_root="${1:?usage: verify-runtime-source.sh <runtime-root> <source-root> <version> <arch> <commit>}"
-source_root="${2:?usage: verify-runtime-source.sh <runtime-root> <source-root> <version> <arch> <commit>}"
-version="${3:?usage: verify-runtime-source.sh <runtime-root> <source-root> <version> <arch> <commit>}"
-arch="${4:?usage: verify-runtime-source.sh <runtime-root> <source-root> <version> <arch> <commit>}"
-commit="${5:?usage: verify-runtime-source.sh <runtime-root> <source-root> <version> <arch> <commit>}"
+runtime_root="${1:?usage: verify-runtime-source.sh <runtime-root> <source-root> <version> <arch> <commit> <epoch>}"
+source_root="${2:?usage: verify-runtime-source.sh <runtime-root> <source-root> <version> <arch> <commit> <epoch>}"
+version="${3:?usage: verify-runtime-source.sh <runtime-root> <source-root> <version> <arch> <commit> <epoch>}"
+arch="${4:?usage: verify-runtime-source.sh <runtime-root> <source-root> <version> <arch> <commit> <epoch>}"
+commit="${5:?usage: verify-runtime-source.sh <runtime-root> <source-root> <version> <arch> <commit> <epoch>}"
+epoch="${6:?usage: verify-runtime-source.sh <runtime-root> <source-root> <version> <arch> <commit> <epoch>}"
 
 runtime_root="$(realpath "$runtime_root")"
 source_root="$(realpath "$source_root")"
 manifest="$runtime_root/MANIFEST"
+
+if find "$runtime_root" ! \( -type f -o -type d -o -type l \) \
+  -print -quit | grep -q .; then
+  printf 'runtime source contains a special filesystem entry\n' >&2
+  exit 1
+fi
 
 manifest_value() {
   local key="$1"
@@ -34,6 +41,7 @@ expect_manifest version "$version"
 expect_manifest os linux
 expect_manifest arch "$arch"
 expect_manifest source_commit "$commit"
+expect_manifest source_date_epoch "$epoch"
 expect_manifest frozen_inputs_sha256 \
   "$(sha256sum "$runtime_root/FROZEN-INPUTS.SHA256" | cut -d' ' -f1)"
 expect_manifest payload_manifest_sha256 \
@@ -52,7 +60,9 @@ expect_manifest modes_manifest_sha256 \
   sha256sum --quiet -c PAYLOAD.SHA256
 )
 
-temporary="$(mktemp -d "${GHOST_RELEASE_WORK_ROOT:-$(dirname "$runtime_root")}/verify.XXXXXX")"
+work_parent="${GHOST_RELEASE_WORK_ROOT:-$(dirname "$runtime_root")}"
+mkdir -p "$work_parent"
+temporary="$(mktemp -d "$work_parent/verify.XXXXXX")"
 cleanup() {
   find "$temporary" -depth -delete
 }
@@ -108,6 +118,7 @@ while IFS= read -r -d '' link; do
   }
 done < <(find "$runtime_root/daemon" -type l -print0)
 
+bash "$source_root/packaging/release/smoke-native-runtime.sh" \
+  "$runtime_root/daemon" "$temporary/native"
 bun "$runtime_root/daemon/dist/main.js" --version | grep -Fxq "$version"
 printf 'Verified runtime source: %s\n' "$runtime_root"
-

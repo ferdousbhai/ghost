@@ -35,7 +35,7 @@ optdepends=(
 )
 provides=('ghost-ai')
 conflicts=('ghost-ai')
-options=('!debug')
+options=('!debug' '!strip')
 install=ghost-ai-git.install
 source=("ghost::git+${GHOST_SOURCE_REPO:-https://github.com/ferdousbhai/ghost.git}#${GHOST_SOURCE_REF:-branch=master}")
 sha256sums=('SKIP')
@@ -90,7 +90,7 @@ _prune_optional_package() {
 }
 
 pkgver() {
-  cd ghost
+  cd -- "$srcdir/ghost"
 
   local version revision commit
   version="$(bun -e 'const p = await Bun.file("package.json").json(); process.stdout.write(p.version)')"
@@ -100,26 +100,26 @@ pkgver() {
 }
 
 build() {
-  cd ghost
+  cd -- "$srcdir/ghost"
 
-  pnpm install --frozen-lockfile
+  ONNXRUNTIME_NODE_INSTALL=skip pnpm install --frozen-lockfile
   pnpm build
 }
 
 check() {
-  cd ghost
+  cd -- "$srcdir/ghost"
 
   pnpm test
   pnpm typecheck
   pnpm lint
   (
-    cd packages/desktop-helper
+    cd -- "$srcdir/ghost/packages/desktop-helper"
     uv run --frozen pytest -m 'not live'
   )
 }
 
 package() {
-  cd ghost
+  cd -- "$srcdir/ghost"
 
   local appdir="$pkgdir/usr/lib/ghost"
   local sharedir="$pkgdir/usr/share/ghost"
@@ -163,12 +163,19 @@ package() {
   _prune_optional_package "$appdir/daemon" '@img+sharp-linuxmusl-x64@*'
   _prune_optional_package "$appdir/daemon" 'lightningcss-linux-x64-musl@*'
   for foreign_dir in \
+    "$appdir/daemon/node_modules/.pnpm/onnxruntime-node@"*/node_modules/onnxruntime-node/bin/napi-v6/linux/arm64 \
     "$appdir/daemon/node_modules/.pnpm/onnxruntime-node@"*/node_modules/onnxruntime-node/bin/napi-v6/darwin \
     "$appdir/daemon/node_modules/.pnpm/onnxruntime-node@"*/node_modules/onnxruntime-node/bin/napi-v6/win32; do
     [[ -e "$foreign_dir" ]] || continue
     _unlink_references_to "$appdir/daemon" "$foreign_dir"
     _remove_tree "$foreign_dir"
   done
+  if find "$appdir/daemon/node_modules/.pnpm" -path \
+    '*/onnxruntime-node/bin/napi-v6/linux/x64/libonnxruntime_providers_*.so' \
+    -print -quit | grep -q .; then
+    printf 'runtime contains non-frozen optional ONNX CUDA provider libraries\n' >&2
+    exit 1
+  fi
 
   install -Dm755 packaging/arch/ghostd "$pkgdir/usr/bin/ghostd"
   install -Dm755 packaging/arch/ghost-desktop-helper \
@@ -197,6 +204,8 @@ package() {
     "$pkgdir/usr/share/applications/ghost.desktop"
   install -Dm755 packaging/arch/service-browser-smoke.sh \
     "$pkgdir/usr/lib/ghost/package-smoke/service-browser-smoke.sh"
+  install -Dm755 packaging/release/smoke-native-runtime.sh \
+    "$pkgdir/usr/lib/ghost/package-smoke/native-runtime-smoke.sh"
 
   _install_tree packages/shell/contrib "$pkgdir/usr/share/doc/ghost/shell-contrib"
   install -Dm644 packaging/arch/README.md "$pkgdir/usr/share/doc/ghost/ARCH.md"

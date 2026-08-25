@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-archive="${1:?usage: smoke-runtime-source.sh <archive> <source-root> <version> <arch> <commit>}"
-source_root="${2:?usage: smoke-runtime-source.sh <archive> <source-root> <version> <arch> <commit>}"
-version="${3:?usage: smoke-runtime-source.sh <archive> <source-root> <version> <arch> <commit>}"
-arch="${4:?usage: smoke-runtime-source.sh <archive> <source-root> <version> <arch> <commit>}"
-commit="${5:?usage: smoke-runtime-source.sh <archive> <source-root> <version> <arch> <commit>}"
+archive="${1:?usage: smoke-runtime-source.sh <archive> <source-root> <version> <arch> <commit> <epoch>}"
+source_root="${2:?usage: smoke-runtime-source.sh <archive> <source-root> <version> <arch> <commit> <epoch>}"
+version="${3:?usage: smoke-runtime-source.sh <archive> <source-root> <version> <arch> <commit> <epoch>}"
+arch="${4:?usage: smoke-runtime-source.sh <archive> <source-root> <version> <arch> <commit> <epoch>}"
+commit="${5:?usage: smoke-runtime-source.sh <archive> <source-root> <version> <arch> <commit> <epoch>}"
+epoch="${6:?usage: smoke-runtime-source.sh <archive> <source-root> <version> <arch> <commit> <epoch>}"
 
 archive="$(realpath "$archive")"
 source_root="$(realpath "$source_root")"
@@ -32,7 +33,7 @@ awk '
 tar -xf "$archive" -C "$work"
 runtime_root="$work/ghost-runtime-${version}-linux-${arch}"
 bash "$source_root/packaging/release/verify-runtime-source.sh" \
-  "$runtime_root" "$source_root" "$version" "$arch" "$commit"
+  "$runtime_root" "$source_root" "$version" "$arch" "$commit" "$epoch"
 
 repacked="$work/repacked.tar.zst"
 bash "$source_root/packaging/release/pack-runtime-source.sh" "$runtime_root" "$repacked"
@@ -43,4 +44,3 @@ if [[ "$(sha256sum "$archive" | cut -d' ' -f1)" \
 fi
 
 printf 'Runtime source smoke test passed: %s\n' "$archive"
-

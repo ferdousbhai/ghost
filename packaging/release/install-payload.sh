@@ -64,6 +64,8 @@ install -Dm644 "$source_root/packages/shell/contrib/ghost.desktop" \
   "$pkgdir/usr/share/applications/ghost.desktop"
 install -Dm755 "$source_root/packaging/arch/service-browser-smoke.sh" \
   "$pkgdir/usr/lib/ghost/package-smoke/service-browser-smoke.sh"
+install -Dm755 "$source_root/packaging/release/smoke-native-runtime.sh" \
+  "$pkgdir/usr/lib/ghost/package-smoke/native-runtime-smoke.sh"
 
 install_tree "$source_root/packages/shell/contrib" \
   "$pkgdir/usr/share/doc/ghost/shell-contrib"
@@ -81,4 +83,3 @@ chown -hR 0:0 "$pkgdir"
 find "$pkgdir" \( -type f -o -type d \) -exec chmod go-w {} +
 
 bash "$source_root/packaging/arch/smoke.sh" "$pkgdir"
-
