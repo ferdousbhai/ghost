@@ -11,6 +11,7 @@ pragma Singleton
 // leak if a burst of turns finish at once.
 import Quickshell
 import QtQuick
+import "NotificationText.js" as NotificationText
 
 Singleton {
     id: root
@@ -39,10 +40,17 @@ Singleton {
             "notify-send",
             "--app-name=ghost",
             "--urgency=" + urgency,
+            // Omarchy persists this hint with the toast and runs it on click.
+            // Other notification servers ignore unknown freedesktop hints.
+            "--hint=string:omarchy-exec:ghost-launch open",
             "--hint=string:x-canonical-private-synchronous:ghost-" + ghost,
             ghost,
             root.excerpt(body)
         ]);
+    }
+
+    function askWaiting(ghost: string, ask: var): void {
+        root.send(ghost, NotificationText.askBody(ask), "normal");
     }
 
     function turnFinished(ghost: string, text: string): void {

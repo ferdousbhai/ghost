@@ -23,6 +23,10 @@ import qs.services
 ShellRoot {
     id: shell
 
+    // An ask is polled while its provider turn remains open. Remember the id
+    // so a reconnect or repeated property assignment cannot raise two toasts.
+    property string announcedAskId: ""
+
     GhostHud {
         id: hud
     }
@@ -137,6 +141,18 @@ ShellRoot {
 
         function onTurnFailed(ghost: string, message: string): void {
             if (!hud.shown) Notifier.turnFailed(ghost, message);
+        }
+
+        function onPendingAskChanged(): void {
+            const ask = Ghostd.pendingAsk;
+            if (!ask) {
+                shell.announcedAskId = "";
+                return;
+            }
+            const askId = String(ask.id || "");
+            if (askId !== "" && askId === shell.announcedAskId) return;
+            shell.announcedAskId = askId;
+            if (!hud.shown) Notifier.askWaiting(Ghostd.activeGhost, ask);
         }
     }
 

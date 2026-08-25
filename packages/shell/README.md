@@ -72,6 +72,10 @@ takes the keyboard: Enter answers, Esc dismisses from anywhere, number keys pick
 options, arrows move through them, and Tab reaches the free-text field. The
 recommended option starts selected, so Enter alone agrees with what the daemon
 would submit if the ask timed out. Answering or dismissing hands focus back.
+When the HUD is shut, a completed turn keeps the active ghost's name and an
+excerpt of its answer. If a turn pauses instead, Ghost raises the actual
+question under that same identity; clicking either Omarchy notification opens
+the HUD. OMP's hard-coded "Oh My Pi / Waiting for input" toast stays disabled.
 
 Dismissal is not a nicety. Until it existed, a question the user did not want to
 answer had no exit but closing the app, which left the conversation holding a

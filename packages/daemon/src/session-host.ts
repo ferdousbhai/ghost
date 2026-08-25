@@ -870,6 +870,10 @@ export class SessionHost {
       "autolearn.enabled": false,
       // Ghost has no approval surface. Sessions are explicitly local and unrestricted.
       "tools.approvalMode": "yolo",
+      // OMP's toast is branded "Oh My Pi" and targets an OMP terminal window.
+      // Ghost's shell owns this surface: it names the ghost, includes the
+      // actual question, and opens the HUD when clicked.
+      "ask.notify": "off",
     };
     const settings = await Settings.loadReadOnly({
       cwd: paths.home,
@@ -2141,7 +2145,10 @@ export class SessionHost {
 
       const toolSession: ToolSession = {
         cwd: ghostPaths(hosted.ghost.dir).home,
-        hasUI: true,
+        // The HTTP broker can reach the owner, but this daemon is not an OMP
+        // terminal UI. Keeping those concepts separate also keeps OMP from
+        // advertising itself as the desktop application for this interaction.
+        hasUI: false,
         canPromptUser: true,
         settings: hosted.session.settings,
         getSessionFile: () => hosted.session.sessionFile ?? null,

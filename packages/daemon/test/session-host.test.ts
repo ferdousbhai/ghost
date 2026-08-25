@@ -421,6 +421,11 @@ describe("SessionHost.runTurn", () => {
       },
       { kind: "text", text: "Matte it is." },
     ]);
+    const opened = await host!.open("casper", "conv-ask");
+    // Ghost owns the desktop interaction. OMP's notifier hard-codes its own
+    // product identity, so it must stay off even though the HTTP broker can
+    // still present and resolve the ask.
+    expect(opened.session.settings.get("ask.notify")).toBe("off");
     const events: PiMessagesEvent[] = [];
     const turn = host!.runTurn("casper", {
       sessionId: "conv-ask",
