@@ -118,6 +118,9 @@ describe("runStagedShutdown", () => {
           disposeAll: () => graceful,
           forceDisposeAll() { console.log("HOST_FORCE"); settle(); },
         },
+        browsers: {
+          async closeAll() { console.log("BROWSERS"); },
+        },
         logger: {
           info(message) { if (message === "shutting down") console.log("STARTED"); },
           warn() {},
@@ -142,6 +145,7 @@ describe("runStagedShutdown", () => {
     await output.waitFor("READY");
     expect(spawnSync("/usr/bin/kill", ["-INT", String(child.pid)]).status).toBe(0);
     await output.waitFor("STARTED");
+    await output.waitFor("BROWSERS");
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(child.exitCode).toBeNull();
     expect(spawnSync("/usr/bin/kill", ["-INT", String(child.pid)]).status).toBe(0);

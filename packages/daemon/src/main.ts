@@ -19,7 +19,7 @@ import { importCommand } from "./import-command.js";
 import { loginCommand } from "./login-command.js";
 import { loadConfig, type DaemonConfig, type DaemonConfigOverrides } from "./config.js";
 import { scrubProviderEnv } from "./env-scrub.js";
-import { ensureGhostHomeLayout } from "./extensions.js";
+import { closeAllBrowserSessions, ensureGhostHomeLayout } from "./extensions.js";
 import { GhostRegistry } from "./ghosts.js";
 import { GhostHookRunner } from "./hooks.js";
 import { acquireHomeReservation, HomeReservationBusyError, type HomeReservation } from "./home-reservation.js";
@@ -138,6 +138,7 @@ export interface ShutdownSignalOptions {
   login: Pick<LoginManager, "dispose">;
   listening: Pick<ListeningServer, "server" | "relay" | "close">;
   host: Pick<SessionHost, "beginShutdown" | "disposeAll" | "forceDisposeAll">;
+  browsers: { closeAll(): Promise<void> };
   logger: Pick<Logger, "info" | "warn">;
   timing?: Pick<StagedShutdownOptions, "graceMs" | "forceMs" | "wait">;
 }
@@ -188,6 +189,7 @@ export async function waitForShutdownSignal(options: ShutdownSignalOptions): Pro
               await Promise.allSettled([
                 options.listening.close(),
                 options.host.disposeAll(),
+                options.browsers.closeAll(),
               ]);
             },
             force,
@@ -472,6 +474,7 @@ async function serveDaemon(
     login,
     listening,
     host,
+    browsers: { closeAll: closeAllBrowserSessions },
     logger,
   });
 

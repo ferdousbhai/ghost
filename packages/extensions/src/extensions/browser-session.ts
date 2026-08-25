@@ -25,7 +25,9 @@ import { writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { GhostError } from "../errors.js";
 import {
+  browserAbortError,
   GhostBrowserError,
+  withTimeout,
   type BackendBackResult,
   type BackendResizeResult,
   type BackendTabsInput,
@@ -44,7 +46,16 @@ import {
   projectNetworkEntries,
 } from "./browser-observation.js";
 import { playwrightBackend } from "./browser-playwright.js";
-import { checkActingScope, checkUrl, type UrlPolicyOptions } from "./browser-policy.js";
+import {
+  checkActingScope,
+  checkNetworkUrl,
+  DEFAULT_DNS_TIMEOUT_MS,
+  defaultBrowserDnsResolver,
+  isPublicInternetAddress,
+  type BrowserDnsResolver,
+  type BrowserPolicyClock,
+  systemBrowserPolicyClock,
+} from "./browser-policy.js";
 import {
   DEFAULT_SCREENSHOT_RETENTION,
   isBrowserScreenshot,
@@ -61,6 +72,7 @@ export const DEFAULT_BROWSER_SCREENSHOT_RETENTION = DEFAULT_SCREENSHOT_RETENTION
 
 export const DEFAULT_ACTION_TIMEOUT_MS = 30_000;
 export const DEFAULT_IDLE_TIMEOUT_MS = 5 * 60_000;
+export const DEFAULT_BROWSER_CLOSE_TIMEOUT_MS = 10_000;
 export const DEFAULT_READ_BUDGET_CHARS = 8_000;
 export const MIN_READ_BUDGET_CHARS = 200;
 export const MAX_READ_BUDGET_CHARS = 100_000;
@@ -92,6 +104,15 @@ export interface BrowserSessionOptions {
   /** Close the browser after this long with no action. Zero disables it. */
   readonly idleTimeoutMs?: number;
   readonly actionTimeoutMs?: number;
+  /** Creator-owned opt-in for loopback/private-network browsing. */
+  readonly allowLocal?: boolean;
+  /** DNS verification timeout and injectable resolver (tests use no network). */
+  readonly dnsTimeoutMs?: number;
+  readonly resolver?: BrowserDnsResolver;
+  /** Shared DNS/idle timer seam for deterministic tests. */
+  readonly clock?: BrowserPolicyClock;
+  /** Bound explicit, idle, and process-wide shutdown. */
+  readonly closeTimeoutMs?: number;
   /**
    * Consequential actions allowed per owner-directed `open()`. See
    * {@link DEFAULT_ACTING_BUDGET}. Zero or negative disables the budget (the
@@ -105,6 +126,11 @@ export interface BrowserSessionOptions {
    * `allowCrossDomain` is the usual, more legible way to widen scope.
    */
   readonly allowActionsOffOrigin?: boolean;
+}
+
+export interface BrowserOperationOptions {
+  readonly timeoutMs?: number;
+  readonly signal?: AbortSignal;
 }
 
 export interface SessionReadResult extends PageSummary {
@@ -146,7 +172,6 @@ export interface BatchStep {
   readonly text?: string;
   readonly submit?: boolean;
   readonly allowCrossDomain?: boolean;
-  readonly allowLocal?: boolean;
   readonly maxChars?: number;
   readonly limit?: number;
   readonly deltaX?: number;
@@ -231,7 +256,9 @@ export class GhostBrowserSession {
   readonly backend: GhostBrowserBackend;
 
   #queue: Promise<unknown> = Promise.resolve();
-  #idleTimer: NodeJS.Timeout | undefined;
+  #queuedActions = 0;
+  #activeAbort: AbortController | undefined;
+  #idleTimer: ReturnType<typeof setTimeout> | undefined;
   /** Refs minted by the most recent `find`, and the page they were minted on. */
   #refs = new Map<string, PageElementMatch>();
   #refPageUrl: string | undefined;
@@ -244,18 +271,33 @@ export class GhostBrowserSession {
 
   readonly #idleTimeoutMs: number;
   readonly #actionTimeoutMs: number;
+  readonly #allowLocal: boolean;
+  readonly #dnsTimeoutMs: number;
+  readonly #resolver: BrowserDnsResolver;
+  readonly #clock: BrowserPolicyClock;
+  readonly #closeTimeoutMs: number;
   readonly #actingBudget: number;
   readonly #allowActionsOffOrigin: boolean;
 
   constructor(options: BrowserSessionOptions) {
     this.homeDir = resolve(options.homeDir);
     this.screenshotDir = join(this.homeDir, SCREENSHOT_DIRNAME);
-    this.backend = (options.backend ?? DEFAULT_BROWSER_BACKEND)({ homeDir: this.homeDir });
     this.#idleTimeoutMs = options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
     this.#actionTimeoutMs = options.actionTimeoutMs ?? DEFAULT_ACTION_TIMEOUT_MS;
+    this.#allowLocal = options.allowLocal ?? false;
+    this.#dnsTimeoutMs = options.dnsTimeoutMs ?? DEFAULT_DNS_TIMEOUT_MS;
+    this.#resolver = options.resolver ?? defaultBrowserDnsResolver;
+    this.#clock = options.clock ?? systemBrowserPolicyClock;
+    this.#closeTimeoutMs = options.closeTimeoutMs ?? DEFAULT_BROWSER_CLOSE_TIMEOUT_MS;
     this.#actingBudget = options.actingBudget ?? DEFAULT_ACTING_BUDGET;
     this.#allowActionsOffOrigin = options.allowActionsOffOrigin ?? false;
     this.#actingRemaining = this.#actingBudget;
+    this.backend = (options.backend ?? DEFAULT_BROWSER_BACKEND)({
+      homeDir: this.homeDir,
+      checkUrl: (url, operation = { timeoutMs: this.#actionTimeoutMs }) =>
+        this.#requireAllowedUrl(url, operation),
+      checkAddress: (address, url) => this.#requirePublicAddress(address, url),
+    });
   }
 
   get running(): boolean {
@@ -298,7 +340,20 @@ export class GhostBrowserSession {
 
   /** Serialize every action; see the file header. */
   #serial<T>(work: () => Promise<T>): Promise<T> {
-    const run = this.#queue.then(work, work);
+    this.#queuedActions += 1;
+    this.#clearIdleTimer();
+    const runWork = async (): Promise<T> => {
+      const controller = new AbortController();
+      this.#activeAbort = controller;
+      try {
+        return await work();
+      } finally {
+        if (this.#activeAbort === controller) this.#activeAbort = undefined;
+        this.#queuedActions -= 1;
+        if (this.#queuedActions === 0) this.#touchIdleTimer();
+      }
+    };
+    const run = this.#queue.then(runWork, runWork);
     this.#queue = run.then(
       () => undefined,
       () => undefined,
@@ -306,19 +361,75 @@ export class GhostBrowserSession {
     return run;
   }
 
-  #timeout(timeoutMs?: number): { timeoutMs: number } {
-    return { timeoutMs: timeoutMs ?? this.#actionTimeoutMs };
+  #timeout(options: { timeoutMs?: number; signal?: AbortSignal }): {
+    timeoutMs: number;
+    signal?: AbortSignal;
+  } {
+    const internal = this.#activeAbort?.signal;
+    const signal = options.signal && internal
+      ? AbortSignal.any([options.signal, internal])
+      : options.signal ?? internal;
+    return {
+      timeoutMs: options.timeoutMs ?? this.#actionTimeoutMs,
+      ...(signal === undefined ? {} : { signal }),
+    };
+  }
+
+  #clearIdleTimer(): void {
+    if (this.#idleTimer) this.#clock.clearTimeout(this.#idleTimer);
+    this.#idleTimer = undefined;
   }
 
   /** Restart the idle countdown. A ghost that stopped browsing stops paying for it. */
   #touchIdleTimer(): void {
-    if (this.#idleTimer) clearTimeout(this.#idleTimer);
-    this.#idleTimer = undefined;
-    if (this.#idleTimeoutMs <= 0) return;
-    this.#idleTimer = setTimeout(() => {
+    this.#clearIdleTimer();
+    if (this.#queuedActions > 0 || !this.backend.running || this.#idleTimeoutMs <= 0) return;
+    this.#idleTimer = this.#clock.setTimeout(() => {
       void this.close().catch(() => undefined);
     }, this.#idleTimeoutMs);
     this.#idleTimer.unref?.();
+  }
+
+  async #requireAllowedUrl(
+    url: string,
+    options: { timeoutMs: number; signal?: AbortSignal },
+  ): Promise<string> {
+    let checked: Awaited<ReturnType<typeof checkNetworkUrl>>;
+    try {
+      checked = await checkNetworkUrl(url, {
+        allowLocal: this.#allowLocal,
+        resolver: this.#resolver,
+        clock: this.#clock,
+        timeoutMs: Math.min(options.timeoutMs, this.#dnsTimeoutMs),
+        ...(options.signal === undefined ? {} : { signal: options.signal }),
+      });
+    } catch (error) {
+      if ((error as Error).name === "AbortError") throw browserAbortError(`verifying ${url}`);
+      throw error;
+    }
+    if (!checked.ok) {
+      throw new GhostBrowserError("blocked_url", checked.rejection.reason, {
+        url: checked.rejection.url,
+      });
+    }
+    return checked.url;
+  }
+
+  #requirePublicAddress(address: string, url: string): void {
+    if (this.#allowLocal || isPublicInternetAddress(address)) return;
+    throw new GhostBrowserError(
+      "blocked_url",
+      `${url} connected to a private or non-public network address, so the page was closed.`,
+      { url },
+    );
+  }
+
+  async #validatePage<T extends PageSummary>(
+    page: T,
+    options: { timeoutMs?: number; signal?: AbortSignal },
+  ): Promise<T> {
+    await this.#requireAllowedUrl(page.url, this.#timeout(options));
+    return page;
   }
 
   #invalidateRefs(): void {
@@ -388,9 +499,12 @@ export class GhostBrowserSession {
   }
 
   /** Nothing but `open` and `close` may act on a browser with no page loaded. */
-  async #requirePage(): Promise<PageSummary> {
-    const page = await this.backend.current();
-    if (page) return page;
+  async #requirePage(
+    options: { timeoutMs?: number; signal?: AbortSignal } = {},
+  ): Promise<PageSummary> {
+    const operation = this.#timeout(options);
+    const page = await this.backend.current(operation);
+    if (page) return this.#validatePage(page, operation);
     throw new GhostBrowserError(
       "no_page",
       "No page is loaded. Use action \"open\" with a URL first.",
@@ -399,23 +513,21 @@ export class GhostBrowserSession {
 
   // -------------------------------------------------------------------- actions
 
-  open(url: string, options: UrlPolicyOptions & { timeoutMs?: number } = {}) {
+  open(url: string, options: BrowserOperationOptions = {}) {
     return this.#serial(() => this.#openImpl(url, options));
   }
 
   async #openImpl(
     url: string,
-    options: UrlPolicyOptions & { timeoutMs?: number },
+    options: BrowserOperationOptions,
   ): Promise<PageSummary> {
-    // The one place a URL is vetted. Backends never see an unchecked one.
-    const checked = checkUrl(url, options);
-    if (!checked.ok) {
-      throw new GhostBrowserError("blocked_url", checked.rejection.reason, {
-        url: checked.rejection.url,
-      });
-    }
+    const operation = this.#timeout(options);
+    const checked = await this.#requireAllowedUrl(url, operation);
     this.#invalidateRefs();
-    const page = await this.backend.open(checked.url, this.#timeout(options.timeoutMs));
+    const page = await this.#validatePage(
+      await this.backend.open(checked, operation),
+      operation,
+    );
     // This navigation came from the owner: re-anchor the trusted origin to
     // where it actually landed, reset the hop count, and refill the budget.
     this.#originUrl = page.url;
@@ -425,19 +537,20 @@ export class GhostBrowserSession {
     return page;
   }
 
-  read(options: { maxChars?: number; timeoutMs?: number } = {}) {
+  read(options: BrowserOperationOptions & { maxChars?: number } = {}) {
     return this.#serial(() => this.#readImpl(options));
   }
 
   async #readImpl(
-    options: { maxChars?: number; timeoutMs?: number },
+    options: BrowserOperationOptions & { maxChars?: number },
   ): Promise<SessionReadResult> {
     const requested = options.maxChars;
     const maxChars = typeof requested === "number" && Number.isFinite(requested)
       ? Math.max(MIN_READ_BUDGET_CHARS, Math.min(Math.floor(requested), MAX_READ_BUDGET_CHARS))
       : DEFAULT_READ_BUDGET_CHARS;
-    await this.#requirePage();
-    const result = await this.backend.read(this.#timeout(options.timeoutMs));
+    const operation = this.#timeout(options);
+    await this.#requirePage(operation);
+    const result = await this.#validatePage(await this.backend.read(operation), operation);
     this.#touchIdleTimer();
     return {
       url: result.url,
@@ -447,13 +560,13 @@ export class GhostBrowserSession {
     };
   }
 
-  find(query: string, options: { limit?: number; timeoutMs?: number } = {}) {
+  find(query: string, options: BrowserOperationOptions & { limit?: number } = {}) {
     return this.#serial(() => this.#findImpl(query, options));
   }
 
   async #findImpl(
     query: string,
-    options: { limit?: number; timeoutMs?: number },
+    options: BrowserOperationOptions & { limit?: number },
   ): Promise<SessionFindResult> {
     const trimmed = query.trim();
     if (trimmed === "") {
@@ -469,11 +582,13 @@ export class GhostBrowserSession {
     const limit = typeof requested === "number" && Number.isFinite(requested)
       ? Math.max(1, Math.min(Math.floor(requested), MAX_FIND_LIMIT))
       : DEFAULT_FIND_LIMIT;
-    const page = await this.#requirePage();
+    const operation = this.#timeout(options);
+    const page = await this.#requirePage(operation);
     const backendMatches = await this.backend.find(trimmed, {
-      ...this.#timeout(options.timeoutMs),
+      ...operation,
       limit,
     });
+    await this.#validatePage(page, operation);
     if (!Array.isArray(backendMatches)) {
       throw new GhostBrowserError(
         "browser_unavailable",
@@ -498,18 +613,22 @@ export class GhostBrowserSession {
     };
   }
 
-  click(target: BackendTarget & { timeoutMs?: number; allowCrossDomain?: boolean }) {
+  click(target: BackendTarget & BrowserOperationOptions & { allowCrossDomain?: boolean }) {
     return this.#serial(() => this.#clickImpl(target));
   }
 
   async #clickImpl(
-    target: BackendTarget & { timeoutMs?: number; allowCrossDomain?: boolean },
+    target: BackendTarget & BrowserOperationOptions & { allowCrossDomain?: boolean },
   ): Promise<PageSummary> {
+    const operation = this.#timeout(target);
     const checked = this.#checkTarget(target);
-    const before = await this.#requirePage();
+    const before = await this.#requirePage(operation);
     // Clicking is consequential: gate it against the trusted origin first.
     this.#gateActing(before.url, target.allowCrossDomain === true);
-    const page = await this.backend.click(checked, this.#timeout(target.timeoutMs));
+    const page = await this.#validatePage(
+      await this.backend.click(checked, operation),
+      operation,
+    );
     // A click that navigated invalidates every ref minted on the old page and
     // counts as one more hop the page — not the owner — drove.
     if (page.url !== before.url) {
@@ -523,28 +642,30 @@ export class GhostBrowserSession {
   type(input: BackendTarget & {
     text: string;
     submit?: boolean;
-    timeoutMs?: number;
     allowCrossDomain?: boolean;
-  }) {
+  } & BrowserOperationOptions) {
     return this.#serial(() => this.#typeImpl(input));
   }
 
   async #typeImpl(input: BackendTarget & {
     text: string;
     submit?: boolean;
-    timeoutMs?: number;
     allowCrossDomain?: boolean;
-  }): Promise<SessionTypeResult> {
+  } & BrowserOperationOptions): Promise<SessionTypeResult> {
+    const operation = this.#timeout(input);
     const checked = this.#checkTarget(input);
-    const before = await this.#requirePage();
+    const before = await this.#requirePage(operation);
     // Typing into and submitting someone's form is consequential too.
     this.#gateActing(before.url, input.allowCrossDomain === true);
     // Submitting is a separate, explicit act: filling a field is reversible,
     // pressing Enter on someone's form is not.
     const submit = input.submit === true;
-    const page = await this.backend.type(
-      { ...checked, text: input.text, submit },
-      this.#timeout(input.timeoutMs),
+    const page = await this.#validatePage(
+      await this.backend.type(
+        { ...checked, text: input.text, submit },
+        operation,
+      ),
+      operation,
     );
     if (submit) {
       this.#invalidateRefs();
@@ -554,18 +675,19 @@ export class GhostBrowserSession {
     return { ...page, submitted: submit };
   }
 
-  screenshot(options: { fullPage?: boolean; timeoutMs?: number } = {}) {
+  screenshot(options: BrowserOperationOptions & { fullPage?: boolean } = {}) {
     return this.#serial(() => this.#screenshotImpl(options));
   }
 
   async #screenshotImpl(
-    options: { fullPage?: boolean; timeoutMs?: number },
+    options: BrowserOperationOptions & { fullPage?: boolean },
   ): Promise<SessionScreenshotResult> {
-    await this.#requirePage();
-    const capture = await this.backend.screenshot({
-      ...this.#timeout(options.timeoutMs),
+    const operation = this.#timeout(options);
+    await this.#requirePage(operation);
+    const capture = await this.#validatePage(await this.backend.screenshot({
+      ...operation,
       fullPage: options.fullPage === true,
-    });
+    }), operation);
     if (!(capture.bytes instanceof Uint8Array)) {
       throw new GhostError(
         "invalid_format",
@@ -601,13 +723,14 @@ export class GhostBrowserSession {
     return result;
   }
 
-  back(options: { timeoutMs?: number } = {}) {
+  back(options: BrowserOperationOptions = {}) {
     return this.#serial(() => this.#backImpl(options));
   }
 
-  async #backImpl(options: { timeoutMs?: number }): Promise<BackendBackResult> {
-    await this.#requirePage();
-    const page = await this.backend.back(this.#timeout(options.timeoutMs));
+  async #backImpl(options: BrowserOperationOptions): Promise<BackendBackResult> {
+    const operation = this.#timeout(options);
+    await this.#requirePage(operation);
+    const page = await this.#validatePage(await this.backend.back(operation), operation);
     // Going back steps toward the origin, so it undoes a hop rather than adding
     // one. Observing only — no gate — but the hop count has to stay honest.
     if (page.moved && this.#originHops > 0) this.#originHops -= 1;
@@ -616,13 +739,14 @@ export class GhostBrowserSession {
     return page;
   }
 
-  forward(options: { timeoutMs?: number } = {}) {
+  forward(options: BrowserOperationOptions = {}) {
     return this.#serial(() => this.#forwardImpl(options));
   }
 
-  async #forwardImpl(options: { timeoutMs?: number }): Promise<BackendBackResult> {
-    await this.#requirePage();
-    const page = await this.backend.forward(this.#timeout(options.timeoutMs));
+  async #forwardImpl(options: BrowserOperationOptions): Promise<BackendBackResult> {
+    const operation = this.#timeout(options);
+    await this.#requirePage(operation);
+    const page = await this.#validatePage(await this.backend.forward(operation), operation);
     // Forward is the inverse of back: it re-takes a step the page — not the
     // owner — had walked, so it re-adds a hop rather than undoing one.
     if (page.moved) this.#originHops += 1;
@@ -636,8 +760,7 @@ export class GhostBrowserSession {
     deltaY: number;
     x?: number;
     y?: number;
-    timeoutMs?: number;
-  }) {
+  } & BrowserOperationOptions) {
     return this.#serial(() => this.#scrollImpl(input));
   }
 
@@ -646,9 +769,9 @@ export class GhostBrowserSession {
     deltaY: number;
     x?: number;
     y?: number;
-    timeoutMs?: number;
-  }): Promise<PageSummary> {
-    await this.#requirePage();
+  } & BrowserOperationOptions): Promise<PageSummary> {
+    const operation = this.#timeout(input);
+    await this.#requirePage(operation);
     requireFiniteNumbers("Scroll", {
       deltaX: input.deltaX,
       deltaY: input.deltaY,
@@ -662,14 +785,17 @@ export class GhostBrowserSession {
       );
     }
     // Scrolling only moves the viewport; it is observing, never gated.
-    const page = await this.backend.scroll(
-      {
-        deltaX: input.deltaX,
-        deltaY: input.deltaY,
-        ...(input.x === undefined ? {} : { x: input.x }),
-        ...(input.y === undefined ? {} : { y: input.y }),
-      },
-      this.#timeout(input.timeoutMs),
+    const page = await this.#validatePage(
+      await this.backend.scroll(
+        {
+          deltaX: input.deltaX,
+          deltaY: input.deltaY,
+          ...(input.x === undefined ? {} : { x: input.x }),
+          ...(input.y === undefined ? {} : { y: input.y }),
+        },
+        operation,
+      ),
+      operation,
     );
     this.#touchIdleTimer();
     return page;
@@ -682,8 +808,7 @@ export class GhostBrowserSession {
     toY: number;
     steps?: number;
     allowCrossDomain?: boolean;
-    timeoutMs?: number;
-  }) {
+  } & BrowserOperationOptions) {
     return this.#serial(() => this.#dragImpl(input));
   }
 
@@ -694,8 +819,8 @@ export class GhostBrowserSession {
     toY: number;
     steps?: number;
     allowCrossDomain?: boolean;
-    timeoutMs?: number;
-  }): Promise<PageSummary> {
+  } & BrowserOperationOptions): Promise<PageSummary> {
+    const operation = this.#timeout(input);
     requireFiniteNumbers("Drag", {
       fromX: input.fromX,
       fromY: input.fromY,
@@ -712,18 +837,21 @@ export class GhostBrowserSession {
         "Drag steps must be an integer from 1 through 100.",
       );
     }
-    const before = await this.#requirePage();
+    const before = await this.#requirePage(operation);
     // Dragging can reorder, move, or drop things: consequential, so it is gated.
     this.#gateActing(before.url, input.allowCrossDomain === true);
-    const page = await this.backend.drag(
-      {
-        fromX: input.fromX,
-        fromY: input.fromY,
-        toX: input.toX,
-        toY: input.toY,
-        ...(input.steps === undefined ? {} : { steps: input.steps }),
-      },
-      this.#timeout(input.timeoutMs),
+    const page = await this.#validatePage(
+      await this.backend.drag(
+        {
+          fromX: input.fromX,
+          fromY: input.fromY,
+          toX: input.toX,
+          toY: input.toY,
+          ...(input.steps === undefined ? {} : { steps: input.steps }),
+        },
+        operation,
+      ),
+      operation,
     );
     if (page.url !== before.url) {
       this.#invalidateRefs();
@@ -738,8 +866,7 @@ export class GhostBrowserSession {
     modifiers?: readonly string[];
     text?: string;
     allowCrossDomain?: boolean;
-    timeoutMs?: number;
-  }) {
+  } & BrowserOperationOptions) {
     return this.#serial(() => this.#keyImpl(input));
   }
 
@@ -748,22 +875,25 @@ export class GhostBrowserSession {
     modifiers?: readonly string[];
     text?: string;
     allowCrossDomain?: boolean;
-    timeoutMs?: number;
-  }): Promise<PageSummary> {
+  } & BrowserOperationOptions): Promise<PageSummary> {
+    const operation = this.#timeout(input);
     const key = input.key.trim();
     if (key === "") {
       throw new GhostBrowserError("invalid_input", "A key press needs a key name.");
     }
-    const before = await this.#requirePage();
+    const before = await this.#requirePage(operation);
     // Pressing keys drives the focused control: consequential, so it is gated.
     this.#gateActing(before.url, input.allowCrossDomain === true);
-    const page = await this.backend.key(
-      {
-        key,
-        ...(input.modifiers === undefined ? {} : { modifiers: [...input.modifiers] }),
-        ...(input.text === undefined ? {} : { text: input.text }),
-      },
-      this.#timeout(input.timeoutMs),
+    const page = await this.#validatePage(
+      await this.backend.key(
+        {
+          key,
+          ...(input.modifiers === undefined ? {} : { modifiers: [...input.modifiers] }),
+          ...(input.text === undefined ? {} : { text: input.text }),
+        },
+        operation,
+      ),
+      operation,
     );
     if (page.url !== before.url) {
       this.#invalidateRefs();
@@ -773,56 +903,65 @@ export class GhostBrowserSession {
     return page;
   }
 
-  javascript(code: string, options: { allowCrossDomain?: boolean; timeoutMs?: number } = {}) {
+  javascript(
+    code: string,
+    options: BrowserOperationOptions & { allowCrossDomain?: boolean } = {},
+  ) {
     return this.#serial(() => this.#javascriptImpl(code, options));
   }
 
   async #javascriptImpl(
     code: string,
-    options: { allowCrossDomain?: boolean; timeoutMs?: number },
+    options: BrowserOperationOptions & { allowCrossDomain?: boolean },
   ): Promise<BoundedJavascriptResult> {
+    const operation = this.#timeout(options);
     if (code.trim() === "") {
       throw new GhostBrowserError("invalid_input", "There is no code to run.");
     }
-    const before = await this.#requirePage();
+    const before = await this.#requirePage(operation);
     // Running script is the sharpest consequential action: gate it exactly like a
     // click, and spend a unit of the acting budget.
     this.#gateActing(before.url, options.allowCrossDomain === true);
     const result = projectJavascriptResult(
-      await this.backend.javascript(code, this.#timeout(options.timeoutMs)),
+      await this.backend.javascript(code, operation),
     );
+    await this.#requirePage(operation);
     // Script can rewrite the page under our refs; the honest move is to drop them.
     this.#invalidateRefs();
     this.#touchIdleTimer();
     return result;
   }
 
-  readConsole(options: { timeoutMs?: number } = {}) {
+  readConsole(options: BrowserOperationOptions = {}) {
     return this.#serial(() => this.#readConsoleImpl(options));
   }
 
   async #readConsoleImpl(
-    options: { timeoutMs?: number },
+    options: BrowserOperationOptions,
   ): Promise<SessionConsoleResult> {
-    await this.#requirePage();
+    const operation = this.#timeout(options);
+    await this.#requirePage(operation);
     const entries = projectConsoleEntries(
-      await this.backend.readConsole(this.#timeout(options.timeoutMs)),
+      await this.backend.readConsole(operation),
     );
+    await this.#requirePage(operation);
     this.#touchIdleTimer();
     return entries;
   }
 
-  readNetwork(options: { timeoutMs?: number } = {}) {
+  readNetwork(options: BrowserOperationOptions = {}) {
     return this.#serial(() => this.#readNetworkImpl(options));
   }
 
   async #readNetworkImpl(
-    options: { timeoutMs?: number },
+    options: BrowserOperationOptions,
   ): Promise<SessionNetworkResult> {
-    await this.#requirePage();
+    const operation = this.#timeout(options);
+    await this.#requirePage(operation);
     const entries = projectNetworkEntries(
-      await this.backend.readNetwork(this.#timeout(options.timeoutMs)),
+      await this.backend.readNetwork(operation),
     );
+    await this.#requirePage(operation);
     this.#touchIdleTimer();
     return entries;
   }
@@ -830,41 +969,43 @@ export class GhostBrowserSession {
   upload(input: BackendTarget & {
     paths: readonly string[];
     allowCrossDomain?: boolean;
-    timeoutMs?: number;
-  }) {
+  } & BrowserOperationOptions) {
     return this.#serial(() => this.#uploadImpl(input));
   }
 
   async #uploadImpl(input: BackendTarget & {
     paths: readonly string[];
     allowCrossDomain?: boolean;
-    timeoutMs?: number;
-  }): Promise<PageSummary> {
+  } & BrowserOperationOptions): Promise<PageSummary> {
+    const operation = this.#timeout(input);
     if (input.paths.length === 0) {
       throw new GhostBrowserError("invalid_input", "Give at least one file path to upload.");
     }
     const checked = this.#checkTarget(input);
-    const before = await this.#requirePage();
+    const before = await this.#requirePage(operation);
     // Handing a file to a form is consequential — gate it against the origin.
     this.#gateActing(before.url, input.allowCrossDomain === true);
-    const page = await this.backend.upload(
-      { ...checked, paths: [...input.paths] },
-      this.#timeout(input.timeoutMs),
+    const page = await this.#validatePage(
+      await this.backend.upload(
+        { ...checked, paths: [...input.paths] },
+        operation,
+      ),
+      operation,
     );
     this.#touchIdleTimer();
     return page;
   }
 
-  resize(input: { width: number; height: number; timeoutMs?: number }) {
+  resize(input: { width: number; height: number } & BrowserOperationOptions) {
     return this.#serial(() => this.#resizeImpl(input));
   }
 
   async #resizeImpl(input: {
     width: number;
     height: number;
-    timeoutMs?: number;
-  }): Promise<BackendResizeResult> {
-    await this.#requirePage();
+  } & BrowserOperationOptions): Promise<BackendResizeResult> {
+    const operation = this.#timeout(input);
+    await this.#requirePage(operation);
     requireFiniteNumbers("Resize", { width: input.width, height: input.height });
     if (
       !Number.isInteger(input.width) || !Number.isInteger(input.height)
@@ -876,9 +1017,12 @@ export class GhostBrowserSession {
         "Resize width and height must be integers from 100 through 10000.",
       );
     }
-    const result = await this.backend.resize(
-      { width: input.width, height: input.height },
-      this.#timeout(input.timeoutMs),
+    const result = await this.#validatePage(
+      await this.backend.resize(
+        { width: input.width, height: input.height },
+        operation,
+      ),
+      operation,
     );
     this.#touchIdleTimer();
     return result;
@@ -888,9 +1032,7 @@ export class GhostBrowserSession {
     op: BackendTabsInput["op"];
     id?: string;
     url?: string;
-    allowLocal?: boolean;
-    timeoutMs?: number;
-  }) {
+  } & BrowserOperationOptions) {
     return this.#serial(() => this.#tabsImpl(input));
   }
 
@@ -898,22 +1040,11 @@ export class GhostBrowserSession {
     op: BackendTabsInput["op"];
     id?: string;
     url?: string;
-    allowLocal?: boolean;
-    timeoutMs?: number;
-  }): Promise<BackendTabsResult> {
+  } & BrowserOperationOptions): Promise<BackendTabsResult> {
+    const operation = this.#timeout(input);
     let url: string | undefined;
     if (input.op === "create" && input.url !== undefined && input.url.trim() !== "") {
-      // A new tab with a URL is an owner-directed navigation: vet it like open,
-      // then re-anchor the trusted origin to it.
-      const checked = checkUrl(input.url, {
-        ...(input.allowLocal === undefined ? {} : { allowLocal: input.allowLocal }),
-      });
-      if (!checked.ok) {
-        throw new GhostBrowserError("blocked_url", checked.rejection.reason, {
-          url: checked.rejection.url,
-        });
-      }
-      url = checked.url;
+      url = await this.#requireAllowedUrl(input.url, operation);
     }
     const result = await this.backend.tabs(
       {
@@ -921,8 +1052,10 @@ export class GhostBrowserSession {
         ...(input.id === undefined ? {} : { id: input.id }),
         ...(url === undefined ? {} : { url }),
       },
-      this.#timeout(input.timeoutMs),
+      operation,
     );
+    for (const tab of result.tabs) await this.#validatePage(tab, operation);
+    if (result.page) await this.#validatePage(result.page, operation);
     // Switching or creating a tab lands the ghost on a different page; the refs
     // minted on the old one no longer mean anything.
     this.#invalidateRefs();
@@ -935,7 +1068,7 @@ export class GhostBrowserSession {
     return result;
   }
 
-  batch(steps: readonly BatchStep[], options: { timeoutMs?: number } = {}) {
+  batch(steps: readonly BatchStep[], options: BrowserOperationOptions = {}) {
     return this.#serial(() => this.#batchImpl(steps, options));
   }
 
@@ -949,12 +1082,12 @@ export class GhostBrowserSession {
    */
   async #batchImpl(
     steps: readonly BatchStep[],
-    options: { timeoutMs?: number },
+    options: BrowserOperationOptions,
   ): Promise<BatchResult> {
     const results: BatchStepResult[] = [];
     for (const step of steps) {
       try {
-        const summary = await this.#runStep(step, options.timeoutMs);
+        const summary = await this.#runStep(step, options);
         results.push({ action: step.action, ok: true, summary });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -967,14 +1100,11 @@ export class GhostBrowserSession {
   }
 
   /** Dispatch one batch step to a non-serialized impl. Returns a short summary. */
-  async #runStep(step: BatchStep, timeoutMs?: number): Promise<string> {
-    const t = timeoutMs === undefined ? {} : { timeoutMs };
+  async #runStep(step: BatchStep, options: BrowserOperationOptions): Promise<string> {
+    const t = options;
     switch (step.action) {
       case "open": {
-        const page = await this.#openImpl(step.url ?? "", {
-          ...t,
-          ...(step.allowLocal === undefined ? {} : { allowLocal: step.allowLocal }),
-        });
+        const page = await this.#openImpl(step.url ?? "", t);
         return `open → ${page.url}`;
       }
       case "read": {
@@ -1075,16 +1205,41 @@ export class GhostBrowserSession {
     }
   }
 
-  /** Close the browser. Safe to call when it was never started. */
-  async close(): Promise<boolean> {
-    if (this.#idleTimer) clearTimeout(this.#idleTimer);
-    this.#idleTimer = undefined;
+  /** Close the browser after every admitted action, with one bounded queue slot. */
+  close(options: BrowserOperationOptions = {}): Promise<boolean> {
+    // Wake a cooperative backend so the terminal close can take its queue slot.
+    // The close itself remains serialized and therefore never races an action.
+    this.#activeAbort?.abort();
+    const timeoutMs = Math.min(
+      options.timeoutMs ?? this.#closeTimeoutMs,
+      this.#closeTimeoutMs,
+    );
+    return withTimeout(
+      this.#serial(() => this.#closeImpl({ ...options, timeoutMs })),
+      timeoutMs,
+      "waiting for browser actions to stop and close",
+      options.signal,
+    );
+  }
+
+  async #closeImpl(options: BrowserOperationOptions): Promise<boolean> {
+    this.#clearIdleTimer();
     this.#invalidateRefs();
     // A fresh browser has no trusted origin until the next open().
     this.#originUrl = undefined;
     this.#originHops = 0;
     this.#actingRemaining = this.#actingBudget;
-    return this.backend.close();
+    const timeoutMs = Math.min(
+      options.timeoutMs ?? this.#closeTimeoutMs,
+      this.#closeTimeoutMs,
+    );
+    const operation = this.#timeout({ ...options, timeoutMs });
+    return withTimeout(
+      this.backend.close(operation),
+      timeoutMs,
+      "closing the browser",
+      options.signal,
+    );
   }
 }
 
@@ -1096,6 +1251,11 @@ interface EffectiveSessionOptions {
   readonly backendDescription: string;
   readonly idleTimeoutMs: number;
   readonly actionTimeoutMs: number;
+  readonly allowLocal: boolean;
+  readonly dnsTimeoutMs: number;
+  readonly resolver: BrowserDnsResolver;
+  readonly clock: BrowserPolicyClock;
+  readonly closeTimeoutMs: number;
   readonly actingBudget: number;
   readonly allowActionsOffOrigin: boolean;
 }
@@ -1106,6 +1266,7 @@ interface BrowserSessionEntry {
 }
 
 const sessions = new Map<string, BrowserSessionEntry>();
+let closingAll: Promise<void> | undefined;
 
 function effectiveSessionOptions(
   options: Omit<BrowserSessionOptions, "homeDir">,
@@ -1117,6 +1278,11 @@ function effectiveSessionOptions(
     backendDescription: backend.sessionDescription ?? (backend.name || "custom backend"),
     idleTimeoutMs: options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS,
     actionTimeoutMs: options.actionTimeoutMs ?? DEFAULT_ACTION_TIMEOUT_MS,
+    allowLocal: options.allowLocal ?? false,
+    dnsTimeoutMs: options.dnsTimeoutMs ?? DEFAULT_DNS_TIMEOUT_MS,
+    resolver: options.resolver ?? defaultBrowserDnsResolver,
+    clock: options.clock ?? systemBrowserPolicyClock,
+    closeTimeoutMs: options.closeTimeoutMs ?? DEFAULT_BROWSER_CLOSE_TIMEOUT_MS,
     actingBudget: options.actingBudget ?? DEFAULT_ACTING_BUDGET,
     allowActionsOffOrigin: options.allowActionsOffOrigin ?? false,
   };
@@ -1135,6 +1301,11 @@ function changedSessionOptions(
   if (!sameIdentity(existing.backendIdentity, requested.backendIdentity)) changed.push("backend");
   if (existing.idleTimeoutMs !== requested.idleTimeoutMs) changed.push("idleTimeoutMs");
   if (existing.actionTimeoutMs !== requested.actionTimeoutMs) changed.push("actionTimeoutMs");
+  if (existing.allowLocal !== requested.allowLocal) changed.push("allowLocal");
+  if (existing.dnsTimeoutMs !== requested.dnsTimeoutMs) changed.push("dnsTimeoutMs");
+  if (!Object.is(existing.resolver, requested.resolver)) changed.push("resolver");
+  if (!Object.is(existing.clock, requested.clock)) changed.push("clock");
+  if (existing.closeTimeoutMs !== requested.closeTimeoutMs) changed.push("closeTimeoutMs");
   if (existing.actingBudget !== requested.actingBudget) changed.push("actingBudget");
   if (existing.allowActionsOffOrigin !== requested.allowActionsOffOrigin) {
     changed.push("allowActionsOffOrigin");
@@ -1147,6 +1318,11 @@ function sessionOptionSummary(options: EffectiveSessionOptions): Record<string, 
     backend: options.backendDescription,
     idleTimeoutMs: options.idleTimeoutMs,
     actionTimeoutMs: options.actionTimeoutMs,
+    allowLocal: options.allowLocal,
+    dnsTimeoutMs: options.dnsTimeoutMs,
+    resolver: options.resolver === defaultBrowserDnsResolver ? "system" : "custom",
+    clock: options.clock === systemBrowserPolicyClock ? "system" : "custom",
+    closeTimeoutMs: options.closeTimeoutMs,
     actingBudget: options.actingBudget,
     allowActionsOffOrigin: options.allowActionsOffOrigin,
   };
@@ -1169,6 +1345,13 @@ export function browserSessionFor(
   options: Omit<BrowserSessionOptions, "homeDir"> = {},
 ): GhostBrowserSession {
   const key = resolve(homeDir);
+  if (closingAll) {
+    throw new GhostError(
+      "conflict",
+      "Browser shutdown is still in progress; wait before opening another session.",
+      { conflict: "browser_shutdown" },
+    );
+  }
   const requested = effectiveSessionOptions(options);
   const existing = sessions.get(key);
   if (existing) {
@@ -1193,6 +1376,11 @@ export function browserSessionFor(
     backend: requested.backend,
     idleTimeoutMs: requested.idleTimeoutMs,
     actionTimeoutMs: requested.actionTimeoutMs,
+    allowLocal: requested.allowLocal,
+    dnsTimeoutMs: requested.dnsTimeoutMs,
+    resolver: requested.resolver,
+    clock: requested.clock,
+    closeTimeoutMs: requested.closeTimeoutMs,
     actingBudget: requested.actingBudget,
     allowActionsOffOrigin: requested.allowActionsOffOrigin,
   });
@@ -1202,7 +1390,27 @@ export function browserSessionFor(
 
 /** Close every browser this process opened. The daemon calls this on shutdown. */
 export async function closeAllBrowserSessions(): Promise<void> {
-  const open = [...sessions.values()].map((entry) => entry.session);
-  sessions.clear();
-  await Promise.all(open.map((session) => session.close()));
+  if (closingAll) return closingAll;
+  const open = [...sessions.entries()];
+  if (open.length === 0) return;
+  const closing = (async () => {
+    const results = await Promise.allSettled(
+      open.map(([, entry]) => entry.session.close()),
+    );
+    for (const [index, [key, entry]] of open.entries()) {
+      if (results[index]?.status === "fulfilled" && sessions.get(key) === entry) {
+        sessions.delete(key);
+      }
+    }
+    const failures = results
+      .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+      .map((result) => result.reason);
+    if (failures.length > 0) {
+      throw new AggregateError(failures, "One or more browser sessions did not close cleanly.");
+    }
+  })().finally(() => {
+    if (closingAll === closing) closingAll = undefined;
+  });
+  closingAll = closing;
+  return closing;
 }

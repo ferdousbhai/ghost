@@ -9,17 +9,17 @@
  * offered. So the policy is a whitelist of schemes plus a blacklist of
  * destinations, applied before Chromium ever sees the string.
  *
- * `allowLocal` opts back into loopback and private ranges for the one honest
- * case: the owner asking the ghost to look at something they are running
- * locally. It is a per-call parameter, deliberately, so it shows up in the
- * transcript next to the URL it unlocked.
+ * `allowLocal` is a creator-owned session setting for the one honest case: the
+ * owner deliberately configuring a ghost to inspect something on their LAN. It
+ * is never a model-controlled tool argument.
  *
- * This module is pure. Everything here is decided from the URL text alone; there
- * is no DNS resolution, so a hostname that resolves to a private address still
- * gets through. That is a known and accepted gap — the ghost has bash on the
- * owner's side anyway, and the point of the gate is to stop accidents and
- * page-suggested URLs, not a determined attacker with a domain.
+ * Text parsing and DNS verification are separate functions so callers that only
+ * need syntax checks stay synchronous. Browser sessions always use the network
+ * check, which rejects a hostname when any answer is not globally reachable.
  */
+
+import { lookup } from "node:dns/promises";
+import { getDomain } from "tldts";
 
 /** The only schemes a navigation may use. */
 const ALLOWED_PROTOCOLS = new Set(["http:", "https:"]);
@@ -31,6 +31,46 @@ export interface UrlPolicyOptions {
   /** Permit loopback, private, and link-local destinations. Off by default. */
   readonly allowLocal?: boolean;
 }
+
+export interface ResolvedAddress {
+  readonly address: string;
+  readonly family: number;
+}
+
+export interface BrowserDnsResolverOptions {
+  readonly signal?: AbortSignal;
+}
+
+/** Injectable so unit tests never consult the network. */
+export type BrowserDnsResolver = (
+  hostname: string,
+  options?: BrowserDnsResolverOptions,
+) => Promise<readonly ResolvedAddress[]>;
+
+export interface NetworkUrlPolicyOptions extends UrlPolicyOptions {
+  readonly resolver?: BrowserDnsResolver;
+  readonly signal?: AbortSignal;
+  readonly timeoutMs?: number;
+  readonly clock?: BrowserPolicyClock;
+}
+
+export interface BrowserPolicyClock {
+  readonly setTimeout: (
+    callback: () => void,
+    delayMs: number,
+  ) => ReturnType<typeof setTimeout>;
+  readonly clearTimeout: (timer: ReturnType<typeof setTimeout>) => void;
+}
+
+export const systemBrowserPolicyClock: BrowserPolicyClock = {
+  setTimeout: (callback, delayMs) => setTimeout(callback, delayMs),
+  clearTimeout: (timer) => clearTimeout(timer),
+};
+
+export const DEFAULT_DNS_TIMEOUT_MS = 5_000;
+
+export const defaultBrowserDnsResolver: BrowserDnsResolver = async (hostname) =>
+  lookup(hostname, { all: true, verbatim: true });
 
 export interface UrlPolicyRejection {
   readonly url: string;
@@ -44,16 +84,22 @@ export type UrlPolicyResult =
 /** Host suffixes that always mean "something on this machine or LAN". */
 const LOCAL_SUFFIXES = [".localhost", ".local", ".internal", ".home.arpa"];
 
-function isPrivateIpv4(host: string): boolean {
+function parseIpv4(host: string): number[] | null {
   const parts = host.split(".");
-  if (parts.length !== 4) return false;
+  if (parts.length !== 4) return null;
   const octets: number[] = [];
   for (const part of parts) {
-    if (!/^\d{1,3}$/.test(part)) return false;
+    if (!/^\d{1,3}$/.test(part)) return null;
     const value = Number(part);
-    if (value > 255) return false;
+    if (value > 255) return null;
     octets.push(value);
   }
+  return octets;
+}
+
+function isPrivateIpv4(host: string): boolean {
+  const octets = parseIpv4(host);
+  if (octets === null) return false;
   const [a = 0, b = 0] = octets;
   if (a === 0 || a === 127) return true; // this host, loopback
   if (a === 10) return true; // RFC1918
@@ -62,6 +108,26 @@ function isPrivateIpv4(host: string): boolean {
   if (a === 169 && b === 254) return true; // link-local, incl. cloud metadata
   if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT / tailscale
   return false;
+}
+
+/**
+ * Permit only globally reachable IPv4. Documentation, benchmark, multicast,
+ * reserved, and protocol-assignment ranges are unusable web peers too; treating
+ * them as public would create policy differences across kernels and networks.
+ */
+function isPublicIpv4(host: string): boolean {
+  const octets = parseIpv4(host);
+  if (octets === null) return false;
+  const [a = 0, b = 0, c = 0] = octets;
+  if (isPrivateIpv4(host)) return false;
+  if (a === 192 && b === 0 && c === 0) return false; // IETF protocol assignments
+  if (a === 192 && b === 0 && c === 2) return false; // TEST-NET-1
+  if (a === 192 && b === 88 && c === 99) return false; // deprecated 6to4 relay
+  if (a === 198 && (b === 18 || b === 19)) return false; // benchmark
+  if (a === 198 && b === 51 && c === 100) return false; // TEST-NET-2
+  if (a === 203 && b === 0 && c === 113) return false; // TEST-NET-3
+  if (a >= 224) return false; // multicast and reserved
+  return true;
 }
 
 /**
@@ -145,6 +211,47 @@ function isPrivateIpv6(host: string): boolean {
   return false;
 }
 
+function isPublicIpv6(host: string): boolean {
+  const inner = host.startsWith("[") && host.endsWith("]") ? host.slice(1, -1) : host;
+  const hextets = parseIpv6(inner.toLowerCase());
+  if (hextets === null || isPrivateIpv6(host)) return false;
+  const [h0 = 0, h1 = 0, h2 = 0, h3 = 0, h4 = 0, h5 = 0, h6 = 0, h7 = 0] = hextets;
+
+  // Deprecated IPv4-compatible, mapped, and well-known NAT64 spellings inherit
+  // the reachability of the embedded low 32 bits.
+  const embedded = `${h6 >> 8}.${h6 & 0xff}.${h7 >> 8}.${h7 & 0xff}`;
+  const ipv4Compatible = h0 === 0 && h1 === 0 && h2 === 0 && h3 === 0 && h4 === 0
+    && (h5 === 0 || h5 === 0xffff);
+  const nat64 = h0 === 0x0064 && h1 === 0xff9b && h2 === 0 && h3 === 0 && h4 === 0 && h5 === 0;
+  if (ipv4Compatible || nat64) return isPublicIpv4(embedded);
+
+  if (h0 === 0x0064 && h1 === 0xff9b && h2 === 1) return false; // local-use NAT64 /48
+  if (h0 === 0x0100 && h1 === 0 && h2 === 0 && h3 === 0) return false; // discard-only /64
+  if (h0 === 0x2001 && h1 <= 0x01ff) return false; // IETF special-purpose /23
+  if (h0 === 0x2001 && h1 === 0x0db8) return false; // documentation /32
+  if (h0 === 0x2002) return isPublicIpv4(
+    `${h1 >> 8}.${h1 & 0xff}.${h2 >> 8}.${h2 & 0xff}`,
+  ); // 6to4 inherits its embedded v4 peer
+  if ((h0 & 0xfff0) === 0x3ff0) return false; // documentation 3fff::/20
+  if ((h0 & 0xfe00) === 0xfc00) return false; // unique-local /7
+  if ((h0 & 0xffc0) === 0xfe80 || (h0 & 0xffc0) === 0xfec0) return false;
+  if ((h0 & 0xff00) === 0xff00) return false; // multicast /8
+  // Native globally-routable unicast is allocated from 2000::/3. Failing
+  // closed outside that range avoids treating future/reserved space as a
+  // public peer merely because it is not one of today's named local blocks.
+  return (h0 & 0xe000) === 0x2000;
+}
+
+/** True only for an IP address suitable as a public Internet peer. */
+export function isPublicInternetAddress(address: string): boolean {
+  const unbracketed = address.startsWith("[") && address.endsWith("]")
+    ? address.slice(1, -1)
+    : address;
+  if (parseIpv4(unbracketed) !== null) return isPublicIpv4(unbracketed);
+  if (unbracketed.includes(":")) return isPublicIpv6(unbracketed);
+  return false;
+}
+
 /** True when this hostname names the owner's machine or private network. */
 export function isLocalHostname(hostname: string): boolean {
   // A trailing dot is a fully-qualified spelling of the same name: `localhost.`
@@ -154,6 +261,51 @@ export function isLocalHostname(hostname: string): boolean {
   if (host === "" || host === "localhost") return true;
   if (LOCAL_SUFFIXES.some((suffix) => host.endsWith(suffix))) return true;
   return isPrivateIpv4(host) || isPrivateIpv6(host);
+}
+
+function rejection(url: string, reason: string): UrlPolicyResult {
+  return { ok: false, rejection: { url, reason } };
+}
+
+function abortReason(): Error {
+  const error = new Error("Browser URL verification was aborted.");
+  error.name = "AbortError";
+  return error;
+}
+
+async function resolveWithin(
+  resolver: BrowserDnsResolver,
+  hostname: string,
+  signal: AbortSignal | undefined,
+  timeoutMs: number,
+  clock: BrowserPolicyClock,
+): Promise<readonly ResolvedAddress[]> {
+  if (signal?.aborted) throw abortReason();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let detachAbort: (() => void) | undefined;
+  try {
+    const deadline = new Promise<never>((_resolve, reject) => {
+      timer = clock.setTimeout(
+        () => reject(new Error(`DNS verification timed out after ${timeoutMs}ms.`)),
+        Math.max(1, timeoutMs),
+      );
+      timer.unref?.();
+    });
+    const aborted = new Promise<never>((_resolve, reject) => {
+      if (!signal) return;
+      const onAbort = () => reject(abortReason());
+      signal.addEventListener("abort", onAbort, { once: true });
+      detachAbort = () => signal.removeEventListener("abort", onAbort);
+    });
+    return await Promise.race([
+      resolver(hostname, signal ? { signal } : undefined),
+      deadline,
+      aborted,
+    ]);
+  } finally {
+    if (timer) clock.clearTimeout(timer);
+    detachAbort?.();
+  }
 }
 
 /**
@@ -202,12 +354,65 @@ export function checkUrl(input: string, options: UrlPolicyOptions = {}): UrlPoli
         reason:
           `${url.hostname} is on this machine or its private network, which the `
           + "browser does not open by default. If the owner asked you to look at "
-          + "something running locally, pass allow_local: true.",
+          + "something running locally, the owner must enable local browsing "
+          + "in this browser session's configuration.",
       },
     };
   }
 
   return { ok: true, url: url.toString() };
+}
+
+/**
+ * Parse a URL and verify every current DNS answer before a browser sees it.
+ * Any empty, malformed, private, or special-purpose answer rejects the whole
+ * hostname; selecting only the public member of a mixed answer set would make
+ * DNS rebinding and round-robin behavior nondeterministic.
+ */
+export async function checkNetworkUrl(
+  input: string,
+  options: NetworkUrlPolicyOptions = {},
+): Promise<UrlPolicyResult> {
+  const checked = checkUrl(input, options);
+  if (!checked.ok || checked.url === BLANK_URL || options.allowLocal) return checked;
+
+  const url = new URL(checked.url);
+  const hostname = url.hostname.replace(/^\[|\]$/g, "").replace(/\.$/, "");
+  if (parseIpv4(hostname) !== null || hostname.includes(":")) {
+    return isPublicInternetAddress(hostname)
+      ? checked
+      : rejection(input, `${url.hostname} is not a globally reachable Internet address.`);
+  }
+
+  let answers: readonly ResolvedAddress[];
+  try {
+    answers = await resolveWithin(
+      options.resolver ?? defaultBrowserDnsResolver,
+      hostname,
+      options.signal,
+      options.timeoutMs ?? DEFAULT_DNS_TIMEOUT_MS,
+      options.clock ?? systemBrowserPolicyClock,
+    );
+  } catch (error) {
+    if ((error as Error).name === "AbortError") throw error;
+    return rejection(
+      input,
+      `The browser could not verify public DNS for ${url.hostname}: `
+        + (error instanceof Error ? error.message : String(error)),
+    );
+  }
+  if (answers.length === 0) {
+    return rejection(input, `Public DNS returned no addresses for ${url.hostname}.`);
+  }
+  const invalid = answers.find((answer) => !isPublicInternetAddress(answer.address));
+  if (invalid) {
+    return rejection(
+      input,
+      `${url.hostname} resolves to a private or non-public network address, which `
+        + "the browser does not open by default.",
+    );
+  }
+  return checked;
 }
 
 // ---------------------------------------------------------------------------
@@ -231,10 +436,9 @@ export function checkUrl(input: string, options: UrlPolicyOptions = {}): UrlPoli
  * content is exactly what an attacker controls.
  *
  * This is a legible heuristic, not a taint system. It compares registrable
- * domains from the URL text; it does not consult the Public Suffix List (a small
- * built-in table of multi-label suffixes covers the common cases) and it does
- * not track per-element data flow. An explicit owner `open()` always re-anchors
- * the origin, so "now go to bank.example and pay this" simply works.
+ * domains with the maintained Public Suffix List, including private suffixes
+ * such as github.io, but does not track per-element data flow. An explicit owner
+ * `open()` always re-anchors the origin.
  */
 
 /**
@@ -278,20 +482,6 @@ export function isActingAction(action: string): boolean {
 }
 
 /**
- * A few two-label public suffixes, so `bbc.co.uk` and `shop.com.au` resolve to
- * one registrable label rather than being read as `co.uk` / `com.au`. Not the
- * full PSL — just the suffixes common enough that getting them wrong would
- * mis-scope a real workflow.
- */
-const MULTI_LABEL_SUFFIXES = new Set([
-  "co.uk", "org.uk", "gov.uk", "ac.uk", "me.uk", "ltd.uk", "plc.uk",
-  "com.au", "net.au", "org.au", "edu.au", "gov.au",
-  "co.jp", "or.jp", "ne.jp", "go.jp",
-  "co.kr", "co.nz", "co.za", "co.in", "co.il", "co.th",
-  "com.br", "com.cn", "com.mx", "com.sg", "com.hk", "com.tr", "com.tw",
-]);
-
-/**
  * The registrable domain of a hostname — the identity a same-site check turns
  * on. Bare IPs (v4 or bracketed v6) are their own identity.
  */
@@ -299,11 +489,7 @@ export function registrableDomain(hostname: string): string {
   const host = hostname.toLowerCase().replace(/\.$/, "");
   if (host === "") return "";
   if (host.startsWith("[") || /^\d{1,3}(?:\.\d{1,3}){3}$/.test(host)) return host;
-  const labels = host.split(".").filter(Boolean);
-  if (labels.length <= 2) return labels.join(".");
-  const lastTwo = labels.slice(-2).join(".");
-  if (MULTI_LABEL_SUFFIXES.has(lastTwo)) return labels.slice(-3).join(".");
-  return lastTwo;
+  return getDomain(host, { allowPrivateDomains: true, validateHostname: true }) ?? host;
 }
 
 /** The registrable domain named by a URL, or undefined if it does not parse. */

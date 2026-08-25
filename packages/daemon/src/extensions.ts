@@ -14,6 +14,7 @@
  */
 import type { ExtensionFactory } from "@oh-my-pi/pi-coding-agent";
 import {
+  closeAllBrowserSessions as closeAllExtensionBrowserSessions,
   createGhostExtension,
   deriveMemoryIndex,
   deriveDocCatalog,
@@ -27,6 +28,11 @@ import {
 } from "@ghost/extensions";
 
 export type { RelayTransport };
+
+/** Drain the process-wide browser registry through the one package boundary. */
+export async function closeAllBrowserSessions(): Promise<void> {
+  await closeAllExtensionBrowserSessions();
+}
 
 /**
  * Ensure one discovered home uses the canonical layout. This also performs the

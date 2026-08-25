@@ -167,6 +167,7 @@ export class RelayHub implements RelayTransport {
     args: Readonly<Record<string, unknown>>,
     options: RelayRequestOptions,
   ): Promise<RelayReply> {
+    if (options.signal?.aborted) return Promise.reject(options.signal.reason);
     const socket = this.#socket;
     if (socket?.readyState !== 1) return Promise.resolve(disconnectedReply(op));
 
@@ -174,17 +175,28 @@ export class RelayHub implements RelayTransport {
     this.#nextId += 1;
     const timeoutMs = Math.max(1_000, options.timeoutMs);
 
-    return new Promise<RelayReply>((resolve) => {
+    return new Promise<RelayReply>((resolve, reject) => {
       let settled = false;
-      const settle = (reply: RelayReply): void => {
-        if (settled) return;
-        settled = true;
+      const detachAbort = (): void => options.signal?.removeEventListener("abort", onAbort);
+      const clearPending = (): void => {
         const entry = this.#pending.get(id);
         if (entry) {
           clearTimeout(entry.timer);
           this.#pending.delete(id);
         }
+        detachAbort();
+      };
+      const settle = (reply: RelayReply): void => {
+        if (settled) return;
+        settled = true;
+        clearPending();
         resolve(reply);
+      };
+      const onAbort = (): void => {
+        if (settled) return;
+        settled = true;
+        clearPending();
+        reject(options.signal?.reason);
       };
 
       // The extension times itself out first and answers with a structured
@@ -204,6 +216,7 @@ export class RelayHub implements RelayTransport {
       timer.unref?.();
 
       this.#pending.set(id, { op, settle, timer });
+      options.signal?.addEventListener("abort", onAbort, { once: true });
       try {
         socket.send(encodeServerFrame({ t: "req", id, op, args: { ...args }, timeoutMs }));
       } catch (error) {
@@ -378,9 +391,9 @@ export class RelayHub implements RelayTransport {
       case "res": {
         const entry = this.#pending.get(frame.id);
         if (!entry) {
-          // A reply to a request we already timed out. Dropping it is correct;
-          // saying so is what makes a timeout-storm diagnosable.
-          this.#logger.debug("relay answered a request that had already given up", {
+          // A reply to a request we already timed out or canceled locally.
+          // Protocol v1 cannot stop the remote work, so dropping it is correct.
+          this.#logger.debug("relay answered a request that was no longer pending", {
             id: frame.id,
           });
           return;

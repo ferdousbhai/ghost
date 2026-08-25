@@ -24,7 +24,11 @@ export interface Harness {
   readonly handlers: Map<string, AnyHandler[]>;
   toolNames(): string[];
   /** Execute a registered tool the way the runtime would. */
-  call(name: string, params?: Record<string, unknown>): Promise<AgentToolResult<any>>;
+  call(
+    name: string,
+    params?: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<AgentToolResult<any>>;
   /** Fire `tool_call`, returning the first blocking result, as pi does. */
   toolCall(
     toolName: string,
@@ -76,10 +80,10 @@ export async function loadExtension(
     tools,
     handlers,
     toolNames: () => [...tools.keys()],
-    async call(name, params = {}) {
+    async call(name, params = {}, signal) {
       const tool = tools.get(name);
       if (!tool) throw new Error(`Tool ${name} is not registered`);
-      return tool.execute(`call-${name}`, params, undefined, undefined, ctx);
+      return tool.execute(`call-${name}`, params, signal, undefined, ctx);
     },
     async toolCall(toolName, input = {}) {
       const event = { type: "tool_call", toolCallId: "call-1", toolName, input } as ToolCallEvent;

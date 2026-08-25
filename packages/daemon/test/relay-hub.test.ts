@@ -335,6 +335,49 @@ describe("requests", () => {
     expect(hub.status().pending).toBe(0);
   }, 10_000);
 
+  it("cancels a pending request locally and ignores its late relay reply", async () => {
+    const socket = await connectExtension();
+    let captured = 0;
+    socket.on("message", (data) => {
+      const frame = JSON.parse(data.toString()) as { t: string; id: number };
+      if (frame.t === "req") captured = frame.id;
+    });
+    const controller = new AbortController();
+    const request = hub.request("read", {}, {
+      timeoutMs: 30_000,
+      signal: controller.signal,
+    });
+    await waitFor(() => captured !== 0 && hub.status().pending === 1);
+
+    controller.abort();
+    await expect(request).rejects.toMatchObject({ name: "AbortError" });
+    expect(hub.status().pending).toBe(0);
+
+    socket.send(JSON.stringify({ t: "res", id: captured, ok: true, result: {} }));
+    await new Promise((done) => setTimeout(done, 50));
+    expect(hub.status().pending).toBe(0);
+  });
+
+  it("does not send or retain a request whose signal was already aborted", async () => {
+    let requests = 0;
+    await connectExtension({
+      onRequest: () => {
+        requests += 1;
+        return {};
+      },
+    });
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(hub.request("read", {}, {
+      timeoutMs: 30_000,
+      signal: controller.signal,
+    })).rejects.toMatchObject({ name: "AbortError" });
+    await new Promise((done) => setTimeout(done, 50));
+    expect(requests).toBe(0);
+    expect(hub.status().pending).toBe(0);
+  });
+
   it("drops an unusable frame without losing the connection", async () => {
     const socket = await connectExtension({
       onRequest: () => ({ page: { url: "https://example.com/", title: "E" } }),

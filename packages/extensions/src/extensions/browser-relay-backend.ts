@@ -8,6 +8,12 @@
  * of the whole exercise — the pages the ghost sees are the pages the owner is
  * already logged into.
  *
+ * Relay protocol v1 reports page URLs but neither the connected peer address
+ * nor a cancel operation. The session therefore validates DNS before a request
+ * and validates every returned page URL, while prompt cancellation stops local
+ * waiting. It cannot peer-pin Chromium's already-delivered request or undo an
+ * operation that the extension has begun; callers must not claim otherwise.
+ *
  * Three things shape this file.
  *
  * **The transport is injected, and it is a two-line interface.** `packages/extensions`
@@ -44,6 +50,7 @@ import {
 import {
   GhostBrowserError,
   identifiedBrowserBackendFactory,
+  withAbort,
   type BackendActionOptions,
   type BackendBackResult,
   type BackendDragInput,
@@ -140,6 +147,12 @@ export type RelayReply =
 
 export interface RelayRequestOptions {
   readonly timeoutMs: number;
+  /**
+   * The transport should cancel its pending request when it can. Relay protocol
+   * v1 has no cancel frame, so an already-delivered browser operation may still
+   * finish remotely after the caller has stopped waiting.
+   */
+  readonly signal?: AbortSignal;
 }
 
 /**
@@ -151,7 +164,7 @@ export interface RelayTransport {
   readonly connected: boolean;
   /** Who is on the other end, for messages: `Chromium 141 on ghost-tab 42`. */
   readonly peer: string | undefined;
-  /** One request, one reply. Resolves even for failures; see `RelayReply`. */
+  /** Browser replies, including failures, resolve; local caller cancellation rejects. */
   request(
     op: RelayOp,
     args: Readonly<Record<string, unknown>>,
@@ -331,7 +344,14 @@ export class RelayBrowserBackend implements GhostBrowserBackend {
       this.#tabs.clear();
       throw new GhostBrowserError("browser_unavailable", RELAY_DISCONNECTED_MESSAGE, { op });
     }
-    const reply = await this.#transport.request(op, args, { timeoutMs: options.timeoutMs });
+    const reply = await withAbort(
+      this.#transport.request(op, args, {
+        timeoutMs: options.timeoutMs,
+        ...(options.signal === undefined ? {} : { signal: options.signal }),
+      }),
+      `${op} through the browser relay`,
+      options.signal,
+    );
     if (!reply.ok) {
       // The extension telling us the tab is gone is the one failure that also
       // changes our own state: there is nothing to act on until the next `open`.
@@ -349,12 +369,12 @@ export class RelayBrowserBackend implements GhostBrowserBackend {
 
   // --------------------------------------------------------------------- actions
 
-  async current(): Promise<PageSummary | undefined> {
+  async current(options: BackendActionOptions = { timeoutMs: 5_000 }): Promise<PageSummary | undefined> {
     // Cheap and non-committal when no tab has ever been opened: do not start or
     // contact anything merely to confirm absence. Once a tab is believed to
     // exist, however, a disconnected relay is a real failure and #call reports it.
     if (this.#tabs.size === 0) return undefined;
-    const result = await this.#call("current", {}, { timeoutMs: 5_000 });
+    const result = await this.#call("current", {}, options);
     const page = result["page"];
     if (page === null || page === undefined) {
       this.#tabs.clear();
@@ -540,9 +560,9 @@ export class RelayBrowserBackend implements GhostBrowserBackend {
    * *browser* is emphatically not closed — it is the owner's, with the rest of
    * their day open in it.
    */
-  async close(): Promise<boolean> {
+  async close(options: BackendActionOptions = { timeoutMs: 10_000 }): Promise<boolean> {
     if (this.#tabs.size === 0) return false;
-    const result = await this.#call("close", {}, { timeoutMs: 10_000 });
+    const result = await this.#call("close", {}, options);
     const closed = result["closed"];
     if (typeof closed !== "boolean") malformed("close", "closed is not a boolean");
     // The `close` op shuts the *active* tab; the extension reports the tabs that

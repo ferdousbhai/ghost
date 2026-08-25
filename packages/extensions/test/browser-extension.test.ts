@@ -11,7 +11,15 @@
  * real DOM, so they are deliberately *not* covered here; the fake page returns
  * canned results for them. They are covered by the live smoke test instead.
  */
-import { access, mkdir, readdir, symlink, utimes, writeFile } from "node:fs/promises";
+import {
+  access,
+  mkdir,
+  readdir,
+  rename,
+  symlink,
+  utimes,
+  writeFile,
+} from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -43,6 +51,7 @@ import type {
   PageElementMatch,
   PageSummary,
 } from "../src/extensions/browser-backend.js";
+import { withAbort, withTimeout } from "../src/extensions/browser-backend.js";
 import {
   MAX_BROWSER_OBSERVATION_BYTES,
   MAX_BROWSER_OBSERVATION_ITEMS,
@@ -54,11 +63,16 @@ import {
   READ_PAGE_SCRIPT,
   REF_ATTRIBUTE,
 } from "../src/extensions/browser-page-scripts.js";
+import type {
+  BrowserDnsResolver,
+  BrowserPolicyClock,
+} from "../src/extensions/browser-policy.js";
 import {
   BROWSER_PROFILE_DIRNAME,
   findChromiumExecutable,
   NO_BROWSER_MESSAGE,
   playwrightBackend,
+  PlaywrightBrowserBackend,
 } from "../src/extensions/browser-playwright.js";
 import {
   browserSessionFor,
@@ -67,6 +81,7 @@ import {
   DEFAULT_ACTION_TIMEOUT_MS,
   DEFAULT_ACTING_BUDGET,
   DEFAULT_IDLE_TIMEOUT_MS,
+  GhostBrowserSession,
   MAX_BROWSER_MATCH_HREF_CHARS,
   MAX_BROWSER_MATCH_TEXT_CHARS,
   MAX_FIND_QUERY_CHARS,
@@ -97,6 +112,9 @@ vi.mock("playwright-core", () => ({
 }));
 
 const FAKE_CHROMIUM = "/nonexistent/fake-chromium";
+const PUBLIC_RESOLVER: BrowserDnsResolver = async () => [
+  { address: "93.184.216.34", family: 4 },
+];
 
 interface FakeCall {
   readonly name: string;
@@ -105,10 +123,12 @@ interface FakeCall {
 
 class FakePage {
   calls: FakeCall[] = [];
+  readonly listeners = new Map<string, ((value: unknown) => void)[]>();
   titles: Record<string, string> = {};
   findResults: PageElementMatch[] = [];
   pageText = "";
   javascriptResult: unknown = "js-result";
+  evaluateBarrier: Promise<void> | undefined;
   /** Selectors that should behave as if nothing matched. */
   missingSelectors = new Set<string>();
   /** Clicking these navigates, the way a link does. */
@@ -116,6 +136,8 @@ class FakePage {
   screenshots: Array<{ type?: string; timeout?: number; fullPage?: boolean }> = [];
   screenshotContents = Buffer.from("not really a png", "utf8");
   ignoreFindLimit = false;
+  closed = false;
+  beforeRequest: ((url: string) => Promise<void>) | undefined;
 
   #url = "about:blank";
   #history: string[] = [];
@@ -130,6 +152,7 @@ class FakePage {
 
   async goto(url: string, options: unknown): Promise<null> {
     this.calls.push({ name: "goto", args: [url, options] });
+    await this.beforeRequest?.(url);
     this.#history.push(this.#url);
     this.#url = url;
     return null;
@@ -181,8 +204,14 @@ class FakePage {
     this.calls.push({ name: "bringToFront", args: [] });
   }
 
-  on(): void {
-    // The backend attaches console/network listeners; the fake ignores them.
+  on(event: string, handler: (value: unknown) => void): void {
+    const handlers = this.listeners.get(event) ?? [];
+    handlers.push(handler);
+    this.listeners.set(event, handlers);
+  }
+
+  emit(event: string, value: unknown): void {
+    for (const handler of this.listeners.get(event) ?? []) handler(value);
   }
 
   /**
@@ -194,6 +223,7 @@ class FakePage {
    */
   async evaluate(script: string): Promise<unknown> {
     this.calls.push({ name: "evaluate", args: [script] });
+    await this.evaluateBarrier;
     if (script === callScript(READ_PAGE_SCRIPT)) {
       // Untruncated on purpose: the budget belongs to the session layer.
       return { title: this.titles[this.#url] ?? "", url: this.#url, text: this.pageText };
@@ -215,6 +245,7 @@ class FakePage {
     }
     const destination = this.navigateOnClick.get(selector);
     if (destination !== undefined) {
+      await this.beforeRequest?.(destination);
       this.#history.push(this.#url);
       this.#url = destination;
     }
@@ -242,12 +273,27 @@ class FakePage {
     this.screenshots.push(options);
     return this.screenshotContents;
   }
+
+  async close(): Promise<void> {
+    this.closed = true;
+    this.calls.push({ name: "close", args: [] });
+  }
 }
 
 class FakeContext {
   closed = false;
   readonly page = new FakePage();
   readonly listeners = new Map<string, ((...args: unknown[]) => void)[]>();
+  routeHandler: ((route: FakeRoute, request: FakeRequest) => Promise<void>) | undefined;
+
+  constructor() {
+    this.page.beforeRequest = async (url) => {
+      if (!this.routeHandler) return;
+      const route = new FakeRoute();
+      await this.routeHandler(route, new FakeRequest(url, this.page));
+      if (route.aborted) throw new Error(`net::ERR_BLOCKED_BY_CLIENT at ${url}`);
+    };
+  }
 
   pages(): FakePage[] {
     return [this.page];
@@ -267,8 +313,105 @@ class FakeContext {
     this.listeners.set(event, existing);
   }
 
+  async route(
+    _pattern: string,
+    handler: (route: FakeRoute, request: FakeRequest) => Promise<void>,
+  ): Promise<void> {
+    this.routeHandler = handler;
+  }
+
   setDefaultTimeout(): void {}
   setDefaultNavigationTimeout(): void {}
+}
+
+class FakeRoute {
+  aborted = false;
+
+  async continue(): Promise<void> {}
+
+  async abort(): Promise<void> {
+    this.aborted = true;
+  }
+}
+
+class FakeRequest {
+  constructor(
+    readonly targetUrl: string,
+    readonly page: FakePage,
+  ) {}
+
+  url(): string {
+    return this.targetUrl;
+  }
+
+  frame(): { page: () => FakePage } {
+    return { page: () => this.page };
+  }
+
+  method(): string {
+    return "GET";
+  }
+
+  resourceType(): string {
+    return "document";
+  }
+}
+
+class FakeResponse {
+  constructor(
+    readonly requestValue: FakeRequest,
+    readonly peer: string | null,
+  ) {}
+
+  url(): string {
+    return this.requestValue.url();
+  }
+
+  status(): number {
+    return 200;
+  }
+
+  request(): FakeRequest {
+    return this.requestValue;
+  }
+
+  async serverAddr(): Promise<{ ipAddress: string; port: number } | null> {
+    return this.peer === null ? null : { ipAddress: this.peer, port: 443 };
+  }
+}
+
+class ManualBrowserClock implements BrowserPolicyClock {
+  #nextId = 1;
+  readonly #callbacks = new Map<number, () => void>();
+
+  setTimeout(callback: () => void): ReturnType<typeof setTimeout> {
+    const id = this.#nextId;
+    this.#nextId += 1;
+    this.#callbacks.set(id, callback);
+    return {
+      __manualBrowserClockId: id,
+      unref: () => undefined,
+    } as unknown as ReturnType<typeof setTimeout>;
+  }
+
+  clearTimeout(timer: ReturnType<typeof setTimeout>): void {
+    const id = (timer as unknown as { __manualBrowserClockId: number }).__manualBrowserClockId;
+    this.#callbacks.delete(id);
+  }
+
+  runAll(): void {
+    const callbacks = [...this.#callbacks.values()];
+    this.#callbacks.clear();
+    for (const callback of callbacks) callback();
+  }
+}
+
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
 }
 
 let fixture: GhostFixture;
@@ -277,8 +420,12 @@ let context: FakeContext;
 function extension(overrides: Record<string, unknown> = {}) {
   return createBrowserExtension({
     backend: playwrightBackend({ executablePath: FAKE_CHROMIUM, headless: false }),
-    browser: { idleTimeoutMs: 0 },
     ...overrides,
+    browser: {
+      idleTimeoutMs: 0,
+      resolver: PUBLIC_RESOLVER,
+      ...((overrides["browser"] as Record<string, unknown> | undefined) ?? {}),
+    },
   });
 }
 
@@ -326,6 +473,8 @@ describe("registration", () => {
     };
     expect(schema.properties["action"]?.enum).toEqual([...BROWSER_ACTIONS]);
     expect(schema.properties["action"]?.type).toBe("string");
+    expect(schema.properties["allow_local"]).toBeUndefined();
+    expect(schema.properties["headless"]).toBeUndefined();
     expect(schema.required).toEqual(["action"]);
   });
 });
@@ -346,6 +495,7 @@ describe("launching", () => {
     expect(launch?.options["executablePath"]).toBe(FAKE_CHROMIUM);
     expect(launch?.options["headless"]).toBe(false);
     expect(launch?.options["chromiumSandbox"]).toBe(true);
+    expect(launch?.options["serviceWorkers"]).toBe("block");
   });
 
   it("delegates launch timeout cancellation to Playwright", async () => {
@@ -356,7 +506,7 @@ describe("launching", () => {
           headless: true,
           launchTimeoutMs: 1_234,
         }),
-        browser: { idleTimeoutMs: 0 },
+        browser: { idleTimeoutMs: 0, resolver: PUBLIC_RESOLVER },
       }),
       fixture.dir,
     );
@@ -380,7 +530,7 @@ describe("launching", () => {
           headless: true,
           launchTimeoutMs: 25,
         }),
-        browser: { idleTimeoutMs: 0 },
+        browser: { idleTimeoutMs: 0, resolver: PUBLIC_RESOLVER },
       }),
       fixture.dir,
     );
@@ -397,15 +547,19 @@ describe("launching", () => {
     shared.makeContext = () => new Promise<FakeContext>((resolve) => {
       finishLaunch = resolve;
     });
-    const harness = await browserHarness();
-    const opening = harness.call(GHOST_BROWSER, {
-      action: "open",
-      url: "https://example.com",
-    });
+    const backend = new PlaywrightBrowserBackend(
+      join(fixture.dir, BROWSER_PROFILE_DIRNAME),
+      { executablePath: FAKE_CHROMIUM, headless: false },
+      {
+        checkUrl: async (url) => url,
+        checkAddress: () => undefined,
+      },
+    );
+    const opening = backend.open("https://example.com", { timeoutMs: 30_000 });
     await vi.waitFor(() => expect(shared.launches).toHaveLength(1));
     const rejected = expect(opening).rejects.toThrowError(/closed while it was starting/i);
 
-    const closing = closeAllBrowserSessions();
+    const closing = backend.close();
     finishLaunch(context);
     await Promise.all([closing, rejected]);
     expect(context.closed).toBe(true);
@@ -418,27 +572,156 @@ describe("launching", () => {
       .toBeFalsy();
   });
 
-  it("honours headless when asked, before the browser starts", async () => {
+  it("removes persisted service-worker registrations before Chromium starts", async () => {
+    const stateDir = join(
+      fixture.dir,
+      BROWSER_PROFILE_DIRNAME,
+      "Default",
+      "Service Worker",
+    );
+    const registration = join(stateDir, "Database", "registration");
+    await mkdir(join(stateDir, "Database"), { recursive: true });
+    await writeFile(registration, "persisted controller");
+
+    const harness = await browserHarness();
+    await harness.call(GHOST_BROWSER, { action: "open", url: "https://example.com" });
+
+    await expect(access(registration)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(shared.launches).toHaveLength(1);
+  });
+
+  it("fails closed instead of following a service-worker state symlink", async () => {
+    const profile = join(fixture.dir, BROWSER_PROFILE_DIRNAME);
+    const defaultProfile = join(profile, "Default");
+    const outside = join(fixture.dir, "outside-service-worker");
+    const marker = join(outside, "registration");
+    await mkdir(defaultProfile, { recursive: true });
+    await mkdir(outside);
+    await writeFile(marker, "must survive");
+    await symlink(outside, join(defaultProfile, "Service Worker"));
+
+    const harness = await browserHarness();
+    const error = await expectGhostError(
+      harness.call(GHOST_BROWSER, { action: "open", url: "https://example.com" }),
+    );
+
+    expect(error.details["failure"]).toBe("browser_unavailable");
+    await expect(access(marker)).resolves.toBeFalsy();
+    expect(shared.launches).toHaveLength(0);
+  });
+
+  it.each(["root", "profile", "state"] as const)(
+    "pins every directory while clearing service-worker state (%s swap)",
+    async (swapLevel) => {
+      const profile = join(fixture.dir, BROWSER_PROFILE_DIRNAME);
+      const defaultProfile = join(profile, "Default");
+      const stateDir = join(defaultProfile, "Service Worker");
+      const ownedMarker = join(stateDir, "Database", "registration");
+      await mkdir(join(stateDir, "Database"), { recursive: true });
+      await writeFile(ownedMarker, "owned persisted controller");
+
+      const target = swapLevel === "root"
+        ? profile
+        : swapLevel === "profile"
+        ? defaultProfile
+        : stateDir;
+      const markerSuffix = swapLevel === "root"
+        ? join("Default", "Service Worker", "Database", "registration")
+        : swapLevel === "profile"
+        ? join("Service Worker", "Database", "registration")
+        : join("Database", "registration");
+      const outside = join(fixture.dir, `outside-${swapLevel}`);
+      const outsideMarker = join(outside, markerSuffix);
+      await mkdir(join(outsideMarker, ".."), { recursive: true });
+      await writeFile(outsideMarker, "outside sentinel");
+
+      const moved = `${target}-owned`;
+      const movedMarker = join(moved, markerSuffix);
+      let swapped = false;
+      const swap = async () => {
+        if (swapped) return;
+        swapped = true;
+        await rename(target, moved);
+        await symlink(outside, target);
+      };
+      const backend = new PlaywrightBrowserBackend(
+        profile,
+        { executablePath: FAKE_CHROMIUM, headless: true },
+        {
+          checkUrl: async (url) => url,
+          checkAddress: () => undefined,
+          profilePurgeHooks: {
+            ...(swapLevel === "root" ? { afterRootOpened: swap } : {}),
+            ...(swapLevel === "profile" ? { afterProfileOpened: swap } : {}),
+            ...(swapLevel === "state" ? { afterStateOpened: swap } : {}),
+          },
+        },
+      );
+
+      const error = await expectGhostError(
+        backend.open("https://example.com", { timeoutMs: 30_000 }),
+      );
+
+      expect(error.details["failure"]).toBe("browser_unavailable");
+      await expect(access(outsideMarker)).resolves.toBeFalsy();
+      await expect(access(movedMarker)).rejects.toMatchObject({ code: "ENOENT" });
+      expect(shared.launches).toHaveLength(0);
+    },
+  );
+
+  it("reports a profile-root file through the typed browser boundary", async () => {
+    const profile = join(fixture.dir, BROWSER_PROFILE_DIRNAME);
+    await writeFile(profile, "not a directory");
+
+    const error = await expectGhostError(
+      browserHarness().then((harness) =>
+        harness.call(GHOST_BROWSER, { action: "open", url: "https://example.com" })
+      ),
+    );
+
+    expect(error.details["failure"]).toBe("browser_unavailable");
+    expect(shared.launches).toHaveLength(0);
+  });
+
+  it("reports a profile-root symlink through the typed browser boundary", async () => {
+    const profile = join(fixture.dir, BROWSER_PROFILE_DIRNAME);
+    const outside = join(fixture.dir, "outside-profile-root");
+    await mkdir(outside);
+    await symlink(outside, profile);
+
+    const error = await expectGhostError(
+      browserHarness().then((harness) =>
+        harness.call(GHOST_BROWSER, { action: "open", url: "https://example.com" })
+      ),
+    );
+
+    expect(error.details["failure"]).toBe("browser_unavailable");
+    expect(shared.launches).toHaveLength(0);
+  });
+
+  it("reports a non-directory Chromium profile through the typed browser boundary", async () => {
+    const profile = join(fixture.dir, BROWSER_PROFILE_DIRNAME);
+    await mkdir(profile);
+    await writeFile(join(profile, "Default"), "not a directory");
+
+    const error = await expectGhostError(
+      browserHarness().then((harness) =>
+        harness.call(GHOST_BROWSER, { action: "open", url: "https://example.com" })
+      ),
+    );
+
+    expect(error.details["failure"]).toBe("browser_unavailable");
+    expect(shared.launches).toHaveLength(0);
+  });
+
+  it("keeps headless mode in creator configuration, outside model arguments", async () => {
     const harness = await browserHarness();
     await harness.call(GHOST_BROWSER, {
       action: "open",
       url: "https://example.com",
       headless: true,
     });
-    expect(shared.launches[0]?.options["headless"]).toBe(true);
-  });
-
-  it("says so when headless arrives too late to apply", async () => {
-    const harness = await browserHarness();
-    await harness.call(GHOST_BROWSER, { action: "open", url: "https://example.com" });
-    const text = resultText(
-      await harness.call(GHOST_BROWSER, {
-        action: "open",
-        url: "https://example.org",
-        headless: true,
-      }),
-    );
-    expect(text).toMatch(/applies the next time the browser starts/i);
+    expect(shared.launches[0]?.options["headless"]).toBe(false);
   });
 });
 
@@ -455,18 +738,27 @@ describe("url policy through the tool", () => {
     expect(shared.launches).toHaveLength(0);
   });
 
-  it("refuses localhost by default and allows it on request", async () => {
+  it("refuses localhost by default and allows only creator configuration to widen it", async () => {
     const harness = await browserHarness();
     const error = await expectGhostError(
-      harness.call(GHOST_BROWSER, { action: "open", url: "http://127.0.0.1:8787/admin" }),
-    );
-    expect(error.details["failure"]).toBe("blocked_url");
-
-    const text = resultText(
-      await harness.call(GHOST_BROWSER, {
+      harness.call(GHOST_BROWSER, {
         action: "open",
         url: "http://127.0.0.1:8787/admin",
         allow_local: true,
+      }),
+    );
+    expect(error.details["failure"]).toBe("blocked_url");
+
+    await closeAllBrowserSessions();
+    context = new FakeContext();
+    shared.makeContext = () => context;
+    const localHarness = await browserHarness({
+      browser: { idleTimeoutMs: 0, allowLocal: true },
+    });
+    const text = resultText(
+      await localHarness.call(GHOST_BROWSER, {
+        action: "open",
+        url: "http://127.0.0.1:8787/admin",
       }),
     );
     expect(text).toContain("http://127.0.0.1:8787/admin");
@@ -476,6 +768,50 @@ describe("url policy through the tool", () => {
     const harness = await browserHarness();
     const error = await expectGhostError(harness.call(GHOST_BROWSER, { action: "open" }));
     expect(error.code).toBe("invalid_format");
+  });
+
+  it("rechecks DNS at the request boundary and blocks a rebinding answer", async () => {
+    let lookups = 0;
+    const harness = await browserHarness({
+      browser: {
+        idleTimeoutMs: 0,
+        resolver: async () => {
+          lookups += 1;
+          return [{
+            address: lookups === 1 ? "93.184.216.34" : "127.0.0.1",
+            family: 4,
+          }];
+        },
+      },
+    });
+    const error = await expectGhostError(
+      harness.call(GHOST_BROWSER, { action: "open", url: "https://rebind.example" }),
+    );
+    expect(error.details["failure"]).toBe("blocked_url");
+    expect(lookups).toBe(2);
+    expect(context.page.url()).toBe("about:blank");
+  });
+
+  it("checks a page-driven redirect before allowing the request", async () => {
+    const harness = await openWithMatches();
+    context.page.navigateOnClick.set("a.next", "http://127.0.0.1/admin");
+    const error = await expectGhostError(
+      harness.call(GHOST_BROWSER, { action: "click", selector: "a.next" }),
+    );
+    expect(error.details["failure"]).toBe("blocked_url");
+    expect(context.page.url()).toBe("https://example.com/");
+  });
+
+  it("closes and refuses a page when Chromium reports a private connected peer", async () => {
+    const harness = await browserHarness();
+    await harness.call(GHOST_BROWSER, { action: "open", url: "https://example.com" });
+    context.page.emit(
+      "response",
+      new FakeResponse(new FakeRequest("https://example.com/redirect", context.page), "127.0.0.1"),
+    );
+    await vi.waitFor(() => expect(context.page.closed).toBe(true));
+    const error = await expectGhostError(harness.call(GHOST_BROWSER, { action: "read" }));
+    expect(error.details["failure"]).toBe("blocked_url");
   });
 });
 
@@ -875,7 +1211,7 @@ describe("prompt-injection guardrail", () => {
     const harness = await loadExtension(
       createBrowserExtension({
         backend: playwrightBackend({ executablePath: FAKE_CHROMIUM, headless: false }),
-        browser: { idleTimeoutMs: 0, actingBudget: 2 },
+        browser: { idleTimeoutMs: 0, actingBudget: 2, resolver: PUBLIC_RESOLVER },
       }),
       fixture.dir,
     );
@@ -1154,7 +1490,10 @@ describe("console, network, and tabs (recording backend)", () => {
   async function recordingHarness() {
     backend = new RecordingBackend();
     return loadExtension(
-      createBrowserExtension({ backend: () => backend, browser: { idleTimeoutMs: 0 } }),
+      createBrowserExtension({
+        backend: () => backend,
+        browser: { idleTimeoutMs: 0, resolver: PUBLIC_RESOLVER },
+      }),
       fixture.dir,
     );
   }
@@ -1417,6 +1756,31 @@ describe("screenshot returns a real image to a vision model", () => {
 // -------------------------------------------------------------------- timeouts
 
 describe("timeouts", () => {
+  it("observes late work failures when cancellation was already signalled", async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    let rejectAbortWork!: (error: Error) => void;
+    const abortWork = new Promise<never>((_resolve, reject) => {
+      rejectAbortWork = reject;
+    });
+    await expect(withAbort(abortWork, "reading the page", controller.signal))
+      .rejects.toMatchObject({ details: { reason: "aborted" } });
+    rejectAbortWork(new Error("late abort work failure"));
+
+    let rejectTimedWork!: (error: Error) => void;
+    const timedWork = new Promise<never>((_resolve, reject) => {
+      rejectTimedWork = reject;
+    });
+    await expect(withTimeout(timedWork, 5_000, "reading the page", controller.signal))
+      .rejects.toMatchObject({ details: { reason: "aborted" } });
+    rejectTimedWork(new Error("late timed work failure"));
+
+    // Vitest reports either rejection as unhandled if the helper did not attach
+    // an observer before taking its pre-aborted path.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+
   it("passes the per-call timeout down to every action", async () => {
     const harness = await browserHarness();
     await harness.call(GHOST_BROWSER, {
@@ -1442,11 +1806,26 @@ describe("timeouts", () => {
     expect((goto.args[1] as { timeout: number }).timeout).toBeGreaterThan(0);
   });
 
+  it("propagates turn cancellation and terminates non-cancellable page work", async () => {
+    const harness = await browserHarness();
+    await harness.call(GHOST_BROWSER, { action: "open", url: "https://example.com" });
+    context.page.evaluateBarrier = new Promise(() => undefined);
+    const controller = new AbortController();
+    const reading = harness.call(GHOST_BROWSER, { action: "read" }, controller.signal);
+    await vi.waitFor(() => {
+      expect(context.page.calls.some((call) => call.name === "evaluate")).toBe(true);
+    });
+    controller.abort();
+    const error = await expectGhostError(reading);
+    expect(error.details["reason"]).toBe("aborted");
+    await vi.waitFor(() => expect(context.page.closed).toBe(true));
+  });
+
   it("shuts the browser down once it has been idle", async () => {
     const harness = await loadExtension(
       createBrowserExtension({
         backend: playwrightBackend({ executablePath: FAKE_CHROMIUM, headless: true }),
-        browser: { idleTimeoutMs: 20 },
+        browser: { idleTimeoutMs: 20, resolver: PUBLIC_RESOLVER },
       }),
       fixture.dir,
     );
@@ -1505,6 +1884,8 @@ class RecordingBackend implements GhostBrowserBackend {
   networkEntries: NetworkEntry[] = [];
   javascriptResult: BackendJavascriptResult = { value: "ran", type: "string" };
   screenshotBytes = Buffer.from("not really a png", "utf8");
+  readBarrier: Promise<void> | undefined;
+  closeBarrier: Promise<void> | undefined;
   #url: string | undefined;
 
   setHeadless(headless: boolean): { applied: boolean } {
@@ -1525,6 +1906,7 @@ class RecordingBackend implements GhostBrowserBackend {
 
   async read(options: BackendActionOptions): Promise<BackendReadResult> {
     this.calls.push({ name: "read", args: [options] });
+    await this.readBarrier;
     return { url: this.#url ?? "", title: "recorded", text: this.pageText };
   }
 
@@ -1626,6 +2008,7 @@ class RecordingBackend implements GhostBrowserBackend {
 
   async close(): Promise<boolean> {
     this.calls.push({ name: "close", args: [] });
+    await this.closeBarrier;
     const wasRunning = this.running;
     this.running = false;
     this.#url = undefined;
@@ -1633,13 +2016,83 @@ class RecordingBackend implements GhostBrowserBackend {
   }
 }
 
+describe("serialized browser lifecycle", () => {
+  it("does not idle-close during an admitted action and rearms only after it settles", async () => {
+    const backend = new RecordingBackend();
+    const clock = new ManualBrowserClock();
+    const blocked = deferred();
+    backend.readBarrier = blocked.promise;
+    const session = new GhostBrowserSession({
+      homeDir: fixture.dir,
+      backend: () => backend,
+      idleTimeoutMs: 25,
+      resolver: PUBLIC_RESOLVER,
+      clock,
+    });
+    await session.open("https://example.com");
+
+    const reading = session.read();
+    await vi.waitFor(() => expect(backend.calls.some((call) => call.name === "read")).toBe(true));
+    clock.runAll();
+    expect(backend.calls.some((call) => call.name === "close")).toBe(false);
+
+    blocked.resolve();
+    await reading;
+    clock.runAll();
+    await vi.waitFor(() => expect(backend.calls.some((call) => call.name === "close")).toBe(true));
+  });
+
+  it("cancels an in-flight action before the queued close begins", async () => {
+    const backend = new RecordingBackend();
+    const blocked = deferred();
+    backend.readBarrier = blocked.promise;
+    const session = new GhostBrowserSession({
+      homeDir: fixture.dir,
+      backend: () => backend,
+      idleTimeoutMs: 0,
+      resolver: PUBLIC_RESOLVER,
+    });
+    await session.open("https://example.com");
+    const reading = session.read();
+    await vi.waitFor(() => expect(backend.calls.some((call) => call.name === "read")).toBe(true));
+    const closing = session.close();
+    await Promise.resolve();
+    expect(backend.calls.some((call) => call.name === "close")).toBe(false);
+    blocked.resolve();
+    const readError = await expectGhostError(reading);
+    expect(readError.details["reason"]).toBe("aborted");
+    await closing;
+    expect(backend.calls.findLast((call) => call.name === "close")).toBeDefined();
+  });
+
+  it("bounds close even when a backend never acknowledges it", async () => {
+    const backend = new RecordingBackend();
+    const blocked = deferred();
+    backend.closeBarrier = blocked.promise;
+    const session = new GhostBrowserSession({
+      homeDir: fixture.dir,
+      backend: () => backend,
+      idleTimeoutMs: 0,
+      closeTimeoutMs: 10,
+      resolver: PUBLIC_RESOLVER,
+    });
+    await session.open("https://example.com");
+    const error = await expectGhostError(session.close());
+    expect(error.details["failure"]).toBe("timeout");
+    blocked.resolve();
+  });
+});
+
 describe("the backend is a choice, and policy sits above it", () => {
   let backend: RecordingBackend;
 
   async function recordingHarness() {
     backend = new RecordingBackend();
     return loadExtension(
-      createBrowserExtension({ backend: () => backend, browser: { idleTimeoutMs: 0 } }),
+      createBrowserExtension({
+        backend: () => backend,
+        browser: { idleTimeoutMs: 0, resolver: PUBLIC_RESOLVER },
+      }),
       fixture.dir,
     );
   }
@@ -1793,9 +2246,40 @@ describe("the process-wide browser session registry", () => {
     }
   });
 
+  it("holds one closeAll barrier and refuses replacement sessions until teardown settles", async () => {
+    const backend = new RecordingBackend();
+    const blocked = deferred();
+    backend.closeBarrier = blocked.promise;
+    const factory = () => backend;
+    const session = browserSessionFor(fixture.dir, {
+      backend: factory,
+      idleTimeoutMs: 0,
+      resolver: PUBLIC_RESOLVER,
+    });
+    await session.open("https://example.com");
+    const first = closeAllBrowserSessions();
+    const second = closeAllBrowserSessions();
+    await vi.waitFor(() => expect(backend.calls.some((call) => call.name === "close")).toBe(true));
+    expect(() => browserSessionFor(fixture.dir, {
+      backend: factory,
+      idleTimeoutMs: 0,
+      resolver: PUBLIC_RESOLVER,
+    })).toThrowError(/shutdown is still in progress/i);
+    blocked.resolve();
+    await Promise.all([first, second]);
+    expect(browserSessionFor(fixture.dir, {
+      backend: factory,
+      idleTimeoutMs: 0,
+      resolver: PUBLIC_RESOLVER,
+    })).not.toBe(session);
+  });
+
   it.each([
     ["idleTimeoutMs", { idleTimeoutMs: DEFAULT_IDLE_TIMEOUT_MS + 1 }],
     ["actionTimeoutMs", { actionTimeoutMs: DEFAULT_ACTION_TIMEOUT_MS + 1 }],
+    ["allowLocal", { allowLocal: true }],
+    ["dnsTimeoutMs", { dnsTimeoutMs: 123 }],
+    ["closeTimeoutMs", { closeTimeoutMs: 456 }],
     ["actingBudget", { actingBudget: DEFAULT_ACTING_BUDGET + 1 }],
     ["allowActionsOffOrigin", { allowActionsOffOrigin: true }],
   ] as const)("throws rather than discarding a changed %s", (name, changed) => {

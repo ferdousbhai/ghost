@@ -13,7 +13,8 @@
  * URL policy, ref bookkeeping and invalidation, read truncation, the idle timer,
  * serialization of parallel tool calls, the tool schema itself — lives above it
  * in `browser-session.ts`, once, for both. A backend gets asked to do one small
- * thing at a time and is trusted with none of the policy.
+ * thing at a time; the session also supplies its URL/peer checks to backends that
+ * can enforce them at the network boundary.
  *
  * The rule for adding to this interface: if a relay into someone's real browser
  * could not honestly implement it, it does not belong here.
@@ -108,6 +109,7 @@ export interface BackendTarget {
 
 export interface BackendActionOptions {
   readonly timeoutMs: number;
+  readonly signal?: AbortSignal;
 }
 
 export interface BackendTypeInput extends BackendTarget {
@@ -250,9 +252,9 @@ export interface GhostBrowserBackend {
    * includes "not started yet" and "sitting on a blank page". Must be cheap and
    * must not start a browser just to answer.
    */
-  current(): Promise<PageSummary | undefined>;
+  current(options?: BackendActionOptions): Promise<PageSummary | undefined>;
 
-  /** Navigate. The URL has already passed the policy check. */
+  /** Navigate. The URL has passed session policy; capable backends recheck at request time. */
   open(url: string, options: BackendActionOptions): Promise<PageSummary>;
 
   /** The page's readable text, untruncated. */
@@ -314,12 +316,20 @@ export interface GhostBrowserBackend {
   tabs(input: BackendTabsInput, options: BackendActionOptions): Promise<BackendTabsResult>;
 
   /** Shut down. Returns false when there was nothing running. */
-  close(): Promise<boolean>;
+  close(options?: BackendActionOptions): Promise<boolean>;
 }
 
 export interface BrowserBackendContext {
   /** The ghost home. A backend that needs per-ghost state puts it under here. */
   readonly homeDir: string;
+  /**
+   * Session-owned network policy. Playwright uses this on every request; other
+   * backends still have their requested and returned URLs checked by the
+   * session layer.
+   */
+  readonly checkUrl: (url: string, options?: BackendActionOptions) => Promise<string>;
+  /** Verify an actual connected peer when a backend can observe it. */
+  readonly checkAddress: (address: string, url: string) => void;
 }
 
 /**
@@ -363,21 +373,63 @@ export function timeoutError(action: string, timeoutMs: number): GhostBrowserErr
   );
 }
 
+export function browserAbortError(action: string): GhostError {
+  return new GhostError(
+    "not_found",
+    `The browser stopped ${action} because the turn was cancelled.`,
+    { action, reason: "aborted" },
+  );
+}
+
+/** Reject promptly when an operation is cancelled, even across an injected seam. */
+export async function withAbort<T>(
+  work: Promise<T>,
+  action: string,
+  signal?: AbortSignal,
+): Promise<T> {
+  // The caller necessarily created `work` before entering this helper. Attach a
+  // rejection observer before checking an already-aborted signal, or a later
+  // failure from non-cancellable work becomes an unhandled rejection.
+  void work.catch(() => undefined);
+  if (!signal) return work;
+  if (signal.aborted) throw browserAbortError(action);
+  let detach: (() => void) | undefined;
+  try {
+    const aborted = new Promise<never>((_resolve, reject) => {
+      const onAbort = () => reject(browserAbortError(action));
+      signal.addEventListener("abort", onAbort, { once: true });
+      detach = () => signal.removeEventListener("abort", onAbort);
+    });
+    try {
+      return await Promise.race([work, aborted]);
+    } catch (error) {
+      if (signal.aborted) throw browserAbortError(action);
+      throw error;
+    }
+  } finally {
+    detach?.();
+  }
+}
+
 /** A wall-clock cap for work whose own timeout we do not control. */
 export async function withTimeout<T>(
   work: Promise<T>,
   timeoutMs: number,
   action: string,
+  signal?: AbortSignal,
 ): Promise<T> {
+  // See withAbort: cancellation can win before this already-created operation
+  // settles, but its eventual rejection must still be observed.
+  void work.catch(() => undefined);
   let timer: NodeJS.Timeout | undefined;
   try {
-    return await Promise.race([
+    return await withAbort(Promise.race([
       work,
       new Promise<never>((_resolve, reject) => {
         timer = setTimeout(() => reject(timeoutError(action, timeoutMs)), timeoutMs);
         timer.unref?.();
       }),
-    ]);
+    ]), action, signal);
   } finally {
     if (timer) clearTimeout(timer);
   }

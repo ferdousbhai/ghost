@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   checkActingScope,
+  checkNetworkUrl,
   checkUrl,
   isActingAction,
   isLocalHostname,
+  isPublicInternetAddress,
   registrableDomain,
+  type BrowserDnsResolver,
+  type BrowserPolicyClock,
 } from "../src/extensions/browser-policy.js";
 
 function reason(input: string, allowLocal = false): string {
@@ -131,6 +135,97 @@ describe("local and private destinations", () => {
   });
 });
 
+describe("resolved network destinations", () => {
+  const answers = (...address: string[]): BrowserDnsResolver => async () =>
+    address.map((value) => ({ address: value, family: value.includes(":") ? 6 : 4 }));
+
+  async function networkReason(input: string, resolver: BrowserDnsResolver): Promise<string> {
+    const result = await checkNetworkUrl(input, { resolver });
+    if (result.ok) throw new Error(`expected ${input} to be rejected`);
+    return result.rejection.reason;
+  }
+
+  it("accepts only globally reachable literal addresses", () => {
+    for (const address of ["8.8.8.8", "2606:4700:4700::1111", "::ffff:808:808"]) {
+      expect(isPublicInternetAddress(address)).toBe(true);
+    }
+    for (const address of [
+      "127.0.0.1",
+      "169.254.169.254",
+      "192.0.2.1",
+      "198.18.0.1",
+      "224.0.0.1",
+      "::1",
+      "fe80::1",
+      "fd00::1",
+      "2001:db8::1",
+      "4000::1",
+      "5f00::1",
+      "::ffff:7f00:1",
+      "64:ff9b::7f00:1",
+    ]) {
+      expect(isPublicInternetAddress(address)).toBe(false);
+    }
+  });
+
+  it("rejects private and mixed DNS answers, and accepts an all-public set", async () => {
+    await expect(networkReason("https://private.example", answers("10.0.0.7")))
+      .resolves.toMatch(/private or non-public/i);
+    await expect(networkReason(
+      "https://rebind.example",
+      answers("93.184.216.34", "127.0.0.1"),
+    )).resolves.toMatch(/private or non-public/i);
+    await expect(checkNetworkUrl("https://public.example", {
+      resolver: answers("93.184.216.34", "2606:4700:4700::1111"),
+    })).resolves.toMatchObject({ ok: true, url: "https://public.example/" });
+  });
+
+  it("rejects empty or malformed resolver answers without consulting the network", async () => {
+    await expect(networkReason("https://empty.example", answers()))
+      .resolves.toMatch(/no addresses/i);
+    await expect(networkReason("https://bad.example", answers("not-an-ip")))
+      .resolves.toMatch(/private or non-public/i);
+  });
+
+  it("uses injected resolver and clock seams for a bounded DNS wait", async () => {
+    let fireDeadline: (() => void) | undefined;
+    const clock: BrowserPolicyClock = {
+      setTimeout(callback) {
+        fireDeadline = callback;
+        return { unref: () => undefined } as unknown as ReturnType<typeof setTimeout>;
+      },
+      clearTimeout: () => undefined,
+    };
+    const never: BrowserDnsResolver = async () => new Promise(() => undefined);
+    const pending = checkNetworkUrl("https://slow.example", {
+      resolver: never,
+      timeoutMs: 17,
+      clock,
+    });
+    fireDeadline?.();
+    const result = await pending;
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected DNS timeout rejection");
+    expect(result.rejection.reason).toMatch(/timed out after 17ms/i);
+  });
+
+  it("propagates cancellation to the resolver and rejects promptly", async () => {
+    const controller = new AbortController();
+    let seenSignal: AbortSignal | undefined;
+    const resolver: BrowserDnsResolver = async (_hostname, options) => {
+      seenSignal = options?.signal;
+      return new Promise(() => undefined);
+    };
+    const pending = checkNetworkUrl("https://slow.example", {
+      resolver,
+      signal: controller.signal,
+    });
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    expect(seenSignal).toBe(controller.signal);
+  });
+});
+
 describe("registrable domain", () => {
   it("keeps the last two labels for ordinary hosts", () => {
     expect(registrableDomain("example.com")).toBe("example.com");
@@ -138,9 +233,18 @@ describe("registrable domain", () => {
     expect(registrableDomain("app.eu.example.com")).toBe("example.com");
   });
 
-  it("keeps three labels under a known two-label suffix", () => {
+  it("follows Public Suffix List wildcard and exception rules", () => {
     expect(registrableDomain("www.bbc.co.uk")).toBe("bbc.co.uk");
     expect(registrableDomain("shop.myshop.com.au")).toBe("myshop.com.au");
+    expect(registrableDomain("a.www.ck")).toBe("www.ck");
+    expect(registrableDomain("foo.city.kawasaki.jp")).toBe("city.kawasaki.jp");
+  });
+
+  it("treats private suffix tenants as separate sites", () => {
+    expect(registrableDomain("foo.github.io")).toBe("foo.github.io");
+    expect(registrableDomain("bar.github.io")).toBe("bar.github.io");
+    expect(registrableDomain("a.appspot.com")).toBe("a.appspot.com");
+    expect(registrableDomain("b.appspot.com")).toBe("b.appspot.com");
   });
 
   it("treats a bare IP as its own identity", () => {

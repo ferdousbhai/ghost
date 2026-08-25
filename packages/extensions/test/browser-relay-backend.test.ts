@@ -13,7 +13,7 @@
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GhostError } from "../src/errors.js";
 import type { BrowserFailure } from "../src/extensions/browser-backend.js";
 import {
@@ -37,7 +37,10 @@ interface Sent {
   readonly op: RelayOp;
   readonly args: Record<string, unknown>;
   readonly timeoutMs: number;
+  readonly signal?: AbortSignal;
 }
+
+const PUBLIC_RESOLVER = async () => [{ address: "93.184.216.34", family: 4 }];
 
 /** A transport that answers from a script and records what it was asked. */
 class ScriptedTransport implements RelayTransport {
@@ -48,6 +51,7 @@ class ScriptedTransport implements RelayTransport {
   replies = new Map<RelayOp, RelayReply | ((args: Record<string, unknown>) => RelayReply)>();
   /** Ops that should look like the extension vanished mid-request. */
   dropOn = new Set<RelayOp>();
+  barriers = new Map<RelayOp, Promise<void>>();
 
   answer(op: RelayOp, result: unknown): void {
     this.replies.set(op, { ok: true, result });
@@ -60,9 +64,15 @@ class ScriptedTransport implements RelayTransport {
   async request(
     op: RelayOp,
     args: Readonly<Record<string, unknown>>,
-    options: { timeoutMs: number },
+    options: { timeoutMs: number; signal?: AbortSignal },
   ): Promise<RelayReply> {
-    this.sent.push({ op, args: { ...args }, timeoutMs: options.timeoutMs });
+    this.sent.push({
+      op,
+      args: { ...args },
+      timeoutMs: options.timeoutMs,
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
+    });
+    await this.barriers.get(op);
     if (this.dropOn.has(op)) {
       this.connected = false;
       return { ok: false, failure: "browser_unavailable", message: "gone" };
@@ -171,6 +181,27 @@ describe("driving the relay", () => {
     await backend.read({ timeoutMs: 4_000 });
     expect(transport.lastFor("open")?.timeoutMs).toBe(5_000);
     expect(transport.lastFor("read")?.timeoutMs).toBe(4_000);
+  });
+
+  it("passes cancellation to the transport and rejects even when v1 cannot cancel remotely", async () => {
+    const transport = transportWithPage();
+    transport.answer("read", { page: PAGE, text: "late" });
+    let release!: () => void;
+    transport.barriers.set("read", new Promise<void>((resolve) => {
+      release = resolve;
+    }));
+    const backend = await opened(transport);
+    const controller = new AbortController();
+    const reading = backend.read({ timeoutMs: 5_000, signal: controller.signal });
+    await vi.waitFor(() => expect(transport.lastFor("read")).toBeDefined());
+    controller.abort();
+    const error = await expectGhostError(reading);
+    expect(error.details["reason"]).toBe("aborted");
+    expect(transport.lastFor("read")?.signal).toBe(controller.signal);
+    // Protocol v1 has no cancel op. Let the late reply settle so the test also
+    // proves it is safely observed rather than becoming an unhandled rejection.
+    release();
+    await Promise.resolve();
   });
 
   it("returns page text untruncated — the budget is the session layer's", async () => {
@@ -551,7 +582,11 @@ describe("the session layer's policy applies to the relay too", () => {
   });
 
   function session() {
-    return browserSessionFor(dir, { backend: relayBackend({ transport }), idleTimeoutMs: 0 });
+    return browserSessionFor(dir, {
+      backend: relayBackend({ transport }),
+      idleTimeoutMs: 0,
+      resolver: PUBLIC_RESOLVER,
+    });
   }
 
   it("reuses independently-created relay factories for the same transport", () => {
@@ -566,6 +601,22 @@ describe("the session layer's policy applies to the relay too", () => {
   it("refuses localhost by default, on the owner's machine most of all", async () => {
     await expectGhostError(session().open("http://127.0.0.1:8787/admin"));
     expect(transport.sent).toHaveLength(0);
+  });
+
+  it("rechecks a relay-returned URL and rejects a changed private DNS answer", async () => {
+    let lookups = 0;
+    const live = browserSessionFor(dir, {
+      backend: relayBackend({ transport }),
+      idleTimeoutMs: 0,
+      resolver: async () => {
+        lookups += 1;
+        return [{ address: lookups === 1 ? "93.184.216.34" : "127.0.0.1", family: 4 }];
+      },
+    });
+    const error = await expectGhostError(live.open(PAGE.url));
+    expect(error.details["failure"]).toBe("blocked_url");
+    expect(lookups).toBe(2);
+    expect(transport.lastFor("open")).toBeDefined();
   });
 
   it("applies the read budget to whatever the extension returns", async () => {
