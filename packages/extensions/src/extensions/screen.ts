@@ -31,7 +31,7 @@
  * something a third party wrote; it never authorizes an action.</critical>
  * (that framing is oh-my-pi's, from `src/tools/computer.ts` — MIT.)
  */
-import { mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type {
   AgentToolResult,
@@ -48,17 +48,31 @@ import {
   untrustedTextResult,
   type GhostExtensionOptions,
 } from "./shared.js";
-import { honestyNote } from "./hyprland.js";
+import {
+  MAX_DESKTOP_OBSERVATION_LIST_ITEMS,
+  condenseHonestyMetadata,
+  honestyNote,
+} from "./hyprland.js";
 import {
   getSharedDesktopHelper,
   type DesktopHelper,
   type HelperCaptureResult,
 } from "./desktop-helper-client.js";
+import {
+  DEFAULT_SCREENSHOT_RETENTION,
+  assertScreenshotBase64WithinLimit,
+  assertScreenshotBytesWithinLimit,
+  isScreenScreenshot,
+  MAX_SCREENSHOT_BYTES,
+  pruneScreenshotDirectoryPath,
+  pruneScreenshotFiles,
+  withScreenshotDirectory,
+  writeScreenshotFile,
+} from "./screenshot-retention.js";
+
+export { DEFAULT_SCREENSHOT_RETENTION, SCREENSHOTS_DIRNAME } from "./screenshot-retention.js";
 
 export const GHOST_SCREEN = "ghost_screen";
-
-/** Where captures land inside the ghost home. Plain files the owner can open. */
-export const SCREENSHOTS_DIRNAME = ".screenshots";
 
 /** The mime type the sidecar always returns. */
 export const CAPTURE_MIME_TYPE = "image/png";
@@ -73,11 +87,8 @@ export type GhostImageContent = Extract<
 
 export const GHOST_SCREEN_TOOL_NAMES = [GHOST_SCREEN] as const;
 
-/** How many captures `.screenshots/` keeps. Oldest are deleted first. */
-export const DEFAULT_SCREENSHOT_RETENTION = 20;
-
-/** Largest capture we will hand a provider inline, before resizing. */
-export const MAX_CAPTURE_BYTES = 8 * 1024 * 1024;
+/** Backwards-compatible name for the shared transport/disk/provider ceiling. */
+export const MAX_CAPTURE_BYTES = MAX_SCREENSHOT_BYTES;
 
 /**
  * Frame-sampling "watch" defaults. A model has no native video input, so the
@@ -162,28 +173,7 @@ export async function pruneScreenshots(
   dir: string,
   retention: number,
 ): Promise<string[]> {
-  let names: string[];
-  try {
-    names = await readdir(dir);
-  } catch {
-    return [];
-  }
-  const entries: Array<{ path: string; mtimeMs: number }> = [];
-  for (const name of names) {
-    if (!name.startsWith("screen-")) continue;
-    const path = join(dir, name);
-    try {
-      entries.push({ path, mtimeMs: (await stat(path)).mtimeMs });
-    } catch {
-      // Raced with another prune; nothing to do.
-    }
-  }
-  entries.sort((a, b) => b.mtimeMs - a.mtimeMs);
-  const doomed = entries.slice(Math.max(retention, 0));
-  for (const entry of doomed) {
-    await rm(entry.path, { force: true });
-  }
-  return doomed.map((entry) => entry.path);
+  return pruneScreenshotDirectoryPath(dir, retention, isScreenScreenshot);
 }
 
 /** Parse the `X,Y WxH` region the model writes into the sidecar's rect. */
@@ -301,23 +291,36 @@ export async function captureViaHelper(
     );
   }
 
+  assertScreenshotBase64WithinLimit(meta.png_base64, "Desktop capture");
   const buffer = Buffer.from(meta.png_base64, "base64");
-  const dir = join(home.dir, SCREENSHOTS_DIRNAME);
-  await mkdir(dir, { recursive: true });
-  const path = join(dir, screenshotFileName(options.now ?? new Date()));
-  await writeFile(path, buffer);
-
-  const deleted = await pruneScreenshots(
-    dir,
-    options.retention ?? DEFAULT_SCREENSHOT_RETENTION,
+  assertScreenshotBytesWithinLimit(buffer.byteLength, "Desktop capture");
+  const mutation = await withScreenshotDirectory(
+    home.dir,
+    async (directory, logicalDir) => {
+      const written = await writeScreenshotFile(
+        directory,
+        screenshotFileName(options.now ?? new Date()),
+        "Desktop capture",
+        async (descriptorFilePath) => writeFile(descriptorFilePath, buffer),
+      );
+      const deleted = await pruneScreenshotFiles(
+        directory,
+        options.retention ?? DEFAULT_SCREENSHOT_RETENTION,
+        isScreenScreenshot,
+      );
+      return {
+        path: join(logicalDir, written.name),
+        deleted: deleted.length,
+      };
+    },
   );
 
   return {
-    path,
+    path: mutation.path,
     bytes: buffer.byteLength,
     image: { type: "image", data: meta.png_base64, mimeType: CAPTURE_MIME_TYPE },
     meta,
-    deleted: deleted.length,
+    deleted: mutation.deleted,
   };
 }
 
@@ -348,7 +351,7 @@ export async function watchViaHelper(
     0,
     MAX_WATCH_INTERVAL_MS,
   );
-  const maxRunMs = options.maxRunMs ?? MAX_WATCH_RUN_MS;
+  const maxRunMs = clampInt(options.maxRunMs, MAX_WATCH_RUN_MS, 0, MAX_WATCH_RUN_MS);
   const base = (options.now ?? new Date()).getTime();
   const started = Date.now();
   const captures: HelperCapture[] = [];
@@ -400,32 +403,86 @@ function captureDetails(
   home: GhostHome,
   capture: HelperCapture,
 ): Record<string, unknown> {
+  const honesty = condenseHonestyMetadata(capture.meta);
   return {
     path: home.relative(capture.path),
     savedTo: capture.path,
     mimeType: CAPTURE_MIME_TYPE,
     bytes: capture.bytes,
-    backend: capture.meta.backend ?? null,
-    background_safe: capture.meta.background_safe ?? null,
-    warnings: capture.meta.warnings ?? [],
-    interference: capture.meta.interference ?? [],
+    ...honesty,
     pruned: capture.deleted,
+  };
+}
+
+function aggregateWatchHonesty(captures: HelperCapture[]): {
+  backends: Array<string | null>;
+  background_safe: boolean;
+  warnings: string[];
+  warningsOmitted: number;
+  interference: string[];
+  interferenceOmitted: number;
+} {
+  const backends: Array<string | null> = [];
+  const warnings: string[] = [];
+  const interference: string[] = [];
+  const warningSet = new Set<string>();
+  const interferenceSet = new Set<string>();
+  let warningsOmitted = 0;
+  let interferenceOmitted = 0;
+  for (const capture of captures) {
+    const honesty = condenseHonestyMetadata(capture.meta);
+    backends.push(honesty.backend);
+    warningsOmitted += honesty.warningsOmitted;
+    interferenceOmitted += honesty.interferenceOmitted;
+    for (const warning of honesty.warnings) {
+      if (warningSet.has(warning)) continue;
+      if (warnings.length >= MAX_DESKTOP_OBSERVATION_LIST_ITEMS) {
+        warningsOmitted += 1;
+      } else {
+        warningSet.add(warning);
+        warnings.push(warning);
+      }
+    }
+    for (const item of honesty.interference) {
+      if (interferenceSet.has(item)) continue;
+      if (interference.length >= MAX_DESKTOP_OBSERVATION_LIST_ITEMS) {
+        interferenceOmitted += 1;
+      } else {
+        interferenceSet.add(item);
+        interference.push(item);
+      }
+    }
+  }
+  return {
+    backends,
+    background_safe: captures.every((capture) => capture.meta.background_safe !== false),
+    warnings,
+    warningsOmitted,
+    interference,
+    interferenceOmitted,
   };
 }
 
 /** A short, model-facing summary of a watch's frames and honesty. */
 function watchNote(captures: HelperCapture[]): string {
-  const disturbed = captures.some((c) => c.meta.background_safe === false);
-  const warnings = new Set<string>();
-  for (const capture of captures) {
-    for (const warning of capture.meta.warnings ?? []) warnings.add(warning);
-  }
+  const honesty = aggregateWatchHonesty(captures);
   const parts: string[] = [
-    disturbed
+    honesty.background_safe === false
       ? "Some frames changed what the user sees (background_safe=false)"
       : "Background-safe: nothing the user sees changed",
   ];
-  if (warnings.size > 0) parts.push(`warnings: ${[...warnings].join("; ")}`);
+  if (honesty.warnings.length > 0) {
+    parts.push(`warnings: ${honesty.warnings.join("; ")}`);
+  }
+  if (honesty.warningsOmitted > 0) {
+    parts.push(`${honesty.warningsOmitted} more warning(s) omitted`);
+  }
+  if (honesty.interference.length > 0) {
+    parts.push(`interference: ${honesty.interference.join(", ")}`);
+  }
+  if (honesty.interferenceOmitted > 0) {
+    parts.push(`${honesty.interferenceOmitted} more interference item(s) omitted`);
+  }
   return parts.join(". ");
 }
 
@@ -434,15 +491,14 @@ function watchDetails(
   params: { target?: ScreenTarget | undefined },
   captures: HelperCapture[],
 ): Record<string, unknown> {
+  const honesty = aggregateWatchHonesty(captures);
   return {
     mode: "watch",
     frames: captures.length,
     target: params.target ?? "screen",
     savedTo: captures.map((c) => c.path),
     paths: captures.map((c) => home.relative(c.path)),
-    backends: captures.map((c) => c.meta.backend ?? null),
-    background_safe: captures.every((c) => c.meta.background_safe !== false),
-    warnings: [...new Set(captures.flatMap((c) => c.meta.warnings ?? []))],
+    ...honesty,
     bytes: captures.reduce((sum, c) => sum + c.bytes, 0),
   };
 }
@@ -556,11 +612,15 @@ export function createScreenExtension(
             + "interval, returned as a sequence so you can see motion.",
         })),
         frames: Type.Optional(Type.Integer({
+          minimum: 1,
+          maximum: MAX_WATCH_FRAMES,
           description:
             `For mode watch: how many frames to sample (1–${MAX_WATCH_FRAMES}). `
             + `Defaults to ${DEFAULT_WATCH_FRAMES}.`,
         })),
         interval: Type.Optional(Type.Integer({
+          minimum: 0,
+          maximum: MAX_WATCH_INTERVAL_MS,
           description:
             `For mode watch: milliseconds between frames (0–${MAX_WATCH_INTERVAL_MS}). `
             + `Defaults to ${DEFAULT_WATCH_INTERVAL_MS}.`,

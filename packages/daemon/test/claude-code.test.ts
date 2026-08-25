@@ -177,10 +177,10 @@ describe("Claude Code subscription runtime", () => {
         browserPage = { url, title: "Bridge fixture" };
         return browserPage;
       },
-      screenshot: async (options: { path: string }) => {
-        writeFileSync(options.path, Buffer.from(TINY_PNG_BASE64, "base64"));
-        return browserPage ?? { url: "about:blank", title: "" };
-      },
+      screenshot: async () => ({
+        ...(browserPage ?? { url: "about:blank", title: "" }),
+        bytes: Buffer.from(TINY_PNG_BASE64, "base64"),
+      }),
       close: async () => {
         browserPage = undefined;
         return true;

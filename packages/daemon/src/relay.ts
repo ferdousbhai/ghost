@@ -29,8 +29,9 @@
  */
 import type { IncomingMessage, Server } from "node:http";
 import type { Duplex } from "node:stream";
-import { WebSocketServer, type WebSocket } from "ws";
+import { WebSocketServer, type RawData, type WebSocket } from "ws";
 import {
+  MAX_CAPTURE_BYTES,
   RELAY_DISCONNECTED_MESSAGE,
   type BrowserFailure,
   type RelayOp,
@@ -42,7 +43,6 @@ import { silentLogger, type Logger } from "./log.js";
 import {
   authorizeRelayUpgrade,
   encodeServerFrame,
-  MAX_FRAME_BYTES,
   parseClientFrame,
   RELAY_PATH,
   RELAY_PROTOCOL_VERSION,
@@ -55,6 +55,15 @@ export const RELAY_TIMEOUT_GRACE_MS = 2_000;
 export const RELAY_CLOSE_GOING_AWAY = 1001;
 /** Close code for "you were replaced or the daemon is shutting down". */
 export const RELAY_CLOSE_SHUTDOWN = 4000;
+/** An 8 MiB PNG after base64 expansion, plus bounded JSON/page metadata. */
+export const MAX_RELAY_MESSAGE_BYTES = Math.ceil(MAX_CAPTURE_BYTES / 3) * 4
+  + 256 * 1024;
+
+function rawDataBytes(data: RawData): number {
+  return Array.isArray(data)
+    ? data.reduce((total, chunk) => total + chunk.byteLength, 0)
+    : data.byteLength;
+}
 
 export interface RelayHubOptions {
   /** The expected pairing token. Defaults to the XDG state file, minted if absent. */
@@ -138,7 +147,9 @@ export class RelayHub implements RelayTransport {
     this.#logger = options.logger ?? silentLogger;
     this.#pingIntervalMs = options.pingIntervalMs ?? RELAY_PING_INTERVAL_MS;
     this.#publicUrl = options.publicUrl;
-    this.#wss = new WebSocketServer({ noServer: true, maxPayload: MAX_FRAME_BYTES });
+    // ws applies maxPayload while assembling fragmented messages, before the
+    // complete string reaches #onFrame.
+    this.#wss = new WebSocketServer({ noServer: true, maxPayload: MAX_RELAY_MESSAGE_BYTES });
   }
 
   // ---------------------------------------------------------------- transport
@@ -298,6 +309,15 @@ export class RelayHub implements RelayTransport {
     this.#alive = true;
 
     ws.on("message", (data, isBinary) => {
+      // maxPayload is the accumulation guard. Keep a second boundary here for
+      // alternate ws runtimes, and check it before allocating a UTF-8 string.
+      if (rawDataBytes(data) > MAX_RELAY_MESSAGE_BYTES) {
+        this.#logger.warn("relay message exceeded its byte limit", {
+          maxBytes: MAX_RELAY_MESSAGE_BYTES,
+        });
+        ws.close(1009, "relay message too large");
+        return;
+      }
       if (isBinary) {
         this.#logger.warn("relay sent a binary frame; dropping it");
         return;

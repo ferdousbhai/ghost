@@ -74,6 +74,7 @@ export {
   type BackendBackResult,
   type BackendReadResult,
   type BackendScreenshotOptions,
+  type BackendScreenshotResult,
   type BackendTarget,
   type BackendTypeInput,
   type BrowserBackendContext,

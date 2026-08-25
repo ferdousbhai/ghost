@@ -42,6 +42,7 @@ import {
   type BackendResizeInput,
   type BackendResizeResult,
   type BackendScreenshotOptions,
+  type BackendScreenshotResult,
   type BackendScrollInput,
   type BackendTabInfo,
   type BackendTabsInput,
@@ -64,6 +65,8 @@ import {
   REF_ATTRIBUTE,
 } from "./browser-page-scripts.js";
 import { BLANK_URL } from "./browser-policy.js";
+import { boundBrowserObservationString } from "./browser-observation.js";
+import { assertScreenshotBytesWithinLimit } from "./screenshot-retention.js";
 
 export const BROWSER_PROFILE_DIRNAME = ".browser-profile";
 
@@ -308,14 +311,16 @@ export class PlaywrightBrowserBackend implements GhostBrowserBackend {
     }) => {
       const loc = msg.location();
       pushConsole({
-        level: msg.type(),
-        text: msg.text(),
-        ...(loc.url ? { url: loc.url } : {}),
-        ...(typeof loc.lineNumber === "number" ? { line: loc.lineNumber } : {}),
+        level: boundBrowserObservationString(msg.type()).value,
+        text: boundBrowserObservationString(msg.text()).value,
+        ...(loc.url ? { url: boundBrowserObservationString(loc.url).value } : {}),
+        ...(typeof loc.lineNumber === "number" && Number.isFinite(loc.lineNumber)
+          ? { line: loc.lineNumber }
+          : {}),
       });
     });
     page.on?.("pageerror", (error: Error) => {
-      pushConsole({ level: "error", text: error.message });
+      pushConsole({ level: "error", text: boundBrowserObservationString(error.message).value });
     });
     page.on?.("response", (response: {
       status: () => number;
@@ -324,10 +329,10 @@ export class PlaywrightBrowserBackend implements GhostBrowserBackend {
     }) => {
       const request = response.request();
       this.#network.push({
-        method: request.method(),
-        url: response.url(),
-        status: response.status(),
-        type: request.resourceType(),
+        method: boundBrowserObservationString(request.method()).value,
+        url: boundBrowserObservationString(response.url()).value,
+        ...(Number.isFinite(response.status()) ? { status: response.status() } : {}),
+        type: boundBrowserObservationString(request.resourceType()).value,
       });
       if (this.#network.length > RING_LIMIT) this.#network.shift();
     });
@@ -524,18 +529,21 @@ export class PlaywrightBrowserBackend implements GhostBrowserBackend {
     return this.#summarize(page);
   }
 
-  async screenshot(options: BackendScreenshotOptions): Promise<PageSummary> {
+  async screenshot(options: BackendScreenshotOptions): Promise<BackendScreenshotResult> {
     const page = await this.#openPage();
     try {
-      await page.screenshot({
-        path: options.path,
+      // Playwright allocates the encoded image before returning it; this is the
+      // earliest boundary at which the caller can enforce a byte ceiling.
+      const bytes = await page.screenshot({
+        type: "png",
         timeout: options.timeoutMs,
         fullPage: options.fullPage,
       });
+      assertScreenshotBytesWithinLimit(bytes.byteLength, "Browser screenshot");
+      return { ...(await this.#summarize(page)), bytes };
     } catch (error) {
       rethrowBackendError(error, "taking a screenshot", options.timeoutMs);
     }
-    return this.#summarize(page);
   }
 
   async back(options: BackendActionOptions): Promise<BackendBackResult> {

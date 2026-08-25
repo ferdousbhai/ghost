@@ -31,6 +31,7 @@ import {
   closeAllBrowserSessions,
   SCREENSHOT_DIRNAME,
 } from "../src/extensions/browser-session.js";
+import { MAX_SCREENSHOT_BYTES } from "../src/extensions/screenshot-retention.js";
 
 interface Sent {
   readonly op: RelayOp;
@@ -405,17 +406,15 @@ describe("screenshots", () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  it("writes the bytes the extension sent to the path the session chose", async () => {
+  it("returns bounded bytes for the session to publish", async () => {
     const png = Buffer.from("not really a png", "utf8");
     const transport = transportWithPage();
     transport.answer("screenshot", { page: PAGE, png: png.toString("base64") });
     const backend = await opened(transport);
 
-    const path = join(dir, "shot.png");
-    const page = await backend.screenshot({ timeoutMs: 5_000, path, fullPage: true });
+    const page = await backend.screenshot({ timeoutMs: 5_000, fullPage: true });
 
-    expect(page).toEqual(PAGE);
-    expect(await readFile(path)).toEqual(png);
+    expect(page).toEqual({ ...PAGE, bytes: png });
     // fullPage is the backend's to forward, not to decide.
     expect(transport.lastFor("screenshot")?.args).toEqual({ fullPage: true });
   });
@@ -425,9 +424,22 @@ describe("screenshots", () => {
     transport.answer("screenshot", { page: PAGE });
     const backend = await opened(transport);
     const error = await expectGhostError(
-      backend.screenshot({ timeoutMs: 5_000, path: join(dir, "shot.png"), fullPage: false }),
+      backend.screenshot({ timeoutMs: 5_000, fullPage: false }),
     );
     expect(error.message).toMatch(/no image came back/i);
+  });
+
+  it("rejects an oversized encoded screenshot before writing it", async () => {
+    const transport = transportWithPage();
+    transport.answer("screenshot", {
+      page: PAGE,
+      png: Buffer.alloc(MAX_SCREENSHOT_BYTES + 1).toString("base64"),
+    });
+    const backend = await opened(transport);
+    const error = await expectGhostError(
+      backend.screenshot({ timeoutMs: 5_000, fullPage: false }),
+    );
+    expect(error.code).toBe("limit_exceeded");
   });
 });
 

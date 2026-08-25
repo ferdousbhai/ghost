@@ -26,6 +26,7 @@ from ._vendor.omaharness.errors import (
     OmaHarnessError,
     StateRestoreError,
 )
+from ._vendor.omaharness.inputs import MAX_CLICKS
 from .bridge import GhostDesktop, UnknownRefError
 
 # Order matters: _error_code returns the first isinstance match, so the more
@@ -91,7 +92,7 @@ _HANDLERS: dict[str, Callable[[GhostDesktop, dict[str, Any]], Any]] = {
         ref=a.get("ref"),
         app=a.get("app"),
         button=a.get("button", "left"),
-        clicks=int(a.get("clicks", 1)),
+        clicks=max(1, min(int(a.get("clicks", 1)), MAX_CLICKS)),
         coordinate_space=a.get("coordinate_space", "screen"),
     ),
     "scroll": lambda d, a: d.scroll(

@@ -21,35 +21,57 @@
  * state, which is the distinction `shared.ts` cares about: nothing here is
  * configured by a process-global, only found by one.
  */
-import { mkdir } from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { GhostError } from "../errors.js";
 import {
   GhostBrowserError,
   type BackendBackResult,
-  type BackendJavascriptResult,
   type BackendResizeResult,
   type BackendTabsInput,
   type BackendTabsResult,
   type BackendTarget,
   type BrowserBackendFactory,
-  type ConsoleEntry,
   type GhostBrowserBackend,
-  type NetworkEntry,
   type PageElementMatch,
   type PageSummary,
 } from "./browser-backend.js";
+import {
+  type BoundedEntryResult,
+  type BoundedJavascriptResult,
+  projectConsoleEntries,
+  projectJavascriptResult,
+  projectNetworkEntries,
+} from "./browser-observation.js";
 import { playwrightBackend } from "./browser-playwright.js";
 import { checkActingScope, checkUrl, type UrlPolicyOptions } from "./browser-policy.js";
+import {
+  DEFAULT_SCREENSHOT_RETENTION,
+  isBrowserScreenshot,
+  assertScreenshotBytesWithinLimit,
+  pruneScreenshotFiles,
+  SCREENSHOTS_DIRNAME,
+  withScreenshotDirectory,
+  writeScreenshotFile,
+} from "./screenshot-retention.js";
 
-export const SCREENSHOT_DIRNAME = ".screenshots";
+/** Backwards-compatible singular export; storage is shared with ghost_screen. */
+export const SCREENSHOT_DIRNAME = SCREENSHOTS_DIRNAME;
+export const DEFAULT_BROWSER_SCREENSHOT_RETENTION = DEFAULT_SCREENSHOT_RETENTION;
 
 export const DEFAULT_ACTION_TIMEOUT_MS = 30_000;
 export const DEFAULT_IDLE_TIMEOUT_MS = 5 * 60_000;
 export const DEFAULT_READ_BUDGET_CHARS = 8_000;
 export const MIN_READ_BUDGET_CHARS = 200;
+export const MAX_READ_BUDGET_CHARS = 100_000;
 export const DEFAULT_FIND_LIMIT = 20;
 export const MAX_FIND_LIMIT = 100;
+export const MAX_FIND_QUERY_CHARS = 1_000;
+export const MAX_BROWSER_MATCH_TEXT_CHARS = 200;
+export const MAX_BROWSER_MATCH_HREF_CHARS = 500;
+export const MAX_BROWSER_REF_CHARS = 128;
+
+const BROWSER_REF_PATTERN = /^[A-Za-z0-9._:-]+$/;
 
 const DEFAULT_BROWSER_BACKEND = playwrightBackend();
 
@@ -96,9 +118,19 @@ export interface SessionTypeResult extends PageSummary {
   readonly submitted: boolean;
 }
 
+export interface SessionFindResult {
+  readonly matches: readonly PageElementMatch[];
+  readonly total: number;
+  readonly omitted: number;
+}
+
 export interface SessionScreenshotResult extends PageSummary {
   readonly path: string;
+  readonly bytes: number;
 }
+
+export type SessionConsoleResult = BoundedEntryResult<import("./browser-backend.js").ConsoleEntry>;
+export type SessionNetworkResult = BoundedEntryResult<import("./browser-backend.js").NetworkEntry>;
 
 /**
  * One step of a {@link GhostBrowserSession.batch}. It mirrors the browser tool's
@@ -146,6 +178,53 @@ export interface BatchResult {
   readonly stopped: boolean;
 }
 
+function boundedMatchString(value: unknown, maxChars: number): string {
+  if (typeof value !== "string") return "";
+  return value.length > maxChars ? `${value.slice(0, maxChars - 1)}…` : value;
+}
+
+function projectBrowserMatch(value: unknown): PageElementMatch | null {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+  const match = value as Record<string, unknown>;
+  const ref = typeof match["ref"] === "string" ? match["ref"].trim() : "";
+  if (
+    ref.length === 0
+    || ref.length > MAX_BROWSER_REF_CHARS
+    || !BROWSER_REF_PATTERN.test(ref)
+  ) return null;
+  const role = boundedMatchString(match["role"], 80);
+  const name = boundedMatchString(match["name"], MAX_BROWSER_MATCH_TEXT_CHARS);
+  const href = boundedMatchString(match["href"], MAX_BROWSER_MATCH_HREF_CHARS);
+  const valueText = boundedMatchString(match["value"], MAX_BROWSER_MATCH_TEXT_CHARS);
+  return {
+    ref,
+    tag: boundedMatchString(match["tag"], 80),
+    ...(role ? { role } : {}),
+    ...(name ? { name } : {}),
+    ...(href ? { href } : {}),
+    ...(valueText ? { value: valueText } : {}),
+    text: boundedMatchString(match["text"], MAX_BROWSER_MATCH_TEXT_CHARS),
+    visible: match["visible"] === true,
+    disabled: match["disabled"] === true,
+  };
+}
+
+function requireFiniteNumbers(
+  label: string,
+  values: Readonly<Record<string, number | undefined>>,
+): void {
+  const invalid = Object.entries(values)
+    .filter(([, value]) => value !== undefined && !Number.isFinite(value))
+    .map(([name]) => name);
+  if (invalid.length > 0) {
+    throw new GhostBrowserError(
+      "invalid_input",
+      `${label} needs finite numeric values; invalid: ${invalid.join(", ")}.`,
+      { invalid },
+    );
+  }
+}
+
 export class GhostBrowserSession {
   readonly homeDir: string;
   readonly screenshotDir: string;
@@ -156,8 +235,6 @@ export class GhostBrowserSession {
   /** Refs minted by the most recent `find`, and the page they were minted on. */
   #refs = new Map<string, PageElementMatch>();
   #refPageUrl: string | undefined;
-  #screenshotCount = 0;
-
   /** The URL the owner's most recent `open()` landed on — the trusted origin. */
   #originUrl: string | undefined;
   /** Navigations the page itself drove since that open (link-follows / redirects). */
@@ -355,10 +432,10 @@ export class GhostBrowserSession {
   async #readImpl(
     options: { maxChars?: number; timeoutMs?: number },
   ): Promise<SessionReadResult> {
-    const maxChars = Math.max(
-      MIN_READ_BUDGET_CHARS,
-      options.maxChars ?? DEFAULT_READ_BUDGET_CHARS,
-    );
+    const requested = options.maxChars;
+    const maxChars = typeof requested === "number" && Number.isFinite(requested)
+      ? Math.max(MIN_READ_BUDGET_CHARS, Math.min(Math.floor(requested), MAX_READ_BUDGET_CHARS))
+      : DEFAULT_READ_BUDGET_CHARS;
     await this.#requirePage();
     const result = await this.backend.read(this.#timeout(options.timeoutMs));
     this.#touchIdleTimer();
@@ -377,24 +454,48 @@ export class GhostBrowserSession {
   async #findImpl(
     query: string,
     options: { limit?: number; timeoutMs?: number },
-  ): Promise<readonly PageElementMatch[]> {
+  ): Promise<SessionFindResult> {
     const trimmed = query.trim();
     if (trimmed === "") {
       throw new GhostBrowserError("invalid_input", "A find needs a query.");
     }
-    const limit = Math.min(
-      MAX_FIND_LIMIT,
-      Math.max(1, options.limit ?? DEFAULT_FIND_LIMIT),
-    );
+    if (trimmed.length > MAX_FIND_QUERY_CHARS) {
+      throw new GhostBrowserError(
+        "invalid_input",
+        `A find query is limited to ${MAX_FIND_QUERY_CHARS} characters.`,
+      );
+    }
+    const requested = options.limit;
+    const limit = typeof requested === "number" && Number.isFinite(requested)
+      ? Math.max(1, Math.min(Math.floor(requested), MAX_FIND_LIMIT))
+      : DEFAULT_FIND_LIMIT;
     const page = await this.#requirePage();
-    const matches = await this.backend.find(trimmed, {
+    const backendMatches = await this.backend.find(trimmed, {
       ...this.#timeout(options.timeoutMs),
       limit,
     });
+    if (!Array.isArray(backendMatches)) {
+      throw new GhostBrowserError(
+        "browser_unavailable",
+        "The browser backend returned an invalid find result.",
+      );
+    }
+    const matches: PageElementMatch[] = [];
+    const refs = new Set<string>();
+    for (const value of backendMatches.slice(0, limit) as readonly unknown[]) {
+      const match = projectBrowserMatch(value);
+      if (!match || refs.has(match.ref)) continue;
+      refs.add(match.ref);
+      matches.push(match);
+    }
     this.#refs = new Map(matches.map((match) => [match.ref, match]));
     this.#refPageUrl = page.url;
     this.#touchIdleTimer();
-    return matches;
+    return {
+      matches,
+      total: backendMatches.length,
+      omitted: Math.max(backendMatches.length - matches.length, 0),
+    };
   }
 
   click(target: BackendTarget & { timeoutMs?: number; allowCrossDomain?: boolean }) {
@@ -461,17 +562,43 @@ export class GhostBrowserSession {
     options: { fullPage?: boolean; timeoutMs?: number },
   ): Promise<SessionScreenshotResult> {
     await this.#requirePage();
-    await mkdir(this.screenshotDir, { recursive: true });
-    this.#screenshotCount += 1;
-    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-    const path = join(this.screenshotDir, `${stamp}-${this.#screenshotCount}.png`);
-    const page = await this.backend.screenshot({
+    const capture = await this.backend.screenshot({
       ...this.#timeout(options.timeoutMs),
-      path,
       fullPage: options.fullPage === true,
     });
+    if (!(capture.bytes instanceof Uint8Array)) {
+      throw new GhostError(
+        "invalid_format",
+        "The browser screenshot backend returned invalid image bytes.",
+        {},
+      );
+    }
+    assertScreenshotBytesWithinLimit(capture.bytes.byteLength, "Browser screenshot");
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-").replace("Z", "");
+    const result = await withScreenshotDirectory(
+      this.homeDir,
+      async (directory, logicalDir) => {
+        const written = await writeScreenshotFile(
+          directory,
+          `browser-${stamp}.png`,
+          "Browser screenshot",
+          async (descriptorFilePath) => writeFile(descriptorFilePath, capture.bytes),
+        );
+        await pruneScreenshotFiles(
+          directory,
+          DEFAULT_BROWSER_SCREENSHOT_RETENTION,
+          isBrowserScreenshot,
+        );
+        return {
+          url: capture.url,
+          title: capture.title,
+          path: join(logicalDir, written.name),
+          bytes: written.bytes,
+        };
+      },
+    );
     this.#touchIdleTimer();
-    return { ...page, path };
+    return result;
   }
 
   back(options: { timeoutMs?: number } = {}) {
@@ -522,6 +649,18 @@ export class GhostBrowserSession {
     timeoutMs?: number;
   }): Promise<PageSummary> {
     await this.#requirePage();
+    requireFiniteNumbers("Scroll", {
+      deltaX: input.deltaX,
+      deltaY: input.deltaY,
+      x: input.x,
+      y: input.y,
+    });
+    if ((input.x === undefined) !== (input.y === undefined)) {
+      throw new GhostBrowserError(
+        "invalid_input",
+        "Scroll needs both x and y when a wheel anchor is provided.",
+      );
+    }
     // Scrolling only moves the viewport; it is observing, never gated.
     const page = await this.backend.scroll(
       {
@@ -557,6 +696,22 @@ export class GhostBrowserSession {
     allowCrossDomain?: boolean;
     timeoutMs?: number;
   }): Promise<PageSummary> {
+    requireFiniteNumbers("Drag", {
+      fromX: input.fromX,
+      fromY: input.fromY,
+      toX: input.toX,
+      toY: input.toY,
+      steps: input.steps,
+    });
+    if (
+      input.steps !== undefined
+      && (!Number.isInteger(input.steps) || input.steps < 1 || input.steps > 100)
+    ) {
+      throw new GhostBrowserError(
+        "invalid_input",
+        "Drag steps must be an integer from 1 through 100.",
+      );
+    }
     const before = await this.#requirePage();
     // Dragging can reorder, move, or drop things: consequential, so it is gated.
     this.#gateActing(before.url, input.allowCrossDomain === true);
@@ -625,7 +780,7 @@ export class GhostBrowserSession {
   async #javascriptImpl(
     code: string,
     options: { allowCrossDomain?: boolean; timeoutMs?: number },
-  ): Promise<BackendJavascriptResult> {
+  ): Promise<BoundedJavascriptResult> {
     if (code.trim() === "") {
       throw new GhostBrowserError("invalid_input", "There is no code to run.");
     }
@@ -633,7 +788,9 @@ export class GhostBrowserSession {
     // Running script is the sharpest consequential action: gate it exactly like a
     // click, and spend a unit of the acting budget.
     this.#gateActing(before.url, options.allowCrossDomain === true);
-    const result = await this.backend.javascript(code, this.#timeout(options.timeoutMs));
+    const result = projectJavascriptResult(
+      await this.backend.javascript(code, this.#timeout(options.timeoutMs)),
+    );
     // Script can rewrite the page under our refs; the honest move is to drop them.
     this.#invalidateRefs();
     this.#touchIdleTimer();
@@ -646,9 +803,11 @@ export class GhostBrowserSession {
 
   async #readConsoleImpl(
     options: { timeoutMs?: number },
-  ): Promise<readonly ConsoleEntry[]> {
+  ): Promise<SessionConsoleResult> {
     await this.#requirePage();
-    const entries = await this.backend.readConsole(this.#timeout(options.timeoutMs));
+    const entries = projectConsoleEntries(
+      await this.backend.readConsole(this.#timeout(options.timeoutMs)),
+    );
     this.#touchIdleTimer();
     return entries;
   }
@@ -659,9 +818,11 @@ export class GhostBrowserSession {
 
   async #readNetworkImpl(
     options: { timeoutMs?: number },
-  ): Promise<readonly NetworkEntry[]> {
+  ): Promise<SessionNetworkResult> {
     await this.#requirePage();
-    const entries = await this.backend.readNetwork(this.#timeout(options.timeoutMs));
+    const entries = projectNetworkEntries(
+      await this.backend.readNetwork(this.#timeout(options.timeoutMs)),
+    );
     this.#touchIdleTimer();
     return entries;
   }
@@ -704,6 +865,17 @@ export class GhostBrowserSession {
     timeoutMs?: number;
   }): Promise<BackendResizeResult> {
     await this.#requirePage();
+    requireFiniteNumbers("Resize", { width: input.width, height: input.height });
+    if (
+      !Number.isInteger(input.width) || !Number.isInteger(input.height)
+      || input.width < 100 || input.width > 10_000
+      || input.height < 100 || input.height > 10_000
+    ) {
+      throw new GhostBrowserError(
+        "invalid_input",
+        "Resize width and height must be integers from 100 through 10000.",
+      );
+    }
     const result = await this.backend.resize(
       { width: input.width, height: input.height },
       this.#timeout(input.timeoutMs),
@@ -810,11 +982,11 @@ export class GhostBrowserSession {
         return `read ${r.text.length} of ${r.totalLength} chars`;
       }
       case "find": {
-        const matches = await this.#findImpl(step.query ?? "", {
+        const result = await this.#findImpl(step.query ?? "", {
           ...t,
           ...(step.limit === undefined ? {} : { limit: step.limit }),
         });
-        return `find "${step.query ?? ""}" → ${matches.length} match(es)`;
+        return `find "${step.query ?? ""}" → ${result.matches.length} match(es)`;
       }
       case "click": {
         const page = await this.#clickImpl({

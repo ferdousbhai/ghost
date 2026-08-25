@@ -31,6 +31,7 @@ import { spawn as nodeSpawn } from "node:child_process";
 import { accessSync, constants as fsConstants, statSync } from "node:fs";
 import { delimiter, join, sep } from "node:path";
 import { GhostError, type GhostErrorCode } from "../errors.js";
+import { MAX_SCREENSHOT_BYTES } from "./screenshot-retention.js";
 
 // ---------------------------------------------------------------------------
 // Protocol shapes (docs/DESKTOP_HELPER.md; packages/desktop-helper)
@@ -371,6 +372,9 @@ export const DEFAULT_START_TIMEOUT_MS = 20_000;
 export const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 export const DEFAULT_IDLE_TIMEOUT_MS = 5 * 60_000;
 export const DEFAULT_STOP_TIMEOUT_MS = 1_000;
+/** One 8 MiB capture after base64 expansion, plus bounded JSON metadata. */
+export const MAX_HELPER_LINE_BYTES = Math.ceil(MAX_SCREENSHOT_BYTES / 3) * 4
+  + 256 * 1024;
 
 interface Pending {
   resolve(value: unknown): void;
@@ -394,6 +398,7 @@ export class DesktopHelperClient implements DesktopHelper {
   private nextId = 1;
   private readonly pending = new Map<number, Pending>();
   private stdoutBuffer = "";
+  private stdoutBufferBytes = 0;
   private stderrBuffer = "";
   private startTimer: ReturnType<typeof setTimeout> | undefined;
   private idleTimer: ReturnType<typeof setTimeout> | undefined;
@@ -530,13 +535,31 @@ export class DesktopHelperClient implements DesktopHelper {
   }
 
   private onStdout(chunk: string, onHello: (hello: HelloPayload) => void): void {
-    this.stdoutBuffer += chunk;
-    let newline = this.stdoutBuffer.indexOf("\n");
-    while (newline !== -1) {
-      const line = this.stdoutBuffer.slice(0, newline).trim();
-      this.stdoutBuffer = this.stdoutBuffer.slice(newline + 1);
+    let offset = 0;
+    while (offset <= chunk.length) {
+      const newline = chunk.indexOf("\n", offset);
+      const end = newline === -1 ? chunk.length : newline;
+      const segment = chunk.slice(offset, end);
+      const nextBytes = this.stdoutBufferBytes + Buffer.byteLength(segment, "utf8");
+      if (nextBytes > MAX_HELPER_LINE_BYTES) {
+        const error = new GhostError(
+          "limit_exceeded",
+          `The desktop helper sent a protocol line larger than ${MAX_HELPER_LINE_BYTES} bytes.`,
+          { maxBytes: MAX_HELPER_LINE_BYTES },
+        );
+        this.failAll(error);
+        void this.teardown(error);
+        return;
+      }
+      this.stdoutBuffer += segment;
+      this.stdoutBufferBytes = nextBytes;
+      if (newline === -1) return;
+
+      const line = this.stdoutBuffer.trim();
+      this.stdoutBuffer = "";
+      this.stdoutBufferBytes = 0;
       if (line) this.onLine(line, onHello);
-      newline = this.stdoutBuffer.indexOf("\n");
+      offset = newline + 1;
     }
   }
 
@@ -713,6 +736,7 @@ export class DesktopHelperClient implements DesktopHelper {
     this.ready = null;
     this.helloPayload = null;
     this.stdoutBuffer = "";
+    this.stdoutBufferBytes = 0;
     this.stderrBuffer = "";
 
     if (alreadyExited) return Promise.resolve();

@@ -83,7 +83,7 @@ screenshot or an empty tree dressed up as success.
 | `drag` | `{x1, y1, x2, y2, app?, button?, coordinate_space?, steps?}` | press → move through interpolated waypoints → release (canvas / drag-and-drop); honesty metadata |
 | `scroll` | `{delta_y, delta_x?, x?, y?, app?, coordinate_space?}` | wheel the focused window (positive `delta_y` up), optionally over `{x, y}`; never background-safe; honesty metadata |
 | `mouse_move` | `{x, y, app?, coordinate_space?}` | park the pointer at a coordinate (a hover); left there, not restored; honesty metadata |
-| `capture` | `{target:"window"\|"screen"\|"region", name?, address?, region?, output?}` | base64 PNG via the 3-tier ladder; honesty metadata |
+| `capture` | `{target:"window"\|"screen"\|"region", name?, address?, region?, output?}` | base64 PNG via the 3-tier ladder; honesty metadata; producer output is limited to 8 MiB |
 | `focus` | `{address \| name}` | focus a window; honesty metadata |
 | `workspace` | `{id \| name}` | switch workspace; honesty metadata |
 | `hello` / `doctor` | — | the handshake payload above |

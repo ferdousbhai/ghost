@@ -116,6 +116,27 @@ export type MouseButton = (typeof MOUSE_BUTTONS)[number];
 /** The AT-SPI attributes `ax_set` can write (bridge.py `ax_set`). */
 export const AX_SET_ATTRIBUTES = ["text", "value", "focused"] as const;
 
+/** AT-SPI actions are application-defined; bound the dynamic name without narrowing it. */
+export const MAX_AX_ACTION_LENGTH = 80;
+
+/** Pointer click repetition is bounded at the extension and helper boundaries. */
+export const MAX_CLICKS = 3;
+
+/** `ghost-desktop-helper` clamps an accessibility query to this ceiling. */
+export const MAX_AX_QUERY_LIMIT = 200;
+
+/** Default used by the sidecar when the caller does not select a query limit. */
+export const DEFAULT_AX_QUERY_LIMIT = 20;
+
+/** Maximum records included in one model-facing desktop observation. */
+export const MAX_DESKTOP_OBSERVATION_ITEMS = 40;
+
+/** Maximum length of one untrusted string in a desktop observation. */
+export const MAX_DESKTOP_OBSERVATION_TEXT = 200;
+
+/** Maximum state/action/warning strings included in one observation field. */
+export const MAX_DESKTOP_OBSERVATION_LIST_ITEMS = 12;
+
 /** Windows listed by `state`. Beyond this the model is paying for noise. */
 export const MAX_LISTED_WINDOWS = 40;
 
@@ -143,6 +164,215 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 function truncate(value: unknown, max = MAX_TITLE_LENGTH): string {
   const text = typeof value === "string" ? value : "";
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
+
+interface BoundedStrings {
+  readonly values: string[];
+  readonly omitted: number;
+}
+
+function boundedStrings(value: unknown): BoundedStrings {
+  if (!Array.isArray(value)) return { values: [], omitted: 0 };
+  const values: string[] = [];
+  for (const item of value) {
+    if (typeof item !== "string") continue;
+    values.push(truncate(item, MAX_DESKTOP_OBSERVATION_TEXT));
+    if (values.length >= MAX_DESKTOP_OBSERVATION_LIST_ITEMS) break;
+  }
+  return { values, omitted: Math.max(value.length - values.length, 0) };
+}
+
+function boundedControlFreeString(value: unknown, max: number): string | null {
+  if (typeof value !== "string" || value.length > max) return null;
+  const text = value.trim();
+  if (text.length === 0) return null;
+  for (let index = 0; index < text.length; index += 1) {
+    const code = text.charCodeAt(index);
+    if (code <= 0x1f || code === 0x7f) return null;
+  }
+  return text;
+}
+
+function boundedActionStrings(value: unknown): BoundedStrings {
+  if (!Array.isArray(value)) return { values: [], omitted: 0 };
+  const values: string[] = [];
+  for (const item of value) {
+    const action = boundedControlFreeString(item, MAX_AX_ACTION_LENGTH);
+    if (action === null) continue;
+    values.push(action);
+    if (values.length >= MAX_DESKTOP_OBSERVATION_LIST_ITEMS) break;
+  }
+  return { values, omitted: Math.max(value.length - values.length, 0) };
+}
+
+function finiteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function boundedCount(reported: unknown, observed: number): number {
+  const value = finiteNumber(reported);
+  return value === undefined ? observed : Math.max(Math.floor(value), observed, 0);
+}
+
+function condensedBounds(value: unknown): Record<string, number> | undefined {
+  const bounds = asRecord(value);
+  if (!bounds) return undefined;
+  const result: Record<string, number> = {};
+  for (const key of ["x", "y", "width", "height"] as const) {
+    const number = finiteNumber(bounds[key]);
+    if (number !== undefined) result[key] = number;
+  }
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
+function condensedScalar(value: unknown): string | number | boolean | null | undefined {
+  if (typeof value === "string") return truncate(value, MAX_DESKTOP_OBSERVATION_TEXT);
+  if (typeof value === "boolean" || value === null) return value;
+  return finiteNumber(value);
+}
+
+function condensedWindow(value: unknown): Record<string, unknown> | null {
+  const window = asRecord(value);
+  if (!window) return null;
+  const bounds = condensedBounds(window["geometry"] ?? window["bounds"]);
+  return {
+    address: truncate(window["address"], 80),
+    class: truncate(window["class"], 80),
+    title: truncate(window["title"], MAX_DESKTOP_OBSERVATION_TEXT),
+    workspace: truncate(workspaceName(window), 80),
+    focused: window["focused"] === true,
+    hidden: window["hidden"] === true,
+    ...(bounds ? { bounds } : {}),
+  };
+}
+
+/** Project a raw `see` response onto bounded, actionable window fields. */
+export function condenseDesktopWindows(value: unknown): Record<string, unknown> {
+  const result = asRecord(value) ?? {};
+  const observed = Array.isArray(result["windows"]) ? result["windows"] : [];
+  const windows = observed
+    .slice(0, MAX_DESKTOP_OBSERVATION_ITEMS)
+    .map(condensedWindow)
+    .filter((window): window is Record<string, unknown> => window !== null);
+  const count = boundedCount(result["count"], observed.length);
+  return { windows, count, omitted: Math.max(count - windows.length, 0) };
+}
+
+/** Project raw layer surfaces without returning arbitrary helper fields. */
+export function condenseDesktopLayers(value: unknown): Record<string, unknown> {
+  const result = asRecord(value) ?? {};
+  const observed = Array.isArray(result["layers"]) ? result["layers"] : [];
+  const layers = observed
+    .slice(0, MAX_DESKTOP_OBSERVATION_ITEMS)
+    .map(asRecord)
+    .filter((layer): layer is Record<string, unknown> => layer !== null)
+    .map((layer) => {
+      const bounds = condensedBounds(layer["bounds"]);
+      const level = finiteNumber(layer["level"]);
+      const alpha = finiteNumber(layer["alpha"]);
+      return {
+        output: truncate(layer["output"], 80),
+        namespace: truncate(layer["namespace"], MAX_DESKTOP_OBSERVATION_TEXT),
+        address: truncate(layer["address"], 80),
+        ...(level === undefined ? {} : { level }),
+        ...(alpha === undefined ? {} : { alpha }),
+        ...(bounds ? { bounds } : {}),
+      };
+    });
+  const count = boundedCount(result["count"], observed.length);
+  return { layers, count, omitted: Math.max(count - layers.length, 0) };
+}
+
+function condensedAxElement(value: unknown): Record<string, unknown> | null {
+  const element = asRecord(value);
+  if (!element) return null;
+  const ref = boundedControlFreeString(element["ref"], 80);
+  if (ref === null) return null;
+  const depth = finiteNumber(element["depth"]);
+  const bounds = condensedBounds(element["bounds"]);
+  const scalarValue = condensedScalar(element["value"]);
+  const states = boundedStrings(element["states"]);
+  const actions = boundedActionStrings(element["actions"]);
+  const settable = boundedStrings(element["settable"]);
+  return {
+    ref,
+    role: truncate(element["role"], 80),
+    name: truncate(element["name"], MAX_DESKTOP_OBSERVATION_TEXT),
+    description: truncate(element["description"], MAX_DESKTOP_OBSERVATION_TEXT),
+    text: truncate(element["text"], MAX_DESKTOP_OBSERVATION_TEXT),
+    ...(scalarValue === undefined ? {} : { value: scalarValue }),
+    ...(depth === undefined ? {} : { depth }),
+    states: states.values,
+    states_omitted: states.omitted,
+    actions: actions.values,
+    actions_omitted: actions.omitted,
+    settable: settable.values,
+    settable_omitted: settable.omitted,
+    bounds_reliability: truncate(element["bounds_reliability"], 80),
+    ...(bounds ? { bounds } : {}),
+  };
+}
+
+/** Project `ax_query` onto fields the next semantic action can use. */
+export function condenseAxQuery(value: unknown): Record<string, unknown> {
+  const result = asRecord(value) ?? {};
+  const observed = Array.isArray(result["elements"]) ? result["elements"] : [];
+  const elements = observed
+    .slice(0, MAX_DESKTOP_OBSERVATION_ITEMS)
+    .map(condensedAxElement)
+    .filter((element): element is Record<string, unknown> => element !== null);
+  const count = boundedCount(result["count"], observed.length);
+  const omitted = Math.max(count - elements.length, 0);
+  const warnings = boundedStrings(result["warnings"]);
+  return {
+    app: truncate(result["app"], 80),
+    elements,
+    count,
+    omitted,
+    truncated: result["truncated"] === true || omitted > 0,
+    warnings: warnings.values,
+    warnings_omitted: warnings.omitted,
+  };
+}
+
+/** Bound the single accessibility element returned by `hit_test`. */
+export function condenseAxHitTest(value: unknown): Record<string, unknown> {
+  const result = asRecord(value) ?? {};
+  return {
+    app: truncate(result["app"], 80),
+    element: condensedAxElement(result["element"]),
+  };
+}
+
+/** Project role counts without returning an unbounded arbitrary-key object. */
+export function condenseAxRoles(value: unknown): Record<string, unknown> {
+  const result = asRecord(value) ?? {};
+  const roles = asRecord(result["roles"]) ?? {};
+  const entries = Object.entries(roles)
+    .filter((entry): entry is [string, number] => finiteNumber(entry[1]) !== undefined)
+    .slice(0, MAX_DESKTOP_OBSERVATION_ITEMS)
+    .map(([role, count]) => [truncate(role, 80), count] as const);
+  const condensedRoles = Object.fromEntries(entries);
+  return {
+    app: truncate(result["app"], 80),
+    roles: condensedRoles,
+    count: Object.keys(roles).length,
+    omitted: Math.max(Object.keys(roles).length - Object.keys(condensedRoles).length, 0),
+  };
+}
+
+function clampAxQueryLimit(value: number): number {
+  if (!Number.isFinite(value)) return DEFAULT_AX_QUERY_LIMIT;
+  return Math.max(1, Math.min(Math.floor(value), MAX_AX_QUERY_LIMIT));
+}
+
+function clampClicks(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return 1;
+  return Math.max(1, Math.min(Math.floor(value), MAX_CLICKS));
+}
+
+function boundedAxAction(value: unknown): string | null {
+  return boundedControlFreeString(value, MAX_AX_ACTION_LENGTH);
 }
 
 function workspaceName(client: Record<string, unknown>): string {
@@ -184,6 +414,8 @@ export interface DesktopState {
   }>;
   /** Windows beyond `MAX_LISTED_WINDOWS` that were not listed. */
   readonly omitted: number;
+  readonly workspacesOmitted: number;
+  readonly monitorsOmitted: number;
 }
 
 /**
@@ -199,44 +431,52 @@ export function condenseDesktopState(
   monitors: unknown = [],
 ): DesktopState {
   const active = asRecord(activeWindow);
-  const activeAddress = typeof active?.["address"] === "string" ? active["address"] : null;
+  const activeAddressRaw = typeof active?.["address"] === "string" ? active["address"] : null;
+  const activeAddress = activeAddressRaw === null ? null : truncate(activeAddressRaw, 80);
 
   const clientList = Array.isArray(clients) ? clients : [];
   const windows = clientList
+    .slice(0, MAX_LISTED_WINDOWS)
     .map(asRecord)
     .filter((client): client is Record<string, unknown> => client !== null)
     .map((client) => ({
-      address: typeof client["address"] === "string" ? client["address"] : "",
+      address: truncate(client["address"], 80),
       class: truncate(client["class"], 40),
       title: truncate(client["title"]),
-      workspace: workspaceName(client),
-      focused: activeAddress !== null && client["address"] === activeAddress,
+      workspace: truncate(workspaceName(client), 40),
+      focused: activeAddressRaw !== null && client["address"] === activeAddressRaw,
     }));
 
   const workspaceList = Array.isArray(workspaces) ? workspaces : [];
   const condensedWorkspaces = workspaceList
+    .slice(0, MAX_DESKTOP_OBSERVATION_ITEMS)
     .map(asRecord)
     .filter((workspace): workspace is Record<string, unknown> => workspace !== null)
-    .map((workspace) => ({
-      id: (workspace["id"] as number | string | undefined) ?? "",
-      name: truncate(workspace["name"], 40),
-      windows: typeof workspace["windows"] === "number" ? workspace["windows"] : 0,
-      monitor: truncate(workspace["monitor"], 40),
-    }));
+    .map((workspace) => {
+      const id = finiteNumber(workspace["id"]);
+      const windows = finiteNumber(workspace["windows"]);
+      return {
+        id: id ?? truncate(workspace["id"], 40),
+        name: truncate(workspace["name"], 40),
+        windows: windows === undefined ? 0 : Math.max(Math.floor(windows), 0),
+        monitor: truncate(workspace["monitor"], 40),
+      };
+    });
 
   const monitorList = Array.isArray(monitors) ? monitors : [];
   const condensedMonitors = monitorList
+    .slice(0, MAX_DESKTOP_OBSERVATION_ITEMS)
     .map(asRecord)
     .filter((monitor): monitor is Record<string, unknown> => monitor !== null)
     .map((monitor) => {
-      const width = monitor["width"];
-      const height = monitor["height"];
+      const width = finiteNumber(monitor["width"]);
+      const height = finiteNumber(monitor["height"]);
       const resolution =
-        typeof width === "number" && typeof height === "number"
+        width !== undefined && height !== undefined
           ? `${width}x${height}`
           : undefined;
       return {
-        name: typeof monitor["name"] === "string" ? monitor["name"] : "",
+        name: truncate(monitor["name"], 40),
         focused: monitor["focused"] === true,
         ...(resolution ? { resolution } : {}),
       };
@@ -253,37 +493,63 @@ export function condenseDesktopState(
       }
       : null,
     workspaces: condensedWorkspaces,
-    windows: windows.slice(0, MAX_LISTED_WINDOWS),
+    windows,
     monitors: condensedMonitors,
-    omitted: Math.max(windows.length - MAX_LISTED_WINDOWS, 0),
+    omitted: Math.max(clientList.length - windows.length, 0),
+    workspacesOmitted: Math.max(workspaceList.length - condensedWorkspaces.length, 0),
+    monitorsOmitted: Math.max(monitorList.length - condensedMonitors.length, 0),
   };
 }
 
 /** A one-line, model-facing summary of a result's honesty metadata. */
 export function honestyNote(meta: HonestyMetadata): string {
+  const condensed = condenseHonestyMetadata(meta);
   const parts: string[] = [];
-  if (meta.background_safe === false) {
+  if (condensed.background_safe === false) {
     parts.push("This changed what the user sees (background_safe=false)");
-  } else if (meta.background_safe === true) {
+  } else if (condensed.background_safe === true) {
     parts.push("Background-safe: nothing the user sees changed");
   }
-  if (meta.interference && meta.interference.length > 0) {
-    parts.push(`interference: ${meta.interference.join(", ")}`);
+  if (condensed.interference.length > 0) {
+    parts.push(`interference: ${condensed.interference.join(", ")}`);
   }
-  if (meta.warnings && meta.warnings.length > 0) {
-    parts.push(`warnings: ${meta.warnings.join("; ")}`);
+  if (condensed.interferenceOmitted > 0) {
+    parts.push(`${condensed.interferenceOmitted} more interference item(s) omitted`);
+  }
+  if (condensed.warnings.length > 0) {
+    parts.push(`warnings: ${condensed.warnings.join("; ")}`);
+  }
+  if (condensed.warningsOmitted > 0) {
+    parts.push(`${condensed.warningsOmitted} more warning(s) omitted`);
   }
   return parts.join(". ");
 }
 
+export interface CondensedHonestyMetadata {
+  readonly backend: string | null;
+  readonly background_safe: boolean | null;
+  readonly interference: string[];
+  readonly interferenceOmitted: number;
+  readonly warnings: string[];
+  readonly warningsOmitted: number;
+}
+
+export function condenseHonestyMetadata(meta: HonestyMetadata): CondensedHonestyMetadata {
+  const interference = boundedStrings(meta.interference);
+  const warnings = boundedStrings(meta.warnings);
+  return {
+    backend: truncate(meta.backend, 80) || null,
+    background_safe: typeof meta.background_safe === "boolean" ? meta.background_safe : null,
+    interference: interference.values,
+    interferenceOmitted: interference.omitted,
+    warnings: warnings.values,
+    warningsOmitted: warnings.omitted,
+  };
+}
+
 /** Details common to every honesty-bearing result. */
 function honestyDetails(meta: HonestyMetadata): Record<string, unknown> {
-  return {
-    backend: meta.backend ?? null,
-    background_safe: meta.background_safe ?? null,
-    interference: meta.interference ?? [],
-    warnings: meta.warnings ?? [],
-  };
+  return { ...condenseHonestyMetadata(meta) };
 }
 
 /** A capture/input/perform result, with honesty and a message. */
@@ -411,7 +677,11 @@ export function createHyprlandExtension(
             + "such as focused,editable.",
         })),
         limit: Type.Optional(Type.Integer({
-          description: "For ax_query: cap on elements returned. Defaults to 20.",
+          minimum: 1,
+          maximum: MAX_AX_QUERY_LIMIT,
+          description:
+            `For ax_query: cap on elements returned (${1}-${MAX_AX_QUERY_LIMIT}). `
+            + `Defaults to ${DEFAULT_AX_QUERY_LIMIT}.`,
         })),
         ref: Type.Optional(Type.String({
           description:
@@ -420,9 +690,12 @@ export function createHyprlandExtension(
             + "given, do not compute with it); only valid until the next ax_query.",
         })),
         ax_action: Type.Optional(Type.String({
+          minLength: 1,
+          maxLength: MAX_AX_ACTION_LENGTH,
+          pattern: "^[^\\u0000-\\u001f\\u007f]+$",
           description:
-            "For ax_perform: the semantic action to invoke on the element, such as "
-            + "press, click, expand, activate. Defaults to click.",
+            "For ax_perform: the application-defined semantic action to invoke. "
+            + "Pass one exposed by ax_query's actions list. Defaults to click.",
         })),
         attribute: Type.Optional(stringEnum(AX_SET_ATTRIBUTES, {
           description:
@@ -473,9 +746,11 @@ export function createHyprlandExtension(
             + "Defaults to left.",
         })),
         clicks: Type.Optional(Type.Integer({
+          minimum: 1,
+          maximum: MAX_CLICKS,
           description:
-            "For click: how many times to click (2 for a double-click). Defaults "
-            + "to 1.",
+            `For click: how many times to click (1-${MAX_CLICKS}; 2 is a `
+            + "double-click). Defaults to 1.",
         })),
         delta_y: Type.Optional(Type.Integer({
           description:
@@ -570,6 +845,8 @@ export function createHyprlandExtension(
               workspaces: condensed.workspaces.length,
               monitors: condensed.monitors.length,
               omitted: condensed.omitted,
+              workspacesOmitted: condensed.workspacesOmitted,
+              monitorsOmitted: condensed.monitorsOmitted,
             }, "desktop");
           }
 
@@ -579,16 +856,22 @@ export function createHyprlandExtension(
               { ...(params.target ? { name: params.target } : {}) },
               opts,
             );
-            return untrustedTextResult(
-              JSON.stringify(result),
-              { count: result.count ?? 0 },
-              "desktop",
-            );
+            const condensed = condenseDesktopWindows(result);
+            return untrustedTextResult(JSON.stringify(condensed), {
+              count: condensed["count"],
+              returned: (condensed["windows"] as unknown[]).length,
+              omitted: condensed["omitted"],
+            }, "desktop");
           }
 
           case "layers": {
             const result = await helper.request("layers", {}, opts);
-            return textResult(JSON.stringify(result), {});
+            const condensed = condenseDesktopLayers(result);
+            return untrustedTextResult(JSON.stringify(condensed), {
+              count: condensed["count"],
+              returned: (condensed["layers"] as unknown[]).length,
+              omitted: condensed["omitted"],
+            }, "desktop");
           }
 
           case "focus": {
@@ -629,28 +912,44 @@ export function createHyprlandExtension(
             if (params.match) args["text"] = params.match;
             const states = splitStates(params.states);
             if (states.length > 0) args["attributes"] = states;
-            if (typeof params.limit === "number") args["limit"] = params.limit;
+            if (typeof params.limit === "number") {
+              args["limit"] = clampAxQueryLimit(params.limit);
+            }
             const result = await helper.request<AxQueryResult>("ax_query", args, opts);
+            const condensed = condenseAxQuery(result);
             const hint =
               "Each element has a ref: use it with ax_perform (invoke), ax_set "
               + "(write text/value), click (ref), or type (ref).";
-            return untrustedTextResult(`${hint}\n${JSON.stringify(result)}`, {
-              count: result.count ?? result.elements?.length ?? 0,
-              truncated: result.truncated ?? false,
-              warnings: result.warnings ?? [],
+            return untrustedTextResult(`${hint}\n${JSON.stringify(condensed)}`, {
+              count: condensed["count"],
+              returned: (condensed["elements"] as unknown[]).length,
+              omitted: condensed["omitted"],
+              truncated: condensed["truncated"],
+              warnings: condensed["warnings"],
             }, "desktop");
           }
 
           case "ax_roles": {
             requireAtspi(hello, "ax_roles");
             const result = await helper.request("ax_roles", { ...appArg }, opts);
-            return textResult(JSON.stringify(result), {});
+            const condensed = condenseAxRoles(result);
+            return untrustedTextResult(JSON.stringify(condensed), {
+              count: condensed["count"],
+              returned: Object.keys(condensed["roles"] as object).length,
+              omitted: condensed["omitted"],
+            }, "desktop");
           }
 
           case "ax_perform": {
             requireAtspi(hello, "ax_perform");
             const ref = requireRef();
-            const axAction = params.ax_action?.trim() || "click";
+            const axAction = boundedAxAction(params.ax_action ?? "click");
+            if (axAction === null) {
+              throw invalidFormat(
+                `action "ax_perform" needs a non-empty ax_action of at most `
+                + `${MAX_AX_ACTION_LENGTH} characters, without control characters.`,
+              );
+            }
             const meta = await helper.request<HonestyMetadata>(
               "ax_perform",
               { ref, action: axAction },
@@ -689,7 +988,7 @@ export function createHyprlandExtension(
 
           case "hit_test": {
             requireAtspi(hello, "hit_test");
-            if (typeof params.x !== "number" || typeof params.y !== "number") {
+            if (finiteNumber(params.x) === undefined || finiteNumber(params.y) === undefined) {
               throw invalidFormat(
                 'action "hit_test" needs both x and y (screen coordinates).',
               );
@@ -699,13 +998,15 @@ export function createHyprlandExtension(
               { x: params.x, y: params.y, ...appArg },
               opts,
             );
+            const condensed = condenseAxHitTest(result);
+            const element = asRecord(condensed["element"]);
             const hint =
               "The element under that point has a ref: use it with ax_perform "
               + "(invoke), ax_set (write), click (ref), or type (ref).";
-            return textResult(`${hint}\n${JSON.stringify(result)}`, {
-              ref: result.element?.ref ?? null,
-              role: result.element?.role ?? null,
-            });
+            return untrustedTextResult(`${hint}\n${JSON.stringify(condensed)}`, {
+              ref: element?.["ref"] ?? null,
+              role: element?.["role"] ?? null,
+            }, "desktop");
           }
 
           case "key": {
@@ -746,9 +1047,7 @@ export function createHyprlandExtension(
           case "click": {
             requireYdotool(hello);
             const button: MouseButton = params.button ?? "left";
-            const clicks = typeof params.clicks === "number" && params.clicks > 1
-              ? Math.floor(params.clicks)
-              : 1;
+            const clicks = clampClicks(params.clicks);
             const buttonArgs = {
               ...(button !== "left" ? { button } : {}),
               ...(clicks !== 1 ? { clicks } : {}),
@@ -756,7 +1055,10 @@ export function createHyprlandExtension(
             let args: Record<string, unknown>;
             if (refValue !== undefined) {
               args = { ref: refValue, ...buttonArgs };
-            } else if (typeof params.x === "number" && typeof params.y === "number") {
+            } else if (
+              finiteNumber(params.x) !== undefined
+              && finiteNumber(params.y) !== undefined
+            ) {
               args = {
                 x: params.x,
                 y: params.y,
@@ -780,8 +1082,8 @@ export function createHyprlandExtension(
           case "drag": {
             requireYdotool(hello);
             if (
-              typeof params.x !== "number" || typeof params.y !== "number"
-              || typeof params.x2 !== "number" || typeof params.y2 !== "number"
+              finiteNumber(params.x) === undefined || finiteNumber(params.y) === undefined
+              || finiteNumber(params.x2) === undefined || finiteNumber(params.y2) === undefined
             ) {
               throw invalidFormat(
                 'action "drag" needs x, y (the start) and x2, y2 (the release).',
@@ -810,8 +1112,14 @@ export function createHyprlandExtension(
 
           case "scroll": {
             requireYdotool(hello);
-            const deltaY = typeof params.delta_y === "number" ? params.delta_y : 0;
-            const deltaX = typeof params.delta_x === "number" ? params.delta_x : 0;
+            if (
+              (params.delta_y !== undefined && finiteNumber(params.delta_y) === undefined)
+              || (params.delta_x !== undefined && finiteNumber(params.delta_x) === undefined)
+            ) {
+              throw invalidFormat('action "scroll" needs finite delta values.');
+            }
+            const deltaY = finiteNumber(params.delta_y) ?? 0;
+            const deltaX = finiteNumber(params.delta_x) ?? 0;
             if (deltaY === 0 && deltaX === 0) {
               throw invalidFormat(
                 'action "scroll" needs a non-zero delta_y (or delta_x).',
@@ -822,7 +1130,16 @@ export function createHyprlandExtension(
               delta_x: deltaX,
               ...appArg,
             };
-            if (typeof params.x === "number" && typeof params.y === "number") {
+            if ((params.x === undefined) !== (params.y === undefined)) {
+              throw invalidFormat('action "scroll" needs both x and y for a pointer anchor.');
+            }
+            if (
+              params.x !== undefined && params.y !== undefined
+              && (finiteNumber(params.x) === undefined || finiteNumber(params.y) === undefined)
+            ) {
+              throw invalidFormat('action "scroll" needs finite x and y coordinates.');
+            }
+            if (finiteNumber(params.x) !== undefined && finiteNumber(params.y) !== undefined) {
               args["x"] = params.x;
               args["y"] = params.y;
               args["coordinate_space"] = params.coordinate_space ?? "screen";
@@ -837,7 +1154,7 @@ export function createHyprlandExtension(
 
           case "mouse_move": {
             requireYdotool(hello);
-            if (typeof params.x !== "number" || typeof params.y !== "number") {
+            if (finiteNumber(params.x) === undefined || finiteNumber(params.y) === undefined) {
               throw invalidFormat('action "mouse_move" needs both x and y.');
             }
             const meta = await helper.request<HonestyMetadata>(

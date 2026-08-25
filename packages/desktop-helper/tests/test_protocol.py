@@ -7,6 +7,7 @@ import json
 import pytest
 from conftest import FakeHyprctl, sample_window, unlocked_runner
 
+from ghost_desktop_helper._vendor.omaharness.inputs import MAX_CLICKS
 from ghost_desktop_helper.bridge import GhostDesktop
 from ghost_desktop_helper.protocol import OPS, Server
 
@@ -60,6 +61,26 @@ def test_state_sources_clients_and_workspaces():
     assert result["clients"][0]["address"] == "0xaaaa"
     assert result["workspaces"]
     assert result["activewindow"]["address"] == "0xaaaa"
+
+
+def test_protocol_caps_huge_click_repetition():
+    class RecordingDesktop:
+        calls: list[dict] = []
+
+        def click(self, **kwargs):
+            self.calls.append(kwargs)
+            return {"clicks": kwargs["clicks"]}
+
+    desktop = RecordingDesktop()
+    response = _server(desktop).handle(
+        {
+            "id": 22,
+            "op": "click",
+            "args": {"x": 1, "y": 2, "clicks": 10**9},
+        }
+    )
+    assert response["ok"] is True
+    assert desktop.calls[0]["clicks"] == MAX_CLICKS
 
 
 def test_invalid_args_object():

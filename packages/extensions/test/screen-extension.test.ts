@@ -10,14 +10,16 @@
  * silently dropped for such a model), and that the capture's honesty metadata
  * (which backend, background-safe or not, warnings) reaches the model.
  */
-import { readdir, mkdir, stat, utimes, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, readdir, stat, symlink, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   captureViaHelper,
   createScreenExtension,
   GHOST_SCREEN,
+  MAX_CAPTURE_BYTES,
   MAX_WATCH_FRAMES,
+  MAX_WATCH_INTERVAL_MS,
   parseRegion,
   pruneScreenshots,
   SCREENSHOTS_DIRNAME,
@@ -173,6 +175,39 @@ describe("captureViaHelper", () => {
       }),
     ).rejects.toThrowError(/is not a monitor name/);
   });
+
+  it("refuses an oversized sidecar payload before creating screenshot storage", async () => {
+    const oversized = Buffer.alloc(MAX_CAPTURE_BYTES + 1).toString("base64");
+    await expect(captureViaHelper({
+      helper: captureHelper({ png_base64: oversized }),
+      home: openGhostHome(fixture.dir),
+      target: "screen",
+    })).rejects.toThrowError(/screenshots are limited/);
+    await expect(access(join(fixture.dir, SCREENSHOTS_DIRNAME))).rejects.toThrow();
+  });
+
+  it("does not follow a screenshots-directory symlink outside the ghost home", async () => {
+    const outside = join(fixture.root, "outside-screenshots");
+    await mkdir(outside);
+    await symlink(outside, join(fixture.dir, SCREENSHOTS_DIRNAME));
+    await expect(captureViaHelper({
+      helper: captureHelper(),
+      home: openGhostHome(fixture.dir),
+      target: "screen",
+    })).rejects.toThrowError(/symbolic link|non-directory component/);
+    expect(await readdir(outside)).toEqual([]);
+  });
+
+  it("uses collision-safe names for simultaneous captures with the same timestamp", async () => {
+    const now = new Date("2026-08-22T10:11:12.345Z");
+    const home = openGhostHome(fixture.dir);
+    const [first, second] = await Promise.all([
+      captureViaHelper({ helper: captureHelper(), home, target: "screen", now }),
+      captureViaHelper({ helper: captureHelper(), home, target: "screen", now }),
+    ]);
+    expect(first.path).not.toBe(second.path);
+    expect(new Set(await readdir(join(fixture.dir, SCREENSHOTS_DIRNAME))).size).toBe(2);
+  });
 });
 
 describe("retention", () => {
@@ -186,15 +221,21 @@ describe("retention", () => {
   it("keeps only the newest captures", async () => {
     const dir = join(fixture.dir, SCREENSHOTS_DIRNAME);
     await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, "browser-owner.png"), "browser");
     for (let index = 0; index < 25; index += 1) {
-      const path = join(dir, `screen-${String(index).padStart(3, "0")}.png`);
+      const path = join(
+        dir,
+        `screen-2026-08-22T10-11-${String(index).padStart(2, "0")}-000.png`,
+      );
       await writeFile(path, "x");
       const when = new Date(Date.now() - (25 - index) * 1000);
       await utimes(path, when, when);
     }
     const deleted = await pruneScreenshots(dir, 20);
     expect(deleted).toHaveLength(5);
-    expect((await readdir(dir)).sort()[0]).toBe("screen-005.png");
+    expect((await readdir(dir)).filter((name) => name.startsWith("screen-")).sort()[0])
+      .toBe("screen-2026-08-22T10-11-05-000.png");
+    await expect(stat(join(dir, "browser-owner.png"))).resolves.toBeDefined();
   });
 
   it("is applied after every capture", async () => {
@@ -210,6 +251,16 @@ describe("retention", () => {
       });
     }
     expect(await readdir(join(fixture.dir, SCREENSHOTS_DIRNAME))).toHaveLength(2);
+  });
+
+  it("fails pruning on a matching symlink without deleting its target", async () => {
+    const dir = join(fixture.dir, SCREENSHOTS_DIRNAME);
+    const target = join(fixture.root, "outside.png");
+    await mkdir(dir);
+    await writeFile(target, "owner data");
+    await symlink(target, join(dir, "screen-2026-08-22T10-11-12-345.png"));
+    await expect(pruneScreenshots(dir, 0)).rejects.toThrowError(/not a regular file/);
+    expect(await readFile(target, "utf8")).toBe("owner data");
   });
 });
 
@@ -233,6 +284,22 @@ describe("ghost_screen tool", () => {
     );
     return { harness, helper };
   }
+
+  it("publishes the same watch bounds that runtime enforces", async () => {
+    const { harness } = await harnessFor(TEXT_ONLY);
+    const parameters = harness.tools.get(GHOST_SCREEN)?.parameters as unknown as {
+      toJsonSchema(): { properties: Record<string, Record<string, unknown>> };
+    };
+    const schema = parameters.toJsonSchema();
+    expect(schema.properties["frames"]).toMatchObject({
+      minimum: 1,
+      maximum: MAX_WATCH_FRAMES,
+    });
+    expect(schema.properties["interval"]).toMatchObject({
+      minimum: 0,
+      maximum: MAX_WATCH_INTERVAL_MS,
+    });
+  });
 
   it("returns the image itself when the chat model can see", async () => {
     const { harness, helper } = await harnessFor(VISION_CHAT);
@@ -320,6 +387,15 @@ describe("ghost_screen tool", () => {
     expect(result.details.warnings).toContain(
       "region capture reads only currently-composited pixels",
     );
+  });
+
+  it("bounds helper honesty lists and reports omitted metadata", async () => {
+    const warnings = Array.from({ length: 20 }, (_, index) => `${index}-${"x".repeat(300)}`);
+    const { harness } = await harnessFor(VISION_CHAT, captureHelper({ warnings }));
+    const result = await harness.call(GHOST_SCREEN, { prompt: "?" });
+    expect(result.details.warnings).toHaveLength(12);
+    expect(result.details.warningsOmitted).toBe(8);
+    expect((result.details.warnings as string[])[0]?.length).toBe(200);
   });
 
   it("passes a window target and window through to the sidecar", async () => {

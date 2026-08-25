@@ -10,12 +10,18 @@ from __future__ import annotations
 
 import tomllib
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
+import pytest
 from conftest import FakeHyprctl, sample_window, unlocked_runner
 
-from ghost_desktop_helper._vendor.omaharness.errors import CapabilityError
-from ghost_desktop_helper.bridge import GhostDesktop
+from ghost_desktop_helper import bridge as bridge_module
+from ghost_desktop_helper._vendor.omaharness.errors import (
+    CapabilityError,
+    OmaHarnessError,
+)
+from ghost_desktop_helper.bridge import MAX_CAPTURE_BYTES, GhostDesktop
 
 
 class _RaisingHeadless:
@@ -74,3 +80,43 @@ def test_capability_error_in_headless_rung_still_degrades():
 
     assert result is None
     assert any("headless-output capture unavailable" in w for w in warnings)
+
+
+def test_oversized_capture_is_rejected_before_read_and_removed(tmp_path: Path):
+    path = tmp_path / "oversized.png"
+    with path.open("wb") as handle:
+        handle.truncate(MAX_CAPTURE_BYTES + 1)
+
+    with pytest.raises(OmaHarnessError, match=r"limited.*8 MiB"):
+        GhostDesktop._encode_png({"path": str(path)})
+
+    assert not path.exists()
+
+
+def test_capture_growth_during_bounded_read_is_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    path = tmp_path / "growing.png"
+    path.write_bytes(
+        b"\x89PNG\r\n\x1a\n"
+        + b"\x00" * 8
+        + (1).to_bytes(4, "big")
+        + (1).to_bytes(4, "big")
+        + b"grew after the first stat"
+    )
+    real_fstat = bridge_module.os.fstat
+    calls = 0
+
+    def staged_fstat(fd: int):
+        nonlocal calls
+        calls += 1
+        actual = real_fstat(fd)
+        if calls == 1:
+            return SimpleNamespace(st_mode=actual.st_mode, st_size=24)
+        return actual
+
+    monkeypatch.setattr(bridge_module.os, "fstat", staged_fstat)
+    with pytest.raises(OmaHarnessError, match="changed size while it was being read"):
+        GhostDesktop._encode_png({"path": str(path)})
+
+    assert not path.exists()

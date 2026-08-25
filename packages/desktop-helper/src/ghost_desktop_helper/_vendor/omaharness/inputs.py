@@ -1,8 +1,8 @@
 # Vendored from omarchy-quattro-harness (https://github.com/fabiopauli/omarchy-quattro-harness)
 # Original module: src/omaharness/inputs.py
 # Copyright (c) 2026 Fabio Pauli. Licensed under the MIT License.
-# See ghost_desktop_helper/_vendor/omaharness/LICENSE. Vendored UNMODIFIED
-# by the Ghost project for ghost-desktop-helper; only this header was added.
+# See ghost_desktop_helper/_vendor/omaharness/LICENSE. Ghost additionally caps
+# repeated click injection at its public helper boundary.
 
 """Focused input injection, wrapped so every call is bounded and diagnosable.
 
@@ -42,6 +42,9 @@ from .keys import evdev_chord
 #: ``ydotool click`` button numbers and its down/up bit flags.
 _BUTTONS = {"left": 0x00, "right": 0x01, "middle": 0x02}
 _DOWN, _UP = 0x40, 0x80
+
+#: Hard ceiling for repeated pointer injection, shared by every Python caller.
+MAX_CLICKS = 3
 
 #: Where the pointer is sent to measure the absolute-coordinate mapping, in
 #: logical layout coordinates. Two probes are needed because the mapping can
@@ -309,7 +312,7 @@ class Ydotool:
 
     def click(self, button: str = "left", *, clicks: int = 1) -> None:
         code = self._button(button)
-        for _ in range(max(1, int(clicks))):
+        for _ in range(max(1, min(int(clicks), MAX_CLICKS))):
             self._call(["click", f"0x{code | _DOWN | _UP:02X}"])
 
     def button_down(self, button: str = "left") -> None:

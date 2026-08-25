@@ -59,7 +59,7 @@ Input (layout-safe)
 - `mouse_move` `{ x, y, app?, coordinate_space? }` → park the pointer at a coordinate (a hover). Unlike click/drag the pointer is **left there**, not restored; it rides a no-cursor-restore transaction that keeps every other guardrail (lock, focus/workspace restore).
 
 Capture (the ladder + honesty)
-- `capture` `{ target: "window"|"screen"|"region", name?, address?, region?, output? }` → PNG bytes (base64) via the 3-tier ladder: grim foreign-toplevel (background-safe) → headless-output → focused-region (visible, background_safe=false). Report which rung + full honesty metadata. Refuse rather than return blank.
+- `capture` `{ target: "window"|"screen"|"region", name?, address?, region?, output? }` → PNG bytes (base64) via the 3-tier ladder: grim foreign-toplevel (background-safe) → headless-output → focused-region (visible, background_safe=false). Report which rung + full honesty metadata. Refuse rather than return blank. Producer output is capped at 8 MiB and is read through a bounded, size-verified stream before encoding.
 
 Compositor control (dispatcher-grammar correct — auto-detect 0.55 string vs 0.56+ `hl.dsp.*` Lua grammar via an `hl.dsp.no_op()` probe; env override `OMAHARNESS_DISPATCH_API`-style)
 - `focus` `{ address | name }` → focus a window.

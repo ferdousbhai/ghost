@@ -12,6 +12,7 @@ from __future__ import annotations
 import pytest
 from conftest import FakeHyprctl, sample_window, unlocked_runner
 
+from ghost_desktop_helper._vendor.omaharness.inputs import MAX_CLICKS, Ydotool
 from ghost_desktop_helper.bridge import GhostDesktop
 
 
@@ -63,6 +64,28 @@ def test_click_passes_button_and_clicks():
     assert result["button"] == "right"
     assert result["clicks"] == 2
     assert result["background_safe"] is False  # a pointer move is visible
+
+
+def test_click_caps_huge_repetition_for_direct_bridge_callers():
+    desktop, ydotool, _ = _desktop()
+    result = desktop.click(x=200, y=200, app="0xaaaa", clicks=10**9)
+    assert ("click", "left", MAX_CLICKS) in ydotool.events
+    assert result["clicks"] == MAX_CLICKS
+
+
+def test_vendored_ydotool_caps_huge_repetition_for_direct_callers():
+    calls: list[list[str]] = []
+
+    def runner(argv, **_kwargs):
+        calls.append(argv)
+
+        class Result:
+            ok = True
+
+        return Result()
+
+    Ydotool(runner=runner).click(clicks=10**9)
+    assert len(calls) == MAX_CLICKS
 
 
 def test_scroll_wheels_the_focused_window():

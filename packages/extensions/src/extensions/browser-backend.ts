@@ -116,9 +116,12 @@ export interface BackendTypeInput extends BackendTarget {
 }
 
 export interface BackendScreenshotOptions extends BackendActionOptions {
-  /** Where to write the PNG. The session layer owns naming and the directory. */
-  readonly path: string;
   readonly fullPage: boolean;
+}
+
+/** The session validates and publishes these bytes into its confined directory. */
+export interface BackendScreenshotResult extends PageSummary {
+  readonly bytes: Uint8Array;
 }
 
 export interface BackendBackResult extends PageSummary {
@@ -269,7 +272,7 @@ export interface GhostBrowserBackend {
 
   type(input: BackendTypeInput, options: BackendActionOptions): Promise<PageSummary>;
 
-  screenshot(options: BackendScreenshotOptions): Promise<PageSummary>;
+  screenshot(options: BackendScreenshotOptions): Promise<BackendScreenshotResult>;
 
   back(options: BackendActionOptions): Promise<BackendBackResult>;
 

@@ -12,6 +12,7 @@ import { describe, expect, it } from "vitest";
 import {
   DesktopHelperClient,
   ghostErrorFromSidecar,
+  MAX_HELPER_LINE_BYTES,
   resolveHelperCommand,
   type HelloPayload,
   type HelperProcess,
@@ -213,6 +214,26 @@ describe("request / response", () => {
     await expect(
       client.request("state", {}, { signal: controller.signal }),
     ).rejects.toThrowError(/aborted/);
+    await client.dispose();
+  });
+
+  it("stops before accumulating an oversized helper response line", async () => {
+    const proc = new FakeProcess();
+    const client = clientFor(proc);
+    const ready = client.hello();
+    proc.line(HELLO);
+    await ready;
+
+    const pending = client.request("capture", {});
+    await tick();
+    const chunk = "x".repeat(1024 * 1024);
+    for (let bytes = 0; bytes <= MAX_HELPER_LINE_BYTES; bytes += chunk.length) {
+      proc.stdout.emit("data", chunk);
+      if (proc.killed) break;
+    }
+
+    await expect(pending).rejects.toMatchObject({ code: "limit_exceeded" });
+    expect(proc.killed).toBe(true);
     await client.dispose();
   });
 });

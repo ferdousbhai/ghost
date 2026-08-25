@@ -37,7 +37,10 @@
  * `browser-relay` package in https://github.com/can1357/oh-my-pi. No code is
  * vendored; that server half is Bun-only and its tool layer is a different seam.
  */
-import { writeFile } from "node:fs/promises";
+import {
+  assertScreenshotBase64WithinLimit,
+  assertScreenshotBytesWithinLimit,
+} from "./screenshot-retention.js";
 import {
   GhostBrowserError,
   identifiedBrowserBackendFactory,
@@ -50,6 +53,7 @@ import {
   type BackendResizeInput,
   type BackendResizeResult,
   type BackendScreenshotOptions,
+  type BackendScreenshotResult,
   type BackendScrollInput,
   type BackendTabInfo,
   type BackendTabsInput,
@@ -401,14 +405,14 @@ export class RelayBrowserBackend implements GhostBrowserBackend {
     return readPage("type", result["page"]);
   }
 
-  async screenshot(options: BackendScreenshotOptions): Promise<PageSummary> {
+  async screenshot(options: BackendScreenshotOptions): Promise<BackendScreenshotResult> {
     const result = await this.#call("screenshot", { fullPage: options.fullPage }, options);
     const png = result["png"];
     if (typeof png !== "string" || png === "") malformed("screenshot", "no image came back");
-    // The seam says the session layer owns naming and the directory, so the bytes
-    // arrive base64 and get written on this side of the socket.
-    await writeFile(options.path, Buffer.from(png, "base64"));
-    return readPage("screenshot", result["page"]);
+    assertScreenshotBase64WithinLimit(png, "Browser relay screenshot");
+    const bytes = Buffer.from(png, "base64");
+    assertScreenshotBytesWithinLimit(bytes.byteLength, "Browser relay screenshot");
+    return { ...readPage("screenshot", result["page"]), bytes };
   }
 
   async back(options: BackendActionOptions): Promise<BackendBackResult> {

@@ -20,6 +20,10 @@ Two rules the harness taught us, kept intact:
 from __future__ import annotations
 
 import base64
+import io
+import os
+import stat
+import struct
 import tempfile
 import time
 from pathlib import Path
@@ -28,14 +32,14 @@ from typing import Any
 from ._vendor.omaharness import atspi as atspi_module
 from ._vendor.omaharness import hypr, process, session
 from ._vendor.omaharness import toplevels as toplevel_protocol
-from ._vendor.omaharness.capture import CaptureRouter, png_size, region_argument
+from ._vendor.omaharness.capture import CaptureRouter, region_argument
 from ._vendor.omaharness.errors import (
     AmbiguousTargetError,
     CapabilityError,
     OmaHarnessError,
 )
 from ._vendor.omaharness.headless import HeadlessCapture
-from ._vendor.omaharness.inputs import Wtype, Ydotool
+from ._vendor.omaharness.inputs import MAX_CLICKS, Wtype, Ydotool
 from ._vendor.omaharness.keys import hypr_shortcut
 from ._vendor.omaharness.transaction import CompositorTransaction
 
@@ -51,6 +55,10 @@ _MAX_NODES_CAP = 5000
 _MAX_DEPTH_CAP = 40
 _MAX_LIMIT_CAP = 200
 _MAX_TIMEOUT_CAP = 5.0
+#: Producer-side ceiling shared by every capture ladder rung. The TypeScript
+#: consumer enforces the same 8 MiB ceiling before disk/provider publication.
+MAX_CAPTURE_BYTES = 8 * 1024 * 1024
+_CAPTURE_READ_CHUNK_BYTES = 64 * 1024
 #: Wall-clock budget for a single snapshot walk, independent of node/depth caps:
 #: a small tree of pathologically slow nodes must still terminate.
 _SNAPSHOT_BUDGET_S = 5.0
@@ -67,6 +75,74 @@ _HOVER_WARNING = (
     "the pointer was left where it moved (a hover); the next input op, or the "
     "user, will move it from here"
 )
+
+
+def _capture_limit_error(size: int) -> OmaHarnessError:
+    return OmaHarnessError(
+        f"Capture is {size} bytes; PNG captures are limited to "
+        f"{MAX_CAPTURE_BYTES} bytes (8 MiB)"
+    )
+
+
+def _read_capture_png(path: Path) -> tuple[str, int, int]:
+    """Read and encode one stable regular PNG within the producer byte cap.
+
+    The initial descriptor stat rejects an already-oversized producer output
+    before reading it. The loop reads at most one byte beyond the cap and the
+    final descriptor stat verifies that the file did not grow or shrink while
+    it was being consumed. Encoding is incremental, so the helper never holds
+    both the complete raw PNG and its larger base64 representation.
+    """
+    encoded = io.StringIO()
+    pending = b""
+    header = bytearray()
+    total = 0
+    width: int | None = None
+    height: int | None = None
+
+    with path.open("rb") as handle:
+        before = os.fstat(handle.fileno())
+        if not stat.S_ISREG(before.st_mode):
+            raise OmaHarnessError(f"Capture did not produce a regular file: {path}")
+        if before.st_size > MAX_CAPTURE_BYTES:
+            raise _capture_limit_error(before.st_size)
+
+        while True:
+            available = MAX_CAPTURE_BYTES + 1 - total
+            chunk = handle.read(min(_CAPTURE_READ_CHUNK_BYTES, available))
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > MAX_CAPTURE_BYTES:
+                raise _capture_limit_error(total)
+
+            if len(header) < 24:
+                header.extend(chunk[: 24 - len(header)])
+                if len(header) == 24:
+                    if header[:8] != b"\x89PNG\r\n\x1a\n":
+                        raise OmaHarnessError(f"Capture did not produce a PNG: {path}")
+                    width, height = struct.unpack(">II", header[16:24])
+                    if width <= 0 or height <= 0:
+                        raise OmaHarnessError(f"Capture produced an empty PNG: {path}")
+
+            block = pending + chunk
+            complete = len(block) - (len(block) % 3)
+            if complete > 0:
+                encoded.write(base64.b64encode(block[:complete]).decode("ascii"))
+            pending = block[complete:]
+
+        after = os.fstat(handle.fileno())
+        if total != before.st_size or after.st_size != before.st_size:
+            raise OmaHarnessError(
+                "Capture changed size while it was being read; refusing an unstable image "
+                f"({before.st_size} bytes before, {total} read, {after.st_size} after)"
+            )
+
+    if width is None or height is None:
+        raise OmaHarnessError(f"Capture did not produce a PNG: {path}")
+    if pending:
+        encoded.write(base64.b64encode(pending).decode("ascii"))
+    return encoded.getvalue(), width, height
 
 
 class UnknownRefError(OmaHarnessError):
@@ -826,6 +902,7 @@ class GhostDesktop:
         clicks: int = 1,
         coordinate_space: str = "screen",
     ) -> dict[str, Any]:
+        clicks = max(1, min(int(clicks), MAX_CLICKS))
         if ref is not None:
             return self._click_ref(ref, button=button, clicks=clicks)
         if x is None or y is None:
@@ -838,7 +915,7 @@ class GhostDesktop:
         with transaction:
             focused = transaction.focus_target(window)
             transaction.move_pointer(*self._reproject(point, window, focused))
-            self.ydotool.click(button, clicks=max(1, int(clicks)))
+            self.ydotool.click(button, clicks=clicks)
         report = transaction.report()
         return _honesty(
             "ydotool",
@@ -847,10 +924,11 @@ class GhostDesktop:
             warnings=report["warnings"],
             target=window["address"],
             button=button,
-            clicks=max(1, int(clicks)),
+            clicks=clicks,
         )
 
     def _click_ref(self, ref: Any, *, button: str, clicks: int) -> dict[str, Any]:
+        clicks = max(1, min(int(clicks), MAX_CLICKS))
         node = self._ax_element(ref)
         # The ref carries the window it was snapshotted in; _ax_element already
         # proved the ref is current, so this window is the one that owns it -
@@ -883,7 +961,7 @@ class GhostDesktop:
             transaction.move_pointer(
                 *self._reproject((center_x, center_y), window, focused)
             )
-            self.ydotool.click(button, clicks=max(1, int(clicks)))
+            self.ydotool.click(button, clicks=clicks)
         report = transaction.report()
         return _honesty(
             "ydotool",
@@ -892,7 +970,7 @@ class GhostDesktop:
             warnings=report["warnings"],
             ref=ref,
             button=button,
-            clicks=max(1, int(clicks)),
+            clicks=clicks,
         )
 
     def _screen_point(
@@ -1237,12 +1315,11 @@ class GhostDesktop:
     def _encode_png(result: dict[str, Any]) -> dict[str, Any]:
         path = Path(result["path"])
         try:
-            width, height = png_size(path)
-            data = path.read_bytes()
+            encoded, width, height = _read_capture_png(path)
         finally:
             process.unlink_quietly(path)
         return {
-            "png_base64": base64.b64encode(data).decode("ascii"),
+            "png_base64": encoded,
             "width": width,
             "height": height,
             "backend": result.get("backend"),

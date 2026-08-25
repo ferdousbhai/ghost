@@ -9,10 +9,22 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  condenseAxHitTest,
+  condenseAxQuery,
+  condenseAxRoles,
+  condenseDesktopLayers,
   condenseDesktopState,
+  condenseDesktopWindows,
   createHyprlandExtension,
+  DEFAULT_AX_QUERY_LIMIT,
   desktopToolNames,
   GHOST_DESKTOP,
+  MAX_AX_ACTION_LENGTH,
+  MAX_AX_QUERY_LIMIT,
+  MAX_CLICKS,
+  MAX_DESKTOP_OBSERVATION_ITEMS,
+  MAX_DESKTOP_OBSERVATION_LIST_ITEMS,
+  MAX_DESKTOP_OBSERVATION_TEXT,
   MAX_LISTED_WINDOWS,
   MAX_TITLE_LENGTH,
 } from "../src/extensions/hyprland.js";
@@ -230,6 +242,153 @@ describe("condenseDesktopState", () => {
   });
 });
 
+describe("bounded desktop observations", () => {
+  const oversizedText = "x".repeat(MAX_DESKTOP_OBSERVATION_TEXT + 100);
+  const tooMany = Array.from(
+    { length: MAX_DESKTOP_OBSERVATION_ITEMS + 5 },
+    (_unused, index) => index,
+  );
+
+  it("caps every state collection and reports each omitted count", () => {
+    const state = condenseDesktopState(
+      tooMany.map(() => ({
+        address: oversizedText,
+        class: oversizedText,
+        title: oversizedText,
+        workspace: { name: oversizedText },
+      })),
+      tooMany.map(() => ({
+        id: { secret: oversizedText },
+        name: oversizedText,
+        monitor: oversizedText,
+        windows: Number.POSITIVE_INFINITY,
+      })),
+      { address: oversizedText, title: oversizedText },
+      tooMany.map((index) => ({
+        name: `${index}-${oversizedText}`,
+        focused: false,
+        width: Number.POSITIVE_INFINITY,
+        height: 1080,
+      })),
+    );
+    expect(state.windows).toHaveLength(MAX_LISTED_WINDOWS);
+    expect(state.workspaces).toHaveLength(MAX_DESKTOP_OBSERVATION_ITEMS);
+    expect(state.monitors).toHaveLength(MAX_DESKTOP_OBSERVATION_ITEMS);
+    expect(state).toMatchObject({
+      omitted: 5,
+      workspacesOmitted: 5,
+      monitorsOmitted: 5,
+    });
+    expect(state.windows[0]?.address).toHaveLength(80);
+    expect(state.windows[0]?.workspace).toHaveLength(40);
+    expect(state.workspaces[0]?.id).toBe("");
+    expect(state.monitors[0]?.name).toHaveLength(40);
+    expect(state.monitors[0]?.resolution).toBeUndefined();
+    expect(JSON.stringify(state)).not.toContain("secret");
+  });
+
+  it("projects and caps see windows", () => {
+    const result = condenseDesktopWindows({
+      windows: tooMany.map((index) => ({
+        address: `0x${index}`,
+        class: "browser",
+        title: oversizedText,
+        workspace: { name: "web" },
+        pid: 1234,
+        secret_helper_field: oversizedText,
+      })),
+      count: tooMany.length,
+    });
+    const windows = result["windows"] as Array<Record<string, unknown>>;
+    expect(windows).toHaveLength(MAX_DESKTOP_OBSERVATION_ITEMS);
+    expect(windows[0]?.["title"]).toHaveLength(MAX_DESKTOP_OBSERVATION_TEXT);
+    expect(result["omitted"]).toBe(5);
+    expect(JSON.stringify(result)).not.toContain("secret_helper_field");
+    expect(JSON.stringify(result)).not.toContain("pid");
+  });
+
+  it("projects and caps layers", () => {
+    const result = condenseDesktopLayers({
+      layers: tooMany.map((index) => ({
+        output: "DP-1",
+        namespace: oversizedText,
+        address: `0x${index}`,
+        pid: 1234,
+        arbitrary: oversizedText,
+      })),
+      count: tooMany.length,
+    });
+    const layers = result["layers"] as Array<Record<string, unknown>>;
+    expect(layers).toHaveLength(MAX_DESKTOP_OBSERVATION_ITEMS);
+    expect(layers[0]?.["namespace"]).toHaveLength(MAX_DESKTOP_OBSERVATION_TEXT);
+    expect(result["omitted"]).toBe(5);
+    expect(JSON.stringify(result)).not.toContain("arbitrary");
+    expect(JSON.stringify(result)).not.toContain("pid");
+  });
+
+  it("projects and caps accessibility elements and their nested lists", () => {
+    const result = condenseAxQuery({
+      app: oversizedText,
+      elements: tooMany.map((index) => ({
+        ref: `1:${index}`,
+        role: "button",
+        name: oversizedText,
+        text: oversizedText,
+        states: Array.from({ length: MAX_DESKTOP_OBSERVATION_LIST_ITEMS + 5 }, () => oversizedText),
+        actions: [
+          "show context menu",
+          "x".repeat(MAX_AX_ACTION_LENGTH + 1),
+          "click\nnow",
+        ],
+        arbitrary: oversizedText,
+      })),
+      count: tooMany.length,
+      warnings: Array.from(
+        { length: MAX_DESKTOP_OBSERVATION_LIST_ITEMS + 5 },
+        () => oversizedText,
+      ),
+    });
+    const elements = result["elements"] as Array<Record<string, unknown>>;
+    expect(elements).toHaveLength(MAX_DESKTOP_OBSERVATION_ITEMS);
+    expect(elements[0]?.["name"]).toHaveLength(MAX_DESKTOP_OBSERVATION_TEXT);
+    expect(elements[0]?.["states"]).toHaveLength(MAX_DESKTOP_OBSERVATION_LIST_ITEMS);
+    expect(elements[0]?.["states_omitted"]).toBe(5);
+    expect(elements[0]?.["actions"]).toEqual(["show context menu"]);
+    expect(elements[0]?.["actions_omitted"]).toBe(2);
+    expect(result["warnings"]).toHaveLength(MAX_DESKTOP_OBSERVATION_LIST_ITEMS);
+    expect(result["warnings_omitted"]).toBe(5);
+    expect(result["omitted"]).toBe(5);
+    expect(result["truncated"]).toBe(true);
+    expect(JSON.stringify(result)).not.toContain("arbitrary");
+  });
+
+  it("bounds the hit-test element with the same accessibility projection", () => {
+    const result = condenseAxHitTest({
+      app: oversizedText,
+      element: {
+        ref: "3:5",
+        role: "button",
+        name: oversizedText,
+        arbitrary: oversizedText,
+      },
+    });
+    const element = result["element"] as Record<string, unknown>;
+    expect(element["name"]).toHaveLength(MAX_DESKTOP_OBSERVATION_TEXT);
+    expect(JSON.stringify(result)).not.toContain("arbitrary");
+  });
+
+  it("turns the arbitrary-key roles map into a bounded list", () => {
+    const result = condenseAxRoles({
+      app: oversizedText,
+      roles: Object.fromEntries(tooMany.map((index) => [`role-${index}-${oversizedText}`, index])),
+    });
+    const roles = result["roles"] as Record<string, number>;
+    expect(Object.keys(roles)).toHaveLength(MAX_DESKTOP_OBSERVATION_ITEMS);
+    expect(Object.keys(roles)[0]).toHaveLength(80);
+    expect(result["omitted"]).toBe(5);
+  });
+});
+
 describe("ghost_desktop read ops", () => {
   it("reads and condenses state from the sidecar", async () => {
     const { extension, helper } = await harness();
@@ -294,6 +453,37 @@ describe("ghost_desktop dispatch", () => {
     expect(helper.requests[0]).toEqual({ op: "focus", args: { name: "firefox" } });
   });
 
+  it("bounds and accounts for honesty metadata from the helper", async () => {
+    const oversized = "x".repeat(MAX_DESKTOP_OBSERVATION_TEXT + 100);
+    const helper = fakeHelper({
+      handle: (op) => op === "focus"
+        ? {
+          backend: oversized,
+          background_safe: false,
+          interference: Array.from(
+            { length: MAX_DESKTOP_OBSERVATION_LIST_ITEMS + 5 },
+            (_, index) => `${index}-${oversized}`,
+          ),
+          warnings: Array.from(
+            { length: MAX_DESKTOP_OBSERVATION_LIST_ITEMS + 5 },
+            (_, index) => `${index}-${oversized}`,
+          ),
+        }
+        : desktopHandler(op),
+    });
+    const { extension } = await harness(helper);
+    const result = await extension.call(GHOST_DESKTOP, {
+      action: "focus",
+      target: "firefox",
+    });
+    expect(result.details.backend).toHaveLength(80);
+    expect(result.details.interference).toHaveLength(MAX_DESKTOP_OBSERVATION_LIST_ITEMS);
+    expect(result.details.interferenceOmitted).toBe(5);
+    expect(result.details.warnings).toHaveLength(MAX_DESKTOP_OBSERVATION_LIST_ITEMS);
+    expect(result.details.warningsOmitted).toBe(5);
+    expect(resultText(result)).toContain("5 more warning(s) omitted");
+  });
+
   it("needs a target to focus", async () => {
     const { extension } = await harness();
     await expect(
@@ -340,6 +530,18 @@ describe("ghost_desktop AT-SPI semantic flow", () => {
     expect(result.details.count).toBe(1);
   });
 
+  it("clamps direct ax_query calls to the helper's hard ceiling", async () => {
+    const { extension, helper } = await harness();
+    await extension.call(GHOST_DESKTOP, {
+      action: "ax_query",
+      limit: MAX_AX_QUERY_LIMIT + 100,
+    });
+    expect(helper.requests[0]?.args).toEqual({ limit: MAX_AX_QUERY_LIMIT });
+
+    await extension.call(GHOST_DESKTOP, { action: "ax_query", limit: 0 });
+    expect(helper.requests[1]?.args).toEqual({ limit: 1 });
+  });
+
   it("drives ax_query → ref → ax_perform", async () => {
     const { extension, helper } = await harness();
     const query = await extension.call(GHOST_DESKTOP, { action: "ax_query", target: "firefox" });
@@ -365,6 +567,34 @@ describe("ghost_desktop AT-SPI semantic flow", () => {
     await expect(
       extension.call(GHOST_DESKTOP, { action: "ax_perform" }),
     ).rejects.toThrowError(/needs ref/);
+  });
+
+  it("preserves application-defined ax_perform actions", async () => {
+    const { extension, helper } = await harness();
+    await extension.call(GHOST_DESKTOP, {
+      action: "ax_perform",
+      ref: "1:7",
+      ax_action: "show context menu",
+    });
+    expect(helper.requests[0]).toEqual({
+      op: "ax_perform",
+      args: { ref: "1:7", action: "show context menu" },
+    });
+  });
+
+  it("bounds malformed application-defined ax_perform actions", async () => {
+    const { extension, helper } = await harness();
+    await expect(extension.call(GHOST_DESKTOP, {
+      action: "ax_perform",
+      ref: "1:7",
+      ax_action: "x".repeat(MAX_AX_ACTION_LENGTH + 1),
+    })).rejects.toThrowError(/at most 80 characters/);
+    await expect(extension.call(GHOST_DESKTOP, {
+      action: "ax_perform",
+      ref: "1:7",
+      ax_action: "click\nnow",
+    })).rejects.toThrowError(/control characters/);
+    expect(helper.requests).toHaveLength(0);
   });
 
   it("ax_set writes an attribute by ref", async () => {
@@ -438,6 +668,18 @@ describe("ghost_desktop input", () => {
     });
     expect(result.details.button).toBe("right");
     expect(result.details.clicks).toBe(2);
+  });
+
+  it("caps clicks even when a direct caller bypasses schema validation", async () => {
+    const { extension, helper } = await harness();
+    const result = await extension.call(GHOST_DESKTOP, {
+      action: "click",
+      x: 100,
+      y: 200,
+      clicks: 1_000_000,
+    });
+    expect(helper.requests[0]?.args).toMatchObject({ clicks: MAX_CLICKS });
+    expect(result.details.clicks).toBe(MAX_CLICKS);
   });
 
   it("omits button/clicks from the args when they are the defaults", async () => {
@@ -533,6 +775,19 @@ describe("ghost_desktop input", () => {
     await expect(
       extension.call(GHOST_DESKTOP, { action: "scroll", delta_y: 0 }),
     ).rejects.toThrowError(/non-zero delta/);
+  });
+
+  it.each([
+    ["hit_test", { action: "hit_test", x: Number.NaN, y: 2 }],
+    ["click", { action: "click", x: Number.POSITIVE_INFINITY, y: 2 }],
+    ["drag", { action: "drag", x: 1, y: 2, x2: Number.NaN, y2: 4 }],
+    ["scroll delta", { action: "scroll", delta_y: Number.NEGATIVE_INFINITY }],
+    ["scroll anchor", { action: "scroll", delta_y: 1, x: Number.NaN, y: 2 }],
+    ["mouse_move", { action: "mouse_move", x: 1, y: Number.POSITIVE_INFINITY }],
+  ] as const)("rejects non-finite direct %s input before the helper", async (_label, params) => {
+    const { extension, helper } = await harness();
+    await expect(extension.call(GHOST_DESKTOP, params)).rejects.toThrow();
+    expect(helper.requests).toEqual([]);
   });
 
   it("moves (hovers) the pointer to a coordinate", async () => {
@@ -735,5 +990,37 @@ describe("ghost_desktop registration", () => {
     expect(extension.toolNames()).toEqual([GHOST_DESKTOP]);
     expect(desktopToolNames()).toEqual([GHOST_DESKTOP]);
     expect(await extension.toolCall(GHOST_DESKTOP)).toBeUndefined();
+  });
+
+  it("publishes bounded limit and accessibility-action schemas", async () => {
+    const { extension } = await harness();
+    const parameters = extension.tools.get(GHOST_DESKTOP)?.parameters as unknown as {
+      toJsonSchema(): {
+        properties: Record<string, {
+          enum?: string[];
+          minLength?: number;
+          maxLength?: number;
+          minimum?: number;
+          maximum?: number;
+          default?: number;
+        }>;
+      };
+    };
+    const schema = parameters.toJsonSchema();
+    expect(schema.properties["limit"]).toMatchObject({
+      minimum: 1,
+      maximum: MAX_AX_QUERY_LIMIT,
+    });
+    expect(schema.properties["limit"]?.default).toBeUndefined();
+    expect(DEFAULT_AX_QUERY_LIMIT).toBe(20);
+    expect(schema.properties["ax_action"]).toMatchObject({
+      minLength: 1,
+      maxLength: MAX_AX_ACTION_LENGTH,
+    });
+    expect(schema.properties["ax_action"]?.enum).toBeUndefined();
+    expect(schema.properties["clicks"]).toMatchObject({
+      minimum: 1,
+      maximum: MAX_CLICKS,
+    });
   });
 });

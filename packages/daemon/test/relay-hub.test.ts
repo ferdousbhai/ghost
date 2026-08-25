@@ -15,6 +15,7 @@ import { WebSocket } from "ws";
 import {
   attachRelay,
   createRelayHub,
+  MAX_RELAY_MESSAGE_BYTES,
   RelayHub,
 } from "../src/relay.js";
 import {
@@ -344,6 +345,15 @@ describe("requests", () => {
     expect(hub.connected).toBe(true);
     expect(await hub.request("read", {}, { timeoutMs: 3_000 })).toMatchObject({ ok: true });
   });
+
+  it("closes before parsing a relay message beyond the screenshot budget", async () => {
+    const socket = await connectExtension();
+    const closed = new Promise<number>((resolve) => socket.once("close", resolve));
+    socket.send("x".repeat(MAX_RELAY_MESSAGE_BYTES + 1));
+
+    expect(await closed).toBe(1009);
+    await waitFor(() => !hub.connected);
+  }, 10_000);
 });
 
 // ------------------------------------------------------------------- shutdown
