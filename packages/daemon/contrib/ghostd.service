@@ -1,11 +1,15 @@
 [Unit]
 Description=Ghost daemon (ghostd)
 Documentation=https://github.com/ferdousbhai/ghost
-After=network.target
+# The desktop helper and headed browser inherit the compositor environment from
+# the user manager. Keep the daemon in the graphical session so it cannot start
+# early with a permanently incomplete WAYLAND_DISPLAY/Hyprland environment.
+PartOf=graphical-session.target
+After=graphical-session.target network.target
 
 [Service]
 Type=simple
-ExecStart=%h/.local/bin/ghostd
+ExecStart=/usr/bin/ghostd
 Restart=on-failure
 RestartSec=2
 
@@ -28,10 +32,16 @@ ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectControlGroups=yes
 RestrictSUIDSGID=yes
-RestrictNamespaces=yes
+# Chromium's sandbox needs to create user, PID, network, IPC, and mount
+# namespaces. Denying namespace creation makes the dedicated browser abort;
+# NoNewPrivileges remains compatible with Chromium's user-namespace sandbox.
 LockPersonality=yes
 MemoryDenyWriteExecute=no
-ReadWritePaths=%h
+# PrivateTmp only isolates /tmp and /var/tmp. The user runtime directory stays
+# available for the omaharness lock and Wayland/Hyprland sockets.
+ReadWritePaths=%h %t
+UMask=0077
+Slice=session.slice
 
 [Install]
-WantedBy=default.target
+WantedBy=graphical-session.target

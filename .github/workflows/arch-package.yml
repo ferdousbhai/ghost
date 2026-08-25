@@ -1,0 +1,89 @@
+name: Arch package
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+    tags: ['v*']
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - name: Update package database and install build dependencies
+        run: >-
+          pacman -Syu --needed --noconfirm
+          at-spi2-core bun chromium desktop-file-utils git grim hyprland libnotify
+          nodejs pnpm python python-dbus python-gobject qt6-5compat quickshell uv wtype
+          xdg-utils ydotool
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build and smoke-test the package
+        env:
+          GHOST_SOURCE_REPO: file://${{ github.workspace }}
+          GHOST_SOURCE_REF: commit=${{ github.sha }}
+        run: |
+          useradd --create-home builder
+          chown -R builder:builder "$GITHUB_WORKSPACE"
+          cd packaging/arch
+          runuser -u builder -- env \
+            GHOST_SOURCE_REPO="$GHOST_SOURCE_REPO" \
+            GHOST_SOURCE_REF="$GHOST_SOURCE_REF" \
+            makepkg --cleanbuild --noconfirm
+
+      - name: Verify the archive with the source checkout hidden
+        run: |
+          archive="$(find packaging/arch -maxdepth 1 -name '*.pkg.tar.zst' -print -quit)"
+          isolated_root="$(mktemp -d)"
+          smoke_copy="$(mktemp)"
+          cp packaging/arch/smoke.sh "$smoke_copy"
+          bsdtar -xf "$archive" -C "$isolated_root"
+          hidden_checkout="$(mktemp -d)"
+          restore_checkout() {
+            if [[ -d "$hidden_checkout" ]]; then
+              find "$hidden_checkout" -mindepth 1 -maxdepth 1 \
+                -exec mv -t "$GITHUB_WORKSPACE" -- {} +
+              rmdir "$hidden_checkout"
+            fi
+          }
+          trap restore_checkout EXIT
+          cd /tmp
+          find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 1 \
+            -exec mv -t "$hidden_checkout" -- {} +
+          bash "$smoke_copy" "$isolated_root"
+          restore_checkout
+          trap - EXIT
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ghost-ai-arch-${{ github.sha }}
+          path: packaging/arch/*.pkg.tar.zst
+          if-no-files-found: error
+
+  release:
+    if: github.event_name == 'release'
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ghost-ai-arch-${{ github.sha }}
+          path: release-artifacts
+
+      - name: Attach package to published release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release upload "${{ github.event.release.tag_name }}" release-artifacts/*.pkg.tar.zst --clobber

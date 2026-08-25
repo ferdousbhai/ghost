@@ -1,0 +1,51 @@
+post_install() {
+  cat <<'EOF'
+Ghost is installed. Enable it for the current graphical login with:
+
+  systemctl --user enable --now ghostd.service ghost-shell.service
+
+The package does not edit Hyprland or Omarchy configuration. Optional summon
+key and bar snippets are under /usr/share/doc/ghost/shell-contrib/.
+
+To relay the browser you already use, load this directory unpacked in Chromium:
+
+  /usr/share/ghost/chromium-extension
+
+Ghost homes, credentials, browser profiles, and daemon state live in your home
+directory. Pacman does not own or remove them.
+EOF
+}
+
+post_upgrade() {
+  cat <<'EOF'
+Ghost was upgraded. Re-enable and restart the user services so an older
+default.target link is replaced by the graphical-session.target lifecycle:
+
+  systemctl --user reenable --now ghostd.service ghost-shell.service
+
+No files under ~/Ghosts, ~/.config/ghost, or ~/.local/state/ghost were changed
+by the package upgrade.
+EOF
+}
+
+pre_remove() {
+  cat <<'EOF'
+Before pacman removes the units, stop and disable them from the desktop user's
+session in another terminal:
+
+  systemctl --user disable --now ghost-shell.service ghostd.service
+
+Removal still preserves every user-owned ghost home, credential, browser
+profile, and daemon state file.
+EOF
+}
+
+post_remove() {
+  cat <<'EOF'
+Ghost's system files were removed. User-owned ghost homes, credentials, browser
+profiles, and daemon state were deliberately left in place. If either process
+is still running in an existing login, stop it with:
+
+  systemctl --user disable --now ghost-shell.service ghostd.service
+EOF
+}

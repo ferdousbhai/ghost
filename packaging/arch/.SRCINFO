@@ -1,0 +1,34 @@
+pkgbase = ghost-ai-git
+	pkgdesc = Owner-local AI persona with memory, tools, and an Omarchy-native desktop shell
+	pkgver = 0.0.1.r100.g0c04ce7
+	pkgrel = 1
+	url = https://github.com/ferdousbhai/ghost
+	install = ghost-ai-git.install
+	arch = x86_64
+	license = Apache-2.0
+	makedepends = desktop-file-utils
+	makedepends = git
+	makedepends = pnpm>=10.11
+	makedepends = uv
+	depends = at-spi2-core>=2.58
+	depends = bun>=1.3.14
+	depends = grim>=1.5
+	depends = hyprland>=0.56
+	depends = libnotify>=0.8
+	depends = python>=3.11
+	depends = python-dbus>=1.4
+	depends = python-gobject>=3.50
+	depends = qt6-5compat>=6.8
+	depends = quickshell>=0.3
+	depends = wtype>=0.4
+	depends = xdg-utils>=1.2
+	depends = ydotool>=1.0
+	optdepends = chromium: dedicated Ghost browser and browser-relay smoke test
+	optdepends = claude-code: Claude Code plan runtime
+	provides = ghost-ai
+	conflicts = ghost-ai
+	options = !debug
+	source = ghost::git+https://github.com/ferdousbhai/ghost.git#branch=master
+	sha256sums = SKIP
+
+pkgname = ghost-ai-git

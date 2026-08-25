@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+exec /usr/bin/bun /usr/lib/ghost/daemon/dist/main.js "$@"
