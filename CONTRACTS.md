@@ -44,6 +44,15 @@ preserve. The source JSON is never rewritten or deleted. An existing native
 target always wins and is never overwritten; malformed fixtures remain in place
 and are reported without preventing the ghost from starting.
 
+`.pi/` holds live provider credentials, and OMP stores them unencrypted: the
+`auth_credentials` row in `agent.db` is plain JSON behind nothing but 0600. That
+is an acceptable posture for a file that never leaves the machine, and the whole
+of it rests on that clause. **Nothing that copies a ghost home off this machine
+may include `.pi/`.** There is no export path today, only import, so this is a
+constraint on the one that gets built rather than a description of one that
+exists. Ghost cannot fix the storage itself until it owns the credential loader
+(#14, #3).
+
 A deleted ghost home leaves the root entirely, for the system trash; see the
 `DELETE` route.
 
