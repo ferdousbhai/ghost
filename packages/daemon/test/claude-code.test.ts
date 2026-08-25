@@ -1,4 +1,5 @@
 import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import type {
   Options as ClaudeQueryOptions,
   Query,
@@ -15,9 +16,11 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   bridgeClaudeCodeTools,
   CLAUDE_CODE_TOOL_CAPABILITIES,
+  type ClaudeCodeQueryInput,
 } from "../src/claude-code.js";
 import { ghostPaths } from "../src/ghosts.js";
 import { GhostHookRunner } from "../src/hooks.js";
+import type { Logger } from "../src/log.js";
 import { setChatModelRole } from "../src/models.js";
 import type { PiMessagesEvent } from "../src/pi-messages.js";
 import { SessionHost } from "../src/session-host.js";
@@ -116,7 +119,12 @@ const TINY_PNG_BASE64 =
 
 function setupClaudeHost(options: {
   authStatus?: { loggedIn: boolean; authMethod?: string; subscriptionType?: string };
+  createQuery?: (
+    input: ClaudeCodeQueryInput,
+    lifecycle: { queries: number; interrupted: number; closed: number },
+  ) => Query;
   hooks?: GhostHookRunner;
+  logger?: Logger;
 } = {}) {
   temp = makeTempGhosts();
   const dir = seedGhost(temp.root, {
@@ -133,6 +141,7 @@ function setupClaudeHost(options: {
   host = new SessionHost({
     registry: temp.registry,
     offline: true,
+    ...(options.logger ? { logger: options.logger } : {}),
     ...(options.hooks ? { hooks: options.hooks } : {}),
     claudeCode: {
       binaryPath: process.execPath,
@@ -144,6 +153,7 @@ function setupClaudeHost(options: {
       createQuery: (input) => {
         lifecycle.queries += 1;
         seenOptions.push(input.options);
+        if (options.createQuery) return options.createQuery(input, lifecycle);
         const sessionId = input.options.sessionId ?? input.options.resume;
         if (!sessionId) throw new Error("test query received no session id");
         return fakeQuery(responseMessages(sessionId, "Hello from the plan."), lifecycle, async () => {
@@ -292,6 +302,35 @@ describe("Claude Code subscription runtime", () => {
     expect(await host!.listSessions("casper")).toEqual([]);
   });
 
+  it("skips and logs malformed Claude Code sidecars without hiding valid sessions", async () => {
+    const warnings: Array<{ message: string; fields?: Record<string, unknown> }> = [];
+    const logger: Logger = {
+      debug: () => {},
+      info: () => {},
+      warn: (message, fields) => warnings.push({ message, fields }),
+      error: () => {},
+    };
+    const { paths } = setupClaudeHost({ logger });
+    await host!.runTurn("casper", {
+      sessionId: "conversation-valid",
+      prompt: "Remember this",
+      emit: () => {},
+    });
+    const malformedPath = join(paths.sessionDir, "claude-malformed.json");
+    writeFileSync(malformedPath, "{ definitely not json\n", "utf8");
+
+    expect(await host!.listSessions("casper")).toEqual([
+      expect.objectContaining({ id: "conversation-valid" }),
+    ]);
+    expect(warnings).toContainEqual({
+      message: "skipping invalid Claude Code session metadata",
+      fields: expect.objectContaining({
+        path: malformedPath,
+        error: expect.stringContaining("not valid Claude session metadata"),
+      }),
+    });
+  });
+
   it("applies session_stop continuations before the Claude turn settles", async () => {
     const hooks = new GhostHookRunner();
     const active: boolean[] = [];
@@ -361,7 +400,7 @@ describe("Claude Code subscription runtime", () => {
   });
 
   it("interrupts and closes an already-aborted turn", async () => {
-    const { lifecycle } = setupClaudeHost();
+    const { lifecycle, seenOptions } = setupClaudeHost();
     const controller = new AbortController();
     const events: PiMessagesEvent[] = [];
     controller.abort();
@@ -375,6 +414,92 @@ describe("Claude Code subscription runtime", () => {
 
     expect(lifecycle.interrupted).toBe(1);
     expect(lifecycle.closed).toBe(1);
+    expect(seenOptions[0]?.abortController?.signal.aborted).toBe(true);
     expect(events.at(-1)).toMatchObject({ type: "error", reason: "aborted" });
+  });
+
+  it("uses the SDK abort controller when interrupt rejects during cancellation", async () => {
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const { lifecycle, seenOptions } = setupClaudeHost({
+      createQuery: (input, state) => {
+        const stream = (async function* () {
+          markStarted();
+          await new Promise<void>((resolve) => {
+            input.options.abortController?.signal.addEventListener("abort", () => resolve(), {
+              once: true,
+            });
+          });
+        })();
+        return Object.assign(stream, {
+          interrupt: async () => {
+            state.interrupted += 1;
+            throw new Error("simulated stuck interrupt");
+          },
+          close: () => {
+            state.closed += 1;
+          },
+        }) as unknown as Query;
+      },
+    });
+    const controller = new AbortController();
+    const events: PiMessagesEvent[] = [];
+    const turn = host!.runTurn("casper", {
+      sessionId: "conversation-wedged",
+      prompt: "hello",
+      signal: controller.signal,
+      emit: (event) => events.push(event),
+    });
+    await started;
+
+    controller.abort();
+    await turn;
+
+    expect(seenOptions[0]?.abortController?.signal.aborted).toBe(true);
+    expect(lifecycle.interrupted).toBe(1);
+    expect(lifecycle.closed).toBe(1);
+    expect(events.at(-1)).toMatchObject({ type: "error", reason: "aborted" });
+  });
+
+  it("aborts the SDK controller while shutting down an active query", async () => {
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const { lifecycle, seenOptions } = setupClaudeHost({
+      createQuery: (input, state) => {
+        const stream = (async function* () {
+          markStarted();
+          await new Promise<void>((resolve) => {
+            input.options.abortController?.signal.addEventListener("abort", () => resolve(), {
+              once: true,
+            });
+          });
+        })();
+        return Object.assign(stream, {
+          interrupt: async () => {
+            state.interrupted += 1;
+          },
+          close: () => {
+            state.closed += 1;
+          },
+        }) as unknown as Query;
+      },
+    });
+    const turn = host!.runTurn("casper", {
+      sessionId: "conversation-shutdown",
+      prompt: "hello",
+      emit: () => {},
+    });
+    await started;
+
+    await host!.disposeAll();
+    await turn;
+
+    expect(seenOptions[0]?.abortController?.signal.aborted).toBe(true);
+    expect(lifecycle.interrupted).toBe(1);
+    expect(lifecycle.closed).toBeGreaterThanOrEqual(1);
   });
 });

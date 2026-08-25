@@ -13,13 +13,22 @@
  * what the secret is for. Those are the parameters; everything else lives
  * here, so a hardening fix applied once applies to both.
  */
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { homedir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 
 /** 32 bytes, hex. Long enough that guessing is not a strategy. */
 const TOKEN_BYTES = 32;
+const TOKEN_CREATE_ATTEMPTS = 8;
 export const TOKEN_PATTERN = /^[0-9a-f]{64}$/;
 
 export interface TokenStoreOptions {
@@ -54,7 +63,7 @@ export interface TokenStore {
   defaultPath(env?: NodeJS.ProcessEnv, home?: string): string;
   /** The token, minting one on first call. */
   readOrCreate(options?: TokenStoreOptions): { token: string; path: string; created: boolean };
-  /** The stored token, or undefined when there is none (or it is unreadable). */
+  /** The stored token, or undefined when there is no token file. */
   read(options?: TokenStoreOptions): string | undefined;
   /** Mint a fresh token, invalidating whatever the old one had paired. */
   rotate(options?: TokenStoreOptions): { token: string; path: string };
@@ -75,13 +84,70 @@ export function tokenMatches(expected: string, presented: string): boolean {
   return timingSafeEqual(a, b);
 }
 
-function writeToken(path: string): string {
-  const token = randomBytes(TOKEN_BYTES).toString("hex");
-  mkdirSync(join(path, ".."), { recursive: true, mode: 0o700 });
-  writeFileSync(path, `${token}\n`, { encoding: "utf8", mode: 0o600 });
-  // `writeFileSync`'s mode is a *creation* mode; an existing file keeps its own.
-  chmodSync(path, 0o600);
+function mintToken(): string {
+  return randomBytes(TOKEN_BYTES).toString("hex");
+}
+
+function ensureTokenDirectory(path: string): void {
+  const directory = dirname(path);
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
+}
+
+function isErrno(error: unknown, code: string): boolean {
+  return (error as NodeJS.ErrnoException | null)?.code === code;
+}
+
+function readToken(path: string): string | undefined {
+  let text: string;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch (error) {
+    if (isErrno(error, "ENOENT")) {
+      try {
+        const entry = lstatSync(path);
+        if (entry.isSymbolicLink()) {
+          throw new Error(
+            `Token file ${path} is a dangling symlink; rotate it explicitly to replace it.`,
+          );
+        }
+      } catch (entryError) {
+        if (isErrno(entryError, "ENOENT")) return undefined;
+        throw entryError;
+      }
+    }
+    throw error;
+  }
+  const token = text.trim();
+  if (!TOKEN_PATTERN.test(token)) {
+    throw new Error(`Token file ${path} is malformed; rotate it explicitly to replace it.`);
+  }
   return token;
+}
+
+function createToken(path: string, token: string): void {
+  writeFileSync(path, `${token}\n`, {
+    encoding: "utf8",
+    flag: "wx",
+    mode: 0o600,
+  });
+  // Keep this explicit for filesystems whose creation-mode handling is less
+  // strict than Linux's; the exclusive create means no prior mode is retained.
+  chmodSync(path, 0o600);
+}
+
+function replaceToken(path: string, token: string): void {
+  const temporary = `${path}.${process.pid}.${randomBytes(8).toString("hex")}.tmp`;
+  try {
+    createToken(temporary, token);
+    renameSync(temporary, path);
+  } catch (cause) {
+    try {
+      unlinkSync(temporary);
+    } catch {
+      // Preserve the write/rename failure; a cleanup error is secondary.
+    }
+    throw cause;
+  }
 }
 
 export function createTokenStore(spec: TokenStoreSpec): TokenStore {
@@ -103,14 +169,7 @@ export function createTokenStore(spec: TokenStoreSpec): TokenStore {
 
   const read = (options: TokenStoreOptions = {}): string | undefined => {
     const path = resolvePath(options);
-    let text: string;
-    try {
-      text = readFileSync(path, "utf8");
-    } catch {
-      return undefined;
-    }
-    const token = text.trim();
-    return TOKEN_PATTERN.test(token) ? token : undefined;
+    return readToken(path);
   };
 
   /**
@@ -122,14 +181,35 @@ export function createTokenStore(spec: TokenStoreSpec): TokenStore {
     options: TokenStoreOptions = {},
   ): { token: string; path: string; created: boolean } => {
     const path = resolvePath(options);
-    const existing = read({ ...options, path });
-    if (existing) return { token: existing, path, created: false };
-    return { token: writeToken(path), path, created: true };
+    for (let attempt = 0; attempt < TOKEN_CREATE_ATTEMPTS; attempt += 1) {
+      const existing = read({ ...options, path });
+      if (existing) return { token: existing, path, created: false };
+
+      ensureTokenDirectory(path);
+      const token = mintToken();
+      try {
+        createToken(path, token);
+        return { token, path, created: true };
+      } catch (error) {
+        if (isErrno(error, "EEXIST")) {
+          // Another daemon or CLI won the exclusive create. Loop so its token
+          // is returned; never overwrite it with the losing process's value.
+          continue;
+        }
+        throw error;
+      }
+    }
+    throw new Error(
+      `Token file ${path} did not settle after ${TOKEN_CREATE_ATTEMPTS} concurrent create attempts.`,
+    );
   };
 
   const rotate = (options: TokenStoreOptions = {}): { token: string; path: string } => {
     const path = resolvePath(options);
-    return { token: writeToken(path), path };
+    ensureTokenDirectory(path);
+    const token = mintToken();
+    replaceToken(path, token);
+    return { token, path };
   };
 
   const command = (

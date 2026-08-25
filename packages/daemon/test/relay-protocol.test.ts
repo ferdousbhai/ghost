@@ -262,12 +262,11 @@ describe("the token store", () => {
     expect((await readFile(path, "utf8")).trim()).toMatch(RELAY_TOKEN_PATTERN);
   });
 
-  it("treats a corrupt token file as no token rather than a broken one", () => {
+  it("keeps separate token files independent and reports a missing file", () => {
     const path = join(dir, "relay-token");
     readOrCreateRelayToken({ path });
-    // Overwrite with junk; the next read must mint rather than pair on garbage.
-    const junked = readOrCreateRelayToken({ path: join(dir, "other") });
-    expect(junked.token).not.toBe(readRelayToken({ path }));
+    const other = readOrCreateRelayToken({ path: join(dir, "other") });
+    expect(other.token).not.toBe(readRelayToken({ path }));
     expect(readRelayToken({ path: join(dir, "nothing-here") })).toBeUndefined();
   });
 

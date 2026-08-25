@@ -703,6 +703,7 @@ function runQueryEffect(input: {
   prompt: string;
   additionalContext?: string;
   options: ClaudeQueryOptions;
+  abortController: AbortController;
   signal: AbortSignal | undefined;
   onQuery: (query: Query | null) => void;
   onMessage: (message: SDKMessage) => void;
@@ -727,6 +728,7 @@ function runQueryEffect(input: {
     input.onQuery(runtime);
 
     const interrupt = () => {
+      input.abortController.abort();
       void runtime.interrupt().catch(() => {
         // The scoped finalizer still closes the process. An interrupt racing a
         // natural result is not itself a second user-visible failure.
@@ -762,7 +764,10 @@ export class ClaudeCodeRuntime {
   private readonly readAuthStatus: NonNullable<ClaudeCodeRuntimeOptions["readAuthStatus"]>;
   private readonly hooks: GhostHookRunner;
   private readonly busy = new Set<string>();
-  private readonly active = new Map<string, Query>();
+  private readonly active = new Map<
+    string,
+    { query: Query; abortController: AbortController }
+  >();
   private disposed = false;
 
   constructor(options: ClaudeCodeRuntimeOptions = {}) {
@@ -883,9 +888,10 @@ export class ClaudeCodeRuntime {
             ? { additionalContext: beforePromptContext }
             : {}),
           options: sdkOptions,
+          abortController,
           signal: options.signal,
           onQuery: (active) => {
-            if (active) this.active.set(key, active);
+            if (active) this.active.set(key, { query: active, abortController });
             else this.active.delete(key);
           },
           onMessage: (message) => {
@@ -990,7 +996,14 @@ export class ClaudeCodeRuntime {
         continue;
       }
       const path = join(sessionDir, name);
-      result.push(parseMetadata(path, await readFile(path, "utf8")));
+      try {
+        result.push(parseMetadata(path, await readFile(path, "utf8")));
+      } catch (cause) {
+        this.logger.warn("skipping invalid Claude Code session metadata", {
+          path,
+          error: cause instanceof Error ? cause.message : String(cause),
+        });
+      }
     }
     return result.sort((a, b) => b.modified.localeCompare(a.modified));
   }
@@ -1006,13 +1019,14 @@ export class ClaudeCodeRuntime {
 
   async close(ghostName: string, conversationId: string): Promise<void> {
     const key = JSON.stringify([ghostName, conversationId]);
-    const runtime = this.active.get(key);
-    if (!runtime) return;
+    const active = this.active.get(key);
+    if (!active) return;
     this.active.delete(key);
+    active.abortController.abort();
     try {
-      await runtime.interrupt();
+      await active.query.interrupt();
     } finally {
-      runtime.close();
+      active.query.close();
     }
   }
 
@@ -1040,7 +1054,8 @@ export class ClaudeCodeRuntime {
     this.disposed = true;
     const active = [...this.active.values()];
     this.active.clear();
-    await Promise.all(active.map(async (runtime) => {
+    await Promise.all(active.map(async ({ query: runtime, abortController }) => {
+      abortController.abort();
       try {
         await runtime.interrupt();
       } catch {
