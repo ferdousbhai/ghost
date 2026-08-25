@@ -48,18 +48,8 @@ export {
 } from "./memory-file.js";
 
 export {
-  CREATOR_SCOPE,
-  describeScope,
-  isVisitorScope,
-  visitorScope,
-  type GhostScope,
-} from "./scope.js";
-
-export {
   deriveDocCatalog,
-  isDocVisible,
   DOC_CATALOG_BUDGET_CHARS,
-  visibleDocs,
 } from "./catalog.js";
 
 export {
@@ -71,7 +61,6 @@ export {
   normalizeDocPath,
   DOCS_DIRNAME,
   openGhostHome,
-  VISITORS_DIRNAME,
   type MemoryListing,
   type MemoryWriteInput,
   type MemoryWriteResult,

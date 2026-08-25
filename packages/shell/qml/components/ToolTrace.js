@@ -59,15 +59,12 @@ function fallback(activity, completed) {
     case "ask":
         return completed ? "Received your answer" : "Waiting for your answer";
     case "ghost_notes_list":
-    case "ghost_docs_list":
         return completed ? "Looked through your docs" : "Looking through your docs";
     case "ghost_notes_read":
-    case "ghost_docs_read":
         return path !== ""
             ? (completed ? "Read " : "Reading ") + path
             : (completed ? "Read a document" : "Reading a document");
     case "ghost_notes_grep":
-    case "ghost_docs_grep":
         return query !== ""
             ? (completed ? "Looked for " : "Looking for ")
                 + quoted(query) + " in your docs"

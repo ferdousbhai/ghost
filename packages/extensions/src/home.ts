@@ -7,7 +7,6 @@
  *       character.md
  *       docs/**\/*.md
  *       memory/*.md
- *       memory/.visitors/<id>/*.md
  *       conversations/*.json
  *       export-manifest.json      (only in imported archives)
  *
@@ -26,7 +25,6 @@
 import { mkdir, readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { isSafe } from "redos-detector";
-import { isDocVisible } from "./catalog.js";
 import { GhostError } from "./errors.js";
 import {
   parseDocument,
@@ -46,7 +44,6 @@ import {
   parseMemoryFile,
   serializeMemoryFile,
 } from "./memory-file.js";
-import { CREATOR_SCOPE, isVisitorScope, type GhostScope } from "./scope.js";
 import type {
   CharacterFile,
   MemoryRecord,
@@ -58,8 +55,6 @@ import type {
 export const DOCS_DIRNAME = "docs";
 const LEGACY_NOTES_DIRNAME = "notes";
 export const MEMORY_DIRNAME = "memory";
-/** Dot-folder: out of the creator's default view, but inspectable. */
-export const VISITORS_DIRNAME = ".visitors";
 export const CONVERSATIONS_DIRNAME = "conversations";
 export const CHARACTER_FILENAME = "character.md";
 export const EXPORT_MANIFEST_FILENAME = "export-manifest.json";
@@ -74,8 +69,7 @@ export interface DocListing {
   readonly docs: readonly DocMeta[];
   /**
    * Files under `docs/` that could not be parsed. They are excluded from the
-   * catalog — and therefore invisible to visitors — rather than guessed at, but
-   * they are reported rather than dropped silently.
+   * catalog rather than guessed at, but are reported rather than dropped silently.
    */
   readonly skipped: readonly SkippedFile[];
 }
@@ -87,8 +81,6 @@ export interface MemoryListing {
 
 export interface DocWriteInput {
   readonly body: string;
-  /** Omitted on an existing doc keeps its current value; new docs default to private. */
-  readonly public?: boolean;
   readonly title?: string;
   readonly tags?: readonly string[];
   readonly archived?: boolean;
@@ -106,13 +98,12 @@ export interface MemoryWriteInput {
 
 export interface MemoryWriteResult {
   readonly slug: string;
-  /** Path relative to the ghost home, e.g. `memory/.visitors/v1/preferred-tone.md`. */
+  /** Path relative to the ghost home, e.g. `memory/preferred-tone.md`. */
   readonly path: string;
   readonly created: boolean;
 }
 
 export interface DocSearchOptions {
-  readonly scope?: GhostScope;
   /** Treat the query as a JavaScript regular expression. */
   readonly regex?: boolean;
   readonly caseSensitive?: boolean;
@@ -231,7 +222,6 @@ function docFrontmatterFrom(text: string): { meta: DocFrontmatter; body: string 
   const parsed = parseDocument(text);
   return {
     meta: {
-      public: readBoolean(parsed.frontmatter, "public"),
       title: readString(parsed.frontmatter, "title"),
       tags: readStringList(parsed.frontmatter, "tags"),
       archived: readBoolean(parsed.frontmatter, "archived"),
@@ -243,7 +233,7 @@ function docFrontmatterFrom(text: string): { meta: DocFrontmatter; body: string 
 
 /** Frontmatter lines in the order the hosted export writes them. */
 function docFrontmatterLines(meta: DocFrontmatter, path: string): string[] {
-  const lines = [`public: ${meta.public}`];
+  const lines: string[] = [];
   const filename = basename(path, ".md");
   if (meta.title !== undefined && meta.title !== filename) {
     lines.push(`title: ${yamlScalar(meta.title)}`);
@@ -277,17 +267,8 @@ export class GhostHome {
     return join(this.dir, MEMORY_DIRNAME);
   }
 
-  get visitorsDir(): string {
-    return join(this.memoryDir, VISITORS_DIRNAME);
-  }
-
   get conversationsDir(): string {
     return join(this.dir, CONVERSATIONS_DIRNAME);
-  }
-
-  /** Where memory lives for a scope. Visitors write under `memory/.visitors/<id>/`. */
-  memoryDirFor(scope: GhostScope): string {
-    return isVisitorScope(scope) ? join(this.visitorsDir, scope.visitorId) : this.memoryDir;
   }
 
   /** A path relative to the ghost home, for messages and results. */
@@ -334,8 +315,6 @@ export class GhostHome {
     }
     const parsed = parseDocument(text);
     return {
-      // character.md is the persona; it is public unless it says otherwise.
-      public: parsed.frontmatter["public"] !== false,
       title: readString(parsed.frontmatter, "title"),
       body: parsed.body,
     };
@@ -344,9 +323,8 @@ export class GhostHome {
   async writeCharacter(input: {
     body: string;
     title?: string;
-    public?: boolean;
   }): Promise<void> {
-    const lines = [`public: ${input.public ?? true}`];
+    const lines: string[] = [];
     if (input.title !== undefined) lines.push(`title: ${yamlScalar(input.title)}`);
     const text = renderDocument(lines, input.body);
     await withFileMutationQueue(this.characterPath, async () => {
@@ -420,7 +398,6 @@ export class GhostHome {
     const existing = await this.findDoc(docPath);
     const meta: DocMeta = {
       path: docPath,
-      public: input.public ?? existing?.public ?? false,
       title: input.title ?? existing?.title,
       tags: input.tags ?? existing?.tags ?? [],
       archived: input.archived ?? existing?.archived ?? false,
@@ -439,7 +416,6 @@ export class GhostHome {
     query: string,
     options: DocSearchOptions = {},
   ): Promise<DocSearchResult> {
-    const scope = options.scope ?? CREATOR_SCOPE;
     const maxResults = Math.max(1, options.maxResults ?? DEFAULT_SEARCH_RESULTS);
     const flags = options.caseSensitive ? "" : "i";
     if (options.regex && query.length > MAX_GREP_PATTERN_CHARS) {
@@ -474,10 +450,9 @@ export class GhostHome {
     }
 
     const { docs } = await this.listDocs();
-    // Archived docs are out of the working set by default; a visitor never sees
-    // them at all, so `includeArchived` only ever widens a creator search.
+    // Archived docs are out of the working set by default.
     const candidates = docs.filter((doc) =>
-      isDocVisible(doc, scope) && (options.includeArchived === true || !doc.archived)
+      options.includeArchived === true || !doc.archived
     );
     const matches: DocSearchMatch[] = [];
     let truncated = false;
@@ -523,8 +498,8 @@ export class GhostHome {
 
   // ------------------------------------------------------------------- memory
 
-  async listMemory(scope: GhostScope = CREATOR_SCOPE): Promise<MemoryListing> {
-    const dir = this.memoryDirFor(scope);
+  async listMemory(): Promise<MemoryListing> {
+    const dir = this.memoryDir;
     const files: MemoryRecord[] = [];
     const skipped: SkippedFile[] = [];
     for (const entry of await readDirEntries(dir)) {
@@ -539,7 +514,6 @@ export class GhostHome {
           description: parsed.description,
           content: parsed.content,
           updated: parsed.updated,
-          scope,
         });
       } catch (error) {
         skipped.push({ path: relativePath, reason: message(error) });
@@ -549,9 +523,9 @@ export class GhostHome {
     return { files, skipped };
   }
 
-  async readMemory(name: string, scope: GhostScope = CREATOR_SCOPE): Promise<MemoryRecord> {
+  async readMemory(name: string): Promise<MemoryRecord> {
     const slug = coerceMemorySlug(name);
-    const dir = this.memoryDirFor(scope);
+    const dir = this.memoryDir;
     const full = resolveWithin(dir, memoryFileName(slug), "Memory file");
     let text: string;
     try {
@@ -572,20 +546,18 @@ export class GhostHome {
       description: parsed.description,
       content: parsed.content,
       updated: parsed.updated,
-      scope,
     };
   }
 
   /** Create or replace exactly one atomic memory file. */
   async writeMemory(
     input: MemoryWriteInput,
-    scope: GhostScope = CREATOR_SCOPE,
   ): Promise<MemoryWriteResult> {
     assertWritableMemory(input.description, input.content);
     const slug = input.name
       ? coerceMemorySlug(input.name)
       : memorySlugForText(input.description);
-    const dir = this.memoryDirFor(scope);
+    const dir = this.memoryDir;
     const full = resolveWithin(dir, memoryFileName(slug), "Memory file");
     const text = serializeMemoryFile({
       description: input.description.trim(),
@@ -596,11 +568,11 @@ export class GhostHome {
     return withFileMutationQueue(full, async () => {
       const created = !(await exists(full));
       if (created) {
-        const { files } = await this.listMemory(scope);
+        const { files } = await this.listMemory();
         if (files.length >= MAX_MEMORY_FILES_PER_SCOPE) {
           throw new GhostError(
             "limit_exceeded",
-            `This memory scope already holds ${MAX_MEMORY_FILES_PER_SCOPE} files. `
+            `Memory already holds ${MAX_MEMORY_FILES_PER_SCOPE} files. `
             + "Rewrite an existing memory instead of adding another.",
             { limit: MAX_MEMORY_FILES_PER_SCOPE },
           );
@@ -610,15 +582,6 @@ export class GhostHome {
       await writeFile(full, text, "utf8");
       return { slug, path: this.relative(full), created };
     });
-  }
-
-  /** Visitor ids that have memory in this home. */
-  async listVisitors(): Promise<string[]> {
-    const entries = await readDirEntries(this.visitorsDir);
-    return entries
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => entry.name)
-      .sort((left, right) => left.localeCompare(right));
   }
 
   // ------------------------------------------------------- conversations/meta

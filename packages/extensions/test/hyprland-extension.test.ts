@@ -8,7 +8,6 @@
  * and how the tool degrades when a backend (AT-SPI, ydotool) is missing.
  */
 import { describe, expect, it } from "vitest";
-import { visitorScope } from "../src/scope.js";
 import {
   condenseDesktopState,
   createHyprlandExtension,
@@ -730,23 +729,8 @@ describe("ghost_desktop notify (local, not the sidecar)", () => {
   });
 });
 
-describe("ghost_desktop scope", () => {
-  it("gives a visitor no tool and blocks the name outright", async () => {
-    const scope = visitorScope("visitor-1");
-    const helper = fakeHelper({ handle: desktopHandler });
-    const extension = await loadExtensionWith(
-      createHyprlandExtension({ scope, helper }),
-      makeContext({ cwd: "/tmp/ghost-does-not-matter" }),
-    );
-    expect(extension.toolNames()).toEqual([]);
-    expect(desktopToolNames({ scope })).toEqual([]);
-    const blocked = await extension.toolCall(GHOST_DESKTOP);
-    expect(blocked?.block).toBe(true);
-    expect(blocked?.reason).toMatch(/visitor conversation/);
-    expect(helper.requests).toHaveLength(0);
-  });
-
-  it("offers exactly one tool to a creator", async () => {
+describe("ghost_desktop registration", () => {
+  it("offers exactly one tool", async () => {
     const { extension } = await harness();
     expect(extension.toolNames()).toEqual([GHOST_DESKTOP]);
     expect(desktopToolNames()).toEqual([GHOST_DESKTOP]);

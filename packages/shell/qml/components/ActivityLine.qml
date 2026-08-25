@@ -45,18 +45,6 @@ Item {
                 "Scrying the live web", "Following fresh omens",
                 "Peering past the veil", "Gathering spectral whispers"
             ],
-            ghost_docs_list: [
-                "Opening the haunted vault", "Listing the spectral archive",
-                "Following phantom folder trails"
-            ],
-            ghost_docs_read: [
-                "Unfolding a ghost document", "Drawing out spectral detail",
-                "Reading the haunted archive"
-            ],
-            ghost_docs_grep: [
-                "Searching the haunted vault", "Matching spectral pages",
-                "Following phantom ink trails"
-            ],
             ghost_memory_list: [
                 "Opening the spirit memory", "Sorting the spectral echoes",
                 "Following remembered threads"

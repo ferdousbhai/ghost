@@ -206,8 +206,7 @@ function* script(name, prompt) {
     `You said: **${prompt}**\n\n`
     + `I am ${name}, a mock ghost. I live entirely in this dev harness — no pi session, `
     + `no model, no memory files. The real daemon streams the same pi-messages events, `
-    + `so whatever renders here renders there.\n\n`
-    + `Visitors get their own memory scope; this mock has none.`;
+    + `so whatever renders here renders there.`;
   for (const chunk of reply.match(/\s*\S+/gu) ?? []) {
     yield { type: "text_delta", contentIndex: answer, delta: chunk };
   }

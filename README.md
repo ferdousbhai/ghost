@@ -9,7 +9,7 @@ Ghost pins OMP 18.0.3. Creator sessions keep OMP's native filesystem, Bash,
 skills, rules, project context, plugins, MCP, web search, task/hub subagents,
 background jobs, steering/follow-ups, fallback routing, and branchable
 conversations. Ghost layers its persona, memory, docs, browser, and desktop
-capabilities on top. Visitor sessions remain scoped to published data. The
+capabilities on top. The
 Quickshell client renders live tool activity and the recovered summoning orb
 from the earlier summon-ghost interface.
 

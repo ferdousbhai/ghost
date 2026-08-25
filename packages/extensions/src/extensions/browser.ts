@@ -1,19 +1,12 @@
 /**
- * `ghost_browser` — the creator-scope web browser.
+ * `ghost_browser` — the ghost's web browser.
  *
  * One tool with an action enum, not eight micro-tools: browsing is a sequence
  * (open → find → click → read) and a single tool keeps that sequence legible in
- * the transcript, keeps the tool list short, and gives one place to hang the
- * scope check. The actions are a closed enum with no free-form escape hatch, per
+ * the transcript and keeps the tool list short. The actions are a closed enum
+ * with no free-form escape hatch, per
  * the schema rules — a model that invents `action: "eval"` gets a validation
  * error, not a surprise capability.
- *
- * **Creator scope only.** A visitor is someone else talking to the ghost over
- * the network; handing that conversation a browser on the creator's machine
- * would be the whole trust model inverted. The tool is not registered for a
- * visitor and, like the docs visibility gate, a
- * `tool_call` handler blocks it anyway, so a browser tool registered by some
- * *other* extension in a visitor session still cannot fire. Two locks, one door.
  *
  * The browser itself lives in `browser-session.ts`: a dedicated persistent
  * Chromium profile under the ghost home, launched lazily, shut down when idle.
@@ -23,12 +16,8 @@ import type {
   ExtensionAPI,
   ExtensionContext,
   ExtensionFactory,
-  ExtensionHandler,
-  ToolCallEvent,
-  ToolCallEventResult,
 } from "@oh-my-pi/pi-coding-agent";
 import { Type } from "@oh-my-pi/pi-coding-agent/extensibility/legacy-typebox";
-import { isVisitorScope, type GhostScope } from "../scope.js";
 import { stringEnum } from "../tool-schema.js";
 import {
   GhostBrowserError,
@@ -45,7 +34,6 @@ import {
 } from "./browser-session.js";
 import {
   resolveHome,
-  resolveScope,
   textResult,
   untrustedTextResult,
   type CwdContext,
@@ -56,9 +44,8 @@ export const GHOST_BROWSER = "ghost_browser";
 
 export const GHOST_BROWSER_TOOL_NAMES = [GHOST_BROWSER] as const;
 
-/** The tools this extension registers for a scope. Empty for a visitor. */
-export function browserToolNames(scope: GhostScope): string[] {
-  return isVisitorScope(scope) ? [] : [GHOST_BROWSER];
+export function browserToolNames(): string[] {
+  return [GHOST_BROWSER];
 }
 
 export const BROWSER_ACTIONS = [
@@ -109,27 +96,8 @@ export interface BrowserExtensionOptions extends GhostExtensionOptions {
   readonly browser?: Omit<BrowserSessionOptions, "homeDir" | "backend">;
 }
 
-const VISITOR_REFUSAL =
-  "ghost_browser is not available in a visitor conversation. It drives a browser "
-  + "on the creator's own machine.";
-
 const MIN_TIMEOUT_MS = 1_000;
 const MAX_TIMEOUT_MS = 120_000;
-
-/**
- * The `tool_call` gate. Exported on its own so a daemon can register it over a
- * tool surface this package did not build — the same shape as the docs gate.
- */
-export function createBrowserScopeGate(
-  options: BrowserExtensionOptions = {},
-): ExtensionHandler<ToolCallEvent, ToolCallEventResult> {
-  const scope = resolveScope(options);
-  return (event) => {
-    if (!isVisitorScope(scope)) return undefined;
-    if (event.toolName !== GHOST_BROWSER) return undefined;
-    return { block: true, reason: VISITOR_REFUSAL };
-  };
-}
 
 /** `" — Title"` when the page has a title, else `""`. */
 function titleSuffix(title: string): string {
@@ -150,13 +118,9 @@ function describeMatch(match: PageElementMatch): string {
   return bits.join(" ");
 }
 
-/** Build the browser extension. Creator scope gets the tool; a visitor gets a gate. */
 export function createBrowserExtension(
   options: BrowserExtensionOptions = {},
 ): ExtensionFactory {
-  const scope = resolveScope(options);
-  const visitor = isVisitorScope(scope);
-
   const sessionFor = (ctx: CwdContext): GhostBrowserSession =>
     browserSessionFor(resolveHome(options, ctx).dir, {
       ...options.browser,
@@ -164,13 +128,6 @@ export function createBrowserExtension(
     });
 
   return (pi: ExtensionAPI) => {
-    if (visitor) {
-      // No tool at all, plus the gate: a browser tool registered elsewhere in a
-      // visitor session still cannot fire.
-      pi.on("tool_call", createBrowserScopeGate(options));
-      return;
-    }
-
     pi.registerTool({
       name: GHOST_BROWSER,
       label: "Browse the web",
@@ -373,12 +330,6 @@ export function createBrowserExtension(
         })),
       }),
       execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
-        // Third lock: the gate blocks the call and the tool is not registered for
-        // a visitor, but the handler refuses on its own too.
-        if (isVisitorScope(scope)) {
-          throw new GhostBrowserError("forbidden_scope", VISITOR_REFUSAL);
-        }
-
         const session = sessionFor(ctx);
         const timeout = params.timeout_ms === undefined ? {} : { timeoutMs: params.timeout_ms };
         let headlessNote = "";

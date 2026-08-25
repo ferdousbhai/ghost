@@ -29,13 +29,8 @@
  *    ghost home's own `.omp/mcp.json` (or `.omp/.mcp.json`) is loaded, never
  *    user/global config belonging to OMP or another coding agent.
  *
- * 3. **Visitor sessions are still a security boundary.** They disable native
- *    discovery and use only Ghost's scope-aware tools. Otherwise native read
- *    or Bash could bypass the published-doc and visitor-memory contracts.
- *
- * 4. **Ghost has no approval UI.** Creator sessions are deliberately local and
- *    unrestricted; visitor sessions rely on their explicit tool allowlist.
- *    OMP's `ask` remains the human-input bridge for both scopes.
+ * 3. **Ghost has no approval UI.** Sessions are deliberately local and
+ *    unrestricted. OMP's `ask` remains the human-input bridge.
  */
 import { existsSync, mkdirSync } from "node:fs";
 import { stat, unlink } from "node:fs/promises";
@@ -92,10 +87,8 @@ import {
   ghostSessionStopContinuation,
 } from "./hooks.js";
 import {
-  isVisitorScope,
   readGhostHomeDigest,
   resolveGhostExtensions,
-  resolveGhostScope,
   type GhostExtensionOptions,
   type GhostHomeDigest,
   type RelayTransport,
@@ -802,8 +795,6 @@ export class SessionHost {
   ): Promise<HostedSession> {
     const ghost = this.registry.get(ghostName);
     const paths = ghostPaths(ghost.dir);
-    const scope = resolveGhostScope(this.extensionOptions.visitorId);
-    const visitor = isVisitorScope(scope);
     mkdirSync(paths.agentDir, { recursive: true });
     mkdirSync(paths.sessionDir, { recursive: true });
 
@@ -834,17 +825,14 @@ export class SessionHost {
       "memory.backend": "off",
       "memories.enabled": false,
       "autolearn.enabled": false,
-      // Ghost has no approval surface. Creator sessions are explicitly local
-      // and unrestricted; visitor sessions have a narrow tool allowlist below.
+      // Ghost has no approval surface. Sessions are explicitly local and unrestricted.
       "tools.approvalMode": "yolo",
     };
-    const settings = visitor
-      ? Settings.isolated(settingsOverrides)
-      : await Settings.loadReadOnly({
-          cwd: paths.home,
-          agentDir: paths.agentDir,
-          overrides: settingsOverrides,
-        });
+    const settings = await Settings.loadReadOnly({
+      cwd: paths.home,
+      agentDir: paths.agentDir,
+      overrides: settingsOverrides,
+    });
     try {
       const routing = ghostOmpModelRouting(readGhostModels(paths.agentDir));
       settings.override("modelRoles", routing.modelRoles);
@@ -863,8 +851,7 @@ export class SessionHost {
     // trigger here does not disable compaction itself.
     // A ghost whose character.md is still the seed has been summoned but never
     // met, so its conversations carry the first-meeting section until that file
-    // is written. Creator scope only: onboarding is the owner's ritual, and a
-    // visitor is not the person the ghost is trying to become.
+    // is written.
     const extraSections = [
       ...(this.extensionOptions.extraSections ?? []),
       ...(this.isFirstMeeting(ghost) ? [FIRST_MEETING_SECTION] : []),
@@ -889,17 +876,11 @@ export class SessionHost {
     });
 
     // Supplying an MCPManager is OMP's SDK lever for skipping its ambient MCP
-    // discovery. Populate it ourselves from the ghost home only. Creator MCP
-    // remains enabled (and propagates to task/hub children); visitors still
-    // take the explicit enableMCP:false path below.
-    const mcp: HostedMCP | undefined = visitor
-      ? undefined
-      : { manager: new MCPManager(paths.home, null) };
-    if (mcp) {
-      mcp.manager.setAuthStorage(modelRuntime.authStorage);
-      if (settings.get("mcp.notifications")) mcp.manager.setNotificationsEnabled(true);
-      await connectGhostProjectMCP(mcp.manager, paths.home, this.logger);
-    }
+    // discovery. Populate it ourselves from the ghost home only.
+    const mcp: HostedMCP = { manager: new MCPManager(paths.home, null) };
+    mcp.manager.setAuthStorage(modelRuntime.authStorage);
+    if (settings.get("mcp.notifications")) mcp.manager.setNotificationsEnabled(true);
+    await connectGhostProjectMCP(mcp.manager, paths.home, this.logger);
 
     const sessionManager = await SessionManager.open(
       join(paths.sessionDir, sessionFileNameFor(sessionKey)),
@@ -910,25 +891,6 @@ export class SessionHost {
     await this.promoteLegacySessionTitle(sessionManager, ghostName, sessionKey);
 
     const ask = new AskBroker();
-    const visitorRestrictions = visitor
-      ? {
-          disableExtensionDiscovery: true,
-          additionalExtensionPaths: [],
-          preloadedExtensionPaths: [],
-          preloadedCustomToolPaths: [],
-          contextFiles: [],
-          skills: [],
-          rules: [],
-          promptTemplates: [],
-          slashCommands: [],
-          systemPrompt: [],
-          enableMCP: false,
-          enableLsp: false,
-          enableIrc: false,
-          skipPythonPreflight: true,
-          toolNames: [...extensions.toolNames, "ask"],
-        }
-      : {};
     let created: Awaited<ReturnType<typeof createAgentSession>>;
     try {
       created = await createAgentSession({
@@ -949,12 +911,11 @@ export class SessionHost {
         // that does not exist yet creates it, so a conversation id maps to a
         // stable transcript across daemon restarts.
         sessionManager,
-        ...(mcp ? { mcpManager: mcp.manager } : {}),
-        ...visitorRestrictions,
+        mcpManager: mcp.manager,
       });
     } catch (error) {
-      await mcp?.manager.disconnectAll().catch(() => {});
-      if (mcp && MCPManager.instance() === mcp.manager) MCPManager.setInstance(undefined);
+      await mcp.manager.disconnectAll().catch(() => {});
+      if (MCPManager.instance() === mcp.manager) MCPManager.setInstance(undefined);
       modelRuntime.close();
       throw error;
     }
@@ -996,7 +957,6 @@ export class SessionHost {
     this.logger.info("ghost session opened", {
       ghost: ghostName,
       session: sessionKey,
-      scope: extensions.scope.kind,
       tools: toolNames.length,
       model: model ? `${model.provider}/${model.id}` : null,
     });
@@ -1362,13 +1322,6 @@ export class SessionHost {
     const paths = ghostPaths(ghost.dir);
     const bashCommand = parseUserBashCommand(options.prompt);
     if (bashCommand) {
-      if (isVisitorScope(resolveGhostScope(this.extensionOptions.visitorId))) {
-        throw new GhostError(
-          "forbidden",
-          "Direct local commands are available only to the ghost's creator.",
-          403,
-        );
-      }
       if (!bashCommand.command) {
         throw new GhostError("invalid_request", "Write a command after ! or !!.", 400);
       }
@@ -1633,7 +1586,6 @@ export class SessionHost {
    * reads as amnesia rather than as a first meeting.
    */
   private isFirstMeeting(ghost: Ghost): boolean {
-    if (isVisitorScope(resolveGhostScope(this.extensionOptions.visitorId))) return false;
     try {
       return isSeededCharacter(ghost.name, readCharacterFile(ghost.dir));
     } catch (error) {
@@ -1890,7 +1842,7 @@ export class SessionHost {
    * its message entries are projected to the same `{ role, content }` shape a
    * pi-messages client renders. Private reasoning (`thinking` blocks) and
    * internal `toolResult` messages are dropped — exactly what the live wire
-   * omits — so a resumed conversation shows what the visitor actually saw.
+   * omits — so a resumed conversation shows what the user actually saw.
    * Capped/paged via `limit`/`offset` for a very long transcript.
    */
   async readTranscript(

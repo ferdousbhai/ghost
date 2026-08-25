@@ -32,13 +32,13 @@ describe("yamlScalar", () => {
 describe("splitFrontmatter", () => {
   it("keeps the body byte-for-byte", () => {
     const body = "  leading spaces\n\nand a trailing newline\n";
-    const text = renderDocument(["public: true"], body);
+    const text = renderDocument(["title: Example"], body);
     expect(splitFrontmatter(text).body).toBe(body);
   });
 
   it("consumes exactly one separator newline", () => {
     const body = "\nbody that starts with a blank line";
-    expect(splitFrontmatter(renderDocument(["public: true"], body)).body).toBe(body);
+    expect(splitFrontmatter(renderDocument(["title: Example"], body)).body).toBe(body);
   });
 
   it("treats a document without frontmatter as all body", () => {
@@ -49,27 +49,25 @@ describe("splitFrontmatter", () => {
   });
 
   it("tolerates CRLF frontmatter", () => {
-    const parsed = parseDocument("---\r\npublic: true\r\n---\r\n\r\nbody\r\n");
-    expect(parsed.frontmatter["public"]).toBe(true);
+    const parsed = parseDocument("---\r\narchived: true\r\n---\r\n\r\nbody\r\n");
+    expect(parsed.frontmatter["archived"]).toBe(true);
     expect(parsed.body).toBe("body\r\n");
   });
 
   it("rejects unterminated frontmatter", () => {
-    expect(() => splitFrontmatter("---\npublic: true\n")).toThrow(GhostError);
+    expect(() => splitFrontmatter("---\ntitle: Example\n")).toThrow(GhostError);
   });
 });
 
 describe("parseFrontmatterLines", () => {
   it("parses the export's vocabulary", () => {
     const record = parseFrontmatterLines([
-      "public: false",
       'title: "Restoring the Vandercook 4: notes"',
       "tags: [paper, press]",
       "archived: true",
       "path: Craft/Paper: notes",
     ]);
     expect(record).toEqual({
-      public: false,
       title: "Restoring the Vandercook 4: notes",
       tags: ["paper", "press"],
       archived: true,
@@ -95,7 +93,6 @@ describe("round trip", () => {
   it("re-renders a document produced by the hosted export unchanged", () => {
     const original = [
       "---",
-      "public: true",
       'title: "Restoring the Vandercook 4: notes"',
       "tags: [paper, press]",
       "---",

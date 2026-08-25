@@ -48,7 +48,6 @@ afterEach(async () => {
 const PERSONA_ANCHOR = "# casper";
 
 const CHARACTER = `---
-public: true
 title: casper
 ---
 
@@ -57,16 +56,14 @@ title: casper
 You are casper, a letterpress printer. You answer in short sentences.
 `;
 
-const PUBLIC_DOC = `---
-public: true
+const PRESS_DOC = `---
 title: Restoring the Vandercook
 ---
 
 Pull the roller bearings before you soak anything.
 `;
 
-const PRIVATE_DOC = `---
-public: false
+const LEDGER_DOC = `---
 title: Ledger
 ---
 
@@ -105,7 +102,7 @@ describe("golden: creator session", () => {
     const dir = seedGhost(temp.root, {
       name: "casper",
       character: CHARACTER,
-      docs: { "press.md": PUBLIC_DOC, "ledger.md": PRIVATE_DOC },
+      docs: { "press.md": PRESS_DOC, "ledger.md": LEDGER_DOC },
       provider: { baseUrl: provider.url, modelId: provider.modelId },
     });
     host = new SessionHost({

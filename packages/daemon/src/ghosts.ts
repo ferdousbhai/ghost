@@ -8,8 +8,7 @@
  *
  * Everything the daemon adds for itself lives in dot-directories inside the
  * ghost home (`.sessions/`, `.pi/`) so the creator's default view of their
- * own ghost stays the plain files they wrote — the same precedent as
- * `memory/.visitors/`.
+ * own ghost stays the plain files they wrote.
  */
 import {
   existsSync,
@@ -166,7 +165,6 @@ export function ghostPaths(dir: string): {
 }
 
 const SEEDED_CHARACTER = (name: string) => `---
-public: true
 title: ${name}
 ---
 
@@ -182,8 +180,7 @@ actually remember over a general statement you could have made about anything.
 ## What you know
 
 Your docs and memory files are yours. Read them before you answer a question
-they cover, and write a memory file when you learn something about a visitor
-that you would want to remember the next time they come back.
+they cover, and write a memory file when you learn something worth keeping.
 `;
 
 /**
@@ -292,7 +289,7 @@ export class GhostRegistry {
       throw new GhostError("already_exists", `A ghost named ${JSON.stringify(name)} already exists.`, 409);
     }
     mkdirSync(dir, { recursive: true });
-    for (const sub of ["docs", "memory", join("memory", ".visitors"), "conversations"]) {
+    for (const sub of ["docs", "memory", "conversations"]) {
       mkdirSync(join(dir, sub), { recursive: true });
     }
     writeFileSync(join(dir, GHOST_CHARACTER_FILENAME), SEEDED_CHARACTER(name), {

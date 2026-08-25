@@ -9,7 +9,7 @@
  */
 
 export type GhostErrorCode =
-  /** The named doc, memory file, visitor, or ghost home does not exist. */
+  /** The named doc, memory file, or ghost home does not exist. */
   | "not_found"
   /** A path escaped the ghost home, or a name is not a legal file name. */
   | "invalid_path"

@@ -10,13 +10,11 @@ catalog) is derived per session and never stored.
 
 ```
 ~/Ghosts/<name>/
-  character.md                 persona → system prompt (frontmatter: public: true, title)
-  docs/**/*.md                 YAML frontmatter: public: false by default; optional
-                               title, tags, archived, path (pre-sanitization app path)
+  character.md                 persona → system prompt (optional title frontmatter)
+  docs/**/*.md                 optional YAML frontmatter: title, tags, archived,
+                               path (pre-sanitization app path)
   memory/*.md                  atomic memory files: frontmatter description + updated,
                                body = the fact
-  memory/.visitors/<id>/*.md   per-visitor memory, same format; dot-folder keeps it
-                               out of the creator's default view but inspectable
   .omp/                        OMP-native project skills, rules, tools, commands,
                                extensions, plugins, prompts, and MCP configuration
   .pi/                         per-ghost OMP settings, model roles, and credentials
@@ -49,11 +47,9 @@ and are reported without preventing the ghost from starting.
 A deleted ghost home leaves the root entirely, for the system trash; see the
 `DELETE` route.
 
-Terminology: **visitors**, never "callers".
+### Session capabilities
 
-### Creator and visitor capability boundary
-
-A creator session is OMP-native. Ghost preserves OMP's system prompt and
+A session is OMP-native. Ghost preserves OMP's system prompt and
 discovery, then appends the Ghost persona and derived memory/doc sections.
 Native filesystem and search (`read`, `glob`, `grep`), mutation (`write`,
 `edit`), Bash, web search, task/hub subagents, background jobs, skills, rules,
@@ -70,8 +66,8 @@ home (see the harness invariants). Image inspection is OMP-native:
 `inspect_image` in its default auto mode, resolving the `vision` role that the
 daemon projects from models.json's `vision_model`.
 
-Creator docs and memory retrieval use those native filesystem tools directly.
-Ghost registers no duplicate creator doc list/read/search/write tools, and
+Docs and memory retrieval use those native filesystem tools directly.
+Ghost registers no duplicate doc list/read/search/write tools, and
 keeps only `ghost_memory_write` for validated, atomic memory-file writes. The
 memory index and doc catalog are derived from disk before each model turn and
 are never stored. `/skill:<name> [args]` is explicit force-invocation of a
@@ -79,14 +75,9 @@ discovered skill; native `read` remains the model-driven discovery path.
 
 `!command` executes immediately through OMP's session-aware Bash runner without
 a model turn. `!!command` does the same but excludes the result from future
-model context. Both are creator-only, appear in the live event stream, and are
+model context. Both appear in the live event stream and are
 persisted in an OMP transcript; a successful standalone `cd` changes the
 conversation working directory without relocating that transcript.
-
-A visitor session remains deliberately restricted to Ghost's scope-aware
-extension tools and `ask`. Native filesystem, Bash, discovery, MCP, LSP, IRC,
-and project context stay disabled because any of them could bypass published
-doc visibility or per-visitor memory isolation.
 
 ## Daemon HTTP API (localhost only)
 
@@ -267,12 +258,12 @@ are read as `smol_model` when the new key is absent; writers persist only
 
 ### The first meeting (onboarding)
 
-While `character.md` is missing, blank, or byte-equal to the seed, creator
-sessions — OMP and Claude Code runtimes alike, never visitor scopes — get a
+While `character.md` is missing, blank, or byte-equal to the seed, sessions —
+OMP and Claude Code runtimes alike — get a
 "first meeting" system-prompt section: interview the owner with genuine
 curiosity (one question at a time, the owner's request always first), save
 durable facts as declarative memories, offer docs for ongoing projects, and
-eventually draft and write the character with the creator-only
+eventually draft and write the character with the
 `ghost_character` tool (read/write `character.md`). The populated character
 file IS the completion latch — there is no separate onboarding state — and the
 section stops being injected on the first session after the file deviates from
@@ -382,9 +373,8 @@ The creator runs `claude auth login` outside Ghost. Ghost accepts no Claude
 credential, stores no Claude credential, and removes ambient API/OAuth-token
 variables from the subprocess environment.
 
-The runtime is creator-only. A visitor scope fails with
-`403 claude_code_owner_only`; the creator's subscription must never fund or be
-resold to visitor traffic. The native Claude Code system prompt, tools,
+The runtime uses the creator's local Claude Code authentication. The native
+Claude Code system prompt, tools,
 filesystem settings, project instructions, skills, plugins, subagents, web
 search, and MCP configuration remain enabled with bypass-permissions mode,
 matching the creator-local unrestricted OMP runtime. Existing Ghost extension
@@ -432,13 +422,11 @@ whole model before any non-local exposure.
   (e.g. `GEMINI_API_KEY`) silently add cloud models to a sovereign ghost.
 - Parallel tool calls: wrap shared-file mutations in a file mutation queue.
 - Tools should throw structured errors, not return `isError` payloads.
-- Creator sessions omit non-MCP discovery/tool restrictions and load read-only
-  effective OMP settings for the ghost cwd/agent directory. Their MCP manager is
+- Sessions omit non-MCP discovery/tool restrictions and load read-only effective
+  OMP settings for the ghost cwd/agent directory. Their MCP manager is
   injected from that ghost's `.omp/mcp.json`/`.omp/.mcp.json` only; machine-level
   OMP, Codex, Claude, Copilot, and other user/global MCP sources are never
-  discovered. This is a sovereignty invariant like env scrubbing. Visitor
-  sessions explicitly disable discovery, context, skills, MCP/LSP/IRC, and
-  native tools.
+  discovered. This is a sovereignty invariant like env scrubbing.
 - OMP may mount non-core tools under xd://; absence from
   `getActiveToolNames()` does not mean absence from its tool registry.
 - Force `memory.backend: "off"` (plus the legacy `memories.enabled` and

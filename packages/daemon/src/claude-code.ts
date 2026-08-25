@@ -62,7 +62,6 @@ import {
   ghostSessionStopContinuation,
 } from "./hooks.js";
 import {
-  CREATOR_SCOPE,
   resolveGhostExtensions,
   type GhostExtensionOptions,
   type RelayTransport,
@@ -351,18 +350,15 @@ async function buildPersona(homeDir: string, ghostName: string): Promise<string>
   const home = openGhostHome(homeDir);
   const [character, memory, docs] = await Promise.all([
     home.readCharacter(),
-    home.listMemory(CREATOR_SCOPE),
+    home.listMemory(),
     home.listDocs(),
   ]);
   return buildGhostSystemPrompt({
     ghostName,
     character,
     memory: deriveMemoryIndex(memory.files),
-    docs: deriveDocCatalog(docs.docs, CREATOR_SCOPE),
-    scope: CREATOR_SCOPE,
-    // This runtime is creator-only (a visitor scope is refused before we get
-    // here), so a seeded character.md means the same thing it means on the OMP
-    // path: this ghost has not met its owner yet.
+    docs: deriveDocCatalog(docs.docs),
+    // A seeded character.md means this ghost has not met its owner yet.
     extraSections: isSeededCharacter(ghostName, readCharacterFile(homeDir))
       ? [FIRST_MEETING_SECTION]
       : [],
@@ -494,13 +490,6 @@ async function buildMcpTools(
     },
     homeDir,
   );
-  if (resolved.scope.kind !== "creator") {
-    throw new GhostError(
-      "claude_code_owner_only",
-      "Claude Code subscription sessions are owner-local and cannot serve visitor traffic.",
-      403,
-    );
-  }
   const definitions = await captureToolDefinitions(resolved.factories);
   const tools = resolved.toolNames.map((name): SdkMcpToolDefinition => {
     const definition = definitions.get(name);
@@ -717,13 +706,6 @@ export class ClaudeCodeRuntime {
         "session_busy",
         "This ghost is already answering in this conversation.",
         409,
-      );
-    }
-    if (this.extensionOptions.visitorId) {
-      throw new GhostError(
-        "claude_code_owner_only",
-        "Claude Code subscription sessions are owner-local and cannot serve visitor traffic.",
-        403,
       );
     }
     this.busy.add(key);

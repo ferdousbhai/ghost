@@ -65,7 +65,7 @@ describe("the extension agrees with the daemon about the protocol", () => {
     const { FAILURES } = await loadExtensionProtocol();
     expect(new Set(Object.values(FAILURES))).toEqual(new Set([
       "browser_unavailable", "blocked_url", "navigation_failed", "timeout",
-      "no_page", "unknown_ref", "element_not_found", "invalid_input", "forbidden_scope",
+      "no_page", "unknown_ref", "element_not_found", "invalid_input",
     ]));
   });
 

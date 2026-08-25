@@ -157,7 +157,7 @@ export interface PiMessagesRequest {
   model: string | null;
   /** `options.sessionId` — the conversation id. */
   sessionId: string | null;
-  /** The visitor's newest user message, flattened to text. */
+  /** The newest user message, flattened to text. */
   prompt: string;
 }
 
@@ -243,7 +243,7 @@ export interface PiMessagesAdapterOptions {
   /**
    * Forward `thinking_*` blocks. Off by default: reasoning quotes the ghost's
    * private memory and docs verbatim, and the hosted UI never showed it to
-   * visitors either. Suppressed blocks consume no wire index.
+   * users either. Suppressed blocks consume no wire index.
    */
   includeThinking?: boolean;
   /** Let the harness hold `done` across hidden session-stop continuations. */

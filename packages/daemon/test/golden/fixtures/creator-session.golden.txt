@@ -24,10 +24,10 @@ One file holds one fact, and its description line above is all a future session 
 (nothing yet)
 
 ## Your docs
-Your docs, by path under docs/. Use read to open them, grep or glob to search them, and write or edit to maintain them. Docs marked private are yours alone; do not treat them as something a visitor knows.
+Your docs, by path under docs/. Use read to open them, grep or glob to search them, and write or edit to maintain them.
 
-- ledger.md: Ledger (private)
-- press.md: Restoring the Vandercook (public)
+- ledger.md: Ledger
+- press.md: Restoring the Vandercook
 
 ------------------------------------------------------------------------------
 [turn 1: provider round-trips]
@@ -81,10 +81,10 @@ One file holds one fact, and its description line above is all a future session 
 - owner-prefers-short.md: The owner wants short answers
 
 ## Your docs
-Your docs, by path under docs/. Use read to open them, grep or glob to search them, and write or edit to maintain them. Docs marked private are yours alone; do not treat them as something a visitor knows.
+Your docs, by path under docs/. Use read to open them, grep or glob to search them, and write or edit to maintain them.
 
-- ledger.md: Ledger (private)
-- press.md: Restoring the Vandercook (public)
+- ledger.md: Ledger
+- press.md: Restoring the Vandercook
 
 ------------------------------------------------------------------------------
 [turn 2: provider round-trips]
@@ -230,7 +230,6 @@ agent.db, models.db, models.json, models.omp.json
 conv-golden.jsonl
 --- character.md ---
 ---
-public: true
 title: casper
 ---
 
@@ -240,7 +239,6 @@ You are casper, a letterpress printer. You answer in short sentences.
 
 --- docs/ledger.md ---
 ---
-public: false
 title: Ledger
 ---
 
@@ -248,7 +246,6 @@ The Heidelberg cost more than it should have.
 
 --- docs/press.md ---
 ---
-public: true
 title: Restoring the Vandercook
 ---
 

@@ -69,8 +69,8 @@ What you remember:
 - owner-prefers-short.md: The owner wants short answers
 
 Your docs:
-- ledger.md: Ledger (private)
-- press.md: Restoring the Vandercook (public)
+- ledger.md: Ledger
+- press.md: Restoring the Vandercook
 </ghost-context>
 
 ------------------------------------------------------------------------------
@@ -140,8 +140,8 @@ What you remember:
 - owner-prefers-short.md: The owner wants short answers
 
 Your docs:
-- ledger.md: Ledger (private)
-- press.md: Restoring the Vandercook (public)
+- ledger.md: Ledger
+- press.md: Restoring the Vandercook
 </ghost-context>
 
 ------------------------------------------------------------------------------
@@ -179,8 +179,8 @@ What you remember:
 - owner-prefers-short.md: The owner wants short answers
 
 Your docs:
-- ledger.md: Ledger (private)
-- press.md: Restoring the Vandercook (public)
+- ledger.md: Ledger
+- press.md: Restoring the Vandercook
 </ghost-context>
 
 ------------------------------------------------------------------------------
@@ -218,8 +218,8 @@ What you remember:
 - owner-prefers-short.md: The owner wants short answers
 
 Your docs:
-- ledger.md: Ledger (private)
-- press.md: Restoring the Vandercook (public)
+- ledger.md: Ledger
+- press.md: Restoring the Vandercook
 </ghost-context>
 
 ------------------------------------------------------------------------------

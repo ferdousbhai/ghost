@@ -3,14 +3,11 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   createMemoryExtension,
-  GHOST_MEMORY_LIST,
-  GHOST_MEMORY_READ,
   GHOST_MEMORY_WRITE,
 } from "../src/extensions/memory.js";
 import { openGhostHome } from "../src/home.js";
-import { visitorScope } from "../src/scope.js";
 import { createGhostFixture, type GhostFixture } from "./support/fixture.js";
-import { loadExtension, resultText } from "./support/harness.js";
+import { loadExtension } from "./support/harness.js";
 
 let fixture: GhostFixture;
 
@@ -23,59 +20,9 @@ afterEach(async () => {
 });
 
 describe("memory extension", () => {
-  it("keeps only the structured writer in creator scope", async () => {
+  it("registers only the structured writer", async () => {
     const harness = await loadExtension(createMemoryExtension(), fixture.dir);
     expect(harness.toolNames()).toEqual([GHOST_MEMORY_WRITE]);
-  });
-
-  it("keeps scoped list/read/write tools for visitors", async () => {
-    const harness = await loadExtension(
-      createMemoryExtension({ scope: visitorScope("visitor-1") }),
-      fixture.dir,
-    );
-    expect(harness.toolNames()).toEqual([
-      GHOST_MEMORY_LIST,
-      GHOST_MEMORY_READ,
-      GHOST_MEMORY_WRITE,
-    ]);
-  });
-
-  it("lists the visitor's derived index, not a stored file", async () => {
-    const harness = await loadExtension(
-      createMemoryExtension({ scope: visitorScope("visitor-1") }),
-      fixture.dir,
-    );
-    const text = resultText(await harness.call(GHOST_MEMORY_LIST));
-    expect(text).toContain("- asked-about-press.md: This visitor keeps circling back");
-    expect(text).not.toContain("working-habit.md");
-  });
-
-  it("reads one visitor memory file", async () => {
-    const harness = await loadExtension(
-      createMemoryExtension({ scope: visitorScope("visitor-1") }),
-      fixture.dir,
-    );
-    const result = await harness.call(GHOST_MEMORY_READ, { name: "asked-about-press.md" });
-    expect(resultText(result)).toContain("Third time they have asked");
-    expect(result.details).toMatchObject({ slug: "asked-about-press", updated: "2026-08-03" });
-  });
-
-  it("throws on a missing file rather than returning an error payload", async () => {
-    const harness = await loadExtension(
-      createMemoryExtension({ scope: visitorScope("visitor-1") }),
-      fixture.dir,
-    );
-    await expect(harness.call(GHOST_MEMORY_READ, { name: "nope.md" }))
-      .rejects.toMatchObject({ code: "not_found" });
-  });
-
-  it("throws with instructional guidance on a bad name", async () => {
-    const harness = await loadExtension(
-      createMemoryExtension({ scope: visitorScope("visitor-1") }),
-      fixture.dir,
-    );
-    await expect(harness.call(GHOST_MEMORY_READ, { name: "../../character.md" }))
-      .rejects.toThrow(/kebab-case/);
   });
 
   it("writes one atomic file and derives its name when none is given", async () => {
@@ -103,27 +50,6 @@ describe("memory extension", () => {
     });
     expect(result.details).toMatchObject({ created: false });
     expect((await openGhostHome(fixture.dir).listMemory()).files).toHaveLength(2);
-  });
-
-  it("scopes a visitor session's writes to memory/.visitors/<id>/", async () => {
-    const harness = await loadExtension(
-      createMemoryExtension({ scope: visitorScope("visitor-1") }),
-      fixture.dir,
-    );
-    const written = await harness.call(GHOST_MEMORY_WRITE, {
-      description: "They restore presses too",
-      content: "A Vandercook 4, same as mine.",
-    });
-    expect(written.details).toMatchObject({
-      path: "memory/.visitors/visitor-1/they-restore-presses-too.md",
-    });
-
-    // The visitor session sees only its own scope, in both directions.
-    const listed = resultText(await harness.call(GHOST_MEMORY_LIST));
-    expect(listed).toContain("they-restore-presses-too.md");
-    expect(listed).not.toContain("working-habit.md");
-    await expect(harness.call(GHOST_MEMORY_READ, { name: "working-habit.md" }))
-      .rejects.toMatchObject({ code: "not_found" });
   });
 
   it("keeps parallel writes to one file consistent", async () => {

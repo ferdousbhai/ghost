@@ -40,8 +40,6 @@ export type BrowserFailure =
   | "element_not_found"
   /** The action's own parameters do not make sense. */
   | "invalid_input"
-  /** A visitor session asked for the browser. */
-  | "forbidden_scope"
   /**
    * A consequential action (click/type) was aimed at a page off the
    * creator-opened origin's registrable domain — the prompt-injection guardrail.
@@ -59,7 +57,6 @@ const FAILURE_CODES = {
   unknown_ref: "not_found",
   element_not_found: "not_found",
   invalid_input: "invalid_format",
-  forbidden_scope: "forbidden",
   blocked_action: "forbidden",
   action_budget: "limit_exceeded",
 } as const;

@@ -10,7 +10,6 @@ import { execFile } from "node:child_process";
 import type { AgentToolResult, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { GhostError } from "../errors.js";
 import { GhostHome, openGhostHome } from "../home.js";
-import { CREATOR_SCOPE, type GhostScope } from "../scope.js";
 import { detectInjection, fenceUntrusted } from "../untrusted.js";
 
 export interface GhostExtensionOptions {
@@ -19,8 +18,6 @@ export interface GhostExtensionOptions {
    * Omitted, each call resolves the home from the session's own `cwd`.
    */
   readonly home?: GhostHome | string;
-  /** Whose session this is. Defaults to the creator, who sees everything. */
-  readonly scope?: GhostScope;
 }
 
 export type CwdContext = Pick<ExtensionContext, "cwd">;
@@ -39,10 +36,6 @@ export function resolveHome(
     );
   }
   return openGhostHome(ctx.cwd);
-}
-
-export function resolveScope(options: GhostExtensionOptions): GhostScope {
-  return options.scope ?? CREATOR_SCOPE;
 }
 
 /** A plain text tool result. Tool *failures* throw; they never return here. */
@@ -88,16 +81,6 @@ export async function untrustedTextResult<TDetails extends object>(
 // Bounded output
 // ---------------------------------------------------------------------------
 
-/**
- * Default cap on a single doc body handed to the model, in characters. One
- * imported doc with no size ceiling can blow the context window in a single
- * `ghost_docs_read`; this mirrors the browser tool's `DEFAULT_READ_BUDGET_CHARS`.
- */
-export const DEFAULT_DOC_READ_BUDGET_CHARS = 8_000;
-
-/** Cap on a single grep match line handed to the model, in characters. */
-export const MAX_GREP_LINE_CHARS = 200;
-
 export interface BudgetedText {
   /** The text, truncated to the budget. */
   readonly text: string;
@@ -132,9 +115,8 @@ export function budgetFooter(result: BudgetedText): string | null {
  * The desktop extensions (screen, hyprland) reach the machine by running small
  * programs — `grim`, `hyprctl`, `notify-send`. They do it through `execFile`
  * with an **argument array and no shell**, so nothing the model emits is ever
- * parsed by `/bin/sh`. There is deliberately no `runShell` here: creator
- * sessions already have OMP's audited Bash runner, while visitor sessions must
- * not gain an unscoped shell through a Ghost extension.
+ * parsed by `/bin/sh`. There is deliberately no `runShell` here; sessions
+ * already have OMP's audited Bash runner.
  */
 export interface CommandResult {
   readonly stdout: string;

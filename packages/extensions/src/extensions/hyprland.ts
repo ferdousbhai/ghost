@@ -30,23 +30,16 @@
  * Off Hyprland, or with a backend missing, actions degrade with a structured
  * error that names the reason and the remedy — never a stack trace.
  *
- * Scope: creator only. A visitor session registers no tool and gets a gate on
- * the name.
  */
 import type {
   ExtensionAPI,
   ExtensionFactory,
-  ExtensionHandler,
-  ToolCallEvent,
-  ToolCallEventResult,
 } from "@oh-my-pi/pi-coding-agent";
 import { Type } from "@oh-my-pi/pi-coding-agent/extensibility/legacy-typebox";
 import { GhostError } from "../errors.js";
-import { isVisitorScope } from "../scope.js";
 import { stringEnum } from "../tool-schema.js";
 import {
   isCommandMissing,
-  resolveScope,
   runCommand,
   textResult,
   untrustedTextResult,
@@ -348,39 +341,17 @@ function splitStates(value: string | undefined): string[] {
     .filter((part) => part.length > 0);
 }
 
-/** Creator-only. */
-export function createDesktopToolGate(
-  options: HyprlandExtensionOptions = {},
-): ExtensionHandler<ToolCallEvent, ToolCallEventResult> {
-  const scope = resolveScope(options);
-  return (event) => {
-    if (event.toolName !== GHOST_DESKTOP) return;
-    if (!isVisitorScope(scope)) return;
-    return {
-      block: true,
-      reason: `${GHOST_DESKTOP} is not available in a visitor conversation.`,
-    };
-  };
-}
-
-/** The tool names this extension offers in a scope. Empty for visitors. */
-export function desktopToolNames(options: HyprlandExtensionOptions = {}): string[] {
-  return isVisitorScope(resolveScope(options)) ? [] : [GHOST_DESKTOP];
+export function desktopToolNames(): string[] {
+  return [GHOST_DESKTOP];
 }
 
 export function createHyprlandExtension(
   options: HyprlandExtensionOptions = {},
 ): ExtensionFactory {
-  const scope = resolveScope(options);
   const run = options.run ?? runCommand;
   const helper = options.helper ?? getSharedDesktopHelper();
 
   return (pi: ExtensionAPI) => {
-    if (isVisitorScope(scope)) {
-      pi.on("tool_call", createDesktopToolGate(options));
-      return;
-    }
-
     pi.registerTool({
       name: GHOST_DESKTOP,
       label: "Desktop",
@@ -899,10 +870,7 @@ export function createHyprlandExtension(
         }
       },
     });
-
-    pi.on("tool_call", createDesktopToolGate(options));
   };
 }
 
-/** Creator-scope desktop control through the computer-use sidecar. */
 export default createHyprlandExtension();

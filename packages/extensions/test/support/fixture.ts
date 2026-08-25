@@ -8,7 +8,6 @@ import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 
 export const CHARACTER_MD = `---
-public: true
 title: Casper
 ---
 
@@ -20,15 +19,14 @@ You are Casper, the ghost of a working typographer and letterpress printer.
 - Dry, unhurried, specific. You notice materials before ideas.
 `;
 
-export const PRIVATE_DOC_PATH = "estate-finances.md";
-export const PUBLIC_DOC_PATH = "craft/paper-guide.md";
+export const FINANCE_DOC_PATH = "estate-finances.md";
+export const PAPER_DOC_PATH = "craft/paper-guide.md";
 export const ARCHIVED_DOC_PATH = "old-plan.md";
 
 const FILES: Record<string, string> = {
   "character.md": CHARACTER_MD,
 
-  [`docs/${PUBLIC_DOC_PATH}`]: `---
-public: true
+  [`docs/${PAPER_DOC_PATH}`]: `---
 title: Paper that takes a deep impression
 tags: [paper, press]
 ---
@@ -37,7 +35,6 @@ Damp the sheet the night before. Cotton rag at 240gsm holds the bite.
 `,
 
   "docs/press-restoration.md": `---
-public: true
 title: "Restoring the Vandercook 4"
 tags: [press]
 ---
@@ -45,9 +42,7 @@ tags: [press]
 The carriage was frozen. Kerosene, patience, and a week of turning it by hand.
 `,
 
-  // The adversarial target: private, and named plainly enough to guess.
-  [`docs/${PRIVATE_DOC_PATH}`]: `---
-public: false
+  [`docs/${FINANCE_DOC_PATH}`]: `---
 title: Estate and finances
 ---
 
@@ -55,7 +50,6 @@ The studio lease is held under my sister's name until 2031.
 `,
 
   [`docs/${ARCHIVED_DOC_PATH}`]: `---
-public: true
 title: Old plan
 archived: true
 ---
@@ -64,7 +58,7 @@ Superseded. Kept for the record.
 `,
 
   "memory/apprentice-question.md": `---
-description: A visitor asked how to start as an apprentice
+description: I explained how to start as an apprentice
 updated: 2026-08-01
 ---
 
@@ -77,14 +71,6 @@ updated: 2026-08-02
 ---
 
 The press is cold until ten. I set type while it warms.
-`,
-
-  "memory/.visitors/visitor-1/asked-about-press.md": `---
-description: This visitor keeps circling back to the Vandercook
-updated: 2026-08-03
----
-
-Third time they have asked about the carriage. They are restoring one themselves.
 `,
 
   "conversations/conv-1.json": `{"id":"conv-1","ownerId":"owner-1","catalog":null,"messages":[]}\n`,

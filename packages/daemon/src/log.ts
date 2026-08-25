@@ -1,7 +1,7 @@
 /**
  * The daemon's logging surface: small, injectable, and never a place where a
  * message body or a credential can land. Callers log categorical facts —
- * ghost names, event counts, error classes — not visitor text.
+ * ghost names, event counts, error classes — not message text.
  */
 export type LogLevel = "debug" | "info" | "warn" | "error";
 

@@ -102,7 +102,6 @@ const KNOWN_FAILURES = new Set<BrowserFailure>([
   "unknown_ref",
   "element_not_found",
   "invalid_input",
-  "forbidden_scope",
 ]);
 
 function asFailure(value: string): BrowserFailure {

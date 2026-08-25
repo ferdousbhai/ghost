@@ -77,8 +77,7 @@ one enum-action tool — `state | see | layers | focus | workspace | key | type
 | click | drag | scroll | mouse_move | ax_query | ax_roles | ax_perform |
 ax_set | hit_test | notify`. `ax_*` + `hit_test` are the semantic path;
 `key/type/click/drag/scroll/mouse_move` the coordinate path. Structured errors;
-execFile arg arrays; no shell interpolation of model input. Still visitor-scope
-OFF.
+execFile arg arrays; no shell interpolation of model input.
 
 `ghost_screen`: uses `capture` (ladder + honesty), returns the image natively
 to a vision-capable model — a text-only model reaches it through OMP's

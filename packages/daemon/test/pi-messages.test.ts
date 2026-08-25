@@ -124,7 +124,9 @@ describe("createPiMessagesAdapter", () => {
     const adapter = createPiMessagesAdapter(emit);
     adapter.handle({ type: "agent_start" } as AgentSessionEvent);
     // Step 1: a tool call at the step's own contentIndex 0.
-    for (const event of toolStep("call_1", "ghost_docs_list", "{}")) adapter.handle(event);
+    for (const event of toolStep("call_1", "ghost_character", '{"action":"read"}')) {
+      adapter.handle(event);
+    }
     // Step 2: text, again at the step's own contentIndex 0.
     for (const event of textStep("the answer")) adapter.handle(event);
     adapter.handle({ type: "agent_end", messages: [], willRetry: false } as AgentSessionEvent);
@@ -139,7 +141,7 @@ describe("createPiMessagesAdapter", () => {
     expect(toolStart).toMatchObject({
       contentIndex: 0,
       id: "call_1",
-      toolName: "ghost_docs_list",
+      toolName: "ghost_character",
     });
     const textStart = events.find((event) => event.type === "text_start");
     expect(textStart).toMatchObject({ contentIndex: 1 });
@@ -151,21 +153,21 @@ describe("createPiMessagesAdapter", () => {
     adapter.handle({
       type: "tool_execution_start",
       toolCallId: "call_1",
-      toolName: "ghost_docs_read",
-      args: { path: "docs/press.md" },
+      toolName: "ghost_character",
+      args: { action: "read" },
       intent: "Recall the restoration details",
     } as AgentSessionEvent);
     adapter.handle({
       type: "tool_execution_update",
       toolCallId: "call_1",
-      toolName: "ghost_docs_read",
-      args: { path: "docs/press.md" },
+      toolName: "ghost_character",
+      args: { action: "read" },
       partialResult: { content: [{ type: "text", text: "Reading the doc now." }] },
     } as AgentSessionEvent);
     adapter.handle({
       type: "tool_execution_end",
       toolCallId: "call_1",
-      toolName: "ghost_docs_read",
+      toolName: "ghost_character",
       result: { content: [{ type: "text", text: "x".repeat(400) }] },
       isError: false,
     } as AgentSessionEvent);
@@ -175,7 +177,7 @@ describe("createPiMessagesAdapter", () => {
       expect.objectContaining({
         type: "tool_execution_start",
         id: "call_1",
-        arguments: { path: "docs/press.md" },
+        arguments: { action: "read" },
       }),
       expect.objectContaining({ type: "tool_execution_update", summary: "Reading the doc now." }),
       expect.objectContaining({ type: "tool_execution_end", isError: false }),
@@ -264,7 +266,9 @@ describe("createPiMessagesAdapter", () => {
     const { events, emit } = collect();
     const adapter = createPiMessagesAdapter(emit);
     adapter.handle({ type: "agent_start" } as AgentSessionEvent);
-    for (const event of toolStep("call_1", "ghost_docs_list", "{}")) adapter.handle(event);
+    for (const event of toolStep("call_1", "ghost_character", '{"action":"read"}')) {
+      adapter.handle(event);
+    }
     for (const event of textStep("done")) adapter.handle(event);
     adapter.handle({ type: "agent_end", messages: [], willRetry: false } as AgentSessionEvent);
 

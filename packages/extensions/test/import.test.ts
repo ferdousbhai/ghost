@@ -5,28 +5,23 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { GhostError } from "../src/errors.js";
 import { importGhostArchive } from "../src/import.js";
 import { deriveMemoryIndex } from "../src/memory-file.js";
-import { visitorScope } from "../src/scope.js";
 import { createTempDir, writeFileTree } from "./support/fixture.js";
 
 /**
  * A hand-built ghost-home/v1 archive in the exact shape the hosted exporter
  * writes (`buildGhostHomeArchive` + `withExportManifest`): one root directory,
- * legacy `notes/` files with `public`/`title`/`tags`, memory files with
- * `description`/`updated`,
- * visitor memory under `memory/.visitors/<id>/`, transcripts in
- * `conversations/`, and the manifest last.
+ * legacy `notes/` files with `title`/`tags`, memory files with
+ * `description`/`updated`, transcripts in `conversations/`, and the manifest last.
  */
 const ROOT = "casper";
 const ARCHIVE: Record<string, string> = {
-  [`${ROOT}/character.md`]: "---\npublic: true\ntitle: Casper\n---\n\n# Casper\n\nA printer.",
+  [`${ROOT}/character.md`]: "---\ntitle: Casper\n---\n\n# Casper\n\nA printer.",
   [`${ROOT}/notes/craft/paper-notes.md`]:
-    "---\npublic: true\ntitle: Paper notes\ntags: [paper]\n---\n\nDamp the sheet.",
+    "---\ntitle: Paper notes\ntags: [paper]\n---\n\nDamp the sheet.",
   [`${ROOT}/notes/estate-finances.md`]:
-    "---\npublic: false\ntitle: Estate and finances\npath: Estate & finances\n---\n\nThe lease.",
+    "---\ntitle: Estate and finances\npath: Estate & finances\n---\n\nThe lease.",
   [`${ROOT}/memory/working-habit.md`]:
     "---\ndescription: I work in the morning\nupdated: 2026-08-02\n---\n\nThe press is cold until ten.\n",
-  [`${ROOT}/memory/.visitors/visitor-1/asked-about-press.md`]:
-    "---\ndescription: Keeps circling back to the Vandercook\nupdated: 2026-08-03\n---\n\nThird time.\n",
   [`${ROOT}/conversations/conv-1.json`]:
     '{\n  "id": "conv-1",\n  "ownerId": "owner-1",\n  "catalog": null,\n  "messages": []\n}\n',
   [`${ROOT}/export-manifest.json`]: `${JSON.stringify({
@@ -38,12 +33,8 @@ const ARCHIVE: Record<string, string> = {
     counts: {
       characterNotes: 1,
       notes: 2,
-      publicNotes: 1,
-      privateNotes: 1,
       archivedNotes: 0,
       memoryFiles: 1,
-      visitors: 1,
-      visitorMemoryFiles: 1,
       conversations: 1,
     },
     derived: [],
@@ -87,7 +78,6 @@ describe("importGhostArchive", () => {
     const { docs } = await home.listDocs();
     expect(docs.map((doc) => doc.path))
       .toEqual(["craft/paper-notes.md", "estate-finances.md"]);
-    expect(docs.find((doc) => doc.path === "estate-finances.md")?.public).toBe(false);
     // The pre-sanitization app path survives the round trip.
     expect(docs.find((doc) => doc.path === "estate-finances.md")?.appPath)
       .toBe("Estate & finances");
@@ -95,10 +85,6 @@ describe("importGhostArchive", () => {
     const memory = await home.listMemory();
     expect(deriveMemoryIndex(memory.files).lines)
       .toEqual(["- working-habit.md: I work in the morning"]);
-
-    expect(await home.listVisitors()).toEqual(["visitor-1"]);
-    const visitor = await home.listMemory(visitorScope("visitor-1"));
-    expect(visitor.files[0]?.slug).toBe("asked-about-press");
 
     expect(await home.listConversations()).toEqual(["conv-1"]);
     expect((await home.readExportManifest())?.["ghostname"]).toBe("casper");

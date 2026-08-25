@@ -102,14 +102,13 @@ function responseMessages(sessionId: string, text: string): SDKMessage[] {
 }
 
 function setupClaudeHost(options: {
-  visitorId?: string;
   authStatus?: { loggedIn: boolean; authMethod?: string; subscriptionType?: string };
   hooks?: GhostHookRunner;
 } = {}) {
   temp = makeTempGhosts();
   const dir = seedGhost(temp.root, {
     name: "casper",
-    character: "---\npublic: true\ntitle: casper\n---\n\nYou are Casper, a letterpress printer.\n",
+    character: "---\ntitle: casper\n---\n\nYou are Casper, a letterpress printer.\n",
   });
   const paths = ghostPaths(dir);
   mkdirSync(paths.agentDir, { recursive: true });
@@ -121,7 +120,6 @@ function setupClaudeHost(options: {
   host = new SessionHost({
     registry: temp.registry,
     offline: true,
-    ...(options.visitorId ? { extensionOptions: { visitorId: options.visitorId } } : {}),
     ...(options.hooks ? { hooks: options.hooks } : {}),
     claudeCode: {
       binaryPath: process.execPath,
@@ -255,18 +253,6 @@ describe("Claude Code subscription runtime", () => {
     expect(seenPrompts[0]).toMatchObject({ isSynthetic: true, shouldQuery: false });
     expect(JSON.stringify(seenPrompts[0]?.message.content)).toContain("Avoid the prior warning.");
     expect(JSON.stringify(seenPrompts[1]?.message.content)).toContain("hello");
-  });
-
-  it("never makes an owner subscription available to a visitor scope", async () => {
-    setupClaudeHost({ visitorId: "visitor-1" });
-    await expect(host!.runTurn("casper", {
-      sessionId: "conversation-1",
-      prompt: "hello",
-      emit: () => {},
-    })).rejects.toMatchObject({
-      code: "claude_code_owner_only",
-      status: 403,
-    });
   });
 
   it("fails closed without Claude.ai plan auth and never starts a query", async () => {

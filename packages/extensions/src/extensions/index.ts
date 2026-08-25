@@ -1,8 +1,7 @@
 /**
  * The ghost extensions, and the composition the daemon actually wants: one
- * factory that installs persona, character, memory, docs, and the computer-use
- * set (screen, desktop, browser) over the same ghost home and scope,
- * plus the visitor-only tool allowlist that goes with it.
+ * factory that installs persona, character, memory, and the computer-use set
+ * (screen, desktop, browser) over the same ghost home.
  */
 import type { ExtensionFactory } from "@oh-my-pi/pi-coding-agent";
 import { browserToolNames, createBrowserExtension, type BrowserExtensionOptions } from "./browser.js";
@@ -12,22 +11,12 @@ import {
   type CharacterExtensionOptions,
 } from "./character.js";
 import { createHyprlandExtension, desktopToolNames, type HyprlandExtensionOptions } from "./hyprland.js";
-import { isVisitorScope, type GhostScope } from "../scope.js";
 import {
   createMemoryExtension,
-  GHOST_MEMORY_LIST,
-  GHOST_MEMORY_READ,
   GHOST_MEMORY_WRITE,
 } from "./memory.js";
-import {
-  createDocsExtension,
-  GHOST_DOCS_GREP,
-  GHOST_DOCS_LIST,
-  GHOST_DOCS_READ,
-} from "./docs.js";
 import { createPersonaExtension, type PersonaExtensionOptions } from "./persona.js";
 import { createScreenExtension, screenToolNames, type ScreenExtensionOptions } from "./screen.js";
-import { resolveScope } from "./shared.js";
 
 export type GhostExtensionSetOptions = PersonaExtensionOptions
   & CharacterExtensionOptions
@@ -36,42 +25,23 @@ export type GhostExtensionSetOptions = PersonaExtensionOptions
   & BrowserExtensionOptions;
 
 /**
- * Every Ghost-specific tool this package registers for a scope. Creator OMP
- * sessions layer these onto the native tool set; visitor sessions use this as
- * their complete allowlist because native filesystem access would bypass doc
- * publication and visitor memory scoping.
+ * Every Ghost-specific tool this package registers. OMP sessions layer these
+ * onto the native tool set.
  */
-export function ghostToolNames(
-  scope: GhostScope,
-  options: GhostExtensionSetOptions = {},
-): string[] {
-  const names = isVisitorScope(scope)
-    ? [
-        GHOST_DOCS_LIST,
-        GHOST_DOCS_READ,
-        GHOST_DOCS_GREP,
-        GHOST_MEMORY_LIST,
-        GHOST_MEMORY_READ,
-        GHOST_MEMORY_WRITE,
-      ]
-    : [GHOST_MEMORY_WRITE];
-  // Creator-only: a visitor never rewrites the persona.
-  const scoped = { ...options, scope };
-  names.push(...characterToolNames(scoped));
-  // Computer-use tools: every one of these returns [] in visitor scope.
+export function ghostToolNames(): string[] {
+  const names = [GHOST_MEMORY_WRITE];
+  names.push(...characterToolNames());
   names.push(
-    ...screenToolNames(scoped),
-    ...desktopToolNames(scoped),
-    ...browserToolNames(scope),
+    ...screenToolNames(),
+    ...desktopToolNames(),
+    ...browserToolNames(),
   );
   return names;
 }
 
 /**
- * Persona + character + memory + docs + computer use (screen, desktop,
- * browser), sharing one home and one scope. The character and
- * computer-use factories each register nothing in visitor scope, so composing
- * them unconditionally is safe.
+ * Persona + character + memory + computer use (screen, desktop, browser),
+ * sharing one home.
  */
 export function createGhostExtension(
   options: GhostExtensionSetOptions = {},
@@ -79,7 +49,6 @@ export function createGhostExtension(
   const persona = createPersonaExtension(options);
   const character = createCharacterExtension(options);
   const memory = createMemoryExtension(options);
-  const docs = createDocsExtension(options);
   const screen = createScreenExtension(options);
   const desktop = createHyprlandExtension(options);
   const browser = createBrowserExtension(options);
@@ -87,7 +56,6 @@ export function createGhostExtension(
     await persona(pi);
     await character(pi);
     await memory(pi);
-    await docs(pi);
     await screen(pi);
     await desktop(pi);
     await browser(pi);
@@ -95,8 +63,8 @@ export function createGhostExtension(
 }
 
 /** The tool names available in a session built with these options. */
-export function ghostToolNamesFor(options: GhostExtensionSetOptions = {}): string[] {
-  return ghostToolNames(resolveScope(options), options);
+export function ghostToolNamesFor(_options: GhostExtensionSetOptions = {}): string[] {
+  return ghostToolNames();
 }
 
 export * from "./browser.js";
@@ -120,7 +88,6 @@ export {
 export * from "./character.js";
 export * from "./hyprland.js";
 export * from "./memory.js";
-export * from "./docs.js";
 export * from "./persona.js";
 export * from "./screen.js";
 export * from "./shared.js";

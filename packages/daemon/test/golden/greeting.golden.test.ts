@@ -52,7 +52,6 @@ afterEach(async () => {
 const LOCAL_TIME = "Sunday, 15 February 2026 at 19:40 (Europe/Berlin)";
 
 const CHARACTER = `---
-public: true
 title: casper
 ---
 
@@ -239,8 +238,8 @@ describe("golden: greeting flow", () => {
           name: "casper",
           character: CHARACTER,
           docs: {
-            "press.md": "---\npublic: true\ntitle: Restoring the Vandercook\n---\n\nRollers first.\n",
-            "ledger.md": "---\npublic: false\ntitle: Ledger\n---\n\nToo much.\n",
+            "press.md": "---\ntitle: Restoring the Vandercook\n---\n\nRollers first.\n",
+            "ledger.md": "---\ntitle: Ledger\n---\n\nToo much.\n",
           },
           memory: {
             "owner-prefers-short.md": memoryFile(

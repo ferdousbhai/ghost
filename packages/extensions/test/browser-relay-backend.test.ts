@@ -15,7 +15,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { GhostError } from "../src/errors.js";
-import { visitorScope } from "../src/scope.js";
 import type { BrowserFailure } from "../src/extensions/browser-backend.js";
 import {
   RelayBrowserBackend,
@@ -127,14 +126,6 @@ describe("the protocol constants are a contract", () => {
     for (const forbidden of ["eval", "evaluate", "exec", "script", "cdp", "raw"]) {
       expect(RELAY_OPS as readonly string[]).not.toContain(forbidden);
     }
-  });
-
-  it("keeps the javascript capability creator-only, like every other browser op", () => {
-    const transport = transportWithPage();
-    // The scope locks are on the backend, not the op: a visitor can never even
-    // build one, so it can never reach `javascript`.
-    expect(() => new RelayBrowserBackend({ transport, scope: visitorScope("v") }))
-      .toThrow(/never available in a visitor conversation/i);
   });
 
   it("frames the javascript result as untrusted in the tool description", async () => {
@@ -528,40 +519,6 @@ describe("when the relay is not there", () => {
     const backend = await opened(transport);
     const error = await expectGhostError(backend.read({ timeoutMs: 5_000 }));
     expect(error.message).toMatch(/different versions/i);
-  });
-});
-
-// ----------------------------------------------------------- the visitor guard
-
-describe("a visitor can never reach the creator's browser", () => {
-  it("refuses to build a backend for a visitor scope", () => {
-    const transport = transportWithPage();
-    expect(() => relayBackend({ transport, scope: visitorScope("visitor-1") }))
-      .toThrow(/never available in a visitor conversation/i);
-  });
-
-  it("refuses to construct one directly either", () => {
-    const transport = transportWithPage();
-    expect(() => new RelayBrowserBackend({ transport, scope: visitorScope("visitor-1") }))
-      .toThrow(/never available in a visitor conversation/i);
-  });
-
-  it("throws a forbidden GhostError, not a bare Error", () => {
-    const transport = transportWithPage();
-    try {
-      relayBackend({ transport, scope: visitorScope("visitor-1") });
-      throw new Error("expected a refusal");
-    } catch (error) {
-      expect(error).toBeInstanceOf(GhostError);
-      expect((error as GhostError).code).toBe("forbidden");
-      expect((error as GhostError).details["failure"]).toBe("forbidden_scope");
-    }
-  });
-
-  it("builds happily for the creator", () => {
-    const transport = transportWithPage();
-    const backend = relayBackend({ transport })({ homeDir: "/tmp/whatever" });
-    expect(backend.name).toBe("relay");
   });
 });
 

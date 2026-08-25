@@ -95,16 +95,14 @@ The ghost tool set contains no vision tool at all. `ghost_screen` returns the
 actual image block and Claude consumes it directly. No OMP `ModelRegistry` is
 fabricated as a fallback.
 
-The backend is owner-local by construction. If a session is resolved with a
-visitor scope, it fails with `claude_code_owner_only`; Phase 2 visitor traffic
-must authenticate as that visitor or use a creator-funded API/provider path.
-The creator's plan is never shared, proxied, or resold.
+The backend is owner-local by construction and uses the creator's external
+Claude Code authentication.
 
 ## Why one Effect scope per turn
 
 T3 Code keeps a long-lived query fed by an Effect queue. That is correct for a
 coding session whose system instructions are stable. A Ghost system prompt is
-not stable: memory files and doc visibility are derived again before every
+not stable: memory files and the doc catalog are derived again before every
 turn. Keeping one query alive would freeze those indexes.
 
 Ghost therefore retains T3's important lifecycle—typed startup/stream

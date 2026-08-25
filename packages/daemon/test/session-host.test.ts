@@ -42,8 +42,7 @@ afterEach(async () => {
   temp = null;
 });
 
-const PUBLIC_DOC = `---
-public: true
+const TEST_DOC = `---
 title: Restoring the Vandercook
 ---
 
@@ -58,7 +57,7 @@ async function setup(
   provider = await startMockProvider({ script });
   const dir = seedGhost(temp.root, {
     name: "casper",
-    docs: { "press.md": PUBLIC_DOC },
+    docs: { "press.md": TEST_DOC },
     provider: { baseUrl: provider.url, modelId: provider.modelId },
   });
   host = new SessionHost({
@@ -362,7 +361,7 @@ describe("SessionHost.runTurn", () => {
 
   it("runs a tool-using turn and streams a well-formed pi-messages sequence", async () => {
     await setup([
-      { kind: "tool", name: "ghost_docs_list", args: {} },
+      { kind: "tool", name: "ghost_character", args: { action: "read" } },
       { kind: "text", text: "Pull the roller bearings first." },
     ]);
     const events: PiMessagesEvent[] = [];
@@ -391,7 +390,7 @@ describe("SessionHost.runTurn", () => {
     expect(new Set(indices)).toEqual(new Set([0, 1]));
 
     const toolStart = events.find((event) => event.type === "toolcall_start");
-    expect(toolStart).toMatchObject({ toolName: "ghost_docs_list" });
+    expect(toolStart).toMatchObject({ toolName: "ghost_character" });
 
     const text = events
       .filter((event): event is Extract<PiMessagesEvent, { type: "text_delta" }> =>
@@ -690,9 +689,9 @@ describe("SessionHost.runTurn", () => {
         kind: "tool",
         name: "ghost_memory_write",
         args: {
-          description: "A visitor asked about the press",
+          description: "I explained the press",
           content: "They wanted the story, not the spec sheet.",
-          name: "visitor-asked-about-press.md",
+          name: "explained-the-press.md",
         },
       },
       { kind: "text", text: "Written down." },
@@ -705,7 +704,7 @@ describe("SessionHost.runTurn", () => {
 
     const memoryDir = join(dir, "memory");
     const files = readdirSync(memoryDir).filter((name) => name.endsWith(".md"));
-    expect(files).toContain("visitor-asked-about-press.md");
+    expect(files).toContain("explained-the-press.md");
     expect(readFileSync(join(memoryDir, files[0]!), "utf8")).toContain("spec sheet");
   });
 
@@ -822,12 +821,12 @@ describe("multi-ghost", () => {
     });
     const casper = seedGhost(temp.root, {
       name: "casper",
-      character: "---\npublic: true\ntitle: casper\n---\n\n# casper\n\nYou set type.\n",
+      character: "---\ntitle: casper\n---\n\n# casper\n\nYou set type.\n",
       provider: { baseUrl: provider.url, modelId: provider.modelId },
     });
     const mina = seedGhost(temp.root, {
       name: "mina",
-      character: "---\npublic: true\ntitle: mina\n---\n\n# mina\n\nYou keep bees.\n",
+      character: "---\ntitle: mina\n---\n\n# mina\n\nYou keep bees.\n",
       provider: { baseUrl: provider.url, modelId: provider.modelId },
     });
     host = new SessionHost({ registry: temp.registry, offline: true });
@@ -1235,7 +1234,7 @@ describe("the first meeting", () => {
    * A ghost straight out of `GhostRegistry.create`: its character.md is the
    * untouched seed, which is the whole definition of "never been met".
    */
-  async function setupSeeded(visitorId?: string) {
+  async function setupSeeded() {
     temp = makeTempGhosts();
     temp.registry.ensureRoot();
     provider = await startMockProvider({ script: [{ kind: "text", text: "hello" }] });
@@ -1252,7 +1251,6 @@ describe("the first meeting", () => {
     host = new SessionHost({
       registry: temp.registry,
       offline: true,
-      ...(visitorId ? { extensionOptions: { visitorId } } : {}),
     });
     return ghost;
   }
@@ -1275,30 +1273,6 @@ describe("the first meeting", () => {
     expect(system).toContain("ghost_character");
     // And it is a ritual, not a gate.
     expect(system).toContain("Their request always comes first");
-  });
-
-  it("never runs the ritual on a visitor — onboarding is the owner's", async () => {
-    await setupSeeded("visitor-1");
-    const system = await systemPromptFor("wisp");
-    expect(system).not.toContain("## Your first meeting");
-  });
-
-  it("keeps native filesystem and direct Bash outside the visitor boundary", async () => {
-    await setupSeeded("visitor-1");
-    const handle = await host!.open("wisp", "conv-visitor-tools");
-    const names = handle.session.getActiveToolNames();
-    expect(names).toEqual(expect.arrayContaining([
-      "ghost_docs_list",
-      "ghost_docs_read",
-      "ghost_memory_write",
-      "ask",
-    ]));
-    for (const name of ["bash", "read", "write"]) expect(names).not.toContain(name);
-    await expect(host!.runTurn("wisp", {
-      sessionId: "conv-visitor-tools",
-      prompt: "!pwd",
-      emit: () => {},
-    })).rejects.toMatchObject({ code: "forbidden", status: 403 });
   });
 
   it("stops once the character file has been written", async () => {

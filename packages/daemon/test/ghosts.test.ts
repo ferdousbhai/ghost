@@ -72,9 +72,8 @@ describe("GhostRegistry.create", () => {
 
     expect(isGhostHome(ghost.dir)).toBe(true);
     const character = readFileSync(ghostPaths(ghost.dir).characterFile, "utf8");
-    expect(character).toContain("public: true");
-    expect(character).toContain("title: casper");
-    for (const sub of ["docs", "memory", join("memory", ".visitors"), "conversations"]) {
+    expect(character).toMatch(/^---\ntitle: casper\n---/);
+    for (const sub of ["docs", "memory", "conversations"]) {
       expect(existsSync(join(ghost.dir, sub)), sub).toBe(true);
     }
     expect(temp.registry.list().map((entry) => entry.name)).toEqual(["casper"]);

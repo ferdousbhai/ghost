@@ -5,12 +5,11 @@ import { deriveDocCatalog } from "../src/catalog.js";
 import { GhostError, MemoryFileFormatError } from "../src/errors.js";
 import { type GhostHome, openGhostHome } from "../src/home.js";
 import { deriveMemoryIndex } from "../src/memory-file.js";
-import { CREATOR_SCOPE, visitorScope } from "../src/scope.js";
 import {
   ARCHIVED_DOC_PATH,
   createGhostFixture,
-  PRIVATE_DOC_PATH,
-  PUBLIC_DOC_PATH,
+  FINANCE_DOC_PATH,
+  PAPER_DOC_PATH,
   type GhostFixture,
 } from "./support/fixture.js";
 
@@ -29,15 +28,7 @@ afterEach(async () => {
 describe("layout", () => {
   it("names itself after its directory", () => {
     expect(home.name).toBe("casper");
-    expect(home.memoryDirFor(CREATOR_SCOPE)).toBe(join(fixture.dir, "memory"));
-    expect(home.memoryDirFor(visitorScope("visitor-1")))
-      .toBe(join(fixture.dir, "memory", ".visitors", "visitor-1"));
-  });
-
-  it("refuses a visitor id that is not a single path segment", () => {
-    expect(() => visitorScope("../escape")).toThrow(GhostError);
-    expect(() => visitorScope("a/b")).toThrow(GhostError);
-    expect(() => visitorScope("")).toThrow(GhostError);
+    expect(home.memoryDir).toBe(join(fixture.dir, "memory"));
   });
 
   it("never writes a derived index", async () => {
@@ -87,7 +78,6 @@ describe("character", () => {
   it("reads the persona body without the frontmatter", async () => {
     const character = await home.readCharacter();
     expect(character?.title).toBe("Casper");
-    expect(character?.public).toBe(true);
     expect(character?.body.startsWith("# Casper")).toBe(true);
   });
 
@@ -101,44 +91,39 @@ describe("docs", () => {
     const { docs, skipped } = await home.listDocs();
     expect(skipped).toEqual([]);
     expect(docs.map((doc) => doc.path)).toEqual([
-      PUBLIC_DOC_PATH,
-      PRIVATE_DOC_PATH,
+      PAPER_DOC_PATH,
+      FINANCE_DOC_PATH,
       ARCHIVED_DOC_PATH,
       "press-restoration.md",
     ].sort((a, b) => a.localeCompare(b)));
 
-    const paper = docs.find((doc) => doc.path === PUBLIC_DOC_PATH);
-    expect(paper?.public).toBe(true);
+    const paper = docs.find((doc) => doc.path === PAPER_DOC_PATH);
     expect(paper?.tags).toEqual(["paper", "press"]);
-    const finances = docs.find((doc) => doc.path === PRIVATE_DOC_PATH);
-    expect(finances?.public).toBe(false);
     const archived = docs.find((doc) => doc.path === ARCHIVED_DOC_PATH);
     expect(archived?.archived).toBe(true);
   });
 
-  it("treats a doc without frontmatter as private", async () => {
+  it("reads a doc without frontmatter", async () => {
     await home.writeDoc("scratch.md", { body: "unmarked" });
     const doc = await home.readDoc("scratch");
-    expect(doc.meta.public).toBe(false);
+    expect(doc.body).toBe("unmarked");
   });
 
   it("keeps the body byte-identical across a read/write round trip", async () => {
-    const before = await readFile(join(home.docsDir, PUBLIC_DOC_PATH), "utf8");
-    const doc = await home.readDoc(PUBLIC_DOC_PATH);
-    await home.writeDoc(PUBLIC_DOC_PATH, {
+    const before = await readFile(join(home.docsDir, PAPER_DOC_PATH), "utf8");
+    const doc = await home.readDoc(PAPER_DOC_PATH);
+    await home.writeDoc(PAPER_DOC_PATH, {
       body: doc.body,
-      public: doc.meta.public,
       ...(doc.meta.title === undefined ? {} : { title: doc.meta.title }),
       tags: doc.meta.tags,
     });
-    expect(await readFile(join(home.docsDir, PUBLIC_DOC_PATH), "utf8")).toBe(before);
+    expect(await readFile(join(home.docsDir, PAPER_DOC_PATH), "utf8")).toBe(before);
   });
 
   it("preserves unspecified frontmatter when rewriting a body", async () => {
-    await home.writeDoc(PUBLIC_DOC_PATH, { body: "new body" });
-    const doc = await home.readDoc(PUBLIC_DOC_PATH);
+    await home.writeDoc(PAPER_DOC_PATH, { body: "new body" });
+    const doc = await home.readDoc(PAPER_DOC_PATH);
     expect(doc.body).toBe("new body");
-    expect(doc.meta.public).toBe(true);
     expect(doc.meta.tags).toEqual(["paper", "press"]);
   });
 
@@ -156,13 +141,6 @@ describe("docs", () => {
     expect(result.matches).toHaveLength(1);
     expect(result.matches[0]?.path).toBe("press-restoration.md");
     expect(result.matches[0]?.line).toBe(1);
-  });
-
-  it("keeps private and archived docs out of a visitor search", async () => {
-    const scope = visitorScope("visitor-1");
-    expect((await home.searchDocs("lease", { scope })).matches).toEqual([]);
-    expect((await home.searchDocs("Superseded", { scope })).matches).toEqual([]);
-    expect((await home.searchDocs("Damp", { scope })).matches).toHaveLength(1);
   });
 
   it("refuses a catastrophic-backtracking regex fast instead of hanging", async () => {
@@ -205,16 +183,12 @@ describe("docs", () => {
 });
 
 describe("doc catalog", () => {
-  it("marks visibility for the creator and hides private docs from a visitor", async () => {
+  it("lists every doc and marks archived entries", async () => {
     const { docs } = await home.listDocs();
-    const creator = deriveDocCatalog(docs, CREATOR_SCOPE);
-    expect(creator.total).toBe(4);
-    expect(creator.lines.join("\n")).toContain(`${PRIVATE_DOC_PATH}: Estate and finances (private)`);
-
-    const visitor = deriveDocCatalog(docs, visitorScope("visitor-1"));
-    expect(visitor.lines.join("\n")).not.toContain(PRIVATE_DOC_PATH);
-    expect(visitor.lines.join("\n")).not.toContain(ARCHIVED_DOC_PATH);
-    expect(visitor.total).toBe(2);
+    const catalog = deriveDocCatalog(docs);
+    expect(catalog.total).toBe(4);
+    expect(catalog.lines.join("\n")).toContain(`${FINANCE_DOC_PATH}: Estate and finances`);
+    expect(catalog.lines.join("\n")).toContain(`${ARCHIVED_DOC_PATH}: Old plan (archived)`);
   });
 });
 
@@ -227,30 +201,6 @@ describe("memory", () => {
       "working-habit",
     ]);
     expect(files[0]?.updated).toBe("2026-08-01");
-  });
-
-  it("keeps visitor memory in its own scope", async () => {
-    const scope = visitorScope("visitor-1");
-    const creator = await home.listMemory();
-    expect(creator.files.some((file) => file.slug === "asked-about-press")).toBe(false);
-
-    const visitor = await home.listMemory(scope);
-    expect(visitor.files.map((file) => file.slug)).toEqual(["asked-about-press"]);
-    expect(await home.listVisitors()).toEqual(["visitor-1"]);
-  });
-
-  it("writes a visitor memory under memory/.visitors/<id>/", async () => {
-    const scope = visitorScope("visitor-2");
-    const written = await home.writeMemory(
-      { description: "They print letterpress too", content: "Restoring a Vandercook." },
-      scope,
-    );
-    expect(written.path).toBe("memory/.visitors/visitor-2/they-print-letterpress-too.md");
-    expect(written.created).toBe(true);
-    expect(await home.listVisitors()).toEqual(["visitor-1", "visitor-2"]);
-    // And it stays out of the creator's index.
-    const creator = await home.listMemory();
-    expect(creator.files.some((file) => file.slug === "they-print-letterpress-too")).toBe(false);
   });
 
   it("replaces an existing file rather than appending a second one", async () => {

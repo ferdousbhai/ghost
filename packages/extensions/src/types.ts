@@ -1,12 +1,8 @@
 /** The ghost-home/v1 value types, shared by the reader/writer and the extensions. */
-import type { GhostScope } from "./scope.js";
 
 export const GHOST_HOME_FORMAT = "ghost-home/v1";
 
-/** Frontmatter a doc carries. `public` absent or false means private. */
 export interface DocFrontmatter {
-  /** `public: true` is the only thing that publishes a doc. */
-  readonly public: boolean;
   readonly title: string | undefined;
   readonly tags: readonly string[];
   readonly archived: boolean;
@@ -26,7 +22,6 @@ export interface DocFile {
 }
 
 export interface CharacterFile {
-  readonly public: boolean;
   readonly title: string | undefined;
   readonly body: string;
 }
@@ -37,7 +32,6 @@ export interface MemoryRecord {
   readonly content: string;
   /** `updated:` from the file, `YYYY-MM-DD`. */
   readonly updated: string | undefined;
-  readonly scope: GhostScope;
 }
 
 export interface DocCatalog {
@@ -45,7 +39,5 @@ export interface DocCatalog {
   readonly lines: readonly string[];
   readonly chars: number;
   readonly omitted: number;
-  /** Docs visible in this scope. */
   readonly total: number;
-  readonly publicCount: number;
 }

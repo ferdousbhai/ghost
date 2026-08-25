@@ -18,7 +18,6 @@ import {
   BROWSER_ACTIONS,
   browserToolNames,
   createBrowserExtension,
-  createBrowserScopeGate,
   GHOST_BROWSER,
 } from "../src/extensions/browser.js";
 import type {
@@ -64,7 +63,6 @@ import {
   SCREENSHOT_DIRNAME,
 } from "../src/extensions/browser-session.js";
 import { GhostError } from "../src/errors.js";
-import { CREATOR_SCOPE, visitorScope } from "../src/scope.js";
 import { createGhostFixture, type GhostFixture } from "./support/fixture.js";
 import { loadExtension, resultText, type Harness } from "./support/harness.js";
 
@@ -297,41 +295,12 @@ afterEach(async () => {
 
 // ------------------------------------------------------------------- registration
 
-describe("registration and scope", () => {
-  it("registers exactly one tool for the creator", async () => {
+describe("registration", () => {
+  it("registers exactly one tool", async () => {
     const harness = await creatorHarness();
     expect(harness.toolNames()).toEqual([GHOST_BROWSER]);
     expect(harness.handlers.get("tool_call")).toBeUndefined();
-    expect(browserToolNames(CREATOR_SCOPE)).toEqual([GHOST_BROWSER]);
-  });
-
-  it("registers no tool at all for a visitor", async () => {
-    const harness = await loadExtension(
-      extension({ scope: visitorScope("visitor-1") }),
-      fixture.dir,
-    );
-    expect(harness.toolNames()).toEqual([]);
-    expect(browserToolNames(visitorScope("visitor-1"))).toEqual([]);
-  });
-
-  it("blocks the call in a visitor session even if something else registered it", async () => {
-    const harness = await loadExtension(
-      extension({ scope: visitorScope("visitor-1") }),
-      fixture.dir,
-    );
-    const blocked = await harness.toolCall(GHOST_BROWSER, { action: "open", url: "x" });
-    expect(blocked?.block).toBe(true);
-    expect(blocked?.reason).toMatch(/not available in a visitor conversation/i);
-  });
-
-  it("leaves other tools and creator sessions alone", async () => {
-    const visitorGate = createBrowserScopeGate({ scope: visitorScope("visitor-1") });
-    const creatorGate = createBrowserScopeGate({ scope: CREATOR_SCOPE });
-    const event = { toolName: "ghost_docs_read", input: {} };
-    expect(await visitorGate(event as never, {} as never)).toBeUndefined();
-    expect(
-      await creatorGate({ toolName: GHOST_BROWSER, input: {} } as never, {} as never),
-    ).toBeUndefined();
+    expect(browserToolNames()).toEqual([GHOST_BROWSER]);
   });
 
   it("offers a closed action enum with no free-form escape hatch", async () => {

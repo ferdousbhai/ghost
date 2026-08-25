@@ -38,7 +38,6 @@
  * vendored; that server half is Bun-only and its tool layer is a different seam.
  */
 import { writeFile } from "node:fs/promises";
-import { isVisitorScope, type GhostScope } from "../scope.js";
 import {
   GhostBrowserError,
   identifiedBrowserBackendFactory,
@@ -90,9 +89,8 @@ export const RELAY_PATH = "/relay";
  * (`ops.js`) by `packages/daemon/test/relay-extension.test.ts`.
  *
  * The set includes `javascript`, which runs page script through CDP
- * `Runtime.evaluate`. That is a real capability, granted to the *creator's own*
- * ghost on the creator's own machine — never to a visitor (the four scope locks
- * still hold) — and the page and the value it returns are untrusted data, which
+ * `Runtime.evaluate`. That is a real capability, granted to the creator's ghost
+ * on the creator's own machine, and the page and the value it returns are untrusted data, which
  * the tool description says out loud. There is deliberately no way for the daemon
  * to smuggle script through any *other* op: each verb is implemented by the
  * extension itself, and only `javascript` carries a code string.
@@ -161,10 +159,6 @@ export const RELAY_DISCONNECTED_MESSAGE =
   "The browser relay is not connected, so the creator's own Chromium cannot be "
   + "driven. Ask them to open Chromium with the Ghost relay extension installed "
   + "and paired (the extension's popup shows the connection status).";
-
-const RELAY_VISITOR_REFUSAL =
-  "The relay browser backend drives the creator's own signed-in Chromium and is "
-  + "never available in a visitor conversation.";
 
 // ---------------------------------------------------------------- reply parsing
 
@@ -288,11 +282,6 @@ function readTabInfos(value: unknown): readonly BackendTabInfo[] {
 export interface RelayBackendOptions {
   /** The daemon's socket, adapted. */
   readonly transport: RelayTransport;
-  /**
-   * Whose session this is. A visitor scope makes construction itself throw — the
-   * fourth lock, below the tool, the gate, and the handler check in `browser.ts`.
-   */
-  readonly scope?: GhostScope;
 }
 
 export class RelayBrowserBackend implements GhostBrowserBackend {
@@ -311,11 +300,6 @@ export class RelayBrowserBackend implements GhostBrowserBackend {
   #tabs = new Set<string>();
 
   constructor(options: RelayBackendOptions) {
-    if (options.scope && isVisitorScope(options.scope)) {
-      throw new GhostBrowserError("forbidden_scope", RELAY_VISITOR_REFUSAL, {
-        visitorId: options.scope.visitorId,
-      });
-    }
     this.#transport = options.transport;
   }
 
@@ -580,18 +564,8 @@ function targetArgs(target: BackendTarget): Record<string, unknown> {
 /**
  * The relay backend factory, for `createBrowserExtension({ backend })`.
  *
- * The scope check happens *here*, at factory time, not only inside the backend:
- * by the time a visitor session has a backend object it has already been handed
- * the capability, and the three locks in `browser.ts` are about the tool, not
- * about who holds the object. A visitor session that somehow reached this
- * function fails to build rather than building something that works.
  */
 export function relayBackend(options: RelayBackendOptions): BrowserBackendFactory {
-  if (options.scope && isVisitorScope(options.scope)) {
-    throw new GhostBrowserError("forbidden_scope", RELAY_VISITOR_REFUSAL, {
-      visitorId: options.scope.visitorId,
-    });
-  }
   return identifiedBrowserBackendFactory(
     (_ctx: BrowserBackendContext) => new RelayBrowserBackend(options),
     "relay",

@@ -10,7 +10,7 @@ import type { ExtensionAPI, ExtensionFactory } from "@oh-my-pi/pi-coding-agent";
 import { deriveDocCatalog } from "../catalog.js";
 import { deriveMemoryIndex } from "../memory-file.js";
 import { buildGhostSystemPrompt } from "../prompt.js";
-import { resolveHome, resolveScope, type GhostExtensionOptions } from "./shared.js";
+import { resolveHome, type GhostExtensionOptions } from "./shared.js";
 
 export interface PersonaExtensionOptions extends GhostExtensionOptions {
   /** Overrides the directory name as the ghost's name. */
@@ -22,14 +22,12 @@ export interface PersonaExtensionOptions extends GhostExtensionOptions {
 export function createPersonaExtension(
   options: PersonaExtensionOptions = {},
 ): ExtensionFactory {
-  const scope = resolveScope(options);
-
   return (pi: ExtensionAPI) => {
     pi.on("before_agent_start", async (event, ctx) => {
       const home = resolveHome(options, ctx);
       const [character, memory, docs] = await Promise.all([
         home.readCharacter(),
-        home.listMemory(scope),
+        home.listMemory(),
         home.listDocs(),
       ]);
       return {
@@ -37,8 +35,7 @@ export function createPersonaExtension(
           ghostName: options.ghostName ?? home.name,
           character,
           memory: deriveMemoryIndex(memory.files),
-          docs: deriveDocCatalog(docs.docs, scope),
-          scope,
+          docs: deriveDocCatalog(docs.docs),
           ...(options.extraSections === undefined
             ? {}
             : { extraSections: options.extraSections }),

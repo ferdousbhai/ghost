@@ -71,7 +71,7 @@ export function seedGhost(root: string, options: SeedGhostOptions = {}): string 
   writeFileSync(
     paths.characterFile,
     options.character
-      ?? `---\npublic: true\ntitle: ${name}\n---\n\n# ${name}\n\nYou are ${name}, a letterpress printer.\n`,
+      ?? `---\ntitle: ${name}\n---\n\n# ${name}\n\nYou are ${name}, a letterpress printer.\n`,
     "utf8",
   );
   for (const [path, content] of Object.entries(options.docs ?? {})) {

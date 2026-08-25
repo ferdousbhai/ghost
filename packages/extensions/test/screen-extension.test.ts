@@ -13,7 +13,6 @@
 import { readdir, mkdir, stat, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { visitorScope } from "../src/scope.js";
 import {
   captureViaHelper,
   createScreenExtension,
@@ -335,20 +334,7 @@ describe("ghost_screen tool", () => {
     await expect(stat(join(fixture.dir, String(result.details.path)))).resolves.toBeTruthy();
   });
 
-  it("gives a visitor no tool and blocks the name outright", async () => {
-    const scope = visitorScope("visitor-1");
-    const harness = await loadExtensionWith(
-      createScreenExtension({ scope, helper: captureHelper() }),
-      makeContext({ cwd: fixture.dir, model: VISION_CHAT }),
-    );
-    expect(harness.toolNames()).toEqual([]);
-    expect(screenToolNames({ scope })).toEqual([]);
-    const blocked = await harness.toolCall(GHOST_SCREEN);
-    expect(blocked?.block).toBe(true);
-    expect(blocked?.reason).toMatch(/visitor conversation/);
-  });
-
-  it("offers exactly one tool to a creator", async () => {
+  it("offers exactly one tool", async () => {
     const { harness } = await harnessFor(VISION_CHAT);
     expect(harness.toolNames()).toEqual([GHOST_SCREEN]);
     expect(screenToolNames()).toEqual([GHOST_SCREEN]);

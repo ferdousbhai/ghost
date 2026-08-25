@@ -7,13 +7,11 @@ import {
   MAX_CHARACTER_BODY_LENGTH,
 } from "../src/extensions/character.js";
 import { openGhostHome } from "../src/home.js";
-import { visitorScope } from "../src/scope.js";
 import { createGhostFixture, type GhostFixture } from "./support/fixture.js";
 import { loadExtension, resultText } from "./support/harness.js";
 
 /** The file the daemon seeds a freshly summoned ghost with. */
 const SEEDED_CHARACTER = `---
-public: true
 title: casper
 ---
 
@@ -29,8 +27,7 @@ actually remember over a general statement you could have made about anything.
 ## What you know
 
 Your docs and memory files are yours. Read them before you answer a question
-they cover, and write a memory file when you learn something about a visitor
-that you would want to remember the next time they come back.
+they cover, and write a memory file when you learn something worth keeping.
 `;
 
 let fixture: GhostFixture;
@@ -63,7 +60,6 @@ describe("character extension", () => {
       empty: false,
       seeded: false,
       title: "Casper",
-      public: true,
       truncated: false,
     });
   });
@@ -77,7 +73,7 @@ describe("character extension", () => {
   });
 
   it("reports an empty body as empty rather than as a persona", async () => {
-    await writeFile(characterPath(), "---\npublic: true\ntitle: Casper\n---\n\n\n", "utf8");
+    await writeFile(characterPath(), "---\ntitle: Casper\n---\n\n\n", "utf8");
     const harness = await loadExtension(createCharacterExtension(), fixture.dir);
     const result = await harness.call(GHOST_CHARACTER, { action: "read" });
     expect(resultText(result)).toContain("is empty");
@@ -98,25 +94,24 @@ describe("character extension", () => {
       action: "write",
       body: "# Casper\n\nI set type in the morning and answer plainly.",
     });
-    expect(result.details).toMatchObject({ created: false, title: "Casper", public: true });
+    expect(result.details).toMatchObject({ created: false, title: "Casper" });
     const character = await openGhostHome(fixture.dir).readCharacter();
     expect(character).toMatchObject({
       title: "Casper",
-      public: true,
       body: "# Casper\n\nI set type in the morning and answer plainly.",
     });
   });
 
-  it("keeps the existing title and public flag when the write omits them", async () => {
+  it("keeps the existing title and drops unrelated frontmatter", async () => {
     await writeFile(
       characterPath(),
-      "---\npublic: false\ntitle: Casper\n---\n\nOld body.\n",
+      "---\nmood: quiet\ntitle: Casper\n---\n\nOld body.\n",
       "utf8",
     );
     const harness = await loadExtension(createCharacterExtension(), fixture.dir);
     await harness.call(GHOST_CHARACTER, { action: "write", body: "New body." });
     const text = await readFile(characterPath(), "utf8");
-    expect(text).toContain("public: false");
+    expect(text).not.toContain("mood:");
     expect(text).toContain("title: Casper");
     expect(text).toContain("New body.");
   });
@@ -139,9 +134,9 @@ describe("character extension", () => {
       action: "write",
       body: "I am new here.",
     });
-    expect(result.details).toMatchObject({ created: true, public: true, title: null });
+    expect(result.details).toMatchObject({ created: true, title: null });
     expect(await openGhostHome(fixture.dir).readCharacter())
-      .toMatchObject({ body: "I am new here.", public: true });
+      .toMatchObject({ body: "I am new here." });
   });
 
   it("throws on an empty body rather than blanking the persona", async () => {
@@ -171,23 +166,12 @@ describe("character extension", () => {
   it("caps an oversized body on the way to the model", async () => {
     await writeFile(
       characterPath(),
-      `---\npublic: true\ntitle: Casper\n---\n\n${"y".repeat(MAX_CHARACTER_BODY_LENGTH + 500)}\n`,
+      `---\ntitle: Casper\n---\n\n${"y".repeat(MAX_CHARACTER_BODY_LENGTH + 500)}\n`,
       "utf8",
     );
     const harness = await loadExtension(createCharacterExtension(), fixture.dir);
     const result = await harness.call(GHOST_CHARACTER, { action: "read" });
     expect(result.details).toMatchObject({ truncated: true });
     expect(resultText(result)).toContain("showing the first");
-  });
-
-  it("registers no tool at all in a visitor scope, and gates the name", async () => {
-    const harness = await loadExtension(
-      createCharacterExtension({ scope: visitorScope("visitor-1") }),
-      fixture.dir,
-    );
-    expect(harness.toolNames()).toEqual([]);
-    const blocked = await harness.toolCall(GHOST_CHARACTER, { action: "read" });
-    expect(blocked).toMatchObject({ block: true });
-    expect(blocked?.reason).toContain("visitor conversation");
   });
 });

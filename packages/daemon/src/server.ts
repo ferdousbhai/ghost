@@ -689,7 +689,7 @@ export function createDaemonServer(options: ServerOptions): Server {
     liveStreams.add(response);
 
     const onClose = () => {
-      // The visitor navigated away or the socket dropped: stop generating.
+      // The client navigated away or the socket dropped: stop generating.
       if (!controller.signal.aborted) controller.abort();
     };
     response.on("close", onClose);

@@ -1,5 +1,5 @@
 /**
- * Ghost's structured memory writer, plus scoped visitor access tools.
+ * Ghost's structured memory writer.
  *
  * Memory is atomic files — one fact per file, a `description` line that becomes
  * that file's line in the derived index, and a body. A write creates or replaces
@@ -9,29 +9,20 @@
  * Creator sessions use OMP's native read/grep/glob tools for discovery and
  * retrieval, avoiding duplicate filesystem-shaped tools. They retain the
  * structured writer because it validates and serializes the atomic memory-file
- * format used by the derived index. Visitor sessions cannot receive native
- * filesystem tools, so they also receive the scoped list/read operations.
+ * format used by the derived index.
  */
 import type { ExtensionAPI, ExtensionFactory } from "@oh-my-pi/pi-coding-agent";
 import { Type } from "@oh-my-pi/pi-coding-agent/extensibility/legacy-typebox";
-import { deriveMemoryIndex, MAX_MEMORY_FILE_DESCRIPTION_LENGTH } from "../memory-file.js";
-import { describeScope, isVisitorScope } from "../scope.js";
+import { MAX_MEMORY_FILE_DESCRIPTION_LENGTH } from "../memory-file.js";
 import {
   resolveHome,
-  resolveScope,
   textResult,
   type GhostExtensionOptions,
 } from "./shared.js";
 
-export const GHOST_MEMORY_LIST = "ghost_memory_list";
-export const GHOST_MEMORY_READ = "ghost_memory_read";
 export const GHOST_MEMORY_WRITE = "ghost_memory_write";
 
-export const GHOST_MEMORY_TOOL_NAMES = [
-  GHOST_MEMORY_LIST,
-  GHOST_MEMORY_READ,
-  GHOST_MEMORY_WRITE,
-] as const;
+export const GHOST_MEMORY_TOOL_NAMES = [GHOST_MEMORY_WRITE] as const;
 
 export type MemoryExtensionOptions = GhostExtensionOptions;
 
@@ -43,60 +34,7 @@ export type MemoryExtensionOptions = GhostExtensionOptions;
 export function createMemoryExtension(
   options: MemoryExtensionOptions = {},
 ): ExtensionFactory {
-  const scope = resolveScope(options);
-  const visitor = isVisitorScope(scope);
-
   return (pi: ExtensionAPI) => {
-    if (visitor) {
-      pi.registerTool({
-        name: GHOST_MEMORY_LIST,
-        label: "List memory",
-        description:
-          "List your memory files. Each line is one file: its name, then the one-line "
-          + "description you gave it. Read a file to see the fact itself.",
-        parameters: Type.Object({}),
-        execute: async (_toolCallId, _params, _signal, _onUpdate, ctx) => {
-          const home = resolveHome(options, ctx);
-          const { files, skipped } = await home.listMemory(scope);
-          const index = deriveMemoryIndex(files);
-          const lines = index.lines.length > 0 ? [...index.lines] : ["(nothing yet)"];
-          if (index.omitted > 0) lines.push(`(+${index.omitted} more, not listed here)`);
-          for (const file of skipped) {
-            lines.push(`(unreadable: ${file.path} — ${file.reason})`);
-          }
-          return textResult(lines.join("\n"), {
-            count: files.length,
-            omitted: index.omitted,
-            skipped: skipped.length,
-            scope: describeScope(scope),
-          });
-        },
-      });
-
-      pi.registerTool({
-        name: GHOST_MEMORY_READ,
-        label: "Read memory",
-        description: "Read one memory file by name, as listed by ghost_memory_list.",
-        parameters: Type.Object({
-          name: Type.String({
-            description: "The memory file name, such as preferred-tone.md.",
-          }),
-        }),
-        execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
-          const home = resolveHome(options, ctx);
-          // Not-found and format errors throw: pi ignores a returned isError flag.
-          const file = await home.readMemory(params.name, scope);
-          const header = file.updated ? `${file.description} (updated ${file.updated})`
-            : file.description;
-          return textResult(`${header}\n\n${file.content}`, {
-            slug: file.slug,
-            updated: file.updated ?? null,
-            scope: describeScope(scope),
-          });
-        },
-      });
-    }
-
     pi.registerTool({
       name: GHOST_MEMORY_WRITE,
       label: "Write memory",
@@ -126,22 +64,18 @@ export function createMemoryExtension(
       // mutation queue; pi runs a batch of tool calls in parallel by default.
       execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
         const home = resolveHome(options, ctx);
-        const written = await home.writeMemory(
-          {
-            description: params.description,
-            content: params.content,
-            ...(params.name === undefined ? {} : { name: params.name }),
-          },
-          scope,
-        );
+        const written = await home.writeMemory({
+          description: params.description,
+          content: params.content,
+          ...(params.name === undefined ? {} : { name: params.name }),
+        });
         return textResult(
           `${written.created ? "Wrote" : "Replaced"} ${written.path}.`,
-          { ...written, scope: describeScope(scope) },
+          written,
         );
       },
     });
   };
 }
 
-/** Structured writer for creators; scoped list/read/write surface for visitors. */
 export default createMemoryExtension();

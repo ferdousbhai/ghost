@@ -19,7 +19,7 @@ TestCase {
 
     function test_liveSummaryBecomesOutcome(): void {
         const activity = {
-            name: "ghost_docs_grep",
+            name: "ghost_notes_grep",
             status: "complete",
             arguments: { query: "launch" },
             intent: "Find the launch plan",
@@ -30,7 +30,7 @@ TestCase {
 
     function test_restoredCallUsesHumanFallback(): void {
         const activity = {
-            name: "ghost_docs_read",
+            name: "ghost_notes_read",
             status: "complete",
             arguments: { path: "projects/roadmap.md" },
             intent: "",

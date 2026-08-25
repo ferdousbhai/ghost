@@ -5,9 +5,9 @@
 A ghost is an AI persona — character, memory, docs, tools — that lives
 entirely on its creator's machine as an Omarchy-native desktop app: an OMP
 engine over a folder of plain markdown files, summoned with a keystroke,
-extended with OMP extensions and skills, and (later) shared with visitors on
-the creator's terms over a Nostr control plane, with payments going directly
-creator ↔ visitor. No server holds a copy. "Your ghost, not our copy of it."
+and extended with OMP extensions and skills. It is an owner-local desktop
+application, not a network-facing agent service. No server holds a copy.
+"Your ghost, not our copy of it."
 
 ## Design goal: modifiable, infinitely extensible
 
@@ -31,35 +31,20 @@ open source (Apache-2.0), and on the OS they skipped (Linux/Omarchy)**.
 Ghosts are hired teammates, not configured assistants: name, job, a chat
 thread, check-ins. Where Grok Bot gives every bot one shared cloud computer
 and pooled credentials, each ghost gets a real Hyprland workspace on your
-actual machine, per-ghost homes, and structural scope gates, with no credential
-pooling and no cloud custody.
+actual machine, with per-ghost homes and credentials, no credential pooling,
+and no cloud custody.
 
 ## Phases
 
-- **Phase 1 — creator-local (IN PROGRESS).** Feature-complete creator ghost:
+- **Creator-local (IN PROGRESS).** Feature-complete ghost:
   multi-ghost plain-file homes, persona/memory/docs pi extensions, `ghostd`
   daemon, Quickshell HUD (Super+G) + bar widget + notifications, import of
   the hosted export, optional owner-local Claude Code plan runtime, AUR
   packaging. Current status: workspace scaffolded;
   `packages/extensions`, `packages/daemon`, `packages/shell` in parallel
   construction; pi SDK path proven by spike (zero fork-risk).
-- **Phase 2 — visitors.** Nostr control plane: keypair identity per ghost,
-  discovery via committed static manifest (+relays as enrichment),
-  presence-before-contact, offline mailbox (encrypted DMs; our libsodium
-  crypto stays authoritative). Streaming data plane: the GhostRelay Durable
-  Object (already built in the predecessor repo — relays measurably cannot
-  carry streamed answers). Visitor sessions: public-docs-only, per-visitor
-  memory scopes, bash/browser default-OFF. Paid-call envelope: our own
-  microstandard (NIP-90 is dead — measured; NIP-AE PR #2220 is the
-  owner↔ghost key-binding template).
-- **Phase 3 — payments.** NWC (NIP-47) settlement spine (all-outbound over
-  relays — no public endpoint, no NAT problem); **prepaid balances keyed to
-  the visitor's npub, metered per call** (per-call payment friction is the
-  measured killer); Cashu for sub-cent/offline; x402 only as an optional
-  agent-facing adapter.
 - **Transition (predecessor platform).** summonghost.com → one-pager +
-  sign-in-gated "Download my ghost" export (shipped) + NIP-05 file so every
-  existing username survives as `name@summonghost.com`; hosted stack frozen,
+  sign-in-gated "Download my ghost" export (shipped); hosted stack frozen,
   then drained (W10 engine + residue verification). Details:
   `~/github.com/ferdousbhai/summon-ghost/docs/sovereignty-migration.md`.
 
@@ -87,31 +72,22 @@ pooling and no cloud custody.
 - **No stored indexes** — memory index and doc catalog are derived per
   session; files edited out-of-band can never go stale against an index.
 - **Docs and skills coexist** — docs are durable ghost-owned knowledge;
-  OMP-native skills are reusable procedural instructions. Creator sessions
-  discover both, including explicit `/skill:<name>` invocation, while visitor
-  sessions keep discovery off to preserve their visibility boundary.
-- **Two browser modes**: "My browser" (relay into the creator's real signed-in Chromium via MV3 extension + chrome.debugger, creator-only, next wave) and "Ghost's browser" (per-ghost Playwright profile, isolated/autonomous), one backend-agnostic tool surface.
+  OMP-native skills are reusable procedural instructions. Sessions discover
+  both, including explicit `/skill:<name>` invocation.
+- **Two browser modes**: "My browser" (relay into the creator's real signed-in Chromium via MV3 extension + chrome.debugger) and "Ghost's browser" (per-ghost Playwright profile, isolated/autonomous), one backend-agnostic tool surface.
 - **Quickshell shell surfaces, not a webapp window** — Omarchy's own shell
   is Quickshell; a layer-shell HUD + bar widget is native in a way no app
   window is. A chromium "deep workspace" view must earn its way in.
-- **Nostr = control plane only** — identity/discovery/presence/mailbox;
-  relays measurably rate-limit streaming, so the GhostRelay DO is the data
-  plane.
-- **NWC + prepaid balances** for payments — direct creator↔visitor, no
-  platform in the money path, no platform revenue required.
-- **Terminology: "visitors", never "callers".**
-- **Visitor memory at `memory/.visitors/<id>/`** — it IS memory, so it
-  lives under `memory/`; dot-folder keeps it out of the creator's default
-  view while staying inspectable.
+- **Owner-local product boundary** — core does not expose ghosts to remote
+  users, meter calls, or operate a money path.
 - **Env scrubbing** — a ghost only sees credentials deliberately configured
   in its models.json; stray shell API keys must never leak cloud models
   into a sovereign ghost.
 - **No Obsidian integration promises** — plain files make it unnecessary.
 - **Apache-2.0, fresh repo** — the predecessor repo's history carries
-  private identifiers; the open contribution is this codebase plus the
-  ghost-over-Nostr conventions once Phase 2 lands.
+  private identifiers; the open contribution is this codebase.
 
-## Onboarding (Phase 1 target)
+## Onboarding
 
 Install from AUR → create a ghost (name + job → seeded `character.md`) →
 pick a model: OpenRouter free model (zero cost, just an account), an OpenAI
@@ -122,26 +98,19 @@ Super+G, start talking. Existing summonghost.com users: sign in there,
 
 ## Open questions
 
-- **Always-on**: laptop lids close; presence-honesty covers Phase 2, but the
-  "keep answering while I'm away" story (remote node? second device?) is
-  unresolved and deliberately later.
+- **Always-on**: laptop lids close; the "keep working while I'm away" behavior
+  on the same machine remains to be polished.
 - **Codex/ChatGPT-subscription OAuth**: RESOLVED — OMP 18 ships native OAuth
   for `openai-codex` (plus other registry providers), and Ghost exposes the
   same flow in both the shell and terminal.
 - **Claude subscription use**: RESOLVED for Phase 1 creator-local —
   `claude-code/default` uses the T3-style official Agent SDK harness and the
-  creator's external Claude Code login. It is forbidden for visitor scopes;
-  OMP's `anthropic` provider remains a separate accounting path. Recheck
+  creator's external Claude Code login. OMP's `anthropic` provider remains a
+  separate accounting path. Recheck
   Anthropic policy before every release that advertises plan accounting.
 - **Teach-by-demonstration** — the Wayland-native version (screen capture +
   input observation → draft skill); v1 fallback is "save this session as a
   skill".
-- **Ghost-to-ghost** — local first; over Nostr across machines in Phase 2+;
-  interaction and trust model undesigned.
+- **Ghost-to-ghost** — local interaction and trust model undesigned.
 - **Packaging** — AUR specifics, systemd unit polish, non-Omarchy Linux
   support (works anywhere Hyprland+Quickshell runs, but supported where?).
-- **NIP-AE-style binding** — exact owner↔ghost key-binding and kind
-  allocation for the paid-call microstandard.
-- **Frozen-platform economics**: RESOLVED — all visitor surface (and with
-  it subsidized inference) was removed from summonghost.com 2026-08-22;
-  the frozen cost is the ~$6/mo Cloudflare floor.

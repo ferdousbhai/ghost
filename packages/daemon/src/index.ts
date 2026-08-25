@@ -76,15 +76,10 @@ export {
   type ScrubResult,
 } from "./env-scrub.js";
 export {
-  CREATOR_SCOPE,
-  isVisitorScope,
   readGhostHomeDigest,
   resolveGhostExtensions,
-  resolveGhostScope,
-  visitorScope,
   type GhostExtensionOptions,
   type GhostHomeDigest,
-  type GhostScope,
   type ResolvedGhostExtensions,
 } from "./extensions.js";
 export {
