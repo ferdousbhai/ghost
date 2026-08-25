@@ -1,9 +1,10 @@
 pragma ComponentBehavior: Bound
 
-// The fixed context rail: one quiet, full-height edge shared by chat and the
-// the ghost's home and OMP capabilities. The host owns routing; this component owns only
-// selection, keyboard traversal, and the active/hover treatment.
+// The fixed context rail: one quiet, full-height edge shared by chat, the
+// ghost's home, and OMP capabilities. The host owns routing; this component
+// owns only selection, keyboard traversal, and the active/hover treatment.
 import QtQuick
+import QtQuick.Shapes
 import qs.services
 
 FocusScope {
@@ -16,17 +17,37 @@ FocusScope {
     signal selected(string section)
 
     readonly property var destinations: [
-        { id: "chat", label: "Chat", mark: "C" },
-        { id: "docs", label: "Docs", mark: "D" },
-        { id: "memory", label: "Memory", mark: "M" },
-        { id: "agents", label: "Wisps", mark: "W" },
-        { id: "commands", label: "Commands", mark: "/" },
-        { id: "character", label: "Character", mark: "ID" }
+        {
+            id: "chat",
+            label: "Chat",
+            icon: "M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"
+        },
+        { id: "character", label: "Character", icon: "" },
+        {
+            id: "memory",
+            label: "Memory",
+            icon: "M9.5 4A2.5 2.5 0 0 1 12 6.5V18a2 2 0 0 1-4 0 2 2 0 0 1-2-2 2 2 0 0 1-2-2 2.5 2.5 0 0 1 .5-4.95A2.5 2.5 0 0 1 6 4.5 2.5 2.5 0 0 1 9.5 4ZM14.5 4A2.5 2.5 0 0 0 12 6.5V18a2 2 0 0 0 4 0 2 2 0 0 0 2-2 2 2 0 0 0 2-2 2.5 2.5 0 0 0-.5-4.95A2.5 2.5 0 0 0 18 4.5 2.5 2.5 0 0 0 14.5 4Z"
+        },
+        {
+            id: "docs",
+            label: "Docs",
+            icon: "M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2zM14 2v6h6M8 13h8M8 17h8M8 9h2"
+        },
+        {
+            id: "agents",
+            label: "Helpers",
+            icon: "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"
+        },
+        {
+            id: "commands",
+            label: "Commands",
+            icon: "M4 3h16a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zM6 9l4 3-4 3M12 15h4"
+        }
     ]
 
     implicitWidth: 64
     implicitHeight: Theme.pad * 30
-    clip: true
+    clip: false
     activeFocusOnTab: true
 
     function activate(index: int): void {
@@ -71,6 +92,9 @@ FocusScope {
                 readonly property var destination: destinationButton.modelData
                 readonly property bool active:
                     root.currentSection === destinationButton.destination.id
+                readonly property color glyphColor: destinationButton.active
+                    ? Theme.ghostAmberBright
+                    : (pointer.containsMouse ? Theme.foreground : Theme.foregroundDim)
 
                 width: Theme.controlHeight + Theme.gap
                 height: Theme.controlHeight + Theme.gap
@@ -112,30 +136,61 @@ FocusScope {
                     color: Theme.amber(0.06)
                 }
 
-                Column {
+                GhostGlyph {
                     anchors.centerIn: parent
-                    spacing: 0
+                    visible: destinationButton.destination.id === "character"
+                    size: 22
+                    tint: destinationButton.glyphColor
+                }
 
-                    Text {
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        text: destinationButton.destination.mark
-                        color: destinationButton.active
-                            ? Theme.ghostAmberBright
-                            : (pointer.containsMouse ? Theme.foreground : Theme.foregroundDim)
-                        font.family: Theme.fontFamilyMono
-                        font.pixelSize: Theme.fontSizeSmall
-                        font.weight: Font.DemiBold
+                Shape {
+                    anchors.centerIn: parent
+                    visible: destinationButton.destination.id !== "character"
+                    width: 24
+                    height: 24
+                    antialiasing: true
+
+                    ShapePath {
+                        strokeColor: destinationButton.glyphColor
+                        fillColor: "transparent"
+                        strokeWidth: 1.8
+                        capStyle: ShapePath.RoundCap
+                        joinStyle: ShapePath.RoundJoin
+
+                        PathSvg {
+                            path: destinationButton.destination.icon
+                        }
+                    }
+                }
+
+                Rectangle {
+                    id: tooltip
+
+                    anchors.right: parent.left
+                    anchors.rightMargin: Theme.gap
+                    anchors.verticalCenter: parent.verticalCenter
+                    z: 20
+                    width: tooltipLabel.implicitWidth + Theme.pad * 1.5
+                    height: Theme.controlHeight - Theme.gap / 2
+                    radius: Theme.radius / 2
+                    color: Theme.surfaceDeep
+                    border.width: 1
+                    border.color: Theme.borderStrong
+                    opacity: pointer.containsMouse ? 1 : 0
+                    visible: opacity > 0
+
+                    Behavior on opacity {
+                        enabled: !Theme.reducedMotion
+                        NumberAnimation { duration: Theme.durFast }
                     }
 
                     Text {
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        text: destinationButton.destination.label === "Character"
-                            ? "Char" : destinationButton.destination.label
-                        color: destinationButton.active
-                            ? Theme.ghostAmber
-                            : Theme.foregroundFaint
+                        id: tooltipLabel
+                        anchors.centerIn: parent
+                        text: destinationButton.destination.label
+                        color: Theme.foregroundBright
                         font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSizeSmall - 3
+                        font.pixelSize: Theme.fontSizeSmall
                     }
                 }
 
