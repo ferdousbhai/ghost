@@ -12,6 +12,11 @@ Type=simple
 ExecStart=/usr/bin/ghostd
 Restart=on-failure
 RestartSec=2
+# ghostd stages a 5s graceful drain and a 2s forced settle. Keep a final
+# service-manager boundary for providers or sidecars that ignore cancellation.
+TimeoutStopSec=10s
+KillMode=mixed
+SendSIGKILL=yes
 
 # The daemon scrubs inherited provider credentials itself (see env-scrub.ts),
 # but a service that never had them is better than one that drops them.

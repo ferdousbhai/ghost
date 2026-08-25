@@ -10,7 +10,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { join, sep } from "node:path";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import type { LiveSessionControllerOptions } from "@oh-my-pi/pi-coding-agent/live/controller";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { claudeSessionMetadataPath } from "../src/claude-code.js";
 import { GHOST_COMPACTION_PROMPT } from "../src/compaction.js";
 import { ghostPaths } from "../src/ghosts.js";
@@ -26,6 +26,10 @@ import { GhostHookRunner } from "../src/hooks.js";
 import { migrateHostedConversations } from "../src/hosted-conversation-import.js";
 import { LiveVoiceManager, type LiveVoiceStatus } from "../src/live-voice.js";
 import {
+  CollaborationManager,
+  type CollaborationStatus,
+} from "../src/collaboration.js";
+import {
   SessionHost,
   forkConversationTitle,
   parseUserBashCommand,
@@ -36,7 +40,11 @@ import {
 import type { PiMessagesEvent } from "../src/pi-messages.js";
 import { readPins, writePins } from "../src/pins.js";
 import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
-import { startMockProvider, type MockProvider } from "./helpers/mock-provider.js";
+import {
+  createMockProviderBarrier,
+  startMockProvider,
+  type MockProvider,
+} from "./helpers/mock-provider.js";
 
 let temp: TempGhosts | null = null;
 let provider: MockProvider | null = null;
@@ -106,7 +114,13 @@ async function setup(
   script: Parameters<typeof startMockProvider>[0]["script"],
   options: Pick<
     SessionHostOptions,
-    "hooks" | "askTimeoutSeconds" | "liveVoice" | "compaction" | "title"
+    | "hooks"
+    | "askTimeoutSeconds"
+    | "liveVoice"
+    | "collaboration"
+    | "compaction"
+    | "title"
+    | "retention"
   > = {},
   providerOptions: Omit<Parameters<typeof startMockProvider>[0], "script"> = {},
 ) {
@@ -176,6 +190,28 @@ async function waitFor<T>(read: () => T | null, timeoutMs = 2_000): Promise<T> {
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   throw new Error("timed out waiting for state");
+}
+
+function deferred(): {
+  promise: Promise<void>;
+  resolve(): void;
+} {
+  let resolve!: () => void;
+  const promise = new Promise<void>((settle) => {
+    resolve = settle;
+  });
+  return { promise, resolve };
+}
+
+function cleanupErrorMessages(error: unknown): string[] {
+  if (error instanceof AggregateError) return error.errors.flatMap(cleanupErrorMessages);
+  return [error instanceof Error ? error.message : String(error)];
+}
+
+function authRuntimeForTest(handle: Awaited<ReturnType<SessionHost["open"]>>): {
+  close(): void;
+} {
+  return (handle as typeof handle & { modelRuntime: { close(): void } }).modelRuntime;
 }
 
 describe("sessionKeyOf", () => {
@@ -468,6 +504,326 @@ lines.on("line", (line) => {
       "Check the tympan and packing",
     );
     expect(JSON.stringify(provider!.requests[0]?.messages)).toContain("focus on the rollers");
+  });
+});
+
+describe("SessionHost retention", () => {
+  it("unrefs its sweep timer, expires idle sessions, and disposes the timer", async () => {
+    let now = 1_000;
+    let sweep = () => {};
+    let unrefs = 0;
+    let disposals = 0;
+    await setup([{ kind: "text", text: "unused" }], {
+      retention: {
+        idleTtlMs: 100,
+        maxSessions: 10,
+        sweepIntervalMs: 25,
+        now: () => now,
+        schedule: (callback, intervalMs) => {
+          expect(intervalMs).toBe(25);
+          sweep = callback;
+          return {
+            unref: () => { unrefs += 1; },
+            dispose: () => { disposals += 1; },
+          };
+        },
+      },
+    });
+    const opened = await host!.open("casper", "conv-expire");
+    expect(unrefs).toBe(1);
+
+    now += 101;
+    sweep();
+    await waitFor(() => host!.cachedSessionCount === 0 ? true : null);
+    expect(opened.session.isDisposed).toBe(true);
+
+    await host!.disposeAll();
+    expect(disposals).toBe(1);
+  });
+
+  it("evicts the least-recently-used idle session at the soft maximum", async () => {
+    let now = 1_000;
+    await setup([{ kind: "text", text: "unused" }], {
+      retention: {
+        idleTtlMs: 0,
+        maxSessions: 2,
+        now: () => now,
+      },
+    });
+    const first = await host!.open("casper", "conv-oldest");
+    now += 1;
+    const second = await host!.open("casper", "conv-recent");
+    now += 1;
+    await host!.open("casper", "conv-oldest");
+    now += 1;
+    await host!.open("casper", "conv-new");
+
+    expect(host!.cachedSessionCount).toBe(2);
+    expect(first.session.isDisposed).toBe(false);
+    expect(second.session.isDisposed).toBe(true);
+  });
+
+  it("does not evict an expired session while a turn owns it", async () => {
+    const barrier = createMockProviderBarrier();
+    let now = 1_000;
+    let sweep = () => {};
+    await setup([{ kind: "text", text: "held", barrier }], {
+      retention: {
+        idleTtlMs: 10,
+        maxSessions: 10,
+        now: () => now,
+        schedule: (callback) => {
+          sweep = callback;
+          return { dispose: () => {} };
+        },
+      },
+    });
+    const opened = await host!.open("casper", "conv-owned");
+    const turn = host!.runTurn("casper", {
+      sessionId: "conv-owned",
+      prompt: "hold",
+      emit: () => {},
+    });
+    await barrier.waitForArrivals();
+
+    now += 100;
+    sweep();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(host!.cachedSessionCount).toBe(1);
+    expect(opened.session.isDisposed).toBe(false);
+
+    barrier.release();
+    await turn;
+    expect(host!.cachedSessionCount).toBe(1);
+  });
+
+  it("times out hung title providers so they cannot protect an unbounded cache", async () => {
+    const titleSignals: AbortSignal[] = [];
+    await setup([{ kind: "text", text: "done" }], {
+      retention: { idleTtlMs: 0, maxSessions: 1 },
+      title: {
+        timeoutMs: 100,
+        generate: async ({ signal }) => {
+          titleSignals.push(signal);
+          return new Promise(() => {});
+        },
+      },
+    });
+
+    await Promise.all([
+      host!.runTurn("casper", { sessionId: "conv-title-a", prompt: "a", emit: () => {} }),
+      host!.runTurn("casper", { sessionId: "conv-title-b", prompt: "b", emit: () => {} }),
+    ]);
+    expect(host!.cachedSessionCount).toBe(2);
+    await waitFor(() => host!.cachedSessionCount === 1 ? true : null);
+    expect(titleSignals).toHaveLength(2);
+    await waitFor(() => titleSignals.every((signal) => signal.aborted) ? true : null);
+  });
+});
+
+describe("SessionHost shutdown", () => {
+  it("stops admission synchronously and aborts an active provider turn", async () => {
+    const barrier = createMockProviderBarrier();
+    await setup([{ kind: "text", text: "held", barrier }]);
+    const events: PiMessagesEvent[] = [];
+    const turn = host!.runTurn("casper", {
+      sessionId: "conv-shutdown",
+      prompt: "hold",
+      emit: (event) => events.push(event),
+    });
+    await barrier.waitForArrivals();
+
+    host!.beginShutdown();
+    await expect(host!.open("casper", "new-after-signal"))
+      .rejects.toMatchObject({ code: "shutting_down", status: 503 });
+    await expect(Promise.race([
+      turn.then(() => true),
+      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 1_000)),
+    ])).resolves.toBe(true);
+    expect(events.at(-1)).toMatchObject({ type: "error", reason: "aborted" });
+
+    barrier.release();
+    await host!.disposeAll();
+  });
+
+  it("cancels a hung background title during shutdown", async () => {
+    const titleStarted = deferred();
+    let titleSignal: AbortSignal | undefined;
+    await setup([{ kind: "text", text: "done" }], {
+      title: {
+        timeoutMs: 5_000,
+        generate: async ({ signal }) => {
+          titleSignal = signal;
+          titleStarted.resolve();
+          return new Promise(() => {});
+        },
+      },
+    });
+    await host!.runTurn("casper", {
+      sessionId: "conv-title-shutdown",
+      prompt: "title me",
+      emit: () => {},
+    });
+    await titleStarted.promise;
+
+    await host!.disposeAll();
+    expect(titleSignal?.aborted).toBe(true);
+  });
+
+  it("keeps a ghost home immovable until a blocked session close settles", async () => {
+    const stopEntered = deferred();
+    const releaseStop = deferred();
+    class BlockingVoiceManager extends LiveVoiceManager {
+      override async stop(sessionKey: string): Promise<LiveVoiceStatus> {
+        stopEntered.resolve();
+        await releaseStop.promise;
+        return super.stop(sessionKey);
+      }
+    }
+    await setup([{ kind: "text", text: "unused" }], {
+      liveVoice: new BlockingVoiceManager(),
+    });
+    await host!.open("casper", "conv-closing-home");
+
+    const closing = host!.close("casper", "conv-closing-home");
+    await stopEntered.promise;
+    await expect(host!.renameGhost("casper", "renamed"))
+      .rejects.toMatchObject({ code: "ghost_busy", status: 409 });
+    await expect(host!.deleteGhost("casper"))
+      .rejects.toMatchObject({ code: "ghost_busy", status: 409 });
+
+    releaseStop.resolve();
+    await closing;
+  });
+
+  it("disposes Pi and its runtime even when voice and collaboration cleanup fail", async () => {
+    class FailingVoiceManager extends LiveVoiceManager {
+      override async stop(): Promise<LiveVoiceStatus> {
+        throw new Error("voice teardown failed");
+      }
+    }
+    class FailingCollaborationManager extends CollaborationManager {
+      override async stop(): Promise<CollaborationStatus> {
+        throw new Error("collaboration teardown failed");
+      }
+    }
+    await setup([{ kind: "text", text: "unused" }], {
+      liveVoice: new FailingVoiceManager(),
+      collaboration: new FailingCollaborationManager(),
+    });
+    const handle = await host!.open("casper", "conv-failed-close");
+    const runtime = authRuntimeForTest(handle);
+    const closeRuntime = vi.spyOn(runtime, "close");
+
+    await expect(host!.close("casper", "conv-failed-close"))
+      .rejects.toBeInstanceOf(AggregateError);
+    expect(handle.session.isDisposed).toBe(true);
+    expect(closeRuntime).toHaveBeenCalledOnce();
+    expect(host!.cachedSessionCount).toBe(0);
+
+    await expect(host!.close("casper", "conv-failed-close")).resolves.toBeUndefined();
+    expect(closeRuntime).toHaveBeenCalledOnce();
+  });
+
+  it("attempts every Pi cleanup stage when lifecycle hooks fail", async () => {
+    const { dir } = await setup([{ kind: "text", text: "unused" }]);
+    writeMcpFixture(dir);
+    const handle = await host!.open("casper", "conv-fault-isolation");
+    const internals = handle as typeof handle & {
+      mcp: { manager: { disconnectAll(): Promise<void> } };
+    };
+    expect(internals.mcp).toBeDefined();
+
+    const originalBeginDispose = handle.session.beginDispose.bind(handle.session);
+    let beginDisposeAttempts = 0;
+    const beginDispose = vi.spyOn(handle.session, "beginDispose").mockImplementation(() => {
+      originalBeginDispose();
+      beginDisposeAttempts += 1;
+      if (beginDisposeAttempts === 1) throw new Error("begin dispose failed after starting");
+    });
+    const originalDisconnect = internals.mcp.manager.disconnectAll.bind(internals.mcp.manager);
+    const disconnect = vi.spyOn(internals.mcp.manager, "disconnectAll").mockImplementation(async () => {
+      await originalDisconnect();
+      throw new Error("MCP disconnect failed after stopping");
+    });
+    const originalSessionDispose = handle.session.dispose.bind(handle.session);
+    const sessionDispose = vi.spyOn(handle.session, "dispose").mockImplementation(async (options) => {
+      await originalSessionDispose(options);
+      throw new Error("session dispose failed after stopping");
+    });
+    const runtime = authRuntimeForTest(handle);
+    const originalRuntimeClose = runtime.close.bind(runtime);
+    const runtimeClose = vi.spyOn(runtime, "close").mockImplementation(() => {
+      originalRuntimeClose();
+      throw new Error("runtime close failed after stopping");
+    });
+
+    const close = host!.close("casper", "conv-fault-isolation");
+    await expect(close).rejects.toBeInstanceOf(AggregateError);
+    const failure = await close.catch((error: unknown) => error as AggregateError);
+    expect(cleanupErrorMessages(failure)).toEqual(expect.arrayContaining([
+      "begin dispose failed after starting",
+      "MCP disconnect failed after stopping",
+      "session dispose failed after stopping",
+      "runtime close failed after stopping",
+    ]));
+    expect(beginDispose).toHaveBeenCalled();
+    expect(disconnect).toHaveBeenCalledOnce();
+    expect(sessionDispose).toHaveBeenCalledOnce();
+    expect(runtimeClose).toHaveBeenCalledOnce();
+    expect(host!.cachedSessionCount).toBe(0);
+
+    const beginCalls = beginDispose.mock.calls.length;
+    await expect(host!.close("casper", "conv-fault-isolation")).resolves.toBeUndefined();
+    expect(beginDispose).toHaveBeenCalledTimes(beginCalls);
+    expect(runtimeClose).toHaveBeenCalledOnce();
+  });
+
+  it("force cleanup continues across sessions after synchronous lifecycle failures", async () => {
+    await setup([{ kind: "text", text: "unused" }]);
+    const first = await host!.open("casper", "conv-force-first");
+    const second = await host!.open("casper", "conv-force-second");
+
+    const firstBeginOriginal = first.session.beginDispose.bind(first.session);
+    let firstBeginAttempts = 0;
+    vi.spyOn(first.session, "beginDispose").mockImplementation(() => {
+      firstBeginOriginal();
+      firstBeginAttempts += 1;
+      if (firstBeginAttempts === 1) throw new Error("first begin dispose failed after starting");
+    });
+    const firstRuntime = authRuntimeForTest(first);
+    const firstCloseOriginal = firstRuntime.close.bind(firstRuntime);
+    vi.spyOn(firstRuntime, "close").mockImplementation(() => {
+      firstCloseOriginal();
+      throw new Error("first runtime close failed after stopping");
+    });
+
+    const secondBeginOriginal = second.session.beginDispose.bind(second.session);
+    const secondBegin = vi.spyOn(second.session, "beginDispose").mockImplementation(() => {
+      secondBeginOriginal();
+    });
+    const secondDisposeOriginal = second.session.dispose.bind(second.session);
+    const secondDispose = vi.spyOn(second.session, "dispose").mockImplementation((options) =>
+      secondDisposeOriginal(options)
+    );
+    const secondRuntime = authRuntimeForTest(second);
+    const secondCloseOriginal = secondRuntime.close.bind(secondRuntime);
+    const secondClose = vi.spyOn(secondRuntime, "close").mockImplementation(() => {
+      secondCloseOriginal();
+    });
+
+    host!.forceDisposeAll();
+    await waitFor(() => secondDispose.mock.calls.length > 0 ? true : null);
+    expect(secondBegin).toHaveBeenCalled();
+    expect(secondDispose).toHaveBeenCalledOnce();
+    expect(secondClose).toHaveBeenCalledOnce();
+    expect(host!.cachedSessionCount).toBe(0);
+
+    const secondBeginCalls = secondBegin.mock.calls.length;
+    host!.forceDisposeAll();
+    expect(secondBegin).toHaveBeenCalledTimes(secondBeginCalls);
+    expect(secondDispose).toHaveBeenCalledOnce();
+    expect(secondClose).toHaveBeenCalledOnce();
   });
 });
 
@@ -2231,6 +2587,54 @@ describe("model switch reaches a live cached session", () => {
       roles: { chat_model: { provider: "ghost-local", modelId: "model-a" } },
     };
   }
+
+  function authRuntimeOf(handle: Awaited<ReturnType<SessionHost["open"]>>) {
+    return (handle as typeof handle & {
+      modelRuntime: {
+        authStorage: { reload(): Promise<void> };
+        modelRegistry: {
+          hydrateCredentialScopedModelCaches(): Promise<void>;
+          refresh(mode: "offline"): Promise<void>;
+        };
+      };
+    }).modelRuntime;
+  }
+
+  it("reloads cached credential and model state before an idle refresh resolves", async () => {
+    await setup([{ kind: "text", text: "unused" }]);
+    const handle = await host!.open("casper", "conv-auth-idle");
+    const runtime = authRuntimeOf(handle);
+    const reload = vi.spyOn(runtime.authStorage, "reload");
+    const hydrate = vi.spyOn(runtime.modelRegistry, "hydrateCredentialScopedModelCaches");
+    const refresh = vi.spyOn(runtime.modelRegistry, "refresh");
+
+    await host!.refreshAuth("casper");
+
+    expect(reload).toHaveBeenCalledOnce();
+    expect(hydrate).toHaveBeenCalledOnce();
+    expect(refresh).toHaveBeenCalledWith("offline");
+  });
+
+  it("defers a login refresh that lands mid-turn until the owner releases", async () => {
+    const barrier = createMockProviderBarrier();
+    await setup([{ kind: "text", text: "held", barrier }]);
+    const handle = await host!.open("casper", "conv-auth-busy");
+    const runtime = authRuntimeOf(handle);
+    const reload = vi.spyOn(runtime.authStorage, "reload");
+
+    const turn = host!.runTurn("casper", {
+      sessionId: "conv-auth-busy",
+      prompt: "hold credentials stable",
+      emit: () => {},
+    });
+    await barrier.waitForArrivals();
+    await host!.refreshAuth("casper");
+    expect(reload).not.toHaveBeenCalled();
+
+    barrier.release();
+    await turn;
+    expect(reload).toHaveBeenCalledOnce();
+  });
 
   it("rebinds a cached session so the next turn runs the newly selected model", async () => {
     temp = makeTempGhosts();

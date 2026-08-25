@@ -237,6 +237,8 @@ export interface LoginManagerOptions {
   retainSettledMs?: number;
   /** Test seam: build the per-ghost runtime a login drives. */
   createRuntime?: (input: { authPath: string; modelsPath: string; offline: boolean }) => Promise<LoginRuntime>;
+  /** Awaited after credentials/model binding, before success becomes observable. */
+  onLoginSucceeded?: (ghostName: string, signal: AbortSignal) => Promise<void>;
   now?: () => number;
 }
 
@@ -291,21 +293,74 @@ export async function bindDefaultChatModelIfUnset(
   agentDir: string,
   runtime: Pick<LoginRuntime, "getAvailable" | "getModels">,
   providerId: string,
+  options: {
+    signal?: AbortSignal;
+    /** Re-checked at the serialized models.json commit boundary. */
+    commitAllowed?: () => boolean;
+  } = {},
 ): Promise<{ provider: string; modelId: string } | null> {
+  const commitAllowed = () => {
+    if (options.signal?.aborted) return false;
+    try {
+      return options.commitAllowed?.() ?? true;
+    } catch {
+      return false;
+    }
+  };
+  if (!commitAllowed()) return null;
   const existing = readGhostModels(agentDir);
   if (resolveChatModelRef(existing)) return null;
 
-  let candidates: readonly Model<Api>[];
-  try {
-    candidates = await runtime.getAvailable(providerId);
-  } catch {
-    candidates = [];
-  }
+  const candidatesOrAborted = await discoverAvailableModels(
+    runtime,
+    providerId,
+    options.signal,
+  );
+  if (candidatesOrAborted === null || !commitAllowed()) return null;
+  let candidates = candidatesOrAborted;
   if (candidates.length === 0) candidates = runtime.getModels(providerId);
   const model = resolveOmpChatModel(null, candidates);
-  if (!model) return null;
+  if (!model || !commitAllowed()) return null;
 
-  return setChatModelRoleIfUnset(agentDir, model.provider, model.id);
+  return setChatModelRoleIfUnset(agentDir, model.provider, model.id, commitAllowed);
+}
+
+async function discoverAvailableModels(
+  runtime: Pick<LoginRuntime, "getAvailable">,
+  providerId: string,
+  signal?: AbortSignal,
+): Promise<readonly Model<Api>[] | null> {
+  if (signal?.aborted) return null;
+  let discovery: Promise<readonly Model<Api>[]>;
+  try {
+    discovery = runtime.getAvailable(providerId);
+  } catch {
+    return [];
+  }
+  if (!signal) {
+    try {
+      return await discovery;
+    } catch {
+      return [];
+    }
+  }
+  return new Promise((resolvePromise) => {
+    const onAbort = () => {
+      signal.removeEventListener("abort", onAbort);
+      resolvePromise(null);
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    void discovery.then(
+      (models) => {
+        signal.removeEventListener("abort", onAbort);
+        resolvePromise(signal.aborted ? null : models);
+      },
+      () => {
+        signal.removeEventListener("abort", onAbort);
+        resolvePromise(signal.aborted ? null : []);
+      },
+    );
+  });
 }
 
 export class LoginManager {
@@ -315,6 +370,7 @@ export class LoginManager {
   private readonly loginTtlMs: number;
   private readonly retainSettledMs: number;
   private readonly createRuntime: NonNullable<LoginManagerOptions["createRuntime"]>;
+  private readonly onLoginSucceeded: NonNullable<LoginManagerOptions["onLoginSucceeded"]>;
   private readonly now: () => number;
   private readonly sessions = new Map<string, LoginSession>();
   /** Runtime construction has started, but no pollable login session exists yet. */
@@ -330,6 +386,7 @@ export class LoginManager {
     this.loginTtlMs = options.loginTtlMs ?? DEFAULT_LOGIN_TTL_MS;
     this.retainSettledMs = options.retainSettledMs ?? DEFAULT_RETAIN_SETTLED_MS;
     this.createRuntime = options.createRuntime ?? defaultCreateRuntime;
+    this.onLoginSucceeded = options.onLoginSucceeded ?? (async () => {});
     this.now = options.now ?? Date.now;
   }
 
@@ -621,7 +678,7 @@ export class LoginManager {
   }
 
   private async onSuccess(session: LoginSession, _credential: Credential): Promise<void> {
-    if (this.sessions.get(session.view.loginId) !== session || this.isSettled(session)) return;
+    if (!this.isActive(session)) return;
     const ghost = this.currentGhost(session);
     if (!ghost) {
       session.pending = null;
@@ -651,9 +708,20 @@ export class LoginManager {
         error: (error as Error).message,
       });
     }
+    if (!this.isActive(session)) return;
+    const refreshedGhost = this.currentGhost(session);
+    if (!refreshedGhost) {
+      throw new GhostError(
+        "ghost_not_found",
+        "The ghost was deleted before login state could be refreshed.",
+        404,
+      );
+    }
+    session.ghostName = refreshedGhost.name;
+    await this.awaitSuccessHook(session, refreshedGhost.name);
     // Deletion/disposal can cancel the flow while the best-effort binding is
-    // awaiting its model lookup. Do not resurrect the discarded session.
-    if (this.sessions.get(session.view.loginId) !== session) return;
+    // awaiting its model lookup or cached-runtime refresh. Do not resurrect it.
+    if (!this.isActive(session)) return;
     session.view.status = "succeeded";
     session.view.message = "Signed in.";
     this.settle(session);
@@ -692,15 +760,42 @@ export class LoginManager {
     const ghost = this.currentGhost(session);
     if (!ghost) return;
     session.ghostName = ghost.name;
+    const targetDir = ghost.dir;
     const bound = await bindDefaultChatModelIfUnset(
-      ghostPaths(ghost.dir).agentDir,
+      ghostPaths(targetDir).agentDir,
       session.runtime,
       session.view.providerId,
+      {
+        signal: session.controller.signal,
+        commitAllowed: () => this.isActive(session)
+          && this.currentGhost(session)?.dir === targetDir,
+      },
     );
-    if (bound) session.view.modelBound = bound;
+    if (bound && this.isActive(session)) session.view.modelBound = bound;
   }
 
   // ---- Lifecycle ---------------------------------------------------------
+
+  private isActive(session: LoginSession): boolean {
+    return this.sessions.get(session.view.loginId) === session
+      && !this.isSettled(session)
+      && !session.controller.signal.aborted;
+  }
+
+  private async awaitSuccessHook(session: LoginSession, ghostName: string): Promise<void> {
+    const signal = session.controller.signal;
+    if (signal.aborted) throw new Error(CANCELLED_MESSAGE);
+    await new Promise<void>((resolvePromise, rejectPromise) => {
+      const onAbort = () => rejectPromise(new Error(CANCELLED_MESSAGE));
+      signal.addEventListener("abort", onAbort, { once: true });
+      void Promise.resolve()
+        .then(() => this.onLoginSucceeded(ghostName, signal))
+        .then(resolvePromise, rejectPromise)
+        .finally(() => {
+          signal.removeEventListener("abort", onAbort);
+        });
+    });
+  }
 
   private isSettled(session: LoginSession): boolean {
     return session.view.status === "succeeded" || session.view.status === "failed";

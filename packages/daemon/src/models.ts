@@ -666,10 +666,16 @@ export function setChatModelRoleIfUnset(
   agentDir: string,
   provider: string,
   modelId: string,
+  commitAllowed: () => boolean = () => true,
 ): GhostModelRoleBinding | null {
+  // Login discovery is asynchronous. Its owner can time out or be disposed
+  // before it reaches this synchronous commit boundary; fail closed before
+  // creating anything and re-check under the writer lock.
+  if (!commitAllowed()) return null;
   mkdirSync(agentDir, { recursive: true });
   const path = ghostModelsPath(agentDir);
   return withSerializedModelsWrite(path, () => {
+    if (!commitAllowed()) return null;
     const file: GhostModelsFile = readGhostModels(agentDir) ?? { providers: {} };
     if (resolveChatModelRef(file)) return null;
     const binding = { provider, modelId };

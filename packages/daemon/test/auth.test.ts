@@ -203,6 +203,132 @@ describe("api-key paste flow", () => {
   });
 });
 
+describe("successful login refresh", () => {
+  it("does not publish succeeded until the cached-runtime hook settles", async () => {
+    const entered = deferred<void>();
+    const release = deferred<void>();
+    const refreshed: string[] = [];
+    const { manager } = setup(async () => oauthCredential(), {
+      onLoginSucceeded: async (ghostName) => {
+        refreshed.push(ghostName);
+        entered.resolve();
+        await release.promise;
+      },
+    });
+
+    const started = await manager.start("casper", "openai-codex", "oauth");
+    await entered.promise;
+    expect(manager.view("casper", started.loginId)).toMatchObject({
+      status: "working",
+      message: "Finishing sign-in.",
+    });
+    expect(refreshed).toEqual(["casper"]);
+
+    release.resolve();
+    await expect(waitFor(
+      () => manager.view("casper", started.loginId),
+      (view) => view.status === "succeeded",
+    )).resolves.toMatchObject({ status: "succeeded" });
+  });
+
+  it("aborts a finishing hook at the login TTL and never resurrects success", async () => {
+    const entered = deferred<void>();
+    const finished = deferred<void>();
+    let hookSignal: AbortSignal | undefined;
+    const { manager } = setup(async () => oauthCredential(), {
+      loginTtlMs: 30,
+      retainSettledMs: 1_000,
+      onLoginSucceeded: async (_ghostName, signal) => {
+        hookSignal = signal;
+        entered.resolve();
+        await new Promise<void>((resolve) => {
+          signal.addEventListener("abort", () => resolve(), { once: true });
+        });
+        finished.resolve();
+      },
+    });
+
+    const started = await manager.start("casper", "openai-codex", "oauth");
+    await entered.promise;
+    const timedOut = await waitFor(
+      () => manager.view("casper", started.loginId),
+      (view) => view.status === "failed",
+    );
+    await finished.promise;
+    expect(hookSignal?.aborted).toBe(true);
+    expect(timedOut.error).toMatch(/timed out/i);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(manager.view("casper", started.loginId).status).toBe("failed");
+  });
+
+  it("does not enter the refresh hook when the TTL expires during default binding", async () => {
+    const finishDiscovery = deferred<readonly ReturnType<typeof fakeOmpModel>[]>();
+    const refreshed: string[] = [];
+    const { manager, root } = setup(async () => oauthCredential(), {
+      loginTtlMs: 30,
+      retainSettledMs: 1_000,
+      createRuntime: async () => {
+        const runtime = makeFakeRuntime({
+          login: async () => oauthCredential(),
+          models: { "openai-codex": ["default-after-timeout"] },
+        });
+        runtime.getAvailable = () => finishDiscovery.promise;
+        return runtime;
+      },
+      onLoginSucceeded: async (ghostName) => {
+        refreshed.push(ghostName);
+      },
+    });
+
+    const started = await manager.start("casper", "openai-codex", "oauth");
+    const timedOut = await waitFor(
+      () => manager.view("casper", started.loginId),
+      (view) => view.status === "failed",
+    );
+    finishDiscovery.resolve([
+      fakeOmpModel({ provider: "openai-codex", id: "default-after-timeout" }),
+    ]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(timedOut.error).toMatch(/timed out/i);
+    const terminal = manager.view("casper", started.loginId);
+    expect(terminal.status).toBe("failed");
+    expect(terminal.modelBound).toBeUndefined();
+    expect(refreshed).toEqual([]);
+    expect(readGhostModels(ghostPaths(join(root, "casper")).agentDir)?.roles?.chat_model)
+      .toBeUndefined();
+  });
+
+  it("cannot bind or publish a model after disposal during default discovery", async () => {
+    const finishDiscovery = deferred<readonly ReturnType<typeof fakeOmpModel>[]>();
+    const { manager, root } = setup(async () => oauthCredential(), {
+      createRuntime: async () => {
+        const runtime = makeFakeRuntime({
+          login: async () => oauthCredential(),
+          models: { "openai-codex": ["default-after-dispose"] },
+        });
+        runtime.getAvailable = () => finishDiscovery.promise;
+        return runtime;
+      },
+    });
+
+    const started = await manager.start("casper", "openai-codex", "oauth");
+    await waitFor(
+      () => manager.view("casper", started.loginId),
+      (view) => view.status === "working",
+    );
+    manager.dispose();
+    finishDiscovery.resolve([
+      fakeOmpModel({ provider: "openai-codex", id: "default-after-dispose" }),
+    ]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(manager.size).toBe(0);
+    expect(readGhostModels(ghostPaths(join(root, "casper")).agentDir)?.roles?.chat_model)
+      .toBeUndefined();
+  });
+});
+
 describe("default model binding", () => {
   it("does not overwrite an explicit choice made while provider discovery is pending", async () => {
     temp = makeTempGhosts();

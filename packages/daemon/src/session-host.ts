@@ -270,17 +270,22 @@ export type TitleGenerator = (input: {
   ghostName: string;
   agentDir: string;
   firstPrompt: string;
+  signal: AbortSignal;
 }) => Promise<string>;
 
 export interface TitleConfig {
   /** Master switch. Defaults to enabled. */
   enabled?: boolean;
+  /** Provider deadline. Defaults to 15 seconds. */
+  timeoutMs?: number;
   /** Test seam: replace the default title generator. */
   generate?: TitleGenerator;
 }
 
+export const DEFAULT_TITLE_TIMEOUT_MS = 15_000;
+
 /** The default: resolve smol_model against the session's own runtime, complete once. */
-const defaultTitleGenerator: TitleGenerator = async ({ runtime, agentDir, firstPrompt }) => {
+const defaultTitleGenerator: TitleGenerator = async ({ runtime, agentDir, firstPrompt, signal }) => {
   let ref = null;
   try {
     ref = resolveSmolModelRef(readGhostModels(agentDir));
@@ -288,7 +293,7 @@ const defaultTitleGenerator: TitleGenerator = async ({ runtime, agentDir, firstP
     // A broken models.json is not fatal to titling: fall back to cheapest usable.
     ref = null;
   }
-  return generateTitle({ runtime, firstPrompt, ref });
+  return generateTitle({ runtime, firstPrompt, ref, signal });
 };
 
 /**
@@ -308,6 +313,39 @@ export interface GreetingConfig {
   ttlMs?: number;
   /** Test seam: replace the default generator. */
   generate?: GreetingGenerator;
+}
+
+export interface SessionRetentionTimer {
+  unref?(): void;
+  dispose(): void;
+}
+
+export interface SessionRetentionConfig {
+  /** Dispose an otherwise-idle cached session after this long. `0` disables TTL expiry. */
+  idleTtlMs?: number;
+  /** Soft maximum: protected sessions may exceed it until they become idle. */
+  maxSessions?: number;
+  /** How often protected sessions are reconsidered after becoming idle. */
+  sweepIntervalMs?: number;
+  /** Monotonic test seam. Production uses `Date.now`. */
+  now?: () => number;
+  /** Timer test seam. The returned timer is always unref'd. */
+  schedule?: (callback: () => void, intervalMs: number) => SessionRetentionTimer;
+}
+
+export const DEFAULT_SESSION_IDLE_TTL_MS = 30 * 60_000;
+export const DEFAULT_MAX_CACHED_SESSIONS = 24;
+export const DEFAULT_SESSION_SWEEP_INTERVAL_MS = 60_000;
+
+function scheduleSessionRetention(
+  callback: () => void,
+  intervalMs: number,
+): SessionRetentionTimer {
+  const timer = setInterval(callback, intervalMs);
+  return {
+    unref: () => timer.unref?.(),
+    dispose: () => clearInterval(timer),
+  };
 }
 
 export interface SessionHostOptions {
@@ -362,6 +400,8 @@ export interface SessionHostOptions {
   collaboration?: CollaborationManager;
   /** Awaited Ghost-owned lifecycle hooks, shared by every model harness. */
   hooks?: GhostHookRunner;
+  /** Internal daemon cache bounds and deterministic lifecycle test seams. */
+  retention?: SessionRetentionConfig;
 }
 
 export interface RunTurnOptions {
@@ -422,6 +462,8 @@ interface HostedMCP {
 
 interface HostedSession extends GhostSessionHandle {
   busy: boolean;
+  /** Last owner-visible use, for TTL and LRU retention. */
+  lastUsedAt: number;
   /** Persistent owner listener for turns started outside SessionHost (collab). */
   unsubscribeOwnership?: () => void;
   /** Coalesces terminal-event and live-voice deferred-update drains. */
@@ -443,14 +485,31 @@ interface HostedSession extends GhostSessionHandle {
    * rebound after that exclusive owner releases the AgentSession.
    */
   pendingRebind?: boolean;
+  /** Credentials changed in agent.db; reload the borrowed OMP runtime once idle. */
+  pendingAuthRefresh?: boolean;
   /** Config changed during a turn or live voice; reconnect once idle. */
   pendingMcpReload?: boolean;
+  /** Project MCP reconnect/tool refresh work currently touching this session. */
+  mcpTransitions?: number;
   /**
    * The in-flight background title generation, if any. `listSessions` awaits it
    * so a just-generated title shows up in the listing; it never blocks a turn.
    * Resolves (never rejects) when title generation settles.
    */
   title?: Promise<void>;
+  /** Cancels the provider call and bounded wrapper on timeout or shutdown. */
+  titleAbort?: AbortController;
+  /** Nested reservations while collaboration starts or stops. */
+  collaborationTransitions?: number;
+  /** Close the borrowed runtime exactly once across graceful/forced teardown. */
+  modelRuntimeClosed?: boolean;
+  /** At-most-once guards shared by graceful and forced cleanup paths. */
+  disposeBegun?: boolean;
+  bashAbortStarted?: boolean;
+  abortTask?: Promise<void>;
+  askClosed?: boolean;
+  ownershipDetached?: boolean;
+  forceDisposeStarted?: boolean;
   /** Monotonic external turn id used by the Ghost session_stop contract. */
   turnId: number;
   /** MCP lifecycle populated strictly from this ghost home's `.omp/`. */
@@ -856,6 +915,7 @@ export class SessionHost {
   private readonly relayTransport: RelayTransport | undefined;
   private readonly compactionConfig: CompactionConfig;
   private readonly titleEnabled: boolean;
+  private readonly titleTimeoutMs: number;
   /** Seconds an unanswered ask waits; 0 waits forever. Projected onto `ask.timeout`. */
   private readonly askTimeoutSeconds: number;
   private readonly generateTitle: TitleGenerator;
@@ -871,6 +931,11 @@ export class SessionHost {
   private readonly conversationListeners = new Map<string, Set<ConversationEventListener>>();
   /** In-flight opens, so two concurrent turns never build two sessions. */
   private readonly opening = new Map<string, Promise<HostedSession>>();
+  /** In-flight closes, so a reopen cannot race a still-disposing session. */
+  private readonly closing = new Map<
+    string,
+    { hosted: HostedSession; promise: Promise<void> }
+  >();
   /** Runtime-qualified conversation identities reserved by destructive delete. */
   private readonly deleting = new Set<string>();
   /** Ghost names reserved by an in-flight whole-ghost move: a delete or a rename. */
@@ -880,6 +945,13 @@ export class SessionHost {
     string,
     { modifiedMs: number; size: number; title: string | null }
   >();
+  private readonly retentionIdleTtlMs: number;
+  private readonly retentionMaxSessions: number;
+  private readonly retentionNow: () => number;
+  private readonly retentionTimer: SessionRetentionTimer;
+  private retentionSweep?: Promise<void>;
+  private shutdownTasks?: readonly Promise<unknown>[];
+  private disposePromise?: Promise<void>;
   private disposed = false;
 
   constructor(options: SessionHostOptions) {
@@ -891,6 +963,10 @@ export class SessionHost {
     this.relayTransport = options.relayTransport;
     this.compactionConfig = options.compaction ?? DEFAULT_COMPACTION_CONFIG;
     this.titleEnabled = options.title?.enabled ?? true;
+    this.titleTimeoutMs = options.title?.timeoutMs ?? DEFAULT_TITLE_TIMEOUT_MS;
+    if (!Number.isFinite(this.titleTimeoutMs) || this.titleTimeoutMs <= 0) {
+      throw new RangeError("title.timeoutMs must be a finite positive number");
+    }
     this.askTimeoutSeconds = options.askTimeoutSeconds ?? 0;
     this.generateTitle = options.title?.generate ?? defaultTitleGenerator;
     this.greetingEnabled = options.greeting?.enabled ?? true;
@@ -920,6 +996,33 @@ export class SessionHost {
       }
     });
     this.collaboration = options.collaboration ?? new CollaborationManager();
+    this.retentionIdleTtlMs = options.retention?.idleTtlMs
+      ?? DEFAULT_SESSION_IDLE_TTL_MS;
+    this.retentionMaxSessions = options.retention?.maxSessions
+      ?? DEFAULT_MAX_CACHED_SESSIONS;
+    const sweepIntervalMs = options.retention?.sweepIntervalMs
+      ?? DEFAULT_SESSION_SWEEP_INTERVAL_MS;
+    if (!Number.isFinite(this.retentionIdleTtlMs) || this.retentionIdleTtlMs < 0) {
+      throw new RangeError("retention.idleTtlMs must be a finite non-negative number");
+    }
+    if (!Number.isInteger(this.retentionMaxSessions) || this.retentionMaxSessions < 1) {
+      throw new RangeError("retention.maxSessions must be a positive integer");
+    }
+    if (!Number.isFinite(sweepIntervalMs) || sweepIntervalMs <= 0) {
+      throw new RangeError("retention.sweepIntervalMs must be a finite positive number");
+    }
+    this.retentionNow = options.retention?.now ?? Date.now;
+    this.retentionTimer = (options.retention?.schedule ?? scheduleSessionRetention)(
+      () => {
+        void this.sweepRetainedSessions().catch((error) => {
+          this.logger.warn("session retention sweep failed", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+      },
+      sweepIntervalMs,
+    );
+    this.retentionTimer.unref?.();
     // Idempotent: main.ts already scrubbed at boot. Repeated here so that a
     // library consumer (or a test) that skips main.ts still cannot leak an
     // ambient provider key or routing override into a ghost.
@@ -933,6 +1036,74 @@ export class SessionHost {
 
   private keyOf(ghostName: string, sessionId: string | null | undefined): string {
     return sessionKeyOf(ghostName, sessionId);
+  }
+
+  /** Test/diagnostic projection of the bounded in-memory Pi session cache. */
+  get cachedSessionCount(): number {
+    return this.sessions.size;
+  }
+
+  private touchSession(hosted: HostedSession): void {
+    hosted.lastUsedAt = this.retentionNow();
+  }
+
+  private sessionProtectedFromRetention(hosted: HostedSession): boolean {
+    const [, conversationId] = sessionKeyParts(hosted.sessionKey);
+    return this.sessionOwned(hosted)
+      || hosted.session.isCompacting
+      || hosted.session.compactionSpeculation === "running"
+      || hosted.session.isEvalRunning
+      || hosted.title !== undefined
+      || hosted.settlingDeferred !== undefined
+      || (hosted.collaborationTransitions ?? 0) > 0
+      || this.collaboration.status(hosted.sessionKey).active
+      || hosted.pendingRebind === true
+      || hosted.pendingAuthRefresh === true
+      || hosted.pendingMcpReload === true
+      || (hosted.mcpTransitions ?? 0) > 0
+      || this.opening.has(hosted.sessionKey)
+      || this.reservedGhosts.has(hosted.ghost.name)
+      || this.deleting.has(deletionKeyOf(hosted.ghost.name, "pi", conversationId));
+  }
+
+  private sweepRetainedSessions(): Promise<void> {
+    if (this.disposed) return Promise.resolve();
+    if (this.retentionSweep) return this.retentionSweep;
+    const sweep = this.doSweepRetainedSessions().finally(() => {
+      if (this.retentionSweep === sweep) this.retentionSweep = undefined;
+    });
+    this.retentionSweep = sweep;
+    return sweep;
+  }
+
+  private async doSweepRetainedSessions(protectedKey?: string): Promise<void> {
+    const oldestFirst = () => [...this.sessions.values()]
+      .filter((hosted) => hosted.sessionKey !== protectedKey)
+      .sort((left, right) => left.lastUsedAt - right.lastUsedAt);
+    const now = this.retentionNow();
+    if (this.retentionIdleTtlMs > 0) {
+      for (const hosted of oldestFirst()) {
+        if (now - hosted.lastUsedAt < this.retentionIdleTtlMs) break;
+        if (this.sessionProtectedFromRetention(hosted)) continue;
+        this.retireHostedSession(hosted.sessionKey, "idle retention expired");
+      }
+    }
+    while (this.sessions.size > this.retentionMaxSessions) {
+      const candidate = oldestFirst()
+        .find((hosted) => !this.sessionProtectedFromRetention(hosted));
+      if (!candidate) break;
+      this.retireHostedSession(candidate.sessionKey, "session cache limit reached");
+    }
+  }
+
+  /** Remove cache admission synchronously; teardown continues without blocking a new open. */
+  private retireHostedSession(key: string, reason: string): void {
+    void this.closeHostedSession(key, reason).catch((error) => {
+      this.logger.warn("retained session disposal failed", {
+        session: key,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
   }
 
   /** Subscribe to small conversation-list invalidations for one ghost. */
@@ -1002,6 +1173,13 @@ export class SessionHost {
     }
     const conversationId = requireRawConversationId(sessionId ?? DEFAULT_SESSION_KEY);
     const key = this.keyOf(ghostName, conversationId);
+    const closing = this.closing.get(key);
+    if (closing) {
+      await closing.promise;
+      if (this.disposed) {
+        throw new GhostError("shutting_down", "The daemon is shutting down.", 503);
+      }
+    }
     if (this.deleting.has(deletionKeyOf(
       ghostName,
       "pi",
@@ -1019,14 +1197,29 @@ export class SessionHost {
     if (existsSync(sessionFile)) {
       await requireSessionFileConversationId(sessionFile, conversationId);
     }
+    const closingAfterMetadataRead = this.closing.get(key);
+    if (closingAfterMetadataRead) {
+      await closingAfterMetadataRead.promise;
+      if (this.disposed) {
+        throw new GhostError("shutting_down", "The daemon is shutting down.", 503);
+      }
+    }
     const existing = this.sessions.get(key);
-    if (existing) return existing;
+    if (existing) {
+      this.touchSession(existing);
+      return existing;
+    }
     const pending = this.opening.get(key);
     if (pending) return pending;
 
     const promise = this.createSession(ghostName, conversationId, key)
-      .then((hosted) => {
+      .then(async (hosted) => {
+        if (this.disposed) {
+          await this.disposePiSession(hosted);
+          throw new GhostError("shutting_down", "The daemon is shutting down.", 503);
+        }
         this.sessions.set(key, hosted);
+        await this.doSweepRetainedSessions(key);
         return hosted;
       })
       .finally(() => {
@@ -1053,9 +1246,7 @@ export class SessionHost {
     try {
       return buildGhostAvailableSlashCommands(hosted.session);
     } finally {
-      // The catalog read is synchronous; no deferred session work can have
-      // arrived while this short admission claim was held.
-      hosted.busy = false;
+      await this.releaseSessionClaim(hosted, ghostName);
     }
   }
 
@@ -1176,22 +1367,47 @@ export class SessionHost {
     assertPiConversation(runtime, "Live collaboration");
     this.assertOmpRuntime(ghostName, "Live collaboration");
     const key = this.keyOf(ghostName, sessionId);
-    if (input.action === "stop") return this.collaboration.stop(key);
+    if (input.action === "stop") {
+      const hosted = this.sessions.get(key);
+      if (hosted) hosted.collaborationTransitions = (hosted.collaborationTransitions ?? 0) + 1;
+      try {
+        return await this.collaboration.stop(key);
+      } finally {
+        if (hosted) {
+          hosted.collaborationTransitions = Math.max(
+            0,
+            (hosted.collaborationTransitions ?? 1) - 1,
+          );
+          this.touchSession(hosted);
+          await this.settleDeferredSession(hosted);
+        }
+      }
+    }
     const hosted = await this.idleHostedSession(
       ghostName,
       sessionId,
       "Wait for this conversation to finish before starting collaboration.",
+      true,
     );
-    const configuredRelay = hosted.session.settings.get("collab.relayUrl");
-    const relayUrl = input.relayUrl
-      ?? (typeof configuredRelay === "string" ? configuredRelay : "");
-    return this.collaboration.start({
-      sessionKey: key,
-      session: hosted.session,
-      relayUrl,
-      writable: input.writable === true,
-      confirmed: input.confirmed === true,
-    });
+    hosted.collaborationTransitions = (hosted.collaborationTransitions ?? 0) + 1;
+    try {
+      const configuredRelay = hosted.session.settings.get("collab.relayUrl");
+      const relayUrl = input.relayUrl
+        ?? (typeof configuredRelay === "string" ? configuredRelay : "");
+      return await this.collaboration.start({
+        sessionKey: key,
+        session: hosted.session,
+        relayUrl,
+        writable: input.writable === true,
+        confirmed: input.confirmed === true,
+      });
+    } finally {
+      hosted.collaborationTransitions = Math.max(
+        0,
+        (hosted.collaborationTransitions ?? 1) - 1,
+      );
+      await this.releaseSessionClaim(hosted, ghostName);
+    }
   }
 
   private async createSession(
@@ -1387,6 +1603,7 @@ export class SessionHost {
       model,
       modelRuntime,
       busy: false,
+      lastUsedAt: this.retentionNow(),
       ask,
       turnId: 0,
       ...(mcp ? { mcp } : {}),
@@ -1396,6 +1613,7 @@ export class SessionHost {
     // terminal public agent_end is emitted only after prompt bookkeeping has
     // unwound; that is the safe boundary for deferred model/MCP ownership.
     hosted.unsubscribeOwnership = session.subscribe((event) => {
+      this.touchSession(hosted);
       if (event.type !== "agent_end" || event.isTerminal === false) return;
       if (!hosted.busy) {
         const [, conversationId] = sessionKeyParts(key);
@@ -1536,16 +1754,84 @@ export class SessionHost {
    * `roles.chat_model` fresh each time (see runTurn), so the next turn already
    * picks up the switch — and a stale pi session for the same conversation is
    * dropped by `closePi` on that next turn.
-   */
+  */
   async rebindModel(ghostName: string): Promise<void> {
-    for (const hosted of this.sessions.values()) {
-      if (hosted.ghost.name !== ghostName) continue;
+    this.registry.get(ghostName);
+    const opening = [...this.opening.entries()]
+      .filter(([key]) => sessionKeyParts(key)[0] === ghostName)
+      .map(([, promise]) => promise);
+    if (opening.length > 0) await Promise.allSettled(opening);
+
+    const sessions = [...this.sessions.values()]
+      .filter((hosted) => hosted.ghost.name === ghostName);
+    for (const hosted of sessions) hosted.pendingRebind = true;
+    await Promise.all(sessions.map((hosted) => this.settleDeferredSession(hosted)));
+  }
+
+  /**
+   * Reload credentials and credential-scoped model state after a successful login.
+   * Idle sessions update before this resolves; active owners coalesce one refresh
+   * at their release boundary so an in-flight turn keeps a stable runtime.
+   */
+  async refreshAuth(ghostName: string, signal?: AbortSignal): Promise<void> {
+    signal?.throwIfAborted();
+    this.registry.get(ghostName);
+    const opening = [...this.opening.entries()]
+      .filter(([key]) => sessionKeyParts(key)[0] === ghostName)
+      .map(([, promise]) => promise);
+    if (opening.length > 0) await Promise.allSettled(opening);
+    signal?.throwIfAborted();
+
+    const sessions = [...this.sessions.values()]
+      .filter((hosted) => hosted.ghost.name === ghostName);
+    const refreshing: Promise<void>[] = [];
+    for (const hosted of sessions) {
+      signal?.throwIfAborted();
       if (this.sessionOwned(hosted)) {
-        hosted.pendingRebind = true;
+        hosted.pendingAuthRefresh = true;
         continue;
       }
-      await this.rebindSessionModel(hosted, ghostName);
+      hosted.busy = true;
+      refreshing.push(this.refreshSessionAuth(hosted, ghostName, signal)
+        .catch((error) => {
+          if (signal?.aborted) {
+            this.retireHostedSession(hosted.sessionKey, "cancelled auth refresh");
+          }
+          throw error;
+        })
+        .finally(() => {
+          hosted.busy = false;
+          this.touchSession(hosted);
+        }));
     }
+    await Promise.all(refreshing);
+  }
+
+  private async refreshSessionAuth(
+    hosted: HostedSession,
+    ghostName: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    await this.awaitUnlessAborted(hosted.modelRuntime.authStorage.reload(), signal);
+    await this.awaitUnlessAborted(
+      hosted.modelRuntime.modelRegistry.hydrateCredentialScopedModelCaches(),
+      signal,
+    );
+    await this.awaitUnlessAborted(hosted.modelRuntime.modelRegistry.refresh("offline"), signal);
+    signal?.throwIfAborted();
+    await this.rebindSessionModel(hosted, ghostName);
+  }
+
+  private async awaitUnlessAborted<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+    if (!signal) return promise;
+    signal.throwIfAborted();
+    return new Promise<T>((resolvePromise, rejectPromise) => {
+      const onAbort = () => rejectPromise(signal.reason);
+      signal.addEventListener("abort", onAbort, { once: true });
+      void promise.then(resolvePromise, rejectPromise).finally(() => {
+        signal.removeEventListener("abort", onAbort);
+      });
+    });
   }
 
   /** Aggregate one configured server's state without opening a conversation. */
@@ -1602,9 +1888,15 @@ export class SessionHost {
     await Promise.all(managers.filter((hosted) => !this.sessionOwned(hosted)).map(async (hosted) => {
       const mcp = hosted.mcp;
       if (!mcp) return null;
-      const connected = await mcp.manager.reconnectServer(serverName, { manual: true });
-      await mcp.refresh;
-      return connected;
+      hosted.mcpTransitions = (hosted.mcpTransitions ?? 0) + 1;
+      try {
+        const connected = await mcp.manager.reconnectServer(serverName, { manual: true });
+        await mcp.refresh;
+        return connected;
+      } finally {
+        hosted.mcpTransitions = Math.max(0, (hosted.mcpTransitions ?? 1) - 1);
+        this.touchSession(hosted);
+      }
     }));
     if (deferred.length > 0) return "deferred";
     return this.mcpConnectionStatus(ghostName, serverName);
@@ -1614,6 +1906,7 @@ export class SessionHost {
   private reloadHostedMcp(hosted: HostedSession): Promise<void> {
     const mcp = hosted.mcp;
     if (!mcp) return Promise.resolve();
+    hosted.mcpTransitions = (hosted.mcpTransitions ?? 0) + 1;
     const reload = (mcp.reload ?? Promise.resolve()).then(async () => {
       await mcp.manager.disconnectAll();
       await connectGhostProjectMCP(mcp.manager, hosted.ghost.dir, this.logger);
@@ -1632,6 +1925,8 @@ export class SessionHost {
     });
     const tracked = reload.finally(() => {
       if (mcp.reload === tracked) mcp.reload = undefined;
+      hosted.mcpTransitions = Math.max(0, (hosted.mcpTransitions ?? 1) - 1);
+      this.touchSession(hosted);
     });
     mcp.reload = tracked;
     return tracked;
@@ -1653,7 +1948,11 @@ export class SessionHost {
   /** Apply queued owner changes, then atomically release this session claim. */
   private async releaseSessionClaim(hosted: HostedSession, ghostName: string): Promise<void> {
     try {
-      while (hosted.pendingRebind || hosted.pendingMcpReload) {
+      while (hosted.pendingAuthRefresh || hosted.pendingRebind || hosted.pendingMcpReload) {
+        if (hosted.pendingAuthRefresh) {
+          hosted.pendingAuthRefresh = false;
+          await this.refreshSessionAuth(hosted, ghostName);
+        }
         if (hosted.pendingRebind) {
           hosted.pendingRebind = false;
           await this.rebindSessionModel(hosted, ghostName);
@@ -1665,6 +1964,7 @@ export class SessionHost {
       }
     } finally {
       hosted.busy = false;
+      this.touchSession(hosted);
     }
   }
 
@@ -2178,13 +2478,33 @@ export class SessionHost {
     agentDir: string,
     firstPrompt: string,
   ): void {
-    const promise = this.generateTitle({
+    const controller = new AbortController();
+    hosted.titleAbort?.abort();
+    hosted.titleAbort = controller;
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, this.titleTimeoutMs);
+    timer.unref?.();
+    let rejectAborted!: (error: Error) => void;
+    const aborted = new Promise<never>((_resolve, reject) => {
+      rejectAborted = reject;
+    });
+    const onAbort = () => rejectAborted(new Error(
+      timedOut ? "Conversation title generation timed out." : "Conversation title generation aborted.",
+    ));
+    controller.signal.addEventListener("abort", onAbort, { once: true });
+
+    const generation = Promise.resolve().then(() => this.generateTitle({
       session: hosted.session,
       runtime: hosted.modelRuntime,
       ghostName,
       agentDir,
       firstPrompt,
-    })
+      signal: controller.signal,
+    }));
+    const promise = Promise.race([generation, aborted])
       .then(async (raw) => {
         const title = raw.trim();
         // A concurrent turn may have titled it first; do not overwrite.
@@ -2199,13 +2519,18 @@ export class SessionHost {
         await this.announceConversationUpdated(ghostName, "pi", conversationId);
       })
       .catch((error: unknown) => {
+        if (controller.signal.aborted && !timedOut) return;
         this.logger.warn("conversation title generation failed", {
           ghost: ghostName,
           error: error instanceof Error ? error.message : String(error),
         });
       });
     const tracked: Promise<void> = promise.finally(() => {
+      clearTimeout(timer);
+      controller.signal.removeEventListener("abort", onAbort);
+      if (hosted.titleAbort === controller) hosted.titleAbort = undefined;
       if (hosted.title === tracked) hosted.title = undefined;
+      void this.sweepRetainedSessions();
     });
     hosted.title = tracked;
   }
@@ -3222,6 +3547,10 @@ export class SessionHost {
    * dispose every session holding a path inside it.
    */
   private async quiesceGhost(ghostName: string): Promise<void> {
+    const alreadyClosing = [...this.closing.entries()]
+      .filter(([key]) => sessionKeyParts(key)[0] === ghostName)
+      .map(([, closing]) => closing.promise);
+    if (alreadyClosing.length > 0) await Promise.all(alreadyClosing);
     const hosted = [...this.sessions].filter(([key]) => sessionKeyParts(key)[0] === ghostName);
     // Title generation can still append to an otherwise-idle transcript. Let
     // it settle before the home moves out from under it.
@@ -3248,13 +3577,16 @@ export class SessionHost {
     }
   }
 
-  /** True while any conversation of this ghost is busy, opening, or mid-delete. */
+  /** True while any conversation of this ghost is busy, opening, closing, or mid-delete. */
   private ghostBusy(ghostName: string): boolean {
     for (const [key, hosted] of this.sessions) {
       if (sessionKeyParts(key)[0] !== ghostName) continue;
       if (this.sessionOwned(hosted)) return true;
     }
     for (const key of this.opening.keys()) {
+      if (sessionKeyParts(key)[0] === ghostName) return true;
+    }
+    for (const key of this.closing.keys()) {
       if (sessionKeyParts(key)[0] === ghostName) return true;
     }
     for (const key of this.deleting) {
@@ -3265,65 +3597,221 @@ export class SessionHost {
 
   private async closePi(ghostName: string, sessionId?: string | null): Promise<void> {
     const key = this.keyOf(ghostName, sessionId);
+    await this.closeHostedSession(key, "conversation closed");
+  }
+
+  /** The sole path that removes and disposes a cached Pi session. */
+  private closeHostedSession(key: string, reason: string): Promise<void> {
+    const alreadyClosing = this.closing.get(key);
+    if (alreadyClosing) return alreadyClosing.promise;
     const hosted = this.sessions.get(key);
-    if (!hosted) return;
-    hosted.liveVoiceTransitions = (hosted.liveVoiceTransitions ?? 0) + 1;
-    const stoppingVoice = this.liveVoice.stop(key);
-    await hosted.liveVoiceStart?.catch(() => {});
-    await stoppingVoice;
-    await this.liveVoice.stop(key);
+    if (!hosted) return Promise.resolve();
+
+    // Remove admission before the first await. Every potentially fallible
+    // teardown action lives inside the settled cleanup below.
     this.sessions.delete(key);
-    await this.collaboration.stop(key, "conversation closed");
-    await this.disposePiSession(hosted);
+    const closing = (async () => {
+      hosted.liveVoiceTransitions = (hosted.liveVoiceTransitions ?? 0) + 1;
+      const results = await Promise.allSettled([
+        (async () => {
+          const stoppingVoice = this.liveVoice.stop(key);
+          await hosted.liveVoiceStart?.catch(() => {});
+          await stoppingVoice;
+          await this.liveVoice.stop(key);
+        })(),
+        Promise.resolve().then(() => this.collaboration.stop(key, reason)),
+        this.disposePiSession(hosted),
+      ]);
+      const failures = results.flatMap((result) =>
+        result.status === "rejected" ? [result.reason] : []
+      );
+      if (failures.length > 0) {
+        throw new AggregateError(failures, `Failed to fully close session ${key}.`);
+      }
+    })().finally(() => {
+      if (this.closing.get(key)?.promise === closing) this.closing.delete(key);
+    });
+    this.closing.set(key, { hosted, promise: closing });
+    return closing;
+  }
+
+  private closeModelRuntime(hosted: HostedSession): void {
+    if (hosted.modelRuntimeClosed) return;
+    hosted.modelRuntimeClosed = true;
+    hosted.modelRuntime.close();
+  }
+
+  private beginHostedDispose(hosted: HostedSession): void {
+    if (hosted.disposeBegun) return;
+    hosted.disposeBegun = true;
+    hosted.session.beginDispose();
+  }
+
+  private abortHostedBash(hosted: HostedSession): void {
+    if (hosted.bashAbortStarted) return;
+    hosted.bashAbortStarted = true;
+    hosted.session.abortBash();
+  }
+
+  private abortHostedSession(hosted: HostedSession): Promise<void> {
+    if (hosted.abortTask) return hosted.abortTask;
+    let abort: Promise<void>;
+    try {
+      abort = Promise.resolve(hosted.session.abort());
+    } catch (error) {
+      abort = Promise.reject(error);
+    }
+    hosted.abortTask = abort;
+    return abort;
+  }
+
+  private closeHostedAsk(hosted: HostedSession): void {
+    if (hosted.askClosed) return;
+    hosted.askClosed = true;
+    hosted.ask.close();
+  }
+
+  private detachHostedOwnership(hosted: HostedSession): void {
+    if (hosted.ownershipDetached) return;
+    hosted.ownershipDetached = true;
+    const unsubscribe = hosted.unsubscribeOwnership;
+    hosted.unsubscribeOwnership = undefined;
+    unsubscribe?.();
+  }
+
+  private async collectCleanupFailure(
+    failures: unknown[],
+    action: () => unknown | Promise<unknown>,
+  ): Promise<void> {
+    try {
+      await action();
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+
+  private reportCleanupFailure(hosted: HostedSession | undefined, stage: string, error: unknown): void {
+    try {
+      this.logger.warn("session cleanup failed", {
+        ...(hosted ? { session: hosted.sessionKey } : {}),
+        stage,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    } catch {
+      // Cleanup must continue even if an injected/test logger is faulty.
+    }
+  }
+
+  private launchCleanupStep(
+    hosted: HostedSession | undefined,
+    stage: string,
+    action: () => unknown | Promise<unknown>,
+  ): void {
+    try {
+      const result = action();
+      void Promise.resolve(result).catch((error) => {
+        this.reportCleanupFailure(hosted, stage, error);
+      });
+    } catch (error) {
+      this.reportCleanupFailure(hosted, stage, error);
+    }
   }
 
   /** Dispose one OMP session and the project-only MCP manager Ghost injected. */
   private async disposePiSession(hosted: HostedSession): Promise<void> {
-    hosted.unsubscribeOwnership?.();
-    hosted.unsubscribeOwnership = undefined;
-    if (hosted.busy || hosted.session.isStreaming || hosted.session.isBashRunning) {
-      hosted.session.abortBash();
-      await hosted.session.abort();
+    const failures: unknown[] = [];
+    await this.collectCleanupFailure(failures, () => this.beginHostedDispose(hosted));
+    await this.collectCleanupFailure(failures, () => this.detachHostedOwnership(hosted));
+    await this.collectCleanupFailure(failures, () => this.abortHostedBash(hosted));
+    await this.collectCleanupFailure(failures, () => this.abortHostedSession(hosted));
+    await this.collectCleanupFailure(failures, () => this.closeHostedAsk(hosted));
+    await this.collectCleanupFailure(failures, () => hosted.titleAbort?.abort());
+    if (hosted.mcp) {
+      await this.collectCleanupFailure(failures, () => hosted.mcp?.reload);
+      await this.collectCleanupFailure(failures, () => hosted.mcp?.manager.disconnectAll());
+      await this.collectCleanupFailure(failures, () => hosted.mcp?.refresh);
+      await this.collectCleanupFailure(failures, () => {
+        if (MCPManager.instance() === hosted.mcp?.manager) MCPManager.setInstance(undefined);
+      });
     }
-    hosted.ask.close();
-    try {
-      if (hosted.mcp) {
-        try {
-          await hosted.mcp.reload?.catch(() => {});
-          await hosted.mcp.manager.disconnectAll();
-        } finally {
-          await hosted.mcp.refresh;
-          if (MCPManager.instance() === hosted.mcp.manager) MCPManager.setInstance(undefined);
-        }
-      }
-    } finally {
-      try {
-        await hosted.session.dispose();
-      } finally {
-        hosted.modelRuntime.close();
-      }
+    await this.collectCleanupFailure(failures, () => hosted.session.dispose());
+    await this.collectCleanupFailure(failures, () => this.closeModelRuntime(hosted));
+    if (failures.length > 0) {
+      throw new AggregateError(failures, `Failed to fully dispose session ${hosted.sessionKey}.`);
     }
   }
 
-  /** Tear down every hosted session. Idempotent. */
-  async disposeAll(): Promise<void> {
+  /** Stop new work and synchronously trip every active owner's cancellation. */
+  beginShutdown(): void {
+    if (this.shutdownTasks) return;
     this.disposed = true;
-    const hosted = [...this.sessions.values()];
-    const stoppingVoice = this.liveVoice.disposeAll();
-    await Promise.allSettled(
-      hosted
-        .map((entry) => entry.liveVoiceStart)
-        .filter((start): start is Promise<LiveVoiceStatus> => start !== undefined),
-    );
-    await stoppingVoice;
-    await this.collaboration.disposeAll();
-    await this.claudeCode.disposeAll();
+    this.launchCleanupStep(undefined, "retention timer", () => this.retentionTimer.dispose());
+    this.shutdownTasks = [
+      Promise.resolve().then(() => this.liveVoice.disposeAll()),
+      Promise.resolve().then(() => this.collaboration.disposeAll()),
+      Promise.resolve().then(() => this.claudeCode.disposeAll()),
+    ];
+    for (const hosted of this.sessions.values()) {
+      this.launchCleanupStep(hosted, "begin dispose", () => this.beginHostedDispose(hosted));
+      this.launchCleanupStep(hosted, "abort bash", () => this.abortHostedBash(hosted));
+      this.launchCleanupStep(hosted, "close ask", () => this.closeHostedAsk(hosted));
+      this.launchCleanupStep(hosted, "abort title", () => hosted.titleAbort?.abort());
+      this.launchCleanupStep(hosted, "abort session", () => this.abortHostedSession(hosted));
+    }
+  }
+
+  /** Tear down every hosted session. Idempotent; bounded by main's shutdown stage. */
+  disposeAll(): Promise<void> {
+    if (this.disposePromise) return this.disposePromise;
+    this.beginShutdown();
+    const dispose = (async () => {
+      await Promise.allSettled([...this.opening.values()]);
+      await Promise.allSettled(
+        [...this.sessions.keys()].map((key) => this.closeHostedSession(key, "daemon stopped")),
+      );
+      await Promise.allSettled([...this.closing.values()].map(({ promise }) => promise));
+      await Promise.allSettled(this.shutdownTasks ?? []);
+      this.sessions.clear();
+    })();
+    this.disposePromise = dispose;
+    return dispose;
+  }
+
+  /**
+   * Best-effort terminal stage after the graceful deadline. The caller still
+   * owns a hard process deadline because third-party providers can ignore abort.
+   */
+  forceDisposeAll(): void {
+    this.beginShutdown();
+    const hosted = [...new Set([
+      ...this.sessions.values(),
+      ...[...this.closing.values()].map(({ hosted: entry }) => entry),
+    ])];
     this.sessions.clear();
     for (const entry of hosted) {
-      try {
-        await this.disposePiSession(entry);
-      } catch (error) {
-        this.logger.warn("session disposal failed", { error: (error as Error).message });
+      this.launchCleanupStep(entry, "force begin dispose", () => this.beginHostedDispose(entry));
+      this.launchCleanupStep(entry, "force abort bash", () => this.abortHostedBash(entry));
+      this.launchCleanupStep(entry, "force close ask", () => this.closeHostedAsk(entry));
+      this.launchCleanupStep(entry, "force abort title", () => entry.titleAbort?.abort());
+      this.launchCleanupStep(entry, "force detach ownership", () => this.detachHostedOwnership(entry));
+      this.launchCleanupStep(entry, "force abort session", () => this.abortHostedSession(entry));
+      if (entry.mcp) {
+        this.launchCleanupStep(
+          entry,
+          "force disconnect MCP",
+          () => entry.mcp?.manager.disconnectAll(),
+        );
+        this.launchCleanupStep(entry, "force clear MCP singleton", () => {
+          if (MCPManager.instance() === entry.mcp?.manager) MCPManager.setInstance(undefined);
+        });
+      }
+      this.launchCleanupStep(entry, "force close model runtime", () => this.closeModelRuntime(entry));
+      if (!entry.forceDisposeStarted) {
+        entry.forceDisposeStarted = true;
+        this.launchCleanupStep(entry, "force dispose session", () => entry.session.dispose({
+          drainTimeoutMs: 0,
+          mnemopiConsolidateTimeoutMs: 0,
+        }));
       }
     }
   }

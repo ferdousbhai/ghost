@@ -25,7 +25,7 @@ import { GhostHookRunner } from "./hooks.js";
 import { acquireHomeReservation, HomeReservationBusyError, type HomeReservation } from "./home-reservation.js";
 import { HomeOperationCoordinator } from "./home-operations.js";
 import { migrateHostedConversations } from "./hosted-conversation-import.js";
-import { createLogger, type LogLevel } from "./log.js";
+import { createLogger, type Logger, type LogLevel } from "./log.js";
 import { McpCatalog } from "./mcp-catalog.js";
 import { ModelCatalog } from "./model-catalog.js";
 import { createRelayHub } from "./relay.js";
@@ -82,6 +82,134 @@ export interface ParsedArgs {
 export interface MainRuntime {
   /** Test observer called after the root reservation and before home access. */
   afterHomeReservationAcquired?: () => Promise<void>;
+}
+
+export const DEFAULT_SHUTDOWN_GRACE_MS = 5_000;
+export const DEFAULT_SHUTDOWN_FORCE_MS = 2_000;
+
+export interface StagedShutdownOptions {
+  /** Synchronously stop listener/session admission. */
+  stopAdmission(): void;
+  /** Synchronously signal cancellation to active work. */
+  abortActive(): void;
+  /** Full orderly teardown, which may contain third-party code. */
+  graceful(): Promise<void>;
+  /** Best-effort terminal close after the grace deadline. */
+  force(): void;
+  graceMs?: number;
+  forceMs?: number;
+  /** Deterministic deadline seam for tests. */
+  wait?: (delayMs: number) => Promise<void>;
+}
+
+function shutdownWait(delayMs: number): Promise<void> {
+  return new Promise((resolvePromise) => {
+    const timer = setTimeout(resolvePromise, delayMs);
+    timer.unref?.();
+  });
+}
+
+/** Complete signal handling in bounded time even when a dependency never settles. */
+export async function runStagedShutdown(options: StagedShutdownOptions): Promise<"graceful" | "forced"> {
+  const wait = options.wait ?? shutdownWait;
+  options.stopAdmission();
+  options.abortActive();
+  const graceful = Promise.resolve().then(options.graceful);
+  const settled = graceful.then(
+    () => true,
+    () => true,
+  );
+  if (await Promise.race([
+    settled,
+    wait(options.graceMs ?? DEFAULT_SHUTDOWN_GRACE_MS).then(() => false),
+  ])) {
+    await graceful;
+    return "graceful";
+  }
+  options.force();
+  await Promise.race([
+    settled,
+    wait(options.forceMs ?? DEFAULT_SHUTDOWN_FORCE_MS),
+  ]);
+  return "forced";
+}
+
+export interface ShutdownSignalOptions {
+  login: Pick<LoginManager, "dispose">;
+  listening: Pick<ListeningServer, "server" | "relay" | "close">;
+  host: Pick<SessionHost, "beginShutdown" | "disposeAll" | "forceDisposeAll">;
+  logger: Pick<Logger, "info" | "warn">;
+  timing?: Pick<StagedShutdownOptions, "graceMs" | "forceMs" | "wait">;
+}
+
+/** Keep both signal handlers live until teardown settles; a repeat forces immediately. */
+export async function waitForShutdownSignal(options: ShutdownSignalOptions): Promise<void> {
+  const signalProcess = process as unknown as {
+    listeners(event: "SIGINT" | "SIGTERM"): Array<(...args: unknown[]) => void>;
+    on(event: "SIGINT" | "SIGTERM", listener: (...args: unknown[]) => void): void;
+    off(event: "SIGINT" | "SIGTERM", listener: (...args: unknown[]) => void): void;
+  };
+  // OMP's CLI-oriented postmortem module installs eager signal handlers that
+  // hard-exit after its own cleanup. ghostd owns process teardown instead: its
+  // sessions/providers are drained below, under shorter bounded deadlines.
+  const inherited = {
+    SIGINT: signalProcess.listeners("SIGINT"),
+    SIGTERM: signalProcess.listeners("SIGTERM"),
+  };
+  for (const listener of inherited.SIGINT) signalProcess.off("SIGINT", listener);
+  for (const listener of inherited.SIGTERM) signalProcess.off("SIGTERM", listener);
+  await new Promise<void>((resolvePromise) => {
+    let shuttingDown = false;
+    let forced = false;
+    const force = () => {
+      if (forced) return;
+      forced = true;
+      options.listening.server.closeAllConnections();
+      void options.listening.relay?.close().catch(() => {});
+      options.host.forceDisposeAll();
+    };
+    const shutdown = (signal: "SIGINT" | "SIGTERM") => {
+      if (shuttingDown) {
+        force();
+        return;
+      }
+      shuttingDown = true;
+      options.logger.info("shutting down", { signal });
+      void (async () => {
+        try {
+          const result = await runStagedShutdown({
+            stopAdmission: () => {
+              options.login.dispose();
+              options.listening.server.close();
+              options.listening.server.closeIdleConnections();
+            },
+            abortActive: () => options.host.beginShutdown(),
+            graceful: async () => {
+              await Promise.allSettled([
+                options.listening.close(),
+                options.host.disposeAll(),
+              ]);
+            },
+            force,
+            ...options.timing,
+          });
+          if (result === "forced") options.logger.warn("shutdown grace deadline expired");
+        } catch (error) {
+          options.logger.warn("shutdown was not clean", { error: (error as Error).message });
+        } finally {
+          signalProcess.off("SIGINT", onSigint);
+          signalProcess.off("SIGTERM", onSigterm);
+          for (const listener of inherited.SIGINT) signalProcess.on("SIGINT", listener);
+          for (const listener of inherited.SIGTERM) signalProcess.on("SIGTERM", listener);
+          resolvePromise();
+        }
+      })();
+    };
+    const onSigint = () => shutdown("SIGINT");
+    const onSigterm = () => shutdown("SIGTERM");
+    signalProcess.on("SIGINT", onSigint);
+    signalProcess.on("SIGTERM", onSigterm);
+  });
 }
 
 class UsageError extends Error {}
@@ -289,7 +417,12 @@ async function serveDaemon(
     hooks,
     ...(relay ? { relayTransport: relay } : {}),
   });
-  const login = new LoginManager({ registry, logger, offline: config.offline });
+  const login = new LoginManager({
+    registry,
+    logger,
+    offline: config.offline,
+    onLoginSucceeded: (name, signal) => host.refreshAuth(name, signal),
+  });
   const catalog = new ModelCatalog({
     registry,
     homeOperations,
@@ -335,26 +468,11 @@ async function serveDaemon(
     relay: listening.relay ? `ws://${config.host}:${listening.port}/relay` : "off",
   });
 
-  await new Promise<void>((resolvePromise) => {
-    let shuttingDown = false;
-    const shutdown = (signal: string) => {
-      if (shuttingDown) return;
-      shuttingDown = true;
-      logger.info("shutting down", { signal });
-      void (async () => {
-        try {
-          login.dispose();
-          await listening.close();
-          await host.disposeAll();
-        } catch (error) {
-          logger.warn("shutdown was not clean", { error: (error as Error).message });
-        } finally {
-          resolvePromise();
-        }
-      })();
-    };
-    process.once("SIGINT", () => shutdown("SIGINT"));
-    process.once("SIGTERM", () => shutdown("SIGTERM"));
+  await waitForShutdownSignal({
+    login,
+    listening,
+    host,
+    logger,
   });
 
   logger.info("stopped");

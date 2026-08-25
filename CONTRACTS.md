@@ -682,7 +682,12 @@ and `prompt` (when present) is `{ kind: "text"|"secret"|"manual_code"|"select",
 message, placeholder?, secret, options? }`. A callback-server flow carries an
 `authUrl` AND a paste `prompt` at once (open the URL, or paste the code). On
 `succeeded`, `modelBound` is set when the ghost had no chat model and one was
-bound. Abandoned logins time out and are cleaned up server-side.
+bound. `succeeded` is not published until the daemon has invalidated and rebuilt
+the cached OMP credential/model state for that ghost. Idle conversations update
+before the terminal login view is visible; a conversation with an active turn,
+live voice, or another exclusive owner records one coalesced refresh and applies
+it at that owner's release boundary, never by changing credentials mid-turn.
+Abandoned logins time out and are cleaned up server-side.
 
 A live login belongs to the ghost home's filesystem identity, not to the
 directory name captured when it started. Renaming the ghost therefore changes
