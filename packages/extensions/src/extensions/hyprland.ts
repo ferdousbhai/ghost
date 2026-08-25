@@ -22,7 +22,7 @@
  * The model never reaches a shell: every value crosses as a JSON value inside
  * the request `args`. There is no `exec`, and deliberately so — the sidecar
  * stays scoped to desktop control (AT-SPI, compositor dispatch, capture), not
- * process launch. A creator OMP session already inherits OMP's native bash for
+ * process launch. An OMP session already inherits OMP's native Bash for
  * arbitrary execution; the sidecar's value is the GUI/Wayland/accessibility
  * reach a shell lacks, with honesty metadata and lock-safe routing. `notify`
  * stays local (`notify-send`), the one thing that is not desktop *control*.

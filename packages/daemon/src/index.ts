@@ -239,7 +239,7 @@ export {
   conversationIdFromSessionFile,
   DEFAULT_TRANSCRIPT_LIMIT,
   MAX_TRANSCRIPT_LIMIT,
-  PI_BUILTIN_TOOL_NAMES,
+  OMP_NATIVE_TOOL_NAMES,
   SessionHost,
   sessionFileNameFor,
   type GhostSessionHandle,

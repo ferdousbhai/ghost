@@ -45,5 +45,5 @@ export function createPersonaExtension(
   };
 }
 
-/** Creator-view persona over the session's own ghost home. */
+/** Persona over the session's own ghost home. */
 export default createPersonaExtension();

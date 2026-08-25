@@ -5,7 +5,7 @@ running locally as an [Omarchy](https://omarchy.org)-native desktop app,
 built on the modern [Oh My Pi](https://github.com/can1357/oh-my-pi)
 agent harness.
 
-Ghost pins OMP 18.0.3. Creator sessions keep OMP's native filesystem, Bash,
+Ghost pins OMP 18.0.3. Sessions keep OMP's native filesystem, Bash,
 skills, rules, project context, plugins, MCP, web search, task/hub subagents,
 background jobs, steering/follow-ups, fallback routing, and branchable
 conversations. Ghost layers its persona, memory, docs, browser, and desktop

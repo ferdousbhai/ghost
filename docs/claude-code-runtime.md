@@ -1,12 +1,12 @@
 # Claude Code plan runtime
 
-Status: implemented for creator-local sessions. Last policy review: 2026-08-22.
+Status: implemented for the owner-local runtime. Last policy review: 2026-08-22.
 
 ## What this path buys us
 
 Selecting `claude-code/default` makes Ghost run the official Claude Agent SDK
-against the creator's installed, unmodified Claude Code executable. The
-creator signs into that executable directly with `claude auth login`; Ghost
+against the owner's installed, unmodified Claude Code executable. The
+owner signs into that executable directly with `claude auth login`; Ghost
 never receives or stores the Claude credential.
 
 Anthropic currently says Claude Agent SDK usage can draw from a user's Claude
@@ -16,7 +16,7 @@ Anthropic provider configured through OMP. The boundary is explicit:
 | selection | harness | authentication | accounting path |
 |---|---|---|---|
 | `anthropic/<model>` | OMP | per-ghost `.pi/agent.db` | the provider account's current API/OAuth terms |
-| `claude-code/default` | official Claude Agent SDK + installed `claude` | creator's external Claude Code login | creator's Claude plan limits, subject to Anthropic's current policy and any enabled overage |
+| `claude-code/default` | official Claude Agent SDK + installed `claude` | owner's external Claude Code login | owner's Claude plan limits, subject to Anthropic's current policy and any enabled overage |
 
 Policy and product behavior can change. Before making a pricing promise, check
 Anthropic's current [Agent SDK plan-usage help page](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan).
@@ -77,7 +77,7 @@ For each turn Ghost:
 6. persists only the opaque Claude session id and listing metadata before it
    emits the terminal `done`, then closes the query process.
 
-The query is deliberately unrestricted for its local creator:
+The query is deliberately unrestricted for its local owner:
 
 - Claude Code's native system prompt is preserved and the Ghost persona is
   appended;
@@ -95,7 +95,7 @@ The ghost tool set contains no vision tool at all. `ghost_screen` returns the
 actual image block and Claude consumes it directly. No OMP `ModelRegistry` is
 fabricated as a fallback.
 
-The backend is owner-local by construction and uses the creator's external
+The backend is owner-local by construction and uses the owner's external
 Claude Code authentication.
 
 ## Why one Effect scope per turn

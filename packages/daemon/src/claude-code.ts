@@ -2,7 +2,7 @@
  * Owner-local Claude Code runtime.
  *
  * The official Claude Agent SDK drives an
- * installed, unmodified `claude` executable which reads the creator's own
+ * installed, unmodified `claude` executable which reads the owner's
  * Claude Code login. Ghost never asks for, reads, stores, or proxies Claude
  * credentials. The Effect lifecycle below is adapted from T3 Code's MIT-
  * licensed Claude adapter (`apps/server/src/provider/Layers/ClaudeAdapter.ts`).

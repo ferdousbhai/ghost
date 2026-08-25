@@ -29,7 +29,7 @@
  *
  * - **OMP's own system prompt** (everything before the persona section). It
  *   embeds the workstation — kernel string, CPU model, GPU, `$TERM` — and, on a
- *   creator session, whatever `CLAUDE.md`/skills the *developer's* own machine
+ *   session, whatever `CLAUDE.md`/skills the *developer's* own machine
  *   happens to have, because `Settings.loadReadOnly` walks up from the ghost
  *   home. It can never be byte-stable across machines. `personaOf()` below
  *   slices it away; the harness invariants that guard it (env scrubbing, the
@@ -289,7 +289,7 @@ export function ghostHomeSnapshot(
  * worth pinning.
  *
  * Names outside `universe` are counted, never listed — see the header on why a
- * creator session's raw tool list is not portable.
+ * session's raw tool list is not portable.
  */
 export function toolSurfaceTable(
   universe: readonly string[],

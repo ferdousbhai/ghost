@@ -217,7 +217,7 @@ describe("golden: greeting flow", () => {
       ghostName: "casper",
       character: "You are casper, a letterpress printer.",
       memoryLines: ["- owner-prefers-short.md: The owner wants short answers"],
-      docLines: ["- press.md: Restoring the Vandercook (public)"],
+      docLines: ["- press.md: Restoring the Vandercook"],
       localTime: LOCAL_TIME,
       daysSinceLastConversation: 12,
       onboarding: false,

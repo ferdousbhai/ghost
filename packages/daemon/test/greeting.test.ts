@@ -28,7 +28,7 @@ const BASE: GreetingContextInput = {
   ghostName: "casper",
   character: "You are casper, a letterpress printer.",
   memoryLines: ["- owner-prefers-short.md: Owner prefers short answers"],
-  docLines: ["- press.md: Restoring the Vandercook (private)"],
+  docLines: ["- press.md: Restoring the Vandercook"],
   localTime: "Sunday, 23 August 2026 at 14:05 (Europe/Berlin)",
   daysSinceLastConversation: 12,
   onboarding: false,

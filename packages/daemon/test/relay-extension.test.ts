@@ -99,7 +99,7 @@ describe("the extension's permission surface is the security model", () => {
 
   it("runs page script only through the one explicit, named javascript op", async () => {
     const [ops, background] = await Promise.all([source("ops.js"), source("background.js")]);
-    // Tier 1 adds a deliberate script capability: the creator's own ghost may run
+    // Tier 1 adds a deliberate script capability: the owner's ghost may run
     // JavaScript in the page. It lives in a single, named op — not a generic
     // eval/exec — so a compromised daemon still cannot smuggle script through any
     // *other* verb. (The scope locks and the untrusted-result framing that keep it

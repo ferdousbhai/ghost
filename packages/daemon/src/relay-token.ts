@@ -6,8 +6,8 @@
  * secret rather than sharing that one, because the thing on the other end of it
  * is a *browser*, and a browser runs code written by strangers: the extension
  * is paired by pasting a token into a popup, which puts the secret inside a
- * process the creator does not fully control, and a leak there must not also
- * hand out the API. Any page the creator visits can open
+ * process the owner does not fully control, and a leak there must not also
+ * hand out the API. Any page the owner visits can open
  * `ws://127.0.0.1:7717/relay`; without a secret, the first tab with a malicious
  * script would inherit the ghost's ability to drive every signed-in tab.
  *
@@ -81,7 +81,7 @@ export function relayTokenMatches(expected: string, presented: string): boolean 
 
 /**
  * `ghostd relay-token [--rotate] [--quiet]` — print the pairing token so the
- * creator can paste it into the extension popup.
+ * owner can paste it into the extension popup.
  */
 export function relayTokenCommand(
   argv: readonly string[] = [],

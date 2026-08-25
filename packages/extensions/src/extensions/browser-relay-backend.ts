@@ -1,11 +1,11 @@
 /**
- * The relay backend: the ghost drives the creator's **real, signed-in Chromium**.
+ * The relay backend: the ghost drives the owner's **real, signed-in Chromium**.
  *
  * The Playwright backend owns a browser. This one owns nothing. An MV3 extension
- * living in the creator's own Chromium dials *out* to ghostd over a localhost
+ * living in the owner's Chromium dials *out* to ghostd over a localhost
  * WebSocket, and every verb in `GhostBrowserBackend` becomes one request frame on
  * that socket. There is no profile to lock, no process to launch, and — the point
- * of the whole exercise — the pages the ghost sees are the pages the creator is
+ * of the whole exercise — the pages the ghost sees are the pages the owner is
  * already logged into.
  *
  * Three things shape this file.
@@ -89,8 +89,8 @@ export const RELAY_PATH = "/relay";
  * (`ops.js`) by `packages/daemon/test/relay-extension.test.ts`.
  *
  * The set includes `javascript`, which runs page script through CDP
- * `Runtime.evaluate`. That is a real capability, granted to the creator's ghost
- * on the creator's own machine, and the page and the value it returns are untrusted data, which
+ * `Runtime.evaluate`. That is a real capability, granted to the owner's ghost
+ * on the owner's machine, and the page and the value it returns are untrusted data, which
  * the tool description says out loud. There is deliberately no way for the daemon
  * to smuggle script through any *other* op: each verb is implemented by the
  * extension itself, and only `javascript` carries a code string.
@@ -156,7 +156,7 @@ export interface RelayTransport {
 }
 
 export const RELAY_DISCONNECTED_MESSAGE =
-  "The browser relay is not connected, so the creator's own Chromium cannot be "
+  "The browser relay is not connected, so the owner's Chromium cannot be "
   + "driven. Ask them to open Chromium with the Ghost relay extension installed "
   + "and paired (the extension's popup shows the connection status).";
 
@@ -286,7 +286,7 @@ export interface RelayBackendOptions {
 
 export class RelayBrowserBackend implements GhostBrowserBackend {
   readonly name = "relay";
-  /** A relay drives a window the creator can see. There is nothing to hide. */
+  /** A relay drives a window the owner can see. There is nothing to hide. */
   readonly headless = false;
 
   readonly #transport: RelayTransport;
@@ -308,7 +308,7 @@ export class RelayBrowserBackend implements GhostBrowserBackend {
   }
 
   /**
-   * Headless is meaningless here: the browser is the creator's, already on their
+   * Headless is meaningless here: the browser is the owner's, already on their
    * desktop. Reporting `applied: false` is what makes the tool say so out loud
    * rather than pretending the flag landed.
    */
@@ -533,7 +533,7 @@ export class RelayBrowserBackend implements GhostBrowserBackend {
 
   /**
    * Close the ghost's tab and let the extension drop its debugger attachment. The
-   * *browser* is emphatically not closed — it is the creator's, with the rest of
+   * *browser* is emphatically not closed — it is the owner's, with the rest of
    * their day open in it.
    */
   async close(): Promise<boolean> {

@@ -3,12 +3,12 @@
  *
  * Three decisions shape this file.
  *
- * **A dedicated profile, never the creator's.** `launchPersistentContext` points
+ * **A dedicated profile, never the owner's.** `launchPersistentContext` points
  * at `<ghost home>/.browser-profile/`. Logins the *ghost* makes persist there and
- * nowhere else, so a credential-isolated persona does not inherit the creator's
+ * nowhere else, so a credential-isolated persona does not inherit the owner's
  * sessions, and two ghosts on one machine do not see each other's. This is also
  * the only shape that still works for a launched browser: Chrome ≥136 refuses
- * `--remote-debugging-port` on the default profile. Driving the creator's real,
+ * `--remote-debugging-port` on the default profile. Driving the owner's real,
  * signed-in browser is a genuinely different mechanism and gets its own backend
  * (an MV3 relay over `chrome.debugger`) rather than being smuggled in here.
  *
@@ -67,7 +67,7 @@ import { BLANK_URL } from "./browser-policy.js";
 export const BROWSER_PROFILE_DIRNAME = ".browser-profile";
 
 export interface PlaywrightBackendOptions {
-  /** Headed by default; the creator can watch the ghost browse. */
+  /** Headed by default; the owner can watch the ghost browse. */
   readonly headless?: boolean;
   /** Skip detection and use this Chrome/Chromium binary. */
   readonly executablePath?: string;
@@ -138,7 +138,7 @@ export async function findChromiumExecutable(
 
 export const NO_BROWSER_MESSAGE =
   "No Chrome or Chromium is installed, so the browser cannot start. Ask the "
-  + "creator to install one — on Arch/Omarchy that is the `chromium` package "
+  + "owner to install one — on Arch/Omarchy that is the `chromium` package "
   + "(`sudo pacman -S chromium`) — or point GHOST_BROWSER_EXECUTABLE at an "
   + "existing Chrome binary. This extension deliberately does not download its "
   + "own browser.";
@@ -252,7 +252,7 @@ export class PlaywrightBrowserBackend implements GhostBrowserBackend {
 
     context.setDefaultTimeout?.(this.#launchTimeoutMs);
     context.setDefaultNavigationTimeout?.(this.#launchTimeoutMs);
-    // The window closing (creator clicked the X) must not leave a stale handle.
+    // The window closing (owner clicked the X) must not leave a stale handle.
     context.on?.("close", () => {
       if (this.#context === context) {
         this.#context = undefined;

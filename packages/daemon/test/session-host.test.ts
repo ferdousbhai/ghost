@@ -2,7 +2,7 @@
  * Session host against a mock provider. No real model is ever called.
  *
  * The properties under test are the ones the spike found are easy to lose:
- * sessions inside the ghost home, OMP-native creator tools and discovery, a
+ * sessions inside the ghost home, native OMP tools and discovery, a
  * Ghost persona layered onto the harness, and two ghosts staying separate
  * while answering at the same time in one process.
  */

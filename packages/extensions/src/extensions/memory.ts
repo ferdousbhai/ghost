@@ -6,7 +6,7 @@
  * exactly one file; there is no index to keep in sync, because the index is
  * derived per session and never stored.
  *
- * Creator sessions use OMP's native read/grep/glob tools for discovery and
+ * Sessions use OMP's native read/grep/glob tools for discovery and
  * retrieval, avoiding duplicate filesystem-shaped tools. They retain the
  * structured writer because it validates and serializes the atomic memory-file
  * format used by the derived index.

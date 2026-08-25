@@ -117,8 +117,8 @@ describe("the protocol constants are a contract", () => {
   });
 
   it("has exactly one op that runs page script, and it is the named `javascript` one", () => {
-    // The closed-set claim changed with Tier 1: the creator's own ghost, on the
-    // creator's own machine, may run script in the page. That capability lives in
+    // The closed-set claim changed with Tier 1: the owner's ghost, on the
+    // owner's machine, may run script in the page. That capability lives in
     // a single, explicit op — `javascript` — and there is still no *other* verb
     // (a generic eval/exec/cdp/raw) that would smuggle script through a different
     // channel.
@@ -551,7 +551,7 @@ describe("the session layer's policy applies to the relay too", () => {
     expect(transport.sent).toHaveLength(0);
   });
 
-  it("refuses localhost by default, on the creator's own machine most of all", async () => {
+  it("refuses localhost by default, on the owner's machine most of all", async () => {
     await expectGhostError(session().open("http://127.0.0.1:8787/admin"));
     expect(transport.sent).toHaveLength(0);
   });

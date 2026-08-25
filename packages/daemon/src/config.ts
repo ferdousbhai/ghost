@@ -36,7 +36,7 @@ export interface DaemonConfig {
   offline: boolean;
   /**
    * Which browser a ghost's `ghost_browser` tool drives:
-   * - `"relay"` (default): the creator's own signed-in Chromium, via the MV3
+   * - `"relay"` (default): the owner's signed-in Chromium, via the MV3
    *   relay extension. The flagship "my browser" mode — the ghost acts as you.
    *   Until the extension is installed and connected, the tool returns an
    *   actionable "open your browser / install the relay" error.

@@ -15,7 +15,7 @@ export type GhostErrorCode =
   | "invalid_path"
   /** The bytes are not in the ghost-home/v1 shape (frontmatter, manifest, …). */
   | "invalid_format"
-  /** The caller's scope is not allowed to see or change this. */
+  /** A safety policy refuses the requested operation. */
   | "forbidden"
   /** A documented size or count limit was exceeded. */
   | "limit_exceeded"

@@ -2,7 +2,7 @@
  * The model indicator + switcher surface.
  *
  * The shell's "Connect a model" affordance becomes a current-model indicator
- * that a creator clicks to switch among the models their ghost can actually
+ * that an owner clicks to switch among the models their ghost can actually
  * use, or to browse the full catalogue. This module is the daemon half of
  * that: it resolves which model answers a ghost's turns, lists the usable and
  * the catalogue-wide models, and writes a new `roles.chat_model` selection.

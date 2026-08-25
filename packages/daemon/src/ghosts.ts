@@ -7,7 +7,7 @@
  * `@ghost/extensions`' job.
  *
  * Everything the daemon adds for itself lives in dot-directories inside the
- * ghost home (`.sessions/`, `.pi/`) so the creator's default view of their
+ * ghost home (`.sessions/`, `.pi/`) so the owner's default view of their
  * own ghost stays the plain files they wrote.
  */
 import {

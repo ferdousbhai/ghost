@@ -184,7 +184,7 @@ function recordTurn(name, sessionId, prompt, assistantText) {
 
 // ---- Greetings -------------------------------------------------------------
 // The empty-chat opening line. Both branches of the contract are demoable:
-// `casper` answers as a ghost that already knows the creator, `moaning-myrtle`
+// `casper` answers as a ghost that already knows the owner, `moaning-myrtle`
 // answers `onboarding: true` (it has no character.md yet and says so), and any
 // ghost created at runtime falls through to `greeting: null` — the "the daemon
 // could not produce one" case, where the HUD must simply keep its static line.

@@ -30,7 +30,7 @@ What you remember:
 - owner-prefers-short.md: The owner wants short answers
 
 Your docs:
-- press.md: Restoring the Vandercook (public)
+- press.md: Restoring the Vandercook
 </ghost-context>
 
 ------------------------------------------------------------------------------

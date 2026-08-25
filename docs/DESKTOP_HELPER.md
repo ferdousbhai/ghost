@@ -64,7 +64,7 @@ Capture (the ladder + honesty)
 Compositor control (dispatcher-grammar correct — auto-detect 0.55 string vs 0.56+ `hl.dsp.*` Lua grammar via an `hl.dsp.no_op()` probe; env override `OMAHARNESS_DISPATCH_API`-style)
 - `focus` `{ address | name }` → focus a window.
 - `workspace` `{ id | name }` → switch workspace.
-- (No `exec` here — the helper stays scoped to desktop control, not arbitrary process launch. The creator already has OMP's native bash for that; the helper's value is the GUI/Wayland/accessibility reach a shell lacks, with honesty metadata and lock-safe routing.)
+- (No `exec` here — the helper stays scoped to desktop control, not arbitrary process launch. OMP already provides native Bash; the helper's value is the GUI/Wayland/accessibility reach a shell lacks, with honesty metadata and lock-safe routing.)
 
 Safety
 - Mutating ops (input, ax_perform/set, focus, workspace) refuse when the session is locked (check `hyprctl`/`logind`; fail closed if unknown).

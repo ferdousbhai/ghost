@@ -25,7 +25,7 @@ games. The strongest path uses both — try semantic, fall back to a screenshot 
 vision.
 
 There is deliberately **no `exec` op**: this is desktop control only. The ghost
-has pi's own bash creator-side.
+already has OMP's native Bash.
 
 ## Transport
 

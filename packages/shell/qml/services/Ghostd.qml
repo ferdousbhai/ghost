@@ -87,7 +87,7 @@ Singleton {
     // The ghost's opening line for an empty chat. Pure upside: the HUD paints
     // its own static invitation the instant the card appears and only swaps to
     // this if and when it arrives, so a slow, absent, or failed greeting costs
-    // the creator nothing. Every failure path therefore leaves it "".
+    // the owner nothing. Every failure path therefore leaves it "".
     /** The daemon's opening line for the active ghost, or "". */
     property string greeting: ""
     /** True when that greeting is the "we have not met yet" onboarding one. */
@@ -505,7 +505,7 @@ Singleton {
         root.greetingRequest = xhr;
         xhr.onreadystatechange = function () {
             if (xhr.readyState !== 4 || xhr !== root.greetingRequest) return;
-            // A greeting for a ghost the creator has since left is not theirs.
+            // A greeting for a ghost the owner has since left is not theirs.
             if (ghost !== root.activeGhost || xhr.status !== 200) return;
             try {
                 const body = JSON.parse(xhr.responseText);
@@ -1532,7 +1532,7 @@ Singleton {
             JSON.stringify({ value: value }));
     }
 
-    /** Open the current auth URL in the creator's browser. */
+    /** Open the current auth URL in the owner's browser. */
     function openLoginUrl(url: string): void {
         if (!ExternalLinks.openLoginUrl(url)) root.loginError = "ghostd sent an unsafe login URL";
     }

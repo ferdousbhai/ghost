@@ -1,5 +1,5 @@
 /**
- * Golden: a creator conversation that writes a memory mid-session.
+ * Golden: a conversation that writes a memory mid-session.
  *
  * Two turns through one hosted session against the scripted mock provider. The
  * model calls `ghost_memory_write` on turn one — the ideal golden tool: no
@@ -16,7 +16,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { resolveGhostExtensions } from "../../src/extensions.js";
 import {
-  OMP_NATIVE_CREATOR_TOOL_NAMES,
+  OMP_NATIVE_TOOL_NAMES,
   SessionHost,
 } from "../../src/session-host.js";
 import type { PiMessagesEvent } from "../../src/pi-messages.js";
@@ -72,13 +72,13 @@ The Heidelberg cost more than it should have.
 
 /**
  * OMP natives beyond the documented minimum in
- * `OMP_NATIVE_CREATOR_TOOL_NAMES`. Ghost does not contract for these, but they
+ * `OMP_NATIVE_TOOL_NAMES`. Ghost does not contract for these, but they
  * are part of the harness a strip is about to cut into, so the fixture records
  * whether each is still there.
  */
 const OTHER_OMP_NATIVES = ["ask", "eval", "inspect_image", "todo"] as const;
 
-describe("golden: creator session", () => {
+describe("golden: session", () => {
   it("writes a memory mid-conversation and carries it into the next turn's persona", async () => {
     temp = makeTempGhosts();
     provider = await startMockProvider({
@@ -153,16 +153,16 @@ describe("golden: creator session", () => {
     // The session's own registry is wider than the wire list: OMP mounts some
     // of Ghost's capabilities through its xd:// device registry rather than
     // advertising them as functions. Recorded as a presence table because a
-    // creator session also discovers whatever the developer's own machine has
+    // session also discovers whatever the developer's own machine has
     // configured — see the harness header.
     const handle = await host.open("casper", "conv-golden");
     const universe = [
-      ...OMP_NATIVE_CREATOR_TOOL_NAMES,
+      ...OMP_NATIVE_TOOL_NAMES,
       ...OTHER_OMP_NATIVES,
       ...resolveGhostExtensions({}, dir).toolNames,
     ];
     sections.push({
-      title: "tool surface (creator)",
+      title: "tool surface",
       body: toolSurfaceTable(
         universe,
         handle.session.getActiveToolNames(),
@@ -186,6 +186,6 @@ describe("golden: creator session", () => {
       body: ghostHomeSnapshot(dir, normalizer),
     });
 
-    expectGolden("creator-session", sections);
+    expectGolden("session", sections);
   });
 });

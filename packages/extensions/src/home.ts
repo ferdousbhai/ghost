@@ -38,7 +38,7 @@ import {
 import {
   assertWritableMemory,
   coerceMemorySlug,
-  MAX_MEMORY_FILES_PER_SCOPE,
+  MAX_MEMORY_FILES,
   memoryFileName,
   memorySlugForText,
   parseMemoryFile,
@@ -569,12 +569,12 @@ export class GhostHome {
       const created = !(await exists(full));
       if (created) {
         const { files } = await this.listMemory();
-        if (files.length >= MAX_MEMORY_FILES_PER_SCOPE) {
+        if (files.length >= MAX_MEMORY_FILES) {
           throw new GhostError(
             "limit_exceeded",
-            `Memory already holds ${MAX_MEMORY_FILES_PER_SCOPE} files. `
+            `Memory already holds ${MAX_MEMORY_FILES} files. `
             + "Rewrite an existing memory instead of adding another.",
-            { limit: MAX_MEMORY_FILES_PER_SCOPE },
+            { limit: MAX_MEMORY_FILES },
           );
         }
       }

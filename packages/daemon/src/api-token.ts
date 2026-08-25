@@ -2,7 +2,7 @@
  * The bearer token for the daemon's HTTP API.
  *
  * Binding to `127.0.0.1` is not authentication. Every browser on the machine
- * can reach loopback, and a page the creator visits can send a form-style
+ * can reach loopback, and a page the owner visits can send a form-style
  * `text/plain` POST to `http://127.0.0.1:7717/api/ghosts/<name>/messages`
  * without a preflight — CORS never sees it, because CORS governs *reading* a
  * response, not *sending* a request. That is a cross-site request forgery

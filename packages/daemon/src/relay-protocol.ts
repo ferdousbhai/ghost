@@ -3,7 +3,7 @@
  * opened at all.
  *
  * Pure and dependency-free on purpose: the interesting failures of a relay are
- * "a page in the creator's browser tried to connect" and "the extension sent a
+ * "a page in the owner's browser tried to connect" and "the extension sent a
  * frame the daemon did not understand", and both are decidable from bytes. Keeping
  * them here means they are unit-testable without a socket, a browser, or a daemon.
  *
@@ -19,7 +19,7 @@
  * `id` correlates a reply with its request and is minted by the daemon, which is
  * the only side that initiates. `op` is the closed `RELAY_OPS` set — there is no
  * "run this script" frame, so a compromised daemon socket still cannot execute
- * arbitrary code in the creator's authenticated browser.
+ * arbitrary code in the owner's authenticated browser.
  */
 import {
   RELAY_OPS,

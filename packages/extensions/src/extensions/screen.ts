@@ -1,5 +1,5 @@
 /**
- * `ghost_screen` — the ghost looks at the creator's screen.
+ * `ghost_screen` — the ghost looks at the owner's screen.
  *
  * Capture goes through the `ghost-desktop-helper` sidecar's `capture` op, not a
  * direct `grim` call, so the ghost gets the sidecar's **background-safe ladder**
@@ -10,7 +10,7 @@
  * faked frame, so a failure is a clear error, not an empty image.
  *
  * Captures land in the ghost home's `.screenshots/` with bounded retention, so a
- * ghost that looks every turn does not fill the disk, and the creator can open
+ * ghost that looks every turn does not fill the disk, and the owner can open
  * the directory and see exactly what their ghost saw.
  *
  * How the image reaches the model depends on the model:
@@ -57,7 +57,7 @@ import {
 
 export const GHOST_SCREEN = "ghost_screen";
 
-/** Where captures land inside the ghost home. Plain files the creator can open. */
+/** Where captures land inside the ghost home. Plain files the owner can open. */
 export const SCREENSHOTS_DIRNAME = ".screenshots";
 
 /** The mime type the sidecar always returns. */
@@ -527,7 +527,7 @@ export function createScreenExtension(
       name: GHOST_SCREEN,
       label: "Look at the screen",
       description:
-        "Take a screenshot of the creator's screen and answer a question about it. "
+        "Take a screenshot of the owner's screen and answer a question about it. "
         + "target window uses the background-safe capture ladder and can reach a "
         + "window even when it is not on top; target screen captures a whole "
         + "monitor. mode watch samples a short burst of frames over an interval "

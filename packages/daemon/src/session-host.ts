@@ -21,7 +21,7 @@
  *    "one directory is the whole ghost" property that backup and future
  *    per-ghost encryption depend on.
  *
- * 2. **Creator sessions use the native OMP runtime.** Its prompt, filesystem,
+ * 2. **Sessions use the native OMP runtime.** Its prompt, filesystem,
  *    Bash, skills, rules, project context, plugins, project MCP, web search,
  *    task/hub, and background-job machinery stay enabled. Ghost appends its
  *    persona and adds the capabilities that are genuinely Ghost-specific.
@@ -131,11 +131,11 @@ import { createGhostOmpRuntime, type GhostOmpRuntime } from "./omp-runtime.js";
 import { AskBroker, AskBrokerError, type PendingAsk } from "./ask-broker.js";
 
 /**
- * The core OMP capabilities Ghost deliberately inherits in creator scope.
+ * The core OMP capabilities Ghost deliberately inherits.
  * OMP may add or gate tools by configuration and model capability, so this is
  * a documented minimum rather than an exhaustive registry.
  */
-export const OMP_NATIVE_CREATOR_TOOL_NAMES: readonly string[] = [
+export const OMP_NATIVE_TOOL_NAMES: readonly string[] = [
   "bash",
   "edit",
   "glob",
@@ -146,9 +146,6 @@ export const OMP_NATIVE_CREATOR_TOOL_NAMES: readonly string[] = [
   "web_search",
   "write",
 ];
-
-/** @deprecated Use `OMP_NATIVE_CREATOR_TOOL_NAMES`. */
-export const PI_BUILTIN_TOOL_NAMES = OMP_NATIVE_CREATOR_TOOL_NAMES;
 
 export interface UserBashCommand {
   command: string;
@@ -287,7 +284,7 @@ export interface SessionHostOptions {
   extensionOptions?: GhostExtensionOptions;
   /**
    * Which browser `ghost_browser` drives. Default `"relay"`. With a
-   * `relayTransport` present, relay sessions point at the creator's real
+   * `relayTransport` present, relay sessions point at the owner's real
    * Chromium; `"profile"` (or no transport) uses the per-ghost profile.
    */
   browserMode?: "relay" | "profile";
@@ -390,7 +387,7 @@ interface HostedSession extends GhostSessionHandle {
   title?: Promise<void>;
   /** Monotonic external turn id used by the Ghost session_stop contract. */
   turnId: number;
-  /** Creator-only MCP lifecycle, populated strictly from this ghost home's `.omp/`. */
+  /** MCP lifecycle populated strictly from this ghost home's `.omp/`. */
   mcp?: HostedMCP;
 }
 
@@ -1625,7 +1622,7 @@ export class SessionHost {
 
   /**
    * Whether a session for this ghost should carry the first-meeting section:
-   * the creator's own conversation with a ghost that is still the seed.
+   * the owner's conversation with a ghost that is still the seed.
    *
    * An unreadable character.md answers "no". Being wrong the other way would
    * push a written ghost back through an interview it has already had, which

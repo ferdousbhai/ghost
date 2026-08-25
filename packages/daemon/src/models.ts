@@ -40,7 +40,7 @@
  *    login broker drives OMP's registry and `AuthStorage` interaction.
  *
  * `claude-code/default` uses neither source: the official Agent SDK invokes
- * the installed `claude`, and that unmodified executable reads the creator's
+ * the installed `claude`, and that unmodified executable reads the owner's
  * own external Claude Code login. The upstream provider path and this external
  * `anthropic` OAuth uses per-token extra usage rather than included plan
  * limits; the two selections must not be conflated.
@@ -571,10 +571,10 @@ export function clearGhostModelFallbacks(
 /**
  * Bind a default only while the role is still unclaimed.
  *
- * Provider discovery is asynchronous, so a creator can make an explicit
+ * Provider discovery is asynchronous, so an owner can make an explicit
  * selection while a just-completed login is resolving its suggested default.
  * Re-reading and testing inside the serialized mutation prevents that stale
- * login snapshot from overwriting the creator's choice.
+ * login snapshot from overwriting the owner's choice.
  */
 export function setChatModelRoleIfUnset(
   agentDir: string,

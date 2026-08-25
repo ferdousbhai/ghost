@@ -206,7 +206,7 @@ function fallback(activity, completed, failed) {
         return path !== ""
             ? (completed ? "Updated " : "Updating ") + path
             : (completed ? "Saved a document" : "Saving a document");
-    // OMP's own file tools. A creator session writes docs and memory through
+    // OMP's own file tools. A session writes docs and memory through
     // these rather than the ghost_* ones, so without them a restored transcript
     // shows nothing where the ghost changed a file.
     case "write":

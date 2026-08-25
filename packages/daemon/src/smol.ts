@@ -18,7 +18,7 @@
  * an included plan) has zero marginal cost, so it is preferred over a cheaper
  * metered model. "Cheapest effective cost, subscription = free."
  *
- *   1. `roles.smol_model` — the creator's explicit choice. If it names a model
+ *   1. `roles.smol_model` — the owner's explicit choice. If it names a model
  *      that is missing or uncredentialed, that is a loud error, not a reason to
  *      quietly pick something else.
  *   2. otherwise the cheapest USABLE model by effective cost (subscription

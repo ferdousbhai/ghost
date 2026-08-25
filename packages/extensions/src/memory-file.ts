@@ -20,7 +20,7 @@ import { parseYamlStringScalar, yamlScalar } from "./frontmatter.js";
 export const MAX_MEMORY_FILE_CONTENT_LENGTH = 2_000;
 export const MAX_MEMORY_FILE_DESCRIPTION_LENGTH = 200;
 export const MAX_MEMORY_FILE_SLUG_LENGTH = 64;
-export const MAX_MEMORY_FILES_PER_SCOPE = 500;
+export const MAX_MEMORY_FILES = 500;
 /** Injection budget for the per-session memory index, in characters. */
 export const MEMORY_INDEX_BUDGET_CHARS = 4_000;
 

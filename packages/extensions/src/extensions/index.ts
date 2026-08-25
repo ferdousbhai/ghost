@@ -62,11 +62,6 @@ export function createGhostExtension(
   };
 }
 
-/** The tool names available in a session built with these options. */
-export function ghostToolNamesFor(_options: GhostExtensionSetOptions = {}): string[] {
-  return ghostToolNames();
-}
-
 export * from "./browser.js";
 export * from "./browser-relay-backend.js";
 /**

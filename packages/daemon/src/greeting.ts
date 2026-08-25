@@ -284,7 +284,7 @@ export function cleanGreeting(raw: string): string | null {
 export interface GenerateGreetingInput {
   readonly runtime: SmolRuntime;
   readonly context: GreetingContextInput;
-  /** `roles.smol_model`, when the creator bound one. */
+  /** `roles.smol_model`, when the owner bound one. */
   readonly ref?: GhostModelRoleBinding | null;
   /** Defaults to `GREETING_TIMEOUT_MS`. */
   readonly timeoutMs?: number;
@@ -415,7 +415,7 @@ export class GreetingCache {
 // ---------------------------------------------------------------------------
 
 /**
- * The system-prompt section a freshly summoned ghost's CREATOR conversations
+ * The system-prompt section a freshly summoned ghost's conversations
  * carry until its character file is written.
  *
  * A ritual, not a gate: the owner may have come to get something done, and a

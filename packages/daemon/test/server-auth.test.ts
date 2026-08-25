@@ -3,7 +3,7 @@
  *
  * The hole this closes (issue #485) is not exotic: binding to `127.0.0.1` keeps
  * the *network* out and does nothing about the browser already running as the
- * same user. A page the creator visits can POST `text/plain` to
+ * same user. A page the owner visits can POST `text/plain` to
  * `http://127.0.0.1:7717/api/ghosts/casper/messages` with no preflight, because
  * a simple request never asks permission — CORS only decides whether the page
  * may *read* the answer, and the attacker does not care about the answer. These

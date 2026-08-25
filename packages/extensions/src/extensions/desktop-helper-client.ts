@@ -17,7 +17,7 @@
  * ydotool / atspi / foreign-toplevel) are actually usable. Everything the model
  * emits crosses as a JSON value inside `args`. The sidecar stays scoped to
  * desktop control — AT-SPI, compositor dispatch, capture — and has no
- * process-launch op: the creator already has OMP's native bash for arbitrary
+ * process-launch op: the owner already has OMP's native bash for arbitrary
  * execution, so the sidecar's value is the GUI/Wayland/accessibility reach a
  * shell lacks, not another way to run programs.
  *

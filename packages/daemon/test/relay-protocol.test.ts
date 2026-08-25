@@ -1,7 +1,7 @@
 /**
  * The relay's pure half: frame parsing, the token store, and the upgrade check.
  *
- * These are the decisions that keep a web page out of the creator's browser and a
+ * These are the decisions that keep a web page out of the owner's browser and a
  * malformed frame out of the request table, and all of them are decidable from
  * bytes — so they are tested from bytes, with no socket, no browser, and no
  * daemon anywhere in sight.

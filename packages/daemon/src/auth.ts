@@ -313,7 +313,7 @@ export class LoginManager {
       if (provider.auth.oauth) authTypes.push("oauth");
       // An api-key provider without a `login` is ambient-only (env vars, AWS
       // profiles): there is nothing interactive to drive, so it is not a
-      // provider a creator "logs into" from the HUD.
+      // provider an owner "logs into" from the HUD.
       if (provider.auth.apiKey?.login) authTypes.push("api_key");
       if (authTypes.length === 0) continue;
       const status = runtime.getProviderAuthStatus(provider.id);
@@ -550,7 +550,7 @@ export class LoginManager {
     session.view.prompt = undefined;
     session.view.status = "succeeded";
     session.view.message = "Signed in.";
-    // Best-effort: give a freshly-signed-in ghost a chat model so the creator
+    // Best-effort: give a freshly-signed-in ghost a chat model so the owner
     // lands ready to talk. Never fatal to the login itself.
     try {
       await this.bindDefaultModel(session);

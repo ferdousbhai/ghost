@@ -4,7 +4,7 @@
  * URL policy, ref bookkeeping and invalidation, the read budget, the idle
  * shutdown timer, and the serialization of parallel tool calls all live here,
  * above the `GhostBrowserBackend` seam, so the Playwright backend and the
- * coming relay-into-the-creator's-Chromium backend get exactly one
+ * coming relay backend for the owner's Chromium get exactly one
  * implementation of each and cannot drift apart on any of them. A backend that
  * forgot to check a URL would be a backend that could open `file:///`; there is
  * no way to forget from down there, because backends never see an unchecked URL.
@@ -56,7 +56,7 @@ const DEFAULT_BROWSER_BACKEND = playwrightBackend();
 /**
  * How many consequential actions (click/type) may fire between two explicit
  * `open()`s. An injected page that hijacks the ghost cannot issue an `open()` on
- * the creator's behalf, so bounding actions per creator-directed navigation caps
+ * the owner's behalf, so bounding actions per owner-directed navigation caps
  * how much a single hijack can do before the transcript shows another deliberate
  * step. Generous by design — a normal form fill is one or two actions.
  */
@@ -71,14 +71,14 @@ export interface BrowserSessionOptions {
   readonly idleTimeoutMs?: number;
   readonly actionTimeoutMs?: number;
   /**
-   * Consequential actions allowed per creator-directed `open()`. See
+   * Consequential actions allowed per owner-directed `open()`. See
    * {@link DEFAULT_ACTING_BUDGET}. Zero or negative disables the budget (the
    * domain-scope guardrail still applies).
    */
   readonly actingBudget?: number;
   /**
    * Per-conversation escape hatch: let consequential actions run off the
-   * opened origin's registrable domain by default, for a creator who is running
+   * opened origin's registrable domain by default, for an owner who is running
    * a deliberate multi-site workflow. Off by default; the per-call
    * `allowCrossDomain` is the usual, more legible way to widen scope.
    */
@@ -158,7 +158,7 @@ export class GhostBrowserSession {
   #refPageUrl: string | undefined;
   #screenshotCount = 0;
 
-  /** The URL the creator's most recent `open()` landed on — the trusted origin. */
+  /** The URL the owner's most recent `open()` landed on — the trusted origin. */
   #originUrl: string | undefined;
   /** Navigations the page itself drove since that open (link-follows / redirects). */
   #originHops = 0;
@@ -279,11 +279,11 @@ export class GhostBrowserSession {
 
   /**
    * The prompt-injection gate for consequential actions. Refuses to click, type,
-   * or submit on a page off the creator-opened origin's registrable domain, and
+   * or submit on a page off the owner-opened origin's registrable domain, and
    * spends one unit of the per-open acting budget. Reads never call this.
    *
    * Fails closed, before the backend ever hears about the action, with a
-   * structured `GhostBrowserError` that names how the creator can widen scope.
+   * structured `GhostBrowserError` that names how the owner can widen scope.
    */
   #gateActing(currentUrl: string, allowCrossDomain: boolean): void {
     const scope = checkActingScope(this.#originUrl, currentUrl, this.#originHops, {
@@ -297,7 +297,7 @@ export class GhostBrowserSession {
         "action_budget",
         `That is more than ${this.#actingBudget} consequential actions since the `
         + "last page you opened. This bounds how far a single hijacked page can "
-        + "push the browser. If the creator asked for this, re-open the page you "
+        + "push the browser. If the owner asked for this, re-open the page you "
         + "mean to act on with action \"open\" (which resets the budget) and "
         + "continue from there.",
         {
@@ -339,7 +339,7 @@ export class GhostBrowserSession {
     }
     this.#invalidateRefs();
     const page = await this.backend.open(checked.url, this.#timeout(options.timeoutMs));
-    // This is the creator's own navigation: re-anchor the trusted origin to
+    // This navigation came from the owner: re-anchor the trusted origin to
     // where it actually landed, reset the hop count, and refill the budget.
     this.#originUrl = page.url;
     this.#originHops = 0;
@@ -410,7 +410,7 @@ export class GhostBrowserSession {
     this.#gateActing(before.url, target.allowCrossDomain === true);
     const page = await this.backend.click(checked, this.#timeout(target.timeoutMs));
     // A click that navigated invalidates every ref minted on the old page and
-    // counts as one more hop the page — not the creator — drove.
+    // counts as one more hop the page — not the owner — drove.
     if (page.url !== before.url) {
       this.#invalidateRefs();
       this.#originHops += 1;
@@ -497,7 +497,7 @@ export class GhostBrowserSession {
     await this.#requirePage();
     const page = await this.backend.forward(this.#timeout(options.timeoutMs));
     // Forward is the inverse of back: it re-takes a step the page — not the
-    // creator — had walked, so it re-adds a hop rather than undoing one.
+    // owner — had walked, so it re-adds a hop rather than undoing one.
     if (page.moved) this.#originHops += 1;
     this.#invalidateRefs();
     this.#touchIdleTimer();
@@ -731,7 +731,7 @@ export class GhostBrowserSession {
   }): Promise<BackendTabsResult> {
     let url: string | undefined;
     if (input.op === "create" && input.url !== undefined && input.url.trim() !== "") {
-      // A new tab with a URL is a creator-directed navigation: vet it like open,
+      // A new tab with a URL is an owner-directed navigation: vet it like open,
       // then re-anchor the trusted origin to it.
       const checked = checkUrl(input.url, {
         ...(input.allowLocal === undefined ? {} : { allowLocal: input.allowLocal }),

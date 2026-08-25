@@ -3,7 +3,7 @@
  *
  * There will be two backends. The first, shipping here, is a dedicated Chromium
  * profile driven by Playwright: the ghost's own browser, its own logins, nothing
- * inherited from the creator. The second, later, is a relay into the creator's
+ * inherited from the owner. The second, later, is a relay into the owner's
  * *real* signed-in Chromium through an MV3 extension and `chrome.debugger` —
  * which is a completely different mechanism (no profile to own, no process to
  * launch, refs that cannot be a DOM attribute we stamped) but exactly the same
@@ -42,7 +42,7 @@ export type BrowserFailure =
   | "invalid_input"
   /**
    * A consequential action (click/type) was aimed at a page off the
-   * creator-opened origin's registrable domain — the prompt-injection guardrail.
+   * owner-opened origin's registrable domain — the prompt-injection guardrail.
    */
   | "blocked_action"
   /** The per-open budget of consequential actions is spent. */
@@ -182,7 +182,7 @@ export interface NetworkEntry {
   readonly bodyBytes?: number;
 }
 
-/** Set files on a file input the creator's browser reads from disk itself. */
+/** Set files on a file input the owner's browser reads from disk itself. */
 export interface BackendUploadInput extends BackendTarget {
   readonly paths: readonly string[];
 }

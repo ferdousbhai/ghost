@@ -19,7 +19,7 @@
  *   POST /api/ghosts/:name/sessions/:id/reanswer → branch an ask result + SSE resume
  *   GET  /api/ghosts/:name/model-routing → Ghost roles + OMP fallback chains
  *   PUT  /api/ghosts/:name/model-routing → set a primary/fallback or clear a chain
- *   GET  /api/relay/status            → whether the creator's Chromium is paired
+ *   GET  /api/relay/status            → whether the owner's Chromium is paired
  *   WS   /relay                       → the MV3 extension's socket (token-gated)
  *
  * Node's built-in `http` plus a twenty-line router: the surface is small and one

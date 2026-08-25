@@ -3,7 +3,7 @@
 ## Vision
 
 A ghost is an AI persona — character, memory, docs, tools — that lives
-entirely on its creator's machine as an Omarchy-native desktop app: an OMP
+entirely on its owner's machine as an Omarchy-native desktop app: an OMP
 engine over a folder of plain markdown files, summoned with a keystroke,
 and extended with OMP extensions and skills. It is an owner-local desktop
 application, not a network-facing agent service. No server holds a copy.
@@ -14,13 +14,13 @@ application, not a network-facing agent service. No server holds a copy.
 **The ghost is modifiable and infinitely extensible. Oh My Pi showed the
 way.** The official repo is the point of collaboration on a narrow,
 opinionated core — ghost home, daemon, shell, the built-in extensions — but
-ghosts are meant to be modified: creators glob onto the plugin and extension
+ghosts are meant to be modified: owners build on the plugin and extension
 interfaces (OMP extensions, skills, model roles, browser backends, tool
 factories) and grow their ghost to whatever their needs are. Core stays
-small and holds the contracts; everything else is a creator's extension.
+small and holds the contracts; everything else belongs in owner-supplied extensions.
 When a capability is generic enough for every ghost, it graduates into core
-(or upstream into OMP itself); until then it lives in the creator's ghost
-home. The measure of success is not what core ships — it is what creators
+(or upstream into OMP itself); until then it lives in the owner's ghost
+home. The measure of success is not what core ships — it is what owners
 can bolt on without asking.
 
 ## Positioning
@@ -36,7 +36,7 @@ and no cloud custody.
 
 ## Phases
 
-- **Creator-local (IN PROGRESS).** Feature-complete ghost:
+- **Owner-local (IN PROGRESS).** Feature-complete ghost:
   multi-ghost plain-file homes, persona/memory/docs pi extensions, `ghostd`
   daemon, Quickshell HUD (Super+G) + bar widget + notifications, import of
   the hosted export, optional owner-local Claude Code plan runtime, AUR
@@ -58,8 +58,8 @@ and no cloud custody.
 - **Build on modern OMP by default, never fork; add official harnesses at explicit
   runtime boundaries** — the spike proved `createAgentSession` + extensions
   express the normal path. `claude-code/default` is the narrow exception: the
-  official Claude Agent SDK invokes an installed, unmodified Claude Code so a
-  creator can use their own plan. Both consume the same Ghost system prompt,
+  official Claude Agent SDK invokes an installed, unmodified Claude Code so the
+  owner can use their own plan. Both consume the same Ghost system prompt,
   tools, and pi-messages wire; neither dependency is forked.
 - **Model-agnostic like OMP; bring any provider.** Two named requirements:
   existing **OpenAI Codex/ChatGPT subscriptions usable as auth**
@@ -74,7 +74,7 @@ and no cloud custody.
 - **Docs and skills coexist** — docs are durable ghost-owned knowledge;
   OMP-native skills are reusable procedural instructions. Sessions discover
   both, including explicit `/skill:<name>` invocation.
-- **Two browser modes**: "My browser" (relay into the creator's real signed-in Chromium via MV3 extension + chrome.debugger) and "Ghost's browser" (per-ghost Playwright profile, isolated/autonomous), one backend-agnostic tool surface.
+- **Two browser modes**: "My browser" (relay into the owner's real signed-in Chromium via MV3 extension + chrome.debugger) and "Ghost's browser" (per-ghost Playwright profile, isolated/autonomous), one backend-agnostic tool surface.
 - **Quickshell shell surfaces, not a webapp window** — Omarchy's own shell
   is Quickshell; a layer-shell HUD + bar widget is native in a way no app
   window is. A chromium "deep workspace" view must earn its way in.
@@ -103,9 +103,9 @@ Super+G, start talking. Existing summonghost.com users: sign in there,
 - **Codex/ChatGPT-subscription OAuth**: RESOLVED — OMP 18 ships native OAuth
   for `openai-codex` (plus other registry providers), and Ghost exposes the
   same flow in both the shell and terminal.
-- **Claude subscription use**: RESOLVED for Phase 1 creator-local —
+- **Claude subscription use**: RESOLVED for Phase 1 owner-local —
   `claude-code/default` uses the T3-style official Agent SDK harness and the
-  creator's external Claude Code login. OMP's `anthropic` provider remains a
+  owner's external Claude Code login. OMP's `anthropic` provider remains a
   separate accounting path. Recheck
   Anthropic policy before every release that advertises plan accounting.
 - **Teach-by-demonstration** — the Wayland-native version (screen capture +

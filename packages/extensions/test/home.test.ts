@@ -193,7 +193,7 @@ describe("doc catalog", () => {
 });
 
 describe("memory", () => {
-  it("lists creator memory in slug order", async () => {
+  it("lists memory in slug order", async () => {
     const { files, skipped } = await home.listMemory();
     expect(skipped).toEqual([]);
     expect(files.map((file) => file.slug)).toEqual([

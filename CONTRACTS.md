@@ -58,13 +58,16 @@ A deleted ghost home leaves the root entirely, for the system trash; see the
 
 ### Session capabilities
 
+Ghost is a single-caller product: the owner is the only user, and every
+session uses the same home, memory, docs, tools, and route behavior.
+
 A session is OMP-native. Ghost preserves OMP's system prompt and
 discovery, then appends the Ghost persona and derived memory/doc sections.
 Native filesystem and search (`read`, `glob`, `grep`), mutation (`write`,
 `edit`), Bash, web search, task/hub subagents, background jobs, skills, rules,
 project context, extensions/plugins, commands, and the ghost home's own project
 MCP remain available under OMP's normal xd:// presentation. MCP is a deliberate
-sovereignty exception to OMP's normal multi-source discovery: an OMP creator
+sovereignty exception to OMP's normal multi-source discovery: an OMP
 session loads only `<ghost>/.omp/mcp.json` (or the legacy `.omp/.mcp.json`) and
 never discovers or loads user/global OMP config or another coding agent's MCP
 config (`~/.codex`, `~/.claude`, `~/.copilot`, and similar). Ghost otherwise
@@ -94,7 +97,7 @@ conversation working directory without relocating that transcript.
 
 Bind to `127.0.0.1`, **and** authenticate. A loopback bind is not
 authentication: every browser on the machine reaches loopback too, and a page
-the creator visits can send a `text/plain` POST to
+the owner visits can send a `text/plain` POST to
 `http://127.0.0.1:7717/api/ghosts/<name>/messages` with no preflight at all —
 CORS decides whether a page may *read* a response, not whether it may *send* a
 request, and a CSRF attacker does not want the response. Without the checks
@@ -281,7 +284,7 @@ rejected outright, never truncated.
 Which model serves the lane is the `smol_model` role in `.pi/models.json`,
 resolved daemon-side:
 
-1. `roles.smol_model` — the creator's explicit choice; a missing or
+1. `roles.smol_model` — the owner's explicit choice; a missing or
    uncredentialed model there is a loud (logged) error, not a silent fallback.
 2. otherwise the **cheapest USABLE model, subscription-aware** (issue #484): a
    capable model on an already-authenticated subscription — `isSubscription`, or
@@ -407,15 +410,15 @@ without deleting the legacy file. After migration, `agent.db` is canonical.
 
 `roles.chat_model = { provider: "claude-code", modelId: "default" }` selects
 the official Claude Agent SDK + an installed, unmodified `claude` executable.
-The creator runs `claude auth login` outside Ghost. Ghost accepts no Claude
+The owner runs `claude auth login` outside Ghost. Ghost accepts no Claude
 credential, stores no Claude credential, and removes ambient API/OAuth-token
 variables from the subprocess environment.
 
-The runtime uses the creator's local Claude Code authentication. The native
+The runtime uses the owner's local Claude Code authentication. The native
 Claude Code system prompt, tools,
 filesystem settings, project instructions, skills, plugins, subagents, web
 search, and MCP configuration remain enabled with bypass-permissions mode,
-matching the creator-local unrestricted OMP runtime. Existing Ghost extension
+matching the unrestricted owner-local OMP runtime. Existing Ghost extension
 tools are added through one in-process SDK MCP server, and the output is
 normalized back to pi-messages. Ambient provider credentials are still
 scrubbed; removing tool restrictions does not turn Ghost into a credential

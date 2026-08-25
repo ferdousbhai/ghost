@@ -1,5 +1,5 @@
 /**
- * The relay hub — ghostd's end of the socket into the creator's real Chromium.
+ * The relay hub — ghostd's end of the socket into the owner's real Chromium.
  *
  * The extension dials *out*. That is the whole architectural decision and it buys
  * three things at once: no inbound listener inside the browser, no native-messaging

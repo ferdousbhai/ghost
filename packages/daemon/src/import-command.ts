@@ -2,8 +2,8 @@
  * `ghostd import` — turn a `ghost-home/v1` archive into a ghost.
  *
  * The archive is the zip the hosted app's "Download my ghost" produces (or an
- * already-extracted directory): character file, every document public and private,
- * memory and conversations, all as plain files. Importing
+ * already-extracted directory): character file, every document, memory, and
+ * conversations, all as plain files. Importing
  * preserves file bytes while translating the hosted archive's legacy `notes/`
  * directory to canonical `docs/`. Hosted conversation fixtures are then copied
  * into native, resumable OMP sessions; the source JSON is retained unchanged.

@@ -17,7 +17,7 @@ import {
   createGhostExtension,
   deriveMemoryIndex,
   deriveDocCatalog,
-  ghostToolNamesFor,
+  ghostToolNames,
   openGhostHome,
   relayBackend,
   type BrowserBackendFactory,
@@ -41,13 +41,13 @@ export interface GhostExtensionOptions {
   ghostName?: string;
   /**
    * Which browser `ghost_browser` drives. `"relay"` (with a `relayTransport`
-   * present) points the tool at the creator's real Chromium; `"profile"` (or
+   * present) points the tool at the owner's real Chromium; `"profile"` (or
    * no transport) leaves the extension's default per-ghost Playwright profile.
    */
   browserMode?: "relay" | "profile";
   /**
    * The daemon's relay hub, adapted as a transport. Present only when the
-   * relay is enabled; the relay backend is built from it per creator session.
+   * relay is enabled; the relay backend is built from it per session.
    */
   relayTransport?: RelayTransport;
   /**
@@ -96,7 +96,7 @@ export function resolveGhostExtensions(
   };
   return {
     factories: [createGhostExtension(extensionOptions)],
-    toolNames: ghostToolNamesFor(extensionOptions),
+    toolNames: ghostToolNames(),
   };
 }
 
