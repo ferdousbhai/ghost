@@ -8,8 +8,8 @@ TestCase {
     function init(): void {
         Ghostd.cancel();
         Ghostd.activeGhost = "casper";
-        Ghostd.currentSessionId = "stream-test";
-        Ghostd.sessionIds = ({ casper: "stream-test" });
+        Ghostd.currentSessionId = "pi:stream-test";
+        Ghostd.sessionIds = ({ casper: "pi:stream-test" });
         Ghostd.clearTranscript();
         Ghostd.lastError = "";
         Ghostd.reachable = true;
@@ -125,6 +125,9 @@ TestCase {
         Ghostd.handleEvent({
             type: "branch_changed",
             transcript: {
+                id: "pi:stream-test",
+                conversationId: "stream-test",
+                runtime: "pi",
                 messages: [{ role: "user", content: "Earlier question", entryId: "entry-1" }]
             }
         });
@@ -160,10 +163,6 @@ TestCase {
     }
 
     function test_askExecutionEndClearsTimedOutDialogBeforeTurnEnds(): void {
-        // The production singleton probes its roster on construction. The
-        // test import deliberately points at an unused non-owner port.
-        ignoreWarning(new RegExp("ghostd is not answering on http://127.0.0.1:17717"));
-        wait(20);
         openTurn();
         Ghostd.pendingAsk = ({ id: "ask-timeout" });
         Ghostd.askSubmitting = true;
@@ -216,7 +215,7 @@ TestCase {
         };
         Ghostd.request = xhr;
 
-        Ghostd.openConversation("stream-test");
+        Ghostd.openConversation("pi:stream-test");
 
         verify(Ghostd.streaming);
         compare(Ghostd.request, xhr);

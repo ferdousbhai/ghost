@@ -136,13 +136,21 @@ import {
   type PiMessagesEvent,
   zeroUsage,
 } from "./pi-messages.js";
-import { readPins, writePins } from "./pins.js";
-import { readReads, writeReads } from "./reads.js";
+import { readPinState, writePins } from "./pins.js";
+import { readReadState, writeReads } from "./reads.js";
+import {
+  conversationIdentity,
+  isValidConversationId,
+  requireRawConversationId,
+  type ConversationRuntime,
+} from "./conversation-identity.js";
 import { generateTitle } from "./title.js";
 import { hostedConversationSourcePaths } from "./hosted-conversation-import.js";
 import { trashPath, type TrashPathResult } from "./trash.js";
 import {
+  bindConversationId,
   conversationIdFromSessionFile,
+  requireSessionFileConversationId,
   sessionFileNameFor,
 } from "./session-files.js";
 export {
@@ -368,6 +376,8 @@ export interface RunTurnOptions {
 
 export interface RunAskReanswerOptions {
   sessionId?: string | null;
+  /** Runtime qualified by the public action id. Re-answer is Pi-only. */
+  runtime?: ConversationRuntime;
   /** Persisted `ask` toolResult entry selected from the branch tree. */
   entryId: string;
   emit: (event: PiMessagesEvent) => void;
@@ -454,15 +464,18 @@ const DEFAULT_SESSION_KEY = "default";
  *
  * `JSON.stringify([ghostName, sessionId])` is collision-proof where a plain
  * delimiter is not: a sessionId containing the delimiter (a space, say) could
- * otherwise be read as belonging to a different ghost. An empty/missing
- * sessionId collapses to DEFAULT_SESSION_KEY, matching how the on-disk
- * transcript is named in createSession.
+ * otherwise be read as belonging to a different ghost. A missing sessionId
+ * selects DEFAULT_SESSION_KEY; an explicit raw id must satisfy the shared
+ * identity grammar before it can enter an in-memory or on-disk key.
  */
 export function sessionKeyOf(
   ghostName: string,
   sessionId: string | null | undefined,
 ): string {
-  return JSON.stringify([ghostName, sessionId || DEFAULT_SESSION_KEY]);
+  return JSON.stringify([
+    ghostName,
+    requireRawConversationId(sessionId ?? DEFAULT_SESSION_KEY),
+  ]);
 }
 
 /** The (ghost, conversation) halves back out of a `sessionKeyOf` key. */
@@ -470,9 +483,64 @@ function sessionKeyParts(key: string): [string, string] {
   return JSON.parse(key) as [string, string];
 }
 
+/** Destructive reservations include runtime: equal raw ids remain independent. */
+function deletionKeyOf(
+  ghostName: string,
+  runtime: ConversationRuntime,
+  conversationId: string,
+): string {
+  return JSON.stringify([ghostName, runtime, conversationId]);
+}
+
+function deletionKeyGhost(key: string): string {
+  return (JSON.parse(key) as [string, ConversationRuntime, string])[0];
+}
+
+type StoredSessionRow = Omit<SessionSummary, "pinned" | "unread">;
+
+function expandLegacyPins(
+  stored: readonly string[],
+  rows: readonly StoredSessionRow[],
+): Set<string> {
+  const expanded = new Set<string>();
+  for (const conversationId of stored) {
+    for (const row of rows) {
+      if (row.conversationId === conversationId) expanded.add(row.id);
+    }
+  }
+  return expanded;
+}
+
+function expandLegacyReads(
+  stored: Readonly<Record<string, string>>,
+  rows: readonly StoredSessionRow[],
+): Record<string, string> {
+  const expanded: Record<string, string> = {};
+  for (const [conversationId, readAt] of Object.entries(stored)) {
+    for (const row of rows) {
+      if (row.conversationId === conversationId) expanded[row.id] = readAt;
+    }
+  }
+  return expanded;
+}
+
+function assertPiConversation(runtime: ConversationRuntime, feature: string): void {
+  if (runtime !== "pi") {
+    throw new GhostError(
+      "not_supported",
+      `${feature} is unavailable for a Claude Code conversation.`,
+      409,
+    );
+  }
+}
+
 /** One row in the conversation listing. Titles are null until generated. */
 export interface SessionSummary {
+  /** Runtime-qualified public row/action identity. */
   id: string;
+  /** Raw runtime resume id; pi-messages keeps sending this as `options.sessionId`. */
+  conversationId: string;
+  runtime: ConversationRuntime;
   title: string | null;
   createdAt: string;
   updatedAt: string;
@@ -484,6 +552,8 @@ export interface SessionSummary {
 export interface ConversationUpdatedEvent {
   type: "conversation-updated";
   id: string;
+  conversationId: string;
+  runtime: ConversationRuntime;
   updatedAt: string;
 }
 
@@ -534,6 +604,8 @@ function askSettlement(details: AskToolDetails | null | undefined): AskSettlemen
 /** A conversation's history for rehydration in the shell. */
 export interface Transcript {
   id: string;
+  conversationId: string;
+  runtime: "pi";
   title: string | null;
   messages: TranscriptMessage[];
   /** Total renderable messages before the page cap. */
@@ -799,7 +871,7 @@ export class SessionHost {
   private readonly conversationListeners = new Map<string, Set<ConversationEventListener>>();
   /** In-flight opens, so two concurrent turns never build two sessions. */
   private readonly opening = new Map<string, Promise<HostedSession>>();
-  /** Conversation ids reserved by a destructive delete operation. */
+  /** Runtime-qualified conversation identities reserved by destructive delete. */
   private readonly deleting = new Set<string>();
   /** Ghost names reserved by an in-flight whole-ghost move: a delete or a rename. */
   private readonly reservedGhosts = new Set<string>();
@@ -879,25 +951,34 @@ export class SessionHost {
   }
 
   /** Publish after storage settles; a deletion uses its mutation time. */
-  private async announceConversationUpdated(ghostName: string, id: string): Promise<void> {
+  private async announceConversationUpdated(
+    ghostName: string,
+    runtime: ConversationRuntime,
+    conversationId: string,
+  ): Promise<void> {
     const listeners = this.conversationListeners.get(ghostName);
     if (!listeners || listeners.size === 0) return;
+    const identity = conversationIdentity(runtime, conversationId);
     let updatedAt = new Date().toISOString();
     try {
       const ghost = this.registry.get(ghostName);
-      const row = (await this.collectSessions(ghost)).find((session) => session.id === id);
+      const row = (await this.collectSessions(ghost)).find((session) => session.id === identity.id);
       if (row) updatedAt = row.updatedAt;
     } catch {
       // Whole-home deletion can remove the ghost before the final invalidation.
     }
-    const event: ConversationUpdatedEvent = { type: "conversation-updated", id, updatedAt };
+    const event: ConversationUpdatedEvent = {
+      type: "conversation-updated",
+      ...identity,
+      updatedAt,
+    };
     for (const listener of [...listeners]) {
       try {
         listener(event);
       } catch (error) {
         this.logger.warn("conversation event listener failed", {
           ghost: ghostName,
-          conversation: id,
+          conversation: identity.id,
           error: error instanceof Error ? error.message : String(error),
         });
       }
@@ -919,20 +1000,31 @@ export class SessionHost {
         409,
       );
     }
-    const key = this.keyOf(ghostName, sessionId);
-    if (this.deleting.has(key)) {
+    const conversationId = requireRawConversationId(sessionId ?? DEFAULT_SESSION_KEY);
+    const key = this.keyOf(ghostName, conversationId);
+    if (this.deleting.has(deletionKeyOf(
+      ghostName,
+      "pi",
+      conversationId,
+    ))) {
       throw new GhostError(
         "session_busy",
         "Wait for this conversation to finish deleting before opening it.",
         409,
       );
     }
+    const ghost = this.registry.get(ghostName);
+    const paths = ghostPaths(ghost.dir);
+    const sessionFile = join(paths.sessionDir, sessionFileNameFor(conversationId));
+    if (existsSync(sessionFile)) {
+      await requireSessionFileConversationId(sessionFile, conversationId);
+    }
     const existing = this.sessions.get(key);
     if (existing) return existing;
     const pending = this.opening.get(key);
     if (pending) return pending;
 
-    const promise = this.createSession(ghostName, sessionId || DEFAULT_SESSION_KEY, key)
+    const promise = this.createSession(ghostName, conversationId, key)
       .then((hosted) => {
         this.sessions.set(key, hosted);
         return hosted;
@@ -948,7 +1040,9 @@ export class SessionHost {
   async availableCommands(
     ghostName: string,
     sessionId?: string | null,
+    runtime: ConversationRuntime = "pi",
   ): Promise<GhostAvailableSlashCommand[]> {
+    assertPiConversation(runtime, "OMP slash commands");
     this.assertOmpRuntime(ghostName, "OMP slash commands");
     const hosted = await this.idleHostedSession(
       ghostName,
@@ -985,7 +1079,12 @@ export class SessionHost {
   }
 
   /** Current realtime voice state; this read never opens a conversation. */
-  liveVoiceStatus(ghostName: string, sessionId?: string | null): LiveVoiceStatus {
+  liveVoiceStatus(
+    ghostName: string,
+    sessionId?: string | null,
+    runtime: ConversationRuntime = "pi",
+  ): LiveVoiceStatus {
+    assertPiConversation(runtime, "Live voice");
     this.assertOmpRuntime(ghostName, "Live voice");
     return this.liveVoice.status(this.keyOf(ghostName, sessionId));
   }
@@ -994,7 +1093,9 @@ export class SessionHost {
     ghostName: string,
     sessionId: string | null | undefined,
     action: "start" | "mute" | "unmute" | "stop",
+    runtime: ConversationRuntime = "pi",
   ): Promise<LiveVoiceStatus> {
+    assertPiConversation(runtime, "Live voice");
     this.assertOmpRuntime(ghostName, "Live voice");
     const key = this.keyOf(ghostName, sessionId);
     if (action === "stop") {
@@ -1054,7 +1155,9 @@ export class SessionHost {
   collaborationStatus(
     ghostName: string,
     sessionId?: string | null,
+    runtime: ConversationRuntime = "pi",
   ): CollaborationStatus {
+    assertPiConversation(runtime, "Live collaboration");
     this.assertOmpRuntime(ghostName, "Live collaboration");
     return this.collaboration.status(this.keyOf(ghostName, sessionId));
   }
@@ -1068,7 +1171,9 @@ export class SessionHost {
       writable?: boolean;
       confirmed?: boolean;
     },
+    runtime: ConversationRuntime = "pi",
   ): Promise<CollaborationStatus> {
+    assertPiConversation(runtime, "Live collaboration");
     this.assertOmpRuntime(ghostName, "Live collaboration");
     const key = this.keyOf(ghostName, sessionId);
     if (input.action === "stop") return this.collaboration.stop(key);
@@ -1188,12 +1293,16 @@ export class SessionHost {
     if (settings.get("mcp.notifications")) mcp.manager.setNotificationsEnabled(true);
     await connectGhostProjectMCP(mcp.manager, paths.home, this.logger);
 
+    const sessionFile = join(paths.sessionDir, sessionFileNameFor(sessionKey));
+    const sessionFileExists = existsSync(sessionFile);
+    if (sessionFileExists) await requireSessionFileConversationId(sessionFile, sessionKey);
     const sessionManager = await SessionManager.open(
-      join(paths.sessionDir, sessionFileNameFor(sessionKey)),
+      sessionFile,
       paths.sessionDir,
       undefined,
       { initialCwd: paths.home },
     );
+    if (!sessionFileExists) bindConversationId(sessionManager, sessionKey);
     await this.promoteLegacySessionTitle(sessionManager, ghostName, sessionKey);
 
     const ask = new AskBroker(this.logger);
@@ -1214,8 +1323,8 @@ export class SessionHost {
         autoApprove: true,
         agentRegistry: new AgentRegistry(),
         // See decision 1: sessions live under the ghost home. `open` on a path
-        // that does not exist yet creates it, so a conversation id maps to a
-        // stable transcript across daemon restarts.
+        // that does not exist yet creates it; the bound raw id keeps that
+        // transcript stable across daemon restarts.
         sessionManager,
         mcpManager: mcp.manager,
       });
@@ -1290,7 +1399,7 @@ export class SessionHost {
       if (event.type !== "agent_end" || event.isTerminal === false) return;
       if (!hosted.busy) {
         const [, conversationId] = sessionKeyParts(key);
-        void this.announceConversationUpdated(ghostName, conversationId);
+        void this.announceConversationUpdated(ghostName, "pi", conversationId);
       }
       void this.settleDeferredSession(hosted).catch((error) => {
         this.logger.warn("deferred session update after external turn failed", {
@@ -1329,7 +1438,12 @@ export class SessionHost {
   }
 
   /** The currently blocked OMP `ask`, if this live conversation has one. */
-  pendingAsk(ghostName: string, sessionId?: string | null): PendingAsk | null {
+  pendingAsk(
+    ghostName: string,
+    sessionId?: string | null,
+    runtime: ConversationRuntime = "pi",
+  ): PendingAsk | null {
+    assertPiConversation(runtime, "Ask");
     this.registry.get(ghostName);
     return this.sessions.get(this.keyOf(ghostName, sessionId))?.ask.pending ?? null;
   }
@@ -1340,7 +1454,9 @@ export class SessionHost {
     sessionId: string | null | undefined,
     askId: string,
     answer: unknown,
+    runtime: ConversationRuntime = "pi",
   ): void {
+    assertPiConversation(runtime, "Ask");
     this.registry.get(ghostName);
     const hosted = this.sessions.get(this.keyOf(ghostName, sessionId));
     if (!hosted) {
@@ -1360,7 +1476,12 @@ export class SessionHost {
     }
   }
 
-  queuedMessages(ghostName: string, sessionId?: string | null): QueuedMessages {
+  queuedMessages(
+    ghostName: string,
+    sessionId?: string | null,
+    runtime: ConversationRuntime = "pi",
+  ): QueuedMessages {
+    assertPiConversation(runtime, "Message queues");
     this.registry.get(ghostName);
     const hosted = this.sessions.get(this.keyOf(ghostName, sessionId));
     if (!hosted) return { streaming: false, count: 0, steering: [], followUp: [] };
@@ -1379,7 +1500,9 @@ export class SessionHost {
     sessionId: string | null | undefined,
     mode: QueueMode,
     text: string,
+    runtime: ConversationRuntime = "pi",
   ): Promise<QueuedMessages> {
+    assertPiConversation(runtime, "Message queues");
     this.registry.get(ghostName);
     const hosted = this.sessions.get(this.keyOf(ghostName, sessionId));
     if (!hosted?.session.isStreaming) {
@@ -1391,7 +1514,7 @@ export class SessionHost {
     }
     if (mode === "followUp") await hosted.session.followUp(text);
     else await hosted.session.steer(text);
-    return this.queuedMessages(ghostName, sessionId);
+    return this.queuedMessages(ghostName, sessionId, runtime);
   }
 
   /**
@@ -1644,7 +1767,7 @@ export class SessionHost {
     command: UserBashCommand,
     options: RunTurnOptions,
   ): Promise<void> {
-    const conversationId = options.sessionId || DEFAULT_SESSION_KEY;
+    const conversationId = options.sessionId ?? DEFAULT_SESSION_KEY;
     if (this.claudeCode.isBusy(ghostName, conversationId)) {
       throw new GhostError(
         "session_busy",
@@ -1827,9 +1950,10 @@ export class SessionHost {
    * client treats a stream that ends without one as a failure.
    */
   async runTurn(ghostName: string, options: RunTurnOptions): Promise<void> {
+    const conversationId = requireRawConversationId(options.sessionId ?? DEFAULT_SESSION_KEY);
     const ghost = this.registry.get(ghostName);
     const paths = ghostPaths(ghost.dir);
-    const key = this.keyOf(ghostName, options.sessionId);
+    const key = this.keyOf(ghostName, conversationId);
     const liveHosted = this.sessions.get(key);
     if (this.liveVoice.status(key).active || (liveHosted?.liveVoiceTransitions ?? 0) > 0) {
       throw new GhostError(
@@ -1846,7 +1970,8 @@ export class SessionHost {
       await this.runUserBash(ghostName, bashCommand, options);
       await this.announceConversationUpdated(
         ghostName,
-        options.sessionId || DEFAULT_SESSION_KEY,
+        "pi",
+        options.sessionId ?? DEFAULT_SESSION_KEY,
       );
       return;
     }
@@ -1860,7 +1985,6 @@ export class SessionHost {
       });
     }
     if (configured?.provider === CLAUDE_CODE_PROVIDER_ID) {
-      const conversationId = options.sessionId || DEFAULT_SESSION_KEY;
       // A model switch must not leave a stale pi AgentSession owning this
       // conversation. Claude itself is scoped per turn and keeps only its
       // opaque resume id between turns.
@@ -1873,7 +1997,7 @@ export class SessionHost {
         );
       }
       await this.closePi(ghostName, options.sessionId);
-      if (this.deleting.has(this.keyOf(ghostName, options.sessionId))) {
+      if (this.deleting.has(deletionKeyOf(ghostName, "claude-code", conversationId))) {
         throw new GhostError(
           "session_busy",
           "Wait for this conversation to finish deleting before opening it.",
@@ -1881,11 +2005,10 @@ export class SessionHost {
         );
       }
       await this.claudeCode.runTurn(ghost, conversationId, configured.modelId, options);
-      await this.announceConversationUpdated(ghostName, conversationId);
+      await this.announceConversationUpdated(ghostName, "claude-code", conversationId);
       return;
     }
 
-    const conversationId = options.sessionId || DEFAULT_SESSION_KEY;
     if (this.liveVoice.status(key).active) {
       throw new GhostError(
         "session_busy",
@@ -1919,7 +2042,7 @@ export class SessionHost {
       } finally {
         await this.releaseSessionClaim(hosted, ghostName);
       }
-      await this.announceConversationUpdated(ghostName, conversationId);
+      await this.announceConversationUpdated(ghostName, "pi", conversationId);
       return;
     }
 
@@ -2037,7 +2160,7 @@ export class SessionHost {
       if (shouldTitle) {
         this.startBackgroundTitle(hosted, ghostName, paths.agentDir, options.prompt);
       }
-      await this.announceConversationUpdated(ghostName, conversationId);
+      await this.announceConversationUpdated(ghostName, "pi", conversationId);
     }
   }
 
@@ -2073,7 +2196,7 @@ export class SessionHost {
           title,
         });
         const [, conversationId] = sessionKeyParts(hosted.sessionKey);
-        await this.announceConversationUpdated(ghostName, conversationId);
+        await this.announceConversationUpdated(ghostName, "pi", conversationId);
       })
       .catch((error: unknown) => {
         this.logger.warn("conversation title generation failed", {
@@ -2241,11 +2364,8 @@ export class SessionHost {
    * each group — pi transcripts plus Claude Code resume sidecars, in one
    * shape.
    *
-   * `id` is the conversation id the shell uses to resume (the pi-messages
-   * `options.sessionId`), recovered from the transcript filename; `title` is
-   * null until the background titler names it. Any in-flight title write for
-   * this ghost is awaited first, so a title generated by the turn that just
-   * finished is already visible here.
+   * Any in-flight title write for this ghost is awaited first, so a title
+   * generated by the turn that just finished is already visible here.
    */
   async listSessions(ghostName: string): Promise<SessionSummary[]> {
     const inflightTitles = [...this.sessions.values()]
@@ -2255,14 +2375,19 @@ export class SessionHost {
 
     const ghost = this.registry.get(ghostName);
     const paths = ghostPaths(ghost.dir);
-    const [rows, pins, reads] = await Promise.all([
+    const [rows, pinState, readState] = await Promise.all([
       this.collectSessions(ghost),
-      readPins(paths.sessionDir),
-      readReads(paths.sessionDir),
+      readPinState(paths.sessionDir),
+      readReadState(paths.sessionDir),
     ]);
     // A pin whose conversation is gone is simply not seen here; the next write
     // prunes it.
-    const pinned = new Set(pins);
+    const pinned = pinState.version === 1
+      ? expandLegacyPins(pinState.pinned, rows)
+      : new Set(pinState.pinned);
+    const reads = readState.version === 1
+      ? expandLegacyReads(readState.reads, rows)
+      : readState.reads;
     return rows
       .map((row) => {
         const readAt = reads[row.id];
@@ -2289,22 +2414,29 @@ export class SessionHost {
     ghostName: string,
     sessionId: string | null | undefined,
     pinned: boolean,
+    runtime: ConversationRuntime = "pi",
   ): Promise<void> {
     const ghost = this.registry.get(ghostName);
-    const id = sessionId || DEFAULT_SESSION_KEY;
+    const conversationId = sessionId ?? DEFAULT_SESSION_KEY;
+    const identity = conversationIdentity(runtime, conversationId);
     const paths = ghostPaths(ghost.dir);
-    const existing = new Set((await this.collectSessions(ghost)).map((row) => row.id));
-    if (!existing.has(id)) {
+    const rows = await this.collectSessions(ghost);
+    const existing = new Set(rows.map((row) => row.id));
+    if (!existing.has(identity.id)) {
       throw new GhostError(
         "not_found",
-        `This ghost has no conversation ${JSON.stringify(id)}.`,
+        `This ghost has no conversation ${JSON.stringify(identity.id)}.`,
         404,
       );
     }
-    const kept = (await readPins(paths.sessionDir))
-      .filter((pin) => pin !== id && existing.has(pin));
-    await writePins(paths.sessionDir, pinned ? [...kept, id] : kept);
-    await this.announceConversationUpdated(ghostName, id);
+    const state = await readPinState(paths.sessionDir);
+    const stored = state.version === 1
+      ? expandLegacyPins(state.pinned, rows)
+      : new Set(state.pinned);
+    stored.delete(identity.id);
+    const kept = [...stored].filter((pin) => existing.has(pin));
+    await writePins(paths.sessionDir, pinned ? [...kept, identity.id] : kept);
+    await this.announceConversationUpdated(ghostName, runtime, conversationId);
   }
 
   /**
@@ -2315,25 +2447,31 @@ export class SessionHost {
     ghostName: string,
     sessionId: string | null | undefined,
     openedAt = new Date(),
+    runtime: ConversationRuntime = "pi",
   ): Promise<string> {
     const ghost = this.registry.get(ghostName);
-    const id = sessionId || DEFAULT_SESSION_KEY;
+    const conversationId = sessionId ?? DEFAULT_SESSION_KEY;
+    const identity = conversationIdentity(runtime, conversationId);
     const paths = ghostPaths(ghost.dir);
-    const existing = new Set((await this.collectSessions(ghost)).map((row) => row.id));
-    if (!existing.has(id)) {
+    const rows = await this.collectSessions(ghost);
+    const existing = new Set(rows.map((row) => row.id));
+    if (!existing.has(identity.id)) {
       throw new GhostError(
         "not_found",
-        `This ghost has no conversation ${JSON.stringify(id)}.`,
+        `This ghost has no conversation ${JSON.stringify(identity.id)}.`,
         404,
       );
     }
-    const reads = await readReads(paths.sessionDir);
+    const state = await readReadState(paths.sessionDir);
+    const reads = state.version === 1
+      ? expandLegacyReads(state.reads, rows)
+      : state.reads;
     const kept = Object.fromEntries(
-      Object.entries(reads).filter(([conversationId]) => existing.has(conversationId)),
+      Object.entries(reads).filter(([id]) => existing.has(id)),
     );
     const readAt = openedAt.toISOString();
-    await writeReads(paths.sessionDir, { ...kept, [id]: readAt });
-    await this.announceConversationUpdated(ghostName, id);
+    await writeReads(paths.sessionDir, { ...kept, [identity.id]: readAt });
+    await this.announceConversationUpdated(ghostName, runtime, conversationId);
     return readAt;
   }
 
@@ -2350,10 +2488,12 @@ export class SessionHost {
     ghostName: string,
     conversationId: string | null | undefined,
     title: string,
+    runtime: ConversationRuntime = "pi",
   ): Promise<string> {
+    assertPiConversation(runtime, "Conversation renaming");
     const ghost = this.registry.get(ghostName);
     const paths = ghostPaths(ghost.dir);
-    const id = conversationId || DEFAULT_SESSION_KEY;
+    const id = conversationId ?? DEFAULT_SESSION_KEY;
     const key = this.keyOf(ghostName, conversationId);
     const sessionFile = join(paths.sessionDir, sessionFileNameFor(id));
     if (!existsSync(sessionFile) && !this.sessions.has(key) && !this.opening.has(key)) {
@@ -2372,7 +2512,8 @@ export class SessionHost {
         404,
       );
     }
-    if (this.deleting.has(key)) {
+    if (existsSync(sessionFile)) await requireSessionFileConversationId(sessionFile, id);
+    if (this.deleting.has(deletionKeyOf(ghostName, "pi", id))) {
       throw new GhostError(
         "session_busy",
         "Wait for this conversation to finish deleting before renaming it.",
@@ -2399,7 +2540,7 @@ export class SessionHost {
         session: id,
         title: stored,
       });
-      await this.announceConversationUpdated(ghostName, id);
+      await this.announceConversationUpdated(ghostName, "pi", id);
       return stored;
     } finally {
       // Release a manager opened for this write alone; the live session keeps
@@ -2433,14 +2574,14 @@ export class SessionHost {
   /** Every stored conversation for one ghost, before pin state is applied. */
   private async collectSessions(
     ghost: Ghost,
-  ): Promise<Omit<SessionSummary, "pinned" | "unread">[]> {
+  ): Promise<StoredSessionRow[]> {
     const paths = ghostPaths(ghost.dir);
     mkdirSync(paths.sessionDir, { recursive: true });
     const [sessions, claudeSessions] = await Promise.all([
       SessionManager.list(paths.home, paths.sessionDir),
       this.claudeCode.listSessions(ghost),
     ]);
-    const ompSessions = await Promise.all(sessions.map(async (info) => {
+    const scannedOmpSessions = await Promise.all(sessions.map(async (info) => {
       const nativeTitle = info.title?.trim() ? info.title : null;
       let title = nativeTitle;
       if (!title) {
@@ -2459,18 +2600,30 @@ export class SessionHost {
           this.legacyTitles.set(info.path, { modifiedMs, size: info.size, title });
         }
       }
+      let conversationId: string | null;
+      try {
+        conversationId = await conversationIdFromSessionFile(info.path);
+      } catch {
+        // A concurrently removed or unreadable transcript is omitted without
+        // making its valid siblings disappear from the listing.
+        return null;
+      }
+      if (conversationId === null) return null;
       return {
-        id: conversationIdFromSessionFile(info.path),
+        ...conversationIdentity("pi", conversationId),
         title,
         createdAt: info.created.toISOString(),
         updatedAt: info.modified.toISOString(),
         messageCount: info.messageCount,
       };
     }));
+    const ompSessions = scannedOmpSessions.filter(
+      (row): row is Exclude<(typeof scannedOmpSessions)[number], null> => row !== null,
+    );
     return [
       ...ompSessions,
-      ...claudeSessions.map((info) => ({
-        id: info.conversationId,
+      ...claudeSessions.filter((info) => isValidConversationId(info.conversationId)).map((info) => ({
+        ...conversationIdentity("claude-code", info.conversationId),
         title: "Claude Code",
         createdAt: info.created,
         updatedAt: info.modified,
@@ -2493,10 +2646,12 @@ export class SessionHost {
     ghostName: string,
     conversationId: string | null | undefined,
     options: { limit?: number; offset?: number } = {},
+    runtime: ConversationRuntime = "pi",
   ): Promise<Transcript> {
+    assertPiConversation(runtime, "Transcript reading");
     const ghost = this.registry.get(ghostName);
     const paths = ghostPaths(ghost.dir);
-    const id = conversationId || DEFAULT_SESSION_KEY;
+    const id = conversationId ?? DEFAULT_SESSION_KEY;
     const path = join(paths.sessionDir, sessionFileNameFor(id));
     if (!existsSync(path)) {
       throw new GhostError(
@@ -2505,6 +2660,7 @@ export class SessionHost {
         404,
       );
     }
+    await requireSessionFileConversationId(path, id);
     // Await an in-flight title for this exact conversation, so a resume made
     // right after the first turn carries the freshly generated title.
     const hosted = this.sessions.get(this.keyOf(ghostName, conversationId));
@@ -2552,7 +2708,7 @@ export class SessionHost {
     const offset = Math.min(clampTranscriptOffset(options.offset), total);
     const messages = all.slice(offset, offset + limit);
     return {
-      id,
+      ...conversationIdentity("pi", id),
       title: manager.getSessionName() ?? legacySessionTitle(manager.getEntries()),
       messages,
       total,
@@ -2603,26 +2759,33 @@ export class SessionHost {
     ghostName: string,
     conversationId: string | null | undefined,
     entryId: string,
+    runtime: ConversationRuntime = "pi",
   ): Promise<{
+    id: string;
+    conversationId: string;
+    runtime: "pi";
     sessionId: string;
     title: string | null;
     draft: string;
     transcript: Transcript;
   }> {
+    assertPiConversation(runtime, "Conversation branching");
     const ghost = this.registry.get(ghostName);
     const paths = ghostPaths(ghost.dir);
-    const sourceId = conversationId || DEFAULT_SESSION_KEY;
+    const sourceId = conversationId ?? DEFAULT_SESSION_KEY;
+    const sourceFile = join(paths.sessionDir, sessionFileNameFor(sourceId));
     // `open` would happily create the conversation being branched from; an id
     // that names neither a live session nor a stored transcript is a 404, not a
     // brand-new empty conversation.
     if (!this.sessions.has(this.keyOf(ghostName, conversationId))
-      && !existsSync(join(paths.sessionDir, sessionFileNameFor(sourceId)))) {
+      && !existsSync(sourceFile)) {
       throw new GhostError(
         "not_found",
         `This ghost has no conversation ${JSON.stringify(sourceId)}.`,
         404,
       );
     }
+    if (existsSync(sourceFile)) await requireSessionFileConversationId(sourceFile, sourceId);
     const forkId = `branch-${randomUUID()}`;
     const source = await this.idleHostedSession(
       ghostName,
@@ -2661,9 +2824,8 @@ export class SessionHost {
         paths.home,
         paths.sessionDir,
         undefined,
-        // Pin the copy's path so its conversation id is the same round-trip
-        // `sessionFileNameFor`/`conversationIdFromSessionFile` pair every other
-        // conversation uses, and `open`/`listSessions` find it unaided.
+        // Pin the copy's path to the same bounded mapping every other
+        // conversation uses, so `open` and `listSessions` find it unaided.
         { sessionFile: join(paths.sessionDir, sessionFileNameFor(forkId)) },
       );
       try {
@@ -2694,12 +2856,13 @@ export class SessionHost {
         const result = await hosted.session.navigateTree(entryId);
         if (result.cancelled) throw new GhostError("branch_cancelled", "Conversation branching was cancelled.", 409);
         const fork = {
+          ...conversationIdentity("pi", forkId),
           sessionId: forkId,
           title: hosted.session.sessionManager.getSessionName() ?? null,
           draft: result.editorText ?? "",
           transcript: this.transcriptFromManager(forkId, hosted.session.sessionManager),
         };
-        await this.announceConversationUpdated(ghostName, forkId);
+        await this.announceConversationUpdated(ghostName, "pi", forkId);
         return fork;
       } finally {
         await this.releaseSessionClaim(hosted, ghostName);
@@ -2716,22 +2879,35 @@ export class SessionHost {
       const ghost = this.registry.get(ghostName);
       const paths = ghostPaths(ghost.dir);
       await this.closePi(ghostName, forkId);
+      const rowsBefore = await this.collectSessions(ghost);
+      const forkIdentity = conversationIdentity("pi", forkId);
       const sessionFile = join(paths.sessionDir, sessionFileNameFor(forkId));
       try {
+        if (existsSync(sessionFile)) {
+          await requireSessionFileConversationId(sessionFile, forkId);
+        }
         await unlink(sessionFile);
         this.legacyTitles.delete(sessionFile);
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       }
-      const pins = await readPins(paths.sessionDir);
-      if (pins.includes(forkId)) {
-        await writePins(paths.sessionDir, pins.filter((pin) => pin !== forkId));
-      }
-      const reads = await readReads(paths.sessionDir);
-      if (reads[forkId]) {
-        delete reads[forkId];
-        await writeReads(paths.sessionDir, reads);
-      }
+      const remainingIds = new Set(rowsBefore
+        .filter((row) => row.id !== forkIdentity.id)
+        .map((row) => row.id));
+      const pinState = await readPinState(paths.sessionDir);
+      const pins = pinState.version === 1
+        ? expandLegacyPins(pinState.pinned, rowsBefore)
+        : new Set(pinState.pinned);
+      pins.delete(forkIdentity.id);
+      await writePins(paths.sessionDir, [...pins].filter((pin) => remainingIds.has(pin)));
+      const readState = await readReadState(paths.sessionDir);
+      const reads = readState.version === 1
+        ? expandLegacyReads(readState.reads, rowsBefore)
+        : { ...readState.reads };
+      delete reads[forkIdentity.id];
+      await writeReads(paths.sessionDir, Object.fromEntries(
+        Object.entries(reads).filter(([id]) => remainingIds.has(id)),
+      ));
     } catch (error) {
       this.logger.warn("could not discard an abandoned branch copy", {
         ghost: ghostName,
@@ -2749,6 +2925,7 @@ export class SessionHost {
     ghostName: string,
     options: RunAskReanswerOptions,
   ): Promise<void> {
+    assertPiConversation(options.runtime ?? "pi", "Ask re-answering");
     const adapter = createPiMessagesAdapter(options.emit, {
       includeThinking: options.includeThinking,
       deferAgentEnd: true,
@@ -2829,7 +3006,7 @@ export class SessionHost {
       options.emit({
         type: "branch_changed",
         transcript: this.transcriptFromManager(
-          options.sessionId || DEFAULT_SESSION_KEY,
+          options.sessionId ?? DEFAULT_SESSION_KEY,
           hosted.session.sessionManager,
         ),
       });
@@ -2853,14 +3030,15 @@ export class SessionHost {
       await this.releaseSessionClaim(hosted, ghostName);
       await this.announceConversationUpdated(
         ghostName,
-        options.sessionId || DEFAULT_SESSION_KEY,
+        "pi",
+        options.sessionId ?? DEFAULT_SESSION_KEY,
       );
     }
   }
 
   /** Drop one hosted session (aborting an in-flight turn). */
   async close(ghostName: string, sessionId?: string | null): Promise<void> {
-    await this.claudeCode.close(ghostName, sessionId || DEFAULT_SESSION_KEY);
+    await this.claudeCode.close(ghostName, sessionId ?? DEFAULT_SESSION_KEY);
     await this.closePi(ghostName, sessionId);
   }
 
@@ -2868,14 +3046,19 @@ export class SessionHost {
   async deleteSession(
     ghostName: string,
     sessionId?: string | null,
+    runtime: ConversationRuntime = "pi",
   ): Promise<TrashedConversation> {
     const ghost = this.registry.get(ghostName);
-    const id = sessionId || DEFAULT_SESSION_KEY;
-    const key = this.keyOf(ghostName, sessionId);
-    const hosted = this.sessions.get(key);
-    if (this.deleting.has(key) || this.opening.has(key)
-      || (hosted ? this.sessionOwned(hosted) : this.liveVoice.status(key).active)
-      || this.claudeCode.isBusy(ghostName, id)) {
+    const id = sessionId ?? DEFAULT_SESSION_KEY;
+    const identity = conversationIdentity(runtime, id);
+    const piKey = this.keyOf(ghostName, sessionId);
+    const deleteKey = deletionKeyOf(ghostName, runtime, id);
+    const hosted = runtime === "pi" ? this.sessions.get(piKey) : undefined;
+    const busy = runtime === "pi"
+      ? this.opening.has(piKey)
+        || (hosted ? this.sessionOwned(hosted) : this.liveVoice.status(piKey).active)
+      : this.claudeCode.isBusy(ghostName, id);
+    if (this.deleting.has(deleteKey) || busy) {
       throw new GhostError(
         "session_busy",
         "Wait for this conversation to finish before deleting it.",
@@ -2883,7 +3066,7 @@ export class SessionHost {
       );
     }
 
-    this.deleting.add(key);
+    this.deleting.add(deleteKey);
     try {
       // Title generation can still append to an otherwise-idle transcript.
       // Let it settle before disposal so deletion cannot race a late write.
@@ -2891,19 +3074,25 @@ export class SessionHost {
         .filter((task): task is Promise<void> => task !== undefined);
       if (background.length > 0) await Promise.allSettled(background);
 
-      await this.closePi(ghostName, sessionId);
+      if (runtime === "pi") await this.closePi(ghostName, sessionId);
+      else await this.claudeCode.close(ghostName, id);
       const paths = ghostPaths(ghost.dir);
       const piPath = join(paths.sessionDir, sessionFileNameFor(id));
       const claudePath = claudeSessionMetadataPath(paths.sessionDir, id);
-      const sourcePaths = await hostedConversationSourcePaths(ghost.dir, id);
+      if (runtime === "pi" && existsSync(piPath)) {
+        await requireSessionFileConversationId(piPath, id);
+      }
+      const rowsBefore = await this.collectSessions(ghost);
       const candidates: Array<{
         artifact: TrashedConversationArtifact["artifact"];
         path: string;
-      }> = [
-        ...sourcePaths.map((path) => ({ artifact: "hosted-source" as const, path })),
-        { artifact: "omp-transcript", path: piPath },
-        { artifact: "claude-sidecar", path: claudePath },
-      ];
+      }> = runtime === "pi"
+        ? [
+            ...(await hostedConversationSourcePaths(ghost.dir, id))
+              .map((path) => ({ artifact: "hosted-source" as const, path })),
+            { artifact: "omp-transcript", path: piPath },
+          ]
+        : [{ artifact: "claude-sidecar", path: claudePath }];
       const artifacts: TrashedConversationArtifact[] = [];
       for (const candidate of candidates) {
         try {
@@ -2919,28 +3108,36 @@ export class SessionHost {
       if (artifacts.length === 0) {
         throw new GhostError(
           "not_found",
-          `This ghost has no conversation ${JSON.stringify(id)}.`,
+          `This ghost has no conversation ${JSON.stringify(identity.id)}.`,
           404,
         );
       }
-      const pins = await readPins(paths.sessionDir);
-      if (pins.includes(id)) {
-        await writePins(paths.sessionDir, pins.filter((pin) => pin !== id));
-      }
-      const reads = await readReads(paths.sessionDir);
-      if (reads[id]) {
-        delete reads[id];
-        await writeReads(paths.sessionDir, reads);
-      }
+      const remainingIds = new Set(rowsBefore
+        .filter((row) => row.id !== identity.id)
+        .map((row) => row.id));
+      const pinState = await readPinState(paths.sessionDir);
+      const pins = pinState.version === 1
+        ? expandLegacyPins(pinState.pinned, rowsBefore)
+        : new Set(pinState.pinned);
+      pins.delete(identity.id);
+      await writePins(paths.sessionDir, [...pins].filter((pin) => remainingIds.has(pin)));
+      const readState = await readReadState(paths.sessionDir);
+      const reads = readState.version === 1
+        ? expandLegacyReads(readState.reads, rowsBefore)
+        : { ...readState.reads };
+      delete reads[identity.id];
+      await writeReads(paths.sessionDir, Object.fromEntries(
+        Object.entries(reads).filter(([key]) => remainingIds.has(key)),
+      ));
       this.logger.info("trashed ghost conversation", {
         ghost: ghostName,
-        session: id,
+        session: identity.id,
         artifacts: artifacts.map((entry) => entry.artifact),
       });
-      await this.announceConversationUpdated(ghostName, id);
+      await this.announceConversationUpdated(ghostName, runtime, id);
       return { artifacts };
     } finally {
-      this.deleting.delete(key);
+      this.deleting.delete(deleteKey);
     }
   }
 
@@ -2971,9 +3168,8 @@ export class SessionHost {
    *
    * The name IS the directory name, so this is one same-filesystem rename and
    * nothing else — persona, memory, docs, conversations, pins, and credentials
-   * are all inside the directory that moved, and every conversation id is still
-   * the transcript filename it always was. Nothing is copied, so nothing can be
-   * half-copied.
+   * are all inside the directory that moved, including the transcript identity
+   * metadata. Nothing is copied, so nothing can be half-copied.
    *
    * The gate is the one deletion uses: renaming is the same whole-home move,
    * and a conversation mid-turn holds paths under the old name.
@@ -3058,8 +3254,11 @@ export class SessionHost {
       if (sessionKeyParts(key)[0] !== ghostName) continue;
       if (this.sessionOwned(hosted)) return true;
     }
-    for (const key of [...this.opening.keys(), ...this.deleting]) {
+    for (const key of this.opening.keys()) {
       if (sessionKeyParts(key)[0] === ghostName) return true;
+    }
+    for (const key of this.deleting) {
+      if (deletionKeyGhost(key) === ghostName) return true;
     }
     return this.claudeCode.isGhostBusy(ghostName);
   }

@@ -19,8 +19,8 @@ catalog) is derived per session and never stored.
                                extensions, plugins, prompts, and MCP configuration
   .pi/                         per-ghost OMP settings, model roles, and credentials
   .sessions/                   daemon-owned OMP transcripts and runtime sidecars
-  .sessions/pins.json          pinned-conversation ids: { "pinned": ["<id>", …] }
-  .sessions/reads.json         owner read state: { "reads": { "<id>": "<ISO timestamp>" } }
+  .sessions/pins.json          v2 pinned state: { "version": 2, "pinned": ["<id>", …] }
+  .sessions/reads.json         v2 read state: { "version": 2, "reads": { "<id>": "<ISO timestamp>" } }
   conversations/*.json         lossless source transcripts from the hosted export;
                                retained unchanged until that conversation is trashed
   export-manifest.json         present in imported archives; counts, pathRewrites,
@@ -231,7 +231,7 @@ one must not be a leak of both.
   ghost's name IS its home directory's name, so renaming one is anchored by a
   same-filesystem rename of `<root>/<old>/` to `<root>/<new>/`. Persona, memory,
   docs, conversations, pins, and credentials are inside the directory that
-  moved; every conversation id (a transcript filename within it) stays valid,
+  moved; every conversation id stored with its transcript stays valid,
   and every other route's `:name` changes with it. `character.md` is the ghost's
   own words and its body is never touched — the one exception is a frontmatter
   `title` byte-equal to the old name, which is the seed's and becomes the new
@@ -311,15 +311,39 @@ one must not be a leak of both.
   OMP's `AgentSession` (request `{ model, context, options }` → SSE stream).
   The pinned client in the summon-ghost repo is the normative spec
   (`~/github.com/ferdousbhai/summon-ghost`, read-only reference).
-- `GET  /api/ghosts/:name/sessions` → `{ sessions: [{ id, title, createdAt,
+- A conversation has two distinct identifiers at this API boundary.
+  `conversationId` is the runtime-owned resume id and is passed unchanged as
+  pi-messages `options.sessionId`. `id` is the opaque public row/action id,
+  qualified as `pi:<conversationId>` or `claude-code:<conversationId>` so two
+  runtimes may own the same raw id without colliding. Every `:id` session action
+  below requires the qualified public id returned by the listing; unqualified
+  legacy action ids are `400 invalid_conversation_id`. The runtime prefixes are
+  the dispatch boundary, not part of the resume id. Pi transcript filenames are
+  safe implementation details: an id that cannot be used directly as a bounded
+  filename is mapped to a reserved hash name and stored exactly in native
+  transcript metadata. Listing and resume recover that exact id; a generated
+  filename stem is never an alternate resume id for the same transcript.
+  Legacy transcripts with no identity metadata keep their existing filename
+  stem as their sole raw id. An unsafe id sanitized by the pre-milestone writer
+  cannot be reconstructed; sending that original id after upgrade creates a
+  distinct correctly bound conversation instead of aliasing the legacy row.
+  A raw resume id contains 1–200 Unicode scalar values. Empty ids, ids over
+  that scalar-value bound, and JavaScript strings containing an unpaired UTF-16
+  high or low surrogate are `400 invalid_conversation_id`; ids are never
+  truncated, normalized, or repaired. A valid astral character counts as one
+  scalar value. The same grammar applies inside every runtime-qualified action
+  id and to stored Pi identity metadata.
+- `GET  /api/ghosts/:name/sessions` → `{ sessions: [{ id, conversationId,
+  runtime, title, createdAt,
   updatedAt, messageCount, pinned, unread }] }` — the ghost's conversations, **pinned
-  first, then newest-updated first within each group**. `id` is the
-  conversation id used to resume it (the pi-messages `options.sessionId`);
+  first, then newest-updated first within each group**. `runtime` is `"pi"` or
+  `"claude-code"`;
   `title` is a short auto-generated name or `null` until one is generated (see
   "Conversation titles" below). OMP transcripts and Claude Code resume sidecars
   share this shape (a Claude conversation's `title` is `"Claude Code"`).
 - `GET  /api/ghosts/:name/events` → an SSE stream of
-  `{ type: "conversation-updated", id, updatedAt }` invalidations. The daemon
+  `{ type: "conversation-updated", id, conversationId, runtime, updatedAt }`
+  invalidations. The daemon
   emits one after persisted conversation or read-state changes; clients refetch
   `GET …/sessions` rather than receiving a duplicated listing on this stream.
   It uses the same SSE headers and 15-second comment keepalive as turn streams.
@@ -330,6 +354,9 @@ one must not be a leak of both.
   state lives in `.sessions/pins.json` (atomic replace, never partial), works
   for OMP and Claude Code conversations alike, and is owner state, not derivable
   — one of the two deliberate owner-state exceptions in the daemon-owned dir.
+  Version 2 stores public qualified ids. A version 1 file with raw ids applies
+  each raw id to every currently matching runtime row and is migrated to version
+  2 on the next owner-state mutation.
   A non-boolean
   `pinned` is `400 invalid_request`; an unknown conversation id is `404 not_found`.
   Deleting a conversation drops its pin; a stale id (conversation gone) is
@@ -339,7 +366,9 @@ one must not be a leak of both.
   clock. Read state lives in `.sessions/reads.json` as conversation id to
   last-opened ISO timestamp (atomic replace, never partial), works for OMP and
   Claude Code conversations alike, and is owner state rather than something a
-  transcript can derive. A row is unread when it has never been opened or its
+  transcript can derive. Version 2 stores public qualified ids. A version 1
+  raw-id entry applies to every currently matching runtime row and is migrated
+  to version 2 on the next owner-state mutation. A row is unread when it has
   `updatedAt` is later than `readAt`. An unknown conversation id is
   `404 not_found`; deletion drops its read entry, and stale ids are pruned on
   the next write.
@@ -409,8 +438,9 @@ one must not be a leak of both.
   shutdown wait for an admitted startup before stopping it. The host is
   conversation-scoped and is stopped when that session closes. Claude Code
   returns `409 not_supported`.
-- `GET  /api/ghosts/:name/sessions/:id/transcript` → `{ id, title, messages,
-  total, truncated }` — a past conversation's history so the shell can rehydrate
+- `GET  /api/ghosts/:name/sessions/:id/transcript` → `{ id, conversationId,
+  runtime, title, messages, total, truncated }` — a past conversation's history
+  so the shell can rehydrate
   it (issue #26). `messages` are OMP's `{ role, content }` messages (user and
   assistant only; private `thinking` reasoning and internal tool-result messages
   are dropped, exactly as the live stream omits them), the same shape a
@@ -465,12 +495,14 @@ one must not be a leak of both.
   native mid-turn queues. POST is `{ mode: "steer"|"followUp", text }`:
   steering enters the active run, while follow-up runs after it.
 - `POST /api/ghosts/:name/sessions/:id/branch` with `{ action: "fork",
-  entryId }` → `{ sessionId, title, draft, transcript }` — branching off is a
+  entryId }` → `{ id, conversationId, runtime, sessionId, title, draft,
+  transcript }` — branching off is a
   **copy, not a rewind**. The conversation's transcript is forked into a new one
   (pi's `SessionManager.forkFrom`, whose header records `parentSession`), the
   copy is rewound to just before `entryId`, and that user message's text comes
-  back as `draft` for the composer. `sessionId` is the new conversation, already
-  in `GET …/sessions`; `transcript` is its rewound history. The source
+  back as `draft` for the composer. `id` is the new public action id;
+  `conversationId` and the compatibility alias `sessionId` are its raw resume id,
+  already in `GET …/sessions`; `transcript` is its rewound history. The source
   conversation is left untouched, leaf included. `entryId` must be a persisted
   user message (`400 invalid_branch`), the source must be idle
   (`409 session_busy`), and any other `action` is `400 invalid_request`.

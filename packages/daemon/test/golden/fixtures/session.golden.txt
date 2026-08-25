@@ -132,10 +132,12 @@ write               registry=yes  wire=yes  invokable=yes
 ------------------------------------------------------------------------------
 [
   {
+    "conversationId": "conv-golden",
     "createdAt": "<time>",
-    "id": "conv-golden",
+    "id": "pi:conv-golden",
     "messageCount": 6,
     "pinned": false,
+    "runtime": "pi",
     "title": "Remembering how you like answers",
     "unread": true,
     "updatedAt": "<time>"
@@ -146,7 +148,8 @@ write               registry=yes  wire=yes  invokable=yes
 [rendered transcript]
 ------------------------------------------------------------------------------
 {
-  "id": "conv-golden",
+  "conversationId": "conv-golden",
+  "id": "pi:conv-golden",
   "messages": [
     {
       "content": [
@@ -217,6 +220,7 @@ write               registry=yes  wire=yes  invokable=yes
       "timestamp": "<time>"
     }
   ],
+  "runtime": "pi",
   "title": "Remembering how you like answers",
   "total": 5,
   "truncated": false

@@ -97,8 +97,35 @@ const ghosts = ["casper", "moaning-myrtle"].map((name) => ({
 
 const conversationEventClients = new Map();
 
-function publishConversationUpdated(name, id, updatedAt = new Date().toISOString()) {
-  const event = `data: ${JSON.stringify({ type: "conversation-updated", id, updatedAt })}\n\n`;
+function conversationIdentity(runtime, conversationId) {
+  return { id: `${runtime}:${conversationId}`, runtime, conversationId };
+}
+
+function parseConversationIdentity(id) {
+  for (const runtime of ["pi", "claude-code"]) {
+    const prefix = `${runtime}:`;
+    if (id.startsWith(prefix) && id.length > prefix.length) {
+      return { id, runtime, conversationId: id.slice(prefix.length) };
+    }
+  }
+  return null;
+}
+
+function routeConversation(parts) {
+  try {
+    return parseConversationIdentity(decodeURIComponent(parts[4]));
+  } catch {
+    return null;
+  }
+}
+
+function publishConversationUpdated(name, runtime, conversationId,
+    updatedAt = new Date().toISOString()) {
+  const event = `data: ${JSON.stringify({
+    type: "conversation-updated",
+    ...conversationIdentity(runtime, conversationId),
+    updatedAt,
+  })}\n\n`;
   for (const response of conversationEventClients.get(name) ?? []) {
     if (!response.writableEnded) response.write(event);
   }
@@ -534,7 +561,7 @@ function ghostSessions(name) {
       ghostAsk: { resultEntryId: archiveResult, settled: "timedOut" },
     };
     const titled = {
-      id: `sess-${name}-1`,
+      ...conversationIdentity("pi", `sess-${name}-1`),
       title: "first contact",
       createdAt: new Date(now - 7_200_000).toISOString(),
       updatedAt: new Date(now - 3_600_000).toISOString(),
@@ -583,7 +610,7 @@ function ghostSessions(name) {
       ]),
     };
     const untitled = {
-      id: `sess-${name}-2`,
+      ...conversationIdentity("pi", `sess-${name}-2`),
       title: null, // background titling hasn't run — exercises the fallback label
       createdAt: new Date(now - 600_000).toISOString(),
       updatedAt: new Date(now - 600_000).toISOString(),
@@ -598,9 +625,8 @@ function ghostSessions(name) {
     // a number the sidecar reports rather than one derived from messages the
     // daemon has, so it is stored instead of counted.
     const sidecar = {
-      id: `sess-${name}-claude`,
+      ...conversationIdentity("claude-code", `sess-${name}-claude`),
       title: "Claude Code",
-      runtime: "claude-code",
       createdAt: new Date(now - 1_800_000).toISOString(),
       updatedAt: new Date(now - 1_500_000).toISOString(),
       messageCount: 18,
@@ -616,6 +642,8 @@ function ghostSessions(name) {
 
 const transcriptOf = (s) => ({
   id: s.id,
+  conversationId: s.conversationId,
+  runtime: s.runtime,
   title: s.title ?? null,
   messages: s.messages,
   total: s.messages.length,
@@ -653,7 +681,7 @@ function forkSession(name, source, entryId) {
   if (at < 0 || source.messages[at].role !== "user") return null;
   const now = Date.now();
   const fork = {
-    id: `sess-${name}-fork-${++forkSeq}`,
+    ...conversationIdentity("pi", `sess-${name}-fork-${++forkSeq}`),
     title: forkTitle(store, source.title),
     createdAt: new Date(now).toISOString(),
     updatedAt: new Date(now).toISOString(),
@@ -661,11 +689,19 @@ function forkSession(name, source, entryId) {
     messages: source.messages.slice(0, at).map(entry),
   };
   store.set(fork.id, fork);
-  return { sessionId: fork.id, title: fork.title, draft: source.messages[at].content, transcript: transcriptOf(fork) };
+  return {
+    ...conversationIdentity("pi", fork.conversationId),
+    sessionId: fork.conversationId,
+    title: fork.title,
+    draft: source.messages[at].content,
+    transcript: transcriptOf(fork),
+  };
 }
 
 const sessionSummary = (s) => ({
   id: s.id,
+  conversationId: s.conversationId,
+  runtime: s.runtime,
   title: s.title ?? null,
   createdAt: s.createdAt,
   updatedAt: s.updatedAt,
@@ -680,11 +716,19 @@ function recordTurn(name, sessionId, prompt, assistantText, ownerMessages = []) 
   if (!sessionId) return;
   const store = ghostSessions(name);
   const now = Date.now();
-  let s = store.get(sessionId);
+  const runtime = resolveCurrent(name).current?.provider === "claude-code" ? "claude-code" : "pi";
+  const identity = conversationIdentity(runtime, sessionId);
+  let s = store.get(identity.id);
   if (!s) {
     // A brand-new conversation the HUD minted: the daemon creates it lazily here.
-    s = { id: sessionId, title: null, createdAt: new Date(now).toISOString(), updatedAt: new Date(now).toISOString(), messages: [] };
-    store.set(sessionId, s);
+    s = {
+      ...identity,
+      title: runtime === "claude-code" ? "Claude Code" : null,
+      createdAt: new Date(now).toISOString(),
+      updatedAt: new Date(now).toISOString(),
+      messages: [],
+    };
+    store.set(identity.id, s);
   }
   s.messages.push(entry({ role: "user", content: prompt, timestamp: now }));
   for (const text of ownerMessages) {
@@ -694,7 +738,7 @@ function recordTurn(name, sessionId, prompt, assistantText, ownerMessages = []) 
   s.updatedAt = new Date(now).toISOString();
   // Background titling after the first turn: derive a title from the prompt.
   if (!s.title) s.title = prompt.slice(0, 40) || "New conversation";
-  publishConversationUpdated(name, sessionId, s.updatedAt);
+  publishConversationUpdated(name, runtime, sessionId, s.updatedAt);
 }
 
 // ---- Greetings -------------------------------------------------------------
@@ -1577,21 +1621,30 @@ createServer(async (req, res) => {
   }
   if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "live"
       && req.method === "GET") {
-    return json(res, 200, ghostLive(name, decodeURIComponent(parts[4])));
+    const conversation = routeConversation(parts);
+    if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
+    if (conversation.runtime !== "pi") {
+      return json(res, 409, { error: { code: "not_supported", message: "Claude Code has no live voice" } });
+    }
+    return json(res, 200, ghostLive(name, conversation.id));
   }
   if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "live"
       && req.method === "POST") {
-    const sessionId = decodeURIComponent(parts[4]);
+    const conversation = routeConversation(parts);
+    if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
+    if (conversation.runtime !== "pi") {
+      return json(res, 409, { error: { code: "not_supported", message: "Claude Code has no live voice" } });
+    }
     const body = await readBody(req).catch(() => ({}));
     const action = body?.action;
-    const current = ghostLive(name, sessionId);
+    const current = ghostLive(name, conversation.id);
     if (!["start", "mute", "unmute", "stop"].includes(action)) {
       return json(res, 400, {
         error: { message: "Unknown live-voice action", code: "invalid_request" },
       });
     }
     if (action === "start") {
-      return json(res, 200, setGhostLive(name, sessionId, {
+      return json(res, 200, setGhostLive(name, conversation.id, {
         phase: "listening",
         muted: false,
         inputLevel: 0.42,
@@ -1604,14 +1657,14 @@ createServer(async (req, res) => {
       }));
     }
     if (action === "stop") {
-      return json(res, 200, setGhostLive(name, sessionId, {
+      return json(res, 200, setGhostLive(name, conversation.id, {
         ...current,
         phase: "stopped",
         muted: false,
         inputLevel: 0,
       }));
     }
-    return json(res, 200, setGhostLive(name, sessionId, {
+    return json(res, 200, setGhostLive(name, conversation.id, {
       ...current,
       phase: action === "mute" ? "muted" : "listening",
       muted: action === "mute",
@@ -1619,7 +1672,11 @@ createServer(async (req, res) => {
     }));
   }
   if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "collab") {
-    const sessionId = decodeURIComponent(parts[4]);
+    const conversation = routeConversation(parts);
+    if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
+    if (conversation.runtime !== "pi") {
+      return json(res, 409, { error: { code: "not_supported", message: "Claude Code has no collaboration host" } });
+    }
     // One seeded ghost demonstrates a daemon that deliberately defers the
     // feature. The UI should render this as product status, not a red HTTP dump.
     if (name === "moaning-myrtle") {
@@ -1630,11 +1687,11 @@ createServer(async (req, res) => {
         },
       });
     }
-    if (req.method === "GET") return json(res, 200, ghostCollab(name, sessionId));
+    if (req.method === "GET") return json(res, 200, ghostCollab(name, conversation.id));
     if (req.method === "POST") {
       const body = await readBody(req).catch(() => ({}));
       if (body?.action === "stop") {
-        return json(res, 200, setGhostCollab(name, sessionId,
+        return json(res, 200, setGhostCollab(name, conversation.id,
           { active: false, phase: "stopped" }));
       }
       if (body?.action !== "start" || body.confirmed !== true
@@ -1646,7 +1703,7 @@ createServer(async (req, res) => {
       const token = ++collabSeq;
       const relay = typeof body.relayUrl === "string" && body.relayUrl.trim() !== ""
         ? body.relayUrl.replace(/\/$/u, "") : "https://relay.example.test";
-      return json(res, 200, setGhostCollab(name, sessionId, {
+      return json(res, 200, setGhostCollab(name, conversation.id, {
         active: true,
         phase: "connected",
         writable: body.writable,
@@ -1670,36 +1727,55 @@ createServer(async (req, res) => {
     return json(res, 200, { sessions: list });
   }
   if (parts[3] === "sessions" && parts.length === 5 && req.method === "DELETE") {
-    const sessionId = decodeURIComponent(parts[4]);
-    const deleted = ghostSessions(name).delete(sessionId);
-    if (deleted) publishConversationUpdated(name, sessionId);
+    const conversation = routeConversation(parts);
+    if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
+    const deleted = ghostSessions(name).delete(conversation.id);
+    if (deleted) publishConversationUpdated(name, conversation.runtime, conversation.conversationId);
     return deleted
       ? json(res, 200, { ok: true })
       : json(res, 404, { error: { message: "no such session", code: "not_found" } });
   }
   if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "read" && req.method === "PUT") {
     await readBody(req).catch(() => ({}));
-    const s = ghostSessions(name).get(decodeURIComponent(parts[4]));
+    const conversation = routeConversation(parts);
+    if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
+    const s = ghostSessions(name).get(conversation.id);
     if (!s) return json(res, 404, { error: { message: "no such session", code: "not_found" } });
     s.readAt = new Date().toISOString();
-    publishConversationUpdated(name, s.id, s.updatedAt);
+    publishConversationUpdated(name, s.runtime, s.conversationId, s.updatedAt);
     return json(res, 200, { ok: true, readAt: s.readAt });
   }
   if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "commands" && req.method === "GET") {
+    const conversation = routeConversation(parts);
+    if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
+    if (conversation.runtime !== "pi") {
+      return json(res, 409, { error: { code: "not_supported", message: "Claude Code has no OMP commands" } });
+    }
     return json(res, 200, { commands: MOCK_COMMANDS });
   }
   if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "transcript" && req.method === "GET") {
-    const s = ghostSessions(name).get(decodeURIComponent(parts[4]));
+    const conversation = routeConversation(parts);
+    if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
+    const s = ghostSessions(name).get(conversation.id);
     // A Claude Code conversation's transcript lives in that runtime's storage,
     // so there is nothing here to read even though the row is in the listing.
     if (!s || s.runtime === "claude-code") {
-      return json(res, 404, { error: { message: "no such session", code: "session_not_found" } });
+      return json(res, s ? 409 : 404, {
+        error: {
+          message: s ? "Claude Code owns this transcript" : "no such session",
+          code: s ? "not_supported" : "session_not_found",
+        },
+      });
     }
     return json(res, 200, transcriptOf(s));
   }
   if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "queue") {
-    const sessionId = decodeURIComponent(parts[4]);
-    const turn = activeTurns.get(turnKey(name, sessionId));
+    const conversation = routeConversation(parts);
+    if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
+    if (conversation.runtime !== "pi") {
+      return json(res, 409, { error: { code: "not_supported", message: "Claude Code has no OMP queue" } });
+    }
+    const turn = activeTurns.get(turnKey(name, conversation.conversationId));
     const snapshot = () => ({
       streaming: turn?.streaming === true,
       count: (turn?.steering.length ?? 0) + (turn?.followUp.length ?? 0),
@@ -1744,20 +1820,26 @@ createServer(async (req, res) => {
     if (title.length > 120) {
       return json(res, 400, { error: { message: "a title is at most 120 characters", code: "invalid_request" } });
     }
-    const s = ghostSessions(name).get(decodeURIComponent(parts[4]));
+    const conversation = routeConversation(parts);
+    if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
+    const s = ghostSessions(name).get(conversation.id);
     if (!s) return json(res, 404, { error: { message: "no such session", code: "not_found" } });
     if (s.runtime === "claude-code") {
       return json(res, 409, { error: { message: "Claude Code owns this conversation's title", code: "not_supported" } });
     }
     s.title = title;
-    publishConversationUpdated(name, s.id, s.updatedAt);
+    publishConversationUpdated(name, s.runtime, s.conversationId, s.updatedAt);
     return json(res, 200, { ok: true, title: s.title });
   }
   if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "branch" && req.method === "POST") {
-    const sessionId = decodeURIComponent(parts[4]);
-    const s = ghostSessions(name).get(sessionId);
+    const conversation = routeConversation(parts);
+    if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
+    if (conversation.runtime !== "pi") {
+      return json(res, 409, { error: { code: "not_supported", message: "Claude Code cannot branch here" } });
+    }
+    const s = ghostSessions(name).get(conversation.id);
     if (!s) return json(res, 404, { error: { message: "no such session", code: "not_found" } });
-    if (answering.has(turnKey(name, sessionId))) {
+    if (answering.has(turnKey(name, conversation.conversationId))) {
       return json(res, 409, {
         error: { message: `${name} is still answering — stop the turn first`, code: "session_busy" },
       });
@@ -1774,12 +1856,22 @@ createServer(async (req, res) => {
 
   // ---- The ask a paused turn is waiting on ---------------------------------
   if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "ask" && req.method === "GET") {
-    const pending = pendingAsks.get(askKey(name, decodeURIComponent(parts[4])));
+    const conversation = routeConversation(parts);
+    if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
+    if (conversation.runtime !== "pi") {
+      return json(res, 409, { error: { code: "not_supported", message: "Claude Code has no OMP ask" } });
+    }
+    const pending = pendingAsks.get(askKey(name, conversation.conversationId));
     return json(res, 200, { ask: pending ? pending.view : null });
   }
   if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "ask" && req.method === "POST") {
     const body = await readBody(req).catch(() => ({}));
-    const pending = pendingAsks.get(askKey(name, decodeURIComponent(parts[4])));
+    const conversation = routeConversation(parts);
+    if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
+    if (conversation.runtime !== "pi") {
+      return json(res, 409, { error: { code: "not_supported", message: "Claude Code has no OMP ask" } });
+    }
+    const pending = pendingAsks.get(askKey(name, conversation.conversationId));
     // Settled or superseded reads the same from here: the question this client
     // is holding is not the one being waited on.
     if (!pending || pending.view.id !== body?.askId) {
@@ -1796,10 +1888,14 @@ createServer(async (req, res) => {
     return json(res, 200, { ok: true });
   }
   if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "reanswer" && req.method === "POST") {
-    const sessionId = decodeURIComponent(parts[4]);
-    const s = ghostSessions(name).get(sessionId);
+    const conversation = routeConversation(parts);
+    if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
+    if (conversation.runtime !== "pi") {
+      return json(res, 409, { error: { code: "not_supported", message: "Claude Code has no OMP ask" } });
+    }
+    const s = ghostSessions(name).get(conversation.id);
     if (!s) return json(res, 404, { error: { message: "no such session", code: "not_found" } });
-    if (answering.has(turnKey(name, sessionId))) {
+    if (answering.has(turnKey(name, conversation.conversationId))) {
       return json(res, 409, {
         error: { message: `${name} is still answering — stop the turn first`, code: "session_busy" },
       });
@@ -1814,7 +1910,7 @@ createServer(async (req, res) => {
         error: { message: "no ask result with that entryId", code: "ask_not_reanswerable" },
       });
     }
-    return streamReanswer(req, res, name, sessionId, s, entryId, record);
+    return streamReanswer(req, res, name, conversation.conversationId, s, entryId, record);
   }
 
   // ---- Model indicator + switcher ------------------------------------------

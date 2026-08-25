@@ -3,7 +3,14 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { READS_FILENAME, readsPath, readReads, writeReads } from "../src/reads.js";
+import {
+  READS_FILENAME,
+  READS_VERSION,
+  readReadState,
+  readsPath,
+  readReads,
+  writeReads,
+} from "../src/reads.js";
 
 let sessionDir: string | null = null;
 
@@ -25,6 +32,12 @@ describe("reads.json", () => {
       writeFileSync(readsPath(dir), body, "utf8");
       expect(await readReads(dir), JSON.stringify(body)).toEqual({});
     }
+    writeFileSync(
+      readsPath(dir),
+      JSON.stringify({ version: 99, reads: { "pi:conv-1": "2026-08-25T10:11:12.000Z" } }),
+      "utf8",
+    );
+    expect(await readReadState(dir)).toEqual({ version: READS_VERSION, reads: {} });
   });
 
   it("round-trips valid ISO timestamps and drops invalid entries", async () => {
@@ -38,6 +51,7 @@ describe("reads.json", () => {
     expect(await readReads(dir)).toEqual({
       "conv-1": "2026-08-25T10:11:12.000Z",
     });
+    expect((await readReadState(dir)).version).toBe(1);
   });
 
   it("writes privately by atomic replacement without temporary debris", async () => {
@@ -49,6 +63,7 @@ describe("reads.json", () => {
     expect(readdirSync(dir)).toEqual([READS_FILENAME]);
     expect(statSync(readsPath(dir)).mode & 0o777).toBe(0o600);
     const stored = JSON.parse(readFileSync(readsPath(dir), "utf8"));
+    expect(stored.version).toBe(READS_VERSION);
     expect(["a", "b"]).toContain(Object.keys(stored.reads)[0]);
   });
 });

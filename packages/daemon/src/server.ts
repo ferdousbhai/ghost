@@ -19,7 +19,7 @@
  *   GET  /api/ghosts/:name/sessions/:id/commands → OMP's session command catalog
  *   GET|POST /api/ghosts/:name/sessions/:id/live → realtime voice lifecycle
  *   GET|POST /api/ghosts/:name/sessions/:id/collab → encrypted relay collaboration
- *   GET  /api/ghosts/:name/sessions/:id/transcript → { id, title, messages } for resume
+ *   GET  /api/ghosts/:name/sessions/:id/transcript → stored messages for resume
  *   GET  /api/ghosts/:name/sessions/:id/ask → { ask } — current OMP ask, if any
  *   POST /api/ghosts/:name/sessions/:id/ask → resolve that ask
  *   GET  /api/ghosts/:name/sessions/:id/queue → OMP steering/follow-up queues
@@ -69,6 +69,10 @@ import type { AddressInfo } from "node:net";
 import { apiTokenMatches, readOrCreateApiToken } from "./api-token.js";
 import type { AuthType, LoginManager } from "./auth.js";
 import { assertLoopback } from "./config.js";
+import {
+  requireConversationIdentity,
+  type ConversationIdentity,
+} from "./conversation-identity.js";
 import { readGhostContext } from "./context-catalog.js";
 import {
   trashGhostContextFile,
@@ -218,6 +222,10 @@ function decodePathSegment(segment: string): string {
     if (error instanceof URIError) throw new InvalidPathEncodingError();
     throw error;
   }
+}
+
+function decodeConversationIdentity(segment: string): ConversationIdentity {
+  return requireConversationIdentity(decodePathSegment(segment));
 }
 
 /** The token out of `Authorization: Bearer <token>`, or "" when there is none. */
@@ -527,22 +535,30 @@ export function createDaemonServer(options: ServerOptions): Server {
 
   const handleDeleteSession = async (
     ghostName: string,
-    conversationId: string,
+    conversation: ConversationIdentity,
     response: ServerResponse,
   ): Promise<void> => {
-    const { artifacts } = await options.host.deleteSession(ghostName, conversationId);
+    const { artifacts } = await options.host.deleteSession(
+      ghostName,
+      conversation.conversationId,
+      conversation.runtime,
+    );
     jsonResponse(response, 200, { ok: true, trash: artifacts });
   };
 
   const handleLiveVoice = async (
     ghostName: string,
-    conversationId: string,
+    conversation: ConversationIdentity,
     method: string,
     request: IncomingMessage,
     response: ServerResponse,
   ): Promise<void> => {
     if (method === "GET") {
-      jsonResponse(response, 200, options.host.liveVoiceStatus(ghostName, conversationId));
+      jsonResponse(response, 200, options.host.liveVoiceStatus(
+        ghostName,
+        conversation.conversationId,
+        conversation.runtime,
+      ));
       return;
     }
     if (method !== "POST") {
@@ -567,19 +583,28 @@ export function createDaemonServer(options: ServerOptions): Server {
     jsonResponse(
       response,
       action === "start" ? 201 : 200,
-      await options.host.liveVoiceAction(ghostName, conversationId, action),
+      await options.host.liveVoiceAction(
+        ghostName,
+        conversation.conversationId,
+        action,
+        conversation.runtime,
+      ),
     );
   };
 
   const handleCollaboration = async (
     ghostName: string,
-    conversationId: string,
+    conversation: ConversationIdentity,
     method: string,
     request: IncomingMessage,
     response: ServerResponse,
   ): Promise<void> => {
     if (method === "GET") {
-      jsonResponse(response, 200, options.host.collaborationStatus(ghostName, conversationId));
+      jsonResponse(response, 200, options.host.collaborationStatus(
+        ghostName,
+        conversation.conversationId,
+        conversation.runtime,
+      ));
       return;
     }
     if (method !== "POST") {
@@ -612,12 +637,17 @@ export function createDaemonServer(options: ServerOptions): Server {
     jsonResponse(
       response,
       action === "start" ? 201 : 200,
-      await options.host.collaborationAction(ghostName, conversationId, {
-        action,
-        ...(typeof relayUrl === "string" ? { relayUrl } : {}),
-        ...(typeof writable === "boolean" ? { writable } : {}),
-        confirmed: confirmed === true,
-      }),
+      await options.host.collaborationAction(
+        ghostName,
+        conversation.conversationId,
+        {
+          action,
+          ...(typeof relayUrl === "string" ? { relayUrl } : {}),
+          ...(typeof writable === "boolean" ? { writable } : {}),
+          confirmed: confirmed === true,
+        },
+        conversation.runtime,
+      ),
     );
   };
 
@@ -627,7 +657,7 @@ export function createDaemonServer(options: ServerOptions): Server {
    */
   const handleSetSessionPin = async (
     ghostName: string,
-    conversationId: string,
+    conversation: ConversationIdentity,
     request: IncomingMessage,
     response: ServerResponse,
   ): Promise<void> => {
@@ -641,14 +671,19 @@ export function createDaemonServer(options: ServerOptions): Server {
       errorResponse(response, 400, "invalid_request", "\"pinned\" must be a boolean.");
       return;
     }
-    await options.host.setPinned(ghostName, conversationId, pinned);
+    await options.host.setPinned(
+      ghostName,
+      conversation.conversationId,
+      pinned,
+      conversation.runtime,
+    );
     jsonResponse(response, 200, { ok: true, pinned });
   };
 
   /** Mark one conversation opened using the daemon's clock. */
   const handleMarkSessionRead = async (
     ghostName: string,
-    conversationId: string,
+    conversation: ConversationIdentity,
     request: IncomingMessage,
     response: ServerResponse,
   ): Promise<void> => {
@@ -657,14 +692,19 @@ export function createDaemonServer(options: ServerOptions): Server {
       errorResponse(response, 400, "invalid_request", "Request body must be a JSON object.");
       return;
     }
-    const readAt = await options.host.markRead(ghostName, conversationId);
+    const readAt = await options.host.markRead(
+      ghostName,
+      conversation.conversationId,
+      undefined,
+      conversation.runtime,
+    );
     jsonResponse(response, 200, { ok: true, readAt });
   };
 
   /** Rename one conversation. A conversation name cannot be unset. */
   const handleRenameSession = async (
     ghostName: string,
-    conversationId: string,
+    conversation: ConversationIdentity,
     request: IncomingMessage,
     response: ServerResponse,
   ): Promise<void> => {
@@ -692,17 +732,26 @@ export function createDaemonServer(options: ServerOptions): Server {
       );
       return;
     }
-    const stored = await options.host.renameConversation(ghostName, conversationId, trimmed);
+    const stored = await options.host.renameConversation(
+      ghostName,
+      conversation.conversationId,
+      trimmed,
+      conversation.runtime,
+    );
     jsonResponse(response, 200, { ok: true, title: stored });
   };
 
   const handleSessionCommands = async (
     ghostName: string,
-    conversationId: string,
+    conversation: ConversationIdentity,
     response: ServerResponse,
   ): Promise<void> => {
     jsonResponse(response, 200, {
-      commands: await options.host.availableCommands(ghostName, conversationId),
+      commands: await options.host.availableCommands(
+        ghostName,
+        conversation.conversationId,
+        conversation.runtime,
+      ),
     });
   };
 
@@ -924,7 +973,7 @@ export function createDaemonServer(options: ServerOptions): Server {
 
   const handleTranscript = async (
     ghostName: string,
-    conversationId: string,
+    conversation: ConversationIdentity,
     url: URL,
     response: ServerResponse,
   ): Promise<void> => {
@@ -947,7 +996,12 @@ export function createDaemonServer(options: ServerOptions): Server {
       }
       query.offset = parsed;
     }
-    jsonResponse(response, 200, await options.host.readTranscript(ghostName, conversationId, query));
+    jsonResponse(response, 200, await options.host.readTranscript(
+      ghostName,
+      conversation.conversationId,
+      query,
+      conversation.runtime,
+    ));
   };
 
   const handleListProviders = async (
@@ -1305,7 +1359,7 @@ export function createDaemonServer(options: ServerOptions): Server {
 
   const handleBranch = async (
     ghostName: string,
-    sessionId: string,
+    conversation: ConversationIdentity,
     method: string,
     request: IncomingMessage,
     response: ServerResponse,
@@ -1328,7 +1382,12 @@ export function createDaemonServer(options: ServerOptions): Server {
       jsonResponse(
         response,
         200,
-        await options.host.forkConversation(ghostName, sessionId, entryId),
+        await options.host.forkConversation(
+          ghostName,
+          conversation.conversationId,
+          entryId,
+          conversation.runtime,
+        ),
       );
       return;
     }
@@ -1337,7 +1396,7 @@ export function createDaemonServer(options: ServerOptions): Server {
 
   const handleAskReanswer = async (
     ghostName: string,
-    sessionId: string,
+    conversation: ConversationIdentity,
     method: string,
     request: IncomingMessage,
     response: ServerResponse,
@@ -1359,7 +1418,8 @@ export function createDaemonServer(options: ServerOptions): Server {
     options.registry.get(ghostName);
     await streamSessionEvents(request, response, (emit, signal) =>
       options.host.runAskReanswer(ghostName, {
-        sessionId,
+        sessionId: conversation.conversationId,
+        runtime: conversation.runtime,
         entryId,
         emit,
         signal,
@@ -1369,13 +1429,17 @@ export function createDaemonServer(options: ServerOptions): Server {
 
   const handleAsk = async (
     ghostName: string,
-    sessionId: string,
+    conversation: ConversationIdentity,
     method: string,
     request: IncomingMessage,
     response: ServerResponse,
   ): Promise<void> => {
     if (method === "GET") {
-      jsonResponse(response, 200, { ask: options.host.pendingAsk(ghostName, sessionId) });
+      jsonResponse(response, 200, { ask: options.host.pendingAsk(
+        ghostName,
+        conversation.conversationId,
+        conversation.runtime,
+      ) });
       return;
     }
     if (method !== "POST") {
@@ -1392,19 +1456,29 @@ export function createDaemonServer(options: ServerOptions): Server {
       errorResponse(response, 400, "invalid_request", '"askId" must be a non-empty string.');
       return;
     }
-    options.host.answerAsk(ghostName, sessionId, askId, answer);
+    options.host.answerAsk(
+      ghostName,
+      conversation.conversationId,
+      askId,
+      answer,
+      conversation.runtime,
+    );
     jsonResponse(response, 200, { accepted: true });
   };
 
   const handleQueue = async (
     ghostName: string,
-    sessionId: string,
+    conversation: ConversationIdentity,
     method: string,
     request: IncomingMessage,
     response: ServerResponse,
   ): Promise<void> => {
     if (method === "GET") {
-      jsonResponse(response, 200, options.host.queuedMessages(ghostName, sessionId));
+      jsonResponse(response, 200, options.host.queuedMessages(
+        ghostName,
+        conversation.conversationId,
+        conversation.runtime,
+      ));
       return;
     }
     if (method !== "POST") {
@@ -1428,7 +1502,13 @@ export function createDaemonServer(options: ServerOptions): Server {
     jsonResponse(
       response,
       200,
-      await options.host.queueMessage(ghostName, sessionId, mode, text.trim()),
+      await options.host.queueMessage(
+        ghostName,
+        conversation.conversationId,
+        mode,
+        text.trim(),
+        conversation.runtime,
+      ),
     );
   };
 
@@ -1528,7 +1608,7 @@ export function createDaemonServer(options: ServerOptions): Server {
           }
           return await handleDeleteSession(
             ghostName,
-            decodePathSegment(segments[4] ?? ""),
+            decodeConversationIdentity(segments[4] ?? ""),
             response,
           );
         }
@@ -1539,7 +1619,7 @@ export function createDaemonServer(options: ServerOptions): Server {
           }
           return await handleSetSessionPin(
             ghostName,
-            decodePathSegment(segments[4] ?? ""),
+            decodeConversationIdentity(segments[4] ?? ""),
             request,
             response,
           );
@@ -1551,7 +1631,7 @@ export function createDaemonServer(options: ServerOptions): Server {
           }
           return await handleMarkSessionRead(
             ghostName,
-            decodePathSegment(segments[4] ?? ""),
+            decodeConversationIdentity(segments[4] ?? ""),
             request,
             response,
           );
@@ -1563,7 +1643,7 @@ export function createDaemonServer(options: ServerOptions): Server {
           }
           return await handleRenameSession(
             ghostName,
-            decodePathSegment(segments[4] ?? ""),
+            decodeConversationIdentity(segments[4] ?? ""),
             request,
             response,
           );
@@ -1575,14 +1655,14 @@ export function createDaemonServer(options: ServerOptions): Server {
           }
           return await handleSessionCommands(
             ghostName,
-            decodePathSegment(segments[4] ?? ""),
+            decodeConversationIdentity(segments[4] ?? ""),
             response,
           );
         }
         if (segments.length === 6 && segments[3] === "sessions" && segments[5] === "live") {
           return await handleLiveVoice(
             ghostName,
-            decodePathSegment(segments[4] ?? ""),
+            decodeConversationIdentity(segments[4] ?? ""),
             method,
             request,
             response,
@@ -1591,7 +1671,7 @@ export function createDaemonServer(options: ServerOptions): Server {
         if (segments.length === 6 && segments[3] === "sessions" && segments[5] === "collab") {
           return await handleCollaboration(
             ghostName,
-            decodePathSegment(segments[4] ?? ""),
+            decodeConversationIdentity(segments[4] ?? ""),
             method,
             request,
             response,
@@ -1604,7 +1684,7 @@ export function createDaemonServer(options: ServerOptions): Server {
           }
           return await handleTranscript(
             ghostName,
-            decodePathSegment(segments[4] ?? ""),
+            decodeConversationIdentity(segments[4] ?? ""),
             url,
             response,
           );
@@ -1612,7 +1692,7 @@ export function createDaemonServer(options: ServerOptions): Server {
         if (segments.length === 6 && segments[3] === "sessions" && segments[5] === "ask") {
           return await handleAsk(
             ghostName,
-            decodePathSegment(segments[4] ?? ""),
+            decodeConversationIdentity(segments[4] ?? ""),
             method,
             request,
             response,
@@ -1621,7 +1701,7 @@ export function createDaemonServer(options: ServerOptions): Server {
         if (segments.length === 6 && segments[3] === "sessions" && segments[5] === "queue") {
           return await handleQueue(
             ghostName,
-            decodePathSegment(segments[4] ?? ""),
+            decodeConversationIdentity(segments[4] ?? ""),
             method,
             request,
             response,
@@ -1630,7 +1710,7 @@ export function createDaemonServer(options: ServerOptions): Server {
         if (segments.length === 6 && segments[3] === "sessions" && segments[5] === "branch") {
           return await handleBranch(
             ghostName,
-            decodePathSegment(segments[4] ?? ""),
+            decodeConversationIdentity(segments[4] ?? ""),
             method,
             request,
             response,
@@ -1639,7 +1719,7 @@ export function createDaemonServer(options: ServerOptions): Server {
         if (segments.length === 6 && segments[3] === "sessions" && segments[5] === "reanswer") {
           return await handleAskReanswer(
             ghostName,
-            decodePathSegment(segments[4] ?? ""),
+            decodeConversationIdentity(segments[4] ?? ""),
             method,
             request,
             response,

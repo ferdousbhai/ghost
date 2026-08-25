@@ -1,5 +1,8 @@
 /** Unread transitions and the passive conversation invalidation stream. */
+import { mkdirSync, writeFileSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
+import { claudeSessionMetadataPath } from "../src/claude-code.js";
+import { ghostPaths } from "../src/ghosts.js";
 import { startDaemonServer, type ListeningServer } from "../src/server.js";
 import { SessionHost } from "../src/session-host.js";
 import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
@@ -61,7 +64,13 @@ async function postTurn(base: string): Promise<void> {
 
 async function nextEvent(
   reader: Pick<ReadableStreamDefaultReader<Uint8Array>, "read">,
-): Promise<{ type: string; id: string; updatedAt: string }> {
+): Promise<{
+  type: string;
+  id: string;
+  conversationId: string;
+  runtime: "pi" | "claude-code";
+  updatedAt: string;
+}> {
   const decoder = new TextDecoder();
   let buffer = "";
   const read = async () => {
@@ -74,6 +83,8 @@ async function nextEvent(
         if (line) return JSON.parse(line.slice(5).trim()) as {
           type: string;
           id: string;
+          conversationId: string;
+          runtime: "pi" | "claude-code";
           updatedAt: string;
         };
         continue;
@@ -102,7 +113,12 @@ describe("conversation unread state", () => {
     let row = (await host!.listSessions("casper"))[0]!;
     expect(row.unread).toBe(true);
 
-    await host!.markRead("casper", row.id, new Date(Date.parse(row.updatedAt) + 1));
+    await host!.markRead(
+      "casper",
+      row.conversationId,
+      new Date(Date.parse(row.updatedAt) + 1),
+      row.runtime,
+    );
     row = (await host!.listSessions("casper"))[0]!;
     expect(row.unread).toBe(false);
 
@@ -113,7 +129,9 @@ describe("conversation unread state", () => {
       emit: () => {},
     });
     expect((await host!.listSessions("casper"))[0]).toMatchObject({
-      id: "conv-1",
+      id: "pi:conv-1",
+      conversationId: "conv-1",
+      runtime: "pi",
       unread: true,
     });
   });
@@ -134,14 +152,16 @@ describe("GET /api/ghosts/:name/events", () => {
     await postTurn(base);
     expect(await nextEvent(reader)).toMatchObject({
       type: "conversation-updated",
-      id: "conv-1",
+      id: "pi:conv-1",
+      conversationId: "conv-1",
+      runtime: "pi",
     });
     let listing = await (await fetch(`${base}/api/ghosts/casper/sessions`)).json() as {
       sessions: Array<{ unread: boolean }>;
     };
     expect(listing.sessions[0]?.unread).toBe(true);
 
-    const marked = await fetch(`${base}/api/ghosts/casper/sessions/conv-1/read`, {
+    const marked = await fetch(`${base}/api/ghosts/casper/sessions/pi%3Aconv-1/read`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: "{}",
@@ -149,12 +169,60 @@ describe("GET /api/ghosts/:name/events", () => {
     expect(marked.status).toBe(200);
     expect(await nextEvent(reader)).toMatchObject({
       type: "conversation-updated",
-      id: "conv-1",
+      id: "pi:conv-1",
+      conversationId: "conv-1",
+      runtime: "pi",
     });
     listing = await (await fetch(`${base}/api/ghosts/casper/sessions`)).json() as {
       sessions: Array<{ unread: boolean }>;
     };
     expect(listing.sessions[0]?.unread).toBe(false);
+
+    controller.abort();
+    await expect(reader.closed).rejects.toBeDefined();
+  });
+
+  it("keeps equal raw Pi and Claude ids distinct on the invalidation stream", async () => {
+    const base = await setup();
+    await postTurn(base);
+    const sessionDir = ghostPaths(temp!.registry.get("casper").dir).sessionDir;
+    mkdirSync(sessionDir, { recursive: true });
+    const now = new Date().toISOString();
+    writeFileSync(
+      claudeSessionMetadataPath(sessionDir, "conv-1"),
+      JSON.stringify({
+        version: 1,
+        runtime: "claude-code",
+        conversationId: "conv-1",
+        sessionId: "8f0a1c1e-0000-4000-8000-000000000000",
+        created: now,
+        modified: now,
+        messageCount: 2,
+      }),
+      "utf8",
+    );
+    const controller = new AbortController();
+    const response = await fetch(`${base}/api/ghosts/casper/events`, {
+      signal: controller.signal,
+    });
+    const reader = response.body!.getReader();
+
+    const markRead = (id: string) => fetch(
+      `${base}/api/ghosts/casper/sessions/${encodeURIComponent(id)}/read`,
+      { method: "PUT", headers: { "content-type": "application/json" }, body: "{}" },
+    );
+    expect((await markRead("claude-code:conv-1")).status).toBe(200);
+    expect(await nextEvent(reader)).toMatchObject({
+      id: "claude-code:conv-1",
+      conversationId: "conv-1",
+      runtime: "claude-code",
+    });
+    expect((await markRead("pi:conv-1")).status).toBe(200);
+    expect(await nextEvent(reader)).toMatchObject({
+      id: "pi:conv-1",
+      conversationId: "conv-1",
+      runtime: "pi",
+    });
 
     controller.abort();
     await expect(reader.closed).rejects.toBeDefined();

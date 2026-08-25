@@ -276,6 +276,13 @@ export {
   type McpServerView,
 } from "./mcp-catalog.js";
 export {
+  conversationIdentity,
+  parseConversationIdentity,
+  requireConversationIdentity,
+  type ConversationIdentity,
+  type ConversationRuntime,
+} from "./conversation-identity.js";
+export {
   createDaemonServer,
   relayHubOf,
   startDaemonServer,

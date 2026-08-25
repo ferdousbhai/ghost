@@ -24,6 +24,10 @@
  */
 import type { Usage } from "@oh-my-pi/pi-ai";
 import type { AgentSessionEvent } from "@oh-my-pi/pi-coding-agent";
+import {
+  isValidConversationId,
+  MAX_CONVERSATION_ID_SCALARS,
+} from "./conversation-identity.js";
 
 export type PiMessagesEvent =
   | { type: "start" }
@@ -241,9 +245,15 @@ export function parsePiMessagesRequest(body: unknown): PiMessagesRequest {
   const sessionId = options && typeof options === "object"
     ? (options as { sessionId?: unknown }).sessionId
     : undefined;
+  if (typeof sessionId === "string" && !isValidConversationId(sessionId)) {
+    throw new PiMessagesRequestError(
+      "invalid_conversation_id",
+      `Conversation ids must contain 1-${MAX_CONVERSATION_ID_SCALARS} Unicode scalar values.`,
+    );
+  }
   return {
     model: typeof request.model === "string" && request.model ? request.model : null,
-    sessionId: typeof sessionId === "string" && sessionId ? sessionId.slice(0, 200) : null,
+    sessionId: typeof sessionId === "string" && sessionId ? sessionId : null,
     prompt,
   };
 }

@@ -427,6 +427,20 @@ describe("parsePiMessagesRequest", () => {
     expect(parsed).toEqual({ model: "ghost/casper", sessionId: "conv-1", prompt: "newest" });
   });
 
+  it("preserves a 200-scalar id and rejects overflow or lone surrogates", () => {
+    const request = (sessionId: string) => ({
+      context: { messages: [{ role: "user", content: "hello" }] },
+      options: { sessionId },
+    });
+    const atLimit = `${"a".repeat(199)}\u{1f47b}`;
+    expect(parsePiMessagesRequest(request(atLimit)).sessionId).toBe(atLimit);
+    for (const invalid of ["", "a".repeat(201), "\ud800", "\udc00"]) {
+      expect(() => parsePiMessagesRequest(request(invalid))).toThrow(expect.objectContaining({
+        code: "invalid_conversation_id",
+      }));
+    }
+  });
+
   it("accepts a bare string content", () => {
     expect(parsePiMessagesRequest({
       context: { messages: [{ role: "user", content: "hello" }] },

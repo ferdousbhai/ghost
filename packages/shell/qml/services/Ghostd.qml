@@ -131,9 +131,9 @@ Singleton {
     // the HUD lists them per ghost, resumes one by loading its transcript, and
     // starts a fresh one on demand. This fixes #26 — a restart no longer loses
     // history, because a conversation lives in the daemon keyed by session id.
-    /** Session listing for the active ghost: [{ id, title, createdAt, updatedAt, messageCount, pinned, unread }], pinned first then newest. */
+    /** Session listing: [{ id, runtime, conversationId, title, … }]. `id` is the action key. */
     property var sessions: []
-    /** The active ghost's current conversation id. "" until one is minted or opened. */
+    /** Runtime-qualified id of the active conversation. */
     property string currentSessionId: ""
     /** Non-empty when a sessions/transcript fetch failed. */
     property string sessionsError: ""
@@ -253,6 +253,8 @@ Singleton {
     property var renameSessionRequest: null
     property var loginRequest: null
     property var modelRequest: null
+    /** Invalidates current-model GETs started before a ghost/model transition. */
+    property int modelGeneration: 0
     property var availRequest: null
     property var catalogRequest: null
     property var setModelRequest: null
@@ -281,7 +283,7 @@ Singleton {
     property var queueStatusRequest: null
     property var branchRequest: null
 
-    property var sessionIds: ({})     // ghost name -> active pi session id
+    property var sessionIds: ({})     // ghost name -> runtime-qualified active id
     /** Full live/presentation state keyed by JSON.stringify([ghost, sessionId]). */
     property var turnStates: ({})
     /** Keys whose HTTP turn is still open; replacing this array wakes bindings. */
@@ -381,7 +383,11 @@ Singleton {
     }
 
     Component.onCompleted: root.refresh()
-    onActiveGhostChanged: root.connectConversationEvents(root.activeGhost)
+    onActiveGhostChanged: {
+        root.modelGeneration += 1;
+        root.modelRequest = null;
+        root.connectConversationEvents(root.activeGhost);
+    }
 
     // ---- Authenticated requests -------------------------------------------
 
@@ -719,6 +725,65 @@ Singleton {
         return JSON.stringify([ghost, sessionId]);
     }
 
+    function conversationActionId(runtime: string, conversationId: string): string {
+        return runtime + ":" + conversationId;
+    }
+
+    function parseConversationActionId(id: string): var {
+        const piPrefix = "pi:";
+        if (id.indexOf(piPrefix) === 0 && id.length > piPrefix.length) return {
+            id: id,
+            runtime: "pi",
+            conversationId: id.slice(piPrefix.length)
+        };
+        const claudePrefix = "claude-code:";
+        if (id.indexOf(claudePrefix) === 0 && id.length > claudePrefix.length) return {
+            id: id,
+            runtime: "claude-code",
+            conversationId: id.slice(claudePrefix.length)
+        };
+        return null;
+    }
+
+    function conversationIdentity(id: string): var {
+        const row = root.sessions.find(function (session) {
+            return session && session.id === id;
+        });
+        if (row && (row.runtime === "pi" || row.runtime === "claude-code")
+                && typeof row.conversationId === "string" && row.conversationId !== "")
+            return { id: id, runtime: row.runtime, conversationId: row.conversationId };
+        return root.parseConversationActionId(id);
+    }
+
+    function transcriptMatchesIdentity(body: var, state: var): bool {
+        return body && state
+            && body.id === state.sessionId
+            && body.conversationId === state.conversationId
+            && body.runtime === state.runtime
+            && Array.isArray(body.messages);
+    }
+
+    function runtimeForNewConversation(): string {
+        return root.currentModel && root.currentModel.provider === "claude-code"
+            ? "claude-code" : "pi";
+    }
+
+    function adoptConversationRuntime(ghost: string, runtime: string): var {
+        if (ghost === "" || ghost !== root.activeGhost
+                || (runtime !== "pi" && runtime !== "claude-code")) return null;
+        const state = root.activeTurnState(false);
+        if (!state || state.runtime === runtime || state.streaming) return state;
+        root.captureActiveTurn(state);
+        const id = root.conversationActionId(runtime, state.conversationId);
+        root.sessionIds[ghost] = id;
+        root.currentSessionId = id;
+        const target = root.ensureTurnState(ghost, id, state.conversationId, runtime);
+        root.showTurnState(ghost, id);
+        root.clearCommands();
+        root.clearConnect();
+        return target;
+    }
+
     function isActiveTurn(state: var): bool {
         return !!state && state.ghost === root.activeGhost
             && state.sessionId === root.currentSessionId;
@@ -743,11 +808,14 @@ Singleton {
         return rows;
     }
 
-    function newTurnState(ghost: string, sessionId: string): var {
+    function newTurnState(ghost: string, sessionId: string,
+            conversationId: string, runtime: string): var {
         return {
             key: root.conversationKey(ghost, sessionId),
             ghost: ghost,
             sessionId: sessionId,
+            conversationId: conversationId,
+            runtime: runtime,
             rows: [],
             hydratedRowCount: 0,
             commandTurnKey: "",
@@ -782,12 +850,19 @@ Singleton {
         };
     }
 
-    function ensureTurnState(ghost: string, sessionId: string): var {
+    function ensureTurnState(ghost: string, sessionId: string,
+            conversationId: var, runtime: var): var {
         if (ghost === "" || sessionId === "") return null;
         const key = root.conversationKey(ghost, sessionId);
         let state = root.turnStates[key];
         if (!state) {
-            state = root.newTurnState(ghost, sessionId);
+            const identity = typeof conversationId === "string" && conversationId !== ""
+                ? { id: sessionId, conversationId: conversationId, runtime: runtime || "pi" }
+                : root.conversationIdentity(sessionId);
+            if (!identity || identity.id !== root.conversationActionId(
+                    identity.runtime, identity.conversationId)) return null;
+            state = root.newTurnState(ghost, sessionId,
+                identity.conversationId, identity.runtime);
             const next = Object.assign({}, root.turnStates);
             next[key] = state;
             root.turnStates = next;
@@ -1673,6 +1748,10 @@ Singleton {
             try {
                 const event = JSON.parse(line.slice(5).trim());
                 if (event.type === "conversation-updated" && typeof event.id === "string"
+                        && (event.runtime === "pi" || event.runtime === "claude-code")
+                        && typeof event.conversationId === "string"
+                        && event.id === root.conversationActionId(
+                            event.runtime, event.conversationId)
                         && ghost === root.activeGhost)
                     root.fetchSessions(ghost);
             } catch (error) {
@@ -1701,6 +1780,17 @@ Singleton {
         return root.orderSessions(list.concat(localLive));
     }
 
+    function validSessionRows(list: var): var {
+        return list.filter(function (session) {
+            return session && typeof session.id === "string"
+                && (session.runtime === "pi" || session.runtime === "claude-code")
+                && typeof session.conversationId === "string"
+                && session.conversationId !== ""
+                && session.id === root.conversationActionId(
+                    session.runtime, session.conversationId);
+        });
+    }
+
     /** GET the active ghost's conversation listing. Newest-updated first. */
     function fetchSessions(ghost: string): void {
         const g = ghost || root.activeGhost;
@@ -1720,7 +1810,7 @@ Singleton {
                     // Contract is { sessions: [...] }; tolerate a bare array too.
                     const list = Array.isArray(body) ? body
                         : (Array.isArray(body.sessions) ? body.sessions : []);
-                    root.sessions = root.mergeSessionListing(g, list);
+                    root.sessions = root.mergeSessionListing(g, root.validSessionRows(list));
                     root.sessionsError = "";
                     const current = root.sessions.find(function (session) {
                         return session && session.id === root.currentSessionId;
@@ -1751,11 +1841,13 @@ Singleton {
         if (ghost === "") return;
         const previous = root.activeTurnState(false);
         if (previous) root.captureActiveTurn(previous);
-        const id = "hud-" + Date.now().toString(36)
+        const conversationId = "hud-" + Date.now().toString(36)
             + "-" + Math.floor(Math.random() * 0xffffff).toString(36);
+        const runtime = root.runtimeForNewConversation();
+        const id = root.conversationActionId(runtime, conversationId);
         root.sessionIds[ghost] = id;
         root.currentSessionId = id;
-        root.ensureTurnState(ghost, id);
+        root.ensureTurnState(ghost, id, conversationId, runtime);
         root.showTurnState(ghost, id);
         root.clearCommands();
         root.clearConnect();
@@ -1769,9 +1861,13 @@ Singleton {
         if (ghost !== root.activeGhost || root.sessions.some(function (session) {
             return session && session.id === id;
         })) return;
+        const identity = root.conversationIdentity(id);
+        if (!identity) return;
         const now = new Date().toISOString();
         root.sessions = root.orderSessions(root.sessions.concat([{
             id: id,
+            conversationId: identity.conversationId,
+            runtime: identity.runtime,
             title: null,
             createdAt: now,
             updatedAt: now,
@@ -1978,8 +2074,10 @@ Singleton {
             if (xhr.status === 200) {
                 try {
                     const body = JSON.parse(xhr.responseText);
+                    if (!root.transcriptMatchesIdentity(body, state))
+                        throw new Error("transcript identity mismatch");
                     if (!state.streaming)
-                        root.rehydrateTurn(state, Array.isArray(body.messages) ? body.messages : []);
+                        root.rehydrateTurn(state, body.messages);
                     root.reachable = true;
                     if (root.isActiveTurn(state)) root.sessionsError = "";
                 } catch (error) {
@@ -2055,7 +2153,9 @@ Singleton {
             if (xhr.status === 200) {
                 try {
                     const body = JSON.parse(xhr.responseText);
-                    root.rehydrateTurn(state, Array.isArray(body.messages) ? body.messages : []);
+                    if (!root.transcriptMatchesIdentity(body, state))
+                        throw new Error("transcript identity mismatch");
+                    root.rehydrateTurn(state, body.messages);
                     root.reachable = true;
                 } catch (error) {
                     if (root.isActiveTurn(state))
@@ -2247,11 +2347,22 @@ Singleton {
             if (xhr.status === 200) {
                 try {
                     const body = JSON.parse(xhr.responseText);
-                    const branched = typeof body.sessionId === "string" ? body.sessionId : "";
-                    if (branched === "") {
+                    const branched = typeof body.id === "string" ? body.id : "";
+                    if (branched === "" || body.runtime !== "pi"
+                            || typeof body.conversationId !== "string"
+                            || body.conversationId === ""
+                            || branched !== root.conversationActionId(
+                                body.runtime, body.conversationId)
+                            || body.sessionId !== body.conversationId
+                            || !body.transcript
+                            || body.transcript.id !== branched
+                            || body.transcript.conversationId !== body.conversationId
+                            || body.transcript.runtime !== body.runtime
+                            || !Array.isArray(body.transcript.messages)) {
                         root.branchError = "ghostd branched into no conversation";
                         return;
                     }
+                    root.ensureTurnState(ghost, branched, body.conversationId, body.runtime);
                     root.adoptConversation(ghost, branched);
                     root.rehydrate(body.transcript && Array.isArray(body.transcript.messages)
                         ? body.transcript.messages : []);
@@ -2300,9 +2411,14 @@ Singleton {
         const prompt = text.trim();
         if (prompt === "" || root.streaming || root.activeGhost === "") return;
         const ghost = root.activeGhost;
-        const sessionId = root.ensureSession(ghost);
+        let sessionId = root.ensureSession(ghost);
+        let state = root.ensureTurnState(ghost, sessionId);
+        if (state && state.runtime !== root.runtimeForNewConversation()) {
+            state = root.adoptConversationRuntime(ghost, root.runtimeForNewConversation());
+            sessionId = state ? state.sessionId : "";
+        }
+        if (!state || sessionId === "") return;
         root.ensureOptimisticSessionRow(ghost, sessionId);
-        const state = root.ensureTurnState(ghost, sessionId);
         root.captureActiveTurn(state);
         // A completed model turn can be visible a tick before its transcript
         // refresh lands. Count that live pair too, while excluding the
@@ -2527,7 +2643,7 @@ Singleton {
         return {
             model: "ghost/" + ghost,
             context: { messages: messages },
-            options: { sessionId: sessionId }
+            options: { sessionId: state.conversationId }
         };
     }
 
@@ -2538,8 +2654,11 @@ Singleton {
      */
     function ensureSession(ghost: string): string {
         if (!root.sessionIds[ghost]) {
-            root.sessionIds[ghost] = "hud-" + Date.now().toString(36)
+            const conversationId = "hud-" + Date.now().toString(36)
                 + "-" + Math.floor(Math.random() * 0xffffff).toString(36);
+            const runtime = root.runtimeForNewConversation();
+            root.sessionIds[ghost] = root.conversationActionId(runtime, conversationId);
+            root.ensureTurnState(ghost, root.sessionIds[ghost], conversationId, runtime);
         }
         if (ghost === root.activeGhost) root.currentSessionId = root.sessionIds[ghost];
         root.ensureTurnState(ghost, root.sessionIds[ghost]);
@@ -2690,8 +2809,11 @@ Singleton {
                 : "using fallback · " + event.model;
             break;
         case "branch_changed":
-            root.rehydrateTurn(state, event.transcript && Array.isArray(event.transcript.messages)
-                ? event.transcript.messages : []);
+            if (!root.transcriptMatchesIdentity(event.transcript, state)) {
+                root.endTurnState(state, "ghostd sent mismatched branch state");
+                break;
+            }
+            root.rehydrateTurn(state, event.transcript.messages);
             root.appendTurnRow(state, {
                 role: "assistant", text: "", tools: "", toolActivity: [], error: "", pending: true,
                 entryId: ""
@@ -3231,26 +3353,47 @@ Singleton {
 
     // ---- Model selection --------------------------------------------------
 
+    function applyCurrentModelResponse(xhr: var, ghost: string, generation: int): bool {
+        if (xhr.readyState !== 4 || xhr !== root.modelRequest
+                || ghost !== root.activeGhost || generation !== root.modelGeneration)
+            return false;
+        root.modelRequest = null;
+        if (xhr.status === 200) {
+            try {
+                const body = JSON.parse(xhr.responseText);
+                root.currentModel = body.current || null;
+                root.modelSource = body.source || "none";
+                root.modelError = "";
+                root.adoptConversationRuntime(ghost,
+                    body.current && body.current.provider === "claude-code"
+                        ? "claude-code" : "pi");
+            } catch (error) {
+                root.modelError = "ghostd sent a malformed model selection";
+            }
+        } else {
+            root.modelError = root.describeError(xhr, "GET model");
+        }
+        return true;
+    }
+
+    function adoptSelectedModelRuntime(ghost: string, provider: string): bool {
+        if (ghost === "" || ghost !== root.activeGhost) return false;
+        root.modelGeneration += 1;
+        root.modelRequest = null;
+        root.adoptConversationRuntime(ghost,
+            provider === "claude-code" ? "claude-code" : "pi");
+        return true;
+    }
+
     /** GET the ghost's current model. Cheap; called on refresh, ghost switch, panel open. */
     function fetchCurrentModel(): void {
         const ghost = root.activeGhost;
         if (ghost === "") return;
+        const generation = root.modelGeneration;
         const xhr = new XMLHttpRequest();
         root.modelRequest = xhr;
         xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4) return;
-            if (xhr.status === 200) {
-                try {
-                    const body = JSON.parse(xhr.responseText);
-                    root.currentModel = body.current || null;
-                    root.modelSource = body.source || "none";
-                    root.modelError = "";
-                } catch (error) {
-                    root.modelError = "ghostd sent a malformed model selection";
-                }
-            } else {
-                root.modelError = root.describeError(xhr, "GET model");
-            }
+            root.applyCurrentModelResponse(xhr, ghost, generation);
         };
         root.dispatch(xhr, "GET",
             "/api/ghosts/" + encodeURIComponent(ghost) + "/model", ({}), null);
@@ -3329,7 +3472,9 @@ Singleton {
         const xhr = new XMLHttpRequest();
         root.setModelRequest = xhr;
         xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4) return;
+            if (xhr.readyState !== 4 || xhr !== root.setModelRequest
+                    || ghost !== root.activeGhost) return;
+            root.setModelRequest = null;
             if (xhr.status === 200) {
                 let body = {};
                 try {
@@ -3341,6 +3486,7 @@ Singleton {
                     ? body.warning
                     : "";
                 root.modelError = "";
+                root.adoptSelectedModelRuntime(ghost, provider);
                 root.fetchCurrentModel();
                 root.fetchAvailableModels();
                 // Claude Code owns its external desktop login. Opening Ghost's

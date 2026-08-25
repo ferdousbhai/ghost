@@ -190,7 +190,10 @@ describe("sessionKeyOf", () => {
 
   it("collapses an empty or missing session id to the default", () => {
     expect(sessionKeyOf("casper", null)).toBe(sessionKeyOf("casper", undefined));
-    expect(sessionKeyOf("casper", "")).toBe(sessionKeyOf("casper", undefined));
+    expect(() => sessionKeyOf("casper", "")).toThrow(expect.objectContaining({
+      code: "invalid_conversation_id",
+      status: 400,
+    }));
     expect(sessionKeyOf("casper", "default")).toBe(sessionKeyOf("casper", undefined));
   });
 });
@@ -1462,7 +1465,8 @@ describe("conversation branching", () => {
     expect(forked.draft).toBe("Original question");
     // The copy is rewound to just before the branched message.
     expect(forked.transcript.messages).toEqual([]);
-    expect(forked.transcript.id).toBe(forked.sessionId);
+    expect(forked.transcript.id).toBe(forked.id);
+    expect(forked.transcript.conversationId).toBe(forked.conversationId);
 
     // The source keeps every entry, its leaf, and its title.
     const after = await host!.readTranscript("casper", "conv-tree");
@@ -1472,7 +1476,7 @@ describe("conversation branching", () => {
 
     // The copy is a first-class conversation: listed, and resumable by its id.
     const listed = await host!.listSessions("casper");
-    expect(listed.map((row) => row.id)).toContain(forked.sessionId);
+    expect(listed.map((row) => row.id)).toContain(forked.id);
     await host!.runTurn("casper", {
       sessionId: forked.sessionId,
       prompt: "Alternative question",
@@ -1513,7 +1517,7 @@ describe("conversation branching", () => {
     const forked = await host!.forkConversation("casper", "conv-tree", firstUser.entryId);
     expect(forked.title).toBeNull();
     const listed = await host!.listSessions("casper");
-    expect(listed.find((row) => row.id === forked.sessionId)?.title).toBeNull();
+    expect(listed.find((row) => row.id === forked.id)?.title).toBeNull();
   });
 
   it("rejects a branch off anything but a persisted user message", async () => {
@@ -1529,7 +1533,7 @@ describe("conversation branching", () => {
       .rejects.toMatchObject({ code: "not_found", status: 404 });
     // The rejected branches created nothing.
     const listed = await host!.listSessions("casper");
-    expect(listed.map((row) => row.id)).toEqual(["conv-tree"]);
+    expect(listed.map((row) => row.id)).toEqual(["pi:conv-tree"]);
   });
 
   it("refuses to branch a conversation that is still answering", async () => {
@@ -1598,7 +1602,11 @@ describe("session listing", () => {
     await host!.runTurn("casper", { sessionId: "conv-1", prompt: "hi", emit: () => {} });
     const sessions = await host!.listSessions("casper");
     expect(sessions).toHaveLength(1);
-    expect(sessions[0]?.id).toBe("conv-1");
+    expect(sessions[0]).toMatchObject({
+      id: "pi:conv-1",
+      conversationId: "conv-1",
+      runtime: "pi",
+    });
     expect(sessions[0]?.messageCount).toBeGreaterThan(0);
     expect(sessions[0]?.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     expect(sessions[0]?.updatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
@@ -1613,7 +1621,7 @@ describe("session listing", () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
     await host!.runTurn("casper", { sessionId: "newer", prompt: "two", emit: () => {} });
     const sessions = await host!.listSessions("casper");
-    expect(sessions.map((session) => session.id)).toEqual(["newer", "older"]);
+    expect(sessions.map((session) => session.id)).toEqual(["pi:newer", "pi:older"]);
   });
 
   it("trashes a stored conversation and lets the id start fresh", async () => {
@@ -1764,7 +1772,13 @@ describe("SessionHost.renameGhost", () => {
     expect(temp!.registry.list().map((ghost) => ghost.name)).toEqual(["wisp"]);
     // The conversation id is the transcript filename, so it travelled intact.
     const sessions = await host!.listSessions("wisp");
-    expect(sessions).toMatchObject([{ id: "conv-1", title: "First light", pinned: true }]);
+    expect(sessions).toMatchObject([{
+      id: "pi:conv-1",
+      conversationId: "conv-1",
+      runtime: "pi",
+      title: "First light",
+      pinned: true,
+    }]);
     expect(readFileSync(join(renamed.dir, "memory", "press.md"), "utf8"))
       .toContain("Vandercook");
     // The old name is gone from the API, and the renamed ghost still answers.
@@ -1857,14 +1871,14 @@ describe("pinned conversations", () => {
     await host!.setPinned("casper", "older", true);
 
     expect((await host!.listSessions("casper")).map((s) => [s.id, s.pinned]))
-      .toEqual([["older", true], ["newer", false]]);
-    expect(await readPins(ghostPaths(dir).sessionDir)).toEqual(["older"]);
+      .toEqual([["pi:older", true], ["pi:newer", false]]);
+    expect(await readPins(ghostPaths(dir).sessionDir)).toEqual(["pi:older"]);
 
     // Pinning is idempotent, and pinning both falls back to recency.
     await host!.setPinned("casper", "older", true);
     await host!.setPinned("casper", "newer", true);
     expect((await host!.listSessions("casper")).map((session) => session.id))
-      .toEqual(["newer", "older"]);
+      .toEqual(["pi:newer", "pi:older"]);
   });
 
   it("unpins, idempotently", async () => {
@@ -1873,7 +1887,7 @@ describe("pinned conversations", () => {
     await host!.setPinned("casper", "older", false);
     await host!.setPinned("casper", "older", false);
     expect((await host!.listSessions("casper")).map((session) => session.id))
-      .toEqual(["newer", "older"]);
+      .toEqual(["pi:newer", "pi:older"]);
     expect(await readPins(ghostPaths(dir).sessionDir)).toEqual([]);
   });
 
@@ -1890,19 +1904,20 @@ describe("pinned conversations", () => {
     await host!.setPinned("casper", "older", true);
     await host!.deleteSession("casper", "older");
     expect(await readPins(ghostPaths(dir).sessionDir)).toEqual([]);
-    expect((await host!.listSessions("casper")).map((session) => session.id)).toEqual(["newer"]);
+    expect((await host!.listSessions("casper")).map((session) => session.id))
+      .toEqual(["pi:newer"]);
   });
 
   it("ignores a stale id on read and prunes it on the next write", async () => {
     const { dir } = await twoConversations();
     const sessionDir = ghostPaths(dir).sessionDir;
-    await writePins(sessionDir, ["ghost-of-a-conversation", "older"]);
+    await writePins(sessionDir, ["pi:ghost-of-a-conversation", "pi:older"]);
 
     expect((await host!.listSessions("casper")).map((s) => [s.id, s.pinned]))
-      .toEqual([["older", true], ["newer", false]]);
+      .toEqual([["pi:older", true], ["pi:newer", false]]);
 
     await host!.setPinned("casper", "newer", true);
-    expect((await readPins(sessionDir)).sort()).toEqual(["newer", "older"]);
+    expect((await readPins(sessionDir)).sort()).toEqual(["pi:newer", "pi:older"]);
   });
 
   it("treats a malformed pins.json as nothing pinned", async () => {
@@ -1914,7 +1929,103 @@ describe("pinned conversations", () => {
       .toEqual([false, false]);
     // And a pin still lands, replacing the unreadable file wholesale.
     await host!.setPinned("casper", "older", true);
-    expect(await readPins(sessionDir)).toEqual(["older"]);
+    expect(await readPins(sessionDir)).toEqual(["pi:older"]);
+  });
+});
+
+describe("runtime-qualified conversation identity", () => {
+  it("expands legacy raw owner state across collisions and migrates it on mutation", async () => {
+    const { dir } = await setup([{ kind: "text", text: "hello" }]);
+    await host!.runTurn("casper", {
+      sessionId: "default",
+      prompt: "Pi conversation",
+      emit: () => {},
+    });
+    const sessionDir = ghostPaths(dir).sessionDir;
+    const now = new Date().toISOString();
+    writeFileSync(
+      claudeSessionMetadataPath(sessionDir, "default"),
+      JSON.stringify({
+        version: 1,
+        runtime: "claude-code",
+        conversationId: "default",
+        sessionId: "8f0a1c1e-0000-4000-8000-000000000000",
+        created: now,
+        modified: now,
+        messageCount: 2,
+      }),
+      "utf8",
+    );
+    const readAt = "2099-01-01T00:00:00.000Z";
+    writeFileSync(join(sessionDir, "pins.json"), JSON.stringify({ pinned: ["default"] }), "utf8");
+    writeFileSync(
+      join(sessionDir, "reads.json"),
+      JSON.stringify({ reads: { default: readAt } }),
+      "utf8",
+    );
+
+    const legacy = await host!.listSessions("casper");
+    expect(legacy.map((row) => [row.id, row.pinned, row.unread])).toEqual(expect.arrayContaining([
+      ["pi:default", true, false],
+      ["claude-code:default", true, false],
+    ]));
+
+    await host!.setPinned("casper", "default", false, "pi");
+    expect(JSON.parse(readFileSync(join(sessionDir, "pins.json"), "utf8"))).toEqual({
+      version: 2,
+      pinned: ["claude-code:default"],
+    });
+    await host!.markRead("casper", "default", new Date(readAt), "pi");
+    expect(JSON.parse(readFileSync(join(sessionDir, "reads.json"), "utf8"))).toEqual({
+      version: 2,
+      reads: {
+        "pi:default": readAt,
+        "claude-code:default": readAt,
+      },
+    });
+  });
+
+  it("migrates legacy owner state when an unpublished Pi fork is discarded", async () => {
+    const { dir } = await setup([{ kind: "text", text: "hello" }]);
+    const forkId = "branch-collision";
+    await host!.runTurn("casper", {
+      sessionId: forkId,
+      prompt: "Unpublished fork",
+      emit: () => {},
+    });
+    const sessionDir = ghostPaths(dir).sessionDir;
+    const now = new Date().toISOString();
+    const claudePath = claudeSessionMetadataPath(sessionDir, forkId);
+    writeFileSync(claudePath, JSON.stringify({
+      version: 1,
+      runtime: "claude-code",
+      conversationId: forkId,
+      sessionId: "8f0a1c1e-0000-4000-8000-000000000000",
+      created: now,
+      modified: now,
+      messageCount: 2,
+    }), "utf8");
+    writeFileSync(join(sessionDir, "pins.json"), JSON.stringify({ pinned: [forkId] }), "utf8");
+    writeFileSync(
+      join(sessionDir, "reads.json"),
+      JSON.stringify({ reads: { [forkId]: "2099-01-01T00:00:00.000Z" } }),
+      "utf8",
+    );
+
+    await (host as unknown as {
+      discardFork(ghostName: string, conversationId: string): Promise<void>;
+    }).discardFork("casper", forkId);
+
+    expect(existsSync(join(sessionDir, sessionFileNameFor(forkId)))).toBe(false);
+    expect(existsSync(claudePath)).toBe(true);
+    expect(JSON.parse(readFileSync(join(sessionDir, "pins.json"), "utf8"))).toEqual({
+      version: 2,
+      pinned: [`claude-code:${forkId}`],
+    });
+    expect(JSON.parse(readFileSync(join(sessionDir, "reads.json"), "utf8"))).toEqual({
+      version: 2,
+      reads: { [`claude-code:${forkId}`]: "2099-01-01T00:00:00.000Z" },
+    });
   });
 });
 
@@ -1988,7 +2099,8 @@ describe("conversation titles", () => {
 describe("renaming a conversation", () => {
   async function titleOf(sessionId = "conv-1"): Promise<string | null> {
     const sessions = await host!.listSessions("casper");
-    return sessions.find((session) => session.id === sessionId)?.title ?? null;
+    return sessions.find((session) => session.conversationId === sessionId
+      && session.runtime === "pi")?.title ?? null;
   }
 
   it("names a conversation and keeps the titler from overwriting it", async () => {
@@ -2076,8 +2188,8 @@ describe("renaming a conversation", () => {
       "utf8",
     );
     expect((await host!.listSessions("casper")).map((session) => session.id))
-      .toContain("claude-conv");
-    await expect(host!.renameConversation("casper", "claude-conv", "Mine now"))
+      .toContain("claude-code:claude-conv");
+    await expect(host!.renameConversation("casper", "claude-conv", "Mine now", "claude-code"))
       .rejects.toMatchObject({ code: "not_supported", status: 409 });
   });
 
@@ -2305,7 +2417,11 @@ describe("transcript resume", () => {
       emit: () => {},
     });
     const transcript = await host!.readTranscript("casper", "conv-1");
-    expect(transcript.id).toBe("conv-1");
+    expect(transcript).toMatchObject({
+      id: "pi:conv-1",
+      conversationId: "conv-1",
+      runtime: "pi",
+    });
     expect(transcript.messages.length).toBeGreaterThanOrEqual(2);
     expect(transcript.messages[0]?.role).toBe("user");
     const roles = new Set(transcript.messages.map((message) => message.role));

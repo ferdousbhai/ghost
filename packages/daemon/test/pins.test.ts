@@ -7,7 +7,14 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { PINS_FILENAME, pinsPath, readPins, writePins } from "../src/pins.js";
+import {
+  PINS_FILENAME,
+  PINS_VERSION,
+  pinsPath,
+  readPinState,
+  readPins,
+  writePins,
+} from "../src/pins.js";
 
 let sessionDir: string | null = null;
 
@@ -31,7 +38,11 @@ describe("pins.json", () => {
     await writePins(dir, ["conv-1", "conv-2"]);
     expect(await readPins(dir)).toEqual(["conv-1", "conv-2"]);
     expect(JSON.parse(readFileSync(pinsPath(dir), "utf8")))
-      .toEqual({ pinned: ["conv-1", "conv-2"] });
+      .toEqual({ version: PINS_VERSION, pinned: ["conv-1", "conv-2"] });
+    expect(await readPinState(dir)).toEqual({
+      version: PINS_VERSION,
+      pinned: ["conv-1", "conv-2"],
+    });
   });
 
   it("creates the session dir and writes the file private", async () => {
@@ -46,6 +57,8 @@ describe("pins.json", () => {
       writeFileSync(pinsPath(dir), body, "utf8");
       expect(await readPins(dir), JSON.stringify(body)).toEqual([]);
     }
+    writeFileSync(pinsPath(dir), JSON.stringify({ version: 99, pinned: ["pi:conv-1"] }), "utf8");
+    expect(await readPinState(dir)).toEqual({ version: PINS_VERSION, pinned: [] });
   });
 
   it("drops non-string, empty, and duplicate entries", async () => {
@@ -56,6 +69,7 @@ describe("pins.json", () => {
       "utf8",
     );
     expect(await readPins(dir)).toEqual(["conv-1", "conv-2"]);
+    expect((await readPinState(dir)).version).toBe(1);
   });
 
   it("replaces atomically: concurrent writers leave one whole file, no debris", async () => {

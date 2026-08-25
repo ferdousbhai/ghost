@@ -48,7 +48,7 @@ async function waitUntilCommandsAreAccepted(
     for (;;) {
       const response = await harness.request(
         "GET",
-        `/api/ghosts/${harness.ghostName}/sessions/${sessionId}/commands`,
+        `/api/ghosts/${harness.ghostName}/sessions/${encodeURIComponent(`pi:${sessionId}`)}/commands`,
       );
       if (response.status === 200) return response;
       expect(response.status).toBe(409);
@@ -99,7 +99,7 @@ describe("real ghostd streaming lifecycle", () => {
       steering: string[];
     }>(
       "POST",
-      "/api/ghosts/casper/sessions/conv-steering/queue",
+      "/api/ghosts/casper/sessions/pi%3Aconv-steering/queue",
       { mode: "steer", text: steeringText },
     );
     expect(queued.status).toBe(200);

@@ -282,7 +282,9 @@ describe("Claude Code subscription runtime", () => {
     const sessions = await host!.listSessions("casper");
     expect(sessions).toEqual([
       expect.objectContaining({
-        id: "conversation-1",
+        id: "claude-code:conversation-1",
+        conversationId: "conversation-1",
+        runtime: "claude-code",
         title: "Claude Code",
         messageCount: 4,
       }),
@@ -298,7 +300,7 @@ describe("Claude Code subscription runtime", () => {
     });
     expect(await host!.listSessions("casper")).toHaveLength(1);
 
-    await host!.deleteSession("casper", "conversation-delete");
+    await host!.deleteSession("casper", "conversation-delete", "claude-code");
     expect(await host!.listSessions("casper")).toEqual([]);
   });
 
@@ -320,7 +322,11 @@ describe("Claude Code subscription runtime", () => {
     writeFileSync(malformedPath, "{ definitely not json\n", "utf8");
 
     expect(await host!.listSessions("casper")).toEqual([
-      expect.objectContaining({ id: "conversation-valid" }),
+      expect.objectContaining({
+        id: "claude-code:conversation-valid",
+        conversationId: "conversation-valid",
+        runtime: "claude-code",
+      }),
     ]);
     expect(warnings).toContainEqual({
       message: "skipping invalid Claude Code session metadata",
