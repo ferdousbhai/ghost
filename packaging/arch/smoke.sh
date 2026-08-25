@@ -22,7 +22,7 @@ require_executable() {
 require_file /usr/lib/ghost/daemon/dist/main.js
 require_file /usr/lib/ghost/daemon/package.json
 require_file /usr/lib/ghost/desktop-helper/ghost_desktop_helper/__main__.py
-require_file /usr/lib/ghost/desktop-helper/omaharness/LICENSE
+require_file /usr/lib/ghost/desktop-helper/ghost_desktop_helper/_vendor/omaharness/LICENSE
 require_file /usr/share/ghost/quickshell/shell.qml
 require_file /usr/share/ghost/quickshell/tray/ghost-tray.py
 require_file /usr/share/ghost/chromium-extension/manifest.json
@@ -70,7 +70,11 @@ fi
 desktop-file-validate "$root/usr/share/applications/ghost.desktop"
 python -m json.tool "$root/usr/share/ghost/chromium-extension/manifest.json" >/dev/null
 PYTHONPATH="$root/usr/lib/ghost/desktop-helper" \
-  python -c 'import ghost_desktop_helper, omaharness'
+  python -c 'import PIL; import ghost_desktop_helper._vendor.omaharness'
+if [[ -e "$root/usr/lib/ghost/desktop-helper/omaharness" ]]; then
+  printf 'package payload exposes the private harness as top-level omaharness\n' >&2
+  exit 1
+fi
 bun "$root/usr/lib/ghost/daemon/dist/main.js" --version | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'
 
 grep -Fxq 'PartOf=graphical-session.target' "$root/usr/lib/systemd/user/ghostd.service"

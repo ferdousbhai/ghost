@@ -67,7 +67,8 @@ SOFTWARE.
 
 ## omarchy-quattro-harness
 
-`packages/desktop-helper/vendor/omaharness/` is a minimal, unmodified,
+`packages/desktop-helper/src/ghost_desktop_helper/_vendor/omaharness/` is a
+minimal, unmodified,
 desktop-only vendor of
 [omarchy-quattro-harness](https://github.com/fabiopauli/omarchy-quattro-harness)
 by Fabio Pauli. The vendored modules (`atspi`, `capture`, `dispatch`, `errors`,
@@ -75,7 +76,8 @@ by Fabio Pauli. The vendored modules (`atspi`, `capture`, `dispatch`, `errors`,
 `transaction`) carry a provenance header pointing back to their upstream path;
 only that header was added. The browser, CLI, desktop-orchestrator, knowledge,
 overlay, native-plugin, and XWayland modules are intentionally not vendored.
-See `packages/desktop-helper/vendor/omaharness/LICENSE` for the full text.
+See `packages/desktop-helper/src/ghost_desktop_helper/_vendor/omaharness/LICENSE`
+for the full text.
 
 MIT License
 

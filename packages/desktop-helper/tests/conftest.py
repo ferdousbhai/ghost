@@ -1,9 +1,8 @@
 """Shared fakes and path bootstrap for the mocked test tier.
 
-Running ``pytest`` straight from the package directory (no install) needs both
-our ``src`` and the vendored ``omaharness`` on the path; add them before any
-test imports. An installed / ``uv run`` invocation already resolves them, and
-inserting an existing path twice is harmless.
+Running ``pytest`` straight from the package directory (no install) needs our
+``src`` tree on the path. The vendored harness lives below the helper's private
+namespace and never receives its own top-level import path.
 """
 
 from __future__ import annotations
@@ -14,14 +13,14 @@ from pathlib import Path
 from typing import Any
 
 _ROOT = Path(__file__).resolve().parent.parent
-for _p in (_ROOT / "src", _ROOT / "vendor"):
+for _p in (_ROOT / "src",):
     if _p.is_dir() and str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
 
 @dataclass
 class FakeResult:
-    """Mimics omaharness.process.CommandResult enough for the code under test."""
+    """Mimic the vendored process result enough for the code under test."""
 
     ok: bool = True
     stdout: str = ""
@@ -33,7 +32,7 @@ class FakeResult:
 
 @dataclass
 class FakeHyprctl:
-    """A dispatch-recording, JSON-free stand-in for omaharness.hypr.Hyprctl."""
+    """Provide a dispatch-recording, JSON-free stand-in for vendored Hyprctl."""
 
     generation: str = "lua-table"
     locked_value: bool | None = False
@@ -41,7 +40,7 @@ class FakeHyprctl:
     dispatched: list[list[str]] = field(default_factory=list)
 
     def __post_init__(self) -> None:
-        from omaharness import dispatch as dispatch_grammar
+        from ghost_desktop_helper._vendor.omaharness import dispatch as dispatch_grammar
 
         self._encoder = dispatch_grammar.DispatchEncoder(self.generation)
 

@@ -25,19 +25,19 @@ import time
 from pathlib import Path
 from typing import Any
 
-from omaharness import atspi as atspi_module
-from omaharness import hypr, process, session
-from omaharness import toplevels as toplevel_protocol
-from omaharness.capture import CaptureRouter, png_size, region_argument
-from omaharness.errors import (
+from ._vendor.omaharness import atspi as atspi_module
+from ._vendor.omaharness import hypr, process, session
+from ._vendor.omaharness import toplevels as toplevel_protocol
+from ._vendor.omaharness.capture import CaptureRouter, png_size, region_argument
+from ._vendor.omaharness.errors import (
     AmbiguousTargetError,
     CapabilityError,
     OmaHarnessError,
 )
-from omaharness.headless import HeadlessCapture
-from omaharness.inputs import Wtype, Ydotool
-from omaharness.keys import hypr_shortcut
-from omaharness.transaction import CompositorTransaction
+from ._vendor.omaharness.headless import HeadlessCapture
+from ._vendor.omaharness.inputs import Wtype, Ydotool
+from ._vendor.omaharness.keys import hypr_shortcut
+from ._vendor.omaharness.transaction import CompositorTransaction
 
 _SKELETAL_TREE = 3
 _CHROMIUM_HINTS = ("chrom", "electron", "code", "slack", "discord", "spotify")
@@ -174,7 +174,7 @@ class GhostDesktop:
         hyprctl: Any = None,
         ydotool: Any = None,
         wtype: Any = None,
-        atspi_backend: Any = None,
+        atspi_backend: atspi_module.AtspiBackend | None = None,
         capture_router: Any = None,
         headless: Any = None,
         runner: Any = process.run,
@@ -1144,17 +1144,18 @@ class GhostDesktop:
             return None
         except ImportError as exc:
             # The headless rung crops the parked window out of a full-output
-            # PNG with Pillow, which is only an optional extra. On a stock
-            # install its `from PIL import Image` raises ImportError - neither a
-            # CapabilityError nor an OmaHarnessError - so without this it would
-            # escape the ladder and fail the whole capture instead of degrading
-            # to the focused-region rung. Treat a missing Pillow as this rung
-            # simply being unavailable.
+            # PNG with Pillow, a declared runtime dependency. Keep this guard
+            # for incomplete/manual installations: an ImportError is neither a
+            # CapabilityError nor an OmaHarnessError, and must not escape the
+            # ladder and fail the whole capture instead of degrading to the
+            # focused-region rung.
             process.unlink_quietly(output)
             warnings.append(
                 "headless-output capture unavailable: Pillow (PIL) is not "
                 "installed, so a headless-output capture cannot be cropped to "
-                f"the window ({exc}); install the 'pillow' extra to enable it"
+                f"the window ({exc}); reinstall ghost-desktop-helper (or the "
+                "Arch python-pillow package) to restore this required runtime "
+                "dependency"
             )
             return None
 
@@ -1275,9 +1276,9 @@ class GhostDesktop:
         )
 
     def workspace(
-        self, *, id: int | str | None = None, name: str | None = None
+        self, *, workspace_id: int | str | None = None, name: str | None = None
     ) -> dict[str, Any]:
-        selector = id if id is not None else name
+        selector = workspace_id if workspace_id is not None else name
         if selector is None:
             raise OmaHarnessError("workspace needs an id or name")
         self._require_input_allowed("workspace")

@@ -19,9 +19,8 @@ pytestmark = pytest.mark.skipif(
     reason="live compositor tests need GHOST_DESKTOP_LIVE=1",
 )
 
-from omaharness import dispatch as dg  # noqa: E402
-from omaharness import hypr, process  # noqa: E402
-
+from ghost_desktop_helper._vendor.omaharness import dispatch as dg  # noqa: E402
+from ghost_desktop_helper._vendor.omaharness import process  # noqa: E402
 from ghost_desktop_helper.bridge import GhostDesktop  # noqa: E402
 from ghost_desktop_helper.protocol import Server  # noqa: E402
 
@@ -93,7 +92,7 @@ def test_capture_active_window_background_safe(desktop):
 
 def test_ax_query_against_any_gtk_app(desktop):
     """Find one AT-SPI-exposing window and query it read-only, or skip."""
-    from omaharness import atspi as atspi_module
+    from ghost_desktop_helper._vendor.omaharness import atspi as atspi_module
 
     if not atspi_module.available():
         pytest.skip("PyGObject/AT-SPI bindings not importable")
@@ -116,8 +115,7 @@ def test_ax_ref_resolves_then_stales_on_the_real_bus(desktop):
     ref stale rather than silently redirecting it. The actual do_action is
     deliberately NOT invoked, so no real window is clicked or focus stolen.
     """
-    from omaharness import atspi as atspi_module
-
+    from ghost_desktop_helper._vendor.omaharness import atspi as atspi_module
     from ghost_desktop_helper.bridge import UnknownRefError
 
     if not atspi_module.available():

@@ -15,17 +15,17 @@ from __future__ import annotations
 import json
 import sys
 import traceback
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
-from omaharness import hypr
-from omaharness.errors import (
+from . import __version__, capabilities
+from ._vendor.omaharness import hypr
+from ._vendor.omaharness.errors import (
     AmbiguousTargetError,
     CapabilityError,
     OmaHarnessError,
     StateRestoreError,
 )
-
-from . import __version__, capabilities
 from .bridge import GhostDesktop, UnknownRefError
 
 # Order matters: _error_code returns the first isinstance match, so the more
@@ -126,7 +126,9 @@ _HANDLERS: dict[str, Callable[[GhostDesktop, dict[str, Any]], Any]] = {
         output=a.get("output"),
     ),
     "focus": lambda d, a: d.focus(address=a.get("address"), name=a.get("name")),
-    "workspace": lambda d, a: d.workspace(id=a.get("id"), name=a.get("name")),
+    "workspace": lambda d, a: d.workspace(
+        workspace_id=a.get("id"), name=a.get("name")
+    ),
 }
 
 OPS = sorted([*_HANDLERS.keys(), "hello", "doctor"])

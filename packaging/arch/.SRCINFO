@@ -18,6 +18,7 @@ pkgbase = ghost-ai-git
 	depends = python>=3.11
 	depends = python-dbus>=1.4
 	depends = python-gobject>=3.50
+	depends = python-pillow>=10
 	depends = qt6-5compat>=6.8
 	depends = quickshell>=0.3
 	depends = wtype>=0.4

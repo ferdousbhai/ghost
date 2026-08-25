@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 
 import pytest
-
 from conftest import FakeHyprctl, sample_window, unlocked_runner
 
 from ghost_desktop_helper.bridge import GhostDesktop

@@ -1,21 +1,21 @@
-"""Capture-ladder degradation: the headless rung must not sink the whole shot.
+"""Capture-ladder dependency and degradation coverage.
 
-The headless-output rung crops with Pillow, an optional extra. On a stock
-install its ``from PIL import Image`` raises ``ImportError`` - which is neither a
-CapabilityError nor an OmaHarnessError - so the ladder in
-``GhostDesktop._headless_fallback`` has to catch it and fall through to the next
-rung rather than let it escape and fail the capture.
+The advertised headless-output rung crops with Pillow, so Pillow is a mandatory
+runtime dependency. A damaged or hand-assembled installation may still raise
+``ImportError``; the ladder catches that and falls through instead of sinking
+the whole capture.
 """
 
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
 from typing import Any
 
 from conftest import FakeHyprctl, sample_window, unlocked_runner
 
+from ghost_desktop_helper._vendor.omaharness.errors import CapabilityError
 from ghost_desktop_helper.bridge import GhostDesktop
-from omaharness.errors import CapabilityError
 
 
 class _RaisingHeadless:
@@ -36,17 +36,31 @@ def _desktop(headless: Any) -> GhostDesktop:
     return GhostDesktop(hyprctl=hyprctl, runner=unlocked_runner, headless=headless)
 
 
-def test_missing_pillow_degrades_headless_rung_instead_of_failing():
+def test_pillow_is_required_for_advertised_headless_rung():
+    project = tomllib.loads(
+        (Path(__file__).parents[1] / "pyproject.toml").read_text(encoding="utf-8")
+    )["project"]
+
+    assert "pillow>=10" in project["dependencies"]
+    assert "image" not in project.get("optional-dependencies", {})
+
+
+def test_damaged_install_missing_pillow_degrades_instead_of_failing():
     desktop = _desktop(_RaisingHeadless(ImportError("No module named 'PIL'")))
     warnings: list[str] = []
     client = desktop.hyprctl.clients()[0]
 
-    result = desktop._headless_fallback(client, Path("/nonexistent/ghost-x.png"), warnings)
+    result = desktop._headless_fallback(
+        client, Path("/nonexistent/ghost-x.png"), warnings
+    )
 
     # The rung yields nothing (so the ladder continues to focused-region) and
     # says why, rather than raising and killing the capture.
     assert result is None
-    assert any("pillow" in w.casefold() for w in warnings)
+    assert any(
+        "pillow" in warning.casefold() and "required runtime dependency" in warning
+        for warning in warnings
+    )
 
 
 def test_capability_error_in_headless_rung_still_degrades():
@@ -54,7 +68,9 @@ def test_capability_error_in_headless_rung_still_degrades():
     warnings: list[str] = []
     client = desktop.hyprctl.clients()[0]
 
-    result = desktop._headless_fallback(client, Path("/nonexistent/ghost-x.png"), warnings)
+    result = desktop._headless_fallback(
+        client, Path("/nonexistent/ghost-x.png"), warnings
+    )
 
     assert result is None
     assert any("headless-output capture unavailable" in w for w in warnings)

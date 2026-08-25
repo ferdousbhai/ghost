@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import pytest
 
-from omaharness import dispatch as dg
-from omaharness.errors import CapabilityError
+from ghost_desktop_helper._vendor.omaharness import dispatch as dg
+from ghost_desktop_helper._vendor.omaharness.errors import CapabilityError
 
 
 def test_lua_focus_window_uses_named_table():

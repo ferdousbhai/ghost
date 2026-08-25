@@ -23,27 +23,24 @@ classifiers = [
   "Programming Language :: Python :: 3",
   "Topic :: Desktop Environment",
 ]
-# No mandatory PyPI runtime deps: the capability tools are SYSTEM packages
-# (grim, wtype, ydotool, hyprctl) and AT-SPI rides the system PyGObject stack.
-# The helper detects each at runtime and degrades with a clear error rather
-# than crashing when one is absent. See the optional extras and README for the
-# system packages to install (`sudo pacman -S grim wtype ydotool python-gobject
-# at-spi2-core`).
-dependencies = []
+# Pillow crops the full headless-output image back to the requested window, so
+# it is part of the advertised three-rung capture ladder rather than an extra.
+# The remaining capability tools are system packages (grim, wtype, ydotool,
+# hyprctl), and AT-SPI rides the system PyGObject stack. See the README for the
+# Arch/Omarchy package names.
+dependencies = ["pillow>=10"]
 
 [project.optional-dependencies]
 # AT-SPI needs the system GObject introspection stack. On Omarchy the supported
 # route is the system package (`sudo pacman -S python-gobject at-spi2-core`);
 # this extra exists only for virtualenvs that build PyGObject themselves.
 atspi = ["PyGObject>=3.50; sys_platform == 'linux'"]
-# Pillow is not required by any op today (the ghost_screen extension does its
-# own downscaling / vision routing on the base64 PNG this helper returns), but
-# it is offered for callers that want in-helper thumbnailing.
-image = ["pillow>=10"]
 
 [dependency-groups]
 dev = [
+  "mypy>=1.17",
   "pytest>=8.0",
+  "ruff>=0.12",
 ]
 
 [tool.uv]
@@ -59,19 +56,51 @@ python-preference = "only-system"
 ghost-desktop-helper = "ghost_desktop_helper.protocol:main"
 
 [tool.hatch.build.targets.wheel]
-# Ship both our bridge and the vendored harness (as the top-level `omaharness`
-# package) so `import omaharness` resolves from an installed wheel exactly as it
-# does from the source checkout via the sibling-vendor bootstrap in __init__.py.
-packages = ["src/ghost_desktop_helper", "vendor/omaharness"]
+# The harness is deliberately nested inside this one distribution's private
+# namespace; installing the upstream top-level `omaharness` alongside Ghost is
+# therefore safe in either order.
+packages = ["src/ghost_desktop_helper"]
 
 [tool.hatch.build.targets.wheel.force-include]
-"vendor/omaharness/LICENSE" = "omaharness/LICENSE"
+"src/ghost_desktop_helper/_vendor/omaharness/LICENSE" = "ghost_desktop_helper/_vendor/omaharness/LICENSE"
 
 [tool.hatch.build.targets.sdist]
-include = ["src", "vendor", "tests", "README.md"]
+include = ["src", "tests", "README.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
   "live: needs a real Hyprland session; skipped unless GHOST_DESKTOP_LIVE=1",
 ]
+
+[tool.ruff]
+target-version = "py311"
+extend-exclude = ["src/ghost_desktop_helper/_vendor"]
+
+[tool.ruff.lint]
+# Keep the first-party bridge and its tests on modern Python, import, bugbear,
+# exception-safety, annotation-marker, and builtin-shadowing rules. The
+# attributed upstream vendor remains byte-for-byte apart from its path header.
+select = ["A", "ANN", "B", "BLE", "E4", "E7", "E9", "F", "I", "UP"]
+# JSON values and injected desktop backends are intentionally dynamic. Strict
+# mypy still checks every explicit Any boundary and all first-party signatures.
+ignore = ["ANN401"]
+
+[tool.ruff.lint.per-file-ignores]
+# Test doubles intentionally accept heterogeneous protocol values; production
+# code remains fully annotated and is also checked by strict mypy below.
+"tests/**" = ["ANN"]
+
+[tool.mypy]
+python_version = "3.11"
+mypy_path = "src"
+files = ["src/ghost_desktop_helper"]
+exclude = ["src/ghost_desktop_helper/_vendor"]
+strict = true
+warn_unreachable = true
+
+[[tool.mypy.overrides]]
+# The private vendor is checked by its upstream project; Ghost type-checks the
+# bridge against its public runtime surface without rewriting third-party code.
+module = ["ghost_desktop_helper._vendor.omaharness.*"]
+ignore_errors = true

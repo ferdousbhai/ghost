@@ -135,9 +135,11 @@ when detection can't run.
 
 ## Runtime requirements
 
-The heavy capabilities are **system tools**, detected at runtime; the helper
+Most heavy capabilities are **system tools**, detected at runtime; the helper
 degrades with a clear "install X" error (and `hello` reports the gap) rather
-than crashing when one is absent.
+than crashing when one is absent. Pillow is the one Python runtime dependency:
+it crops a full headless-output capture back to the requested window, making
+the advertised second capture rung usable.
 
 | Tool | Purpose | Install (Arch/Omarchy) |
 |------|---------|------------------------|
@@ -146,13 +148,15 @@ than crashing when one is absent.
 | `wtype` | layout-safe text injection | `sudo pacman -S wtype` |
 | `ydotool` + `ydotoold` | evdev chords + coordinate clicks | `sudo pacman -S ydotool`; `systemctl --user enable --now ydotool` |
 | PyGObject + at-spi2-core | AT-SPI accessibility | `sudo pacman -S python-gobject at-spi2-core` |
+| Pillow | crop headless-output captures to the target window | installed with the Python package; `sudo pacman -S python-pillow` on Arch |
 
 Without `ydotool` the helper still observes, captures, sends chords via
 `hyprctl sendshortcut`, and types via `wtype`; only raw coordinate clicks and
 evdev-only chords refuse. Without PyGObject the `ax_*` ops refuse (with the
 exact interpreter-aware remediation) while everything else works.
 
-Python ≥ 3.11. No mandatory PyPI runtime dependencies.
+Python ≥ 3.11. The Python distribution declares `pillow>=10` as a runtime
+dependency; the Arch package declares the equivalent `python-pillow>=10`.
 
 ### The one system dependency that constrains the interpreter
 
@@ -181,7 +185,7 @@ instead of quietly returning nothing.
 ## Running
 
 ```
-# from a source checkout (uv resolves the vendored omaharness automatically)
+# from a source checkout (the private harness ships inside this package)
 uv run ghost-desktop-helper
 # or
 python -m ghost_desktop_helper
@@ -207,6 +211,8 @@ Two tiers, mirroring the harness:
 ```
 uv run --with pytest python -m pytest tests -q            # mocked (no compositor)
 GHOST_DESKTOP_LIVE=1 uv run --with pytest python -m pytest tests/test_live.py -q
+uv run ruff check src tests
+uv run mypy
 ```
 
 The mocked tier covers protocol shaping, dispatch-grammar selection, honesty
@@ -217,10 +223,12 @@ address so the dispatcher runs but changes nothing).
 
 ## Attribution
 
-`vendor/omaharness/` is a minimal, unmodified, desktop-only vendor of
+`src/ghost_desktop_helper/_vendor/omaharness/` is a minimal, unmodified,
+desktop-only vendor of
 [omarchy-quattro-harness](https://github.com/fabiopauli/omarchy-quattro-harness)
 — Copyright (c) 2026 Fabio Pauli, MIT License (see
-`vendor/omaharness/LICENSE` and the repo-root `THIRD_PARTY_NOTICES.md`). The
+`src/ghost_desktop_helper/_vendor/omaharness/LICENSE` and the repo-root
+`THIRD_PARTY_NOTICES.md`). The
 browser, CLI, desktop-orchestrator, knowledge, overlay, native-plugin, and
 XWayland modules are intentionally **not** vendored. The thin JSON bridge in
 `src/ghost_desktop_helper/` is original Ghost code (Apache-2.0, matching the

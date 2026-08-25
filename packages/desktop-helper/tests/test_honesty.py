@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import pytest
-
 from conftest import FakeHyprctl, sample_window, unlocked_runner
 
+from ghost_desktop_helper._vendor.omaharness.errors import CapabilityError
 from ghost_desktop_helper.bridge import GhostDesktop
 from ghost_desktop_helper.protocol import Server
 
@@ -35,7 +35,7 @@ def test_focus_carries_honesty_and_correct_grammar():
 
 def test_workspace_switch_reports_interference():
     desktop, hyprctl = _desktop()
-    result = desktop.workspace(id=5)
+    result = desktop.workspace(workspace_id=5)
     assert result["background_safe"] is False
     assert "workspace-switch" in result["interference"]
     assert hyprctl.dispatched[-1] == ["hl.dsp.focus{ workspace = 5 }"]
@@ -78,5 +78,5 @@ def test_unknown_lock_state_fails_closed():
         return FakeResult(ok=False, stderr="no session")
 
     desktop._runner = blind_runner
-    with pytest.raises(Exception):
+    with pytest.raises(CapabilityError):
         desktop.focus(address="0xaaaa")

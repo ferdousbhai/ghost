@@ -9,7 +9,6 @@ ref registry, and honesty metadata on semantic writes.
 from __future__ import annotations
 
 import pytest
-
 from conftest import FakeHyprctl, sample_window, unlocked_runner
 
 from ghost_desktop_helper.bridge import GhostDesktop

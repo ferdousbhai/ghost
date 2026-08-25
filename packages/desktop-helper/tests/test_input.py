@@ -10,7 +10,6 @@ the transaction's cursor-restore logic runs for real against a coherent pointer.
 from __future__ import annotations
 
 import pytest
-
 from conftest import FakeHyprctl, sample_window, unlocked_runner
 
 from ghost_desktop_helper.bridge import GhostDesktop
@@ -107,7 +106,7 @@ def test_drag_releases_button_even_if_a_move_raises():
         real_move(x, y)
 
     ydotool.move_absolute = flaky_move  # type: ignore[method-assign]
-    with pytest.raises(Exception):
+    with pytest.raises(RuntimeError, match="pointer wedged"):
         desktop.drag(x1=150, y1=150, x2=250, y2=250, app="0xaaaa", steps=4)
     # the button must not be left stuck down
     kinds = [e[0] for e in ydotool.events]

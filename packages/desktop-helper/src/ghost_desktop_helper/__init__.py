@@ -3,14 +3,11 @@
 A thin JSON stdin/stdout bridge over a vendored, attributed subset of
 omarchy-quattro-harness (MIT, Fabio Pauli). See README.md and DESKTOP_HELPER.md.
 
-The vendored harness lives in the sibling ``vendor/`` directory as the
-top-level ``omaharness`` package. When the helper runs from a source checkout
-(uv run, python -m, the tests) that directory is not automatically on the
-import path, so bootstrap it here. When installed as a wheel, ``omaharness`` is
-shipped alongside this package and importable directly; the bootstrap is then a
-harmless no-op because the sibling path does not exist.
+The vendored harness is private implementation detail under
+``ghost_desktop_helper._vendor``. It is never added to ``sys.path`` and cannot
+shadow, or be shadowed by, an independently installed top-level ``omaharness``.
 
-The second bootstrap is PyGObject. See ``_bootstrap_system_gi``.
+The only import-path bootstrap is for PyGObject. See ``_bootstrap_system_gi``.
 """
 
 from __future__ import annotations
@@ -69,20 +66,6 @@ def _bootstrap_system_gi() -> None:
             return
 
 
-def _bootstrap_vendor() -> None:
-    try:
-        import omaharness  # noqa: F401 - already importable (installed wheel)
-
-        return
-    except ImportError:
-        pass
-    # packages/desktop-helper/src/ghost_desktop_helper/__init__.py -> vendor/
-    vendor = _Path(__file__).resolve().parent.parent.parent / "vendor"
-    if vendor.is_dir() and str(vendor) not in _sys.path:
-        _sys.path.insert(0, str(vendor))
-
-
 _bootstrap_system_gi()
-_bootstrap_vendor()
 
 __all__ = ["__version__", "SYSTEM_GI_OPT_OUT"]

@@ -11,12 +11,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from omaharness import atspi as atspi_module
-from omaharness import capture as capture_module
-from omaharness import dispatch as dispatch_grammar
-from omaharness import hypr, inputs, process
-from omaharness import toplevels as toplevel_protocol
-from omaharness.errors import OmaHarnessError
+from ._vendor.omaharness import atspi as atspi_module
+from ._vendor.omaharness import capture as capture_module
+from ._vendor.omaharness import hypr, inputs, process
+from ._vendor.omaharness import toplevels as toplevel_protocol
+from ._vendor.omaharness.errors import OmaHarnessError
 
 
 def _tool(name: str) -> dict[str, Any]:

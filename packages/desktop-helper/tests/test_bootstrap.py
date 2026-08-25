@@ -9,9 +9,14 @@ environment installed may be shadowed by a distro package).
 
 from __future__ import annotations
 
+import os
+import subprocess
 import sys
+from pathlib import Path
 
 import ghost_desktop_helper
+
+_SOURCE_ROOT = Path(__file__).resolve().parent.parent / "src"
 
 
 def _fake_system_root(tmp_path, tag: str):
@@ -76,3 +81,32 @@ def test_opt_out_env_var_is_honoured(monkeypatch, tmp_path):
     before = list(sys.path)
     ghost_desktop_helper._bootstrap_system_gi()
     assert sys.path == before
+
+
+def test_external_omaharness_cannot_collide_with_private_vendor(tmp_path):
+    """An upstream top-level install and Ghost's private copy stay independent."""
+    external = tmp_path / "external"
+    package = external / "omaharness"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("identity = 'external'\n", encoding="utf-8")
+    env = {
+        **os.environ,
+        "PYTHONPATH": os.pathsep.join((str(external), str(_SOURCE_ROOT))),
+    }
+    check = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import omaharness; "
+            "from ghost_desktop_helper import bridge; "
+            "assert omaharness.identity == 'external'; "
+            "assert bridge.hypr.__name__ == "
+            "'ghost_desktop_helper._vendor.omaharness.hypr'",
+        ],
+        check=False,
+        capture_output=True,
+        cwd=tmp_path,
+        env=env,
+        text=True,
+    )
+    assert check.returncode == 0, check.stderr

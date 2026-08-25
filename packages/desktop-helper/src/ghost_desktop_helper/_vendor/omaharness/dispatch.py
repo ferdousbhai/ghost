@@ -1,7 +1,7 @@
 # Vendored from omarchy-quattro-harness (https://github.com/fabiopauli/omarchy-quattro-harness)
 # Original module: src/omaharness/dispatch.py
 # Copyright (c) 2026 Fabio Pauli. Licensed under the MIT License.
-# See vendor/omaharness/LICENSE for the full text. Vendored UNMODIFIED
+# See ghost_desktop_helper/_vendor/omaharness/LICENSE. Vendored UNMODIFIED
 # by the Ghost project for ghost-desktop-helper; only this header was added.
 
 """Compositor dispatch, encoded for whichever grammar this Hyprland speaks.

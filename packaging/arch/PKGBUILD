@@ -16,6 +16,7 @@ depends=(
   'python>=3.11'
   'python-dbus>=1.4'
   'python-gobject>=3.50'
+  'python-pillow>=10'
   'qt6-5compat>=6.8'
   'quickshell>=0.3'
   'wtype>=0.4'
@@ -179,10 +180,8 @@ package() {
   # This deliberately avoids installing `omaharness` as a global Python package.
   while IFS= read -r -d '' file; do
     install -Dm644 "$file" "$appdir/desktop-helper/${file#packages/desktop-helper/src/}"
-  done < <(find packages/desktop-helper/src -type f -name '*.py' -print0)
-  while IFS= read -r -d '' file; do
-    install -Dm644 "$file" "$appdir/desktop-helper/${file#packages/desktop-helper/vendor/}"
-  done < <(find packages/desktop-helper/vendor -type f \( -name '*.py' -o -name 'LICENSE' \) -print0)
+  done < <(find packages/desktop-helper/src -type f \
+    \( -name '*.py' -o -name 'LICENSE' \) -print0)
 
   _install_tree packages/shell/qml "$sharedir/quickshell"
   install -d -m755 -o root -g root "$pkgdir/etc/xdg/quickshell"
