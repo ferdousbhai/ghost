@@ -18,19 +18,21 @@
  *    computed per session (`deriveMemoryIndex`, `deriveDocCatalog`). There is no
  *    MEMORY.md and no catalog file, by contract.
  *
- * Every mutation goes through a path-keyed queue: OMP runs tool calls in
- * parallel by default, so two `ghost_memory_write` calls in one batch can
- * otherwise interleave on the same file.
+ * Mutations use a path-keyed in-process queue plus descriptor locks and atomic
+ * rename: OMP runs tool calls in parallel, and ghostd import can be a separate
+ * process, so neither shared quotas nor file publication may rely on one event
+ * loop.
  */
 import {
+  lstat,
   mkdir,
+  open,
   readdir,
-  readFile,
   rename,
-  stat,
   unlink,
-  writeFile,
+  type FileHandle,
 } from "node:fs/promises";
+import { constants } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { isSafe } from "redos-detector";
@@ -51,6 +53,14 @@ import {
   parseMemoryFile,
   serializeMemoryFile,
 } from "./memory-file.js";
+import {
+  descriptorPath,
+  openConfinedDirectory,
+  openConfinedFile,
+  openDirectoryNoFollow,
+  openRegularFileNoFollow,
+  withDescriptorLock,
+} from "./linux-fs.js";
 import { GHOST_HOME_FORMAT } from "./types.js";
 import type {
   CharacterFile,
@@ -167,18 +177,10 @@ const MAX_GREP_LINE_SCAN_CHARS = 10_000;
 
 async function exists(path: string): Promise<boolean> {
   try {
-    await stat(path);
+    await lstat(path);
     return true;
-  } catch {
-    return false;
-  }
-}
-
-async function readDirEntries(dir: string) {
-  try {
-    return await readdir(dir, { withFileTypes: true });
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
     throw error;
   }
 }
@@ -198,6 +200,93 @@ function resolveWithin(base: string, relativePath: string, label: string): strin
     );
   }
   return full;
+}
+
+async function readConfinedText(
+  homeDir: string,
+  path: string,
+  label: string,
+): Promise<string | null> {
+  const file = await openConfinedFile(homeDir, path, label);
+  if (!file) return null;
+  try {
+    return await file.readFile("utf8");
+  } finally {
+    await file.close();
+  }
+}
+
+async function existingFileMode(
+  directory: FileHandle,
+  name: string,
+  label: string,
+): Promise<number | null> {
+  let file: FileHandle;
+  try {
+    file = await openRegularFileNoFollow(
+      descriptorPath(directory, name),
+      label,
+    );
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return null;
+    throw error;
+  }
+  try {
+    const stats = await file.stat();
+    return stats.mode & 0o777;
+  } finally {
+    await file.close();
+  }
+}
+
+async function atomicWriteFile(
+  homeDir: string,
+  path: string,
+  content: string | Uint8Array,
+  lockedDirectory?: FileHandle,
+): Promise<void> {
+  const ownedDirectory = lockedDirectory === undefined;
+  const directory = lockedDirectory ?? await openConfinedDirectory(
+    homeDir,
+    dirname(path),
+    { create: true, label: "Write path" },
+  );
+  const name = basename(path);
+  const temporaryName = `.${name}.write-${process.pid}-${randomUUID()}`;
+  let handle: FileHandle | undefined;
+  const publish = async (): Promise<void> => {
+    const existingMode = await existingFileMode(directory, name, "Write path");
+    const mode = existingMode ?? 0o666;
+    const temporary = descriptorPath(directory, temporaryName);
+    const target = descriptorPath(directory, name);
+    try {
+      handle = await open(
+        temporary,
+        constants.O_CREAT
+          | constants.O_EXCL
+          | constants.O_WRONLY
+          | constants.O_NOFOLLOW,
+        mode,
+      );
+      await handle.writeFile(content);
+      await handle.sync();
+      await handle.close();
+      handle = undefined;
+      await rename(temporary, target);
+      await directory.sync();
+    } catch (error) {
+      await handle?.close().catch(() => undefined);
+      await unlink(temporary).catch(() => undefined);
+      throw error;
+    }
+  };
+  try {
+    if (ownedDirectory) await withDescriptorLock(directory, publish);
+    else await publish();
+  } finally {
+    if (ownedDirectory) await directory.close();
+  }
 }
 
 /** `craft/paper` and `craft/paper.md` both mean `craft/paper.md`. */
@@ -222,36 +311,97 @@ export function normalizeDocPath(input: string): string {
   return segments.join("/");
 }
 
-async function migrateDocFile(fullPath: string, docPath: string): Promise<void> {
+async function migrateDocFile(
+  homeDir: string,
+  directory: FileHandle,
+  name: string,
+  fullPath: string,
+  docPath: string,
+): Promise<void> {
   await withFileMutationQueue(fullPath, async () => {
-    const text = await readFile(fullPath, "utf8");
-    const migrated = migrateDoc(text, docPath);
-    if (migrated === text) return;
-
-    const temporary = join(
-      dirname(fullPath),
-      `.${basename(fullPath)}.migrate-${process.pid}-${randomUUID()}`,
-    );
-    try {
-      await writeFile(temporary, migrated, { encoding: "utf8", flag: "wx" });
-      await rename(temporary, fullPath);
-    } catch (error) {
-      await unlink(temporary).catch(() => undefined);
-      throw error;
-    }
+    await withDescriptorLock(directory, async () => {
+      const text = await readEntryText(directory, name, "Document path");
+      if (text === null) return;
+      const migrated = migrateDoc(text, docPath);
+      if (migrated === text) return;
+      await atomicWriteFile(homeDir, fullPath, migrated, directory);
+    });
   });
 }
 
-async function migrateDocTree(dir: string, prefix = ""): Promise<void> {
-  for (const entry of await readDirEntries(dir)) {
+async function migrateDocTree(
+  homeDir: string,
+  directory: FileHandle,
+  lexicalDir: string,
+  prefix = "",
+): Promise<void> {
+  for (const entry of await readdir(descriptorPath(directory), { withFileTypes: true })) {
     if (entry.name.startsWith(".")) continue;
     const docPath = prefix ? `${prefix}/${entry.name}` : entry.name;
-    const fullPath = join(dir, entry.name);
+    const fullPath = join(lexicalDir, entry.name);
     if (entry.isDirectory()) {
-      await migrateDocTree(fullPath, docPath);
+      const child = await openDirectoryNoFollow(
+        descriptorPath(directory, entry.name),
+        "Document path",
+      );
+      try {
+        await migrateDocTree(homeDir, child, fullPath, docPath);
+      } finally {
+        await child.close();
+      }
     } else if (entry.isFile() && entry.name.endsWith(".md")) {
-      await migrateDocFile(fullPath, docPath);
+      await migrateDocFile(homeDir, directory, entry.name, fullPath, docPath);
     }
+  }
+}
+
+async function readEntryText(
+  directory: FileHandle,
+  name: string,
+  label: string,
+): Promise<string | null> {
+  let file: FileHandle;
+  try {
+    file = await openRegularFileNoFollow(
+      descriptorPath(directory, name),
+      label,
+    );
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return null;
+    throw error;
+  }
+  try {
+    return await file.readFile("utf8");
+  } finally {
+    await file.close();
+  }
+}
+
+async function openOrCreateChildDirectory(
+  parent: FileHandle,
+  name: string,
+  label: string,
+): Promise<FileHandle> {
+  const child = descriptorPath(parent, name);
+  try {
+    await mkdir(child);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+  }
+  return openDirectoryNoFollow(child, label);
+}
+
+async function openChildDirectoryIfPresent(
+  parent: FileHandle,
+  name: string,
+  label: string,
+): Promise<FileHandle | null> {
+  try {
+    return await openDirectoryNoFollow(descriptorPath(parent, name), label);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
   }
 }
 
@@ -274,16 +424,18 @@ function parseExportManifest(text: string): Record<string, unknown> {
   return parsed as Record<string, unknown>;
 }
 
-async function migrateExportManifest(dir: string): Promise<void> {
+async function migrateExportManifest(
+  dir: string,
+  directory: FileHandle,
+): Promise<void> {
   const fullPath = join(dir, EXPORT_MANIFEST_FILENAME);
   await withFileMutationQueue(fullPath, async () => {
-    let text: string;
-    try {
-      text = await readFile(fullPath, "utf8");
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
-      throw error;
-    }
+    const text = await readEntryText(
+      directory,
+      EXPORT_MANIFEST_FILENAME,
+      "Manifest path",
+    );
+    if (text === null) return;
 
     const manifest = parseExportManifest(text);
     if (manifest.format === GHOST_HOME_FORMAT) return;
@@ -296,21 +448,12 @@ async function migrateExportManifest(dir: string): Promise<void> {
       );
     }
 
-    const temporary = join(
+    await atomicWriteFile(
       dir,
-      `.${EXPORT_MANIFEST_FILENAME}.migrate-${process.pid}-${randomUUID()}`,
+      fullPath,
+      `${JSON.stringify({ ...manifest, format: GHOST_HOME_FORMAT }, null, 2)}\n`,
+      directory,
     );
-    try {
-      await writeFile(
-        temporary,
-        `${JSON.stringify({ ...manifest, format: GHOST_HOME_FORMAT }, null, 2)}\n`,
-        { encoding: "utf8", flag: "wx" },
-      );
-      await rename(temporary, fullPath);
-    } catch (error) {
-      await unlink(temporary).catch(() => undefined);
-      throw error;
-    }
   });
 }
 
@@ -354,37 +497,82 @@ export class GhostHome {
 
   /** Create the directory skeleton. Safe to call repeatedly. */
   async ensure(): Promise<void> {
-    const legacyNotesDir = join(this.dir, LEGACY_NOTES_DIRNAME);
-    const [hasDocs, hasLegacyNotes] = await Promise.all([
-      exists(this.docsDir),
-      exists(legacyNotesDir),
-    ]);
-    if (hasDocs && hasLegacyNotes) {
-      throw new GhostError(
-        "conflict",
-        `Both ${DOCS_DIRNAME}/ and the legacy ${LEGACY_NOTES_DIRNAME}/ directory exist in `
-        + `${this.dir}. Merge them into ${DOCS_DIRNAME}/ before opening this ghost.`,
-        { docs: this.docsDir, legacyNotes: legacyNotesDir },
-      );
-    }
-    if (hasLegacyNotes) await rename(legacyNotesDir, this.docsDir);
-    await mkdir(this.docsDir, { recursive: true });
-    await migrateDocTree(this.docsDir);
-    await migrateExportManifest(this.dir);
-    await mkdir(this.memoryDir, { recursive: true });
-    await mkdir(this.conversationsDir, { recursive: true });
+    await withFileMutationQueue(this.dir, async () => {
+      await mkdir(this.dir, { recursive: true });
+      const directory = await openConfinedDirectory(this.dir, this.dir, {
+        label: "Ghost home",
+      });
+      try {
+        await withDescriptorLock(directory, async () => {
+          const legacyNotesDir = join(this.dir, LEGACY_NOTES_DIRNAME);
+          let docs = await openChildDirectoryIfPresent(
+            directory,
+            DOCS_DIRNAME,
+            "Documents path",
+          );
+          let legacyNotes: FileHandle | null = null;
+          try {
+            legacyNotes = await openChildDirectoryIfPresent(
+              directory,
+              LEGACY_NOTES_DIRNAME,
+              "Legacy notes path",
+            );
+            if (docs && legacyNotes) {
+              throw new GhostError(
+                "conflict",
+                `Both ${DOCS_DIRNAME}/ and the legacy ${LEGACY_NOTES_DIRNAME}/ directory exist in `
+                + `${this.dir}. Merge them into ${DOCS_DIRNAME}/ before opening this ghost.`,
+                { docs: this.docsDir, legacyNotes: legacyNotesDir },
+              );
+            }
+            if (legacyNotes) {
+              await legacyNotes.close();
+              legacyNotes = null;
+              await rename(
+                descriptorPath(directory, LEGACY_NOTES_DIRNAME),
+                descriptorPath(directory, DOCS_DIRNAME),
+              );
+              docs = await openDirectoryNoFollow(
+                descriptorPath(directory, DOCS_DIRNAME),
+                "Documents path",
+              );
+            }
+            docs ??= await openOrCreateChildDirectory(
+              directory,
+              DOCS_DIRNAME,
+              "Documents path",
+            );
+            await migrateDocTree(this.dir, docs, this.docsDir);
+          } finally {
+            await docs?.close().catch(() => undefined);
+            await legacyNotes?.close().catch(() => undefined);
+          }
+          await migrateExportManifest(this.dir, directory);
+
+          const memory = await openOrCreateChildDirectory(
+            directory,
+            MEMORY_DIRNAME,
+            "Memory path",
+          );
+          await memory.close();
+          const conversations = await openOrCreateChildDirectory(
+            directory,
+            CONVERSATIONS_DIRNAME,
+            "Conversations path",
+          );
+          await conversations.close();
+        });
+      } finally {
+        await directory.close();
+      }
+    });
   }
 
   // ---------------------------------------------------------------- character
 
   async readCharacter(): Promise<CharacterFile | null> {
-    let text: string;
-    try {
-      text = await readFile(this.characterPath, "utf8");
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-      throw error;
-    }
+    const text = await readConfinedText(this.dir, this.characterPath, "Character path");
+    if (text === null) return null;
     const parsed = parseDocument(text);
     return {
       title: readString(parsed.frontmatter, "title"),
@@ -400,8 +588,7 @@ export class GhostHome {
     if (input.title !== undefined) lines.push(`title: ${yamlScalar(input.title)}`);
     const text = renderDocument(lines, input.body);
     await withFileMutationQueue(this.characterPath, async () => {
-      await mkdir(this.dir, { recursive: true });
-      await writeFile(this.characterPath, text, "utf8");
+      await atomicWriteFile(this.dir, this.characterPath, text);
     });
   }
 
@@ -412,17 +599,42 @@ export class GhostHome {
     const docs: DocMeta[] = [];
     const skipped: SkippedFile[] = [];
 
-    const walk = async (dir: string, prefix: string): Promise<void> => {
-      for (const entry of await readDirEntries(dir)) {
+    if (!(await exists(this.docsDir))) return { docs, skipped };
+    const root = await openConfinedDirectory(this.dir, this.docsDir, {
+      label: "Documents path",
+    });
+
+    const walk = async (directory: FileHandle, prefix: string): Promise<void> => {
+      for (const entry of await readdir(descriptorPath(directory), {
+        withFileTypes: true,
+      })) {
         if (entry.name.startsWith(".")) continue;
         const childPath = prefix ? `${prefix}/${entry.name}` : entry.name;
         if (entry.isDirectory()) {
-          await walk(join(dir, entry.name), childPath);
+          let child: FileHandle;
+          try {
+            child = await openDirectoryNoFollow(
+              descriptorPath(directory, entry.name),
+              "Document path",
+            );
+          } catch (error) {
+            skipped.push({
+              path: `${DOCS_DIRNAME}/${childPath}`,
+              reason: message(error),
+            });
+            continue;
+          }
+          try {
+            await walk(child, childPath);
+          } finally {
+            await child.close();
+          }
           continue;
         }
         if (!entry.name.endsWith(".md")) continue;
         try {
-          const text = await readFile(join(dir, entry.name), "utf8");
+          const text = await readEntryText(directory, entry.name, "Document path");
+          if (text === null) continue;
           docs.push({ ...parseDoc(text), path: childPath });
         } catch (error) {
           skipped.push({
@@ -433,7 +645,11 @@ export class GhostHome {
       }
     };
 
-    await walk(this.docsDir, "");
+    try {
+      await walk(root, "");
+    } finally {
+      await root.close();
+    }
     docs.sort((left, right) => left.path.localeCompare(right.path));
     return { docs, skipped };
   }
@@ -441,14 +657,9 @@ export class GhostHome {
   async readDoc(path: string): Promise<DocFile> {
     const docPath = normalizeDocPath(path);
     const full = resolveWithin(this.docsDir, docPath, "Document path");
-    let text: string;
-    try {
-      text = await readFile(full, "utf8");
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        throw new GhostError("not_found", `No document at ${docPath}.`, { path: docPath });
-      }
-      throw error;
+    const text = await readConfinedText(this.dir, full, "Document path");
+    if (text === null) {
+      throw new GhostError("not_found", `No document at ${docPath}.`, { path: docPath });
     }
     const parsed = parseDoc(text);
     return { meta: { ...parsed, path: docPath }, body: text };
@@ -469,8 +680,7 @@ export class GhostHome {
     const full = resolveWithin(this.docsDir, docPath, "Document path");
     const parsed = parseDoc(input.body);
     await withFileMutationQueue(full, async () => {
-      await mkdir(dirname(full), { recursive: true });
-      await writeFile(full, input.body, "utf8");
+      await atomicWriteFile(this.dir, full, input.body);
     });
     return { ...parsed, path: docPath };
   }
@@ -568,13 +778,31 @@ export class GhostHome {
     const dir = this.memoryDir;
     const files: MemoryRecord[] = [];
     const skipped: SkippedFile[] = [];
-    for (const entry of await readDirEntries(dir)) {
-      if (!entry.isFile() || entry.name.startsWith(".") || !entry.name.endsWith(".md")) {
-        continue;
-      }
-      const relativePath = this.relative(join(dir, entry.name));
+    if (!(await exists(dir))) return { files, skipped };
+    const directory = await openConfinedDirectory(this.dir, dir, { label: "Memory path" });
+    try {
+      await this.listMemoryFromDirectory(directory, files, skipped);
+    } finally {
+      await directory.close();
+    }
+    files.sort((left, right) => left.slug.localeCompare(right.slug));
+    return { files, skipped };
+  }
+
+  private async listMemoryFromDirectory(
+    directory: FileHandle,
+    files: MemoryRecord[],
+    skipped: SkippedFile[],
+  ): Promise<void> {
+    for (const entry of await readdir(descriptorPath(directory), {
+      withFileTypes: true,
+    })) {
+      if (entry.name.startsWith(".") || !entry.name.endsWith(".md")) continue;
+      const relativePath = `${MEMORY_DIRNAME}/${entry.name}`;
       try {
-        const parsed = parseMemoryFile(await readFile(join(dir, entry.name), "utf8"));
+        const text = await readEntryText(directory, entry.name, "Memory file");
+        if (text === null) continue;
+        const parsed = parseMemoryFile(text);
         files.push({
           slug: coerceMemorySlug(entry.name),
           description: parsed.description,
@@ -585,26 +813,19 @@ export class GhostHome {
         skipped.push({ path: relativePath, reason: message(error) });
       }
     }
-    files.sort((left, right) => left.slug.localeCompare(right.slug));
-    return { files, skipped };
   }
 
   async readMemory(name: string): Promise<MemoryRecord> {
     const slug = coerceMemorySlug(name);
     const dir = this.memoryDir;
     const full = resolveWithin(dir, memoryFileName(slug), "Memory file");
-    let text: string;
-    try {
-      text = await readFile(full, "utf8");
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        throw new GhostError(
-          "not_found",
-          `No memory file named ${memoryFileName(slug)}.`,
-          { name: memoryFileName(slug) },
-        );
-      }
-      throw error;
+    const text = await readConfinedText(this.dir, full, "Memory file");
+    if (text === null) {
+      throw new GhostError(
+        "not_found",
+        `No memory file named ${memoryFileName(slug)}.`,
+        { name: memoryFileName(slug) },
+      );
     }
     const parsed = parseMemoryFile(text);
     return {
@@ -631,22 +852,39 @@ export class GhostHome {
       updatedAt: input.updatedAt ?? new Date(),
     });
 
-    return withFileMutationQueue(full, async () => {
-      const created = !(await exists(full));
-      if (created) {
-        const { files } = await this.listMemory();
-        if (files.length >= MAX_MEMORY_FILES) {
-          throw new GhostError(
-            "limit_exceeded",
-            `Memory already holds ${MAX_MEMORY_FILES} files. `
-            + "Rewrite an existing memory instead of adding another.",
-            { limit: MAX_MEMORY_FILES },
-          );
-        }
+    // The quota spans the directory, so new names must share one queue. A
+    // per-file queue lets parallel creates all observe the same free slot.
+    return withFileMutationQueue(dir, async () => {
+      const directory = await openConfinedDirectory(this.dir, dir, {
+        create: true,
+        label: "Memory path",
+      });
+      try {
+        return await withDescriptorLock(directory, async () => {
+          const created = await existingFileMode(
+            directory,
+            memoryFileName(slug),
+            "Memory file",
+          ) === null;
+          if (created) {
+            const files: MemoryRecord[] = [];
+            const skipped: SkippedFile[] = [];
+            await this.listMemoryFromDirectory(directory, files, skipped);
+            if (files.length >= MAX_MEMORY_FILES) {
+              throw new GhostError(
+                "limit_exceeded",
+                `Memory already holds ${MAX_MEMORY_FILES} files. `
+                + "Rewrite an existing memory instead of adding another.",
+                { limit: MAX_MEMORY_FILES },
+              );
+            }
+          }
+          await atomicWriteFile(this.dir, full, text, directory);
+          return { slug, path: this.relative(full), created };
+        });
+      } finally {
+        await directory.close();
       }
-      await mkdir(dir, { recursive: true });
-      await writeFile(full, text, "utf8");
-      return { slug, path: this.relative(full), created };
     });
   }
 
@@ -654,22 +892,44 @@ export class GhostHome {
 
   /** Imported transcript file names, without the `.json`. */
   async listConversations(): Promise<string[]> {
-    const entries = await readDirEntries(this.conversationsDir);
-    return entries
-      .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
-      .map((entry) => entry.name.slice(0, -".json".length))
-      .sort((left, right) => left.localeCompare(right));
+    if (!(await exists(this.conversationsDir))) return [];
+    const directory = await openConfinedDirectory(this.dir, this.conversationsDir, {
+      label: "Conversations path",
+    });
+    try {
+      const conversations: string[] = [];
+      for (const entry of await readdir(descriptorPath(directory), {
+        withFileTypes: true,
+      })) {
+        if (!entry.name.endsWith(".json")) continue;
+        let file: FileHandle | undefined;
+        try {
+          file = await openRegularFileNoFollow(
+            descriptorPath(directory, entry.name),
+            "Conversation path",
+          );
+          conversations.push(entry.name.slice(0, -".json".length));
+        } catch (error) {
+          const code = (error as NodeJS.ErrnoException).code;
+          if (
+            code !== "ENOENT"
+            && !(error instanceof GhostError && error.code === "invalid_path")
+          ) throw error;
+        } finally {
+          await file?.close();
+        }
+      }
+      return conversations.sort((left, right) => left.localeCompare(right));
+    } finally {
+      await directory.close();
+    }
   }
 
   /** The v2 `export-manifest.json` of the archive this home was imported from. */
   async readExportManifest(): Promise<Record<string, unknown> | null> {
-    let text: string;
-    try {
-      text = await readFile(join(this.dir, EXPORT_MANIFEST_FILENAME), "utf8");
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-      throw error;
-    }
+    const fullPath = join(this.dir, EXPORT_MANIFEST_FILENAME);
+    const text = await readConfinedText(this.dir, fullPath, "Manifest path");
+    if (text === null) return null;
     const manifest = parseExportManifest(text);
     if (manifest.format !== GHOST_HOME_FORMAT) {
       throw new GhostError(

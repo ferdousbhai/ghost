@@ -1,5 +1,8 @@
-import { readFile, stat, writeFile } from "node:fs/promises";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
+import { once } from "node:events";
+import { mkdir, readFile, readdir, stat, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { deriveDocCatalog } from "../src/catalog.js";
 import { GhostError, MemoryFileFormatError } from "../src/errors.js";
@@ -15,6 +18,31 @@ import {
 
 let fixture: GhostFixture;
 let home: GhostHome;
+const execFileAsync = promisify(execFile);
+
+async function waitForPath(path: string): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  for (;;) {
+    try {
+      await stat(path);
+      return;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    if (Date.now() >= deadline) throw new Error(`Timed out waiting for ${path}.`);
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 10));
+  }
+}
+
+async function childResult(child: ChildProcess): Promise<{ code: number | null; stderr: string }> {
+  let stderr = "";
+  child.stderr?.setEncoding("utf8");
+  child.stderr?.on("data", (chunk: string) => {
+    stderr += chunk;
+  });
+  const [code] = await once(child, "exit");
+  return { code: code as number | null, stderr };
+}
 
 beforeEach(async () => {
   fixture = await createGhostFixture();
@@ -246,6 +274,56 @@ describe("docs", () => {
     await expect(home.writeDoc("../outside.md", { body: "# X\n" })).rejects.toThrow(GhostError);
   });
 
+  it("refuses file and directory symlinks instead of following them outside", async () => {
+    const outsideFile = join(fixture.root, "outside.md");
+    const outsideDir = join(fixture.root, "outside-docs");
+    const outsideBytes = "# Outside secret\n\nNever list me.\n";
+    await writeFile(outsideFile, outsideBytes, "utf8");
+    await mkdir(outsideDir);
+    await symlink(outsideFile, join(home.docsDir, "linked.md"));
+    await symlink(outsideDir, join(home.docsDir, "linked-dir"));
+
+    await expect(home.readDoc("linked.md"))
+      .rejects.toMatchObject({ code: "invalid_path" });
+    await expect(home.writeDoc("linked.md", { body: "# Replacement\n" }))
+      .rejects.toMatchObject({ code: "invalid_path" });
+    await expect(home.writeDoc("linked-dir/new.md", { body: "# New\n" }))
+      .rejects.toMatchObject({ code: "invalid_path" });
+
+    const listing = await home.listDocs();
+    expect(listing.docs.map((doc) => doc.title)).not.toContain("Outside secret");
+    expect(listing.skipped).toContainEqual(
+      expect.objectContaining({ path: "docs/linked.md" }),
+    );
+    expect(await readFile(outsideFile, "utf8")).toBe(outsideBytes);
+    await expect(readFile(join(outsideDir, "new.md"), "utf8")).rejects.toThrow();
+  });
+
+  it("rejects a FIFO document without blocking on open", async () => {
+    await execFileAsync("mkfifo", [join(home.docsDir, "blocking.md")]);
+    const started = Date.now();
+    const listing = await home.listDocs();
+    await expect(home.readDoc("blocking.md"))
+      .rejects.toMatchObject({ code: "invalid_path" });
+    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(listing.skipped).toContainEqual(
+      expect.objectContaining({ path: "docs/blocking.md" }),
+    );
+  });
+
+  it("publishes concurrent doc replacements as complete atomic files", async () => {
+    const bodies = Array.from(
+      { length: 12 },
+      (_, index) => `# Version ${index}\n\n${String(index).repeat(100_000)}\n`,
+    );
+    await Promise.all(bodies.map((body) => home.writeDoc("races/hot.md", { body })));
+
+    expect(bodies).toContain(await readFile(join(home.docsDir, "races/hot.md"), "utf8"));
+    expect((await readdir(join(home.docsDir, "races"))).filter((name) =>
+      name.includes(".write-")
+    )).toEqual([]);
+  });
+
   it("throws not_found rather than returning an error payload", async () => {
     await expect(home.readDoc("missing.md")).rejects.toMatchObject({ code: "not_found" });
   });
@@ -366,6 +444,76 @@ describe("memory", () => {
     expect(file.content).toBe(`body ${file.description.slice("write ".length)}`);
     const { files } = await home.listMemory();
     expect(files.filter((entry) => entry.slug === "hot-file")).toHaveLength(1);
+  });
+
+  it("serializes the directory-wide quota across different new names", async () => {
+    const filler = `---
+description: filler
+updated: 2026-08-25
+---
+
+x
+`;
+    await Promise.all(Array.from({ length: 497 }, (_, index) =>
+      writeFile(join(home.memoryDir, `filler-${index}.md`), filler, "utf8")
+    ));
+
+    const results = await Promise.allSettled([
+      home.writeMemory({ name: "last-a", description: "last a", content: "a" }),
+      home.writeMemory({ name: "last-b", description: "last b", content: "b" }),
+    ]);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((result) => result.status === "rejected")).toEqual([
+      expect.objectContaining({ reason: expect.objectContaining({ code: "limit_exceeded" }) }),
+    ]);
+    expect((await home.listMemory()).files).toHaveLength(500);
+  });
+
+  it("serializes the memory quota across separate Bun processes", async () => {
+    const filler = `---
+description: filler
+updated: 2026-08-25
+---
+
+x
+`;
+    await Promise.all(Array.from({ length: 497 }, (_, index) =>
+      writeFile(join(home.memoryDir, `process-filler-${index}.md`), filler, "utf8")
+    ));
+
+    const go = join(fixture.root, "process-go");
+    const moduleUrl = new URL("../src/home.ts", import.meta.url).href;
+    const spawnWriter = (name: string): ChildProcess => {
+      const ready = join(fixture.root, `${name}.ready`);
+      return spawn(process.execPath, [
+        "-e",
+        `
+          const { openGhostHome } = await import(${JSON.stringify(moduleUrl)});
+          await Bun.write(${JSON.stringify(ready)}, "ready");
+          while (!(await Bun.file(${JSON.stringify(go)}).exists())) await Bun.sleep(5);
+          await openGhostHome(${JSON.stringify(fixture.dir)}).writeMemory({
+            name: ${JSON.stringify(name)},
+            description: ${JSON.stringify(name)},
+            content: ${JSON.stringify(name)},
+          });
+        `,
+      ], { stdio: ["ignore", "ignore", "pipe"] });
+    };
+    const first = spawnWriter("process-last-a");
+    const second = spawnWriter("process-last-b");
+    const firstResult = childResult(first);
+    const secondResult = childResult(second);
+    await Promise.all([
+      waitForPath(join(fixture.root, "process-last-a.ready")),
+      waitForPath(join(fixture.root, "process-last-b.ready")),
+    ]);
+    await writeFile(go, "go");
+
+    const results = await Promise.all([firstResult, secondResult]);
+    expect(results.map((result) => result.code).sort()).toEqual([0, 1]);
+    expect(results.find((result) => result.code !== 0)?.stderr)
+      .toContain("limit_exceeded");
+    expect((await home.listMemory()).files).toHaveLength(500);
   });
 });
 
