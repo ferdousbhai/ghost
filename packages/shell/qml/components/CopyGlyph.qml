@@ -1,5 +1,5 @@
 // Lucide's copy icon, drawn locally for the same predictable rendering as the
-// ghost and branch glyphs.
+// ghost and pencil glyphs.
 import QtQuick
 import QtQuick.Shapes
 import qs.services

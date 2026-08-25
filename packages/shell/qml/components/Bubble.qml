@@ -35,7 +35,7 @@ Item {
     /** Position in the transcript model; gates entrances to freshly arrived rows. */
     required property int rowIndex
 
-    /** The branch glyph was clicked. The HUD decides what it costs. */
+    /** The edit action was clicked. The HUD decides what it costs. */
     signal branchRequested(string entryId)
 
     readonly property bool mine: root.speaker === "user"
@@ -130,7 +130,10 @@ Item {
         anchors.left: root.mine ? undefined : parent.left
         width: root.mine
             ? Math.min(parent.width * 0.82,
-                Math.max(bodyText.implicitWidth + root.contentInset * 2, 72))
+                Math.max(bodyText.implicitWidth
+                    + (messageActions.visible
+                        ? messageActions.implicitWidth + Theme.gap / 2 : 0)
+                    + root.contentInset * 2, 72))
             : parent.width
         implicitWidth: Math.max(content.implicitWidth, 1) + root.contentInset * 2
         implicitHeight: content.implicitHeight + root.contentInset * 2
@@ -166,140 +169,199 @@ Item {
                 }
             }
 
-            Text {
-                id: bodyText
+            Item {
+                id: message
+
                 width: parent.width
-                visible: root.body !== ""
-                text: root.body
-                textFormat: root.mine || root.commandOutput
-                    ? Text.PlainText : Text.MarkdownText
-                color: root.mine ? Theme.foregroundBright : Theme.foreground
-                // Links wear the ghost's own amber, never Theme.accent — the
-                // inherited Omarchy accent is blue in most themes, and reading
-                // copy is not a web page.
-                linkColor: Theme.ghostAmber
-                font.family: root.commandOutput
-                    ? Theme.fontFamilyMono : Theme.fontFamily
-                font.pixelSize: Theme.fontSize
-                lineHeight: Theme.lineHeight
-                wrapMode: Text.Wrap
-                onLinkActivated: link => ExternalLinks.openModelUrl(link)
+                height: implicitHeight
+                visible: bodyText.visible || messageActions.visible
+                implicitHeight: Math.max(
+                    bodyText.visible ? bodyText.implicitHeight : 0,
+                    messageActions.visible
+                        ? messageActions.y + messageActions.height : 0)
 
-                // Hover affordance only: Qt.NoButton lets the press fall
-                // through to the Text so link activation still fires.
-                MouseArea {
-                    anchors.fill: parent
-                    acceptedButtons: Qt.NoButton
-                    cursorShape: bodyText.hoveredLink !== ""
-                        ? Qt.PointingHandCursor : Qt.ArrowCursor
-                }
-            }
-
-            // Settled messages keep their actions quiet and icon-sized. Human
-            // prompts can branch; ghost replies can be copied.
-            Row {
-                // A ghost's row earns this line for its reply or for the trail
-                // it is holding back, and a turn that spent itself entirely on
-                // tool calls has only the latter.
-                visible: !root.busy && (root.mine
-                    ? (root.body !== "" && root.sourceEntryId !== "")
-                    : (root.body !== "" || root.quietToolCount > 0))
-                spacing: Theme.gap
-
-                Item {
-                    id: branchAction
-
-                    visible: root.mine && root.sourceEntryId !== ""
-                    // A running turn owns the conversation. Dimmed rather than
-                    // hidden: the click still answers, in the line above the
-                    // composer, instead of vanishing under the pointer.
-                    opacity: Ghostd.streaming ? 0.4 : 1
-                    width: 16
-                    height: 16
-                    Accessible.role: Accessible.Button
-                    Accessible.name: "Start new conversation from here"
-
-                    BranchGlyph {
-                        anchors.fill: parent
-                        size: branchAction.width
-                        tint: branchArea.containsMouse
-                            ? Theme.ghostAmberBright : Theme.foregroundFaint
-                    }
-
-                    MouseArea {
-                        id: branchArea
-                        anchors.fill: parent
-                        anchors.margins: -Theme.gap / 2
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        // The HUD owns what happens next: branching copies the
-                        // thread into a new conversation and hands this
-                        // message's text to the composer, which may already
-                        // hold something worth asking about first.
-                        onClicked: root.branchRequested(root.sourceEntryId)
-                    }
-                }
-
-                // No sibling navigator lives here any more. A branch is its own
-                // conversation now, so the way back to the other answer is the
-                // sidebar — the same place every other thread is reached from.
-
-                // The trail, for when something did need checking after all.
-                // A count rather than a glyph: it is the only thing here that
-                // has to say how much it is hiding.
                 Text {
-                    id: trailToggle
+                    id: bodyText
 
-                    visible: !root.mine && root.quietToolCount > 0
-                    text: root.toolsOpen
-                        ? "hide"
-                        : root.quietToolCount + (root.quietToolCount === 1 ? " step" : " steps")
-                    color: trailArea.containsMouse ? Theme.ghostAmber : Theme.foregroundFaint
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeSmall
-                    font.letterSpacing: 0.5
-                    Accessible.role: Accessible.Button
-                    Accessible.name: root.toolsOpen
-                        ? "Hide what the ghost did" : "Show what the ghost did"
+                    width: parent.width
+                    visible: root.body !== ""
+                    text: root.body
+                    textFormat: root.mine || root.commandOutput
+                        ? Text.PlainText : Text.MarkdownText
+                    color: root.mine ? Theme.foregroundBright : Theme.foreground
+                    // Links wear the ghost's own amber, never Theme.accent — the
+                    // inherited Omarchy accent is blue in most themes, and reading
+                    // copy is not a web page.
+                    linkColor: Theme.ghostAmber
+                    font.family: root.commandOutput
+                        ? Theme.fontFamilyMono : Theme.fontFamily
+                    font.pixelSize: Theme.fontSize
+                    lineHeight: Theme.lineHeight
+                    wrapMode: Text.Wrap
+                    onLinkActivated: link => ExternalLinks.openModelUrl(link)
 
-                    Behavior on color {
-                        enabled: !Theme.reducedMotion
-                        ColorAnimation { duration: Theme.durFast; easing.type: Easing.OutQuad }
-                    }
-
+                    // Hover affordance only: Qt.NoButton lets the press fall
+                    // through to the Text so link activation still fires.
                     MouseArea {
-                        id: trailArea
                         anchors.fill: parent
-                        anchors.margins: -Theme.gap / 2
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: root.toolsOpen = !root.toolsOpen
+                        acceptedButtons: Qt.NoButton
+                        cursorShape: bodyText.hoveredLink !== ""
+                            ? Qt.PointingHandCursor : Qt.ArrowCursor
                     }
                 }
 
-                Item {
-                    id: copyAction
+                // QQuickText does not expose cursor geometry for rich text,
+                // and lineLaidOut only reports its plain-text path. A hidden,
+                // read-only document gives us the horizontal end cursor for
+                // both formats without changing the rendered typography.
+                TextEdit {
+                    id: bodyMeasure
 
-                    visible: !root.mine && root.body !== ""
-                    width: 16
-                    height: 16
-                    Accessible.role: Accessible.Button
-                    Accessible.name: "Copy message"
-
-                    CopyGlyph {
-                        anchors.fill: parent
-                        size: copyAction.width
-                        tint: copyArea.containsMouse
-                            ? Theme.foreground : Theme.foregroundFaint
+                    readonly property rect endRect: {
+                        // A method call alone is not a binding dependency. The
+                        // geometry reads make the cursor follow reflow as the
+                        // HUD or the user capsule changes width.
+                        bodyMeasure.width;
+                        bodyMeasure.contentHeight;
+                        return bodyMeasure.positionToRectangle(bodyMeasure.length);
                     }
 
-                    MouseArea {
-                        id: copyArea
-                        anchors.fill: parent
-                        anchors.margins: -Theme.gap / 2
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: Quickshell.clipboardText = root.body
+                    width: parent.width
+                    visible: false
+                    readOnly: true
+                    text: root.body
+                    textFormat: root.mine || root.commandOutput
+                        ? TextEdit.PlainText : TextEdit.MarkdownText
+                    font.family: root.commandOutput
+                        ? Theme.fontFamilyMono : Theme.fontFamily
+                    font.pixelSize: Theme.fontSize
+                    wrapMode: TextEdit.Wrap
+                }
+
+                // Settled actions sit on the final text line instead of
+                // claiming a line of their own. If the last line reaches the
+                // reading edge, they wrap below it like any other inline item.
+                Row {
+                    id: messageActions
+
+                    readonly property real finalLineHeight:
+                        bodyMeasure.endRect.height * bodyText.lineHeight
+                    readonly property real inlineX: bodyMeasure.endRect.x
+                        + Theme.gap / 2
+                    readonly property bool fitsInline: root.body !== ""
+                        && messageActions.inlineX + messageActions.implicitWidth
+                            <= message.width
+
+                    // A ghost's row earns actions for its reply or for the
+                    // trail it is holding back. A turn spent entirely on tool
+                    // calls has only the latter.
+                    visible: !root.busy && (root.mine
+                        ? (root.body !== "" && root.sourceEntryId !== "")
+                        : (root.body !== "" || root.quietToolCount > 0))
+                    spacing: Theme.gap
+                    x: messageActions.fitsInline ? messageActions.inlineX : 0
+                    y: messageActions.fitsInline
+                        ? bodyText.implicitHeight
+                            - (messageActions.finalLineHeight + height) / 2
+                        : (bodyText.visible
+                            ? bodyText.implicitHeight + Theme.gap / 2 : 0)
+
+                    Item {
+                        id: copyAction
+
+                        visible: !root.mine && root.body !== ""
+                        width: 16
+                        height: 16
+                        Accessible.role: Accessible.Button
+                        Accessible.name: "Copy message"
+
+                        CopyGlyph {
+                            anchors.fill: parent
+                            size: copyAction.width
+                            tint: copyArea.containsMouse
+                                ? Theme.foreground : Theme.foregroundFaint
+                        }
+
+                        MouseArea {
+                            id: copyArea
+                            anchors.fill: parent
+                            anchors.margins: -Theme.gap / 2
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: Quickshell.clipboardText = root.body
+                        }
+                    }
+
+                    Item {
+                        id: editAction
+
+                        visible: root.mine && root.sourceEntryId !== ""
+                        // A running turn owns the conversation. Dimmed rather
+                        // than hidden: the click still answers, in the line
+                        // above the composer, instead of vanishing under the
+                        // pointer.
+                        opacity: Ghostd.streaming ? 0.4 : 1
+                        width: 16
+                        height: 16
+                        Accessible.role: Accessible.Button
+                        Accessible.name: "Edit message"
+
+                        PencilGlyph {
+                            anchors.fill: parent
+                            size: editAction.width
+                            tint: editArea.containsMouse
+                                ? Theme.ghostAmberBright : Theme.foregroundFaint
+                        }
+
+                        MouseArea {
+                            id: editArea
+                            anchors.fill: parent
+                            anchors.margins: -Theme.gap / 2
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            // The HUD owns what happens next: editing copies
+                            // the thread into a new conversation and hands
+                            // this message's text to the composer, which may
+                            // already hold something worth asking about first.
+                            onClicked: root.branchRequested(root.sourceEntryId)
+                        }
+                    }
+
+                    // No sibling navigator lives here any more. An edit starts
+                    // its own conversation, so the way back to the other answer
+                    // is the sidebar — where every other thread is reached.
+
+                    // The trail, for when something did need checking after
+                    // all. A count rather than a glyph: it is the only thing
+                    // here that has to say how much it is hiding.
+                    Text {
+                        id: trailToggle
+
+                        visible: !root.mine && root.quietToolCount > 0
+                        text: root.toolsOpen
+                            ? "hide"
+                            : root.quietToolCount + (root.quietToolCount === 1 ? " step" : " steps")
+                        color: trailArea.containsMouse ? Theme.ghostAmber : Theme.foregroundFaint
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSizeSmall
+                        font.letterSpacing: 0.5
+                        Accessible.role: Accessible.Button
+                        Accessible.name: root.toolsOpen
+                            ? "Hide what the ghost did" : "Show what the ghost did"
+
+                        Behavior on color {
+                            enabled: !Theme.reducedMotion
+                            ColorAnimation { duration: Theme.durFast; easing.type: Easing.OutQuad }
+                        }
+
+                        MouseArea {
+                            id: trailArea
+                            anchors.fill: parent
+                            anchors.margins: -Theme.gap / 2
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.toolsOpen = !root.toolsOpen
+                        }
                     }
                 }
             }
