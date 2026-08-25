@@ -183,9 +183,13 @@ one must not be a leak of both.
   pi-messages client renders. Paged with `?limit` (default 1000, max 2000) and
   `?offset`; `total` is the full renderable count and `truncated` is true when a
   page omits messages. Each message also carries its persisted `entryId` and
-  `parentId`; branch points carry `{ index, count, previousEntryId?,
-  nextEntryId? }`. Ask tool calls carry equivalent `ghostAsk` navigation
-  metadata. `404 not_found` for an unknown conversation id. Only OMP
+  `parentId`. Sibling-branch metadata is gone with the navigation it described:
+  branching forks the conversation instead of walking a tree in place. Ask tool
+  calls carry `ghostAsk` with the `resultEntryId` a re-answer branches from,
+  plus `settled: "submitted" | "cancelled" | "timedOut" | "chat"`,
+  always present and derived from the persisted tool result, so a restored ask
+  card states how that question actually closed rather than assuming an answer.
+  `404 not_found` for an unknown conversation id. Only OMP
   conversations are readable here; a Claude Code conversation's transcript lives
   in that runtime's own storage.
 - `GET /api/ghosts/:name/sessions/:id/ask` → `{ ask }`, where `ask` is the
@@ -197,9 +201,17 @@ one must not be a leak of both.
 - `GET|POST /api/ghosts/:name/sessions/:id/queue` reads or enqueues OMP's
   native mid-turn queues. POST is `{ mode: "steer"|"followUp", text }`:
   steering enters the active run, while follow-up runs after it.
-- `POST /api/ghosts/:name/sessions/:id/branch` with `{ action:
-  "rewind"|"navigate", entryId }` either returns an earlier user message as an
-  editable draft or selects an existing sibling branch.
+- `POST /api/ghosts/:name/sessions/:id/branch` with `{ action: "fork",
+  entryId }` → `{ sessionId, title, draft, transcript }` — branching off is a
+  **copy, not a rewind**. The conversation's transcript is forked into a new one
+  (pi's `SessionManager.forkFrom`, whose header records `parentSession`), the
+  copy is rewound to just before `entryId`, and that user message's text comes
+  back as `draft` for the composer. `sessionId` is the new conversation, already
+  in `GET …/sessions`; `transcript` is its rewound history. The source
+  conversation is left untouched, leaf included. `entryId` must be a persisted
+  user message (`400 invalid_branch`), the source must be idle
+  (`409 session_busy`), and any other `action` is `400 invalid_request`.
+  In-file sibling branches are not part of the API: there is no `navigate`.
 - `POST /api/ghosts/:name/sessions/:id/reanswer` with `{ entryId }` reopens a
   persisted `ask` result, commits the answer as a sibling, and resumes the model
   on that branch. Its response is an SSE stream and includes `branch_changed`.
@@ -224,7 +236,10 @@ a reply or bill like a chat turn. The role name adopts OMP's own convention
 daemon generates a 3-6 word title from the first user message with one smol
 completion, fire-and-forget (mirroring background compaction): it never blocks
 the reply and a failure is logged, never fatal. A conversation is titled once
-and never re-titled. The title is stored through OMP's native fixed-width
+and never re-titled. A fork is named at fork time instead, the way a file
+manager names a copy: `<source title> (n)` for the smallest free `n` from 2 up,
+with any trailing ` (k)` stripped from the base first, so a fork of a fork does
+not stack suffixes. An untitled source forks to an untitled conversation. The title is stored through OMP's native fixed-width
 **`title` slot** at the start of the conversation's own `.sessions/*.jsonl`
 transcript, with its append-only `title_change` audit entry. It never enters the
 model's context, needs no sidecar, and rides the same per-ghost storage backup

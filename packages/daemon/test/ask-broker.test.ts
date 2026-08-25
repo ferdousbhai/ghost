@@ -71,6 +71,51 @@ describe("AskBroker", () => {
     }
   });
 
+  it("applies the daemon's default timeout when the asker names none", async () => {
+    vi.useFakeTimers();
+    try {
+      const broker = new AskBroker(2);
+      const result = broker.uiContext.askDialog!(QUESTIONS);
+      expect(broker.pending?.timeoutAt).toBeTruthy();
+      await vi.advanceTimersByTimeAsync(2000);
+      // The recommended option, submitted on the user's behalf, is what lets
+      // the turn carry on instead of holding a question nobody can answer.
+      await expect(result).resolves.toMatchObject({
+        kind: "submit",
+        results: [{ timedOut: true }],
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("lets a question with its own deadline keep it", async () => {
+    vi.useFakeTimers();
+    try {
+      const broker = new AskBroker(600);
+      const result = broker.uiContext.askDialog!(QUESTIONS, { timeout: 500 });
+      await vi.advanceTimersByTimeAsync(500);
+      await expect(result).resolves.toMatchObject({ kind: "submit" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("waits forever at zero, which is what shipped before a default existed", async () => {
+    vi.useFakeTimers();
+    try {
+      const broker = new AskBroker(0);
+      const result = broker.uiContext.askDialog!(QUESTIONS);
+      expect(broker.pending?.timeoutAt).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(3_600_000);
+      expect(broker.pending).not.toBeNull();
+      broker.close();
+      await expect(result).resolves.toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("cancels the dialog when its turn signal aborts", async () => {
     const broker = new AskBroker();
     const controller = new AbortController();

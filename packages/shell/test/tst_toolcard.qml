@@ -101,6 +101,169 @@ TestCase {
         compare(ToolTrace.text(activity, false, false, false), "Reading its own character");
     }
 
+    // ---- ask ------------------------------------------------------------
+    // One settled ask, reused: the question the user closed the app on rather
+    // than answering.
+    function askActivity(settled: string): var {
+        return {
+            name: "ask",
+            status: "complete",
+            askSettled: settled,
+            arguments: {
+                questions: [{
+                    id: "q1",
+                    header: "Danger",
+                    question: "Delete /home/dous/verygoodplugins and everything inside it?",
+                    options: [
+                        { label: "Delete it" },
+                        { label: "Leave it alone" }
+                    ],
+                    recommended: 1
+                }]
+            },
+            intent: "",
+            summary: ""
+        };
+    }
+
+    // The bug this whole card was reworked for: a question nobody answered
+    // reported an answer, because "complete" was read as "submitted".
+    function test_cancelledAskNeverClaimsAnAnswer(): void {
+        const trace = ToolTrace.text(askActivity("cancelled"), true, false, false);
+        compare(trace, "Never got an answer");
+        verify(!trace.includes("Received"));
+    }
+
+    function test_timedOutAskSaysTheGhostStoppedWaiting(): void {
+        compare(
+            ToolTrace.text(askActivity("timedOut"), true, false, false),
+            "Stopped waiting for an answer"
+        );
+    }
+
+    function test_submittedAskStillReadsAsAnswered(): void {
+        compare(
+            ToolTrace.text(askActivity("submitted"), true, false, false),
+            "Received your answer"
+        );
+    }
+
+    function test_chatRedirectIsNotAnAnswer(): void {
+        compare(
+            ToolTrace.text(askActivity("chat"), true, false, false),
+            "Talked it through instead"
+        );
+    }
+
+    // A transcript written before the daemon reported settlement, and any
+    // value this shell does not know, must not be guessed into an outcome.
+    function test_unknownSettlementReportsOnlyThatItWasAsked(): void {
+        compare(
+            ToolTrace.text(askActivity(""), true, false, false),
+            "Asked you a question"
+        );
+        compare(
+            ToolTrace.text(askActivity("half-answered"), true, false, false),
+            "Asked you a question"
+        );
+    }
+
+    function test_liveAskIsStillWaiting(): void {
+        compare(
+            ToolTrace.text(askActivity(""), false, false, false),
+            "Waiting for your answer"
+        );
+    }
+
+    // An ask that errored out was closed or abandoned, not a tool that broke,
+    // so it keeps its own words instead of wearing the generic failure prefix.
+    function test_failedAskIsAnUnansweredQuestionNotABrokenTool(): void {
+        const trace = ToolTrace.text(askActivity(""), false, true, false);
+        compare(trace, "Never got an answer");
+        verify(!trace.includes("Couldn’t complete"));
+    }
+
+    // The card's whole point: the question survives the scrollback.
+    function test_askCardCarriesTheQuestionItself(): void {
+        compare(
+            ToolTrace.askPrompt(askActivity("cancelled")),
+            "Danger · Delete /home/dous/verygoodplugins and everything inside it?"
+        );
+    }
+
+    function test_expandedAskNamesTheOptionsAndTheRecommendation(): void {
+        compare(
+            ToolTrace.askDetail(askActivity("cancelled")),
+            "Options · Delete it · Leave it alone (recommended)"
+        );
+    }
+
+    // A multi-part ask has room for one question on the line; the rest are
+    // counted there and named behind the expand.
+    function test_multiPartAskCountsTheRestAndNamesThemWhenExpanded(): void {
+        const activity = {
+            name: "ask",
+            status: "complete",
+            askSettled: "cancelled",
+            arguments: {
+                questions: [
+                    { id: "a", question: "Delete the folder?", options: [{ label: "Yes" }] },
+                    { id: "b", question: "Back it up first?", options: [{ label: "No" }] }
+                ]
+            },
+            intent: "",
+            summary: ""
+        };
+        compare(ToolTrace.askPrompt(activity), "Delete the folder?  +1 more question");
+        compare(
+            ToolTrace.askDetail(activity),
+            "Options · Yes\nAlso asked · Back it up first?\nOptions · No"
+        );
+    }
+
+    // "Re-answer" presumes a first answer that a cancelled question never got.
+    function test_actionOffersAFirstAnswerWhenThereWasNone(): void {
+        compare(ToolTrace.askAction(askActivity("submitted")), "Re-answer");
+        compare(ToolTrace.askAction(askActivity("cancelled")), "Answer it");
+        compare(ToolTrace.askAction(askActivity("")), "Answer it");
+    }
+
+    // The rose temperature is for a question with no answer — including one
+    // still standing open — and never for one that was answered. Not knowing
+    // how a finished ask settled is not the same as knowing it went unanswered.
+    function test_onlyAnUnansweredQuestionLeavesTheAmber(): void {
+        verify(ToolTrace.askAwaiting(askActivity("cancelled"), true));
+        verify(ToolTrace.askAwaiting(askActivity("timedOut"), true));
+        verify(ToolTrace.askAwaiting(askActivity(""), false));
+        verify(!ToolTrace.askAwaiting(askActivity("submitted"), true));
+        verify(!ToolTrace.askAwaiting(askActivity("chat"), true));
+        verify(!ToolTrace.askAwaiting(askActivity(""), true));
+    }
+
+    function test_ordinaryToolNeverWearsTheQuestionTreatment(): void {
+        const activity = {
+            name: "ghost_docs_read",
+            status: "complete",
+            arguments: { path: "notes.md" },
+            intent: "",
+            summary: ""
+        };
+        compare(ToolTrace.askPrompt(activity), "");
+        compare(ToolTrace.askDetail(activity), "");
+        verify(!ToolTrace.askAwaiting(activity, false));
+    }
+
+    // The questions are on the card now, so the count row would only repeat
+    // them — but a non-ask tool that happens to carry questions keeps it.
+    function test_askInputRowYieldsToTheQuestionsThemselves(): void {
+        compare(ToolTrace.input(askActivity("cancelled")), "");
+        verify(ToolTrace.hasDiagnostics(askActivity("cancelled")));
+        compare(
+            ToolTrace.input({ name: "survey", arguments: { questions: [1, 2] } }),
+            "2 questions"
+        );
+    }
+
     function test_unknownCallStaysOutOfTheTranscript(): void {
         const activity = {
             name: "internal_operation",

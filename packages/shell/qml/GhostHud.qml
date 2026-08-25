@@ -61,7 +61,7 @@ FloatingWindow {
     property string pendingDeleteTitle: ""
     /** The ghost awaiting a confirmed banish, or "". */
     property string pendingDeleteGhost: ""
-    /** The message a branch would rewind to, held while the composer's own
+    /** The message a branch would fork from, held while the composer's own
         draft is being asked about, or "". */
     property string pendingBranchEntryId: ""
 
@@ -74,9 +74,10 @@ FloatingWindow {
     }
 
     /**
-     * Branch from a message. Rewinding hands that message's text back to the
-     * composer, which overwrites whatever is in it, so an unsent draft gets a
-     * question first — the one thing here nothing else can recover.
+     * Branch from a message. The copy the daemon makes is a new conversation,
+     * so nothing already said is at risk — but the branched text lands in the
+     * composer, overwriting whatever is in it, so an unsent draft gets a
+     * question first. It is the one thing here nothing else can recover.
      */
     function requestBranch(entryId: string): void {
         if (entryId === "") return;
@@ -648,7 +649,6 @@ FloatingWindow {
                             required property string error
                             required property bool pending
                             required property string entryId
-                            required property var branch
                             required property int index
 
                             width: transcriptView.width
@@ -660,7 +660,6 @@ FloatingWindow {
                             failure: error
                             busy: pending
                             sourceEntryId: entryId
-                            branchNavigation: branch
                             onBranchRequested: id => hud.requestBranch(id)
                         }
 
@@ -930,7 +929,7 @@ FloatingWindow {
                     }
 
                     // A branch that refused. It belongs here, under the
-                    // transcript it would have rewound, and clears itself on
+                    // transcript it would have forked, and clears itself on
                     // the next attempt or on a click.
                     Text {
                         visible: Ghostd.branchError !== ""
@@ -956,6 +955,7 @@ FloatingWindow {
                         error: Ghostd.askError
                         onAnswered: answer => Ghostd.answerAsk(answer)
                         onChatRequested: Ghostd.chatAboutAsk()
+                        onDismissed: Ghostd.dismissAsk()
                     }
 
                     Composer {
@@ -965,6 +965,20 @@ FloatingWindow {
                         onSubmitted: (prompt, mode) => {
                             if (mode === "prompt") Ghostd.send(prompt);
                             else Ghostd.queueMessage(prompt, mode);
+                        }
+
+                        // The ask form takes the keyboard while a question is
+                        // standing, so answering or dismissing one has to hand
+                        // it back — otherwise the composer returns with nothing
+                        // focused and the next thing typed goes nowhere. Gated
+                        // on the HUD being up, since Quickshell's FloatingWindow
+                        // exposes no focus state and grabbing the caret for a
+                        // window nobody is looking at is worse than not.
+                        Connections {
+                            target: Ghostd
+                            function onPendingAskChanged(): void {
+                                if (Ghostd.pendingAsk === null && hud.shown) composer.take();
+                            }
                         }
                     }
                 }
@@ -1038,7 +1052,7 @@ FloatingWindow {
             onDismissed: hud.dismissDelete()
         }
 
-        // Rewinding overwrites the composer with the branched message's text.
+        // Branching overwrites the composer with the branched message's text.
         // Only asked when that would cost something the user typed.
         ConfirmDialog {
             id: branchDialog
@@ -1046,8 +1060,9 @@ FloatingWindow {
             anchors.fill: parent
             open: hud.pendingBranchEntryId !== ""
             title: "Replace what you're typing?"
-            body: "Branching puts that message's text in the composer. What "
-                + "you have typed there now is not saved anywhere."
+            body: "Branching opens a copy of this conversation and puts that "
+                + "message's text in the composer. What you have typed there "
+                + "now is not saved anywhere."
             confirmText: "Replace"
             destructive: false
             onConfirmed: {

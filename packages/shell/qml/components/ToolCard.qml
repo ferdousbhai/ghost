@@ -26,6 +26,13 @@ Rectangle {
     readonly property var askBranch: activity.askBranch || null
     readonly property bool hasDiagnostics: ToolTrace.hasDiagnostics(root.activity)
 
+    // A question the ghost is still holding, or one that closed without an
+    // answer. It is not the same event as "read a file", so it stops wearing
+    // the same amber.
+    readonly property bool askAwaiting: ToolTrace.askAwaiting(root.activity, root.completed)
+    readonly property string askPrompt: ToolTrace.askPrompt(root.activity)
+    readonly property string askDetail: ToolTrace.askDetail(root.activity)
+
     // The file this call wrote, ready for the workbench. Relative tool
     // arguments resolve against the active ghost's home (the session cwd), so
     // this is "" — and no affordance is offered — while that home is unknown or
@@ -35,19 +42,27 @@ Rectangle {
     readonly property bool openable: root.workbenchPath !== ""
         && Workbench.kindOf(root.workbenchPath) !== ""
 
+    /** Rose, the failure temperature, rather than the ordinary amber. */
+    readonly property bool cool: root.failed || root.askAwaiting
+
     // #fde68a at 90% — the old card's amber-100 label. On paper that wash is
     // unreadable, so light mode keeps the amber fills and takes a plain ink.
-    readonly property color labelColor: Theme.light
-        ? Theme.foregroundBright : Qt.rgba(0.992, 0.902, 0.541, 0.9)
+    // An unanswered question takes the rose ink instead, but only in dark mode
+    // and only for the ask: rose at this weight is thin on paper, and tinting
+    // every failed card's words would make the ordinary retry shout.
+    readonly property color labelColor: {
+        if (Theme.light) return Theme.foregroundBright;
+        return root.askAwaiting ? Theme.ghostRose : Qt.rgba(0.992, 0.902, 0.541, 0.9);
+    }
     readonly property color detailColor: Theme.light ? Theme.foreground : Theme.foregroundDim
-    readonly property color glyphTint: root.failed ? Theme.ghostRose : Theme.ghostAmberBright
+    readonly property color glyphTint: root.cool ? Theme.ghostRose : Theme.ghostAmberBright
 
     visible: root.trace !== "" || root.askBranch !== null
     implicitHeight: visible ? toolContent.implicitHeight + 12 : 0
     radius: 12
     color: cardHover.containsMouse ? Theme.amber(0.08) : Theme.amber(0.05)
     border.width: 1
-    border.color: root.failed ? Theme.rose(0.35) : Theme.amber(0.10)
+    border.color: root.cool ? Theme.rose(0.35) : Theme.amber(0.10)
 
     Behavior on color {
         enabled: !Theme.reducedMotion
@@ -146,6 +161,39 @@ Rectangle {
             }
         }
 
+        // The question, quoted under its own rule. It sits on the collapsed
+        // card rather than behind the expand because it is the only thing here
+        // a reader scrolling back has actually lost: the trace says how the
+        // question ended, and this says what was asked. The rule is the
+        // quotation mark — real quote glyphs collide with a question that
+        // already contains a path or a phrase in quotes.
+        Row {
+            visible: root.askPrompt !== ""
+            // 16 glyph + the trace Row's own spacing, so the quote lines up
+            // under the words above it.
+            x: 16 + Theme.gap / 2
+            width: parent.width - x
+            spacing: Theme.gap / 2
+
+            Rectangle {
+                width: 2
+                height: askPromptText.implicitHeight
+                radius: 1
+                color: root.askAwaiting ? Theme.rose(0.5) : Theme.amber(0.4)
+            }
+
+            Text {
+                id: askPromptText
+                width: parent.width - x
+                text: root.askPrompt
+                color: Theme.light ? Theme.foreground : Theme.foregroundBright
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeSmall
+                wrapMode: root.expanded ? Text.Wrap : Text.NoWrap
+                elide: root.expanded ? Text.ElideNone : Text.ElideRight
+            }
+        }
+
         // Open-the-file affordance, indented under the trace line rather than
         // beside it: the trace is a full-width elided line, so a sibling in
         // that Row would be the thing that gets elided away.
@@ -204,6 +252,18 @@ Rectangle {
             wrapMode: Text.Wrap
         }
 
+        // Carries its own labels — one line per question and per option set —
+        // so a multi-part ask reads as a list instead of one wrapped sentence.
+        Text {
+            visible: root.expanded && root.askDetail !== ""
+            width: parent.width
+            text: root.askDetail
+            color: root.detailColor
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontSizeSmall
+            wrapMode: Text.Wrap
+        }
+
         Text {
             visible: root.expanded && root.activity.name !== ""
             width: parent.width
@@ -224,7 +284,12 @@ Rectangle {
             wrapMode: Text.Wrap
         }
 
-        Row {
+        // A chip, not a word: this is the one thing on the card that acts, and
+        // as bare text it read as a stray label rather than something to press.
+        // It borrows the file chip's shape so the card has one affordance
+        // vocabulary, and stays amber even on an unanswered question — rose
+        // here would warn against the very thing it is offering.
+        Rectangle {
             id: askRow
 
             // Bindings evaluate even while invisible, so a null askBranch must
@@ -232,56 +297,42 @@ Rectangle {
             readonly property var nav: root.askBranch || ({})
 
             visible: root.activity.name === "ask" && root.askBranch !== null
-            width: parent.width
-            spacing: Theme.gap
+            x: 16 + Theme.gap / 2
+            width: Math.min(parent.width - x, askLabel.implicitWidth + Theme.gap * 1.5)
+            height: visible ? askLabel.implicitHeight + 6 : 0
+            radius: Theme.radius / 2
+            color: askArea.containsMouse ? Theme.amber(0.16) : Theme.amber(0.08)
+            border.width: 1
+            border.color: askArea.containsMouse ? Theme.amber(0.35) : Theme.amber(0.18)
+
+            Behavior on color {
+                enabled: !Theme.reducedMotion
+                ColorAnimation { duration: Theme.durFast; easing.type: Easing.OutQuad }
+            }
 
             Text {
-                text: "Re-answer"
+                id: askLabel
+                anchors.centerIn: parent
+                text: ToolTrace.askAction(root.activity)
                 color: Theme.ghostAmber
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontSizeSmall
-                MouseArea {
-                    anchors.fill: parent
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: Ghostd.reanswerHistoricalAsk(askRow.nav.resultEntryId || "")
-                }
             }
 
-            Text {
-                visible: askRow.nav.count > 1
-                text: askRow.nav.previousTargetId ? "‹" : "·"
-                color: askRow.nav.previousTargetId ? Theme.ghostAmber : root.detailColor
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSizeSmall
-                MouseArea {
-                    anchors.fill: parent
-                    enabled: Boolean(askRow.nav.previousTargetId)
-                    cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-                    onClicked: Ghostd.navigateBranch(askRow.nav.previousTargetId)
-                }
+            // Smaller than cardHover and declared after it, so pressing this
+            // answers the question instead of toggling the diagnostics.
+            MouseArea {
+                id: askArea
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: Ghostd.reanswerHistoricalAsk(askRow.nav.resultEntryId || "")
             }
 
-            Text {
-                visible: askRow.nav.count > 1
-                text: (askRow.nav.index + 1) + "/" + askRow.nav.count
-                color: root.detailColor
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSizeSmall
-            }
-
-            Text {
-                visible: askRow.nav.count > 1
-                text: askRow.nav.nextTargetId ? "›" : "·"
-                color: askRow.nav.nextTargetId ? Theme.ghostAmber : root.detailColor
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSizeSmall
-                MouseArea {
-                    anchors.fill: parent
-                    enabled: Boolean(askRow.nav.nextTargetId)
-                    cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-                    onClicked: Ghostd.navigateBranch(askRow.nav.nextTargetId)
-                }
-            }
+            // Re-answering still commits a sibling in this conversation — that
+            // is OMP's own two-phase Ask tree, not the branch route — but the
+            // shell no longer offers a way to step between those siblings,
+            // because the daemon no longer has one to offer.
         }
     }
 }

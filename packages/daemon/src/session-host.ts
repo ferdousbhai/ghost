@@ -294,6 +294,12 @@ export interface SessionHostOptions {
   /** The daemon's relay hub as a transport, for the relay browser backend. */
   relayTransport?: RelayTransport;
   /**
+   * Seconds a question waits before answering itself with its recommended
+   * option. Daemon-wide; see DaemonConfig.askTimeoutSeconds for why it is not
+   * a property of the ghost. `0` (the default here) waits forever.
+   */
+  askTimeoutSeconds?: number;
+  /**
    * Background compaction policy. Defaults to enabled at
    * `min(0.8 × contextWindow, 100_000)` tokens. See compaction.ts.
    */
@@ -452,20 +458,47 @@ export interface TranscriptMessage {
   timestamp?: number;
   entryId: string;
   parentId: string | null;
-  /** Sibling user-message branches reachable at this point in the tree. */
-  branch?: BranchNavigation;
 }
 
-export interface BranchNavigation {
-  index: number;
-  count: number;
-  previousTargetId?: string;
-  nextTargetId?: string;
-}
+export type AskSettlement = "submitted" | "cancelled" | "timedOut" | "chat";
 
-export interface AskBranchNavigation extends BranchNavigation {
+/**
+ * What a persisted `ask` still offers a reader. Branching off a message forks
+ * the conversation rather than walking siblings in place, so the only sibling
+ * left to describe is the ask's own: re-answering commits a new one here.
+ */
+export interface AskBranchNavigation {
   /** The active ask toolResult entry; selecting re-answer creates its sibling. */
   resultEntryId: string;
+  settled: AskSettlement;
+}
+
+/**
+ * How an ask closed survives only in the tool result OMP wrote. A cancel or an
+ * abort throws out of the tool, leaving an error entry with empty details; an
+ * answer carries the selections, either as `results` for a multi-question ask
+ * or flattened onto details for a single one. Without reading that back, a
+ * restored transcript cannot tell an answer from a question nobody ever saw.
+ */
+function askSettlement(details: unknown): AskSettlement {
+  if (details === null || typeof details !== "object") return "cancelled";
+  const record = details as {
+    chatRedirect?: unknown;
+    results?: unknown;
+    selectedOptions?: unknown;
+    customInput?: unknown;
+    timedOut?: unknown;
+  };
+  if (record.chatRedirect === true) return "chat";
+  const timedOut = (item: unknown) =>
+    (item as { timedOut?: unknown } | null)?.timedOut === true;
+  if (Array.isArray(record.results) && record.results.length > 0) {
+    return record.results.some(timedOut) ? "timedOut" : "submitted";
+  }
+  if (Array.isArray(record.selectedOptions) || typeof record.customInput === "string") {
+    return record.timedOut === true ? "timedOut" : "submitted";
+  }
+  return "cancelled";
 }
 
 /** A conversation's history for rehydration in the shell. */
@@ -501,7 +534,6 @@ function clampTranscriptOffset(offset: number | undefined): number {
  */
 function projectTranscriptMessage(
   entry: Extract<SessionEntry, { type: "message" }>,
-  branch: BranchNavigation | undefined,
   askBranches: ReadonlyMap<string, AskBranchNavigation>,
 ): TranscriptMessage | null {
   const message = entry.message;
@@ -533,29 +565,10 @@ function projectTranscriptMessage(
     content,
     entryId: entry.id,
     parentId: entry.parentId,
-    ...(branch ? { branch } : {}),
   };
   const timestamp = (message as { timestamp?: unknown }).timestamp;
   if (typeof timestamp === "number") projected.timestamp = timestamp;
   return projected;
-}
-
-function branchNavigation(
-  entry: SessionEntry,
-  siblings: readonly SessionEntry[],
-  deepestTarget: (entryId: string) => string,
-): BranchNavigation | undefined {
-  if (siblings.length <= 1) return undefined;
-  const index = siblings.findIndex((candidate) => candidate.id === entry.id);
-  if (index < 0) return undefined;
-  const previous = siblings[index - 1];
-  const next = siblings[index + 1];
-  return {
-    index,
-    count: siblings.length,
-    ...(previous ? { previousTargetId: deepestTarget(previous.id) } : {}),
-    ...(next ? { nextTargetId: deepestTarget(next.id) } : {}),
-  };
 }
 
 /**
@@ -590,6 +603,36 @@ async function readLegacySessionTitle(sessionFile: string): Promise<string | nul
     if ((entry as { type?: unknown }).type === "session_info") entries.push(entry);
   });
   return legacySessionTitle(entries);
+}
+
+/** A title already ending in a copy counter, as `<base> (<n>)`. */
+const COPY_COUNTER_TITLE = /^(.*\S)\s+\((\d+)\)$/;
+
+/**
+ * Name a branched-off conversation the way a file manager names a copy:
+ * `<title> (2)`, then `(3)`, `(4)` as more branches come off the same base.
+ *
+ * The counter is stripped before it is re-applied, so branching "Weekend trip
+ * (2)" gives "Weekend trip (3)" rather than "Weekend trip (2) (2)", and the
+ * first free counter is chosen against the ghost's existing conversation
+ * titles. An untitled source stays untitled: nothing here invents a name, and
+ * a copy carries history, so the background titler will never name it either.
+ */
+export function forkConversationTitle(
+  sourceTitle: string | null,
+  existingTitles: Iterable<string | null>,
+): string | null {
+  const title = sourceTitle?.trim();
+  if (!title) return null;
+  const base = COPY_COUNTER_TITLE.exec(title)?.[1] ?? title;
+  const taken = new Set<string>();
+  for (const existing of existingTitles) {
+    const normalized = existing?.trim();
+    if (normalized) taken.add(normalized);
+  }
+  let counter = 2;
+  while (taken.has(`${base} (${counter})`)) counter += 1;
+  return `${base} (${counter})`;
 }
 
 /** Upgrade one loaded pi 0.84 title to OMP 18's durable native title slot. */
@@ -695,6 +738,8 @@ export class SessionHost {
   private readonly relayTransport: RelayTransport | undefined;
   private readonly compactionConfig: CompactionConfig;
   private readonly titleEnabled: boolean;
+  /** Seconds an unanswered ask waits before it answers itself; 0 waits forever. */
+  private readonly askTimeoutSeconds: number;
   private readonly generateTitle: TitleGenerator;
   private readonly greetingEnabled: boolean;
   private readonly greetings: GreetingCache;
@@ -724,6 +769,7 @@ export class SessionHost {
     this.relayTransport = options.relayTransport;
     this.compactionConfig = options.compaction ?? DEFAULT_COMPACTION_CONFIG;
     this.titleEnabled = options.title?.enabled ?? true;
+    this.askTimeoutSeconds = options.askTimeoutSeconds ?? 0;
     this.generateTitle = options.title?.generate ?? defaultTitleGenerator;
     this.greetingEnabled = options.greeting?.enabled ?? true;
     this.greetings = new GreetingCache(
@@ -890,7 +936,7 @@ export class SessionHost {
     );
     await this.promoteLegacySessionTitle(sessionManager, ghostName, sessionKey);
 
-    const ask = new AskBroker();
+    const ask = new AskBroker(this.askTimeoutSeconds);
     let created: Awaited<ReturnType<typeof createAgentSession>>;
     try {
       created = await createAgentSession({
@@ -1880,76 +1926,25 @@ export class SessionHost {
     manager: SessionManager,
     options: { limit?: number; offset?: number } = {},
   ): Transcript {
-    const entries = manager.getEntries();
     const active = manager.getBranch();
-    const children = new Map<string | null, SessionEntry[]>();
-    const order = new Map<string, number>();
-    for (const [index, entry] of entries.entries()) {
-      order.set(entry.id, index);
-      const siblings = children.get(entry.parentId) ?? [];
-      siblings.push(entry);
-      children.set(entry.parentId, siblings);
-    }
-    const deepestTarget = (entryId: string): string => {
-      let best = entryId;
-      let bestOrder = order.get(entryId) ?? -1;
-      const stack = [entryId];
-      const visited = new Set<string>();
-      while (stack.length > 0) {
-        const current = stack.pop();
-        if (current === undefined) break;
-        if (visited.has(current)) continue;
-        visited.add(current);
-        const descendants = children.get(current) ?? [];
-        if (descendants.length === 0) {
-          const candidateOrder = order.get(current) ?? -1;
-          if (candidateOrder >= bestOrder) {
-            best = current;
-            bestOrder = candidateOrder;
-          }
-        } else {
-          for (const child of descendants) stack.push(child.id);
-        }
-      }
-      return best;
-    };
 
+    // Which persisted `ask` a re-answer would branch from, and how that ask
+    // ended. Branching a message forks the conversation now, so the tree walk
+    // that described every sibling went with the navigator it fed.
     const askBranches = new Map<string, AskBranchNavigation>();
     for (const entry of active) {
       if (entry.type !== "message" || entry.message.role !== "toolResult"
         || entry.message.toolName !== "ask") continue;
-      const toolCallId = entry.message.toolCallId;
-      const siblings = (children.get(entry.parentId) ?? []).filter(
-        (candidate): candidate is Extract<SessionEntry, { type: "message" }> =>
-          candidate.type === "message"
-          && candidate.message.role === "toolResult"
-          && candidate.message.toolName === "ask"
-          && candidate.message.toolCallId === toolCallId,
-      );
-      const navigation = branchNavigation(entry, siblings, deepestTarget)
-        ?? { index: 0, count: 1 };
-      askBranches.set(toolCallId, {
-        ...navigation,
+      askBranches.set(entry.message.toolCallId, {
         resultEntryId: entry.id,
+        settled: askSettlement(entry.message.details),
       });
     }
 
     const all: TranscriptMessage[] = [];
     for (const entry of active) {
       if (entry.type !== "message") continue;
-      const userSiblings = entry.message.role === "user"
-        ? (children.get(entry.parentId) ?? []).filter(
-            (candidate): candidate is Extract<SessionEntry, { type: "message" }> =>
-              candidate.type === "message" && candidate.message.role === "user",
-          )
-        : [];
-      const message = projectTranscriptMessage(
-        entry,
-        entry.message.role === "user"
-          ? branchNavigation(entry, userSiblings, deepestTarget)
-          : undefined,
-        askBranches,
-      );
+      const message = projectTranscriptMessage(entry, askBranches);
       if (message) all.push(message);
     }
     const total = all.length;
@@ -1958,7 +1953,7 @@ export class SessionHost {
     const messages = all.slice(offset, offset + limit);
     return {
       id,
-      title: manager.getSessionName() ?? legacySessionTitle(entries),
+      title: manager.getSessionName() ?? legacySessionTitle(manager.getEntries()),
       messages,
       total,
       truncated: offset > 0 || offset + messages.length < total,
@@ -1980,52 +1975,132 @@ export class SessionHost {
     return hosted;
   }
 
-  /** Rewind before one user message and return its text as an editable branch draft. */
-  async branchConversation(
+  /**
+   * Branch off one user message into a NEW conversation, rewound to just
+   * before it, and leave the source conversation exactly as it was.
+   *
+   * A branch is a copy, not an in-file sibling: `SessionManager.forkFrom`
+   * writes every non-header entry of the source verbatim into a fresh
+   * transcript (entry ids and all), so the caller's `entryId` still resolves
+   * inside the copy and the rewind — pi's `navigateTree`, which returns the
+   * message text as `editorText` — runs on the copy alone. The source keeps
+   * its leaf, its entries, and its title.
+   */
+  async forkConversation(
     ghostName: string,
     conversationId: string | null | undefined,
     entryId: string,
-  ): Promise<{ draft: string; transcript: Transcript }> {
-    const hosted = await this.idleHostedSession(ghostName, conversationId);
-    const entry = hosted.session.sessionManager.getEntry(entryId);
+  ): Promise<{
+    sessionId: string;
+    title: string | null;
+    draft: string;
+    transcript: Transcript;
+  }> {
+    const ghost = this.registry.get(ghostName);
+    const paths = ghostPaths(ghost.dir);
+    const sourceId = conversationId || DEFAULT_SESSION_KEY;
+    // `open` would happily create the conversation being branched from; an id
+    // that names neither a live session nor a stored transcript is a 404, not a
+    // brand-new empty conversation.
+    if (!this.sessions.has(this.keyOf(ghostName, conversationId))
+      && !existsSync(join(paths.sessionDir, sessionFileNameFor(sourceId)))) {
+      throw new GhostError(
+        "not_found",
+        `This ghost has no conversation ${JSON.stringify(sourceId)}.`,
+        404,
+      );
+    }
+    const source = await this.idleHostedSession(ghostName, conversationId);
+    const sourceManager = source.session.sessionManager;
+    const entry = sourceManager.getEntry(entryId);
     if (entry?.type !== "message" || entry.message.role !== "user") {
       throw new GhostError("invalid_branch", "Only a persisted user message can start an editable branch.", 400);
     }
-    hosted.busy = true;
+    const forkId = `branch-${randomUUID()}`;
+    // Hold the source for the copy only. It is never written to: the flag just
+    // keeps a turn from appending to the transcript being copied.
+    source.busy = true;
     try {
-      const result = await hosted.session.navigateTree(entryId);
-      if (result.cancelled) throw new GhostError("branch_cancelled", "Conversation branching was cancelled.", 409);
-      return {
-        draft: result.editorText ?? "",
-        transcript: this.transcriptFromManager(
-          conversationId || DEFAULT_SESSION_KEY,
-          hosted.session.sessionManager,
-        ),
-      };
+      // A title generated by the turn that just finished may still be in
+      // flight; the copy is named after it.
+      if (source.title) await source.title.catch(() => {});
+      // Session persistence is lazy and buffered, so the file being copied has
+      // to be complete on disk first.
+      await sourceManager.ensureOnDisk();
+      await sourceManager.flush();
+      const sourceFile = sourceManager.getSessionFile();
+      if (!sourceFile) {
+        throw new GhostError("invalid_branch", "This conversation has no transcript to branch from.", 400);
+      }
+      // Names to avoid colliding with, straight from OMP's own listing. The
+      // full `listSessions` would also read every Claude Code sidecar and the
+      // pins, and wait on unrelated titles, for one `(n)`.
+      const title = forkConversationTitle(
+        sourceManager.getSessionName() ?? null,
+        (await SessionManager.list(paths.home, paths.sessionDir)).map((info) => info.title ?? null),
+      );
+      const forked = await SessionManager.forkFrom(
+        sourceFile,
+        paths.home,
+        paths.sessionDir,
+        undefined,
+        // Pin the copy's path so its conversation id is the same round-trip
+        // `sessionFileNameFor`/`conversationIdFromSessionFile` pair every other
+        // conversation uses, and `open`/`listSessions` find it unaided.
+        { sessionFile: join(paths.sessionDir, sessionFileNameFor(forkId)) },
+      );
+      try {
+        // forkFrom inherits the source's title *and* its provenance, and OMP
+        // refuses an "auto" write over a name the user chose. The copy name is
+        // derived from that name, so it inherits its standing with it.
+        if (title) await forked.setSessionName(title, forked.titleSource ?? "auto", "ghost-fork");
+        await forked.ensureOnDisk();
+      } finally {
+        // Release the copy's writer before the host opens it as a session.
+        await forked.close();
+      }
     } finally {
-      hosted.busy = false;
+      source.busy = false;
+    }
+
+    // From here the copy exists on disk and would show up in the sidebar, so
+    // every failure has to take it back out again: a branch the user was told
+    // was refused must not leave a titled duplicate behind.
+    try {
+      const hosted = await this.idleHostedSession(ghostName, forkId);
+      hosted.busy = true;
+      try {
+        const result = await hosted.session.navigateTree(entryId);
+        if (result.cancelled) throw new GhostError("branch_cancelled", "Conversation branching was cancelled.", 409);
+        return {
+          sessionId: forkId,
+          title: hosted.session.sessionManager.getSessionName() ?? null,
+          draft: result.editorText ?? "",
+          transcript: this.transcriptFromManager(forkId, hosted.session.sessionManager),
+        };
+      } finally {
+        hosted.busy = false;
+      }
+    } catch (error) {
+      await this.discardFork(ghostName, forkId);
+      throw error;
     }
   }
 
-  /** Switch the active leaf to an existing sibling branch. */
-  async navigateConversation(
-    ghostName: string,
-    conversationId: string | null | undefined,
-    targetId: string,
-  ): Promise<{ transcript: Transcript }> {
-    const hosted = await this.idleHostedSession(ghostName, conversationId);
-    hosted.busy = true;
+  /**
+   * Undo a fork that never reached the user, through the same removal an
+   * ordinary conversation delete uses so the two cannot drift. Best-effort by
+   * construction: the error that brought us here is the one worth reporting.
+   */
+  private async discardFork(ghostName: string, forkId: string): Promise<void> {
     try {
-      const result = await hosted.session.navigateTree(targetId);
-      if (result.cancelled) throw new GhostError("branch_cancelled", "Branch navigation was cancelled.", 409);
-      return {
-        transcript: this.transcriptFromManager(
-          conversationId || DEFAULT_SESSION_KEY,
-          hosted.session.sessionManager,
-        ),
-      };
-    } finally {
-      hosted.busy = false;
+      await this.deleteSession(ghostName, forkId);
+    } catch (error) {
+      this.logger.warn("could not discard an abandoned branch copy", {
+        ghost: ghostName,
+        conversation: forkId,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 

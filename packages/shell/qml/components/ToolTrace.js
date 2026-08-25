@@ -15,6 +15,121 @@ function quoted(value) {
     return "“" + compact(value, 80) + "”";
 }
 
+function isAsk(activity) {
+    return String(activity.name || "") === "ask";
+}
+
+/**
+ * How the question ended, from the daemon's `askSettled`. Anything the runtime
+ * did not say — an older transcript, a live ask still standing open — reads as
+ * unknown, and every caller here treats unknown as "say nothing" rather than
+ * guessing an outcome. That guess is exactly what used to report an answer for
+ * a question the user closed the app on.
+ */
+function askSettlement(activity) {
+    switch (String(activity.askSettled || "")) {
+    case "submitted":
+    case "cancelled":
+    case "timedOut":
+    case "chat":
+        return String(activity.askSettled);
+    default:
+        return "";
+    }
+}
+
+/**
+ * The questions this ask put to the user, normalised. Gated on the tool name
+ * rather than on the shape of the arguments: some other tool is free to take a
+ * `questions` array without meaning OMP's ask dialog by it.
+ */
+function askQuestions(activity) {
+    const args = activity.arguments;
+    if (!isAsk(activity) || !args || typeof args !== "object") return [];
+    if (!Array.isArray(args.questions)) return [];
+    const out = [];
+    for (const raw of args.questions) {
+        if (!raw || typeof raw !== "object") continue;
+        const question = typeof raw.question === "string" ? raw.question.trim() : "";
+        if (question === "") continue;
+        const recommended = typeof raw.recommended === "number" ? raw.recommended : -1;
+        const options = [];
+        if (Array.isArray(raw.options)) {
+            raw.options.forEach(function (option, index) {
+                const label = typeof option === "string"
+                    ? option
+                    : (option && typeof option.label === "string" ? option.label : "");
+                if (label.trim() === "") return;
+                options.push({ label: label.trim(), recommended: index === recommended });
+            });
+        }
+        out.push({
+            header: typeof raw.header === "string" ? raw.header.trim() : "",
+            question: question,
+            options: options
+        });
+    }
+    return out;
+}
+
+/**
+ * The question itself, for the line under the trace. This stays out of the
+ * expand: a settled card that says only "never got an answer" is a card about
+ * nothing, and the question is the one thing a reader scrolling back has lost.
+ * Only the first one — the rest are counted here and named when expanded,
+ * because the line has room for exactly one.
+ */
+function askPrompt(activity) {
+    const questions = askQuestions(activity);
+    if (questions.length === 0) return "";
+    const first = questions[0];
+    const head = first.header !== "" ? first.header + " · " : "";
+    const others = questions.length - 1;
+    const tail = others === 0
+        ? ""
+        : "  +" + others + (others === 1 ? " more question" : " more questions");
+    return head + compact(first.question, 1200) + tail;
+}
+
+/**
+ * What expanding an ask card adds: the options it offered, and the questions
+ * the collapsed line could only count. Each line carries its own label so the
+ * block sits among "Tool ·" and "Input ·" instead of floating unlabelled.
+ */
+function askDetail(activity) {
+    const lines = [];
+    askQuestions(activity).forEach(function (question, index) {
+        if (index > 0) lines.push("Also asked · " + compact(question.question, 300));
+        const options = question.options.map(function (option) {
+            return option.recommended ? option.label + " (recommended)" : option.label;
+        });
+        if (options.length > 0) lines.push("Options · " + options.join(" · "));
+    });
+    return lines.join("\n");
+}
+
+/**
+ * True when this card is a question no answer ever reached — still standing
+ * open, or settled without one. A question the ghost is still holding is
+ * nearer to a failed call than to a file read, so the card can drop the amber
+ * every ordinary tool wears. Unknown settlement on a finished call is not
+ * counted: not knowing is not the same as knowing it went unanswered.
+ */
+function askAwaiting(activity, completed) {
+    if (!isAsk(activity)) return false;
+    const settled = askSettlement(activity);
+    if (settled === "cancelled" || settled === "timedOut") return true;
+    return settled === "" && !completed;
+}
+
+/**
+ * The card's action. "Re-answer" is a lie on a question that was never
+ * answered once, so anything but a submitted ask offers a first answer.
+ */
+function askAction(activity) {
+    return askSettlement(activity) === "submitted" ? "Re-answer" : "Answer it";
+}
+
 /**
  * The file a call wrote, named the way the tool named it: absolute, or relative
  * to the session cwd, which OMP sets to the ghost home. Writers only — a read
@@ -46,7 +161,7 @@ function fileTarget(activity) {
 // A trace describes the purpose of the work, never the mechanism used to do
 // it. These fallbacks also keep restored transcripts useful: persisted tool
 // calls retain their arguments, while live intent/result summaries do not.
-function fallback(activity, completed) {
+function fallback(activity, completed, failed) {
     const name = String(activity.name || "");
     const query = argument(activity, "query");
     const path = argument(activity, "path");
@@ -57,7 +172,25 @@ function fallback(activity, completed) {
 
     switch (name) {
     case "ask":
-        return completed ? "Received your answer" : "Waiting for your answer";
+        switch (askSettlement(activity)) {
+        case "submitted":
+            return "Received your answer";
+        case "cancelled":
+            return "Never got an answer";
+        case "timedOut":
+            return "Stopped waiting for an answer";
+        // OMP's "Chat about this": the question was set aside for the
+        // conversation rather than answered in the card.
+        case "chat":
+            return "Talked it through instead";
+        default:
+            // An ask that errored out was closed, aborted, or abandoned — the
+            // one thing it certainly was not is answered.
+            if (failed) return "Never got an answer";
+            // Nothing here knows the outcome, so the trace reports only what
+            // is certain: that the question was put.
+            return completed ? "Asked you a question" : "Waiting for your answer";
+        }
     case "ghost_notes_list":
         return completed ? "Looked through your docs" : "Looking through your docs";
     case "ghost_notes_read":
@@ -152,8 +285,12 @@ function text(activity, completed, failed, expanded) {
     const limit = expanded ? 1200 : 180;
     const summary = compact(activity.summary || "", limit);
     const intent = compact(activity.intent || "", limit);
-    const base = summary || intent || fallback(activity, completed);
-    if (failed && summary === "" && base !== "") return "Couldn’t complete: " + base;
+    const base = summary || intent || fallback(activity, completed, failed);
+    // An ask that failed is not a tool that broke — it is a question that went
+    // unanswered, and its own trace already says so. "Couldn't complete" in
+    // front of that would report a malfunction where there was only a silence.
+    if (failed && summary === "" && base !== "" && !isAsk(activity))
+        return "Couldn’t complete: " + base;
     return base;
 }
 
@@ -161,6 +298,9 @@ function input(activity) {
     const args = activity.arguments;
     if (!args || typeof args !== "object") return "";
     if (Array.isArray(args.questions)) {
+        // An ask card renders the questions themselves, so a count beside them
+        // is noise — and the fall-through below would dump the raw array.
+        if (isAsk(activity)) return "";
         const count = args.questions.length;
         return count + (count === 1 ? " question" : " questions");
     }

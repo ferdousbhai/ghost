@@ -43,7 +43,7 @@ export default defineConfig({
         // lazy proxies, so preserve Bun's runtime shape inside Vitest.
         return source.replace(
           "\t\tapplyToolProxy(registeredTool.definition, this);",
-          "\t\tObject.defineProperties(this, { renderCall: { value: undefined, writable: true, configurable: true }, renderResult: { value: undefined, writable: true, configurable: true } });\n\t\tapplyToolProxy(registeredTool.definition, this);",
+          "\t\tObject.defineProperties(this, { renderCall: { value: undefined, writable: true, configurable: true }, renderResult: { value: undefined, writable: true, configurable: true }, loadMode: { value: undefined, writable: true, configurable: true } });\n\t\tapplyToolProxy(registeredTool.definition, this);",
         );
       }
       if (!source.includes("import.meta.dir")) return null;

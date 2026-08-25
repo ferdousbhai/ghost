@@ -42,8 +42,11 @@ qs -p qml/shell.qml kill
   left (`casper`, `moaning-myrtle`, `+ new ghost`), transcript in the middle,
   composer at the bottom. `SUPER+CTRL+G` is launch-or-focus: reveal+focus when
   hidden/unfocused, hide only when already focused.
-- On `ask`: the spectral summoning orb, then a `read_memory` lifecycle card,
-  then the reply arriving word by word with `**bold**` rendered as bold.
+- On `ask`: the spectral summoning orb saying "Checking what I remember about
+  that" in the ghost's own words rather than a spectral phrase, then the reply
+  arriving word by word with `**bold**` rendered as bold. The narration never
+  reaches the transcript, and the `read_memory` call it announced settles behind
+  the row's quiet "1 step" toggle rather than into a card of its own.
 - With the HUD closed, a finished turn raises a `notify-send` notification
   instead.
 - `Esc` cancels a running turn (nothing when idle — a normal window is not

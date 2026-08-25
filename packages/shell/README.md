@@ -64,23 +64,50 @@ Chat, Vision, Titles, General, and Research primaries plus ordered retry
 fallbacks. Within each provider, current model families sort ahead of older
 versions.
 
-OMP's built-in `ask` appears as a structured in-chat form. It supports offered
-options, custom input, notes, multiple selection, chat-about-this, and cancel;
-it is separate from tool approval, which Ghost does not expose. While a model
+OMP's built-in `ask` appears as a structured in-chat form, taking the composer's
+place while a question stands. It supports offered options, custom input, notes,
+multiple selection, chat-about-this, and dismissal; it is separate from tool
+approval, which Ghost does not expose. Because it replaces the composer, it also
+takes the keyboard: Enter answers, Esc dismisses from anywhere, number keys pick
+options, arrows move through them, and Tab reaches the free-text field. The
+recommended option starts selected, so Enter alone agrees with what the daemon
+would submit if the ask timed out. Answering or dismissing hands focus back.
+
+Dismissal is not a nicety. Until it existed, a question the user did not want to
+answer had no exit but closing the app, which left the conversation holding a
+question and no way to answer it. A settled ask keeps a card in the transcript
+carrying the question, the options offered, and how it actually ended — answered,
+never answered, timed out, or talked through instead, from the transcript's
+`ghostAsk.settled`. An unanswered one wears the rose that failure wears, and
+offers to answer it now on the branch the daemon kept. While a model
 is streaming, Enter steers the active run, Ctrl+Enter queues a follow-up, and
 Shift+Enter inserts a newline. The queued state is visible below the composer.
 
-Tool work persists as compact traces: purpose while active, outcome when one is
-available, and implementation details only when expanded. User messages expose
-editable branch points and sibling navigation;
-historical ask cards can be re-answered to create a sibling branch and resume
-generation from it.
+A reply is the answer, not an account of how it was reached. Which tools ran is
+narrated by the activity line while it happens and then leaves: a settled turn
+shows only the calls a reader still needs — the ones that failed, and `ask`,
+whose card carries the re-answer branch — behind a quiet "3 steps" toggle that
+restores the full trail. Those traces are unchanged: purpose while active,
+outcome when one is available, implementation details only when expanded. User
+messages expose editable branch points and sibling navigation; historical ask
+cards can be re-answered to create a sibling branch and resume generation from
+it.
 
 The activity line uses the recovered summon-ghost spectral orb and rotating,
 tool-aware summoning copy. The QML port traces to summon-ghost commit
 `be07ca78c95fe38dae105866f7543283f483443b` (the mature glow-clipping fix).
 Its aura is deliberately unclipped, the line keeps a stable height, and motion
 can be disabled with `GHOST_REDUCE_MOTION=1`.
+
+It also carries the ghost's own narration. A model that opens a turn with
+"Checking your Dropbox for the invoice" before reaching for a tool is reporting
+status, not replying, so that line goes beside the orb rather than into the
+reading column, and the spectral phrases fill the silences instead.
+`qml/services/TurnBlocks.js` makes the call, with no classifier: a text block
+only becomes a preamble because a tool call came after it, and that is
+structural. A block long enough to be a section of a multi-step answer stays in
+the reply whatever follows it. Live and restored transcripts run the same split,
+so a reload does not resurrect what streaming set aside.
 
 ## System tray
 

@@ -65,6 +65,20 @@ function stringField(
 export class AskBroker {
   #active: ActiveAsk | null = null;
 
+  /**
+   * Milliseconds a question waits when its asker names no deadline of its own.
+   * Ghost's setting, not OMP's: the tool may still pass a shorter or longer
+   * `timeout` for a question it knows the shape of, and that always wins.
+   * `0` waits forever, which is what shipped before this had a default.
+   */
+  readonly #defaultTimeout: number;
+
+  constructor(defaultTimeoutSeconds = 0) {
+    this.#defaultTimeout = Number.isFinite(defaultTimeoutSeconds) && defaultTimeoutSeconds > 0
+      ? defaultTimeoutSeconds * 1000
+      : 0;
+  }
+
   readonly uiContext = {
     timeoutStartsOnPresentation: true,
     askDialog: (
@@ -134,7 +148,8 @@ export class AskBroker {
     // manages to overlap two dialogs instead of orphaning the first promise.
     this.close();
     const now = Date.now();
-    const timeout = options?.timeout && options.timeout > 0 ? options.timeout : undefined;
+    const asked = options?.timeout && options.timeout > 0 ? options.timeout : undefined;
+    const timeout = asked ?? (this.#defaultTimeout > 0 ? this.#defaultTimeout : undefined);
     const { promise, resolve } = Promise.withResolvers<ExtensionAskDialogResult | undefined>();
     const active: ActiveAsk = {
       id: randomUUID(),

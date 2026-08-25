@@ -242,6 +242,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     offline: config.offline,
     browserMode: config.browserMode,
     compaction: config.compaction,
+    askTimeoutSeconds: config.askTimeoutSeconds,
     hooks,
     ...(relay ? { relayTransport: relay } : {}),
   });

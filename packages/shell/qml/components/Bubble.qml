@@ -32,7 +32,6 @@ Item {
     required property string failure
     required property bool busy
     required property string sourceEntryId
-    required property var branchNavigation
     /** Position in the transcript model; gates entrances to freshly arrived rows. */
     required property int rowIndex
 
@@ -41,6 +40,34 @@ Item {
 
     readonly property bool mine: root.speaker === "user"
     readonly property int contentInset: root.mine ? 12 : 0
+
+    /**
+     * Which tool cards this row shows. Which tools ran is not what a reply is
+     * about — the orb narrated that while it happened, and then it stopped
+     * being interesting — so a settled turn keeps only the calls a reader still
+     * needs: the ones that failed, because a silent failure is how you get a
+     * confidently wrong answer, and `ask`, whose card carries the re-answer
+     * branch. Everything else is one click away, never in the reading column.
+     */
+    property bool toolsOpen: false
+    // A JS array handed to a ListModel role comes back out as a nested
+    // QQmlListModel, which has `count` and no `filter`, so a rehydrated row
+    // would throw here and render no cards at all. Copy to a real array once.
+    readonly property var allActivities: {
+        const value = root.activities;
+        if (!value) return [];
+        if (Array.isArray(value)) return value;
+        const list = [];
+        for (let i = 0; i < value.count; i++) list.push(value.get(i));
+        return list;
+    }
+    readonly property var loudActivities: root.allActivities.filter(item =>
+        item.status === "failed" || item.name === "ask")
+    readonly property var shownActivities: root.toolsOpen
+        ? root.allActivities
+        : root.loudActivities
+    readonly property int quietToolCount:
+        root.allActivities.length - root.loudActivities.length
 
     implicitHeight: card.implicitHeight
 
@@ -130,7 +157,7 @@ Item {
             spacing: Theme.gap / 2
 
             Repeater {
-                model: root.activities || []
+                model: root.shownActivities
                 delegate: ToolCard {
                     required property var modelData
                     width: content.width
@@ -168,16 +195,19 @@ Item {
             // Settled messages keep their actions quiet and icon-sized. Human
             // prompts can branch; ghost replies can be copied.
             Row {
-                visible: !root.busy && root.body !== ""
-                    && (!root.mine || root.sourceEntryId !== ""
-                        || Boolean(root.branchNavigation && root.branchNavigation.count > 1))
+                // A ghost's row earns this line for its reply or for the trail
+                // it is holding back, and a turn that spent itself entirely on
+                // tool calls has only the latter.
+                visible: !root.busy && (root.mine
+                    ? (root.body !== "" && root.sourceEntryId !== "")
+                    : (root.body !== "" || root.quietToolCount > 0))
                 spacing: Theme.gap
 
                 Item {
                     id: branchAction
 
                     visible: root.mine && root.sourceEntryId !== ""
-                    // A running turn owns the session tree. Dimmed rather than
+                    // A running turn owns the conversation. Dimmed rather than
                     // hidden: the click still answers, in the line above the
                     // composer, instead of vanishing under the pointer.
                     opacity: Ghostd.streaming ? 0.4 : 1
@@ -199,61 +229,55 @@ Item {
                         anchors.margins: -Theme.gap / 2
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
-                        // The HUD owns what happens next: rewinding hands this
-                        // message's text back to the composer, which may already
+                        // The HUD owns what happens next: branching copies the
+                        // thread into a new conversation and hands this
+                        // message's text to the composer, which may already
                         // hold something worth asking about first.
                         onClicked: root.branchRequested(root.sourceEntryId)
                     }
                 }
 
+                // No sibling navigator lives here any more. A branch is its own
+                // conversation now, so the way back to the other answer is the
+                // sidebar — the same place every other thread is reached from.
+
+                // The trail, for when something did need checking after all.
+                // A count rather than a glyph: it is the only thing here that
+                // has to say how much it is hiding.
                 Text {
-                    visible: root.mine
-                        && Boolean(root.branchNavigation && root.branchNavigation.count > 1)
-                    text: root.branchNavigation && root.branchNavigation.previousTargetId ? "‹" : "·"
-                    color: root.branchNavigation && root.branchNavigation.previousTargetId
-                        ? Theme.ghostAmber : Theme.foregroundDim
+                    id: trailToggle
+
+                    visible: !root.mine && root.quietToolCount > 0
+                    text: root.toolsOpen
+                        ? "hide"
+                        : root.quietToolCount + (root.quietToolCount === 1 ? " step" : " steps")
+                    color: trailArea.containsMouse ? Theme.ghostAmber : Theme.foregroundFaint
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.fontSizeSmall
-                    MouseArea {
-                        anchors.fill: parent
-                        enabled: Boolean(root.branchNavigation && root.branchNavigation.previousTargetId)
-                        cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-                        onClicked: if (root.branchNavigation)
-                            Ghostd.navigateBranch(root.branchNavigation.previousTargetId)
+                    font.letterSpacing: 0.5
+                    Accessible.role: Accessible.Button
+                    Accessible.name: root.toolsOpen
+                        ? "Hide what the ghost did" : "Show what the ghost did"
+
+                    Behavior on color {
+                        enabled: !Theme.reducedMotion
+                        ColorAnimation { duration: Theme.durFast; easing.type: Easing.OutQuad }
                     }
-                }
 
-                Text {
-                    visible: root.mine
-                        && Boolean(root.branchNavigation && root.branchNavigation.count > 1)
-                    text: root.branchNavigation
-                        ? (root.branchNavigation.index + 1) + "/" + root.branchNavigation.count : ""
-                    color: Theme.foregroundDim
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeSmall
-                }
-
-                Text {
-                    visible: root.mine
-                        && Boolean(root.branchNavigation && root.branchNavigation.count > 1)
-                    text: root.branchNavigation && root.branchNavigation.nextTargetId ? "›" : "·"
-                    color: root.branchNavigation && root.branchNavigation.nextTargetId
-                        ? Theme.ghostAmber : Theme.foregroundDim
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeSmall
                     MouseArea {
+                        id: trailArea
                         anchors.fill: parent
-                        enabled: Boolean(root.branchNavigation && root.branchNavigation.nextTargetId)
-                        cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-                        onClicked: if (root.branchNavigation)
-                            Ghostd.navigateBranch(root.branchNavigation.nextTargetId)
+                        anchors.margins: -Theme.gap / 2
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.toolsOpen = !root.toolsOpen
                     }
                 }
 
                 Item {
                     id: copyAction
 
-                    visible: !root.mine
+                    visible: !root.mine && root.body !== ""
                     width: 16
                     height: 16
                     Accessible.role: Accessible.Button
@@ -277,21 +301,10 @@ Item {
                 }
             }
 
-            Text {
-                id: pending
-                visible: root.busy && root.body === ""
-                text: "…"
-                color: Theme.foregroundDim
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSize
-
-                SequentialAnimation on opacity {
-                    running: pending.visible && !Theme.reducedMotion
-                    loops: Animation.Infinite
-                    NumberAnimation { from: 1; to: 0.4; duration: 600; easing.type: Easing.InOutQuad }
-                    NumberAnimation { from: 0.4; to: 1; duration: 600; easing.type: Easing.InOutQuad }
-                }
-            }
+            // No placeholder for a reply that has not started. The orb below
+            // the transcript is already saying the ghost is working, in its own
+            // words where it gave any, and an empty row is quieter than the
+            // same news told twice.
 
             // A failed turn is a card of its own, not a red outline on the row:
             // the recovery text has to read as content, not as damage.

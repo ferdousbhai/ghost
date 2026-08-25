@@ -50,6 +50,17 @@ export interface DaemonConfig {
    * (or retune the threshold) to change how a ghost handles a long transcript.
    */
   compaction: CompactionConfig;
+  /**
+   * Seconds a question waits before it answers itself with the option its
+   * asker marked recommended, letting the turn carry on. `0` waits forever.
+   *
+   * This is daemon-wide rather than per-ghost on purpose. How long a dialog
+   * sits before giving up is a property of the person at the keyboard, not of
+   * the persona asking; a ghost home holds what makes that ghost that ghost.
+   * It is also ghost's own setting rather than OMP's `ask.timeout`, so it
+   * survives the move off OMP's config namespace (issue #14).
+   */
+  askTimeoutSeconds: number;
   /** Where the config was read from, or null when defaults/env only. */
   configPath: string | null;
   /** Trusted user-level command-hook configuration beside config.json. */
@@ -68,6 +79,7 @@ export interface DaemonConfigFile {
     thresholdTokens?: number;
     thresholdFraction?: number;
   };
+  askTimeoutSeconds?: number;
 }
 
 /** Explicit overrides from CLI flags — highest precedence. */
@@ -78,6 +90,7 @@ export interface DaemonConfigOverrides {
   offline?: boolean;
   browserMode?: "relay" | "profile";
   compaction?: CompactionConfig;
+  askTimeoutSeconds?: number;
   /** Config file path; defaults to <XDG_CONFIG_HOME>/ghost/config.json. */
   configPath?: string;
   /** Injected for tests. Defaults to process.env. */
@@ -87,6 +100,13 @@ export interface DaemonConfigOverrides {
 }
 
 export const DEFAULT_PORT = 7717;
+/**
+ * Long enough that reaching it means the user genuinely walked away, short
+ * enough that a forgotten question does not hold a conversation open for hours
+ * — which is the state that used to leave a ghost holding a question nobody
+ * could ever answer.
+ */
+export const DEFAULT_ASK_TIMEOUT_SECONDS = 120;
 export const DEFAULT_HOST = "127.0.0.1";
 export const DEFAULT_GHOSTS_DIRNAME = "Ghosts";
 
@@ -187,6 +207,13 @@ function readConfigFile(path: string): DaemonConfigFile | null {
     }
     config.compaction = compaction;
   }
+  if (file.askTimeoutSeconds !== undefined) {
+    if (typeof file.askTimeoutSeconds !== "number" || !Number.isFinite(file.askTimeoutSeconds)
+      || file.askTimeoutSeconds < 0) {
+      throw new Error(`${path}: "askTimeoutSeconds" must be a non-negative number.`);
+    }
+    config.askTimeoutSeconds = file.askTimeoutSeconds;
+  }
   return config;
 }
 
@@ -205,6 +232,14 @@ function parsePositiveNumber(raw: string, source: string): number {
   const value = Number(raw);
   if (!Number.isFinite(value) || value <= 0) {
     throw new Error(`Invalid positive number from ${source}: ${JSON.stringify(raw)}`);
+  }
+  return value;
+}
+
+function parseNonNegativeNumber(raw: string, source: string): number {
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error(`Invalid non-negative number from ${source}: ${JSON.stringify(raw)}`);
   }
   return value;
 }
@@ -236,6 +271,7 @@ function expandHome(path: string, home: string): string {
  * - `GHOSTD_COMPACTION` → compaction.enabled
  * - `GHOSTD_COMPACTION_THRESHOLD_TOKENS`   → compaction.thresholdTokens
  * - `GHOSTD_COMPACTION_THRESHOLD_FRACTION` → compaction.thresholdFraction
+ * - `GHOSTD_ASK_TIMEOUT` → askTimeoutSeconds (0 waits forever)
  * - `GHOSTD_CONFIG`     → config file path
  * - `GHOSTD_HOOKS`      → trusted user command-hook file
  * - `XDG_CONFIG_HOME`   → config and hook directory
@@ -256,6 +292,7 @@ export function loadConfig(overrides: DaemonConfigOverrides = {}): DaemonConfig 
   const envCompaction = env.GHOSTD_COMPACTION?.trim();
   const envCompactionTokens = env.GHOSTD_COMPACTION_THRESHOLD_TOKENS?.trim();
   const envCompactionFraction = env.GHOSTD_COMPACTION_THRESHOLD_FRACTION?.trim();
+  const envAskTimeout = env.GHOSTD_ASK_TIMEOUT?.trim();
   const envHooksPath = env.GHOSTD_HOOKS?.trim();
 
   const port = overrides.port
@@ -294,6 +331,11 @@ export function loadConfig(overrides: DaemonConfigOverrides = {}): DaemonConfig 
     ...(thresholdFraction !== undefined ? { thresholdFraction } : {}),
   };
 
+  const askTimeoutSeconds = overrides.askTimeoutSeconds
+    ?? (envAskTimeout ? parseNonNegativeNumber(envAskTimeout, "GHOSTD_ASK_TIMEOUT") : undefined)
+    ?? file?.askTimeoutSeconds
+    ?? DEFAULT_ASK_TIMEOUT_SECONDS;
+
   const hooksPath = resolve(expandHome(envHooksPath || join(dirname(configPath), "hooks.json"), home));
 
   assertLoopback(host);
@@ -304,6 +346,7 @@ export function loadConfig(overrides: DaemonConfigOverrides = {}): DaemonConfig 
     offline,
     browserMode,
     compaction,
+    askTimeoutSeconds,
     configPath: file ? configPath : null,
     hooksPath,
   };

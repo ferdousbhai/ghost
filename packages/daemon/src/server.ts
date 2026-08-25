@@ -15,7 +15,7 @@
  *   POST /api/ghosts/:name/sessions/:id/ask → resolve that ask
  *   GET  /api/ghosts/:name/sessions/:id/queue → OMP steering/follow-up queues
  *   POST /api/ghosts/:name/sessions/:id/queue → enqueue a steer or follow-up
- *   POST /api/ghosts/:name/sessions/:id/branch → rewind/navigate the OMP tree
+ *   POST /api/ghosts/:name/sessions/:id/branch → branch off into a new conversation
  *   POST /api/ghosts/:name/sessions/:id/reanswer → branch an ask result + SSE resume
  *   GET  /api/ghosts/:name/model-routing → Ghost roles + OMP fallback chains
  *   PUT  /api/ghosts/:name/model-routing → set a primary/fallback or clear a chain
@@ -767,23 +767,15 @@ export function createDaemonServer(options: ServerOptions): Server {
       errorResponse(response, 400, "invalid_request", '"entryId" must be a non-empty string.');
       return;
     }
-    if (action === "rewind") {
+    if (action === "fork") {
       jsonResponse(
         response,
         200,
-        await options.host.branchConversation(ghostName, sessionId, entryId),
+        await options.host.forkConversation(ghostName, sessionId, entryId),
       );
       return;
     }
-    if (action === "navigate") {
-      jsonResponse(
-        response,
-        200,
-        await options.host.navigateConversation(ghostName, sessionId, entryId),
-      );
-      return;
-    }
-    errorResponse(response, 400, "invalid_request", '"action" must be "rewind" or "navigate".');
+    errorResponse(response, 400, "invalid_request", '"action" must be "fork".');
   };
 
   const handleAskReanswer = async (

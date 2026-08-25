@@ -28,6 +28,14 @@ ghostd [options]
       --log-level <level>  debug | info | warn | error
 ```
 
+`config.json` carries the same settings plus `browserMode`, `compaction`, and
+`askTimeoutSeconds`. The last is how long a question waits before answering
+itself with the option its asker marked recommended, so that a turn nobody is
+watching resumes instead of stalling; `0` waits forever. It is daemon-wide
+rather than per-ghost because how long a dialog sits is a property of the person
+at the keyboard, not of the persona asking. Every setting also has an
+environment override (`GHOSTD_ASK_TIMEOUT` here); see `loadConfig`.
+
 The systemd user unit is in `contrib/ghostd.service`. `SIGINT` and `SIGTERM`
 stop new requests, end live streams, dispose hosted sessions, and exit cleanly.
 
@@ -121,9 +129,11 @@ ad-hoc prompts:
 - Tool lifecycle events include start, update, completion, error, bounded
   result summaries, and model-fallback state so the shell can render durable
   activity cards rather than a transient name.
-- OMP's session tree backs editable branching, sibling navigation, and
-  re-answering a historical `ask`; the revised result is committed as a sibling
-  and generation resumes on that branch.
+- Branching off a message forks the conversation: the transcript is copied to a
+  new conversation, rewound to just before that message, and its text handed
+  back as a draft, leaving the original untouched. Re-answering a historical
+  `ask` still commits the revised result as a sibling in place and resumes
+  generation there.
 
 ## HTTP API
 
@@ -135,7 +145,7 @@ The authoritative route and payload contract is
 | DELETE | `/api/ghosts/:name/sessions/:id` | permanently delete an idle conversation |
 | GET/POST | `/api/ghosts/:name/sessions/:id/ask` | poll or resolve the active ask |
 | GET/POST | `/api/ghosts/:name/sessions/:id/queue` | inspect or enqueue steer/follow-up |
-| POST | `/api/ghosts/:name/sessions/:id/branch` | rewind or navigate the session tree |
+| POST | `/api/ghosts/:name/sessions/:id/branch` | fork the conversation at a message |
 | POST | `/api/ghosts/:name/sessions/:id/reanswer` | branch an ask answer and resume via SSE |
 | GET/PUT | `/api/ghosts/:name/model-routing` | inspect or mutate role/fallback policy |
 

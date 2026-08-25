@@ -6,7 +6,7 @@
  * Ghost persona layered onto the harness, and two ghosts staying separate
  * while answering at the same time in one process.
  */
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, sep } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { ghostPaths } from "../src/ghosts.js";
@@ -20,6 +20,7 @@ import {
 import { GhostHookRunner } from "../src/hooks.js";
 import {
   SessionHost,
+  forkConversationTitle,
   parseUserBashCommand,
   sessionFileNameFor,
   sessionKeyOf,
@@ -477,9 +478,9 @@ describe("SessionHost.runTurn", () => {
     const askCall = before.messages
       .flatMap((message) => Array.isArray(message.content) ? message.content : [])
       .find((part) => (part as { name?: unknown }).name === "ask") as {
-        ghostAsk?: { resultEntryId?: string; count?: number };
+        ghostAsk?: { resultEntryId?: string; settled?: string };
       };
-    expect(askCall.ghostAsk).toMatchObject({ count: 1 });
+    expect(askCall.ghostAsk?.settled).toBe("submitted");
     const resultEntryId = askCall.ghostAsk?.resultEntryId;
     expect(resultEntryId).toBeTruthy();
 
@@ -504,10 +505,86 @@ describe("SessionHost.runTurn", () => {
     const revisedCall = after.messages
       .flatMap((message) => Array.isArray(message.content) ? message.content : [])
       .find((part) => (part as { name?: unknown }).name === "ask") as {
-        ghostAsk?: { index?: number; count?: number; previousTargetId?: string };
+        ghostAsk?: { resultEntryId?: string; settled?: string };
       };
-    expect(revisedCall.ghostAsk).toMatchObject({ index: 1, count: 2 });
-    expect(revisedCall.ghostAsk?.previousTargetId).toBeTruthy();
+    // The re-answer committed a sibling and the transcript follows it: the ask
+    // the card now points at is the new result, not the one just left behind.
+    expect(revisedCall.ghostAsk?.resultEntryId).toBeTruthy();
+    expect(revisedCall.ghostAsk?.resultEntryId).not.toBe(resultEntryId);
+    expect(revisedCall.ghostAsk?.settled).toBe("submitted");
+  });
+
+  describe("how a historical ask settled", () => {
+    const ASK_STEP = {
+      kind: "tool" as const,
+      name: "ask",
+      args: {
+        questions: [{
+          id: "finish",
+          question: "Which finish should I use?",
+          options: [{ label: "Matte" }, { label: "Gloss" }],
+          recommended: 0,
+        }],
+      },
+    };
+
+    async function settledOf(sessionId: string): Promise<string | undefined> {
+      const transcript = await host!.readTranscript("casper", sessionId);
+      const askCall = transcript.messages
+        .flatMap((message) => Array.isArray(message.content) ? message.content : [])
+        .find((part) => (part as { name?: unknown }).name === "ask") as {
+          ghostAsk?: { settled?: string };
+        } | undefined;
+      return askCall?.ghostAsk?.settled;
+    }
+
+    it("reports an answered ask as submitted", async () => {
+      await setup([ASK_STEP, { kind: "text", text: "Matte it is." }]);
+      const turn = host!.runTurn("casper", {
+        sessionId: "conv-submitted",
+        prompt: "Choose a finish.",
+        emit: () => {},
+      });
+      const pending = await waitFor(() => host!.pendingAsk("casper", "conv-submitted"));
+      host!.answerAsk("casper", "conv-submitted", pending.id, {
+        kind: "submit",
+        results: [{ id: "finish", selectedOptions: ["Matte"] }],
+      });
+      await turn;
+
+      expect(await settledOf("conv-submitted")).toBe("submitted");
+    });
+
+    it("reports a cancelled ask as cancelled", async () => {
+      await setup([ASK_STEP, { kind: "text", text: "No finish chosen." }]);
+      const turn = host!.runTurn("casper", {
+        sessionId: "conv-cancelled",
+        prompt: "Choose a finish.",
+        emit: () => {},
+      });
+      const pending = await waitFor(() => host!.pendingAsk("casper", "conv-cancelled"));
+      host!.answerAsk("casper", "conv-cancelled", pending.id, { kind: "cancel" });
+      await turn;
+
+      expect(await settledOf("conv-cancelled")).toBe("cancelled");
+    });
+
+    it("reports an ask nobody answered in time as timedOut", async () => {
+      const { dir } = await setup([ASK_STEP, { kind: "text", text: "Matte it is." }]);
+      // OMP reads `ask.timeout` (seconds) from the ghost home's own config, the
+      // only lever a test has on the auto-select deadline.
+      mkdirSync(join(dir, ".omp"), { recursive: true });
+      writeFileSync(join(dir, ".omp", "config.yml"), "ask:\n  timeout: 1\n", "utf8");
+      const turn = host!.runTurn("casper", {
+        sessionId: "conv-timedout",
+        prompt: "Choose a finish.",
+        emit: () => {},
+      });
+      await waitFor(() => host!.pendingAsk("casper", "conv-timedout"));
+      await turn;
+
+      expect(await settledOf("conv-timedout")).toBe("timedOut");
+    }, 15_000);
   });
 
   it("queues OMP steering and follow-up messages while a turn is live", async () => {
@@ -766,43 +843,139 @@ describe("SessionHost.runTurn", () => {
   });
 });
 
+describe("forkConversationTitle", () => {
+  it("names a copy the way a file manager does, from the first free counter", () => {
+    expect(forkConversationTitle("Weekend trip", [])).toBe("Weekend trip (2)");
+    expect(forkConversationTitle("Weekend trip", ["Weekend trip", "Weekend trip (2)"]))
+      .toBe("Weekend trip (3)");
+    // The counter is stripped before it is re-applied, never stacked.
+    expect(forkConversationTitle("Weekend trip (2)", ["Weekend trip", "Weekend trip (2)"]))
+      .toBe("Weekend trip (3)");
+    // Untitled stays untitled; nothing here invents a name.
+    expect(forkConversationTitle(null, ["Weekend trip"])).toBeNull();
+    expect(forkConversationTitle("   ", [])).toBeNull();
+  });
+});
+
 describe("conversation branching", () => {
-  it("rewinds a user message into a draft and keeps both sibling branches navigable", async () => {
-    await setup([{ kind: "text", text: "A branch-aware answer." }]);
-    await host!.runTurn("casper", {
+  /** Two turns in one conversation, with a title, ready to branch off. */
+  async function seedBranchable(title: string | null = "Weekend trip") {
+    temp = makeTempGhosts();
+    provider = await startMockProvider({ script: [{ kind: "text", text: "A branch-aware answer." }] });
+    seedGhost(temp.root, {
+      name: "casper",
+      provider: { baseUrl: provider.url, modelId: provider.modelId },
+    });
+    host = new SessionHost({
+      registry: temp.registry,
+      offline: true,
+      title: title === null
+        ? { enabled: false }
+        : { generate: async () => title },
+    });
+    await host.runTurn("casper", {
       sessionId: "conv-tree",
       prompt: "Original question",
       emit: () => {},
     });
-    await host!.runTurn("casper", {
+    await host.runTurn("casper", {
       sessionId: "conv-tree",
       prompt: "Original follow-up",
       emit: () => {},
     });
-    const original = await host!.readTranscript("casper", "conv-tree");
-    const firstUser = original.messages.find((message) => message.role === "user")!;
+    const original = await host.readTranscript("casper", "conv-tree");
+    return { firstUser: original.messages.find((message) => message.role === "user")! };
+  }
 
-    const rewound = await host!.branchConversation("casper", "conv-tree", firstUser.entryId);
-    expect(rewound.draft).toBe("Original question");
-    expect(rewound.transcript.messages).toEqual([]);
+  it("copies the conversation, rewinds the copy, and leaves the source untouched", async () => {
+    const { firstUser } = await seedBranchable();
+    const before = await host!.readTranscript("casper", "conv-tree");
 
+    const forked = await host!.forkConversation("casper", "conv-tree", firstUser.entryId);
+    expect(forked.sessionId).not.toBe("conv-tree");
+    expect(forked.draft).toBe("Original question");
+    // The copy is rewound to just before the branched message.
+    expect(forked.transcript.messages).toEqual([]);
+    expect(forked.transcript.id).toBe(forked.sessionId);
+
+    // The source keeps every entry, its leaf, and its title.
+    const after = await host!.readTranscript("casper", "conv-tree");
+    expect(after.messages).toEqual(before.messages);
+    expect(JSON.stringify(after.messages)).toContain("Original follow-up");
+    expect(after.title).toBe("Weekend trip");
+
+    // The copy is a first-class conversation: listed, and resumable by its id.
+    const listed = await host!.listSessions("casper");
+    expect(listed.map((row) => row.id)).toContain(forked.sessionId);
     await host!.runTurn("casper", {
-      sessionId: "conv-tree",
+      sessionId: forked.sessionId,
       prompt: "Alternative question",
       emit: () => {},
     });
-    const alternative = await host!.readTranscript("casper", "conv-tree");
-    const alternativeUser = alternative.messages.find((message) => message.role === "user")!;
-    expect(alternativeUser.branch).toMatchObject({ index: 1, count: 2 });
-    expect(alternativeUser.branch?.previousTargetId).toBeTruthy();
+    const alternative = await host!.readTranscript("casper", forked.sessionId);
+    expect(JSON.stringify(alternative.messages)).toContain("Alternative question");
     expect(JSON.stringify(alternative.messages)).not.toContain("Original follow-up");
+    // The source is still untouched after the copy has been written to.
+    expect(await host!.readTranscript("casper", "conv-tree")).toEqual(after);
+  });
 
-    const navigated = await host!.navigateConversation(
-      "casper",
-      "conv-tree",
-      alternativeUser.branch!.previousTargetId!,
-    );
-    expect(JSON.stringify(navigated.transcript.messages)).toContain("Original follow-up");
+  it("names each copy with the next free counter and never stacks counters", async () => {
+    const { firstUser } = await seedBranchable();
+
+    const first = await host!.forkConversation("casper", "conv-tree", firstUser.entryId);
+    expect(first.title).toBe("Weekend trip (2)");
+    const second = await host!.forkConversation("casper", "conv-tree", firstUser.entryId);
+    expect(second.title).toBe("Weekend trip (3)");
+
+    // Branching a branch strips the counter before re-applying it.
+    const copied = await host!.readTranscript("casper", first.sessionId);
+    const copiedUser = copied.messages.find((message) => message.role === "user")!;
+    const third = await host!.forkConversation("casper", first.sessionId, copiedUser.entryId);
+    expect(third.title).toBe("Weekend trip (4)");
+
+    const titles = (await host!.listSessions("casper")).map((row) => row.title);
+    expect(titles).toEqual(expect.arrayContaining([
+      "Weekend trip",
+      "Weekend trip (2)",
+      "Weekend trip (3)",
+      "Weekend trip (4)",
+    ]));
+  });
+
+  it("leaves a copy of an untitled conversation untitled", async () => {
+    const { firstUser } = await seedBranchable(null);
+    const forked = await host!.forkConversation("casper", "conv-tree", firstUser.entryId);
+    expect(forked.title).toBeNull();
+    const listed = await host!.listSessions("casper");
+    expect(listed.find((row) => row.id === forked.sessionId)?.title).toBeNull();
+  });
+
+  it("rejects a branch off anything but a persisted user message", async () => {
+    const { firstUser } = await seedBranchable();
+    const transcript = await host!.readTranscript("casper", "conv-tree");
+    const assistant = transcript.messages.find((message) => message.role === "assistant")!;
+    await expect(host!.forkConversation("casper", "conv-tree", assistant.entryId))
+      .rejects.toMatchObject({ code: "invalid_branch", status: 400 });
+    await expect(host!.forkConversation("casper", "conv-tree", "no-such-entry"))
+      .rejects.toMatchObject({ code: "invalid_branch", status: 400 });
+    // An unknown conversation is a 404, not a new empty one to branch from.
+    await expect(host!.forkConversation("casper", "no-such-conversation", firstUser.entryId))
+      .rejects.toMatchObject({ code: "not_found", status: 404 });
+    // The rejected branches created nothing.
+    const listed = await host!.listSessions("casper");
+    expect(listed.map((row) => row.id)).toEqual(["conv-tree"]);
+  });
+
+  it("refuses to branch a conversation that is still answering", async () => {
+    const { firstUser } = await seedBranchable();
+    const hosted = await host!.open("casper", "conv-tree") as unknown as { busy: boolean };
+    hosted.busy = true;
+    try {
+      await expect(host!.forkConversation("casper", "conv-tree", firstUser.entryId))
+        .rejects.toMatchObject({ code: "session_busy", status: 409 });
+    } finally {
+      hosted.busy = false;
+    }
   });
 });
 

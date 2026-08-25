@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   assertLoopback,
+  DEFAULT_ASK_TIMEOUT_SECONDS,
   DEFAULT_HOST,
   DEFAULT_PORT,
   defaultConfigPath,
@@ -163,6 +164,31 @@ describe("loadConfig", () => {
         compaction: { enabled: true },
       }).compaction.enabled,
     ).toBe(true);
+  });
+
+  it("defaults the ask timeout, and lets the file and env retune it", () => {
+    const root = makeHome();
+    expect(loadConfig({ env: {}, home: root }).askTimeoutSeconds)
+      .toBe(DEFAULT_ASK_TIMEOUT_SECONDS);
+    writeConfig(root, { askTimeoutSeconds: 45 });
+    expect(loadConfig({ env: {}, home: root }).askTimeoutSeconds).toBe(45);
+    expect(loadConfig({ env: { GHOSTD_ASK_TIMEOUT: "10" }, home: root }).askTimeoutSeconds)
+      .toBe(10);
+    expect(loadConfig({ env: {}, home: root, askTimeoutSeconds: 5 }).askTimeoutSeconds).toBe(5);
+  });
+
+  it("takes zero as wait-forever, and rejects a negative ask timeout", () => {
+    const root = makeHome();
+    // Zero is a real setting, not an unset one: a question that must never
+    // answer itself. It has to survive the ?? chain rather than fall through
+    // to the default.
+    writeConfig(root, { askTimeoutSeconds: 0 });
+    expect(loadConfig({ env: {}, home: root }).askTimeoutSeconds).toBe(0);
+    expect(() => loadConfig({ env: { GHOSTD_ASK_TIMEOUT: "-1" }, home: root }))
+      .toThrowError(/Invalid non-negative number/);
+    writeConfig(root, { askTimeoutSeconds: -5 });
+    expect(() => loadConfig({ env: {}, home: root }))
+      .toThrowError(/"askTimeoutSeconds" must be a non-negative number/);
   });
 
   it("rejects an out-of-range compaction fraction", () => {

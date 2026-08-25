@@ -11,7 +11,8 @@
  *   POST /api/ghosts/:name/greeting           → { greeting, onboarding }, ~800ms late
  *   GET  /api/ghosts/:name/sessions           → { sessions: [...] }, newest first
  *   DELETE /api/ghosts/:name/sessions/:id     → delete one conversation
- *   GET  /api/ghosts/:name/sessions/:id/transcript → { id, title, messages }
+ *   GET  /api/ghosts/:name/sessions/:id/transcript → { id, title, messages, … }
+ *   POST /api/ghosts/:name/sessions/:id/branch → { action: "fork", entryId }
  *   GET  /api/ghosts/:name/providers          → loginable providers
  *   POST /api/ghosts/:name/login              → start a login → { loginId, status }
  *   GET  /api/ghosts/:name/login/:loginId     → current login step
@@ -66,6 +67,13 @@ const ghosts = ["casper", "moaning-myrtle"].map((name) => ({
 /** @type {Map<string, Map<string, { id, title, createdAt, updatedAt, messages }>>} */
 const sessionStore = new Map();
 
+// Persisted messages carry an `entryId`; the branch glyph is bound to it, so a
+// transcript without one has nothing to branch from and the surface cannot be
+// demoed at all. Opaque and monotonic here, as it is in a real transcript.
+let entrySeq = 0;
+let forkSeq = 0;
+const entry = (message) => ({ ...message, entryId: `entry-${++entrySeq}` });
+
 function ghostSessions(name) {
   if (!sessionStore.has(name)) {
     const now = Date.now();
@@ -76,8 +84,10 @@ function ghostSessions(name) {
       createdAt: new Date(now - 7_200_000).toISOString(),
       updatedAt: new Date(now - 3_600_000).toISOString(),
       messages: [
-        { role: "user", content: "hello, who lives here?", timestamp: now - 7_200_000 },
-        { role: "assistant", content: `I'm **${name}**. This thread was seeded by the mock so resume has history to show.`, timestamp: now - 7_195_000 },
+        entry({ role: "user", content: "hello, who lives here?", timestamp: now - 7_200_000 }),
+        entry({ role: "assistant", content: `I'm **${name}**. This thread was seeded by the mock so resume has history to show.`, timestamp: now - 7_195_000 }),
+        entry({ role: "user", content: "and what do you remember about me?", timestamp: now - 3_610_000 }),
+        entry({ role: "assistant", content: "Nothing yet — but branch that question and you get a second thread to ask it differently.", timestamp: now - 3_600_000 }),
       ],
     };
     const untitled = {
@@ -86,8 +96,8 @@ function ghostSessions(name) {
       createdAt: new Date(now - 600_000).toISOString(),
       updatedAt: new Date(now - 600_000).toISOString(),
       messages: [
-        { role: "user", content: "quick question about memory", timestamp: now - 600_000 },
-        { role: "assistant", content: "Ask away — this is the untitled seed conversation.", timestamp: now - 595_000 },
+        entry({ role: "user", content: "quick question about memory", timestamp: now - 600_000 }),
+        entry({ role: "assistant", content: "Ask away — this is the untitled seed conversation.", timestamp: now - 595_000 }),
       ],
     };
     seed.set(titled.id, titled);
@@ -95,6 +105,56 @@ function ghostSessions(name) {
     sessionStore.set(name, seed);
   }
   return sessionStore.get(name);
+}
+
+const transcriptOf = (s) => ({
+  id: s.id,
+  title: s.title ?? null,
+  messages: s.messages,
+  total: s.messages.length,
+  truncated: false,
+});
+
+/**
+ * The fork's name, on the file-copy convention the daemon uses: the source
+ * title with any trailing " (k)" dropped, then the smallest free n >= 2. A
+ * source nobody has titled yet forks into one nobody has titled either —
+ * inventing "(2)" for a null title would name the copy better than the thing
+ * it was copied from.
+ */
+function forkTitle(store, sourceTitle) {
+  if (!sourceTitle) return null;
+  // Same shape the daemon strips (session-host.ts forkConversationTitle), so a
+  // demo names a copy the way the real thing would.
+  const base = sourceTitle.replace(/^(.*\S)\s+\(\d+\)$/u, "$1");
+  const taken = new Set([...store.values()].map((s) => s.title).filter(Boolean));
+  for (let n = 2; ; n++) {
+    const candidate = `${base} (${n})`;
+    if (!taken.has(candidate)) return candidate;
+  }
+}
+
+/**
+ * Branch: copy the thread up to (not including) `entryId` into a conversation
+ * of its own and hand back the branched text as a draft. The source is not
+ * touched — that is the whole point of the action, so the mock must not cheat
+ * it by rewinding in place.
+ */
+function forkSession(name, source, entryId) {
+  const store = ghostSessions(name);
+  const at = source.messages.findIndex((m) => m.entryId === entryId);
+  if (at < 0 || source.messages[at].role !== "user") return null;
+  const now = Date.now();
+  const fork = {
+    id: `sess-${name}-fork-${++forkSeq}`,
+    title: forkTitle(store, source.title),
+    createdAt: new Date(now).toISOString(),
+    updatedAt: new Date(now).toISOString(),
+    // A copy is a new conversation, so its entries are new entries.
+    messages: source.messages.slice(0, at).map(entry),
+  };
+  store.set(fork.id, fork);
+  return { sessionId: fork.id, title: fork.title, draft: source.messages[at].content, transcript: transcriptOf(fork) };
 }
 
 const sessionSummary = (s) => ({
@@ -115,8 +175,8 @@ function recordTurn(name, sessionId, prompt, assistantText) {
     s = { id: sessionId, title: null, createdAt: new Date(now).toISOString(), updatedAt: new Date(now).toISOString(), messages: [] };
     store.set(sessionId, s);
   }
-  s.messages.push({ role: "user", content: prompt, timestamp: now });
-  s.messages.push({ role: "assistant", content: assistantText, timestamp: now });
+  s.messages.push(entry({ role: "user", content: prompt, timestamp: now }));
+  s.messages.push(entry({ role: "assistant", content: assistantText, timestamp: now }));
   s.updatedAt = new Date(now).toISOString();
   // Background titling after the first turn: derive a title from the prompt.
   if (!s.title) s.title = prompt.slice(0, 40) || "New conversation";
@@ -171,12 +231,22 @@ const readBody = (req) =>
   });
 
 /**
- * A scripted turn: one tool call — two for a ghost still being written — then a
- * two-paragraph answer.
+ * A scripted turn: the ghost narrating itself, one tool call — two for a ghost
+ * still being written — then a two-paragraph answer.
  */
 function* script(name, prompt) {
   let contentIndex = 0;
   yield { type: "start" };
+  // The preamble a real model emits before reaching for a tool. It belongs
+  // beside the orb, never in the reading column, so this is what the HUD's
+  // split (qml/services/TurnBlocks.js) has to get right.
+  const preamble = contentIndex++;
+  const narration = "Checking what I remember about that";
+  yield { type: "text_start", contentIndex: preamble };
+  for (const chunk of narration.match(/\s*\S+/gu) ?? []) {
+    yield { type: "text_delta", contentIndex: preamble, delta: chunk };
+  }
+  yield { type: "text_end", contentIndex: preamble, content: narration };
   const memory = contentIndex++;
   yield { type: "toolcall_start", contentIndex: memory, id: "call_1", toolName: "read_memory" };
   yield { type: "toolcall_delta", contentIndex: memory, delta: '{"query":"' };
@@ -555,7 +625,24 @@ createServer(async (req, res) => {
   if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "transcript" && req.method === "GET") {
     const s = ghostSessions(name).get(decodeURIComponent(parts[4]));
     if (!s) return json(res, 404, { error: { message: "no such session", code: "session_not_found" } });
-    return json(res, 200, { id: s.id, title: s.title ?? null, messages: s.messages });
+    return json(res, 200, transcriptOf(s));
+  }
+  if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "branch" && req.method === "POST") {
+    const s = ghostSessions(name).get(decodeURIComponent(parts[4]));
+    if (!s) return json(res, 404, { error: { message: "no such session", code: "not_found" } });
+    if (answering.has(name)) {
+      return json(res, 409, {
+        error: { message: `${name} is still answering — stop the turn first`, code: "session_busy" },
+      });
+    }
+    const body = await readBody(req).catch(() => ({}));
+    if (body?.action !== "fork") {
+      return json(res, 400, { error: { message: "action must be \"fork\"", code: "invalid_branch" } });
+    }
+    const forked = forkSession(name, s, typeof body?.entryId === "string" ? body.entryId : "");
+    return forked
+      ? json(res, 200, forked)
+      : json(res, 400, { error: { message: "no user message with that entryId", code: "invalid_branch" } });
   }
 
   // ---- Model indicator + switcher ------------------------------------------

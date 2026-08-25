@@ -24,6 +24,7 @@ pragma Singleton
 import Quickshell
 import Quickshell.Io
 import QtQuick
+import "TurnBlocks.js" as TurnBlocks
 
 Singleton {
     id: root
@@ -77,9 +78,9 @@ Singleton {
     property string sessionsError: ""
     /** Conversation currently being deleted, or "" when idle. */
     property string deletingSessionId: ""
-    /** Why the last branch action refused, or "". Kept apart from
-        `sessionsError`: that one renders in the conversation list, and a branch
-        is asked for from a message, half a window away from it. */
+    /** Why the last branch refused, or "". Kept apart from `sessionsError`:
+        that one renders in the conversation list, and a branch is asked for
+        from a message, half a window away from it. */
     property string branchError: ""
 
     // ---- Greeting ---------------------------------------------------------
@@ -101,6 +102,13 @@ Singleton {
     property bool streaming: false
     /** Compact activity line: "thinking", "read_memory", "" when idle. */
     property string activity: ""
+    /**
+     * The ghost's own words for what it is doing right now, or "" when it is
+     * working silently. A model narrating itself ("Checking your Dropbox for
+     * the invoice") is status, not reply: it belongs beside the orb for as long
+     * as it is true, and nowhere afterwards. See TurnBlocks.js for the split.
+     */
+    property string statusText: ""
     /** OMP's currently-blocking ask interaction, or null. */
     property var pendingAsk: null
     property bool askSubmitting: false
@@ -455,6 +463,7 @@ Singleton {
     function clearTranscript(): void {
         transcriptModel.clear();
         root.activity = "";
+        root.statusText = "";
         root.pendingAsk = null;
         root.askSubmitting = false;
         root.askError = "";
@@ -654,6 +663,21 @@ Singleton {
     }
 
     /**
+     * Make one conversation the ghost's active one, clearing everything the
+     * last one owned. Shared with branching, which lands the user in the copy
+     * it just made: without this the source's queues, its pending ask and its
+     * errors would follow them into a conversation that never had them.
+     */
+    function adoptConversation(ghost: string, id: string): void {
+        root.sessionIds[ghost] = id;
+        root.currentSessionId = id;
+        root.clearTranscript();
+        // A conversation with its own history needs no opening line; a greeting
+        // would be answering a question nobody just asked.
+        root.clearGreeting();
+    }
+
+    /**
      * Resume a conversation: make it active for the ghost and load its transcript
      * so history is visible. A 404 or an empty/unstarted session leaves the view
      * cleared rather than erroring — the conversation is simply blank.
@@ -662,12 +686,7 @@ Singleton {
         const ghost = root.activeGhost;
         if (ghost === "" || id === "") return;
         root.cancel();
-        root.sessionIds[ghost] = id;
-        root.currentSessionId = id;
-        root.clearTranscript();
-        // A resumed conversation has its own history; an opening line would be
-        // answering a question nobody just asked.
-        root.clearGreeting();
+        root.adoptConversation(ghost, id);
         const xhr = new XMLHttpRequest();
         root.transcriptRequest = xhr;
         xhr.onreadystatechange = function () {
@@ -693,7 +712,7 @@ Singleton {
             + "/sessions/" + encodeURIComponent(id) + "/transcript", ({}), null);
     }
 
-    /** Refresh entry ids and branch metadata after a settled live turn. */
+    /** Refresh the persisted entry ids a live turn could not know yet. */
     function refreshCurrentTranscript(): void {
         const ghost = root.activeGhost;
         const id = root.currentSessionId;
@@ -716,39 +735,37 @@ Singleton {
             + "/sessions/" + encodeURIComponent(id) + "/transcript", ({}), null);
     }
 
-    /** Replace the transcript view with a conversation's stored messages. */
+    /**
+     * Replace the transcript view with a conversation's stored messages.
+     *
+     * Storage gives a turn one message per content block — the Claude Code
+     * runtime puts every tool call in a message of its own — while the live
+     * stream renders a whole turn as one row. Consecutive assistant messages
+     * are therefore regrouped before the split, or a restored answer scatters
+     * across five rows and a preamble is severed from the tool call that made
+     * it one.
+     *
+     * A text-less row survives when it still carries tool activity. That is the
+     * only thing standing between an unanswered `ask` and a dead conversation:
+     * its message is a lone `toolCall` part, so dropping the row takes the
+     * card's re-answer branch with it and the question can never be answered.
+     */
     function rehydrate(messages: var): void {
         transcriptModel.clear();
         root.activity = "";
-        for (const message of messages) {
-            const role = message.role === "assistant" ? "assistant" : "user";
-            if (message.role !== "user" && message.role !== "assistant") continue;
-            const text = root.messageText(message);
-            if (text === "") continue;
+        root.statusText = "";
+        for (const row of TurnBlocks.rows(messages)) {
             transcriptModel.append({
-                role: role,
-                text: text,
+                role: row.role,
+                text: row.text,
                 tools: "",
-                toolActivity: role === "assistant" ? root.messageTools(message) : [],
+                toolActivity: row.role === "assistant"
+                    ? root.messageTools({ content: row.parts }) : [],
                 error: "",
                 pending: false,
-                entryId: typeof message.entryId === "string" ? message.entryId : "",
-                branch: message.branch || ({})
+                entryId: row.entryId
             });
         }
-    }
-
-    /** Flatten a stored message's content to display text (string or parts). */
-    function messageText(message: var): string {
-        if (typeof message.content === "string") return message.content;
-        if (Array.isArray(message.content)) {
-            return message.content
-                .filter(part => part && part.type === "text" && typeof part.text === "string")
-                .map(part => part.text)
-                .join("\n\n");
-        }
-        if (typeof message.text === "string") return message.text;
-        return "";
     }
 
     /** Recover completed tool cards from an assistant message on transcript load. */
@@ -763,11 +780,31 @@ Singleton {
                 arguments: part.arguments || ({}),
                 summary: "",
                 intent: "",
-                askBranch: part.ghostAsk || null
+                askBranch: part.ghostAsk || null,
+                // How the question actually settled, so a restored card can stop
+                // reporting an answer for one that was cancelled or timed out.
+                // "" for a runtime that does not say, which the card reads as
+                // unknown rather than guessing.
+                askSettled: part.ghostAsk && typeof part.ghostAsk.settled === "string"
+                    ? part.ghostAsk.settled : ""
             }));
     }
 
-    /** Rewind before a user message; the next send appends a sibling branch. */
+    /**
+     * Branch off a user message into a conversation of its own.
+     *
+     * The daemon copies the thread up to (not including) that message into a
+     * brand-new conversation and hands back its id, title, transcript, and the
+     * branched text as a draft. The source thread is left exactly as it was —
+     * a second answer to the same question is a second thread, not an
+     * overwrite of the first, so nothing the ghost already said is spent to
+     * ask again.
+     *
+     * So the shell moves the user *into* the copy the way opening a
+     * conversation from the sidebar would: same active-session bookkeeping,
+     * same rehydrate, plus a re-list because the new row does not exist in the
+     * listing the sidebar is showing.
+     */
     function branchFrom(entryId: string): void {
         const ghost = root.activeGhost;
         const sessionId = root.currentSessionId;
@@ -782,12 +819,22 @@ Singleton {
         root.branchRequest = xhr;
         xhr.onreadystatechange = function () {
             if (xhr.readyState !== 4 || xhr !== root.branchRequest) return;
+            // A branch of a conversation the user has since left is not theirs.
+            if (ghost !== root.activeGhost || sessionId !== root.currentSessionId) return;
             if (xhr.status === 200) {
                 try {
                     const body = JSON.parse(xhr.responseText);
+                    const branched = typeof body.sessionId === "string" ? body.sessionId : "";
+                    if (branched === "") {
+                        root.branchError = "ghostd branched into no conversation";
+                        return;
+                    }
+                    root.adoptConversation(ghost, branched);
                     root.rehydrate(body.transcript && Array.isArray(body.transcript.messages)
                         ? body.transcript.messages : []);
                     root.branchError = "";
+                    root.sessionsError = "";
+                    root.fetchSessions(ghost);
                     root.branchDraftReady(typeof body.draft === "string" ? body.draft : "");
                 } catch (error) {
                     root.branchError = "ghostd sent malformed branch state";
@@ -799,40 +846,7 @@ Singleton {
         root.dispatch(xhr, "POST", "/api/ghosts/" + encodeURIComponent(ghost)
             + "/sessions/" + encodeURIComponent(sessionId) + "/branch",
             ({ "Content-Type": "application/json" }),
-            JSON.stringify({ action: "rewind", entryId: entryId }));
-    }
-
-    /** Switch to an already-existing sibling leaf. */
-    function navigateBranch(targetId: string): void {
-        const ghost = root.activeGhost;
-        const sessionId = root.currentSessionId;
-        if (ghost === "" || sessionId === "" || targetId === "") return;
-        if (root.streaming) {
-            root.branchError = "Wait for this answer to finish before changing branches.";
-            return;
-        }
-        root.branchError = "";
-        const xhr = new XMLHttpRequest();
-        root.branchRequest = xhr;
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.branchRequest) return;
-            if (xhr.status === 200) {
-                try {
-                    const body = JSON.parse(xhr.responseText);
-                    root.rehydrate(body.transcript && Array.isArray(body.transcript.messages)
-                        ? body.transcript.messages : []);
-                    root.branchError = "";
-                } catch (error) {
-                    root.branchError = "ghostd sent malformed branch state";
-                }
-            } else {
-                root.branchError = root.describeError(xhr, "navigate branch");
-            }
-        };
-        root.dispatch(xhr, "POST", "/api/ghosts/" + encodeURIComponent(ghost)
-            + "/sessions/" + encodeURIComponent(sessionId) + "/branch",
-            ({ "Content-Type": "application/json" }),
-            JSON.stringify({ action: "navigate", entryId: targetId }));
+            JSON.stringify({ action: "fork", entryId: entryId }));
     }
 
     /** Run modern OMP's two-phase Ask tree re-answer as a streamed continuation. */
@@ -850,6 +864,7 @@ Singleton {
         root.consumed = 0;
         root.frameBuffer = "";
         root.activity = "waiting for ghostd";
+        root.statusText = "";
         root.pendingAsk = null;
         root.askSubmitting = false;
         root.askError = "";
@@ -889,11 +904,11 @@ Singleton {
 
         transcriptModel.append({
             role: "user", text: prompt, tools: "", toolActivity: [], error: "", pending: false,
-            entryId: "", branch: ({})
+            entryId: ""
         });
         transcriptModel.append({
             role: "assistant", text: "", tools: "", toolActivity: [], error: "", pending: true,
-            entryId: "", branch: ({})
+            entryId: ""
         });
         root.assistantRow = transcriptModel.count - 1;
         // The conversation has messages now; the opening line has been answered.
@@ -907,6 +922,7 @@ Singleton {
         root.consumed = 0;
         root.frameBuffer = "";
         root.activity = "waiting for ghostd";
+        root.statusText = "";
         root.pendingAsk = null;
         root.askSubmitting = false;
         root.askError = "";
@@ -951,6 +967,8 @@ Singleton {
         if (root.request) root.request.abort();
         flushTimer.stop();
         root.streaming = false;
+        root.flush();
+        root.statusText = "";
         root.activity = "";
         root.pendingAsk = null;
         root.askSubmitting = false;
@@ -1127,7 +1145,7 @@ Singleton {
                 ? event.transcript.messages : []);
             transcriptModel.append({
                 role: "assistant", text: "", tools: "", toolActivity: [], error: "", pending: true,
-                entryId: "", branch: ({})
+                entryId: ""
             });
             root.assistantRow = transcriptModel.count - 1;
             root.blocks = ({});
@@ -1136,6 +1154,7 @@ Singleton {
             root.toolIdsByContent = ({});
             root.toolArgumentText = ({});
             root.activity = "";
+            root.statusText = "";
             break;
         case "done":
             root.finishTurn("");
@@ -1165,7 +1184,10 @@ Singleton {
             status: "preparing",
             arguments: ({}),
             summary: "",
-            intent: ""
+            intent: "",
+            // A live ask has not settled yet; the card reads "" as unknown and
+            // says nothing about an outcome rather than inventing one.
+            askSettled: ""
         }, patch));
         root.toolActivities = next;
         root.syncToolActivity();
@@ -1189,15 +1211,11 @@ Singleton {
     /** Push buffered block text into the model. Cheap when nothing changed. */
     function flush(): void {
         if (root.assistantRow < 0 || root.assistantRow >= transcriptModel.count) return;
-        const indices = Object.keys(root.blocks).map(Number).sort((a, b) => a - b);
-        let text = "";
-        for (const index of indices) {
-            const block = root.blocks[index];
-            if (block.kind === "text" && block.text !== "")
-                text += (text === "" ? "" : "\n\n") + block.text;
-        }
+        const turn = TurnBlocks.split(
+            root.blocks, Object.keys(root.toolIdsByContent), root.streaming);
         const row = transcriptModel.get(root.assistantRow);
-        if (row.text !== text) transcriptModel.setProperty(root.assistantRow, "text", text);
+        if (row.text !== turn.body) transcriptModel.setProperty(root.assistantRow, "text", turn.body);
+        if (root.statusText !== turn.status) root.statusText = turn.status;
         const tools = root.toolNames.join(", ");
         if (row.tools !== tools) transcriptModel.setProperty(root.assistantRow, "tools", tools);
     }
@@ -1211,6 +1229,10 @@ Singleton {
         if (!root.streaming) return;
         root.settleToolActivity();
         root.streaming = false;
+        // Re-split now the turn is closed: a trailing block held beside the orb
+        // while it might still have been a preamble is the reply after all.
+        root.flush();
+        root.statusText = "";
         root.activity = "";
         root.pendingAsk = null;
         root.askSubmitting = false;
@@ -1304,6 +1326,16 @@ Singleton {
 
     function chatAboutAsk(): void {
         root.answerAsk({ kind: "chat" });
+    }
+
+    /**
+     * Decline the question. The daemon has always accepted this; nothing in the
+     * HUD ever sent it, so a question the user did not want to answer had no
+     * exit but closing the app — which is precisely how a conversation ends up
+     * holding a question nobody can ever answer.
+     */
+    function dismissAsk(): void {
+        root.answerAsk({ kind: "cancel" });
     }
 
     // ---- OMP steering + follow-up queues --------------------------------

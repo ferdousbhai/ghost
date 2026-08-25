@@ -550,7 +550,7 @@ describe("GET /api/ghosts/:name/sessions/:id/transcript", () => {
 });
 
 describe("OMP conversation tree routes", () => {
-  it("rewinds, creates, and navigates sibling user-message branches over HTTP", async () => {
+  it("branches a user message off into a new conversation over HTTP", async () => {
     const base = await serve([{ kind: "text", text: "Branch answer." }]);
     await postTurn(base, { ...TURN_BODY, options: { sessionId: "conv-tree" } });
     await postTurn(base, {
@@ -562,37 +562,68 @@ describe("OMP conversation tree routes", () => {
       `${base}/api/ghosts/casper/sessions/conv-tree/transcript`,
     )).json() as { messages: Array<{ role: string; entryId: string }> };
     const firstUser = original.messages.find((message) => message.role === "user")!;
-    const rewind = await fetch(`${base}/api/ghosts/casper/sessions/conv-tree/branch`, {
+    const response = await fetch(`${base}/api/ghosts/casper/sessions/conv-tree/branch`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action: "rewind", entryId: firstUser.entryId }),
+      body: JSON.stringify({ action: "fork", entryId: firstUser.entryId }),
     });
-    expect(rewind.status).toBe(200);
-    expect(await rewind.json()).toMatchObject({ draft: "Who are you?", transcript: { messages: [] } });
+    expect(response.status).toBe(200);
+    const forked = await response.json() as {
+      sessionId: string;
+      title: string | null;
+      draft: string;
+      transcript: { id: string; messages: unknown[] };
+    };
+    expect(forked.draft).toBe("Who are you?");
+    expect(forked.transcript).toMatchObject({ id: forked.sessionId, messages: [] });
+    expect(forked.sessionId).not.toBe("conv-tree");
 
+    // The source conversation is untouched.
+    const source = await (await fetch(
+      `${base}/api/ghosts/casper/sessions/conv-tree/transcript`,
+    )).json() as { messages: unknown[] };
+    expect(source.messages).toEqual(original.messages);
+
+    // And the new conversation is listed and resumable by its own id.
+    const listed = await (await fetch(`${base}/api/ghosts/casper/sessions`)).json() as {
+      sessions: Array<{ id: string; title: string | null }>;
+    };
+    expect(listed.sessions.map((row) => row.id)).toContain(forked.sessionId);
     await postTurn(base, {
       ...TURN_BODY,
       context: { messages: [{ role: "user", content: "Alternative question" }] },
-      options: { sessionId: "conv-tree" },
+      options: { sessionId: forked.sessionId },
     });
     const alternative = await (await fetch(
-      `${base}/api/ghosts/casper/sessions/conv-tree/transcript`,
-    )).json() as {
-      messages: Array<{
-        role: string;
-        branch?: { index: number; count: number; previousTargetId?: string };
-      }>;
-    };
-    const branch = alternative.messages.find((message) => message.role === "user")?.branch;
-    expect(branch).toMatchObject({ index: 1, count: 2 });
+      `${base}/api/ghosts/casper/sessions/${forked.sessionId}/transcript`,
+    )).json() as { messages: unknown[] };
+    expect(JSON.stringify(alternative.messages)).toContain("Alternative question");
+    expect(JSON.stringify(alternative.messages)).not.toContain("Original follow-up");
+  });
 
-    const navigate = await fetch(`${base}/api/ghosts/casper/sessions/conv-tree/branch`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action: "navigate", entryId: branch?.previousTargetId }),
-    });
-    expect(navigate.status).toBe(200);
-    expect(JSON.stringify(await navigate.json())).toContain("Original follow-up");
+  it("rejects an unknown branch action, a non-user entry, and an unknown conversation", async () => {
+    const base = await serve([{ kind: "text", text: "Branch answer." }]);
+    await postTurn(base, { ...TURN_BODY, options: { sessionId: "conv-tree" } });
+    const transcript = await (await fetch(
+      `${base}/api/ghosts/casper/sessions/conv-tree/transcript`,
+    )).json() as { messages: Array<{ role: string; entryId: string }> };
+    const assistant = transcript.messages.find((message) => message.role === "assistant")!;
+    const branch = async (body: unknown, sessionId = "conv-tree") => fetch(
+      `${base}/api/ghosts/casper/sessions/${sessionId}/branch`,
+      { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) },
+    );
+
+    const navigate = await branch({ action: "navigate", entryId: assistant.entryId });
+    expect(navigate.status).toBe(400);
+    expect(await navigate.json()).toMatchObject({ error: { code: "invalid_request" } });
+
+    const nonUser = await branch({ action: "fork", entryId: assistant.entryId });
+    expect(nonUser.status).toBe(400);
+    expect(await nonUser.json()).toMatchObject({ error: { code: "invalid_branch" } });
+
+    const unknown = await branch({ action: "fork", entryId: assistant.entryId }, "nope");
+    expect(unknown.status).toBe(404);
+    expect(await unknown.json()).toMatchObject({ error: { code: "not_found" } });
   });
 
   it("streams a historical Ask re-answer and its resumed model continuation", async () => {
