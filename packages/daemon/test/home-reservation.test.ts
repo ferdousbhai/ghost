@@ -44,8 +44,8 @@ describe("home reservation", () => {
     const aliasParent = join(root, "alias");
     mkdirSync(realParent);
     symlinkSync(realParent, aliasParent);
-    const directRoot = join(realParent, "Ghosts");
-    const aliasRoot = join(aliasParent, "Ghosts");
+    const directRoot = join(realParent, "ghosts");
+    const aliasRoot = join(aliasParent, "ghosts");
 
     const first = await acquireHomeReservation(directRoot);
     await expect(acquireHomeReservation(aliasRoot)).rejects.toBeInstanceOf(HomeReservationBusyError);
@@ -62,13 +62,13 @@ describe("home reservation", () => {
     mkdirSync(outside);
     symlinkSync(outside, join(parent, ".ghost-home-gates"));
 
-    await expect(acquireHomeReservation(join(parent, "Ghosts"))).rejects.toSatisfy(
+    await expect(acquireHomeReservation(join(parent, "ghosts"))).rejects.toSatisfy(
       (error: NodeJS.ErrnoException) => error.code === "ELOOP" || error.code === "ENOTDIR",
     );
   });
 
   it("conflicts across processes and is released by SIGKILL", async () => {
-    const ghostsRoot = join(root, "nested", "Ghosts");
+    const ghostsRoot = join(root, "nested", "ghosts");
     const ready = join(root, "ready");
     const holder = spawnReservationHolder(ghostsRoot, ready);
     let stderr = "";

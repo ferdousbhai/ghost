@@ -141,7 +141,7 @@ afterEach(async () => {
 
 describe("importGhostArchive", () => {
   it("lands a zip as a readable ghost home", async () => {
-    const ghostsRoot = join(workspace.dir, "Ghosts");
+    const ghostsRoot = join(workspace.dir, "ghosts");
     const result = await importGhostArchive(zipPath, ghostsRoot);
 
     expect(result.ghostName).toBe("casper");
@@ -170,7 +170,7 @@ describe("importGhostArchive", () => {
   });
 
   it("migrates v1 docs and manifest while preserving unrelated archive bytes", async () => {
-    const ghostsRoot = join(workspace.dir, "Ghosts");
+    const ghostsRoot = join(workspace.dir, "ghosts");
     const { dir } = await importGhostArchive(zipPath, ghostsRoot);
     expect(await readFile(join(dir, "docs/craft/paper-notes.md"), "utf8"))
       .toBe("# Paper notes\n\nDamp the sheet.\n\n#paper\n");
@@ -190,7 +190,7 @@ describe("importGhostArchive", () => {
       ...ARCHIVE,
       [`${ROOT}/docs/estate-finances.md`]: "different bytes",
     }));
-    await expect(importGhostArchive(collision, join(workspace.dir, "Ghosts")))
+    await expect(importGhostArchive(collision, join(workspace.dir, "ghosts")))
       .rejects.toMatchObject({ code: "invalid_format" });
   });
 
@@ -213,14 +213,14 @@ describe("importGhostArchive", () => {
   });
 
   it("honours an explicit ghost name", async () => {
-    const result = await importGhostArchive(zipPath, join(workspace.dir, "Ghosts"), {
+    const result = await importGhostArchive(zipPath, join(workspace.dir, "ghosts"), {
       name: "casper-2",
     });
     expect(result.home.name).toBe("casper-2");
   });
 
   it("refuses to import into a non-empty ghost home unless told to", async () => {
-    const ghostsRoot = join(workspace.dir, "Ghosts");
+    const ghostsRoot = join(workspace.dir, "ghosts");
     const original = await importGhostArchive(zipPath, ghostsRoot);
     await writeFile(join(original.dir, "old-only.txt"), "must disappear", "utf8");
     await expect(importGhostArchive(zipPath, ghostsRoot))
@@ -236,7 +236,7 @@ describe("importGhostArchive", () => {
   });
 
   it("leaves the existing home untouched when staged validation fails", async () => {
-    const ghostsRoot = join(workspace.dir, "Ghosts");
+    const ghostsRoot = join(workspace.dir, "ghosts");
     const original = await importGhostArchive(zipPath, ghostsRoot);
     await writeFile(join(original.dir, "sentinel.txt"), "original", "utf8");
     const invalid = join(workspace.dir, "invalid-staging.zip");
@@ -307,14 +307,14 @@ describe("importGhostArchive", () => {
     await writeFile(wrong, zipArchive({
       [`${ROOT}/export-manifest.json`]: '{"format":"ghost-home/v3"}',
     }));
-    await expect(importGhostArchive(wrong, join(workspace.dir, "Ghosts")))
+    await expect(importGhostArchive(wrong, join(workspace.dir, "ghosts")))
       .rejects.toMatchObject({ code: "invalid_format" });
   });
 
   it("rejects an archive with no manifest", async () => {
     const bare = join(workspace.dir, "bare.zip");
     await writeFile(bare, zipArchive({ [`${ROOT}/character.md`]: "hello" }));
-    await expect(importGhostArchive(bare, join(workspace.dir, "Ghosts")))
+    await expect(importGhostArchive(bare, join(workspace.dir, "ghosts")))
       .rejects.toThrow(GhostError);
   });
 
@@ -324,7 +324,7 @@ describe("importGhostArchive", () => {
       [`${ROOT}/export-manifest.json`]: '{"format":"ghost-home/v1","ghostname":"casper"}',
       [`${ROOT}/../../pwned.md`]: "no",
     }));
-    await expect(importGhostArchive(evil, join(workspace.dir, "Ghosts")))
+    await expect(importGhostArchive(evil, join(workspace.dir, "ghosts")))
       .rejects.toMatchObject({ code: "invalid_path" });
   });
 
@@ -335,7 +335,7 @@ describe("importGhostArchive", () => {
       "__MACOSX/._casper": "",
       [`${ROOT}/.DS_Store`]: "",
     }));
-    const result = await importGhostArchive(noisy, join(workspace.dir, "Ghosts"));
+    const result = await importGhostArchive(noisy, join(workspace.dir, "ghosts"));
     expect(result.ignored).toContain("__MACOSX/._casper");
     expect(result.filesWritten).toBe(Object.keys(ARCHIVE).length);
   });
@@ -405,7 +405,7 @@ describe("importGhostArchive", () => {
     const oversized = join(workspace.dir, "oversized.zip");
     await writeFile(oversized, new Uint8Array());
     await truncate(oversized, MAX_IMPORT_COMPRESSED_BYTES + 1);
-    await expect(importGhostArchive(oversized, join(workspace.dir, "Ghosts")))
+    await expect(importGhostArchive(oversized, join(workspace.dir, "ghosts")))
       .rejects.toMatchObject({ code: "limit_exceeded" });
   });
 

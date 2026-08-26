@@ -1060,7 +1060,7 @@ export async function importGhostArchive(
   const sourcePath = resolve(source);
   const root = resolve(ghostsRoot);
   await mkdir(root, { recursive: true });
-  const rootDirectory = await openDirectoryNoFollow(root, "Ghosts root");
+  const rootDirectory = await openDirectoryNoFollow(root, "ghosts root");
   try {
     return await withDescriptorLock(rootDirectory, async () => {
       await recoverStaleTransactions(root, rootDirectory);

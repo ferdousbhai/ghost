@@ -1,7 +1,7 @@
 /**
  * Ghost registry — discovery, creation, and validation of ghost homes.
  *
- * A ghost is one directory under the ghosts root (default `~/Ghosts/`), laid
+ * A ghost is one directory under the ghosts root (default `~/ghosts/`), laid
  * out per `ghost-home/v1` in CONTRACTS.md. The registry owns only the shape
  * of that directory; reading its *contents* (character, docs, memory) is
  * `@ghost/extensions`' job.

@@ -133,7 +133,7 @@ function publishConversationUpdated(name, runtime, conversationId,
 
 // ---- Browsable ghost context ----------------------------------------------
 // Metadata stays in memory. The default root gets matching temporary files so
-// FilePane exercises real atomic reads/writes without touching ~/Ghosts.
+// FilePane exercises real atomic reads/writes without touching ~/ghosts.
 const MOCK_DOCS = [
   {
     path: "docs/launch-notes.md",

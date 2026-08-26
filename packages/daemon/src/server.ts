@@ -3,7 +3,7 @@
  * machine-local bearer token, plus the browser relay.
  *
  *   GET  /api/ghosts                  → [{ name, dir, createdAt }]
- *   POST /api/ghosts                  { name } → creates ~/Ghosts/<name>/
+ *   POST /api/ghosts                  { name } → creates ~/ghosts/<name>/
  *   DELETE /api/ghosts/:name?confirm=<name> → moves the home into the XDG trash
  *   PUT  /api/ghosts/:name/name       { name } → renames the ghost (and its home)
  *   POST /api/ghosts/:name/messages   pi-messages request → SSE of pi-messages events

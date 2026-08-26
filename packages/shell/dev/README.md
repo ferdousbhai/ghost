@@ -129,7 +129,7 @@ bottom, and the permanent Chat / Docs / Memory / Helpers / Commands / MCP / Remo
   `moaning-myrtle` deliberately returns structured `not_supported` for
   collaboration so that state is demoable too.
   The mock's temporary fixture makes every pane live without
-  touching `~/Ghosts`.
+  touching `~/ghosts`.
 - On `ask`: the spectral summoning orb saying "Checking what I remember about
   that" in the ghost's own words rather than a spectral phrase, then the reply
   arriving word by word with `**bold**` rendered as bold. The narration never

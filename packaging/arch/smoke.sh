@@ -130,8 +130,8 @@ bash "$root/usr/lib/ghost/package-smoke/native-runtime-smoke.sh" \
 cleanup
 trap - EXIT
 
-if find "$root" -path '*/Ghosts/*' -print -quit | grep -q .; then
-  printf 'package payload must not own a user Ghosts directory\n' >&2
+if find "$root" -path '*/ghosts/*' -print -quit | grep -q .; then
+  printf 'package payload must not own a user ghosts directory\n' >&2
   exit 1
 fi
 

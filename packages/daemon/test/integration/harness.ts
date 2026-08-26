@@ -268,7 +268,7 @@ export async function startRealDaemonHarness(
 ): Promise<RealDaemonHarness> {
   const environment = { ...process.env };
   const tempRoot = mkdtempSync(join(tmpdir(), "ghostd-integration-"));
-  const ghostsRoot = join(tempRoot, "Ghosts");
+  const ghostsRoot = join(tempRoot, "ghosts");
   const disposableHome = join(tempRoot, "home");
   const xdgConfigHome = join(tempRoot, "xdg-config");
   const xdgDataHome = join(tempRoot, "xdg-data");

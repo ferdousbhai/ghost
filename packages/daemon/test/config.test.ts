@@ -1,4 +1,11 @@
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -9,6 +16,7 @@ import {
   DEFAULT_PORT,
   defaultConfigPath,
   loadConfig,
+  migrateLegacyGhostsRoot,
 } from "../src/config.js";
 
 let home: string | null = null;
@@ -32,13 +40,13 @@ function writeConfig(configHome: string, body: unknown): string {
 }
 
 describe("loadConfig", () => {
-  it("defaults to ~/Ghosts on 127.0.0.1, online", () => {
+  it("defaults to ~/ghosts on 127.0.0.1, online", () => {
     const root = makeHome();
     const config = loadConfig({ env: {}, home: root });
     expect(config).toMatchObject({
       port: DEFAULT_PORT,
       host: DEFAULT_HOST,
-      ghostsRoot: join(root, "Ghosts"),
+      ghostsRoot: join(root, "ghosts"),
       offline: false,
       browserMode: "relay",
       configPath: null,
@@ -198,5 +206,47 @@ describe("loadConfig", () => {
     writeConfig(root, { compaction: { thresholdFraction: 0 } });
     expect(() => loadConfig({ env: {}, home: root }))
       .toThrowError(/"compaction.thresholdFraction" must be a number/);
+  });
+});
+
+describe("migrateLegacyGhostsRoot", () => {
+  it("moves a capitalized root onto the default lowercase one", () => {
+    const root = makeHome();
+    mkdirSync(join(root, "Ghosts", "casper"), { recursive: true });
+    writeFileSync(join(root, "Ghosts", "casper", "character.md"), "# Casper\n", "utf8");
+
+    const moved = migrateLegacyGhostsRoot(join(root, "ghosts"), root);
+
+    expect(moved).toBe(join(root, "Ghosts"));
+    expect(existsSync(join(root, "Ghosts"))).toBe(false);
+    expect(existsSync(join(root, "ghosts", "casper", "character.md"))).toBe(true);
+  });
+
+  it("leaves both roots alone once the lowercase one exists", () => {
+    const root = makeHome();
+    mkdirSync(join(root, "Ghosts", "casper"), { recursive: true });
+    mkdirSync(join(root, "ghosts", "wendy"), { recursive: true });
+
+    expect(migrateLegacyGhostsRoot(join(root, "ghosts"), root)).toBeNull();
+    expect(existsSync(join(root, "Ghosts", "casper"))).toBe(true);
+    expect(existsSync(join(root, "ghosts", "wendy"))).toBe(true);
+  });
+
+  it("never follows a legacy symlink", () => {
+    const root = makeHome();
+    mkdirSync(join(root, "elsewhere", "casper"), { recursive: true });
+    symlinkSync(join(root, "elsewhere"), join(root, "Ghosts"));
+
+    expect(migrateLegacyGhostsRoot(join(root, "ghosts"), root)).toBeNull();
+    expect(existsSync(join(root, "ghosts"))).toBe(false);
+    expect(existsSync(join(root, "elsewhere", "casper"))).toBe(true);
+  });
+
+  it("ignores a root the owner configured somewhere else", () => {
+    const root = makeHome();
+    mkdirSync(join(root, "Ghosts", "casper"), { recursive: true });
+
+    expect(migrateLegacyGhostsRoot(join(root, "custom"), root)).toBeNull();
+    expect(existsSync(join(root, "Ghosts", "casper"))).toBe(true);
   });
 });

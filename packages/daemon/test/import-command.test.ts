@@ -243,7 +243,7 @@ describe("importCommand", () => {
 
   it("imports an archive into <ghostsRoot>/<name>", async () => {
     const archive = makeArchiveDir(root, "casper");
-    const ghostsRoot = join(root, "Ghosts");
+    const ghostsRoot = join(root, "ghosts");
 
     const code = await importCommand([archive, "--ghosts-root", ghostsRoot], io());
 
@@ -255,7 +255,7 @@ describe("importCommand", () => {
 
   it("refuses a new-home import while another process owns the ghosts root", async () => {
     const archive = makeArchiveDir(root, "casper");
-    const ghostsRoot = join(root, "Ghosts");
+    const ghostsRoot = join(root, "ghosts");
     const reservation = await acquireHomeReservation(ghostsRoot);
     try {
       const code = await importCommand([archive, "--ghosts-root", ghostsRoot], io());
@@ -269,7 +269,7 @@ describe("importCommand", () => {
 
   it("--name overrides the archive's ghostname", async () => {
     const archive = makeArchiveDir(root, "casper");
-    const ghostsRoot = join(root, "Ghosts");
+    const ghostsRoot = join(root, "ghosts");
 
     const code = await importCommand([archive, "--name", "mildred", "--ghosts-root", ghostsRoot], io());
 
@@ -303,7 +303,7 @@ describe("importCommand", () => {
       ],
     });
     writeFileSync(join(conversations, "old-chat.json"), source);
-    const ghostsRoot = join(root, "Ghosts");
+    const ghostsRoot = join(root, "ghosts");
 
     const code = await importCommand([archive, "--ghosts-root", ghostsRoot], io());
 
@@ -317,7 +317,7 @@ describe("importCommand", () => {
 
   it("refuses a non-empty home without --overwrite, then accepts it with", async () => {
     const archive = makeArchiveDir(root, "casper");
-    const ghostsRoot = join(root, "Ghosts");
+    const ghostsRoot = join(root, "ghosts");
     mkdirSync(join(ghostsRoot, "casper"), { recursive: true });
     writeFileSync(join(ghostsRoot, "casper", "keep.md"), "existing");
 
@@ -335,7 +335,7 @@ describe("importCommand", () => {
 
   it("allows a stopped-daemon overwrite with an ephemeral daemon port", async () => {
     const archive = makeArchiveDir(root, "casper");
-    const ghostsRoot = join(root, "Ghosts");
+    const ghostsRoot = join(root, "ghosts");
     const home = join(ghostsRoot, "casper");
     mkdirSync(home, { recursive: true });
     writeFileSync(join(home, "character.md"), "# Keep\n");
@@ -356,7 +356,7 @@ describe("importCommand", () => {
     "refuses a legacy daemon on $listenerHost through --host $importHost",
     async ({ listenerHost, importHost }) => {
       const archive = makeArchiveDir(root, "casper");
-      const ghostsRoot = join(root, "Ghosts");
+      const ghostsRoot = join(root, "ghosts");
       const home = join(ghostsRoot, "casper");
       mkdirSync(home, { recursive: true });
       writeFileSync(join(home, "character.md"), "# Before\n");
@@ -392,7 +392,7 @@ describe("importCommand", () => {
 
   it("holds the legacy listener through publication and closes it before the home reservation", async () => {
     const archive = makeArchiveDir(root, "casper");
-    const ghostsRoot = join(root, "Ghosts");
+    const ghostsRoot = join(root, "ghosts");
     const home = join(ghostsRoot, "casper");
     mkdirSync(home, { recursive: true });
     writeFileSync(join(home, "character.md"), "# Before\n");
@@ -432,7 +432,7 @@ describe("importCommand", () => {
 
   it("refuses live-daemon overwrite publication, then imports after that daemon stops", async () => {
     const archive = makeArchiveDir(root, "casper");
-    const ghostsRoot = join(root, "Ghosts");
+    const ghostsRoot = join(root, "ghosts");
     const home = join(ghostsRoot, "casper");
     mkdirSync(home, { recursive: true });
     writeFileSync(join(home, "character.md"), "# Before\n\nThe live daemon owns this home.\n");
@@ -468,7 +468,7 @@ describe("importCommand", () => {
 
   it("prevents daemon startup during the complete overwrite transaction", async () => {
     const archive = makeArchiveDir(root, "casper");
-    const ghostsRoot = join(root, "Ghosts");
+    const ghostsRoot = join(root, "ghosts");
     const home = join(ghostsRoot, "casper");
     mkdirSync(home, { recursive: true });
     writeFileSync(join(home, "character.md"), "# Before\n");
@@ -514,7 +514,7 @@ describe("importCommand", () => {
 
   it("prevents overwrite during startup and releases after startup failure", async () => {
     const archive = makeArchiveDir(root, "casper");
-    const ghostsRoot = join(root, "Ghosts");
+    const ghostsRoot = join(root, "ghosts");
     const home = join(ghostsRoot, "casper");
     mkdirSync(home, { recursive: true });
     writeFileSync(join(home, "character.md"), "# Before\n");
@@ -623,7 +623,7 @@ describe("importCommand", () => {
 
   it("allows only one concurrent overwrite to publish", async () => {
     const archive = makeArchiveDir(root, "casper");
-    const ghostsRoot = join(root, "Ghosts");
+    const ghostsRoot = join(root, "ghosts");
     const home = join(ghostsRoot, "casper");
     mkdirSync(home, { recursive: true });
     writeFileSync(join(home, "character.md"), "# Before\n");
@@ -660,7 +660,7 @@ describe("importCommand", () => {
 
   it("refuses overwrite throughout a terminal login home-access window", async () => {
     const archive = makeArchiveDir(root, "casper");
-    const ghostsRoot = join(root, "Ghosts");
+    const ghostsRoot = join(root, "ghosts");
     const home = join(ghostsRoot, "casper");
     mkdirSync(home, { recursive: true });
     writeFileSync(join(home, "character.md"), "# Before\n");
@@ -738,7 +738,7 @@ describe("importCommand", () => {
   });
 
   it("releases the reservation when an overwrite fails before publication", async () => {
-    const ghostsRoot = join(root, "Ghosts");
+    const ghostsRoot = join(root, "ghosts");
     const code = await importCommand(
       [join(root, "missing"), "--overwrite", "--port", "0", "--ghosts-root", ghostsRoot],
       io(),
@@ -753,7 +753,7 @@ describe("importCommand", () => {
     const archive = makeArchiveDir(root, "casper");
     const entry = fileURLToPath(new URL("../src/main.ts", import.meta.url));
 
-    const configRoot = join(root, "from-config", "Ghosts");
+    const configRoot = join(root, "from-config", "ghosts");
     const configPath = join(root, "daemon-config.json");
     writeFileSync(
       configPath,
@@ -772,7 +772,7 @@ describe("importCommand", () => {
     expect(configured.stderr).toMatch(/ghostd is running or starting/);
     await configReservation.close();
 
-    const environmentRoot = join(root, "from-env", "Ghosts");
+    const environmentRoot = join(root, "from-env", "ghosts");
     const environmentReservation = await acquireHomeReservation(environmentRoot);
     const fromEnvironment = await collectProcess(
       [entry, "import", archive, "--overwrite"],
@@ -787,7 +787,7 @@ describe("importCommand", () => {
     await environmentReservation.close();
 
     const defaultHome = join(root, "default-home");
-    const defaultRoot = join(defaultHome, "Ghosts");
+    const defaultRoot = join(defaultHome, "ghosts");
     const defaultReservation = await acquireHomeReservation(defaultRoot);
     const fromDefaults = await collectProcess(
       [entry, "import", archive, "--overwrite", "--port", "0"],
@@ -801,7 +801,7 @@ describe("importCommand", () => {
     writeFileSync(
       unsafeConfig,
       JSON.stringify({
-        ghostsRoot: join(root, "unsafe", "Ghosts"),
+        ghostsRoot: join(root, "unsafe", "ghosts"),
         host: "0.0.0.0",
         port: 0,
       }),
@@ -815,13 +815,13 @@ describe("importCommand", () => {
   }, 30_000);
 
   it("fails cleanly on a missing archive", async () => {
-    const code = await importCommand([join(root, "nope-archive"), "--ghosts-root", join(root, "Ghosts")], io());
+    const code = await importCommand([join(root, "nope-archive"), "--ghosts-root", join(root, "ghosts")], io());
     expect(code).toBe(1);
     expect(err.join("")).toMatch(/import:/);
   });
 
   it("returns usage code 2 with no source", async () => {
-    const code = await importCommand(["--ghosts-root", join(root, "Ghosts")], io());
+    const code = await importCommand(["--ghosts-root", join(root, "ghosts")], io());
     expect(code).toBe(2);
   });
 });

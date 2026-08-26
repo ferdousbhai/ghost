@@ -46,7 +46,7 @@ edits `~/.config/hypr` or `~/.config/omarchy`.
 ## Upgrades, rollback, and uninstall
 
 The package owns only files under `/usr`, plus the system Quickshell symlink at
-`/etc/xdg/quickshell/ghost`. It does not create or own `~/Ghosts`,
+`/etc/xdg/quickshell/ghost`. It does not create or own `~/ghosts`,
 `~/.config/ghost`, `~/.local/state/ghost`, or a browser profile. Upgrading or
 removing it therefore leaves personas, docs, memory, sessions, provider
 credentials, API tokens, and browser state untouched.
@@ -69,7 +69,7 @@ sudo pacman -Rns ghost-ai-git
 
 For the stable package, the final command is `sudo pacman -Rns ghost-ai`.
 
-That removes package-owned files only. It deliberately leaves `~/Ghosts`,
+That removes package-owned files only. It deliberately leaves `~/ghosts`,
 provider credentials, API/relay tokens, and browser profiles untouched.
 
 `smoke.sh` validates a staged package tree, including daemon startup metadata,

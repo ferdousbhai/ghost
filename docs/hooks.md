@@ -69,7 +69,7 @@ working directory:
   "session_id": "...",
   "session_file": "...",
   "ghost_name": "casper",
-  "cwd": "/home/me/Ghosts/casper",
+  "cwd": "/home/me/ghosts/casper",
   "runtime": "omp"
 }
 ```
@@ -108,7 +108,7 @@ contains the same message directly:
   "session_file": "...",
   "stop_hook_active": false,
   "ghost_name": "casper",
-  "cwd": "/home/me/Ghosts/casper",
+  "cwd": "/home/me/ghosts/casper",
   "runtime": "omp"
 }
 ```

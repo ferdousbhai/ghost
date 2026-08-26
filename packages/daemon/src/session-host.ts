@@ -7,10 +7,10 @@
  * concurrently; the OMP path is scoped entirely through SDK options — no env
  * var, no child process — following the spike (`pi-spike/concurrent-ghosts.mjs`):
  *
- *   cwd        = ~/Ghosts/<name>            the ghost home; extensions derive
+ *   cwd        = ~/ghosts/<name>            the ghost home; extensions derive
  *                                           their paths from ctx.cwd
- *   agentDir   = ~/Ghosts/<name>/.pi        settings, models.json, agent.db
- *   sessionDir = ~/Ghosts/<name>/.sessions  transcripts
+ *   agentDir   = ~/ghosts/<name>/.pi        settings, models.json, agent.db
+ *   sessionDir = ~/ghosts/<name>/.sessions  transcripts
  *
  * Four decisions that are easy to get wrong and are load-bearing here:
  *

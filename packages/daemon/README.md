@@ -51,7 +51,7 @@ stop new requests, end live streams, dispose hosted sessions, and exit cleanly.
 Everything Ghost owns for an OMP conversation stays inside the ghost home:
 
 ```text
-~/Ghosts/<name>/
+~/ghosts/<name>/
   docs/**/*.md             canonical v2 Markdown documents
   .pi/
     models.json            providers plus Ghost roles/fallbacks

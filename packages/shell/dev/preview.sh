@@ -30,7 +30,7 @@ for command_name in Hyprland hyprctl quickshell qs grim curl node dbus-daemon se
 done
 
 owner_home=${HOME:?preview: HOME is required}
-owner_ghosts_root=${GHOSTS_ROOT:-$owner_home/Ghosts}
+owner_ghosts_root=${GHOSTS_ROOT:-$owner_home/ghosts}
 parent_runtime=${XDG_RUNTIME_DIR:?preview: XDG_RUNTIME_DIR is required}
 parent_display=${WAYLAND_DISPLAY:?preview: run this from the owner Wayland desktop}
 if [[ $parent_display == /* ]]; then

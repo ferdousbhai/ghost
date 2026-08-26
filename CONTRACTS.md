@@ -8,8 +8,13 @@ commit, with every consumer updated.
 One directory per ghost. Plain files; anything derivable (memory index, doc
 catalog) is derived per session and never stored.
 
+The root is `~/ghosts` unless `ghostsRoot` says otherwise. It used to be
+capitalized; startup moves a leftover `~/Ghosts` onto the lowercase name once,
+and only when the default root is in use and the lowercase directory does not
+exist yet.
+
 ```
-~/Ghosts/<name>/
+~/ghosts/<name>/
   character.md                 persona → system prompt (optional title frontmatter)
   docs/**/*.md                 first line `# Title`; optional final hashtag line
                                such as `#launch #product`
@@ -206,7 +211,7 @@ one must not be a leak of both.
 ### Routes
 
 - `GET  /api/ghosts` → `[{ name, dir, createdAt }]`
-- `POST /api/ghosts` `{ name }` → creates `~/Ghosts/<name>/` with a seeded
+- `POST /api/ghosts` `{ name }` → creates `~/ghosts/<name>/` with a seeded
   `character.md`
 - `DELETE /api/ghosts/:name?confirm=<name>` → `{ ok: true, trash: "<abs path>" }`
   — moves `<root>/<name>/` to the freedesktop home trash
