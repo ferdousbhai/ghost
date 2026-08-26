@@ -46,6 +46,18 @@ refresh during startup causes OMP to discover skills again.
                                notIncluded
 ```
 
+What lives in a ghost home and what lives in the machine's own directories is
+decided by lifecycle, not by which reads more natural. Mutable per-ghost state
+stays in the home, because the home is the unit of atomic operation: rename and
+delete are a single same-filesystem `rename(2)` under a filesystem-identity
+lease, and a second store for the same ghost reintroduces orphans, split
+consistency, and a crash window between the two moves. A write-once artifact of
+using the machine goes where the machine puts that kind of artifact, carrying
+attribution from the moment it is created, so it needs no migration when a ghost
+is renamed. Secrets are the exception in the other direction: they belong in the
+machine's secret facility, where locking is real and exclusion from an export is
+structural rather than a rule somebody has to remember (#23).
+
 Screenshots are the one thing a ghost produces that does not live in its home.
 `ghost_screen` and `ghost_browser` write to the desktop's own screenshot
 directory (`OMARCHY_SCREENSHOT_DIR`, else `XDG_PICTURES_DIR`, else
