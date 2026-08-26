@@ -31,6 +31,7 @@ makedepends=(
 )
 checkdepends=(
   'nodejs'
+  'python-yaml'
   'ripgrep'
 )
 optdepends=(

@@ -38,6 +38,10 @@ command -v node >/dev/null || {
   printf 'nodejs is required by package checks but is not installed\n' >&2
   exit 1
 }
+python -c 'import yaml' >/dev/null 2>&1 || {
+  printf 'python-yaml is required by package checks but is not installed\n' >&2
+  exit 1
+}
 
 bash "$script_dir/test-ci-dependencies.sh"
 
@@ -52,6 +56,7 @@ rg -q '"test"[[:space:]]*:[[:space:]]*"node --test' \
 ) > "$work/ghost-ai-git.SRCINFO"
 cmp "$script_dir/.SRCINFO" "$work/ghost-ai-git.SRCINFO"
 require_srcinfo_entry checkdepends nodejs "$work/ghost-ai-git.SRCINFO"
+require_srcinfo_entry checkdepends python-yaml "$work/ghost-ai-git.SRCINFO"
 require_srcinfo_entry checkdepends ripgrep "$work/ghost-ai-git.SRCINFO"
 
 bash "$source_root/packaging/release/render-arch-package.sh" \
@@ -62,12 +67,13 @@ bash "$source_root/packaging/release/render-arch-package.sh" \
   0000000000000000000000000000000000000000000000000000000000000000 \
   0000000000000000000000000000000000000000000000000000000000000000
 require_srcinfo_entry checkdepends nodejs "$work/ghost-ai/.SRCINFO"
+require_srcinfo_entry checkdepends python-yaml "$work/ghost-ai/.SRCINFO"
 require_srcinfo_entry checkdepends ripgrep "$work/ghost-ai/.SRCINFO"
 
 ci_dependencies_file="$work/ci-dependencies"
 bash "$script_dir/ci-dependencies.sh" --names > "$ci_dependencies_file"
 mapfile -t ci_dependencies < "$ci_dependencies_file"
-for package in nodejs ripgrep; do
+for package in nodejs python-yaml ripgrep; do
   if [[ ! " ${ci_dependencies[*]} " =~ [[:space:]]${package}[[:space:]] ]]; then
     printf 'CI dependency set does not contain %s\n' "$package" >&2
     exit 1

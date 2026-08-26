@@ -26,6 +26,7 @@ depends=(
 makedepends=('desktop-file-utils')
 checkdepends=(
   'nodejs'
+  'python-yaml'
   'ripgrep'
 )
 optdepends=(

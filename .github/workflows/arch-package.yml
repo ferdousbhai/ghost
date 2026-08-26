@@ -45,30 +45,41 @@ jobs:
           pacman -S --needed --noconfirm -- "${packages[@]}"
           pacman -T -- "${constraints[@]}"
 
-      - name: Prepare unprivileged package builder
+      - name: Create unprivileged package builder
+        shell: bash
+        run: /usr/bin/useradd --create-home builder
+
+      - name: Verify CI privilege boundaries
         shell: bash
         run: |
-          useradd --create-home builder
-          chown -R builder:builder "$GITHUB_WORKSPACE"
+          PATH=/usr/bin /usr/bin/bash packaging/arch/test-ci-git-ownership.sh builder
+          PATH=/usr/bin /usr/bin/bash packaging/arch/test-ci-release-root.sh builder
+          PATH=/usr/bin /usr/bin/bash packaging/arch/test-release-checksums.sh builder
+
+      - name: Prepare builder-owned release paths
+        shell: bash
+        run: |
+          exec /usr/bin/env -i HOME=/root PATH=/usr/bin TMPDIR=/var/tmp \
+            /usr/bin/bash packaging/arch/prepare-ci-release-environment.sh \
+              builder "$GITHUB_ENV" "$GITHUB_WORKSPACE"
 
       - name: Verify package check dependency coverage
         shell: bash
-        run: >-
-          runuser -u builder -- env
-          GHOST_ARCH_DEPENDENCY_TEST_ROOT=/home/builder
-          bash packaging/arch/test-check-dependencies.sh
+        run: |
+          exec /usr/bin/runuser -u builder -- /usr/bin/env -i \
+            HOME=/home/builder PATH=/usr/bin TMPDIR=/home/builder \
+            GHOST_ARCH_DEPENDENCY_TEST_ROOT=/home/builder \
+            /usr/bin/bash packaging/arch/test-check-dependencies.sh
 
       - name: Build and smoke-test the package
         shell: bash
         run: |
-          set -euo pipefail
-          source_repo="$(bash packaging/arch/resolve-ci-source-repo.sh "$GITHUB_SHA")"
-          source_commit="$GITHUB_SHA"
-          cd "$GITHUB_WORKSPACE/packaging/arch"
-          runuser -u builder -- env \
-            GHOST_SOURCE_REPO="$source_repo" \
-            GHOST_SOURCE_REF="commit=$source_commit" \
-            makepkg --cleanbuild --noconfirm
+          exec /usr/bin/runuser -u builder -- /usr/bin/env -i \
+            HOME=/home/builder PATH=/usr/bin TMPDIR=/home/builder \
+            GITHUB_WORKSPACE="$GITHUB_WORKSPACE" \
+            GITHUB_SHA="$GITHUB_SHA" \
+            /usr/bin/bash \
+              "$GITHUB_WORKSPACE/packaging/arch/ci-build-development.sh"
 
       - name: Build and verify stable release sources offline
         env:
@@ -76,152 +87,47 @@ jobs:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
           REF_NAME: ${{ github.ref_name }}
           REF_TYPE: ${{ github.ref_type }}
+        shell: bash
         run: |
-          source_tree="$GITHUB_WORKSPACE/packaging/arch/src/ghost"
-          release_out="$GITHUB_WORKSPACE/packaging/release/out"
-          release_work="$GITHUB_WORKSPACE/packaging/release/work"
-          version="$(bun -e 'const p = await Bun.file(process.argv[1]).json(); process.stdout.write(p.version)' "$source_tree/package.json")"
-          commit="$(git -C "$source_tree" rev-parse HEAD)"
-          epoch="$(git -C "$source_tree" show -s --format=%ct "$commit")"
-          runtime="ghost-runtime-$version-linux-x86_64.tar.zst"
-          source_archive="$release_out/ghost-$version.tar.gz"
-          checkout_commit="$(git -C "$GITHUB_WORKSPACE" rev-parse 'HEAD^{commit}')"
+          exec /usr/bin/runuser -u builder -- /usr/bin/env -i \
+            HOME=/home/builder PATH=/usr/bin TMPDIR=/home/builder \
+            GITHUB_WORKSPACE="$GITHUB_WORKSPACE" \
+            GHOST_CI_RELEASE_OUTER="$GHOST_CI_RELEASE_OUTER" \
+            GHOST_CI_RELEASE_OUT="$GHOST_CI_RELEASE_OUT" \
+            GHOST_CI_RELEASE_WORK="$GHOST_CI_RELEASE_WORK" \
+            GHOST_CI_RELEASE_OUTER_DEVICE="$GHOST_CI_RELEASE_OUTER_DEVICE" \
+            GHOST_CI_RELEASE_OUTER_INODE="$GHOST_CI_RELEASE_OUTER_INODE" \
+            GHOST_CI_RELEASE_OUT_DEVICE="$GHOST_CI_RELEASE_OUT_DEVICE" \
+            GHOST_CI_RELEASE_OUT_INODE="$GHOST_CI_RELEASE_OUT_INODE" \
+            GHOST_CI_RELEASE_WORK_DEVICE="$GHOST_CI_RELEASE_WORK_DEVICE" \
+            GHOST_CI_RELEASE_WORK_INODE="$GHOST_CI_RELEASE_WORK_INODE" \
+            EVENT_NAME="$EVENT_NAME" \
+            RELEASE_TAG="$RELEASE_TAG" \
+            REF_NAME="$REF_NAME" \
+            REF_TYPE="$REF_TYPE" \
+            /usr/bin/bash \
+              "$GITHUB_WORKSPACE/packaging/release/ci-build-stable.sh"
 
-          if [[ "$checkout_commit" != "$commit" ]]; then
-            printf 'package source commit %s does not match checkout %s\n' \
-              "$commit" "$checkout_commit" >&2
-            exit 1
-          fi
-
-          expected_tag="v$version"
-          event_tag="$REF_NAME"
-          if [[ "$EVENT_NAME" == release ]]; then
-            event_tag="$RELEASE_TAG"
-          fi
-          if [[ "$REF_TYPE" == tag || "$EVENT_NAME" == release ]]; then
-            if [[ "$event_tag" != "$expected_tag" ]]; then
-              printf 'release ref %s does not match package.json version %s\n' \
-                "$event_tag" "$version" >&2
-              exit 1
-            fi
-            tag_commit="$(git -C "$GITHUB_WORKSPACE" rev-parse --verify "$expected_tag^{commit}")"
-            if [[ "$tag_commit" != "$commit" ]]; then
-              printf 'tag %s resolves to %s, not checked-out commit %s\n' \
-                "$expected_tag" "$tag_commit" "$commit" >&2
-              exit 1
-            fi
-          fi
-
-          install -d -o builder -g builder "$release_out" "$release_work"
-          runuser -u builder -- env SOURCE_DATE_EPOCH="$epoch" \
-            bash "$source_tree/packaging/release/make-source-archive.sh" \
-              "$source_tree" "$source_archive" "$version" HEAD
-          runuser -u builder -- \
-            bash "$source_tree/packaging/release/prepare-pnpm-engine.sh" \
-              "$source_tree"
-          runuser -u builder -- pnpm --dir "$source_tree" fetch --frozen-lockfile
-          runuser -u builder -- env \
-            ALL_PROXY=http://127.0.0.1:9 \
-            FTP_PROXY=http://127.0.0.1:9 \
-            GLOBAL_AGENT_HTTPS_PROXY=http://127.0.0.1:9 \
-            HTTPS_PROXY=http://127.0.0.1:9 \
-            HTTP_PROXY=http://127.0.0.1:9 \
-            NO_PROXY= \
-            GHOST_RELEASE_WORK_ROOT="$release_work" \
-            SOURCE_DATE_EPOCH="$epoch" \
-            bash "$source_tree/packaging/release/build-runtime-source.sh" \
-              "$source_tree" "$release_out" "$version" x86_64 "$commit"
-
-          runuser -u builder -- env GHOST_RELEASE_WORK_ROOT="$release_work" \
-            bash "$source_tree/packaging/release/smoke-runtime-source.sh" \
-              "$release_out/$runtime" "$source_tree" "$version" x86_64 \
-                "$commit" "$epoch"
-
-          source_sha="$(sha256sum "$source_archive" | cut -d' ' -f1)"
-          runtime_sha="$(sha256sum "$release_out/$runtime" | cut -d' ' -f1)"
-          runuser -u builder -- env GHOST_RELEASE_WORK_ROOT="$release_work" \
-            bash "$source_tree/packaging/release/smoke-rendered-package.sh" \
-              "$version" "$commit" "$epoch" "$source_sha" "$runtime_sha"
-          aur_dir="$release_work/ghost-ai-$version-aur"
-          runuser -u builder -- bash "$source_tree/packaging/release/render-arch-package.sh" \
-            "$aur_dir" "$version" "$commit" "$epoch" "$source_sha" "$runtime_sha"
-
-          install -d -o builder -g builder \
-            "$release_work/makepkg-build" "$release_work/makepkg-sources"
-          runuser -u builder -- env \
-            ALL_PROXY=http://127.0.0.1:9 \
-            FTP_PROXY=http://127.0.0.1:9 \
-            GLOBAL_AGENT_HTTPS_PROXY=http://127.0.0.1:9 \
-            HTTPS_PROXY=http://127.0.0.1:9 \
-            HTTP_PROXY=http://127.0.0.1:9 \
-            NO_PROXY= \
-            GHOST_RELEASE_SOURCE_URL="file://$source_archive" \
-            GHOST_RELEASE_RUNTIME_URL="file://$release_out/$runtime" \
-            GHOST_RELEASE_WORK_ROOT="$release_work" \
-            BUILDDIR="$release_work/makepkg-build" \
-            SRCDEST="$release_work/makepkg-sources" \
-            PKGDEST="$release_out" \
-            makepkg --dir "$aur_dir" --cleanbuild --noconfirm
-
-          runuser -u builder -- bash -c '
-            set -euo pipefail
-            cd "$1"
-            makepkg --printsrcinfo > .SRCINFO.rendered
-            cmp .SRCINFO .SRCINFO.rendered
-            rm .SRCINFO.rendered
-          ' _ "$aur_dir"
-
-          aur_bundle="$release_out/ghost-ai-$version-aur.tar.zst"
-          runuser -u builder -- bash "$source_tree/packaging/release/pack-aur-source.sh" \
-            "$aur_dir" "$aur_bundle" "$epoch"
-          (
-            cd "$release_out"
-            find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%P\0' \
-              | LC_ALL=C sort -z | xargs -0 sha256sum > SHA256SUMS
-          )
-
-      - name: Verify package archives with the source checkout hidden
+      - name: Seal release artifacts for upload
+        shell: bash
         run: |
-          isolation_parent="$(mktemp -d -p /var/tmp ghost-package-isolation.XXXXXX)"
-          smoke_copy="$isolation_parent/smoke.sh"
-          cp packaging/arch/smoke.sh "$smoke_copy"
-          mapfile -t archives < <(
-            find packaging/arch packaging/release/out -maxdepth 1 \
-              -name '*.pkg.tar.zst' -print | sort
-          )
-          [[ "${#archives[@]}" -eq 2 ]]
-          roots=()
-          for index in "${!archives[@]}"; do
-            root="$isolation_parent/root-$index"
-            mkdir "$root"
-            bsdtar -xf "${archives[$index]}" -C "$root"
-            roots+=("$root")
-          done
-          hidden_checkout="$(mktemp -d -p /var/tmp ghost-hidden-checkout.XXXXXX)"
-          restore_checkout() {
-            if [[ -d "$hidden_checkout" ]]; then
-              find "$hidden_checkout" -mindepth 1 -maxdepth 1 \
-                -exec mv -t "$GITHUB_WORKSPACE" -- {} +
-              rmdir "$hidden_checkout"
-            fi
-          }
-          trap restore_checkout EXIT
-          cd /tmp
-          find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 1 \
-            -exec mv -t "$hidden_checkout" -- {} +
-          for root in "${roots[@]}"; do
-            bash "$smoke_copy" "$root"
-          done
-          restore_checkout
-          trap - EXIT
+          exec /usr/bin/env -i HOME=/root PATH=/usr/bin TMPDIR=/var/tmp \
+            /usr/bin/python \
+              "$GHOST_CI_RELEASE_OUTER/seal-ci-release-artifacts.py" \
+              builder "$GHOST_CI_RELEASE_OUTER" \
+              "$GHOST_CI_RELEASE_OUTER_DEVICE" \
+              "$GHOST_CI_RELEASE_OUTER_INODE" \
+              "$GHOST_CI_RELEASE_OUT_DEVICE" \
+              "$GHOST_CI_RELEASE_OUT_INODE" \
+              "$GHOST_CI_RELEASE_SEALED_DEVICE" \
+              "$GHOST_CI_RELEASE_SEALED_INODE"
 
       - name: Upload package artifact
         uses: actions/upload-artifact@v4
         with:
           name: ghost-ai-arch-${{ github.sha }}
           path: |
-            packaging/arch/*.pkg.tar.zst
-            packaging/release/out/ghost-ai-*.pkg.tar.zst
+            ${{ env.GHOST_CI_RELEASE_SEALED }}/ghost-ai-*.pkg.tar.zst
           if-no-files-found: error
 
       - name: Upload stable release-source artifacts
@@ -229,12 +135,29 @@ jobs:
         with:
           name: ghost-ai-release-source-${{ github.sha }}
           path: |
-            packaging/release/out/SHA256SUMS
-            packaging/release/out/ghost-*.tar.gz
-            packaging/release/out/ghost-ai-*-aur.tar.zst
-            packaging/release/out/ghost-runtime-*.tar.zst
-            packaging/release/out/ghost-runtime-*.tar.zst.sha256
+            ${{ env.GHOST_CI_RELEASE_SEALED }}/SHA256SUMS
+            ${{ env.GHOST_CI_RELEASE_SEALED }}/ghost-*.tar.gz
+            ${{ env.GHOST_CI_RELEASE_SEALED }}/ghost-ai-*-aur.tar.zst
+            ${{ env.GHOST_CI_RELEASE_SEALED }}/ghost-runtime-*.tar.zst
+            ${{ env.GHOST_CI_RELEASE_SEALED }}/ghost-runtime-*.tar.zst.sha256
           if-no-files-found: error
+
+      - name: Remove trusted release outer
+        if: always() && env.GHOST_CI_RELEASE_OUTER != ''
+        shell: bash
+        run: |
+          exec /usr/bin/env -i HOME=/root PATH=/usr/bin TMPDIR=/var/tmp \
+            /usr/bin/bash \
+              "$GHOST_CI_RELEASE_OUTER/remove-ci-release-root" builder \
+              "$GHOST_CI_RELEASE_OUTER" \
+              "$GHOST_CI_RELEASE_OUTER_DEVICE" \
+              "$GHOST_CI_RELEASE_OUTER_INODE" \
+              "$GHOST_CI_RELEASE_OUT_DEVICE" \
+              "$GHOST_CI_RELEASE_OUT_INODE" \
+              "$GHOST_CI_RELEASE_WORK_DEVICE" \
+              "$GHOST_CI_RELEASE_WORK_INODE" \
+              "$GHOST_CI_RELEASE_SEALED_DEVICE" \
+              "$GHOST_CI_RELEASE_SEALED_INODE"
 
   release:
     if: github.event_name == 'release'
