@@ -11,24 +11,35 @@ workspace="${GITHUB_WORKSPACE:?GITHUB_WORKSPACE is required}"
 script_dir="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 # shellcheck source=ci-release-paths.sh
 source "$script_dir/ci-release-paths.sh"
+# shellcheck source=ci-checkout-isolation.sh
+source "$script_dir/ci-checkout-isolation.sh"
 ghost_ci_validate_release_paths
 release_out="$GHOST_CI_RELEASE_OUT"
 
 isolation_parent="$(mktemp -d -p /var/tmp ghost-package-isolation.XXXXXX)"
-hidden_checkout=""
+checkout_isolated=0
 restore_checkout() {
-  if [[ -n "$hidden_checkout" && -d "$hidden_checkout" ]]; then
-    find "$hidden_checkout" -mindepth 1 -maxdepth 1 \
-      -exec mv -t "$workspace" -- {} +
-    rmdir -- "$hidden_checkout"
-    hidden_checkout=""
+  if (( checkout_isolated )) || \
+      [[ "${GHOST_CI_ISOLATION_CREATED:-0}" == 1 ]]; then
+    ghost_ci_restore_checkout "$workspace" || return 1
+    checkout_isolated=0
   fi
 }
 cleanup() {
-  restore_checkout
-  find -P "$isolation_parent" -depth -delete
+  local status=$?
+  trap - EXIT HUP INT TERM
+  if ! restore_checkout; then
+    printf 'checkout restoration failed; isolation state retained at %s\n' \
+      "$(ghost_ci_isolation_path "$workspace")" >&2
+    exit 1
+  fi
+  find -P "$isolation_parent" -depth -delete || exit 1
+  exit "$status"
 }
 trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 smoke_copy="$isolation_parent/smoke.sh"
 cp -- "$workspace/packaging/arch/smoke.sh" "$smoke_copy"
@@ -45,13 +56,14 @@ for index in "${!archives[@]}"; do
   roots+=("$root")
 done
 
-hidden_checkout="$(mktemp -d -p /var/tmp ghost-hidden-checkout.XXXXXX)"
-cd /var/tmp
-find "$workspace" -mindepth 1 -maxdepth 1 \
-  -exec mv -t "$hidden_checkout" -- {} +
+if ! ghost_ci_hide_checkout "$workspace"; then
+  if [[ "${GHOST_CI_ISOLATION_CREATED:-0}" == 1 ]]; then
+    checkout_isolated=1
+  fi
+  exit 1
+fi
+checkout_isolated=1
 for root in "${roots[@]}"; do
   bash "$smoke_copy" "$root"
 done
 restore_checkout
-trap - EXIT
-find -P "$isolation_parent" -depth -delete

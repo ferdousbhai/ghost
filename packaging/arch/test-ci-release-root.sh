@@ -21,6 +21,8 @@ stable_build="$(realpath "$script_dir/../release/ci-build-stable.sh")"
 archive_verify="$(realpath \
   "$script_dir/../release/ci-verify-package-archives.sh")"
 path_validator="$(realpath "$script_dir/../release/ci-release-paths.sh")"
+isolation_test="$(realpath \
+  "$script_dir/../release/test-checkout-isolation.sh")"
 workflow="$(realpath "$script_dir/../../.github/workflows/arch-package.yml")"
 
 grep -Fq '${{ env.GHOST_CI_RELEASE_SEALED }}/' "$workflow"
@@ -292,4 +294,6 @@ fi
 outer=""
 [[ "$(stat -Lc '%u:%g:%a:%d:%i' -- "$outside")" == "$outside_identity" ]]
 [[ "$(sha256sum "$outside/sentinel")" == "$outside_hash" ]]
+"${builder_command[@]}" GHOST_CI_ISOLATION_TEST_ROOT=/home/builder \
+  /usr/bin/bash "$isolation_test"
 printf 'trusted CI release-root and sealed-upload isolation passed\n'
