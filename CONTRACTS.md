@@ -54,7 +54,18 @@ directory (`OMARCHY_SCREENSHOT_DIR`, else `XDG_PICTURES_DIR`, else
 `ghost-<ghost>-screen-<timestamp>.png` and `ghost-<ghost>-browser-<timestamp>.png`.
 Retention keeps the newest captures per ghost and producer and deletes only
 names matching that exact pattern, so the owner's own screenshots and another
-ghost's captures share the directory untouched.
+ghost's captures share the directory untouched. Sharing the directory is a
+deliberate exposure: a ghost captures far more often than a person does,
+sometimes over a password manager, and `~/Pictures` is a common sync target
+whose versioning keeps even the captures retention removed.
+
+The same rule governs every write-once artifact a ghost produces, and the rest
+of them do not exist yet. Downloads land in `XDG_DOWNLOAD_DIR` under the name
+the page suggested, sanitised to a basename, deduplicated the way a browser
+does; they are never pruned, because a download is a deliberate act with no
+Omarchy retention convention to match, and their attribution lives in the
+transcript rather than the filename. Recordings follow the screenshot pattern
+exactly, and never prune the file currently being written.
 
 Every document is ordinary Markdown in one canonical form:
 
@@ -119,7 +130,18 @@ exists. Ghost cannot fix the storage itself until it owns the credential loader
 (#14, #3).
 
 A deleted ghost home leaves the root entirely, for the system trash; see the
-`DELETE` route.
+`DELETE` route. That carries `.pi/` with it, so an owner who excludes
+`~/ghosts` from a backup or sync tool has not excluded those credentials:
+deleting a ghost currently makes them more likely to leave the machine, not
+less. Nothing here fixes that; #23 does, by removing the plaintext store.
+
+One naming convention makes the boundary readable rather than remembered. A
+plain-named entry in a ghost home is part of that ghost's identity and travels
+with it. A dot-prefixed entry is bound to this machine and never leaves it:
+`.pi/` (credentials), `.browser-profile/` (cookies and logins), `.trash/`, and
+`.omp/settings.json`, which an import regenerates rather than copies.
+`.omp/mcp.json` is the exception that proves it, identity pinned into a
+dot-directory by OMP's own convention until ghost owns the config loader.
 
 ### Session capabilities
 
