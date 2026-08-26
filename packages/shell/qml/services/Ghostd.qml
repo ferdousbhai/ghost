@@ -222,6 +222,8 @@ Singleton {
     property string modelSource: "none"
     /** scope=available rows the ghost can use now: [{ provider, id, name?, …, current }]. */
     property var availableModels: []
+    /** Full available-model count behind the page held in availableModels. */
+    property int availableModelTotal: 0
     /** scope=catalog rows for the last search: same shape plus `usable`. */
     property var catalogModels: []
     /** Full filtered count behind the current catalog page (may exceed catalogModels.length). */
@@ -275,6 +277,8 @@ Singleton {
     /** Invalidates current-model GETs started before a ghost/model transition. */
     property int modelGeneration: 0
     property var availRequest: null
+    /** Test seam; production constructs the native available-model XHR. */
+    property var availableModelsRequestFactory: null
     property var catalogRequest: null
     property var setModelRequest: null
     property var modelRoutingRequest: null
@@ -293,7 +297,14 @@ Singleton {
     property var collabRequest: null
     property var greetingRequest: null
     property var transcriptRequest: null
+    /** Test seam; production constructs each native transcript-page XHR. */
+    property var transcriptRequestFactory: null
+    /** Keep transcript restoration finite if a peer reports an absurd total. */
+    readonly property int transcriptPageLimit: 1000
+    readonly property int transcriptMaxPages: 10
     property var deleteSessionRequest: null
+    /** Test seam; production constructs the native session-deletion XHR. */
+    property var deleteSessionRequestFactory: null
     property var pinSessionRequest: null
     property var readSessionRequests: ({})
     property var askRequest: null
@@ -301,6 +312,8 @@ Singleton {
     property var queueRequest: null
     property var queueStatusRequest: null
     property var branchRequest: null
+    /** Test seam; production constructs the native branch XHR. */
+    property var branchRequestFactory: null
 
     property var sessionIds: ({})     // ghost name -> runtime-qualified active id
     /** Full live/presentation state keyed by JSON.stringify([ghost, sessionId]). */
@@ -402,7 +415,12 @@ Singleton {
     }
 
     Component.onCompleted: root.refresh()
-    Component.onDestruction: root.cancelLogin()
+    Component.onDestruction: root.retireClientRequests()
+
+    function retireClientRequests(): void {
+        root.cancelLogin();
+        root.cancelAllTranscriptLoads();
+    }
     onActiveGhostChanged: {
         root.modelGeneration += 1;
         root.modelRequest = null;
@@ -722,7 +740,8 @@ Singleton {
         const kept = ({});
         for (const key of Object.keys(root.turnStates)) {
             const state = root.turnStates[key];
-            if (state && state.ghost !== name) kept[key] = state;
+            if (state && state.ghost === name) root.cancelTranscriptLoad(state);
+            else if (state) kept[key] = state;
         }
         root.turnStates = kept;
         root.updateLiveConversationKeys();
@@ -743,7 +762,10 @@ Singleton {
     function selectGhost(name: string): void {
         if (name === root.activeGhost) return;
         const previous = root.activeTurnState(false);
-        if (previous) root.captureActiveTurn(previous);
+        if (previous) {
+            root.captureActiveTurn(previous);
+            root.cancelTranscriptLoad(previous);
+        }
         root.activeGhost = name;
         // Conversations are per ghost; restore this ghost's last-active session
         // id (if any) and list its conversations. The transcript view stays
@@ -807,6 +829,22 @@ Singleton {
             && Array.isArray(body.messages);
     }
 
+    function cancelTranscriptLoad(state: var): void {
+        if (!state) return;
+        const xhr = state.transcriptRequest;
+        state.transcriptGeneration = Number(state.transcriptGeneration || 0) + 1;
+        state.transcriptRequest = null;
+        state.transcriptLoad = null;
+        if (root.isActiveTurn(state)) root.transcriptRequest = null;
+        // Retire ownership before abort because Qt may synchronously deliver DONE.
+        if (xhr && xhr.readyState !== 4 && typeof xhr.abort === "function") xhr.abort();
+    }
+
+    function cancelAllTranscriptLoads(): void {
+        for (const key of Object.keys(root.turnStates))
+            root.cancelTranscriptLoad(root.turnStates[key]);
+    }
+
     function runtimeForNewConversation(): string {
         return root.currentModel && root.currentModel.provider === "claude-code"
             ? "claude-code" : "pi";
@@ -818,6 +856,7 @@ Singleton {
         const state = root.activeTurnState(false);
         if (!state || state.runtime === runtime || state.streaming) return state;
         root.captureActiveTurn(state);
+        root.cancelTranscriptLoad(state);
         const id = root.conversationActionId(runtime, state.conversationId);
         root.sessionIds[ghost] = id;
         root.currentSessionId = id;
@@ -890,7 +929,9 @@ Singleton {
             askSubmitRequest: null,
             queueRequest: null,
             queueStatusRequest: null,
-            transcriptRequest: null
+            transcriptRequest: null,
+            transcriptGeneration: 0,
+            transcriptLoad: null
         };
     }
 
@@ -993,6 +1034,7 @@ Singleton {
         root.consumed = state.consumed;
         root.frameBuffer = state.frameBuffer;
         root.presentationDirty = state.presentationDirty;
+        root.transcriptRequest = state.transcriptRequest;
     }
 
     function clearTurnProjection(): void {
@@ -1020,6 +1062,7 @@ Singleton {
         root.consumed = 0;
         root.frameBuffer = "";
         root.presentationDirty = false;
+        root.transcriptRequest = null;
     }
 
     function showTurnState(ghost: string, sessionId: string): void {
@@ -1125,6 +1168,7 @@ Singleton {
         root.currentModel = null;
         root.modelSource = "none";
         root.availableModels = [];
+        root.availableModelTotal = 0;
         root.modelRouting = [];
         root.modelRoutingLoading = false;
         root.modelWarning = "";
@@ -1884,7 +1928,10 @@ Singleton {
         const ghost = root.activeGhost;
         if (ghost === "") return;
         const previous = root.activeTurnState(false);
-        if (previous) root.captureActiveTurn(previous);
+        if (previous) {
+            root.captureActiveTurn(previous);
+            root.cancelTranscriptLoad(previous);
+        }
         const conversationId = "hud-" + Date.now().toString(36)
             + "-" + Math.floor(Math.random() * 0xffffff).toString(36);
         const runtime = root.runtimeForNewConversation();
@@ -1932,7 +1979,8 @@ Singleton {
         }
         root.deletingSessionId = id;
         root.sessionsError = "";
-        const xhr = new XMLHttpRequest();
+        const xhr = root.deleteSessionRequestFactory
+            ? root.deleteSessionRequestFactory() : new XMLHttpRequest();
         root.deleteSessionRequest = xhr;
         xhr.onreadystatechange = function () {
             if (xhr.readyState !== 4 || xhr !== root.deleteSessionRequest) return;
@@ -1941,6 +1989,7 @@ Singleton {
                 root.dropCommandTranscripts(ghost, id);
                 const key = root.conversationKey(ghost, id);
                 const kept = Object.assign({}, root.turnStates);
+                root.cancelTranscriptLoad(kept[key]);
                 delete kept[key];
                 root.turnStates = kept;
                 root.updateLiveConversationKeys();
@@ -2083,7 +2132,10 @@ Singleton {
      */
     function adoptConversation(ghost: string, id: string): void {
         const previous = root.activeTurnState(false);
-        if (previous) root.captureActiveTurn(previous);
+        if (previous) {
+            root.captureActiveTurn(previous);
+            if (previous.sessionId !== id) root.cancelTranscriptLoad(previous);
+        }
         root.sessionIds[ghost] = id;
         root.currentSessionId = id;
         root.showTurnState(ghost, id);
@@ -2110,34 +2162,7 @@ Singleton {
         root.markConversationRead(ghost, id);
         const state = root.ensureTurnState(ghost, id);
         if (state.streaming) return;
-        const xhr = new XMLHttpRequest();
-        state.transcriptRequest = xhr;
-        root.transcriptRequest = xhr;
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4) return;
-            if (xhr.status === 200) {
-                try {
-                    const body = JSON.parse(xhr.responseText);
-                    if (!root.transcriptMatchesIdentity(body, state))
-                        throw new Error("transcript identity mismatch");
-                    if (!state.streaming)
-                        root.rehydrateTurn(state, body.messages);
-                    root.reachable = true;
-                    if (root.isActiveTurn(state)) root.sessionsError = "";
-                } catch (error) {
-                    if (root.isActiveTurn(state))
-                        root.sessionsError = "ghostd sent a malformed transcript";
-                }
-            } else if (xhr.status === 404) {
-                // An unstarted conversation has no transcript yet; that is fine.
-                if (root.isActiveTurn(state)) root.sessionsError = "";
-            } else if (root.isActiveTurn(state)) {
-                root.sessionsError = root.describeError(xhr, "GET transcript");
-                if (xhr.status === 0) root.fail(root.sessionsError);
-            }
-        };
-        root.dispatch(xhr, "GET", "/api/ghosts/" + encodeURIComponent(ghost)
-            + "/sessions/" + encodeURIComponent(id) + "/transcript", ({}), null);
+        root.loadConversationTranscript(state, true);
     }
 
     /** Persist that the owner opened a stored conversation. */
@@ -2187,30 +2212,146 @@ Singleton {
 
     function refreshConversationTranscript(state: var): void {
         if (!state || state.streaming) return;
-        const ghost = state.ghost;
-        const id = state.sessionId;
-        const xhr = new XMLHttpRequest();
+        root.loadConversationTranscript(state, false);
+    }
+
+    function newTranscriptRequest(): var {
+        return root.transcriptRequestFactory
+            ? root.transcriptRequestFactory() : new XMLHttpRequest();
+    }
+
+    function newBranchRequest(): var {
+        return root.branchRequestFactory
+            ? root.branchRequestFactory() : new XMLHttpRequest();
+    }
+
+    function transcriptLoadIsCurrent(state: var, load: var, xhr: var): bool {
+        return !!state && !!load && state.transcriptLoad === load
+            && state.transcriptGeneration === load.generation
+            && state.transcriptRequest === xhr && !state.streaming;
+    }
+
+    /**
+     * Read a complete transcript through the daemon's bounded page API. The
+     * previous visible rows stay intact until every page has been validated,
+     * so a failed or inconsistent read is visible as an error, never as a
+     * convincing partial history.
+     */
+    function loadConversationTranscript(state: var, allowNotFound: bool): void {
+        if (!state || state.streaming) return;
+        root.cancelTranscriptLoad(state);
+        const load = {
+            generation: state.transcriptGeneration,
+            allowNotFound: allowNotFound,
+            total: -1,
+            nextOffset: 0,
+            pageCount: 0,
+            messages: [],
+            entryIds: new Set()
+        };
+        state.transcriptLoad = load;
+        root.requestTranscriptPage(state, load);
+    }
+
+    function failTranscriptLoad(state: var, load: var, message: string, unreachable: bool): void {
+        if (!state || state.transcriptLoad !== load
+                || state.transcriptGeneration !== load.generation) return;
+        state.transcriptRequest = null;
+        state.transcriptLoad = null;
+        if (!root.isActiveTurn(state)) return;
+        root.transcriptRequest = null;
+        root.sessionsError = message;
+        if (unreachable) root.fail(message);
+    }
+
+    function completeTranscriptLoad(state: var, load: var): void {
+        if (!state || state.transcriptLoad !== load
+                || state.transcriptGeneration !== load.generation || state.streaming) return;
+        state.transcriptRequest = null;
+        state.transcriptLoad = null;
+        root.rehydrateTurn(state, load.messages);
+        root.reachable = true;
+        if (root.isActiveTurn(state)) {
+            root.transcriptRequest = null;
+            root.sessionsError = "";
+        }
+    }
+
+    function requestTranscriptPage(state: var, load: var): void {
+        if (!state || state.transcriptLoad !== load
+                || state.transcriptGeneration !== load.generation || state.streaming) return;
+        if (load.pageCount >= root.transcriptMaxPages) {
+            root.failTranscriptLoad(state, load,
+                "Transcript is too large to load safely", false);
+            return;
+        }
+        const requestedOffset = load.nextOffset;
+        const xhr = root.newTranscriptRequest();
+        load.pageCount += 1;
         state.transcriptRequest = xhr;
         if (root.isActiveTurn(state)) root.transcriptRequest = xhr;
         xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== state.transcriptRequest || state.streaming) return;
-            if (xhr.status === 200) {
-                try {
-                    const body = JSON.parse(xhr.responseText);
-                    if (!root.transcriptMatchesIdentity(body, state))
-                        throw new Error("transcript identity mismatch");
-                    root.rehydrateTurn(state, body.messages);
-                    root.reachable = true;
-                } catch (error) {
-                    if (root.isActiveTurn(state))
-                        root.sessionsError = "ghostd sent a malformed transcript";
+            if (xhr.readyState !== 4 || !root.transcriptLoadIsCurrent(state, load, xhr)) return;
+            if (xhr.status === 404 && requestedOffset === 0 && load.allowNotFound) {
+                load.messages = [];
+                root.completeTranscriptLoad(state, load);
+                return;
+            }
+            if (xhr.status !== 200) {
+                const message = root.describeError(xhr, "GET transcript");
+                root.failTranscriptLoad(state, load, message, xhr.status === 0);
+                return;
+            }
+            try {
+                const body = JSON.parse(xhr.responseText);
+                if (!root.transcriptMatchesIdentity(body, state))
+                    throw new Error("transcript identity mismatch");
+                if (typeof body.total !== "number" || !Number.isFinite(body.total)
+                        || Math.floor(body.total) !== body.total || body.total < 0)
+                    throw new Error("invalid transcript total");
+                if (body.total > root.transcriptPageLimit * root.transcriptMaxPages)
+                    throw new Error("transcript exceeds client cap");
+                if (typeof body.truncated !== "boolean")
+                    throw new Error("invalid transcript truncation marker");
+                if (load.total < 0) load.total = body.total;
+                else if (load.total !== body.total)
+                    throw new Error("transcript changed between pages");
+                const expected = Math.min(root.transcriptPageLimit,
+                    load.total - requestedOffset);
+                if (expected < 0 || body.messages.length !== expected)
+                    throw new Error("inconsistent transcript page length");
+                const truncated = requestedOffset > 0
+                    || requestedOffset + body.messages.length < load.total;
+                if (body.truncated !== truncated)
+                    throw new Error("inconsistent transcript truncation marker");
+                for (const message of body.messages) {
+                    if (!message || typeof message.entryId !== "string"
+                            || message.entryId === "" || load.entryIds.has(message.entryId))
+                        throw new Error("invalid or repeated transcript entry id");
+                    load.entryIds.add(message.entryId);
                 }
-            } else if (xhr.status === 0) {
-                root.fail(root.describeError(xhr, "GET transcript"));
+                load.messages = load.messages.concat(body.messages);
+                load.nextOffset = requestedOffset + body.messages.length;
+                if (load.nextOffset === load.total) {
+                    root.completeTranscriptLoad(state, load);
+                    return;
+                }
+                if (body.messages.length === 0 || load.nextOffset <= requestedOffset)
+                    throw new Error("transcript page made no progress");
+                root.requestTranscriptPage(state, load);
+            } catch (error) {
+                root.failTranscriptLoad(state, load,
+                    String(error).indexOf("exceeds client cap") >= 0
+                        ? "Transcript is too large to load safely"
+                        : "ghostd sent an inconsistent transcript page", false);
             }
         };
-        root.dispatch(xhr, "GET", "/api/ghosts/" + encodeURIComponent(ghost)
-            + "/sessions/" + encodeURIComponent(id) + "/transcript", ({}), null);
+        root.dispatch(xhr, "GET", "/api/ghosts/" + encodeURIComponent(state.ghost)
+            + "/sessions/" + encodeURIComponent(state.sessionId) + "/transcript"
+            + "?limit=" + root.transcriptPageLimit + "&offset=" + requestedOffset,
+            ({}), null, function () {
+                return root.transcriptLoadIsCurrent(state, load, xhr);
+            });
     }
 
     /**
@@ -2382,7 +2523,7 @@ Singleton {
             return;
         }
         root.branchError = "";
-        const xhr = new XMLHttpRequest();
+        const xhr = root.newBranchRequest();
         root.branchRequest = xhr;
         xhr.onreadystatechange = function () {
             if (xhr.readyState !== 4 || xhr !== root.branchRequest) return;
@@ -2406,10 +2547,18 @@ Singleton {
                         root.branchError = "ghostd branched into no conversation";
                         return;
                     }
-                    root.ensureTurnState(ghost, branched, body.conversationId, body.runtime);
+                    const state = root.ensureTurnState(
+                        ghost, branched, body.conversationId, body.runtime);
+                    if (!state) {
+                        root.branchError = "ghostd branched into no conversation";
+                        return;
+                    }
                     root.adoptConversation(ghost, branched);
-                    root.rehydrate(body.transcript && Array.isArray(body.transcript.messages)
-                        ? body.transcript.messages : []);
+                    // POST carries the daemon's default transcript page, which may
+                    // omit a deep branch's tail. Publish only the bounded pager's
+                    // fully validated assembly so branching and reopening have the
+                    // same complete-history semantics.
+                    root.loadConversationTranscript(state, false);
                     root.branchError = "";
                     root.sessionsError = "";
                     root.fetchSessions(ghost);
@@ -2539,6 +2688,7 @@ Singleton {
     }
 
     function beginTurnFor(state: var): void {
+        root.cancelTranscriptLoad(state);
         root.resetAssistantSegmentFor(state);
         state.assistantRow = -1;
         state.consumed = 0;
@@ -3623,14 +3773,23 @@ Singleton {
     function fetchAvailableModels(): void {
         const ghost = root.activeGhost;
         if (ghost === "") return;
-        const xhr = new XMLHttpRequest();
+        const xhr = root.availableModelsRequestFactory
+            ? root.availableModelsRequestFactory() : new XMLHttpRequest();
         root.availRequest = xhr;
         xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4) return;
+            if (xhr.readyState !== 4 || xhr !== root.availRequest
+                    || ghost !== root.activeGhost) return;
             if (xhr.status === 200) {
                 try {
                     const body = JSON.parse(xhr.responseText);
-                    root.availableModels = Array.isArray(body.models) ? body.models : [];
+                    if (!Array.isArray(body.models) || typeof body.total !== "number"
+                            || !Number.isFinite(body.total) || Math.floor(body.total) !== body.total
+                            || body.total < body.models.length || body.limit !== 500
+                            || body.offset !== 0
+                            || body.models.length !== Math.min(body.total, body.limit))
+                        throw new Error("invalid available model page");
+                    root.availableModels = body.models;
+                    root.availableModelTotal = body.total;
                     root.modelError = "";
                 } catch (error) {
                     root.modelError = "ghostd sent a malformed model list";
@@ -3640,7 +3799,8 @@ Singleton {
             }
         };
         root.dispatch(xhr, "GET", "/api/ghosts/" + encodeURIComponent(ghost)
-            + "/models?scope=available", ({}), null);
+            + "/models?scope=available&limit=500&offset=0", ({}), null,
+            function () { return xhr === root.availRequest && ghost === root.activeGhost; });
     }
 
     /**

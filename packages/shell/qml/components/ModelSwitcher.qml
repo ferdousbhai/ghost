@@ -265,8 +265,8 @@ Rectangle {
                 }
                 return Ghostd.availableModels.length === 0
                     ? "No usable models yet — connect a provider"
-                    : Ghostd.availableModels.length + " model"
-                        + (Ghostd.availableModels.length === 1 ? "" : "s") + " ready to use";
+                    : Ghostd.availableModelTotal + " model"
+                        + (Ghostd.availableModelTotal === 1 ? "" : "s") + " ready to use";
             }
             color: Ghostd.modelError !== ""
                 ? Theme.danger

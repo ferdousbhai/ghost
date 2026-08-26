@@ -640,15 +640,29 @@ function ghostSessions(name) {
   return sessionStore.get(name);
 }
 
-const transcriptOf = (s) => ({
-  id: s.id,
-  conversationId: s.conversationId,
-  runtime: s.runtime,
-  title: s.title ?? null,
-  messages: s.messages,
-  total: s.messages.length,
-  truncated: false,
-});
+const transcriptOf = (s, params) => {
+  const limitValue = params?.get("limit");
+  const offsetValue = params?.get("offset");
+  const requestedLimit = limitValue === null || limitValue === undefined
+    ? undefined : Number(limitValue);
+  const requestedOffset = offsetValue === null || offsetValue === undefined
+    ? undefined : Number(offsetValue);
+  const limit = requestedLimit === undefined ? 1000
+    : Math.max(1, Math.min(2000, Math.floor(requestedLimit)));
+  const offset = Math.min(s.messages.length,
+    requestedOffset === undefined || requestedOffset < 0
+      ? 0 : Math.floor(requestedOffset));
+  const messages = s.messages.slice(offset, offset + limit);
+  return {
+    id: s.id,
+    conversationId: s.conversationId,
+    runtime: s.runtime,
+    title: s.title ?? null,
+    messages,
+    total: s.messages.length,
+    truncated: offset > 0 || offset + messages.length < s.messages.length,
+  };
+};
 
 /**
  * The fork's name, on the file-copy convention the daemon uses: the source
@@ -1367,14 +1381,19 @@ function listModels(name, params) {
   const scope = params.get("scope") === "catalog" ? "catalog" : "available";
   const provider = params.get("provider") || "";
   const q = (params.get("q") || "").toLowerCase();
-  const limit = Math.min(500, Number(params.get("limit")) || 100);
-  const offset = Math.max(0, Number(params.get("offset")) || 0);
+  const limitValue = params.get("limit");
+  const offsetValue = params.get("offset");
+  const limit = limitValue === null ? 100
+    : Math.max(1, Math.min(500, Math.floor(Number(limitValue))));
+  const requestedOffset = offsetValue === null ? 0 : Number(offsetValue);
   const cur = resolveCurrent(name).current;
 
   let rows = CATALOG.filter((m) => (scope === "available" ? credentialed.has(m.provider) : true));
   if (provider) rows = rows.filter((m) => m.provider === provider);
   if (q) rows = rows.filter((m) => (m.id + " " + m.name).toLowerCase().includes(q));
   const total = rows.length;
+  const offset = Math.min(total,
+    requestedOffset < 0 ? 0 : Math.floor(requestedOffset));
   const page = rows.slice(offset, offset + limit).map((m) => {
     const row = modelRow(m);
     row.current = Boolean(cur && cur.provider === m.provider && cur.id === m.id);
@@ -1754,6 +1773,14 @@ createServer(async (req, res) => {
     return json(res, 200, { commands: MOCK_COMMANDS });
   }
   if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "transcript" && req.method === "GET") {
+    for (const field of ["limit", "offset"]) {
+      const value = url.searchParams.get(field);
+      if (value !== null && !Number.isFinite(Number(value))) {
+        return json(res, 400, {
+          error: { message: `"${field}" must be a number.`, code: "invalid_request" },
+        });
+      }
+    }
     const conversation = routeConversation(parts);
     if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
     const s = ghostSessions(name).get(conversation.id);
@@ -1767,7 +1794,7 @@ createServer(async (req, res) => {
         },
       });
     }
-    return json(res, 200, transcriptOf(s));
+    return json(res, 200, transcriptOf(s, url.searchParams));
   }
   if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "queue") {
     const conversation = routeConversation(parts);
@@ -1918,6 +1945,14 @@ createServer(async (req, res) => {
     return json(res, 200, resolveCurrent(name));
   }
   if (parts[3] === "models" && parts.length === 4 && req.method === "GET") {
+    for (const field of ["limit", "offset"]) {
+      const value = url.searchParams.get(field);
+      if (value !== null && !Number.isFinite(Number(value))) {
+        return json(res, 400, {
+          error: { message: `"${field}" must be a number.`, code: "invalid_request" },
+        });
+      }
+    }
     return json(res, 200, listModels(name, url.searchParams));
   }
   if (parts[3] === "model" && parts.length === 4 && req.method === "PUT") {
