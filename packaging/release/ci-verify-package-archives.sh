@@ -48,6 +48,8 @@ mapfile -t archives < <(
     -name '*.pkg.tar.zst' -print | LC_ALL=C sort
 )
 [[ "${#archives[@]}" -eq 2 ]]
+bash "$workspace/packaging/release/verify-package-archive-ownership.sh" \
+  "${archives[@]}"
 roots=()
 for index in "${!archives[@]}"; do
   root="$isolation_parent/root-$index"

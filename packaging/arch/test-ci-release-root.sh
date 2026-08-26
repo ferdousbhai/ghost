@@ -20,6 +20,10 @@ checksum_writer="$(realpath "$script_dir/../release/write-sha256sums.sh")"
 stable_build="$(realpath "$script_dir/../release/ci-build-stable.sh")"
 archive_verify="$(realpath \
   "$script_dir/../release/ci-verify-package-archives.sh")"
+archive_owner_test="$(realpath \
+  "$script_dir/../release/test-package-archive-ownership.sh")"
+archive_owner_verify="$(realpath \
+  "$script_dir/../release/verify-package-archive-ownership.sh")"
 path_validator="$(realpath "$script_dir/../release/ci-release-paths.sh")"
 isolation_test="$(realpath \
   "$script_dir/../release/test-checkout-isolation.sh")"
@@ -148,6 +152,11 @@ if /usr/bin/bash "$archive_verify"; then
   printf 'archive verification accepted a root caller\n' >&2
   exit 1
 fi
+if /usr/bin/bash "$archive_owner_verify" "$outside/sentinel"; then
+  printf 'archive ownership verification accepted a root caller\n' >&2
+  exit 1
+fi
+"${builder_command[@]}" /usr/bin/bash "$archive_owner_test"
 "${builder_command[@]}" "${release_env[@]}" /usr/bin/bash -c \
   'source "$1"; ghost_ci_validate_release_paths' _ "$path_validator"
 

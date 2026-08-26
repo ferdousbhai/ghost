@@ -35,10 +35,8 @@ require_executable /usr/bin/ghost-launch
 require_executable /usr/lib/ghost/package-smoke/service-browser-smoke.sh
 require_executable /usr/lib/ghost/package-smoke/native-runtime-smoke.sh
 
-if find "$root" -xdev \( ! -uid 0 -o ! -gid 0 \) -print -quit | grep -q .; then
-  printf 'package payload contains a non-root owner\n' >&2
-  exit 1
-fi
+# Numeric ownership is checked on the package archive itself. An unprivileged
+# extraction deliberately owns its materialized tree and cannot preserve root.
 if find "$root" -xdev \( -type f -o -type d \) -perm /022 -print -quit | grep -q .; then
   printf 'package payload contains a group/world-writable path\n' >&2
   exit 1
