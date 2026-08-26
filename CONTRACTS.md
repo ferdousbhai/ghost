@@ -10,16 +10,16 @@ catalog) is derived per session and never stored.
 
 The root is `~/ghosts` unless `ghostsRoot` says otherwise.
 
-A ghost home is its own OMP extension package root, declared by the daemon in
-`.omp/settings.json` as `{ "extensions": ["."] }` before settings are read. That
-is what makes the home's `skills/`, `agents/`, `commands/`, `rules/`,
-`prompts/`, `tools/`, and `hooks/` load, so every artifact a ghost owns sits in
-plain sight beside `character.md` rather than under a dot-directory. Roots
-merge: the owner's global skills, agents, and commands (`~/.agents`, `~/.codex`,
-`~/.claude`, and the rest of OMP's user-level sources) keep arriving alongside.
-Declaring the root in a file rather than in memory is load-bearing, because OMP
-rediscovers skills whenever the tool surface changes and reads this file again
-each time.
+A ghost home is its own OMP extension package root, named explicitly by Ghost
+whenever OMP discovers or rediscovers capabilities. That is what makes the
+home's `skills/`, `agents/`, `commands/`, `rules/`, `prompts/`, `tools/`, and
+`hooks/` load, so every artifact a ghost owns sits in plain sight beside
+`character.md` rather than under a dot-directory. OMP's configured and
+installed package roots are disabled for the session; the owner's global
+skills, agents, and commands (`~/.agents`, `~/.codex`, `~/.claude`, and the
+other capability providers) still arrive alongside. Re-entering the explicit
+root scope for every rediscovery is load-bearing because the first MCP tool
+refresh during startup causes OMP to discover skills again.
 
 ```
 ~/ghosts/<name>/
@@ -33,13 +33,13 @@ each time.
   commands/<name>.md           the ghost's own slash commands
   rules/, prompts/, tools/, hooks/
                                the remaining OMP package-root artifact directories
+  settings.yml                 the ghost's OMP settings
+  models.json                  providers plus model roles and fallback chains
+  mcp.json                     the ghost's MCP servers
   sessions/                    daemon-owned OMP transcripts and runtime sidecars
   sessions/pins.json           v2 pinned state: { "version": 2, "pinned": ["<id>", …] }
   sessions/reads.json          v2 read state: { "version": 2, "reads": { "<id>": "<ISO timestamp>" } }
-  .omp/settings.json           daemon-written: declares the home as its own
-                               extension package root
-  .omp/mcp.json                the ghost's MCP servers
-  .pi/                         per-ghost OMP settings, model roles, and credentials
+  .pi/                         provider credentials and derived OMP machine runtime
   conversations/*.json         lossless source transcripts from the hosted export;
                                retained unchanged until that conversation is trashed
   export-manifest.json         present in imported archives; counts, pathRewrites,
@@ -126,8 +126,7 @@ is an acceptable posture for a file that never leaves the machine, and the whole
 of it rests on that clause. **Nothing that copies a ghost home off this machine
 may include `.pi/`.** There is no export path today, only import, so this is a
 constraint on the one that gets built rather than a description of one that
-exists. Ghost cannot fix the storage itself until it owns the credential loader
-(#14, #3).
+exists. Ghost moves that store to Secret Service in #23.
 
 A deleted ghost home leaves the root entirely, for the system trash; see the
 `DELETE` route. That carries `.pi/` with it, so an owner who excludes
@@ -137,11 +136,12 @@ less. Nothing here fixes that; #23 does, by removing the plaintext store.
 
 One naming convention makes the boundary readable rather than remembered. A
 plain-named entry in a ghost home is part of that ghost's identity and travels
-with it. A dot-prefixed entry is bound to this machine and never leaves it:
-`.pi/` (credentials), `.browser-profile/` (cookies and logins), `.trash/`, and
-`.omp/settings.json`, which an import regenerates rather than copies.
-`.omp/mcp.json` is the exception that proves it, identity pinned into a
-dot-directory by OMP's own convention until ghost owns the config loader.
+with it, including `settings.yml`, `models.json`, and `mcp.json`. A dot-prefixed
+entry is bound to this machine and never leaves it: `.pi/` (credentials and
+derived OMP runtime), `.browser-profile/` (cookies and logins), and `.trash/`.
+Until #23 replaces inline secrets with Secret Service references, credential
+values may still appear inside the otherwise portable `models.json` and
+`mcp.json`; any future export must not copy those values as identity.
 
 ### Session capabilities
 
@@ -174,7 +174,7 @@ Native filesystem and search (`read`, `glob`, `grep`), mutation (`write`,
 project context, extensions/plugins, commands, and the ghost home's own project
 MCP remain available under OMP's normal xd:// presentation. MCP is a deliberate
 sovereignty exception to OMP's normal multi-source discovery: an OMP
-session loads only `<ghost>/.omp/mcp.json` (or the legacy `.omp/.mcp.json`) and
+session loads only `<ghost>/mcp.json` and
 never discovers or loads user/global OMP config or another coding agent's MCP
 config (`~/.codex`, `~/.claude`, `~/.copilot`, and similar). The owner's
 global instructions are the other exception, in the opposite direction: OMP
@@ -348,10 +348,8 @@ one must not be a leak of both.
   The ordinary destination is the freedesktop home Trash; cross-filesystem
   moves fall back to `<ghost>/.trash/`, still by rename rather than copy/unlink.
 - `GET  /api/ghosts/:name/mcp` → `{ servers, skipped }` — the effective
-  project-only MCP configuration from `<ghost>/.omp/mcp.json` followed by the
-  legacy `.omp/.mcp.json`, with canonical same-name precedence: a canonical
-  name shadows its legacy duplicate even when disabled or malformed. It never
-  scans ambient OMP, Codex, Claude, Copilot, or other agent configuration. Each
+  ghost-only MCP configuration from `<ghost>/mcp.json`. It never scans ambient
+  OMP, Codex, Claude, Copilot, or other agent configuration. Each
   valid server is `{ name, enabled, source, path, config, connectionStatus }`.
   `config` is deliberately lossy: header/environment key names and counts may
   be shown, but their values, command arguments, OAuth/auth credentials, URL
@@ -364,8 +362,8 @@ one must not be a leak of both.
   siblings.
 - MCP mutations use OMP's locked atomic project-config writer and return the
   refreshed sanitized snapshot: `POST /api/ghosts/:name/mcp`
-  `{ name, config }` adds to canonical config; `PUT|DELETE
-  /api/ghosts/:name/mcp/:server` replaces/removes the owning effective entry;
+  `{ name, config }` adds to `mcp.json`; `PUT|DELETE
+  /api/ghosts/:name/mcp/:server` replaces/removes the named entry;
   `PUT …/:server/enabled` `{ enabled }` toggles it. Every mutation reloads all
   open OMP conversations for the ghost. An idle session reconnects and replaces
   its mounted MCP tools immediately; a busy session coalesces changes into one
@@ -628,7 +626,7 @@ ending with an invitation to talk. Character, memory-index, and doc-catalog
 inputs are fenced as untrusted data; output that answers instead of greeting is
 rejected outright, never truncated.
 
-Which model serves the lane is the `smol_model` role in `.pi/models.json`,
+Which model serves the lane is the `smol_model` role in `models.json`,
 resolved daemon-side:
 
 1. `roles.smol_model` — the owner's explicit choice; a missing or
@@ -721,7 +719,7 @@ replaces, removes, or reorders the complete retry chain. The older
 Vision primaries/fallbacks must accept images. `claude-code/default` is valid
 only as the primary chat runtime because it is not an OMP provider model.
 
-Ghost persists this in `.pi/models.json` under `roles` and `fallbacks`, then
+Ghost persists this in `models.json` under `roles` and `fallbacks`, then
 projects it onto OMP's `modelRoles` and `retry.fallbackChains`. OMP owns retry
 classification, provider cooldowns, and fallback execution. A successful model
 selection returns immediately and the shell closes the picker back to chat.
@@ -833,11 +831,12 @@ whole model before any non-local exposure.
   (e.g. `GEMINI_API_KEY`) silently add cloud models to a sovereign ghost.
 - Parallel tool calls: wrap shared-file mutations in a file mutation queue.
 - Tools should throw structured errors, not return `isError` payloads.
-- Sessions omit non-MCP discovery/tool restrictions and load read-only effective
-  OMP settings for the ghost cwd/agent directory. Their MCP manager is
-  injected from that ghost's `.omp/mcp.json`/`.omp/.mcp.json` only; machine-level
-  OMP, Codex, Claude, Copilot, and other user/global MCP sources are never
-  discovered. This is a sovereignty invariant like env scrubbing.
+- Sessions omit non-MCP capability-provider restrictions, explicitly scope
+  every artifact discovery to the ghost home, and load read-only settings from
+  that home's `settings.yml` only. Their MCP manager is injected from that
+  ghost's `mcp.json` only; machine-level OMP, Codex, Claude, Copilot, and other
+  user/global MCP sources are never discovered. This is a sovereignty invariant
+  like env scrubbing.
 - OMP may mount non-core tools under xd://; absence from
   `getActiveToolNames()` does not mean absence from its tool registry.
 - Force `memory.backend: "off"` (plus the legacy `memories.enabled` and

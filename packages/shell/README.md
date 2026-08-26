@@ -170,8 +170,7 @@ Commands that OMP exposes but Ghost supports only partially (or not at all)
 remain discoverable with an availability badge and reason; selecting one still
 only stages text, so the palette never suggests that staging proved support.
 
-MCP manages only the selected ghost's project-owned `.omp/mcp.json` (and the
-legacy `.omp/.mcp.json` when it owns an existing row): list, add, replace,
+MCP manages only the selected ghost's visible `mcp.json`: list, add, replace,
 enable/disable, and delete. The daemon's catalog is sanitized before it reaches
 QML. Command arguments, environment/header values, authentication references,
 OAuth settings, and URL query values are never displayed. Safe placement and

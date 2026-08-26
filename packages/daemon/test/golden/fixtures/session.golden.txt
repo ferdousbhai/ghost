@@ -230,16 +230,9 @@ write               registry=yes  wire=yes  invokable=yes
 [ghost home after the conversation]
 ------------------------------------------------------------------------------
 --- .pi/ (contents not compared) ---
-agent.db, models.db, models.json, models.omp.json
+agent.db, models.db, models.omp.json
 --- sessions/ (contents not compared) ---
 conv-golden.jsonl
---- .omp/settings.json ---
-{
-  "extensions": [
-    "."
-  ]
-}
-
 --- character.md ---
 ---
 title: casper
@@ -266,3 +259,38 @@ updated: <today>
 ---
 
 They asked for the story, not the spec sheet. Keep replies to a line or two.
+
+--- models.json ---
+{
+  "providers": {
+    "ghost-local": {
+      "name": "ghost-local",
+      "baseUrl": "<mock-provider>",
+      "api": "openai-completions",
+      "models": [
+        {
+          "id": "mock-ghost-1",
+          "name": "mock-ghost-1",
+          "input": [
+            "text"
+          ],
+          "contextWindow": 128000,
+          "maxTokens": 8192,
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          }
+        }
+      ],
+      "apiKey": "not-needed"
+    }
+  },
+  "roles": {
+    "chat_model": {
+      "provider": "ghost-local",
+      "modelId": "mock-ghost-1"
+    }
+  }
+}

@@ -209,7 +209,7 @@ describe("api-key paste flow", () => {
 
     // A ghost with no chat model gets one bound on success.
     expect(done.modelBound).toEqual({ provider: "openrouter", modelId: "deepseek/deepseek-r1:free" });
-    const models = JSON.parse(readFileSync(ghostModelsPath(ghostPaths(join(root, "casper")).agentDir), "utf8"));
+    const models = JSON.parse(readFileSync(ghostModelsPath(ghostPaths(join(root, "casper")).home), "utf8"));
     expect(models.roles.chat_model).toEqual({ provider: "openrouter", modelId: "deepseek/deepseek-r1:free" });
     // The secret is nowhere in the ghost's models.json either.
     expect(JSON.stringify(models)).not.toContain("sk-or-SECRET-KEY");
@@ -308,7 +308,7 @@ describe("successful login refresh", () => {
     expect(terminal.status).toBe("failed");
     expect(terminal.modelBound).toBeUndefined();
     expect(refreshed).toEqual([]);
-    expect(readGhostModels(ghostPaths(join(root, "casper")).agentDir)?.roles?.chat_model)
+    expect(readGhostModels(ghostPaths(join(root, "casper")).home)?.roles?.chat_model)
       .toBeUndefined();
   });
 
@@ -337,7 +337,7 @@ describe("successful login refresh", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(manager.size).toBe(0);
-    expect(readGhostModels(ghostPaths(join(root, "casper")).agentDir)?.roles?.chat_model)
+    expect(readGhostModels(ghostPaths(join(root, "casper")).home)?.roles?.chat_model)
       .toBeUndefined();
   });
 });
@@ -347,7 +347,7 @@ describe("default model binding", () => {
     temp = makeTempGhosts();
     temp.registry.ensureRoot();
     const dir = seedGhost(temp.root, { name: "casper" });
-    const agentDir = ghostPaths(dir).agentDir;
+    const agentDir = ghostPaths(dir).home;
     const discoveryStarted = deferred();
     const finishDiscovery = deferred<readonly ReturnType<typeof fakeOmpModel>[]>();
     const binding = bindDefaultChatModelIfUnset(
@@ -480,8 +480,8 @@ describe("per-ghost isolation", () => {
     await waitFor(() => manager.view("casper", started.loginId), (v) => v.status === "succeeded");
 
     // Only casper's models.json was written; mina's is untouched.
-    const casperModels = ghostModelsPath(ghostPaths(join(temp.root, "casper")).agentDir);
-    const minaModels = ghostModelsPath(ghostPaths(join(temp.root, "mina")).agentDir);
+    const casperModels = ghostModelsPath(ghostPaths(join(temp.root, "casper")).home);
+    const minaModels = ghostModelsPath(ghostPaths(join(temp.root, "mina")).home);
     expect(readFileSync(casperModels, "utf8")).toContain("openrouter");
     expect(() => readFileSync(minaModels, "utf8")).toThrowError();
   });

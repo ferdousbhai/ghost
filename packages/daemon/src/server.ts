@@ -9,7 +9,7 @@
  *   POST /api/ghosts/:name/messages   pi-messages request → SSE of pi-messages events
  *   POST /api/ghosts/:name/greeting   → { greeting, onboarding } — the empty-chat opener
  *   GET|DELETE /api/ghosts/:name/context → browse or trash one docs/memory file
- *   GET|POST /api/ghosts/:name/mcp    → list or add project MCP servers
+ *   GET|POST /api/ghosts/:name/mcp    → list or add ghost MCP servers
  *   PUT|DELETE /api/ghosts/:name/mcp/:server → replace or remove one server
  *   GET  /api/ghosts/:name/sessions   → { sessions } — conversation listing for that ghost
  *   GET  /api/ghosts/:name/events     → SSE conversation-list invalidations

@@ -1,8 +1,8 @@
-import { join } from "node:path";
 import { openGhostHome } from "@ghost/extensions";
-import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { discoverAgents } from "@oh-my-pi/pi-coding-agent/task/discovery";
 import type { AgentSource } from "@oh-my-pi/pi-coding-agent/task/types";
+import { withGhostArtifactRoot } from "./artifact-root.js";
+import { loadGhostSettings } from "./ghost-settings.js";
 
 export interface GhostContextCharacter {
   path: "character.md";
@@ -54,8 +54,8 @@ export async function readGhostContext(dir: string): Promise<GhostContextSnapsho
     home.readCharacter(),
     home.listDocs(),
     home.listMemory(),
-    discoverAgents(dir),
-    Settings.loadReadOnly({ cwd: dir, agentDir: join(dir, ".pi") }),
+    withGhostArtifactRoot(dir, () => discoverAgents(dir)),
+    loadGhostSettings(dir),
   ]);
 
   const disabledAgents = new Set(settings.get("task.disabledAgents"));

@@ -98,9 +98,9 @@ Singleton {
     property string commandsGhost: ""
     property string commandsSessionId: ""
 
-    // ---- Project MCP -----------------------------------------------------
-    // Only the active ghost's project-owned `.omp/mcp.json` (or legacy
-    // `.omp/.mcp.json`) is represented here. GET is sanitized by the daemon;
+    // ---- Ghost MCP -------------------------------------------------------
+    // Only the active ghost's visible `mcp.json` is represented here. GET is
+    // sanitized by the daemon;
     // secret-bearing values are write-only through mutation bodies.
     property var mcpServers: []
     property var mcpSkipped: []

@@ -56,7 +56,7 @@ function setup(): { catalog: ModelCatalog; agentDir: string; notified: string[] 
   });
   const notified: string[] = [];
   return {
-    agentDir: ghostPaths(home).agentDir,
+    agentDir: ghostPaths(home).home,
     notified,
     catalog: new ModelCatalog({
       registry: temp.registry,

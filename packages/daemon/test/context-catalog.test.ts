@@ -109,14 +109,14 @@ describe("readGhostContext", () => {
 
   it("uses OMP agent precedence and effective disabled-agent settings", async () => {
     const home = makeGhostHome();
-    write(home, ".omp/config.yml", [
+    write(home, "settings.yml", [
       "task:",
       "  disabledAgents:",
       "    - hidden-helper",
       "    - reviewer",
       "",
     ].join("\n"));
-    write(home, ".omp/agents/scout.md", [
+    write(home, "agents/scout.md", [
       "---",
       "name: scout",
       "description: Project scout override",
@@ -126,14 +126,14 @@ describe("readGhostContext", () => {
       "---",
       "Project-only investigation instructions.",
     ].join("\n"));
-    write(home, ".omp/agents/plain-helper.md", [
+    write(home, "agents/plain-helper.md", [
       "---",
       "name: plain-helper",
       "description: Minimal project helper",
       "---",
       "Project helper instructions.",
     ].join("\n"));
-    write(home, ".omp/agents/hidden-helper.md", [
+    write(home, "agents/hidden-helper.md", [
       "---",
       "name: hidden-helper",
       "description: Disabled project helper",
@@ -148,7 +148,7 @@ describe("readGhostContext", () => {
     expect(scout).toEqual({
       name: "scout",
       description: "Project scout override",
-      source: "project",
+      source: "user",
       tools: ["read", "grep", "yield"],
       model: ["@smol", "openai/test-model"],
       spawns: ["task", "librarian"],
@@ -156,7 +156,7 @@ describe("readGhostContext", () => {
     expect(plain).toEqual({
       name: "plain-helper",
       description: "Minimal project helper",
-      source: "project",
+      source: "user",
       tools: null,
       model: [],
       spawns: null,

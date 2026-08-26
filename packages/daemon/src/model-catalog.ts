@@ -458,9 +458,9 @@ export class ModelCatalog {
   private async resolveModelRouting(
     ghostName: string,
     runtime: ModelCatalogRuntime,
-    agentDir: string,
+    configDir: string,
   ): Promise<ModelRoutingView> {
-    const file = this.readModelsFile(agentDir, ghostName);
+    const file = this.readModelsFile(configDir, ghostName);
     // Availability is ghost-wide, not role-wide. Resolve it once alongside
     // the independent harness check, then reuse it for every automatic role.
     const [claudePlan, available] = await Promise.all([
@@ -499,8 +499,8 @@ export class ModelCatalog {
 
   /** All durable Ghost roles and their ordered OMP retry chains. */
   async getModelRouting(ghostName: string): Promise<ModelRoutingView> {
-    return this.withRuntime(ghostName, ({ runtime, agentDir }) =>
-      this.resolveModelRouting(ghostName, runtime, agentDir));
+    return this.withRuntime(ghostName, ({ runtime, configDir }) =>
+      this.resolveModelRouting(ghostName, runtime, configDir));
   }
 
   private validateRoutingModel(
@@ -546,12 +546,12 @@ export class ModelCatalog {
     provider: string,
     id: string,
   ): Promise<ModelRoutingView> {
-    return this.withMutationRuntime(ghostName, async ({ runtime, agentDir }) => {
+    return this.withMutationRuntime(ghostName, async ({ runtime, configDir }) => {
       const model = this.validateRoutingModel(runtime, role, target, provider, id);
       if (target === "primary") {
-        setGhostModelRole(agentDir, role, model.provider, model.id);
+        setGhostModelRole(configDir, role, model.provider, model.id);
       } else {
-        const file = this.readModelsFile(agentDir, ghostName);
+        const file = this.readModelsFile(configDir, ghostName);
         const primary = role === "chat_model" ? resolveChatModelRef(file) : file?.roles?.[role];
         if (primary?.provider === model.provider && primary.modelId === model.id) {
           throw new GhostError(
@@ -560,10 +560,10 @@ export class ModelCatalog {
             400,
           );
         }
-        appendGhostModelFallback(agentDir, role, model.provider, model.id);
+        appendGhostModelFallback(configDir, role, model.provider, model.id);
       }
       await this.notifyModelRoutingChanged(ghostName);
-      return this.resolveModelRouting(ghostName, runtime, agentDir);
+      return this.resolveModelRouting(ghostName, runtime, configDir);
     });
   }
 
@@ -572,10 +572,10 @@ export class ModelCatalog {
     ghostName: string,
     role: GhostModelRole,
   ): Promise<ModelRoutingView> {
-    return this.withMutationRuntime(ghostName, async ({ runtime, agentDir }) => {
-      clearGhostModelFallbacks(agentDir, role);
+    return this.withMutationRuntime(ghostName, async ({ runtime, configDir }) => {
+      clearGhostModelFallbacks(configDir, role);
       await this.notifyModelRoutingChanged(ghostName);
-      return this.resolveModelRouting(ghostName, runtime, agentDir);
+      return this.resolveModelRouting(ghostName, runtime, configDir);
     });
   }
 
@@ -584,10 +584,10 @@ export class ModelCatalog {
     ghostName: string,
     role: GhostModelRole,
   ): Promise<ModelRoutingView> {
-    return this.withMutationRuntime(ghostName, async ({ runtime, agentDir }) => {
-      clearGhostModelRole(agentDir, role);
+    return this.withMutationRuntime(ghostName, async ({ runtime, configDir }) => {
+      clearGhostModelRole(configDir, role);
       await this.notifyModelRoutingChanged(ghostName);
-      return this.resolveModelRouting(ghostName, runtime, agentDir);
+      return this.resolveModelRouting(ghostName, runtime, configDir);
     });
   }
 
@@ -601,8 +601,8 @@ export class ModelCatalog {
     role: GhostModelRole,
     selections: readonly ModelRouteSelection[],
   ): Promise<ModelRoutingView> {
-    return this.withMutationRuntime(ghostName, async ({ runtime, agentDir }) => {
-      const file = this.readModelsFile(agentDir, ghostName);
+    return this.withMutationRuntime(ghostName, async ({ runtime, configDir }) => {
+      const file = this.readModelsFile(configDir, ghostName);
       const primary = role === "chat_model" ? resolveChatModelRef(file) : file?.roles?.[role];
       const bindings: GhostModelRoleBinding[] = [];
       const seen = new Set<string>();
@@ -636,15 +636,15 @@ export class ModelCatalog {
         seen.add(key);
         bindings.push({ provider: model.provider, modelId: model.id });
       }
-      replaceGhostModelFallbacks(agentDir, role, bindings);
+      replaceGhostModelFallbacks(configDir, role, bindings);
       await this.notifyModelRoutingChanged(ghostName);
-      return this.resolveModelRouting(ghostName, runtime, agentDir);
+      return this.resolveModelRouting(ghostName, runtime, configDir);
     });
   }
 
   private async withRuntime<T>(
     ghostName: string,
-    operation: (prepared: { runtime: ModelCatalogRuntime; agentDir: string }) => T | Promise<T>,
+    operation: (prepared: { runtime: ModelCatalogRuntime; configDir: string }) => T | Promise<T>,
   ): Promise<T> {
     const prepared = await this.prepare(ghostName);
     try {
@@ -656,27 +656,28 @@ export class ModelCatalog {
 
   private withMutationRuntime<T>(
     ghostName: string,
-    operation: (prepared: { runtime: ModelCatalogRuntime; agentDir: string }) => T | Promise<T>,
+    operation: (prepared: { runtime: ModelCatalogRuntime; configDir: string }) => T | Promise<T>,
   ): Promise<T> {
     return this.homeOperations.withLease(ghostName, () => this.withRuntime(ghostName, operation));
   }
 
-  private async prepare(ghostName: string): Promise<{ runtime: ModelCatalogRuntime; agentDir: string }> {
+  private async prepare(ghostName: string): Promise<{ runtime: ModelCatalogRuntime; configDir: string }> {
     const ghost = this.registry.get(ghostName);
-    const agentDir = ghostPaths(ghost.dir).agentDir;
+    const paths = ghostPaths(ghost.dir);
+    const configDir = paths.home;
     const runtime = await this.createRuntime({
-      authPath: ghostAuthPath(agentDir),
-      modelsPath: ghostModelsPath(agentDir),
+      authPath: ghostAuthPath(paths.agentDir),
+      modelsPath: ghostModelsPath(configDir),
       // Off when offline: gates only catalogue refresh, never a read of the
       // already-cached static catalogue.
       allowModelNetwork: !this.offline,
     });
-    return { runtime, agentDir };
+    return { runtime, configDir };
   }
 
-  private readModelsFile(agentDir: string, ghostName: string): GhostModelsFile | null {
+  private readModelsFile(configDir: string, ghostName: string): GhostModelsFile | null {
     try {
-      return readGhostModels(agentDir);
+      return readGhostModels(configDir);
     } catch (error) {
       // A broken models.json is not fatal to *reading* the catalogue: report as
       // if unconfigured (OMP's default applies) and log it, mirroring how
@@ -688,8 +689,8 @@ export class ModelCatalog {
 
   /** Which model answers this ghost's turns, and why. Mirrors session-host. */
   async getCurrent(ghostName: string): Promise<CurrentModel> {
-    return this.withRuntime(ghostName, ({ runtime, agentDir }) =>
-      this.resolveCurrent(runtime, this.readModelsFile(agentDir, ghostName)));
+    return this.withRuntime(ghostName, ({ runtime, configDir }) =>
+      this.resolveCurrent(runtime, this.readModelsFile(configDir, ghostName)));
   }
 
   private async resolveCurrent(
@@ -731,18 +732,18 @@ export class ModelCatalog {
    * current selection is flagged, and `catalog` rows carry `usable`.
    */
   async listModels(ghostName: string, query: ListModelsQuery = {}): Promise<ListModelsResult> {
-    return this.withRuntime(ghostName, ({ runtime, agentDir }) =>
-      this.listModelsWithRuntime(ghostName, runtime, agentDir, query));
+    return this.withRuntime(ghostName, ({ runtime, configDir }) =>
+      this.listModelsWithRuntime(ghostName, runtime, configDir, query));
   }
 
   private async listModelsWithRuntime(
     ghostName: string,
     runtime: ModelCatalogRuntime,
-    agentDir: string,
+    configDir: string,
     query: ListModelsQuery,
   ): Promise<ListModelsResult> {
     const scope: ModelScope = query.scope === "catalog" ? "catalog" : "available";
-    const file = this.readModelsFile(agentDir, ghostName);
+    const file = this.readModelsFile(configDir, ghostName);
     const providerFilter = query.provider && query.provider !== "" ? query.provider : undefined;
     const needle = query.q?.trim().toLowerCase();
 
@@ -852,14 +853,14 @@ export class ModelCatalog {
    * shell can prompt a login rather than the switch silently failing.
    */
   async setChatModel(ghostName: string, provider: string, id: string): Promise<SetModelResult> {
-    return this.withMutationRuntime(ghostName, ({ runtime, agentDir }) =>
-      this.setChatModelWithRuntime(ghostName, runtime, agentDir, provider, id));
+    return this.withMutationRuntime(ghostName, ({ runtime, configDir }) =>
+      this.setChatModelWithRuntime(ghostName, runtime, configDir, provider, id));
   }
 
   private async setChatModelWithRuntime(
     ghostName: string,
     runtime: ModelCatalogRuntime,
-    agentDir: string,
+    configDir: string,
     provider: string,
     id: string,
   ): Promise<SetModelResult> {
@@ -871,7 +872,7 @@ export class ModelCatalog {
           400,
         );
       }
-      setChatModelRole(agentDir, provider, id);
+      setChatModelRole(configDir, provider, id);
       await this.notifyModelRoutingChanged(ghostName);
       const usable = await this.claudeCodePlanStatus();
       this.logger.info("ghost chat model set", {
@@ -901,7 +902,7 @@ export class ModelCatalog {
         400,
       );
     }
-    setChatModelRole(agentDir, model.provider, model.id);
+    setChatModelRole(configDir, model.provider, model.id);
     await this.notifyModelRoutingChanged(ghostName);
     const usable = runtime.getProviderAuthStatus(model.provider).configured;
     this.logger.info("ghost chat model set", { ghost: ghostName, provider: model.provider, model: model.id, usable });

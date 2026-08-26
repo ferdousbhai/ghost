@@ -7,8 +7,8 @@
  * `@ghost/extensions`' job.
  *
  * A ghost home is plain files the owner can open, `sessions/` included. The
- * one exception is `.pi/`, which holds provider credentials and the model
- * catalog, and stays hidden until those move out of the home entirely.
+ * one exception is `.pi/`, which holds provider credentials and OMP's
+ * machine-bound runtime state until those move out of the home entirely.
  */
 import { randomUUID } from "node:crypto";
 import {
@@ -38,6 +38,7 @@ export interface Ghost {
 export const GHOST_SESSIONS_DIRNAME = "sessions";
 export const GHOST_AGENT_DIRNAME = ".pi";
 export const GHOST_CHARACTER_FILENAME = "character.md";
+export const GHOST_SETTINGS_FILENAME = "settings.yml";
 
 /**
  * Where a deleted ghost goes when the freedesktop home trash is on another
@@ -120,6 +121,8 @@ function createdAtOf(dir: string): string {
 export function ghostPaths(dir: string): {
   home: string;
   agentDir: string;
+  settingsRuntimeDir: string;
+  settingsFile: string;
   sessionDir: string;
   characterFile: string;
 } {
@@ -128,6 +131,8 @@ export function ghostPaths(dir: string): {
   return {
     home,
     agentDir,
+    settingsRuntimeDir: join(agentDir, "runtime"),
+    settingsFile: join(home, GHOST_SETTINGS_FILENAME),
     sessionDir: join(home, GHOST_SESSIONS_DIRNAME),
     characterFile: join(home, GHOST_CHARACTER_FILENAME),
   };

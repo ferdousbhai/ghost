@@ -112,6 +112,7 @@ describe("golden: session", () => {
     });
 
     const normalizer = new Normalizer()
+      .path(provider.url, "<mock-provider>")
       .path(dir, "<ghost-home>")
       .path(temp.root, "<ghosts-root>");
     const sections: GoldenSection[] = [];

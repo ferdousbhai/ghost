@@ -33,7 +33,7 @@ import type { Api, AssistantMessage, Model } from "@oh-my-pi/pi-ai";
 import type { GhostModelRoleBinding } from "./models.js";
 import type { GhostOmpRuntime } from "./omp-runtime.js";
 
-/** The role name in `<home>/.pi/models.json`. Mirrors `GhostModelRole`. */
+/** The role name in `<home>/models.json`. Mirrors `GhostModelRole`. */
 export const SMOL_MODEL_ROLE = "smol_model";
 
 // ---------------------------------------------------------------------------
@@ -148,7 +148,7 @@ export function resolveSmolModel(
       throw new SmolModelUnavailableError(
         `This ghost's ${SMOL_MODEL_ROLE} role names ${ref.provider}/${ref.modelId}, `
         + "which is not in its model catalogue. Fix roles.smol_model in "
-        + ".pi/models.json, or declare that provider and model there.",
+        + "models.json, or declare that provider and model there.",
         "unknown_model",
       );
     }
@@ -168,7 +168,7 @@ export function resolveSmolModel(
     throw new SmolModelUnavailableError(
       "This ghost has no usable model for its cheap background work: no provider in its "
       + "catalogue is authenticated. Sign a provider in, or set roles.smol_model in "
-      + ".pi/models.json.",
+      + "models.json.",
       "none_available",
     );
   }

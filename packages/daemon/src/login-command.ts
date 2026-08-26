@@ -284,7 +284,7 @@ export async function loginCommand(
     const paths = ghostPaths(ghost.dir);
     const runtime = await createGhostOmpRuntime({
       authPath: ghostAuthPath(paths.agentDir),
-      modelsPath: ghostModelsPath(paths.agentDir),
+      modelsPath: ghostModelsPath(paths.home),
       allowModelNetwork: !config.offline,
     });
     const choice = await resolveProvider(rl, runtime, args);
@@ -292,7 +292,7 @@ export async function loginCommand(
     out(`\nSigning ${ghost.name} in to ${choice.name} (${choice.authType})...`);
     await runtime.login(choice.id, choice.authType, terminalInteraction(rl));
 
-    const bound = await bindDefaultChatModelIfUnset(paths.agentDir, runtime, choice.id);
+    const bound = await bindDefaultChatModelIfUnset(paths.home, runtime, choice.id);
     out(`\n✓ ${ghost.name} is signed in to ${choice.name}.`);
     if (bound) out(`  Chat model set to ${bound.provider}/${bound.modelId}.`);
     else out("  Pick a model in the shell, or set roles.chat_model in models.json.");

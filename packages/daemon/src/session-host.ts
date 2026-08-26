@@ -9,7 +9,7 @@
  *
  *   cwd        = ~/ghosts/<name>            the ghost home; extensions derive
  *                                           their paths from ctx.cwd
- *   agentDir   = ~/ghosts/<name>/.pi        settings, models.json, agent.db
+ *   agentDir   = ~/ghosts/<name>/.pi        credentials and OMP runtime state
  *   sessionDir = ~/ghosts/<name>/sessions  transcripts
  *
  * Four decisions that are easy to get wrong and are load-bearing here:
@@ -22,11 +22,11 @@
  *    per-ghost encryption depend on.
  *
  * 2. **Sessions use the native OMP runtime.** Its prompt, filesystem,
- *    Bash, skills, rules, project context, plugins, project MCP, web search,
+ *    Bash, skills, rules, project context, plugins, ghost MCP, web search,
  *    task/hub, and background-job machinery stay enabled. Ghost appends its
  *    persona and adds the capabilities that are genuinely Ghost-specific.
  *    MCP is deliberately narrower than OMP's default discovery: only the
- *    ghost home's own `.omp/mcp.json` (or `.omp/.mcp.json`) is loaded, never
+ *    ghost home's own `mcp.json` is loaded, never
  *    user/global config belonging to OMP or another coding agent.
  *
  * 3. **Ghost has no approval UI.** Sessions are deliberately local and
@@ -50,7 +50,6 @@ import {
   visitEntriesFromFile,
   visitEntriesFromFileStream,
 } from "@oh-my-pi/pi-coding-agent/session/session-loader";
-import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { SettingPath } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { SourceMeta } from "@oh-my-pi/pi-coding-agent/capability/types";
 import { expandEnvVarsDeep } from "@oh-my-pi/pi-coding-agent/discovery/helpers";
@@ -158,7 +157,12 @@ export {
   sessionFileNameFor,
 };
 import { createGhostOmpRuntime, type GhostOmpRuntime } from "./omp-runtime.js";
-import { ensureGhostArtifactRoot } from "./artifact-root.js";
+import {
+  ghostHookExtensionPaths,
+  scopeGhostSessionArtifactRediscovery,
+  withGhostArtifactRoot,
+} from "./artifact-root.js";
+import { loadGhostSettings } from "./ghost-settings.js";
 import { AskBroker, AskBrokerError, type PendingAsk } from "./ask-broker.js";
 import {
   buildGhostAvailableSlashCommands,
@@ -269,7 +273,7 @@ export type TitleGenerator = (input: {
   session: AgentSession;
   runtime: GhostOmpRuntime;
   ghostName: string;
-  agentDir: string;
+  configDir: string;
   firstPrompt: string;
   signal: AbortSignal;
 }) => Promise<string>;
@@ -286,10 +290,10 @@ export interface TitleConfig {
 export const DEFAULT_TITLE_TIMEOUT_MS = 15_000;
 
 /** The default: resolve smol_model against the session's own runtime, complete once. */
-const defaultTitleGenerator: TitleGenerator = async ({ runtime, agentDir, firstPrompt, signal }) => {
+const defaultTitleGenerator: TitleGenerator = async ({ runtime, configDir, firstPrompt, signal }) => {
   let ref = null;
   try {
-    ref = resolveSmolModelRef(readGhostModels(agentDir));
+    ref = resolveSmolModelRef(readGhostModels(configDir));
   } catch {
     // A broken models.json is not fatal to titling: fall back to cheapest usable.
     ref = null;
@@ -490,7 +494,7 @@ interface HostedSession extends GhostSessionHandle {
   pendingAuthRefresh?: boolean;
   /** Config changed during a turn or live voice; reconnect once idle. */
   pendingMcpReload?: boolean;
-  /** Project MCP reconnect/tool refresh work currently touching this session. */
+  /** Ghost MCP reconnect/tool refresh work currently touching this session. */
   mcpTransitions?: number;
   /**
    * The in-flight background title generation, if any. `listSessions` awaits it
@@ -513,7 +517,7 @@ interface HostedSession extends GhostSessionHandle {
   forceDisposeStarted?: boolean;
   /** Monotonic external turn id used by the Ghost session_stop contract. */
   turnId: number;
-  /** MCP lifecycle populated strictly from this ghost home's `.omp/`. */
+  /** MCP lifecycle populated strictly from this ghost home's `mcp.json`. */
   mcp?: HostedMCP;
 }
 
@@ -832,11 +836,11 @@ export async function migrateLegacySessionTitle(
 }
 
 /**
- * Connect only the native project MCP files contained by one ghost home.
+ * Connect only the MCP file contained by one ghost home.
  *
  * OMP's ordinary discovery intentionally merges user-level OMP configuration
  * with Codex, Claude, Copilot, and other coding-agent sources. A sovereign
- * ghost must not even scan those sources. Reading the two native project files
+ * ghost must not even scan those sources. Reading the visible ghost file
  * directly, then injecting the resulting manager into the SDK, preserves the
  * ghost's own MCP without consulting anything outside its home.
  */
@@ -886,7 +890,7 @@ async function connectGhostProjectMCP(
     }
   } catch (error) {
     logger.error("ghost project MCP failed to load", {
-      path: join(ghostHome, ".omp"),
+      path: join(ghostHome, "mcp.json"),
       error: error instanceof Error ? error.message : String(error),
     });
   }
@@ -1245,7 +1249,10 @@ export class SessionHost {
       true,
     );
     try {
-      return buildGhostAvailableSlashCommands(hosted.session);
+      return withGhostArtifactRoot(
+        hosted.ghost.dir,
+        () => buildGhostAvailableSlashCommands(hosted.session),
+      );
     } finally {
       await this.releaseSessionClaim(hosted, ghostName);
     }
@@ -1255,7 +1262,7 @@ export class SessionHost {
   private assertOmpRuntime(ghostName: string, feature: string): Ghost {
     const ghost = this.registry.get(ghostName);
     try {
-      const configured = resolveChatModelRef(readGhostModels(ghostPaths(ghost.dir).agentDir));
+      const configured = resolveChatModelRef(readGhostModels(ghostPaths(ghost.dir).home));
       if (configured?.provider === CLAUDE_CODE_PROVIDER_ID) {
         throw new GhostError(
           "not_supported",
@@ -1420,10 +1427,6 @@ export class SessionHost {
     const paths = ghostPaths(ghost.dir);
     mkdirSync(paths.agentDir, { recursive: true });
     mkdirSync(paths.sessionDir, { recursive: true });
-    // Before settings are read: this is what makes the home's own `skills/`,
-    // `agents/`, `commands/`, `rules/`, `prompts/`, `tools/`, and `hooks/`
-    // discoverable.
-    ensureGhostArtifactRoot(paths.home);
 
     const settingsOverrides: Partial<Record<SettingPath, unknown>> = {
       ...nativeCompactionSettings(this.compactionConfig),
@@ -1476,7 +1479,7 @@ export class SessionHost {
       // belongs here rather than in the broker: OMP's ask tool resolves the
       // deadline once, subtracting plan mode and an explicit `0`, and hands the
       // broker the answer. Setting it as an override also puts the daemon-wide
-      // value above a ghost home's own `.omp` settings, which is the direction
+      // value above a ghost home's own settings, which is the direction
       // it was always meant to run — the person at the keyboard decides how
       // long a dialog waits, not the persona asking.
       "ask.timeout": this.askTimeoutSeconds,
@@ -1485,13 +1488,9 @@ export class SessionHost {
       // actual question, and opens the HUD when clicked.
       "ask.notify": "off",
     };
-    const settings = await Settings.loadReadOnly({
-      cwd: paths.home,
-      agentDir: paths.agentDir,
-      overrides: settingsOverrides,
-    });
+    const settings = await loadGhostSettings(paths.home, settingsOverrides);
     try {
-      const routing = ghostOmpModelRouting(readGhostModels(paths.agentDir));
+      const routing = ghostOmpModelRouting(readGhostModels(paths.home));
       settings.override("modelRoles", routing.modelRoles);
       settings.override("retry.fallbackChains", routing.fallbackChains);
     } catch (error) {
@@ -1524,7 +1523,7 @@ export class SessionHost {
 
     const modelRuntime = await createGhostOmpRuntime({
       authPath: ghostAuthPath(paths.agentDir),
-      modelsPath: ghostModelsPath(paths.agentDir),
+      modelsPath: ghostModelsPath(paths.home),
       // Provider catalogs are fetched only when the daemon is not offline.
       allowModelNetwork: !this.offline,
       settings,
@@ -1550,6 +1549,7 @@ export class SessionHost {
     await this.promoteLegacySessionTitle(sessionManager, ghostName, sessionKey);
 
     const ask = new AskBroker(this.logger);
+    const hookExtensionPaths = await ghostHookExtensionPaths(paths.home);
     let created: Awaited<ReturnType<typeof createAgentSession>>;
     try {
       created = await createAgentSession({
@@ -1559,6 +1559,9 @@ export class SessionHost {
         authStorage: modelRuntime.authStorage,
         modelRegistry: modelRuntime.modelRegistry,
         extensions: extensions.factories,
+        additionalExtensionPaths: [paths.home],
+        disableExtensionDiscovery: true,
+        preloadedExtensionPaths: hookExtensionPaths,
         hasUI: false,
         // `ask` is a human-input bridge, not a tool-approval surface. OMP keeps
         // those concerns separate: interactivePrompts exposes AskTool while the
@@ -1579,6 +1582,7 @@ export class SessionHost {
       throw error;
     }
     const { session, extensionsResult, setToolUIContext } = created;
+    scopeGhostSessionArtifactRediscovery(session, paths.home);
     setToolUIContext(ask.uiContext, true);
 
     // Injected managers are borrowed in OMP's ownership model, so Ghost must
@@ -2028,12 +2032,12 @@ export class SessionHost {
    * throws — a failure leaves the previous binding in place and is logged.
    */
   private async rebindSessionModel(hosted: HostedSession, ghostName: string): Promise<void> {
-    const agentDir = ghostPaths(hosted.ghost.dir).agentDir;
+    const configDir = ghostPaths(hosted.ghost.dir).home;
     try {
       hosted.model = await this.selectModel(
         hosted.session,
         hosted.modelRuntime,
-        agentDir,
+        configDir,
         ghostName,
       );
     } catch (error) {
@@ -2055,12 +2059,12 @@ export class SessionHost {
   private async selectModel(
     session: AgentSession,
     modelRuntime: GhostOmpRuntime,
-    agentDir: string,
+    configDir: string,
     ghostName: string,
   ): Promise<{ provider: string; id: string } | null> {
     let ref: ReturnType<typeof resolveChatModelRef> = null;
     try {
-      const file = readGhostModels(agentDir);
+      const file = readGhostModels(configDir);
       const routing = ghostOmpModelRouting(file);
       session.settings.override("modelRoles", routing.modelRoles);
       session.settings.override("retry.fallbackChains", routing.fallbackChains);
@@ -2306,7 +2310,7 @@ export class SessionHost {
     }
     let configured: ReturnType<typeof resolveChatModelRef> = null;
     try {
-      configured = resolveChatModelRef(readGhostModels(paths.agentDir));
+      configured = resolveChatModelRef(readGhostModels(paths.home));
     } catch (error) {
       this.logger.error("models.json is unusable", {
         ghost: ghostName,
@@ -2487,7 +2491,7 @@ export class SessionHost {
       // Name the conversation from its first message, fire-and-forget. Runs
       // after the reply is fully delivered and never blocks the next turn.
       if (shouldTitle) {
-        this.startBackgroundTitle(hosted, ghostName, paths.agentDir, options.prompt);
+        this.startBackgroundTitle(hosted, ghostName, paths.home, options.prompt);
       }
       await this.announceConversationUpdated(ghostName, "pi", conversationId);
     }
@@ -2504,7 +2508,7 @@ export class SessionHost {
   private startBackgroundTitle(
     hosted: HostedSession,
     ghostName: string,
-    agentDir: string,
+    configDir: string,
     firstPrompt: string,
   ): void {
     const controller = new AbortController();
@@ -2529,7 +2533,7 @@ export class SessionHost {
       session: hosted.session,
       runtime: hosted.modelRuntime,
       ghostName,
-      agentDir,
+      configDir,
       firstPrompt,
       signal: controller.signal,
     }));
@@ -2671,10 +2675,10 @@ export class SessionHost {
     ghost: Ghost;
     context: GreetingContextInput;
   }): Promise<string | null> {
-    const agentDir = ghostPaths(input.ghost.dir).agentDir;
+    const configDir = ghostPaths(input.ghost.dir).home;
     let ref: GhostModelRoleBinding | null = null;
     try {
-      ref = resolveSmolModelRef(readGhostModels(agentDir));
+      ref = resolveSmolModelRef(readGhostModels(configDir));
     } catch {
       // A broken models.json is not fatal to greeting: fall back to cheapest usable.
       ref = null;
@@ -2703,7 +2707,7 @@ export class SessionHost {
     const paths = ghostPaths(ghost.dir);
     const runtime = await createGhostOmpRuntime({
       authPath: ghostAuthPath(paths.agentDir),
-      modelsPath: ghostModelsPath(paths.agentDir),
+      modelsPath: ghostModelsPath(paths.home),
       allowModelNetwork: !this.offline,
     });
     try {

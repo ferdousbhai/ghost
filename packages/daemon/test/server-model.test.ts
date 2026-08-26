@@ -70,7 +70,7 @@ async function serve(options: ServeOptions = {}): Promise<string> {
 
 function agentDir(name = "casper"): string {
   if (!temp) throw new Error("no temp ghosts");
-  return ghostPaths(`${temp.root}/${name}`).agentDir;
+  return ghostPaths(`${temp.root}/${name}`).home;
 }
 
 async function getJson(url: string): Promise<{ status: number; body: Record<string, unknown>; raw: string }> {

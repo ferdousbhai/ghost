@@ -101,7 +101,7 @@ describe("path-bound mutations during whole-home moves", () => {
     expect(selected.status).toBe(200);
     expect(renamed.status).toBe(200);
     expect(existsSync(join(temp.root, "casper"))).toBe(false);
-    const movedModels = readGhostModels(ghostPaths(join(temp.root, "wisp")).agentDir);
+    const movedModels = readGhostModels(ghostPaths(join(temp.root, "wisp")).home);
     expect(movedModels?.roles?.chat_model).toEqual({
       provider: "openai-codex",
       modelId: "gpt-5-codex",
@@ -176,7 +176,7 @@ describe("path-bound mutations during whole-home moves", () => {
     expect(deleted.status).toBe(200);
     const { trash } = await deleted.json() as { trash: string };
     expect(existsSync(join(temp.root, "casper"))).toBe(false);
-    const moved = JSON.parse(readFileSync(join(trash, ".omp", "mcp.json"), "utf8")) as {
+    const moved = JSON.parse(readFileSync(join(trash, "mcp.json"), "utf8")) as {
       mcpServers: Record<string, unknown>;
     };
     expect(Object.keys(moved.mcpServers)).toEqual(["alpha"]);

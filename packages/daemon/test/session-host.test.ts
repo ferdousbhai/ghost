@@ -14,6 +14,7 @@ import type { LiveSessionControllerOptions } from "@oh-my-pi/pi-coding-agent/liv
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { claudeSessionMetadataPath } from "../src/claude-code.js";
 import { GHOST_COMPACTION_PROMPT } from "../src/compaction.js";
+import { withGhostArtifactRoot } from "../src/artifact-root.js";
 import { ghostPaths } from "../src/ghosts.js";
 import {
   clearGhostModelRole,
@@ -69,8 +70,6 @@ function writeMcpFixture(
   dir: string,
   options: { enabled?: boolean; empty?: boolean } = {},
 ): void {
-  const ompDir = join(dir, ".omp");
-  mkdirSync(ompDir, { recursive: true });
   const serverPath = join(dir, "reload-mcp.mjs");
   if (!existsSync(serverPath)) {
     writeFileSync(
@@ -96,7 +95,7 @@ lines.on("line", (line) => {
     );
   }
   writeFileSync(
-    join(ompDir, "mcp.json"),
+    join(dir, "mcp.json"),
     JSON.stringify({
       mcpServers: options.empty ? {} : {
         reload_fixture: {
@@ -276,7 +275,7 @@ describe("OMP slash commands", () => {
 
   it("reports that an active Claude Code runtime has no OMP command catalog", async () => {
     const { dir } = await setup([{ kind: "text", text: "unused" }]);
-    setChatModelRole(ghostPaths(dir).agentDir, "claude-code", "default");
+    setChatModelRole(ghostPaths(dir).home, "claude-code", "default");
 
     await expect(host!.availableCommands("casper", "conv-claude"))
       .rejects.toMatchObject({ code: "not_supported", status: 409 });
@@ -333,10 +332,8 @@ describe("SessionHost.open", () => {
 
   it("leaves OMP retry behavior under the ghost home's own settings", async () => {
     const { dir } = await setup([{ kind: "text", text: "hello" }]);
-    const ompDir = join(dir, ".omp");
-    mkdirSync(ompDir, { recursive: true });
     writeFileSync(
-      join(ompDir, "config.yml"),
+      ghostPaths(dir).settingsFile,
       "retry:\n  modelFallback: false\n  fallbackRevertPolicy: never\n",
       "utf8",
     );
@@ -388,10 +385,10 @@ describe("SessionHost.open", () => {
     expect(other.sessionFile).not.toBe(first.sessionFile);
   });
 
-  it("loads native OMP project extensions from the ghost home", async () => {
+  it("loads executable hooks from the visible ghost home", async () => {
     const { dir } = await setup([{ kind: "text", text: "hello" }]);
     const { mkdirSync, writeFileSync } = await import("node:fs");
-    const extDir = join(dir, ".omp", "extensions");
+    const extDir = join(dir, "hooks", "pre");
     mkdirSync(extDir, { recursive: true });
     writeFileSync(
       join(extDir, "project.ts"),
@@ -406,12 +403,9 @@ describe("SessionHost.open", () => {
     expect(handle.session.getToolByName("project_tool")).toBeDefined();
   });
 
-  it("loads only the ghost home's project MCP, never ambient coding-agent MCP", async () => {
+  it("loads only the ghost home's MCP, never ambient coding-agent MCP", async () => {
     const { dir } = await setup([{ kind: "text", text: "hello" }]);
-    const { mkdirSync } = await import("node:fs");
-    const ompDir = join(dir, ".omp");
     const serverPath = join(dir, "project-mcp.mjs");
-    mkdirSync(ompDir, { recursive: true });
     writeFileSync(
       serverPath,
       `import { createInterface } from "node:readline";
@@ -429,7 +423,7 @@ lines.on("line", (line) => {
   } else if (request.method === "tools/list") {
     send(request.id, { tools: [{
       name: "project_echo",
-      description: "Echo from the ghost home's project MCP.",
+      description: "Echo from the ghost home's MCP.",
       inputSchema: { type: "object", properties: {}, additionalProperties: false },
     }] });
   } else if (request.method === "resources/list") {
@@ -446,7 +440,7 @@ lines.on("line", (line) => {
       "utf8",
     );
     writeFileSync(
-      join(ompDir, "mcp.json"),
+      join(dir, "mcp.json"),
       JSON.stringify({
         mcpServers: {
           ghost_project: {
@@ -492,10 +486,18 @@ lines.on("line", (line) => {
     expect(handle.session.skills.map((skill) => skill.name)).toContain("inking");
     expect(handle.session.slashCommands?.map((command) => command.name) ?? [])
       .toContain("proofsheet");
+    mkdirSync(join(dir, "skills", "engraving"), { recursive: true });
+    writeFileSync(
+      join(dir, "skills", "engraving", "SKILL.md"),
+      "---\nname: engraving\ndescription: Cut an engraving.\n---\n\nCut it.\n",
+      "utf8",
+    );
+    await handle.session.refreshSkills();
+    expect(handle.session.skills.map((skill) => skill.name)).toContain("engraving");
     // Subagents are discovered when `task` runs rather than at open, so assert
     // against the same discovery the tool uses.
     const { discoverAgents } = await import("@oh-my-pi/pi-coding-agent/task/discovery");
-    const agents = await discoverAgents(dir);
+    const agents = await withGhostArtifactRoot(dir, () => discoverAgents(dir));
     expect(agents.agents.map((agent) => agent.name)).toContain("pressman");
     // The owner's global skills keep arriving alongside the ghost's own.
     expect(handle.session.skills.length).toBeGreaterThan(1);
@@ -542,7 +544,7 @@ lines.on("line", (line) => {
       "# Workshop rule\nAlways identify the composing stick.\n",
       "utf8",
     );
-    const skillDir = join(dir, ".omp", "skills", "press-review");
+    const skillDir = join(dir, "skills", "press-review");
     mkdirSync(skillDir, { recursive: true });
     writeFileSync(
       join(skillDir, "SKILL.md"),
@@ -930,10 +932,11 @@ describe("SessionHost live voice ownership", () => {
 });
 
 describe("SessionHost.reloadMcp", () => {
-  it("lets a disabled canonical server shadow an enabled legacy duplicate on open and reload", async () => {
+  it("never falls back to the former hidden MCP path on open or reload", async () => {
     const { dir } = await setup([{ kind: "text", text: "unused" }]);
     writeMcpFixture(dir, { enabled: false });
     const serverPath = join(dir, "reload-mcp.mjs");
+    mkdirSync(join(dir, ".omp"), { recursive: true });
     writeFileSync(
       join(dir, ".omp", ".mcp.json"),
       JSON.stringify({
@@ -954,11 +957,11 @@ describe("SessionHost.reloadMcp", () => {
 
     writeMcpFixture(dir, { empty: true });
     await host!.reloadMcp("casper");
-    expect(handle.session.getToolByName(toolName)).toBeDefined();
-
-    writeMcpFixture(dir, { enabled: false });
-    await host!.reloadMcp("casper");
     expect(handle.session.getToolByName(toolName)).toBeUndefined();
+
+    writeMcpFixture(dir);
+    await host!.reloadMcp("casper");
+    expect(handle.session.getToolByName(toolName)).toBeDefined();
   });
 
   it("mounts the first server across open conversations and unmounts disabled or removed tools", async () => {
@@ -1216,7 +1219,7 @@ describe("SessionHost.runTurn", () => {
         modelId: fallback.modelId,
         apiKey: "fallback-key",
       });
-      writeGhostModels(ghostPaths(dir).agentDir, {
+      writeGhostModels(ghostPaths(dir).home, {
         providers: { ...primaryFile.providers, ...fallbackFile.providers },
         roles: { chat_model: { provider: "primary", modelId: provider.modelId } },
         fallbacks: {
@@ -2710,7 +2713,7 @@ describe("model switch reaches a live cached session", () => {
     provider = await startMockProvider({ script: [{ kind: "text", text: "ok" }] });
     const dir = seedGhost(temp.root, { name: "casper" });
     const paths = ghostPaths(dir);
-    writeGhostModels(paths.agentDir, twoModelFile(provider.url));
+    writeGhostModels(paths.home, twoModelFile(provider.url));
     host = new SessionHost({ registry: temp.registry, offline: true });
 
     // First turn: the session is built once and cached, bound to model-a.
@@ -2720,7 +2723,7 @@ describe("model switch reaches a live cached session", () => {
     // Switch the role on disk exactly as ModelCatalog.setChatModel does, then
     // fire the same rebind hook it invokes. Without the rebind the cached
     // session would answer on model-a forever.
-    setChatModelRole(paths.agentDir, "ghost-local", "model-b");
+    setChatModelRole(paths.home, "ghost-local", "model-b");
     await host.rebindModel("casper");
 
     // The SAME cached conversation now answers on model-b.
@@ -2735,13 +2738,13 @@ describe("model switch reaches a live cached session", () => {
     const paths = ghostPaths(dir);
     const models = twoModelFile(provider.url);
     models.roles = { chat_model: { provider: "ghost-local", modelId: "model-b" } };
-    writeGhostModels(paths.agentDir, models);
+    writeGhostModels(paths.home, models);
     host = new SessionHost({ registry: temp.registry, offline: true });
 
     const handle = await host.open("casper", "conv-default-rebind");
     expect(handle.model).toEqual({ provider: "ghost-local", id: "model-b" });
 
-    clearGhostModelRole(paths.agentDir, "chat_model");
+    clearGhostModelRole(paths.home, "chat_model");
     await host.rebindModel("casper");
 
     expect(handle.model).toEqual({ provider: "ghost-local", id: "model-a" });
@@ -2756,7 +2759,7 @@ describe("model switch reaches a live cached session", () => {
     });
     const dir = seedGhost(temp.root, { name: "casper" });
     const paths = ghostPaths(dir);
-    writeGhostModels(paths.agentDir, twoModelFile(provider.url));
+    writeGhostModels(paths.home, twoModelFile(provider.url));
     host = new SessionHost({ registry: temp.registry, offline: true });
 
     // Build and cache the session up front, so the timed turn below reuses it
@@ -2773,7 +2776,7 @@ describe("model switch reaches a live cached session", () => {
     await new Promise((resolve) => setTimeout(resolve, 5));
 
     // Switch while busy: the model must not be yanked out from under the run.
-    setChatModelRole(paths.agentDir, "ghost-local", "model-b");
+    setChatModelRole(paths.home, "ghost-local", "model-b");
     await host.rebindModel("casper");
     await inflight;
 
@@ -2805,13 +2808,13 @@ describe("model switch reaches a live cached session", () => {
     });
     const dir = seedGhost(temp.root, { name: "casper" });
     const paths = ghostPaths(dir);
-    writeGhostModels(paths.agentDir, twoModelFile(provider.url));
+    writeGhostModels(paths.home, twoModelFile(provider.url));
     host = new SessionHost({ registry: temp.registry, offline: true });
     const handle = await host.open("casper", "conv-remote-model");
 
     const remoteTurn = handle.session.prompt("Remote prompt.");
     const pending = await waitFor(() => host!.pendingAsk("casper", "conv-remote-model"));
-    setChatModelRole(paths.agentDir, "ghost-local", "model-b");
+    setChatModelRole(paths.home, "ghost-local", "model-b");
     await host.rebindModel("casper");
     expect(handle.model).toEqual({ provider: "ghost-local", id: "model-a" });
 
@@ -2829,7 +2832,7 @@ describe("model switch reaches a live cached session", () => {
     provider = await startMockProvider({ script: [{ kind: "text", text: "unused" }] });
     const dir = seedGhost(temp.root, { name: "casper" });
     const paths = ghostPaths(dir);
-    writeGhostModels(paths.agentDir, twoModelFile(provider.url));
+    writeGhostModels(paths.home, twoModelFile(provider.url));
     const voice = testLiveVoice();
     host = new SessionHost({
       registry: temp.registry,
@@ -2839,7 +2842,7 @@ describe("model switch reaches a live cached session", () => {
     const handle = await host.open("casper", "conv-voice-model");
     await host.liveVoiceAction("casper", "conv-voice-model", "start");
 
-    setChatModelRole(paths.agentDir, "ghost-local", "model-b");
+    setChatModelRole(paths.home, "ghost-local", "model-b");
     await host.rebindModel("casper");
     expect(handle.model).toEqual({ provider: "ghost-local", id: "model-a" });
 
@@ -2856,7 +2859,7 @@ describe("model switch reaches a live cached session", () => {
     provider = await startMockProvider({ script: [{ kind: "text", text: "unused" }] });
     const dir = seedGhost(temp.root, { name: "casper" });
     const paths = ghostPaths(dir);
-    writeGhostModels(paths.agentDir, twoModelFile(provider.url));
+    writeGhostModels(paths.home, twoModelFile(provider.url));
     const voice = testLiveVoice(startGate, new Error("microphone unavailable"));
     host = new SessionHost({
       registry: temp.registry,
@@ -2867,7 +2870,7 @@ describe("model switch reaches a live cached session", () => {
     const starting = host.liveVoiceAction("casper", "conv-voice-start-failure", "start");
     await voice.startEntered;
 
-    setChatModelRole(paths.agentDir, "ghost-local", "model-b");
+    setChatModelRole(paths.home, "ghost-local", "model-b");
     await host.rebindModel("casper");
     releaseStart();
     await expect(starting).rejects.toMatchObject({ code: "live_start_failed", status: 502 });
@@ -2956,7 +2959,7 @@ describe("the first meeting", () => {
     provider = await startMockProvider({ script: [{ kind: "text", text: "hello" }] });
     const ghost = temp.registry.create("wisp");
     writeGhostModels(
-      ghostPaths(ghost.dir).agentDir,
+      ghostPaths(ghost.dir).home,
       openAiCompatiblePreset({
         providerId: "ghost-local",
         baseUrl: provider.url,

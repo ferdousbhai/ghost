@@ -6,7 +6,7 @@
  * proved the consequence: with `GEMINI_API_KEY` merely *present* in the
  * shell, a sovereign ghost silently gained 22 Google cloud models it was
  * never configured for. A ghost must be able to reach exactly the endpoints
- * its own `<home>/.pi/models.json` declares — nothing the daemon happened to
+ * its own `<home>/models.json` declares — nothing the daemon happened to
  * inherit from the user's login shell, a systemd `EnvironmentFile`, or a
  * terminal that had just sourced a project `.envrc`.
  *
@@ -18,7 +18,7 @@
  *
  * Credentials therefore come from exactly two places, both per-ghost and
  * both inside the ghost home:
- *   - `<home>/.pi/models.json` — provider definitions incl. `apiKey`
+ *   - `<home>/models.json`     — provider definitions incl. `apiKey`
  *   - `<home>/.pi/agent.db`    — OMP's credential store
  *
  * ## What is removed

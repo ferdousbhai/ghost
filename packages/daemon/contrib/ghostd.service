@@ -21,7 +21,7 @@ SendSIGKILL=yes
 # The daemon scrubs inherited provider credentials itself (see env-scrub.ts),
 # but a service that never had them is better than one that drops them.
 # Do NOT add an EnvironmentFile with API keys here: a ghost's credentials
-# belong in %h/Ghosts/<name>/.pi/{models.json,agent.db}.
+# belong in %h/Ghosts/<name>/{models.json,.pi/agent.db}.
 Environment=GHOSTD_HOST=127.0.0.1
 
 # Local-only service; nothing here should reach outside the user's own files.

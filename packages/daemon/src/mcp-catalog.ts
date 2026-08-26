@@ -3,10 +3,8 @@
  *
  * OMP normally discovers MCP servers from several user-level and third-party
  * coding-agent locations. Ghost deliberately does not call that discovery
- * path here: the only inputs are the two native files inside the selected
- * ghost home. New servers are written to `.omp/mcp.json`; the older
- * `.omp/.mcp.json` remains readable and editable so existing homes can be
- * managed without an implicit migration.
+ * path here: the only input is the visible `mcp.json` inside the selected
+ * ghost home.
  *
  * The list view is safe to send to a UI. It never returns header or environment
  * values, command arguments, OAuth client secrets, or URL query values.
@@ -38,7 +36,7 @@ import {
   type HomeOperationCoordinator,
 } from "./home-operations.js";
 
-export type McpConfigSource = "canonical" | "legacy";
+export type McpConfigSource = "canonical";
 export type McpTransport = "stdio" | "http" | "sse";
 
 export interface McpConfiguredKeysView {
@@ -92,7 +90,7 @@ export interface McpServerView {
   enabled: boolean;
   source: McpConfigSource;
   /** Ghost-home-relative, never an ambient or absolute path. */
-  path: ".omp/mcp.json" | ".omp/.mcp.json";
+  path: "mcp.json";
   config: McpServerConfigView;
 }
 
@@ -256,25 +254,18 @@ function validateMutation(name: string, value: unknown): asserts value is MCPSer
   }
 }
 
-function projectMcpSources(home: string): [ProjectMcpConfigSource, ProjectMcpConfigSource] {
+function projectMcpSources(home: string): [ProjectMcpConfigSource] {
   return [
     {
       kind: "canonical",
-      absolutePath: join(home, ".omp", "mcp.json"),
-      relativePath: ".omp/mcp.json",
-    },
-    {
-      kind: "legacy",
-      absolutePath: join(home, ".omp", ".mcp.json"),
-      relativePath: ".omp/.mcp.json",
+      absolutePath: join(home, "mcp.json"),
+      relativePath: "mcp.json",
     },
   ];
 }
 
 /**
- * Resolve the only two MCP sources a sovereign Ghost session may read.
- * Canonical names are claimed before validation or enabled filtering, so a
- * disabled or malformed canonical row cannot reactivate a legacy duplicate.
+ * Resolve the only MCP source a sovereign Ghost session may read.
  */
 export async function readEffectiveProjectMcp(home: string): Promise<EffectiveProjectMcpRead> {
   const claimed = new Set<string>();
@@ -327,7 +318,7 @@ function translateWriterError(error: unknown, name: string): never {
 }
 
 /**
- * CRUD and sanitized discovery for the MCP files owned by one ghost.
+ * CRUD and sanitized discovery for the MCP file owned by one ghost.
  *
  * No method calls OMP capability discovery or `getMCPConfigPath("user")`.
  * That negative guarantee is the sovereignty boundary of this class.
@@ -347,7 +338,7 @@ export class McpCatalog {
     return this.homeOperations.withLease(ghostName, operation);
   }
 
-  private sources(ghostName: string): [ProjectMcpConfigSource, ProjectMcpConfigSource] {
+  private sources(ghostName: string): [ProjectMcpConfigSource] {
     return projectMcpSources(this.registry.get(ghostName).dir);
   }
 
@@ -399,7 +390,7 @@ export class McpCatalog {
     });
   }
 
-  /** Replace an effective server in the native file that currently owns it. */
+  /** Replace an effective server in the visible file that currently owns it. */
   async update(ghostName: string, name: string, config: unknown): Promise<McpCatalogSnapshot> {
     validateMutation(name, config);
     return this.withMutation(ghostName, async () => {
@@ -416,7 +407,7 @@ export class McpCatalog {
     });
   }
 
-  /** Toggle an effective, valid server without moving it between native files. */
+  /** Toggle an effective, valid server in place. */
   async setEnabled(ghostName: string, name: string, enabled: boolean): Promise<McpCatalogSnapshot> {
     if (typeof enabled !== "boolean") {
       throw new GhostError("invalid_request", '"enabled" must be a boolean.', 400);

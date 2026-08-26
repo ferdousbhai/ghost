@@ -25,7 +25,7 @@ function writeJson(home: string, relativePath: string, value: unknown): void {
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }
 
-function readServers(home: string, relativePath = ".omp/mcp.json"): Record<string, unknown> {
+function readServers(home: string, relativePath = "mcp.json"): Record<string, unknown> {
   const parsed = JSON.parse(readFileSync(join(home, relativePath), "utf8")) as {
     mcpServers?: Record<string, unknown>;
   };
@@ -33,22 +33,21 @@ function readServers(home: string, relativePath = ".omp/mcp.json"): Record<strin
 }
 
 describe("McpCatalog project-only discovery", () => {
-  it("uses canonical precedence, keeps legacy-only rows, and never scans ambient files", async () => {
+  it("reads only the visible Ghost file and never scans ambient files", async () => {
     const { catalog, home } = setup();
-    writeJson(home, ".omp/mcp.json", {
+    writeJson(home, "mcp.json", {
       mcpServers: {
         shared: { type: "http", url: "https://canonical.example/mcp" },
         disabled: { type: "stdio", command: "disabled-server", enabled: false },
       },
     });
-    writeJson(home, ".omp/.mcp.json", {
-      mcpServers: {
-        shared: { type: "http", url: "https://legacy.example/mcp" },
-        disabled: { type: "stdio", command: "must-not-reappear" },
-        legacy: { type: "stdio", command: "legacy-server" },
-      },
-    });
-    for (const relativePath of [".pi/mcp.json", ".claude/mcp.json", ".codex/mcp.json"]) {
+    for (const relativePath of [
+      ".omp/mcp.json",
+      ".omp/.mcp.json",
+      ".pi/mcp.json",
+      ".claude/mcp.json",
+      ".codex/mcp.json",
+    ]) {
       writeJson(home, relativePath, {
         mcpServers: { ambient: { type: "stdio", command: "ambient-server" } },
       });
@@ -56,10 +55,10 @@ describe("McpCatalog project-only discovery", () => {
 
     const snapshot = await catalog.list("casper");
 
-    expect(snapshot.servers.map((server) => server.name)).toEqual(["disabled", "legacy", "shared"]);
+    expect(snapshot.servers.map((server) => server.name)).toEqual(["disabled", "shared"]);
     expect(snapshot.servers.find((server) => server.name === "shared")).toMatchObject({
       source: "canonical",
-      path: ".omp/mcp.json",
+      path: "mcp.json",
       config: { type: "http", url: "https://canonical.example/mcp" },
     });
     expect(snapshot.servers.find((server) => server.name === "disabled")).toMatchObject({
@@ -72,7 +71,7 @@ describe("McpCatalog project-only discovery", () => {
 
   it("redacts header, environment, argument, OAuth, auth, userinfo, and query values", async () => {
     const { catalog, home } = setup();
-    writeJson(home, ".omp/mcp.json", {
+    writeJson(home, "mcp.json", {
       mcpServers: {
         remote: {
           type: "http",
@@ -135,30 +134,26 @@ describe("McpCatalog project-only discovery", () => {
 
   it("reports malformed files and rows without hiding valid siblings", async () => {
     const { catalog, home } = setup();
-    writeJson(home, ".omp/mcp.json", {
+    writeJson(home, "mcp.json", {
       mcpServers: {
         good: { type: "stdio", command: "good-server" },
         broken: { type: "stdio" },
         "bad/name": { type: "stdio", command: "bad-name" },
       },
     });
-    const legacyPath = join(home, ".omp", ".mcp.json");
-    writeFileSync(legacyPath, "{ definitely not json", "utf8");
-
     const snapshot = await catalog.list("casper");
 
     expect(snapshot.servers.map((server) => server.name)).toEqual(["good"]);
     expect(snapshot.skipped.map((entry) => entry.path)).toEqual([
-      ".omp/.mcp.json",
-      ".omp/mcp.json#mcpServers.bad/name",
-      ".omp/mcp.json#mcpServers.broken",
+      "mcp.json#mcpServers.bad/name",
+      "mcp.json#mcpServers.broken",
     ]);
     expect(snapshot.skipped.every((entry) => entry.reason.length > 0)).toBe(true);
   });
 
-  it("lets a malformed canonical row shadow a valid legacy row of the same name", async () => {
+  it("does not fall back to the former hidden MCP paths", async () => {
     const { catalog, home } = setup();
-    writeJson(home, ".omp/mcp.json", { mcpServers: { shared: { type: "http" } } });
+    writeJson(home, "mcp.json", { mcpServers: { shared: { type: "http" } } });
     writeJson(home, ".omp/.mcp.json", {
       mcpServers: { shared: { type: "http", url: "https://legacy.example/mcp" } },
     });
@@ -167,14 +162,14 @@ describe("McpCatalog project-only discovery", () => {
 
     expect(snapshot.servers).toEqual([]);
     expect(snapshot.skipped).toHaveLength(1);
-    expect(snapshot.skipped[0]?.path).toBe(".omp/mcp.json#mcpServers.shared");
+    expect(snapshot.skipped[0]?.path).toBe("mcp.json#mcpServers.shared");
   });
 });
 
 describe("McpCatalog mutations", () => {
-  it("adds to canonical, updates the owning legacy file, toggles, and removes", async () => {
+  it("adds, updates, toggles, and removes in the visible file", async () => {
     const { catalog, home } = setup();
-    writeJson(home, ".omp/.mcp.json", {
+    writeJson(home, "mcp.json", {
       mcpServers: { legacy: { type: "stdio", command: "before" } },
     });
 
@@ -186,7 +181,7 @@ describe("McpCatalog mutations", () => {
     await catalog.setEnabled("casper", "legacy", false);
 
     expect(readServers(home)).toHaveProperty("smithery:cloudflare.api-v1");
-    expect(readServers(home, ".omp/.mcp.json")).toEqual({
+    expect(readServers(home)).toMatchObject({
       legacy: { type: "stdio", command: "after", enabled: false },
     });
 

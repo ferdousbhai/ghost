@@ -272,7 +272,7 @@ async function defaultCreateRuntime(input: {
  * login` CLI so both leave a freshly-signed-in ghost ready to chat.
  */
 export async function bindDefaultChatModelIfUnset(
-  agentDir: string,
+  configDir: string,
   runtime: Pick<LoginRuntime, "getAvailable" | "getModels">,
   providerId: string,
   options: {
@@ -290,7 +290,7 @@ export async function bindDefaultChatModelIfUnset(
     }
   };
   if (!commitAllowed()) return null;
-  const existing = readGhostModels(agentDir);
+  const existing = readGhostModels(configDir);
   if (resolveChatModelRef(existing)) return null;
 
   const candidatesOrAborted = await discoverAvailableModels(
@@ -304,7 +304,7 @@ export async function bindDefaultChatModelIfUnset(
   const model = resolveOmpChatModel(null, candidates);
   if (!model || !commitAllowed()) return null;
 
-  return setChatModelRoleIfUnset(agentDir, model.provider, model.id, commitAllowed);
+  return setChatModelRoleIfUnset(configDir, model.provider, model.id, commitAllowed);
 }
 
 async function discoverAvailableModels(
@@ -376,7 +376,7 @@ export class LoginManager {
     const paths = ghostPaths(ghostDir);
     return this.createRuntime({
       authPath: ghostAuthPath(paths.agentDir),
-      modelsPath: ghostModelsPath(paths.agentDir),
+      modelsPath: ghostModelsPath(paths.home),
       offline: this.offline,
     });
   }
@@ -743,7 +743,7 @@ export class LoginManager {
     session.ghostName = ghost.name;
     const targetDir = ghost.dir;
     const bound = await bindDefaultChatModelIfUnset(
-      ghostPaths(targetDir).agentDir,
+      ghostPaths(targetDir).home,
       session.runtime,
       session.view.providerId,
       {

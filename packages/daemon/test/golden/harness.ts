@@ -29,9 +29,9 @@
  *
  * - **OMP's own system prompt** (everything before the persona section). It
  *   embeds the workstation — kernel string, CPU model, GPU, `$TERM` — and, on a
- *   session, whatever `CLAUDE.md`/skills the *developer's* own machine
- *   happens to have, because `Settings.loadReadOnly` walks up from the ghost
- *   home. It can never be byte-stable across machines. `personaOf()` below
+ *   session, whatever global instructions and skills the *developer's* own
+ *   machine happens to have through the retained capability providers. It can
+ *   never be byte-stable across machines. `personaOf()` below
  *   slices it away; the harness invariants that guard it (env scrubbing, the
  *   settings overrides) have their own unit tests.
  * - **`agentDir` internals** — `.pi/agent.db`, the `sessions/*.jsonl`
@@ -50,7 +50,7 @@
  *   (`toolSurfaceTable`) rather than the raw list, so a strip that drops or
  *   renames a tool still fails without pinning presentation internals. Ambient
  *   machine MCP is no longer a source of variation: a focused session-host test
- *   pins that only the ghost home's project MCP loads.
+ *   pins that only the ghost home's `mcp.json` loads.
  *
  * Tool-call ids (`call_1`, …) and token usage are NOT normalised: the mock
  * provider mints both deterministically, so a change there is a real change.
@@ -222,15 +222,15 @@ export function personaOf(systemPrompt: string, anchor: string): string {
  * sorted by path.
  *
  * Two directories are listed by name only, never by content:
- * `.pi/` (OMP's agent dir — `agent.db` is SQLite, plus WAL/shm files that
- * differ byte-for-byte every run) and `sessions/` (raw OMP transcripts, full
- * of ids and clock values; the rendered transcript covers the same ground in a
- * stable shape). Listing their *filenames* still pins the contract that
- * sessions and agent state live inside the ghost home.
+ * `.pi/` (credentials and derived OMP runtime — `agent.db` is SQLite, plus
+ * WAL/shm files that differ byte-for-byte every run) and `sessions/` (raw OMP
+ * transcripts, full of ids and clock values; the rendered transcript covers
+ * the same ground in a stable shape). Listing their *filenames* still pins the
+ * contract that sessions and machine state live inside the ghost home.
  *
  * What remains is the whole of Ghost's own storage contract: character.md,
- * docs/, memory/ — plain files, which is exactly the invariant a strip could
- * break without any unit test noticing.
+ * docs/, memory/, and visible configuration — plain files, which is exactly
+ * the invariant a strip could break without any unit test noticing.
  */
 export function ghostHomeSnapshot(
   dir: string,

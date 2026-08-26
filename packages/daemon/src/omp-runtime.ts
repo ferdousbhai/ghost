@@ -145,8 +145,7 @@ function ompModelsDocument(value: unknown): { providers: Record<string, unknown>
   return { providers };
 }
 
-function syncOmpModelsView(modelsPath: string): string {
-  const agentDir = dirname(modelsPath);
+function syncOmpModelsView(modelsPath: string, agentDir: string): string {
   const target = join(agentDir, OMP_MODELS_VIEW);
   const input = existsSync(modelsPath) ? readJson(modelsPath) : { providers: {} };
   const rendered = `${JSON.stringify(ompModelsDocument(input), null, 2)}\n`;
@@ -187,7 +186,7 @@ export class GhostOmpRuntime implements LoginRuntime, ModelCatalogRuntime {
     await authStorage.reload();
     await importLegacyAuth(authStorage, input.authPath, agentDir);
 
-    const ompModelsPath = syncOmpModelsView(input.modelsPath);
+    const ompModelsPath = syncOmpModelsView(input.modelsPath, agentDir);
     const modelRegistry = new ModelRegistry(authStorage, ompModelsPath, {
       ...(input.settings ? { settings: input.settings } : {}),
       cacheDbPath: join(agentDir, "models.db"),

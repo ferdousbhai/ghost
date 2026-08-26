@@ -152,10 +152,10 @@ describe("GET /api/ghosts/:name/context", () => {
     const base = await serve();
     const ghostDir = join(temp!.root, "casper");
     mkdirSync(join(ghostDir, "docs", "guides"), { recursive: true });
-    mkdirSync(join(ghostDir, ".omp", "agents"), { recursive: true });
-    writeFileSync(join(ghostDir, ".omp", "config.yml"), "task:\n  disabledAgents: []\n", "utf8");
+    mkdirSync(join(ghostDir, "agents"), { recursive: true });
+    writeFileSync(join(ghostDir, "settings.yml"), "task:\n  disabledAgents: []\n", "utf8");
     writeFileSync(
-      join(ghostDir, ".omp", "agents", "route-probe.md"),
+      join(ghostDir, "agents", "route-probe.md"),
       "---\nname: route-probe\ndescription: HTTP route fixture\n---\nPrivate fixture prompt.\n",
       "utf8",
     );
@@ -190,7 +190,7 @@ describe("GET /api/ghosts/:name/context", () => {
     }));
     expect(body.agents).toContainEqual(expect.objectContaining({
       name: "route-probe",
-      source: "project",
+      source: "user",
     }));
 
     expect((await fetch(`${base}/api/ghosts/casper/context`, {
@@ -278,7 +278,7 @@ describe("GET /api/ghosts/:name/sessions/:id/commands", () => {
       `${base}/api/ghosts/missing/sessions/${piSegment("conv-commands")}/commands`,
     )).status).toBe(404);
 
-    setChatModelRole(ghostPaths(join(temp!.root, "casper")).agentDir, "claude-code", "default");
+    setChatModelRole(ghostPaths(join(temp!.root, "casper")).home, "claude-code", "default");
     const claude = await fetch(url);
     expect(claude.status).toBe(409);
     expect(await claude.json()).toMatchObject({
@@ -365,7 +365,7 @@ describe("session Connect routes", () => {
   });
 });
 
-describe("project MCP routes", () => {
+describe("ghost MCP routes", () => {
   const jsonRequest = (url: string, method: string, body?: unknown) => fetch(url, {
     method,
     ...(body === undefined ? {} : {

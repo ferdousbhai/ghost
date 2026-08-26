@@ -325,9 +325,11 @@ describe("GhostRegistry.get", () => {
 });
 
 describe("ghostPaths", () => {
-  it("keeps daemon state in dot-directories inside the home", () => {
+  it("separates visible identity config from machine-bound runtime state", () => {
     const paths = ghostPaths("/tmp/ghosts/casper");
     expect(paths.agentDir).toBe("/tmp/ghosts/casper/.pi");
+    expect(paths.settingsRuntimeDir).toBe("/tmp/ghosts/casper/.pi/runtime");
+    expect(paths.settingsFile).toBe("/tmp/ghosts/casper/settings.yml");
     expect(paths.sessionDir).toBe("/tmp/ghosts/casper/sessions");
   });
 });

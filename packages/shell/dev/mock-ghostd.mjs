@@ -372,7 +372,7 @@ function mcpSnapshot(name) {
       name: serverName,
       enabled: config.enabled !== false,
       source: "canonical",
-      path: ".omp/mcp.json",
+      path: "mcp.json",
       config: sanitizeMcpConfig(config),
     })).sort((a, b) => a.name.localeCompare(b.name)),
     skipped: [],

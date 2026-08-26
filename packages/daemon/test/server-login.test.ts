@@ -187,7 +187,7 @@ describe("POST /api/ghosts/:name/login", () => {
 
     const done = await waitForStatus(base, loginId, "succeeded");
     expect(done.modelBound).toEqual({ provider: "openrouter", modelId: "openai/gpt-5.5" });
-    expect(readGhostModels(ghostPaths(join(temp!.root, "casper")).agentDir)?.roles?.chat_model)
+    expect(readGhostModels(ghostPaths(join(temp!.root, "casper")).home)?.roles?.chat_model)
       .toEqual({ provider: "openrouter", modelId: "openai/gpt-5.5" });
   });
 });
@@ -285,7 +285,7 @@ describe("the full url + paste state machine", () => {
     } finally {
       stored.close();
     }
-    expect(readGhostModels(agentDir)?.roles?.chat_model)
+    expect(readGhostModels(ghostPaths(join(temp!.root, "bob")).home)?.roles?.chat_model)
       .toEqual({ provider: "openrouter", modelId: "m-1" });
   });
 

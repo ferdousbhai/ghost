@@ -53,8 +53,10 @@ Everything Ghost owns for an OMP conversation stays inside the ghost home:
 ```text
 ~/ghosts/<name>/
   docs/**/*.md             canonical v2 Markdown documents
+  settings.yml             per-ghost OMP settings
+  models.json              providers plus Ghost roles/fallbacks
+  mcp.json                 the ghost's MCP servers
   .pi/
-    models.json            providers plus Ghost roles/fallbacks
     models.omp.json        generated OMP-compatible provider projection
     models.db              derived OMP catalogue cache
     agent.db               canonical OMP credential store
@@ -102,15 +104,15 @@ application-path write options. Context listings are derived from disk for each
 request, report malformed siblings instead of guessing, and never persist a
 catalog.
 
-### Project MCP
+### Ghost MCP
 
-Ghost deliberately narrows OMP's MCP discovery to the selected home’s
-`.omp/mcp.json` and legacy `.omp/.mcp.json`. The management API reads and writes
-only those files. Its list response redacts every credential-bearing value and
+Ghost deliberately narrows OMP's MCP discovery to the selected home's visible
+`mcp.json`. The management API reads and writes only that file. Its list
+response redacts every credential-bearing value and
 does not open a conversation merely to report connection status.
 
-Config mutations are live: every idle OMP conversation reconnects from the two
-project files and replaces its mounted MCP tools; a busy conversation defers one
+Config mutations are live: every idle OMP conversation reconnects from that
+ghost file and replaces its mounted MCP tools; a busy conversation defers one
 coalesced reload until it settles. An explicit test uses an isolated MCP manager
 without creating an AgentSession, while reconnect only targets managers that
 are already loaded.

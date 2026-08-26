@@ -1,8 +1,12 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import { listOmpExtensionRoots } from "@oh-my-pi/pi-coding-agent/discovery/omp-extension-roots";
 import { afterEach, describe, expect, it } from "vitest";
-import { ensureGhostArtifactRoot, ghostOmpSettingsPath } from "../src/artifact-root.js";
+import {
+  ghostHookExtensionPaths,
+  withGhostArtifactRoot,
+} from "../src/artifact-root.js";
 
 let home: string | null = null;
 
@@ -16,53 +20,30 @@ afterEach(() => {
   home = null;
 });
 
-function readSettings(dir: string): Record<string, unknown> {
-  return JSON.parse(readFileSync(ghostOmpSettingsPath(dir), "utf8")) as Record<string, unknown>;
-}
-
-describe("ensureGhostArtifactRoot", () => {
-  it("declares the ghost home as its own extension root", () => {
+describe("ghost artifact loading", () => {
+  it("scopes OMP package discovery to the visible home without writing .omp", async () => {
     const dir = makeHome();
 
-    ensureGhostArtifactRoot(dir);
-
-    expect(readSettings(dir)).toEqual({ extensions: ["."] });
-  });
-
-  it("writes once and leaves the file alone afterwards", () => {
-    const dir = makeHome();
-    ensureGhostArtifactRoot(dir);
-    const first = readFileSync(ghostOmpSettingsPath(dir), "utf8");
-
-    ensureGhostArtifactRoot(dir);
-
-    expect(readFileSync(ghostOmpSettingsPath(dir), "utf8")).toBe(first);
-  });
-
-  it("keeps settings the owner already wrote", () => {
-    const dir = makeHome();
-    mkdirSync(join(dir, ".omp"), { recursive: true });
-    writeFileSync(
-      ghostOmpSettingsPath(dir),
-      JSON.stringify({ "tools.maxTimeout": 60, extensions: ["~/shared-pack"] }),
-      "utf8",
-    );
-
-    ensureGhostArtifactRoot(dir);
-
-    expect(readSettings(dir)).toEqual({
-      "tools.maxTimeout": 60,
-      extensions: [".", "~/shared-pack"],
+    const roots = await withGhostArtifactRoot(dir, async () => {
+      await Promise.resolve();
+      return listOmpExtensionRoots({ cwd: dir, home: homedir(), repoRoot: null });
     });
+
+    expect(roots).toEqual([{ path: dir, name: dir.split("/").at(-1), level: "user" }]);
+    expect(existsSync(join(dir, ".omp"))).toBe(false);
   });
 
-  it("replaces a settings file OMP could not read anyway", () => {
+  it("preloads only executable hook files from the home", async () => {
     const dir = makeHome();
-    mkdirSync(join(dir, ".omp"), { recursive: true });
-    writeFileSync(ghostOmpSettingsPath(dir), "{ not json", "utf8");
+    mkdirSync(join(dir, "hooks", "pre"), { recursive: true });
+    mkdirSync(join(dir, "hooks", "post"), { recursive: true });
+    writeFileSync(join(dir, "hooks", "pre", "before.ts"), "export default () => {}", "utf8");
+    writeFileSync(join(dir, "hooks", "post", "after.js"), "export default () => {}", "utf8");
+    writeFileSync(join(dir, "hooks", "post", "notes.md"), "not executable", "utf8");
 
-    ensureGhostArtifactRoot(dir);
-
-    expect(readSettings(dir)).toEqual({ extensions: ["."] });
+    expect(await ghostHookExtensionPaths(dir)).toEqual([
+      join(dir, "hooks", "pre", "before.ts"),
+      join(dir, "hooks", "post", "after.js"),
+    ]);
   });
 });

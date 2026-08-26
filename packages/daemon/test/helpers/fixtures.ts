@@ -60,7 +60,7 @@ export interface SeedGhostOptions {
   provider?: { baseUrl: string; modelId: string; providerId?: string };
 }
 
-/** A ghost home with a persona, optional docs/memory, and a models.json. */
+/** A ghost home with a persona, optional docs/memory, and a visible models.json. */
 export function seedGhost(root: string, options: SeedGhostOptions = {}): string {
   const name = options.name ?? "casper";
   const dir = join(root, name);
@@ -83,9 +83,8 @@ export function seedGhost(root: string, options: SeedGhostOptions = {}): string 
     writeFileSync(join(dir, "memory", path), content, "utf8");
   }
   if (options.provider) {
-    mkdirSync(paths.agentDir, { recursive: true });
     writeGhostModels(
-      paths.agentDir,
+      paths.home,
       openAiCompatiblePreset({
         providerId: options.provider.providerId ?? "ghost-local",
         baseUrl: options.provider.baseUrl,

@@ -5,7 +5,7 @@
  * marker is `claude-code/default`, because an installed Claude Code process
  * has different auth/accounting semantics than OMP's Anthropic provider.
  * Durable model/runtime choice lives in the ghost's own
- * `<home>/.pi/models.json`. `omp-runtime.ts` projects the provider portion to
+ * `<home>/models.json`. `omp-runtime.ts` projects the provider portion to
  * OMP while retaining Ghost's role and fallback metadata. OMP's canonical
  * credential store is `<home>/.pi/agent.db`; a legacy `auth.json` is imported
  * once and retained as a recoverable migration source.
@@ -285,16 +285,16 @@ export class GhostModelsLockError extends Error {
   }
 }
 
-export function ghostModelsPath(agentDir: string): string {
-  return join(agentDir, MODELS_FILENAME);
+export function ghostModelsPath(configDir: string): string {
+  return join(configDir, MODELS_FILENAME);
 }
 
 export function ghostAuthPath(agentDir: string): string {
   return join(agentDir, AUTH_FILENAME);
 }
 
-export function ghostModelsLockPath(agentDir: string): string {
-  return `${ghostModelsPath(agentDir)}${MODELS_LOCK_SUFFIX}`;
+export function ghostModelsLockPath(configDir: string): string {
+  return `${ghostModelsPath(configDir)}${MODELS_LOCK_SUFFIX}`;
 }
 
 function parseLockOwner(raw: string): GhostModelsLockOwner | null {
@@ -454,9 +454,9 @@ function migrateLegacySmolRole<T>(
   return migrated;
 }
 
-/** Read `<agentDir>/models.json`, or null when absent. Throws on malformed. */
-export function readGhostModels(agentDir: string): GhostModelsFile | null {
-  const path = ghostModelsPath(agentDir);
+/** Read `<home>/models.json`, or null when absent. Throws on malformed. */
+export function readGhostModels(configDir: string): GhostModelsFile | null {
+  const path = ghostModelsPath(configDir);
   let text: string;
   try {
     text = readFileSync(path, "utf8");
@@ -494,9 +494,9 @@ export function readGhostModels(agentDir: string): GhostModelsFile | null {
   };
 }
 
-export function writeGhostModels(agentDir: string, file: GhostModelsFile): void {
-  mkdirSync(agentDir, { recursive: true });
-  const path = ghostModelsPath(agentDir);
+export function writeGhostModels(configDir: string, file: GhostModelsFile): void {
+  mkdirSync(configDir, { recursive: true });
+  const path = ghostModelsPath(configDir);
   withSerializedModelsWrite(path, () => persistGhostModels(path, file));
 }
 
@@ -546,14 +546,14 @@ export function resolveSmolModelRef(
  * model" action, not a first-run default.
  */
 export function setChatModelRole(
-  agentDir: string,
+  configDir: string,
   provider: string,
   modelId: string,
 ): GhostModelsFile {
-  mkdirSync(agentDir, { recursive: true });
-  const path = ghostModelsPath(agentDir);
+  mkdirSync(configDir, { recursive: true });
+  const path = ghostModelsPath(configDir);
   return withSerializedModelsWrite(path, () => {
-    const file: GhostModelsFile = readGhostModels(agentDir) ?? { providers: {} };
+    const file: GhostModelsFile = readGhostModels(configDir) ?? { providers: {} };
     file.roles = { ...(file.roles ?? {}), chat_model: { provider, modelId } };
     persistGhostModels(path, file);
     return file;
@@ -562,15 +562,15 @@ export function setChatModelRole(
 
 /** Set any Ghost model role while preserving providers, other roles, and chains. */
 export function setGhostModelRole(
-  agentDir: string,
+  configDir: string,
   role: GhostModelRole,
   provider: string,
   modelId: string,
 ): GhostModelsFile {
-  mkdirSync(agentDir, { recursive: true });
-  const path = ghostModelsPath(agentDir);
+  mkdirSync(configDir, { recursive: true });
+  const path = ghostModelsPath(configDir);
   return withSerializedModelsWrite(path, () => {
-    const file: GhostModelsFile = readGhostModels(agentDir) ?? { providers: {} };
+    const file: GhostModelsFile = readGhostModels(configDir) ?? { providers: {} };
     file.roles = { ...(file.roles ?? {}), [role]: { provider, modelId } };
     persistGhostModels(path, file);
     return file;
@@ -579,13 +579,13 @@ export function setGhostModelRole(
 
 /** Clear one explicit primary while preserving its retry chain and every sibling role. */
 export function clearGhostModelRole(
-  agentDir: string,
+  configDir: string,
   role: GhostModelRole,
 ): GhostModelsFile {
-  mkdirSync(agentDir, { recursive: true });
-  const path = ghostModelsPath(agentDir);
+  mkdirSync(configDir, { recursive: true });
+  const path = ghostModelsPath(configDir);
   return withSerializedModelsWrite(path, () => {
-    const file: GhostModelsFile = readGhostModels(agentDir) ?? { providers: {} };
+    const file: GhostModelsFile = readGhostModels(configDir) ?? { providers: {} };
     const roles = { ...(file.roles ?? {}) };
     delete roles[role];
     file.roles = roles;
@@ -596,15 +596,15 @@ export function clearGhostModelRole(
 
 /** Append one retry choice unless the same provider/model is already present. */
 export function appendGhostModelFallback(
-  agentDir: string,
+  configDir: string,
   role: GhostModelRole,
   provider: string,
   modelId: string,
 ): GhostModelsFile {
-  mkdirSync(agentDir, { recursive: true });
-  const path = ghostModelsPath(agentDir);
+  mkdirSync(configDir, { recursive: true });
+  const path = ghostModelsPath(configDir);
   return withSerializedModelsWrite(path, () => {
-    const file: GhostModelsFile = readGhostModels(agentDir) ?? { providers: {} };
+    const file: GhostModelsFile = readGhostModels(configDir) ?? { providers: {} };
     const current = [...(file.fallbacks?.[role] ?? [])];
     if (!current.some((binding) => binding.provider === provider && binding.modelId === modelId)) {
       current.push({ provider, modelId });
@@ -620,14 +620,14 @@ export function appendGhostModelFallback(
  * Ordering is significant. An empty list has the same durable shape as clear.
  */
 export function replaceGhostModelFallbacks(
-  agentDir: string,
+  configDir: string,
   role: GhostModelRole,
   bindings: readonly GhostModelRoleBinding[],
 ): GhostModelsFile {
-  mkdirSync(agentDir, { recursive: true });
-  const path = ghostModelsPath(agentDir);
+  mkdirSync(configDir, { recursive: true });
+  const path = ghostModelsPath(configDir);
   return withSerializedModelsWrite(path, () => {
-    const file: GhostModelsFile = readGhostModels(agentDir) ?? { providers: {} };
+    const file: GhostModelsFile = readGhostModels(configDir) ?? { providers: {} };
     const fallbacks = { ...(file.fallbacks ?? {}) };
     if (bindings.length === 0) delete fallbacks[role];
     else fallbacks[role] = bindings.map((binding) => ({ ...binding }));
@@ -639,13 +639,13 @@ export function replaceGhostModelFallbacks(
 
 /** Clear a role's retry chain without disturbing its primary binding. */
 export function clearGhostModelFallbacks(
-  agentDir: string,
+  configDir: string,
   role: GhostModelRole,
 ): GhostModelsFile {
-  mkdirSync(agentDir, { recursive: true });
-  const path = ghostModelsPath(agentDir);
+  mkdirSync(configDir, { recursive: true });
+  const path = ghostModelsPath(configDir);
   return withSerializedModelsWrite(path, () => {
-    const file: GhostModelsFile = readGhostModels(agentDir) ?? { providers: {} };
+    const file: GhostModelsFile = readGhostModels(configDir) ?? { providers: {} };
     const fallbacks = { ...(file.fallbacks ?? {}) };
     delete fallbacks[role];
     file.fallbacks = fallbacks;
@@ -663,7 +663,7 @@ export function clearGhostModelFallbacks(
  * login snapshot from overwriting the owner's choice.
  */
 export function setChatModelRoleIfUnset(
-  agentDir: string,
+  configDir: string,
   provider: string,
   modelId: string,
   commitAllowed: () => boolean = () => true,
@@ -672,11 +672,11 @@ export function setChatModelRoleIfUnset(
   // before it reaches this synchronous commit boundary; fail closed before
   // creating anything and re-check under the writer lock.
   if (!commitAllowed()) return null;
-  mkdirSync(agentDir, { recursive: true });
-  const path = ghostModelsPath(agentDir);
+  mkdirSync(configDir, { recursive: true });
+  const path = ghostModelsPath(configDir);
   return withSerializedModelsWrite(path, () => {
     if (!commitAllowed()) return null;
-    const file: GhostModelsFile = readGhostModels(agentDir) ?? { providers: {} };
+    const file: GhostModelsFile = readGhostModels(configDir) ?? { providers: {} };
     if (resolveChatModelRef(file)) return null;
     const binding = { provider, modelId };
     file.roles = { ...(file.roles ?? {}), chat_model: binding };

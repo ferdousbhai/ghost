@@ -171,7 +171,7 @@ function setupClaudeHost(options: {
   });
   const paths = ghostPaths(dir);
   mkdirSync(paths.agentDir, { recursive: true });
-  setChatModelRole(paths.agentDir, "claude-code", "default");
+  setChatModelRole(paths.home, "claude-code", "default");
 
   const seenOptions: ClaudeQueryOptions[] = [];
   const seenPrompts: SDKUserMessage[] = [];

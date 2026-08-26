@@ -40,7 +40,7 @@ curl -X PUT http://127.0.0.1:7717/api/ghosts/casper/model \
   --data '{"provider":"claude-code","id":"default"}'
 ```
 
-Equivalently, the resulting `<ghost>/.pi/models.json` role is:
+Equivalently, the resulting `<ghost>/models.json` role is:
 
 ```json
 {
