@@ -1,7 +1,7 @@
 /**
  * Materialize the hosted export's `conversations/*.json` fixtures as native
  * OMP sessions. The fixture remains the lossless hosted wire shape while its
- * `.sessions/` projection exists; user-triggered conversation deletion moves
+ * `sessions/` projection exists; user-triggered conversation deletion moves
  * both artifacts to trash so the fixture cannot recreate a deleted chat.
  */
 import { randomUUID } from "node:crypto";
@@ -39,7 +39,7 @@ import { serializeTitleSlot } from "@oh-my-pi/pi-coding-agent/session/session-ti
 import { sessionFileNameFor } from "./session-files.js";
 
 const HOSTED_CONVERSATIONS_DIRNAME = "conversations";
-const NATIVE_SESSIONS_DIRNAME = ".sessions";
+const NATIVE_SESSIONS_DIRNAME = "sessions";
 const IMPORT_FORMAT_VERSION = 1;
 
 interface HostedCatalog {

@@ -34,7 +34,7 @@
  *   home. It can never be byte-stable across machines. `personaOf()` below
  *   slices it away; the harness invariants that guard it (env scrubbing, the
  *   settings overrides) have their own unit tests.
- * - **`agentDir` internals** — `.pi/agent.db`, the `.sessions/*.jsonl`
+ * - **`agentDir` internals** — `.pi/agent.db`, the `sessions/*.jsonl`
  *   transcripts. Binary/SQLite and full of ids and clock values; the rendered
  *   transcript is the same information in a stable shape.
  * - **Wall-clock everything**: entry timestamps, `createdAt`/`updatedAt`, the
@@ -223,7 +223,7 @@ export function personaOf(systemPrompt: string, anchor: string): string {
  *
  * Two directories are listed by name only, never by content:
  * `.pi/` (OMP's agent dir — `agent.db` is SQLite, plus WAL/shm files that
- * differ byte-for-byte every run) and `.sessions/` (raw OMP transcripts, full
+ * differ byte-for-byte every run) and `sessions/` (raw OMP transcripts, full
  * of ids and clock values; the rendered transcript covers the same ground in a
  * stable shape). Listing their *filenames* still pins the contract that
  * sessions and agent state live inside the ghost home.

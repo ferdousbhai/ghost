@@ -1018,7 +1018,7 @@ describe("PUT /api/ghosts/:name/sessions/:id/pin", () => {
     const pinned = await setPin(base, "conv-1", { pinned: true });
     expect(pinned.status).toBe(200);
     expect(await pinned.json()).toEqual({ ok: true, pinned: true });
-    expect(existsSync(join(temp!.root, "casper", ".sessions", "pins.json"))).toBe(true);
+    expect(existsSync(join(temp!.root, "casper", "sessions", "pins.json"))).toBe(true);
     expect((await listSessions(base)).map((session) => [session.id, session.pinned]))
       .toEqual([["pi:conv-1", true], ["pi:conv-2", false]]);
 
@@ -1061,7 +1061,7 @@ describe("PUT /api/ghosts/:name/sessions/:id/pin", () => {
     await fetch(`${base}/api/ghosts/casper/sessions/${piSegment("conv-1")}`, {
       method: "DELETE",
     });
-    expect(JSON.parse(readFileSync(join(temp!.root, "casper", ".sessions", "pins.json"), "utf8")))
+    expect(JSON.parse(readFileSync(join(temp!.root, "casper", "sessions", "pins.json"), "utf8")))
       .toEqual({ version: 2, pinned: [] });
   });
 });

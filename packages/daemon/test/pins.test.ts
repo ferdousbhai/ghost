@@ -1,6 +1,6 @@
 /**
  * The pin sidecar on its own: it must read as empty rather than throw for
- * anything a user could have left in `.sessions/pins.json`, and it must never
+ * anything a user could have left in `sessions/pins.json`, and it must never
  * leave a partially written file behind for the listing to read.
  */
 import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -46,7 +46,7 @@ describe("pins.json", () => {
   });
 
   it("creates the session dir and writes the file private", async () => {
-    const dir = join(makeSessionDir(), "nested", ".sessions");
+    const dir = join(makeSessionDir(), "nested", "sessions");
     await writePins(dir, ["conv-1"]);
     expect(statSync(pinsPath(dir)).mode & 0o777).toBe(0o600);
   });

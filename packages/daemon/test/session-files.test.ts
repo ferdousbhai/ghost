@@ -38,7 +38,7 @@ describe("Pi conversation transcript identity", () => {
 
   it("round-trips an unsafe raw id from native transcript metadata", async () => {
     root = mkdtempSync(join(tmpdir(), "ghost-session-files-"));
-    const sessionDir = join(root, ".sessions");
+    const sessionDir = join(root, "sessions");
     mkdirSync(sessionDir);
     const conversationId = "unsafe/folder?query=#fragment and spaces";
     const path = join(sessionDir, sessionFileNameFor(conversationId));
@@ -57,7 +57,7 @@ describe("Pi conversation transcript identity", () => {
 
   it("recovers an unsafe hosted projection from its existing import marker", async () => {
     root = mkdtempSync(join(tmpdir(), "ghost-session-files-"));
-    const sessionDir = join(root, ".sessions");
+    const sessionDir = join(root, "sessions");
     mkdirSync(sessionDir);
     const conversationId = "hosted/unsafe id";
     const path = join(sessionDir, sessionFileNameFor(conversationId));
@@ -79,7 +79,7 @@ describe("Pi conversation transcript identity", () => {
 
   it("omits a transplanted hash identity and rejects direct actions with 409", async () => {
     root = mkdtempSync(join(tmpdir(), "ghost-session-files-"));
-    const sessionDir = join(root, ".sessions");
+    const sessionDir = join(root, "sessions");
     mkdirSync(sessionDir);
     const requested = "unsafe/requested id";
     const stored = "unsafe/stored id";

@@ -60,7 +60,7 @@ Everything Ghost owns for an OMP conversation stays inside the ghost home:
     agent.db               canonical OMP credential store
     auth.json              optional legacy import source; retained after import
     .auth-json-imported-v18 one-time import marker
-  .sessions/
+  sessions/
     <conversation>.jsonl   OMP session tree
     claude-<sha256>.json   Claude resume metadata, when selected
 ```

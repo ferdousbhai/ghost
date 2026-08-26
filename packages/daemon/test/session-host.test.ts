@@ -466,6 +466,41 @@ lines.on("line", (line) => {
     expect(toolNames.some((name) => name.startsWith("mcp__node_repl_"))).toBe(false);
   });
 
+  it("discovers skills, agents, and commands from plain directories in the home", async () => {
+    const { dir } = await setup([{ kind: "text", text: "hello" }]);
+    mkdirSync(join(dir, "skills", "inking"), { recursive: true });
+    mkdirSync(join(dir, "agents"), { recursive: true });
+    mkdirSync(join(dir, "commands"), { recursive: true });
+    writeFileSync(
+      join(dir, "skills", "inking", "SKILL.md"),
+      "---\nname: inking\ndescription: Ink a forme evenly.\n---\n\nInk it.\n",
+      "utf8",
+    );
+    writeFileSync(
+      join(dir, "agents", "pressman.md"),
+      "---\nname: pressman\ndescription: Runs the press.\n---\n\nRun it.\n",
+      "utf8",
+    );
+    writeFileSync(
+      join(dir, "commands", "proofsheet.md"),
+      "---\ndescription: Proof a sheet.\n---\n\nProof it.\n",
+      "utf8",
+    );
+
+    const handle = await host!.open("casper", "conv-visible-artifacts");
+
+    expect(handle.session.skills.map((skill) => skill.name)).toContain("inking");
+    expect(handle.session.slashCommands?.map((command) => command.name) ?? [])
+      .toContain("proofsheet");
+    // Subagents are discovered when `task` runs rather than at open, so assert
+    // against the same discovery the tool uses.
+    const { discoverAgents } = await import("@oh-my-pi/pi-coding-agent/task/discovery");
+    const agents = await discoverAgents(dir);
+    expect(agents.agents.map((agent) => agent.name)).toContain("pressman");
+    // The owner's global skills keep arriving alongside the ghost's own.
+    expect(handle.session.skills.length).toBeGreaterThan(1);
+  });
+
   it("keeps the owner's coding-agent identity file out of the prompt", async () => {
     // OMP hands the session exactly one user-level context file, the
     // highest-priority provider's, and Claude Code outranks the agent-dirs

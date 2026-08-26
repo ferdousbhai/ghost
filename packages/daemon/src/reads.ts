@@ -1,5 +1,5 @@
 /**
- * Owner read state for conversations — `.sessions/reads.json`.
+ * Owner read state for conversations — `sessions/reads.json`.
  *
  * Like pins, this is deliberately stored in the daemon-owned session
  * directory because no transcript can say when the owner last opened it.
@@ -20,7 +20,7 @@ export interface ConversationReadState {
   reads: ConversationReads;
 }
 
-/** The read-state file inside one ghost's `.sessions/` directory. */
+/** The read-state file inside one ghost's `sessions/` directory. */
 export function readsPath(sessionDir: string): string {
   return join(sessionDir, READS_FILENAME);
 }

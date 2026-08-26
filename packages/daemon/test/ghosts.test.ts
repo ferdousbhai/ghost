@@ -328,6 +328,6 @@ describe("ghostPaths", () => {
   it("keeps daemon state in dot-directories inside the home", () => {
     const paths = ghostPaths("/tmp/ghosts/casper");
     expect(paths.agentDir).toBe("/tmp/ghosts/casper/.pi");
-    expect(paths.sessionDir).toBe("/tmp/ghosts/casper/.sessions");
+    expect(paths.sessionDir).toBe("/tmp/ghosts/casper/sessions");
   });
 });

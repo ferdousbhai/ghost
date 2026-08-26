@@ -32,30 +32,18 @@ function characterSection(input: GhostSystemPromptInput): string {
 }
 
 function memorySection(input: GhostSystemPromptInput): string[] {
-  const heading = "## Your memory";
-  const lead = "Memory files you have written. Each line names a file under memory/. Use "
-    + "read to open one and grep or glob to search the directory. Save a new "
-    + "atomic memory with the ghost_memory_write capability when you learn something "
-    + "worth keeping; OMP may expose that capability through its xd:// registry.";
-  const doctrine = "One file holds one fact, and its description line above is all a future "
-    + "session sees until it opens the file. Check this index before writing: "
-    + "update the existing file rather than adding a near-duplicate, and "
-    + "delete a memory that is wrong or no longer true; memories are living "
-    + "facts, expected to change as life moves. Write dates as dates "
-    + "(\"2026-08-24\", never \"last week\"). Do not record what character.md, "
-    + "your docs, or the files on disk already say. When you save guidance "
-    + "about how to behave, include why, so you can later judge whether it "
-    + "still applies. Mention a related memory by its slug in double "
-    + "brackets, like [[knee-injury]]; a bracketed slug with no file yet "
-    + "marks a memory worth writing. Memory and docs divide the way "
-    + "remembering and writing do for a person. A document is what someone "
-    + "writes down on purpose (research, reference, drafts, a diary) and is "
-    + "durable in its written form; a memory is what someone simply "
-    + "remembers about their life and the people in it, true today and "
-    + "revised as things change. The owner straining a knee is a memory; "
-    + "the physiotherapy research gathered afterward is a document, with at "
-    + "most a one-line memory pointing to it. These lines say what was true "
-    + "when written; verify anything time-sensitive before acting on it.";
+  const heading = "## Memory";
+  const lead = "One fact per file under memory/. The line here is all you see until you "
+    + "read the file; grep and glob search the rest. Save one with ghost_memory_write.";
+  const doctrine = "Before writing, check this list: update the file that already covers it, "
+    + "and delete what is no longer true. Dates absolute (\"2026-08-24\"). Skip "
+    + "what character.md, your docs, or the files themselves already say. With "
+    + "guidance, record why, so you can judge later whether it still holds. Link "
+    + "a related memory as [[its-slug]]; a slug with no file marks one worth "
+    + "writing. A memory is what you remember about the owner's life, revised as "
+    + "life moves; a doc is what someone sat down and wrote. The strained knee is "
+    + "a memory, the physiotherapy research a doc. These lines were true when "
+    + "written; check anything time-sensitive.";
   const lines = input.memory.lines.length > 0
     ? [...input.memory.lines]
     : ["(nothing yet)"];
@@ -66,13 +54,11 @@ function memorySection(input: GhostSystemPromptInput): string[] {
 }
 
 function docsSection(input: GhostSystemPromptInput): string[] {
-  const heading = "## Your docs";
-  const lead = "Your docs, by path under docs/. Use read to open them, grep or glob to "
-    + "search them, and write or edit to maintain them. Every doc is ghost-home/v2 "
-    + "Markdown and must start at byte 0 with a non-empty first-line H1 (`# Title`). It may have "
-    + "one optional final nonblank line containing only space-separated lowercase "
-    + "hashtags matching `#[a-z0-9]+(?:-[a-z0-9]+)*`; keep that line final when editing. "
-    + "The reserved `#archived` tag archives the doc. Never use YAML frontmatter.";
+  const heading = "## Docs";
+  const lead = "By path under docs/; read, grep, glob, write, edit. A doc starts at byte 0 "
+    + "with `# Title` and may end with one line of lowercase `#hashtags` "
+    + "(`#[a-z0-9]+(?:-[a-z0-9]+)*`); keep that line last. `#archived` archives it. "
+    + "Never YAML frontmatter.";
   const lines = input.docs.lines.length > 0
     ? [...input.docs.lines]
     : ["(no docs yet)"];
@@ -93,4 +79,29 @@ export function buildGhostSystemPrompt(input: GhostSystemPromptInput): string {
     if (trimmed) sections.push(trimmed);
   }
   return `${sections.join("\n\n")}\n`;
+}
+
+/**
+ * Drop OMP's `§ Role` section from an assembled harness prompt.
+ *
+ * The section casts the model as an assistant for "load-bearing changes in Oh
+ * My Pi coding harness" and follows with engineering house style. A ghost is
+ * whoever character.md says, and that section sits roughly twenty thousand
+ * characters earlier in the prompt, so it wins on anything they disagree
+ * about. Everything after it (runtime, tool policy, workflow, delivery) is
+ * about operating the tools and stays.
+ *
+ * `personality: "none"` already removes the voice rules inside the section
+ * through OMP's own setting; this removes the framing that has no setting.
+ * A prompt without both markers is returned untouched, so an upstream rewrite
+ * costs tokens rather than breaking a session.
+ */
+export function stripHarnessRoleSection(block: string): string {
+  const lines = block.split("\n");
+  const start = lines.findIndex((line) => line.trimEnd() === "\u00a7 Role");
+  if (start === -1) return block;
+  const end = lines.findIndex((line, index) => index > start && line.startsWith("\u00a7 "));
+  if (end === -1) return block;
+  const kept = [...lines.slice(0, start), ...lines.slice(end)];
+  return kept.join("\n");
 }

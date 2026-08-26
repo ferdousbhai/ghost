@@ -111,7 +111,7 @@ describe("migrateHostedConversations", () => {
     expect(result).toEqual({ found: 1, imported: 1, existing: 0, failures: [] });
     expect(readFileSync(sourcePath, "utf8")).toBe(sourceBytes);
 
-    const sessionDir = join(home, ".sessions");
+    const sessionDir = join(home, "sessions");
     const target = join(sessionDir, sessionFileNameFor("hosted-one"));
     const header = readFileSync(target, "utf8")
       .split("\n")
@@ -188,7 +188,7 @@ describe("migrateHostedConversations", () => {
     const sourcePath = join(conversationsDir, "hosted-one.json");
     writeFileSync(sourcePath, JSON.stringify(hostedConversation()));
     expect((await migrateHostedConversations(home)).imported).toBe(1);
-    const target = join(home, ".sessions", sessionFileNameFor("hosted-one"));
+    const target = join(home, "sessions", sessionFileNameFor("hosted-one"));
     const original = readFileSync(target, "utf8");
     const originalMtime = statSync(target).mtimeMs;
 

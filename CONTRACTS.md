@@ -10,6 +10,17 @@ catalog) is derived per session and never stored.
 
 The root is `~/ghosts` unless `ghostsRoot` says otherwise.
 
+A ghost home is its own OMP extension package root, declared by the daemon in
+`.omp/settings.json` as `{ "extensions": ["."] }` before settings are read. That
+is what makes the home's `skills/`, `agents/`, `commands/`, `rules/`,
+`prompts/`, `tools/`, and `hooks/` load, so every artifact a ghost owns sits in
+plain sight beside `character.md` rather than under a dot-directory. Roots
+merge: the owner's global skills, agents, and commands (`~/.agents`, `~/.codex`,
+`~/.claude`, and the rest of OMP's user-level sources) keep arriving alongside.
+Declaring the root in a file rather than in memory is load-bearing, because OMP
+rediscovers skills whenever the tool surface changes and reads this file again
+each time.
+
 ```
 ~/ghosts/<name>/
   character.md                 persona → system prompt (optional title frontmatter)
@@ -17,12 +28,18 @@ The root is `~/ghosts` unless `ghostsRoot` says otherwise.
                                such as `#launch #product`
   memory/*.md                  atomic memory files: frontmatter description + updated,
                                body = the fact
-  .omp/                        OMP-native project skills, rules, tools, commands,
-                               extensions, plugins, prompts, and MCP configuration
+  skills/<name>/SKILL.md       the ghost's own skills
+  agents/<name>.md             the ghost's own subagents
+  commands/<name>.md           the ghost's own slash commands
+  rules/, prompts/, tools/, hooks/
+                               the remaining OMP package-root artifact directories
+  sessions/                    daemon-owned OMP transcripts and runtime sidecars
+  sessions/pins.json           v2 pinned state: { "version": 2, "pinned": ["<id>", …] }
+  sessions/reads.json          v2 read state: { "version": 2, "reads": { "<id>": "<ISO timestamp>" } }
+  .omp/settings.json           daemon-written: declares the home as its own
+                               extension package root
+  .omp/mcp.json                the ghost's MCP servers
   .pi/                         per-ghost OMP settings, model roles, and credentials
-  .sessions/                   daemon-owned OMP transcripts and runtime sidecars
-  .sessions/pins.json          v2 pinned state: { "version": 2, "pinned": ["<id>", …] }
-  .sessions/reads.json         v2 read state: { "version": 2, "reads": { "<id>": "<ISO timestamp>" } }
   conversations/*.json         lossless source transcripts from the hosted export;
                                retained unchanged until that conversation is trashed
   export-manifest.json         present in imported archives; counts, pathRewrites,
@@ -64,7 +81,7 @@ New homes and all writes produce only v2 docs.
 
 Hosted conversation JSON is also a migration fixture, not the daemon's live
 session store. `ghostd import` and daemon startup idempotently project each valid
-`conversations/*.json` file into a native OMP transcript in `.sessions/`, keeping
+`conversations/*.json` file into a native OMP transcript in `sessions/`, keeping
 the conversation and message ids, roles, title, available message timestamps,
 conversation created/updated times, readable text and attachments, and paired
 tool calls/results. A missing message timestamp is placed deterministically
@@ -102,8 +119,21 @@ session-scoped Remote voice and collaboration routes below are the only
 deliberate exceptions. They are explicitly initiated off-machine capabilities
 and never broaden another ghost or conversation.
 
-A session is OMP-native. Ghost preserves OMP's system prompt and
-discovery, then appends the Ghost persona and derived memory/doc sections.
+A session is OMP-native. Ghost keeps OMP's discovery and the operating half of
+its system prompt, then appends the Ghost persona and derived memory/doc
+sections.
+
+Three deliberate subtractions from the harness prompt, in the order they cost
+tokens. `§ Role` is removed by the persona extension: it casts the model as a
+coding assistant and sets its voice roughly twenty thousand characters before
+`character.md` gets a word in, and it has no setting. `personality: "none"`
+drops the voice rules OMP does expose a setting for. `tools.xdevDocs:
+"catalog"` moves the built-in device schemas (`ast_edit`, `debug`, `lsp`,
+`inspect_image`) out of the prompt, leaving the catalog that names them and one
+`xd://<name>` read before first use. Everything about operating the tools stays:
+runtime, internal URLs, tool inventory, tool policy, workflow, delivery. A
+seeded ghost's first turn carries about 14.5k characters of system prompt where
+it carried 23.8k.
 Native filesystem and search (`read`, `glob`, `grep`), mutation (`write`,
 `edit`), Bash, web search, task/hub subagents, background jobs, skills, rules,
 project context, extensions/plugins, commands, and the ghost home's own project
@@ -359,7 +389,7 @@ one must not be a leak of both.
   subscribing never opens or retains an agent session.
 - `PUT  /api/ghosts/:name/sessions/:id/pin` `{ pinned: boolean }` →
   `{ ok: true, pinned }` — pin or unpin one conversation, idempotently. Pin
-  state lives in `.sessions/pins.json` (atomic replace, never partial), works
+  state lives in `sessions/pins.json` (atomic replace, never partial), works
   for OMP and Claude Code conversations alike, and is owner state, not derivable
   — one of the two deliberate owner-state exceptions in the daemon-owned dir.
   Version 2 stores public qualified ids. A version 1 file with raw ids applies
@@ -371,7 +401,7 @@ one must not be a leak of both.
   ignored on read and pruned on the next write.
 - `PUT  /api/ghosts/:name/sessions/:id/read` `{}` →
   `{ ok: true, readAt }` — mark a stored conversation opened using the daemon's
-  clock. Read state lives in `.sessions/reads.json` as conversation id to
+  clock. Read state lives in `sessions/reads.json` as conversation id to
   last-opened ISO timestamp (atomic replace, never partial), works for OMP and
   Claude Code conversations alike, and is owner state rather than something a
   transcript can derive. Version 2 stores public qualified ids. A version 1
@@ -543,7 +573,7 @@ and never re-titled. A fork is named at fork time instead, the way a file
 manager names a copy: `<source title> (n)` for the smallest free `n` from 2 up,
 with any trailing ` (k)` stripped from the base first, so a fork of a fork does
 not stack suffixes. An untitled source forks to an untitled conversation. The title is stored through OMP's native fixed-width
-**`title` slot** at the start of the conversation's own `.sessions/*.jsonl`
+**`title` slot** at the start of the conversation's own `sessions/*.jsonl`
 transcript, with its append-only `title_change` audit entry. It never enters the
 model's context, needs no sidecar, and rides the same per-ghost storage backup
 and future encryption cover. `GET …/sessions` surfaces it as `title`. A
@@ -731,7 +761,7 @@ proxy.
 
 Each turn is an Effect scope. It rebuilds the Ghost system prompt, resumes the
 opaque Claude session id, streams one turn, atomically writes a mode-`0600`
-metadata sidecar under `.sessions/`, emits one terminal event, and closes the
+metadata sidecar under `sessions/`, emits one terminal event, and closes the
 query. Claude Code owns the actual transcript under its own
 `~/.claude/projects/` storage; the sidecar is not a transcript. Full rationale,
 T3 Code provenance, policy caveat, and legal boundary:

@@ -1,5 +1,5 @@
 /**
- * Pinned conversations — `.sessions/pins.json`.
+ * Pinned conversations — `sessions/pins.json`.
  *
  * Pin state is the one thing in the daemon-owned session dir that is *not*
  * derivable: nothing on disk says a conversation matters to its owner. It is
@@ -32,7 +32,7 @@ export interface ConversationPins {
   pinned: string[];
 }
 
-/** The pin file inside one ghost's `.sessions/` directory. */
+/** The pin file inside one ghost's `sessions/` directory. */
 export function pinsPath(sessionDir: string): string {
   return join(sessionDir, PINS_FILENAME);
 }

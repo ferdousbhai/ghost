@@ -10,7 +10,7 @@
  *   cwd        = ~/ghosts/<name>            the ghost home; extensions derive
  *                                           their paths from ctx.cwd
  *   agentDir   = ~/ghosts/<name>/.pi        settings, models.json, agent.db
- *   sessionDir = ~/ghosts/<name>/.sessions  transcripts
+ *   sessionDir = ~/ghosts/<name>/sessions  transcripts
  *
  * Four decisions that are easy to get wrong and are load-bearing here:
  *
@@ -158,6 +158,7 @@ export {
   sessionFileNameFor,
 };
 import { createGhostOmpRuntime, type GhostOmpRuntime } from "./omp-runtime.js";
+import { ensureGhostArtifactRoot } from "./artifact-root.js";
 import { AskBroker, AskBrokerError, type PendingAsk } from "./ask-broker.js";
 import {
   buildGhostAvailableSlashCommands,
@@ -1419,6 +1420,10 @@ export class SessionHost {
     const paths = ghostPaths(ghost.dir);
     mkdirSync(paths.agentDir, { recursive: true });
     mkdirSync(paths.sessionDir, { recursive: true });
+    // Before settings are read: this is what makes the home's own `skills/`,
+    // `agents/`, `commands/`, `rules/`, `prompts/`, `tools/`, and `hooks/`
+    // discoverable.
+    ensureGhostArtifactRoot(paths.home);
 
     const settingsOverrides: Partial<Record<SettingPath, unknown>> = {
       ...nativeCompactionSettings(this.compactionConfig),
@@ -1442,6 +1447,17 @@ export class SessionHost {
       "memory.backend": "off",
       "memories.enabled": false,
       "autolearn.enabled": false,
+      // OMP's harness prompt opens by casting the model as a coding assistant
+      // and spends ~900 characters on how that assistant should talk. A ghost
+      // speaks from character.md instead, so the personality block is off and
+      // the persona extension drops what remains of the role section.
+      "personality": "none",
+      // Device docs on demand rather than inline. The four built-in devices
+      // (ast_edit, debug, lsp, inspect_image) carry ~180 lines of prose and
+      // TypeScript schemas that a conversation almost never reaches for. The
+      // catalog still names every device; the model reads `xd://<name>` when
+      // it wants one, at the cost of one extra read before first use.
+      "tools.xdevDocs": "catalog",
       // A ghost inherits the owner's vendor-neutral global instructions from
       // ~/.agents/AGENTS.md, and not ~/.claude/CLAUDE.md, which is written to
       // steer a coding agent and usually opens by telling the model who it is.

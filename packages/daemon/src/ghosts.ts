@@ -6,9 +6,9 @@
  * of that directory; reading its *contents* (character, docs, memory) is
  * `@ghost/extensions`' job.
  *
- * Everything the daemon adds for itself lives in dot-directories inside the
- * ghost home (`.sessions/`, `.pi/`) so the owner's default view of their
- * own ghost stays the plain files they wrote.
+ * A ghost home is plain files the owner can open, `sessions/` included. The
+ * one exception is `.pi/`, which holds provider credentials and the model
+ * catalog, and stays hidden until those move out of the home entirely.
  */
 import { randomUUID } from "node:crypto";
 import {
@@ -35,7 +35,7 @@ export interface Ghost {
 }
 
 /** Directory names the daemon owns inside a ghost home. */
-export const GHOST_SESSIONS_DIRNAME = ".sessions";
+export const GHOST_SESSIONS_DIRNAME = "sessions";
 export const GHOST_AGENT_DIRNAME = ".pi";
 export const GHOST_CHARACTER_FILENAME = "character.md";
 

@@ -55,7 +55,7 @@ describe("reads.json", () => {
   });
 
   it("writes privately by atomic replacement without temporary debris", async () => {
-    const dir = join(makeSessionDir(), "nested", ".sessions");
+    const dir = join(makeSessionDir(), "nested", "sessions");
     await Promise.all([
       writeReads(dir, { a: "2026-08-25T10:00:00.000Z" }),
       writeReads(dir, { b: "2026-08-25T11:00:00.000Z" }),
