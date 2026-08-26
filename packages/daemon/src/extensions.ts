@@ -27,6 +27,8 @@ import {
   type RelayTransport,
 } from "@ghost/extensions";
 
+import { ensureGhostArtifactRoot } from "./artifact-root.js";
+
 export type { RelayTransport };
 
 /** Drain the process-wide browser registry through the one package boundary. */
@@ -35,12 +37,13 @@ export async function closeAllBrowserSessions(): Promise<void> {
 }
 
 /**
- * Ensure one discovered home uses the canonical layout. This also performs the
- * one supported legacy migration: an unambiguous `notes/` directory is renamed
- * atomically to `docs/` before any session can see the home.
+ * Ensure one discovered home uses the canonical layout: the artifact root
+ * declaration, and the one supported legacy migration, an unambiguous `notes/`
+ * directory renamed atomically to `docs/` before any session sees the home.
  */
 export async function ensureGhostHomeLayout(homeDir: string): Promise<void> {
   await openGhostHome(homeDir).ensure();
+  ensureGhostArtifactRoot(homeDir);
 }
 
 /** How the daemon asks for a session's extension set. */
