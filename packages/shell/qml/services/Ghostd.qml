@@ -26,6 +26,7 @@ import Quickshell.Io
 import QtQuick
 import "CommandTranscript.js" as CommandTranscript
 import "GhostRename.js" as GhostRename
+import "HookStatus.js" as HookStatus
 import "TurnBlocks.js" as TurnBlocks
 
 Singleton {
@@ -72,6 +73,15 @@ Singleton {
         apart from `ghostDeleteError`: that one renders inside the banish
         modal, and a rename is typed in the roster row itself. */
     property string ghostRenameError: ""
+
+    // ---- Lifecycle hooks -------------------------------------------------
+    // Global daemon configuration, redacted to safe labels and trigger metadata.
+    property var activeHooks: []
+    property int activeHookCount: 0
+    property int hookContinuationCap: 0
+    property bool hooksLoading: false
+    property bool hooksLoaded: false
+    property string hooksError: ""
 
     // ---- Browsable context -----------------------------------------------
     // Plain files stay canonical. This is only the latest derived daemon
@@ -289,6 +299,7 @@ Singleton {
     property int eventsConsumed: 0
     property string eventsFrameBuffer: ""
     property var contextRequest: null
+    property var hooksRequest: null
     property var contextDeleteRequest: null
     property var commandsRequest: null
     property var mcpRequest: null
@@ -503,6 +514,7 @@ Singleton {
     // ---- Ghost roster -----------------------------------------------------
 
     function refresh(): void {
+        root.fetchHooks(false);
         const xhr = new XMLHttpRequest();
         root.listRequest = xhr;
         xhr.onreadystatechange = function () {
@@ -532,6 +544,44 @@ Singleton {
             }
         };
         root.dispatch(xhr, "GET", "/api/ghosts", ({}), null);
+    }
+
+    // ---- Lifecycle-hook status ------------------------------------------
+
+    function fetchHooks(force: bool): void {
+        if (!force && root.hooksLoaded) return;
+        if (root.hooksRequest && root.hooksRequest.readyState !== 4) {
+            if (!force) return;
+            root.hooksRequest.abort();
+        }
+        const xhr = new XMLHttpRequest();
+        root.hooksRequest = xhr;
+        root.hooksLoading = true;
+        root.hooksError = "";
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || xhr !== root.hooksRequest) return;
+            root.hooksLoading = false;
+            if (xhr.status === 200) {
+                try {
+                    const status = HookStatus.normalize(JSON.parse(xhr.responseText));
+                    if (status === null) throw new Error("malformed hook status");
+                    root.activeHooks = status.hooks;
+                    root.activeHookCount = status.total;
+                    root.hookContinuationCap = status.sessionStopContinuationCap;
+                    root.hooksLoaded = true;
+                    root.hooksError = "";
+                    root.reachable = true;
+                } catch (error) {
+                    root.activeHooks = [];
+                    root.activeHookCount = 0;
+                    root.hookContinuationCap = 0;
+                    root.hooksError = "ghostd sent malformed hook status";
+                }
+            } else {
+                root.hooksError = root.describeError(xhr, "GET hooks");
+            }
+        };
+        root.dispatch(xhr, "GET", "/api/hooks", ({}), null);
     }
 
     function createGhost(name: string): void {

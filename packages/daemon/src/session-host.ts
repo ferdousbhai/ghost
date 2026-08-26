@@ -87,6 +87,9 @@ import {
   nativeCompactionSettings,
   type CompactionConfig,
 } from "./compaction.js";
+import type {
+  ConversationContextMaintenance,
+} from "./conversation-maintenance.js";
 import { scrubProviderEnv } from "./env-scrub.js";
 import {
   GHOST_SESSION_STOP_CONTINUATION_CAP,
@@ -397,7 +400,12 @@ export interface SessionHostOptions {
    */
   claudeCode?: Omit<
     ClaudeCodeRuntimeOptions,
-    "logger" | "extensionOptions" | "browserMode" | "relayTransport" | "hooks"
+    | "logger"
+    | "extensionOptions"
+    | "browserMode"
+    | "relayTransport"
+    | "hooks"
+    | "conversationMaintenance"
   >;
   /** Injectable owner for OMP's conversation-scoped realtime voice surface. */
   liveVoice?: LiveVoiceManager;
@@ -405,6 +413,11 @@ export interface SessionHostOptions {
   collaboration?: CollaborationManager;
   /** Awaited Ghost-owned lifecycle hooks, shared by every model harness. */
   hooks?: GhostHookRunner;
+  /** Optional built-in background memory/docs maintenance hook. */
+  conversationMaintenance?: Pick<
+    ConversationContextMaintenance,
+    "recordTurn" | "forgetConversation"
+  >;
   /** Internal daemon cache bounds and deterministic lifecycle test seams. */
   retention?: SessionRetentionConfig;
 }
@@ -929,6 +942,9 @@ export class SessionHost {
   private readonly generateGreetingFor: GreetingGenerator;
   private readonly claudeCode: ClaudeCodeRuntime;
   private readonly hooks: GhostHookRunner;
+  private readonly conversationMaintenance:
+    | Pick<ConversationContextMaintenance, "recordTurn" | "forgetConversation">
+    | undefined;
   private readonly liveVoice: LiveVoiceManager;
   private readonly collaboration: CollaborationManager;
   private readonly sessions = new Map<string, HostedSession>();
@@ -981,12 +997,14 @@ export class SessionHost {
     this.generateGreetingFor = options.greeting?.generate
       ?? ((input) => this.defaultGreeting(input));
     this.hooks = options.hooks ?? new GhostHookRunner({ logger: this.logger });
+    this.conversationMaintenance = options.conversationMaintenance;
     this.claudeCode = new ClaudeCodeRuntime({
       logger: this.logger,
       extensionOptions: this.extensionOptions,
       browserMode: this.browserMode,
       ...(this.relayTransport ? { relayTransport: this.relayTransport } : {}),
       hooks: this.hooks,
+      conversationMaintenance: this.conversationMaintenance,
       ...(options.claudeCode ?? {}),
     });
     this.liveVoice = options.liveVoice ?? new LiveVoiceManager();
@@ -2287,6 +2305,9 @@ export class SessionHost {
     const ghost = this.registry.get(ghostName);
     const paths = ghostPaths(ghost.dir);
     const key = this.keyOf(ghostName, conversationId);
+    // A new owner action resets the one-minute idle boundary, and aborts an
+    // idle hook that happened to start at the same instant.
+    this.hooks.cancelConversationIdle(key);
     const liveHosted = this.sessions.get(key);
     if (this.liveVoice.status(key).active || (liveHosted?.liveVoiceTransitions ?? 0) > 0) {
       throw new GhostError(
@@ -2400,6 +2421,7 @@ export class SessionHost {
     const unsubscribe = hosted.session.subscribe((event: AgentSessionEvent) => {
       adapter.handle(event);
     });
+    let turnOutcome: "completed" | "failed" | "aborted" = "completed";
 
     const onAbort = () => {
       void hosted.session.abort();
@@ -2413,6 +2435,7 @@ export class SessionHost {
           type: "before_prompt",
           prompt: options.prompt,
           turn_id: hosted.turnId,
+          conversation_id: conversationId,
           session_id: hosted.session.sessionId,
           ...(hosted.session.sessionFile ? { session_file: hosted.session.sessionFile } : {}),
           signal: options.signal ?? new AbortController().signal,
@@ -2426,6 +2449,7 @@ export class SessionHost {
             content: result.additionalContext,
             display: false,
           }, { triggerTurn: false });
+          await result.acknowledge?.();
         }
       }
       await promptOmpSession(hosted.session, options.prompt);
@@ -2437,6 +2461,7 @@ export class SessionHost {
         const lastAssistant = [...messages].reverse().find((message) => message.role === "assistant");
         const result = await this.hooks.emitSessionStop({
           type: "session_stop",
+          conversation_id: conversationId,
           owner_prompt: options.prompt,
           // Stop hooks review this pass, not the screenshot/tool-heavy session
           // history. This also matches the Claude Code runtime's payload.
@@ -2475,6 +2500,7 @@ export class SessionHost {
         else adapter.finishDone();
       }
     } catch (error) {
+      turnOutcome = options.signal?.aborted ? "aborted" : "failed";
       this.logger.error("turn failed", {
         ghost: ghostName,
         error: (error as Error).message,
@@ -2494,6 +2520,43 @@ export class SessionHost {
       if (shouldTitle) {
         this.startBackgroundTitle(hosted, ghostName, paths.home, options.prompt);
       }
+      if (this.conversationMaintenance) {
+        const lastAssistant = [...hosted.session.messages]
+          .reverse()
+          .find((message) => message.role === "assistant");
+        const assistantText = lastAssistant?.content
+          .filter((part): part is { type: "text"; text: string } => part.type === "text")
+          .map((part) => part.text)
+          .join("")
+          .trim() ?? "";
+        try {
+          await this.conversationMaintenance.recordTurn({
+            ghostName,
+            cwd: paths.home,
+            runtime: "omp",
+            conversationId,
+            turnId: hosted.turnId,
+            ownerPrompt: options.prompt,
+            assistantText,
+            outcome: options.signal?.aborted ? "aborted" : turnOutcome,
+          });
+        } catch (error) {
+          this.logger.warn("could not retain a turn for conversation maintenance", {
+            ghost: ghostName,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+      this.hooks.scheduleConversationIdle(key, {
+        conversation_id: conversationId,
+        turn_id: hosted.turnId,
+        session_id: hosted.session.sessionId,
+        ...(hosted.session.sessionFile ? { session_file: hosted.session.sessionFile } : {}),
+        last_turn_outcome: options.signal?.aborted ? "aborted" : turnOutcome,
+        ghost_name: ghostName,
+        cwd: paths.home,
+        runtime: "omp",
+      });
       await this.announceConversationUpdated(ghostName, "pi", conversationId);
     }
   }
@@ -2716,6 +2779,14 @@ export class SessionHost {
     } finally {
       runtime.close();
     }
+  }
+
+  /** Borrow or open the ghost-scoped raw completion runtime for background work. */
+  async withBackgroundRuntime<T>(
+    ghostName: string,
+    use: (runtime: GhostOmpRuntime) => Promise<T>,
+  ): Promise<T> {
+    return this.withGreetingRuntime(this.registry.get(ghostName), use);
   }
 
   /**
@@ -3397,6 +3468,7 @@ export class SessionHost {
 
   /** Drop one hosted session (aborting an in-flight turn). */
   async close(ghostName: string, sessionId?: string | null): Promise<void> {
+    this.hooks.cancelConversationIdle(this.keyOf(ghostName, sessionId));
     await this.claudeCode.close(ghostName, sessionId ?? DEFAULT_SESSION_KEY);
     await this.closePi(ghostName, sessionId);
   }
@@ -3411,6 +3483,7 @@ export class SessionHost {
     const id = sessionId ?? DEFAULT_SESSION_KEY;
     const identity = conversationIdentity(runtime, id);
     const piKey = this.keyOf(ghostName, sessionId);
+    this.hooks.cancelConversationIdle(piKey);
     const deleteKey = deletionKeyOf(ghostName, runtime, id);
     const hosted = runtime === "pi" ? this.sessions.get(piKey) : undefined;
     const busy = runtime === "pi"
@@ -3488,6 +3561,19 @@ export class SessionHost {
       await writeReads(paths.sessionDir, Object.fromEntries(
         Object.entries(reads).filter(([key]) => remainingIds.has(key)),
       ));
+      try {
+        await this.conversationMaintenance?.forgetConversation(
+          paths.home,
+          runtime === "pi" ? "omp" : "claude-code",
+          id,
+        );
+      } catch (error) {
+        this.logger.warn("could not remove deleted conversation maintenance state", {
+          ghost: ghostName,
+          session: identity.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
       this.logger.info("trashed ghost conversation", {
         ghost: ghostName,
         session: identity.id,
@@ -3510,6 +3596,7 @@ export class SessionHost {
    */
   async deleteGhost(ghostName: string): Promise<{ trash: string }> {
     const ghost = this.registry.get(ghostName);
+    this.hooks.cancelConversationIdleForGhost(ghost.name);
     this.reserveGhosts([ghost.name], "deleting it");
     try {
       await this.quiesceGhost(ghost.name);
@@ -3539,6 +3626,7 @@ export class SessionHost {
     // Renaming a ghost to what it is already called is a no-op, not a
     // collision with itself.
     if (nextName === ghost.name) return ghost;
+    this.hooks.cancelConversationIdleForGhost(ghost.name);
     // Anything at all under the new name is a collision: renaming onto an
     // occupied path would bury whatever the owner keeps there.
     if (existsSync(join(this.registry.root, nextName))) {
@@ -3779,6 +3867,7 @@ export class SessionHost {
   beginShutdown(): void {
     if (this.shutdownTasks) return;
     this.disposed = true;
+    this.hooks.cancelAllConversationIdle();
     this.launchCleanupStep(undefined, "retention timer", () => this.retentionTimer.dispose());
     this.shutdownTasks = [
       Promise.resolve().then(() => this.liveVoice.disposeAll()),

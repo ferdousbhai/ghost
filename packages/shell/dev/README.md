@@ -107,8 +107,9 @@ stop the mock separately.
   layout like any app. The HUD uses a neutral reading canvas with the current
   Omarchy accent and semantic status colours. Roster on the left (`casper`,
   `moaning-myrtle`, `+ new ghost`), transcript in the middle, composer at the
-bottom, and the permanent Chat / Docs / Memory / Helpers / Commands / MCP / Remote / Character rail at
-  the right edge. `SUPER+CTRL+G` is launch-or-focus: reveal+focus when
+  bottom, and the permanent Chat / Docs / Memory / Helpers / Commands / Hooks /
+  MCP / Remote / Character rail at the right edge. `SUPER+CTRL+G` is
+  launch-or-focus: reveal+focus when
   hidden/unfocused, hide only when already focused.
   `section docs` shows the Train-style file index and v2 documents. The editor
   has a lossless monospace source view and a read-only Markdown Reading view;
@@ -121,7 +122,10 @@ bottom, and the permanent Chat / Docs / Memory / Helpers / Commands / MCP / Remo
   confirmed, recoverable deletion; the mock moves its owned fixture into a
   temporary mock Trash. Commands shows the session's searchable OMP catalog and
   stages a chosen slash command in chat; typing `/` opens its compact
-  autocomplete, including clear partial/unsupported labels. MCP lists
+  autocomplete, including clear partial/unsupported labels. Hooks shows safe
+  names, descriptions, triggers, idle timing, and active counts, with no
+  commands or injected context.
+  MCP lists
   sanitized stdio, HTTP, and SSE fixtures and exercises add, full replacement,
   enable/disable, and confirmed deletion without ever returning the seeded
   secret values. Remote exercises the OpenAI live-voice lifecycle and

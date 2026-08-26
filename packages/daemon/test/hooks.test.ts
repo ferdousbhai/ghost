@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   GHOST_SESSION_STOP_CONTINUATION_CAP,
   GhostHookRunner,
@@ -12,6 +12,7 @@ import {
 
 const directories: string[] = [];
 afterEach(() => {
+  vi.useRealTimers();
   for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
 });
 
@@ -72,7 +73,30 @@ describe("GhostHookRunner", () => {
     const result = await runner.emitSessionStop(event());
     expect(calls).toEqual(["first", "second"]);
     expect(ghostSessionStopContinuation(result)).toBe("Revise this answer.");
-    expect(GHOST_SESSION_STOP_CONTINUATION_CAP).toBe(2);
+    expect(GHOST_SESSION_STOP_CONTINUATION_CAP).toBe(6);
+    expect(runner.status()).toEqual({
+      active: true,
+      total: 3,
+      events: [{ event: "session_stop", count: 3 }],
+      hooks: [
+        {
+          event: "session_stop",
+          name: "Session-stop extension hook",
+          description: "Reviews the current assistant pass and may continue it.",
+        },
+        {
+          event: "session_stop",
+          name: "Session-stop extension hook",
+          description: "Reviews the current assistant pass and may continue it.",
+        },
+        {
+          event: "session_stop",
+          name: "Session-stop extension hook",
+          description: "Reviews the current assistant pass and may continue it.",
+        },
+      ],
+      session_stop_continuation_cap: 6,
+    });
   });
 
   it("combines nonblocking before_prompt context without starting a continuation", async () => {
@@ -89,6 +113,72 @@ describe("GhostHookRunner", () => {
     const result = await runner.emitBeforePrompt(beforePromptEvent());
     expect(calls).toEqual(["Continue"]);
     expect(result?.additionalContext).toBe("First advisory.\n\nSecond advisory.");
+    expect(runner.status()).toMatchObject({
+      active: true,
+      total: 2,
+      events: [{ event: "before_prompt", count: 2 }],
+    });
+  });
+
+  it("fires conversation_idle once after a resettable inactivity delay", async () => {
+    vi.useFakeTimers();
+    const runner = new GhostHookRunner();
+    const observed: Array<{ idleFor: number; outcome: string }> = [];
+    await runner.register((api) => {
+      api.on("conversation_idle", (input) => {
+        observed.push({ idleFor: input.idle_for_ms, outcome: input.last_turn_outcome });
+      });
+    });
+    const idleEvent = {
+      conversation_id: "conversation-1",
+      turn_id: 4,
+      session_id: "session-1",
+      last_turn_outcome: "completed" as const,
+      ghost_name: "casper",
+      cwd: process.cwd(),
+      runtime: "omp" as const,
+    };
+
+    runner.scheduleConversationIdle("casper/conversation-1", idleEvent);
+    await vi.advanceTimersByTimeAsync(30_000);
+    runner.scheduleConversationIdle("casper/conversation-1", idleEvent);
+    await vi.advanceTimersByTimeAsync(59_999);
+    expect(observed).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(observed).toEqual([{ idleFor: 60_000, outcome: "completed" }]);
+    expect(runner.status()).toMatchObject({
+      total: 1,
+      events: [{ event: "conversation_idle", count: 1 }],
+      hooks: [{ event: "conversation_idle", name: "Conversation-idle extension hook" }],
+    });
+  });
+
+  it("keeps an independent configured delay for each conversation_idle hook", async () => {
+    vi.useFakeTimers();
+    const runner = new GhostHookRunner();
+    const observed: string[] = [];
+    await runner.register((api) => {
+      api.on("conversation_idle", () => { observed.push("fast"); }, { idleSeconds: 60 });
+      api.on("conversation_idle", () => { observed.push("slow"); }, { idleSeconds: 600 });
+    });
+    runner.scheduleConversationIdle("casper/conversation-1", {
+      conversation_id: "conversation-1",
+      turn_id: 1,
+      session_id: "session-1",
+      last_turn_outcome: "completed",
+      ghost_name: "casper",
+      cwd: process.cwd(),
+      runtime: "omp",
+    });
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(observed).toEqual(["fast"]);
+    await vi.advanceTimersByTimeAsync(540_000);
+    expect(observed).toEqual(["fast", "slow"]);
+    expect(runner.status().hooks).toMatchObject([
+      { event: "conversation_idle", idle_seconds: 60 },
+      { event: "conversation_idle", idle_seconds: 600 },
+    ]);
   });
 
   it("loads Claude-style command groups and passes the OMP-compatible payload", async () => {
@@ -108,12 +198,28 @@ describe("GhostHookRunner", () => {
     writeFileSync(config, JSON.stringify({
       hooks: {
         session_stop: [{
-          hooks: [{ type: "command", command: `${JSON.stringify(process.execPath)} ${JSON.stringify(script)}`, timeout: 5 }],
+          hooks: [{
+            type: "command",
+            command: `${JSON.stringify(process.execPath)} ${JSON.stringify(script)}`,
+            name: "Completion review",
+            description: "Checks whether the current request is complete.",
+            timeout: 5,
+          }],
         }],
       },
     }));
 
     const runner = GhostHookRunner.fromConfig(config);
+    expect(runner.status()).toMatchObject({
+      active: true,
+      total: 1,
+      events: [{ event: "session_stop", count: 1 }],
+      hooks: [{
+        event: "session_stop",
+        name: "Completion review",
+        description: "Checks whether the current request is complete.",
+      }],
+    });
     const result = await runner.emitSessionStop(event({
       last_assistant_message: { role: "assistant", content: [{ type: "text", text: "draft" }] },
       stop_hook_active: true,

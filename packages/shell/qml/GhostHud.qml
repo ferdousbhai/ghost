@@ -153,7 +153,7 @@ FloatingWindow {
 
     /** Move between the ghost's chat, context, and capability surfaces. */
     function showSection(section: string): void {
-        if (["chat", "docs", "memory", "agents", "commands", "mcp", "connect", "character"]
+        if (["chat", "docs", "memory", "agents", "commands", "hooks", "mcp", "connect", "character"]
                 .indexOf(section) < 0)
             return;
         hud.loginOpen = false;
@@ -163,6 +163,8 @@ FloatingWindow {
             composer.take();
         } else if (section === "commands") {
             Ghostd.fetchCommands(false);
+        } else if (section === "hooks") {
+            Ghostd.fetchHooks(false);
         } else if (section === "mcp") {
             Ghostd.fetchMcp(false);
         } else if (section === "connect") {
@@ -1075,6 +1077,13 @@ FloatingWindow {
                 }
             }
 
+            HooksBrowser {
+                visible: hud.currentSection === "hooks"
+                    && !hud.loginOpen && !hud.switcherOpen
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+            }
+
             McpBrowser {
                 id: mcpBrowser
                 visible: hud.currentSection === "mcp"
@@ -1128,6 +1137,7 @@ FloatingWindow {
             anchors.bottom: parent.bottom
             width: hud.navigationWidth
             currentSection: hud.currentSection
+            activeHookCount: Ghostd.activeHookCount
             onSelected: section => hud.showSection(section)
         }
 

@@ -16,6 +16,8 @@ import { pathToFileURL } from "node:url";
 import { apiTokenCommand } from "./api-token.js";
 import { LoginManager } from "./auth.js";
 import { ClaudeCodeProbe } from "./claude-code.js";
+import { ConversationContextMaintenance } from "./conversation-maintenance.js";
+import { ContinuityReview } from "./continuity-review.js";
 import { importCommand } from "./import-command.js";
 import { loginCommand } from "./login-command.js";
 import { loadConfig, type DaemonConfig, type DaemonConfigOverrides } from "./config.js";
@@ -411,7 +413,12 @@ async function serveDaemon(
   const relay = createRelayHub({ logger });
   const homeOperations = new HomeOperationCoordinator(registry);
   const claudeCodeProbe = new ClaudeCodeProbe();
-  const host = new SessionHost({
+  let host!: SessionHost;
+  const conversationMaintenance = new ConversationContextMaintenance({
+    logger,
+    withRuntime: (ghostName, use) => host.withBackgroundRuntime(ghostName, use),
+  });
+  host = new SessionHost({
     registry,
     logger,
     offline: config.offline,
@@ -419,9 +426,16 @@ async function serveDaemon(
     compaction: config.compaction,
     askTimeoutSeconds: config.askTimeoutSeconds,
     hooks,
+    conversationMaintenance,
     claudeCode: { probe: claudeCodeProbe },
     ...(relay ? { relayTransport: relay } : {}),
   });
+  const continuityReview = new ContinuityReview({
+    logger,
+    withRuntime: (ghostName, use) => host.withBackgroundRuntime(ghostName, use),
+  });
+  await hooks.register(continuityReview.hookFactory);
+  await hooks.register(conversationMaintenance.hookFactory);
   const login = new LoginManager({
     registry,
     logger,
@@ -449,6 +463,7 @@ async function serveDaemon(
       login,
       catalog,
       mcp,
+      hooks,
       logger,
       port: config.port,
       address: config.host,

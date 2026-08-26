@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { claudeSessionMetadataPath } from "../src/claude-code.js";
 import { ghostPaths } from "../src/ghosts.js";
+import { GhostHookRunner } from "../src/hooks.js";
 import { McpCatalog } from "../src/mcp-catalog.js";
 import { setChatModelRole } from "../src/models.js";
 import type { PiMessagesEvent } from "../src/pi-messages.js";
@@ -41,6 +42,7 @@ async function serve(
   serverOptions: {
     maxBodyBytes?: number;
     apiToken?: string | null;
+    hooks?: GhostHookRunner;
   } = {},
 ) {
   temp = makeTempGhosts();
@@ -59,6 +61,7 @@ async function serve(
     port: 0,
     // Routing and streaming are the subject here; auth has its own file.
     apiToken: null,
+    ...(serverOptions.hooks ? { hooks: serverOptions.hooks } : {}),
     ...(serverOptions.maxBodyBytes === undefined
       ? {}
       : { maxBodyBytes: serverOptions.maxBodyBytes }),
@@ -144,6 +147,48 @@ describe("GET /api/ghosts", () => {
     expect(ghosts).toHaveLength(1);
     expect(ghosts[0]).toMatchObject({ name: "casper", dir: join(temp!.root, "casper") });
     expect(ghosts[0]?.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  });
+});
+
+describe("GET /api/hooks", () => {
+  it("reports active event counts without exposing hook implementation details", async () => {
+    const hooks = new GhostHookRunner();
+    await hooks.register((api) => {
+      api.on("before_prompt", () => undefined);
+      api.on("session_stop", () => undefined);
+      api.on("session_stop", () => undefined);
+    });
+    const base = await serve(undefined, { hooks });
+
+    const response = await fetch(`${base}/api/hooks`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      active: true,
+      total: 3,
+      events: [
+        { event: "before_prompt", count: 1 },
+        { event: "session_stop", count: 2 },
+      ],
+      hooks: [
+        {
+          event: "before_prompt",
+          name: "Before-prompt extension hook",
+          description: "Adds context before the owner prompt is sent.",
+        },
+        {
+          event: "session_stop",
+          name: "Session-stop extension hook",
+          description: "Reviews the current assistant pass and may continue it.",
+        },
+        {
+          event: "session_stop",
+          name: "Session-stop extension hook",
+          description: "Reviews the current assistant pass and may continue it.",
+        },
+      ],
+      session_stop_continuation_cap: 6,
+    });
+    expect((await fetch(`${base}/api/hooks`, { method: "POST" })).status).toBe(405);
   });
 });
 

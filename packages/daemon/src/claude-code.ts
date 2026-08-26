@@ -56,6 +56,7 @@ import * as Effect from "effect/Effect";
 import * as Stream from "effect/Stream";
 import * as z from "zod";
 import { createClaudePiMessagesAdapter } from "./claude-pi-messages.js";
+import type { ConversationContextMaintenance } from "./conversation-maintenance.js";
 import {
   isValidConversationId,
   requireRawConversationId,
@@ -65,6 +66,7 @@ import {
   GHOST_SESSION_STOP_CONTINUATION_CAP,
   GhostHookRunner,
   ghostSessionStopContinuation,
+  type GhostConversationIdleEvent,
 } from "./hooks.js";
 import {
   resolveGhostExtensions,
@@ -158,6 +160,8 @@ export interface ClaudeCodeRuntimeOptions {
   probe?: ClaudeCodeProbe;
   /** Ghost-owned lifecycle hooks shared with the pi harness. */
   hooks?: GhostHookRunner;
+  /** Optional built-in background memory/docs maintenance hook. */
+  conversationMaintenance?: Pick<ConversationContextMaintenance, "recordTurn">;
 }
 
 export class ClaudeCodeProcessError extends Error {
@@ -953,6 +957,9 @@ export class ClaudeCodeRuntime {
   private readonly createQuery: ClaudeCodeQueryFactory;
   private readonly probe: ClaudeCodeProbe;
   private readonly hooks: GhostHookRunner;
+  private readonly conversationMaintenance:
+    | Pick<ConversationContextMaintenance, "recordTurn">
+    | undefined;
   private readonly busy = new Set<string>();
   private readonly active = new Map<
     string,
@@ -977,6 +984,7 @@ export class ClaudeCodeRuntime {
       ...(options.readAuthStatus ? { readAuthStatus: options.readAuthStatus } : {}),
     });
     this.hooks = options.hooks ?? new GhostHookRunner({ logger: this.logger });
+    this.conversationMaintenance = options.conversationMaintenance;
   }
 
   invalidateAuthProbe(): void {
@@ -1017,6 +1025,7 @@ export class ClaudeCodeRuntime {
         409,
       );
     }
+    this.hooks.cancelConversationIdle(key);
     this.busy.add(key);
     const controller = new AbortController();
     const linked = linkedTurnSignal(options.signal, controller.signal);
@@ -1049,6 +1058,8 @@ export class ClaudeCodeRuntime {
     const adapter = createClaudePiMessagesAdapter(options.emit, {
       includeThinking: options.includeThinking,
     });
+    let idleEvent: Omit<GhostConversationIdleEvent, "idle_for_ms" | "signal" | "type"> | undefined;
+    let finalAssistantText = "";
     try {
       const { binaryPath, authStatus: auth } = await this.probe.read();
       this.assertTurnAdmitted();
@@ -1075,11 +1086,13 @@ export class ClaudeCodeRuntime {
       const systemPrompt = await buildPersona(paths.home, ghost.name);
       this.assertTurnAdmitted();
       let beforePromptContext: string | undefined;
+      let acknowledgeBeforePrompt: (() => Promise<void> | void) | undefined;
       if (this.hooks.hasHandlers("before_prompt")) {
         const result = await this.hooks.emitBeforePrompt({
           type: "before_prompt",
           prompt: options.prompt,
           turn_id: ownerTurnId,
+          conversation_id: conversationId,
           session_id: metadata?.sessionId ?? conversationId,
           session_file: claudeSessionMetadataPath(paths.sessionDir, conversationId),
           signal: options.signal ?? new AbortController().signal,
@@ -1089,6 +1102,7 @@ export class ClaudeCodeRuntime {
         });
         if (result?.additionalContext && !options.signal?.aborted) {
           beforePromptContext = result.additionalContext;
+          acknowledgeBeforePrompt = result.acknowledge;
         }
         this.assertTurnAdmitted();
       }
@@ -1176,6 +1190,10 @@ export class ClaudeCodeRuntime {
         this.assertTurnAdmitted();
         await writeMetadata(paths.sessionDir, metadata);
         this.assertTurnAdmitted();
+        if (continuationCount === 0 && beforePromptContext) {
+          await acknowledgeBeforePrompt?.();
+          acknowledgeBeforePrompt = undefined;
+        }
         if (options.signal?.aborted) {
           adapter.finishError(new Error("Turn aborted."), true);
           break;
@@ -1184,6 +1202,7 @@ export class ClaudeCodeRuntime {
         const resultText = "result" in completed && typeof completed.result === "string"
           ? completed.result
           : "";
+        finalAssistantText = resultText.trim();
         const lastAssistant = {
           role: "assistant",
           content: resultText ? [{ type: "text", text: resultText }] : [],
@@ -1191,6 +1210,7 @@ export class ClaudeCodeRuntime {
         const hookResult = completed.subtype === "success" && this.hooks.hasHandlers("session_stop")
           ? await this.hooks.emitSessionStop({
             type: "session_stop",
+            conversation_id: conversationId,
             owner_prompt: options.prompt,
             messages: [lastAssistant],
             turn_id: ownerTurnId,
@@ -1208,6 +1228,16 @@ export class ClaudeCodeRuntime {
         const additionalContext = ghostSessionStopContinuation(hookResult);
         if (!additionalContext) {
           adapter.handle(completed);
+          idleEvent = {
+            conversation_id: conversationId,
+            turn_id: ownerTurnId,
+            session_id: completed.session_id,
+            session_file: claudeSessionMetadataPath(paths.sessionDir, conversationId),
+            last_turn_outcome: completed.subtype === "success" ? "completed" : "failed",
+            ghost_name: ghost.name,
+            cwd: paths.home,
+            runtime: "claude-code",
+          };
           break;
         }
         if (continuationCount >= GHOST_SESSION_STOP_CONTINUATION_CAP) {
@@ -1217,6 +1247,16 @@ export class ClaudeCodeRuntime {
             cap: GHOST_SESSION_STOP_CONTINUATION_CAP,
           });
           adapter.handle(completed);
+          idleEvent = {
+            conversation_id: conversationId,
+            turn_id: ownerTurnId,
+            session_id: completed.session_id,
+            session_file: claudeSessionMetadataPath(paths.sessionDir, conversationId),
+            last_turn_outcome: completed.subtype === "success" ? "completed" : "failed",
+            ghost_name: ghost.name,
+            cwd: paths.home,
+            runtime: "claude-code",
+          };
           break;
         }
         adapter.recordUsage(completed);
@@ -1226,6 +1266,28 @@ export class ClaudeCodeRuntime {
       }
       if (!adapter.isTerminal()) {
         throw new ClaudeCodeProcessError("Claude Code result did not terminate the turn.");
+      }
+      if (idleEvent) {
+        if (this.conversationMaintenance) {
+          try {
+            await this.conversationMaintenance.recordTurn({
+              ghostName: ghost.name,
+              cwd: ghostPaths(ghost.dir).home,
+              runtime: "claude-code",
+              conversationId,
+              turnId: idleEvent.turn_id,
+              ownerPrompt: options.prompt,
+              assistantText: finalAssistantText,
+              outcome: idleEvent.last_turn_outcome,
+            });
+          } catch (error) {
+            this.logger.warn("could not retain a turn for conversation maintenance", {
+              ghost: ghost.name,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
+        this.hooks.scheduleConversationIdle(key, idleEvent);
       }
     } catch (cause) {
       this.logger.error("Claude Code turn failed", {

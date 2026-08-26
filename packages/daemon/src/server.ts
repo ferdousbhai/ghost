@@ -28,6 +28,7 @@
  *   POST /api/ghosts/:name/sessions/:id/reanswer → branch an ask result + SSE resume
  *   GET  /api/ghosts/:name/model-routing → Ghost roles + OMP fallback chains
  *   PUT  /api/ghosts/:name/model-routing → set/clear a primary or replace a retry chain
+ *   GET  /api/hooks                     → redacted active lifecycle-hook status
  *   GET  /api/relay/status            → whether the owner's Chromium is paired
  *   WS   /relay                       → the MV3 extension's socket (token-gated)
  *
@@ -89,6 +90,10 @@ import {
   type HomeOperationCoordinator,
 } from "./home-operations.js";
 import { assertValidGhostName, GhostError, type GhostRegistry } from "./ghosts.js";
+import {
+  GHOST_SESSION_STOP_CONTINUATION_CAP,
+  type GhostHookRunner,
+} from "./hooks.js";
 import { GHOST_MODEL_ROLES, type GhostModelRole } from "./models.js";
 import { silentLogger, type Logger } from "./log.js";
 import {
@@ -123,6 +128,8 @@ export interface ServerOptions {
   catalog?: ModelCatalog;
   /** Project-only MCP management. Omit to leave the MCP routes out. */
   mcp?: McpCatalog;
+  /** Loaded lifecycle hooks. Only their redacted status crosses HTTP. */
+  hooks?: GhostHookRunner;
   logger?: Logger;
   /** Max request body. A turn is a few KB; this is a sanity bound. */
   maxBodyBytes?: number;
@@ -1542,6 +1549,20 @@ export function createDaemonServer(options: ServerOptions): Server {
           jsonResponse(response, 200, relay
             ? { enabled: true, ...relay.status() }
             : { enabled: false, connected: false, reason: "The relay is off (GHOSTD_RELAY)." });
+          return;
+        }
+        if (segments[1] === "hooks" && segments.length === 2) {
+          if (method !== "GET") {
+            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+            return;
+          }
+          jsonResponse(response, 200, options.hooks?.status() ?? {
+            active: false,
+            total: 0,
+            events: [],
+            hooks: [],
+            session_stop_continuation_cap: GHOST_SESSION_STOP_CONTINUATION_CAP,
+          });
           return;
         }
         if (segments[1] !== "ghosts") {

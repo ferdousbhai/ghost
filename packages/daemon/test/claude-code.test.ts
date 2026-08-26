@@ -12,7 +12,7 @@ import {
   GHOST_BROWSER,
   GHOST_SCREEN,
 } from "@ghost/extensions";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   bridgeClaudeCodeTools,
   claudeSessionMetadataPath,
@@ -162,6 +162,7 @@ function setupClaudeHost(options: {
     lifecycle: { queries: number; interrupted: number; closed: number },
   ) => Query;
   hooks?: GhostHookRunner;
+  conversationMaintenance?: ConstructorParameters<typeof SessionHost>[0]["conversationMaintenance"];
   logger?: Logger;
 } = {}) {
   temp = makeTempGhosts();
@@ -181,6 +182,9 @@ function setupClaudeHost(options: {
     offline: true,
     ...(options.logger ? { logger: options.logger } : {}),
     ...(options.hooks ? { hooks: options.hooks } : {}),
+    ...(options.conversationMaintenance
+      ? { conversationMaintenance: options.conversationMaintenance }
+      : {}),
     claudeCode: {
       ...(options.probe
         ? { probe: options.probe }
@@ -815,11 +819,14 @@ describe("Claude Code subscription runtime", () => {
   });
 
   it("applies session_stop continuations before the Claude turn settles", async () => {
-    const hooks = new GhostHookRunner();
+    const hooks = new GhostHookRunner({ conversationIdleDelayMs: 0 });
     const active: boolean[] = [];
     const beforeTurnIds: number[] = [];
     const turnIds: number[] = [];
     const ownerPrompts: string[] = [];
+    const idleEvents: Array<{ conversation: string; outcome: string; runtime: string }> = [];
+    let firstIdleResolve!: () => void;
+    const firstIdle = new Promise<void>((resolve) => { firstIdleResolve = resolve; });
     await hooks.register((api) => {
       api.on("before_prompt", (event) => {
         beforeTurnIds.push(event.turn_id);
@@ -829,6 +836,14 @@ describe("Claude Code subscription runtime", () => {
         turnIds.push(event.turn_id);
         ownerPrompts.push(event.owner_prompt);
         if (!event.stop_hook_active) return { continue: true, additionalContext: "Revise it once." };
+      });
+      api.on("conversation_idle", (event) => {
+        idleEvents.push({
+          conversation: event.conversation_id,
+          outcome: event.last_turn_outcome,
+          runtime: event.runtime,
+        });
+        firstIdleResolve();
       });
     });
     let queryNumber = 0;
@@ -857,6 +872,12 @@ describe("Claude Code subscription runtime", () => {
     expect(events.filter((event) => event.type === "start")).toHaveLength(1);
     expect(events.filter((event) => event.type === "done")).toHaveLength(1);
     expect(events.at(-1)).toMatchObject({ type: "done", usage: { totalTokens: 4 } });
+    await firstIdle;
+    expect(idleEvents[0]).toEqual({
+      conversation: "conversation-hooks",
+      outcome: "completed",
+      runtime: "claude-code",
+    });
 
     await host!.runTurn("casper", {
       sessionId: "conversation-hooks",
@@ -879,10 +900,21 @@ describe("Claude Code subscription runtime", () => {
 
   it("injects before_prompt guidance into one Claude query", async () => {
     const hooks = new GhostHookRunner();
+    const acknowledge = vi.fn();
+    const recordTurn = vi.fn(async () => {});
     await hooks.register((api) => {
-      api.on("before_prompt", () => ({ additionalContext: "Avoid the prior warning." }));
+      api.on("before_prompt", () => ({
+        additionalContext: "Avoid the prior warning.",
+        acknowledge,
+      }));
     });
-    const { seenOptions, seenPrompts, lifecycle } = setupClaudeHost({ hooks });
+    const { seenOptions, seenPrompts, lifecycle } = setupClaudeHost({
+      hooks,
+      conversationMaintenance: {
+        recordTurn,
+        forgetConversation: vi.fn(async () => {}),
+      },
+    });
 
     await host!.runTurn("casper", {
       sessionId: "conversation-before-prompt",
@@ -896,6 +928,14 @@ describe("Claude Code subscription runtime", () => {
     expect(seenPrompts[0]).toMatchObject({ isSynthetic: true, shouldQuery: false });
     expect(JSON.stringify(seenPrompts[0]?.message.content)).toContain("Avoid the prior warning.");
     expect(JSON.stringify(seenPrompts[1]?.message.content)).toContain("hello");
+    expect(acknowledge).toHaveBeenCalledTimes(1);
+    expect(recordTurn).toHaveBeenCalledWith(expect.objectContaining({
+      runtime: "claude-code",
+      conversationId: "conversation-before-prompt",
+      ownerPrompt: "hello",
+      assistantText: "Hello from the plan.",
+      outcome: "completed",
+    }));
   });
 
   it("fails closed without Claude.ai plan auth and never starts a query", async () => {

@@ -14,6 +14,7 @@ CopyGlyph 1.0 CopyGlyph.qml
 FilePane 1.0 FilePane.qml
 GhostGlyph 1.0 GhostGlyph.qml
 GhostNavigation 1.0 GhostNavigation.qml
+HooksBrowser 1.0 HooksBrowser.qml
 InlineRename 1.0 InlineRename.qml
 MarkdownEditor 1.0 MarkdownEditor.qml
 McpBrowser 1.0 McpBrowser.qml

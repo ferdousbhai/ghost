@@ -26,6 +26,7 @@ import {
   type AssistantMessage,
   type Context,
   type Model,
+  type SimpleStreamOptions,
 } from "@oh-my-pi/pi-ai";
 import {
   getOAuthProviders,
@@ -234,14 +235,14 @@ export class GhostOmpRuntime implements LoginRuntime, ModelCatalogRuntime {
   complete(
     model: Model<never>,
     context: Context,
-    options: { signal?: AbortSignal } = {},
+    options: Omit<SimpleStreamOptions, "apiKey"> = {},
   ): Promise<AssistantMessage> {
     return completeSimple(
       model,
       context,
       {
+        ...options,
         apiKey: this.modelRegistry.resolver(model),
-        ...(options.signal ? { signal: options.signal } : {}),
       },
     );
   }

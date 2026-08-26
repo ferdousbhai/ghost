@@ -39,6 +39,9 @@ refresh during startup causes OMP to discover skills again.
   sessions/                    daemon-owned OMP transcripts and runtime sidecars
   sessions/pins.json           v2 pinned state: { "version": 2, "pinned": ["<id>", …] }
   sessions/reads.json          v2 read state: { "version": 2, "reads": { "<id>": "<ISO timestamp>" } }
+  sessions/context-maintenance.json
+                               pending idle transcript deltas, processed-turn watermarks,
+                               and undelivered maintenance diff notices
   .pi/                         provider credentials and derived OMP machine runtime
   conversations/*.json         lossless source transcripts from the hosted export;
                                retained unchanged until that conversation is trashed
@@ -167,10 +170,46 @@ A session is OMP-native. Ghost keeps OMP's discovery and the operating half of
 its system prompt, then appends the Ghost persona and derived memory/doc
 sections.
 
-The machine-trusted awaited hook boundary is runtime-neutral. `session_stop`
+The machine-trusted hook boundary is runtime-neutral. Awaited `session_stop`
 receives the unchanged current owner prompt and only the current assistant pass;
 it does not receive or reconstruct conversation history. Hidden continuations
-repeat that owner prompt while replacing the assistant pass under review.
+repeat that owner prompt while replacing the assistant pass under review. A
+hook may request at most six consecutive hidden continuations; the seventh
+assistant pass is accepted so a faulty reviewer cannot loop forever.
+
+Ghost's built-in continuity hook routes each assistant pass through the
+ghost's `smol_model` as a conservative classifier. Only flagged passes reach
+the model selected by the `advisor_model` role. The advisor may be called at
+most six times for one owner turn, including all hidden continuations. Either
+model failing or returning malformed output fails open.
+
+Non-blocking `conversation_idle` fires after a settled conversation has
+received no new owner activity for the hook's own delay, which defaults to 60
+seconds and is independently configurable per handler. New work cancels its
+timers and aborts handlers that crossed the same boundary. It carries stable conversation
+and runtime session identity, the session-file reference, the last turn outcome,
+and the measured idle duration, but no transcript or model context. Its output
+cannot change or continue the accepted reply.
+
+The built-in idle maintenance hook persists a per-conversation turn watermark
+and a bounded pending transcript delta. It runs `smol_model` in the background
+with only list, read, search, write, and recoverable-delete operations for
+`docs/` and `memory/`. It cannot access character, shell, network, browser, MCP,
+or general session tools. A successful no-change run advances the watermark
+without adding context.
+
+When maintenance changes files, Ghost stores a changed-path manifest and a
+unified diff capped at 4096 bytes. The next owner turn receives that notice as
+hidden context. The notice remains pending until the runtime confirms that it
+was attached to the conversation, then is removed from the delivery queue. The
+message itself remains in conversation history, so later turns know the work
+already happened without reinjecting the same diff.
+
+Hook visibility is owner-facing and redacted. The daemon reports only loaded
+event names, safe configured names and descriptions, handler counts, and the
+continuation cap. It never returns command text, arguments, paths, or injected
+context. The shell keeps a Hooks destination in the navigation rail and badges
+it with the total active count.
 
 Deliberate subtractions from the harness prompt. The persona extension removes
 `§ Role`, `§ Workflow`, `§ Delivery`, and `§ Critical`: the first casts the
@@ -295,6 +334,13 @@ one must not be a leak of both.
 
 ### Routes
 
+- `GET /api/hooks` → `{ active, total, events, hooks,
+  session_stop_continuation_cap }`, where `events` contains only active
+  `{ event, count }` rows in lifecycle order and `hooks` contains an
+  `{ event, name, description, idle_seconds? }` row for every handler. This is daemon-global
+  because the trusted hook configuration is shared by every ghost. The route
+  is authenticated like every API route except relay status. It never exposes
+  hook commands, arguments, source paths, or context.
 - `GET  /api/ghosts` → `[{ name, dir, createdAt }]`
 - `POST /api/ghosts` `{ name }` → creates `~/ghosts/<name>/` with a seeded
   `character.md`

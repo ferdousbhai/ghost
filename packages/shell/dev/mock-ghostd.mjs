@@ -4,6 +4,7 @@
  * the Quickshell surfaces without pi, models, or a real ghost home.
  *
  * Implements:
+ *   GET  /api/hooks                           → redacted lifecycle-hook status
  *   GET  /api/ghosts                          → [{ name, dir, createdAt }]
  *   POST /api/ghosts { name }                 → 201 + the new ghost
  *   DELETE /api/ghosts/:name?confirm=:name    → 200 { ok, trash } | 400 | 404 | 409
@@ -1444,6 +1445,38 @@ createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", `http://${HOST}:${PORT}`);
   const parts = url.pathname.split("/").filter(Boolean); // ["api","ghosts",...]
   console.error(`${req.method} ${url.pathname}`);
+
+  if (parts[0] === "api" && parts[1] === "hooks" && parts.length === 2
+      && req.method === "GET") {
+    return json(res, 200, {
+      active: true,
+      total: 3,
+      events: [
+        { event: "before_prompt", count: 1 },
+        { event: "session_stop", count: 1 },
+        { event: "conversation_idle", count: 1 },
+      ],
+      hooks: [
+        {
+          event: "before_prompt",
+          name: "Maintenance change context",
+          description: "Shows the conversation what the idle updater changed so work is not repeated.",
+        },
+        {
+          event: "session_stop",
+          name: "Conversation continuity",
+          description: "Uses a fast classifier and the selected advisor model to continue unfinished work.",
+        },
+        {
+          event: "conversation_idle",
+          name: "Memory and docs upkeep",
+          description: "Reviews new conversation turns and updates durable memory or docs in the background.",
+          idle_seconds: 60,
+        },
+      ],
+      session_stop_continuation_cap: 6,
+    });
+  }
 
   if (parts[0] !== "api" || parts[1] !== "ghosts") return json(res, 404, { error: "not found" });
 

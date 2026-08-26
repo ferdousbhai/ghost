@@ -121,6 +121,7 @@ async function setup(
     | "compaction"
     | "title"
     | "retention"
+    | "conversationMaintenance"
   > = {},
   providerOptions: Omit<Parameters<typeof startMockProvider>[0], "script"> = {},
 ) {
@@ -1559,10 +1560,13 @@ describe("SessionHost.runTurn", () => {
   });
 
   it("awaits session_stop and sends only the current assistant pass", async () => {
-    const hooks = new GhostHookRunner();
+    const hooks = new GhostHookRunner({ conversationIdleDelayMs: 0 });
     const active: boolean[] = [];
     const passes: unknown[][] = [];
     const ownerPrompts: string[] = [];
+    const idleEvents: Array<{ conversation: string; outcome: string; idleFor: number }> = [];
+    let idleResolve!: () => void;
+    const idle = new Promise<void>((resolve) => { idleResolve = resolve; });
     await hooks.register((api) => {
       api.on("session_stop", (event) => {
         active.push(event.stop_hook_active);
@@ -1571,6 +1575,14 @@ describe("SessionHost.runTurn", () => {
         if (!event.stop_hook_active) {
           return { decision: "block", reason: "Rewrite the answer without canned phrasing." };
         }
+      });
+      api.on("conversation_idle", (event) => {
+        idleEvents.push({
+          conversation: event.conversation_id,
+          outcome: event.last_turn_outcome,
+          idleFor: event.idle_for_ms,
+        });
+        idleResolve();
       });
     });
     await setup([
@@ -1599,16 +1611,26 @@ describe("SessionHost.runTurn", () => {
     expect(events.filter((event) => event.type === "start")).toHaveLength(1);
     expect(events.filter((event) => event.type === "done")).toHaveLength(1);
     expect(events.at(-1)?.type).toBe("done");
+    await idle;
+    expect(idleEvents).toHaveLength(1);
+    expect(idleEvents[0]).toMatchObject({ conversation: "conv-hooks", outcome: "completed" });
+    expect(idleEvents[0]!.idleFor).toBeGreaterThanOrEqual(0);
   });
 
   it("injects before_prompt context into the user turn without an extra model pass", async () => {
     const hooks = new GhostHookRunner();
+    const acknowledge = vi.fn();
+    const recordTurn = vi.fn(async () => {});
     await hooks.register((api) => {
       api.on("before_prompt", () => ({
         additionalContext: "Avoid the warning from the previous reply.",
+        acknowledge,
       }));
     });
-    await setup([{ kind: "text", text: "Direct answer." }], { hooks });
+    await setup([{ kind: "text", text: "Direct answer." }], {
+      hooks,
+      conversationMaintenance: { recordTurn, forgetConversation: vi.fn(async () => {}) },
+    });
 
     await host!.runTurn("casper", {
       sessionId: "conv-before-prompt",
@@ -1620,6 +1642,14 @@ describe("SessionHost.runTurn", () => {
     expect(JSON.stringify(provider!.requests[0]?.messages)).toContain(
       "Avoid the warning from the previous reply.",
     );
+    expect(acknowledge).toHaveBeenCalledTimes(1);
+    expect(recordTurn).toHaveBeenCalledWith(expect.objectContaining({
+      runtime: "omp",
+      conversationId: "conv-before-prompt",
+      ownerPrompt: "Continue.",
+      assistantText: "Direct answer.",
+      outcome: "completed",
+    }));
   });
 
   it("layers the ghost persona onto OMP's native prompt and tools", async () => {
