@@ -8,15 +8,50 @@ set -euo pipefail
 script_dir="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 wrapper="$script_dir/run-with-check-runtime.sh"
 
+read_process_stat() {
+  local pid="$1"
+  local raw rest
+  local -a fields
+  PROCESS_STATE=
+  PROCESS_GROUP=
+  PROCESS_SESSION=
+  PROCESS_START=
+  [[ -r "/proc/$pid/stat" ]] || return 1
+  raw="$(<"/proc/$pid/stat")"
+  rest="${raw##*) }"
+  read -r -a fields <<< "$rest"
+  (( ${#fields[@]} >= 20 )) || return 1
+  PROCESS_STATE="${fields[0]}"
+  PROCESS_GROUP="${fields[2]}"
+  PROCESS_SESSION="${fields[3]}"
+  PROCESS_START="${fields[19]}"
+}
+
+write_process_identity() {
+  local pid="$1"
+  local output="$2"
+  read_process_stat "$pid"
+  printf '%s %s\n' "$pid" "$PROCESS_START" > "$output"
+}
+
 if [[ "${1:-}" == --signal-child ]]; then
   ready="$2"
   runtime_record="$3"
   descendant_record="$4"
-  trap 'exit 0' HUP INT TERM
-  bash -c 'trap "exit 0" HUP INT TERM; while :; do sleep 1; done' &
+  descendant=
+  finish_signal_child() {
+    trap '' HUP INT TERM
+    if [[ -n "$descendant" ]]; then
+      kill -TERM "$descendant" 2>/dev/null || true
+      wait "$descendant" 2>/dev/null || true
+    fi
+    exit 0
+  }
+  trap finish_signal_child HUP INT TERM
+  sleep 30 &
   descendant=$!
   printf '%s\n' "$XDG_RUNTIME_DIR" > "$runtime_record"
-  printf '%s\n' "$descendant" > "$descendant_record"
+  write_process_identity "$descendant" "$descendant_record"
   printf 'ready\n' > "$ready"
   wait "$descendant"
   exit $?
@@ -26,10 +61,10 @@ if [[ "${1:-}" == --stubborn-signal-child ]]; then
   runtime_record="$3"
   descendant_record="$4"
   trap '' HUP INT TERM
-  bash -c 'trap "" HUP INT TERM; while :; do sleep 1; done' &
+  bash -c 'trap "" HUP INT TERM; exec sleep 30' &
   descendant=$!
   printf '%s\n' "$XDG_RUNTIME_DIR" > "$runtime_record"
-  printf '%s\n' "$descendant" > "$descendant_record"
+  write_process_identity "$descendant" "$descendant_record"
   printf 'ready\n' > "$ready"
   wait "$descendant"
   exit $?
@@ -72,6 +107,7 @@ work="$(mktemp -d -- "$temp_base/ghost-check-runtime-test.XXXXXX")"
 unrelated_pid=
 cleanup() {
   if [[ -n "$unrelated_pid" ]]; then
+    kill -KILL -- "-$unrelated_pid" 2>/dev/null || true
     kill -KILL "$unrelated_pid" 2>/dev/null || true
     wait "$unrelated_pid" 2>/dev/null || true
   fi
@@ -94,6 +130,42 @@ fi
 (( EUID != 0 )) || {
   printf 'runtime-wrapper isolation tests must run as the unprivileged builder\n' >&2
   exit 1
+}
+
+wait_for_process_termination() {
+  local pid="$1"
+  local expected_start="$2"
+  local label="$3"
+  for _ in {1..500}; do
+    if ! read_process_stat "$pid"; then
+      return 0
+    fi
+    if [[ "$PROCESS_START" != "$expected_start" ]]; then
+      return 0
+    fi
+    case "$PROCESS_STATE" in
+      Z|X) return 0 ;;
+    esac
+    sleep 0.01
+  done
+  printf '%s remains executing as pid %s (state %s)\n' \
+    "$label" "$pid" "$PROCESS_STATE" >&2
+  return 1
+}
+
+assert_process_identity_live() {
+  local pid="$1"
+  local expected_start="$2"
+  local label="$3"
+  read_process_stat "$pid" || {
+    printf '%s exited unexpectedly\n' "$label" >&2
+    return 1
+  }
+  [[ "$PROCESS_START" == "$expected_start" \
+    && "$PROCESS_STATE" != Z && "$PROCESS_STATE" != X ]] || {
+    printf '%s is not the expected live process\n' "$label" >&2
+    return 1
+  }
 }
 
 grep -Fq 'run-with-check-runtime.sh" "$srcdir" \' "$pkgbuild"
@@ -199,7 +271,7 @@ for signal_spec in 'HUP 129' 'INT 130' 'TERM 143'; do
   done
   [[ -f "$ready" ]]
   signal_runtime="$(<"$signal_runtime_record")"
-  descendant="$(<"$descendant_record")"
+  read -r descendant descendant_start < "$descendant_record"
   kill -s "$signal" "$wrapper_pid"
   set +e
   wait "$wrapper_pid"
@@ -207,21 +279,15 @@ for signal_spec in 'HUP 129' 'INT 130' 'TERM 143'; do
   set -e
   [[ "$wrapper_status" == "$expected_status" ]]
   [[ ! -e "$signal_runtime" && ! -L "$signal_runtime" ]]
-  for _ in {1..200}; do
-    kill -0 "$descendant" 2>/dev/null || break
-    sleep 0.01
-  done
-  if kill -0 "$descendant" 2>/dev/null; then
-    printf 'runtime wrapper left a descendant after %s\n' "$signal" >&2
-    exit 1
-  fi
+  wait_for_process_termination "$descendant" "$descendant_start" \
+    "runtime wrapper descendant after $signal"
   grep -Fxq outside "$outside/sentinel"
 done
 
 unrelated_ready="$work/unrelated.ready"
 unrelated_signal="$work/unrelated.signal"
 env --default-signal=HUP --default-signal=INT --default-signal=TERM \
-  bash "$script_dir/test-check-runtime.sh" --unrelated-sentinel \
+  setsid -- bash "$script_dir/test-check-runtime.sh" --unrelated-sentinel \
     "$unrelated_ready" "$unrelated_signal" &
 unrelated_pid=$!
 for _ in {1..500}; do
@@ -230,6 +296,10 @@ for _ in {1..500}; do
   sleep 0.01
 done
 [[ -f "$unrelated_ready" ]]
+read_process_stat "$unrelated_pid"
+[[ "$PROCESS_GROUP" == "$unrelated_pid" \
+  && "$PROCESS_SESSION" == "$unrelated_pid" ]]
+unrelated_start="$PROCESS_START"
 
 stubborn_ready="$work/stubborn.ready"
 stubborn_runtime_record="$work/stubborn.runtime"
@@ -246,7 +316,8 @@ for _ in {1..500}; do
 done
 [[ -f "$stubborn_ready" ]]
 stubborn_runtime="$(<"$stubborn_runtime_record")"
-stubborn_descendant="$(<"$stubborn_descendant_record")"
+read -r stubborn_descendant stubborn_descendant_start \
+  < "$stubborn_descendant_record"
 stubborn_started="$(date +%s%3N)"
 kill -TERM "$stubborn_wrapper"
 set +e
@@ -257,11 +328,10 @@ stubborn_elapsed=$(( $(date +%s%3N) - stubborn_started ))
 [[ "$stubborn_status" == 143 ]]
 (( stubborn_elapsed >= 1500 && stubborn_elapsed < 5000 ))
 [[ ! -e "$stubborn_runtime" && ! -L "$stubborn_runtime" ]]
-if kill -0 "$stubborn_descendant" 2>/dev/null; then
-  printf 'runtime wrapper left its stubborn descendant alive\n' >&2
-  exit 1
-fi
-kill -0 "$unrelated_pid"
+wait_for_process_termination "$stubborn_descendant" \
+  "$stubborn_descendant_start" 'runtime wrapper stubborn descendant'
+assert_process_identity_live "$unrelated_pid" "$unrelated_start" \
+  'unrelated sentinel'
 [[ ! -e "$unrelated_signal" ]]
 grep -Fxq outside "$outside/sentinel"
 
@@ -287,6 +357,11 @@ for delay_ms in 0 1 3; do
       used_runtime="$(<"$race_runtime")"
       [[ ! -e "$used_runtime" && ! -L "$used_runtime" ]]
     fi
+    if [[ -f "$race_descendant" ]]; then
+      read -r raced_descendant raced_descendant_start < "$race_descendant"
+      wait_for_process_termination "$raced_descendant" \
+        "$raced_descendant_start" 'race-stress descendant'
+    fi
   done
 done
 if find "$parent" -mindepth 1 -maxdepth 1 \
@@ -295,7 +370,8 @@ if find "$parent" -mindepth 1 -maxdepth 1 \
   printf 'runtime wrapper race stress left a reserved directory\n' >&2
   exit 1
 fi
-kill -0 "$unrelated_pid"
+assert_process_identity_live "$unrelated_pid" "$unrelated_start" \
+  'unrelated sentinel'
 [[ ! -e "$unrelated_signal" ]]
 grep -Fxq outside "$outside/sentinel"
 
