@@ -6,6 +6,8 @@ pkgbase = ghost-ai-git
 	install = ghost-ai-git.install
 	arch = x86_64
 	license = Apache-2.0
+	checkdepends = nodejs
+	checkdepends = ripgrep
 	makedepends = desktop-file-utils
 	makedepends = git
 	makedepends = pnpm>=10.11

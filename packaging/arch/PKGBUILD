@@ -29,6 +29,10 @@ makedepends=(
   'pnpm>=10.11'
   'uv'
 )
+checkdepends=(
+  'nodejs'
+  'ripgrep'
+)
 optdepends=(
   'chromium: dedicated Ghost browser and browser-relay smoke test'
   'claude-code: Claude Code plan runtime'
@@ -109,6 +113,7 @@ build() {
 check() {
   cd -- "$srcdir/ghost"
 
+  bash packaging/arch/test-check-dependencies.sh
   pnpm test
   pnpm typecheck
   pnpm lint

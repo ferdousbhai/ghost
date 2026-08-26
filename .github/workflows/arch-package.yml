@@ -16,12 +16,8 @@ jobs:
     runs-on: ubuntu-latest
     container: archlinux:base-devel
     steps:
-      - name: Update package database and install build dependencies
-        run: >-
-          pacman -Syu --needed --noconfirm
-          at-spi2-core bun chromium desktop-file-utils git grim hyprland libnotify
-          nodejs pnpm python python-dbus python-gobject python-pillow qt6-5compat
-          quickshell uv wtype xdg-utils ydotool
+      - name: Update package database and install checkout dependency
+        run: pacman -Syu --needed --noconfirm git
 
       - uses: actions/checkout@v4
         with:
@@ -31,14 +27,43 @@ jobs:
         shell: bash
         run: bash packaging/arch/test-ci-source-repo.sh
 
+      - name: Install declared package dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash packaging/arch/test-ci-dependencies.sh
+          work="$(mktemp -d /tmp/ghost-ci-dependencies.XXXXXX)"
+          cleanup() {
+            find -P "$work" -depth -delete
+          }
+          trap cleanup EXIT
+          bash packaging/arch/ci-dependencies.sh --names > "$work/names"
+          bash packaging/arch/ci-dependencies.sh --constraints > "$work/constraints"
+          mapfile -t packages < "$work/names"
+          mapfile -t constraints < "$work/constraints"
+          [[ "${#packages[@]}" -gt 0 && "${#constraints[@]}" -gt 0 ]]
+          pacman -S --needed --noconfirm -- "${packages[@]}"
+          pacman -T -- "${constraints[@]}"
+
+      - name: Prepare unprivileged package builder
+        shell: bash
+        run: |
+          useradd --create-home builder
+          chown -R builder:builder "$GITHUB_WORKSPACE"
+
+      - name: Verify package check dependency coverage
+        shell: bash
+        run: >-
+          runuser -u builder -- env
+          GHOST_ARCH_DEPENDENCY_TEST_ROOT=/home/builder
+          bash packaging/arch/test-check-dependencies.sh
+
       - name: Build and smoke-test the package
         shell: bash
         run: |
           set -euo pipefail
           source_repo="$(bash packaging/arch/resolve-ci-source-repo.sh "$GITHUB_SHA")"
           source_commit="$GITHUB_SHA"
-          useradd --create-home builder
-          chown -R builder:builder "$GITHUB_WORKSPACE"
           cd "$GITHUB_WORKSPACE/packaging/arch"
           runuser -u builder -- env \
             GHOST_SOURCE_REPO="$source_repo" \

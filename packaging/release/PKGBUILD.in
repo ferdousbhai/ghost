@@ -24,6 +24,10 @@ depends=(
   'ydotool>=1.0'
 )
 makedepends=('desktop-file-utils')
+checkdepends=(
+  'nodejs'
+  'ripgrep'
+)
 optdepends=(
   'chromium: dedicated Ghost browser and browser-relay smoke test'
   'claude-code: Claude Code plan runtime'
@@ -71,6 +75,7 @@ build() {
 check() {
   local source_root="$srcdir/ghost-${pkgver}"
   local runtime_root="$srcdir/runtime/ghost-runtime-${pkgver}-linux-${CARCH}"
+  bash "$source_root/packaging/arch/test-check-dependencies.sh"
   bash "$source_root/packaging/release/verify-runtime-source.sh" \
     "$runtime_root" "$source_root" "$pkgver" "$CARCH" "$_source_commit" \
       "$_source_date_epoch"
