@@ -114,12 +114,15 @@ check() {
   cd -- "$srcdir/ghost"
 
   bash packaging/arch/test-check-dependencies.sh
+  GHOST_ARCH_CHECK_RUNTIME_TEST_ROOT="$srcdir" \
+    bash packaging/arch/test-check-runtime.sh packaging/arch/PKGBUILD
   pnpm test
   pnpm typecheck
   pnpm lint
   (
     cd -- "$srcdir/ghost/packages/desktop-helper"
-    uv run --frozen pytest -m 'not live'
+    bash "$srcdir/ghost/packaging/arch/run-with-check-runtime.sh" "$srcdir" \
+      uv run --frozen pytest -m 'not live'
   )
 }
 

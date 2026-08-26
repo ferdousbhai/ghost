@@ -66,4 +66,9 @@ if bash "$parser" --srcinfo "$work/link.SRCINFO" --names > /dev/null 2>&1; then
   exit 1
 fi
 
+if (( EUID == 0 )); then
+  GHOST_ARCH_CHECK_RUNTIME_TEST_ROOT="$work" \
+    bash "$script_dir/test-check-runtime.sh" --root-refusal-only
+fi
+
 printf 'Arch CI dependency parser passed\n'
