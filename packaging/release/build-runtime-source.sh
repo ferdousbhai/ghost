@@ -70,7 +70,7 @@ trap cleanup EXIT
 name="ghost-runtime-${version}-linux-${arch}"
 runtime_root="$work/$name"
 daemon="$runtime_root/daemon"
-mkdir -p "$daemon"
+mkdir -p "$runtime_root"
 
 bash "$source_root/packaging/release/runtime-tree.sh" "$source_root" "$daemon"
 

@@ -26,7 +26,7 @@ depends=(
 makedepends=(
   'desktop-file-utils'
   'git'
-  'pnpm>=10.11'
+  'pnpm>=10.12.2'
   'uv'
 )
 checkdepends=(
@@ -106,6 +106,7 @@ pkgver() {
 build() {
   cd -- "$srcdir/ghost"
 
+  bash packaging/release/prepare-pnpm-engine.sh .
   ONNXRUNTIME_NODE_INSTALL=skip pnpm install --frozen-lockfile
   pnpm build
 }
@@ -116,6 +117,8 @@ check() {
   bash packaging/arch/test-check-dependencies.sh
   GHOST_ARCH_CHECK_RUNTIME_TEST_ROOT="$srcdir" \
     bash packaging/arch/test-check-runtime.sh packaging/arch/PKGBUILD
+  GHOST_OFFLINE_DEPLOY_TEST_ROOT="$srcdir" \
+    bash packaging/release/test-offline-deploy.sh "$srcdir/ghost"
   pnpm test
   pnpm typecheck
   pnpm lint
@@ -132,37 +135,10 @@ package() {
   local appdir="$pkgdir/usr/lib/ghost"
   local sharedir="$pkgdir/usr/share/ghost"
 
-  # pnpm's legacy deploy produces a self-contained production tree from the
-  # frozen workspace lockfile. Nothing is downloaded when ghostd starts.
-  pnpm --offline --filter @ghost/daemon --prod deploy --legacy "$appdir/daemon"
-
-  # Legacy deploy leaves the workspace override for pi-catalog pointing back at
-  # the checkout. Materialize one canonical copy, repoint every consumer to it,
-  # and remove unused workspace-registry links before the closure check.
-  local source_catalog_dir="$(realpath vendor/pi-catalog)"
-  local catalog_dir="$appdir/daemon/node_modules/.ghost-workspaces/pi-catalog"
-  install -Dm644 -o root -g root vendor/pi-catalog/package.json "$catalog_dir/package.json"
-  _install_tree vendor/pi-catalog/src "$catalog_dir/src"
-  _install_tree vendor/pi-catalog/dist/types "$catalog_dir/dist/types"
-  for file in README.md CHANGELOG.md LICENSE THIRD-PARTY-NOTICES.txt; do
-    install -Dm644 -o root -g root "vendor/pi-catalog/$file" "$catalog_dir/$file"
-  done
-  install -d -m755 -o root -g root "$catalog_dir/node_modules/@oh-my-pi"
-  for dependency in omptype pi-utils; do
-    local dependency_target="$appdir/daemon/node_modules/.pnpm/node_modules/@oh-my-pi/$dependency"
-    ln -s "$(realpath --relative-to="$catalog_dir/node_modules/@oh-my-pi" \
-      "$dependency_target")" "$catalog_dir/node_modules/@oh-my-pi/$dependency"
-  done
-  while IFS= read -r -d '' link; do
-    if [[ "$(realpath -m "$link")" == "$source_catalog_dir" ]]; then
-      unlink "$link"
-      ln -s "$(realpath --relative-to="$(dirname "$link")" "$catalog_dir")" "$link"
-    fi
-  done < <(find "$appdir/daemon" -type l -print0)
-  for package_name in chromium-extension daemon shell; do
-    local workspace_link="$appdir/daemon/node_modules/.pnpm/node_modules/@ghost/$package_name"
-    [[ ! -L "$workspace_link" ]] || unlink "$workspace_link"
-  done
+  # Assemble from the frozen shared lock without registry metadata. The helper
+  # gives pnpm a fresh cache/home and dead network, then makes the injected
+  # workspace payload self-contained and checkout-path independent.
+  bash packaging/release/deploy-runtime.sh . "$appdir/daemon"
 
   # Arch is x86_64 glibc. Remove optional musl payloads and non-Linux ONNX
   # libraries, first unlinking only references into the exact discarded tree.

@@ -116,6 +116,9 @@ jobs:
           runuser -u builder -- env SOURCE_DATE_EPOCH="$epoch" \
             bash "$source_tree/packaging/release/make-source-archive.sh" \
               "$source_tree" "$source_archive" "$version" HEAD
+          runuser -u builder -- \
+            bash "$source_tree/packaging/release/prepare-pnpm-engine.sh" \
+              "$source_tree"
           runuser -u builder -- pnpm --dir "$source_tree" fetch --frozen-lockfile
           runuser -u builder -- env \
             ALL_PROXY=http://127.0.0.1:9 \

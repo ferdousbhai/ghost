@@ -10,7 +10,7 @@ pkgbase = ghost-ai-git
 	checkdepends = ripgrep
 	makedepends = desktop-file-utils
 	makedepends = git
-	makedepends = pnpm>=10.11
+	makedepends = pnpm>=10.12.2
 	makedepends = uv
 	depends = at-spi2-core>=2.58
 	depends = bun>=1.3.14

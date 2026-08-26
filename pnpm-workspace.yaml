@@ -7,3 +7,10 @@ packages:
 # vendor/pi-catalog/GHOST-VENDOR.md.
 overrides:
   "@oh-my-pi/pi-catalog": "workspace:*"
+
+# pnpm's shared-lockfile deploy is the only deploy path that remains fully
+# frozen and offline. Keep injected workspace copies synchronized after each
+# build so development and release installs cannot package stale output.
+injectWorkspacePackages: true
+syncInjectedDepsAfterScripts:
+  - build
