@@ -1,6 +1,7 @@
-import { constants } from "node:fs";
+import { constants, readFileSync } from "node:fs";
 import { lstat, open, readdir, rm, type FileHandle } from "node:fs/promises";
-import { basename, extname, join } from "node:path";
+import { homedir } from "node:os";
+import { basename, extname, isAbsolute, join, resolve } from "node:path";
 import { GhostError } from "../errors.js";
 import {
   descriptorPath,
@@ -10,8 +11,75 @@ import {
   withDescriptorLock,
 } from "../linux-fs.js";
 
-/** The one screenshot directory shared by the screen and browser tools. */
-export const SCREENSHOTS_DIRNAME = ".screenshots";
+/**
+ * Ghost's captures land where the desktop's own screenshots land.
+ *
+ * A ghost taking a picture of the screen is doing what the owner does with
+ * SUPER+SHIFT+S, so the pictures belong in the same drawer rather than in a
+ * private one the owner would have to be told about. The precedence matches
+ * Omarchy's `omarchy-capture-screenshot` exactly, `user-dirs.dirs` included,
+ * because a systemd user unit inherits none of the XDG desktop variables.
+ */
+export function resolveScreenshotDirectory(
+  env: NodeJS.ProcessEnv = process.env,
+  home: string = homedir(),
+): string {
+  const configured = env.OMARCHY_SCREENSHOT_DIR?.trim();
+  if (configured) return resolve(expandHome(configured, home));
+  const pictures = env.XDG_PICTURES_DIR?.trim() ?? readUserDir("XDG_PICTURES_DIR", home);
+  if (pictures) return resolve(expandHome(pictures, home));
+  return join(home, "Pictures");
+}
+
+function expandHome(path: string, home: string): string {
+  if (path === "~") return home;
+  if (path.startsWith("~/")) return join(home, path.slice(2));
+  if (path.startsWith("$HOME/")) return join(home, path.slice("$HOME/".length));
+  return isAbsolute(path) ? path : join(home, path);
+}
+
+/** One `NAME="value"` line out of the freedesktop user-dirs file. */
+function readUserDir(name: string, home: string): string | null {
+  let contents: string;
+  try {
+    contents = readFileSync(join(home, ".config", "user-dirs.dirs"), "utf8");
+  } catch {
+    return null;
+  }
+  const match = new RegExp(`^\\s*${name}\\s*=\\s*"?([^"\\n]+)"?\\s*$`, "m").exec(contents);
+  return match?.[1]?.trim() || null;
+}
+
+/**
+ * What a ghost's captures are called, and the only files retention will ever
+ * delete. The owner's own screenshots share the directory, so the prefix names
+ * the ghost that took the picture and nothing else in the drawer matches it.
+ */
+export function ghostScreenshotName(
+  ghostName: string,
+  producer: ScreenshotProducer,
+  now: Date = new Date(),
+): string {
+  const stamp = now.toISOString().replace(/[:.]/g, "-").replace("Z", "");
+  return `ghost-${ghostName}-${producer}-${stamp}.png`;
+}
+
+export type ScreenshotProducer = "screen" | "browser";
+
+/** Matches exactly what `ghostScreenshotName` writes for one ghost and producer. */
+export function ghostScreenshotMatcher(
+  ghostName: string,
+  producer: ScreenshotProducer,
+): (name: string) => boolean {
+  const pattern = new RegExp(
+    `^ghost-${escapeForPattern(ghostName)}-${producer}-${GENERATED_TIMESTAMP}(?:-\\d+)?\\.png$`,
+  );
+  return (name) => pattern.test(name);
+}
+
+function escapeForPattern(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 /** Each screenshot producer keeps this many of its own captures. */
 export const DEFAULT_SCREENSHOT_RETENTION = 20;
@@ -24,11 +92,7 @@ const CREATE_SCREENSHOT_FLAGS = constants.O_WRONLY
   | constants.O_CREAT
   | constants.O_EXCL
   | constants.O_NOFOLLOW;
-const LEGACY_BROWSER_SCREENSHOT =
-  /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z-\d+\.png$/;
 const GENERATED_TIMESTAMP = "\\d{4}-\\d{2}-\\d{2}T\\d{2}-\\d{2}-\\d{2}-\\d{3}";
-const SCREEN_SCREENSHOT = new RegExp(`^screen-${GENERATED_TIMESTAMP}(?:-\\d+)?\\.png$`);
-const BROWSER_SCREENSHOT = new RegExp(`^browser-${GENERATED_TIMESTAMP}(?:-\\d+)?\\.png$`);
 
 function screenshotLimitError(label: string, bytes: number): GhostError {
   return new GhostError(
@@ -51,20 +115,6 @@ export function assertScreenshotBytesWithinLimit(bytes: number, label: string): 
   if (!Number.isFinite(bytes) || bytes < 0 || bytes > MAX_SCREENSHOT_BYTES) {
     throw screenshotLimitError(label, bytes);
   }
-}
-
-export function isScreenScreenshot(name: string): boolean {
-  return SCREEN_SCREENSHOT.test(name);
-}
-
-/**
- * Browser captures gained a prefix when retention was added. Match the former
- * timestamp-only spelling too, so the first new capture also bounds an existing
- * directory rather than abandoning the files that exposed the original leak.
- */
-export function isBrowserScreenshot(name: string): boolean {
-  return BROWSER_SCREENSHOT.test(name)
-    || LEGACY_BROWSER_SCREENSHOT.test(name);
 }
 
 function collisionName(baseName: string, attempt: number): string {
@@ -193,13 +243,13 @@ export async function pruneScreenshotFiles(
   return doomed.map((entry) => entry.name);
 }
 
-/** Pin and exclusively lock the shared screenshot directory for one mutation. */
+/** Pin and exclusively lock the screenshot directory for one mutation. */
 export async function withScreenshotDirectory<T>(
-  homeDir: string,
+  screenshotDir: string,
   action: (directory: FileHandle, logicalDir: string) => Promise<T>,
 ): Promise<T> {
-  const logicalDir = join(homeDir, SCREENSHOTS_DIRNAME);
-  const directory = await openConfinedDirectory(homeDir, logicalDir, {
+  const logicalDir = resolve(screenshotDir);
+  const directory = await openConfinedDirectory(logicalDir, logicalDir, {
     create: true,
     label: "Screenshots path",
   });
@@ -228,8 +278,11 @@ export async function pruneScreenshotDirectoryPath(
 }
 
 /** Read a confined screenshot without allocating more than the screenshot cap. */
-export async function readScreenshotFile(homeDir: string, path: string): Promise<Buffer> {
-  const file = await openConfinedFile(homeDir, path, "Screenshot file");
+export async function readScreenshotFile(
+  screenshotDir: string,
+  path: string,
+): Promise<Buffer> {
+  const file = await openConfinedFile(resolve(screenshotDir), path, "Screenshot file");
   if (!file) {
     throw new GhostError("not_found", `Screenshot ${JSON.stringify(path)} no longer exists.`, {
       path,

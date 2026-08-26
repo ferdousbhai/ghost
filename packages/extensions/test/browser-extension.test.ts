@@ -85,11 +85,10 @@ import {
   MAX_BROWSER_MATCH_HREF_CHARS,
   MAX_BROWSER_MATCH_TEXT_CHARS,
   MAX_FIND_QUERY_CHARS,
-  SCREENSHOT_DIRNAME,
 } from "../src/extensions/browser-session.js";
 import { GhostError } from "../src/errors.js";
 import { MAX_SCREENSHOT_BYTES } from "../src/extensions/screenshot-retention.js";
-import { createGhostFixture, type GhostFixture } from "./support/fixture.js";
+import { createGhostFixture, createTempDir, type GhostFixture } from "./support/fixture.js";
 import { loadExtension, resultText, type Harness } from "./support/harness.js";
 
 const shared = vi.hoisted(() => ({
@@ -415,6 +414,9 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
 }
 
 let fixture: GhostFixture;
+let picturesRoot: { dir: string; cleanup(): Promise<void> };
+/** Where captures land: the desktop's screenshot directory, not the ghost home. */
+let shots: string;
 let context: FakeContext;
 
 function extension(overrides: Record<string, unknown> = {}) {
@@ -445,6 +447,9 @@ async function expectGhostError(work: Promise<unknown>): Promise<GhostError> {
 
 beforeEach(async () => {
   fixture = await createGhostFixture();
+  picturesRoot = await createTempDir();
+  shots = join(picturesRoot.dir, "Pictures");
+  vi.stubEnv("OMARCHY_SCREENSHOT_DIR", shots);
   context = new FakeContext();
   shared.launches = [];
   shared.makeContext = () => context;
@@ -452,6 +457,8 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await closeAllBrowserSessions();
+  vi.unstubAllEnvs();
+  await picturesRoot.cleanup();
   await fixture.cleanup();
 });
 
@@ -1237,24 +1244,24 @@ describe("prompt-injection guardrail", () => {
 // ------------------------------------------------------- screenshot, back, close
 
 describe("screenshot, back, close", () => {
-  it("writes the screenshot under the ghost home and returns its path", async () => {
+  it("writes the screenshot where the desktop saves screenshots", async () => {
     const harness = await browserHarness();
     await harness.call(GHOST_BROWSER, { action: "open", url: "https://example.com" });
     const result = await harness.call(GHOST_BROWSER, { action: "screenshot" });
 
     const path = (result.details as { path: string }).path;
-    expect(path.startsWith(join(fixture.dir, SCREENSHOT_DIRNAME))).toBe(true);
-    expect(path.split("/").at(-1)).toMatch(/^browser-.*(?:-\d+)?\.png$/);
+    expect(path.startsWith(shots)).toBe(true);
+    expect(path.split("/").at(-1)).toMatch(/^ghost-casper-browser-.*(?:-\d+)?\.png$/);
     expect(path.endsWith(".png")).toBe(true);
     expect(resultText(result)).toContain(path);
     await expect(access(path)).resolves.toBeFalsy();
     expect(context.page.screenshots[0]).not.toHaveProperty("path");
   });
 
-  it("does not follow a screenshots-directory symlink outside the ghost home", async () => {
+  it("does not follow a symlink standing in for the screenshots directory", async () => {
     const outside = join(fixture.root, "outside-browser-screenshots");
     await mkdir(outside);
-    await symlink(outside, join(fixture.dir, SCREENSHOT_DIRNAME));
+    await symlink(outside, shots);
     const harness = await browserHarness();
     await harness.call(GHOST_BROWSER, { action: "open", url: "https://example.com" });
     await expect(harness.call(GHOST_BROWSER, { action: "screenshot" }))
@@ -1269,7 +1276,7 @@ describe("screenshot, back, close", () => {
     await harness.call(GHOST_BROWSER, { action: "open", url: "https://example.com" });
     await expect(harness.call(GHOST_BROWSER, { action: "screenshot" }))
       .rejects.toThrowError(/screenshots are limited/);
-    await expect(access(join(fixture.dir, SCREENSHOT_DIRNAME))).rejects.toThrow();
+    await expect(access(shots)).rejects.toThrow();
   });
 
   it("uses collision-safe names for simultaneous screenshots", async () => {
@@ -1283,23 +1290,25 @@ describe("screenshot, back, close", () => {
         harness.call(GHOST_BROWSER, { action: "screenshot" }),
       ]);
       expect(first.details.path).not.toBe(second.details.path);
-      expect(await readdir(join(fixture.dir, SCREENSHOT_DIRNAME))).toHaveLength(2);
+      expect(await readdir(shots)).toHaveLength(2);
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it("retains only the newest browser captures and leaves screen captures alone", async () => {
-    const dir = join(fixture.dir, SCREENSHOT_DIRNAME);
+  it("retains only the newest browser captures and leaves everything else alone", async () => {
+    const dir = shots;
     await mkdir(dir, { recursive: true });
-    const screenPath = join(dir, "screen-2026-08-22T10-11-12-345.png");
+    const screenPath = join(dir, "ghost-casper-screen-2026-08-22T10-11-12-345.png");
     await writeFile(screenPath, "screen");
+    const ownerPath = join(dir, "screenshot-2026-08-22_10-11-12.png");
+    await writeFile(ownerPath, "owner");
     for (let index = 0; index < DEFAULT_BROWSER_SCREENSHOT_RETENTION + 4; index += 1) {
       const path = join(
         dir,
-        `2026-08-22T10-11-${String(index).padStart(2, "0")}-000Z-${index}.png`,
+        `ghost-casper-browser-2026-08-22T10-11-${String(index).padStart(2, "0")}-000.png`,
       );
-      await writeFile(path, "legacy browser");
+      await writeFile(path, "older browser capture");
       const when = new Date(Date.now() - (DEFAULT_BROWSER_SCREENSHOT_RETENTION + 4 - index) * 1000);
       await utimes(path, when, when);
     }
@@ -1309,9 +1318,10 @@ describe("screenshot, back, close", () => {
     await harness.call(GHOST_BROWSER, { action: "screenshot" });
 
     const names = await readdir(dir);
-    expect(names.filter((name) => !name.startsWith("screen-")))
+    expect(names.filter((name) => name.startsWith("ghost-casper-browser-")))
       .toHaveLength(DEFAULT_BROWSER_SCREENSHOT_RETENTION);
     await expect(access(screenPath)).resolves.toBeFalsy();
+    await expect(access(ownerPath)).resolves.toBeFalsy();
   });
 
   it("passes full_page through", async () => {
@@ -2147,7 +2157,7 @@ describe("the backend is a choice, and policy sits above it", () => {
     await harness.call(GHOST_BROWSER, { action: "open", url: "https://example.com" });
     const result = await harness.call(GHOST_BROWSER, { action: "screenshot" });
     const path = (result.details as { path: string }).path;
-    expect(path.startsWith(join(fixture.dir, SCREENSHOT_DIRNAME))).toBe(true);
+    expect(path.startsWith(shots)).toBe(true);
     await expect(access(path)).resolves.toBeFalsy();
   });
 
@@ -2159,7 +2169,7 @@ describe("the backend is a choice, and policy sits above it", () => {
       harness.call(GHOST_BROWSER, { action: "screenshot" }),
     );
     expect(error.code).toBe("limit_exceeded");
-    await expect(access(join(fixture.dir, SCREENSHOT_DIRNAME))).rejects.toThrow();
+    await expect(access(shots)).rejects.toThrow();
   });
 
   it("rejects non-finite direct coordinates before the backend sees them", async () => {

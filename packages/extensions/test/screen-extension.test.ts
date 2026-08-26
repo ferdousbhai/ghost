@@ -12,7 +12,7 @@
  */
 import { access, mkdir, readFile, readdir, stat, symlink, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   captureViaHelper,
   createScreenExtension,
@@ -22,12 +22,11 @@ import {
   MAX_WATCH_INTERVAL_MS,
   parseRegion,
   pruneScreenshots,
-  SCREENSHOTS_DIRNAME,
   screenToolNames,
   screenshotFileName,
 } from "../src/extensions/screen.js";
 import { openGhostHome } from "../src/home.js";
-import { createGhostFixture, type GhostFixture } from "./support/fixture.js";
+import { createGhostFixture, createTempDir, type GhostFixture } from "./support/fixture.js";
 import {
   fixtureModel,
   fakeHelper,
@@ -73,9 +72,9 @@ function captureHelper(capture: Record<string, unknown> = {}): FakeHelper {
 }
 
 describe("screenshotFileName", () => {
-  it("sorts chronologically and is filesystem-safe", () => {
-    const name = screenshotFileName(new Date("2026-08-22T10:11:12.345Z"));
-    expect(name).toBe("screen-2026-08-22T10-11-12-345.png");
+  it("sorts chronologically, names the ghost, and is filesystem-safe", () => {
+    const name = screenshotFileName("casper", new Date("2026-08-22T10:11:12.345Z"));
+    expect(name).toBe("ghost-casper-screen-2026-08-22T10-11-12-345.png");
     expect(name).not.toMatch(/[:*?"<>|]/);
   });
 });
@@ -92,13 +91,24 @@ describe("parseRegion", () => {
 
 describe("captureViaHelper", () => {
   let fixture: GhostFixture;
+  let picturesRoot: { dir: string; cleanup(): Promise<void> };
+  let shots: string;
 
   beforeEach(async () => {
     fixture = await createGhostFixture();
+    // Captures land in the desktop's pictures directory; keep the suite out of
+    // the real one, and let the capture create it the way a fresh machine would.
+    picturesRoot = await createTempDir();
+    shots = join(picturesRoot.dir, "Pictures");
+    vi.stubEnv("OMARCHY_SCREENSHOT_DIR", shots);
   });
-  afterEach(() => fixture.cleanup());
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    await picturesRoot.cleanup();
+    await fixture.cleanup();
+  });
 
-  it("captures a whole screen and saves the PNG under the home", async () => {
+  it("captures a whole screen and saves the PNG where screenshots go", async () => {
     const helper = captureHelper();
     const capture = await captureViaHelper({
       helper,
@@ -108,7 +118,7 @@ describe("captureViaHelper", () => {
     expect(helper.requests).toEqual([{ op: "capture", args: { target: "screen" } }]);
     expect(capture.bytes).toBeGreaterThan(0);
     expect(capture.image.data).toBe(TINY_PNG_BASE64);
-    expect(capture.path.startsWith(join(fixture.dir, SCREENSHOTS_DIRNAME))).toBe(true);
+    expect(capture.path.startsWith(shots)).toBe(true);
     await expect(stat(capture.path)).resolves.toBeTruthy();
   });
 
@@ -183,13 +193,13 @@ describe("captureViaHelper", () => {
       home: openGhostHome(fixture.dir),
       target: "screen",
     })).rejects.toThrowError(/screenshots are limited/);
-    await expect(access(join(fixture.dir, SCREENSHOTS_DIRNAME))).rejects.toThrow();
+    await expect(access(shots)).rejects.toThrow();
   });
 
-  it("does not follow a screenshots-directory symlink outside the ghost home", async () => {
+  it("does not follow a symlink standing in for the screenshots directory", async () => {
     const outside = join(fixture.root, "outside-screenshots");
     await mkdir(outside);
-    await symlink(outside, join(fixture.dir, SCREENSHOTS_DIRNAME));
+    await symlink(outside, shots);
     await expect(captureViaHelper({
       helper: captureHelper(),
       home: openGhostHome(fixture.dir),
@@ -206,36 +216,55 @@ describe("captureViaHelper", () => {
       captureViaHelper({ helper: captureHelper(), home, target: "screen", now }),
     ]);
     expect(first.path).not.toBe(second.path);
-    expect(new Set(await readdir(join(fixture.dir, SCREENSHOTS_DIRNAME))).size).toBe(2);
+    expect(new Set(await readdir(shots)).size).toBe(2);
   });
 });
 
 describe("retention", () => {
   let fixture: GhostFixture;
+  let picturesRoot: { dir: string; cleanup(): Promise<void> };
+  let shots: string;
 
   beforeEach(async () => {
     fixture = await createGhostFixture();
+    // Captures land in the desktop's pictures directory; keep the suite out of
+    // the real one, and let the capture create it the way a fresh machine would.
+    picturesRoot = await createTempDir();
+    shots = join(picturesRoot.dir, "Pictures");
+    vi.stubEnv("OMARCHY_SCREENSHOT_DIR", shots);
   });
-  afterEach(() => fixture.cleanup());
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    await picturesRoot.cleanup();
+    await fixture.cleanup();
+  });
 
-  it("keeps only the newest captures", async () => {
-    const dir = join(fixture.dir, SCREENSHOTS_DIRNAME);
+  it("keeps only the newest captures, and only its own", async () => {
+    const dir = shots;
     await mkdir(dir, { recursive: true });
-    await writeFile(join(dir, "browser-owner.png"), "browser");
+    // The owner's own screenshot, another ghost's capture, and this ghost's
+    // browser captures all share the directory and none of them are ours.
+    await writeFile(join(dir, "screenshot-2026-08-22_10-11-12.png"), "owner");
+    await writeFile(join(dir, "ghost-mina-screen-2026-08-22T10-11-12-345.png"), "mina");
+    await writeFile(join(dir, "ghost-casper-browser-2026-08-22T10-11-12-345.png"), "browser");
     for (let index = 0; index < 25; index += 1) {
       const path = join(
         dir,
-        `screen-2026-08-22T10-11-${String(index).padStart(2, "0")}-000.png`,
+        `ghost-casper-screen-2026-08-22T10-11-${String(index).padStart(2, "0")}-000.png`,
       );
       await writeFile(path, "x");
       const when = new Date(Date.now() - (25 - index) * 1000);
       await utimes(path, when, when);
     }
-    const deleted = await pruneScreenshots(dir, 20);
+    const deleted = await pruneScreenshots(dir, 20, "casper");
     expect(deleted).toHaveLength(5);
-    expect((await readdir(dir)).filter((name) => name.startsWith("screen-")).sort()[0])
-      .toBe("screen-2026-08-22T10-11-05-000.png");
-    await expect(stat(join(dir, "browser-owner.png"))).resolves.toBeDefined();
+    expect((await readdir(dir)).filter((name) => name.startsWith("ghost-casper-screen-")).sort()[0])
+      .toBe("ghost-casper-screen-2026-08-22T10-11-05-000.png");
+    await expect(stat(join(dir, "screenshot-2026-08-22_10-11-12.png"))).resolves.toBeDefined();
+    await expect(stat(join(dir, "ghost-mina-screen-2026-08-22T10-11-12-345.png")))
+      .resolves.toBeDefined();
+    await expect(stat(join(dir, "ghost-casper-browser-2026-08-22T10-11-12-345.png")))
+      .resolves.toBeDefined();
   });
 
   it("is applied after every capture", async () => {
@@ -250,27 +279,38 @@ describe("retention", () => {
         now: new Date(Date.UTC(2026, 7, 22, 10, 0, index)),
       });
     }
-    expect(await readdir(join(fixture.dir, SCREENSHOTS_DIRNAME))).toHaveLength(2);
+    expect(await readdir(shots)).toHaveLength(2);
   });
 
   it("fails pruning on a matching symlink without deleting its target", async () => {
-    const dir = join(fixture.dir, SCREENSHOTS_DIRNAME);
+    const dir = shots;
     const target = join(fixture.root, "outside.png");
     await mkdir(dir);
     await writeFile(target, "owner data");
-    await symlink(target, join(dir, "screen-2026-08-22T10-11-12-345.png"));
-    await expect(pruneScreenshots(dir, 0)).rejects.toThrowError(/not a regular file/);
+    await symlink(target, join(dir, "ghost-casper-screen-2026-08-22T10-11-12-345.png"));
+    await expect(pruneScreenshots(dir, 0, "casper")).rejects.toThrowError(/not a regular file/);
     expect(await readFile(target, "utf8")).toBe("owner data");
   });
 });
 
 describe("ghost_screen tool", () => {
   let fixture: GhostFixture;
+  let picturesRoot: { dir: string; cleanup(): Promise<void> };
+  let shots: string;
 
   beforeEach(async () => {
     fixture = await createGhostFixture();
+    // Captures land in the desktop's pictures directory; keep the suite out of
+    // the real one, and let the capture create it the way a fresh machine would.
+    picturesRoot = await createTempDir();
+    shots = join(picturesRoot.dir, "Pictures");
+    vi.stubEnv("OMARCHY_SCREENSHOT_DIR", shots);
   });
-  afterEach(() => fixture.cleanup());
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    await picturesRoot.cleanup();
+    await fixture.cleanup();
+  });
 
   async function harnessFor(
     chatModel: FixtureModel,
@@ -342,7 +382,7 @@ describe("ghost_screen tool", () => {
     expect(resultImages(result)).toHaveLength(0);
 
     const saved = String(result.details.savedTo);
-    expect(saved.startsWith(join(fixture.dir, SCREENSHOTS_DIRNAME))).toBe(true);
+    expect(saved.startsWith(shots)).toBe(true);
     await expect(stat(saved)).resolves.toBeTruthy();
     const text = resultText(result);
     expect(text).toContain(`saved to ${saved}`);
@@ -407,11 +447,11 @@ describe("ghost_screen tool", () => {
     });
   });
 
-  it("saves the capture under the ghost home", async () => {
+  it("saves the capture where the desktop saves screenshots", async () => {
     const { harness } = await harnessFor(VISION_CHAT);
     const result = await harness.call(GHOST_SCREEN, { prompt: "?" });
-    expect(String(result.details.path).startsWith(`${SCREENSHOTS_DIRNAME}/`)).toBe(true);
-    await expect(stat(join(fixture.dir, String(result.details.path)))).resolves.toBeTruthy();
+    expect(String(result.details.path).startsWith(`${shots}/`)).toBe(true);
+    await expect(stat(String(result.details.path))).resolves.toBeTruthy();
   });
 
   it("offers exactly one tool", async () => {

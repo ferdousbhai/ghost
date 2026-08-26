@@ -31,7 +31,7 @@ import {
   type BrowserSessionOptions,
   type GhostBrowserSession,
 } from "./browser-session.js";
-import { readScreenshotFile } from "./screenshot-retention.js";
+import { readScreenshotFile, resolveScreenshotDirectory } from "./screenshot-retention.js";
 import {
   resolveHome,
   resolveToolCapabilities,
@@ -451,7 +451,7 @@ export function createBrowserExtension(
             if (resolveToolCapabilities(options, ctx).vision) {
               let data: string | undefined;
               try {
-                data = (await readScreenshotFile(session.homeDir, shot.path)).toString("base64");
+                data = (await readScreenshotFile(resolveScreenshotDirectory(), shot.path)).toString("base64");
               } catch {
                 data = undefined;
               }
@@ -805,7 +805,6 @@ export {
   browserSessionFor,
   closeAllBrowserSessions,
   screenshotDirFor,
-  SCREENSHOT_DIRNAME,
 } from "./browser-session.js";
 export {
   BROWSER_PROFILE_DIRNAME,

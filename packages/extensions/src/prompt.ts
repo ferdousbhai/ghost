@@ -82,26 +82,44 @@ export function buildGhostSystemPrompt(input: GhostSystemPromptInput): string {
 }
 
 /**
- * Drop OMP's `§ Role` section from an assembled harness prompt.
+ * Sections of OMP's assembled harness prompt a ghost does not carry.
  *
- * The section casts the model as an assistant for "load-bearing changes in Oh
- * My Pi coding harness" and follows with engineering house style. A ghost is
- * whoever character.md says, and that section sits roughly twenty thousand
- * characters earlier in the prompt, so it wins on anything they disagree
- * about. Everything after it (runtime, tool policy, workflow, delivery) is
- * about operating the tools and stays.
+ * `§ Role` casts the model as an assistant for "load-bearing changes in Oh My
+ * Pi coding harness" and sets its house style. `§ Workflow`, `§ Delivery`, and
+ * `§ Critical` are the rules of a coding task: six numbered phases, what counts
+ * as done, never yield while work remains. A ghost is whoever character.md
+ * says, holding a conversation that is often not a task at all, and all four
+ * sections sit thousands of characters ahead of the persona.
  *
- * `personality: "none"` already removes the voice rules inside the section
- * through OMP's own setting; this removes the framing that has no setting.
- * A prompt without both markers is returned untouched, so an upstream rewrite
- * costs tokens rather than breaking a session.
+ * What stays is everything about operating the machine: the runtime section
+ * with its skills and internal URLs, the tool inventory, and `§ Tool Policy`.
  */
-export function stripHarnessRoleSection(block: string): string {
-  const lines = block.split("\n");
-  const start = lines.findIndex((line) => line.trimEnd() === "\u00a7 Role");
-  if (start === -1) return block;
-  const end = lines.findIndex((line, index) => index > start && line.startsWith("\u00a7 "));
-  if (end === -1) return block;
-  const kept = [...lines.slice(0, start), ...lines.slice(end)];
-  return kept.join("\n");
+const DROPPED_HARNESS_SECTIONS = [
+  "\u00a7 Role",
+  "\u00a7 Workflow",
+  "\u00a7 Delivery",
+  "\u00a7 Critical",
+] as const;
+
+const SECTION_MARKER = "\u00a7 ";
+
+/**
+ * Remove those sections from one assembled harness prompt.
+ *
+ * `personality: "none"` already drops the voice rules inside `§ Role` through
+ * OMP's own setting; these have no setting. A section whose heading is absent
+ * is skipped rather than guessed at, so an upstream rewrite costs tokens
+ * instead of breaking a session.
+ */
+export function stripHarnessSections(block: string): string {
+  let lines = block.split("\n");
+  for (const heading of DROPPED_HARNESS_SECTIONS) {
+    const start = lines.findIndex((line) => line.trimEnd() === heading);
+    if (start === -1) continue;
+    const next = lines.findIndex(
+      (line, index) => index > start && line.startsWith(SECTION_MARKER),
+    );
+    lines = [...lines.slice(0, start), ...(next === -1 ? [] : lines.slice(next))];
+  }
+  return lines.join("\n").trimEnd();
 }

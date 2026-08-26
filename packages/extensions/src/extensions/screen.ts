@@ -62,15 +62,21 @@ import {
   DEFAULT_SCREENSHOT_RETENTION,
   assertScreenshotBase64WithinLimit,
   assertScreenshotBytesWithinLimit,
-  isScreenScreenshot,
+  ghostScreenshotMatcher,
+  ghostScreenshotName,
   MAX_SCREENSHOT_BYTES,
   pruneScreenshotDirectoryPath,
   pruneScreenshotFiles,
+  resolveScreenshotDirectory,
   withScreenshotDirectory,
   writeScreenshotFile,
 } from "./screenshot-retention.js";
 
-export { DEFAULT_SCREENSHOT_RETENTION, SCREENSHOTS_DIRNAME } from "./screenshot-retention.js";
+export {
+  DEFAULT_SCREENSHOT_RETENTION,
+  ghostScreenshotName,
+  resolveScreenshotDirectory,
+} from "./screenshot-retention.js";
 
 export const GHOST_SCREEN = "ghost_screen";
 
@@ -159,10 +165,9 @@ export interface ScreenExtensionOptions extends GhostExtensionOptions {
   readonly retention?: number;
 }
 
-/** A filename that sorts chronologically and is safe on every filesystem. */
-export function screenshotFileName(now: Date = new Date()): string {
-  const stamp = now.toISOString().replace(/[:.]/g, "-").replace("Z", "");
-  return `screen-${stamp}.png`;
+/** A filename that sorts chronologically and names the ghost that took it. */
+export function screenshotFileName(ghostName: string, now: Date = new Date()): string {
+  return ghostScreenshotName(ghostName, "screen", now);
 }
 
 /**
@@ -172,8 +177,9 @@ export function screenshotFileName(now: Date = new Date()): string {
 export async function pruneScreenshots(
   dir: string,
   retention: number,
+  ghostName: string,
 ): Promise<string[]> {
-  return pruneScreenshotDirectoryPath(dir, retention, isScreenScreenshot);
+  return pruneScreenshotDirectoryPath(dir, retention, ghostScreenshotMatcher(ghostName, "screen"));
 }
 
 /** Parse the `X,Y WxH` region the model writes into the sidecar's rect. */
@@ -295,18 +301,18 @@ export async function captureViaHelper(
   const buffer = Buffer.from(meta.png_base64, "base64");
   assertScreenshotBytesWithinLimit(buffer.byteLength, "Desktop capture");
   const mutation = await withScreenshotDirectory(
-    home.dir,
+    resolveScreenshotDirectory(),
     async (directory, logicalDir) => {
       const written = await writeScreenshotFile(
         directory,
-        screenshotFileName(options.now ?? new Date()),
+        screenshotFileName(home.name, options.now ?? new Date()),
         "Desktop capture",
         async (descriptorFilePath) => writeFile(descriptorFilePath, buffer),
       );
       const deleted = await pruneScreenshotFiles(
         directory,
         options.retention ?? DEFAULT_SCREENSHOT_RETENTION,
-        isScreenScreenshot,
+        ghostScreenshotMatcher(home.name, "screen"),
       );
       return {
         path: join(logicalDir, written.name),

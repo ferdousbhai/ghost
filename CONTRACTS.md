@@ -46,6 +46,16 @@ each time.
                                notIncluded
 ```
 
+Screenshots are the one thing a ghost produces that does not live in its home.
+`ghost_screen` and `ghost_browser` write to the desktop's own screenshot
+directory (`OMARCHY_SCREENSHOT_DIR`, else `XDG_PICTURES_DIR`, else
+`~/Pictures`, matching `omarchy-capture-screenshot` and reading
+`user-dirs.dirs` because a user unit inherits no XDG variables), named
+`ghost-<ghost>-screen-<timestamp>.png` and `ghost-<ghost>-browser-<timestamp>.png`.
+Retention keeps the newest captures per ghost and producer and deletes only
+names matching that exact pattern, so the owner's own screenshots and another
+ghost's captures share the directory untouched.
+
 Every document is ordinary Markdown in one canonical form:
 
 ```md
@@ -123,16 +133,19 @@ A session is OMP-native. Ghost keeps OMP's discovery and the operating half of
 its system prompt, then appends the Ghost persona and derived memory/doc
 sections.
 
-Three deliberate subtractions from the harness prompt, in the order they cost
-tokens. `§ Role` is removed by the persona extension: it casts the model as a
-coding assistant and sets its voice roughly twenty thousand characters before
-`character.md` gets a word in, and it has no setting. `personality: "none"`
-drops the voice rules OMP does expose a setting for. `tools.xdevDocs:
-"catalog"` moves the built-in device schemas (`ast_edit`, `debug`, `lsp`,
-`inspect_image`) out of the prompt, leaving the catalog that names them and one
-`xd://<name>` read before first use. Everything about operating the tools stays:
-runtime, internal URLs, tool inventory, tool policy, workflow, delivery. A
-seeded ghost's first turn carries about 14.5k characters of system prompt where
+Deliberate subtractions from the harness prompt. The persona extension removes
+`§ Role`, `§ Workflow`, `§ Delivery`, and `§ Critical`: the first casts the
+model as a coding assistant and sets its voice twenty thousand characters
+before `character.md` is reached, and the rest are the rules of a coding task,
+which a conversation is often not. None of the four has a setting.
+`personality: "none"` drops the voice rules that do. `tools.xdevDocs: "catalog"`
+moves the built-in device schemas (`ast_edit`, `debug`, `lsp`, `inspect_image`)
+out of the prompt, leaving the catalog that names them and one `xd://<name>`
+read before first use.
+
+What stays is everything about operating the machine: `§ Runtime` with its
+skills, rules, and internal URLs, the tool inventory, and `§ Tool Policy`. A
+seeded ghost's first turn carries about 10.2k characters of system prompt where
 it carried 23.8k.
 Native filesystem and search (`read`, `glob`, `grep`), mutation (`write`,
 `edit`), Bash, web search, task/hub subagents, background jobs, skills, rules,

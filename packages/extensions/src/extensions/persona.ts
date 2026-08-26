@@ -6,13 +6,13 @@
  * section is rebuilt before every agent start, so a doc or memory written
  * mid-session is reflected on the next turn without a session restart.
  *
- * The same pass drops OMP's `§ Role` section, which would otherwise tell the
- * model it is a coding assistant before character.md gets a word in.
+ * The same pass drops the harness sections a ghost does not carry: the role it
+ * would otherwise be told it has, and the rules of a coding task.
  */
 import type { ExtensionAPI, ExtensionFactory } from "@oh-my-pi/pi-coding-agent";
 import { deriveDocCatalog } from "../catalog.js";
 import { deriveMemoryIndex } from "../memory-file.js";
-import { buildGhostSystemPrompt, stripHarnessRoleSection } from "../prompt.js";
+import { buildGhostSystemPrompt, stripHarnessSections } from "../prompt.js";
 import { resolveHome, type GhostExtensionOptions } from "./shared.js";
 
 export interface PersonaExtensionOptions extends GhostExtensionOptions {
@@ -34,7 +34,7 @@ export function createPersonaExtension(
         home.listDocs(),
       ]);
       return {
-        systemPrompt: [...event.systemPrompt.map(stripHarnessRoleSection), buildGhostSystemPrompt({
+        systemPrompt: [...event.systemPrompt.map(stripHarnessSections), buildGhostSystemPrompt({
           ghostName: options.ghostName ?? home.name,
           character,
           memory: deriveMemoryIndex(memory.files),

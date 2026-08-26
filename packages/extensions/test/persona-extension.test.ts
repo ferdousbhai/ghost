@@ -62,7 +62,7 @@ describe("persona extension", () => {
     expect(prompt).toContain("a doc is what someone sat down and wrote");
   });
 
-  it("drops OMP's role section and keeps everything after it", async () => {
+  it("drops the harness sections a ghost does not carry", async () => {
     const harness = await loadExtension(createPersonaExtension(), fixture.dir);
     const harnessPrompt = [
       "<system-conventions>",
@@ -78,6 +78,21 @@ describe("persona extension", () => {
       "\u00a7 Runtime",
       "# Tool Inventory",
       "- Read: `read`",
+      "",
+      "\u00a7 Tool Policy",
+      "- Prefer glob over find.",
+      "",
+      "\u00a7 Workflow",
+      "# 1. Scope",
+      "- Read the request.",
+      "",
+      "\u00a7 Delivery",
+      "<contract>",
+      "Finish the task.",
+      "</contract>",
+      "",
+      "\u00a7 Critical",
+      "- NEVER yield while actionable work remains.",
     ].join("\n");
 
     const prompt = (await harness.beforeAgentStart(harnessPrompt)) ?? "";
@@ -85,12 +100,19 @@ describe("persona extension", () => {
     expect(prompt).not.toContain("\u00a7 Role");
     expect(prompt).not.toContain("Oh My Pi coding harness");
     expect(prompt).not.toContain("# Engineering");
+    expect(prompt).not.toContain("\u00a7 Workflow");
+    expect(prompt).not.toContain("\u00a7 Delivery");
+    expect(prompt).not.toContain("\u00a7 Critical");
+    expect(prompt).not.toContain("NEVER yield");
+    // Everything about operating the machine stays.
     expect(prompt).toContain("<system-conventions>");
     expect(prompt).toContain("\u00a7 Runtime");
     expect(prompt).toContain("- Read: `read`");
+    expect(prompt).toContain("\u00a7 Tool Policy");
+    expect(prompt).toContain("- Prefer glob over find.");
   });
 
-  it("leaves a harness prompt without the role markers untouched", async () => {
+  it("leaves a harness prompt without those markers untouched", async () => {
     const harness = await loadExtension(createPersonaExtension(), fixture.dir);
     const renamed = "\u00a7 Purpose\nSomething upstream rewrote.\n";
 

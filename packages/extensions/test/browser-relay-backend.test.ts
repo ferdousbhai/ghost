@@ -29,7 +29,6 @@ import {
 import {
   browserSessionFor,
   closeAllBrowserSessions,
-  SCREENSHOT_DIRNAME,
 } from "../src/extensions/browser-session.js";
 import { MAX_SCREENSHOT_BYTES } from "../src/extensions/screenshot-retention.js";
 
@@ -569,15 +568,19 @@ describe("when the relay is not there", () => {
 
 describe("the session layer's policy applies to the relay too", () => {
   let dir: string;
+  let shots: string;
   let transport: ScriptedTransport;
 
   beforeEach(async () => {
     dir = await mkdtemp(join(tmpdir(), "ghost-relay-home-"));
+    shots = join(dir, "Pictures");
+    vi.stubEnv("OMARCHY_SCREENSHOT_DIR", shots);
     transport = transportWithPage();
   });
 
   afterEach(async () => {
     await closeAllBrowserSessions();
+    vi.unstubAllEnvs();
     await rm(dir, { recursive: true, force: true });
   });
 
@@ -646,7 +649,7 @@ describe("the session layer's policy applies to the relay too", () => {
     const live = session();
     await live.open(PAGE.url);
     const shot = await live.screenshot();
-    expect(shot.path.startsWith(join(dir, SCREENSHOT_DIRNAME))).toBe(true);
+    expect(shot.path.startsWith(shots)).toBe(true);
     expect(await readFile(shot.path, "utf8")).toBe("png-ish");
   });
 

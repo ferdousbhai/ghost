@@ -22,7 +22,7 @@
  * configured by a process-global, only found by one.
  */
 import { writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { GhostError } from "../errors.js";
 import {
   browserAbortError,
@@ -58,16 +58,17 @@ import {
 } from "./browser-policy.js";
 import {
   DEFAULT_SCREENSHOT_RETENTION,
-  isBrowserScreenshot,
+  ghostScreenshotMatcher,
+  ghostScreenshotName,
+  resolveScreenshotDirectory,
   assertScreenshotBytesWithinLimit,
   pruneScreenshotFiles,
-  SCREENSHOTS_DIRNAME,
   withScreenshotDirectory,
   writeScreenshotFile,
 } from "./screenshot-retention.js";
 
 /** Backwards-compatible singular export; storage is shared with ghost_screen. */
-export const SCREENSHOT_DIRNAME = SCREENSHOTS_DIRNAME;
+
 export const DEFAULT_BROWSER_SCREENSHOT_RETENTION = DEFAULT_SCREENSHOT_RETENTION;
 
 export const DEFAULT_ACTION_TIMEOUT_MS = 30_000;
@@ -281,7 +282,7 @@ export class GhostBrowserSession {
 
   constructor(options: BrowserSessionOptions) {
     this.homeDir = resolve(options.homeDir);
-    this.screenshotDir = join(this.homeDir, SCREENSHOT_DIRNAME);
+    this.screenshotDir = resolveScreenshotDirectory();
     this.#idleTimeoutMs = options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
     this.#actionTimeoutMs = options.actionTimeoutMs ?? DEFAULT_ACTION_TIMEOUT_MS;
     this.#allowLocal = options.allowLocal ?? false;
@@ -696,20 +697,20 @@ export class GhostBrowserSession {
       );
     }
     assertScreenshotBytesWithinLimit(capture.bytes.byteLength, "Browser screenshot");
-    const stamp = new Date().toISOString().replace(/[:.]/g, "-").replace("Z", "");
+    const ghostName = basename(resolve(this.homeDir));
     const result = await withScreenshotDirectory(
-      this.homeDir,
+      this.screenshotDir,
       async (directory, logicalDir) => {
         const written = await writeScreenshotFile(
           directory,
-          `browser-${stamp}.png`,
+          ghostScreenshotName(ghostName, "browser"),
           "Browser screenshot",
           async (descriptorFilePath) => writeFile(descriptorFilePath, capture.bytes),
         );
         await pruneScreenshotFiles(
           directory,
           DEFAULT_BROWSER_SCREENSHOT_RETENTION,
-          isBrowserScreenshot,
+          ghostScreenshotMatcher(ghostName, "browser"),
         );
         return {
           url: capture.url,
@@ -1329,8 +1330,8 @@ function sessionOptionSummary(options: EffectiveSessionOptions): Record<string, 
 }
 
 /** Where a ghost's screenshots go. */
-export function screenshotDirFor(homeDir: string): string {
-  return join(resolve(homeDir), SCREENSHOT_DIRNAME);
+export function screenshotDirFor(_homeDir: string): string {
+  return resolveScreenshotDirectory();
 }
 
 /**
