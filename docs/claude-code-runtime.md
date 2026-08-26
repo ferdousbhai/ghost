@@ -65,8 +65,9 @@ adapter is `packages/daemon/src/claude-pi-messages.ts`.
 
 For each turn Ghost:
 
-1. resolves the installed executable and runs the token-free
-   `claude auth status --json` preflight;
+1. reads a daemon-shared, five-second executable and token-free
+   `claude auth status --json` snapshot (single-flight across catalogue reads
+   and turns, and invalidated after a successful login/auth refresh);
 2. requires Claude.ai plan auth rather than accepting an API-key-backed
    status;
 3. rebuilds the persona, memory index, and doc catalogue from the ghost home;
@@ -119,6 +120,20 @@ session list. This is an explicit exception to “the ghost directory is the
 whole backup”: backing up only the ghost home does not back up Claude's own
 transcript. We do not copy that transcript because doing so would couple Ghost
 to Claude Code's private storage format.
+
+The sidecar's `messageCount` remains message-shaped for compatibility with
+existing listings. Every SDK query that reaches a terminal result (success or
+an SDK terminal error such as the maximum-turn limit) persists its resume id
+and adds twice its reported `num_turns`; zero is a valid increment, and
+session-stop continuation queries count separately. A query that is aborted or
+loses its process before any terminal result changes no count. Existing counts
+are preserved.
+
+Hook sequencing is deliberately separate. `ownerTurnCount` advances once per
+owner-initiated request, so Claude's internal tool/sampling turns and hidden
+session-stop continuations cannot skip hook turn ids. A v1 sidecar without this
+field is migrated from the old invariant of two displayed messages per owner
+request, then every later sidecar write persists the independent count.
 
 ## T3 Code provenance and adaptation
 

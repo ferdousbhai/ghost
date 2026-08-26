@@ -38,9 +38,8 @@ import {
   CLAUDE_CODE_BINARY_ENV,
   CLAUDE_CODE_DEFAULT_MODEL_ID,
   CLAUDE_CODE_PROVIDER_ID,
+  ClaudeCodeProbe,
   isClaudePlanAuth,
-  readClaudeCodeAuthStatus,
-  resolveClaudeCodeExecutable,
 } from "./claude-code.js";
 import { GhostError, ghostPaths, type GhostRegistry } from "./ghosts.js";
 import {
@@ -240,6 +239,8 @@ export interface ModelCatalogOptions {
   }) => Promise<ModelCatalogRuntime>;
   /** Test seam for the external, credential-free Claude Code status probe. */
   claudeCodePlanStatus?: () => Promise<boolean>;
+  /** Shared executable/auth probe used by both catalogue reads and turns. */
+  claudeCodeProbe?: ClaudeCodeProbe;
   /**
    * Notified after `roles.chat_model` is written, with the ghost name, so a
    * live cached session rebinds to the new model instead of answering on the
@@ -260,12 +261,9 @@ const CLAUDE_CODE_MODEL: CatalogModel = {
   input: ["text", "image"],
 };
 
-async function defaultClaudeCodePlanStatus(): Promise<boolean> {
+async function defaultClaudeCodePlanStatus(probe: ClaudeCodeProbe): Promise<boolean> {
   try {
-    const binary = await resolveClaudeCodeExecutable(
-      process.env[CLAUDE_CODE_BINARY_ENV] ?? "claude",
-    );
-    return isClaudePlanAuth(await readClaudeCodeAuthStatus(binary));
+    return isClaudePlanAuth((await probe.read()).authStatus);
   } catch {
     return false;
   }
@@ -345,7 +343,11 @@ export class ModelCatalog {
     this.logger = options.logger ?? silentLogger;
     this.offline = options.offline ?? false;
     this.createRuntime = options.createRuntime ?? defaultCreateRuntime;
-    this.claudeCodePlanStatus = options.claudeCodePlanStatus ?? defaultClaudeCodePlanStatus;
+    const claudeCodeProbe = options.claudeCodeProbe ?? new ClaudeCodeProbe({
+      binaryPath: process.env[CLAUDE_CODE_BINARY_ENV] ?? "claude",
+    });
+    this.claudeCodePlanStatus = options.claudeCodePlanStatus
+      ?? (() => defaultClaudeCodePlanStatus(claudeCodeProbe));
     this.onModelRoutingChanged = options.onModelRoutingChanged ?? options.onChatModelChanged;
   }
 

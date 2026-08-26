@@ -95,6 +95,19 @@ describe("listProviders", () => {
     expect(anthropic.loginLabel).toBe("Sign in (extra usage)");
     expect(anthropic.billingNote).toContain("not Claude plan limits");
   });
+
+  it("does not advertise providers an empty OMP registry cannot start", async () => {
+    const login: LoginImpl = async () => oauthCredential();
+    const { manager } = setup(login, {
+      createRuntime: async () => makeFakeRuntime({ login, providers: [] }),
+    });
+
+    expect(await manager.listProviders("casper")).toEqual([]);
+    await expect(manager.start("casper", "openai-codex", "oauth")).rejects.toMatchObject({
+      code: "unknown_provider",
+      status: 400,
+    });
+  });
 });
 
 describe("OAuth url + paste flow", () => {

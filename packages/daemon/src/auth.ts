@@ -248,24 +248,6 @@ const CANCELLED_MESSAGE = "Login cancelled";
 const AUTH_TYPES: readonly AuthType[] = ["oauth", "api_key"];
 export const ANTHROPIC_EXTRA_USAGE_NOTE = "extra usage billed per token; not Claude plan limits";
 
-/**
- * Curated fallback, used ONLY if OMP's registry comes back empty (it should not
- * should). The real list is derived from `runtime.getProviders()`.
- */
-const FALLBACK_PROVIDERS: readonly ProviderInfo[] = [
-  { id: "openai-codex", name: "OpenAI Codex", subscription: true, authTypes: ["oauth"], configured: false },
-  {
-    id: "anthropic",
-    name: "Anthropic",
-    subscription: false,
-    authTypes: ["oauth", "api_key"],
-    loginLabel: "Sign in (extra usage)",
-    billingNote: ANTHROPIC_EXTRA_USAGE_NOTE,
-    configured: false,
-  },
-  { id: "openrouter", name: "OpenRouter", subscription: false, authTypes: ["oauth", "api_key"], configured: false },
-];
-
 async function defaultCreateRuntime(input: {
   authPath: string;
   modelsPath: string;
@@ -404,8 +386,7 @@ export class LoginManager {
     const ghost = this.registry.get(ghostName);
     const runtime = await this.buildRuntime(ghost.dir);
     try {
-      const infos = this.providersFrom(runtime);
-      return infos.length > 0 ? infos : [...FALLBACK_PROVIDERS];
+      return this.providersFrom(runtime);
     } finally {
       runtime.close?.();
     }

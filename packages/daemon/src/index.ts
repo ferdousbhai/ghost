@@ -49,8 +49,11 @@ export {
 export {
   CLAUDE_CODE_BINARY_ENV,
   CLAUDE_CODE_DEFAULT_MODEL_ID,
+  CLAUDE_CODE_PROBE_TTL_MS,
   CLAUDE_CODE_PROVIDER_ID,
+  MAX_CLAUDE_CODE_PROBE_TTL_MS,
   ClaudeCodeProcessError,
+  ClaudeCodeProbe,
   ClaudeCodeRuntime,
   claudeSessionMetadataPath,
   isClaudePlanAuth,
@@ -58,6 +61,8 @@ export {
   resolveClaudeCodeExecutable,
   type ClaudeCodeAuthStatus,
   type ClaudeCodeQueryFactory,
+  type ClaudeCodeProbeOptions,
+  type ClaudeCodeProbeResult,
   type ClaudeCodeRuntimeOptions,
   type ClaudeSessionMetadata,
 } from "./claude-code.js";

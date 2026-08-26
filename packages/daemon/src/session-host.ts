@@ -1776,6 +1776,7 @@ export class SessionHost {
   async refreshAuth(ghostName: string, signal?: AbortSignal): Promise<void> {
     signal?.throwIfAborted();
     this.registry.get(ghostName);
+    this.claudeCode.invalidateAuthProbe();
     const opening = [...this.opening.entries()]
       .filter(([key]) => sessionKeyParts(key)[0] === ghostName)
       .map(([, promise]) => promise);

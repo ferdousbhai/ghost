@@ -15,6 +15,7 @@
 import { pathToFileURL } from "node:url";
 import { apiTokenCommand } from "./api-token.js";
 import { LoginManager } from "./auth.js";
+import { ClaudeCodeProbe } from "./claude-code.js";
 import { importCommand } from "./import-command.js";
 import { loginCommand } from "./login-command.js";
 import { loadConfig, type DaemonConfig, type DaemonConfigOverrides } from "./config.js";
@@ -409,6 +410,7 @@ async function serveDaemon(
   // the per-ghost profile).
   const relay = createRelayHub({ logger });
   const homeOperations = new HomeOperationCoordinator(registry);
+  const claudeCodeProbe = new ClaudeCodeProbe();
   const host = new SessionHost({
     registry,
     logger,
@@ -417,6 +419,7 @@ async function serveDaemon(
     compaction: config.compaction,
     askTimeoutSeconds: config.askTimeoutSeconds,
     hooks,
+    claudeCode: { probe: claudeCodeProbe },
     ...(relay ? { relayTransport: relay } : {}),
   });
   const login = new LoginManager({
@@ -430,6 +433,7 @@ async function serveDaemon(
     homeOperations,
     logger,
     offline: config.offline,
+    claudeCodeProbe,
     // A model switch must reach any conversation that is already open, not just
     // the next freshly built session: rebind the live cached sessions.
     onModelRoutingChanged: (name) => host.rebindModel(name),

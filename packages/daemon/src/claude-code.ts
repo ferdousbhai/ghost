@@ -56,6 +56,10 @@ import * as Effect from "effect/Effect";
 import * as Stream from "effect/Stream";
 import * as z from "zod";
 import { createClaudePiMessagesAdapter } from "./claude-pi-messages.js";
+import {
+  isValidConversationId,
+  requireRawConversationId,
+} from "./conversation-identity.js";
 import { scrubProviderEnv } from "./env-scrub.js";
 import {
   GHOST_SESSION_STOP_CONTINUATION_CAP,
@@ -81,9 +85,13 @@ import type { RunTurnOptions } from "./session-host.js";
 export const CLAUDE_CODE_PROVIDER_ID = "claude-code";
 export const CLAUDE_CODE_DEFAULT_MODEL_ID = "default";
 export const CLAUDE_CODE_BINARY_ENV = "GHOST_CLAUDE_BINARY";
+export const CLAUDE_CODE_PROBE_TTL_MS = 5_000;
+export const MAX_CLAUDE_CODE_PROBE_TTL_MS = 30_000;
 
 const CLAUDE_SESSION_PREFIX = "claude-";
 const CLAUDE_SESSION_SUFFIX = ".json";
+const CLAUDE_SESSION_FILE_PATTERN = /^claude-[0-9a-f]{64}\.json$/u;
+const MAX_CLAUDE_CODE_SESSION_ID_SCALARS = 512;
 const AUTH_STATUS_TIMEOUT_MS = 10_000;
 export const CLAUDE_CODE_TOOL_CAPABILITIES: GhostToolCapabilities = { vision: true };
 const execFileAsync = promisify(execFile);
@@ -104,6 +112,8 @@ export interface ClaudeSessionMetadata {
   created: string;
   modified: string;
   messageCount: number;
+  /** Owner-initiated turns, independent of Claude's internal sampling/tool turns. */
+  ownerTurnCount: number;
 }
 
 export interface ClaudeCodeQueryInput {
@@ -112,6 +122,24 @@ export interface ClaudeCodeQueryInput {
 }
 
 export type ClaudeCodeQueryFactory = (input: ClaudeCodeQueryInput) => Query;
+
+export interface ClaudeCodeProbeResult {
+  binaryPath: string;
+  authStatus: ClaudeCodeAuthStatus;
+}
+
+export interface ClaudeCodeProbeOptions {
+  /** Installed Claude Code path/name. Defaults to GHOST_CLAUDE_BINARY or `claude`. */
+  binaryPath?: string;
+  /** Short cache lifetime for one executable/auth snapshot. */
+  ttlMs?: number;
+  /** Deterministic cache clock seam. */
+  now?: () => number;
+  /** Test seam for executable discovery. */
+  resolveExecutable?: (binaryPath: string) => Promise<string>;
+  /** Test seam for the external `claude auth status` process. */
+  readAuthStatus?: (binaryPath: string) => Promise<ClaudeCodeAuthStatus>;
+}
 
 export interface ClaudeCodeRuntimeOptions {
   logger?: Logger;
@@ -124,6 +152,10 @@ export interface ClaudeCodeRuntimeOptions {
   createQuery?: ClaudeCodeQueryFactory;
   /** Test seam for the external `claude auth status` preflight. */
   readAuthStatus?: (binaryPath: string) => Promise<ClaudeCodeAuthStatus>;
+  /** Test seam for installed-executable discovery. */
+  resolveExecutable?: (binaryPath: string) => Promise<string>;
+  /** Shared catalogue/turn probe. Production wires one daemon-wide instance. */
+  probe?: ClaudeCodeProbe;
   /** Ghost-owned lifecycle hooks shared with the pi harness. */
   hooks?: GhostHookRunner;
 }
@@ -284,12 +316,124 @@ export function isClaudePlanAuth(status: ClaudeCodeAuthStatus): boolean {
   return status.loggedIn && status.authMethod === "claude.ai";
 }
 
+/**
+ * One short-lived snapshot of the external Claude executable and auth state.
+ * Successful probes (including logged-out state) are cached; process failures
+ * are cached for the same bounded lifetime so a polling catalogue cannot spin
+ * up a failing process on every request.
+ */
+export class ClaudeCodeProbe {
+  private readonly binaryPath: string;
+  private readonly ttlMs: number;
+  private readonly now: () => number;
+  private readonly resolveExecutable: NonNullable<ClaudeCodeProbeOptions["resolveExecutable"]>;
+  private readonly readAuthStatus: NonNullable<ClaudeCodeProbeOptions["readAuthStatus"]>;
+  private generation = 0;
+  private cached?: {
+    outcome:
+      | { ok: true; value: ClaudeCodeProbeResult }
+      | { ok: false; error: unknown };
+    expiresAt: number;
+  };
+  private inFlight?: { generation: number; promise: Promise<ClaudeCodeProbeResult> };
+
+  constructor(options: ClaudeCodeProbeOptions = {}) {
+    this.binaryPath = options.binaryPath
+      ?? process.env[CLAUDE_CODE_BINARY_ENV]
+      ?? "claude";
+    this.ttlMs = options.ttlMs ?? CLAUDE_CODE_PROBE_TTL_MS;
+    if (!Number.isFinite(this.ttlMs)
+      || this.ttlMs <= 0
+      || this.ttlMs > MAX_CLAUDE_CODE_PROBE_TTL_MS) {
+      throw new RangeError(
+        `Claude Code probe ttlMs must be finite and in (0, ${MAX_CLAUDE_CODE_PROBE_TTL_MS}]`,
+      );
+    }
+    this.now = options.now ?? Date.now;
+    this.resolveExecutable = options.resolveExecutable ?? resolveClaudeCodeExecutable;
+    this.readAuthStatus = options.readAuthStatus ?? readClaudeCodeAuthStatus;
+  }
+
+  async read(): Promise<ClaudeCodeProbeResult> {
+    const now = this.now();
+    if (this.cached && now < this.cached.expiresAt) {
+      if (this.cached.outcome.ok) return this.cached.outcome.value;
+      throw this.cached.outcome.error;
+    }
+
+    const generation = this.generation;
+    if (this.inFlight?.generation === generation) return this.inFlight.promise;
+
+    const promise = this.readFresh(generation);
+    this.inFlight = { generation, promise };
+    void promise.then(
+      () => this.clearInFlight(promise),
+      () => this.clearInFlight(promise),
+    );
+    return promise;
+  }
+
+  async isPlanAuthenticated(): Promise<boolean> {
+    return isClaudePlanAuth((await this.read()).authStatus);
+  }
+
+  /** Drop both the settled snapshot and ownership of any older in-flight probe. */
+  invalidate(): void {
+    this.generation += 1;
+    this.cached = undefined;
+    this.inFlight = undefined;
+  }
+
+  private async readFresh(generation: number): Promise<ClaudeCodeProbeResult> {
+    try {
+      const binaryPath = await this.resolveExecutable(this.binaryPath);
+      const authStatus = await this.readAuthStatus(binaryPath);
+      if (generation !== this.generation) return this.read();
+      const value = { binaryPath, authStatus };
+      this.cached = { outcome: { ok: true, value }, expiresAt: this.now() + this.ttlMs };
+      return value;
+    } catch (error) {
+      // An invalidation is a state boundary. Even callers already awaiting the
+      // old generation must observe the new generation, never its stale result.
+      if (generation !== this.generation) return this.read();
+      this.cached = { outcome: { ok: false, error }, expiresAt: this.now() + this.ttlMs };
+      throw error;
+    }
+  }
+
+  private clearInFlight(promise: Promise<ClaudeCodeProbeResult>): void {
+    if (this.inFlight?.promise === promise) this.inFlight = undefined;
+  }
+}
+
+function claudeSessionMetadataName(conversationId: string): string {
+  requireRawConversationId(conversationId);
+  const digest = createHash("sha256").update(conversationId).digest("hex");
+  return `${CLAUDE_SESSION_PREFIX}${digest}${CLAUDE_SESSION_SUFFIX}`;
+}
+
 export function claudeSessionMetadataPath(
   sessionDir: string,
   conversationId: string,
 ): string {
-  const digest = createHash("sha256").update(conversationId).digest("hex");
-  return join(sessionDir, `${CLAUDE_SESSION_PREFIX}${digest}${CLAUDE_SESSION_SUFFIX}`);
+  return join(sessionDir, claudeSessionMetadataName(conversationId));
+}
+
+function isBoundedScalarString(value: string, maximum: number): boolean {
+  let scalars = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const unit = value.charCodeAt(index);
+    if (unit >= 0xd800 && unit <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) return false;
+      index += 1;
+    } else if (unit >= 0xdc00 && unit <= 0xdfff) {
+      return false;
+    }
+    scalars += 1;
+    if (scalars > maximum) return false;
+  }
+  return scalars > 0;
 }
 
 function parseMetadata(path: string, raw: string): ClaudeSessionMetadata {
@@ -307,17 +451,32 @@ function parseMetadata(path: string, raw: string): ClaudeSessionMetadata {
   if (value?.version !== 1
     || value.runtime !== "claude-code"
     || typeof value.conversationId !== "string"
+    || !isValidConversationId(value.conversationId)
     || typeof value.sessionId !== "string"
+    || !isBoundedScalarString(value.sessionId, MAX_CLAUDE_CODE_SESSION_ID_SCALARS)
     || typeof value.created !== "string"
     || typeof value.modified !== "string"
-    || typeof value.messageCount !== "number") {
+    || typeof value.messageCount !== "number"
+    || !Number.isSafeInteger(value.messageCount)
+    || value.messageCount < 0
+    || (value.ownerTurnCount !== undefined
+      && (typeof value.ownerTurnCount !== "number"
+        || !Number.isSafeInteger(value.ownerTurnCount)
+        || value.ownerTurnCount < 0))
+    || (value.ownerTurnCount === undefined && value.messageCount % 2 !== 0)) {
     throw new GhostError(
       "claude_session_invalid",
       `${path} does not match the claude-code session metadata contract.`,
       500,
     );
   }
-  return value as ClaudeSessionMetadata;
+  return {
+    ...(value as Omit<ClaudeSessionMetadata, "ownerTurnCount">),
+    // Released sidecars predate ownerTurnCount and added exactly two display
+    // messages per owner request. Use that once as the migration baseline;
+    // every subsequent write persists the independent sequence.
+    ownerTurnCount: value.ownerTurnCount ?? Math.floor(value.messageCount / 2),
+  };
 }
 
 async function readMetadata(
@@ -326,7 +485,15 @@ async function readMetadata(
 ): Promise<ClaudeSessionMetadata | null> {
   const path = claudeSessionMetadataPath(sessionDir, conversationId);
   try {
-    return parseMetadata(path, await readFile(path, "utf8"));
+    const metadata = parseMetadata(path, await readFile(path, "utf8"));
+    if (metadata.conversationId !== conversationId) {
+      throw new GhostError(
+        "session_identity_mismatch",
+        "The stored Claude conversation identity does not match the requested resume id.",
+        409,
+      );
+    }
+    return metadata;
   } catch (cause) {
     if ((cause as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw cause;
@@ -754,19 +921,46 @@ function runtimeKeyGhost(key: string): string {
   return (JSON.parse(key) as [string, string])[0];
 }
 
+function linkedTurnSignal(
+  external: AbortSignal | undefined,
+  lifecycle: AbortSignal,
+): { signal: AbortSignal; dispose: () => void } {
+  if (!external) return { signal: lifecycle, dispose: () => {} };
+  const controller = new AbortController();
+  const forward = (source: AbortSignal) => {
+    if (!controller.signal.aborted) controller.abort(source.reason);
+  };
+  const onExternal = () => forward(external);
+  const onLifecycle = () => forward(lifecycle);
+  if (external.aborted) forward(external);
+  else external.addEventListener("abort", onExternal, { once: true });
+  if (lifecycle.aborted) forward(lifecycle);
+  else lifecycle.addEventListener("abort", onLifecycle, { once: true });
+  return {
+    signal: controller.signal,
+    dispose: () => {
+      external.removeEventListener("abort", onExternal);
+      lifecycle.removeEventListener("abort", onLifecycle);
+    },
+  };
+}
+
 export class ClaudeCodeRuntime {
   private readonly logger: Logger;
   private readonly extensionOptions: GhostExtensionOptions;
   private readonly browserMode: "relay" | "profile";
   private readonly relayTransport: RelayTransport | undefined;
-  private readonly configuredBinaryPath: string;
   private readonly createQuery: ClaudeCodeQueryFactory;
-  private readonly readAuthStatus: NonNullable<ClaudeCodeRuntimeOptions["readAuthStatus"]>;
+  private readonly probe: ClaudeCodeProbe;
   private readonly hooks: GhostHookRunner;
   private readonly busy = new Set<string>();
   private readonly active = new Map<
     string,
     { query: Query; abortController: AbortController }
+  >();
+  private readonly turns = new Map<
+    string,
+    { controller: AbortController; promise: Promise<void> }
   >();
   private disposed = false;
 
@@ -775,13 +969,24 @@ export class ClaudeCodeRuntime {
     this.extensionOptions = options.extensionOptions ?? {};
     this.browserMode = options.browserMode ?? "relay";
     this.relayTransport = options.relayTransport;
-    this.configuredBinaryPath = options.binaryPath
-      ?? process.env[CLAUDE_CODE_BINARY_ENV]
-      ?? "claude";
     this.createQuery = options.createQuery
       ?? ((input) => query({ prompt: input.prompt, options: input.options }));
-    this.readAuthStatus = options.readAuthStatus ?? readClaudeCodeAuthStatus;
+    this.probe = options.probe ?? new ClaudeCodeProbe({
+      ...(options.binaryPath ? { binaryPath: options.binaryPath } : {}),
+      ...(options.resolveExecutable ? { resolveExecutable: options.resolveExecutable } : {}),
+      ...(options.readAuthStatus ? { readAuthStatus: options.readAuthStatus } : {}),
+    });
     this.hooks = options.hooks ?? new GhostHookRunner({ logger: this.logger });
+  }
+
+  invalidateAuthProbe(): void {
+    this.probe.invalidate();
+  }
+
+  private assertTurnAdmitted(): void {
+    if (this.disposed) {
+      throw new GhostError("shutting_down", "The daemon is shutting down.", 503);
+    }
   }
 
   isBusy(ghostName: string, conversationId: string): boolean {
@@ -796,15 +1001,14 @@ export class ClaudeCodeRuntime {
     return false;
   }
 
-  async runTurn(
+  runTurn(
     ghost: Ghost,
     conversationId: string,
     modelId: string,
     options: RunTurnOptions,
   ): Promise<void> {
-    if (this.disposed) {
-      throw new GhostError("shutting_down", "The daemon is shutting down.", 503);
-    }
+    this.assertTurnAdmitted();
+    requireRawConversationId(conversationId);
     const key = JSON.stringify([ghost.name, conversationId]);
     if (this.busy.has(key)) {
       throw new GhostError(
@@ -814,13 +1018,40 @@ export class ClaudeCodeRuntime {
       );
     }
     this.busy.add(key);
+    const controller = new AbortController();
+    const linked = linkedTurnSignal(options.signal, controller.signal);
+    let promise!: Promise<void>;
+    promise = Promise.resolve()
+      .then(() => this.runAdmittedTurn(
+        ghost,
+        conversationId,
+        modelId,
+        { ...options, signal: linked.signal },
+        key,
+      ))
+      .finally(() => {
+        linked.dispose();
+        this.active.delete(key);
+        this.busy.delete(key);
+        if (this.turns.get(key)?.promise === promise) this.turns.delete(key);
+      });
+    this.turns.set(key, { controller, promise });
+    return promise;
+  }
 
+  private async runAdmittedTurn(
+    ghost: Ghost,
+    conversationId: string,
+    modelId: string,
+    options: RunTurnOptions,
+    key: string,
+  ): Promise<void> {
     const adapter = createClaudePiMessagesAdapter(options.emit, {
       includeThinking: options.includeThinking,
     });
     try {
-      const binaryPath = await resolveClaudeCodeExecutable(this.configuredBinaryPath);
-      const auth = await this.readAuthStatus(binaryPath);
+      const { binaryPath, authStatus: auth } = await this.probe.read();
+      this.assertTurnAdmitted();
       if (!isClaudePlanAuth(auth)) {
         throw new GhostError(
           "claude_code_subscription_required",
@@ -833,15 +1064,22 @@ export class ClaudeCodeRuntime {
 
       const paths = ghostPaths(ghost.dir);
       await mkdir(paths.sessionDir, { recursive: true });
+      this.assertTurnAdmitted();
       let metadata = await readMetadata(paths.sessionDir, conversationId);
-      const turnId = Math.floor((metadata?.messageCount ?? 0) / 2);
+      this.assertTurnAdmitted();
+      const ownerTurnCount = metadata?.ownerTurnCount ?? 0;
+      if (ownerTurnCount >= Number.MAX_SAFE_INTEGER) {
+        throw new ClaudeCodeProcessError("Claude Code's owner turn count overflowed.");
+      }
+      const ownerTurnId = ownerTurnCount + 1;
       const systemPrompt = await buildPersona(paths.home, ghost.name);
+      this.assertTurnAdmitted();
       let beforePromptContext: string | undefined;
       if (this.hooks.hasHandlers("before_prompt")) {
         const result = await this.hooks.emitBeforePrompt({
           type: "before_prompt",
           prompt: options.prompt,
-          turn_id: turnId + 1,
+          turn_id: ownerTurnId,
           session_id: metadata?.sessionId ?? conversationId,
           session_file: claudeSessionMetadataPath(paths.sessionDir, conversationId),
           signal: options.signal ?? new AbortController().signal,
@@ -852,6 +1090,7 @@ export class ClaudeCodeRuntime {
         if (result?.additionalContext && !options.signal?.aborted) {
           beforePromptContext = result.additionalContext;
         }
+        this.assertTurnAdmitted();
       }
       const bridge = await buildMcpTools(
         paths.home,
@@ -861,11 +1100,13 @@ export class ClaudeCodeRuntime {
         this.browserMode,
         this.relayTransport,
       );
+      this.assertTurnAdmitted();
 
       let prompt = options.prompt;
       let stopHookActive = false;
       let continuationCount = 0;
       while (!adapter.isTerminal()) {
+        this.assertTurnAdmitted();
         const abortController = new AbortController();
         const sdkOptions = queryOptions({
           binaryPath,
@@ -905,24 +1146,36 @@ export class ClaudeCodeRuntime {
             }
           },
         }));
+        this.assertTurnAdmitted();
 
         if (!terminalResult) {
           throw new ClaudeCodeProcessError("Claude Code ended without a terminal result.");
         }
         const completed = terminalResult as SDKResultMessage;
-        if (completed.num_turns > 0) {
-          const now = new Date().toISOString();
-          metadata = {
-            version: 1,
-            runtime: "claude-code",
-            conversationId,
-            sessionId: completed.session_id,
-            created: metadata?.created ?? now,
-            modified: now,
-            messageCount: (metadata?.messageCount ?? 0) + 2,
-          };
-          await writeMetadata(paths.sessionDir, metadata);
+        if (!Number.isSafeInteger(completed.num_turns) || completed.num_turns < 0) {
+          throw new ClaudeCodeProcessError("Claude Code returned an invalid num_turns count.");
         }
+        if (!isBoundedScalarString(completed.session_id, MAX_CLAUDE_CODE_SESSION_ID_SCALARS)) {
+          throw new ClaudeCodeProcessError("Claude Code returned an invalid session id.");
+        }
+        const messageCount = (metadata?.messageCount ?? 0) + (completed.num_turns * 2);
+        if (!Number.isSafeInteger(messageCount)) {
+          throw new ClaudeCodeProcessError("Claude Code's cumulative message count overflowed.");
+        }
+        const now = new Date().toISOString();
+        metadata = {
+          version: 1,
+          runtime: "claude-code",
+          conversationId,
+          sessionId: completed.session_id,
+          created: metadata?.created ?? now,
+          modified: now,
+          messageCount,
+          ownerTurnCount: ownerTurnId,
+        };
+        this.assertTurnAdmitted();
+        await writeMetadata(paths.sessionDir, metadata);
+        this.assertTurnAdmitted();
         if (options.signal?.aborted) {
           adapter.finishError(new Error("Turn aborted."), true);
           break;
@@ -939,7 +1192,7 @@ export class ClaudeCodeRuntime {
           ? await this.hooks.emitSessionStop({
             type: "session_stop",
             messages: [lastAssistant],
-            turn_id: turnId,
+            turn_id: ownerTurnId,
             last_assistant_message: lastAssistant,
             session_id: completed.session_id,
             session_file: claudeSessionMetadataPath(paths.sessionDir, conversationId),
@@ -950,6 +1203,7 @@ export class ClaudeCodeRuntime {
             runtime: "claude-code",
           })
           : undefined;
+        this.assertTurnAdmitted();
         const additionalContext = ghostSessionStopContinuation(hookResult);
         if (!additionalContext) {
           adapter.handle(completed);
@@ -978,11 +1232,8 @@ export class ClaudeCodeRuntime {
         error: cause instanceof Error ? cause.message : String(cause),
       });
       if (!adapter.isTerminal()) {
-        adapter.finishError(cause, options.signal?.aborted === true);
+        adapter.finishError(cause, options.signal?.aborted === true || this.disposed);
       }
-    } finally {
-      this.active.delete(key);
-      this.busy.delete(key);
     }
   }
 
@@ -997,7 +1248,16 @@ export class ClaudeCodeRuntime {
       }
       const path = join(sessionDir, name);
       try {
-        result.push(parseMetadata(path, await readFile(path, "utf8")));
+        const metadata = parseMetadata(path, await readFile(path, "utf8"));
+        if (!CLAUDE_SESSION_FILE_PATTERN.test(name)
+          || claudeSessionMetadataName(metadata.conversationId) !== name) {
+          throw new GhostError(
+            "session_identity_mismatch",
+            "The stored Claude conversation identity does not match its sidecar filename.",
+            409,
+          );
+        }
+        result.push(metadata);
       } catch (cause) {
         this.logger.warn("skipping invalid Claude Code session metadata", {
           path,
@@ -1052,18 +1312,9 @@ export class ClaudeCodeRuntime {
 
   async disposeAll(): Promise<void> {
     this.disposed = true;
-    const active = [...this.active.values()];
-    this.active.clear();
-    await Promise.all(active.map(async ({ query: runtime, abortController }) => {
-      abortController.abort();
-      try {
-        await runtime.interrupt();
-      } catch {
-        // close() below is the authoritative teardown.
-      } finally {
-        runtime.close();
-      }
-    }));
-    this.busy.clear();
+    const turns = [...this.turns.values()];
+    const shutdown = new GhostError("shutting_down", "The daemon is shutting down.", 503);
+    for (const turn of turns) turn.controller.abort(shutdown);
+    await Promise.allSettled(turns.map(({ promise }) => promise));
   }
 }
