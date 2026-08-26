@@ -1562,10 +1562,12 @@ describe("SessionHost.runTurn", () => {
     const hooks = new GhostHookRunner();
     const active: boolean[] = [];
     const passes: unknown[][] = [];
+    const ownerPrompts: string[] = [];
     await hooks.register((api) => {
       api.on("session_stop", (event) => {
         active.push(event.stop_hook_active);
         passes.push(event.messages);
+        ownerPrompts.push(event.owner_prompt);
         if (!event.stop_hook_active) {
           return { decision: "block", reason: "Rewrite the answer without canned phrasing." };
         }
@@ -1586,6 +1588,7 @@ describe("SessionHost.runTurn", () => {
     });
 
     expect(active).toEqual([false, true]);
+    expect(ownerPrompts).toEqual(["Answer me.", "Answer me."]);
     expect(passes).toHaveLength(2);
     expect(passes.every((messages) => messages.length === 1)).toBe(true);
     expect(passes.map((messages) => JSON.stringify(messages))).toEqual([

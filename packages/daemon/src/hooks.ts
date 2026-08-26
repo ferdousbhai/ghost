@@ -39,6 +39,7 @@ export interface GhostBeforePromptResult {
 
 export interface GhostSessionStopEvent extends GhostHookEventBase {
   type: "session_stop";
+  owner_prompt: string;
   messages: unknown[];
   turn_id: number;
   last_assistant_message?: unknown;

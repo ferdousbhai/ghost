@@ -88,13 +88,15 @@ runtime it is a synthetic, non-querying message paired with the real user prompt
 
 ## `session_stop` protocol
 
-A command receives JSON on stdin. `messages` contains only the current assistant
-pass, not the session history or prior tool results; `last_assistant_message`
-contains the same message directly:
+A command receives JSON on stdin. `owner_prompt` contains the current
+user-initiated request and remains unchanged across hidden continuations.
+`messages` contains only the current assistant pass, not the session history or
+prior tool results; `last_assistant_message` contains the same message directly:
 
 ```json
 {
   "type": "session_stop",
+  "owner_prompt": "Complete the requested change and verify it.",
   "messages": [{
     "role": "assistant",
     "content": [{ "type": "text", "text": "The answer." }]
@@ -113,8 +115,8 @@ contains the same message directly:
 }
 ```
 
-`runtime` is `omp` or `claude-code`. Both runtimes expose only the current
-assistant pass in `messages`; conversation history remains owned by the runtime.
+`runtime` is `omp` or `claude-code`. Both runtimes expose only the current owner
+prompt and assistant pass; conversation history remains owned by the runtime.
 
 Exit 0 with no output or `{}` accepts the pass. Either response below requests a
 hidden continuation:

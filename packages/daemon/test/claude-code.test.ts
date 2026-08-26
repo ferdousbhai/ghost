@@ -819,6 +819,7 @@ describe("Claude Code subscription runtime", () => {
     const active: boolean[] = [];
     const beforeTurnIds: number[] = [];
     const turnIds: number[] = [];
+    const ownerPrompts: string[] = [];
     await hooks.register((api) => {
       api.on("before_prompt", (event) => {
         beforeTurnIds.push(event.turn_id);
@@ -826,6 +827,7 @@ describe("Claude Code subscription runtime", () => {
       api.on("session_stop", (event) => {
         active.push(event.stop_hook_active);
         turnIds.push(event.turn_id);
+        ownerPrompts.push(event.owner_prompt);
         if (!event.stop_hook_active) return { continue: true, additionalContext: "Revise it once." };
       });
     });
@@ -850,6 +852,7 @@ describe("Claude Code subscription runtime", () => {
 
     expect(lifecycle.queries).toBe(2);
     expect(active).toEqual([false, true]);
+    expect(ownerPrompts).toEqual(["hello", "hello"]);
     expect(seenOptions[1]?.resume).toBe(seenOptions[0]?.sessionId);
     expect(events.filter((event) => event.type === "start")).toHaveLength(1);
     expect(events.filter((event) => event.type === "done")).toHaveLength(1);
@@ -862,6 +865,7 @@ describe("Claude Code subscription runtime", () => {
     });
     expect(lifecycle.queries).toBe(4);
     expect(active).toEqual([false, true, false, true]);
+    expect(ownerPrompts).toEqual(["hello", "hello", "one more owner turn", "one more owner turn"]);
     expect(beforeTurnIds).toEqual([1, 2]);
     expect(turnIds).toEqual([1, 1, 2, 2]);
     expect(JSON.parse(readFileSync(

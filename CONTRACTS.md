@@ -167,6 +167,11 @@ A session is OMP-native. Ghost keeps OMP's discovery and the operating half of
 its system prompt, then appends the Ghost persona and derived memory/doc
 sections.
 
+The machine-trusted awaited hook boundary is runtime-neutral. `session_stop`
+receives the unchanged current owner prompt and only the current assistant pass;
+it does not receive or reconstruct conversation history. Hidden continuations
+repeat that owner prompt while replacing the assistant pass under review.
+
 Deliberate subtractions from the harness prompt. The persona extension removes
 `§ Role`, `§ Workflow`, `§ Delivery`, and `§ Critical`: the first casts the
 model as a coding assistant and sets its voice twenty thousand characters

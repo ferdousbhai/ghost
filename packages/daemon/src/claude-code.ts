@@ -1191,6 +1191,7 @@ export class ClaudeCodeRuntime {
         const hookResult = completed.subtype === "success" && this.hooks.hasHandlers("session_stop")
           ? await this.hooks.emitSessionStop({
             type: "session_stop",
+            owner_prompt: options.prompt,
             messages: [lastAssistant],
             turn_id: ownerTurnId,
             last_assistant_message: lastAssistant,

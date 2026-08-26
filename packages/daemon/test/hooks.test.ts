@@ -38,6 +38,7 @@ function beforePromptEvent(overrides: Partial<GhostBeforePromptEvent> = {}): Gho
 function event(overrides: Partial<GhostSessionStopEvent> = {}): GhostSessionStopEvent {
   return {
     type: "session_stop",
+    owner_prompt: "Finish the current request.",
     messages: [],
     turn_id: 1,
     session_id: "session-1",
@@ -121,6 +122,7 @@ describe("GhostHookRunner", () => {
     expect(ghostSessionStopContinuation(result)).toBe("Fix the final answer.");
     expect(JSON.parse(readFileSync(observed, "utf8"))).toMatchObject({
       type: "session_stop",
+      owner_prompt: "Finish the current request.",
       ghost_name: "casper",
       stop_hook_active: true,
     });
