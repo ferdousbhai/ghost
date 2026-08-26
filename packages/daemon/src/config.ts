@@ -8,7 +8,7 @@
  * file IS an error — silently falling back to defaults would move a user's
  * ghosts without telling them.
  */
-import { lstatSync, readFileSync, renameSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { DEFAULT_COMPACTION_CONFIG, type CompactionConfig } from "./compaction.js";
@@ -110,11 +110,6 @@ export const DEFAULT_PORT = 7717;
 export const DEFAULT_ASK_TIMEOUT_SECONDS = 120;
 export const DEFAULT_HOST = "127.0.0.1";
 export const DEFAULT_GHOSTS_DIRNAME = "ghosts";
-/**
- * The root ghost homes lived under before the lowercase rename. Kept only so
- * `migrateLegacyGhostsRoot` can move an existing one; nothing else reads it.
- */
-export const LEGACY_GHOSTS_DIRNAME = "Ghosts";
 
 /** Loopback-only, per CONTRACTS.md. v1 has no auth, so exposure is the risk. */
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "localhost"]);
@@ -356,46 +351,4 @@ export function loadConfig(overrides: DaemonConfigOverrides = {}): DaemonConfig 
     configPath: file ? configPath : null,
     hooksPath,
   };
-}
-
-/**
- * Move a pre-rename `~/Ghosts` onto the current default root.
- *
- * The root used to be capitalized. A rename that silently leaves the old
- * directory behind reads to the owner as "every ghost is gone", so the move
- * happens once at startup, before the home reservation locks the root.
- *
- * It only ever fires for the default root, only when the old directory is a
- * real directory (never a symlink pointing somewhere else), and only when the
- * new one does not exist yet — which also makes it a no-op on a
- * case-insensitive filesystem, where the two names are already one directory.
- *
- * Returns the path that was moved, or null when there was nothing to do.
- */
-export function migrateLegacyGhostsRoot(
-  ghostsRoot: string,
-  home: string = homedir(),
-): string | null {
-  const target = resolve(join(home, DEFAULT_GHOSTS_DIRNAME));
-  if (resolve(ghostsRoot) !== target) return null;
-  const legacy = resolve(join(home, LEGACY_GHOSTS_DIRNAME));
-  if (legacy === target) return null;
-
-  let legacyEntry: ReturnType<typeof lstatSync>;
-  try {
-    legacyEntry = lstatSync(legacy);
-  } catch {
-    return null;
-  }
-  if (!legacyEntry.isDirectory()) return null;
-
-  try {
-    lstatSync(target);
-    return null;
-  } catch {
-    // The target is absent, which is the only case this migration handles.
-  }
-
-  renameSync(legacy, target);
-  return legacy;
 }

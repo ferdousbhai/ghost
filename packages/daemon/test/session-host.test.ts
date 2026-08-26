@@ -7,6 +7,7 @@
  * while answering at the same time in one process.
  */
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join, sep } from "node:path";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import type { LiveSessionControllerOptions } from "@oh-my-pi/pi-coding-agent/live/controller";
@@ -463,6 +464,39 @@ lines.on("line", (line) => {
     // This machine deliberately has `node_repl` in ~/.codex/config.toml. Its
     // absence here is the live sovereignty regression, not a mocked condition.
     expect(toolNames.some((name) => name.startsWith("mcp__node_repl_"))).toBe(false);
+  });
+
+  it("keeps the owner's coding-agent identity file out of the prompt", async () => {
+    // OMP hands the session exactly one user-level context file, the
+    // highest-priority provider's, and Claude Code outranks the agent-dirs
+    // provider. Excluding ~/.claude/CLAUDE.md drops instructions that open by
+    // telling the model it is a coding agent, and is also what lets
+    // ~/.agents/AGENTS.md through in its place.
+    //
+    // Bun resolves os.homedir() once per process, so this reads the real home
+    // rather than a fixture, in the same spirit as the ambient-MCP check above.
+    const ownerClaudeMd = join(homedir(), ".claude", "CLAUDE.md");
+    const ownerAgentsMd = join(homedir(), ".agents", "AGENTS.md");
+    if (!existsSync(ownerClaudeMd)) return;
+
+    await setup([{ kind: "text", text: "hello" }]);
+    const handle = await host!.open("casper", "conv-owner-context");
+    const prompt = handle.session.systemPrompt.join("\n");
+
+    const claudeLine = readFileSync(ownerClaudeMd, "utf8")
+      .split("\n")
+      .find((line) => line.trim().length > 0);
+    expect(claudeLine).toBeDefined();
+    expect(prompt).not.toContain(claudeLine!);
+
+    // The other half of the same rule, once the owner has written one.
+    if (existsSync(ownerAgentsMd)) {
+      const agentsLine = readFileSync(ownerAgentsMd, "utf8")
+        .split("\n")
+        .find((line) => line.trim().length > 0);
+      expect(agentsLine).toBeDefined();
+      expect(prompt).toContain(agentsLine!);
+    }
   });
 
   it("discovers OMP project context and supports /skill:name invocation", async () => {

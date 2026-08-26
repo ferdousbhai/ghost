@@ -1442,6 +1442,18 @@ export class SessionHost {
       "memory.backend": "off",
       "memories.enabled": false,
       "autolearn.enabled": false,
+      // A ghost inherits the owner's vendor-neutral global instructions from
+      // ~/.agents/AGENTS.md, and not ~/.claude/CLAUDE.md, which is written to
+      // steer a coding agent and usually opens by telling the model who it is.
+      // That fights character.md, which is the one thing a ghost is.
+      //
+      // One entry does both jobs. OMP dedupes user-level context files under a
+      // single key, so the highest-priority provider wins outright: Claude Code
+      // (80) shadows the agent-dirs provider (70) whenever ~/.claude/CLAUDE.md
+      // exists. Disabling it both removes the identity text and lets
+      // ~/.agents/AGENTS.md through. Project-level CLAUDE.md is untouched, so a
+      // ghost working inside a repo still reads what that repo tells an agent.
+      "disabledExtensions": ["context-file:user:CLAUDE.md"],
       // Ghost has no approval surface. Sessions are explicitly local and unrestricted.
       "tools.approvalMode": "yolo",
       // How long an unanswered question waits is the owner's setting, and it

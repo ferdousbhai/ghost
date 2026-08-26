@@ -18,12 +18,7 @@ import { LoginManager } from "./auth.js";
 import { ClaudeCodeProbe } from "./claude-code.js";
 import { importCommand } from "./import-command.js";
 import { loginCommand } from "./login-command.js";
-import {
-  loadConfig,
-  migrateLegacyGhostsRoot,
-  type DaemonConfig,
-  type DaemonConfigOverrides,
-} from "./config.js";
+import { loadConfig, type DaemonConfig, type DaemonConfigOverrides } from "./config.js";
 import { scrubProviderEnv } from "./env-scrub.js";
 import { closeAllBrowserSessions, ensureGhostHomeLayout } from "./extensions.js";
 import { GhostRegistry } from "./ghosts.js";
@@ -341,22 +336,6 @@ export async function main(argv: string[] = process.argv.slice(2), runtime: Main
   } catch (error) {
     logger.error("hook configuration is invalid", {
       path: hooksPath,
-      error: (error as Error).message,
-    });
-    return 1;
-  }
-
-  try {
-    const moved = migrateLegacyGhostsRoot(config.ghostsRoot);
-    if (moved !== null) {
-      logger.info("moved the ghosts root to its lowercase name", {
-        from: moved,
-        to: config.ghostsRoot,
-      });
-    }
-  } catch (error) {
-    logger.error("could not move the legacy ghosts root", {
-      ghostsRoot: config.ghostsRoot,
       error: (error as Error).message,
     });
     return 1;

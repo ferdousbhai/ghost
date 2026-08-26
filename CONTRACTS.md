@@ -8,10 +8,7 @@ commit, with every consumer updated.
 One directory per ghost. Plain files; anything derivable (memory index, doc
 catalog) is derived per session and never stored.
 
-The root is `~/ghosts` unless `ghostsRoot` says otherwise. It used to be
-capitalized; startup moves a leftover `~/Ghosts` onto the lowercase name once,
-and only when the default root is in use and the lowercase directory does not
-exist yet.
+The root is `~/ghosts` unless `ghostsRoot` says otherwise.
 
 ```
 ~/ghosts/<name>/
@@ -114,7 +111,13 @@ MCP remain available under OMP's normal xd:// presentation. MCP is a deliberate
 sovereignty exception to OMP's normal multi-source discovery: an OMP
 session loads only `<ghost>/.omp/mcp.json` (or the legacy `.omp/.mcp.json`) and
 never discovers or loads user/global OMP config or another coding agent's MCP
-config (`~/.codex`, `~/.claude`, `~/.copilot`, and similar). Ghost otherwise
+config (`~/.codex`, `~/.claude`, `~/.copilot`, and similar). The owner's
+global instructions are the other exception, in the opposite direction: OMP
+surfaces exactly one user-level context file, the highest-priority provider's,
+and Ghost disables `context-file:user:CLAUDE.md` so that file is
+`~/.agents/AGENTS.md` rather than `~/.claude/CLAUDE.md`, whose contents are
+written to tell a model it is a coding agent. Project-level context files stay
+untouched. Ghost otherwise
 disables only the overlapping OMP browser and computer tools because
 `ghost_browser`, `ghost_desktop`, and `ghost_screen` own those surfaces, and
 OMP's memory/autolearn backends because ghost memory is plain files in the ghost
