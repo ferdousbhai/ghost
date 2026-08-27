@@ -26,8 +26,7 @@ refresh during startup causes OMP to discover skills again.
   character.md                 plain Markdown persona → system prompt
   docs/**/*.md                 first line `# Title`; optional final hashtag line
                                such as `#launch #product`
-  memory/*.md                  atomic memory files: frontmatter description + updated,
-                               body = the fact
+  memory/*.md                  one concise fact per plain Markdown file
   skills/<name>/SKILL.md       the ghost's own skills
   agents/<name>.md             the ghost's own subagents
   commands/<name>.md           the ghost's own slash commands
@@ -50,13 +49,14 @@ refresh during startup causes OMP to discover skills again.
 `######`) is the derived display title, while the complete Markdown body is the
 persona injected into the system prompt.
 
-Memory frontmatter is not duplicate presentation metadata. `description` is
-the bounded synopsis used in the per-session memory index instead of injecting
-every file body, and `updated` is the writer-stamped date that survives copies
-and imports. Documents already keep their title in the leading `#` heading and
-tags in a final hashtag line; legacy document frontmatter exists only at the
-import migration boundary. OMP skill `name`/`description` fields remain the
-upstream discovery contract.
+Memory files have no frontmatter and no required heading. Their complete
+Markdown content is the fact. The per-session index normalizes that content to
+one line and derives a word-aware preview of at most 32 characters, including
+`...`; the context API derives `updated` from the file's modification time.
+Documents already keep their title in the leading `#` heading and tags in a
+final hashtag line; legacy document frontmatter exists only at the import
+migration boundary. OMP skill `name`/`description` fields remain the upstream
+discovery contract.
 
 What lives in a ghost home and what lives in the machine's own directories is
 decided by lifecycle, not by which reads more natural. Mutable per-ghost state
@@ -217,8 +217,9 @@ daemon projects from models.json's `vision_model`.
 Docs and memory retrieval use those native filesystem tools directly.
 Ghost registers no duplicate doc list/read/search/write tools, and
 keeps only `ghost_memory_write` for validated, atomic memory-file writes. The
-memory index and doc catalog are derived from disk before each model turn and
-are never stored. `/skill:<name> [args]` is explicit force-invocation of a
+writer accepts only the fact content and an optional slug; the memory index and
+doc catalog are derived from disk before each model turn and are never stored.
+`/skill:<name> [args]` is explicit force-invocation of a
 discovered skill; native `read` remains the model-driven discovery path.
 
 Slash-command discovery is session-scoped and comes from OMP's
@@ -352,7 +353,9 @@ one must not be a leak of both.
   Markdown heading. `docs` contains
   `{ path: "docs/<relative>.md", relativePath, title, tags, archived }`, derived
   from the document's first H1 and optional final hashtag line. `memory`
-  contains `{ path: "memory/<slug>.md", slug, description, content, updated }`.
+  contains `{ path: "memory/<slug>.md", slug, description, content, updated }`,
+  where `description` is the derived 32-character index preview and `updated`
+  is the filesystem modification date.
   `agents` contains the OMP task helpers available under the same project,
   user, extension, bundled, precedence, and `task.disabledAgents` rules as a
   live session, normalized to `{ name, description, source, tools, model,

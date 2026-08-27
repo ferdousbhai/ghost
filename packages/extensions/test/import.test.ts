@@ -30,8 +30,9 @@ import { deriveMemoryIndex } from "../src/memory-file.js";
 import { createTempDir, writeFileTree } from "./support/fixture.js";
 
 /**
- * A hand-built ghost-home/v1 archive in the exact shape the hosted exporter
- * wrote. Import is the only boundary that still admits it.
+ * A hand-built ghost-home/v1 archive exercising the retained document
+ * migration boundary. Its memory already uses canonical plain Markdown;
+ * legacy memory metadata is not interpreted.
  */
 const ROOT = "casper";
 const execFileAsync = promisify(execFile);
@@ -42,7 +43,7 @@ const ARCHIVE: Record<string, string> = {
   [`${ROOT}/notes/estate-finances.md`]:
     "---\ntitle: Estate and finances\npath: Estate & finances\n---\n\nThe lease.",
   [`${ROOT}/memory/working-habit.md`]:
-    "---\ndescription: I work in the morning\nupdated: 2026-08-02\n---\n\nThe press is cold until ten.\n",
+    "I work in the morning. The press is cold until ten.\n",
   [`${ROOT}/conversations/conv-1.json`]:
     '{\n  "id": "conv-1",\n  "ownerId": "owner-1",\n  "catalog": null,\n  "messages": []\n}\n',
   [`${ROOT}/export-manifest.json`]: `${JSON.stringify({
@@ -160,7 +161,7 @@ describe("importGhostArchive", () => {
 
     const memory = await home.listMemory();
     expect(deriveMemoryIndex(memory.files).lines)
-      .toEqual(["- working-habit.md: I work in the morning"]);
+      .toEqual(["- working-habit.md: I work in the morning. The..."]);
 
     expect(await home.listConversations()).toEqual(["conv-1"]);
     expect(await home.readExportManifest())

@@ -56,8 +56,8 @@ const CHARACTER = `# casper
 You are casper, a letterpress printer. You answer in short sentences.
 `;
 
-function memoryFile(description: string, body: string): string {
-  return `---\ndescription: ${description}\nupdated: 2026-01-15\n---\n\n${body}\n`;
+function memoryFile(content: string): string {
+  return `${content}\n`;
 }
 
 /**
@@ -239,8 +239,7 @@ describe("golden: greeting flow", () => {
           },
           memory: {
             "owner-prefers-short.md": memoryFile(
-              "The owner wants short answers",
-              "Keep replies to a line or two.",
+              "The owner wants short answers. Keep replies to a line or two.",
             ),
           },
         });

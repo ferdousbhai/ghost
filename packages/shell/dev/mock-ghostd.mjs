@@ -155,15 +155,15 @@ const MOCK_MEMORY = [
   {
     path: "memory/preferred-tone.md",
     slug: "preferred-tone",
-    description: "The owner prefers direct, evidence-first answers.",
-    content: "Use terse, concrete language. Lead with the decision and evidence.",
+    description: "The owner prefers direct...",
+    content: "The owner prefers direct, evidence-first answers. Use terse, concrete language. Lead with the decision and evidence.",
     updated: "2026-08-24",
   },
   {
     path: "memory/current-project.md",
     slug: "current-project",
-    description: "Ghost is the owner's local sovereign assistant.",
-    content: "Keep context in plain files and keep cloud credentials out of exports.",
+    description: "Ghost is the owner's local...",
+    content: "Ghost is the owner's local sovereign assistant. Keep context in plain files and keep cloud credentials out of exports.",
     updated: "2026-08-25",
   },
 ];
@@ -466,12 +466,12 @@ function seedMockHome(name) {
   );
   writeFileSync(
     join(dir, "memory", "preferred-tone.md"),
-    "---\ndescription: The owner prefers direct, evidence-first answers.\nupdated: 2026-08-24\n---\n\nUse terse, concrete language. Lead with the decision and evidence.\n",
+    `${MOCK_MEMORY[0].content}\n`,
     "utf8",
   );
   writeFileSync(
     join(dir, "memory", "current-project.md"),
-    "---\ndescription: Ghost is the owner's local sovereign assistant.\nupdated: 2026-08-25\n---\n\nKeep context in plain files and keep cloud credentials out of exports.\n",
+    `${MOCK_MEMORY[1].content}\n`,
     "utf8",
   );
 }
@@ -887,7 +887,7 @@ const LIVE_QUESTION = {
     { label: "Answer here and stop", description: "One paragraph back, nothing written to disk." },
     {
       label: "Answer and keep it as a memory",
-      description: "One memory file, described and dated.",
+      description: "One concise memory file.",
       preview: "memory/what-the-owner-asked-for.md",
     },
     { label: "Answer and draft a doc", description: "A new file under docs/, yours to edit after." },

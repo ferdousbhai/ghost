@@ -125,8 +125,7 @@ describe("persona extension", () => {
     const harness = await loadExtension(createPersonaExtension(), fixture.dir);
     expect(await harness.beforeAgentStart()).not.toContain("freshly-written");
     await openGhostHome(fixture.dir).writeMemory({
-      description: "freshly-written memory",
-      content: "written between turns",
+      content: "freshly-written memory between turns",
     });
     expect(await harness.beforeAgentStart()).toContain("freshly-written memory");
   });

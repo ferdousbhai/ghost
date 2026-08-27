@@ -1723,8 +1723,7 @@ describe("SessionHost.runTurn", () => {
         kind: "tool",
         name: "ghost_memory_write",
         args: {
-          description: "I explained the press",
-          content: "They wanted the story, not the spec sheet.",
+          content: "I explained the press. They wanted the story, not the spec sheet.",
           name: "explained-the-press.md",
         },
       },
@@ -1985,7 +1984,7 @@ describe("multi-ghost", () => {
         {
           kind: "tool",
           name: "ghost_memory_write",
-          args: { description: "Who asked", content: "Someone asked who I am." },
+          args: { content: "Someone asked who I am." },
         },
         { kind: "text", text: "I am who I am." },
       ],

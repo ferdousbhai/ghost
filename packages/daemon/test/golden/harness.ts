@@ -263,10 +263,8 @@ export function ghostHomeSnapshot(
   walk(dir);
   for (const full of files.sort()) {
     const rel = relative(dir, full).split(sep).join("/");
-    // `ghost_memory_write` stamps the day it ran into the file's frontmatter.
-    // Only *today's* date is normalised, and only on a frontmatter date line:
-    // a date a fixture seeded itself stays literal, and so do the dates the
-    // persona uses as worked examples in its prose.
+    // Normalize dated metadata from runtime sidecars. Memory files contain only
+    // their fact, so no writer-stamped frontmatter date exists here.
     const content = normalizer
       .text(readFileSync(full, "utf8"))
       .replace(

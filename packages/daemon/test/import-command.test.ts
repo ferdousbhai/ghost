@@ -32,7 +32,7 @@ function makeArchiveDir(parent: string, ghostname: string): string {
   };
   writeFileSync(join(dir, "export-manifest.json"), JSON.stringify(manifest));
   writeFileSync(join(dir, "character.md"), "# imported\n\nI am a ghost.\n");
-  writeFileSync(join(dir, "memory", "tone.md"), "---\ndescription: tone\n---\n\nTerse.\n");
+  writeFileSync(join(dir, "memory", "tone.md"), "Terse.\n");
   return dir;
 }
 

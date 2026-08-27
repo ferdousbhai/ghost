@@ -22,7 +22,7 @@ export interface GhostContextMemory {
   slug: string;
   description: string;
   content: string;
-  updated: string | null;
+  updated: string;
 }
 
 export interface GhostContextAgent {
@@ -74,7 +74,7 @@ export async function readGhostContext(dir: string): Promise<GhostContextSnapsho
       slug: record.slug,
       description: record.description,
       content: record.content,
-      updated: record.updated ?? null,
+      updated: record.updated,
     }))
     .sort((left, right) => left.slug.localeCompare(right.slug));
   const agents = discovery.agents

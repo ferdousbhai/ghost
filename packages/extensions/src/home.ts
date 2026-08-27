@@ -43,6 +43,7 @@ import {
   coerceMemorySlug,
   MAX_MEMORY_FILES,
   memoryFileName,
+  memoryIndexPreview,
   memorySlugForText,
   parseMemoryFile,
   serializeMemoryFile,
@@ -97,11 +98,9 @@ export interface DocWriteInput {
 }
 
 export interface MemoryWriteInput {
-  /** `preferred-tone` or `preferred-tone.md`. Derived from the description when omitted. */
+  /** `preferred-tone` or `preferred-tone.md`. Derived from the content when omitted. */
   readonly name?: string;
-  readonly description: string;
   readonly content: string;
-  readonly updatedAt?: Date;
 }
 
 export interface MemoryWriteResult {
@@ -201,10 +200,26 @@ async function readConfinedText(
   path: string,
   label: string,
 ): Promise<string | null> {
+  const source = await readConfinedTextFile(homeDir, path, label);
+  return source?.text ?? null;
+}
+
+interface ReadTextFile {
+  readonly text: string;
+  readonly modified: Date;
+}
+
+async function readConfinedTextFile(
+  homeDir: string,
+  path: string,
+  label: string,
+): Promise<ReadTextFile | null> {
   const file = await openConfinedFile(homeDir, path, label);
   if (!file) return null;
   try {
-    return await file.readFile("utf8");
+    const text = await file.readFile("utf8");
+    const stats = await file.stat();
+    return { text, modified: stats.mtime };
   } finally {
     await file.close();
   }
@@ -354,6 +369,15 @@ async function readEntryText(
   name: string,
   label: string,
 ): Promise<string | null> {
+  const source = await readEntryTextFile(directory, name, label);
+  return source?.text ?? null;
+}
+
+async function readEntryTextFile(
+  directory: FileHandle,
+  name: string,
+  label: string,
+): Promise<ReadTextFile | null> {
   let file: FileHandle;
   try {
     file = await openRegularFileNoFollow(
@@ -366,7 +390,9 @@ async function readEntryText(
     throw error;
   }
   try {
-    return await file.readFile("utf8");
+    const text = await file.readFile("utf8");
+    const stats = await file.stat();
+    return { text, modified: stats.mtime };
   } finally {
     await file.close();
   }
@@ -800,14 +826,14 @@ export class GhostHome {
       if (entry.name.startsWith(".") || !entry.name.endsWith(".md")) continue;
       const relativePath = `${MEMORY_DIRNAME}/${entry.name}`;
       try {
-        const text = await readEntryText(directory, entry.name, "Memory file");
-        if (text === null) continue;
-        const parsed = parseMemoryFile(text);
+        const source = await readEntryTextFile(directory, entry.name, "Memory file");
+        if (source === null) continue;
+        const parsed = parseMemoryFile(source.text);
         files.push({
           slug: coerceMemorySlug(entry.name),
-          description: parsed.description,
+          description: memoryIndexPreview(parsed.content),
           content: parsed.content,
-          updated: parsed.updated,
+          updated: source.modified.toISOString().slice(0, 10),
         });
       } catch (error) {
         skipped.push({ path: relativePath, reason: message(error) });
@@ -819,20 +845,20 @@ export class GhostHome {
     const slug = coerceMemorySlug(name);
     const dir = this.memoryDir;
     const full = resolveWithin(dir, memoryFileName(slug), "Memory file");
-    const text = await readConfinedText(this.dir, full, "Memory file");
-    if (text === null) {
+    const source = await readConfinedTextFile(this.dir, full, "Memory file");
+    if (source === null) {
       throw new GhostError(
         "not_found",
         `No memory file named ${memoryFileName(slug)}.`,
         { name: memoryFileName(slug) },
       );
     }
-    const parsed = parseMemoryFile(text);
+    const parsed = parseMemoryFile(source.text);
     return {
       slug,
-      description: parsed.description,
+      description: memoryIndexPreview(parsed.content),
       content: parsed.content,
-      updated: parsed.updated,
+      updated: source.modified.toISOString().slice(0, 10),
     };
   }
 
@@ -840,17 +866,13 @@ export class GhostHome {
   async writeMemory(
     input: MemoryWriteInput,
   ): Promise<MemoryWriteResult> {
-    assertWritableMemory(input.description, input.content);
+    assertWritableMemory(input.content);
     const slug = input.name
       ? coerceMemorySlug(input.name)
-      : memorySlugForText(input.description);
+      : memorySlugForText(input.content);
     const dir = this.memoryDir;
     const full = resolveWithin(dir, memoryFileName(slug), "Memory file");
-    const text = serializeMemoryFile({
-      description: input.description.trim(),
-      content: input.content.trim(),
-      updatedAt: input.updatedAt ?? new Date(),
-    });
+    const text = serializeMemoryFile(input.content);
 
     // The quota spans the directory, so new names must share one queue. A
     // per-file queue lets parallel creates all observe the same free slot.

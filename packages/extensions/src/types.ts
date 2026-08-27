@@ -25,10 +25,11 @@ export interface CharacterFile {
 
 export interface MemoryRecord {
   readonly slug: string;
+  /** Compact index preview derived from `content`. */
   readonly description: string;
   readonly content: string;
-  /** `updated:` from the file, `YYYY-MM-DD`. */
-  readonly updated: string | undefined;
+  /** Filesystem modification date, `YYYY-MM-DD`. */
+  readonly updated: string;
 }
 
 export interface DocCatalog {

@@ -43,24 +43,9 @@ describe("readGhostContext", () => {
     ].join("\n"));
     write(home, "docs/guides/first-stop.md", "# First Stop\n\nA canonical guide.\n");
     write(home, "docs/broken.md", "---\ntitle: Legacy Metadata\n---\n\nNo H1.");
-    write(home, "memory/zeta.md", [
-      "---",
-      "description: The last remembered fact",
-      "updated: 2026-08-24",
-      "---",
-      "",
-      "Zeta content, including the full body.",
-      "",
-    ].join("\n"));
-    write(home, "memory/alpha.md", [
-      "---",
-      "description: The first remembered fact",
-      "---",
-      "",
-      "Alpha content.",
-      "",
-    ].join("\n"));
-    write(home, "memory/broken.md", "---\nupdated: 2026-08-25\n---\n\nNo description.");
+    write(home, "memory/zeta.md", "The last remembered fact. Zeta content, including the full body.\n");
+    write(home, "memory/alpha.md", "The first remembered fact. Alpha content.\n");
+    write(home, "memory/broken.md", "\n");
 
     const snapshot = await readGhostContext(home);
 
@@ -85,16 +70,16 @@ describe("readGhostContext", () => {
       {
         path: "memory/alpha.md",
         slug: "alpha",
-        description: "The first remembered fact",
-        content: "Alpha content.",
-        updated: null,
+        description: "The first remembered fact...",
+        content: "The first remembered fact. Alpha content.",
+        updated: expect.any(String),
       },
       {
         path: "memory/zeta.md",
         slug: "zeta",
-        description: "The last remembered fact",
-        content: "Zeta content, including the full body.",
-        updated: "2026-08-24",
+        description: "The last remembered fact...",
+        content: "The last remembered fact. Zeta content, including the full body.",
+        updated: expect.any(String),
       },
     ]);
     expect(snapshot.skipped).toHaveLength(2);

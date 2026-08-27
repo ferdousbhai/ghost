@@ -33,8 +33,9 @@ function characterSection(input: GhostSystemPromptInput): string {
 
 function memorySection(input: GhostSystemPromptInput): string[] {
   const heading = "## Memory";
-  const lead = "One fact per file under memory/. The line here is all you see until you "
-    + "read the file; grep and glob search the rest. Save one with ghost_memory_write.";
+  const lead = "One concise fact per plain Markdown file under memory/. The shortened "
+    + "preview here is all you see until you read the file; grep and glob search the "
+    + "rest. Save one with ghost_memory_write.";
   const doctrine = "Before writing, check this list: update the file that already covers it, "
     + "and delete what is no longer true. Dates absolute (\"2026-08-24\"). Skip "
     + "what character.md, your docs, or the files themselves already say. With "

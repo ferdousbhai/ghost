@@ -81,8 +81,7 @@ describe("golden: session", () => {
           name: "ghost_memory_write",
           args: {
             name: "owner-prefers-short.md",
-            description: "The owner wants short answers",
-            content: "They asked for the story, not the spec sheet. Keep replies to a line or two.",
+            content: "The owner wants short answers. They asked for the story, not the spec sheet. Keep replies to a line or two.",
           },
         },
         // Turn 1, step 2: having written it, say so.

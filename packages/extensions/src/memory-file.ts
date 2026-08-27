@@ -1,41 +1,29 @@
 /**
- * The atomic memory-file format, ported from the hosted repo's
- * `src/lib/memory/memory-file-format.ts`. The limits, the slug rules, the
- * frontmatter shape, and the derived-index line format are all deliberately
- * unchanged: an archive exported by the hosted app must read back here without
- * a migration step.
+ * The atomic memory-file format.
  *
- * One file, one fact. The index over them is derived per session and never
+ * One file is one concise fact, stored as plain Markdown with no metadata.
+ * The per-session index preview is derived from the fact each time and never
  * written to disk.
- *
- * There is deliberately no type/category field in the frontmatter. A taxonomy
- * (owner/feedback/project/reference and the like) was considered and rejected:
- * the owner's testing found model-assigned type labels unreliable, so nothing
- * downstream may depend on one. Whatever classification matters goes in the
- * description line, in words. Do not reintroduce a type field.
  */
 import { MemoryFileFormatError } from "./errors.js";
-import { parseYamlStringScalar, yamlScalar } from "./frontmatter.js";
 
 export const MAX_MEMORY_FILE_CONTENT_LENGTH = 2_000;
-export const MAX_MEMORY_FILE_DESCRIPTION_LENGTH = 200;
 export const MAX_MEMORY_FILE_SLUG_LENGTH = 64;
 export const MAX_MEMORY_FILES = 500;
+/** Maximum length of one derived index preview, including an ellipsis. */
+export const MEMORY_INDEX_PREVIEW_CHARS = 32;
 /** Injection budget for the per-session memory index, in characters. */
 export const MEMORY_INDEX_BUDGET_CHARS = 4_000;
 
 const MEMORY_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-const FRONTMATTER_FENCE = "---";
 
 export interface ParsedMemoryFile {
-  readonly description: string;
   readonly content: string;
-  /** The `updated:` line as written. Advisory — the writer's clock is authoritative. */
-  readonly updated: string | undefined;
 }
 
 export interface MemoryFileMeta {
   readonly slug: string;
+  /** A preview derived from the memory content, never stored separately. */
   readonly description: string;
 }
 
@@ -85,105 +73,42 @@ export function memorySlugForText(text: string): string {
   return slug || "memory";
 }
 
-export function serializeMemoryFile(input: {
-  readonly description: string;
-  readonly updatedAt: Date;
-  readonly content: string;
-}): string {
-  const updated = input.updatedAt.toISOString().slice(0, 10);
-  return [
-    FRONTMATTER_FENCE,
-    `description: ${yamlScalar(input.description)}`,
-    `updated: ${updated}`,
-    FRONTMATTER_FENCE,
-    "",
-    input.content,
-    "",
-  ].join("\n");
-}
+/** The compact index text derived from a memory's normalized content. */
+export function memoryIndexPreview(content: string): string {
+  const normalized = normalizeMemoryText(content);
+  if (normalized.length <= MEMORY_INDEX_PREVIEW_CHARS) return normalized;
 
-const FORMAT_GUIDANCE =
-  "A memory file starts with frontmatter: a --- line, `description: <one line for the index>`, "
-  + "and a closing --- line, followed by the body.";
-
-/**
- * Parse a memory file the model wrote. `updated` is returned but never trusted —
- * the writer stamps the real timestamp.
- */
-export function parseMemoryFile(markdown: string): ParsedMemoryFile {
-  const normalized = markdown.replace(/\r\n?/g, "\n");
-  const lines = normalized.split("\n");
-  if (lines[0]?.trim() !== FRONTMATTER_FENCE) {
-    throw new MemoryFileFormatError(`Missing frontmatter. ${FORMAT_GUIDANCE}`);
+  const available = MEMORY_INDEX_PREVIEW_CHARS - "...".length;
+  let prefix = normalized.slice(0, available);
+  const next = normalized[available];
+  if (next !== undefined && !/\s/u.test(next)) {
+    const lastSpace = prefix.lastIndexOf(" ");
+    if (lastSpace > 0) prefix = prefix.slice(0, lastSpace);
   }
-  const closingIndex = lines.findIndex(
-    (line, index) => index > 0 && line.trim() === FRONTMATTER_FENCE,
-  );
-  if (closingIndex < 0) {
-    throw new MemoryFileFormatError(`Unterminated frontmatter. ${FORMAT_GUIDANCE}`);
-  }
-
-  let description: string | undefined;
-  let updated: string | undefined;
-  for (const line of lines.slice(1, closingIndex)) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    const separator = trimmed.indexOf(":");
-    if (separator < 0) {
-      throw new MemoryFileFormatError(
-        `Invalid frontmatter line "${trimmed}". ${FORMAT_GUIDANCE}`,
-      );
-    }
-    const key = trimmed.slice(0, separator).trim().toLowerCase();
-    const value = parseYamlStringScalar(trimmed.slice(separator + 1));
-    if (key === "description") description = value;
-    if (key === "updated") updated = value;
-    // Other keys (including the retired `type`) are tolerated so files written
-    // before the taxonomy was dropped still round-trip.
-  }
-
-  if (!description) {
-    throw new MemoryFileFormatError(
-      "Frontmatter must include a non-empty description; it becomes this memory's line in the index.",
-    );
-  }
-  if (description.length > MAX_MEMORY_FILE_DESCRIPTION_LENGTH) {
-    throw new MemoryFileFormatError(
-      `description must be ${MAX_MEMORY_FILE_DESCRIPTION_LENGTH} characters or fewer.`,
-    );
-  }
-
-  const content = lines.slice(closingIndex + 1).join("\n").trim();
-  if (content.length > MAX_MEMORY_FILE_CONTENT_LENGTH) {
-    throw new MemoryFileFormatError(
-      `Memory file bodies must be ${MAX_MEMORY_FILE_CONTENT_LENGTH} characters or fewer. Split unrelated facts into separate files.`,
-    );
-  }
-
-  return { description, content, updated };
+  return `${prefix.trimEnd().replace(/[.,;:!?]+$/u, "")}...`;
 }
 
 /** Validate a memory file the model is about to write, before it hits disk. */
-export function assertWritableMemory(description: string, content: string): void {
-  const normalizedDescription = description.trim();
-  if (normalizedDescription.length === 0) {
+export function assertWritableMemory(content: string): void {
+  const normalized = content.trim();
+  if (normalized.length === 0) {
+    throw new MemoryFileFormatError("A memory must contain one concise fact.");
+  }
+  if (normalized.length > MAX_MEMORY_FILE_CONTENT_LENGTH) {
     throw new MemoryFileFormatError(
-      "description must be a non-empty one-liner; it becomes this memory's line in the index.",
+      `Memory files must be ${MAX_MEMORY_FILE_CONTENT_LENGTH} characters or fewer. Split unrelated facts into separate files.`,
     );
   }
-  if (normalizedDescription.length > MAX_MEMORY_FILE_DESCRIPTION_LENGTH) {
-    throw new MemoryFileFormatError(
-      `description must be ${MAX_MEMORY_FILE_DESCRIPTION_LENGTH} characters or fewer.`,
-    );
-  }
-  if (/[\r\n\u2028\u2029]/u.test(description)) {
-    throw new MemoryFileFormatError("description must be a single line.");
-  }
-  if (content.length > MAX_MEMORY_FILE_CONTENT_LENGTH) {
-    throw new MemoryFileFormatError(
-      `Memory file bodies must be ${MAX_MEMORY_FILE_CONTENT_LENGTH} characters or fewer. Split unrelated facts into separate files.`,
-    );
-  }
+}
+
+export function serializeMemoryFile(content: string): string {
+  assertWritableMemory(content);
+  return `${content.trim()}\n`;
+}
+
+export function parseMemoryFile(markdown: string): ParsedMemoryFile {
+  assertWritableMemory(markdown);
+  return { content: markdown.trim() };
 }
 
 export interface MemoryIndex {
@@ -199,8 +124,7 @@ export interface MemoryIndex {
 
 /**
  * The per-session memory index: one line per file in stable slug order, cut off
- * at the injection budget. Derived on every session start and **never written to
- * disk** — a stored index is a second source of truth that goes stale.
+ * at the injection budget. Derived on every session start and never stored.
  */
 export function deriveMemoryIndex(files: readonly MemoryFileMeta[]): MemoryIndex {
   const sorted = [...files]

@@ -1,10 +1,9 @@
 /**
  * Ghost's structured memory writer.
  *
- * Memory is atomic files — one fact per file, a `description` line that becomes
- * that file's line in the derived index, and a body. A write creates or replaces
- * exactly one file; there is no index to keep in sync, because the index is
- * derived per session and never stored.
+ * Memory is atomic files — one concise fact per plain Markdown file. A write
+ * creates or replaces exactly one file; the compact index preview is derived
+ * from its content per session and never stored.
  *
  * Sessions use OMP's native read/grep/glob tools for discovery and
  * retrieval, avoiding duplicate filesystem-shaped tools. They retain the
@@ -13,7 +12,6 @@
  */
 import type { ExtensionAPI, ExtensionFactory } from "@oh-my-pi/pi-coding-agent";
 import { Type } from "@oh-my-pi/pi-coding-agent/extensibility/legacy-typebox";
-import { MAX_MEMORY_FILE_DESCRIPTION_LENGTH } from "../memory-file.js";
 import {
   resolveHome,
   textResult,
@@ -39,24 +37,21 @@ export function createMemoryExtension(
       name: GHOST_MEMORY_WRITE,
       label: "Write memory",
       description:
-        "Write one memory file: a single fact worth keeping, with a one-line "
-        + "description for the index. Writing a name that already exists replaces "
+        "Write one memory file: a single concise fact worth keeping. Writing a "
+        + "name that already exists replaces "
         + "that file, which is how you correct or update a memory. Keep unrelated "
         + "facts in separate files, and mention a related memory in the content "
         + "by its slug in double brackets, like [[preferred-tone]].",
       parameters: Type.Object({
-        description: Type.String({
-          description:
-            `One line for the index, ${MAX_MEMORY_FILE_DESCRIPTION_LENGTH} characters `
-            + "or fewer, describing what this memory holds.",
-        }),
         content: Type.String({
-          description: "The fact itself, in your own words.",
+          description:
+            "One concise fact, in your own words. This is the entire Markdown file "
+            + "and is shortened automatically for the memory index.",
         }),
         name: Type.Optional(Type.String({
           description:
             "File name, lowercase words joined by dashes, such as preferred-tone.md. "
-            + "Omit it and a name is derived from the description. Reuse an existing "
+            + "Omit it and a name is derived from the fact. Reuse an existing "
             + "name to replace that memory.",
         })),
       }),
@@ -65,7 +60,6 @@ export function createMemoryExtension(
       execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
         const home = resolveHome(options, ctx);
         const written = await home.writeMemory({
-          description: params.description,
           content: params.content,
           ...(params.name === undefined ? {} : { name: params.name }),
         });

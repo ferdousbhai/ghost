@@ -17,7 +17,7 @@ Remember that I want short answers.
 You are casper, a letterpress printer. You answer in short sentences.
 
 ## Memory
-One fact per file under memory/. The line here is all you see until you read the file; grep and glob search the rest. Save one with ghost_memory_write.
+One concise fact per plain Markdown file under memory/. The shortened preview here is all you see until you read the file; grep and glob search the rest. Save one with ghost_memory_write.
 
 Before writing, check this list: update the file that already covers it, and delete what is no longer true. Dates absolute ("2026-08-24"). Skip what character.md, your docs, or the files themselves already say. With guidance, record why, so you can judge later whether it still holds. Link a related memory as [[its-slug]]; a slug with no file marks one worth writing. A memory is what you remember about the owner's life, revised as life moves; a doc is what someone sat down and wrote. The strained knee is a memory, the physiotherapy research a doc. These lines were true when written; check anything time-sensitive.
 
@@ -43,17 +43,16 @@ round-trip 2: model=mock-ghost-1
 {"contentIndex":0,"delta":"","type":"toolcall_delta"}
 {"contentIndex":0,"delta":"{\"name\":\"owner-p","type":"toolcall_delta"}
 {"contentIndex":0,"delta":"refers-short.md\"","type":"toolcall_delta"}
-{"contentIndex":0,"delta":",\"description\":\"","type":"toolcall_delta"}
-{"contentIndex":0,"delta":"The owner wants ","type":"toolcall_delta"}
-{"contentIndex":0,"delta":"short answers\",\"","type":"toolcall_delta"}
-{"contentIndex":0,"delta":"content\":\"They a","type":"toolcall_delta"}
-{"contentIndex":0,"delta":"sked for the sto","type":"toolcall_delta"}
-{"contentIndex":0,"delta":"ry, not the spec","type":"toolcall_delta"}
-{"contentIndex":0,"delta":" sheet. Keep rep","type":"toolcall_delta"}
-{"contentIndex":0,"delta":"lies to a line o","type":"toolcall_delta"}
-{"contentIndex":0,"delta":"r two.\"}","type":"toolcall_delta"}
-{"contentIndex":0,"toolCall":{"arguments":{"content":"They asked for the story, not the spec sheet. Keep replies to a line or two.","description":"The owner wants short answers","name":"owner-prefers-short.md"},"id":"call_1","name":"ghost_memory_write","partialArgs":"{\"name\":\"owner-prefers-short.md\",\"description\":\"The owner wants short answers\",\"content\":\"They asked for the story, not the spec sheet. Keep replies to a line or two.\"}","streamIndex":0,"type":"toolCall"},"type":"toolcall_end"}
-{"arguments":{"content":"They asked for the story, not the spec sheet. Keep replies to a line or two.","description":"The owner wants short answers","name":"owner-prefers-short.md"},"id":"call_1","toolName":"ghost_memory_write","type":"tool_execution_start"}
+{"contentIndex":0,"delta":",\"content\":\"The ","type":"toolcall_delta"}
+{"contentIndex":0,"delta":"owner wants shor","type":"toolcall_delta"}
+{"contentIndex":0,"delta":"t answers. They ","type":"toolcall_delta"}
+{"contentIndex":0,"delta":"asked for the st","type":"toolcall_delta"}
+{"contentIndex":0,"delta":"ory, not the spe","type":"toolcall_delta"}
+{"contentIndex":0,"delta":"c sheet. Keep re","type":"toolcall_delta"}
+{"contentIndex":0,"delta":"plies to a line ","type":"toolcall_delta"}
+{"contentIndex":0,"delta":"or two.\"}","type":"toolcall_delta"}
+{"contentIndex":0,"toolCall":{"arguments":{"content":"The owner wants short answers. They asked for the story, not the spec sheet. Keep replies to a line or two.","name":"owner-prefers-short.md"},"id":"call_1","name":"ghost_memory_write","partialArgs":"{\"name\":\"owner-prefers-short.md\",\"content\":\"The owner wants short answers. They asked for the story, not the spec sheet. Keep replies to a line or two.\"}","streamIndex":0,"type":"toolCall"},"type":"toolcall_end"}
+{"arguments":{"content":"The owner wants short answers. They asked for the story, not the spec sheet. Keep replies to a line or two.","name":"owner-prefers-short.md"},"id":"call_1","toolName":"ghost_memory_write","type":"tool_execution_start"}
 {"id":"call_1","isError":false,"summary":"Wrote memory/owner-prefers-short.md.","toolName":"ghost_memory_write","type":"tool_execution_end"}
 {"contentIndex":1,"type":"text_start"}
 {"contentIndex":1,"delta":"Written ","type":"text_delta"}
@@ -74,11 +73,11 @@ What do you remember about me?
 You are casper, a letterpress printer. You answer in short sentences.
 
 ## Memory
-One fact per file under memory/. The line here is all you see until you read the file; grep and glob search the rest. Save one with ghost_memory_write.
+One concise fact per plain Markdown file under memory/. The shortened preview here is all you see until you read the file; grep and glob search the rest. Save one with ghost_memory_write.
 
 Before writing, check this list: update the file that already covers it, and delete what is no longer true. Dates absolute ("2026-08-24"). Skip what character.md, your docs, or the files themselves already say. With guidance, record why, so you can judge later whether it still holds. Link a related memory as [[its-slug]]; a slug with no file marks one worth writing. A memory is what you remember about the owner's life, revised as life moves; a doc is what someone sat down and wrote. The strained knee is a memory, the physiotherapy research a doc. These lines were true when written; check anything time-sensitive.
 
-- owner-prefers-short.md: The owner wants short answers
+- owner-prefers-short.md: The owner wants short...
 
 ## Docs
 By path under docs/; read, grep, glob, write, edit. A doc starts at byte 0 with `# Title` and may end with one line of lowercase `#hashtags` (`#[a-z0-9]+(?:-[a-z0-9]+)*`); keep that line last. `#archived` archives it. Never YAML frontmatter.
@@ -167,13 +166,12 @@ write               registry=yes  wire=yes  invokable=yes
       "content": [
         {
           "arguments": {
-            "content": "They asked for the story, not the spec sheet. Keep replies to a line or two.",
-            "description": "The owner wants short answers",
+            "content": "The owner wants short answers. They asked for the story, not the spec sheet. Keep replies to a line or two.",
             "name": "owner-prefers-short.md"
           },
           "id": "call_1",
           "name": "ghost_memory_write",
-          "partialArgs": "{\"name\":\"owner-prefers-short.md\",\"description\":\"The owner wants short answers\",\"content\":\"They asked for the story, not the spec sheet. Keep replies to a line or two.\"}",
+          "partialArgs": "{\"name\":\"owner-prefers-short.md\",\"content\":\"The owner wants short answers. They asked for the story, not the spec sheet. Keep replies to a line or two.\"}",
           "streamIndex": 0,
           "type": "toolCall"
         }
@@ -249,12 +247,7 @@ The Heidelberg cost more than it should have.
 Pull the roller bearings before you soak anything.
 
 --- memory/owner-prefers-short.md ---
----
-description: The owner wants short answers
-updated: <today>
----
-
-They asked for the story, not the spec sheet. Keep replies to a line or two.
+The owner wants short answers. They asked for the story, not the spec sheet. Keep replies to a line or two.
 
 --- models.json ---
 {

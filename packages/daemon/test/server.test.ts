@@ -166,7 +166,7 @@ describe("GET /api/ghosts/:name/context", () => {
     );
     writeFileSync(
       join(ghostDir, "memory", "preferred-tone.md"),
-      "---\ndescription: The owner prefers direct answers.\nupdated: 2026-08-25\n---\n\nLead with the decision.\n",
+      "The owner prefers direct answers. Lead with the decision.\n",
       "utf8",
     );
 
@@ -185,8 +185,8 @@ describe("GET /api/ghosts/:name/context", () => {
     }));
     expect(body.memory).toContainEqual(expect.objectContaining({
       path: "memory/preferred-tone.md",
-      description: "The owner prefers direct answers.",
-      content: "Lead with the decision.",
+      description: "The owner prefers direct...",
+      content: "The owner prefers direct answers. Lead with the decision.",
     }));
     expect(body.agents).toContainEqual(expect.objectContaining({
       name: "route-probe",
@@ -207,7 +207,7 @@ describe("GET /api/ghosts/:name/context", () => {
     const doc = join(ghostDir, "docs", "delete-me.md");
     const memory = join(ghostDir, "memory", "delete-me-too.md");
     writeFileSync(doc, "doc\n", "utf8");
-    writeFileSync(memory, "---\ndescription: temporary\n---\n\nmemory\n", "utf8");
+    writeFileSync(memory, "temporary memory\n", "utf8");
     const remove = (body: unknown) => fetch(`${base}/api/ghosts/casper/context`, {
       method: "DELETE",
       headers: { "content-type": "application/json" },

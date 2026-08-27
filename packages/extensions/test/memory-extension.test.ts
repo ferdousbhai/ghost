@@ -28,24 +28,24 @@ describe("memory extension", () => {
   it("writes one atomic file and derives its name when none is given", async () => {
     const harness = await loadExtension(createMemoryExtension(), fixture.dir);
     const result = await harness.call(GHOST_MEMORY_WRITE, {
-      description: "Prefers short answers",
-      content: "Said so twice.",
+      content: "Prefers short answers. Said so twice.",
     });
     expect(result.details).toMatchObject({
-      slug: "prefers-short-answers",
-      path: "memory/prefers-short-answers.md",
+      slug: "prefers-short-answers-said-so-twice",
+      path: "memory/prefers-short-answers-said-so-twice.md",
       created: true,
     });
-    expect(await readFile(join(fixture.dir, "memory/prefers-short-answers.md"), "utf8"))
-      .toBe("---\ndescription: Prefers short answers\nupdated: "
-        + `${new Date().toISOString().slice(0, 10)}\n---\n\nSaid so twice.\n`);
+    expect(await readFile(
+      join(fixture.dir, "memory/prefers-short-answers-said-so-twice.md"),
+      "utf8",
+    ))
+      .toBe("Prefers short answers. Said so twice.\n");
   });
 
   it("replaces a file when the name already exists", async () => {
     const harness = await loadExtension(createMemoryExtension(), fixture.dir);
     const result = await harness.call(GHOST_MEMORY_WRITE, {
       name: "working-habit",
-      description: "I work in the morning",
       content: "Now: the press is cold until nine.",
     });
     expect(result.details).toMatchObject({ created: false });
@@ -58,11 +58,10 @@ describe("memory extension", () => {
       Array.from({ length: 10 }, (_, position) =>
         harness.call(GHOST_MEMORY_WRITE, {
           name: "hot-file.md",
-          description: `write ${position}`,
-          content: `body ${position}`,
+          content: `write ${position}`,
         })),
     );
     const file = await openGhostHome(fixture.dir).readMemory("hot-file");
-    expect(file.content).toBe(`body ${file.description.slice("write ".length)}`);
+    expect(file.content).toBe(file.description);
   });
 });

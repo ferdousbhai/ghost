@@ -48,20 +48,10 @@ Superseded. Kept for the record.
 #archived
 `,
 
-  "memory/apprentice-question.md": `---
-description: I explained how to start as an apprentice
-updated: 2026-08-01
----
-
-They wanted to know where to begin. I said: find a shop that still prints, and sweep its floor.
+  "memory/apprentice-question.md": `I explained how to start as an apprentice. They wanted to know where to begin. I said: find a shop that still prints, and sweep its floor.
 `,
 
-  "memory/working-habit.md": `---
-description: I work in the morning, on paper, before anyone calls
-updated: 2026-08-02
----
-
-The press is cold until ten. I set type while it warms.
+  "memory/working-habit.md": `I work in the morning, on paper, before anyone calls. The press is cold until ten. I set type while it warms.
 `,
 
   "conversations/conv-1.json": `{"id":"conv-1","ownerId":"owner-1","catalog":null,"messages":[]}\n`,

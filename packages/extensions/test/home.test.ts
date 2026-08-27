@@ -60,7 +60,7 @@ describe("layout", () => {
   });
 
   it("never writes a derived index", async () => {
-    await home.writeMemory({ description: "a fact", content: "the body" });
+    await home.writeMemory({ content: "a fact" });
     const listing = await home.listMemory();
     expect(deriveMemoryIndex(listing.files).lines.length).toBeGreaterThan(0);
     await expect(readFile(join(fixture.dir, "MEMORY.md"), "utf8")).rejects.toThrow();
@@ -407,13 +407,12 @@ describe("memory", () => {
       "apprentice-question",
       "working-habit",
     ]);
-    expect(files[0]?.updated).toBe("2026-08-01");
+    expect(files[0]?.updated).toBe(new Date().toISOString().slice(0, 10));
   });
 
   it("replaces an existing file rather than appending a second one", async () => {
     await home.writeMemory({
       name: "working-habit.md",
-      description: "I work in the morning",
       content: "Updated: the press is cold until nine.",
     });
     const { files } = await home.listMemory();
@@ -423,14 +422,14 @@ describe("memory", () => {
   });
 
   it("rejects a malformed write with instructional guidance", async () => {
-    await expect(home.writeMemory({ description: "", content: "x" }))
+    await expect(home.writeMemory({ content: "" }))
       .rejects.toThrow(MemoryFileFormatError);
-    await expect(home.writeMemory({ description: "d", content: "x".repeat(2_001) }))
+    await expect(home.writeMemory({ content: "x".repeat(2_001) }))
       .rejects.toThrow(MemoryFileFormatError);
   });
 
-  it("reports an unreadable memory file instead of dropping it silently", async () => {
-    await writeFile(join(home.memoryDir, "broken.md"), "no frontmatter", "utf8");
+  it("reports an empty memory file instead of dropping it silently", async () => {
+    await writeFile(join(home.memoryDir, "broken.md"), "\n", "utf8");
     const { files, skipped } = await home.listMemory();
     expect(files.map((file) => file.slug)).not.toContain("broken");
     expect(skipped[0]?.path).toBe("memory/broken.md");
@@ -443,32 +442,25 @@ describe("memory", () => {
       Array.from({ length: 12 }, (_, position) =>
         home.writeMemory({
           name: "hot-file.md",
-          description: `write ${position}`,
-          content: `body ${position}`,
+          content: `write ${position}`,
         })),
     );
     const file = await home.readMemory("hot-file");
     expect(file.description).toMatch(/^write \d+$/);
-    expect(file.content).toBe(`body ${file.description.slice("write ".length)}`);
+    expect(file.content).toBe(file.description);
     const { files } = await home.listMemory();
     expect(files.filter((entry) => entry.slug === "hot-file")).toHaveLength(1);
   });
 
   it("serializes the directory-wide quota across different new names", async () => {
-    const filler = `---
-description: filler
-updated: 2026-08-25
----
-
-x
-`;
+    const filler = "x\n";
     await Promise.all(Array.from({ length: 497 }, (_, index) =>
       writeFile(join(home.memoryDir, `filler-${index}.md`), filler, "utf8")
     ));
 
     const results = await Promise.allSettled([
-      home.writeMemory({ name: "last-a", description: "last a", content: "a" }),
-      home.writeMemory({ name: "last-b", description: "last b", content: "b" }),
+      home.writeMemory({ name: "last-a", content: "a" }),
+      home.writeMemory({ name: "last-b", content: "b" }),
     ]);
     expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
     expect(results.filter((result) => result.status === "rejected")).toEqual([
@@ -478,13 +470,7 @@ x
   });
 
   it("serializes the memory quota across separate Bun processes", async () => {
-    const filler = `---
-description: filler
-updated: 2026-08-25
----
-
-x
-`;
+    const filler = "x\n";
     await Promise.all(Array.from({ length: 497 }, (_, index) =>
       writeFile(join(home.memoryDir, `process-filler-${index}.md`), filler, "utf8")
     ));
@@ -501,7 +487,6 @@ x
           while (!(await Bun.file(${JSON.stringify(go)}).exists())) await Bun.sleep(5);
           await openGhostHome(${JSON.stringify(fixture.dir)}).writeMemory({
             name: ${JSON.stringify(name)},
-            description: ${JSON.stringify(name)},
             content: ${JSON.stringify(name)},
           });
         `,

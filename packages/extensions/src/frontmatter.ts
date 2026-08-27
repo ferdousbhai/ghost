@@ -1,10 +1,9 @@
 /**
- * YAML frontmatter support for legacy document migration plus memory scalars.
+ * YAML frontmatter support for legacy document migration.
  *
  * Live ghost-home/v2 docs never enter through this parser. Hosted v1 exports
- * used a fixed scalar/list vocabulary, while memory files retain their own
- * frontmatter contract. The hand-rolled reader keeps those migrations
- * byte-predictable without introducing a general YAML writer.
+ * used a fixed scalar/list vocabulary. The hand-rolled reader keeps that
+ * migration byte-predictable without introducing a general YAML writer.
  */
 import { GhostError } from "./errors.js";
 
@@ -132,11 +131,6 @@ function unquote(value: string): string {
     return value.slice(1, -1).replace(/''/g, "'");
   }
   return value;
-}
-
-/** Parse one scalar that the caller's schema requires to remain a string. */
-export function parseYamlStringScalar(raw: string): string {
-  return unquote(raw.trim());
 }
 
 /** Split a flow-list body on commas that are not inside quotes. */
