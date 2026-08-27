@@ -50,6 +50,7 @@ copy_checkout() {
     )
     tar -cf - \
       package.json pnpm-lock.yaml pnpm-workspace.yaml \
+      patches \
       "${manifests[@]}" \
       packages/daemon/dist packages/daemon/contrib packages/daemon/README.md \
       packages/extensions/dist \
@@ -208,6 +209,28 @@ assert_rejected_work_root() {
 
 copy_checkout "$checkout_a"
 copy_checkout "$checkout_b"
+
+# Dependency patches are frozen release inputs in their own right. Prove a
+# patch-only byte change invalidates the exact manifest input set, then restore
+# the checkout before exercising the offline deploy.
+patch_path="$checkout_a/patches/@oh-my-pi__pi-coding-agent@18.0.3.patch"
+patch_backup="$work/patch.backup"
+cp -- "$patch_path" "$patch_backup"
+patch_digest_before="$(
+  bash "$source_root/packaging/release/frozen-inputs.sh" "$checkout_a" \
+    | sha256sum | cut -d' ' -f1
+)"
+printf '\n# frozen-input digest regression fixture\n' >> "$patch_path"
+patch_digest_after="$(
+  bash "$source_root/packaging/release/frozen-inputs.sh" "$checkout_a" \
+    | sha256sum | cut -d' ' -f1
+)"
+[[ "$patch_digest_before" != "$patch_digest_after" ]] || {
+  printf 'dependency patch-only change did not alter the frozen input digest\n' >&2
+  exit 1
+}
+cp -- "$patch_backup" "$patch_path"
+cmp -- "$patch_backup" "$patch_path"
 
 # Work state can never be the requested final destination or live beneath it:
 # either choice would let a later cleanup erase the published payload. Both

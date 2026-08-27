@@ -81,15 +81,10 @@ if find "$daemon" ! \( -type f -o -type d -o -type l \) \
 fi
 
 # Bind the runtime to every frozen dependency input, including the in-tree
-# catalog override. The tagged source rechecks these before packaging.
-(
-  cd "$source_root"
-  {
-    printf '%s\0' package.json pnpm-lock.yaml pnpm-workspace.yaml
-    find packages -mindepth 2 -maxdepth 2 -type f -name package.json -print0
-    find vendor/pi-catalog -type f -print0
-  } | LC_ALL=C sort -zu | xargs -0 sha256sum
-) > "$runtime_root/FROZEN-INPUTS.SHA256"
+# catalog override and every dependency patch. The tagged source rechecks these
+# before packaging.
+bash "$source_root/packaging/release/frozen-inputs.sh" "$source_root" \
+  > "$runtime_root/FROZEN-INPUTS.SHA256"
 
 (
   cd "$runtime_root"

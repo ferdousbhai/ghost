@@ -8,6 +8,11 @@ settings:
 overrides:
   '@oh-my-pi/pi-catalog': workspace:*
 
+patchedDependencies:
+  '@oh-my-pi/pi-coding-agent@18.0.3':
+    hash: 2aac0f811d414dbdb6c48dd8a3576dbeba6ba55fdcb70a3e336b400a6fe9fbd7
+    path: patches/@oh-my-pi__pi-coding-agent@18.0.3.patch
+
 importers:
 
   .:
@@ -39,6 +44,9 @@ importers:
         specifier: 18.0.3
         version: 18.0.3
       '@oh-my-pi/pi-coding-agent':
+        specifier: 18.0.3
+        version: 18.0.3(patch_hash=2aac0f811d414dbdb6c48dd8a3576dbeba6ba55fdcb70a3e336b400a6fe9fbd7)
+      '@oh-my-pi/pi-utils':
         specifier: 18.0.3
         version: 18.0.3
       effect:
@@ -74,7 +82,7 @@ importers:
         version: 18.0.3
       '@oh-my-pi/pi-coding-agent':
         specifier: 18.0.3
-        version: 18.0.3
+        version: 18.0.3(patch_hash=2aac0f811d414dbdb6c48dd8a3576dbeba6ba55fdcb70a3e336b400a6fe9fbd7)
       '@oh-my-pi/pi-utils':
         specifier: 18.0.3
         version: 18.0.3
@@ -2470,7 +2478,7 @@ snapshots:
       '@oh-my-pi/omptype': 18.0.3
       '@oh-my-pi/pi-utils': 18.0.3
 
-  '@oh-my-pi/pi-coding-agent@18.0.3':
+  '@oh-my-pi/pi-coding-agent@18.0.3(patch_hash=2aac0f811d414dbdb6c48dd8a3576dbeba6ba55fdcb70a3e336b400a6fe9fbd7)':
     dependencies:
       '@babel/parser': 7.29.8
       '@oh-my-pi/hashline': 18.0.3
