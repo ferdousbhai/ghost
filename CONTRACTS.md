@@ -495,6 +495,21 @@ one must not be a leak of both.
   Claude Code returns `409 not_supported`, because opening an unrelated OMP
   session just to discover commands would lie about the active runtime;
   non-GET methods return `405`.
+- `POST /api/ghosts/:name/sessions/:id/recap` with `{}` →
+  `{ recap: string | null }` — one transient OMP side-channel turn over the
+  existing conversation snapshot. The shell arms it after four minutes of
+  inactivity following a successful Pi turn, only while the composer is empty.
+  It uses that conversation's current chat model and OMP system prompt/history,
+  asks for fewer than 40 words in one or two plain sentences, collapses the
+  result to one line, and bounds it at 280 Unicode scalar values. The prompt and
+  reply are never appended to the transcript or stored anywhere. Typing,
+  navigation, a new owner turn, client disconnect, conversation teardown, or
+  daemon shutdown aborts it; a new owner turn waits for that cancellation and
+  then wins session admission. A generation/provider/output failure is pure
+  upside and returns `200 { recap: null }`; an unknown conversation is `404`, a
+  busy conversation is `409 session_busy`, and Claude Code is
+  `409 not_supported` because that runtime exposes no non-mutating conversation
+  snapshot side channel.
 - A standalone builtin sent through `POST …/messages` produces exactly
   `start`, one or more `command_output` events, then `done` with zero usage.
   Unsupported and failed commands set `isError` and `code` on their output but

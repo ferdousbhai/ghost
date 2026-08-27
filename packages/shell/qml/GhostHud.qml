@@ -966,6 +966,18 @@ FloatingWindow {
                         Layout.fillWidth: true
                     }
 
+                    Text {
+                        visible: Ghostd.recapText !== ""
+                        Layout.fillWidth: true
+                        text: "※ recap: " + Ghostd.recapText
+                        textFormat: Text.PlainText
+                        color: Theme.foregroundDim
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSizeSmall
+                        font.italic: true
+                        wrapMode: Text.Wrap
+                    }
+
                     QueueLine {
                         Layout.fillWidth: true
                         steering: Ghostd.steeringQueue

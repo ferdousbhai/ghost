@@ -17,6 +17,7 @@
  *   PUT  /api/ghosts/:name/sessions/:id/pin → { pinned } — pin or unpin it
  *   PUT  /api/ghosts/:name/sessions/:id/title → { title } — rename it
  *   GET  /api/ghosts/:name/sessions/:id/commands → OMP's session command catalog
+ *   POST /api/ghosts/:name/sessions/:id/recap → transient OMP side-channel recap
  *   GET|POST /api/ghosts/:name/sessions/:id/live → realtime voice lifecycle
  *   GET|POST /api/ghosts/:name/sessions/:id/collab → encrypted relay collaboration
  *   GET  /api/ghosts/:name/sessions/:id/transcript → stored messages for resume
@@ -753,6 +754,38 @@ export function createDaemonServer(options: ServerOptions): Server {
         conversation.runtime,
       ),
     });
+  };
+
+  const handleRecap = async (
+    ghostName: string,
+    conversation: ConversationIdentity,
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): Promise<void> => {
+    const body = await readJsonBody(request, maxBodyBytes);
+    if (body === null || typeof body !== "object" || Array.isArray(body)) {
+      errorResponse(response, 400, "invalid_request", "Request body must be a JSON object.");
+      return;
+    }
+
+    const controller = new AbortController();
+    const onClose = () => controller.abort();
+    request.on("aborted", onClose);
+    response.on("close", onClose);
+    try {
+      const recap = await options.host.recap(
+        ghostName,
+        conversation.conversationId,
+        conversation.runtime,
+        controller.signal,
+      );
+      if (!response.writableEnded && !controller.signal.aborted) {
+        jsonResponse(response, 200, { recap });
+      }
+    } finally {
+      request.off("aborted", onClose);
+      response.off("close", onClose);
+    }
   };
 
   const decorateMcpSnapshot = (
@@ -1656,6 +1689,18 @@ export function createDaemonServer(options: ServerOptions): Server {
           return await handleSessionCommands(
             ghostName,
             decodeConversationIdentity(segments[4] ?? ""),
+            response,
+          );
+        }
+        if (segments.length === 6 && segments[3] === "sessions" && segments[5] === "recap") {
+          if (method !== "POST") {
+            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+            return;
+          }
+          return await handleRecap(
+            ghostName,
+            decodeConversationIdentity(segments[4] ?? ""),
+            request,
             response,
           );
         }

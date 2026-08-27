@@ -95,6 +95,13 @@ offers to answer it now on the branch the daemon kept. While a model
 is streaming, Enter steers the active run, Ctrl+Enter queues a follow-up, and
 Shift+Enter inserts a newline. The queued state is visible below the composer.
 
+After a successful Pi turn, four minutes with an empty composer arms OMP's
+transient recap side channel. Its one-line `※ recap:` status restores the goal,
+current task, and one next action without adding a message to history. Typing,
+starting another turn, or changing ghost/conversation clears it and aborts any
+request still running; recap failures stay silent because the transcript is
+already the durable fallback.
+
 A reply is the answer, not an account of how it was reached. Which tools ran is
 narrated by the activity line while it happens and then leaves: a settled turn
 shows only the calls a reader still needs — the ones that failed, and `ask`,

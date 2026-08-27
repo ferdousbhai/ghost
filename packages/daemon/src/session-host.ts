@@ -137,6 +137,7 @@ import {
 } from "./pi-messages.js";
 import { readPinState, writePins } from "./pins.js";
 import { readReadState, writeReads } from "./reads.js";
+import { buildRecapPrompt, normalizeRecap } from "./recap.js";
 import {
   conversationIdentity,
   isValidConversationId,
@@ -465,6 +466,11 @@ interface HostedMCP {
   reload?: Promise<void>;
 }
 
+interface HostedRecap {
+  controller: AbortController;
+  task: Promise<string | null>;
+}
+
 interface HostedSession extends GhostSessionHandle {
   busy: boolean;
   /** Last owner-visible use, for TTL and LRU retention. */
@@ -504,6 +510,8 @@ interface HostedSession extends GhostSessionHandle {
   title?: Promise<void>;
   /** Cancels the provider call and bounded wrapper on timeout or shutdown. */
   titleAbort?: AbortController;
+  /** One abortable, non-persisted OMP side-channel recap. */
+  recap?: HostedRecap;
   /** Nested reservations while collaboration starts or stops. */
   collaborationTransitions?: number;
   /** Close the borrowed runtime exactly once across graceful/forced teardown. */
@@ -936,6 +944,8 @@ export class SessionHost {
   private readonly conversationListeners = new Map<string, Set<ConversationEventListener>>();
   /** In-flight opens, so two concurrent turns never build two sessions. */
   private readonly opening = new Map<string, Promise<HostedSession>>();
+  /** Synchronous owner-turn admission, visible before an async session open settles. */
+  private readonly turnAdmissions = new Set<string>();
   /** In-flight closes, so a reopen cannot race a still-disposing session. */
   private readonly closing = new Map<
     string,
@@ -1059,6 +1069,7 @@ export class SessionHost {
       || hosted.session.compactionSpeculation === "running"
       || hosted.session.isEvalRunning
       || hosted.title !== undefined
+      || hosted.recap !== undefined
       || hosted.settlingDeferred !== undefined
       || (hosted.collaborationTransitions ?? 0) > 0
       || this.collaboration.status(hosted.sessionKey).active
@@ -1316,6 +1327,8 @@ export class SessionHost {
       return this.liveVoice.setMuted(key, action === "mute");
     }
 
+    const recapCancellation = this.cancelRecap(key);
+    if (recapCancellation) await recapCancellation;
     const current = this.liveVoice.status(key);
     const currentHosted = this.sessions.get(key);
     if (current.active && (currentHosted?.liveVoiceTransitions ?? 0) === 0) return current;
@@ -1646,6 +1659,9 @@ export class SessionHost {
     // unwound; that is the safe boundary for deferred model/MCP ownership.
     hosted.unsubscribeOwnership = session.subscribe((event) => {
       this.touchSession(hosted);
+      // Writable collaboration can start a turn without SessionHost admission.
+      // Owner work wins over a presentation-only recap in that path too.
+      if (event.type === "agent_start") hosted.recap?.controller.abort();
       if (event.type !== "agent_end" || event.isTerminal === false) return;
       if (!hosted.busy) {
         const [, conversationId] = sessionKeyParts(key);
@@ -1973,6 +1989,7 @@ export class SessionHost {
   /** Every way OMP can have an exclusive owner, including raw CollabHost turns. */
   private sessionOwned(hosted: HostedSession): boolean {
     return hosted.busy
+      || hosted.recap !== undefined
       || hosted.session.isStreaming
       || hosted.session.isBashRunning
       || this.liveVoiceOwnsSession(hosted);
@@ -1999,6 +2016,17 @@ export class SessionHost {
       hosted.busy = false;
       this.touchSession(hosted);
     }
+  }
+
+  /** Cancel presentation-only recap work before admitting owner activity. */
+  private cancelRecap(key: string): Promise<void> | undefined {
+    const hosted = this.sessions.get(key);
+    const recap = hosted?.recap;
+    if (!recap) return undefined;
+    recap.controller.abort();
+    return recap.task.catch(() => {}).then(async () => {
+      if (hosted) await this.settleDeferredSession(hosted);
+    });
   }
 
   /** Apply deferred owner changes after voice releases its AgentSession. */
@@ -2284,9 +2312,33 @@ export class SessionHost {
    */
   async runTurn(ghostName: string, options: RunTurnOptions): Promise<void> {
     const conversationId = requireRawConversationId(options.sessionId ?? DEFAULT_SESSION_KEY);
+    const key = this.keyOf(ghostName, conversationId);
+    if (this.turnAdmissions.has(key)) {
+      throw new GhostError(
+        "session_busy",
+        "This ghost is already answering in this conversation.",
+        409,
+      );
+    }
+    this.turnAdmissions.add(key);
+    try {
+      await this.runAdmittedTurn(ghostName, options, conversationId, key);
+    } finally {
+      this.turnAdmissions.delete(key);
+    }
+  }
+
+  private async runAdmittedTurn(
+    ghostName: string,
+    options: RunTurnOptions,
+    conversationId: string,
+    key: string,
+  ): Promise<void> {
     const ghost = this.registry.get(ghostName);
     const paths = ghostPaths(ghost.dir);
-    const key = this.keyOf(ghostName, conversationId);
+    // A returning owner must never lose a turn to background recap ownership.
+    const recapCancellation = this.cancelRecap(key);
+    if (recapCancellation) await recapCancellation;
     const liveHosted = this.sessions.get(key);
     if (this.liveVoice.status(key).active || (liveHosted?.liveVoiceTransitions ?? 0) > 0) {
       throw new GhostError(
@@ -2495,6 +2547,87 @@ export class SessionHost {
       }
       await this.announceConversationUpdated(ghostName, "pi", conversationId);
     }
+  }
+
+  /**
+   * Generate a transient OMP-native recap over one existing Pi conversation.
+   * The side-channel snapshot and reply never enter the session transcript.
+   */
+  async recap(
+    ghostName: string,
+    conversationId: string | null | undefined,
+    runtime: ConversationRuntime = "pi",
+    signal?: AbortSignal,
+  ): Promise<string | null> {
+    assertPiConversation(runtime, "Conversation recap");
+    const ghost = this.assertOmpRuntime(ghostName, "Conversation recap");
+    const id = requireRawConversationId(conversationId ?? DEFAULT_SESSION_KEY);
+    const key = this.keyOf(ghostName, id);
+    const sessionFile = join(ghostPaths(ghost.dir).sessionDir, sessionFileNameFor(id));
+
+    // `open` creates a transcript lazily. Recap is a view over existing history,
+    // so an unknown id remains a 404 instead of creating a blank conversation.
+    if (!existsSync(sessionFile) && !this.sessions.has(key) && !this.opening.has(key)) {
+      throw new GhostError(
+        "not_found",
+        `This ghost has no conversation ${JSON.stringify(id)}.`,
+        404,
+      );
+    }
+    if (this.turnAdmissions.has(key)) {
+      throw new GhostError(
+        "session_busy",
+        "Wait for this conversation to finish before generating a recap.",
+        409,
+      );
+    }
+    if (signal?.aborted) return null;
+
+    const hosted = (await this.open(ghostName, id)) as HostedSession;
+    if (this.turnAdmissions.has(key) || this.sessionOwned(hosted)) {
+      throw new GhostError(
+        "session_busy",
+        "Wait for this conversation to finish before generating a recap.",
+        409,
+      );
+    }
+    await hosted.mcp?.reload;
+    if (this.turnAdmissions.has(key) || this.sessionOwned(hosted)) {
+      throw new GhostError(
+        "session_busy",
+        "Wait for this conversation to finish before generating a recap.",
+        409,
+      );
+    }
+    if (hosted.session.messages.length === 0 || signal?.aborted) return null;
+
+    const controller = new AbortController();
+    const onAbort = () => controller.abort(signal?.reason);
+    signal?.addEventListener("abort", onAbort, { once: true });
+
+    let tracked!: Promise<string | null>;
+    const generation = hosted.session.runEphemeralTurn({
+      promptText: buildRecapPrompt(hosted.session.sessionName),
+      signal: controller.signal,
+    }).then(({ replyText }) => normalizeRecap(replyText));
+    tracked = generation.catch((error: unknown) => {
+      if (!controller.signal.aborted) {
+        this.logger.warn("conversation recap generation failed", {
+          ghost: ghostName,
+          session: id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      return null;
+    }).finally(() => {
+      signal?.removeEventListener("abort", onAbort);
+      if (hosted.recap?.task === tracked) hosted.recap = undefined;
+      this.touchSession(hosted);
+    });
+    hosted.recap = { controller, task: tracked };
+    const recap = await tracked;
+    await this.settleDeferredSession(hosted);
+    return recap;
   }
 
   /**
@@ -3411,6 +3544,10 @@ export class SessionHost {
     const identity = conversationIdentity(runtime, id);
     const piKey = this.keyOf(ghostName, sessionId);
     const deleteKey = deletionKeyOf(ghostName, runtime, id);
+    if (runtime === "pi") {
+      const recapCancellation = this.cancelRecap(piKey);
+      if (recapCancellation) await recapCancellation;
+    }
     const hosted = runtime === "pi" ? this.sessions.get(piKey) : undefined;
     const busy = runtime === "pi"
       ? this.opening.has(piKey)
@@ -3587,9 +3724,10 @@ export class SessionHost {
     const hosted = [...this.sessions].filter(([key]) => sessionKeyParts(key)[0] === ghostName);
     // Title generation can still append to an otherwise-idle transcript. Let
     // it settle before the home moves out from under it.
-    const background = hosted
-      .flatMap(([, entry]) => [entry.title])
-      .filter((task): task is Promise<void> => task !== undefined);
+    for (const [, entry] of hosted) entry.recap?.controller.abort();
+    const background: Promise<unknown>[] = hosted
+      .flatMap(([, entry]) => [entry.title, entry.recap?.task])
+      .filter((task) => task !== undefined);
     if (background.length > 0) await Promise.allSettled(background);
 
     for (const [key] of hosted) await this.closePi(ghostName, sessionKeyParts(key)[1]);
@@ -3617,6 +3755,9 @@ export class SessionHost {
       if (this.sessionOwned(hosted)) return true;
     }
     for (const key of this.opening.keys()) {
+      if (sessionKeyParts(key)[0] === ghostName) return true;
+    }
+    for (const key of this.turnAdmissions) {
       if (sessionKeyParts(key)[0] === ghostName) return true;
     }
     for (const key of this.closing.keys()) {
@@ -3755,6 +3896,8 @@ export class SessionHost {
     const failures: unknown[] = [];
     await this.collectCleanupFailure(failures, () => this.beginHostedDispose(hosted));
     await this.collectCleanupFailure(failures, () => this.detachHostedOwnership(hosted));
+    await this.collectCleanupFailure(failures, () => hosted.recap?.controller.abort());
+    await this.collectCleanupFailure(failures, () => hosted.recap?.task);
     await this.collectCleanupFailure(failures, () => this.abortHostedBash(hosted));
     await this.collectCleanupFailure(failures, () => this.abortHostedSession(hosted));
     await this.collectCleanupFailure(failures, () => this.closeHostedAsk(hosted));
@@ -3789,6 +3932,7 @@ export class SessionHost {
       this.launchCleanupStep(hosted, "abort bash", () => this.abortHostedBash(hosted));
       this.launchCleanupStep(hosted, "close ask", () => this.closeHostedAsk(hosted));
       this.launchCleanupStep(hosted, "abort title", () => hosted.titleAbort?.abort());
+      this.launchCleanupStep(hosted, "abort recap", () => hosted.recap?.controller.abort());
       this.launchCleanupStep(hosted, "abort session", () => this.abortHostedSession(hosted));
     }
   }

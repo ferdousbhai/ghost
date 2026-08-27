@@ -19,6 +19,7 @@
  *   GET  /api/ghosts/:name/sessions           → { sessions: [...] }, newest first
  *   GET  /api/ghosts/:name/events             → conversation invalidation SSE
  *   GET  /api/ghosts/:name/sessions/:id/commands → effective OMP slash commands
+ *   POST /api/ghosts/:name/sessions/:id/recap → transient one-line recap
  *   DELETE /api/ghosts/:name/sessions/:id     → delete one conversation
  *   PUT  /api/ghosts/:name/sessions/:id/read  → mark one conversation read
  *   GET  /api/ghosts/:name/sessions/:id/transcript → { id, title, messages, … }
@@ -1771,6 +1772,21 @@ createServer(async (req, res) => {
       return json(res, 409, { error: { code: "not_supported", message: "Claude Code has no OMP commands" } });
     }
     return json(res, 200, { commands: MOCK_COMMANDS });
+  }
+  if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "recap" && req.method === "POST") {
+    await readBody(req).catch(() => ({}));
+    const conversation = routeConversation(parts);
+    if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
+    if (conversation.runtime !== "pi") {
+      return json(res, 409, {
+        error: { code: "not_supported", message: "Claude Code has no ephemeral recap side channel" },
+      });
+    }
+    const s = ghostSessions(name).get(conversation.id);
+    if (!s) return json(res, 404, { error: { code: "not_found", message: "no such session" } });
+    return json(res, 200, {
+      recap: "You were shaping the launch notes into a clear plan. Next: choose the first section to finish.",
+    });
   }
   if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "transcript" && req.method === "GET") {
     for (const field of ["limit", "offset"]) {

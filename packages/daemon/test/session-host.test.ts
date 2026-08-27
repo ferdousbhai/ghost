@@ -318,6 +318,120 @@ describe("OMP slash commands", () => {
   });
 });
 
+describe("SessionHost recap", () => {
+  it("uses OMP's ephemeral snapshot without changing the transcript", async () => {
+    await setup([
+      { kind: "text", text: "We are shaping the launch notes." },
+      { kind: "text", text: "You are shaping the launch notes. Next: finish the opening section." },
+    ], {
+      title: { enabled: false },
+    }, {
+      sequential: true,
+    });
+    await host!.runTurn("casper", {
+      sessionId: "conv-recap",
+      prompt: "Help me finish the launch notes.",
+      emit: () => {},
+    });
+    const handle = await host!.open("casper", "conv-recap");
+    const before = readFileSync(handle.sessionFile!, "utf8");
+
+    await expect(host!.recap("casper", "conv-recap")).resolves.toBe(
+      "You are shaping the launch notes. Next: finish the opening section.",
+    );
+
+    expect(readFileSync(handle.sessionFile!, "utf8")).toBe(before);
+    expect(provider!.requests).toHaveLength(2);
+    expect(JSON.stringify(provider!.requests[1]?.messages)).toContain("<recap>");
+    expect(JSON.stringify(provider!.requests[1]?.messages)).toContain(
+      "Help me finish the launch notes.",
+    );
+  });
+
+  it("keeps failure pure-upside and refuses unknown or non-Pi conversations", async () => {
+    await setup([{ kind: "text", text: "Conversation established." }], {
+      title: { enabled: false },
+    });
+    await host!.runTurn("casper", {
+      sessionId: "conv-recap-failure",
+      prompt: "Start here.",
+      emit: () => {},
+    });
+    const handle = await host!.open("casper", "conv-recap-failure");
+    vi.spyOn(handle.session, "runEphemeralTurn")
+      .mockRejectedValueOnce(new Error("provider unavailable"));
+
+    await expect(host!.recap("casper", "conv-recap-failure")).resolves.toBeNull();
+    await expect(host!.recap("casper", "missing"))
+      .rejects.toMatchObject({ code: "not_found", status: 404 });
+    await expect(host!.recap("casper", "conv-recap-failure", "claude-code"))
+      .rejects.toMatchObject({ code: "not_supported", status: 409 });
+  });
+
+  it("aborts an in-flight recap before admitting the owner's next turn", async () => {
+    const recapBarrier = createMockProviderBarrier();
+    await setup([
+      { kind: "text", text: "First turn complete." },
+      { kind: "text", text: "Stale recap.", barrier: recapBarrier },
+      { kind: "text", text: "The owner turn won." },
+    ], {
+      title: { enabled: false },
+    }, {
+      sequential: true,
+    });
+    await host!.runTurn("casper", {
+      sessionId: "conv-recap-preempt",
+      prompt: "First turn.",
+      emit: () => {},
+    });
+
+    const recap = host!.recap("casper", "conv-recap-preempt");
+    await recapBarrier.waitForArrivals();
+    const events: PiMessagesEvent[] = [];
+    const ownerTurn = host!.runTurn("casper", {
+      sessionId: "conv-recap-preempt",
+      prompt: "I am back.",
+      emit: (event) => events.push(event),
+    });
+    await ownerTurn;
+    recapBarrier.release();
+
+    await expect(recap).resolves.toBeNull();
+    expect(events.at(-1)?.type).toBe("done");
+    expect(provider!.requests).toHaveLength(3);
+  });
+
+  it("lets an owner turn win while recap is still reopening an evicted session", async () => {
+    await setup([
+      { kind: "text", text: "Stored conversation." },
+      { kind: "text", text: "Owner resumed." },
+    ], {
+      title: { enabled: false },
+    }, {
+      sequential: true,
+    });
+    await host!.runTurn("casper", {
+      sessionId: "conv-recap-opening",
+      prompt: "Store this turn.",
+      emit: () => {},
+    });
+    await host!.close("casper", "conv-recap-opening");
+
+    const recap = host!.recap("casper", "conv-recap-opening");
+    const events: PiMessagesEvent[] = [];
+    const ownerTurn = host!.runTurn("casper", {
+      sessionId: "conv-recap-opening",
+      prompt: "Resume before recap opens.",
+      emit: (event) => events.push(event),
+    });
+
+    await expect(recap).rejects.toMatchObject({ code: "session_busy", status: 409 });
+    await ownerTurn;
+    expect(events.at(-1)?.type).toBe("done");
+    expect(provider!.requests).toHaveLength(2);
+  });
+});
+
 describe("SessionHost.open", () => {
   it("keeps sessions, settings, and models inside the ghost home", async () => {
     const { dir } = await setup([{ kind: "text", text: "hello" }]);
