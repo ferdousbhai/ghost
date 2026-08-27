@@ -75,7 +75,7 @@ describe("GhostRegistry.list", () => {
 });
 
 describe("GhostRegistry.create", () => {
-  it("seeds character.md and the ghost-home/v1 directories", () => {
+  it("seeds character.md and steady-state ghost-home/v2 directories", () => {
     temp = makeTempGhosts();
     temp.registry.ensureRoot();
     const ghost = temp.registry.create("casper");
@@ -84,9 +84,10 @@ describe("GhostRegistry.create", () => {
     const character = readFileSync(ghostPaths(ghost.dir).characterFile, "utf8");
     expect(character).toMatch(/^# casper\n/);
     expect(character).not.toContain("title:");
-    for (const sub of ["docs", "memory", "conversations"]) {
+    for (const sub of ["memory", "conversations"]) {
       expect(existsSync(join(ghost.dir, sub)), sub).toBe(true);
     }
+    expect(existsSync(join(ghost.dir, "docs"))).toBe(false);
     expect(temp.registry.list().map((entry) => entry.name)).toEqual(["casper"]);
   });
 

@@ -1,6 +1,6 @@
 pragma ComponentBehavior: Bound
 
-// Manage the active ghost's project MCP servers. The catalog is intentionally
+// Manage the active ghost's visible mcp.json servers. The catalog is intentionally
 // sanitized: credentials are described only as configured key names/counts.
 // Editing is a full replacement, so any hidden values must be re-entered and
 // explicitly acknowledged before the UI will send the new JSON.
@@ -385,7 +385,7 @@ Rectangle {
                             Text {
                                 width: parent.width
                                 text: McpConfig.transport(serverRow.modelData).toUpperCase()
-                                    + " · " + root.textOf(serverRow.modelData.source || "project")
+                                    + " · " + root.textOf(serverRow.modelData.source || "ghost")
                                 color: Theme.foregroundDim
                                 font.family: Theme.fontFamilyMono
                                 font.pixelSize: Theme.fontSizeSmall - 1
@@ -846,7 +846,7 @@ Rectangle {
                             visible: !root.editorOpen && root.selectedServer === null
                             text: Ghostd.mcpLoading ? "Loading MCP servers…"
                                 : (Ghostd.activeGhost === "" ? "Select a ghost to manage MCP servers."
-                                    : "Add an MCP server to give this ghost another project tool.")
+                                    : "Add an MCP server to give this ghost another local tool.")
                             color: Theme.foregroundDim
                             font.family: Theme.fontFamily
                             font.pixelSize: Theme.fontSize
@@ -863,7 +863,7 @@ Rectangle {
         anchors.fill: parent
         open: root.pendingDeleteName !== ""
         title: "Delete MCP server?"
-        body: "Remove “" + root.pendingDeleteName + "” from this ghost's project MCP configuration?"
+        body: "Remove “" + root.pendingDeleteName + "” from this ghost's mcp.json?"
         confirmText: "Delete"
         busy: Ghostd.mcpMutating
         error: root.pendingDeleteName !== "" ? Ghostd.mcpError : ""

@@ -153,26 +153,32 @@ FloatingWindow {
 
     /** Move between the ghost's chat, context, and capability surfaces. */
     function showSection(section: string): void {
-        if (["chat", "docs", "memory", "agents", "commands", "mcp", "connect", "character"]
+        if (["chat", "docs", "memory", "agents", "commands", "hooks", "mcp", "connect", "character"]
                 .indexOf(section) < 0)
             return;
         hud.loginOpen = false;
         hud.switcherOpen = false;
+        projectChip.hide();
         hud.currentSection = section;
         if (section === "chat") {
             composer.take();
         } else if (section === "commands") {
             Ghostd.fetchCommands(false);
+        } else if (section === "hooks") {
+            Ghostd.fetchHooks(false);
         } else if (section === "mcp") {
             Ghostd.fetchMcp(false);
         } else if (section === "connect") {
             Ghostd.fetchConnect(false);
+        } else if (section === "docs") {
+            Ghostd.fetchDocuments("", "", false, false);
         } else {
             Ghostd.fetchContext(false);
         }
     }
 
     function open(): void {
+        projectChip.hide();
         hud.shown = true;
         // The "focus" half of launch-or-focus. A freshly mapped toplevel is
         // auto-focused by Hyprland; this also pulls an already-open window
@@ -189,11 +195,13 @@ FloatingWindow {
     }
 
     function close(): void {
+        projectChip.hide();
         hud.loginOpen = false;
         hud.shown = false;
     }
 
     function openLogin(): void {
+        projectChip.hide();
         hud.currentSection = "chat";
         hud.loginFromSwitcher = false;
         hud.switcherOpen = false;
@@ -203,6 +211,7 @@ FloatingWindow {
 
     /** Open the model switcher over the transcript. */
     function openSwitcher(): void {
+        projectChip.hide();
         hud.currentSection = "chat";
         hud.loginOpen = false;
         hud.switcherOpen = true;
@@ -211,6 +220,7 @@ FloatingWindow {
 
     /** Reach the provider login from the switcher; closing it returns to the switcher. */
     function openLoginFromSwitcher(): void {
+        projectChip.hide();
         hud.currentSection = "chat";
         hud.loginFromSwitcher = true;
         hud.switcherOpen = false;
@@ -220,6 +230,7 @@ FloatingWindow {
 
     /** Authenticate a model already selected in the switcher; completion returns to chat. */
     function openLoginForSelectedModel(): void {
+        projectChip.hide();
         hud.currentSection = "chat";
         hud.loginFromSwitcher = false;
         hud.switcherOpen = false;
@@ -296,6 +307,9 @@ FloatingWindow {
                 event.accepted = true;
             } else if (hud.pendingBranchEntryId !== "") {
                 hud.dismissBranch();
+                event.accepted = true;
+            } else if (projectChip.panelOpen) {
+                projectChip.hide();
                 event.accepted = true;
             } else if (Ghostd.streaming) {
                 Ghostd.cancel();
@@ -383,6 +397,7 @@ FloatingWindow {
             Item {
                 Layout.fillWidth: true
                 implicitHeight: 32
+                z: 20
 
                 Row {
                     anchors.left: parent.left
@@ -436,6 +451,15 @@ FloatingWindow {
                     anchors.right: parent.right
                     anchors.verticalCenter: parent.verticalCenter
                     spacing: Theme.pad
+
+                    ProjectChip {
+                        id: projectChip
+                        anchors.verticalCenter: parent.verticalCenter
+                        visible: Ghostd.activeGhost !== ""
+                        compact: hud.bodyWidth < 760
+                        availableWidth: Math.max(300, hud.bodyWidth - Theme.pad)
+                        availableHeight: Math.max(260, hud.height - Theme.pad * 2 - 44)
+                    }
 
                     // Current-model indicator → opens the switcher. Shows the
                     // model name (or id), a vision badge, a "default" hint when
@@ -1049,16 +1073,26 @@ FloatingWindow {
                 }
             }
 
-            // Docs, memory, OMP helpers, and character replace chat rather than
+            // Memory, inactive agent definitions, and character replace chat rather than
             // nesting its roster/conversation sidebar inside their own index.
             ContextBrowser {
                 id: contextBrowser
-                visible: ["docs", "memory", "agents", "character"]
+                visible: ["memory", "agents", "character"]
                     .indexOf(hud.currentSection) >= 0
                     && !hud.loginOpen && !hud.switcherOpen
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 section: hud.currentSection
+            }
+
+            // Machine-shared Documents have their own lazy folder hierarchy;
+            // unlike ghost context, it survives ghost selection and rename.
+            DocumentsBrowser {
+                id: documentsBrowser
+                visible: hud.currentSection === "docs"
+                    && !hud.loginOpen && !hud.switcherOpen
+                Layout.fillWidth: true
+                Layout.fillHeight: true
             }
 
             // The effective OMP command palette is conversation-scoped. A pick
@@ -1073,6 +1107,16 @@ FloatingWindow {
                     hud.currentSection = "chat";
                     composer.stageCommand(invocation);
                 }
+            }
+
+            // Machine-level hook configuration is global and display-only. It
+            // never creates or selects a conversation merely to show status.
+            HooksBrowser {
+                id: hooksBrowser
+                visible: hud.currentSection === "hooks"
+                    && !hud.loginOpen && !hud.switcherOpen
+                Layout.fillWidth: true
+                Layout.fillHeight: true
             }
 
             McpBrowser {
@@ -1128,6 +1172,7 @@ FloatingWindow {
             anchors.bottom: parent.bottom
             width: hud.navigationWidth
             currentSection: hud.currentSection
+            activeHookCount: Ghostd.activeHookCount
             onSelected: section => hud.showSection(section)
         }
 
@@ -1179,8 +1224,9 @@ FloatingWindow {
             anchors.fill: parent
             open: hud.pendingDeleteGhost !== ""
             title: "Banish " + hud.pendingDeleteGhost + "?"
-            body: "Its memories, docs, and conversations move to the trash. "
-                + "Type “" + hud.pendingDeleteGhost + "” to confirm."
+            body: "Its persona, memories, credentials, and conversations move to Trash. "
+                + "Shared Documents stay on this machine. Type “"
+                + hud.pendingDeleteGhost + "” to confirm."
             challenge: hud.pendingDeleteGhost
             confirmText: "Banish"
             busy: Ghostd.deletingGhost === hud.pendingDeleteGhost

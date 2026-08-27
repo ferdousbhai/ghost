@@ -1,0 +1,80 @@
+[
+  {
+    "name": "valid https origin and path",
+    "input": "https://example.com/mcp/v1",
+    "expected": "https://example.com/mcp/v1",
+    "sentinels": []
+  },
+  {
+    "name": "valid http loopback port and path",
+    "input": "http://127.0.0.1:8080/events",
+    "expected": "http://127.0.0.1:8080/events",
+    "sentinels": []
+  },
+  {
+    "name": "userinfo query and fragment",
+    "input": "https://MCP_URL_USERNAME_SENTINEL:MCP_URL_PASSWORD_SENTINEL@example.com/mcp?token=MCP_URL_QUERY_SENTINEL&region=eu#MCP_URL_FRAGMENT_SENTINEL",
+    "expected": "https://example.com/mcp?token=%5Bconfigured%5D&region=%5Bconfigured%5D",
+    "sentinels": [
+      "MCP_URL_USERNAME_SENTINEL",
+      "MCP_URL_PASSWORD_SENTINEL",
+      "MCP_URL_QUERY_SENTINEL",
+      "MCP_URL_FRAGMENT_SENTINEL"
+    ]
+  },
+  {
+    "name": "fragment without query",
+    "input": "https://example.com/events#MCP_URL_FRAGMENT_ONLY_SENTINEL",
+    "expected": "https://example.com/events",
+    "sentinels": ["MCP_URL_FRAGMENT_ONLY_SENTINEL"]
+  },
+  {
+    "name": "templated authority",
+    "input": "https://MCP_URL_USERNAME_SENTINEL:MCP_URL_PASSWORD_SENTINEL@${MCP_HOST_TEMPLATE}/mcp?token=MCP_URL_QUERY_SENTINEL#MCP_URL_FRAGMENT_SENTINEL",
+    "expected": "[configured]",
+    "sentinels": [
+      "MCP_URL_USERNAME_SENTINEL",
+      "MCP_URL_PASSWORD_SENTINEL",
+      "MCP_HOST_TEMPLATE",
+      "MCP_URL_QUERY_SENTINEL",
+      "MCP_URL_FRAGMENT_SENTINEL"
+    ]
+  },
+  {
+    "name": "malformed URL",
+    "input": "not a URL MCP_URL_MALFORMED_SENTINEL?token=MCP_URL_QUERY_SENTINEL#MCP_URL_FRAGMENT_SENTINEL",
+    "expected": "[configured]",
+    "sentinels": [
+      "MCP_URL_MALFORMED_SENTINEL",
+      "MCP_URL_QUERY_SENTINEL",
+      "MCP_URL_FRAGMENT_SENTINEL"
+    ]
+  },
+  {
+    "name": "opaque URL",
+    "input": "mailto:MCP_URL_OPAQUE_SENTINEL@example.com?token=MCP_URL_QUERY_SENTINEL#MCP_URL_FRAGMENT_SENTINEL",
+    "expected": "[configured]",
+    "sentinels": [
+      "MCP_URL_OPAQUE_SENTINEL",
+      "MCP_URL_QUERY_SENTINEL",
+      "MCP_URL_FRAGMENT_SENTINEL"
+    ]
+  },
+  {
+    "name": "non-http hierarchical URL",
+    "input": "ftp://MCP_URL_USERNAME_SENTINEL:MCP_URL_PASSWORD_SENTINEL@example.com/private?token=MCP_URL_QUERY_SENTINEL#MCP_URL_FRAGMENT_SENTINEL",
+    "expected": "[configured]",
+    "sentinels": [
+      "MCP_URL_USERNAME_SENTINEL",
+      "MCP_URL_PASSWORD_SENTINEL",
+      "MCP_URL_QUERY_SENTINEL",
+      "MCP_URL_FRAGMENT_SENTINEL"
+    ]
+  },
+  {
+    "name": "http opaque form",
+    "input": "https:MCP_URL_HTTP_OPAQUE_SENTINEL",
+    "expected": "[configured]",
+    "sentinels": ["MCP_URL_HTTP_OPAQUE_SENTINEL"]
+  }
+]

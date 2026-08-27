@@ -30,6 +30,7 @@ interface LiveController {
 }
 
 type LiveControllerFactory = (options: LiveSessionControllerOptions) => LiveController;
+type SendCustomMessage = AgentSession["sendCustomMessage"];
 
 interface LiveVoiceRecord {
   controller?: LiveController;
@@ -94,7 +95,11 @@ export class LiveVoiceManager {
     }
   }
 
-  async start(sessionKey: string, session: AgentSession): Promise<LiveVoiceStatus> {
+  async start(
+    sessionKey: string,
+    session: AgentSession,
+    sendCustomMessage?: SendCustomMessage,
+  ): Promise<LiveVoiceStatus> {
     const existing = this.records.get(sessionKey);
     if (existing?.controller) return cloneStatus(existing.status);
 
@@ -139,8 +144,17 @@ export class LiveVoiceManager {
         this.notifyInactive(sessionKey);
       },
     };
+    const controllerSession = sendCustomMessage
+      ? new Proxy(session, {
+          get(target, property) {
+            if (property === "sendCustomMessage") return sendCustomMessage;
+            const value = Reflect.get(target, property, target) as unknown;
+            return typeof value === "function" ? value.bind(target) : value;
+          },
+        })
+      : session;
     controller = this.createController({
-      session,
+      session: controllerSession,
       callbacks,
       extractAssistantText: assistantText,
       voice: session.settings.get("live.voice"),

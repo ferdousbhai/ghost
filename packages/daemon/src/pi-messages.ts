@@ -62,6 +62,8 @@ export type PiMessagesEvent =
       id: string;
       toolName: string;
       arguments: unknown;
+      /** Absolute working directory captured when this exact call began. */
+      cwd: string;
       intent?: string;
     }
   | {
@@ -265,7 +267,7 @@ export function parsePiMessagesRequest(body: unknown): PiMessagesRequest {
 export interface PiMessagesAdapterOptions {
   /**
    * Forward `thinking_*` blocks. Off by default: reasoning quotes the ghost's
-   * private memory and docs verbatim, and the hosted UI never showed it to
+   * private memory and the owner's Documents verbatim, and the hosted UI never showed it to
    * users either. Suppressed blocks consume no wire index.
    */
   includeThinking?: boolean;
@@ -276,6 +278,8 @@ export interface PiMessagesAdapterOptions {
   skipOwnerMessages?: number;
   /** Let the harness hold `done` across hidden session-stop continuations. */
   deferAgentEnd?: boolean;
+  /** Session cwd snapshot captured independently for every tool start. */
+  getCwd?: () => string;
 }
 
 export interface PiMessagesAdapter {
@@ -518,6 +522,7 @@ export function createPiMessagesAdapter(
             id: event.toolCallId,
             toolName: event.toolName,
             arguments: event.args,
+            cwd: options.getCwd?.() ?? process.cwd(),
             ...(event.intent ? { intent: event.intent } : {}),
           });
           return;

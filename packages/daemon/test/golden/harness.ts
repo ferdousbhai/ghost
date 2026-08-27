@@ -22,18 +22,16 @@
  *   active registry reports it.
  * - **The pi-messages event stream** of every turn, canonicalised.
  * - **The rendered transcript** and the conversation listing.
- * - **The ghost home on disk** after the conversation — plain files, which is
- *   the whole storage contract.
+ * - **The ghost home on disk** after the conversation, including the names of
+ *   opaque runtime artifacts owned there.
  *
  * ## What is deliberately excluded, and why
  *
  * - **OMP's own system prompt** (everything before the persona section). It
- *   embeds the workstation — kernel string, CPU model, GPU, `$TERM` — and, on a
- *   session, whatever global instructions and skills the *developer's* own
- *   machine happens to have through the retained capability providers. It can
- *   never be byte-stable across machines. `personaOf()` below
- *   slices it away; the harness invariants that guard it (env scrubbing, the
- *   settings overrides) have their own unit tests.
+ *   embeds workstation details such as the kernel, CPU, GPU, and `$TERM`, so it
+ *   cannot be byte-stable across machines. `personaOf()` below slices it away;
+ *   focused tests separately pin the explicit ghost/project snapshots and the
+ *   absence of ambient owner-home resources.
  * - **`agentDir` internals** — `.pi/agent.db`, the `sessions/*.jsonl`
  *   transcripts. Binary/SQLite and full of ids and clock values; the rendered
  *   transcript is the same information in a stable shape.
@@ -49,8 +47,8 @@
  *   fixture therefore records a *presence table* over a named universe of tools
  *   (`toolSurfaceTable`) rather than the raw list, so a strip that drops or
  *   renames a tool still fails without pinning presentation internals. Ambient
- *   machine MCP is no longer a source of variation: a focused session-host test
- *   pins that only the ghost home's `mcp.json` loads.
+ *   machine MCP is no longer a source of variation: focused SessionHost tests
+ *   pin the visible ghost config plus the explicitly bound project snapshot.
  *
  * Tool-call ids (`call_1`, …) and token usage are NOT normalised: the mock
  * provider mints both deterministically, so a change there is a real change.
@@ -222,15 +220,15 @@ export function personaOf(systemPrompt: string, anchor: string): string {
  * sorted by path.
  *
  * Two directories are listed by name only, never by content:
- * `.pi/` (credentials and derived OMP runtime — `agent.db` is SQLite, plus
- * WAL/shm files that differ byte-for-byte every run) and `sessions/` (raw OMP
- * transcripts, full of ids and clock values; the rendered transcript covers
- * the same ground in a stable shape). Listing their *filenames* still pins the
- * contract that sessions and machine state live inside the ghost home.
+ * `.pi/` (OMP's agent dir — `agent.db` is SQLite, plus WAL/shm files that
+ * differ byte-for-byte every run) and `sessions/` (raw OMP transcripts, full
+ * of ids and clock values; the rendered transcript covers the same ground in a
+ * stable shape). Listing their *filenames* still pins the contract that
+ * sessions and agent state live inside the ghost home.
  *
- * What remains is the whole of Ghost's own storage contract: character.md,
- * docs/, memory/, and visible configuration — plain files, which is exactly
- * the invariant a strip could break without any unit test noticing.
+ * The remaining visible files pin this fixture's ghost-owned persona, memory,
+ * and policy state. Owner Documents and Claude's native transcript have
+ * separate lifecycles and deliberately are not represented here.
  */
 export function ghostHomeSnapshot(
   dir: string,
@@ -302,7 +300,7 @@ export function toolSurfaceTable(
   const yn = (value: boolean) => (value ? "yes" : "no ");
   const rows = [...universe].sort().map((name) =>
     `${name.padEnd(width)}  registry=${yn(inRegistry.has(name))}  wire=${yn(onWire.has(name))}`
-    + (resolvable ? `  invokable=${yn(resolvable(name))}` : ""));
+    + (resolvable ? `  invokable=${yn(resolvable(name)).trimEnd()}` : ""));
   // Deliberately not a count: how many extras a machine contributes is exactly
   // the part that is not portable.
   rows.push("(tools outside this universe are not compared)");

@@ -1,19 +1,18 @@
 .pragma library
 
 // Keep destructive targeting and post-delete selection independent from the
-// visual delegates. Character and helper rows deliberately yield no target.
+// visual delegates. Only memory is ghost-scoped and deletable here; machine
+// Documents have their own authenticated route and reducer.
 
 function text(value) {
     return value === undefined || value === null ? "" : String(value);
 }
 
 function target(section, row) {
-    if ((section !== "docs" && section !== "memory") || !row) return null;
+    if (section !== "memory" || !row) return null;
     const path = text(row.path).trim();
     if (path === "") return null;
-    const title = section === "docs"
-        ? (text(row.title).trim() || text(row.relativePath).trim() || path)
-        : (text(row.slug).trim() || text(row.description).trim() || path);
+    const title = text(row.slug).trim() || text(row.description).trim() || path;
     return { section: section, path: path, title: title };
 }
 

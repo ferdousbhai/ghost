@@ -1,8 +1,10 @@
 pragma ComponentBehavior: Bound
 
 // Browse the active ghost's durable context without bringing the conversation
-// sidebar along. Documents and character remain real files; memory and helper
-// definitions are deliberately rendered as read-only snapshot data.
+// sidebar along. Character remains a real file; memory and confined agent
+// definitions are deliberately rendered as read-only snapshot data. Agent
+// definitions are inactive until the isolated task runtime exists. Machine Documents use
+// DocumentsBrowser and never enter this ghost-scoped surface.
 import QtQuick
 import qs.services
 import "ContextDelete.js" as ContextDelete
@@ -10,10 +12,9 @@ import "ContextDelete.js" as ContextDelete
 Rectangle {
     id: root
 
-    /** One of docs, memory, agents, or character. */
+    /** One of memory, agents, or character. */
     required property string section
 
-    property string selectedDocPath: ""
     property string selectedMemorySlug: ""
     property string selectedAgentName: ""
     property bool narrowDetailOpen: false
@@ -21,36 +22,25 @@ Rectangle {
     property string pendingDeleteSection: ""
     property string pendingDeletePath: ""
     property string pendingDeleteTitle: ""
-    property bool deleteClosedDoc: false
-    property alias docSearchText: searchInput.text
 
-    readonly property bool validSection: ["docs", "memory", "agents", "character"]
+    readonly property bool validSection: ["memory", "agents", "character"]
         .indexOf(root.section) >= 0
     readonly property int indexWidth: Theme.pad * 13
     readonly property int detailMinimumWidth: Theme.pad * 17 + Theme.gap
     readonly property bool narrow: root.width
         < root.indexWidth + root.detailMinimumWidth + Theme.sectionGap
 
-    readonly property var docs: Array.isArray(Ghostd.contextDocs)
-        ? Ghostd.contextDocs : []
     readonly property var memory: Array.isArray(Ghostd.contextMemory)
         ? Ghostd.contextMemory : []
-    readonly property var agents: Array.isArray(Ghostd.contextAgents)
-        ? Ghostd.contextAgents : []
+    readonly property var agents: (Array.isArray(Ghostd.contextAgents)
+        ? Ghostd.contextAgents : []).filter(function (agent) {
+            return agent && agent.source === "project";
+        })
     readonly property var skipped: Array.isArray(Ghostd.contextSkipped)
         ? Ghostd.contextSkipped : []
     readonly property var character: Ghostd.contextCharacter || null
 
-    readonly property string docQuery: root.docSearchText.trim().toLowerCase()
-    readonly property var filteredDocs: root.docs.filter(function (doc) {
-        if (root.docQuery === "") return true;
-        const tags = doc && Array.isArray(doc.tags) ? doc.tags.join(" ") : "";
-        const haystack = root.textOf(doc ? doc.title : "") + " "
-            + root.textOf(doc ? doc.relativePath : "") + " " + tags;
-        return haystack.toLowerCase().indexOf(root.docQuery) >= 0;
-    })
     readonly property var sectionRows: {
-        if (root.section === "docs") return root.filteredDocs;
         if (root.section === "memory") return root.memory;
         if (root.section === "agents") return root.agents;
         return [];
@@ -59,15 +49,12 @@ Rectangle {
         return entry && entry.section === root.section;
     })
 
-    readonly property var selectedDoc: root.findBy(root.docs, "path", root.selectedDocPath)
     readonly property var selectedMemory:
         root.findBy(root.memory, "slug", root.selectedMemorySlug)
     readonly property var selectedAgent:
         root.findBy(root.agents, "name", root.selectedAgentName)
 
     readonly property string editorRelativePath: {
-        if (root.section === "docs" && root.selectedDoc)
-            return root.textOf(root.selectedDoc.path);
         if (root.section === "character" && root.characterPaneOpen && root.character)
             return root.textOf(root.character.path);
         return "";
@@ -75,17 +62,16 @@ Rectangle {
     readonly property string editorAbsolutePath: root.editorRelativePath === ""
         ? "" : Workbench.absolute(root.editorRelativePath)
     readonly property bool editorVisible: root.editorAbsolutePath !== ""
-        && ((root.section === "docs" && root.selectedDoc)
-            || (root.section === "character" && root.characterPaneOpen))
+        && root.section === "character" && root.characterPaneOpen
 
     readonly property var agentFields: {
         const agent = root.selectedAgent;
         if (!agent) return [];
         return [
             { label: "Source", value: root.valueOr(agent.source, "Not specified") },
-            { label: "Tools", value: root.toolValue(agent.tools) },
-            { label: "Model routing", value: root.modelValue(agent.model) },
-            { label: "Can delegate to", value: root.spawnValue(agent.spawns) }
+            { label: "Declared tools", value: root.toolValue(agent.tools) },
+            { label: "Declared model routing", value: root.modelValue(agent.model) },
+            { label: "Declared delegation", value: root.spawnValue(agent.spawns) }
         ];
     }
 
@@ -104,18 +90,18 @@ Rectangle {
     }
 
     function toolValue(value: var): string {
-        if (!Array.isArray(value) || value.length === 0) return "All available tools";
+        if (!Array.isArray(value) || value.length === 0) return "No tool restriction declared";
         return value.join(", ");
     }
 
     function modelValue(value: var): string {
-        if (!Array.isArray(value) || value.length === 0) return "Active model";
+        if (!Array.isArray(value) || value.length === 0) return "No model override declared";
         return value.join(", ");
     }
 
     function spawnValue(value: var): string {
-        if (value === "*") return "Any available helper";
-        if (!Array.isArray(value)) return "No one";
+        if (value === "*") return "Any named agent definition";
+        if (!Array.isArray(value)) return "No delegation declared";
         return value.length === 0 ? "None" : value.join(", ");
     }
 
@@ -128,16 +114,10 @@ Rectangle {
     }
 
     function sectionTitle(): string {
-        if (root.section === "docs") return "Docs";
         if (root.section === "memory") return "Memory";
-        if (root.section === "agents") return "Helpers";
+        if (root.section === "agents") return "Agent definitions (inactive)";
         if (root.section === "character") return "Character";
         return "Context";
-    }
-
-    function docTitle(doc: var): string {
-        if (!doc) return "Untitled document";
-        return root.valueOr(doc.title, root.valueOr(doc.relativePath, "Untitled document"));
     }
 
     function memoryTitle(item: var): string {
@@ -145,27 +125,19 @@ Rectangle {
     }
 
     function rowTitle(row: var): string {
-        if (root.section === "docs") return root.docTitle(row);
         if (root.section === "memory") return root.memoryTitle(row);
-        if (root.section === "agents") return root.valueOr(row ? row.name : "", "Unnamed helper");
+        if (root.section === "agents")
+            return root.valueOr(row ? row.name : "", "Unnamed agent definition");
         return "";
     }
 
     function rowSubtitle(row: var): string {
-        if (root.section === "docs") return root.valueOr(row ? row.relativePath : "", "Path unavailable");
         if (root.section === "memory") return root.valueOr(row ? row.description : "", "No description");
         if (root.section === "agents") return root.valueOr(row ? row.description : "", "No description");
         return "";
     }
 
     function rowMeta(row: var): string {
-        if (root.section === "docs") {
-            const tags = row && Array.isArray(row.tags) && row.tags.length > 0
-                ? row.tags.join(" · ") : "";
-            const archived = row && row.archived === true ? "Archived" : "";
-            return archived !== "" && tags !== "" ? archived + " · " + tags
-                : (archived !== "" ? archived : tags);
-        }
         if (root.section === "memory") {
             const updated = root.textOf(row ? row.updated : "");
             return updated === "" ? "Update time unavailable" : "Updated " + updated;
@@ -177,8 +149,6 @@ Rectangle {
 
     function rowSelected(row: var): bool {
         if (!row) return false;
-        if (root.section === "docs")
-            return root.textOf(row.path) === root.selectedDocPath;
         if (root.section === "memory")
             return root.textOf(row.slug) === root.selectedMemorySlug;
         if (root.section === "agents")
@@ -188,24 +158,19 @@ Rectangle {
 
     function pick(row: var): void {
         if (!row) return;
-        if (root.section === "docs") root.selectedDocPath = root.textOf(row.path);
-        else if (root.section === "memory") root.selectedMemorySlug = root.textOf(row.slug);
+        if (root.section === "memory") root.selectedMemorySlug = root.textOf(row.slug);
         else if (root.section === "agents") root.selectedAgentName = root.textOf(row.name);
         if (root.narrow) root.narrowDetailOpen = true;
     }
 
     function ensureSelection(): void {
-        if (root.section === "docs" && !root.selectedDoc)
-            root.selectedDocPath = root.docs.length > 0 ? root.textOf(root.docs[0].path) : "";
-        else if (root.section === "memory" && !root.selectedMemory)
+        if (root.section === "memory" && !root.selectedMemory)
             root.selectedMemorySlug = root.memory.length > 0 ? root.textOf(root.memory[0].slug) : "";
         else if (root.section === "agents" && !root.selectedAgent)
             root.selectedAgentName = root.agents.length > 0 ? root.textOf(root.agents[0].name) : "";
     }
 
     function resetForGhost(): void {
-        root.docSearchText = "";
-        root.selectedDocPath = "";
         root.selectedMemorySlug = "";
         root.selectedAgentName = "";
         root.narrowDetailOpen = false;
@@ -213,11 +178,9 @@ Rectangle {
         root.pendingDeleteSection = "";
         root.pendingDeletePath = "";
         root.pendingDeleteTitle = "";
-        root.deleteClosedDoc = false;
     }
 
     function resetForSection(): void {
-        root.docSearchText = "";
         root.narrowDetailOpen = false;
         root.characterPaneOpen = true;
         root.ensureSelection();
@@ -227,22 +190,18 @@ Rectangle {
         if (Ghostd.activeGhost === "") return "No ghost selected";
         if (Ghostd.contextLoading) return "Loading context";
         if (Ghostd.contextError !== "") return "Context unavailable";
-        if (root.section === "docs" && root.docQuery !== "") return "No matching documents";
-        if (root.section === "docs") return "No documents found";
         if (root.section === "memory") return "No memories recorded";
-        if (root.section === "agents") return "No helpers available";
+        if (root.section === "agents") return "No agent definitions discovered";
         return "Context unavailable";
     }
 
     function sectionEmptyBody(): string {
         if (Ghostd.activeGhost === "") return "Choose a ghost before browsing its context.";
-        if (Ghostd.contextLoading) return "Reading the ghost home and available helpers.";
+        if (Ghostd.contextLoading) return "Reading ghost-home context.";
         if (Ghostd.contextError !== "") return "Refresh to try reading the snapshot again.";
-        if (root.section === "docs" && root.docQuery !== "")
-            return "Try another title, path, or tag.";
-        if (root.section === "docs") return "Markdown files under docs/ will appear here.";
         if (root.section === "memory") return "Recorded memories will appear here with their update time.";
-        if (root.section === "agents") return "Helpers available from this ghost's directory will appear here.";
+        if (root.section === "agents")
+            return "Confined definitions from this ghost home appear here for inspection only.";
         return "This section could not be shown.";
     }
 
@@ -253,59 +212,32 @@ Rectangle {
         root.pendingDeleteSection = target.section;
         root.pendingDeletePath = target.path;
         root.pendingDeleteTitle = target.title;
-        root.deleteClosedDoc = false;
     }
 
     function confirmDelete(): void {
         if (root.pendingDeletePath === "" || Ghostd.contextDeletingPath !== "") return;
-        if (root.pendingDeleteSection === "docs"
-                && root.selectedDocPath === root.pendingDeletePath) {
-            // FilePane.flush() waits for its atomic write. Only after the
-            // buffer and disk agree do we hide/rebind the pane; otherwise a
-            // pending autosave could recreate the file after it reached Trash.
-            fileEditor.flush();
-            if (fileEditor.dirty || fileEditor.conflictText !== "") {
-                Ghostd.contextDeleteError = fileEditor.conflictText !== ""
-                    ? "Resolve the file conflict before moving this document to Trash."
-                    : "The document could not be saved. It was not moved to Trash.";
-                return;
-            }
-            root.deleteClosedDoc = true;
-            root.selectedDocPath = "";
-            if (root.narrow) root.narrowDetailOpen = false;
-        }
         Ghostd.deleteContextFile(root.pendingDeleteSection, root.pendingDeletePath);
     }
 
     function dismissDelete(): void {
         if (Ghostd.contextDeletingPath !== "") return;
-        if (root.deleteClosedDoc && root.pendingDeleteSection === "docs"
-                && root.findBy(root.docs, "path", root.pendingDeletePath)) {
-            root.selectedDocPath = root.pendingDeletePath;
-            if (root.narrow) root.narrowDetailOpen = true;
-        }
         root.pendingDeleteSection = "";
         root.pendingDeletePath = "";
         root.pendingDeleteTitle = "";
-        root.deleteClosedDoc = false;
         Ghostd.contextDeleteError = "";
     }
 
     function settleDeleteSelection(section: string, path: string): void {
-        if (section === "docs" && (root.selectedDocPath === path || root.deleteClosedDoc))
-            root.selectedDocPath = ContextDelete.nextValue(root.docs, path, "path");
-        else if (section === "memory" && root.selectedMemory
+        if (section === "memory" && root.selectedMemory
                 && root.textOf(root.selectedMemory.path) === path)
             root.selectedMemorySlug = ContextDelete.nextValue(root.memory, path, "slug");
         root.pendingDeleteSection = "";
         root.pendingDeletePath = "";
         root.pendingDeleteTitle = "";
-        root.deleteClosedDoc = false;
         Ghostd.contextDeleteError = "";
     }
 
     onSectionChanged: Qt.callLater(root.resetForSection)
-    onDocsChanged: root.ensureSelection()
     onMemoryChanged: root.ensureSelection()
     onAgentsChanged: root.ensureSelection()
 
@@ -487,122 +419,11 @@ Rectangle {
             width: root.narrow ? parent.width : root.indexWidth
             color: Theme.surface
 
-            Item {
-                id: indexControls
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.top: parent.top
-                height: root.section === "docs" && root.docs.length > 0
-                    ? indexControlsColumn.implicitHeight + Theme.pad * 2 : 0
-
-                Column {
-                    id: indexControlsColumn
-                    anchors.left: parent.left
-                    anchors.leftMargin: Theme.pad
-                    anchors.right: parent.right
-                    anchors.rightMargin: Theme.pad
-                    anchors.verticalCenter: parent.verticalCenter
-
-                    Rectangle {
-                        visible: root.section === "docs" && root.docs.length > 0
-                        width: parent.width
-                        height: Theme.controlHeight
-                        radius: Theme.radius / 2
-                        color: searchInput.activeFocus ? Theme.film(0.10) : Theme.film(0.06)
-                        border.width: searchInput.activeFocus ? 1 : 0
-                        border.color: Theme.amber(0.45)
-
-                        Behavior on color {
-                            enabled: !Theme.reducedMotion
-                            ColorAnimation { duration: Theme.durFast }
-                        }
-
-                        Text {
-                            id: searchMark
-                            anchors.left: parent.left
-                            anchors.leftMargin: Theme.gap
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: "⌕"
-                            color: Theme.foregroundFaint
-                            font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSize
-                        }
-
-                        TextInput {
-                            id: searchInput
-                            anchors.left: searchMark.right
-                            anchors.leftMargin: Theme.gap / 2
-                            anchors.right: clearSearch.left
-                            anchors.rightMargin: Theme.gap / 2
-                            anchors.verticalCenter: parent.verticalCenter
-                            color: Theme.foregroundBright
-                            font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSizeSmall
-                            selectByMouse: true
-                            selectionColor: Theme.selection
-                            clip: true
-                            Accessible.name: "Search documents"
-
-                            Keys.onEscapePressed: event => {
-                                event.accepted = root.docSearchText !== "";
-                                root.docSearchText = "";
-                            }
-
-                            Text {
-                                anchors.left: parent.left
-                                anchors.verticalCenter: parent.verticalCenter
-                                visible: root.docSearchText === ""
-                                text: "Search documents"
-                                color: Theme.foregroundDim
-                                font.family: Theme.fontFamily
-                                font.pixelSize: Theme.fontSizeSmall
-                            }
-                        }
-
-                        Item {
-                            id: clearSearch
-                            anchors.right: parent.right
-                            anchors.rightMargin: Theme.gap / 2
-                            anchors.verticalCenter: parent.verticalCenter
-                            width: root.docSearchText === "" ? 0 : Theme.controlHeight - Theme.pad
-                            height: parent.height
-                            visible: root.docSearchText !== ""
-
-                            Text {
-                                anchors.centerIn: parent
-                                text: "×"
-                                color: clearArea.containsMouse
-                                    ? Theme.foreground : Theme.foregroundFaint
-                                font.family: Theme.fontFamily
-                                font.pixelSize: Theme.fontSize
-                            }
-
-                            MouseArea {
-                                id: clearArea
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: root.docSearchText = ""
-                            }
-                        }
-                    }
-                }
-
-                Rectangle {
-                    visible: indexControls.height > 0
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.bottom: parent.bottom
-                    height: 1
-                    color: Theme.border
-                }
-            }
-
             Flickable {
                 id: indexScroll
                 anchors.left: parent.left
                 anchors.right: parent.right
-                anchors.top: indexControls.bottom
+                anchors.top: parent.top
                 anchors.bottom: parent.bottom
                 contentWidth: width
                 contentHeight: indexContent.implicitHeight + Theme.pad * 2
@@ -681,9 +502,7 @@ Rectangle {
                                     visible: text !== ""
                                     width: parent.width
                                     text: root.rowMeta(contextRow.modelData)
-                                    color: root.section === "docs"
-                                            && contextRow.modelData.archived === true
-                                        ? Theme.warn : Theme.foregroundFaint
+                                    color: Theme.foregroundFaint
                                     font.family: Theme.fontFamilyMono
                                     font.pixelSize: Theme.fontSizeSmall - 1
                                     elide: Text.ElideRight
@@ -695,7 +514,7 @@ Rectangle {
                                 anchors.right: parent.right
                                 anchors.rightMargin: Theme.gap / 2
                                 anchors.verticalCenter: parent.verticalCenter
-                                visible: root.section === "docs" || root.section === "memory"
+                                visible: root.section === "memory"
                                 width: visible ? Theme.controlHeight - Theme.gap : 0
                                 height: width
                                 radius: Theme.radius / 2
@@ -809,6 +628,7 @@ Rectangle {
                         model: root.skippedForSection
 
                         Rectangle {
+                            id: skippedRow
                             required property var modelData
                             width: indexContent.width
                             height: skippedCopy.implicitHeight + Theme.gap * 2
@@ -826,7 +646,7 @@ Rectangle {
 
                                 Text {
                                     width: parent.width
-                                    text: root.valueOr(parent.parent.modelData.path, "Unknown path")
+                                    text: root.valueOr(skippedRow.modelData.path, "Unknown path")
                                     color: Theme.warn
                                     font.family: Theme.fontFamilyMono
                                     font.pixelSize: Theme.fontSizeSmall
@@ -835,7 +655,7 @@ Rectangle {
 
                                 Text {
                                     width: parent.width
-                                    text: root.valueOr(parent.parent.modelData.reason, "Could not read this entry")
+                                    text: root.valueOr(skippedRow.modelData.reason, "Could not read this entry")
                                     color: Theme.foregroundDim
                                     font.family: Theme.fontFamily
                                     font.pixelSize: Theme.fontSizeSmall - 1
@@ -944,14 +764,7 @@ Rectangle {
                     enabled: visible
                     filePath: root.editorAbsolutePath
 
-                    onClosed: {
-                        if (root.section === "docs") {
-                            root.selectedDocPath = "";
-                            if (root.narrow) root.narrowDetailOpen = false;
-                        } else if (root.section === "character") {
-                            root.characterPaneOpen = false;
-                        }
-                    }
+                    onClosed: root.characterPaneOpen = false
                 }
 
                 Item {
@@ -1067,7 +880,8 @@ Rectangle {
                             Text {
                                 width: parent.width
                                 text: root.selectedAgent
-                                    ? root.valueOr(root.selectedAgent.name, "Unnamed helper") : ""
+                                    ? root.valueOr(root.selectedAgent.name,
+                                        "Unnamed agent definition") : ""
                                 color: Theme.foregroundBright
                                 font.family: Theme.fontFamily
                                 font.pixelSize: Theme.fontSize + 1
@@ -1084,6 +898,18 @@ Rectangle {
                                 font.pixelSize: Theme.fontSize
                                 wrapMode: Text.WordWrap
                                 lineHeight: Theme.lineHeight
+                            }
+
+                            Text {
+                                objectName: "agentInactiveNotice"
+                                width: parent.width
+                                text: "Inactive in phase 1. This confined definition is shown for "
+                                    + "inspection only and cannot run tasks or delegate."
+                                color: Theme.warn
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSizeSmall
+                                wrapMode: Text.WordWrap
+                                Accessible.role: Accessible.AlertMessage
                             }
                         }
 
@@ -1143,9 +969,8 @@ Rectangle {
                                 if (root.section === "character" && !root.characterPaneOpen)
                                     return "Character editor closed";
                                 if (root.section === "character") return "Character unavailable";
-                                if (root.section === "docs") return "Choose a document";
                                 if (root.section === "memory") return "Choose a memory";
-                                if (root.section === "agents") return "Choose a helper";
+                                if (root.section === "agents") return "Choose an agent definition";
                                 return "Context unavailable";
                             }
                             color: Ghostd.contextError !== "" ? Theme.danger : Theme.foreground
@@ -1159,7 +984,8 @@ Rectangle {
                         Text {
                             width: parent.width
                             text: {
-                                if (!root.validSection) return "Use Docs, Memory, Helpers, or Character.";
+                                if (!root.validSection)
+                                    return "Use Memory, Agent definitions, or Character.";
                                 if (Ghostd.activeGhost === "")
                                     return "Choose a ghost before browsing its context.";
                                 if (Ghostd.contextLoading) return "Reading the ghost home.";
@@ -1229,8 +1055,7 @@ Rectangle {
     ConfirmDialog {
         anchors.fill: parent
         open: root.pendingDeletePath !== ""
-        title: root.pendingDeleteSection === "memory"
-            ? "Delete memory?" : "Delete document?"
+        title: "Delete memory?"
         body: "“" + root.pendingDeleteTitle + "” moves to system Trash and can be restored from your file manager."
         confirmText: "Move to Trash"
         busy: Ghostd.contextDeletingPath === root.pendingDeletePath

@@ -28,20 +28,6 @@ function fixture(): { ghost: string; trash: string; xdg: string } {
 }
 
 describe("trashGhostContextFile", () => {
-  it("moves a nested document into the freedesktop trash", () => {
-    const { ghost, trash, xdg } = fixture();
-    const source = join(ghost, "docs", "nested", "notes.md");
-    writeFileSync(source, "notes\n", "utf8");
-
-    const result = trashGhostContextFile(ghost, "docs", "docs/nested/notes.md", {
-      env: { XDG_DATA_HOME: xdg },
-    });
-
-    expect(result.path).toBe("docs/nested/notes.md");
-    expect(result.trash).toBe(join(trash, "files", "notes.md"));
-    expect(readFileSync(result.trash, "utf8")).toBe("notes\n");
-  });
-
   it("moves a memory symlink itself without following it", () => {
     const { ghost, xdg } = fixture();
     const outside = join(ghost, "outside.txt");
@@ -56,11 +42,9 @@ describe("trashGhostContextFile", () => {
   });
 
   it.each([
-    ["docs", "../character.md"],
-    ["docs", "docs/../../outside.md"],
-    ["docs", "/tmp/outside.md"],
     ["memory", "docs/note.md"],
     ["memory", "memory/not-markdown.txt"],
+    ["memory", "memory/../../outside.md"],
   ] as const)("rejects %s path %s", (section, path) => {
     const { ghost } = fixture();
     expect(() => trashGhostContextFile(ghost, section, path)).toThrowError(

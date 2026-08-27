@@ -8,8 +8,14 @@
  * turn "no greeting today" into an error dialog over an empty chat window.
  */
 import { afterEach, describe, expect, it } from "vitest";
+import type { GhostHomeDigestReaders } from "../src/extensions.js";
+import type { Logger } from "../src/log.js";
 import { startDaemonServer, type ListeningServer } from "../src/server.js";
-import { SessionHost, type GreetingGenerator } from "../src/session-host.js";
+import {
+  SessionHost,
+  type GreetingConfig,
+  type GreetingGenerator,
+} from "../src/session-host.js";
 import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
 import { fetchNoReuse as fetch } from "./helpers/http-fetch.js";
 
@@ -31,6 +37,8 @@ interface ServeOptions {
   generate?: GreetingGenerator;
   /** Seed a written character.md ghost. Off, the ghost is created from the seed. */
   written?: boolean;
+  greeting?: Omit<GreetingConfig, "generate">;
+  logger?: Logger;
 }
 
 async function serve(options: ServeOptions = {}): Promise<string> {
@@ -46,7 +54,10 @@ async function serve(options: ServeOptions = {}): Promise<string> {
   host = new SessionHost({
     registry: temp.registry,
     offline: true,
-    ...(options.generate ? { greeting: { generate: options.generate } } : {}),
+    ...(options.logger ? { logger: options.logger } : {}),
+    ...(options.generate || options.greeting
+      ? { greeting: { ...options.greeting, ...(options.generate ? { generate: options.generate } : {}) } }
+      : {}),
   });
   listening = await startDaemonServer({
     registry: temp.registry,
@@ -183,4 +194,169 @@ describe("POST /api/ghosts/:name/greeting", () => {
     expect(status).toBe(200);
     expect(body).toEqual({ greeting: null, onboarding: false });
   });
+
+  for (const code of ["EACCES", "EIO"] as const) {
+    it(`keeps the route at 200 and preserves memory/Documents when character reads fail with ${code}`, async () => {
+      const logLines: string[] = [];
+      const logger: Logger = {
+        debug: () => {},
+        info: () => {},
+        warn: (message, fields) => logLines.push(JSON.stringify({ message, fields })),
+        error: (message, fields) => logLines.push(JSON.stringify({ message, fields })),
+      };
+      const failure = () => {
+        throw Object.assign(new Error("SENSITIVE-/owner/ghosts/casper/character.md"), { code });
+      };
+      let seen: Parameters<GreetingGenerator>[0]["context"] | undefined;
+      const base = await serve({
+        written: true,
+        logger,
+        generate: async ({ context }) => {
+          seen = context;
+          return "Still here. What shall we do?";
+        },
+        greeting: {
+          readRawCharacter: failure,
+          inputReaders: {
+            character: async () => failure(),
+            memory: async () => ({
+              files: [{
+                slug: "survives",
+                description: "MEMORY_SURVIVES",
+                content: "kept",
+                updated: "2026-08-27",
+              }],
+              skipped: [],
+            }),
+            documents: async () => documentPage("DOCUMENT_SURVIVES"),
+          },
+        },
+      });
+
+      const { status, body } = await postGreeting(base);
+      expect(status).toBe(200);
+      expect(body).toEqual({
+        greeting: "Still here. What shall we do?",
+        onboarding: false,
+      });
+      expect(seen?.character).toBeNull();
+      expect(seen?.memoryLines).toEqual(["- survives.md: MEMORY_SURVIVES"]);
+      expect(seen?.documents.lines).toEqual(['- file: "DOCUMENT_SURVIVES"']);
+      expect(logLines.join("\n")).toContain('"input":"character"');
+      expect(logLines.join("\n")).not.toContain("SENSITIVE-");
+      expect(logLines.join("\n")).not.toContain("character.md");
+    });
+  }
+
+  for (const testCase of [
+    { label: "memory EIO", memoryFails: true, documentsFail: false, code: "EIO" },
+    {
+      label: "Documents EACCES",
+      memoryFails: false,
+      documentsFail: true,
+      code: "EACCES",
+    },
+    {
+      label: "memory and Documents EIO",
+      memoryFails: true,
+      documentsFail: true,
+      code: "EIO",
+    },
+  ]) {
+    it(`preserves every successful greeting input when ${testCase.label} is unavailable`, async () => {
+      const logLines: string[] = [];
+      const logger: Logger = {
+        debug: () => {},
+        info: () => {},
+        warn: (message, fields) => logLines.push(JSON.stringify({ message, fields })),
+        error: (message, fields) => logLines.push(JSON.stringify({ message, fields })),
+      };
+      const failed = async (): Promise<never> => {
+        throw Object.assign(new Error("SENSITIVE-INPUT-PATH"), { code: testCase.code });
+      };
+      let seen: Parameters<GreetingGenerator>[0]["context"] | undefined;
+      const readers: GhostHomeDigestReaders = {
+        character: async () => ({ title: "Casper", body: "CHARACTER_SURVIVES" }),
+        memory: testCase.memoryFails
+          ? failed
+          : async () => ({
+            files: [{
+              slug: "survives",
+              description: "MEMORY_SURVIVES",
+              content: "kept",
+              updated: "2026-08-27",
+            }],
+            skipped: [],
+          }),
+        documents: testCase.documentsFail
+          ? failed
+          : async () => documentPage("DOCUMENT_SURVIVES"),
+      };
+      const base = await serve({
+        written: true,
+        logger,
+        generate: async ({ context }) => {
+          seen = context;
+          return "Hello despite a missing input.";
+        },
+        greeting: { inputReaders: readers },
+      });
+
+      const { status, body } = await postGreeting(base);
+      expect(status).toBe(200);
+      expect(body.greeting).toBe("Hello despite a missing input.");
+      expect(seen?.character).toBe("CHARACTER_SURVIVES");
+      expect(seen?.memoryLines).toEqual(
+        testCase.memoryFails ? [] : ["- survives.md: MEMORY_SURVIVES"],
+      );
+      expect(seen?.documents.lines).toEqual(
+        testCase.documentsFail ? [] : ['- file: "DOCUMENT_SURVIVES"'],
+      );
+      if (testCase.memoryFails) expect(logLines.join("\n")).toContain('"input":"memory"');
+      if (testCase.documentsFail) {
+        expect(logLines.join("\n")).toContain('"input":"documents"');
+      }
+      expect(logLines.join("\n")).not.toContain("SENSITIVE-");
+    });
+  }
+
+  it("returns the null fallback when every known-ghost input is unavailable", async () => {
+    const failed = async (): Promise<never> => {
+      throw Object.assign(new Error("SENSITIVE-ALL-INPUTS"), { code: "EIO" });
+    };
+    const base = await serve({
+      written: true,
+      greeting: {
+        readRawCharacter: () => {
+          throw Object.assign(new Error("SENSITIVE-RAW-CHARACTER"), { code: "EACCES" });
+        },
+        inputReaders: { character: failed, memory: failed, documents: failed },
+      },
+    });
+
+    const { status, body } = await postGreeting(base);
+    expect(status).toBe(200);
+    expect(body).toEqual({ greeting: null, onboarding: false });
+  });
 });
+
+function documentPage(name: string) {
+  return {
+    root: "/owner/Documents",
+    path: "",
+    query: "",
+    entries: [{
+      name,
+      path: name,
+      kind: "file" as const,
+      size: 0,
+      modifiedAt: "2026-08-27T00:00:00.000Z",
+    }],
+    total: 1,
+    fileCount: 1,
+    directoryCount: 0,
+    nextCursor: null,
+    truncated: false,
+    skipped: [],
+  };
+}

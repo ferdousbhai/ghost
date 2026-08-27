@@ -27,6 +27,7 @@ import {
   type ImportFaultPoint,
 } from "../src/import.js";
 import { deriveMemoryIndex } from "../src/memory-file.js";
+import { parseDoc } from "../src/doc-format.js";
 import { createTempDir, writeFileTree } from "./support/fixture.js";
 
 /**
@@ -153,10 +154,8 @@ describe("importGhostArchive", () => {
     const home = result.home;
     expect((await home.readCharacter())?.title).toBe("Casper");
 
-    const { docs } = await home.listDocs();
-    expect(docs.map((doc) => doc.path))
-      .toEqual(["craft/paper-notes.md", "estate-finances.md"]);
-    expect(docs.find((doc) => doc.path === "estate-finances.md"))
+    expect(await readdir(join(result.dir, "docs", "craft"))).toEqual(["paper-notes.md"]);
+    expect(parseDoc(await readFile(join(result.dir, "docs", "estate-finances.md"), "utf8")))
       .toMatchObject({ title: "Estate and finances", tags: [], archived: false });
 
     const memory = await home.listMemory();

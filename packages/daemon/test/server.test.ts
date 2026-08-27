@@ -5,19 +5,36 @@
  * pi-messages client uses (see `parseSseStream`), so a framing change that
  * would break the real UI breaks these tests.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { execFileSync } from "node:child_process";
+import { DOCUMENT_INLINE_MAX_BYTES, MachineDocuments } from "@ghost/extensions";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { claudeSessionMetadataPath } from "../src/claude-code.js";
+import { DocumentsService } from "../src/documents.js";
 import { ghostPaths } from "../src/ghosts.js";
+import { HomeOperationCoordinator } from "../src/home-operations.js";
 import { McpCatalog } from "../src/mcp-catalog.js";
 import { setChatModelRole } from "../src/models.js";
 import type { PiMessagesEvent } from "../src/pi-messages.js";
-import { startDaemonServer, type ListeningServer } from "../src/server.js";
+import { projectBindingPath } from "../src/project-binding.js";
+import {
+  startDaemonServer,
+  type ListeningServer,
+  type ServerOptions,
+} from "../src/server.js";
 import { SessionHost, sessionFileNameFor } from "../src/session-host.js";
+import { toolCwdsPath } from "../src/tool-cwds.js";
 import { makeTempGhosts, parseSseStream, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
-import { fetchNoReuse as fetch } from "./helpers/http-fetch.js";
 import { startMockProvider, type MockProvider } from "./helpers/mock-provider.js";
+import { fetchNoReuse as fetch } from "./helpers/http-fetch.js";
 
 let temp: TempGhosts | null = null;
 let provider: MockProvider | null = null;
@@ -42,6 +59,7 @@ async function serve(
   serverOptions: {
     maxBodyBytes?: number;
     apiToken?: string | null;
+    hooks?: ServerOptions["hooks"];
   } = {},
 ) {
   temp = makeTempGhosts();
@@ -51,12 +69,23 @@ async function serve(
     name: "casper",
     provider: { baseUrl: provider.url, modelId: provider.modelId },
   });
-  host = new SessionHost({ registry: temp.registry, offline: true });
+  const machineDocuments = new MachineDocuments(join(temp.root, ".documents"));
+  const documents = new DocumentsService(machineDocuments);
+  const homeOperations = new HomeOperationCoordinator(temp.registry);
+  host = new SessionHost({
+    registry: temp.registry,
+    homeOperations,
+    ownerHome: temp.ownerHome,
+    offline: true,
+    extensionOptions: { documents: machineDocuments },
+  });
   const mcp = new McpCatalog({ registry: temp.registry });
   listening = await startDaemonServer({
     registry: temp.registry,
     host,
+    documents,
     mcp,
+    homeOperations,
     port: 0,
     // Routing and streaming are the subject here; auth has its own file.
     apiToken: null,
@@ -64,6 +93,7 @@ async function serve(
       ? {}
       : { maxBodyBytes: serverOptions.maxBodyBytes }),
     ...(serverOptions.apiToken === undefined ? {} : { apiToken: serverOptions.apiToken }),
+    ...(serverOptions.hooks === undefined ? {} : { hooks: serverOptions.hooks }),
   });
   return `http://127.0.0.1:${listening.port}`;
 }
@@ -96,6 +126,34 @@ const TURN_BODY = {
 
 const piId = (conversationId: string): string => `pi:${conversationId}`;
 const piSegment = (conversationId: string): string => encodeURIComponent(piId(conversationId));
+const claudeSegment = (conversationId: string): string =>
+  encodeURIComponent(`claude-code:${conversationId}`);
+
+function writeMcpRouteFixture(dir: string, fileName: string, toolName: string): string {
+  const serverPath = join(dir, fileName);
+  writeFileSync(
+    serverPath,
+    `import { createInterface } from "node:readline";
+const lines = createInterface({ input: process.stdin });
+const send = (id, result) => process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id, result }) + "\\n");
+lines.on("line", (line) => {
+  const request = JSON.parse(line);
+  if (request.id === undefined) return;
+  if (request.method === "initialize") send(request.id, {
+    protocolVersion: "2025-11-25", capabilities: { tools: {} },
+    serverInfo: { name: "route-fixture", version: "1.0.0" }
+  });
+  else if (request.method === "tools/list") send(request.id, { tools: [{
+    name: ${JSON.stringify(toolName)}, description: "Route fixture",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false }
+  }] });
+  else send(request.id, {});
+});
+`,
+    "utf8",
+  );
+  return serverPath;
+}
 
 function seedClaudeSidecar(conversationId: string): void {
   const sessionDir = ghostPaths(join(temp!.root, "casper")).sessionDir;
@@ -112,7 +170,7 @@ function seedClaudeSidecar(conversationId: string): void {
       modified: now,
       messageCount: 2,
     })}\n`,
-    "utf8",
+    { encoding: "utf8", mode: 0o600 },
   );
 }
 
@@ -148,15 +206,622 @@ describe("GET /api/ghosts", () => {
   });
 });
 
+describe("GET /api/hooks", () => {
+  it("returns the exact empty daemon-global projection when no runner is supplied", async () => {
+    const base = await serve();
+    const response = await fetch(`${base}/api/hooks`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      active: false,
+      total: 0,
+      events: [],
+      hooks: [],
+      sessionStopContinuationCap: 2,
+    });
+  });
+
+  it("returns only the runner's bounded redacted projection", async () => {
+    const projection: ReturnType<NonNullable<ServerOptions["hooks"]>["status"]> = {
+      active: true,
+      total: 3,
+      events: [
+        { event: "before_prompt", count: 1 },
+        { event: "session_stop", count: 1 },
+        { event: "conversation_idle", count: 1 },
+      ],
+      hooks: [
+        { event: "before_prompt", name: "Prompt policy", description: "Adds policy." },
+        { event: "session_stop", name: "Completion", description: "Checks completion." },
+        {
+          event: "conversation_idle",
+          name: "Idle upkeep",
+          description: "Runs after inactivity.",
+          idleSeconds: 60,
+        },
+      ],
+      sessionStopContinuationCap: 2,
+    };
+    const status = vi.fn(() => projection);
+    Object.assign(projection as unknown as Record<string, unknown>, {
+      scheduler: { nextRun: "secret" },
+      error: "secret",
+      errors: ["secret"],
+      commands: ["secret"],
+      prompts: ["secret"],
+      contexts: ["secret"],
+    });
+    Object.assign(projection.hooks[0] as unknown as Record<string, unknown>, {
+      command: "secret",
+      args: ["secret"],
+      arguments: ["secret"],
+      path: "/secret",
+      paths: ["/secret"],
+      prompt: "secret",
+      context: "secret",
+    });
+    const base = await serve(undefined, { hooks: { status } });
+
+    const response = await fetch(`${base}/api/hooks`);
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toEqual({
+      active: true,
+      total: 3,
+      events: [
+        { event: "before_prompt", count: 1 },
+        { event: "session_stop", count: 1 },
+        { event: "conversation_idle", count: 1 },
+      ],
+      hooks: [
+        { event: "before_prompt", name: "Prompt policy", description: "Adds policy." },
+        { event: "session_stop", name: "Completion", description: "Checks completion." },
+        {
+          event: "conversation_idle",
+          name: "Idle upkeep",
+          description: "Runs after inactivity.",
+          idleSeconds: 60,
+        },
+      ],
+      sessionStopContinuationCap: 2,
+    });
+    expect(status).toHaveBeenCalledTimes(1);
+
+    const serialized = JSON.stringify(body);
+    for (const forbidden of [
+      "command",
+      "commands",
+      "args",
+      "arguments",
+      "path",
+      "paths",
+      "prompt",
+      "prompts",
+      "context",
+      "contexts",
+      "error",
+      "errors",
+      "scheduler",
+    ]) {
+      expect(serialized).not.toContain(`"${forbidden}"`);
+    }
+  });
+
+  it("rejects non-GET methods without invoking the status projection", async () => {
+    const status = vi.fn(() => ({
+      active: false,
+      total: 0,
+      events: [],
+      hooks: [],
+      sessionStopContinuationCap: 2,
+    }));
+    const base = await serve(undefined, { hooks: { status } });
+    const response = await fetch(`${base}/api/hooks`, { method: "POST" });
+    expect(response.status).toBe(405);
+    expect(await response.json()).toEqual({
+      error: { code: "method_not_allowed", message: "POST is not allowed here." },
+    });
+    expect(status).not.toHaveBeenCalled();
+  });
+});
+
+describe("/api/documents", () => {
+  it("lists and filters one shared directory with direct-child counts", async () => {
+    const base = await serve();
+    const root = join(temp!.root, ".documents");
+    mkdirSync(join(root, "Projects", "deep"), { recursive: true });
+    writeFileSync(join(root, "Projects", "deep", "hidden-from-root.txt"), "deep");
+    writeFileSync(join(root, "project brief.txt"), "arbitrary bytes");
+    writeFileSync(join(root, "other.pdf"), "pdf bytes");
+    writeFileSync(join(root, ".hidden"), "hidden");
+
+    const response = await fetch(`${base}/api/documents?q=PROJECT&limit=1`);
+    expect(response.status).toBe(200);
+    const body = await response.json() as {
+      root: string;
+      path: string;
+      query: string;
+      entries: Array<{ name: string; path: string; kind: string }>;
+      total: number;
+      fileCount: number;
+      directoryCount: number;
+      nextCursor: string | null;
+    };
+    expect(body).toMatchObject({
+      root,
+      path: "",
+      query: "PROJECT",
+      total: 2,
+      fileCount: 1,
+      directoryCount: 1,
+    });
+    expect(body.entries).toEqual([
+      { name: "Projects", path: "Projects", kind: "directory", modifiedAt: expect.any(String) },
+    ]);
+    expect(JSON.stringify(body)).not.toContain("hidden-from-root");
+
+    const next = await fetch(
+      `${base}/api/documents?q=PROJECT&limit=1&cursor=${encodeURIComponent(body.nextCursor ?? "")}`,
+    );
+    expect(next.status).toBe(200);
+    expect((await next.json() as { entries: Array<{ name: string }> }).entries)
+      .toEqual([expect.objectContaining({ name: "project brief.txt" })]);
+  });
+
+  it("keeps exact non-numeric ordering stable across API pages", async () => {
+    const base = await serve();
+    const root = join(temp!.root, ".documents");
+    mkdirSync(root, { recursive: true });
+    for (const name of ["file-2", "file-10", "file-1", "Alpha", "alpha"]) {
+      writeFileSync(join(root, name), name);
+    }
+    mkdirSync(join(root, "file-20"));
+    mkdirSync(join(root, "file-3"));
+
+    const names: string[] = [];
+    let cursor: string | null = null;
+    do {
+      const query = new URLSearchParams({ limit: "2" });
+      if (cursor) query.set("cursor", cursor);
+      const response = await fetch(`${base}/api/documents?${query}`);
+      expect(response.status).toBe(200);
+      const page = await response.json() as {
+        entries: Array<{ name: string }>;
+        nextCursor: string | null;
+      };
+      names.push(...page.entries.map((entry) => entry.name));
+      cursor = page.nextCursor;
+    } while (cursor);
+
+    expect(names).toEqual([
+      "file-20",
+      "file-3",
+      "Alpha",
+      "alpha",
+      "file-1",
+      "file-10",
+      "file-2",
+    ]);
+  });
+
+  it("returns cursor_stale after the direct entry set changes", async () => {
+    const base = await serve();
+    const root = join(temp!.root, ".documents");
+    mkdirSync(root, { recursive: true });
+    writeFileSync(join(root, "a.txt"), "a");
+    writeFileSync(join(root, "b.txt"), "b");
+    const first = await fetch(`${base}/api/documents?limit=1`);
+    const cursor = (await first.json() as { nextCursor: string }).nextCursor;
+    writeFileSync(join(root, "c.txt"), "c");
+
+    const stale = await fetch(
+      `${base}/api/documents?limit=1&cursor=${encodeURIComponent(cursor)}`,
+    );
+    expect(stale.status).toBe(409);
+    expect(await stale.json()).toMatchObject({ error: { code: "cursor_stale" } });
+  });
+
+  it("returns not_found for a missing direct or nested directory", async () => {
+    const base = await serve();
+    for (const path of ["missing", "missing/deep"]) {
+      const response = await fetch(
+        `${base}/api/documents?path=${encodeURIComponent(path)}`,
+      );
+      expect(response.status).toBe(404);
+      expect(await response.json()).toMatchObject({ error: { code: "not_found" } });
+    }
+  });
+
+  it("serves only bounded strict UTF-8 content through the confined content route", async () => {
+    const base = await serve();
+    const root = join(temp!.root, ".documents");
+    mkdirSync(root, { recursive: true });
+    const atLimit = "x".repeat(DOCUMENT_INLINE_MAX_BYTES);
+    writeFileSync(join(root, "at limit.md"), atLimit);
+    writeFileSync(join(root, "too-large.md"), `${atLimit}x`);
+    writeFileSync(join(root, "invalid.txt"), new Uint8Array([0xc3, 0x28]));
+    writeFileSync(join(root, "nul.txt"), new Uint8Array([0x61, 0, 0x62]));
+
+    const content = await fetch(
+      `${base}/api/documents/content?path=${encodeURIComponent("at limit.md")}`,
+    );
+    expect(content.status).toBe(200);
+    expect(await content.json()).toMatchObject({
+      root,
+      path: "at limit.md",
+      size: DOCUMENT_INLINE_MAX_BYTES,
+      content: atLimit,
+      modifiedAt: expect.any(String),
+    });
+    for (const [path, status, code] of [
+      ["too-large.md", 413, "document_too_large"],
+      ["invalid.txt", 400, "invalid_document_content"],
+      ["nul.txt", 400, "invalid_document_content"],
+    ] as const) {
+      const response = await fetch(
+        `${base}/api/documents/content?path=${encodeURIComponent(path)}`,
+      );
+      expect(response.status).toBe(status);
+      expect(await response.json()).toMatchObject({ error: { code } });
+    }
+  });
+
+  it("fails closed when listed content is replaced by a large file, FIFO, or symlink", async () => {
+    const base = await serve();
+    const root = join(temp!.root, ".documents");
+    mkdirSync(root, { recursive: true });
+    const changing = join(root, "changing.txt");
+    const outside = join(temp!.root, "outside-content.txt");
+    writeFileSync(changing, "small");
+    const listed = await fetch(`${base}/api/documents`);
+    expect((await listed.json() as { entries: Array<{ name: string }> }).entries)
+      .toContainEqual(expect.objectContaining({ name: "changing.txt" }));
+
+    unlinkSync(changing);
+    writeFileSync(changing, "x".repeat(DOCUMENT_INLINE_MAX_BYTES + 1));
+    let response = await fetch(`${base}/api/documents/content?path=changing.txt`);
+    expect(response.status).toBe(413);
+    expect(await response.json()).toMatchObject({ error: { code: "document_too_large" } });
+
+    unlinkSync(changing);
+    execFileSync("mkfifo", [changing]);
+    const started = Date.now();
+    response = await fetch(`${base}/api/documents/content?path=changing.txt`);
+    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: { code: "invalid_path" } });
+
+    unlinkSync(changing);
+    writeFileSync(outside, "outside secret");
+    symlinkSync(outside, changing);
+    response = await fetch(`${base}/api/documents/content?path=changing.txt`);
+    expect(response.status).toBe(400);
+    const raw = await response.text();
+    expect(raw).not.toContain("outside secret");
+    expect(JSON.parse(raw)).toMatchObject({ error: { code: "invalid_path" } });
+  });
+
+  it("moves one exactly confirmed regular file to recoverable Trash", async () => {
+    const base = await serve();
+    const root = join(temp!.root, ".documents");
+    mkdirSync(join(root, "folder"), { recursive: true });
+    const file = join(root, "folder", "keep name.bin");
+    writeFileSync(file, "kept bytes");
+    const remove = (confirm: string) => fetch(`${base}/api/documents`, {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: "folder/keep name.bin", confirm }),
+    });
+
+    expect((await remove("wrong")).status).toBe(400);
+    expect(existsSync(file)).toBe(true);
+    const response = await remove("folder/keep name.bin");
+    expect(response.status).toBe(200);
+    const body = await response.json() as {
+      ok: boolean;
+      path: string;
+      trash: string;
+      kind: "freedesktop" | "fallback";
+    };
+    expect(body).toMatchObject({
+      ok: true,
+      path: "folder/keep name.bin",
+      kind: "freedesktop",
+    });
+    expect(readFileSync(body.trash, "utf8")).toBe("kept bytes");
+    expect(existsSync(file)).toBe(false);
+  });
+
+  it("serializes concurrent deletion of the same file", async () => {
+    const base = await serve();
+    const root = join(temp!.root, ".documents");
+    mkdirSync(root, { recursive: true });
+    writeFileSync(join(root, "one.txt"), "one");
+    const remove = () => fetch(`${base}/api/documents`, {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: "one.txt", confirm: "one.txt" }),
+    });
+
+    const responses = await Promise.all([remove(), remove()]);
+    expect(responses.map((response) => response.status).sort()).toEqual([200, 404]);
+    const bodies = await Promise.all(responses.map((response) => response.json()));
+    expect(bodies).toEqual(expect.arrayContaining([
+      expect.objectContaining({ ok: true, path: "one.txt" }),
+      expect.objectContaining({ error: expect.objectContaining({ code: "not_found" }) }),
+    ]));
+  });
+
+  it("refuses a symbolic-link document without touching its target", async () => {
+    const base = await serve();
+    const root = join(temp!.root, ".documents");
+    mkdirSync(root, { recursive: true });
+    const outside = join(temp!.root, "outside.txt");
+    const link = join(root, "outside-link.txt");
+    writeFileSync(outside, "outside bytes");
+    symlinkSync(outside, link);
+
+    const response = await fetch(`${base}/api/documents`, {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: "outside-link.txt", confirm: "outside-link.txt" }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      error: { code: "invalid_documents_path" },
+    });
+    expect(readFileSync(outside, "utf8")).toBe("outside bytes");
+    expect(existsSync(link)).toBe(true);
+  });
+});
+
+describe("conversation project binding", () => {
+  it("binds a trusted project before the first turn with durable cwd and optimistic generation", async () => {
+    const base = await serve();
+    const project = join(temp!.root, "wide project");
+    const child = join(project, "packages", "app");
+    mkdirSync(child, { recursive: true });
+    writeFileSync(join(project, "AGENTS.md"), "# Project instructions\n");
+    const route = `${base}/api/ghosts/casper/sessions/${piSegment("draft-project")}/project`;
+
+    const relativePreview = await fetch(`${route}/preview`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: "wide project" }),
+    });
+    expect(relativePreview.status).toBe(400);
+    expect(await relativePreview.json()).toMatchObject({ error: { code: "invalid_request" } });
+
+    const initial = await fetch(route);
+    expect(initial.status).toBe(200);
+    expect(await initial.json()).toMatchObject({
+      root: null,
+      cwd: temp!.ownerHome,
+      relativeCwd: null,
+      generation: 0,
+      status: "unbound",
+      canRebind: true,
+    });
+
+    const preview = await fetch(`${route}/preview`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: project }),
+    });
+    expect(preview.status).toBe(200);
+    const receipt = await preview.json() as { root: string; trustToken: string };
+    expect(receipt.root).toBe(project);
+
+    const relativeCwd = await fetch(route, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        root: project,
+        cwd: "packages/app",
+        trustToken: receipt.trustToken,
+        expectedGeneration: 0,
+      }),
+    });
+    expect(relativeCwd.status).toBe(400);
+    expect(await relativeCwd.json()).toMatchObject({
+      error: { code: "invalid_request" },
+    });
+
+    const relativeRoot = await fetch(route, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        root: "wide project",
+        trustToken: receipt.trustToken,
+        expectedGeneration: 0,
+      }),
+    });
+    expect(relativeRoot.status).toBe(400);
+    expect(await relativeRoot.json()).toMatchObject({ error: { code: "invalid_request" } });
+
+    const replacementPreview = await fetch(`${route}/preview`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: project }),
+    });
+    const replacementReceipt = await replacementPreview.json() as { trustToken: string };
+
+    const bind = await fetch(route, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        root: project,
+        cwd: child,
+        trustToken: replacementReceipt.trustToken,
+        expectedGeneration: 0,
+      }),
+    });
+    expect(bind.status).toBe(200);
+    expect(await bind.json()).toMatchObject({
+      root: project,
+      cwd: child,
+      relativeCwd: "packages/app",
+      generation: 1,
+      status: "ready",
+      resources: { instructions: 1 },
+    });
+
+    const listing = await fetch(`${base}/api/ghosts/casper/sessions`);
+    expect(await listing.json()).toEqual({ sessions: [] });
+
+    const stale = await fetch(route, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ root: null, expectedGeneration: 0 }),
+    });
+    expect(stale.status).toBe(409);
+    expect(await stale.json()).toMatchObject({ error: { code: "stale_generation" } });
+
+    const reload = await fetch(`${route}/reload`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ expectedGeneration: 1 }),
+    });
+    expect(reload.status).toBe(200);
+    expect(await reload.json()).toMatchObject({ generation: 2, reason: "reloaded" });
+
+    const removed = await fetch(
+      `${base}/api/ghosts/casper/sessions/${piSegment("draft-project")}`,
+      { method: "DELETE" },
+    );
+    expect(removed.status).toBe(200);
+    expect(await removed.json()).toMatchObject({
+      ok: true,
+      trash: [
+        expect.objectContaining({ artifact: "project-binding" }),
+        expect.objectContaining({ artifact: "project-snapshot" }),
+      ],
+    });
+    expect(await (await fetch(route)).json()).toMatchObject({ root: null, generation: 0 });
+  });
+
+  it("abandons only an unpublished runtime-qualified project draft", async () => {
+    const base = await serve([{ kind: "text", text: "published" }]);
+    const project = join(temp!.root, "abandon-route-project");
+    mkdirSync(project);
+    const id = "abandon-route";
+    const route = `${base}/api/ghosts/casper/sessions/${piSegment(id)}/project`;
+    const preview = await (await fetch(`${route}/preview`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: project }),
+    })).json() as { trustToken: string };
+    expect((await fetch(route, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        root: project,
+        trustToken: preview.trustToken,
+        expectedGeneration: 0,
+      }),
+    })).status).toBe(200);
+
+    const abandoned = await fetch(`${route}/draft`, { method: "DELETE" });
+    expect(abandoned.status).toBe(200);
+    expect(await abandoned.json()).toEqual({
+      ok: true,
+      id: `pi:${id}`,
+      conversationId: id,
+      runtime: "pi",
+      abandoned: true,
+    });
+    expect(await (await fetch(`${route}/draft`, { method: "DELETE" })).json())
+      .toMatchObject({ id: `pi:${id}`, abandoned: false });
+    const wrongMethod = await fetch(`${route}/draft`);
+    expect(wrongMethod.status).toBe(405);
+
+    const nextPreview = await (await fetch(`${route}/preview`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: project }),
+    })).json() as { trustToken: string };
+    expect((await fetch(route, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        root: project,
+        trustToken: nextPreview.trustToken,
+        expectedGeneration: 0,
+      }),
+    })).status).toBe(200);
+    await postTurn(base, { ...TURN_BODY, options: { sessionId: id } });
+    const published = await fetch(`${route}/draft`, { method: "DELETE" });
+    expect(published.status).toBe(409);
+    expect(await published.json()).toMatchObject({
+      error: { code: "project_draft_published" },
+    });
+  });
+
+  it("binds preview receipts to one runtime conversation and freezes Claude after its first turn", async () => {
+    const base = await serve();
+    const project = join(temp!.root, "claude-project");
+    mkdirSync(project, { recursive: true });
+    const firstRoute = `${base}/api/ghosts/casper/sessions/${claudeSegment("claude-project")}/project`;
+    const wrongRoute = `${base}/api/ghosts/casper/sessions/${piSegment("other")}/project`;
+    const preview = await fetch(`${firstRoute}/preview`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: project }),
+    });
+    const receipt = await preview.json() as { trustToken: string };
+
+    const wrong = await fetch(wrongRoute, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        root: project,
+        trustToken: receipt.trustToken,
+        expectedGeneration: 0,
+      }),
+    });
+    expect(wrong.status).toBe(403);
+    expect(await wrong.json()).toMatchObject({ error: { code: "trust_token_invalid" } });
+
+    const secondPreview = await fetch(`${firstRoute}/preview`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: project }),
+    });
+    const secondReceipt = await secondPreview.json() as { trustToken: string };
+    expect((await fetch(firstRoute, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        root: project,
+        trustToken: secondReceipt.trustToken,
+        expectedGeneration: 0,
+      }),
+    })).status).toBe(200);
+
+    seedClaudeSidecar("claude-project");
+    const frozen = await fetch(firstRoute);
+    expect(await frozen.json()).toMatchObject({ canRebind: false, generation: 1 });
+    const reload = await fetch(`${firstRoute}/reload`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ expectedGeneration: 1 }),
+    });
+    expect(reload.status).toBe(409);
+    expect(await reload.json()).toMatchObject({
+      error: { code: "project_rebind_requires_new_conversation" },
+    });
+  });
+});
+
 describe("GET /api/ghosts/:name/context", () => {
   it("serves the derived context catalog and rejects other methods", async () => {
     const base = await serve();
     const ghostDir = join(temp!.root, "casper");
     mkdirSync(join(ghostDir, "docs", "guides"), { recursive: true });
-    mkdirSync(join(ghostDir, "agents"), { recursive: true });
-    writeFileSync(join(ghostDir, "settings.yml"), "task:\n  disabledAgents: []\n", "utf8");
+    mkdirSync(join(ghostDir, ".omp", "agents"), { recursive: true });
+    writeFileSync(join(ghostDir, ".omp", "config.yml"), "task:\n  disabledAgents: []\n", "utf8");
     writeFileSync(
-      join(ghostDir, "agents", "route-probe.md"),
+      join(ghostDir, ".omp", "agents", "route-probe.md"),
       "---\nname: route-probe\ndescription: HTTP route fixture\n---\nPrivate fixture prompt.\n",
       "utf8",
     );
@@ -175,24 +840,17 @@ describe("GET /api/ghosts/:name/context", () => {
     expect(response.status).toBe(200);
     const body = await response.json() as {
       character: { path: string };
-      docs: Array<{ path: string; title: string }>;
       memory: Array<{ path: string; description: string; content: string }>;
       agents: Array<{ name: string; source: string }>;
     };
     expect(body.character.path).toBe("character.md");
-    expect(body.docs).toContainEqual(expect.objectContaining({
-      path: "docs/guides/launch.md",
-      title: "Launch guide",
-    }));
+    expect(body).not.toHaveProperty("docs");
     expect(body.memory).toContainEqual(expect.objectContaining({
       path: "memory/preferred-tone.md",
       description: "The owner prefers direct...",
       content: "The owner prefers direct answers. Lead with the decision.",
     }));
-    expect(body.agents).toContainEqual(expect.objectContaining({
-      name: "route-probe",
-      source: "user",
-    }));
+    expect(body.agents).toEqual([]);
 
     expect((await fetch(`${base}/api/ghosts/casper/context`, {
       method: "POST",
@@ -202,11 +860,12 @@ describe("GET /api/ghosts/:name/context", () => {
     expect((await fetch(`${base}/api/ghosts/missing/context`)).status).toBe(404);
   });
 
-  it("moves confirmed docs and memory files to Trash", async () => {
+  it("moves confirmed memory files to Trash and refuses ghost-local docs", async () => {
     const base = await serve();
     const ghostDir = join(temp!.root, "casper");
     const doc = join(ghostDir, "docs", "delete-me.md");
     const memory = join(ghostDir, "memory", "delete-me-too.md");
+    mkdirSync(join(ghostDir, "docs"), { recursive: true });
     writeFileSync(doc, "doc\n", "utf8");
     writeFileSync(memory, "temporary memory\n", "utf8");
     const remove = (body: unknown) => fetch(`${base}/api/ghosts/casper/context`, {
@@ -228,11 +887,8 @@ describe("GET /api/ghosts/:name/context", () => {
       path: "docs/delete-me.md",
       confirm: "docs/delete-me.md",
     });
-    expect(docResponse.status).toBe(200);
-    const docBody = await docResponse.json() as { ok: boolean; path: string; trash: string };
-    expect(docBody).toMatchObject({ ok: true, path: "docs/delete-me.md" });
-    expect(readFileSync(docBody.trash, "utf8")).toBe("doc\n");
-    expect(existsSync(doc)).toBe(false);
+    expect(docResponse.status).toBe(400);
+    expect(existsSync(doc)).toBe(true);
 
     expect((await remove({
       section: "memory",
@@ -246,6 +902,215 @@ describe("GET /api/ghosts/:name/context", () => {
       confirm: "character.md",
     })).status).toBe(400);
     expect(existsSync(join(ghostDir, "character.md"))).toBe(true);
+  });
+});
+
+describe("POST /api/ghosts/:name/messages runtime admission", () => {
+  const body = (sessionId: string, prompt: string) => ({
+    ...TURN_BODY,
+    context: { messages: [{ role: "user", content: prompt }] },
+    options: { sessionId },
+  });
+
+  it("returns typed 409 for direct Bash under Claude without creating Pi state", async () => {
+    const base = await serve([{ kind: "text", text: "must not run" }]);
+    const home = ghostPaths(join(temp!.root, "casper")).home;
+    const sessionDir = ghostPaths(home).sessionDir;
+    setChatModelRole(home, "claude-code", "default");
+    const id = "http-claude-direct";
+
+    const result = await postTurn(base, body(id, "!!cd /"));
+
+    expect(result.status).toBe(409);
+    expect(JSON.parse(result.raw)).toMatchObject({
+      error: { code: "not_supported", message: expect.stringContaining("Claude Code") },
+    });
+    expect(result.headers.get("content-type")).toContain("application/json");
+    expect(provider!.requests).toHaveLength(0);
+    expect(host!.cachedSessionCount).toBe(0);
+    expect(existsSync(join(sessionDir, sessionFileNameFor(id)))).toBe(false);
+    expect(existsSync(toolCwdsPath(sessionDir, id))).toBe(false);
+    expect(existsSync(projectBindingPath(sessionDir, "pi", id))).toBe(false);
+  });
+
+  it("rejects invalid Claude resume timestamps before SSE or runtime admission", async () => {
+    const base = await serve([{ kind: "text", text: "must not run" }]);
+    const paths = ghostPaths(join(temp!.root, "casper"));
+    setChatModelRole(paths.home, "claude-code", "default");
+    const conversationId = "http-invalid-claude-time";
+    const sidecar = claudeSessionMetadataPath(paths.sessionDir, conversationId);
+    mkdirSync(paths.sessionDir, { recursive: true });
+    const original = `${JSON.stringify({
+      version: 3,
+      runtime: "claude-code",
+      conversationId,
+      sessionId: "sdk-http-invalid-claude-time",
+      created: "2026-01-01T00:00:00Z",
+      modified: "not-a-timestamp",
+      messageCount: 2,
+      ownerTurnCount: 1,
+      cwd: temp!.ownerHome,
+      projectSnapshot: {
+        root: null,
+        declarative: {
+          instructions: [],
+          skills: [],
+          rules: [],
+          prompts: [],
+          commands: [],
+        },
+        mcpServers: {},
+        resourceWarnings: [],
+        mcpWarnings: [],
+      },
+    })}\n`;
+    writeFileSync(sidecar, original, { mode: 0o600 });
+    const claude = (host as unknown as {
+      claudeCode: { runTurn(...args: unknown[]): Promise<void> };
+    }).claudeCode;
+    const run = vi.spyOn(claude, "runTurn");
+
+    const result = await postTurn(base, body(conversationId, "must fail before Claude starts"));
+
+    expect(result.status).toBe(500);
+    expect(result.headers.get("content-type")).toContain("application/json");
+    expect(JSON.parse(result.raw)).toMatchObject({
+      error: { code: "claude_session_invalid" },
+    });
+    expect(result.events).toEqual([]);
+    expect(run).not.toHaveBeenCalled();
+    expect(provider!.requests).toHaveLength(0);
+    expect(readFileSync(sidecar, "utf8")).toBe(original);
+  });
+
+  it("returns typed project_runtime_mismatch in both selected-runtime directions", async () => {
+    const base = await serve([{ kind: "text", text: "must not run" }]);
+    const home = ghostPaths(join(temp!.root, "casper")).home;
+    const sessionDir = ghostPaths(home).sessionDir;
+    const project = join(temp!.root, "http-runtime-mismatch-project");
+    mkdirSync(project);
+
+    for (const [selectedRuntime, oppositeRuntime, id, prompt] of [
+      ["pi", "claude-code", "http-pi-mismatch", "ordinary owner message"],
+      ["claude-code", "pi", "http-claude-mismatch", "!pwd"],
+    ] as const) {
+      if (selectedRuntime === "claude-code") {
+        setChatModelRole(home, "claude-code", "default");
+      }
+      const preview = await host!.previewProject("casper", id, oppositeRuntime, project);
+      await host!.bindProject("casper", id, oppositeRuntime, {
+        root: project,
+        trustToken: preview.trustToken,
+        expectedGeneration: 0,
+      });
+      const oppositePath = projectBindingPath(sessionDir, oppositeRuntime, id);
+      const oppositeBytes = readFileSync(oppositePath, "utf8");
+
+      const result = await postTurn(base, body(id, prompt));
+
+      expect(result.status).toBe(409);
+      expect(JSON.parse(result.raw)).toMatchObject({
+        error: { code: "project_runtime_mismatch" },
+      });
+      expect(result.headers.get("content-type")).toContain("application/json");
+      expect(readFileSync(oppositePath, "utf8")).toBe(oppositeBytes);
+      expect(existsSync(projectBindingPath(sessionDir, selectedRuntime, id))).toBe(false);
+      expect(existsSync(join(sessionDir, sessionFileNameFor(id)))).toBe(false);
+      expect(existsSync(toolCwdsPath(sessionDir, id))).toBe(false);
+      expect(existsSync(claudeSessionMetadataPath(sessionDir, id))).toBe(false);
+    }
+    expect(provider!.requests).toHaveLength(0);
+    expect(host!.cachedSessionCount).toBe(0);
+  });
+
+  it("keeps admitted HTTP turns and MCP transitions mutually exclusive before SSE", async () => {
+    const base = await serve([{ kind: "text", text: "lease stayed intact" }]);
+    const admitted = Promise.withResolvers<void>();
+    const releaseStream = Promise.withResolvers<void>();
+    const originalAdmit = host!.admitTurn.bind(host);
+    vi.spyOn(host!, "admitTurn").mockImplementation(async (ghostName, options) => {
+      const admission = await originalAdmit(ghostName, options);
+      admitted.resolve();
+      return {
+        release: admission.release,
+        run: async (streamOptions) => {
+          await releaseStream.promise;
+          await admission.run(streamOptions);
+        },
+      };
+    });
+
+    const firstId = "http-admitted-mcp-lease";
+    const firstTurn = postTurn(base, body(firstId, "hold admission before streaming"));
+    await admitted.promise;
+    const collection = `${base}/api/ghosts/casper/mcp`;
+    const rejectedMutation = await fetch(collection, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: "blocked",
+        config: { type: "stdio", command: process.execPath, args: ["--version"] },
+      }),
+    });
+    expect(rejectedMutation.status).toBe(409);
+    expect(await rejectedMutation.json()).toMatchObject({ error: { code: "session_busy" } });
+    const ghostMcpPath = join(temp!.root, "casper", "mcp.json");
+    expect(existsSync(ghostMcpPath)).toBe(false);
+
+    writeFileSync(ghostMcpPath, JSON.stringify({
+      mcpServers: {
+        existing: {
+          enabled: false,
+          type: "stdio",
+          command: process.execPath,
+          args: ["--version"],
+        },
+      },
+    }));
+    const mcpBytes = readFileSync(ghostMcpPath, "utf8");
+    const rejectedReconnect = await fetch(`${collection}/existing/reconnect`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
+    expect(rejectedReconnect.status).toBe(409);
+    expect(await rejectedReconnect.json()).toMatchObject({ error: { code: "session_busy" } });
+    expect(readFileSync(ghostMcpPath, "utf8")).toBe(mcpBytes);
+
+    releaseStream.resolve();
+    const first = await firstTurn;
+    expect(first.status).toBe(200);
+    expect(first.events.filter((event) => event.type === "done" || event.type === "error"))
+      .toEqual([expect.objectContaining({ type: "done" })]);
+
+    const transitionEntered = Promise.withResolvers<void>();
+    const releaseTransition = Promise.withResolvers<void>();
+    const transition = host!.withMcpReload("casper", async () => {
+      transitionEntered.resolve();
+      await releaseTransition.promise;
+    });
+    await transitionEntered.promise;
+    const rejectedTurn = await postTurn(
+      base,
+      body("http-blocked-by-mcp-lease", "must fail before SSE"),
+    );
+    expect(rejectedTurn.status).toBe(409);
+    expect(rejectedTurn.headers.get("content-type")).toContain("application/json");
+    expect(JSON.parse(rejectedTurn.raw)).toMatchObject({ error: { code: "session_busy" } });
+    expect(existsSync(join(
+      ghostPaths(join(temp!.root, "casper")).sessionDir,
+      sessionFileNameFor("http-blocked-by-mcp-lease"),
+    ))).toBe(false);
+    releaseTransition.resolve();
+    await transition;
+
+    const retriedTurn = await postTurn(
+      base,
+      body("http-after-mcp-lease", "run after the transition releases its lease"),
+    );
+    expect(retriedTurn.status).toBe(200);
+    expect(retriedTurn.events.filter((event) => event.type === "done" || event.type === "error"))
+      .toEqual([expect.objectContaining({ type: "done" })]);
   });
 });
 
@@ -375,6 +1240,37 @@ describe("ghost MCP routes", () => {
     }),
   });
 
+  it("keeps malformed MCP values out of HTTP and rejects them on mutation", async () => {
+    const base = await serve();
+    const collection = `${base}/api/ghosts/casper/mcp`;
+    const sentinel = "MCP_HTTP_MALFORMED_SENTINEL";
+    const ghostDir = join(temp!.root, "casper");
+    writeFileSync(join(ghostDir, "mcp.json"), JSON.stringify({
+      mcpServers: {
+        valid: { type: "stdio", command: process.execPath, args: ["--version"] },
+        malformed: { type: "http", url: { secret: sentinel } },
+      },
+    }));
+
+    const listed = await fetch(collection);
+    expect(listed.status).toBe(200);
+    const listedText = await listed.text();
+    expect(listedText).not.toContain(sentinel);
+    expect(JSON.parse(listedText)).toMatchObject({
+      servers: [expect.objectContaining({ name: "valid" })],
+      skipped: [expect.objectContaining({
+        path: "mcp.json#mcpServers.malformed",
+      })],
+    });
+
+    const mutation = await jsonRequest(collection, "POST", {
+      name: "rejected",
+      config: { type: "stdio", command: { secret: sentinel } },
+    });
+    expect(mutation.status).toBe(400);
+    expect(await mutation.text()).not.toContain(sentinel);
+  });
+
   it("lists without opening a session and manages the project-owned config", async () => {
     const base = await serve();
     const collection = `${base}/api/ghosts/casper/mcp`;
@@ -445,6 +1341,186 @@ describe("ghost MCP routes", () => {
     expect((await jsonRequest(`${collection}/missing/test`, "POST", {})).status).toBe(404);
     expect((await jsonRequest(collection, "PUT", {})).status).toBe(405);
   });
+
+  it("keeps inherited-object MCP names as ordinary own entries over HTTP", async () => {
+    const base = await serve();
+    const collection = `${base}/api/ghosts/casper/mcp`;
+    const names = ["__proto__", "constructor", "toString"];
+    for (const name of names) {
+      const response = await jsonRequest(collection, "POST", {
+        name,
+        config: { type: "stdio", command: `${name}-before` },
+      });
+      expect(response.status).toBe(201);
+    }
+
+    const listed = await (await fetch(collection)).json() as {
+      servers: Array<{ name: string; source: string; path: string }>;
+    };
+    const listedByName = new Map(listed.servers.map((server) => [server.name, server]));
+    for (const name of names) {
+      expect(listedByName.get(name)).toMatchObject({
+        name,
+        source: "canonical",
+        path: "mcp.json",
+      });
+    }
+
+    expect((await jsonRequest(`${collection}/__proto__`, "PUT", {
+      config: { type: "stdio", command: "proto-after" },
+    })).status).toBe(200);
+    expect((await jsonRequest(`${collection}/constructor/enabled`, "PUT", {
+      enabled: false,
+    })).status).toBe(200);
+    expect((await jsonRequest(`${collection}/toString`, "DELETE")).status).toBe(200);
+
+    const final = await (await fetch(collection)).json() as {
+      servers: Array<{ name: string; enabled: boolean; config: { command?: string } }>;
+    };
+    const finalByName = new Map(final.servers.map((server) => [server.name, server]));
+    expect(finalByName.get("__proto__")).toMatchObject({
+      enabled: true,
+      config: { command: "proto-after" },
+    });
+    expect(finalByName.get("constructor")).toMatchObject({ enabled: false });
+    expect(finalByName.has("toString")).toBe(false);
+
+    const persisted = JSON.parse(readFileSync(join(temp!.root, "casper", "mcp.json"), "utf8")) as {
+      mcpServers: Record<string, unknown>;
+    };
+    expect(Object.hasOwn(persisted.mcpServers, "__proto__")).toBe(true);
+    expect(Object.hasOwn(persisted.mcpServers, "constructor")).toBe(true);
+    expect(Object.hasOwn(persisted.mcpServers, "toString")).toBe(false);
+  });
+
+  it("returns post-reload connection state for every mutation of an open session", async () => {
+    const base = await serve();
+    const collection = `${base}/api/ghosts/casper/mcp`;
+    const ghostDir = join(temp!.root, "casper");
+    const firstServer = writeMcpRouteFixture(ghostDir, "route-mcp-first.mjs", "first_echo");
+    const secondServer = writeMcpRouteFixture(ghostDir, "route-mcp-second.mjs", "second_echo");
+    const opened = await host!.open("casper", "route-mcp-live");
+    const firstTool = "mcp__route_fixture_first_echo";
+    const secondTool = "mcp__route_fixture_second_echo";
+
+    const added = await jsonRequest(collection, "POST", {
+      name: "route_fixture",
+      config: { type: "stdio", command: process.execPath, args: [firstServer] },
+    });
+    expect(added.status).toBe(201);
+    expect(await added.json()).toMatchObject({
+      servers: [expect.objectContaining({
+        name: "route_fixture",
+        connectionStatus: "connected",
+      })],
+    });
+    expect(host!.mcpConnectionStatus("casper", "route_fixture")).toBe("connected");
+    expect(opened.session.getToolByName(firstTool)).toBeDefined();
+
+    const disabled = await jsonRequest(`${collection}/route_fixture/enabled`, "PUT", {
+      enabled: false,
+    });
+    expect(disabled.status).toBe(200);
+    expect(await disabled.json()).toMatchObject({
+      servers: [expect.objectContaining({
+        name: "route_fixture",
+        connectionStatus: "disabled",
+      })],
+    });
+    expect(opened.session.getToolByName(firstTool)).toBeUndefined();
+
+    const enabled = await jsonRequest(`${collection}/route_fixture/enabled`, "PUT", {
+      enabled: true,
+    });
+    expect(enabled.status).toBe(200);
+    expect(await enabled.json()).toMatchObject({
+      servers: [expect.objectContaining({
+        name: "route_fixture",
+        connectionStatus: "connected",
+      })],
+    });
+    expect(host!.mcpConnectionStatus("casper", "route_fixture")).toBe("connected");
+    expect(opened.session.getToolByName(firstTool)).toBeDefined();
+
+    const replaced = await jsonRequest(`${collection}/route_fixture`, "PUT", {
+      config: { type: "stdio", command: process.execPath, args: [secondServer] },
+    });
+    expect(replaced.status).toBe(200);
+    expect(await replaced.json()).toMatchObject({
+      servers: [expect.objectContaining({
+        name: "route_fixture",
+        connectionStatus: "connected",
+      })],
+    });
+    expect(host!.mcpConnectionStatus("casper", "route_fixture")).toBe("connected");
+    expect(opened.session.getToolByName(firstTool)).toBeUndefined();
+    expect(opened.session.getToolByName(secondTool)).toBeDefined();
+
+    const removed = await jsonRequest(`${collection}/route_fixture`, "DELETE");
+    expect(removed.status).toBe(200);
+    expect(await removed.json()).toMatchObject({ servers: [] });
+    expect(opened.session.getToolByName(secondTool)).toBeUndefined();
+    expect(host!.mcpConnectionStatus("casper", "route_fixture")).toBe("disconnected");
+  });
+
+  it("reports a live reload failure without discarding the old manager or durable mutation", async () => {
+    const base = await serve();
+    const collection = `${base}/api/ghosts/casper/mcp`;
+    const ghostDir = join(temp!.root, "casper");
+    const firstServer = writeMcpRouteFixture(ghostDir, "route-mcp-stable.mjs", "stable_echo");
+    const secondServer = writeMcpRouteFixture(ghostDir, "route-mcp-next.mjs", "next_echo");
+    const opened = await host!.open("casper", "route-mcp-reload-failure");
+    const stableTool = "mcp__route_fixture_stable_echo";
+    const nextTool = "mcp__route_fixture_next_echo";
+
+    const added = await jsonRequest(collection, "POST", {
+      name: "route_fixture",
+      config: { type: "stdio", command: process.execPath, args: [firstServer] },
+    });
+    expect(added.status).toBe(201);
+    expect(opened.session.getToolByName(stableTool)).toBeDefined();
+
+    vi.spyOn(opened.session, "refreshMCPTools")
+      .mockRejectedValueOnce(new Error("injected live MCP publication failure"));
+    const failed = await jsonRequest(`${collection}/route_fixture`, "PUT", {
+      config: {
+        type: "stdio",
+        command: process.execPath,
+        args: [secondServer],
+        cwd: ghostDir,
+      },
+    });
+    expect(failed.status).toBe(500);
+    expect(await failed.json()).toMatchObject({ error: { code: "internal_error" } });
+    expect(opened.session.getToolByName(stableTool)).toBeDefined();
+    expect(opened.session.getToolByName(nextTool)).toBeUndefined();
+    expect(host!.mcpConnectionStatus("casper", "route_fixture")).toBe("connected");
+
+    const durable = await fetch(collection);
+    expect(durable.status).toBe(200);
+    expect(await durable.json()).toMatchObject({
+      servers: [expect.objectContaining({
+        name: "route_fixture",
+        connectionStatus: "connected",
+        config: expect.objectContaining({ cwd: ghostDir }),
+      })],
+    });
+
+    const retried = await jsonRequest(`${collection}/route_fixture`, "PUT", {
+      config: {
+        type: "stdio",
+        command: process.execPath,
+        args: [secondServer],
+        cwd: ghostDir,
+      },
+    });
+    expect(retried.status).toBe(200);
+    expect(await retried.json()).toMatchObject({
+      servers: [expect.objectContaining({ connectionStatus: "connected" })],
+    });
+    expect(opened.session.getToolByName(stableTool)).toBeUndefined();
+    expect(opened.session.getToolByName(nextTool)).toBeDefined();
+  });
 });
 
 describe("POST /api/ghosts", () => {
@@ -482,6 +1558,73 @@ describe("POST /api/ghosts", () => {
 });
 
 describe("POST /api/ghosts/:name/messages", () => {
+  it("rejects unsupported first-turn Claude project MCP before SSE or runtime publication", async () => {
+    const base = await serve();
+    const ghostDir = join(temp!.root, "casper");
+    const paths = ghostPaths(ghostDir);
+    setChatModelRole(paths.home, "claude-code", "default");
+    const project = join(temp!.root, "claude-prestream-secret-project");
+    const sentinel = "CLAUDE_PRESTREAM_PROJECT_SECRET";
+    mkdirSync(join(project, ".omp"), { recursive: true });
+    writeFileSync(join(project, ".omp", "mcp.json"), JSON.stringify({
+      mcpServers: {
+        secret: {
+          type: "stdio",
+          command: process.execPath,
+          env: { PROJECT_TOKEN: sentinel },
+        },
+      },
+    }));
+    const conversationId = "claude-prestream-secret";
+    const projectRoute = `${base}/api/ghosts/casper/sessions/${claudeSegment(conversationId)}/project`;
+    const preview = await (await fetch(`${projectRoute}/preview`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: project }),
+    })).json() as { trustToken: string };
+    const bound = await fetch(projectRoute, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        root: project,
+        trustToken: preview.trustToken,
+        expectedGeneration: 0,
+      }),
+    });
+    expect(bound.status).toBe(200);
+    const before = await (await fetch(projectRoute)).json() as Record<string, unknown>;
+    const claude = (host as unknown as {
+      claudeCode: {
+        admitProjectSnapshot(...args: unknown[]): Promise<unknown>;
+        runTurn(...args: unknown[]): Promise<void>;
+      };
+    }).claudeCode;
+    const scan = vi.spyOn(claude, "admitProjectSnapshot");
+    const run = vi.spyOn(claude, "runTurn");
+
+    const response = await fetch(`${base}/api/ghosts/casper/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "text/event-stream" },
+      body: JSON.stringify({ ...TURN_BODY, options: { sessionId: conversationId } }),
+    });
+    const raw = await response.text();
+    expect(response.status).toBe(409);
+    expect(response.headers.get("content-type")).toContain("application/json");
+    expect(raw).not.toContain("data:");
+    expect(JSON.parse(raw)).toMatchObject({
+      error: { code: "claude_project_mcp_secrets_unsupported" },
+    });
+    expect(raw).not.toContain(sentinel);
+    expect(scan).toHaveBeenCalledTimes(1);
+    expect(run).not.toHaveBeenCalled();
+    expect(provider!.requests).toHaveLength(0);
+    expect(existsSync(claudeSessionMetadataPath(paths.sessionDir, conversationId))).toBe(false);
+    expect(existsSync(join(paths.sessionDir, sessionFileNameFor(conversationId)))).toBe(false);
+    expect(await (await fetch(`${base}/api/ghosts/casper/sessions`)).json())
+      .toMatchObject({ sessions: [] });
+    expect(await (await fetch(projectRoute)).json()).toMatchObject(before);
+  });
+
   it("streams one well-formed pi-messages turn", async () => {
     const base = await serve([
       { kind: "tool", name: "ghost_memory_list", args: {} },
@@ -1194,7 +2337,7 @@ describe("DELETE /api/ghosts/:name/sessions/:id", () => {
     };
     expect(body).toMatchObject({
       ok: true,
-      trash: [{ artifact: "omp-transcript", kind: "freedesktop" }],
+      trash: [{ artifact: "omp-transcript", kind: "fallback" }],
     });
     expect(existsSync(body.trash[0]!.source)).toBe(false);
     expect(existsSync(body.trash[0]!.trash)).toBe(true);
@@ -1272,10 +2415,18 @@ describe("DELETE /api/ghosts/:name", () => {
     const turn = postTurn(base, { ...TURN_BODY, options: { sessionId: "conv-ask" } });
     const ask = await waitForAsk(base, "conv-ask");
 
+    const renameBusy = await fetch(`${base}/api/ghosts/casper/name`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "wisp" }),
+    });
+    expect(renameBusy.status).toBe(409);
+    expect(await renameBusy.json()).toMatchObject({ error: { code: "ghost_busy" } });
     const busy = await fetch(`${base}/api/ghosts/casper?confirm=casper`, { method: "DELETE" });
     expect(busy.status).toBe(409);
     expect(await busy.json()).toMatchObject({ error: { code: "ghost_busy" } });
     expect(existsSync(join(temp!.root, "casper"))).toBe(true);
+    expect(existsSync(join(temp!.root, "wisp"))).toBe(false);
 
     await fetch(`${base}/api/ghosts/casper/sessions/${piSegment("conv-ask")}/ask`, {
       method: "POST",

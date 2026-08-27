@@ -12,13 +12,13 @@ function dispatch(message, ghostd, hud, quit) {
         hud.open();
         return true;
     case "conversation":
-        if (message.name) ghostd.selectGhost(message.name);
-        if (message.sessionId) ghostd.openConversation(message.sessionId);
+        if (message.name && message.sessionId)
+            ghostd.openConversationForGhost(message.name, message.sessionId);
         hud.open();
         return true;
     case "new":
-        if (message.name) ghostd.selectGhost(message.name);
-        ghostd.newConversation();
+        if (message.name) ghostd.newConversationForGhost(message.name);
+        else ghostd.newConversation();
         hud.open();
         return true;
     case "switcher":

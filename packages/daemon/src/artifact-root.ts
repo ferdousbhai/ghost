@@ -1,49 +1,134 @@
-/**
- * Ghost-owned loading for the visible OMP artifact directories.
- *
- * OMP's invocation scope is the narrow dependency boundary: it lets Ghost
- * name the home directly and exclude OMP's configured/installed package roots
- * while the ordinary Agents, Codex, and Claude providers still contribute the
- * owner's global skills, agents, and commands. Session methods can rediscover
- * capabilities long after construction, so callers must enter this scope for
- * every such operation rather than relying on creation-time async context.
- */
+/** Explicit loading for the visible Ghost-owned OMP artifact directories. */
 import type { Dirent } from "node:fs";
-import { readdir } from "node:fs/promises";
+import { readdir, type FileHandle } from "node:fs/promises";
 import { join } from "node:path";
+import type { ExtensionFactory } from "@oh-my-pi/pi-coding-agent";
 import { withOmpExtensionRootScope } from "@oh-my-pi/pi-coding-agent/discovery/omp-extension-roots";
+import { withHostGuard } from "@oh-my-pi/pi-coding-agent/extensibility/utils";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
+import {
+  descriptorPath,
+  openDirectoryNoFollow,
+  openRegularFileNoFollow,
+} from "@ghost/extensions";
 
 export function withGhostArtifactRoot<T>(homeDir: string, operation: () => T): T {
   return withOmpExtensionRootScope([homeDir], "explicit-only", operation);
 }
 
-/**
- * JS/TS hooks execute as OMP extensions rather than passive capability rows.
- * Preloading only these paths avoids treating arbitrary files in the home as
- * extension modules when the home is also the package root.
- */
-export async function ghostHookExtensionPaths(homeDir: string): Promise<string[]> {
-  const paths: string[] = [];
-  for (const kind of ["pre", "post"] as const) {
-    const dir = join(homeDir, "hooks", kind);
-    let entries: Dirent[];
-    try {
-      entries = await readdir(dir, { withFileTypes: true });
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
-      throw error;
-    }
-    for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
-      if (!(entry.isFile() || entry.isSymbolicLink())) continue;
-      if (!entry.name.endsWith(".ts") && !entry.name.endsWith(".js")) continue;
-      paths.push(join(dir, entry.name));
-    }
-  }
-  return paths;
+export interface GhostHookExtensionLoad {
+  factories: ExtensionFactory[];
+  errors: Array<{ path: string; error: string }>;
 }
 
-/** Keep OMP's public rediscovery entry point pinned to this ghost's root. */
+export interface GhostHookExtensionLoadOptions {
+  /** Test/diagnostic seam after the final entry is pinned, before evaluation. */
+  afterOpen?: (path: string) => void | Promise<void>;
+}
+
+let hookImportSequence = 0;
+
+function hookFactory(value: unknown): ExtensionFactory | null {
+  const candidate = typeof value === "function"
+    ? value
+    : value && typeof value === "object"
+      ? (value as { default?: unknown }).default
+      : undefined;
+  return typeof candidate === "function" ? candidate as ExtensionFactory : null;
+}
+
+async function close(file: FileHandle | undefined): Promise<void> {
+  await file?.close().catch(() => undefined);
+}
+
+/** Load only descriptor-pinned regular JS/TS hook entries from the visible home. */
+export async function loadGhostHookExtensions(
+  homeDir: string,
+  options: GhostHookExtensionLoadOptions = {},
+): Promise<GhostHookExtensionLoad> {
+  const result: GhostHookExtensionLoad = { factories: [], errors: [] };
+  let root: FileHandle | undefined;
+  let hooks: FileHandle | undefined;
+  try {
+    root = await openDirectoryNoFollow(homeDir, "Ghost home");
+    try {
+      hooks = await openDirectoryNoFollow(descriptorPath(root, "hooks"), "Ghost hooks");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return result;
+      result.errors.push({ path: join(homeDir, "hooks"), error: "Hook directory was rejected." });
+      return result;
+    }
+    for (const kind of ["pre", "post"] as const) {
+      const logicalDirectory = join(homeDir, "hooks", kind);
+      let directory: FileHandle | undefined;
+      try {
+        try {
+          directory = await openDirectoryNoFollow(
+            descriptorPath(hooks, kind),
+            `Ghost ${kind} hooks`,
+          );
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+          result.errors.push({ path: logicalDirectory, error: "Hook directory was rejected." });
+          continue;
+        }
+        let entries: Dirent[];
+        try {
+          entries = await readdir(descriptorPath(directory), { withFileTypes: true });
+        } catch {
+          result.errors.push({ path: logicalDirectory, error: "Hook directory could not be read." });
+          continue;
+        }
+        for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+          if (entry.name.startsWith(".")) continue;
+          if (!entry.name.endsWith(".ts") && !entry.name.endsWith(".js")) continue;
+          const logicalPath = join(logicalDirectory, entry.name);
+          if (!entry.isFile()) {
+            result.errors.push({ path: logicalPath, error: "Hook entry is not a regular file." });
+            continue;
+          }
+          let file: FileHandle | undefined;
+          try {
+            file = await openRegularFileNoFollow(
+              descriptorPath(directory, entry.name),
+              "Ghost hook entry",
+            );
+            const openedFile = file;
+            const before = await openedFile.stat({ bigint: true });
+            if (!before.isFile()) throw new Error("Hook entry is not a regular file.");
+            await options.afterOpen?.(logicalPath);
+            hookImportSequence += 1;
+            const importTag = hookImportSequence;
+            const imported = await withHostGuard(() =>
+              import(`${descriptorPath(openedFile)}?ghost-hook=${importTag}`));
+            const after = await openedFile.stat({ bigint: true });
+            if (!after.isFile() || before.dev !== after.dev || before.ino !== after.ino) {
+              throw new Error("Hook entry changed filesystem identity while loading.");
+            }
+            const factory = hookFactory(imported);
+            if (!factory) throw new Error("Hook entry does not export a factory function.");
+            result.factories.push(factory);
+          } catch (error) {
+            result.errors.push({
+              path: logicalPath,
+              error: error instanceof Error ? error.message : "Hook entry could not be loaded.",
+            });
+          } finally {
+            await close(file);
+          }
+        }
+      } finally {
+        await close(directory);
+      }
+    }
+    return result;
+  } finally {
+    await close(hooks);
+    await close(root);
+  }
+}
+
+/** Keep OMP's public rediscovery entry points pinned to one Ghost root. */
 export function scopeGhostSessionArtifactRediscovery(
   session: AgentSession,
   homeDir: string,

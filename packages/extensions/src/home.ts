@@ -1,22 +1,22 @@
 /**
- * The ghost-home/v2 reader/writer and one-time v1 document migrator.
+ * The ghost-home/v2 reader/writer and retained hosted-document compatibility.
  *
  * A ghost is a directory (CONTRACTS.md):
  *
  *     <ghostsRoot>/<name>/
  *       character.md
- *       docs/**\/*.md
+ *       docs/**\/*.md              (legacy hosted import input only)
  *       memory/*.md
  *       conversations/*.json
  *       export-manifest.json      (only in imported archives)
  *
  * Two rules run through everything here:
  *
- * 1. **Bodies are bytes.** A doc read and written back unchanged is
+ * 1. **Bodies are bytes.** A legacy imported doc read and written back unchanged is
  *    byte-identical. No trimming, no newline normalization, no "tidying".
- * 2. **Nothing derived is stored.** The memory index and the doc catalog are
- *    computed per session (`deriveMemoryIndex`, `deriveDocCatalog`). There is no
- *    MEMORY.md and no catalog file, by contract.
+ * 2. **Nothing derived is stored.** The memory index is computed per session,
+ *    and the separate owner-wide Documents index is read from the machine.
+ *    There is no MEMORY.md or catalog file, by contract.
  *
  * Mutations use a path-keyed in-process queue plus descriptor locks and atomic
  * rename: OMP runs tool calls in parallel, and ghostd import can be a separate
@@ -32,15 +32,15 @@ import {
   unlink,
   type FileHandle,
 } from "node:fs/promises";
-import { constants } from "node:fs";
-import { randomUUID } from "node:crypto";
+import { constants, type BigIntStats } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
 import { basename, dirname, join, resolve, sep } from "node:path";
-import { isSafe } from "redos-detector";
-import { migrateDoc, parseDoc } from "./doc-format.js";
-import { GhostError } from "./errors.js";
+import { migrateDoc } from "./doc-format.js";
+import { GhostError, MemoryFileFormatError } from "./errors.js";
 import {
   assertWritableMemory,
   coerceMemorySlug,
+  MAX_MEMORY_FILE_BYTES,
   MAX_MEMORY_FILES,
   memoryFileName,
   memoryIndexPreview,
@@ -60,8 +60,6 @@ import { GHOST_HOME_FORMAT } from "./types.js";
 import type {
   CharacterFile,
   MemoryRecord,
-  DocFile,
-  DocMeta,
 } from "./types.js";
 
 export const DOCS_DIRNAME = "docs";
@@ -78,23 +76,9 @@ export interface SkippedFile {
   readonly reason: string;
 }
 
-export interface DocListing {
-  readonly docs: readonly DocMeta[];
-  /**
-   * Files under `docs/` that could not be parsed. They are excluded from the
-   * catalog rather than guessed at, but are reported rather than dropped silently.
-   */
-  readonly skipped: readonly SkippedFile[];
-}
-
 export interface MemoryListing {
   readonly files: readonly MemoryRecord[];
   readonly skipped: readonly SkippedFile[];
-}
-
-export interface DocWriteInput {
-  /** Complete canonical ghost-home/v2 Markdown, written byte-for-byte. */
-  readonly body: string;
 }
 
 export interface MemoryWriteInput {
@@ -110,27 +94,58 @@ export interface MemoryWriteResult {
   readonly created: boolean;
 }
 
-export interface DocSearchOptions {
-  /** Treat the query as a JavaScript regular expression. */
-  readonly regex?: boolean;
-  readonly caseSensitive?: boolean;
-  readonly maxResults?: number;
-  readonly includeArchived?: boolean;
+export interface MemoryWriteIntent {
+  readonly id: string;
+  readonly path: `memory/${string}.md`;
+  /** Exact prior admitted UTF-8 Markdown, or null when this creates the file. */
+  readonly before: string | null;
+  /** Exact serialized Markdown that will be atomically published. */
+  readonly after: string;
+  readonly beforeSha256: string | null;
+  readonly afterSha256: string;
 }
 
-export interface DocSearchMatch {
-  readonly path: string;
-  readonly line: number;
-  readonly text: string;
+export interface MemoryWriteReceipt extends MemoryWriteIntent {
+  readonly operation: "created" | "updated";
 }
 
-export interface DocSearchResult {
-  readonly matches: readonly DocSearchMatch[];
-  readonly truncated: boolean;
-  readonly docsSearched: number;
+export interface MemoryWriteWithReceiptResult {
+  readonly written: MemoryWriteResult;
+  readonly receipt: MemoryWriteReceipt;
 }
 
-const DEFAULT_SEARCH_RESULTS = 50;
+export type MemoryReadStage = "opened" | "read";
+
+export interface GhostHomeOptions {
+  /** Deterministic descriptor-race injection for filesystem-boundary tests. */
+  readonly memoryReadProbe?: (
+    stage: MemoryReadStage,
+    path: string,
+  ) => void | Promise<void>;
+}
+
+function sha256(text: string): string {
+  return createHash("sha256").update(text).digest("hex");
+}
+
+function memoryIntentName(intent: MemoryWriteIntent): { name: string; slug: string } {
+  const prefix = `${MEMORY_DIRNAME}/`;
+  if (!intent.path.startsWith(prefix)) {
+    throw new GhostError("invalid_format", "A memory replay intent has an invalid path.");
+  }
+  const name = intent.path.slice(prefix.length);
+  const slug = coerceMemorySlug(name);
+  if (intent.before !== null) assertAdmittedMemorySource(intent.before, intent.path);
+  assertAdmittedMemorySource(intent.after, intent.path);
+  if (intent.path !== `${prefix}${memoryFileName(slug)}`
+    || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(intent.id)
+    || intent.afterSha256 !== sha256(intent.after)
+    || intent.beforeSha256 !== (intent.before === null ? null : sha256(intent.before))
+    || serializeMemoryFile(parseMemoryFile(intent.after).content) !== intent.after) {
+    throw new GhostError("invalid_format", "A memory replay intent failed exact validation.");
+  }
+  return { name, slug };
+}
 
 /** Serialize mutations to the same file while allowing unrelated files to proceed. */
 const fileMutationQueues = new Map<string, Promise<unknown>>();
@@ -145,28 +160,6 @@ async function withFileMutationQueue<T>(path: string, mutate: () => Promise<T>):
     if (fileMutationQueues.get(path) === running) fileMutationQueues.delete(path);
   }
 }
-
-/**
- * ReDoS defence for `searchDocs` with `regex: true`. The query is model- or
- * page-supplied (a ghost greps text it just read off the web), and it is compiled
- * and `.test()`ed against every line. Without a guard, a pattern like `(a+)+$`
- * against one long line backtracks catastrophically and pins the daemon's single
- * event loop, taking the HTTP API and every ghost session down with it.
- *
- * The guarantee has three parts:
- *   1. Cap the pattern length, so the analysis below always gets a small input.
- *   2. Prove the pattern cannot backtrack super-linearly, with `redos-detector`
- *      (a static, linear-time analysis; no native binding, unlike RE2, which
- *      would need a workspace-root build-script allowlist). The analysis itself
- *      is wall-time bounded and fails closed — a timeout counts as unsafe.
- *   3. Cap the characters of any one line handed to the matcher, so even a
- *      proven-linear pattern does bounded work per line.
- * A literal (non-regex) query is escaped before compiling and is always linear,
- * so it skips this gate entirely.
- */
-const MAX_GREP_PATTERN_CHARS = 1_000;
-const REDOS_ANALYSIS_TIMEOUT_MS = 50;
-const MAX_GREP_LINE_SCAN_CHARS = 10_000;
 
 async function exists(path: string): Promise<boolean> {
   try {
@@ -207,6 +200,115 @@ async function readConfinedText(
 interface ReadTextFile {
   readonly text: string;
   readonly modified: Date;
+}
+
+function sameFileIdentity(left: BigIntStats, right: BigIntStats): boolean {
+  return left.isFile() && right.isFile()
+    && left.dev === right.dev
+    && left.ino === right.ino
+    && left.size === right.size
+    && left.mtimeNs === right.mtimeNs
+    && left.ctimeNs === right.ctimeNs
+    && left.mode === right.mode
+    && left.nlink === right.nlink;
+}
+
+function invalidMemoryBytes(path: string, reason: string): MemoryFileFormatError {
+  return new MemoryFileFormatError(
+    `Memory file ${JSON.stringify(path)} ${reason}.`,
+    { path, limit: MAX_MEMORY_FILE_BYTES },
+  );
+}
+
+function normalizeMemoryReadError(error: unknown, path: string): never {
+  if (error instanceof GhostError) throw error;
+  throw invalidMemoryBytes(path, `could not be read safely: ${message(error)}`);
+}
+
+function memoryChanged(path: string): GhostError {
+  return new GhostError(
+    "conflict",
+    `Memory file ${JSON.stringify(path)} changed while it was being read.`,
+    { path },
+  );
+}
+
+function assertAdmittedMemorySource(text: string, path: string): void {
+  if (Buffer.byteLength(text) > MAX_MEMORY_FILE_BYTES) {
+    throw invalidMemoryBytes(path, `exceeds its ${MAX_MEMORY_FILE_BYTES}-byte limit`);
+  }
+  parseMemoryFile(text);
+}
+
+/**
+ * Read one complete memory through its pinned directory entry. The initial
+ * descriptor size is admitted before allocating or decoding any file data.
+ */
+async function readPinnedMemoryTextFile(
+  directory: FileHandle,
+  name: string,
+  path: string,
+  probe?: GhostHomeOptions["memoryReadProbe"],
+): Promise<ReadTextFile | null> {
+  let file: FileHandle;
+  try {
+    file = await openRegularFileNoFollow(
+      descriptorPath(directory, name),
+      "Memory file",
+    );
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    return normalizeMemoryReadError(error, path);
+  }
+  try {
+    const before = await file.stat({ bigint: true });
+    if (!before.isFile()) throw invalidMemoryBytes(path, "is not a regular file");
+    if (before.size < 0n || before.size > BigInt(MAX_MEMORY_FILE_BYTES)) {
+      throw invalidMemoryBytes(path, `exceeds its ${MAX_MEMORY_FILE_BYTES}-byte limit`);
+    }
+    await probe?.("opened", path);
+
+    const bytes = Buffer.alloc(Number(before.size) + 1);
+    let length = 0;
+    while (length < bytes.length) {
+      const result = await file.read(bytes, length, bytes.length - length, length);
+      if (result.bytesRead === 0) break;
+      length += result.bytesRead;
+    }
+    await probe?.("read", path);
+
+    const after = await file.stat({ bigint: true });
+    if (length > MAX_MEMORY_FILE_BYTES || after.size > BigInt(MAX_MEMORY_FILE_BYTES)) {
+      throw invalidMemoryBytes(path, `exceeds its ${MAX_MEMORY_FILE_BYTES}-byte limit`);
+    }
+    if (BigInt(length) !== before.size || !sameFileIdentity(before, after)) {
+      throw memoryChanged(path);
+    }
+
+    let live: BigIntStats;
+    try {
+      live = await lstat(descriptorPath(directory, name), { bigint: true });
+    } catch {
+      throw memoryChanged(path);
+    }
+    if (!sameFileIdentity(after, live)) {
+      throw memoryChanged(path);
+    }
+
+    try {
+      // Preserve an admitted UTF-8 BOM as U+FEFF so receipt comparisons and
+      // hashes round-trip the exact owner-authored bytes.
+      const text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true })
+        .decode(bytes.subarray(0, length));
+      return { text, modified: after.mtime };
+    } catch {
+      throw invalidMemoryBytes(path, "is not valid UTF-8");
+    }
+  } catch (error) {
+    return normalizeMemoryReadError(error, path);
+  } finally {
+    await file.close().catch(() => undefined);
+  }
 }
 
 async function readConfinedTextFile(
@@ -296,28 +398,6 @@ async function atomicWriteFile(
   } finally {
     if (ownedDirectory) await directory.close();
   }
-}
-
-/** `craft/paper` and `craft/paper.md` both mean `craft/paper.md`. */
-export function normalizeDocPath(input: string): string {
-  const segments = input
-    .trim()
-    .replace(/\\/g, "/")
-    .split("/")
-    .filter((segment) => segment.length > 0 && segment !== ".");
-  if (segments.length === 0) {
-    throw new GhostError("invalid_path", "A document path is required.");
-  }
-  if (segments.some((segment) => segment === "..")) {
-    throw new GhostError(
-      "invalid_path",
-      `Document path ${JSON.stringify(input)} escapes the docs directory.`,
-      { path: input },
-    );
-  }
-  const last = segments[segments.length - 1] as string;
-  segments[segments.length - 1] = last.endsWith(".md") ? last : `${last}.md`;
-  return segments.join("/");
 }
 
 async function migrateDocFile(
@@ -482,10 +562,12 @@ export class GhostHome {
   readonly dir: string;
   /** Directory name — the ghost's name. */
   readonly name: string;
+  readonly #memoryReadProbe?: GhostHomeOptions["memoryReadProbe"];
 
-  constructor(dir: string) {
+  constructor(dir: string, options: GhostHomeOptions = {}) {
     this.dir = resolve(dir);
     this.name = basename(this.dir);
+    this.#memoryReadProbe = options.memoryReadProbe;
   }
 
   get characterPath(): string {
@@ -557,12 +639,10 @@ export class GhostHome {
                 "Documents path",
               );
             }
-            docs ??= await openOrCreateChildDirectory(
-              directory,
-              DOCS_DIRNAME,
-              "Documents path",
-            );
-            await migrateDocTree(this.dir, docs, this.docsDir);
+            // `docs/` is a legacy/import input now. New homes use the shared
+            // XDG Documents directory and do not recreate an empty per-ghost
+            // directory after the owner's one-time move.
+            if (docs) await migrateDocTree(this.dir, docs, this.docsDir);
           } finally {
             await docs?.close().catch(() => undefined);
             await legacyNotes?.close().catch(() => undefined);
@@ -618,194 +698,19 @@ export class GhostHome {
     });
   }
 
-  // -------------------------------------------------------------------- docs
-
-  /** Every `.md` under `docs/`, recursively. Hidden files and dirs are skipped. */
-  async listDocs(): Promise<DocListing> {
-    const docs: DocMeta[] = [];
-    const skipped: SkippedFile[] = [];
-
-    if (!(await exists(this.docsDir))) return { docs, skipped };
-    const root = await openConfinedDirectory(this.dir, this.docsDir, {
-      label: "Documents path",
-    });
-
-    const walk = async (directory: FileHandle, prefix: string): Promise<void> => {
-      for (const entry of await readdir(descriptorPath(directory), {
-        withFileTypes: true,
-      })) {
-        if (entry.name.startsWith(".")) continue;
-        const childPath = prefix ? `${prefix}/${entry.name}` : entry.name;
-        if (entry.isDirectory()) {
-          let child: FileHandle;
-          try {
-            child = await openDirectoryNoFollow(
-              descriptorPath(directory, entry.name),
-              "Document path",
-            );
-          } catch (error) {
-            skipped.push({
-              path: `${DOCS_DIRNAME}/${childPath}`,
-              reason: message(error),
-            });
-            continue;
-          }
-          try {
-            await walk(child, childPath);
-          } finally {
-            await child.close();
-          }
-          continue;
-        }
-        if (!entry.name.endsWith(".md")) continue;
-        try {
-          const text = await readEntryText(directory, entry.name, "Document path");
-          if (text === null) continue;
-          docs.push({ ...parseDoc(text), path: childPath });
-        } catch (error) {
-          skipped.push({
-            path: `${DOCS_DIRNAME}/${childPath}`,
-            reason: message(error),
-          });
-        }
-      }
-    };
-
-    try {
-      await walk(root, "");
-    } finally {
-      await root.close();
-    }
-    docs.sort((left, right) => left.path.localeCompare(right.path));
-    return { docs, skipped };
-  }
-
-  async readDoc(path: string): Promise<DocFile> {
-    const docPath = normalizeDocPath(path);
-    const full = resolveWithin(this.docsDir, docPath, "Document path");
-    const text = await readConfinedText(this.dir, full, "Document path");
-    if (text === null) {
-      throw new GhostError("not_found", `No document at ${docPath}.`, { path: docPath });
-    }
-    const parsed = parseDoc(text);
-    return { meta: { ...parsed, path: docPath }, body: text };
-  }
-
-  /** Metadata for one doc, or null when it does not exist. */
-  async findDoc(path: string): Promise<DocMeta | null> {
-    try {
-      return (await this.readDoc(path)).meta;
-    } catch (error) {
-      if (error instanceof GhostError && error.code === "not_found") return null;
-      throw error;
-    }
-  }
-
-  async writeDoc(path: string, input: DocWriteInput): Promise<DocMeta> {
-    const docPath = normalizeDocPath(path);
-    const full = resolveWithin(this.docsDir, docPath, "Document path");
-    const parsed = parseDoc(input.body);
-    await withFileMutationQueue(full, async () => {
-      await atomicWriteFile(this.dir, full, input.body);
-    });
-    return { ...parsed, path: docPath };
-  }
-
-  /** Plain substring or regex search over doc bodies and titles. */
-  async searchDocs(
-    query: string,
-    options: DocSearchOptions = {},
-  ): Promise<DocSearchResult> {
-    const maxResults = Math.max(1, options.maxResults ?? DEFAULT_SEARCH_RESULTS);
-    const flags = options.caseSensitive ? "" : "i";
-    if (options.regex && query.length > MAX_GREP_PATTERN_CHARS) {
-      throw new GhostError(
-        "invalid_format",
-        `A regular-expression search may be at most ${MAX_GREP_PATTERN_CHARS} characters.`,
-        { query },
-      );
-    }
-    let pattern: RegExp;
-    try {
-      pattern = options.regex
-        ? new RegExp(query, flags)
-        : new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), flags);
-    } catch (error) {
-      throw new GhostError(
-        "invalid_format",
-        `Invalid search pattern: ${message(error)}`,
-        { query },
-      );
-    }
-    // Only a caller-supplied *regex* can be adversarial; the escaped literal above
-    // is always linear. See MAX_GREP_PATTERN_CHARS for the full rationale.
-    if (options.regex && !isSafe(pattern, { timeout: REDOS_ANALYSIS_TIMEOUT_MS }).safe) {
-      throw new GhostError(
-        "invalid_format",
-        "That regular expression can backtrack catastrophically and could hang the "
-        + "daemon, so it was refused. Simplify it — remove nested quantifiers such as "
-        + "\"(a+)+\" — or search for a plain phrase instead.",
-        { query },
-      );
-    }
-
-    const { docs } = await this.listDocs();
-    // Archived docs are out of the working set by default.
-    const candidates = docs.filter((doc) =>
-      options.includeArchived === true || !doc.archived
-    );
-    const matches: DocSearchMatch[] = [];
-    let truncated = false;
-    let docsSearched = 0;
-
-    // One collector for title and body matches alike. The title push used to
-    // bypass maxResults entirely and never set `truncated`, so a corpus of
-    // title-matching docs could overrun the cap silently; now every match is
-    // gated the same way. Returns false once the cap is reached.
-    const collect = (match: DocSearchMatch): boolean => {
-      if (matches.length >= maxResults) {
-        truncated = true;
-        return false;
-      }
-      matches.push(match);
-      return true;
-    };
-
-    for (const doc of candidates) {
-      docsSearched += 1;
-      const { body, meta } = await this.readDoc(doc.path);
-      if (pattern.test(meta.title)) {
-        if (!collect({ path: doc.path, line: 0, text: `title: ${meta.title}` })) break;
-      }
-      const lines = body.split("\n");
-      let overflowed = false;
-      // The complete v2 body includes the title heading; it was already
-      // represented by the stable synthetic line 0 above.
-      for (let index = 1; index < lines.length; index += 1) {
-        const line = lines[index] as string;
-        const scanned = line.length > MAX_GREP_LINE_SCAN_CHARS
-          ? line.slice(0, MAX_GREP_LINE_SCAN_CHARS)
-          : line;
-        if (!pattern.test(scanned)) continue;
-        if (!collect({ path: doc.path, line: index + 1, text: line.trim() })) {
-          overflowed = true;
-          break;
-        }
-      }
-      if (overflowed) break;
-    }
-
-    return { matches, truncated, docsSearched };
-  }
-
   // ------------------------------------------------------------------- memory
 
   async listMemory(): Promise<MemoryListing> {
     const dir = this.memoryDir;
     const files: MemoryRecord[] = [];
     const skipped: SkippedFile[] = [];
-    if (!(await exists(dir))) return { files, skipped };
-    const directory = await openConfinedDirectory(this.dir, dir, { label: "Memory path" });
+    let directory: FileHandle;
+    try {
+      directory = await openConfinedDirectory(this.dir, dir, { label: "Memory path" });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return { files, skipped };
+      throw error;
+    }
     try {
       await this.listMemoryFromDirectory(directory, files, skipped);
     } finally {
@@ -826,7 +731,12 @@ export class GhostHome {
       if (entry.name.startsWith(".") || !entry.name.endsWith(".md")) continue;
       const relativePath = `${MEMORY_DIRNAME}/${entry.name}`;
       try {
-        const source = await readEntryTextFile(directory, entry.name, "Memory file");
+        const source = await readPinnedMemoryTextFile(
+          directory,
+          entry.name,
+          relativePath,
+          this.#memoryReadProbe,
+        );
         if (source === null) continue;
         const parsed = parseMemoryFile(source.text);
         files.push({
@@ -843,14 +753,14 @@ export class GhostHome {
 
   async readMemory(name: string): Promise<MemoryRecord> {
     const slug = coerceMemorySlug(name);
-    const dir = this.memoryDir;
-    const full = resolveWithin(dir, memoryFileName(slug), "Memory file");
-    const source = await readConfinedTextFile(this.dir, full, "Memory file");
+    const fileName = memoryFileName(slug);
+    const path = `${MEMORY_DIRNAME}/${fileName}`;
+    const source = await this.readMemoryEntry(fileName, path);
     if (source === null) {
       throw new GhostError(
         "not_found",
-        `No memory file named ${memoryFileName(slug)}.`,
-        { name: memoryFileName(slug) },
+        `No memory file named ${fileName}.`,
+        { name: fileName },
       );
     }
     const parsed = parseMemoryFile(source.text);
@@ -862,10 +772,67 @@ export class GhostHome {
     };
   }
 
+  /**
+   * Exact serialized bytes for a memory receipt/recovery comparison.
+   * Presentation fields are derived and therefore cannot be used to
+   * reconstruct owner-authored whitespace byte-for-byte.
+   */
+  async readMemorySource(name: string): Promise<string> {
+    const slug = coerceMemorySlug(name);
+    const fileName = memoryFileName(slug);
+    const source = await this.readMemoryEntry(
+      fileName,
+      `${MEMORY_DIRNAME}/${fileName}`,
+    );
+    if (source === null) {
+      throw new GhostError(
+        "not_found",
+        `No memory file named ${fileName}.`,
+        { name: fileName },
+      );
+    }
+    assertAdmittedMemorySource(source.text, `${MEMORY_DIRNAME}/${fileName}`);
+    return source.text;
+  }
+
+  private async readMemoryEntry(name: string, path: string): Promise<ReadTextFile | null> {
+    let directory: FileHandle;
+    try {
+      directory = await openConfinedDirectory(this.dir, this.memoryDir, {
+        label: "Memory path",
+      });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      return normalizeMemoryReadError(error, path);
+    }
+    try {
+      return await readPinnedMemoryTextFile(
+        directory,
+        name,
+        path,
+        this.#memoryReadProbe,
+      );
+    } finally {
+      await directory.close();
+    }
+  }
+
   /** Create or replace exactly one atomic memory file. */
   async writeMemory(
     input: MemoryWriteInput,
   ): Promise<MemoryWriteResult> {
+    return (await this.writeMemoryWithReceipt(input, async () => {})).written;
+  }
+
+  /**
+   * Publish one memory write with an exact, pre-publication receipt boundary.
+   * The callback runs under the memory mutation queue and descriptor lock, so
+   * durable callers can journal the precise before/after bytes before rename.
+   */
+  async writeMemoryWithReceipt(
+    input: MemoryWriteInput,
+    beforePublish: (intent: MemoryWriteIntent) => Promise<void>,
+  ): Promise<MemoryWriteWithReceiptResult> {
     assertWritableMemory(input.content);
     const slug = input.name
       ? coerceMemorySlug(input.name)
@@ -883,11 +850,17 @@ export class GhostHome {
       });
       try {
         return await withDescriptorLock(directory, async () => {
-          const created = await existingFileMode(
+          const name = memoryFileName(slug);
+          const before = (await readPinnedMemoryTextFile(
             directory,
-            memoryFileName(slug),
-            "Memory file",
-          ) === null;
+            name,
+            `${MEMORY_DIRNAME}/${name}`,
+            this.#memoryReadProbe,
+          ))?.text ?? null;
+          if (before !== null) {
+            assertAdmittedMemorySource(before, `${MEMORY_DIRNAME}/${name}`);
+          }
+          const created = before === null;
           if (created) {
             const files: MemoryRecord[] = [];
             const skipped: SkippedFile[] = [];
@@ -901,8 +874,69 @@ export class GhostHome {
               );
             }
           }
+          const intent: MemoryWriteIntent = {
+            id: randomUUID(),
+            path: `${MEMORY_DIRNAME}/${name}` as `memory/${string}.md`,
+            before,
+            after: text,
+            beforeSha256: before === null ? null : sha256(before),
+            afterSha256: sha256(text),
+          };
+          await beforePublish(intent);
           await atomicWriteFile(this.dir, full, text, directory);
-          return { slug, path: this.relative(full), created };
+          const written = { slug, path: this.relative(full), created };
+          return {
+            written,
+            receipt: {
+              ...intent,
+              operation: created ? "created" : "updated",
+            },
+          };
+        });
+      } finally {
+        await directory.close();
+      }
+    });
+  }
+
+  /**
+   * Replay one already-journaled exact memory publication without consulting a
+   * model. The durable intent owns the exact before/after boundary: replay is
+   * allowed only while the descriptor-pinned current bytes still equal before.
+   */
+  async replayMemoryWriteIntent(intent: MemoryWriteIntent): Promise<MemoryWriteReceipt> {
+    const { name } = memoryIntentName(intent);
+    const dir = this.memoryDir;
+    const full = resolveWithin(dir, name, "Memory file");
+    return withFileMutationQueue(dir, async () => {
+      const directory = await openConfinedDirectory(this.dir, dir, {
+        create: true,
+        label: "Memory path",
+      });
+      try {
+        return await withDescriptorLock(directory, async () => {
+          const current = (await readPinnedMemoryTextFile(
+            directory,
+            name,
+            `${MEMORY_DIRNAME}/${name}`,
+            this.#memoryReadProbe,
+          ))?.text ?? null;
+          if (current !== null) {
+            assertAdmittedMemorySource(current, `${MEMORY_DIRNAME}/${name}`);
+          }
+          const currentSha256 = current === null ? null : sha256(current);
+          if (current !== intent.before || currentSha256 !== intent.beforeSha256) {
+            throw new GhostError(
+              "conflict",
+              "The journaled memory write no longer matches the current file bytes.",
+              { path: intent.path },
+            );
+          }
+          await atomicWriteFile(this.dir, full, intent.after, directory);
+          return {
+            ...intent,
+            operation: intent.before === null ? "created" : "updated",
+          };
         });
       } finally {
         await directory.close();
@@ -965,6 +999,6 @@ export class GhostHome {
   }
 }
 
-export function openGhostHome(dir: string): GhostHome {
-  return new GhostHome(dir);
+export function openGhostHome(dir: string, options: GhostHomeOptions = {}): GhostHome {
+  return new GhostHome(dir, options);
 }

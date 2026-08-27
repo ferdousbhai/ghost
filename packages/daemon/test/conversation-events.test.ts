@@ -199,7 +199,7 @@ describe("GET /api/ghosts/:name/events", () => {
         modified: now,
         messageCount: 2,
       }),
-      "utf8",
+      { encoding: "utf8", mode: 0o600 },
     );
     const controller = new AbortController();
     const response = await fetch(`${base}/api/ghosts/casper/events`, {

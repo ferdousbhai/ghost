@@ -4,11 +4,15 @@
  * the Quickshell surfaces without pi, models, or a real ghost home.
  *
  * Implements:
+ *   GET  /api/hooks                           → redacted daemon-global hook status
  *   GET  /api/ghosts                          → [{ name, dir, createdAt }]
  *   POST /api/ghosts { name }                 → 201 + the new ghost
  *   DELETE /api/ghosts/:name?confirm=:name    → 200 { ok, trash } | 400 | 404 | 409
- *   GET  /api/ghosts/:name/context            → docs, memory, character, agents
- *   DELETE /api/ghosts/:name/context          → move one doc/memory file to mock Trash
+ *   GET  /api/documents                       → one shared direct-directory page
+ *   GET  /api/documents/content               → bounded confined UTF-8 content
+ *   DELETE /api/documents                     → move one shared file to mock Trash
+ *   GET  /api/ghosts/:name/context            → memory, character; agents empty in phase 1
+ *   DELETE /api/ghosts/:name/context          → move one memory file to mock Trash
  *   GET  /api/ghosts/:name/mcp                → sanitized project MCP catalog
  *   POST/PUT/DELETE /api/ghosts/:name/mcp/... → manage project MCP servers
  *   GET/POST /api/ghosts/:name/sessions/:id/live   → remote live-voice status/actions
@@ -19,6 +23,9 @@
  *   GET  /api/ghosts/:name/sessions           → { sessions: [...] }, newest first
  *   GET  /api/ghosts/:name/events             → conversation invalidation SSE
  *   GET  /api/ghosts/:name/sessions/:id/commands → effective OMP slash commands
+ *   GET/PUT /api/ghosts/:name/sessions/:id/project → explicit project binding
+ *   POST /api/ghosts/:name/sessions/:id/project/preview|reload → staged project actions
+ *   DELETE /api/ghosts/:name/sessions/:id/project/draft → abandon an unpublished binding
  *   DELETE /api/ghosts/:name/sessions/:id     → delete one conversation
  *   PUT  /api/ghosts/:name/sessions/:id/read  → mark one conversation read
  *   GET  /api/ghosts/:name/sessions/:id/transcript → { id, title, messages, … }
@@ -65,10 +72,29 @@
  *   --stall-stream  leave the response open after the script, without a terminal
  *                  event or keepalive; the shell watchdog must settle it.
  */
-import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  constants,
+  fstatSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  readSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
+import {
+  mockProjectResources,
+  mockProjectWarnings,
+  resolveMockProjectRoot,
+} from "./mock-project-fixture.mjs";
 
 const argv = process.argv.slice(2);
 const flag = (name) => argv.includes(name);
@@ -79,6 +105,7 @@ const opt = (name, fallback) => {
 
 const PORT = Number(opt("--port", process.env.GHOSTD_PORT ?? "7717"));
 const HOST = "127.0.0.1";
+const SESSION_CWD = homedir();
 const DELTA_MS = flag("--slow") ? 30 : 12;
 const TOOL_STEPS = Math.max(1, Math.min(100, Number(opt("--tool-steps", "1")) || 1));
 /** The contract's `askTimeoutSeconds` default; 0 means no deadline is armed. */
@@ -86,7 +113,11 @@ const ASK_TIMEOUT_S = Math.max(0, Number(opt("--ask-timeout", "120")) || 0);
 const OWNS_GHOSTS_ROOT = !process.env.GHOSTS_ROOT;
 const GHOSTS_ROOT = process.env.GHOSTS_ROOT
   || mkdtempSync(join(tmpdir(), "ghost-shell-mock-"));
+const OWNS_DOCUMENTS_ROOT = !process.env.GHOST_DOCUMENTS_ROOT;
+const DOCUMENTS_ROOT = process.env.GHOST_DOCUMENTS_ROOT
+  || mkdtempSync(join(tmpdir(), "ghost-documents-mock-"));
 const TRASH_ROOT = join(process.env.XDG_DATA_HOME || join(homedir(), ".local", "share"), "Trash", "files");
+const DOCUMENT_INLINE_MAX_BYTES = 1_048_576;
 
 /** @type {{ name: string, dir: string, createdAt: string }[]} */
 const ghosts = ["casper", "moaning-myrtle"].map((name) => ({
@@ -120,11 +151,12 @@ function routeConversation(parts) {
 }
 
 function publishConversationUpdated(name, runtime, conversationId,
-    updatedAt = new Date().toISOString()) {
+    updatedAt = new Date().toISOString(), reason = undefined) {
   const event = `data: ${JSON.stringify({
     type: "conversation-updated",
     ...conversationIdentity(runtime, conversationId),
     updatedAt,
+    ...(reason ? { reason } : {}),
   })}\n\n`;
   for (const response of conversationEventClients.get(name) ?? []) {
     if (!response.writableEnded) response.write(event);
@@ -134,23 +166,6 @@ function publishConversationUpdated(name, runtime, conversationId,
 // ---- Browsable ghost context ----------------------------------------------
 // Metadata stays in memory. The default root gets matching temporary files so
 // FilePane exercises real atomic reads/writes without touching ~/ghosts.
-const MOCK_DOCS = [
-  {
-    path: "docs/launch-notes.md",
-    relativePath: "launch-notes.md",
-    title: "Launch notes",
-    tags: ["launch", "product"],
-    archived: false,
-  },
-  {
-    path: "docs/reference/working-agreement.md",
-    relativePath: "reference/working-agreement.md",
-    title: "Working agreement",
-    tags: ["reference"],
-    archived: true,
-  },
-];
-
 const MOCK_MEMORY = [
   {
     path: "memory/preferred-tone.md",
@@ -167,65 +182,6 @@ const MOCK_MEMORY = [
     updated: "2026-08-25",
   },
 ];
-
-const MOCK_AGENTS = [
-  {
-    name: "designer",
-    description: "UI/UX implementation and visual refinement.",
-    systemPrompt: "Implement and review interfaces with close attention to hierarchy, accessibility, and the existing design system.",
-    tools: ["read", "grep", "glob"],
-    model: ["@designer"],
-    spawns: null,
-  },
-  {
-    name: "librarian",
-    description: "Source-verified external library research.",
-    systemPrompt: "Research external libraries and APIs from source code and official documentation. Ground every answer in evidence.",
-    tools: ["read", "grep", "glob", "web_search"],
-    model: ["@smol"],
-    spawns: null,
-  },
-  {
-    name: "reviewer",
-    description: "Correctness and quality review.",
-    systemPrompt: "Review changes for concrete, actionable defects and return an evidence-backed verdict.",
-    tools: ["read", "grep", "glob"],
-    model: ["@slow"],
-    spawns: ["scout"],
-  },
-  {
-    name: "scout",
-    description: "Fast read-only codebase investigation.",
-    systemPrompt: "Investigate the codebase rapidly and return compressed findings for handoff.",
-    tools: ["read", "grep", "glob"],
-    model: ["@smol"],
-    spawns: null,
-  },
-  {
-    name: "security-reviewer",
-    description: "Evidence-backed vulnerability discovery.",
-    systemPrompt: "Trace attacker-controlled input to dangerous sinks and report only demonstrated vulnerabilities.",
-    tools: ["read", "grep", "glob"],
-    model: [],
-    spawns: null,
-  },
-  {
-    name: "sonic",
-    description: "Strictly mechanical updates and collection.",
-    systemPrompt: "Perform only the assigned mechanical update or data-collection task.",
-    tools: null,
-    model: ["@smol"],
-    spawns: null,
-  },
-  {
-    name: "task",
-    description: "General-purpose delegated implementation.",
-    systemPrompt: "Complete the delegated task with full access to the available tools.",
-    tools: null,
-    model: ["@task"],
-    spawns: "*",
-  },
-].map(agent => ({ ...agent, source: "bundled" }));
 
 // Effective command discovery is session-scoped in the real daemon. These
 // exercise built-ins, aliases, input hints, subcommands, skills, and a project
@@ -316,17 +272,26 @@ function configuredKeys(value) {
 }
 
 function sanitizeRemoteUrl(value) {
+  const lower = value.toLowerCase();
+  if (value.includes("${")
+    || (!lower.startsWith("http://") && !lower.startsWith("https://"))) {
+    return "[configured]";
+  }
   try {
-    const url = new URL(String(value));
+    const url = new URL(value);
+    if ((url.protocol !== "http:" && url.protocol !== "https:") || !url.hostname) {
+      return "[configured]";
+    }
     url.username = "";
     url.password = "";
+    url.hash = "";
     for (const key of new Set(url.searchParams.keys())) {
       url.searchParams.delete(key);
       url.searchParams.append(key, "[configured]");
     }
     return url.toString();
   } catch {
-    return String(value || "").replace(/[?#].*$/, "?[configured]");
+    return "[configured]";
   }
 }
 
@@ -438,32 +403,61 @@ function contextSnapshot(name) {
   const deleted = contextDeletedFor(name);
   return {
     character: { path: "character.md", title: name },
-    docs: MOCK_DOCS.filter((item) => !deleted.has(item.path)),
     memory: MOCK_MEMORY.filter((item) => !deleted.has(item.path)),
-    agents: MOCK_AGENTS,
+    agents: [],
     skipped: [],
   };
 }
 
-function seedMockHome(name) {
+function seedMockDocuments() {
+  mkdirSync(join(DOCUMENTS_ROOT, "Projects", "Ghost", "Research"), { recursive: true });
+  mkdirSync(join(DOCUMENTS_ROOT, "Reference"), { recursive: true });
+  mkdirSync(join(DOCUMENTS_ROOT, "Empty folder"), { recursive: true });
+  writeFileSync(join(DOCUMENTS_ROOT, "Welcome.md"),
+    "# Welcome to Documents\n\nThis file belongs to the machine, not to one ghost.\n", "utf8");
+  writeFileSync(join(DOCUMENTS_ROOT, "Launch notes.md"),
+    "# Launch notes\n\nFinish the shared Documents browser and verify its narrow layout.\n", "utf8");
+  writeFileSync(join(DOCUMENTS_ROOT, "Alpha.md"), "# Uppercase tie\n", "utf8");
+  writeFileSync(join(DOCUMENTS_ROOT, "alpha.md"), "# Lowercase tie\n", "utf8");
+  writeFileSync(join(DOCUMENTS_ROOT, "household-budget.csv"),
+    "month,amount\nAugust,420\n", "utf8");
+  writeFileSync(join(DOCUMENTS_ROOT, "note 10.md"), "# Lexical ten\n", "utf8");
+  writeFileSync(join(DOCUMENTS_ROOT, "note 2.md"), "# Lexical two\n", "utf8");
+  writeFileSync(join(DOCUMENTS_ROOT, "A Oversized draft.md"),
+    `# Oversized draft\n\n${"x".repeat(1048577)}`, "utf8");
+  writeFileSync(join(DOCUMENTS_ROOT, "reading-list.pdf"),
+    "%PDF-1.4 mock preview fixture\n", "utf8");
+  writeFileSync(join(DOCUMENTS_ROOT, "Projects", "roadmap.md"),
+    "# Project roadmap\n\nFolders load one level at a time.\n", "utf8");
+  writeFileSync(join(DOCUMENTS_ROOT, "Projects", "Ghost", "decisions.md"),
+    "# Decisions\n\nShared Documents stay independent from ghost selection.\n", "utf8");
+  writeFileSync(join(DOCUMENTS_ROOT, "Projects", "Ghost", "Research", "notes.txt"),
+    "No folder depth is a product limit.\n", "utf8");
+  writeFileSync(join(DOCUMENTS_ROOT, "Reference", "settings.json"),
+    "{\n  \"shared\": true\n}\n", "utf8");
+}
+
+function seedMockHome(name, includeLegacyDocs = false) {
   const dir = join(GHOSTS_ROOT, name);
-  mkdirSync(join(dir, "docs", "reference"), { recursive: true });
   mkdirSync(join(dir, "memory"), { recursive: true });
   writeFileSync(
     join(dir, "character.md"),
     `# ${name}\n\nI am ${name}, a quiet local ghost who answers directly.\n`,
     "utf8",
   );
-  writeFileSync(
-    join(dir, "docs", "launch-notes.md"),
-    "# Launch notes\n\nShip the context navigator with the right rail, a document index, and a lossless editor.\n\n#launch #product\n",
-    "utf8",
-  );
-  writeFileSync(
-    join(dir, "docs", "reference", "working-agreement.md"),
-    "# Working agreement\n\nDecisions first. Evidence next. No second source of truth.\n\n#reference #archived\n",
-    "utf8",
-  );
+  if (includeLegacyDocs) {
+    mkdirSync(join(dir, "docs", "reference"), { recursive: true });
+    writeFileSync(
+      join(dir, "docs", "launch-notes.md"),
+      "# Legacy launch notes\n\nThis hosted-import fixture remains inside the ghost home.\n",
+      "utf8",
+    );
+    writeFileSync(
+      join(dir, "docs", "reference", "working-agreement.md"),
+      "# Legacy working agreement\n\nImport-only; never exposed as shared Documents.\n",
+      "utf8",
+    );
+  }
   writeFileSync(
     join(dir, "memory", "preferred-tone.md"),
     `${MOCK_MEMORY[0].content}\n`,
@@ -477,11 +471,15 @@ function seedMockHome(name) {
 }
 
 if (OWNS_GHOSTS_ROOT) {
-  for (const ghost of ghosts) seedMockHome(ghost.name);
+  for (const ghost of ghosts) seedMockHome(ghost.name, true);
   process.once("exit", () => rmSync(GHOSTS_ROOT, { recursive: true, force: true }));
   const stop = () => process.exit(0);
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);
+}
+if (OWNS_DOCUMENTS_ROOT) {
+  seedMockDocuments();
+  process.once("exit", () => rmSync(DOCUMENTS_ROOT, { recursive: true, force: true }));
 }
 
 // ---- Conversation store ----------------------------------------------------
@@ -511,7 +509,7 @@ const SEEDED_QUESTIONS = {
   notes: {
     id: "q-notes",
     header: "Launch notes",
-    question: "Three sections in roadmap.md are unfinished. Which do you want me to draft first?",
+    question: "Three sections in shared Documents/Projects/roadmap.md are unfinished. Which do you want me to draft first?",
     recommended: 1,
     options: [
       { label: "The roadmap section", description: "Six bullets, mostly written. I'd tidy and finish it." },
@@ -570,19 +568,20 @@ function ghostSessions(name) {
         entry({ role: "assistant", content: `I'm **${name}**. This thread was seeded by the mock so resume has history to show.`, timestamp: now - 7_195_000 }),
         entry({ role: "user", content: "and what do you remember about me?", timestamp: now - 3_610_000 }),
         entry({ role: "assistant", content: "Nothing yet — but branch that question and you get a second thread to ask it differently.", timestamp: now - 3_609_000 }),
-        entry({ role: "user", content: "open the launch notes and tell me what's left", timestamp: now - 3_608_000 }),
+        entry({ role: "user", content: "open Launch notes.md in shared Documents and tell me what's left", timestamp: now - 3_608_000 }),
         entry({
           role: "assistant",
           timestamp: now - 3_607_000,
           content: [
-            { type: "text", text: "Opening the notes" },
+            { type: "text", text: "Opening the shared Documents launch notes" },
             // A restored call has no live intent and no summary, so the card
             // falls back to the arguments: they have to say what it was for.
             {
               type: "toolCall",
               id: "call-seed-browser",
-              name: "ghost_browser",
-              arguments: { action: "open", url: "https://example.com/launch-notes" },
+              name: "read",
+              arguments: { path: join(DOCUMENTS_ROOT, "Launch notes.md") },
+              cwd: SESSION_CWD,
               failed: true,
             },
             notesAsk,
@@ -726,6 +725,100 @@ const sessionSummary = (s) => ({
   unread: !s.readAt || s.updatedAt > s.readAt,
 });
 
+// ---- Explicit conversation projects --------------------------------------
+
+const projectStore = new Map();
+const projectTrust = new Map();
+const abandonedProjectDrafts = new Set();
+let projectTrustSeq = 0;
+const EMPTY_PROJECT_RESOURCES = Object.freeze({
+  instructions: 0,
+  skills: 0,
+  rules: 0,
+  prompts: 0,
+  commands: 0,
+  agents: 0,
+  mcpServers: 0,
+  ignoredExecutable: 0,
+});
+
+function ghostProjects(name) {
+  if (!projectStore.has(name)) projectStore.set(name, new Map());
+  return projectStore.get(name);
+}
+
+function projectCanRebind(name, conversation) {
+  if (conversation.runtime !== "claude-code") return true;
+  const session = ghostSessions(name).get(conversation.id);
+  return !session || (session.messageCount ?? session.messages?.length ?? 0) === 0;
+}
+
+function defaultProjectState(name, conversation) {
+  return {
+    ...conversation,
+    root: null,
+    cwd: SESSION_CWD,
+    relativeCwd: null,
+    name: null,
+    generation: 0,
+    status: "unbound",
+    error: null,
+    mcpStatus: "off",
+    resources: { ...EMPTY_PROJECT_RESOURCES },
+    canRebind: projectCanRebind(name, conversation),
+    lastRefreshAt: null,
+    reason: "default",
+  };
+}
+
+function projectState(name, conversation) {
+  const stored = ghostProjects(name).get(conversation.id)
+    || defaultProjectState(name, conversation);
+  return {
+    ...stored,
+    resources: { ...stored.resources },
+    error: stored.error ? { ...stored.error } : null,
+    canRebind: projectCanRebind(name, conversation),
+  };
+}
+
+function withinProject(root, cwd) {
+  const nested = relative(root, cwd);
+  return nested === "" || (nested !== ".." && !nested.startsWith(`..${sep}`)
+    && !isAbsolute(nested));
+}
+
+function storeProject(name, conversation, next) {
+  abandonedProjectDrafts.delete(JSON.stringify([name, conversation.id]));
+  ghostProjects(name).set(conversation.id, next);
+  publishConversationUpdated(name, conversation.runtime, conversation.conversationId,
+    new Date().toISOString(), "project");
+  return projectState(name, conversation);
+}
+
+function previewProject(name, conversation, path) {
+  const canonical = resolveMockProjectRoot(path);
+  if (!canonical) return null;
+  abandonedProjectDrafts.delete(JSON.stringify([name, conversation.id]));
+  const resources = mockProjectResources();
+  const token = `mock-trust-${++projectTrustSeq}-${Date.now().toString(36)}`;
+  const expires = Date.now() + 5 * 60_000;
+  projectTrust.set(token, {
+    name,
+    id: conversation.id,
+    root: canonical,
+    expires,
+  });
+  return {
+    root: canonical,
+    name: basename(canonical) || "/",
+    trustToken: token,
+    expiresAt: new Date(expires).toISOString(),
+    resources,
+    warnings: mockProjectWarnings(resources),
+  };
+}
+
 function recordTurn(name, sessionId, prompt, assistantText, ownerMessages = []) {
   if (!sessionId) return;
   const store = ghostSessions(name);
@@ -752,7 +845,8 @@ function recordTurn(name, sessionId, prompt, assistantText, ownerMessages = []) 
   s.updatedAt = new Date(now).toISOString();
   // Background titling after the first turn: derive a title from the prompt.
   if (!s.title) s.title = prompt.slice(0, 40) || "New conversation";
-  publishConversationUpdated(name, runtime, sessionId, s.updatedAt);
+  publishConversationUpdated(name, runtime, sessionId, s.updatedAt,
+    runtime === "claude-code" ? "project" : undefined);
 }
 
 // ---- Greetings -------------------------------------------------------------
@@ -766,7 +860,7 @@ function recordTurn(name, sessionId, prompt, assistantText, ownerMessages = []) 
 const GREETINGS = {
   casper: {
     greeting:
-      "You left the launch notes half-written last night, and the kettle is still on in roadmap.md. "
+      "You left Launch notes.md half-written in shared Documents, and the kettle is still on in Projects/roadmap.md. "
       + "Want to pick that thread back up? I can also just sit here quietly.",
     onboarding: false,
   },
@@ -890,7 +984,7 @@ const LIVE_QUESTION = {
       description: "One concise memory file.",
       preview: "memory/what-the-owner-asked-for.md",
     },
-    { label: "Answer and draft a doc", description: "A new file under docs/, yours to edit after." },
+    { label: "Answer and draft a doc", description: "A new file in shared Documents, yours to edit after." },
     { label: "Neither — forget I asked", description: "No answer, no files." },
   ],
 };
@@ -927,6 +1021,7 @@ function* script(name, prompt, sessionId) {
     id: "call_1",
     toolName: "read_memory",
     arguments: { query: prompt.slice(0, 24) },
+    cwd: SESSION_CWD,
     intent: "Read the relevant memory",
   };
   yield {
@@ -940,7 +1035,10 @@ function* script(name, prompt, sessionId) {
     const index = contentIndex++;
     const id = `call_long_${step}`;
     const toolName = step % 3 === 0 ? "grep" : (step % 3 === 1 ? "read" : "glob");
-    const args = { step: step + 1, path: `docs/step-${step + 1}.md` };
+    const args = {
+      step: step + 1,
+      path: join(DOCUMENTS_ROOT, "Projects", "Ghost", `step-${step + 1}.md`),
+    };
     yield { type: "toolcall_start", contentIndex: index, id, toolName };
     yield { type: "toolcall_delta", contentIndex: index, delta: JSON.stringify(args) };
     yield {
@@ -953,6 +1051,7 @@ function* script(name, prompt, sessionId) {
       id,
       toolName,
       arguments: args,
+      cwd: SESSION_CWD,
       intent: `Run tool-heavy step ${step + 1}`,
     };
     yield {
@@ -994,6 +1093,7 @@ function* script(name, prompt, sessionId) {
       id: call.id,
       toolName: "ask",
       arguments: call.arguments,
+      cwd: SESSION_CWD,
       intent: "Ask before writing anything",
     };
     const answered = yield { sentinel: ASK_WAIT, wait };
@@ -1148,6 +1248,7 @@ function* reanswerScript(name, sessionId, session, entryId, record) {
     id,
     toolName: "ask",
     arguments: { questions },
+    cwd: SESSION_CWD,
     intent: "Re-answer an earlier question",
   };
   const answered = yield { sentinel: ASK_WAIT, wait };
@@ -1440,10 +1541,400 @@ function routeState(name) {
   };
 }
 
-createServer(async (req, res) => {
+// ---- Shared Documents -----------------------------------------------------
+
+const DOCUMENT_DIRECTORY_FLAGS = constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW;
+const DOCUMENT_FILE_FLAGS = constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW;
+
+function mockDocumentError(status, code, message) {
+  return Object.assign(new Error(message), { status, code });
+}
+
+function documentSegments(relativePath, allowRoot = true) {
+  if (typeof relativePath !== "string" || relativePath.startsWith("/")) return null;
+  if (relativePath === "") return allowRoot ? [] : null;
+  const segments = relativePath.split("/");
+  return segments.some((segment) => segment === "" || segment === "." || segment === "..")
+    ? null : segments;
+}
+
+function documentDescriptorPath(directoryFd, name = "") {
+  const directory = `/proc/self/fd/${directoryFd}`;
+  return name === "" ? directory : `${directory}/${name}`;
+}
+
+function openMockDocumentDirectory(relativePath = "") {
+  const segments = documentSegments(relativePath);
+  if (!segments) throw mockDocumentError(400, "invalid_path", "invalid Documents path");
+  let directoryFd;
+  try {
+    directoryFd = openSync(DOCUMENTS_ROOT, DOCUMENT_DIRECTORY_FLAGS);
+    for (const segment of segments) {
+      const next = openSync(documentDescriptorPath(directoryFd, segment), DOCUMENT_DIRECTORY_FLAGS);
+      closeSync(directoryFd);
+      directoryFd = next;
+    }
+    return directoryFd;
+  } catch (error) {
+    if (directoryFd !== undefined) closeSync(directoryFd);
+    throw error;
+  }
+}
+
+function openMockDocumentParent(relativePath) {
+  const segments = documentSegments(relativePath, false);
+  if (!segments) throw mockDocumentError(400, "invalid_path", "invalid Documents path");
+  const name = segments.pop();
+  return {
+    directoryFd: openMockDocumentDirectory(segments.join("/")),
+    name,
+  };
+}
+
+function compareDocumentEntries(left, right) {
+  if (left.kind !== right.kind) return left.kind === "directory" ? -1 : 1;
+  const foldedLeft = left.name.toLocaleLowerCase("en-US");
+  const foldedRight = right.name.toLocaleLowerCase("en-US");
+  if (foldedLeft < foldedRight) return -1;
+  if (foldedLeft > foldedRight) return 1;
+  return left.name < right.name ? -1 : left.name > right.name ? 1 : 0;
+}
+
+function documentDigest(entries) {
+  return createHash("sha256")
+    .update(entries.map((entry) => `${entry.kind}\0${entry.name}`).join("\0"))
+    .digest("base64url");
+}
+
+function encodeDocumentCursor(payload) {
+  return Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+}
+
+function decodeDocumentCursor(raw) {
+  try {
+    const parsed = JSON.parse(Buffer.from(raw, "base64url").toString("utf8"));
+    if (!parsed || !Number.isInteger(parsed.offset) || parsed.offset < 0
+        || typeof parsed.digest !== "string" || typeof parsed.path !== "string"
+        || typeof parsed.query !== "string") return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function listMockDocuments(url) {
+  const path = url.searchParams.get("path") || "";
+  const query = (url.searchParams.get("q") || "").trim().toLowerCase();
+  const limitRaw = Number(url.searchParams.get("limit") || 100);
+  if (!Number.isInteger(limitRaw) || limitRaw < 1 || limitRaw > 250) {
+    return { status: 400, body: { error: { code: "invalid_request", message: "limit must be 1..250" } } };
+  }
+  if (!documentSegments(path)) {
+    return { status: 400, body: { error: { code: "invalid_path", message: "invalid Documents path" } } };
+  }
+  let directoryFd;
+  let dirents;
+  try {
+    directoryFd = openMockDocumentDirectory(path);
+    dirents = readdirSync(documentDescriptorPath(directoryFd), { withFileTypes: true });
+  } catch (error) {
+    if (directoryFd !== undefined) closeSync(directoryFd);
+    if (typeof error?.status === "number") {
+      return { status: error.status, body: { error: { code: error.code, message: error.message } } };
+    }
+    if (["ELOOP", "ENOTDIR"].includes(error?.code)) {
+      return { status: 400, body: { error: { code: "invalid_path", message: "folder is not a confined directory" } } };
+    }
+    return { status: 404, body: { error: { code: "not_found", message: "folder is unavailable" } } };
+  }
+  const entries = [];
+  const skipped = [];
+  try {
+    for (const dirent of dirents) {
+      if (dirent.name.startsWith(".")) continue;
+      const relative = path === "" ? dirent.name : `${path}/${dirent.name}`;
+      try {
+        const stats = lstatSync(documentDescriptorPath(directoryFd, dirent.name));
+        if (stats.isSymbolicLink() || (!stats.isDirectory() && !stats.isFile())) {
+          skipped.push({ name: dirent.name, path: relative, reason: "Not a regular file or directory" });
+          continue;
+        }
+        entries.push({
+          name: dirent.name,
+          path: relative,
+          kind: stats.isDirectory() ? "directory" : "file",
+          ...(stats.isFile() ? { size: stats.size } : {}),
+          modifiedAt: stats.mtime.toISOString(),
+        });
+      } catch (error) {
+        skipped.push({ name: dirent.name, path: relative, reason: String(error.message || error) });
+      }
+    }
+  } finally {
+    closeSync(directoryFd);
+  }
+  const filtered = entries
+    .filter((entry) => query === "" || entry.name.toLowerCase().includes(query))
+    .sort(compareDocumentEntries);
+  const digest = documentDigest(filtered);
+  const rawCursor = url.searchParams.get("cursor");
+  let offset = 0;
+  if (rawCursor) {
+    const cursor = decodeDocumentCursor(rawCursor);
+    if (!cursor || cursor.path !== path || cursor.query !== query) {
+      return { status: 400, body: { error: { code: "invalid_cursor", message: "cursor does not belong to this listing" } } };
+    }
+    if (cursor.digest !== digest) {
+      return { status: 409, body: { error: { code: "cursor_stale", message: "folder changed during pagination" } } };
+    }
+    offset = cursor.offset;
+  }
+  if (offset > filtered.length) {
+    return { status: 409, body: { error: { code: "cursor_stale", message: "folder changed during pagination" } } };
+  }
+  const page = filtered.slice(offset, offset + limitRaw);
+  const nextOffset = offset + page.length;
+  const hasNextPage = nextOffset < filtered.length;
+  return {
+    status: 200,
+    body: {
+      root: DOCUMENTS_ROOT,
+      path,
+      query,
+      entries: page,
+      total: filtered.length,
+      fileCount: filtered.filter((entry) => entry.kind === "file").length,
+      directoryCount: filtered.filter((entry) => entry.kind === "directory").length,
+      nextCursor: hasNextPage
+        ? encodeDocumentCursor({ offset: nextOffset, digest, path, query }) : null,
+      // Production's flag describes this response, not whether another page
+      // follows it. A final non-first page is still only part of the result.
+      truncated: page.length < filtered.length,
+      skipped,
+    },
+  };
+}
+
+function readMockDocumentContent(relativePath) {
+  if (!documentSegments(relativePath, false)) {
+    throw mockDocumentError(400, "invalid_path", "invalid Documents path");
+  }
+  let directoryFd;
+  let fileFd;
+  try {
+    const opened = openMockDocumentParent(relativePath);
+    directoryFd = opened.directoryFd;
+    const { name } = opened;
+    try {
+      fileFd = openSync(documentDescriptorPath(directoryFd, name), DOCUMENT_FILE_FLAGS);
+    } catch (error) {
+      if (error?.code === "ENOENT") {
+        throw mockDocumentError(404, "not_found", "No such Documents file");
+      }
+      throw error;
+    }
+    const before = fstatSync(fileFd, { bigint: true });
+    if (!before.isFile()) {
+      throw mockDocumentError(400, "invalid_path", "Documents content must be a regular file");
+    }
+    if (before.size > BigInt(DOCUMENT_INLINE_MAX_BYTES)) {
+      throw mockDocumentError(413, "document_too_large", "Documents inline content is limited to 1 MiB");
+    }
+    const bytes = Buffer.allocUnsafe(DOCUMENT_INLINE_MAX_BYTES + 1);
+    let length = 0;
+    while (length < bytes.length) {
+      const count = readSync(fileFd, bytes, length, bytes.length - length, null);
+      if (count === 0) break;
+      length += count;
+    }
+    const after = fstatSync(fileFd, { bigint: true });
+    if (length > DOCUMENT_INLINE_MAX_BYTES
+        || after.size > BigInt(DOCUMENT_INLINE_MAX_BYTES)) {
+      throw mockDocumentError(413, "document_too_large", "Documents inline content is limited to 1 MiB");
+    }
+    const live = lstatSync(documentDescriptorPath(directoryFd, name), { bigint: true });
+    if (!after.isFile() || !live.isFile() || before.dev !== after.dev
+        || before.ino !== after.ino || before.size !== after.size
+        || before.mtimeNs !== after.mtimeNs || before.ctimeNs !== after.ctimeNs
+        || after.size !== BigInt(length) || live.dev !== after.dev || live.ino !== after.ino
+        || live.size !== after.size || live.mtimeNs !== after.mtimeNs
+        || live.ctimeNs !== after.ctimeNs) {
+      throw mockDocumentError(409, "conflict", "The Documents file changed while it was being read");
+    }
+    let content;
+    try {
+      content = new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(0, length));
+    } catch {
+      throw mockDocumentError(400, "invalid_document_content", "This Documents file is not valid UTF-8 text");
+    }
+    if (content.includes("\0")) {
+      throw mockDocumentError(400, "invalid_document_content", "This Documents file contains NUL bytes");
+    }
+    return {
+      root: DOCUMENTS_ROOT,
+      path: relativePath,
+      size: length,
+      modifiedAt: new Date(Number(after.mtimeMs)).toISOString(),
+      content,
+    };
+  } catch (error) {
+    if (typeof error?.status === "number") throw error;
+    if (error?.code === "ENOENT") {
+      throw mockDocumentError(404, "not_found", "No such Documents file");
+    }
+    if (["ELOOP", "ENOTDIR", "ENXIO"].includes(error?.code)) {
+      throw mockDocumentError(400, "invalid_path", "Documents path is not a regular confined file");
+    }
+    throw error;
+  } finally {
+    if (fileFd !== undefined) closeSync(fileFd);
+    if (directoryFd !== undefined) closeSync(directoryFd);
+  }
+}
+
+function deleteMockDocument(relativePath) {
+  if (!documentSegments(relativePath, false)) {
+    throw mockDocumentError(400, "invalid_path", "invalid Documents path");
+  }
+  let directoryFd;
+  let sourceFd;
+  let rootFd;
+  let trashFd;
+  let bucketFd;
+  try {
+    const opened = openMockDocumentParent(relativePath);
+    directoryFd = opened.directoryFd;
+    const { name } = opened;
+    const sourcePath = documentDescriptorPath(directoryFd, name);
+    try {
+      sourceFd = openSync(sourcePath, DOCUMENT_FILE_FLAGS);
+    } catch (error) {
+      if (error?.code === "ENOENT") {
+        throw mockDocumentError(404, "not_found", "No such regular document");
+      }
+      throw error;
+    }
+    const openedStats = fstatSync(sourceFd, { bigint: true });
+    const liveStats = lstatSync(sourcePath, { bigint: true });
+    if (!openedStats.isFile() || !liveStats.isFile() || openedStats.dev !== liveStats.dev
+        || openedStats.ino !== liveStats.ino) {
+      throw mockDocumentError(404, "not_found", "No such regular document");
+    }
+
+    rootFd = openMockDocumentDirectory();
+    const trashRootPath = documentDescriptorPath(rootFd, ".mock-trash");
+    try {
+      mkdirSync(trashRootPath, { mode: 0o700 });
+    } catch (error) {
+      if (error?.code !== "EEXIST") throw error;
+    }
+    trashFd = openSync(trashRootPath, DOCUMENT_DIRECTORY_FLAGS);
+    const bucketPath = mkdtempSync(`${documentDescriptorPath(trashFd)}/delete-`);
+    bucketFd = openSync(bucketPath, DOCUMENT_DIRECTORY_FLAGS);
+    const destinationPath = documentDescriptorPath(bucketFd, name);
+
+    renameSync(sourcePath, destinationPath);
+    const trashedStats = lstatSync(destinationPath, { bigint: true });
+    if (!trashedStats.isFile() || trashedStats.dev !== openedStats.dev
+        || trashedStats.ino !== openedStats.ino) {
+      throw mockDocumentError(409, "conflict", "Document changed while it was moved to mock Trash");
+    }
+    return {
+      path: relativePath,
+      trash: join(DOCUMENTS_ROOT, ".mock-trash", basename(bucketPath), name),
+      kind: "fallback",
+    };
+  } catch (error) {
+    if (typeof error?.status === "number") throw error;
+    if (error?.code === "ENOENT") {
+      throw mockDocumentError(404, "not_found", "No such regular document");
+    }
+    if (["ELOOP", "ENOTDIR", "ENXIO"].includes(error?.code)) {
+      throw mockDocumentError(400, "invalid_path", "Document path is not a confined regular file");
+    }
+    throw error;
+  } finally {
+    if (bucketFd !== undefined) closeSync(bucketFd);
+    if (trashFd !== undefined) closeSync(trashFd);
+    if (rootFd !== undefined) closeSync(rootFd);
+    if (sourceFd !== undefined) closeSync(sourceFd);
+    if (directoryFd !== undefined) closeSync(directoryFd);
+  }
+}
+
+const mockServer = createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", `http://${HOST}:${PORT}`);
   const parts = url.pathname.split("/").filter(Boolean); // ["api","ghosts",...]
   console.error(`${req.method} ${url.pathname}`);
+
+  if (parts.length === 2 && parts[0] === "api" && parts[1] === "hooks") {
+    if (req.method !== "GET") return json(res, 405, {
+      error: { code: "method_not_allowed", message: `${req.method} is not allowed here.` },
+    });
+    return json(res, 200, {
+      active: true,
+      total: 3,
+      events: [
+        { event: "before_prompt", count: 1 },
+        { event: "session_stop", count: 1 },
+        { event: "conversation_idle", count: 1 },
+      ],
+      hooks: [
+        {
+          event: "before_prompt",
+          name: "Prompt context",
+          description: "Adds bounded guidance before an owner prompt.",
+        },
+        {
+          event: "session_stop",
+          name: "Completion check",
+          description: "Reviews the current assistant pass before it settles.",
+        },
+        {
+          event: "conversation_idle",
+          name: "Idle upkeep",
+          description: "Runs after the current conversation remains inactive.",
+          idleSeconds: 60,
+        },
+      ],
+      sessionStopContinuationCap: 2,
+    });
+  }
+
+  if (parts.length === 2 && parts[0] === "api" && parts[1] === "documents"
+      && req.method === "GET") {
+    const result = listMockDocuments(url);
+    return json(res, result.status, result.body);
+  }
+  if (parts.length === 3 && parts[0] === "api" && parts[1] === "documents"
+      && parts[2] === "content" && req.method === "GET") {
+    const path = url.searchParams.get("path") || "";
+    try {
+      return json(res, 200, readMockDocumentContent(path));
+    } catch (error) {
+      return json(res, error.status || 500, {
+        error: { code: error.code || "internal_error", message: error.message || "content read failed" },
+      });
+    }
+  }
+  if (parts.length === 2 && parts[0] === "api" && parts[1] === "documents"
+      && req.method === "DELETE") {
+    const body = await readBody(req).catch(() => ({}));
+    const path = typeof body?.path === "string" ? body.path : "";
+    if (!documentSegments(path, false) || body?.confirm !== path) {
+      return json(res, 400, {
+        error: { code: "confirmation_required", message: "document deletion requires its exact path" },
+      });
+    }
+    try {
+      const deleted = deleteMockDocument(path);
+      return json(res, 200, { ok: true, ...deleted });
+    } catch (error) {
+      return json(res, error.status || 500, {
+        error: { code: error.code || "internal_error", message: error.message || "document delete failed" },
+      });
+    }
+  }
 
   if (parts[0] !== "api" || parts[1] !== "ghosts") return json(res, 404, { error: "not found" });
 
@@ -1493,7 +1984,7 @@ createServer(async (req, res) => {
     const body = await readBody(req).catch(() => ({}));
     const section = body?.section;
     const path = typeof body?.path === "string" ? body.path : "";
-    if ((section !== "docs" && section !== "memory") || path === ""
+    if (section !== "memory" || path === ""
         || body?.confirm !== path) {
       return json(res, 400, {
         error: {
@@ -1502,8 +1993,7 @@ createServer(async (req, res) => {
         },
       });
     }
-    const catalog = section === "docs" ? MOCK_DOCS : MOCK_MEMORY;
-    if (!catalog.some((item) => item.path === path) || contextDeletedFor(name).has(path)) {
+    if (!MOCK_MEMORY.some((item) => item.path === path) || contextDeletedFor(name).has(path)) {
       return json(res, 404, {
         error: { message: "No such context file", code: "not_found" },
       });
@@ -1533,6 +2023,13 @@ createServer(async (req, res) => {
     if (OWNS_GHOSTS_ROOT) rmSync(ghost.dir, { recursive: true, force: true });
     ghosts.splice(ghosts.indexOf(ghost), 1);
     sessionStore.delete(name);
+    projectStore.delete(name);
+    for (const receipt of abandonedProjectDrafts) {
+      if (JSON.parse(receipt)[0] === name) abandonedProjectDrafts.delete(receipt);
+    }
+    for (const [token, preview] of projectTrust) {
+      if (preview.name === name) projectTrust.delete(token);
+    }
     deletedContext.delete(name);
     mcpStore.delete(name);
     liveStates.delete(name);
@@ -1561,11 +2058,21 @@ createServer(async (req, res) => {
         error: { message: `${name} is still answering — stop the turn first`, code: "ghost_busy" },
       });
     }
-    for (const store of [sessionStore, deletedContext, mcpStore, liveStates, collabStates, roles, routing]) {
+    for (const store of [sessionStore, projectStore, deletedContext, mcpStore,
+        liveStates, collabStates, roles, routing]) {
       if (store.has(name)) {
         store.set(next, store.get(name));
         store.delete(name);
       }
+    }
+    for (const receipt of [...abandonedProjectDrafts]) {
+      const [receiptGhost, id] = JSON.parse(receipt);
+      if (receiptGhost !== name) continue;
+      abandonedProjectDrafts.delete(receipt);
+      abandonedProjectDrafts.add(JSON.stringify([next, id]));
+    }
+    for (const preview of projectTrust.values()) {
+      if (preview.name === name) preview.name = next;
     }
     if (OWNS_GHOSTS_ROOT) renameSync(ghost.dir, join(GHOSTS_ROOT, next));
     ghost.name = next;
@@ -1636,6 +2143,162 @@ createServer(async (req, res) => {
     if (parts.length === 5 && req.method === "DELETE") {
       servers.delete(serverName);
       return json(res, 200, mcpSnapshot(name));
+    }
+  }
+  if (parts[3] === "sessions" && parts.length >= 6 && parts[5] === "project") {
+    const conversation = routeConversation(parts);
+    if (!conversation) return json(res, 400, {
+      error: { code: "invalid_conversation_id", message: "invalid conversation id" },
+    });
+    const current = () => projectState(name, conversation);
+    if (parts.length === 6 && req.method === "GET") return json(res, 200, current());
+    if (parts.length === 7 && parts[6] === "draft" && req.method === "DELETE") {
+      const receipt = JSON.stringify([name, conversation.id]);
+      if (ghostSessions(name).has(conversation.id)) return json(res, 409, {
+        error: {
+          code: "project_draft_published",
+          message: "Published conversations cannot be abandoned as drafts.",
+        },
+      });
+      if (answering.has(turnKey(name, conversation.conversationId))) {
+        return json(res, 409, {
+          error: { code: "session_busy", message: "Wait for this answer to finish." },
+        });
+      }
+      const projects = ghostProjects(name);
+      if (!projects.has(conversation.id)) {
+        if (!abandonedProjectDrafts.has(receipt)) return json(res, 404, {
+          error: { code: "not_found", message: "No unpublished project draft exists." },
+        });
+        return json(res, 200, { ok: true, ...conversation, abandoned: false });
+      }
+      projects.delete(conversation.id);
+      for (const [token, preview] of projectTrust) {
+        if (preview.name === name && preview.id === conversation.id) projectTrust.delete(token);
+      }
+      abandonedProjectDrafts.add(receipt);
+      return json(res, 200, { ok: true, ...conversation, abandoned: true });
+    }
+    if (answering.has(turnKey(name, conversation.conversationId))) {
+      return json(res, 409, {
+        error: { code: "session_busy", message: "Wait for this answer to finish." },
+      });
+    }
+    if (parts.length === 7 && parts[6] === "preview" && req.method === "POST") {
+      const body = await readBody(req).catch(() => ({}));
+      const path = typeof body?.path === "string" ? body.path.trim() : "";
+      const preview = path === "" ? null : previewProject(name, conversation, path);
+      return preview
+        ? json(res, 200, preview)
+        : json(res, 400, {
+          error: { code: "invalid_project_path", message: "Choose an available directory." },
+        });
+    }
+    if (parts.length === 6 && req.method === "PUT") {
+      const body = await readBody(req).catch(() => ({}));
+      const before = current();
+      if (!Number.isInteger(body?.expectedGeneration)
+          || body.expectedGeneration !== before.generation) {
+        return json(res, 409, {
+          error: { code: "stale_generation", message: "The project changed in another client." },
+        });
+      }
+      if (!before.canRebind) {
+        return json(res, 409, {
+          error: {
+            code: "project_rebind_requires_new_conversation",
+            message: "Claude Code fixes its project after the first message.",
+          },
+        });
+      }
+      if (body.root === null) {
+        const cwd = typeof body.cwd === "string" && body.cwd.startsWith("/")
+          ? resolve(body.cwd) : before.cwd;
+        return json(res, 200, storeProject(name, conversation, {
+          ...before,
+          root: null,
+          cwd,
+          relativeCwd: null,
+          name: null,
+          generation: before.generation + 1,
+          status: "unbound",
+          error: null,
+          mcpStatus: "off",
+          resources: { ...EMPTY_PROJECT_RESOURCES },
+          lastRefreshAt: new Date().toISOString(),
+          reason: "unbound",
+        }));
+      }
+      if (typeof body.root !== "string" || typeof body.cwd !== "string"
+          || typeof body.trustToken !== "string") {
+        return json(res, 400, {
+          error: { code: "invalid_request", message: "A preview token and project cwd are required." },
+        });
+      }
+      const trusted = projectTrust.get(body.trustToken);
+      if (!trusted || trusted.name !== name || trusted.id !== conversation.id
+          || trusted.root !== body.root) {
+        return json(res, 403, {
+          error: { code: "trust_token_invalid", message: "Resolve and trust this folder again." },
+        });
+      }
+      if (trusted.expires <= Date.now()) {
+        projectTrust.delete(body.trustToken);
+        return json(res, 403, {
+          error: { code: "trust_token_expired", message: "The project preview expired." },
+        });
+      }
+      if (!withinProject(trusted.root, resolve(body.cwd))) {
+        return json(res, 400, {
+          error: { code: "cwd_outside_project", message: "The working directory must be inside the project." },
+        });
+      }
+      projectTrust.delete(body.trustToken);
+      const resources = mockProjectResources();
+      return json(res, 200, storeProject(name, conversation, {
+        ...before,
+        root: trusted.root,
+        cwd: resolve(body.cwd),
+        relativeCwd: relative(trusted.root, resolve(body.cwd)) || ".",
+        name: basename(trusted.root),
+        generation: before.generation + 1,
+        status: "ready",
+        error: null,
+        mcpStatus: resources.mcpServers > 0 ? "ready" : "off",
+        resources,
+        lastRefreshAt: new Date().toISOString(),
+        reason: "bound",
+      }));
+    }
+    if (parts.length === 7 && parts[6] === "reload" && req.method === "POST") {
+      const body = await readBody(req).catch(() => ({}));
+      const before = current();
+      if (!Number.isInteger(body?.expectedGeneration)
+          || body.expectedGeneration !== before.generation) {
+        return json(res, 409, {
+          error: { code: "stale_generation", message: "The project changed in another client." },
+        });
+      }
+      if (before.root === null) return json(res, 400, {
+        error: { code: "invalid_request", message: "Home has no project resources to reload." },
+      });
+      if (!before.canRebind) return json(res, 409, {
+        error: {
+          code: "project_rebind_requires_new_conversation",
+          message: "Claude Code fixes its project after the first message.",
+        },
+      });
+      const resources = mockProjectResources();
+      return json(res, 200, storeProject(name, conversation, {
+        ...before,
+        generation: before.generation + 1,
+        status: "ready",
+        error: null,
+        mcpStatus: resources.mcpServers > 0 ? "ready" : "off",
+        resources,
+        lastRefreshAt: new Date().toISOString(),
+        reason: "reloaded",
+      }));
     }
   }
   if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "live"
@@ -1749,7 +2412,10 @@ createServer(async (req, res) => {
     const conversation = routeConversation(parts);
     if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
     const deleted = ghostSessions(name).delete(conversation.id);
-    if (deleted) publishConversationUpdated(name, conversation.runtime, conversation.conversationId);
+    if (deleted) {
+      ghostProjects(name).delete(conversation.id);
+      publishConversationUpdated(name, conversation.runtime, conversation.conversationId);
+    }
     return deleted
       ? json(res, 200, { ok: true })
       : json(res, 404, { error: { message: "no such session", code: "not_found" } });
@@ -2043,6 +2709,9 @@ createServer(async (req, res) => {
   }
 
   return json(res, 404, { error: "not found" });
-}).listen(PORT, HOST, () => {
-  console.error(`mock-ghostd on http://${HOST}:${PORT} — ghosts: ${ghosts.map((g) => g.name).join(", ")}`);
+});
+mockServer.listen(PORT, HOST, () => {
+  const address = mockServer.address();
+  const listeningPort = typeof address === "object" && address ? address.port : PORT;
+  console.error(`mock-ghostd on http://${HOST}:${listeningPort} — ghosts: ${ghosts.map((g) => g.name).join(", ")}`);
 });

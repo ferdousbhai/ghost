@@ -12,6 +12,8 @@ FocusScope {
 
     /** The route currently shown by the host. */
     property string currentSection: "chat"
+    /** Redacted daemon-global handler count shown on the Hooks destination. */
+    property int activeHookCount: 0
 
     /** A destination was chosen by pointer or keyboard. */
     signal selected(string section)
@@ -29,7 +31,7 @@ FocusScope {
         },
         {
             id: "docs",
-            label: "Docs",
+            label: "Documents",
             icon: "M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2zM14 2v6h6M8 13h8M8 17h8M8 9h2"
         },
         {
@@ -39,13 +41,19 @@ FocusScope {
         },
         {
             id: "agents",
-            label: "Helpers",
+            label: "Agent definitions (inactive)",
             icon: "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"
         },
         {
             id: "commands",
             label: "Commands",
             icon: "M4 3h16a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zM6 9l4 3-4 3M12 15h4"
+        },
+        {
+            id: "hooks",
+            label: root.activeHookCount > 0
+                ? "Hooks · " + root.activeHookCount + " loaded" : "Hooks",
+            icon: "M8 12h8M12 8v8M7 3v4M17 3v4M7 17v4M17 17v4M3 7h4M17 7h4M3 17h4M17 17h4M7 7h10v10H7z"
         },
         {
             id: "mcp",
@@ -176,6 +184,30 @@ FocusScope {
                 }
 
                 Rectangle {
+                    visible: destinationButton.destination.id === "hooks"
+                        && root.activeHookCount > 0
+                    anchors.right: parent.right
+                    anchors.rightMargin: 3
+                    anchors.top: parent.top
+                    anchors.topMargin: 3
+                    width: Math.max(14, hookCount.implicitWidth + 6)
+                    height: 14
+                    radius: 7
+                    color: Theme.ghostAmberBright
+
+                    Text {
+                        id: hookCount
+                        anchors.centerIn: parent
+                        text: String(root.activeHookCount)
+                        textFormat: Text.PlainText
+                        color: Theme.background
+                        font.family: Theme.fontFamily
+                        font.pixelSize: 9
+                        font.weight: Font.Bold
+                    }
+                }
+
+                Rectangle {
                     id: tooltip
 
                     anchors.right: parent.left
@@ -200,6 +232,7 @@ FocusScope {
                         id: tooltipLabel
                         anchors.centerIn: parent
                         text: destinationButton.destination.label
+                        textFormat: Text.PlainText
                         color: Theme.foregroundBright
                         font.family: Theme.fontFamily
                         font.pixelSize: Theme.fontSizeSmall

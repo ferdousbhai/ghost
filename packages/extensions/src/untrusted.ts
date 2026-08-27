@@ -398,9 +398,9 @@ function escapeAttribute(value: string): string {
 }
 
 /**
- * Delimit untrusted content with a fresh identifier in both tags. An exact
- * close marker already present in the payload is escaped before wrapping, so
- * even a deterministic test nonce cannot manufacture an early close.
+ * Delimit untrusted content with an identifier in both tags. Exact copies of
+ * either marker already present in the payload are escaped before wrapping,
+ * so even a deterministic nonce cannot manufacture a nested or early fence.
  */
 export function fenceUntrusted(
   content: string,
@@ -411,12 +411,14 @@ export function fenceUntrusted(
     throw new TypeError("The untrusted-content nonce must contain only letters, digits, _ or -.");
   }
 
+  const openTag = `<untrusted source="${escapeAttribute(opts.source)}" id="${nonce}">`;
   const closeTag = `</untrusted id="${nonce}">`;
-  const neutralized = content.replaceAll(closeTag, `&lt;/untrusted id="${nonce}">`);
-  if (neutralized.includes(closeTag)) {
-    throw new Error("Failed to neutralize an untrusted-content close marker.");
+  const neutralized = content
+    .replaceAll(openTag, `&lt;untrusted source="${escapeAttribute(opts.source)}" id="${nonce}">`)
+    .replaceAll(closeTag, `&lt;/untrusted id="${nonce}">`);
+  if (neutralized.includes(openTag) || neutralized.includes(closeTag)) {
+    throw new Error("Failed to neutralize an untrusted-content fence marker.");
   }
 
-  return `<untrusted source="${escapeAttribute(opts.source)}" id="${nonce}">\n`
-    + `${neutralized}\n${closeTag}`;
+  return `${openTag}\n${neutralized}\n${closeTag}`;
 }

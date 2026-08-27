@@ -1,10 +1,11 @@
 /**
  * OMP slash-command discovery plus Ghost's headless execution boundary.
  *
- * Discovery stays upstream-owned. Execution is deliberately narrower: a
- * builtin must be explicitly admitted here before its OMP text handler runs.
- * A known command that is not admitted is still consumed, so it can never be
- * mistaken for an ordinary model prompt.
+ * Catalog composition stays upstream-owned, but file commands come from the
+ * conversation's pinned snapshot rather than being rediscovered from live cwd.
+ * Execution is deliberately narrower: a builtin must be explicitly admitted
+ * here before its OMP text handler runs. A known command that is not admitted
+ * is still consumed, so it can never be mistaken for an ordinary model prompt.
  */
 import {
   buildAvailableSlashCommands,
@@ -99,7 +100,11 @@ function availabilityFor(command: InternalAvailableSlashCommand): Pick<
 export async function buildGhostAvailableSlashCommands(
   session: AgentSession,
 ): Promise<GhostAvailableSlashCommand[]> {
-  const discovered = await buildAvailableSlashCommands(session);
+  const pinnedFileCommands = [...session.slashCommands];
+  const discovered = await buildAvailableSlashCommands(
+    session,
+    async () => pinnedFileCommands,
+  );
   const discoveredBuiltins = new Map(
     discovered
       .filter((command) => command.source === "builtin")
@@ -125,6 +130,17 @@ export async function buildGhostAvailableSlashCommands(
   const dynamic = discovered
     .filter((command) => command.source !== "builtin")
     .map((command) => ({ ...command, ...availabilityFor(command) }));
+  const seen = new Set([...builtins, ...dynamic].map((command) => command.name));
+  for (const template of session.promptTemplates) {
+    if (seen.has(template.name)) continue;
+    seen.add(template.name);
+    dynamic.push({
+      name: template.name,
+      description: template.description,
+      source: "file",
+      availability: "available",
+    });
+  }
   return [...builtins, ...dynamic];
 }
 

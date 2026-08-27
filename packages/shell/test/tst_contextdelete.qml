@@ -11,8 +11,8 @@ TestCase {
         { path: "docs/c.md", relativePath: "c.md", title: "C" }
     ]
 
-    function test_targetsOnlyDocsAndMemory(): void {
-        compare(ContextDelete.target("docs", docs[0]).path, "docs/a.md");
+    function test_targetsOnlyMemory(): void {
+        verify(ContextDelete.target("docs", docs[0]) === null);
         compare(ContextDelete.target("memory", {
             path: "memory/fact.md", slug: "fact"
         }).title, "fact");

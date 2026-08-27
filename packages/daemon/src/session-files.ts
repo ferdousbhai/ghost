@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { basename } from "node:path";
+import { basename, join } from "node:path";
 import type { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { visitEntriesFromFileStream } from "@oh-my-pi/pi-coding-agent/session/session-loader";
 import {
@@ -13,6 +13,8 @@ const HASHED_SESSION_PREFIX = "ghost~";
 const HASHED_SESSION_PATTERN = /^ghost~[0-9a-f]{64}\.jsonl$/u;
 const CONVERSATION_ID_ENTRY = "ghost_conversation_identity";
 const HOSTED_IMPORT_ENTRY = "ghost_hosted_conversation_import";
+const CLAUDE_SESSION_PREFIX = "claude-";
+const CLAUDE_SESSION_SUFFIX = ".json";
 
 function conversationIdFitsFileName(conversationId: string): boolean {
   return conversationId.length > 0
@@ -28,6 +30,16 @@ export function sessionFileNameFor(conversationId: string): string {
   // `~` is outside the direct-filename alphabet above. Therefore the generated
   // stem can never itself be treated as an alias for this transcript.
   return `${HASHED_SESSION_PREFIX}${digest}.jsonl`;
+}
+
+/** Collision-safe Claude v3 metadata sidecar for one exact raw conversation id. */
+export function claudeSessionMetadataPath(
+  sessionDir: string,
+  conversationId: string,
+): string {
+  requireRawConversationId(conversationId);
+  const digest = createHash("sha256").update(conversationId).digest("hex");
+  return join(sessionDir, `${CLAUDE_SESSION_PREFIX}${digest}${CLAUDE_SESSION_SUFFIX}`);
 }
 
 /** Persist an exact raw id when the safe transcript name cannot carry it. */

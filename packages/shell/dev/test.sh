@@ -3,6 +3,10 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+node test/fixtures/mock-project-parity-probe.mjs
+node test/fixtures/mock-documents-confinement-probe.mjs
+node test/fixtures/mock-mcp-url-sanitizer-probe.mjs
+
 for candidate in "${QMLTESTRUNNER:-}" /usr/lib/qt6/bin/qmltestrunner /usr/lib/qt6/qmltestrunner qmltestrunner6; do
   if [[ -n $candidate ]] && command -v "$candidate" >/dev/null 2>&1; then
     QMLTESTRUNNER=$candidate
@@ -24,6 +28,9 @@ if [[ -z ${QML:-} ]]; then
   echo "no Qt6 qml runtime found" >&2
   exit 1
 fi
+
+node test/fixtures/document-resource-probe.mjs "$QML"
+node test/fixtures/hook-resource-probe.mjs "$QML"
 
 sse_tmp=$(mktemp -d "${TMPDIR:-/tmp}/ghost-shell-sse.XXXXXX")
 sse_url_file="$sse_tmp/url"
@@ -75,3 +82,22 @@ fi
 
 rg -q 'onLinkActivated: link => ExternalLinks\.openModelUrl\(link\)' qml/components/Bubble.qml
 rg -q 'ExternalLinks\.openLoginUrl\(url\)' qml/services/Ghostd.qml
+
+# Inline Documents content is authenticated text, not a QML resource surface.
+# Keep this source-level invariant beside the hostile-markup QML regression so
+# a future renderer change cannot silently re-enable URL or local-file loads.
+document_view=qml/components/DocumentView.qml
+rg -q 'textFormat: Text\.PlainText' "$document_view"
+if rg -q 'Text\.(MarkdownText|RichText)|TextEdit\.(MarkdownText|RichText)|onLinkActivated|\b(Image|AnimatedImage|BorderImage|CodeView|FileView|FilePane)\s*\{' "$document_view"; then
+  echo "DocumentView must expose only literal Text.PlainText content" >&2
+  exit 1
+fi
+
+# Hook labels originate in trusted machine configuration but still remain
+# display-only text. AutoText must never turn them into a resource surface.
+hooks_view=qml/components/HooksBrowser.qml
+rg -q 'textFormat: Text\.PlainText' "$hooks_view"
+if rg -q 'Text\.(MarkdownText|RichText)|TextEdit\.(MarkdownText|RichText)|onLinkActivated|\b(Image|AnimatedImage|BorderImage|CodeView|FileView|FilePane)\s*\{' "$hooks_view"; then
+  echo "HooksBrowser must expose only literal Text.PlainText labels" >&2
+  exit 1
+fi

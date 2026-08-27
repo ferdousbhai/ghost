@@ -8,25 +8,25 @@
  * licensed Claude adapter (`apps/server/src/provider/Layers/ClaudeAdapter.ts`).
  *
  * Ghost deliberately opens one scoped query per turn instead of keeping T3's
- * query process alive forever. Our persona, memory index, and doc catalogue
+ * query process alive forever. Our persona, memory index, and Documents index
  * are rebuilt on every turn; a long-lived query would freeze those system
  * instructions at session creation. Claude's opaque session id supplies
  * continuity when the next scoped query resumes.
  */
 import { execFile } from "node:child_process";
-import { randomUUID, createHash } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import {
   access,
+  lstat,
   mkdir,
   open as openFile,
-  readFile,
   readdir,
   rename,
   unlink,
-  writeFile,
 } from "node:fs/promises";
-import { delimiter, isAbsolute, join, resolve } from "node:path";
+import { delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { homedir } from "node:os";
 import { promisify } from "node:util";
 import {
   createSdkMcpServer,
@@ -38,7 +38,14 @@ import {
   type SDKResultMessage,
   type SDKUserMessage,
   type SdkMcpToolDefinition,
+  type McpServerConfig as ClaudeMcpServerConfig,
 } from "@anthropic-ai/claude-agent-sdk";
+import type {
+  MCPHttpServerConfig as OmpMcpHttpServerConfig,
+  MCPSseServerConfig as OmpMcpSseServerConfig,
+  MCPServerConfig as OmpMcpServerConfig,
+  MCPStdioServerConfig as OmpMcpStdioServerConfig,
+} from "@oh-my-pi/pi-coding-agent/mcp/types";
 import type {
   AgentToolResult,
   ExtensionAPI,
@@ -47,9 +54,13 @@ import type {
 } from "@oh-my-pi/pi-coding-agent";
 import {
   buildGhostSystemPrompt,
+  DOCUMENT_INDEX_MAX_ENTRIES,
   deriveMemoryIndex,
-  deriveDocCatalog,
+  deriveDocumentsIndex,
+  MachineDocuments,
+  openMachineDocuments,
   openGhostHome,
+  openRegularFileNoFollow,
   type GhostToolCapabilities,
 } from "@ghost/extensions";
 import * as Effect from "effect/Effect";
@@ -80,7 +91,21 @@ import {
   type Ghost,
 } from "./ghosts.js";
 import { silentLogger, type Logger } from "./log.js";
+import type { SettledMaintenanceTurn } from "./conversation-maintenance.js";
+import type { EffectiveProjectMcpRead } from "./mcp-catalog.js";
 import type { RunTurnOptions } from "./session-host.js";
+import { claudeSessionMetadataPath as nativeClaudeSessionMetadataPath } from "./session-files.js";
+import {
+  loadProjectDeclarativeSnapshot,
+  type ProjectFilesystemIdentity,
+} from "./project-resources.js";
+import {
+  declarativePromptSnapshot,
+  mergeDeclarativePromptSnapshots,
+  mergeProjectDeclarativeSnapshots,
+  renderDeclarativePrompt,
+  type DeclarativePromptSnapshot,
+} from "./declarative-snapshot.js";
 
 export const CLAUDE_CODE_PROVIDER_ID = "claude-code";
 export const CLAUDE_CODE_DEFAULT_MODEL_ID = "default";
@@ -92,6 +117,8 @@ const CLAUDE_SESSION_PREFIX = "claude-";
 const CLAUDE_SESSION_SUFFIX = ".json";
 const CLAUDE_SESSION_FILE_PATTERN = /^claude-[0-9a-f]{64}\.json$/u;
 const MAX_CLAUDE_CODE_SESSION_ID_SCALARS = 512;
+const MODEL_TURN_PERSISTENCE_ERROR = "Could not durably settle this owner turn.";
+export const CLAUDE_SESSION_METADATA_MAX_BYTES = 16 * 1_048_576;
 const AUTH_STATUS_TIMEOUT_MS = 10_000;
 export const CLAUDE_CODE_TOOL_CAPABILITIES: GhostToolCapabilities = { vision: true };
 const execFileAsync = promisify(execFile);
@@ -105,7 +132,7 @@ export interface ClaudeCodeAuthStatus {
 }
 
 export interface ClaudeSessionMetadata {
-  version: 1;
+  version: 1 | 2 | 3;
   runtime: "claude-code";
   conversationId: string;
   sessionId: string;
@@ -114,6 +141,41 @@ export interface ClaudeSessionMetadata {
   messageCount: number;
   /** Owner-initiated turns, independent of Claude's internal sampling/tool turns. */
   ownerTurnCount: number;
+  /** Version 2 pins the actual runtime cwd; version 1 resumes at ghost home. */
+  cwd?: string;
+  /** Version 3's exact bounded project inputs, reused without filesystem reads. */
+  projectSnapshot?: ClaudePersistedProjectSnapshot;
+}
+
+export interface ClaudePersistedProjectSnapshot {
+  root: string | null;
+  identity?: ProjectFilesystemIdentity;
+  declarative: DeclarativePromptSnapshot;
+  mcpServers: Record<string, ClaudeMcpServerConfig>;
+  resourceWarnings: string[];
+  mcpWarnings: string[];
+}
+
+function mcpServerRecord<T>(
+  entries: Iterable<readonly [string, T]>,
+): Record<string, T> {
+  // Object.fromEntries defines every name as an own data property, including
+  // JavaScript's inherited object names. Never assign an untrusted MCP name
+  // through an ordinary `{}` dictionary.
+  return Object.fromEntries(entries) as Record<string, T>;
+}
+
+export interface ClaudeProjectSnapshot {
+  root: string | null;
+  cwd: string;
+  identity?: ProjectFilesystemIdentity;
+  /** Exact validated project inputs captured before the caller publishes SSE. */
+  admittedSnapshot?: ClaudePersistedProjectSnapshot;
+  reportStatus?: (input: {
+    status: "ready" | "degraded";
+    error: { code: string; message: string } | null;
+    mcpStatus: "off" | "ready" | "degraded";
+  }) => Promise<void>;
 }
 
 export interface ClaudeCodeQueryInput {
@@ -142,6 +204,8 @@ export interface ClaudeCodeProbeOptions {
 }
 
 export interface ClaudeCodeRuntimeOptions {
+  /** OS account home. New unbound Claude conversations start here. */
+  ownerHome?: string;
   logger?: Logger;
   extensionOptions?: GhostExtensionOptions;
   browserMode?: "relay" | "profile";
@@ -406,17 +470,11 @@ export class ClaudeCodeProbe {
   }
 }
 
-function claudeSessionMetadataName(conversationId: string): string {
-  requireRawConversationId(conversationId);
-  const digest = createHash("sha256").update(conversationId).digest("hex");
-  return `${CLAUDE_SESSION_PREFIX}${digest}${CLAUDE_SESSION_SUFFIX}`;
-}
-
 export function claudeSessionMetadataPath(
   sessionDir: string,
   conversationId: string,
 ): string {
-  return join(sessionDir, claudeSessionMetadataName(conversationId));
+  return nativeClaudeSessionMetadataPath(sessionDir, conversationId);
 }
 
 function isBoundedScalarString(value: string, maximum: number): boolean {
@@ -436,6 +494,210 @@ function isBoundedScalarString(value: string, maximum: number): boolean {
   return scalars > 0;
 }
 
+function objectRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function hasOnlyFields(
+  value: Record<string, unknown>,
+  allowed: ReadonlySet<string>,
+): boolean {
+  return Object.keys(value).every((key) => allowed.has(key));
+}
+
+function stringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((entry) => typeof entry === "string");
+}
+
+function stringRecord(value: unknown): value is Record<string, string> {
+  const row = objectRecord(value);
+  return row !== null && Object.values(row).every((entry) => typeof entry === "string");
+}
+
+function optionalNonNegativeNumber(value: unknown): boolean {
+  return value === undefined
+    || (typeof value === "number" && Number.isFinite(value) && value >= 0);
+}
+
+function optionalBoolean(value: unknown): boolean {
+  return value === undefined || typeof value === "boolean";
+}
+
+const CLAUDE_MCP_STDIO_FIELDS = new Set([
+  "type",
+  "command",
+  "args",
+  "env",
+  "timeout",
+  "alwaysLoad",
+]);
+const CLAUDE_MCP_REMOTE_FIELDS = new Set([
+  "type",
+  "url",
+  "headers",
+  "tools",
+  "timeout",
+  "alwaysLoad",
+]);
+const CLAUDE_MCP_TOOL_POLICY_FIELDS = new Set(["name", "permission_policy"]);
+const CLAUDE_MCP_SERVER_NAME_PATTERN = /^[a-zA-Z0-9_.:-]{1,100}$/u;
+const CLAUDE_MCP_PERMISSION_POLICIES = new Set([
+  "always_allow",
+  "always_ask",
+  "always_deny",
+]);
+
+function validClaudeMcpToolPolicy(value: unknown): boolean {
+  const policy = objectRecord(value);
+  return policy !== null
+    && hasOnlyFields(policy, CLAUDE_MCP_TOOL_POLICY_FIELDS)
+    && typeof policy.name === "string"
+    && policy.name.length > 0
+    && typeof policy.permission_policy === "string"
+    && CLAUDE_MCP_PERMISSION_POLICIES.has(policy.permission_policy);
+}
+
+/** Validate exactly the serializable stdio/http/sse SDK MCP union persisted by Ghost. */
+function validPersistedClaudeMcpConfig(value: unknown): value is ClaudeMcpServerConfig {
+  const config = objectRecord(value);
+  if (!config || containsEnvironmentExpansion(config)) return false;
+  const type = config.type ?? "stdio";
+  if (type === "stdio") {
+    return hasOnlyFields(config, CLAUDE_MCP_STDIO_FIELDS)
+      && (config.type === undefined || config.type === "stdio")
+      && typeof config.command === "string"
+      && config.command.length > 0
+      && (config.args === undefined || stringArray(config.args))
+      && (config.env === undefined
+        || (stringRecord(config.env) && Object.keys(config.env).length === 0))
+      && optionalNonNegativeNumber(config.timeout)
+      && optionalBoolean(config.alwaysLoad);
+  }
+  if (type !== "http" && type !== "sse") return false;
+  if (!hasOnlyFields(config, CLAUDE_MCP_REMOTE_FIELDS)
+    || typeof config.url !== "string"
+    || (config.headers !== undefined
+      && (!stringRecord(config.headers) || Object.keys(config.headers).length > 0))
+    || (config.tools !== undefined
+      && (!Array.isArray(config.tools) || !config.tools.every(validClaudeMcpToolPolicy)))
+    || !optionalNonNegativeNumber(config.timeout)
+    || !optionalBoolean(config.alwaysLoad)) {
+    return false;
+  }
+  try {
+    const url = new URL(config.url);
+    return (url.protocol === "http:" || url.protocol === "https:")
+      && !url.username
+      && !url.password
+      && !url.search
+      && !url.hash;
+  } catch {
+    return false;
+  }
+}
+
+const CLAUDE_METADATA_COMMON_FIELDS = [
+  "version",
+  "runtime",
+  "conversationId",
+  "sessionId",
+  "created",
+  "modified",
+  "messageCount",
+  "ownerTurnCount",
+] as const;
+const CLAUDE_METADATA_V1_FIELDS = new Set(CLAUDE_METADATA_COMMON_FIELDS);
+const CLAUDE_METADATA_V2_FIELDS = new Set([...CLAUDE_METADATA_COMMON_FIELDS, "cwd"]);
+const CLAUDE_METADATA_V3_FIELDS = new Set([
+  ...CLAUDE_METADATA_COMMON_FIELDS,
+  "cwd",
+  "projectSnapshot",
+]);
+const CLAUDE_PROJECT_SNAPSHOT_FIELDS = new Set([
+  "root",
+  "identity",
+  "declarative",
+  "mcpServers",
+  "resourceWarnings",
+  "mcpWarnings",
+]);
+const CLAUDE_PROJECT_IDENTITY_FIELDS = new Set(["dev", "ino"]);
+const CLAUDE_DECLARATIVE_FIELDS = new Set([
+  "instructions",
+  "skills",
+  "rules",
+  "prompts",
+  "commands",
+]);
+const CLAUDE_DECLARATIVE_INSTRUCTION_FIELDS = new Set(["path", "content"]);
+const CLAUDE_DECLARATIVE_NAMED_PATH_FIELDS = new Set(["name", "path", "content"]);
+const CLAUDE_DECLARATIVE_NAMED_FIELDS = new Set(["name", "content"]);
+
+function uniqueNamedResources(values: readonly unknown[]): boolean {
+  const names = new Set<string>();
+  for (const value of values) {
+    const row = objectRecord(value);
+    if (!row || typeof row.name !== "string" || row.name.length === 0 || names.has(row.name)) {
+      return false;
+    }
+    names.add(row.name);
+  }
+  return true;
+}
+
+function validDeclarativePromptSnapshot(value: unknown, root: string | null): boolean {
+  const snapshot = objectRecord(value);
+  if (!snapshot
+    || !hasOnlyFields(snapshot, CLAUDE_DECLARATIVE_FIELDS)
+    || !Array.isArray(snapshot.instructions)
+    || !Array.isArray(snapshot.skills)
+    || !Array.isArray(snapshot.rules)
+    || !Array.isArray(snapshot.prompts)
+    || !Array.isArray(snapshot.commands)) {
+    return false;
+  }
+  const validPathResource = (
+    entry: unknown,
+    allowed: ReadonlySet<string>,
+    named: boolean,
+  ): boolean => {
+    const row = objectRecord(entry);
+    return Boolean(row
+      && hasOnlyFields(row, allowed)
+      && (!named || (typeof row.name === "string" && row.name.length > 0))
+      && typeof row.path === "string"
+      && root !== null
+      && pathWithin(root, row.path)
+      && typeof row.content === "string");
+  };
+  const validNamedResource = (entry: unknown): boolean => {
+    const row = objectRecord(entry);
+    return Boolean(row
+      && hasOnlyFields(row, CLAUDE_DECLARATIVE_NAMED_FIELDS)
+      && typeof row.name === "string"
+      && row.name.length > 0
+      && typeof row.content === "string");
+  };
+  if (!snapshot.instructions.every((entry) =>
+    validPathResource(entry, CLAUDE_DECLARATIVE_INSTRUCTION_FIELDS, false))
+    || !snapshot.skills.every((entry) =>
+      validPathResource(entry, CLAUDE_DECLARATIVE_NAMED_PATH_FIELDS, true))
+    || !snapshot.rules.every((entry) =>
+      validPathResource(entry, CLAUDE_DECLARATIVE_NAMED_PATH_FIELDS, true))
+    || !snapshot.prompts.every(validNamedResource)
+    || !snapshot.commands.every(validNamedResource)
+    || !uniqueNamedResources(snapshot.skills)
+    || !uniqueNamedResources(snapshot.rules)
+    || !uniqueNamedResources(snapshot.prompts)
+    || !uniqueNamedResources(snapshot.commands)) {
+    return false;
+  }
+  return root !== null || Object.values(snapshot).every((entries) =>
+    Array.isArray(entries) && entries.length === 0);
+}
+
 function parseMetadata(path: string, raw: string): ClaudeSessionMetadata {
   let parsed: unknown;
   try {
@@ -447,15 +709,21 @@ function parseMetadata(path: string, raw: string): ClaudeSessionMetadata {
       500,
     );
   }
-  const value = parsed as Partial<ClaudeSessionMetadata> | null;
-  if (value?.version !== 1
+  const record = objectRecord(parsed);
+  const value = record as Partial<ClaudeSessionMetadata> | null;
+  const allowed = value?.version === 1
+    ? CLAUDE_METADATA_V1_FIELDS
+    : value?.version === 2 ? CLAUDE_METADATA_V2_FIELDS : CLAUDE_METADATA_V3_FIELDS;
+  if (!record
+    || (value?.version !== 1 && value?.version !== 2 && value?.version !== 3)
+    || !hasOnlyFields(record, allowed)
     || value.runtime !== "claude-code"
     || typeof value.conversationId !== "string"
     || !isValidConversationId(value.conversationId)
     || typeof value.sessionId !== "string"
     || !isBoundedScalarString(value.sessionId, MAX_CLAUDE_CODE_SESSION_ID_SCALARS)
-    || typeof value.created !== "string"
-    || typeof value.modified !== "string"
+    || !exactIsoTimestamp(value.created)
+    || !exactIsoTimestamp(value.modified)
     || typeof value.messageCount !== "number"
     || !Number.isSafeInteger(value.messageCount)
     || value.messageCount < 0
@@ -463,7 +731,12 @@ function parseMetadata(path: string, raw: string): ClaudeSessionMetadata {
       && (typeof value.ownerTurnCount !== "number"
         || !Number.isSafeInteger(value.ownerTurnCount)
         || value.ownerTurnCount < 0))
-    || (value.ownerTurnCount === undefined && value.messageCount % 2 !== 0)) {
+    || (value.ownerTurnCount === undefined && value.messageCount % 2 !== 0)
+    || (value.version === 1 && (value.cwd !== undefined || value.projectSnapshot !== undefined))
+    || ((value.version === 2 || value.version === 3)
+      && (typeof value.cwd !== "string" || !isAbsolute(value.cwd)))
+    || (value.version === 2 && value.projectSnapshot !== undefined)
+    || (value.version === 3 && !validPersistedProjectSnapshot(value.projectSnapshot))) {
     throw new GhostError(
       "claude_session_invalid",
       `${path} does not match the claude-code session metadata contract.`,
@@ -479,13 +752,131 @@ function parseMetadata(path: string, raw: string): ClaudeSessionMetadata {
   };
 }
 
+function exactIsoTimestamp(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const milliseconds = Date.parse(value);
+  return Number.isFinite(milliseconds) && new Date(milliseconds).toISOString() === value;
+}
+
+function validPersistedProjectSnapshot(value: unknown): value is ClaudePersistedProjectSnapshot {
+  const record = objectRecord(value);
+  if (!record || !hasOnlyFields(record, CLAUDE_PROJECT_SNAPSHOT_FIELDS)) return false;
+  const snapshot = record as Partial<ClaudePersistedProjectSnapshot>;
+  if (snapshot.root !== null && (typeof snapshot.root !== "string" || !isAbsolute(snapshot.root))) {
+    return false;
+  }
+  if (!validDeclarativePromptSnapshot(snapshot.declarative, snapshot.root ?? null)
+    || !snapshot.mcpServers
+    || typeof snapshot.mcpServers !== "object"
+    || Array.isArray(snapshot.mcpServers)
+    || !Array.isArray(snapshot.resourceWarnings)
+    || !snapshot.resourceWarnings.every((warning) => typeof warning === "string")
+    || !Array.isArray(snapshot.mcpWarnings)
+    || !snapshot.mcpWarnings.every((warning) => typeof warning === "string")) {
+    return false;
+  }
+  if (!Object.entries(snapshot.mcpServers).every(([name, config]) =>
+    name !== "ghost"
+    && CLAUDE_MCP_SERVER_NAME_PATTERN.test(name)
+    && validPersistedClaudeMcpConfig(config))) {
+    return false;
+  }
+  if (snapshot.root === null) {
+    return snapshot.identity === undefined
+      && Object.keys(snapshot.mcpServers).length === 0
+      && snapshot.resourceWarnings.length === 0
+      && snapshot.mcpWarnings.length === 0;
+  }
+  const identity = objectRecord(snapshot.identity);
+  return Boolean(identity
+    && hasOnlyFields(identity, CLAUDE_PROJECT_IDENTITY_FIELDS)
+    && typeof identity.dev === "string" && /^\d+$/u.test(identity.dev)
+    && typeof identity.ino === "string" && /^\d+$/u.test(identity.ino));
+}
+
+function invalidMetadataFile(path: string): GhostError {
+  return new GhostError(
+    "claude_session_invalid",
+    `${path} does not match the secure Claude session sidecar contract.`,
+    500,
+  );
+}
+
+/**
+ * Read one sidecar through a pinned non-following descriptor. `afterStat` is a
+ * deterministic race-test seam; production callers omit it.
+ */
+export async function readClaudeSessionMetadataFile(
+  path: string,
+  afterStat?: (path: string) => void | Promise<void>,
+): Promise<string> {
+  let file: Awaited<ReturnType<typeof openRegularFileNoFollow>> | undefined;
+  try {
+    file = await openRegularFileNoFollow(path, "Claude session sidecar");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") throw error;
+    throw invalidMetadataFile(path);
+  }
+  try {
+    const before = await file.stat({ bigint: true });
+    if (!before.isFile()
+      || before.nlink !== 1n
+      || (Number(before.mode) & 0o777) !== 0o600
+      || before.size > BigInt(CLAUDE_SESSION_METADATA_MAX_BYTES)) {
+      throw invalidMetadataFile(path);
+    }
+    await afterStat?.(path);
+    const bytes = Buffer.allocUnsafe(Number(before.size) + 1);
+    let length = 0;
+    while (length < bytes.byteLength) {
+      const result = await file.read(bytes, length, bytes.byteLength - length, length);
+      if (result.bytesRead === 0) break;
+      length += result.bytesRead;
+    }
+    const after = await file.stat({ bigint: true });
+    if (!after.isFile()
+      || after.nlink !== 1n
+      || (Number(after.mode) & 0o777) !== 0o600
+      || after.dev !== before.dev
+      || after.ino !== before.ino
+      || after.size !== before.size
+      || after.mtimeNs !== before.mtimeNs
+      || after.ctimeNs !== before.ctimeNs
+      || after.size !== BigInt(length)
+      || after.size > BigInt(CLAUDE_SESSION_METADATA_MAX_BYTES)) {
+      throw invalidMetadataFile(path);
+    }
+    const live = await lstat(path, { bigint: true });
+    if (!live.isFile()
+      || live.nlink !== 1n
+      || (Number(live.mode) & 0o777) !== 0o600
+      || live.dev !== after.dev
+      || live.ino !== after.ino
+      || live.size !== after.size
+      || live.mtimeNs !== after.mtimeNs
+      || live.ctimeNs !== after.ctimeNs) {
+      throw invalidMetadataFile(path);
+    }
+    try {
+      return new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(0, length));
+    } catch {
+      throw invalidMetadataFile(path);
+    }
+  } catch (error) {
+    if (error instanceof GhostError && error.code === "claude_session_invalid") throw error;
+    throw invalidMetadataFile(path);
+  } finally {
+    await file.close().catch(() => {});
+  }
+}
+
 async function readMetadata(
   sessionDir: string,
   conversationId: string,
 ): Promise<ClaudeSessionMetadata | null> {
   const path = claudeSessionMetadataPath(sessionDir, conversationId);
   try {
-    const metadata = parseMetadata(path, await readFile(path, "utf8"));
+    const metadata = parseMetadata(path, await readClaudeSessionMetadataFile(path));
     if (metadata.conversationId !== conversationId) {
       throw new GhostError(
         "session_identity_mismatch",
@@ -507,26 +898,47 @@ async function writeMetadata(
   await mkdir(sessionDir, { recursive: true });
   const path = claudeSessionMetadataPath(sessionDir, metadata.conversationId);
   const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
-  await writeFile(temporary, `${JSON.stringify(metadata, null, 2)}\n`, {
-    encoding: "utf8",
-    mode: 0o600,
-  });
-  await rename(temporary, path);
+  let file: Awaited<ReturnType<typeof openFile>> | undefined;
+  try {
+    file = await openFile(temporary, "wx", 0o600);
+    await file.writeFile(`${JSON.stringify(metadata, null, 2)}\n`, "utf8");
+    await file.sync();
+    await file.close();
+    file = undefined;
+    await rename(temporary, path);
+    const directory = await openFile(dirname(path), "r");
+    try {
+      await directory.sync();
+    } finally {
+      await directory.close();
+    }
+  } catch (error) {
+    await file?.close().catch(() => {});
+    await unlink(temporary).catch(() => {});
+    throw error;
+  }
   return path;
 }
 
-async function buildPersona(homeDir: string, ghostName: string): Promise<string> {
+async function buildPersona(
+  homeDir: string,
+  ghostName: string,
+  configuredDocuments?: MachineDocuments | string,
+): Promise<string> {
   const home = openGhostHome(homeDir);
-  const [character, memory, docs] = await Promise.all([
+  const documents = configuredDocuments instanceof MachineDocuments
+    ? configuredDocuments
+    : openMachineDocuments(configuredDocuments);
+  const [character, memory, documentPage] = await Promise.all([
     home.readCharacter(),
     home.listMemory(),
-    home.listDocs(),
+    documents.listDirectory("", { limit: DOCUMENT_INDEX_MAX_ENTRIES }),
   ]);
   return buildGhostSystemPrompt({
     ghostName,
     character,
     memory: deriveMemoryIndex(memory.files),
-    docs: deriveDocCatalog(docs.docs),
+    docs: deriveDocumentsIndex(documentPage),
     // A seeded character.md means this ghost has not met its owner yet.
     extraSections: isSeededCharacter(ghostName, readCharacterFile(homeDir))
       ? [FIRST_MEETING_SECTION]
@@ -826,6 +1238,7 @@ function queryOptions(input: {
   metadata: ClaudeSessionMetadata | null;
   newSessionId: string;
   abortController: AbortController;
+  projectMcpServers: Record<string, ClaudeMcpServerConfig>;
 }): ClaudeQueryOptions {
   const mcp = createSdkMcpServer({
     name: "ghost",
@@ -843,12 +1256,19 @@ function queryOptions(input: {
       append: input.systemPrompt,
     },
     title: `${input.ghostName} in Ghost`,
-    skills: "all",
+    // The subprocess cwd must not implicitly authorize project settings,
+    // hooks, plugins, or MCP. Ghost injects the approved declarative snapshot
+    // and project MCP explicitly at the session boundary.
+    settingSources: [],
+    skills: [],
     tools: { type: "preset", preset: "claude_code" },
     allowedTools: input.toolNames.map((name) => `mcp__ghost__${name}`),
     permissionMode: "bypassPermissions",
     allowDangerouslySkipPermissions: true,
-    mcpServers: { ghost: mcp },
+    mcpServers: mcpServerRecord([
+      ...Object.entries(input.projectMcpServers),
+      ["ghost", mcp],
+    ]),
     includePartialMessages: true,
     persistSession: true,
     promptSuggestions: false,
@@ -858,6 +1278,199 @@ function queryOptions(input: {
       : { sessionId: input.newSessionId }),
     env: credentialFreeEnvironment(),
   };
+}
+
+function pathWithin(root: string, candidate: string): boolean {
+  const rel = relative(root, candidate);
+  return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
+}
+
+function projectMcpServers(
+  effective: EffectiveProjectMcpRead,
+): {
+  servers: Record<string, ClaudeMcpServerConfig>;
+  warnings: string[];
+} {
+  const entries: Array<[string, ClaudeMcpServerConfig]> = [];
+  const warnings: string[] = [];
+  for (const server of effective.servers) {
+    if (server.name === "ghost") {
+      warnings.push("ghost: this MCP name is reserved by the Ghost runtime.");
+      continue;
+    }
+    if (server.errors.length > 0) {
+      warnings.push(`${server.name}: ${server.errors.join("; ")}`);
+      continue;
+    }
+    const config = server.config as OmpMcpServerConfig;
+    if (config.enabled === false) continue;
+    if (claudeMcpConfigCarriesSecrets(config)) {
+      throw new GhostError(
+        "claude_project_mcp_secrets_unsupported",
+        `Claude project MCP ${JSON.stringify(server.name)} uses environment expansion or `
+          + "secret-bearing env, header, auth, OAuth, or URL fields. Phase 1 does not persist "
+          + "those values in Claude resume metadata.",
+        409,
+      );
+    }
+    if (config.timeout !== undefined && config.timeout < 1_000) {
+      warnings.push(
+        `${server.name}: row rejected because Claude Code cannot preserve MCP timeouts below 1000 ms.`,
+      );
+      continue;
+    }
+    const type = config.type ?? "stdio";
+    if (type === "stdio") {
+      const stdio = config as OmpMcpStdioServerConfig;
+      if (stdio.cwd) {
+        warnings.push(
+          `${server.name}: row rejected because Claude project MCP does not support an explicit cwd.`,
+        );
+        continue;
+      }
+      entries.push([server.name, {
+        type: "stdio",
+        command: stdio.command,
+        alwaysLoad: true,
+        ...(stdio.args ? { args: stdio.args } : {}),
+        ...(stdio.env ? { env: stdio.env } : {}),
+        ...(stdio.timeout !== undefined ? { timeout: stdio.timeout } : {}),
+      }]);
+      continue;
+    }
+    if (type === "http" || type === "sse") {
+      const remote = config as OmpMcpHttpServerConfig | OmpMcpSseServerConfig;
+      entries.push([server.name, {
+        type,
+        url: remote.url,
+        alwaysLoad: true,
+        ...(remote.headers ? { headers: remote.headers } : {}),
+        ...(remote.timeout !== undefined ? { timeout: remote.timeout } : {}),
+      }]);
+      continue;
+    }
+    warnings.push(`${server.name}: unsupported MCP transport ${String(type)}.`);
+  }
+  return { servers: mcpServerRecord(entries), warnings };
+}
+
+function containsEnvironmentExpansion(value: unknown): boolean {
+  if (typeof value === "string") return /\$\{[^}]+\}/u.test(value);
+  if (Array.isArray(value)) return value.some(containsEnvironmentExpansion);
+  if (!value || typeof value !== "object") return false;
+  return Object.values(value as Record<string, unknown>).some(containsEnvironmentExpansion);
+}
+
+function nonEmptyRecord(value: unknown): boolean {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value)
+    && Object.keys(value as Record<string, unknown>).length > 0);
+}
+
+function claudeMcpConfigCarriesSecrets(config: OmpMcpServerConfig): boolean {
+  if (containsEnvironmentExpansion(config)) return true;
+  if (nonEmptyRecord(config.auth) || nonEmptyRecord(config.oauth)) return true;
+  const type = config.type ?? "stdio";
+  if (type === "stdio") return nonEmptyRecord((config as OmpMcpStdioServerConfig).env);
+  const remote = config as OmpMcpHttpServerConfig | OmpMcpSseServerConfig;
+  if (nonEmptyRecord(remote.headers)) return true;
+  try {
+    const url = new URL(remote.url);
+    return Boolean(url.username || url.password || url.search || url.hash);
+  } catch {
+    // Validation reports malformed URLs before this point. Treat any remaining
+    // unparsable value as unsafe instead of persisting an opaque credential.
+    return true;
+  }
+}
+
+async function loadClaudeProjectSnapshot(
+  root: string | null,
+  identity?: ProjectFilesystemIdentity,
+): Promise<ClaudePersistedProjectSnapshot> {
+  if (!root) {
+    return {
+      root: null,
+      declarative: mergeDeclarativePromptSnapshots([]),
+      mcpServers: mcpServerRecord([]),
+      resourceWarnings: [],
+      mcpWarnings: [],
+    };
+  }
+  if (!identity) {
+    throw new GhostError(
+      "project_identity_missing",
+      "A trusted filesystem identity is required for a bound Claude project.",
+      409,
+    );
+  }
+  const snapshot = await loadProjectDeclarativeSnapshot(root, {
+    level: "project",
+    expectedIdentity: identity,
+  });
+  const approvedMcp = projectMcpServers(snapshot.mcp);
+  const mcpWarningSet = new Set(snapshot.mcpWarnings);
+  return {
+    root,
+    identity: { dev: identity.dev, ino: identity.ino },
+    declarative: declarativePromptSnapshot(mergeProjectDeclarativeSnapshots([snapshot])),
+    mcpServers: approvedMcp.servers,
+    resourceWarnings: snapshot.warnings.filter((warning) => !mcpWarningSet.has(warning)),
+    mcpWarnings: [...snapshot.mcpWarnings, ...approvedMcp.warnings],
+  };
+}
+
+function withRepresentableClaudeMcpTimeouts(
+  snapshot: ClaudePersistedProjectSnapshot,
+): ClaudePersistedProjectSnapshot {
+  const entries: Array<[string, ClaudeMcpServerConfig]> = [];
+  const mcpWarnings = [...snapshot.mcpWarnings];
+  for (const [name, config] of Object.entries(snapshot.mcpServers)) {
+    const timeout = "timeout" in config ? config.timeout : undefined;
+    if (timeout !== undefined && timeout < 1_000) {
+      const warning = `${name}: row rejected because Claude Code cannot preserve MCP timeouts below 1000 ms.`;
+      if (!mcpWarnings.includes(warning)) mcpWarnings.push(warning);
+      continue;
+    }
+    entries.push([name, config]);
+  }
+  return { ...snapshot, mcpServers: mcpServerRecord(entries), mcpWarnings };
+}
+
+function requireMatchingClaudeProjectSnapshot(
+  metadata: ClaudeSessionMetadata | null,
+  project: Pick<ClaudeProjectSnapshot, "root" | "identity">,
+): Promise<ClaudePersistedProjectSnapshot> | ClaudePersistedProjectSnapshot {
+  if (!metadata) return loadClaudeProjectSnapshot(project.root, project.identity);
+  if (metadata.version !== 3 || !metadata.projectSnapshot) {
+    if (project.root) {
+      throw new GhostError(
+        "claude_project_snapshot_missing",
+        "This legacy Claude conversation cannot safely resume a bound project; start a new conversation.",
+        409,
+      );
+    }
+    return {
+      root: null,
+      declarative: mergeDeclarativePromptSnapshots([]),
+      mcpServers: mcpServerRecord([]),
+      resourceWarnings: [],
+      mcpWarnings: [],
+    };
+  }
+  const snapshot = metadata.projectSnapshot;
+  const identityMatches = snapshot.root === null
+    ? project.identity === undefined
+    : Boolean(project.identity
+      && snapshot.identity?.dev === project.identity.dev
+      && snapshot.identity.ino === project.identity.ino);
+  if (snapshot.root !== project.root || !identityMatches) {
+    throw new GhostError(
+      "project_metadata_mismatch",
+      "Claude resume metadata does not match the conversation's trusted project snapshot.",
+      409,
+    );
+  }
+  return withRepresentableClaudeMcpTimeouts(snapshot);
 }
 
 /**
@@ -953,6 +1566,7 @@ export class ClaudeCodeRuntime {
   private readonly createQuery: ClaudeCodeQueryFactory;
   private readonly probe: ClaudeCodeProbe;
   private readonly hooks: GhostHookRunner;
+  private readonly ownerHome: string;
   private readonly busy = new Set<string>();
   private readonly active = new Map<
     string,
@@ -965,6 +1579,8 @@ export class ClaudeCodeRuntime {
   private disposed = false;
 
   constructor(options: ClaudeCodeRuntimeOptions = {}) {
+    this.ownerHome = resolve(options.ownerHome ?? homedir());
+    if (!isAbsolute(this.ownerHome)) throw new TypeError("ownerHome must be absolute");
     this.logger = options.logger ?? silentLogger;
     this.extensionOptions = options.extensionOptions ?? {};
     this.browserMode = options.browserMode ?? "relay";
@@ -993,6 +1609,23 @@ export class ClaudeCodeRuntime {
     return this.busy.has(JSON.stringify([ghostName, conversationId]));
   }
 
+  /** Cwd/rebind defaults derived solely from durable Claude resume metadata. */
+  async projectDefaults(
+    ghost: Ghost,
+    conversationId: string,
+  ): Promise<{ cwd?: string; canRebind: boolean }> {
+    requireRawConversationId(conversationId);
+    const paths = ghostPaths(ghost.dir);
+    const metadata = await readMetadata(paths.sessionDir, conversationId);
+    if (!metadata) return { canRebind: true };
+    return {
+      cwd: (metadata.version === 2 || metadata.version === 3) && metadata.cwd
+        ? resolve(metadata.cwd)
+        : paths.home,
+      canRebind: metadata.ownerTurnCount === 0,
+    };
+  }
+
   /** True while ANY conversation of this ghost is mid-turn. */
   isGhostBusy(ghostName: string): boolean {
     for (const key of this.busy) {
@@ -1001,11 +1634,30 @@ export class ClaudeCodeRuntime {
     return false;
   }
 
+  /**
+   * Validate and capture the exact project inputs before an HTTP turn can
+   * publish its stream. A first turn scans once here; a resume validates and
+   * reuses its persisted v3 snapshot without reopening project resources.
+   */
+  async admitProjectSnapshot(
+    ghost: Ghost,
+    conversationId: string,
+    project: Pick<ClaudeProjectSnapshot, "root" | "cwd" | "identity">,
+  ): Promise<ClaudePersistedProjectSnapshot> {
+    this.assertTurnAdmitted();
+    requireRawConversationId(conversationId);
+    const metadata = await readMetadata(ghostPaths(ghost.dir).sessionDir, conversationId);
+    this.assertTurnAdmitted();
+    return await requireMatchingClaudeProjectSnapshot(metadata, project);
+  }
+
   runTurn(
     ghost: Ghost,
     conversationId: string,
     modelId: string,
     options: RunTurnOptions,
+    project: ClaudeProjectSnapshot,
+    finishMaintenance?: (turn?: SettledMaintenanceTurn) => Promise<void>,
   ): Promise<void> {
     this.assertTurnAdmitted();
     requireRawConversationId(conversationId);
@@ -1028,6 +1680,8 @@ export class ClaudeCodeRuntime {
         modelId,
         { ...options, signal: linked.signal },
         key,
+        project,
+        finishMaintenance,
       ))
       .finally(() => {
         linked.dispose();
@@ -1045,11 +1699,19 @@ export class ClaudeCodeRuntime {
     modelId: string,
     options: RunTurnOptions,
     key: string,
+    project: ClaudeProjectSnapshot,
+    finishMaintenance?: (turn?: SettledMaintenanceTurn) => Promise<void>,
   ): Promise<void> {
     const adapter = createClaudePiMessagesAdapter(options.emit, {
       includeThinking: options.includeThinking,
     });
+    let settledTurn: SettledMaintenanceTurn | undefined;
+    let pendingTerminalResult: SDKResultMessage | undefined;
+    let pendingFailure: { cause: unknown; aborted: boolean } | undefined;
     try {
+      const paths = ghostPaths(ghost.dir);
+      let metadata = await readMetadata(paths.sessionDir, conversationId);
+      this.assertTurnAdmitted();
       const { binaryPath, authStatus: auth } = await this.probe.read();
       this.assertTurnAdmitted();
       if (!isClaudePlanAuth(auth)) {
@@ -1062,19 +1724,88 @@ export class ClaudeCodeRuntime {
         );
       }
 
-      const paths = ghostPaths(ghost.dir);
       await mkdir(paths.sessionDir, { recursive: true });
       this.assertTurnAdmitted();
-      let metadata = await readMetadata(paths.sessionDir, conversationId);
-      this.assertTurnAdmitted();
+      const runtimeCwd = metadata
+        ? (metadata.version === 2 || metadata.version === 3) && metadata.cwd
+          ? resolve(metadata.cwd)
+          : paths.home
+        : resolve(project.cwd || this.ownerHome);
+      if (metadata && resolve(runtimeCwd) !== resolve(project.cwd)) {
+        throw new GhostError(
+          "project_metadata_mismatch",
+          "Claude resume metadata does not match the conversation's trusted working directory.",
+          409,
+        );
+      }
+      if (project.root && !pathWithin(project.root, runtimeCwd)) {
+        throw new GhostError(
+          "cwd_outside_project",
+          "Claude resume metadata points outside the trusted project.",
+          409,
+        );
+      }
       const ownerTurnCount = metadata?.ownerTurnCount ?? 0;
       if (ownerTurnCount >= Number.MAX_SAFE_INTEGER) {
         throw new ClaudeCodeProcessError("Claude Code's owner turn count overflowed.");
       }
       const ownerTurnId = ownerTurnCount + 1;
-      const systemPrompt = await buildPersona(paths.home, ghost.name);
+      const [persona, ghostDeclarative] = await Promise.all([
+        buildPersona(
+          paths.home,
+          ghost.name,
+          this.extensionOptions.documents,
+        ),
+        loadProjectDeclarativeSnapshot(paths.home, { level: "user" }),
+      ]);
+      const approvedProject = project.admittedSnapshot
+        ?? await requireMatchingClaudeProjectSnapshot(metadata, project);
+      const effectiveDeclarative = mergeDeclarativePromptSnapshots([
+        declarativePromptSnapshot(mergeProjectDeclarativeSnapshots([ghostDeclarative])),
+        approvedProject.declarative,
+      ]);
+      const declarativeAppend = renderDeclarativePrompt(effectiveDeclarative);
+      const systemPrompt = declarativeAppend ? `${persona}\n\n${declarativeAppend}` : persona;
+      for (const warning of ghostDeclarative.warnings) {
+        this.logger.warn("Claude Ghost resource stayed disabled", {
+          ghost: ghost.name,
+          warning,
+        });
+      }
+      for (const warning of approvedProject.resourceWarnings) {
+        this.logger.warn("Claude project resource stayed disabled", {
+          ghost: ghost.name,
+          project: project.root,
+          warning,
+        });
+      }
+      for (const warning of approvedProject.mcpWarnings) {
+        this.logger.warn("Claude project MCP stayed disabled", {
+          ghost: ghost.name,
+          project: project.root,
+          warning,
+        });
+      }
+      const configuredProjectMcp = Object.keys(approvedProject.mcpServers);
+      const publishProjectMcpStatus = async (failed: boolean): Promise<void> => {
+        if (!project.reportStatus || !project.root) return;
+        await project.reportStatus({
+          status: failed ? "degraded" : "ready",
+          error: failed
+            ? {
+                code: "project_mcp_degraded",
+                message: "One or more project MCP resources could not be loaded.",
+              }
+            : null,
+          mcpStatus: failed
+            ? "degraded"
+            : configuredProjectMcp.length > 0 ? "ready" : "off",
+        });
+      };
+      await publishProjectMcpStatus(approvedProject.mcpWarnings.length > 0);
       this.assertTurnAdmitted();
       let beforePromptContext: string | undefined;
+      let beforePromptAcknowledge: (() => void | Promise<void>) | undefined;
       if (this.hooks.hasHandlers("before_prompt")) {
         const result = await this.hooks.emitBeforePrompt({
           type: "before_prompt",
@@ -1084,11 +1815,15 @@ export class ClaudeCodeRuntime {
           session_file: claudeSessionMetadataPath(paths.sessionDir, conversationId),
           signal: options.signal ?? new AbortController().signal,
           ghost_name: ghost.name,
-          cwd: paths.home,
+          ghost_home: paths.home,
+          cwd: runtimeCwd,
           runtime: "claude-code",
+          conversation_runtime: "claude-code",
+          conversation_id: conversationId,
         });
         if (result?.additionalContext && !options.signal?.aborted) {
           beforePromptContext = result.additionalContext;
+          beforePromptAcknowledge = result.acknowledge;
         }
         this.assertTurnAdmitted();
       }
@@ -1110,7 +1845,7 @@ export class ClaudeCodeRuntime {
         const abortController = new AbortController();
         const sdkOptions = queryOptions({
           binaryPath,
-          cwd: paths.home,
+          cwd: runtimeCwd,
           ghostName: ghost.name,
           modelId,
           systemPrompt,
@@ -1119,9 +1854,11 @@ export class ClaudeCodeRuntime {
           metadata,
           newSessionId: randomUUID(),
           abortController,
+          projectMcpServers: approvedProject.mcpServers,
         });
 
         let terminalResult: SDKResultMessage | null = null;
+        let observedProjectMcpFailure = false;
         await Effect.runPromise(runQueryEffect({
           createQuery: this.createQuery,
           prompt,
@@ -1136,6 +1873,13 @@ export class ClaudeCodeRuntime {
             else this.active.delete(key);
           },
           onMessage: (message) => {
+            if (message.type === "system" && message.subtype === "init") {
+              const statuses = new Map(
+                (message.mcp_servers ?? []).map((server) => [server.name, server.status]),
+              );
+              observedProjectMcpFailure = configuredProjectMcp.some((name) =>
+                statuses.get(name) !== "connected");
+            }
             if (message.type === "result") {
               // Hold the terminal frame until its resume metadata is durable. A
               // `done` followed by a failed sidecar write would lie to the shell
@@ -1146,6 +1890,9 @@ export class ClaudeCodeRuntime {
             }
           },
         }));
+        await publishProjectMcpStatus(
+          approvedProject.mcpWarnings.length > 0 || observedProjectMcpFailure,
+        );
         this.assertTurnAdmitted();
 
         if (!terminalResult) {
@@ -1164,7 +1911,7 @@ export class ClaudeCodeRuntime {
         }
         const now = new Date().toISOString();
         metadata = {
-          version: 1,
+          version: 3,
           runtime: "claude-code",
           conversationId,
           sessionId: completed.session_id,
@@ -1172,18 +1919,45 @@ export class ClaudeCodeRuntime {
           modified: now,
           messageCount,
           ownerTurnCount: ownerTurnId,
+          cwd: runtimeCwd,
+          projectSnapshot: approvedProject,
         };
         this.assertTurnAdmitted();
         await writeMetadata(paths.sessionDir, metadata);
         this.assertTurnAdmitted();
+        if (beforePromptAcknowledge) {
+          const acknowledge = beforePromptAcknowledge;
+          beforePromptAcknowledge = undefined;
+          try {
+            await acknowledge();
+          } catch {
+            this.logger.warn("before_prompt hook acknowledgement failed", {
+              ghost: ghost.name,
+              runtime: "claude-code",
+            });
+          }
+        }
         if (options.signal?.aborted) {
-          adapter.finishError(new Error("Turn aborted."), true);
+          settledTurn = undefined;
+          pendingFailure = { cause: new Error("Turn aborted."), aborted: true };
           break;
         }
 
         const resultText = "result" in completed && typeof completed.result === "string"
           ? completed.result
           : "";
+        settledTurn = {
+          source: {
+            runtime: "claude-code",
+            createdAt: metadata.created,
+            resumeId: completed.session_id,
+          },
+          sourceRevision: { kind: "claude-owner-turn", value: ownerTurnId },
+          cwd: runtimeCwd,
+          ownerPrompt: options.prompt,
+          assistantText: resultText,
+          outcome: completed.subtype === "success" ? "completed" : "failed",
+        };
         const lastAssistant = {
           role: "assistant",
           content: resultText ? [{ type: "text", text: resultText }] : [],
@@ -1197,16 +1971,20 @@ export class ClaudeCodeRuntime {
             session_id: completed.session_id,
             session_file: claudeSessionMetadataPath(paths.sessionDir, conversationId),
             stop_hook_active: stopHookActive,
+            owner_prompt: options.prompt,
             signal: options.signal ?? new AbortController().signal,
             ghost_name: ghost.name,
-            cwd: paths.home,
+            ghost_home: paths.home,
+            cwd: runtimeCwd,
             runtime: "claude-code",
+            conversation_runtime: "claude-code",
+            conversation_id: conversationId,
           })
           : undefined;
         this.assertTurnAdmitted();
         const additionalContext = ghostSessionStopContinuation(hookResult);
         if (!additionalContext) {
-          adapter.handle(completed);
+          pendingTerminalResult = completed;
           break;
         }
         if (continuationCount >= GHOST_SESSION_STOP_CONTINUATION_CAP) {
@@ -1215,7 +1993,7 @@ export class ClaudeCodeRuntime {
             session: completed.session_id,
             cap: GHOST_SESSION_STOP_CONTINUATION_CAP,
           });
-          adapter.handle(completed);
+          pendingTerminalResult = completed;
           break;
         }
         adapter.recordUsage(completed);
@@ -1223,16 +2001,38 @@ export class ClaudeCodeRuntime {
         stopHookActive = true;
         prompt = additionalContext;
       }
-      if (!adapter.isTerminal()) {
+      if (!adapter.isTerminal() && !pendingTerminalResult && !pendingFailure) {
         throw new ClaudeCodeProcessError("Claude Code result did not terminate the turn.");
       }
     } catch (cause) {
+      if (options.signal?.aborted) settledTurn = undefined;
+      else if (settledTurn) settledTurn = { ...settledTurn, outcome: "failed" };
       this.logger.error("Claude Code turn failed", {
         ghost: ghost.name,
         error: cause instanceof Error ? cause.message : String(cause),
       });
-      if (!adapter.isTerminal()) {
-        adapter.finishError(cause, options.signal?.aborted === true || this.disposed);
+      if (!adapter.isTerminal()) pendingFailure = {
+        cause,
+        aborted: options.signal?.aborted === true || this.disposed,
+      };
+    } finally {
+      try {
+        await finishMaintenance?.(settledTurn);
+      } catch {
+        this.logger.warn("conversation maintenance turn record failed", {
+          ghost: ghost.name,
+          runtime: "claude-code",
+        });
+        pendingTerminalResult = undefined;
+        pendingFailure = {
+          cause: new Error(MODEL_TURN_PERSISTENCE_ERROR),
+          aborted: false,
+        };
+      }
+      if (pendingTerminalResult && !adapter.isTerminal()) {
+        adapter.handle(pendingTerminalResult);
+      } else if (pendingFailure && !adapter.isTerminal()) {
+        adapter.finishError(pendingFailure.cause, pendingFailure.aborted);
       }
     }
   }
@@ -1248,9 +2048,9 @@ export class ClaudeCodeRuntime {
       }
       const path = join(sessionDir, name);
       try {
-        const metadata = parseMetadata(path, await readFile(path, "utf8"));
+        const metadata = parseMetadata(path, await readClaudeSessionMetadataFile(path));
         if (!CLAUDE_SESSION_FILE_PATTERN.test(name)
-          || claudeSessionMetadataName(metadata.conversationId) !== name) {
+          || claudeSessionMetadataPath(sessionDir, metadata.conversationId) !== path) {
           throw new GhostError(
             "session_identity_mismatch",
             "The stored Claude conversation identity does not match its sidecar filename.",

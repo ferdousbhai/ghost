@@ -1,5 +1,6 @@
 import QtQuick
 import QtTest
+import qs.services
 import "../qml/components/ToolTrace.js" as ToolTrace
 
 TestCase {
@@ -41,7 +42,7 @@ TestCase {
         compare(ToolTrace.text(activity, true, false, false), "Read projects/roadmap.md");
     }
 
-    function test_legacyNoteCallPointsAtMigratedDoc(): void {
+    function test_legacyNoteCallStaysInImportedGhostHome(): void {
         const activity = {
             name: "ghost_notes_write",
             status: "complete",
@@ -50,6 +51,41 @@ TestCase {
             summary: ""
         };
         compare(ToolTrace.fileTarget(activity), "docs/projects/roadmap.md");
+        compare(ToolTrace.fileBase(activity), "ghost");
+    }
+
+    function test_nativeWriterUsesItsCapturedCwd(): void {
+        const activity = {
+            name: "write",
+            status: "complete",
+            cwd: "/home/owner/projects/one",
+            arguments: { path: "notes/today.md" },
+            intent: "",
+            summary: ""
+        };
+        const view = ToolTrace.view(activity, true, false, false);
+        compare(view.fileBase, "cwd");
+        compare(view.fileCwd, "/home/owner/projects/one");
+        compare(
+            Workbench.absoluteFrom(view.fileTarget, view.fileCwd),
+            "/home/owner/projects/one/notes/today.md"
+        );
+    }
+
+    function test_relativeNativeWriterWithoutRecordedCwdIsRefused(): void {
+        compare(Workbench.absoluteFrom("notes/today.md", ""), "");
+        // Absolute historical arguments remain unambiguous without the new field.
+        compare(Workbench.absoluteFrom("/srv/archive/today.md", ""),
+            "/srv/archive/today.md");
+    }
+
+    function test_resolutionUsesTheCallCwdNotCurrentGhostOrLaterCd(): void {
+        compare(Workbench.absoluteFrom("same.md", "/home/owner"),
+            "/home/owner/same.md");
+        compare(Workbench.absoluteFrom("same.md", "/home/owner/code/project"),
+            "/home/owner/code/project/same.md");
+        compare(Workbench.absoluteFrom("../shared.md", "/home/owner/code/project"),
+            "/home/owner/code/shared.md");
     }
 
     function test_failureKeepsPurpose(): void {

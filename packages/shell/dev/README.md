@@ -3,22 +3,23 @@
 No daemon, no OMP, no models needed. `mock-ghostd.mjs` implements enough of the
 CONTRACTS.md API to build and demo every surface.
 
-## Files and document contract
+## Files and Documents contract
 
-The mock fixtures use `ghost-home/v2`: each `docs/**/*.md` starts at byte 0
-with a non-empty `# Title`, and may end with one nonblank line containing only
-lowercase hashtag slugs matching `#[a-z0-9]+(?:-[a-z0-9]+)*`. `#archived` is
-reserved and removes a document from the default working set. Title and tags
-are raw Markdown, not YAML frontmatter.
+The mock owns a temporary, machine-wide Documents root. `/api/documents` lists
+one directory at a time, folders first, with opaque pagination, and the bounded
+`/api/documents/content` fixture returns the same strict UTF-8, at-most-1-MiB
+shape as the live daemon. The browser uses returned content for its read-only
+literal plain-text viewer: Markdown/raw HTML images and links remain visible
+syntax and cannot load network, local, or data-URL resources. The absolute root
+is used only for explicit external-open actions. Its nested text, JSON, CSV, and
+unsupported PDF fixtures remain the same when a ghost is switched, renamed, or
+deleted.
 
-Import and daemon startup run the one-time migration from `ghost-home/v1` after
-renaming an unambiguous `notes/` directory to `docs/`. The migration chooses a
-legacy title by first H1, then frontmatter `title`, then filename; slugifies
-legacy tags, turns `archived: true` into `#archived`, merges and deduplicates
-trailing hashtags, discards the import-only `path`, and atomically rewrites each
-file. It is safe to rerun after interruption, keeps no marker, and leaves no
-dual-format reader. This mock starts with v2 fixtures and does not emulate the
-legacy format.
+The two seeded ghosts also contain `docs/` Markdown solely as hosted-import
+compatibility fixtures. Those legacy files are import-only: sessions, context,
+and the Documents API ignore them, and nothing copies them into shared
+Documents. They move only with their ghost home. Ghosts created through the
+mock API do not get a `docs/` directory.
 
 ## Isolated HUD preview — the required verification path
 
@@ -107,29 +108,34 @@ stop the mock separately.
   layout like any app. The HUD uses a neutral reading canvas with the current
   Omarchy accent and semantic status colours. Roster on the left (`casper`,
   `moaning-myrtle`, `+ new ghost`), transcript in the middle, composer at the
-bottom, and the permanent Chat / Docs / Memory / Helpers / Commands / MCP / Remote / Character rail at
-  the right edge. `SUPER+CTRL+G` is launch-or-focus: reveal+focus when
+  bottom, and the permanent Chat / Documents / Memory / Agent definitions /
+  Commands / Hooks / MCP / Remote / Character rail at the right edge. `SUPER+CTRL+G` is
+  launch-or-focus: reveal+focus when
   hidden/unfocused, hide only when already focused.
-  `section docs` shows the Train-style file index and v2 documents. The editor
-  has a lossless monospace source view and a read-only Markdown Reading view;
-  switching views never rewrites the document. Typing autosaves the complete
-  body atomically, while closing or switching files flushes first. An external
-  change is merged line-by-line when safe and otherwise pauses autosave for an
-  explicit keep-mine/take-theirs choice. The daemon's writer validates and
-  writes exactly the complete v2 body. Memory is read-only, Helpers describes
-  OMP subagents, and Character edits `character.md`. Docs and memory rows offer
-  confirmed, recoverable deletion; the mock moves its owned fixture into a
-  temporary mock Trash. Commands shows the session's searchable OMP catalog and
-  stages a chosen slash command in chat; typing `/` opens its compact
-  autocomplete, including clear partial/unsupported labels. MCP lists
+  `section docs` shows the adaptive shared Documents browser: a folder tree,
+  direct-file list, and read-only detail at wide sizes, with a reversible stack when
+  narrow. It loads one directory page at a time with no product depth cap,
+  renders bounded supported text files through the mock content route, and
+  offers unsupported files to the desktop.
+  Documents stay selected across ghost switches. Memory is read-only; the
+  phase-one context returns no agent definitions because its isolated task
+  runtime is disabled; Character edits `character.md`. Document and memory rows
+  offer confirmed, recoverable deletion; the mock moves its owned fixtures into
+  temporary same-filesystem mock Trash and reports the real `fallback` result kind.
+  Commands shows the session's searchable OMP catalog and stages a chosen slash
+  command in chat; typing `/` opens its compact
+  autocomplete, including clear partial/unsupported labels. Hooks shows the
+  daemon-global redacted catalog: bounded labels, lifecycle triggers, idle
+  timing, and the loaded count. It never returns hook commands, paths, prompts,
+  or injected context, and opening it does not create a conversation. MCP lists
   sanitized stdio, HTTP, and SSE fixtures and exercises add, full replacement,
   enable/disable, and confirmed deletion without ever returning the seeded
   secret values. Remote exercises the OpenAI live-voice lifecycle and
   encrypted collaboration with distinct read-only/writable relay links.
   `moaning-myrtle` deliberately returns structured `not_supported` for
   collaboration so that state is demoable too.
-  The mock's temporary fixture makes every pane live without
-  touching `~/ghosts`.
+  The mock's temporary ghost and shared Documents fixtures make every pane live
+  without touching `~/ghosts` or the owner's Documents directory.
 - On `ask`: the spectral summoning orb saying "Checking what I remember about
   that" in the ghost's own words rather than a spectral phrase, then the reply
   arriving word by word with `**bold**` rendered as bold. The narration never

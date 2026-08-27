@@ -7,6 +7,18 @@ interface HomeOperationState {
   drained: (() => void) | null;
 }
 
+export interface HomeMoveParticipantReservation {
+  drained: Promise<void>;
+  release(): void;
+}
+
+export interface HomeMoveParticipant {
+  /** Reject an active owner before any participant is cancelled or reserved. */
+  preclaim?(ghostName: string): void;
+  /** Reserve idle work synchronously, then expose its actual drain. */
+  reserve(ghostName: string): HomeMoveParticipantReservation;
+}
+
 function homeIdentity(dir: string): string {
   const stats = statSync(dir, { bigint: true });
   return `${stats.dev}:${stats.ino}`;
@@ -20,6 +32,7 @@ function homeIdentity(dir: string): string {
 export class HomeOperationCoordinator {
   private readonly registry: GhostRegistry;
   private readonly states = new Map<string, HomeOperationState>();
+  private readonly moveParticipants = new Set<HomeMoveParticipant>();
 
   constructor(registry: GhostRegistry) {
     this.registry = registry;
@@ -61,20 +74,59 @@ export class HomeOperationCoordinator {
     }
   }
 
+  /** Register work which must be cancelled and drained before a whole-home move. */
+  registerMoveParticipant(participant: HomeMoveParticipant): () => void {
+    this.moveParticipants.add(participant);
+    let registered = true;
+    return () => {
+      if (!registered) return;
+      registered = false;
+      this.moveParticipants.delete(participant);
+    };
+  }
+
   /** Block new leases, then wait for every operation admitted before the block. */
   async reserveMove(ghostName: string): Promise<() => void> {
     const identity = homeIdentity(this.registry.get(ghostName).dir);
+    // A move never cancels or waits for active owner/model work. Run every
+    // participant's read-only precheck before taking any reservation so a
+    // later participant cannot discover an owner after earlier work changed.
+    for (const participant of this.moveParticipants) participant.preclaim?.(ghostName);
+    const participantReservations: HomeMoveParticipantReservation[] = [];
+    try {
+      // Participants reserve synchronously: no new background generation can
+      // slip between this call and the filesystem identity gate below.
+      for (const participant of this.moveParticipants) {
+        participantReservations.push(participant.reserve(ghostName));
+      }
+    } catch (error) {
+      for (const reservation of participantReservations.reverse()) reservation.release();
+      throw error;
+    }
     const state = this.states.get(identity) ?? { active: 0, moving: false, drained: null };
     if (state.moving) {
+      for (const reservation of participantReservations.reverse()) reservation.release();
       throw new GhostError("ghost_busy", "Another whole-home move is already in progress.", 409);
     }
     state.moving = true;
     this.states.set(identity, state);
 
-    if (state.active > 0) {
-      await new Promise<void>((resolve) => {
-        state.drained = resolve;
-      });
+    try {
+      const activeDrained = state.active > 0
+        ? new Promise<void>((resolve) => {
+            state.drained = resolve;
+          })
+        : Promise.resolve();
+      await Promise.all([
+        activeDrained,
+        ...participantReservations.map(({ drained }) => drained),
+      ]);
+    } catch (error) {
+      state.moving = false;
+      state.drained = null;
+      if (state.active === 0) this.states.delete(identity);
+      for (const reservation of participantReservations.reverse()) reservation.release();
+      throw error;
     }
 
     let released = false;
@@ -83,6 +135,7 @@ export class HomeOperationCoordinator {
       released = true;
       state.moving = false;
       if (state.active === 0) this.states.delete(identity);
+      for (const reservation of participantReservations.reverse()) reservation.release();
     };
   }
 

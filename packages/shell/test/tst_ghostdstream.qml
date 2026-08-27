@@ -182,6 +182,39 @@ TestCase {
         verify(Ghostd.streaming);
     }
 
+    function test_toolExecutionCapturesTheCallCwd(): void {
+        openTurn();
+        Ghostd.handleEvent({
+            type: "tool_execution_start",
+            id: "call-write",
+            toolName: "write",
+            arguments: { path: "notes.md" },
+            cwd: "/home/owner/project-a"
+        });
+
+        const tools = Ghostd.transcript.get(1).toolActivity;
+        compare(tools.count, 1);
+        compare(tools.get(0).cwd, "/home/owner/project-a");
+    }
+
+    function test_restoredToolKeepsItsOwnCwd(): void {
+        const tools = Ghostd.messageTools({
+            content: [{
+                type: "toolCall",
+                id: "history-write",
+                name: "write",
+                arguments: { path: "notes.md" },
+                cwd: "/home/owner/project-before-cd"
+            }]
+        });
+
+        compare(tools.length, 1);
+        compare(tools[0].cwd, "/home/owner/project-before-cd");
+        compare(Ghostd.messageTools({
+            content: [{ type: "toolCall", name: "write", arguments: { path: "old.md" } }]
+        })[0].cwd, "");
+    }
+
     function test_cancelRetiresXhrBeforeItsSynchronousAbortCallback(): void {
         openTurn();
         let aborts = 0;

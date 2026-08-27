@@ -5,13 +5,19 @@ running locally as an [Omarchy](https://omarchy.org)-native desktop app,
 built on the modern [Oh My Pi](https://github.com/can1357/oh-my-pi)
 agent harness.
 
-Ghost pins OMP 18.0.3. Sessions keep OMP's native filesystem, Bash,
-skills, rules, project context, plugins, MCP, web search, task/hub subagents,
-background jobs, steering/follow-ups, fallback routing, and branchable
-conversations. Ghost layers its persona, memory, docs, browser, and desktop
-capabilities on top. The
-Quickshell client renders live tool activity and the recovered summoning orb
-from the earlier summon-ghost interface.
+Ghost pins OMP 18.0.3. Pi sessions keep its native filesystem, Bash, web search,
+hub coordination, background jobs, steering/follow-ups, fallback routing, and
+branchable conversations. Ghost adds bounded declarative skills, rules,
+Markdown commands/prompts, and MCP from the visible ghost home plus one
+explicitly trusted project. Pi's `task` tool and every subagent definition are
+disabled in phase 1; project plugins, hooks, custom code tools, and LSP are also
+disabled pending a per-session isolation boundary. Trusted visible
+`hooks/pre` and `hooks/post` files in the ghost home remain the explicit
+in-process extension surface. The optional Claude Code runtime retains Claude's
+native subagents. Ghost layers its persona, memory, shallow owner Documents
+index, browser, and desktop capabilities on top. The Quickshell client renders
+live tool activity and the recovered summoning orb from the earlier
+summon-ghost interface.
 
 Status: early construction. See CONTRACTS.md for the data and API contracts,
 and [docs/hooks.md](docs/hooks.md) for awaited model-harness hooks.

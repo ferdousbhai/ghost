@@ -15,28 +15,40 @@ export interface TempGhosts {
   xdgDataHome: string;
   /** The freedesktop home trash under it — where a deleted ghost lands. */
   trashDir: string;
+  /** Disposable owner-wide Documents root for any session the fixture opens. */
+  documentsDir: string;
+  /** Disposable OS owner home for cwd/project trust tests. */
+  ownerHome: string;
   registry: GhostRegistry;
   cleanup(): void;
 }
 
 /**
- * A temp ghosts root, plus a temp `XDG_DATA_HOME` for the duration.
+ * A temp ghosts root, plus temp XDG data and Documents roots for the duration.
  *
  * Deleting a ghost moves it into the freedesktop home trash, so every test
  * that can reach `trash()` must have `XDG_DATA_HOME` pointed somewhere
  * disposable: a leak here would put test ghosts in the developer's own
- * `~/.local/share/Trash`. `cleanup()` restores the previous value.
+ * `~/.local/share/Trash`. Session prompts must likewise never index the
+ * developer's real Documents. `cleanup()` restores both previous values.
  */
 export function makeTempGhosts(): TempGhosts {
   const root = mkdtempSync(join(tmpdir(), "ghostd-test-"));
   const xdgDataHome = mkdtempSync(join(tmpdir(), "ghostd-test-xdg-"));
   const previousXdg = process.env.XDG_DATA_HOME;
+  const previousDocuments = process.env.XDG_DOCUMENTS_DIR;
+  const documentsDir = join(root, ".documents");
+  const ownerHome = join(root, ".owner");
+  mkdirSync(ownerHome, { recursive: true });
   process.env.XDG_DATA_HOME = xdgDataHome;
+  process.env.XDG_DOCUMENTS_DIR = documentsDir;
   let restored = false;
   return {
     root,
     xdgDataHome,
     trashDir: join(xdgDataHome, "Trash"),
+    documentsDir,
+    ownerHome,
     registry: new GhostRegistry(root),
     cleanup: () => {
       // Idempotent: a test may clean up early and the afterEach hook again.
@@ -44,6 +56,8 @@ export function makeTempGhosts(): TempGhosts {
         restored = true;
         if (previousXdg === undefined) delete process.env.XDG_DATA_HOME;
         else process.env.XDG_DATA_HOME = previousXdg;
+        if (previousDocuments === undefined) delete process.env.XDG_DOCUMENTS_DIR;
+        else process.env.XDG_DOCUMENTS_DIR = previousDocuments;
       }
       rmSync(root, { recursive: true, force: true });
       rmSync(xdgDataHome, { recursive: true, force: true });
@@ -60,12 +74,12 @@ export interface SeedGhostOptions {
   provider?: { baseUrl: string; modelId: string; providerId?: string };
 }
 
-/** A ghost home with a persona, optional docs/memory, and a visible models.json. */
+/** A ghost home with a persona, optional legacy docs, memory, and a models.json. */
 export function seedGhost(root: string, options: SeedGhostOptions = {}): string {
   const name = options.name ?? "casper";
   const dir = join(root, name);
   const paths = ghostPaths(dir);
-  mkdirSync(join(dir, "docs"), { recursive: true });
+  if (options.docs) mkdirSync(join(dir, "docs"), { recursive: true });
   mkdirSync(join(dir, "memory"), { recursive: true });
   mkdirSync(join(dir, "conversations"), { recursive: true });
   writeFileSync(
@@ -83,6 +97,7 @@ export function seedGhost(root: string, options: SeedGhostOptions = {}): string 
     writeFileSync(join(dir, "memory", path), content, "utf8");
   }
   if (options.provider) {
+    mkdirSync(paths.agentDir, { recursive: true });
     writeGhostModels(
       paths.home,
       openAiCompatiblePreset({

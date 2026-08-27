@@ -5,30 +5,35 @@ commit, with every consumer updated.
 
 ## Ghost home (`ghost-home/v2`)
 
-One directory per ghost. Plain files; anything derivable (memory index, doc
-catalog) is derived per session and never stored.
+One directory per ghost. Plain files; anything derivable (memory index and
+machine Documents index) is derived per session and never stored.
 
 The root is `~/ghosts` unless `ghostsRoot` says otherwise.
 
-A ghost home is its own OMP extension package root, named explicitly by Ghost
-whenever OMP discovers or rediscovers capabilities. That is what makes the
-home's `skills/`, `agents/`, `commands/`, `rules/`, `prompts/`, `tools/`, and
-`hooks/` load, so every artifact a ghost owns sits in plain sight beside
-`character.md` rather than under a dot-directory. OMP's configured and
-installed package roots are disabled for the session; the owner's global
-skills, agents, and commands (`~/.agents`, `~/.codex`, `~/.claude`, and the
-other capability providers) still arrive alongside. Re-entering the explicit
-root scope for every rediscovery is load-bearing because the first MCP tool
-refresh during startup causes OMP to discover skills again.
+A ghost home is its own OMP package root, named explicitly by Ghost whenever
+OMP discovers or rediscovers capabilities. Its plain `skills/`, `agents/`,
+`commands/`, `rules/`, `prompts/`, `tools/`, and `hooks/` remain the ghost-owned
+sources. Its declarative snapshot admits only those visible directories plus
+visible `AGENTS.md`/`CLAUDE.md`; hidden `.agents`, `.claude`, `.pi`, and `.omp`
+compatibility providers are project-only and are never user-level aliases
+inside a ghost home. The daemon resolves the declarative categories into an
+immutable session snapshot and passes the ghost's absolute extension roots
+explicitly. It never lets the operational cwd become an implicit package root.
+Owner-home or project executable extensions, hooks,
+TypeScript commands, and custom code tools are disabled until #31 can load them
+in a per-session isolated worker. A deliberately bound project's data-only
+instructions, skills, rules, Markdown prompts/commands, and MCP join the
+snapshot. Pi's `task` tool and every custom or ambient subagent definition are
+disabled for phase 1 until #31 supplies an isolated per-session agent boundary.
+Ghost and project `agents/*.md` definitions remain previewed but inert. `hub`
+does not create task subagents. Claude Code retains its own native subagents.
 
 ```
 ~/ghosts/<name>/
   character.md                 plain Markdown persona → system prompt
-  docs/**/*.md                 first line `# Title`; optional final hashtag line
-                               such as `#launch #product`
   memory/*.md                  one concise fact per plain Markdown file
   skills/<name>/SKILL.md       the ghost's own skills
-  agents/<name>.md             the ghost's own subagents
+  agents/<name>.md             reserved custom subagents (preview-only today)
   commands/<name>.md           the ghost's own slash commands
   rules/, prompts/, tools/, hooks/
                                the remaining OMP package-root artifact directories
@@ -36,6 +41,16 @@ refresh during startup causes OMP to discover skills again.
   models.json                  providers plus model roles and fallback chains
   mcp.json                     the ghost's MCP servers
   sessions/                    daemon-owned OMP transcripts and runtime sidecars
+  sessions/<stem>.<runtime>.project.json
+                               conversation project root, actual cwd, immutable
+                               resource summary, status, generation
+  sessions/<stem>.pi.project-snapshot.<generation>.json
+                               exact admitted Pi project instructions/resources/MCP
+  sessions/<stem>.pi.tool-cwds.json
+                               bounded execution-time cwd by persisted Pi tool-call id
+  sessions/<stem>.<runtime>.maintenance.json
+                               v1 idle-memory journal for one runtime-qualified
+                               conversation; never cloned by fork
   sessions/pins.json           v2 pinned state: { "version": 2, "pinned": ["<id>", …] }
   sessions/reads.json          v2 read state: { "version": 2, "reads": { "<id>": "<ISO timestamp>" } }
   .pi/                         provider credentials and derived OMP machine runtime
@@ -45,18 +60,27 @@ refresh during startup causes OMP to discover skills again.
                                notIncluded
 ```
 
-`character.md` has no frontmatter. Its leading Markdown heading (`#` through
-`######`) is the derived display title, while the complete Markdown body is the
-persona injected into the system prompt.
+`character.md` has no frontmatter. Its leading Markdown heading
+(`#` through `######`) is the derived display title, while the complete
+Markdown body is the persona injected into the system prompt.
 
 Memory files have no frontmatter and no required heading. Their complete
 Markdown content is the fact. The per-session index normalizes that content to
 one line and derives a word-aware preview of at most 32 characters, including
 `...`; the context API derives `updated` from the file's modification time.
-Documents already keep their title in the leading `#` heading and tags in a
-final hashtag line; legacy document frontmatter exists only at the import
-migration boundary. OMP skill `name`/`description` fields remain the upstream
-discovery contract.
+One file is at most 2,000 JavaScript UTF-16 code units of content and 6,001
+on-disk bytes, inclusive; the byte ceiling is the worst-case canonical UTF-8
+content plus the writer's final newline. Every list, direct read, and exact
+maintenance receipt/replay read opens the final entry with
+`O_NOFOLLOW|O_NONBLOCK`, admits that byte size before allocation, reads through
+the pinned regular-file descriptor, decodes fatal UTF-8, and verifies the
+descriptor and live pathname stayed identical. Unsafe or over-limit entries
+are reported as skipped by listings; a direct or receipt read fails rather than
+truncating, replacing bytes, or treating invalid state as absence.
+Canonical ghost-home Documents already keep their title in the leading `#`
+heading and tags in a final hashtag line; legacy document frontmatter exists
+only at the import migration boundary. OMP skill `name`/`description` fields
+remain the upstream discovery contract.
 
 What lives in a ghost home and what lives in the machine's own directories is
 decided by lifecycle, not by which reads more natural. Mutable per-ghost state
@@ -69,6 +93,24 @@ attribution from the moment it is created, so it needs no migration when a ghost
 is renamed. Secrets are the exception in the other direction: they belong in the
 machine's secret facility, where locking is real and exclusion from an export is
 structural rather than a rule somebody has to remember (#23).
+
+The owner's live Documents are neither per-ghost state nor write-once ghost
+artifacts. They are one owner-wide mutable tree shared by every session, rooted
+at `XDG_DOCUMENTS_DIR`, else `XDG_CONFIG_HOME/user-dirs.dirs`'s
+`XDG_DOCUMENTS_DIR`, else `~/Documents`. The root returned to trusted clients
+is absolute and canonical. It stays outside every ghost home and is therefore
+excluded from ghost rename, delete, and any ghost-home export. There is one
+owner and one Documents tree; Ghost does not create per-ghost partitions,
+import roots, or path mappings inside it.
+
+A trusted project is likewise owner/machine-wide live data, not ghost state.
+Ghost stores only a conversation's canonical root/cwd reference and immutable
+resource summary in its sidecar. Ghost rename, delete, and future export move or
+remove that sidecar with the conversation but never rename, delete, copy, or
+export the referenced project tree. The machine-local trust ledger is excluded
+from ghost-home export and remains when one ghost or conversation is removed;
+trust says this OS owner confirmed this filesystem identity, not that a persona
+owns the directory.
 
 Screenshots are the one thing a ghost produces that does not live in its home.
 `ghost_screen` and `ghost_browser` write to the desktop's own screenshot
@@ -91,38 +133,28 @@ Omarchy retention convention to match, and their attribution lives in the
 transcript rather than the filename. Recordings follow the screenshot pattern
 exactly, and never prune the file currently being written.
 
-Every document is ordinary Markdown in one canonical form:
+Documents may be regular files of any type and may nest to any depth or width;
+Ghost imposes no folder-depth or sibling-count policy on the live tree. It does
+not parse arbitrary Markdown or text as a Ghost canonical format. Native
+filesystem tools may read or mutate a path when a model or owner explicitly
+chooses it. Automatic context is narrower: before each OMP/Pi or Claude Code
+turn, and for greeting input, Ghost lists only the root's immediate non-hidden
+regular files and directories, folders first and then by name. It reads no file
+content, follows no symbolic link, and never descends. At most 100 entries and
+4,000 characters enter the prompt; the index states the exact number of
+eligible root entries omitted. Names are fenced and treated as untrusted data.
 
-```md
-# Launch notes
-
-The document body.
-
-#launch #product
-```
-
-The first line is a non-empty level-one ATX heading and is the catalog title.
-The optional final nonblank line is a space-separated list of lowercase tag
-slugs matching `#[a-z0-9]+(?:-[a-z0-9]+)*`; `#archived` is reserved and removes
-the document from the default working set. Derived `tags` exclude that reserved
-status and deduplicate repeated slugs. The title and tag line remain part of the
-Markdown file. Docs never use YAML frontmatter, and readers reject anything
-outside this form after migration.
-
-`docs/` is canonical. On import and daemon startup, the one-time `ghost-home/v1`
-to `ghost-home/v2` migration first renames an unambiguous legacy `notes/`
-directory to `docs/`, then rewrites every legacy document atomically. A
-document's existing first H1 wins as its title, followed by legacy frontmatter
-`title`, then its filename. Legacy tags become lowercase hyphenated hashtag
-slugs, `archived: true` becomes `#archived`, and the import-only legacy `path`
-field is discarded. A trailing hashtag line already in the body is merged and
-deduplicated. An imported home's `export-manifest.json` is atomically promoted
-from `ghost-home/v1` to `ghost-home/v2` with every other field preserved.
-Each converted file is immediately valid v2, so a crash is recovered by
-rerunning the scan; no marker or dual-format reader is kept. If
-both `notes/` and `docs/` exist, startup still fails instead of guessing which
-files win. Import rejects entries that collide after directory translation.
-New homes and all writes produce only v2 docs.
+The archive importer still accepts the hosted archive's legacy `notes/` and
+`docs/` entries under its existing bounded, collision-checking extraction
+rules. Its existing `ghost-home/v1` to `ghost-home/v2` compatibility pass may
+canonicalize those imported Markdown files inside the staged ghost home. Those
+files are not live Documents: sessions, the Documents API, and ghost context
+ignore them. Until the owner explicitly places them, they remain legacy files
+inside that home and follow its whole-directory rename, delete, and future
+export lifecycle. There is deliberately no automatic startup/import move into
+the live Documents tree and no general multi-ghost migration. Placing retained
+legacy files into the one owner's Documents tree is an explicit, collision-safe
+owner operation outside the daemon. New ghost homes do not create `docs/`.
 
 Hosted conversation JSON is also a migration fixture, not the daemon's live
 session store. `ghostd import` and daemon startup idempotently project each valid
@@ -143,6 +175,35 @@ of the OMP session format. Round-trip validation of its exact staged bytes
 through `SessionManager.open` is the invariant that licenses this exception.
 `CURRENT_SESSION_VERSION` comes from OMP's own exports, so a format bump breaks
 loudly at import time.
+
+New hosted projections write the OS owner's home into the OMP session header,
+matching new unbound conversations. Already-released Pi transcript headers are
+history: a legacy conversation resumes at the absolute cwd in its header rather
+than silently changing the meaning of its relative tool paths. Project-state
+inspection reads the runtime-qualified binding sidecar first and never opens the
+Pi transcript when that sidecar exists. Only when the binding is absent may it
+inspect a legacy header: it opens the mode-`0600`, single-link regular transcript
+with `O_NOFOLLOW|O_NONBLOCK`, admits at most a stable 64 KiB prefix, decodes only
+complete records as strict UTF-8 (reading one extra byte only as the overflow
+sentinel), and accepts a session header on line one or on
+line two after OMP's native title slot. The append-only remainder may be
+arbitrarily large and is not read. A missing, linked, special, incorrectly
+permissioned, mutated, malformed, or overlong-prefix transcript supplies no cwd;
+the project response truthfully remains the owner-home `default` rather than
+granting legacy path authority.
+
+Whenever the daemon parses a conversation control artifact — a project
+binding, immutable Pi project snapshot, tool-cwd map, or draft/fork/delete
+transaction marker — it uses one bounded descriptor-pinned reader. The final
+entry is opened with `O_NOFOLLOW|O_NONBLOCK` and must remain a single-link
+regular file with mode exactly `0600`; bytes are read positionally with a
+declared cap and fatal UTF-8 decoding, and device, inode, size, timestamps,
+mode, link count, descriptor state, and live pathname identity must agree
+before and after the read. Only `ENOENT` from the initial open means absent.
+A FIFO, link, oversized file, invalid byte sequence, or file removed, replaced,
+or grown after admission is invalid state rather than an empty/default value.
+Recovery markers remain the authoritative owner of their id on such an error;
+the daemon neither erases them nor starts a replacement transaction.
 
 `.pi/` holds live provider credentials, and OMP stores them unencrypted: the
 `auth_credentials` row in `agent.db` is plain JSON behind nothing but 0600. That
@@ -170,14 +231,19 @@ values may still appear inside the otherwise portable `models.json` and
 ### Session capabilities
 
 Ghost is owner-local by default: the owner is the only local caller, and every
-session uses the same home, memory, docs, tools, and route behavior. The
-session-scoped Remote voice and collaboration routes below are the only
+session uses the same ghost home, memory, owner-wide Documents tree, tools, and
+route behavior. The session-scoped Remote voice and collaboration routes below
+are the only
 deliberate exceptions. They are explicitly initiated off-machine capabilities
 and never broaden another ghost or conversation.
 
-A session is OMP-native. Ghost keeps OMP's discovery and the operating half of
-its system prompt, then appends the Ghost persona and derived memory/doc
-sections.
+A Pi session uses OMP's runtime and native tools, but Ghost owns its roots. A
+new conversation's operational cwd is the OS account home (`os.homedir()`),
+while `agentDir`, `sessionDir`, character, memory, persona, credentials, tokens,
+browser profile, and MCP/config sources remain explicit paths under the ghost
+home. Cwd is not storage and is not authority to discover a project. Ghost
+keeps the operating half of OMP's system prompt, then appends the Ghost persona,
+derived memory section, and shallow machine Documents index.
 
 Deliberate subtractions from the harness prompt. The persona extension removes
 `§ Role`, `§ Workflow`, `§ Delivery`, and `§ Critical`: the first casts the
@@ -194,37 +260,83 @@ skills, rules, and internal URLs, the tool inventory, and `§ Tool Policy`. A
 seeded ghost's first turn carries about 10.2k characters of system prompt where
 it carried 23.8k.
 Native filesystem and search (`read`, `glob`, `grep`), mutation (`write`,
-`edit`), Bash, web search, task/hub subagents, background jobs, skills, rules,
-project context, extensions/plugins, commands, and the ghost home's own project
-MCP remain available under OMP's normal xd:// presentation. MCP is a deliberate
-sovereignty exception to OMP's normal multi-source discovery: an OMP
-session loads only `<ghost>/mcp.json` and
-never discovers or loads user/global OMP config or another coding agent's MCP
-config (`~/.codex`, `~/.claude`, `~/.copilot`, and similar). The owner's
-global instructions are the other exception, in the opposite direction: OMP
-surfaces exactly one user-level context file, the highest-priority provider's,
-and Ghost disables `context-file:user:CLAUDE.md` so that file is
-`~/.agents/AGENTS.md` rather than `~/.claude/CLAUDE.md`, whose contents are
-written to tell a model it is a coding agent. Project-level context files stay
-untouched. Ghost otherwise
-disables only the overlapping OMP browser and computer tools because
+`edit`), Bash, web search, hub coordination, background jobs, and Ghost's
+explicit declarative snapshot remain available under OMP's normal xd://
+presentation. The Pi runtime explicitly denies `task`; no bundled, custom, or
+ambient subagent can be spawned. Claude Code retains its own native subagent
+behavior. OMP settings and
+model/config discovery use the ghost home, never
+the live cwd. OMP extension discovery receives explicit empty additional and
+preloaded path lists. Ghost imports only its descriptor-pinned visible
+`hooks/pre` and `hooks/post` entries as already-admitted inline factories;
+neither the ghost home's `tools/` nor any owner-home or bound-project package
+root is offered to OMP discovery. Project extensions, hooks, TypeScript
+commands, custom code tools, and LSP are disabled for phase 1. Project and
+ghost-file agent definitions are excluded from the spawn allow-list until #31
+supplies an isolated custom-agent seam. MCP is a deliberate sovereignty
+exception to OMP's normal multi-source discovery: a session receives only the
+ghost's `mcp.json` plus the explicitly bound project's native
+`.omp/mcp.json`/`.omp/.mcp.json` files. It never scans user/global OMP config or another coding
+agent's MCP config merely because cwd is the owner home. A failed project MCP
+load marks that conversation's project state `degraded`; it does not fall back
+to ambient configuration. Project MCP bytes share the declarative scan's
+descriptor confinement and 256 KiB per-file/1 MiB aggregate caps; that one scan
+produces the exact parsed and validated rows consumed by Pi and Claude, so
+neither runtime reopens a project MCP pathname between admission and launch.
+The two fixed project MCP candidates are checked before broad declarative
+directory walks consume the shared entry, byte, or cooperative-time budget. If
+the scan cannot admit or determine one, it records an MCP-specific rejection
+instead of silently treating that candidate as absent.
+The visible ghost `mcp.json` remains a distinct mutable owner source and is the
+only MCP input refreshed by a ghost-level MCP mutation. Before any cast,
+redaction, persistence, expansion,
+or launch, Ghost applies its own strict transport-discriminated schema: command,
+URL, cwd, arguments, records, flags, finite timeout, request-id, auth, and OAuth
+fields must have exactly their declared types, and unsupported fields are
+rejected. A malformed row is skipped with a generic field-only reason, cannot
+hide valid siblings, and no supplied value crosses HTTP or logging.
+Accepted server names remain opaque own map keys through configuration,
+provenance, connection status, runtime translation, and durable metadata; a
+name matching a JavaScript Object prototype member is never inherited,
+dropped, or allowed to mutate dictionary state.
+OMP source provenance remains exact after injection: rows from the visible
+ghost `mcp.json` carry user-level source metadata, while rows from the trusted
+bound project carry project-level metadata. The isolated ghost MCP connection
+probe likewise marks its visible source user-level.
+
+For Pi stdio MCP, an omitted `cwd` becomes the immutable source root that owned
+the row (ghost home or trusted project); a relative `cwd` resolves against that
+same root after allowed Pi environment expansion, never against ghostd's owner-
+home process cwd. An explicit absolute cwd remains explicit. Claude project MCP
+inherits the query's persisted operational cwd when `cwd` is omitted. The
+Claude SDK phase-1 translation has no cwd field, so an explicit stdio `cwd` row
+is rejected from the snapshot with a warning and publishes degraded project MCP
+status rather than silently running it elsewhere. Ghost otherwise disables the overlapping OMP browser
+and computer tools because
 `ghost_browser`, `ghost_desktop`, and `ghost_screen` own those surfaces, and
 OMP's memory/autolearn backends because ghost memory is plain files in the ghost
 home (see the harness invariants). Image inspection is OMP-native:
 `inspect_image` in its default auto mode, resolving the `vision` role that the
 daemon projects from models.json's `vision_model`.
 
-Docs and memory retrieval use those native filesystem tools directly.
-Ghost registers no duplicate doc list/read/search/write tools, and
+Documents and memory retrieval use those native filesystem tools directly.
+Ghost registers no duplicate document list/read/search/write tools, and
 keeps only `ghost_memory_write` for validated, atomic memory-file writes. The
 writer accepts only the fact content and an optional slug; the memory index and
-doc catalog are derived from disk before each model turn and are never stored.
-`/skill:<name> [args]` is explicit force-invocation of a
-discovered skill; native `read` remains the model-driven discovery path.
+root-only Documents index are derived from disk before each model turn and are
+never stored. `/skill:<name> [args]` is explicit
+force-invocation of a discovered skill; native `read` remains the model-driven
+discovery path.
+
+`GhostHome` retains only the private hosted-import compatibility walk that
+canonicalizes staged legacy `notes/`/`docs/` Markdown. It exposes no live
+legacy document list, read, find, write, or search API; live Documents are
+exclusively the machine-wide `MachineDocuments` boundary and daemon route.
 
 Slash-command discovery is session-scoped and comes from OMP's
-`buildAvailableSlashCommands`, including builtins, skills, extensions, custom
-commands, MCP prompts, and project file commands. Ghost annotates each result
+`buildAvailableSlashCommands`, using the conversation's pinned declarative
+snapshot, including builtins, skills, admitted Ghost extensions, Markdown
+commands, and MCP prompts. Ghost annotates each result
 as `available`, `partial`, or `unsupported`: only explicitly admitted
 informational builtin forms execute through OMP's headless handlers. Every
 known but unsupported builtin — including TUI-only commands and commands that
@@ -232,11 +344,18 @@ conflict with Ghost's memory, browser/computer, MCP, conversation, or fixed-home
 contracts — is consumed before `AgentSession.prompt()` and reported as
 `command_output`. It is never sent to a model as ordinary slash-prefixed text.
 
-`!command` executes immediately through OMP's session-aware Bash runner without
-a model turn. `!!command` does the same but excludes the result from future
-model context. Both appear in the live event stream and are
-persisted in an OMP transcript; a successful standalone `cd` changes the
-conversation working directory without relocating that transcript.
+Runtime selection is resolved before Ghost dispatches a leading `!` or `!!`.
+Under Pi, `!command` executes immediately through OMP's session-aware Bash
+runner without a model turn; `!!command` does the same but excludes the result
+from future model context. Under Claude Code both forms are a typed
+`409 not_supported` before stream headers, and do not create, duplicate, or open
+a Pi session or persist Pi cwd state. Admitted Pi commands appear in the live
+event stream and are persisted in an OMP transcript; a successful standalone `cd` changes and
+durably records the conversation working directory without relocating that
+transcript. In a bound project it may move only within the canonical project
+root. Leaving requires a new preview/trust/rebind. In an unbound conversation it
+may move anywhere the owner can access, but that operational movement discovers
+no project resources; binding is the only discovery transition.
 
 Long-context maintenance is OMP-native. The daemon projects its owner-facing
 `compaction.enabled`, `thresholdTokens`, and `thresholdFraction` settings onto
@@ -251,6 +370,103 @@ does not re-create the cap. Ghost contributes only the summary
 instructions through `session.compacting`; OMP owns speculative and mid-turn
 maintenance, keep-recent/reserve behavior, history estimates and pruning, and
 overflow compact-and-retry.
+
+Conversation-idle memory maintenance is a separate Ghost lifecycle, shared by
+Pi and Claude Code rather than inferred from either harness's notification
+events. Every owner action first reserves its runtime-qualified conversation,
+cancels and drains any background generation, and only then reaches the model.
+After a completed or failed owner turn is durably settled, the daemon records
+its immutable owner prompt, bounded assistant text, runtime-native source
+revision, and a daemon-generated monotonic sequence. Each `conversation_idle`
+registration has its own whole-second `idleSeconds` deadline; the scheduler
+wakes at the earliest deadline, dispatches only registrations then due, and
+reports actual elapsed idle time. Ghost's memory registration is due after 60
+seconds. Every registration has a stable semantic identity across an unchanged
+hook configuration. Restart derives the remaining (or overdue) delay only for
+registrations not durably delivered for the current activity generation, from
+durable `lastActivityAt`, never a fresh 60-second window. At most one generation
+runs per conversation and one newest pending trigger is coalesced; a new owner
+action, conversation delete, whole-home move, or shutdown aborts and drains it.
+An admitted owner action which reaches no model records only its exact source
+identity, actual operational cwd, and new `lastActivityAt`; it appends no
+synthetic prompt/assistant turn and advances no source revision or sequence,
+but resets every idle deadline from that owner activity. Admission and the
+pre-action maintenance drain remain strict. Once the native action has
+succeeded, however, this activity record is fail-open bookkeeping: a state
+write failure is generically logged, preserves the prior pending maintenance
+state, and cannot suppress the successful terminal result or undo an already
+durable cwd change.
+If a transient/aborted/model failure leaves pending turns without an active
+receipt, exactly one fixed 60-second retry is armed; repeated failures re-arm
+that bounded delay rather than hot-looping. Its exact kind, stable registration
+identity, and ISO `dueAt` are persisted before maintenance dispatch and after a
+failed attempt, so restart preserves the remaining/overdue delay. A retry
+targets the built-in memory registration by its exact registration identity;
+another `conversation_idle` handler or machine command with the same numeric
+deadline is ordinary due work and is not dispatched again by that retry. Whole-home
+work takes the shared home lease before resolving a home path and keeps that
+lease through model use, memory access, and state publication. Fork copies no
+maintenance state.
+
+Conversation deletion reserves maintenance before publishing its tombstone.
+Its release outcome is explicit: `rolled-back` re-arms pending work only while
+no tombstone owns the id (or after that tombstone was durably retired),
+`recovery-pending` releases the active drain but keeps the runtime-qualified
+slot suppressed for a same-process retry, and `completed` is accepted only
+after successful deletion removed the slot. Startup restoration applies the
+same suppression when a tombstone remains; an owner action cannot re-arm the
+conversation between resumable DELETE attempts.
+
+Machine-level command-hook configuration admits only non-empty, NUL-free
+commands. Every command dispatch owns its process tree and catches synchronous
+spawn failure, process-start error, and unexpected execution rejection at the
+awaited hook boundary. Those failures are generically logged and fail open for
+`before_prompt`, `session_stop`, and `conversation_idle`; they cannot fail an
+owner turn or expose the command/error payload.
+
+The maintenance model receives only a close-neutralized untrusted transcript
+fence and four memory-only tools: list metadata, read one memory, plain-text
+search, and one atomic write. It has no Documents, character, deletion,
+network/MCP, native filesystem, shell, or general session tool. One generation
+may publish at most one memory file. Before the memory rename, the GhostHome
+writer invokes the daemon's receipt journal callback inside the existing memory
+queue and descriptor lock with exact `before`/`after` bytes and their SHA-256
+digests. A mode-`0600` v1 sidecar beside the transcript carries an immutable
+UUID incarnation, exact runtime/raw conversation identity and source identity,
+monotonic state/turn/activity revisions, bounded pending turns, completed
+notices, the bounded unique registration identities already delivered for the
+current activity generation, the optional exact built-in memory retry, and the
+active generation/mutation/receipt. It is read through the common bounded
+daemon control-file reader; only initial `ENOENT` is empty. It is written by a
+same-directory `wx` temporary file, file fsync, atomic rename, and directory
+fsync. The source is exactly `{ runtime:"pi", createdAt }` for Pi and
+`{ runtime:"claude-code", createdAt, resumeId }` for Claude; its discriminator
+must match the outer runtime, and Claude's persisted SDK resume id is required.
+The source revision discriminator is equally strict: Pi state and incoming
+settlements admit only `pi-leaf`, while Claude admits only
+`claude-owner-turn`. A mismatch is invalid state/input and cannot overwrite the
+sidecar.
+
+Every parsed intent and receipt recomputes both SHA-256 digests. Recovery also
+re-reads exact current memory bytes for an already stored completed receipt:
+bytes equal to `after` complete it. Bytes equal to `before` are verified against
+both stored digests and
+the exact journaled `after` bytes are replayed under the same descriptor lock,
+without another model generation; receipt publication and intent clearing are
+one atomic sidecar replacement. Any third value is a conflict that writes
+nothing and retains the pending work. Model-visible notice is created only for
+that exact completed receipt and remains until the runtime acknowledges durable
+prompt attachment.
+
+Idle delivery uses two deliberate crash semantics. A non-maintenance observer
+or command is claimed in the sidecar before invocation and is therefore
+at-most-once for that activity generation: restart never duplicates a
+side-effecting hook, but a process crash after the claim and before execution
+may skip it. The receipt-journaled built-in memory registration instead stores
+its exact retry before invocation and is at-least-once until its pending turns
+settle; exact memory intent/receipt reconciliation makes a repeated attempt
+safe. A new model turn or no-model owner activity atomically increments the
+activity generation and clears prior delivery/retry progress.
 
 ## Daemon HTTP API (localhost only)
 
@@ -303,9 +519,80 @@ one must not be a leak of both.
 
 ### Routes
 
+- `GET /api/hooks` → `{ active, total, events, hooks,
+  sessionStopContinuationCap }` — authenticated, redacted hook diagnostics.
+  `events` is the nonzero canonical-order list of `{ event, count }`; `hooks`
+  has one canonical-order `{ event, name, description }` row per registration,
+  where `event` is exactly `before_prompt`, `session_stop`, or
+  `conversation_idle`, with integer `idleSeconds` only on
+  `conversation_idle`. `active` is
+  `total > 0`, and `total` equals both event counts and row count. The body
+  never exposes commands, source paths, arguments, prompts, injected context,
+  errors, receipts, or scheduler state. `sessionStopContinuationCap` is the
+  exact value `2`, the consecutive hidden-continuation cap.
 - `GET  /api/ghosts` → `[{ name, dir, createdAt }]`
 - `POST /api/ghosts` `{ name }` → creates `~/ghosts/<name>/` with a seeded
   `character.md`
+- `GET /api/documents?path=<relative-dir>&q=<name-query>&limit=<n>&cursor=<opaque>`
+  → `{ root, path, query, entries, total, fileCount, directoryCount,
+  nextCursor, truncated, skipped }` — lazily lists exactly one directory under
+  the owner-wide Documents root. `path` is normalized Documents-relative text
+  (`""` is the root); `root` is the same absolute canonical root on every page.
+  Entries are immediate non-hidden regular directories and files, folders
+  first and then plain lexical order of `name.toLocaleLowerCase("en-US")`, with
+  a plain case-sensitive lexical comparison of the original names as the tie
+  break. Numeric collation is not used. Entries are shaped as
+  `{ name, path, kind, modifiedAt, size? }`; only files
+  carry `size`. No response contains content or descendants. `q` trims its input
+  and filters both kinds by case-insensitive current-directory name substring.
+  `total`, `fileCount`, and `directoryCount` count that filtered direct result
+  before pagination, never descendants. `skipped` reports matching symbolic
+  links and special/inaccessible entries as `{ name, path, reason }`; hidden
+  entries are excluded, not reported. The default page size is 100 and the
+  maximum is 250. `nextCursor` is null at the end; `truncated` is true whenever
+  this response does not itself contain the whole filtered result. An opaque
+  cursor is bound to normalized `path`, query, offset, and the direct entry set:
+  malformed or mismatched is `400 invalid_cursor`, and a changed set is
+  `409 cursor_stale`, after which the client restarts that directory at page 1.
+  A missing directory is `404 not_found`. Paths are opened component by
+  component under pinned directory descriptors with `O_NOFOLLOW`; absolute,
+  dot, parent, empty-component, backslash, and symlink-traversing paths are
+  refused. Live directory depth and width have no Ghost policy cap.
+- `GET /api/documents/content?path=<relative-file>` →
+  `{ root, path, size, modifiedAt, content }` — reads one regular file for the
+  trusted shell's inline viewer. The file is opened below a pinned Documents
+  directory descriptor with `O_NOFOLLOW|O_NONBLOCK`, verified as regular, read
+  through that same descriptor with a strict inclusive limit of 1 MiB
+  (1,048,576 bytes), and checked again for replacement or mutation before any
+  content is returned. `content` is strict UTF-8 text; invalid UTF-8 and NUL are
+  `400 invalid_document_content`. A file already over the limit, or one that
+  grows past it while being read, is `413 document_too_large`; a concurrent
+  replacement is `409 conflict`. Missing files are `404 not_found`, and
+  symbolic links, FIFOs, special files, or escaping paths are refused with the
+  existing `invalid_path` error. The daemon never truncates or repairs content.
+  The shell renders returned content only as literal `Text.PlainText`:
+  Markdown images/links, raw HTML, data URLs, and local or network resource
+  references are displayed byte-for-byte and are never resolved, activated, or
+  fetched. Inline viewing is read-only and reloads explicitly; “Open
+  externally” is a deliberate owner action handed to the desktop for the
+  current absolute path, outside this confined content-read boundary.
+- `DELETE /api/documents` `{ path, confirm: path }` →
+  `{ ok: true, path, trash, kind: "freedesktop" | "fallback" }` — moves
+  exactly one regular file, of any type and at any depth, to recoverable Trash.
+  `kind` identifies the actual destination mechanism, not the source entry type.
+  Directories, symbolic links,
+  special files, and escaping paths are refused; `confirm` must byte-match
+  `path`. The parent directory is descriptor-confined and held under a shared
+  filesystem mutation lock through validation and rename. This lock serializes
+  Ghost callers and the descriptor-relative source means a swapped symbolic
+  link is moved as a link, never followed. Linux exposes no atomic
+  descriptor-to-freedesktop-Trash primitive, however, so an unrelated local
+  process that ignores the advisory lock can replace the final directory entry
+  between validation and `rename(2)`; this API does not claim inode-identity
+  deletion against that owner-local race. The ordinary
+  destination is freedesktop home Trash with the original absolute Documents
+  path in `.trashinfo`; `EXDEV` falls back to the Documents root's hidden
+  `.trash/`, still by rename rather than copy/unlink.
 - `DELETE /api/ghosts/:name?confirm=<name>` → `{ ok: true, trash: "<abs path>" }`
   — moves `<root>/<name>/` to the freedesktop home trash
   (`$XDG_DATA_HOME/Trash`, default `~/.local/share/Trash`): the home becomes
@@ -323,20 +610,20 @@ one must not be a leak of both.
   `409 ghost_busy`, as is a second concurrent delete of the same ghost. Idle
   hosted sessions are closed (disposed, not deleted) and pending
   title work is awaited first. **Deletion is a move, never an `rm`**:
-  the ghost home holds the only copy of a persona, its memory, and its docs, so
+  the ghost home holds the only copy of a persona and its memory, so
   nothing on any path follows the rename with a recursive removal.
 - `PUT  /api/ghosts/:name/name` `{ name: "<new>" }` → `{ ok: true, name }` — the
   ghost's name IS its home directory's name, so renaming one is anchored by a
   same-filesystem rename of `<root>/<old>/` to `<root>/<new>/`. Persona, memory,
-  docs, conversations, pins, and credentials are inside the directory that
+  conversations, pins, and credentials are inside the directory that
   moved; every conversation id stored with its transcript stays valid,
   and every other route's `:name` changes with it. `character.md` is the ghost's
   own words and is never touched. The one exception is a character file
-  byte-equal to the daemon-authored seed: it is re-rendered in canonical
-  Markdown under the new name. That replacement is staged beside the character
-  file before the home moves and published atomically afterwards; a staging
-  failure moves nothing, and a publish failure rolls the home move back. Checked
-  in this order: the new name gets the same validation
+  byte-equal to the daemon-authored seed: it is re-rendered in
+  canonical Markdown under the new name. That replacement is staged beside the
+  character file before the home moves and published atomically afterwards; a
+  staging failure moves nothing, and a publish failure rolls the home move back.
+  Checked in this order: the new name gets the same validation
   `POST /api/ghosts` applies (`400`); an unknown ghost is `404 not_found`;
   renaming to the ghost's current name is a no-op `200`; a name already taken in
   the root — by a ghost or by anything else — is `409 already_exists`; a ghost
@@ -346,44 +633,48 @@ one must not be a leak of both.
   holds a path under the old name across the rename. A Claude Code conversation
   keeps its resume sidecar, but that runtime stores the transcript itself under
   its own `~/.claude/projects/<cwd>` path, which does not move with the home.
-- `GET  /api/ghosts/:name/context` → `{ character, docs, memory, agents,
-  skipped }` — the owner's browseable ghost context and OMP capabilities,
+- `GET  /api/ghosts/:name/context` → `{ character, memory, agents,
+  skipped }` — the owner's browseable ghost context,
   derived from disk for each request and never stored. `character` is
   `{ path: "character.md", title }`, where `title` is derived from its leading
-  Markdown heading. `docs` contains
-  `{ path: "docs/<relative>.md", relativePath, title, tags, archived }`, derived
-  from the document's first H1 and optional final hashtag line. `memory`
-  contains `{ path: "memory/<slug>.md", slug, description, content, updated }`,
-  where `description` is the derived 32-character index preview and `updated`
-  is the filesystem modification date.
-  `agents` contains the OMP task helpers available under the same project,
-  user, extension, bundled, precedence, and `task.disabledAgents` rules as a
-  live session, normalized to `{ name, description, source, tools, model,
-  spawns }`. `tools: null` means the helper keeps the available session toolset,
-  and a list restricts it to those tools. An empty `model` list means the helper
-  inherits the active model. `spawns: null` means it cannot delegate further,
-  `"*"` allows any available helper, and a list allows only those named helpers.
-  System prompts and agent file paths are never returned. `skipped` reports
-  malformed doc or memory files as `{ section, path, reason }` without
+  Markdown heading. `memory` contains
+  `{ path: "memory/<slug>.md", slug, description, content, updated }`, where
+  `description` is the derived 32-character index preview and `updated` is the
+  filesystem modification date.
+  `agents` is an empty compatibility array: custom agent definitions may be
+  counted during a trusted-project preview, but are inactive and never ambiently
+  discovered. Pi's `task` tool is disabled, so agent definitions are not runtime
+  capabilities and do not appear here. `skipped` reports
+  malformed memory files as `{ section: "memory", path, reason }` without
   hiding the valid siblings. The returned file paths are ghost-home-relative;
   a client already gets that home's absolute `dir` from `GET /api/ghosts`.
 - `DELETE /api/ghosts/:name/context`
-  `{ section: "docs"|"memory", path, confirm: path }` →
+  `{ section: "memory", path, confirm: path }` →
   `{ ok: true, path, trash, kind }` — moves exactly one Markdown file under the
-  named section to recoverable Trash. `confirm` must byte-match `path`; absolute
+  memory section to recoverable Trash. `confirm` must byte-match `path`; absolute
   paths, traversal, non-Markdown paths, directories, `character.md`, and helper
   definitions are refused. A symlink is moved as a symlink and never followed.
   The ordinary destination is the freedesktop home Trash; cross-filesystem
   moves fall back to `<ghost>/.trash/`, still by rename rather than copy/unlink.
 - `GET  /api/ghosts/:name/mcp` → `{ servers, skipped }` — the effective
-  ghost-only MCP configuration from `<ghost>/mcp.json`. It never scans ambient
-  OMP, Codex, Claude, Copilot, or other agent configuration. Each
+  ghost-only MCP configuration from `<ghost>/mcp.json`. It never
+  scans ambient OMP, Codex, Claude, Copilot, or other agent configuration. Each
   valid server is `{ name, enabled, source, path, config, connectionStatus }`.
   `config` is deliberately lossy: header/environment key names and counts may
   be shown, but their values, command arguments, OAuth/auth credentials, URL
   userinfo, and query values never cross HTTP. Non-secret placement/policy
   fields (`cwd`, `envPolicy`, and `headerPolicy`) do cross so replacement edits
-  preserve the server's execution semantics. `connectionStatus` is
+  preserve the server's execution semantics. A displayed URL preserves only a
+  parsed hierarchical HTTP(S) origin/path; userinfo and fragments are removed
+  and query values become `[configured]` markers. Malformed, templated, opaque,
+  and non-HTTP(S) strings are wholly `[configured]`.
+  Before a live connection or isolated test, Ghost applies OMP's ordinary
+  environment interpolation to the rest of the validated server row. A stdio
+  `env` map with `envPolicy:"literal"` and a remote `headers` map with
+  `headerPolicy:"origin-locked"` are excluded from that traversal and reach
+  `MCPManager` value-for-value; ambient environment values never enter those
+  protected maps. Rows without the policy retain OMP's ordinary expansion
+  behavior. `connectionStatus` is
   `connected`, `connecting`, `disconnected`, `mixed`, `disabled`, or
   `not_loaded`; GET only inspects already-open OMP conversations and never
   opens one. Malformed files/rows appear in `skipped` without hiding valid
@@ -393,9 +684,30 @@ one must not be a leak of both.
   `{ name, config }` adds to `mcp.json`; `PUT|DELETE
   /api/ghosts/:name/mcp/:server` replaces/removes the named entry;
   `PUT …/:server/enabled` `{ enabled }` toggles it. Every mutation reloads all
-  open OMP conversations for the ghost. An idle session reconnects and replaces
-  its mounted MCP tools immediately; a busy session coalesces changes into one
-  reload after the turn settles. Thus adding the first server mounts tools, and
+  open OMP conversations for the ghost before the response snapshot's
+  `connectionStatus` is inspected, so that field describes the manager and
+  mounted tools that completed this mutation rather than their prior state. An
+  idle session reconnects and replaces
+  its mounted MCP tools immediately, connecting a candidate manager before it
+  swaps away the live one. A pre-stream ordinary turn admission and the
+  ghost-wide MCP mutation/reconnect lease are mutually exclusive in both
+  admission orders: the loser receives `409 session_busy` before a config write,
+  manager transition, or SSE header and retries after the winner settles. A
+  raw voice owner that began outside this HTTP admission coalesces an
+  already-admitted change into one reload after it settles. Writable
+  collaboration is admitted at CollabHost's raw `promptCustomMessage` boundary.
+  Candidate connection may run concurrently, but manager/tool publication and
+  old-manager disconnect take a per-session publication lease: a raw prompt
+  that wins first holds the existing manager and tools unchanged until its
+  terminal session event, while publication that wins first completes before
+  the raw prompt reaches the AgentSession. Prompt failure, abort, and shutdown
+  release this ownership in `finally`, so a deferred publication can retry and
+  no collaboration stream observes a mid-turn refresh or disconnect.
+  If live tool publication fails after the atomic config write, the mutation
+  request fails, the durable new config remains available for retry, and the
+  candidate swap restores the previous manager and mounted tools.
+  A bound project's failed rows/connections leave its
+  state explicitly `degraded`. Thus adding the first server mounts tools, and
   updating, disabling, or removing one cannot leave stale tools selected.
   Model and MCP mutations take a filesystem-identity operation lease before
   resolving any home path. Whole-home rename/delete first block new leases and
@@ -404,12 +716,29 @@ one must not be a leak of both.
 - `POST …/mcp/:server/test` runs an isolated no-session connection probe and
   returns a sanitized `result` with status/tool count; transport error text is
   not returned because it may echo secrets. `POST …/mcp/:server/reconnect`
-  manually retries already-loaded live managers without opening a conversation;
-  it reports `not_loaded` when none exists and `deferred` when one is busy.
+  manually retries already-loaded live managers without opening a conversation.
+  Each idle session connects a complete candidate from its manager's existing
+  immutable configs/sources, then publishes that manager through the same
+  prompt boundary and only then disconnects the prior transports. It reports
+  `not_loaded` when none exists and `deferred` for an already-owning raw
+  collaboration/voice session. An ordinary admitted turn is instead the
+  `409 session_busy` lease conflict described above. When the requested server
+  has project-level provenance, Ghost derives configured and failed project
+  counts from the complete candidate result plus the immutable snapshot's
+  rejected rows, then compare-and-swaps runtime health against the binding's
+  root identity and generation. A fully successful retry changes
+  `degraded` to `ready`; a failed project connection changes `ready` to
+  `degraded`, and either successful publication emits
+  `conversation-updated` with `reason:"project"`. A stale-generation result is
+  discarded without an event. Reconnecting a user-level ghost `mcp.json`
+  server never rewrites bound-project health.
 - `POST /api/ghosts/:name/messages` — the **pi-messages wire protocol** over
   OMP's `AgentSession` (request `{ model, context, options }` → SSE stream).
   The pinned client in the summon-ghost repo is the normative spec
   (`~/github.com/ferdousbhai/summon-ghost`, read-only reference).
+  Every native `tool_execution_start` includes `cwd`, the absolute
+  `SessionManager.getCwd()` snapshot captured at execution start. It is
+  activity-local: a client must not substitute a later session cwd for it.
 - A conversation has two distinct identifiers at this API boundary.
   `conversationId` is the runtime-owned resume id and is passed unchanged as
   pi-messages `options.sessionId`. `id` is the opaque public row/action id,
@@ -440,14 +769,266 @@ one must not be a leak of both.
   `title` is a short auto-generated name or `null` until one is generated (see
   "Conversation titles" below). OMP transcripts and Claude Code resume sidecars
   share this shape (a Claude conversation's `title` is `"Claude Code"`).
+- `GET /api/ghosts/:name/sessions/:id/project` →
+  `{ id, conversationId, runtime, root, cwd, relativeCwd, name, generation,
+  status, error, mcpStatus, resources, canRebind, lastRefreshAt, reason }`.
+  This route, preview, and PUT accept a valid runtime-qualified id before its
+  first turn; a project sidecar alone does not publish a row in `GET …/sessions`.
+  `root` is the canonical trusted project root or `null`; `cwd` is always the
+  absolute operational cwd; `relativeCwd` is `"."` at the root, a relative path
+  beneath it, or `null` while unbound. `status` is `unbound`, `ready`, or
+  `degraded`; `error` is null or `{ code, message }`; `mcpStatus` is `off`,
+  `ready`, or `degraded`. `resources` always contains non-negative
+  `instructions`, `skills`, `rules`, `prompts`, `commands`, `agents`,
+  `mcpServers`, and `ignoredExecutable` counts. Instructions and the typed
+  declarative categories count only entries that the bounded parser accepted;
+  in particular, a skill requires explicit nonempty string `name` and
+  `description` fields in its own frontmatter. A malformed/missing field is
+  warning-skipped; Ghost never synthesizes a name from the directory, so it
+  cannot shadow an accepted ghost or project sibling. `agents` and
+  `ignoredExecutable` are discovery counts because those
+  categories are deliberately inactive. The counts are a bounded, content-free
+  preview, not an authorization to execute anything. One scan
+  admits at most 512 entries, 1 MiB total file data, 256 KiB per file, and eight
+  path components measured from the project root. A one-second cooperative scan budget is checked before and
+  after each admission and between directory reads; an already-issued kernel
+  I/O operation is not cancellable, so it may return after that wall-clock
+  point, but its result is not admitted. It reports every reached cap and
+  ignored symlink or rejected typed resource in `warnings`; counts describe
+  only admitted, effective entries. Every declarative and MCP candidate is
+  decoded as strict fatal UTF-8 before parsing. Invalid instruction, skill,
+  rule, prompt, or command bytes are warning-skipped without admitting a
+  replacement character; invalid MCP bytes produce an MCP-specific rejection,
+  so runtime health cannot report that source as merely absent. Preview
+  performs the same bounded typed validation needed to make those counts
+  truthful, but returns no resource content and does not authorize or persist
+  its scan. Bind/reload performs one new content-bearing scan and retains its
+  exact validated project MCP rows in the immutable runtime snapshot; those
+  values do not cross this HTTP response.
+  The durable binding sidecar is an exact-key version-1 object containing only
+  `version`, `runtime`, `conversationId`, `root`, `cwd`, `generation`,
+  `status`, `error`, `mcpStatus`, `resources`, `lastRefreshAt`, `reason`, and
+  `identity`. Root and cwd are canonical absolute non-NUL paths bounded to 16
+  KiB of UTF-8; a bound cwd is confined beneath root. A bound root has an exact
+  `{ dev, ino }` identity whose canonical decimal members are at most 64 digits.
+  The persisted root/identity pair must exactly match an existing trusted-ledger
+  row; a mismatch is corrupt binding metadata. The separately pinned live root
+  must still match that trusted identity, and replacement of an otherwise-valid
+  project's inode retains the ordinary `project_not_trusted` response. A null
+  root requires null identity, unbound/off/null health, and zero resource counts.
+  Generation and every exact resource field are non-negative safe integers;
+  statuses, MCP state, and reason are closed enums; `lastRefreshAt` is null or
+  an exact ISO timestamp. `error` is null or an exact nonempty string pair
+  `{ code, message }`, bounded to 128 and 8,192 UTF-8 bytes respectively.
+  Preview warnings are not binding state and are never persisted; an added
+  `warnings` member is therefore invalid rather than a compatibility bag.
+  Missing, extra, mistyped, noncanonical, inconsistent, or out-of-bound fields
+  fail `500 project_binding_invalid` without default repair, legacy transcript
+  fallback, trust bypass, or rewriting the bytes.
+- `POST …/sessions/:id/project/preview` `{ path }` requires an absolute
+  directory and returns `{ root, name, trustToken, expiresAt, resources,
+  warnings }`. `warnings` is an array of strings. The opaque short-lived token
+  is bound server-side to ghost, runtime-qualified conversation id, canonical
+  path, device, and inode; equal raw ids in different ghosts cannot exchange a
+  receipt, and device/inode never cross HTTP. Conversation deletion or raw-id
+  reuse and whole-ghost rename/delete revoke every outstanding receipt for the
+  old incarnation. Preview uses the same transition/tombstone gate as bind and
+  reload, so none can mint a receipt while those lifecycle operations own the
+  identity. Confirmed trust is stored
+  machine-locally in `$XDG_STATE_HOME/ghost/project-trust.json` (default
+  `~/.local/state/ghost/project-trust.json`), mode `0600`, and becomes invalid
+  when the path resolves to a different filesystem identity. Only `ENOENT`
+  means an empty trust ledger. An existing ledger is read through componentwise
+  non-following directory descriptors and a pinned regular-file descriptor,
+  capped at 1 MiB, decoded as fatal UTF-8, and required to have one link, mode
+  exactly `0600`, the exact version/row schema, and unchanged device, inode,
+  size, mtime, ctime, and live directory-entry identity across the read.
+  Malformed, wrong-version, linked, wrong-mode, oversized, permission-denied,
+  or transient-I/O state fails with `500 project_trust_invalid`; a failed read
+  never publishes an empty replacement over previously trusted roots. All
+  in-process writers of the canonical ledger path share one queue. A writer
+  validates the same exact version/row schema before publication: at most 8,192
+  unique rows, canonical absolute non-NUL roots bounded to 16 KiB of UTF-8,
+  canonical decimal device/inode members bounded to 64 digits, and exact ISO
+  timestamps. It serializes the candidate once and admits at most the same
+  inclusive 1 MiB; an invalid or one-byte-over candidate leaves the prior
+  ledger bytes and trust state unchanged, and a later valid write may retry.
+  Every bound-state read rechecks that identity and canonical cwd before any
+  runtime or discovery consumer may use the sidecar. Consumers open the trusted root with
+  `O_NOFOLLOW`, compare the open descriptor's device/inode with the receipt,
+  and traverse every resource parent and file descriptor-relatively without
+  following links. At the bound project root, instruction providers shadow in
+  Pi order: `.omp/AGENTS.md`, `.claude/CLAUDE.md`, `.agents/AGENTS.md`,
+  `AGENTS.md`, then `CLAUDE.md`; Ghost injects the first admitted regular file
+  only. Pi injects the resulting context/skills/rules/prompts/
+  commands as exact arrays and injects null/empty active-repository, watchdog,
+  and passive-advisor inputs; no lexical post-load filter is an authority boundary.
+  Project and ghost-file agent definitions are counted but inactive. Pi's
+  `task` tool is explicitly disabled and performs no live/ambient agent
+  discovery. Claude keeps
+  native `skills:[]` and `settingSources:[]`: instead, its
+  always-active system-prompt append combines the visible ghost home's bounded
+  user-level instruction/skill/rule/prompt/Markdown-command snapshot with the
+  same already-read project categories Pi receives. Exact resource names use
+  Pi's project-over-ghost shadowing; a malformed project resource is rejected
+  before that merge and cannot hide an accepted ghost sibling. Agent-definition
+  content and executable project code enter neither runtime. This is
+  declarative context, not Claude skill enablement, and cannot trigger later cwd
+  discovery. `SessionHost.admitTurn` performs the first owner turn's one bounded
+  project scan and Claude-specific MCP translation before an HTTP caller can
+  publish SSE headers. The reservation freezes that admitted snapshot through
+  query execution; Claude does not reopen project files between admission and
+  launch. After the turn Claude stores those exact admitted project bytes and
+  translated project MCP rows in its mode-`0600` resume sidecar.
+  Every continuation, project-state read, and session listing opens that
+  sidecar with `O_NOFOLLOW` and reads at most 16 MiB through the pinned
+  regular-file descriptor. The file
+  must have one link and mode exactly `0600`; device, inode, size, mtime, ctime,
+  and the live pathname identity must remain unchanged across the read. Invalid
+  UTF-8, replacement, mutation, and oversize sidecars fail closed. `created`
+  and `modified` must each be the exact canonical string produced by
+  `Date.toISOString()`; invalid or merely equivalent noncanonical timestamps
+  fail during turn admission, before maintenance reservation or any Claude
+  executable/auth probe. Before a
+  stored project snapshot can reach the SDK, every MCP row must match exactly
+  one complete serializable SDK stdio, HTTP, or SSE transport schema: the
+  discriminator, allowed keys, and every nested value are validated, unknown
+  fields are rejected, and the credential-free restrictions below are applied
+  again. Every continuation and post-restart resume uses that validated stored
+  snapshot without reopening project files; an older bound sidecar without the
+  snapshot fails closed and requires a new conversation. Phase 1 admits only MCP
+  rows whose persisted SDK translation is
+  credential-free: any environment expansion, non-empty stdio `env`, remote
+  header, auth/OAuth field, or URL userinfo/query/fragment rejects the turn with
+  `409 claude_project_mcp_secrets_unsupported` as an ordinary HTTP response,
+  before SSE, a query, or a Claude sidecar is created. The rejected admission
+  does not mutate transcript or project status and releases cleanly for retry.
+  Disabled rows are not translated. Ordinary credential-free stdio,
+  HTTP, and SSE rows remain available; Ghost never expands an environment value
+  into resume metadata. Because the Claude SDK cannot preserve MCP timeout
+  values from 0 through 999 milliseconds, those rows are omitted with an
+  MCP-specific warning and degraded project state. Values at least 1000
+  milliseconds are preserved exactly. The same check is applied to stored rows
+  before every resume, so older metadata cannot silently change timeout
+  semantics.
+  The sidecar retains general declarative-scan warnings separately from MCP
+  scan/validation/translation warnings. General resource warnings remain
+  visible diagnostics but do not degrade MCP health; only MCP-specific warnings
+  or observed MCP connection failure make `mcpStatus` and project status
+  `degraded`. A project with no admitted MCP rows remains `mcpStatus:"off"`.
+- `PUT …/sessions/:id/project`
+  `{ root: string|null, cwd?, trustToken?, expectedGeneration }` returns the
+  full state. A non-null root requires the matching unused preview token; cwd
+  must canonicalize to a directory inside it. `root:null` removes discovery;
+  cwd stays current unless the caller supplies an absolute replacement (the
+  shell's “Use Home” supplies the OS owner home). Every successful transition
+  atomically increments `generation`. `POST …/project/reload`
+  `{ expectedGeneration }` re-resolves the already-trusted declarative/MCP
+  snapshot and increments it. For Pi, bind/reload writes and fsyncs a separate
+  mode-`0600`, generation-qualified artifact containing the exact admitted
+  instructions, skills, rules, prompts, Markdown commands, and MCP rows, then
+  publishes the project-binding sidecar as the commit marker. Failure leaves
+  the prior generation and live runtime intact; an obsolete generation is
+  removed only after the new binding is durable. Pi recreation after cache
+  eviction or daemon restart validates and loads the artifact and never
+  rescans live project files. Missing, malformed, mismatched-identity, or
+  wrong-mode artifacts fail closed with `project_snapshot_invalid`. The
+  artifact's bounded bytes are decoded with fatal UTF-8 before JSON parsing, so
+  an invalid byte inside an otherwise valid JSON string also fails as
+  `project_snapshot_invalid` rather than entering a resumed Pi snapshot as a
+  replacement character.
+  A successful persistent `!cd` clones the same bytes into the next binding
+  generation rather than changing discovery. Binding/reload closes an idle cached Pi session
+  only after validation, the bounded scan, trust/state persistence, and atomic
+  sidecar publication succeed, so a failed transition leaves the existing Pi
+  session, MCP manager, and background jobs untouched. Publication is the
+  commit: a later cached-session, MCP, or background teardown failure cannot
+  roll back that durable generation or turn the successful mutation into an
+  HTTP failure. Every cached Pi-session removal uses the same teardown gate,
+  whether it came from an explicit/ordinary close, retention, a committed
+  project mutation, or daemon shutdown. The old session is removed from the
+  active cache and installed in that per-session gate before the first cleanup
+  await. Concurrent attempts coalesce onto its in-flight teardown; a failure is
+  logged where the initiating operation is best-effort and leaves the gate
+  retryable. An explicit close, later project transition, repeated shutdown,
+  or next open retries the exact retained session, and no replacement Pi
+  runtime, MCP manager, collaboration/background owner, or voice transport is
+  admitted until every cleanup branch succeeds. An open whose retry still
+  fails is `503 session_cleanup_pending` and leaves the gate intact. Only an
+  in-flight abort promise is coalesced internally and a rejected one is
+  cleared; voice, collaboration, tool-cwd, Bash, abort, ask, title, MCP
+  reload/disconnect/refresh/singleton, AgentSession, and model-runtime stages
+  are marked complete only after that stage succeeds. Retried cleanup therefore
+  does not repeat completed stages, and the gate is removed only after voice,
+  collaboration, and Pi teardown all complete. Shutdown reports retained
+  session cleanup failures and a repeated drain retries them. The next
+  successful open receives the new immutable snapshot; no process-global OMP
+  reload occurs.
+- `DELETE …/sessions/:id/project/draft` abandons only an unpublished,
+  runtime-qualified pre-turn draft and returns
+  `{ ok:true, id, conversationId, runtime, abandoned }`. The daemon refuses a
+  transcript, cached/runtime session, Claude resume sidecar, fork marker, or
+  delete transaction with `409 project_draft_published|session_busy`; it never
+  treats a published conversation as disposable draft state. A durable pending
+  marker hides a cleanup in progress while Ghost removes only that draft's
+  project binding, generation-qualified Pi snapshot, Pi tool-cwd sidecar, and
+  outstanding preview receipts. Each required sidecar is verified absent and
+  the sessions directory fsynced before a durable completion receipt is
+  published and the pending marker retired. A failed cleanup retains the marker
+  for an idempotent retry. The first completed request has `abandoned:true`;
+  later retries of that same abandoned incarnation have `abandoned:false`.
+  Previewing or binding the qualified id again removes the completion receipt
+  and starts a new incarnation.
+- Project mutations are serialized per runtime-qualified conversation and use
+  optimistic generation. A stale value is `409 stale_generation`; a concurrent
+  runtime-neutral turn admission, either runtime's open/close, or another
+  mutation is `409 session_busy`. Admission is checked before preview mints a
+  trust receipt and before bind/reload reads or writes project state; a Pi
+  teardown therefore also blocks a Claude transition for the same raw
+  conversation id. A syntactically invalid or
+  relative root/cwd is `400 invalid_request`; a confined-open failure or cwd
+  escape is `400 invalid_project_path|cwd_outside_project`; absent paths are
+  `404 not_found`; missing/wrong/expired trust is
+  `403 project_not_trusted|trust_token_invalid|trust_token_expired`. Claude may
+  bind only before its first owner turn. Afterwards `canRebind:false` blocks
+  PUT and reload with `409 project_rebind_requires_new_conversation`; the owner
+  starts a new conversation to choose a different project. A draft binding pins
+  the runtime-qualified id, so changing runtime before first send requires
+  unbinding or a new draft id rather than silently transferring trust.
+  Every message admission resolves the selected runtime once, before opening a
+  runtime or publishing stream headers. If that selected runtime has no project
+  binding while the opposite runtime's same raw conversation id is bound, the
+  request is `409 project_runtime_mismatch`. This applies equally to ordinary
+  owner messages and direct Bash, to unpublished draft ids and to raw ids with
+  rows in both runtimes; the refusal creates no selected-runtime transcript,
+  sidecar, or cwd state. A binding is never inferred or transferred across the
+  `pi:`/`claude-code:` qualification boundary.
+  Whole-ghost rename/delete, conversation delete, and MCP reload/reconnect are
+  mutually exclusive with a project transition in both admission orders.
+  Runtime MCP health writes compare runtime, conversation id, canonical root,
+  device/inode, and generation before replacing status, so a stale connection
+  result cannot overwrite a newer binding.
+  A bound project's MCP row owns a same-name server ahead of the ghost-home
+  row even when the project row is disabled or malformed; it shadows rather
+  than falling back to the lower-precedence server. The immutable project MCP
+  snapshot stores that ordered set of claimed names separately from its
+  admitted servers. Only enabled rows that pass the strict typed schema enter
+  the admitted array or `resources.mcpServers` count. A disabled row claims its
+  name without warning and a disabled-only project is initially
+  `status:"ready", mcpStatus:"off"`; an invalid row claims its name, is omitted
+  with a sanitized MCP warning, and makes initial bind/reload health
+  `degraded`. Valid admitted siblings remain usable and count exactly once.
 - `GET  /api/ghosts/:name/events` → an SSE stream of
-  `{ type: "conversation-updated", id, conversationId, runtime, updatedAt }`
+  `{ type: "conversation-updated", id, conversationId, runtime, updatedAt,
+  reason? }`
   invalidations. The daemon
   emits one after persisted conversation or read-state changes; clients refetch
   `GET …/sessions` rather than receiving a duplicated listing on this stream.
   It uses the same SSE headers and 15-second comment keepalive as turn streams.
   Disconnect or abort unregisters the listener and keepalive immediately, and
-  subscribing never opens or retains an agent session.
+  subscribing never opens or retains an agent session. Project transitions and
+  every completed Claude owner turn use `reason:"project"`, so the active shell
+  refetches eligibility/status as well as the ordinary session listing.
 - `PUT  /api/ghosts/:name/sessions/:id/pin` `{ pinned: boolean }` →
   `{ ok: true, pinned }` — pin or unpin one conversation, idempotently. Pin
   state lives in `sessions/pins.json` (atomic replace, never partial), works
@@ -485,8 +1066,9 @@ one must not be a leak of both.
   conversation tree.
 - `GET  /api/ghosts/:name/sessions/:id/commands` → `{ commands }` — OMP's live
   command catalog for that conversation, rebuilt with
-  `buildAvailableSlashCommands` so cwd-scoped file commands, skills,
-  extensions, custom commands, and MCP prompts remain current, then augmented
+  `buildAvailableSlashCommands` from its pinned project snapshot so admitted
+  Markdown commands/prompts, skills, Ghost extensions, and MCP prompts remain
+  current without rediscovering from a changed cwd, then augmented
   from OMP's unified registry with TUI-only builtins marked `unsupported`.
   Rows preserve
   OMP's `name`, `aliases`, `description`, `input`, `subcommands`, and `source`,
@@ -505,11 +1087,52 @@ one must not be a leak of both.
   Ghost-owned artifact for the conversation to recoverable Trash. Hosted-import
   source fixtures move first, followed by the OMP transcript and/or Claude Code
   resume sidecar; this order prevents startup from resurrecting a removed
-  projection. `artifact` is `hosted-source`, `omp-transcript`, or
-  `claude-sidecar`. Claude Code's actual transcript remains in that runtime's
+  projection. `artifact` is `hosted-source`, `omp-transcript`,
+  `claude-sidecar`, `project-binding`, `project-snapshot`, `tool-cwds`, or
+  `maintenance-state`.
+  Every generation-qualified Pi project snapshot is included. Claude Code's actual
+  transcript remains in that runtime's
   external `~/.claude` storage; Ghost does not claim to delete it. An active
   turn or live-voice session must finish or be stopped first
   (`409 session_busy`); an unknown conversation returns `404 not_found`.
+  Deletion writes and fsyncs a v3 tombstone before moving the first artifact.
+  Each move first creates a private same-filesystem fallback Trash root, then
+  journals its exact collision-free `{ artifact, source, trash, kind }` intent
+  before rename. Resume reconciles the two authoritative locations: source-only
+  performs the move, Trash-only completes its receipt, both is a conflict, and
+  neither fails closed. Thus a crash after rename but before the receipt update
+  cannot lose the destination. After every successful reconciliation Ghost
+  atomically rewrites and fsyncs the tombstone with the complete ordered receipt
+  so far.
+  Before any reconciliation or cleanup, every v2/v3 row's artifact label and
+  source must match the exact runtime/conversation-derived allow-list: the one
+  Pi transcript or Claude sidecar, that runtime's binding, the Pi tool-cwd
+  sidecar and generation-qualified snapshot names, or a hosted fixture whose
+  parsed conversation id matches. Sources and destinations are globally
+  distinct and completed receipts require source absent plus Trash destination
+  present. A v3 pending move additionally requires the exact private
+  `.trash/.conversation-<uuid>` root and its next sequential, collision-reserved
+  direct child; aliases and another conversation's artifacts are invalid.
+  Listings and every open/project route hide or refuse that runtime-qualified
+  id while the tombstone exists, so a crash cannot expose a surviving sidecar
+  or let the raw id bind again. Retrying DELETE resumes the transaction; the
+  successful response includes both earlier and newly moved receipt rows.
+  Legacy v1 tombstones remain resumable with an initially empty receipt, and v2
+  accumulated receipts resume without a pending intent. The
+  tombstone is removed and the sessions directory fsynced only after artifact,
+  pin, and read-state updates settle.
+  An invalid or unreadable exact tombstone stays pending, keeps the id hidden,
+  and makes DELETE fail `500 delete_recovery_pending`; Ghost does not infer an
+  empty receipt from untrusted marker bytes.
+  DELETE claims the runtime-qualified conversation synchronously before its
+  first marker inspection. Marker admission uses `lstat`: only `ENOENT` proves
+  absence. A dangling link or permission/I/O failure at the draft-abandon
+  marker remains authoritative and returns `409 session_busy`; the equivalent
+  delete-marker state returns `500 delete_recovery_pending`. Neither case
+  reads through, replaces, or removes the marker or conversation artifacts.
+  Once the delete marker is present or indeterminate, the maintenance
+  scheduler also retains a recovery-pending suppression after DELETE returns;
+  only successful deletion or explicit durable marker retirement clears it.
   Failed fork rollback is the sole permanent-unlink path: the fork was never
   published to the owner and must not pollute Trash.
 - `GET|POST /api/ghosts/:name/sessions/:id/live` owns OMP realtime voice for
@@ -534,7 +1157,10 @@ one must not be a leak of both.
   tools with the host's local authority. Links are never logged or copied
   automatically. At most one host startup is admitted per conversation;
   concurrent starts coalesce, while stop, conversation close, and daemon
-  shutdown wait for an admitted startup before stopping it. The host is
+  shutdown wait for an admitted startup before stopping it. A writable remote
+  prompt takes the raw-prompt ownership described by the MCP mutation contract
+  before it enters the AgentSession; prepared MCP candidates cannot publish or
+  disconnect its current manager until that prompt settles. The host is
   conversation-scoped and is stopped when that session closes. Claude Code
   returns `409 not_supported`.
 - `GET  /api/ghosts/:name/sessions/:id/transcript` → `{ id, conversationId,
@@ -555,8 +1181,30 @@ one must not be a leak of both.
   A tool call whose persisted result was an error also carries `failed: true`;
   the result messages themselves are dropped here, and without that bit a
   rehydrated transcript would show every recovered call as having succeeded.
-  Its absence means "not known to have failed" — a call with no result at all
-  (an abandoned turn) carries nothing.
+  Absence of `failed` means “not known to have failed”; a call with no result
+  at all (an abandoned turn) carries nothing.
+  Every restored assistant tool-call part also carries `cwd: string|null`, read
+  from the conversation's mode-`0600` tool-cwd sidecar. `null` means historical
+  execution cwd is unknown and a client must not resolve a relative argument
+  against ghost home or current cwd. Version 2 stores exact
+  `{ version:2, cwds:[[toolCallId, absoluteCwd], ...] }` state in
+  oldest-to-newest activity order. Recording an existing id removes and
+  reinserts it at the newest position. The writer validates and serializes each
+  entry once, then deterministically removes oldest entries until the complete
+  file is at most the control reader's inclusive 16 MiB limit; if one
+  pathological newest entry cannot fit, the readable empty map is published.
+  An evicted id therefore restores as `cwd:null`. The reader accepts the prior
+  version-1 object map, but every new publication uses the ordered version-2
+  form and the same bounded atomic control-file writer.
+  The daemon subscribes once to the raw AgentSession, so HTTP, collaboration,
+  live-voice, hook, and re-answer turns all record the execution-start cwd. It
+  coalesces bursts into atomic fsynced replacements without clearing a dirty
+  revision on failure. Normal HTTP and ask re-answer adapters hold their one
+  terminal `done|error` frame until the sidecar write has durably succeeded or
+  bounded retries produce an explicit terminal persistence error. Raw-session
+  terminal observation drives the same flush before conversation invalidation,
+  and every session close retries any remaining dirty revision; per-HTTP
+  adapters do not record a duplicate cwd.
   `404 not_found` for an unknown conversation id. Only OMP
   conversations are readable here; a Claude Code conversation's transcript lives
   in that runtime's own storage.
@@ -606,25 +1254,54 @@ one must not be a leak of both.
   user message (`400 invalid_branch`), the source must be idle
   (`409 session_busy`), and any other `action` is `400 invalid_request`.
   In-file sibling branches are not part of the API: there is no `navigate`.
+  A fork clones the source's project binding, generation-qualified immutable
+  Pi project snapshot when bound, and tool-cwd map before it is
+  published, so relative historical tool paths keep their meaning. A durable
+  pending marker hides the raw id while the transcript is written under a
+  temporary name and every applicable sidecar is fsynced; the transcript rename is the
+  publication barrier and the marker is removed last. Startup/list recovery
+  recognizes both v1 and v2 markers, publishes a complete set or removes an
+  incomplete set. A retained marker after an I/O failure keeps even a visible
+  transcript hidden from listing and makes open return `409 session_busy`; a
+  later recovery retries the same artifact set. Cleanup verifies every required
+  partial path absent (or every recovered publication path present) and fsyncs
+  the sessions directory before unlinking the marker. An unlink, verification,
+  or directory-fsync failure retains or restores the marker, so it is retired
+  only after the complete state is durable. Failed fork cleanup removes those
+  unpublished sidecars with the transcript. Before examining or removing any
+  artifact, recovery derives every final path from the marker's validated raw
+  conversation id and runtime. Every final and temporary path must be a
+  distinct, lexically exact direct child of that sessions directory; each
+  temporary basename must carry its own transcript, project-binding,
+  generation-qualified snapshot, or tool-cwd final basename plus the admitted
+  pending suffix. An invalid relationship keeps the marker pending, performs
+  zero cleanup, and cannot name a victim transcript or sidecar.
 - `POST /api/ghosts/:name/sessions/:id/reanswer` with `{ entryId }` reopens a
   persisted `ask` result, commits the answer as a sibling, and resumes the model
   on that branch. Its response is an SSE stream and includes `branch_changed`.
+  Re-answer and awaited Ghost hooks use the conversation's actual live cwd;
+  the Pi runtime still keeps `task` disabled and never discovers agents from
+  that cwd.
 - `POST /api/ghosts/:name/greeting` `{}` → `{ greeting: string | null,
   onboarding: boolean }` — one smol-lane completion (see below) writes a short
   in-persona opener for an empty chat from the character file, memory index,
-  doc catalog, and the current time. `greeting` is `null` on ANY generation
-  failure (no usable model, provider error, timeout, output rejected by
+  shallow Documents index, and the current time. `greeting` is `null` on ANY
+  generation failure (no usable model, provider error, timeout, output rejected by
   validation) — never a 5xx; the shell keeps its static invitation and the
   greeting is pure upside. `onboarding` is true while `character.md` is
   missing, blank, or still byte-equal to the seed, and is recomputed per
-  request even when generation fails. Cached per ghost (TTL ~10 min,
+  request even when generation fails. Character/onboarding, memory, Documents,
+  and conversation-recency reads are independently best-effort: an unavailable
+  input defaults only its own section, never discards successful siblings, and
+  never exposes its error or path. An unreadable character fails closed to
+  `onboarding: false`. Only an unknown ghost makes the endpoint fail. Cached per ghost (TTL ~10 min,
   single-flight), invalidated when `character.md` changes.
 
 ### The smol lane (the `smol_model` role)
 
-One cheap, fast model role carries every side-completion that must never block
-a reply or bill like a chat turn. The role name adopts OMP's own convention
-(`modelRoles.smol`, the `@smol` alias family). Two consumers today:
+One cheap, fast model role carries small raw completions that should not bill
+like a chat turn. The role name adopts OMP's own convention
+(`modelRoles.smol`, the `@smol` alias family). Three consumers today:
 
 **Conversation titles.** After the first turn of a conversation completes, the
 daemon generates a 3-6 word title from the first user message with one smol
@@ -650,9 +1327,18 @@ refuses an automatic title over a name a person chose.
 **Greetings.** `POST …/greeting` (above) writes the empty-chat opener with one
 smol completion: 1-3 sentences in the ghost's own voice, at most one timely
 detail (time of day, a gap since the last conversation, something from memory),
-ending with an invitation to talk. Character, memory-index, and doc-catalog
-inputs are fenced as untrusted data; output that answers instead of greeting is
-rejected outright, never truncated.
+ending with an invitation to talk. Character, memory-index, and root Documents
+index inputs are fenced as untrusted data. The greeting's 1,200-character
+Documents budget admits complete index lines only and states the exact total
+omitted after combining the source-index cap with this tighter cut. Output that
+answers instead of greeting is rejected outright, never truncated.
+
+**Command-hook classification.** `ghostd hook-smol-complete` reads
+`{ ghost_home, prompt }` from stdin and writes `{ text }` to stdout. It exists
+for trusted machine command hooks such as the `session_stop` continuity
+classifier. The command resolves the named ghost's normal smol lane and runs
+one raw completion with no tools, transcript, session, or reasoning-effort
+override; it never hardcodes a provider model.
 
 Which model serves the lane is the `smol_model` role in `models.json`,
 resolved daemon-side:
@@ -810,20 +1496,32 @@ The owner runs `claude auth login` outside Ghost. Ghost accepts no Claude
 credential, stores no Claude credential, and removes ambient API/OAuth-token
 variables from the subprocess environment.
 
-The runtime uses the owner's local Claude Code authentication. The native
-Claude Code system prompt, tools,
-filesystem settings, project instructions, skills, plugins, subagents, web
-search, and MCP configuration remain enabled with bypass-permissions mode,
-matching the unrestricted owner-local OMP runtime. Existing Ghost extension
-tools are added through one in-process SDK MCP server, and the output is
-normalized back to pi-messages. Ambient provider credentials are still
-scrubbed; removing tool restrictions does not turn Ghost into a credential
-proxy.
+The runtime uses the owner's local Claude Code authentication, native system
+prompt, built-in tools, and web search in bypass-permissions mode. Filesystem
+setting sources are pinned to `[]`: neither owner-home cwd nor a trusted project
+may inject executable settings, hooks, or plugins. Every query appends the
+visible ghost home's bounded user-level instruction/skill/rule/prompt/
+Markdown-command snapshot while keeping SDK `skills:[]`; a bound project adds
+its stored accepted snapshot with Pi's exact-name project-over-ghost shadowing
+and translates only its validated native MCP rows into the SDK config. Unbound
+sessions enable no cwd-discovered skills. Existing Ghost extension
+tools are added through one in-process SDK MCP server, and output is normalized
+back to pi-messages. Ambient provider credentials remain scrubbed.
 
-Each turn is an Effect scope. It rebuilds the Ghost system prompt, resumes the
-opaque Claude session id, streams one turn, atomically writes a mode-`0600`
-metadata sidecar under `sessions/`, emits one terminal event, and closes the
-query. Claude Code owns the actual transcript under its own
+Each turn is an Effect scope. A new conversation uses its pre-turn project cwd,
+or owner home while unbound. That choice is fixed at the first owner turn:
+later PUT/reload is rejected and the shell must start a new conversation.
+Every accepted metadata version stores exact canonical ISO `created` and
+`modified` timestamps. Version-3 mode-`0600` metadata stores the actual cwd and the exact first-turn
+project snapshot beside the opaque Claude resume id. A version-1 sidecar
+predates cwd and resumes at ghost home for history safety; version 2 has cwd but
+no project snapshot. Either legacy version may promote while unbound, but a
+bound legacy resume fails closed rather than rereading mutable project inputs.
+The runtime rebuilds the Ghost persona/memory/Documents prompt and visible
+ghost declarative snapshot, reuses the stored project bytes and MCP rows,
+streams one turn,
+atomically writes metadata before the terminal event, and closes the query.
+Claude Code owns the actual transcript under its own
 `~/.claude/projects/` storage; the sidecar is not a transcript. Full rationale,
 T3 Code provenance, policy caveat, and legal boundary:
 [`docs/claude-code-runtime.md`](docs/claude-code-runtime.md).
@@ -834,9 +1532,9 @@ whole model before any non-local exposure.
 
 ## Package boundaries
 
-- `packages/extensions` — pure OMP extensions + ghost-home fs helpers. No HTTP,
-  no daemon lifecycle. Exports the extension factories and the ghost-home
-  reader/writer.
+- `packages/extensions` — pure OMP extensions plus ghost-home and machine
+  Documents filesystem helpers. No HTTP, no daemon lifecycle. Exports the
+  extension factories and typed readers/writers.
 - `packages/daemon` — per-ghost OMP `AgentSession` and Claude Code query
   lifecycles, env scrubbing, model/runtime selection, the HTTP API, systemd
   unit. Depends on `extensions`.
@@ -857,14 +1555,50 @@ whole model before any non-local exposure.
   `SessionManager.create(cwd, sessionDir)` or sessions land in global `~/.pi`.
 - Scrub inherited env before session creation: stray provider API keys
   (e.g. `GEMINI_API_KEY`) silently add cloud models to a sovereign ghost.
+- Also scrub `PI_CONFIG_FILES`, `PI_SHELL_PREFIX`, and
+  `CLAUDE_CODE_SHELL_PREFIX`. Hosted settings pass an explicit empty overlay
+  list, and every Bash/PTY path receives that conversation's Settings instance;
+  neither surface may fall back to an OMP process singleton.
 - Parallel tool calls: wrap shared-file mutations in a file mutation queue.
 - Tools should throw structured errors, not return `isError` payloads.
-- Sessions omit non-MCP capability-provider restrictions, explicitly scope
-  every artifact discovery to the ghost home, and load read-only settings from
-  that home's `settings.yml` only. Their MCP manager is injected from that
-  ghost's `mcp.json` only; machine-level OMP, Codex, Claude, Copilot, and other
-  user/global MCP sources are never discovered. This is a sovereignty invariant
-  like env scrubbing.
+- Sessions load read-only OMP settings only from the ghost home's visible
+  `settings.yml`, while operational cwd defaults to owner home. The loader
+  always passes an authoritative overlay list: `[<ghost>/settings.yml]` when
+  present and `[]` when absent, so `PI_CONFIG_FILES` cannot supply a fallback.
+  Every ghost/user declarative category comes only from visible ghost paths;
+  hidden compatibility providers are admitted only for a trusted project.
+  Every category is passed as an explicit immutable snapshot from ghost root
+  plus one trusted project root. Executable discovery receives explicit empty
+  `additionalExtensionPaths` and `preloadedExtensionPaths`; project and visible
+  Ghost `tools/` code stay disabled. Ghost separately preloads only direct, non-hidden
+  regular JavaScript/TypeScript entries from its visible `hooks/pre` and
+  `hooks/post`. It opens the ghost
+  root, hook directories, and final entry descriptor-relatively with
+  `O_NOFOLLOW`, verifies regular-file identity, imports the factory through the
+  pinned descriptor, and supplies an explicit empty extension-path list so OMP
+  cannot rescan a swapped pathname. Dot-prefixed entries are silently skipped
+  before extension, type, or link checks; visible symbolic-link entries are
+  rejected. These
+  trusted ghost-owned in-process factories preserve Ghost hooks without
+  admitting custom tools, owner-home code, or bound-project code. Their MCP manager
+  is injected from the ghost's visible `mcp.json` plus the bound project's
+  native config only; machine-level OMP, Codex,
+  Claude, Copilot, and other user/global MCP sources are never discovered. This
+  is a sovereignty invariant like env scrubbing.
+- Each top-level `AgentSession` owns its own `AsyncJobManager`; background Bash
+  never uses or clears another conversation's manager. `mcp://` and `rule://`
+  resolution similarly receives the calling session's manager/rule snapshot at
+  every native consumer (Read, Bash URL expansion, glob/grep/find and shared
+  search scopes) and has no process-global fallback.
+  Snapshot-backed `skill://name` remains readable through the snapshot-aware
+  Read/model protocol. Bash path expansion rejects its root and subresources
+  with `snapshot_skill_filesystem_unsupported`; it never resolves the live
+  `baseDir` of a skill admitted before the project changed.
+- Eval receives the calling `ToolSession.settings` through its executor, output
+  sink, kernel/runtime selection, and interpreter availability checks. Kernel
+  and availability caches include that Settings identity; no hosted eval path
+  calls `Settings.init()` or borrows another ghost's process singleton merely
+  because two sessions share a cwd.
 - OMP may mount non-core tools under xd://; absence from
   `getActiveToolNames()` does not mean absence from its tool registry.
 - Force `memory.backend: "off"` (plus the legacy `memories.enabled` and

@@ -22,8 +22,9 @@ actually remember over a general statement you could have made about anything.
 
 ## What you know
 
-Your docs and memory files are yours. Read them before you answer a question
-they cover, and write a memory file when you learn something worth keeping.
+Your memory files are yours, and the owner's Documents are shared with you. Read
+them before you answer a question they cover, and write a memory file when you
+learn something worth keeping.
 `;
 
 let fixture: GhostFixture;
@@ -76,9 +77,9 @@ describe("character extension", () => {
     expect(result.details).toMatchObject({ exists: true, empty: true, length: 0 });
   });
 
-  it("flags a file that is still the seeded one", async () => {
-    await writeFile(characterPath(), SEEDED_CHARACTER, "utf8");
+  it("flags the current file when it is still seeded", async () => {
     const harness = await loadExtension(createCharacterExtension(), fixture.dir);
+    await writeFile(characterPath(), SEEDED_CHARACTER, "utf8");
     const result = await harness.call(GHOST_CHARACTER, { action: "read" });
     expect(resultText(result)).toContain("still the seeded file");
     expect(result.details).toMatchObject({ exists: true, empty: false, seeded: true });

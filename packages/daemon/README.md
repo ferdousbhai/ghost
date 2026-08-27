@@ -52,10 +52,11 @@ Everything Ghost owns for an OMP conversation stays inside the ghost home:
 
 ```text
 ~/ghosts/<name>/
-  docs/**/*.md             canonical v2 Markdown documents
+  character.md             persona
+  memory/*.md              per-ghost durable facts
   settings.yml             per-ghost OMP settings
   models.json              providers plus Ghost roles/fallbacks
-  mcp.json                 the ghost's MCP servers
+  mcp.json                 ghost-owned MCP servers
   .pi/
     models.omp.json        generated OMP-compatible provider projection
     models.db              derived OMP catalogue cache
@@ -65,27 +66,71 @@ Everything Ghost owns for an OMP conversation stays inside the ghost home:
   sessions/
     <conversation>.jsonl   OMP session tree
     claude-<sha256>.json   Claude resume metadata, when selected
+    <stem>.<runtime>.project.json
+                           conversation project root, cwd, and snapshot status
+    <stem>.pi.project-snapshot.<generation>.json
+                           immutable accepted Pi project resources
+    <stem>.pi.tool-cwds.json
+                           execution cwd for persisted Pi tool calls
+    <stem>.<runtime>.maintenance.json
+                           durable idle-maintenance state
 ```
 
-### Documents (`ghost-home/v2`)
+### Owner-wide Documents
 
-`docs/**/*.md` is the canonical document tree. Every document starts at byte 0
-with a non-empty level-one ATX heading (`# Title`). Its optional final nonblank
-line is a space-separated list made only of lowercase hashtag slugs matching
-`#[a-z0-9]+(?:-[a-z0-9]+)*`; `#archived` is reserved and excludes that document
-from the default working set. The heading and tag line are ordinary Markdown
-and remain in `DocFile.body`. Documents never use YAML frontmatter.
+Live documents are the owner's XDG Documents tree, not per-ghost state. Ghost
+resolves `XDG_DOCUMENTS_DIR`, then `user-dirs.dirs`, then `~/Documents`; every
+ghost shares that one root. Files may have any type and folders may nest to any
+depth or width. A model's automatic index contains only the root's immediate
+non-hidden regular files and directories, with no content reads or descent,
+capped at 100 entries and 4,000 characters. Explicit native filesystem tools
+can traverse further when the task calls for it.
 
-Import and daemon startup perform the one-time `ghost-home/v1` migration after
-renaming an unambiguous `notes/` directory to `docs/`. For each legacy file,
-the first H1 supplies the title, then legacy frontmatter `title`, then the
-filename. Legacy tags become lowercase hyphenated hashtag slugs,
-`archived: true` becomes `#archived`, and the import-only `path` field is
-discarded. Existing trailing hashtags are merged and deduplicated. Each file
-is rewritten atomically and is valid v2 immediately, so a failed scan can be
-rerun safely. There is no migration marker and no dual-format reader: after
-migration, readers and writers accept v2 only. If both `notes/` and `docs/`
-exist, startup fails rather than guessing.
+The HTTP API browses one directory at a time with opaque pagination and current-
+directory name filtering. It never follows symbolic links. Its inline content
+route opens a regular file below pinned directory descriptors, reads at most
+1 MiB of strict UTF-8 text, and rejects NUL, replacement, and special-file
+swaps; the shell does not read Documents pathnames itself. File deletion is
+descriptor-confined, serialized through the shared filesystem lock, and moves
+one exactly confirmed regular file to recoverable Trash. Ghost rename, delete,
+and future home export never move or copy the owner-wide Documents tree.
+
+The hosted importer retains its bounded archive safety and may leave legacy
+`notes/`/`docs/` Markdown under the imported ghost home for explicit manual
+placement. That compatibility tree is not indexed or exposed as live Documents;
+there is no automatic startup/import migration into the owner's XDG directory.
+
+To retain those files, stop Ghost and choose one legacy home. The source is
+normally `<ghost-home>/docs` after hosted import compatibility has run; use the
+exact `root` reported by `GET /api/documents`. The operator command defaults to
+a read-only dry run:
+
+```bash
+ghostd place-legacy-documents \
+  --source /absolute/path/to/ghost-home/docs \
+  --documents-root /absolute/path/from-api
+```
+
+It refuses relative paths, symbolic links in either root or any traversed
+component, special source files, overlapping roots, and every destination
+collision. Review a clean plan, then repeat the exact command with `--apply`.
+Apply copies through pinned directory descriptors, publishes with no-overwrite
+hard links, preserves each regular file's mode and timestamps, verifies the
+published inode, and rolls the whole invocation back on failure. No legacy
+source file is modified or removed:
+
+```bash
+ghostd place-legacy-documents \
+  --source /absolute/path/to/ghost-home/docs \
+  --documents-root /absolute/path/from-api \
+  --apply
+```
+
+Never delete the legacy source until the resulting Documents files have been
+independently inspected and backed up. Repeat separately for another retained
+home; matching relative paths collide and require an owner-chosen name rather
+than an automatic namespace. This is an explicit operator tool, never an
+automatic startup/import migration.
 
 `ghostd import` requires the daemon to be stopped. The command and daemon take
 the same root-keyed filesystem reservation before accessing a ghost home. The
@@ -98,24 +143,26 @@ The import's `--host` and `--port` options retain a listener check for older
 daemon versions that do not take the root reservation; they must match that
 older daemon's effective loopback listener.
 
-`writeDoc(path, { body })` validates the complete canonical Markdown body and
-writes exactly that body; there are no separate title, tag, archived, or
-application-path write options. Context listings are derived from disk for each
-request, report malformed siblings instead of guessing, and never persist a
-catalog.
+Ghost-home context listings are derived from disk for each request and never
+persist a catalog. Documents use their separate machine-level route.
 
-### Ghost MCP
+### Ghost and conversation-project MCP
 
-Ghost deliberately narrows OMP's MCP discovery to the selected home's visible
-`mcp.json`. The management API reads and writes only that file. Its list
-response redacts every credential-bearing value and
-does not open a conversation merely to report connection status.
+Ghost deliberately narrows OMP's MCP discovery to the ghost home's visible
+`mcp.json`, plus `.omp/mcp.json` and legacy `.omp/.mcp.json` under one
+explicitly trusted conversation project. The ghost MCP management API reads and
+writes only the visible ghost-owned file. Its list response redacts every credential-
+bearing value and does not open a conversation merely to report connection
+status.
 
-Config mutations are live: every idle OMP conversation reconnects from that
-ghost file and replaces its mounted MCP tools; a busy conversation defers one
-coalesced reload until it settles. An explicit test uses an isolated MCP manager
-without creating an AgentSession, while reconnect only targets managers that
-are already loaded.
+Ghost MCP mutations are live: every idle OMP conversation reconnects from the
+visible ghost file while reusing the exact project MCP rows admitted with that
+conversation's immutable declarative snapshot. It connects a candidate manager
+before replacing the mounted MCP tools; a busy conversation defers one
+coalesced reload until it settles. Explicit project reload validates and
+publishes a new snapshot before the old session is closed and reopened. A bound
+project's failures are retained as explicit degraded state. Reconnect only
+targets managers that are already loaded.
 
 ### Connect and recoverable deletion
 
@@ -125,11 +172,12 @@ Realtime with the ghost's Codex OAuth. Collaboration exposes distinct encrypted
 read-only and confirmed writable relay links; the latter can drive the host
 session and its local tools. Links are never logged.
 
-Every user-visible file deletion is a move to freedesktop Trash. This covers
-whole ghosts, OMP transcripts, Claude resume sidecars, hosted import sources,
-documents, and memory files. Cross-filesystem moves fall back to a hidden
-same-filesystem Trash directory. Only rollback of a fork that was never shown
-to the owner remains a permanent unlink.
+Whole ghosts, documents, and memory files move to freedesktop Trash, with a
+same-filesystem fallback when needed. Conversation deletion pre-journals every
+owned transcript/sidecar destination inside a private same-filesystem fallback
+Trash root so a crash after rename can recover the complete receipt. Only
+rollback of a fork or project draft that was never shown to the owner remains a
+permanent unlink.
 
 `SessionManager.open` receives the explicit per-ghost session directory;
 `createAgentSession({ agentDir })` alone does not redirect transcripts.
@@ -138,10 +186,21 @@ removes provider keys and routing variables before OMP is loaded. Provider
 login writes `agent.db`; a previous `.pi/auth.json` is imported once, without
 being deleted.
 
-Sessions are trusted local OMP projects. They keep native filesystem,
-Bash, skills, rules, project context, plugins, MCP, LSP, task/hub, web search,
-and background jobs, then add Ghost's extensions. Tool approval UI is disabled
-(`approvalMode: yolo`, `autoApprove: true`); `ask` is not an approval prompt.
+New sessions start with the owner's home as their operational cwd, while all
+transcripts, persona, memory, credentials, browser state, and configuration
+remain under the ghost home. The cwd alone grants no discovery authority. A
+conversation may explicitly trust and bind one project, after which Ghost pins
+its data-only instructions, skills, rules, Markdown commands/prompts, and scoped
+MCP configuration. Project executable extensions, hooks, custom code tools,
+LSP, and custom agent definitions stay disabled until they can run through an
+isolated per-session boundary. Pi explicitly disables OMP's `task` tool, so no
+bundled, project, ghost-file, or ambient subagent is invokable in phase 1.
+Native filesystem/Bash, hub, web search, background jobs, and Ghost's explicit
+extensions remain available. Tool
+approval UI is disabled (`approvalMode: yolo`, `autoApprove: true`); `ask` is
+not an approval prompt.
+
+Claude Code sessions retain Claude's native subagents.
 
 
 ## Models and routing
@@ -180,6 +239,9 @@ Ghost maps its roles to OMP as follows:
 | `advisor_model` | `advisor` |
 | `general_purpose_model` | `general` |
 | `research_model` | `research` |
+
+`task_model` and `advisor_model` remain OMP routing-policy roles. They do not
+make either kind of subagent available while Pi spawning is disabled in phase 1.
 
 Fallback arrays are ordered and projected to `retry.fallbackChains`; OMP owns
 retry classification, cooldowns, and fallback execution. The switcher orders a
@@ -231,10 +293,16 @@ The authoritative route and payload contract is
 
 | method | path | purpose |
 |---|---|---|
+| GET | `/api/documents` | lazily list one shared Documents directory |
+| DELETE | `/api/documents` | move one confirmed regular Documents file to Trash |
 | PUT | `/api/ghosts/:name/name` | rename the ghost, moving its whole home |
-| GET | `/api/ghosts/:name/context` | derive browsable docs, memory, character, and available task helpers |
-| DELETE | `/api/ghosts/:name/context` | move one confirmed docs/memory file to Trash |
-| GET/POST | `/api/ghosts/:name/mcp` | list or add project-owned MCP servers |
+| GET | `/api/ghosts/:name/context` | derive browsable character and memory; `agents` is an empty compatibility array while Pi subagents remain disabled |
+| DELETE | `/api/ghosts/:name/context` | move one confirmed memory file to Trash |
+| GET/PUT | `/api/ghosts/:name/sessions/:id/project` | inspect, bind, or unbind one conversation project |
+| POST | `/api/ghosts/:name/sessions/:id/project/preview` | inspect a project and mint a short-lived trust receipt |
+| POST | `/api/ghosts/:name/sessions/:id/project/reload` | refresh an idle conversation's trusted snapshot |
+| DELETE | `/api/ghosts/:name/sessions/:id/project/draft` | abandon an unpublished pre-turn project draft |
+| GET/POST | `/api/ghosts/:name/mcp` | list or add ghost-owned MCP servers |
 | PUT/DELETE | `/api/ghosts/:name/mcp/:server` | replace or remove one MCP server |
 | PUT | `/api/ghosts/:name/mcp/:server/enabled` | enable or disable one MCP server |
 | POST | `/api/ghosts/:name/mcp/:server/test` | isolated sanitized connection probe |

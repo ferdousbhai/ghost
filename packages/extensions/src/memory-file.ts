@@ -8,6 +8,12 @@
 import { MemoryFileFormatError } from "./errors.js";
 
 export const MAX_MEMORY_FILE_CONTENT_LENGTH = 2_000;
+/**
+ * Inclusive on-disk boundary for one memory. JavaScript's 2,000 UTF-16-unit
+ * content limit can occupy at most three UTF-8 bytes per unit, followed by the
+ * writer's canonical newline.
+ */
+export const MAX_MEMORY_FILE_BYTES = MAX_MEMORY_FILE_CONTENT_LENGTH * 3 + 1;
 export const MAX_MEMORY_FILE_SLUG_LENGTH = 64;
 export const MAX_MEMORY_FILES = 500;
 /** Maximum length of one derived index preview, including an ellipsis. */
@@ -98,6 +104,10 @@ export function assertWritableMemory(content: string): void {
     throw new MemoryFileFormatError(
       `Memory files must be ${MAX_MEMORY_FILE_CONTENT_LENGTH} characters or fewer. Split unrelated facts into separate files.`,
     );
+  }
+  const utf8 = new TextEncoder().encode(normalized);
+  if (new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(utf8) !== normalized) {
+    throw new MemoryFileFormatError("A memory must contain valid Unicode text.");
   }
 }
 

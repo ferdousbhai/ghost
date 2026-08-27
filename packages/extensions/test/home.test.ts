@@ -1,24 +1,24 @@
-import { execFile, spawn, type ChildProcess } from "node:child_process";
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
-import { mkdir, readFile, readdir, stat, symlink, writeFile } from "node:fs/promises";
+import {
+  appendFile,
+  readFile,
+  rename,
+  stat,
+  symlink,
+  truncate,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import { join } from "node:path";
-import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { deriveDocCatalog } from "../src/catalog.js";
 import { GhostError, MemoryFileFormatError } from "../src/errors.js";
 import { type GhostHome, openGhostHome } from "../src/home.js";
-import { deriveMemoryIndex } from "../src/memory-file.js";
-import {
-  ARCHIVED_DOC_PATH,
-  createGhostFixture,
-  FINANCE_DOC_PATH,
-  PAPER_DOC_PATH,
-  type GhostFixture,
-} from "./support/fixture.js";
+import { deriveMemoryIndex, MAX_MEMORY_FILE_BYTES } from "../src/memory-file.js";
+import { createGhostFixture, type GhostFixture } from "./support/fixture.js";
 
 let fixture: GhostFixture;
 let home: GhostHome;
-const execFileAsync = promisify(execFile);
 
 async function waitForPath(path: string): Promise<void> {
   const deadline = Date.now() + 5_000;
@@ -216,189 +216,6 @@ describe("character", () => {
   });
 });
 
-describe("docs", () => {
-  it("lists strict v2 metadata derived from the raw Markdown", async () => {
-    const { docs, skipped } = await home.listDocs();
-    expect(skipped).toEqual([]);
-    expect(docs.map((doc) => doc.path)).toEqual([
-      PAPER_DOC_PATH,
-      FINANCE_DOC_PATH,
-      ARCHIVED_DOC_PATH,
-      "press-restoration.md",
-    ].sort((a, b) => a.localeCompare(b)));
-
-    const paper = docs.find((doc) => doc.path === PAPER_DOC_PATH);
-    expect(paper).toMatchObject({
-      title: "Paper that takes a deep impression",
-      tags: ["paper", "press"],
-      archived: false,
-    });
-    const archived = docs.find((doc) => doc.path === ARCHIVED_DOC_PATH);
-    expect(archived).toMatchObject({ tags: [], archived: true });
-  });
-
-  it("returns the complete canonical Markdown body", async () => {
-    const bytes = await readFile(join(home.docsDir, PAPER_DOC_PATH), "utf8");
-    const doc = await home.readDoc(PAPER_DOC_PATH);
-    expect(doc.body).toBe(bytes);
-    expect(doc.body.startsWith("# Paper that takes a deep impression")).toBe(true);
-    expect(doc.body.endsWith("#paper #press\n")).toBe(true);
-  });
-
-  it("validates then writes exactly the supplied canonical bytes", async () => {
-    const exact = "# Exact bytes\r\n\r\nKeep trailing spaces  \r\n\r\n#one\r\n";
-    const meta = await home.writeDoc("nested/exact.md", { body: exact });
-    expect(meta).toMatchObject({ title: "Exact bytes", tags: ["one"], archived: false });
-    expect(await readFile(join(home.docsDir, "nested/exact.md"), "utf8")).toBe(exact);
-    expect((await home.readDoc("nested/exact")).body).toBe(exact);
-  });
-
-  it("rejects non-v2 bytes on every live read and write path", async () => {
-    const invalidPath = join(home.docsDir, "invalid.md");
-    await writeFile(invalidPath, "---\ntitle: Legacy\n---\n\nbody\n");
-    await expect(home.readDoc("invalid")).rejects.toMatchObject({ code: "invalid_format" });
-    const listing = await home.listDocs();
-    expect(listing.docs.some((doc) => doc.path === "invalid.md")).toBe(false);
-    expect(listing.skipped).toEqual([
-      expect.objectContaining({ path: "docs/invalid.md" }),
-    ]);
-    await expect(home.writeDoc("plain.md", { body: "plain bytes" }))
-      .rejects.toMatchObject({ code: "invalid_format" });
-    await expect(home.writeDoc("uppercase-tag.md", {
-      body: "# Valid title\n\n#Not-Canonical\n",
-    })).rejects.toMatchObject({ code: "invalid_format" });
-    await expect(readFile(join(home.docsDir, "plain.md"), "utf8")).rejects.toThrow();
-  });
-
-  it("keeps canonical bytes identical across a read/write round trip", async () => {
-    const before = await readFile(join(home.docsDir, PAPER_DOC_PATH), "utf8");
-    const doc = await home.readDoc(PAPER_DOC_PATH);
-    await home.writeDoc(PAPER_DOC_PATH, { body: doc.body });
-    expect(await readFile(join(home.docsDir, PAPER_DOC_PATH), "utf8")).toBe(before);
-  });
-
-  it("refuses paths that escape the docs directory", async () => {
-    await expect(home.readDoc("../../etc/passwd")).rejects.toThrow(GhostError);
-    await expect(home.writeDoc("../outside.md", { body: "# X\n" })).rejects.toThrow(GhostError);
-  });
-
-  it("refuses file and directory symlinks instead of following them outside", async () => {
-    const outsideFile = join(fixture.root, "outside.md");
-    const outsideDir = join(fixture.root, "outside-docs");
-    const outsideBytes = "# Outside secret\n\nNever list me.\n";
-    await writeFile(outsideFile, outsideBytes, "utf8");
-    await mkdir(outsideDir);
-    await symlink(outsideFile, join(home.docsDir, "linked.md"));
-    await symlink(outsideDir, join(home.docsDir, "linked-dir"));
-
-    await expect(home.readDoc("linked.md"))
-      .rejects.toMatchObject({ code: "invalid_path" });
-    await expect(home.writeDoc("linked.md", { body: "# Replacement\n" }))
-      .rejects.toMatchObject({ code: "invalid_path" });
-    await expect(home.writeDoc("linked-dir/new.md", { body: "# New\n" }))
-      .rejects.toMatchObject({ code: "invalid_path" });
-
-    const listing = await home.listDocs();
-    expect(listing.docs.map((doc) => doc.title)).not.toContain("Outside secret");
-    expect(listing.skipped).toContainEqual(
-      expect.objectContaining({ path: "docs/linked.md" }),
-    );
-    expect(await readFile(outsideFile, "utf8")).toBe(outsideBytes);
-    await expect(readFile(join(outsideDir, "new.md"), "utf8")).rejects.toThrow();
-  });
-
-  it("rejects a FIFO document without blocking on open", async () => {
-    await execFileAsync("mkfifo", [join(home.docsDir, "blocking.md")]);
-    const started = Date.now();
-    const listing = await home.listDocs();
-    await expect(home.readDoc("blocking.md"))
-      .rejects.toMatchObject({ code: "invalid_path" });
-    expect(Date.now() - started).toBeLessThan(1_000);
-    expect(listing.skipped).toContainEqual(
-      expect.objectContaining({ path: "docs/blocking.md" }),
-    );
-  });
-
-  it("publishes concurrent doc replacements as complete atomic files", async () => {
-    const bodies = Array.from(
-      { length: 12 },
-      (_, index) => `# Version ${index}\n\n${String(index).repeat(100_000)}\n`,
-    );
-    await Promise.all(bodies.map((body) => home.writeDoc("races/hot.md", { body })));
-
-    expect(bodies).toContain(await readFile(join(home.docsDir, "races/hot.md"), "utf8"));
-    expect((await readdir(join(home.docsDir, "races"))).filter((name) =>
-      name.includes(".write-")
-    )).toEqual([]);
-  });
-
-  it("throws not_found rather than returning an error payload", async () => {
-    await expect(home.readDoc("missing.md")).rejects.toMatchObject({ code: "not_found" });
-  });
-
-  it("searches bodies and reports line numbers", async () => {
-    const result = await home.searchDocs("carriage");
-    expect(result.matches).toHaveLength(1);
-    expect(result.matches[0]?.path).toBe("press-restoration.md");
-    expect(result.matches[0]?.line).toBe(3);
-  });
-
-  it("excludes #archived docs from search unless explicitly activated", async () => {
-    expect((await home.searchDocs("Superseded")).matches).toEqual([]);
-    const active = await home.searchDocs("Superseded", { includeArchived: true });
-    expect(active.matches).toEqual([
-      expect.objectContaining({ path: ARCHIVED_DOC_PATH, line: 3 }),
-    ]);
-  });
-
-  it("refuses a catastrophic-backtracking regex fast instead of hanging", async () => {
-    const started = Date.now();
-    await expect(home.searchDocs("(a+)+$", { regex: true }))
-      .rejects.toMatchObject({ code: "invalid_format" });
-    await expect(home.searchDocs("(.*a){30}", { regex: true }))
-      .rejects.toMatchObject({ code: "invalid_format" });
-    // The whole guard, analysis included, is bounded well under a second.
-    expect(Date.now() - started).toBeLessThan(2_000);
-  });
-
-  it("still runs an ordinary regex search", async () => {
-    const result = await home.searchDocs("carr[a-z]+", { regex: true });
-    expect(result.matches.length).toBeGreaterThan(0);
-    expect(result.matches[0]?.path).toBe("press-restoration.md");
-  });
-
-  it("leaves the literal (non-regex) path untouched by the ReDoS guard", async () => {
-    // The same string that is refused as a regex is a fine literal query: it is
-    // escaped, so it can never backtrack, and it simply matches nothing here.
-    const result = await home.searchDocs("(a+)+$");
-    expect(result.matches).toEqual([]);
-    expect(result.docsSearched).toBeGreaterThan(0);
-  });
-
-  it("caps title matches at max_results and reports truncation", async () => {
-    for (let index = 0; index < 10; index += 1) {
-      await home.writeDoc(`widgets/w${index}.md`, {
-        body: `# Widget number ${index}\n\nNothing to match in the body.\n`,
-      });
-    }
-    const result = await home.searchDocs("Widget number", { maxResults: 3 });
-    expect(result.matches).toHaveLength(3);
-    expect(result.truncated).toBe(true);
-    // Every returned match is a title hit (line 0), the path that used to overrun.
-    expect(result.matches.every((match) => match.line === 0)).toBe(true);
-  });
-});
-
-describe("doc catalog", () => {
-  it("lists every doc and marks archived entries", async () => {
-    const { docs } = await home.listDocs();
-    const catalog = deriveDocCatalog(docs);
-    expect(catalog.total).toBe(4);
-    expect(catalog.lines.join("\n")).toContain(`${FINANCE_DOC_PATH}: Estate and finances`);
-    expect(catalog.lines.join("\n")).toContain(`${ARCHIVED_DOC_PATH}: Old plan (archived)`);
-  });
-});
-
 describe("memory", () => {
   it("lists memory in slug order", async () => {
     const { files, skipped } = await home.listMemory();
@@ -421,6 +238,73 @@ describe("memory", () => {
       .toBe("Updated: the press is cold until nine.");
   });
 
+  it("journals exact memory bytes before publishing and returns the matching receipt", async () => {
+    const before = await readFile(join(home.memoryDir, "working-habit.md"), "utf8");
+    let publishedDuringJournal = false;
+    const result = await home.writeMemoryWithReceipt({
+      name: "working-habit",
+      content: "The owner now starts the press at ten.",
+    }, async (intent) => {
+      expect(intent.before).toBe(before);
+      expect(intent.after).toBe("The owner now starts the press at ten.\n");
+      expect(intent.beforeSha256).toMatch(/^[0-9a-f]{64}$/u);
+      expect(intent.afterSha256).toMatch(/^[0-9a-f]{64}$/u);
+      expect(intent.path).toBe("memory/working-habit.md");
+      publishedDuringJournal = await readFile(join(home.memoryDir, "working-habit.md"), "utf8")
+        === intent.after;
+    });
+
+    expect(publishedDuringJournal).toBe(false);
+    expect(result.written).toEqual({
+      slug: "working-habit",
+      path: "memory/working-habit.md",
+      created: false,
+    });
+    expect(result.receipt).toMatchObject({
+      operation: "updated",
+      before,
+      after: "The owner now starts the press at ten.\n",
+    });
+    expect(await readFile(join(home.memoryDir, "working-habit.md"), "utf8"))
+      .toBe(result.receipt.after);
+  });
+
+  it("does not publish a memory write when its pre-publication journal fails", async () => {
+    const path = join(home.memoryDir, "working-habit.md");
+    const before = await readFile(path, "utf8");
+    await expect(home.writeMemoryWithReceipt({
+      name: "working-habit",
+      content: "This must not publish.",
+    }, async () => {
+      throw new Error("journal unavailable");
+    })).rejects.toThrow("journal unavailable");
+    expect(await readFile(path, "utf8")).toBe(before);
+  });
+
+  it("replays only the exact journaled memory bytes under the descriptor lock", async () => {
+    const path = join(home.memoryDir, "working-habit.md");
+    const before = await readFile(path, "utf8");
+    let intent: Parameters<typeof home.replayMemoryWriteIntent>[0] | undefined;
+    await expect(home.writeMemoryWithReceipt({
+      name: "working-habit",
+      content: "The owner starts the press at eleven.",
+    }, async (journaled) => {
+      intent = journaled;
+      throw new Error("simulated crash before rename");
+    })).rejects.toThrow("simulated crash before rename");
+    expect(await readFile(path, "utf8")).toBe(before);
+
+    const receipt = await home.replayMemoryWriteIntent(intent as NonNullable<typeof intent>);
+    expect(receipt).toMatchObject({
+      operation: "updated",
+      before,
+      after: "The owner starts the press at eleven.\n",
+    });
+    expect(await readFile(path, "utf8")).toBe(receipt.after);
+    await expect(home.replayMemoryWriteIntent(intent as NonNullable<typeof intent>))
+      .rejects.toMatchObject({ code: "conflict" });
+  });
+
   it("rejects a malformed write with instructional guidance", async () => {
     await expect(home.writeMemory({ content: "" }))
       .rejects.toThrow(MemoryFileFormatError);
@@ -433,6 +317,136 @@ describe("memory", () => {
     const { files, skipped } = await home.listMemory();
     expect(files.map((file) => file.slug)).not.toContain("broken");
     expect(skipped[0]?.path).toBe("memory/broken.md");
+  });
+
+  it("admits the exact 6,001-byte UTF-8 boundary and skips one byte beyond it", async () => {
+    const content = "\u0800".repeat(2_000);
+    const atLimit = join(home.memoryDir, "at-limit.md");
+    const overLimit = join(home.memoryDir, "over-limit.md");
+    const overCharacters = join(home.memoryDir, "over-characters.md");
+    const bomOverLimit = join(home.memoryDir, "bom-over-limit.md");
+    await writeFile(atLimit, `${content}\n`);
+    await writeFile(overLimit, `${content}\n\n`);
+    await writeFile(overCharacters, `${"x".repeat(2_001)}\n`);
+    await writeFile(bomOverLimit, `\uFEFF${content}\n`);
+
+    expect((await stat(atLimit)).size).toBe(MAX_MEMORY_FILE_BYTES);
+    expect((await stat(overCharacters)).size).toBeLessThan(MAX_MEMORY_FILE_BYTES);
+    expect((await stat(bomOverLimit)).size).toBe(MAX_MEMORY_FILE_BYTES + 3);
+    await expect(home.readMemory("at-limit")).resolves.toMatchObject({ content });
+    await expect(home.readMemorySource("at-limit")).resolves.toBe(`${content}\n`);
+    await expect(home.readMemory("over-limit"))
+      .rejects.toMatchObject({ code: "invalid_format" });
+    await expect(home.readMemorySource("over-limit"))
+      .rejects.toMatchObject({ code: "invalid_format" });
+    await expect(home.readMemory("over-characters"))
+      .rejects.toMatchObject({ code: "invalid_format" });
+    await expect(home.readMemorySource("over-characters"))
+      .rejects.toMatchObject({ code: "invalid_format" });
+    await expect(home.readMemory("bom-over-limit"))
+      .rejects.toMatchObject({ code: "invalid_format" });
+
+    const listing = await home.listMemory();
+    expect(listing.files.map((file) => file.slug)).toContain("at-limit");
+    expect(listing.files.map((file) => file.slug)).not.toContain("over-limit");
+    expect(listing.files.map((file) => file.slug)).not.toContain("over-characters");
+    expect(listing.skipped).toContainEqual(expect.objectContaining({
+      path: "memory/over-limit.md",
+      reason: expect.stringContaining(`${MAX_MEMORY_FILE_BYTES}-byte limit`),
+    }));
+    expect(listing.skipped).toContainEqual(expect.objectContaining({
+      path: "memory/over-characters.md",
+      reason: expect.stringContaining("2000 characters or fewer"),
+    }));
+  });
+
+  it("rejects oversized sparse memory before reading or decoding it", async () => {
+    const path = join(home.memoryDir, "sparse.md");
+    await writeFile(path, "");
+    await truncate(path, MAX_MEMORY_FILE_BYTES + 1);
+
+    await expect(home.readMemory("sparse"))
+      .rejects.toBeInstanceOf(MemoryFileFormatError);
+    await expect(home.readMemorySource("sparse"))
+      .rejects.toMatchObject({ code: "invalid_format" });
+    expect((await home.listMemory()).skipped).toContainEqual(expect.objectContaining({
+      path: "memory/sparse.md",
+      reason: expect.stringContaining(`${MAX_MEMORY_FILE_BYTES}-byte limit`),
+    }));
+  });
+
+  it("skips symlink, FIFO, and invalid UTF-8 entries while direct reads fail typed", async () => {
+    const outside = join(fixture.root, "outside-memory.md");
+    await writeFile(outside, "outside bytes must not be read\n");
+    await symlink(outside, join(home.memoryDir, "linked.md"));
+    execFileSync("mkfifo", [join(home.memoryDir, "blocking.md")]);
+    await writeFile(join(home.memoryDir, "invalid-utf8.md"), new Uint8Array([0xc3, 0x28]));
+
+    const started = Date.now();
+    const listing = await home.listMemory();
+    expect(Date.now() - started).toBeLessThan(1_000);
+    for (const name of ["linked", "blocking", "invalid-utf8"]) {
+      expect(listing.files.map((file) => file.slug)).not.toContain(name);
+      expect(listing.skipped.map((entry) => entry.path)).toContain(`memory/${name}.md`);
+      await expect(home.readMemory(name)).rejects.toBeInstanceOf(GhostError);
+      await expect(home.readMemorySource(name)).rejects.toBeInstanceOf(GhostError);
+    }
+    await expect(home.readMemory("invalid-utf8"))
+      .rejects.toBeInstanceOf(MemoryFileFormatError);
+    expect(JSON.stringify(listing)).not.toContain("outside bytes");
+  });
+
+  it("skips descriptor-time mutation and fails direct reads on pathname replacement", async () => {
+    const growing = join(home.memoryDir, "growing.md");
+    await writeFile(growing, "stable fact\n");
+    let grew = false;
+    const listingHome = openGhostHome(fixture.dir, {
+      memoryReadProbe: async (stage, path) => {
+        if (!grew && stage === "read" && path === "memory/growing.md") {
+          grew = true;
+          await appendFile(growing, "growth");
+        }
+      },
+    });
+    const listing = await listingHome.listMemory();
+    expect(listing.files.map((file) => file.slug)).not.toContain("growing");
+    expect(listing.skipped).toContainEqual(expect.objectContaining({
+      path: "memory/growing.md",
+      reason: expect.stringContaining("changed while it was being read"),
+    }));
+
+    const swapped = join(home.memoryDir, "swapped.md");
+    const displaced = join(home.memoryDir, ".swapped.displaced");
+    await writeFile(swapped, "pinned fact\n");
+    let replaced = false;
+    const directHome = openGhostHome(fixture.dir, {
+      memoryReadProbe: async (stage, path) => {
+        if (!replaced && stage === "opened" && path === "memory/swapped.md") {
+          replaced = true;
+          await rename(swapped, displaced);
+          await writeFile(swapped, "pinned fact\n");
+        }
+      },
+    });
+    await expect(directHome.readMemory("swapped"))
+      .rejects.toMatchObject({ code: "conflict" });
+    await unlink(displaced);
+  });
+
+  it("preserves exact admitted owner bytes at the maintenance receipt boundary", async () => {
+    const path = join(home.memoryDir, "working-habit.md");
+    const ownerBytes = "\uFEFF  Owner-authored spacing stays exact.  \n\n";
+    await writeFile(path, ownerBytes);
+    await expect(home.readMemorySource("working-habit")).resolves.toBe(ownerBytes);
+
+    let journaledBefore: string | null | undefined;
+    await home.writeMemoryWithReceipt({
+      name: "working-habit",
+      content: "Replacement fact.",
+    }, async (intent) => {
+      journaledBefore = intent.before;
+    });
+    expect(journaledBefore).toBe(ownerBytes);
   });
 
   it("serializes concurrent writes to the same file", async () => {

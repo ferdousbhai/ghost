@@ -85,8 +85,15 @@ export {
   resolveGhostExtensions,
   type GhostExtensionOptions,
   type GhostHomeDigest,
+  type GhostHomeDigestInput,
+  type GhostHomeDigestReaders,
+  type GhostHomeDigestReadOptions,
   type ResolvedGhostExtensions,
 } from "./extensions.js";
+export {
+  DocumentsService,
+  type TrashedDocument,
+} from "./documents.js";
 export {
   assertValidGhostName,
   GHOST_AGENT_DIRNAME,
@@ -120,6 +127,7 @@ export {
 } from "./greeting.js";
 export {
   defaultGhostHooksPath,
+  GHOST_CONVERSATION_IDLE_DELAY_MS,
   GHOST_HOOK_HANDLER_TIMEOUT_MS,
   GHOST_SESSION_STOP_CONTINUATION_CAP,
   GhostHookRunner,
@@ -127,19 +135,47 @@ export {
   type GhostBeforePromptEvent,
   type GhostBeforePromptHandler,
   type GhostBeforePromptResult,
+  type GhostConversationIdleEvent,
+  type GhostConversationIdleHandler,
+  type GhostConversationIdleRegistration,
   type GhostHookAPI,
   type GhostHookContext,
   type GhostHookEvent,
   type GhostHookFactory,
   type GhostHookResult,
+  type GhostHookRegistrationOptions,
+  type GhostHookStatus,
+  type GhostHookStatusItem,
   type GhostSessionStopEvent,
   type GhostSessionStopHandler,
   type GhostSessionStopResult,
 } from "./hooks.js";
+export {
+  CONVERSATION_MAINTENANCE_IDLE_SECONDS,
+  CONVERSATION_MAINTENANCE_MAX_TOOL_ROUNDS,
+  CONVERSATION_MAINTENANCE_STATE_MAX_BYTES,
+  ConversationMaintenance,
+  maintenanceStatePath,
+  type ConversationMaintenanceOptions,
+  type ConversationMaintenanceStateV1,
+  type MaintenanceConversationDeleteOutcome,
+  type MaintenanceConversationDeleteReservation,
+  type MaintenanceDrainReservation,
+  type MaintenanceIdentity,
+  type MaintenanceOwnerActivity,
+  type MaintenanceOwnerAdmission,
+  type MaintenanceRuntime,
+  type MaintenanceSourceIdentity,
+  type MaintenanceSourceRevision,
+  type MaintenanceWithRuntime,
+  type SettledMaintenanceTurn,
+} from "./conversation-maintenance.js";
 export { createLogger, silentLogger, type Logger, type LogLevel } from "./log.js";
 export {
   HomeOperationCoordinator,
   homeOperationsFor,
+  type HomeMoveParticipant,
+  type HomeMoveParticipantReservation,
 } from "./home-operations.js";
 export {
   DEFAULT_MODELS_LIMIT,
@@ -301,6 +337,7 @@ export {
   OMP_NATIVE_TOOL_NAMES,
   SessionHost,
   sessionFileNameFor,
+  type AdmittedTurnOptions,
   type ConversationEventListener,
   type ConversationUpdatedEvent,
   type GhostSessionHandle,
@@ -315,6 +352,7 @@ export {
   type TitleGenerator,
   type Transcript,
   type TranscriptMessage,
+  type TurnAdmission,
 } from "./session-host.js";
 export {
   assistantText,

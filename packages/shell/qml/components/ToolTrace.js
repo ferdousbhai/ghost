@@ -209,10 +209,10 @@ function askAction(activity) {
 }
 
 /**
- * The file a call wrote, named the way the tool named it: absolute, or relative
- * to the session cwd, which OMP sets to the ghost home. Writers only — a read
- * changed nothing worth opening. Resolving this to an absolute path (and
- * deciding whether anything can render it) belongs to the caller.
+ * The file a call wrote, named the way the tool named it. Writers only — a
+ * read changed nothing worth opening. Native file tools resolve relative paths
+ * against the cwd captured on that activity; legacy Ghost-owned writers stay
+ * relative to the ghost home.
  */
 function fileTarget(activity) {
     activity = fields(activity);
@@ -221,8 +221,8 @@ function fileTarget(activity) {
     case "edit":
         // OMP's native file tools take `path`; some providers emit `file_path`.
         return argument(activity, "path") || argument(activity, "file_path");
-    // Historical transcripts keep the old tool name, but the home migration
-    // moved their targets into docs/ too.
+    // Historical transcripts keep the old tool name and target import-only
+    // files in that ghost home. They are never shared Documents paths.
     case "ghost_notes_write": {
         // A doc path is relative to the docs directory, not to the home.
         const doc = argument(activity, "path");
@@ -235,6 +235,27 @@ function fileTarget(activity) {
     default:
         return "";
     }
+}
+
+/** Which explicit path base the caller must use for {@link fileTarget}. */
+function fileBase(activity) {
+    activity = fields(activity);
+    switch (String(activity.name || "")) {
+    case "write":
+    case "edit":
+        return "cwd";
+    case "ghost_notes_write":
+    case "ghost_character":
+        return "ghost";
+    default:
+        return "";
+    }
+}
+
+/** Absolute session cwd captured by the daemon when this tool began. */
+function fileCwd(activity) {
+    activity = fields(activity);
+    return typeof activity.cwd === "string" ? activity.cwd.trim() : "";
 }
 
 // A trace describes the purpose of the work, never the mechanism used to do
@@ -443,6 +464,8 @@ function view(activity, completed, failed, expanded) {
         askPrompt: ask.prompt,
         askDetail: ask.detail,
         askAction: ask.action,
-        fileTarget: target
+        fileTarget: target,
+        fileBase: fileBase(activity),
+        fileCwd: fileCwd(activity)
     };
 }

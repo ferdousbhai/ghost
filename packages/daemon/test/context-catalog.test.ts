@@ -27,7 +27,7 @@ afterEach(() => {
 });
 
 describe("readGhostContext", () => {
-  it("reads character, nested docs, atomic memory, and per-file diagnostics", async () => {
+  it("reads character, atomic memory, and per-file diagnostics", async () => {
     const home = makeGhostHome();
     write(home, "character.md", [
       "## The Navigator",
@@ -50,22 +50,6 @@ describe("readGhostContext", () => {
     const snapshot = await readGhostContext(home);
 
     expect(snapshot.character).toEqual({ path: "character.md", title: "The Navigator" });
-    expect(snapshot.docs).toEqual([
-      {
-        path: "docs/guides/first-stop.md",
-        relativePath: "guides/first-stop.md",
-        title: "First Stop",
-        tags: [],
-        archived: false,
-      },
-      {
-        path: "docs/z-last.md",
-        relativePath: "z-last.md",
-        title: "Last Note",
-        tags: ["reference", "route-planning"],
-        archived: true,
-      },
-    ]);
     expect(snapshot.memory).toEqual([
       {
         path: "memory/alpha.md",
@@ -82,24 +66,23 @@ describe("readGhostContext", () => {
         updated: expect.any(String),
       },
     ]);
-    expect(snapshot.skipped).toHaveLength(2);
+    expect(snapshot.skipped).toHaveLength(1);
     expect(snapshot.skipped.map(({ section, path }) => ({ section, path }))).toEqual([
-      { section: "docs", path: "docs/broken.md" },
       { section: "memory", path: "memory/broken.md" },
     ]);
     expect(snapshot.skipped.every((entry) => entry.reason.length > 0)).toBe(true);
   });
 
-  it("uses OMP agent precedence and effective disabled-agent settings", async () => {
+  it("does not expose ambient or ghost agent definitions while task is disabled", async () => {
     const home = makeGhostHome();
-    write(home, "settings.yml", [
+    write(home, ".omp/config.yml", [
       "task:",
       "  disabledAgents:",
       "    - hidden-helper",
       "    - reviewer",
       "",
     ].join("\n"));
-    write(home, "agents/scout.md", [
+    write(home, ".omp/agents/scout.md", [
       "---",
       "name: scout",
       "description: Project scout override",
@@ -109,14 +92,14 @@ describe("readGhostContext", () => {
       "---",
       "Project-only investigation instructions.",
     ].join("\n"));
-    write(home, "agents/plain-helper.md", [
+    write(home, ".omp/agents/plain-helper.md", [
       "---",
       "name: plain-helper",
       "description: Minimal project helper",
       "---",
       "Project helper instructions.",
     ].join("\n"));
-    write(home, "agents/hidden-helper.md", [
+    write(home, ".omp/agents/hidden-helper.md", [
       "---",
       "name: hidden-helper",
       "description: Disabled project helper",
@@ -125,37 +108,6 @@ describe("readGhostContext", () => {
     ].join("\n"));
 
     const snapshot = await readGhostContext(home);
-    const scout = snapshot.agents.find((agent) => agent.name === "scout");
-    const plain = snapshot.agents.find((agent) => agent.name === "plain-helper");
-
-    expect(scout).toEqual({
-      name: "scout",
-      description: "Project scout override",
-      source: "user",
-      tools: ["read", "grep", "yield"],
-      model: ["@smol", "openai/test-model"],
-      spawns: ["task", "librarian"],
-    });
-    expect(plain).toEqual({
-      name: "plain-helper",
-      description: "Minimal project helper",
-      source: "user",
-      tools: null,
-      model: [],
-      spawns: null,
-    });
-    expect(snapshot.agents.some((agent) => agent.name === "task" && agent.source === "bundled"))
-      .toBe(true);
-    expect(snapshot.agents.some((agent) => agent.name === "hidden-helper")).toBe(false);
-    expect(snapshot.agents.some((agent) => agent.name === "reviewer")).toBe(false);
-    expect(snapshot.agents.map((agent) => agent.name)).toEqual(
-      [...snapshot.agents.map((agent) => agent.name)].sort((left, right) => left.localeCompare(right)),
-    );
-    const serializedAgents = JSON.stringify(snapshot.agents);
-    expect(snapshot.agents.every((agent) => !("filePath" in agent))).toBe(true);
-    expect(snapshot.agents.every((agent) => !("systemPrompt" in agent))).toBe(true);
-    expect(serializedAgents).not.toContain(home);
-    expect(serializedAgents).not.toContain("Project-only investigation instructions.");
-    expect(serializedAgents).not.toContain("Project helper instructions.");
+    expect(snapshot.agents).toEqual([]);
   });
 });

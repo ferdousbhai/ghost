@@ -4,6 +4,7 @@ import {
   assertWritableMemory,
   coerceMemorySlug,
   deriveMemoryIndex,
+  MAX_MEMORY_FILE_BYTES,
   MAX_MEMORY_FILE_CONTENT_LENGTH,
   MEMORY_INDEX_BUDGET_CHARS,
   MEMORY_INDEX_PREVIEW_CHARS,
@@ -53,6 +54,13 @@ describe("plain Markdown memory", () => {
   it("rejects oversized content", () => {
     const body = "x".repeat(MAX_MEMORY_FILE_CONTENT_LENGTH + 1);
     expect(() => parseMemoryFile(body)).toThrow(MemoryFileFormatError);
+  });
+
+  it("pins the canonical UTF-8 byte ceiling and rejects unpaired surrogates", () => {
+    const widest = "\u0800".repeat(MAX_MEMORY_FILE_CONTENT_LENGTH);
+    expect(Buffer.byteLength(serializeMemoryFile(widest))).toBe(MAX_MEMORY_FILE_BYTES);
+    expect(() => serializeMemoryFile("owner \ud800 fact"))
+      .toThrow(MemoryFileFormatError);
   });
 
   it("does not interpret YAML-looking content", () => {

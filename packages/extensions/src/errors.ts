@@ -19,6 +19,14 @@ export type GhostErrorCode =
   | "forbidden"
   /** A documented size or count limit was exceeded. */
   | "limit_exceeded"
+  /** A Documents file exceeded the shell's bounded inline-content limit. */
+  | "document_too_large"
+  /** A bounded Documents file is not strict UTF-8 text. */
+  | "invalid_document_content"
+  /** A paginated listing cursor is malformed or bound to another request. */
+  | "invalid_cursor"
+  /** The paged directory changed after the cursor was issued. */
+  | "cursor_stale"
   /** The target already exists and the operation refused to clobber it. */
   | "conflict";
 

@@ -2,22 +2,6 @@
 
 export const GHOST_HOME_FORMAT = "ghost-home/v2";
 
-export interface DocMeta {
-  /** Path relative to `docs/`, always ending in `.md`, always `/`-separated. */
-  readonly path: string;
-  /** Text of the required first `# Title` heading. */
-  readonly title: string;
-  /** Trailing tag slugs, excluding the reserved `archived` status tag. */
-  readonly tags: readonly string[];
-  readonly archived: boolean;
-}
-
-export interface DocFile {
-  readonly meta: DocMeta;
-  /** Complete canonical Markdown, exactly as stored, including title and tags. */
-  readonly body: string;
-}
-
 export interface CharacterFile {
   readonly title: string | undefined;
   readonly body: string;
@@ -32,8 +16,10 @@ export interface MemoryRecord {
   readonly updated: string;
 }
 
-export interface DocCatalog {
-  /** Budgeted catalog lines, a contiguous prefix of the path-sorted catalog. */
+export interface DocumentsIndex {
+  /** Absolute local root used by native filesystem tools and trusted clients. */
+  readonly root: string;
+  /** Budgeted top-level entry lines. No descendant or file content is included. */
   readonly lines: readonly string[];
   readonly chars: number;
   readonly omitted: number;

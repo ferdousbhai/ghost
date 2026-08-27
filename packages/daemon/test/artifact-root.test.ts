@@ -1,10 +1,18 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { listOmpExtensionRoots } from "@oh-my-pi/pi-coding-agent/discovery/omp-extension-roots";
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  ghostHookExtensionPaths,
+  loadGhostHookExtensions,
   withGhostArtifactRoot,
 } from "../src/artifact-root.js";
 
@@ -37,13 +45,92 @@ describe("ghost artifact loading", () => {
     const dir = makeHome();
     mkdirSync(join(dir, "hooks", "pre"), { recursive: true });
     mkdirSync(join(dir, "hooks", "post"), { recursive: true });
-    writeFileSync(join(dir, "hooks", "pre", "before.ts"), "export default () => {}", "utf8");
+    const visibleMarker = join(dir, "visible-ran");
+    const hiddenRegularMarker = join(dir, "hidden-regular-ran");
+    const hiddenSymlinkMarker = join(dir, "hidden-symlink-ran");
+    writeFileSync(
+      join(dir, "hooks", "pre", "before.ts"),
+      `import { writeFileSync } from "node:fs";
+       writeFileSync(${JSON.stringify(visibleMarker)}, "ran");
+       export default () => {};`,
+      "utf8",
+    );
     writeFileSync(join(dir, "hooks", "post", "after.js"), "export default () => {}", "utf8");
     writeFileSync(join(dir, "hooks", "post", "notes.md"), "not executable", "utf8");
+    writeFileSync(
+      join(dir, "hooks", "pre", ".hidden.js"),
+      `import { writeFileSync } from "node:fs";
+       writeFileSync(${JSON.stringify(hiddenRegularMarker)}, "ran");
+       export default () => {};`,
+      "utf8",
+    );
+    const hiddenOutside = join(dir, "hidden-outside.ts");
+    writeFileSync(
+      hiddenOutside,
+      `import { writeFileSync } from "node:fs";
+       writeFileSync(${JSON.stringify(hiddenSymlinkMarker)}, "ran");
+       export default () => {};`,
+      "utf8",
+    );
+    symlinkSync(hiddenOutside, join(dir, "hooks", "post", ".hidden-link.ts"));
 
-    expect(await ghostHookExtensionPaths(dir)).toEqual([
-      join(dir, "hooks", "pre", "before.ts"),
-      join(dir, "hooks", "post", "after.js"),
+    const loaded = await loadGhostHookExtensions(dir);
+
+    expect(loaded.errors).toEqual([]);
+    expect(loaded.factories).toHaveLength(2);
+    expect(existsSync(visibleMarker)).toBe(true);
+    expect(existsSync(hiddenRegularMarker)).toBe(false);
+    expect(existsSync(hiddenSymlinkMarker)).toBe(false);
+  });
+
+  it("rejects a hook entry symlink without evaluating its outside target", async () => {
+    const dir = makeHome();
+    const hooks = join(dir, "hooks", "pre");
+    mkdirSync(hooks, { recursive: true });
+    const marker = join(dir, "outside-ran");
+    const outside = join(dir, "outside.ts");
+    writeFileSync(
+      outside,
+      `import { writeFileSync } from "node:fs";
+       writeFileSync(${JSON.stringify(marker)}, "ran");
+       export default () => {};
+      `,
+    );
+    const link = join(hooks, "outside.ts");
+    symlinkSync(outside, link);
+
+    const loaded = await loadGhostHookExtensions(dir);
+
+    expect(loaded.factories).toEqual([]);
+    expect(loaded.errors).toEqual([
+      { path: link, error: "Hook entry is not a regular file." },
     ]);
+    expect(existsSync(marker)).toBe(false);
+  });
+
+  it("evaluates the pinned regular hook when its final entry is exchanged", async () => {
+    const dir = makeHome();
+    const hooks = join(dir, "hooks", "pre");
+    mkdirSync(hooks, { recursive: true });
+    const entry = join(hooks, "before.ts");
+    const pinned = join(hooks, "before-pinned.ts");
+    const outside = join(dir, "outside.ts");
+    writeFileSync(entry, `export default (api: any) => api.registerTool({ name: "pinned" });`);
+    writeFileSync(outside, `export default (api: any) => api.registerTool({ name: "outside" });`);
+
+    const loaded = await loadGhostHookExtensions(dir, {
+      afterOpen: (path) => {
+        if (path !== entry) return;
+        renameSync(entry, pinned);
+        symlinkSync(outside, entry);
+      },
+    });
+    const registered: string[] = [];
+    await loaded.factories[0]?.({
+      registerTool: (tool: { name: string }) => registered.push(tool.name),
+    } as never);
+
+    expect(loaded.errors).toEqual([]);
+    expect(registered).toEqual(["pinned"]);
   });
 });

@@ -1,10 +1,11 @@
 /**
  * The smol lane: which cheap, fast model does a ghost's throwaway work.
  *
- * A ghost has exactly one such lane, OMP's conventional `smol` role, and two
+ * A ghost has exactly one such lane, OMP's conventional `smol` role, and three
  * things ride on it: the conversation title written after a first turn
- * (`title.ts`) and the opening line the shell asks for on an empty chat
- * (`greeting.ts`). Both are the same shape of work — one raw `complete()` call,
+ * (`title.ts`), the opening line the shell asks for on an empty chat
+ * (`greeting.ts`), and trusted command-hook classification
+ * (`hook-smol-complete.ts`). All are the same shape of work — one raw `complete()` call,
  * no `AgentSession`, no tools, no transcript — so they share one resolution
  * rule and one role rather than each growing a setting of its own.
  *

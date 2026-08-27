@@ -2,8 +2,8 @@
  * Ghost registry — discovery, creation, and validation of ghost homes.
  *
  * A ghost is one directory under the ghosts root (default `~/ghosts/`), laid
- * out per `ghost-home/v1` in CONTRACTS.md. The registry owns only the shape
- * of that directory; reading its *contents* (character, docs, memory) is
+ * out per `ghost-home/v2` in CONTRACTS.md. The registry owns only the shape
+ * of that directory; reading its *contents* (character and memory) is
  * `@ghost/extensions`' job.
  *
  * A ghost home is plain files the owner can open, `sessions/` included. The
@@ -102,8 +102,8 @@ function isFile(path: string): boolean {
 
 /**
  * A directory is a ghost home when it exists and holds a `character.md`.
- * The persona file is the one thing a ghost cannot be without — docs,
- * memory, and conversations are all optional and may be empty.
+ * The persona file is the one thing a ghost cannot be without — memory and
+ * conversations are optional and may be empty.
  */
 export function isGhostHome(dir: string): boolean {
   return isDirectory(dir) && isFile(join(dir, GHOST_CHARACTER_FILENAME));
@@ -149,8 +149,9 @@ actually remember over a general statement you could have made about anything.
 
 ## What you know
 
-Your docs and memory files are yours. Read them before you answer a question
-they cover, and write a memory file when you learn something worth keeping.
+Your memory files are yours, and the owner's Documents are shared with you. Read
+them before you answer a question they cover, and write a memory file when you
+learn something worth keeping.
 `;
 
 /**
@@ -302,7 +303,7 @@ export class GhostRegistry {
 
   /**
    * Create `<root>/<name>/` with a seeded `character.md` and the empty
-   * `ghost-home/v1` directories. Refuses to overwrite an existing ghost.
+   * `ghost-home/v2` directories. Refuses to overwrite an existing ghost.
    */
   create(name: string): Ghost {
     assertValidGhostName(name);
@@ -311,7 +312,7 @@ export class GhostRegistry {
       throw new GhostError("already_exists", `A ghost named ${JSON.stringify(name)} already exists.`, 409);
     }
     mkdirSync(dir, { recursive: true });
-    for (const sub of ["docs", "memory", "conversations"]) {
+    for (const sub of ["memory", "conversations"]) {
       mkdirSync(join(dir, sub), { recursive: true });
     }
     writeFileSync(join(dir, GHOST_CHARACTER_FILENAME), SEEDED_CHARACTER(name), {
@@ -326,7 +327,7 @@ export class GhostRegistry {
   /**
    * Rename `<root>/<name>/` to `<root>/<nextName>/` — which renames the ghost,
    * because the directory name is the name. One same-filesystem rename carries
-   * the persona, memory, docs, conversations, pins, and credentials across
+   * the persona, memory, conversations, pins, and credentials across
    * together, and leaves every conversation id (a transcript filename inside
    * the home) valid.
    *
@@ -399,7 +400,7 @@ export class GhostRegistry {
    * file manager's Trash see it and can put it back.
    *
    * Deleting a ghost is a rename, never a recursive removal: the ghost home
-   * holds the only copy of a persona, its memory, and its docs, and no HTTP
+   * holds the only copy of a persona and its memory, and no HTTP
    * route may be one bug away from erasing that. That also fixes the failure
    * mode when the trash is on another filesystem — a cross-device `rename`
    * raises `EXDEV`, and rather than degrade into copy-then-delete we fall back

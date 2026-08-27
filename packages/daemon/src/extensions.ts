@@ -1,11 +1,11 @@
 /**
  * The daemon's seam onto `@ghost/extensions`.
  *
- * `packages/extensions` owns what a ghost *is* — the persona, memory, and
- * memory extensions plus the `ghost-home/v1` reader. The daemon owns how one
- * *runs*. This module is the whole of the boundary between them: the rest of
- * the daemon never imports the extensions package directly, so a change in
- * its shape is a change in one file here.
+ * `packages/extensions` owns what a ghost *is* — the persona and memory
+ * extensions, the machine Documents reader, and the `ghost-home/v2` reader.
+ * The daemon owns how one *runs*. This module centralizes the session extension
+ * composition seam; daemon services import typed filesystem helpers only where
+ * their own lifecycle or HTTP boundary needs them.
  *
  * Two things come across the seam per session:
  *
@@ -17,13 +17,20 @@ import {
   closeAllBrowserSessions as closeAllExtensionBrowserSessions,
   createGhostExtension,
   deriveMemoryIndex,
-  deriveDocCatalog,
+  deriveDocumentsIndex,
+  DOCUMENT_INDEX_MAX_ENTRIES,
   ghostToolNames,
+  MachineDocuments,
+  openMachineDocuments,
   openGhostHome,
   relayBackend,
   type BrowserBackendFactory,
+  type CharacterFile,
+  type DocumentDirectoryPage,
+  type DocumentsIndex,
   type GhostToolCapabilitiesSource,
   type GhostToolCapabilitiesResolver,
+  type MemoryListing,
   type RelayTransport,
 } from "@ghost/extensions";
 
@@ -35,9 +42,9 @@ export async function closeAllBrowserSessions(): Promise<void> {
 }
 
 /**
- * Ensure one discovered home uses the canonical layout. The one supported
- * legacy migration is an unambiguous `notes/` directory renamed atomically to
- * `docs/` before any session sees the home.
+ * Ensure one discovered home uses the canonical layout. The home reader
+ * retains hosted archive compatibility, but does not move legacy documents
+ * into the owner's live Documents tree.
  */
 export async function ensureGhostHomeLayout(homeDir: string): Promise<void> {
   await openGhostHome(homeDir).ensure();
@@ -47,6 +54,8 @@ export async function ensureGhostHomeLayout(homeDir: string): Promise<void> {
 export interface GhostExtensionOptions {
   /** Overrides the ghost home directory name as the ghost's name. */
   ghostName?: string;
+  /** Shared machine Documents store, injected once by the daemon. */
+  documents?: MachineDocuments | string;
   /**
    * Which browser `ghost_browser` drives. `"relay"` (with a `relayTransport`
    * present) points the tool at the owner's real Chromium; `"profile"` (or
@@ -105,6 +114,7 @@ export function resolveGhostExtensions(
   const extensionOptions = {
     ...(homeDir === undefined ? {} : { home: homeDir }),
     ...(options.ghostName === undefined ? {} : { ghostName: options.ghostName }),
+    ...(options.documents === undefined ? {} : { documents: options.documents }),
     ...(backend === undefined ? {} : { backend }),
     ...(options.extraSections === undefined ? {} : { extraSections: options.extraSections }),
     capabilities,
@@ -129,19 +139,58 @@ export interface GhostHomeDigest {
   /** The character body, or null when there is no character file. */
   character: string | null;
   memoryLines: readonly string[];
-  docLines: readonly string[];
+  documents: DocumentsIndex;
 }
 
-export async function readGhostHomeDigest(homeDir: string): Promise<GhostHomeDigest> {
+export type GhostHomeDigestInput = "character" | "memory" | "documents";
+
+/** Injectable input readers for deterministic failure and isolation tests. */
+export interface GhostHomeDigestReaders {
+  readonly character?: () => Promise<CharacterFile | null>;
+  readonly memory?: () => Promise<MemoryListing>;
+  readonly documents?: () => Promise<DocumentDirectoryPage>;
+}
+
+export interface GhostHomeDigestReadOptions {
+  readonly readers?: GhostHomeDigestReaders;
+  /** Categorical only: the rejected error and its paths never cross this seam. */
+  readonly onUnavailable?: (input: GhostHomeDigestInput) => void;
+}
+
+export async function readGhostHomeDigest(
+  homeDir: string,
+  configuredDocuments?: MachineDocuments | string,
+  options: GhostHomeDigestReadOptions = {},
+): Promise<GhostHomeDigest> {
   const home = openGhostHome(homeDir);
-  const [character, memory, docs] = await Promise.all([
-    home.readCharacter(),
-    home.listMemory(),
-    home.listDocs(),
+  const settled = await Promise.allSettled([
+    Promise.resolve().then(() =>
+      options.readers?.character ? options.readers.character() : home.readCharacter()),
+    Promise.resolve().then(() =>
+      options.readers?.memory ? options.readers.memory() : home.listMemory()),
+    Promise.resolve().then(() => {
+      if (options.readers?.documents) return options.readers.documents();
+      const documents = configuredDocuments instanceof MachineDocuments
+        ? configuredDocuments
+        : openMachineDocuments(configuredDocuments);
+      return documents.listDirectory("", { limit: DOCUMENT_INDEX_MAX_ENTRIES });
+    }),
   ]);
+  const [characterResult, memoryResult, documentsResult] = settled;
+  if (characterResult.status === "rejected") options.onUnavailable?.("character");
+  if (memoryResult.status === "rejected") options.onUnavailable?.("memory");
+  if (documentsResult.status === "rejected") options.onUnavailable?.("documents");
+
+  const character = characterResult.status === "fulfilled" ? characterResult.value : null;
+  const memory = memoryResult.status === "fulfilled"
+    ? memoryResult.value
+    : { files: [], skipped: [] };
+  const documentPage = documentsResult.status === "fulfilled"
+    ? documentsResult.value
+    : { root: "", path: "", entries: [], total: 0 };
   return {
     character: character?.body ?? null,
     memoryLines: deriveMemoryIndex(memory.files).lines,
-    docLines: deriveDocCatalog(docs.docs).lines,
+    documents: deriveDocumentsIndex(documentPage),
   };
 }

@@ -4,8 +4,8 @@
  * `POST /api/ghosts/:name/greeting` is the line that opens an empty chat. It is
  * the one Ghost surface driven by a *second* model — `roles.smol_model` — and
  * its contract is unusually easy to break quietly: every failure must come back
- * as `200 {greeting: null}`, never a 5xx, and the prompt must keep the ghost's
- * own files fenced as data.
+ * as `200 {greeting: null}`, never a 5xx, and the prompt must keep ghost context
+ * and shared Documents names fenced as data.
  *
  * This fixture drives the real route, the real `SessionHost.greeting` cache, and
  * the real `generateGreeting` against a scripted smol runtime, and records both
@@ -18,10 +18,14 @@
  * with `localTimeString()`, which is the machine's zone and the current minute;
  * the generator below swaps in a pinned string before building the prompt, so
  * the prompt text in the fixture is the real one with a stable clock rather than
- * a redacted one. Everything else — the memory budget, the doc index, the
+ * a redacted one. Everything else — the memory budget, the shallow Documents
+ * index, the
  * "days since your last conversation" line — is what the route actually
  * assembled. See ./harness.ts for the shared normalisation rules.
  */
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { MachineDocuments } from "@ghost/extensions";
 import { afterEach, describe, expect, it } from "vitest";
 import type { AssistantMessage, Context } from "@oh-my-pi/pi-ai";
 import {
@@ -214,7 +218,13 @@ describe("golden: greeting flow", () => {
       ghostName: "casper",
       character: "You are casper, a letterpress printer.",
       memoryLines: ["- owner-prefers-short.md: The owner wants short answers"],
-      docLines: ["- press.md: Restoring the Vandercook"],
+      documents: {
+        root: "/home/owner/Documents",
+        lines: ['- file: "press.md"'],
+        chars: 19,
+        omitted: 0,
+        total: 1,
+      },
       localTime: LOCAL_TIME,
       daysSinceLastConversation: 12,
       onboarding: false,
@@ -230,20 +240,20 @@ describe("golden: greeting flow", () => {
       // depend on earlier ones.
       temp = makeTempGhosts();
       temp.registry.ensureRoot();
+      const documentsRoot = join(temp.root, ".documents");
+      mkdirSync(documentsRoot);
       if (testCase.written) {
         seedGhost(temp.root, {
           name: "casper",
           character: CHARACTER,
-          docs: {
-            "press.md": "# Restoring the Vandercook\n\nRollers first.\n",
-            "ledger.md": "# Ledger\n\nToo much.\n",
-          },
           memory: {
             "owner-prefers-short.md": memoryFile(
               "The owner wants short answers. Keep replies to a line or two.",
             ),
           },
         });
+        writeFileSync(join(documentsRoot, "press.md"), "# Restoring the Vandercook\n\nRollers first.\n");
+        writeFileSync(join(documentsRoot, "ledger.md"), "# Ledger\n\nToo much.\n");
       } else {
         // The registry's own seed is the definition of "never been met".
         temp.registry.create("casper");
@@ -251,7 +261,9 @@ describe("golden: greeting flow", () => {
       const smol = scriptedSmol(testCase.reply, testCase.credentialed ?? true);
       host = new SessionHost({
         registry: temp.registry,
+        ownerHome: temp.ownerHome,
         offline: true,
+        extensionOptions: { documents: new MachineDocuments(documentsRoot) },
         greeting: { generate: pinnedGenerator(smol) },
       });
       listening = await startDaemonServer({
@@ -295,7 +307,11 @@ describe("golden: greeting flow", () => {
     // A ghost that is not there is still a client bug, not a missing greeting.
     temp = makeTempGhosts();
     temp.registry.ensureRoot();
-    host = new SessionHost({ registry: temp.registry, offline: true });
+    host = new SessionHost({
+      registry: temp.registry,
+      ownerHome: temp.ownerHome,
+      offline: true,
+    });
     listening = await startDaemonServer({
       registry: temp.registry,
       host,

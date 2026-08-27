@@ -26,7 +26,10 @@ import Quickshell.Io
 import QtQuick
 import "CommandTranscript.js" as CommandTranscript
 import "GhostRename.js" as GhostRename
+import "HookStatus.js" as HookStatus
 import "TurnBlocks.js" as TurnBlocks
+import "../components/DocumentModel.js" as DocumentModel
+import "../components/ProjectModel.js" as ProjectModel
 
 Singleton {
     id: root
@@ -73,11 +76,772 @@ Singleton {
         modal, and a rename is typed in the roster row itself. */
     property string ghostRenameError: ""
 
-    // ---- Browsable context -----------------------------------------------
+    // ---- Lifecycle-hook catalog ------------------------------------------
+    // Daemon-global trusted configuration, projected as bounded display-only
+    // metadata. It is deliberately independent of ghost, conversation,
+    // project, and the owner-wide Documents cache.
+
+    function makeHooksRequest(): var {
+        return typeof root.hooksRequestFactory === "function"
+            ? root.hooksRequestFactory() : new XMLHttpRequest();
+    }
+
+    /** Retire ownership before abort because test/native XHR may finish inline. */
+    function retireHooksRequest(): void {
+        const request = root.hooksRequest;
+        root.hooksRequest = null;
+        root.hooksLoading = false;
+        if (request && request.readyState !== 4) request.abort();
+    }
+
+    function beginHooksConnectionEpoch(): void {
+        root.hooksEpoch += 1;
+        root.retireHooksRequest();
+        root.activeHooks = [];
+        root.hookEvents = [];
+        root.activeHookCount = 0;
+        root.hookContinuationCap = 2;
+        root.hooksLoaded = false;
+        root.hooksStale = false;
+        root.hooksError = "";
+        root.hooksConnectionReset(root.hooksEpoch);
+    }
+
+    function failHooksTransport(epoch: int): void {
+        if (epoch !== root.hooksEpoch) return;
+        root.reachable = false;
+        // A true -> false transition resets through onReachableChanged. During
+        // startup reachable is already false, so retire this epoch directly.
+        if (epoch === root.hooksEpoch) root.beginHooksConnectionEpoch();
+    }
+
+    function fetchHooks(force: bool): void {
+        if (!force && (root.hooksLoaded || root.hooksLoading)) return;
+        if (root.hooksRequest && root.hooksRequest.readyState !== 4) {
+            if (!force) return;
+            root.retireHooksRequest();
+        }
+        const xhr = root.makeHooksRequest();
+        const epoch = root.hooksEpoch;
+        root.hooksRequest = xhr;
+        root.hooksLoading = true;
+        root.hooksStale = false;
+        root.hooksError = "";
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || epoch !== root.hooksEpoch
+                    || xhr !== root.hooksRequest) return;
+            root.hooksRequest = null;
+            root.hooksLoading = false;
+            if (xhr.status === 200) {
+                try {
+                    const status = HookStatus.normalize(JSON.parse(xhr.responseText));
+                    if (status === null) throw new Error("invalid hook status");
+                    root.activeHooks = status.hooks;
+                    root.hookEvents = status.events;
+                    root.activeHookCount = status.total;
+                    root.hookContinuationCap = status.sessionStopContinuationCap;
+                    root.hooksLoaded = true;
+                    root.hooksStale = false;
+                    root.hooksError = "";
+                    root.reachable = true;
+                } catch (error) {
+                    root.hooksStale = root.hooksLoaded;
+                    root.hooksError = "ghostd sent malformed hook status";
+                }
+            } else if (xhr.status === 0) {
+                root.failHooksTransport(epoch);
+                return;
+            } else {
+                root.hooksStale = root.hooksLoaded;
+                root.hooksError = root.describeError(xhr, "GET hooks");
+            }
+        };
+        root.dispatch(xhr, "GET", "/api/hooks", ({}), null, function () {
+            return epoch === root.hooksEpoch && root.hooksRequest === xhr;
+        });
+    }
+
+    // ---- Shared Documents ------------------------------------------------
+
+    function documentSnapshot(path: string, query: string): var {
+        return DocumentModel.snapshot(root.documentDirectories, path, query);
+    }
+
+    function makeDocumentRequest(): var {
+        return typeof root.documentRequestFactory === "function"
+            ? root.documentRequestFactory() : new XMLHttpRequest();
+    }
+
+    function makeDocumentDeleteRequest(): var {
+        return typeof root.documentDeleteRequestFactory === "function"
+            ? root.documentDeleteRequestFactory() : new XMLHttpRequest();
+    }
+
+    function makeDocumentContentRequest(): var {
+        return typeof root.documentContentRequestFactory === "function"
+            ? root.documentContentRequestFactory() : new XMLHttpRequest();
+    }
+
+    function installDocumentRequest(key: string, xhr: var): void {
+        const next = DocumentModel.copyMap(root.documentRequests);
+        const previous = DocumentModel.mapValue(next, key, null);
+        delete next[key];
+        root.documentRequests = next;
+        if (previous && previous.readyState !== 4) previous.abort();
+        const installed = DocumentModel.copyMap(root.documentRequests);
+        installed[key] = xhr;
+        root.documentRequests = installed;
+    }
+
+    function retireDocumentRequest(key: string, xhr: var): void {
+        if (DocumentModel.mapValue(root.documentRequests, key, null) !== xhr) return;
+        const next = DocumentModel.copyMap(root.documentRequests);
+        delete next[key];
+        root.documentRequests = next;
+    }
+
+    /** Retire ownership before abort: fake/native XHR may finish synchronously. */
+    function retireDocumentRequests(): void {
+        const requests = root.documentRequests;
+        const content = root.documentContentRequest;
+        const deletion = root.documentDeleteRequest;
+        root.documentRequests = DocumentModel.emptyMap();
+        root.documentContentRequest = null;
+        root.documentDeleteRequest = null;
+        for (const key of Object.keys(requests || {})) {
+            if (requests[key] && requests[key].readyState !== 4) requests[key].abort();
+        }
+        if (content && content.readyState !== 4) content.abort();
+        if (deletion && deletion.readyState !== 4) deletion.abort();
+    }
+
+    function beginDocumentsConnectionEpoch(): void {
+        root.documentsEpoch += 1;
+        root.retireDocumentRequests();
+        root.documentsRoot = "";
+        root.documentDirectories = DocumentModel.emptyMap();
+        root.documentContentPath = "";
+        root.documentContent = "";
+        root.documentContentModifiedAt = "";
+        root.documentContentSize = -1;
+        root.documentContentLoading = false;
+        root.documentContentReady = false;
+        root.documentContentError = "";
+        root.documentDeletingPath = "";
+        root.documentDeleteError = "";
+        root.documentsConnectionReset(root.documentsEpoch);
+    }
+
+    /**
+     * A status-0 Documents result owns the whole Documents connection epoch,
+     * even during startup when the general daemon reachability latch is
+     * already false. Retiring the epoch clears every loading owner and makes a
+     * later healthy daemon establish its root from a fresh first page.
+     */
+    function failDocumentsTransport(epoch: int): void {
+        if (epoch !== root.documentsEpoch) return;
+        root.reachable = false;
+        // A true -> false transition already retired the epoch through
+        // onReachableChanged. When reachable was false already, do it here.
+        if (epoch === root.documentsEpoch) root.beginDocumentsConnectionEpoch();
+    }
+
+    /**
+     * Read one direct directory page. `append` consumes the cursor held by the
+     * cached first page; `force` starts that path/query over without dropping
+     * the prior rows while the replacement is in flight.
+     */
+    function fetchDocuments(path: string, query: string, append: bool, force: bool): void {
+        if (!DocumentModel.isCanonicalPath(path)) return;
+        const normalizedPath = DocumentModel.normalizePath(path);
+        const normalizedQuery = DocumentModel.normalizedQuery(query);
+        const firstRootPage = normalizedPath === "" && normalizedQuery === "" && !append;
+        // A daemon restart may legitimately resolve a different XDG Documents
+        // root. Only a new root page establishes that authority for this epoch.
+        if (root.documentsRoot === "" && !firstRootPage) {
+            root.fetchDocuments("", "", false, false);
+            return;
+        }
+        const cacheKey = DocumentModel.key(normalizedPath, normalizedQuery);
+        const current = root.documentSnapshot(normalizedPath, normalizedQuery);
+        if (append && (!current.loaded || current.nextCursor === "")) return;
+        if (!append && !force && (current.loaded || current.loading)) return;
+
+        const xhr = root.makeDocumentRequest();
+        const epoch = root.documentsEpoch;
+        root.installDocumentRequest(cacheKey, xhr);
+        root.documentDirectories = DocumentModel.begin(root.documentDirectories,
+            normalizedPath, normalizedQuery, append);
+        const cursor = append ? current.nextCursor : "";
+        const params = [
+            "path=" + encodeURIComponent(normalizedPath),
+            "q=" + encodeURIComponent(normalizedQuery),
+            "limit=100"
+        ];
+        if (cursor !== "") params.push("cursor=" + encodeURIComponent(cursor));
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || epoch !== root.documentsEpoch
+                    || DocumentModel.mapValue(root.documentRequests, cacheKey, null) !== xhr) return;
+            root.retireDocumentRequest(cacheKey, xhr);
+            if (xhr.status === 200) {
+                try {
+                    const body = JSON.parse(xhr.responseText);
+                    if (root.documentsRoot === "" && !firstRootPage) {
+                        throw new Error("Documents root was not established by a fresh first page");
+                    }
+                    if (root.documentsRoot !== "" && body.root !== root.documentsRoot) {
+                        root.documentDirectories = DocumentModel.fail(root.documentDirectories,
+                            normalizedPath, normalizedQuery,
+                            "ghostd changed the Documents root during a listing", false);
+                        root.documentDirectoryChanged(normalizedPath, normalizedQuery);
+                        return;
+                    }
+                    const applied = DocumentModel.applyPage(root.documentDirectories,
+                        normalizedPath, normalizedQuery, body, append);
+                    root.documentDirectories = applied.cache;
+                    if (applied.ok) {
+                        root.documentsRoot = body.root;
+                        root.reachable = true;
+                    }
+                } catch (error) {
+                    root.documentDirectories = DocumentModel.fail(root.documentDirectories,
+                        normalizedPath, normalizedQuery,
+                        "ghostd sent a malformed Documents page", false);
+                }
+            } else if (xhr.status === 0) {
+                root.failDocumentsTransport(epoch);
+                return;
+            } else {
+                const stale = xhr.status === 409 && root.errorCode(xhr) === "cursor_stale";
+                const detail = stale
+                    ? "This folder changed while more items were loading. Refresh it to continue."
+                    : root.describeError(xhr, "GET Documents");
+                root.documentDirectories = DocumentModel.fail(root.documentDirectories,
+                    normalizedPath, normalizedQuery, detail, stale);
+            }
+            root.documentDirectoryChanged(normalizedPath, normalizedQuery);
+        };
+        root.dispatch(xhr, "GET", "/api/documents?" + params.join("&"), ({}), null,
+            function () {
+                return epoch === root.documentsEpoch
+                    && DocumentModel.mapValue(root.documentRequests, cacheKey, null) === xhr;
+            });
+    }
+
+    function refreshDocuments(path: string, query: string): void {
+        root.fetchDocuments(path, query, false, true);
+    }
+
+    function loadMoreDocuments(path: string, query: string): void {
+        root.fetchDocuments(path, query, true, false);
+    }
+
+    function clearDocumentContent(): void {
+        const request = root.documentContentRequest;
+        root.documentContentRequest = null;
+        if (request && request.readyState !== 4) request.abort();
+        root.documentContentPath = "";
+        root.documentContent = "";
+        root.documentContentModifiedAt = "";
+        root.documentContentSize = -1;
+        root.documentContentLoading = false;
+        root.documentContentReady = false;
+        root.documentContentError = "";
+    }
+
+    /** Read one inline-safe file through ghostd; QML never opens its pathname. */
+    function fetchDocumentContent(path: string, force: bool): void {
+        if (!DocumentModel.isCanonicalPath(path) || path === "" || root.documentsRoot === "") {
+            root.clearDocumentContent();
+            return;
+        }
+        const normalized = DocumentModel.normalizePath(path);
+        if (!force && root.documentContentPath === normalized
+                && (root.documentContentReady || root.documentContentLoading)) return;
+        const previous = root.documentContentRequest;
+        root.documentContentRequest = null;
+        if (previous && previous.readyState !== 4) previous.abort();
+        const xhr = root.makeDocumentContentRequest();
+        const epoch = root.documentsEpoch;
+        root.documentContentRequest = xhr;
+        if (root.documentContentPath !== normalized) {
+            root.documentContent = "";
+            root.documentContentModifiedAt = "";
+            root.documentContentSize = -1;
+            root.documentContentReady = false;
+        }
+        root.documentContentPath = normalized;
+        root.documentContentLoading = true;
+        root.documentContentError = "";
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || epoch !== root.documentsEpoch
+                    || xhr !== root.documentContentRequest) return;
+            root.documentContentRequest = null;
+            root.documentContentLoading = false;
+            if (xhr.status === 200) {
+                try {
+                    const body = JSON.parse(xhr.responseText);
+                    if (!DocumentModel.exactKeys(body,
+                            ["root", "path", "size", "modifiedAt", "content"])
+                            || body.root !== root.documentsRoot || body.path !== normalized
+                            || !Number.isSafeInteger(body.size) || body.size < 0
+                            || body.size > DocumentModel.inlineFileMaxBytes()
+                            || !DocumentModel.validTimestamp(body.modifiedAt)
+                            || typeof body.content !== "string"
+                            || body.content.indexOf("\0") >= 0
+                            || DocumentModel.utf8ByteLength(body.content) !== body.size)
+                        throw new Error("invalid content result");
+                    root.documentContent = body.content;
+                    root.documentContentModifiedAt = body.modifiedAt;
+                    root.documentContentSize = body.size;
+                    root.documentContentReady = true;
+                    root.documentContentError = "";
+                    root.reachable = true;
+                } catch (error) {
+                    root.documentContentReady = false;
+                    root.documentContentError = "ghostd sent malformed Documents content";
+                }
+            } else if (xhr.status === 0) {
+                root.failDocumentsTransport(epoch);
+                return;
+            } else {
+                root.documentContentReady = false;
+                root.documentContentError = root.describeError(xhr, "GET Documents content");
+            }
+        };
+        root.dispatch(xhr, "GET", "/api/documents/content?path="
+            + encodeURIComponent(normalized), ({}), null, function () {
+                return epoch === root.documentsEpoch && root.documentContentRequest === xhr;
+            });
+    }
+
+    /** Move one shared regular file to system Trash after exact confirmation. */
+    function deleteDocument(path: string): void {
+        if (!DocumentModel.isCanonicalPath(path)) return;
+        const normalized = DocumentModel.normalizePath(path);
+        if (normalized === "" || root.documentDeletingPath !== "") return;
+        if (root.documentDeleteRequest && root.documentDeleteRequest.readyState !== 4)
+            root.documentDeleteRequest.abort();
+        const xhr = root.makeDocumentDeleteRequest();
+        const epoch = root.documentsEpoch;
+        root.documentDeleteRequest = xhr;
+        root.documentDeletingPath = normalized;
+        root.documentDeleteError = "";
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || epoch !== root.documentsEpoch
+                    || xhr !== root.documentDeleteRequest) return;
+            root.documentDeleteRequest = null;
+            root.documentDeletingPath = "";
+            if (xhr.status === 200) {
+                try {
+                    const body = JSON.parse(xhr.responseText);
+                    if (!DocumentModel.exactKeys(body, ["ok", "path", "trash", "kind"])
+                            || body.ok !== true || body.path !== normalized
+                            || (body.kind !== "freedesktop" && body.kind !== "fallback")
+                            || !DocumentModel.validAbsolutePath(body.trash))
+                        throw new Error("invalid trash result");
+                    root.documentDirectories = DocumentModel.removePath(
+                        root.documentDirectories, normalized);
+                    root.documentDeleteError = "";
+                    root.documentDeleteFinished(normalized, true);
+                    root.refreshDocuments(DocumentModel.parent(normalized), "");
+                } catch (error) {
+                    root.documentDeleteError = "ghostd sent a malformed document trash result";
+                    root.documentDeleteFinished(normalized, false);
+                }
+            } else if (xhr.status === 0) {
+                root.failDocumentsTransport(epoch);
+                return;
+            } else {
+                root.documentDeleteError = root.describeError(xhr, "DELETE document");
+                root.documentDeleteFinished(normalized, false);
+            }
+        };
+        root.dispatch(xhr, "DELETE", "/api/documents",
+            ({ "Content-Type": "application/json" }),
+            JSON.stringify({ path: normalized, confirm: normalized }),
+            function () {
+                return epoch === root.documentsEpoch && root.documentDeleteRequest === xhr;
+            });
+    }
+
+    // ---- Conversation project binding ------------------------------------
+
+    function makeProjectRequest(kind: string): var {
+        let factory = null;
+        if (kind === "get") factory = root.projectRequestFactory;
+        else if (kind === "preview") factory = root.projectPreviewRequestFactory;
+        else if (kind === "abandon") factory = root.projectAbandonRequestFactory;
+        else factory = root.projectMutationRequestFactory;
+        return typeof factory === "function" ? factory() : new XMLHttpRequest();
+    }
+
+    function projectRoute(ghost: string, sessionId: string): string {
+        return "/api/ghosts/" + encodeURIComponent(ghost)
+            + "/sessions/" + encodeURIComponent(sessionId) + "/project";
+    }
+
+    function projectIdentityCurrent(ghost: string, sessionId: string): bool {
+        return ghost !== "" && sessionId !== "" && ghost === root.activeGhost
+            && sessionId === root.currentSessionId;
+    }
+
+    /** Retire ownership before abort so synchronous DONE cannot publish stale state. */
+    function retireProjectRequests(): void {
+        const requests = [root.projectRequest, root.projectPreviewRequest,
+            root.projectMutationRequest, root.projectAbandonRequest];
+        root.projectRequest = null;
+        root.projectPreviewRequest = null;
+        root.projectMutationRequest = null;
+        root.projectAbandonRequest = null;
+        root.pendingProjectReplacement = null;
+        for (const request of requests) {
+            if (request && request.readyState !== 4) request.abort();
+        }
+        root.projectLoading = false;
+        root.projectPreviewLoading = false;
+        root.projectMutating = false;
+    }
+
+    /**
+     * Return the active in-memory identity only when every shell signal says it
+     * is a bound draft which has never been published. Published rows are
+     * never offered to the draft endpoint; the daemon repeats this admission
+     * check as the authority.
+     */
+    function activeBoundProjectDraft(): var {
+        const ghost = root.activeGhost;
+        const sessionId = root.currentSessionId;
+        if (!root.projectIdentityCurrent(ghost, sessionId)
+                || root.projectGhost !== ghost || root.projectSessionId !== sessionId
+                || root.projectState.id !== sessionId || root.projectState.root === null)
+            return null;
+        const identity = root.parseConversationActionId(sessionId);
+        if (!identity) return null;
+        if (root.sessions.some(function (session) {
+            return session && session.id === sessionId;
+        })) return null;
+        const state = root.turnStates[root.conversationKey(ghost, sessionId)];
+        if (!state || state.published === true || state.streaming === true || state.request
+                || state.hydratedRowCount > 0) return null;
+        return {
+            ghost: ghost,
+            id: sessionId,
+            conversationId: identity.conversationId,
+            runtime: identity.runtime
+        };
+    }
+
+    function validProjectAbandonResponse(body: var, draft: var): bool {
+        return body && body.ok === true && typeof body.abandoned === "boolean"
+            && body.id === draft.id && body.conversationId === draft.conversationId
+            && body.runtime === draft.runtime;
+    }
+
+    function forgetAbandonedProjectDraft(draft: var): void {
+        const key = root.conversationKey(draft.ghost, draft.id);
+        const kept = Object.assign({}, root.turnStates);
+        root.cancelTranscriptLoad(kept[key]);
+        delete kept[key];
+        root.turnStates = kept;
+        root.updateLiveConversationKeys();
+        if (root.sessionIds[draft.ghost] === draft.id) root.sessionIds[draft.ghost] = "";
+    }
+
+    /**
+     * Keep the old draft selected until ghostd has durably abandoned its
+     * binding. A failed request leaves every local identity and project field
+     * intact; repeating the owner action retries the idempotent endpoint.
+     */
+    function requestProjectReplacement(action: var): void {
+        if (!action || typeof action.kind !== "string") return;
+        const draft = root.activeBoundProjectDraft();
+        if (!draft) {
+            root.performProjectReplacement(action);
+            return;
+        }
+        if (root.projectMutating) {
+            root.projectError = "Wait for the current project change before leaving this draft.";
+            return;
+        }
+        const xhr = root.makeProjectRequest("abandon");
+        root.projectAbandonRequest = xhr;
+        root.pendingProjectReplacement = action;
+        root.projectMutating = true;
+        root.projectError = "";
+        root.projectNotice = "";
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || xhr !== root.projectAbandonRequest) return;
+            root.projectAbandonRequest = null;
+            root.projectMutating = false;
+            const pending = root.pendingProjectReplacement;
+            root.pendingProjectReplacement = null;
+            const stillCurrent = root.projectIdentityCurrent(draft.ghost, draft.id);
+            if (xhr.status === 200) {
+                try {
+                    const body = JSON.parse(xhr.responseText);
+                    if (!root.validProjectAbandonResponse(body, draft))
+                        throw new Error("invalid abandon result");
+                    root.forgetAbandonedProjectDraft(draft);
+                    if (stillCurrent) root.performProjectReplacement(pending);
+                } catch (error) {
+                    if (stillCurrent)
+                        root.projectError = "ghostd sent malformed project draft abandonment";
+                }
+                return;
+            }
+            if (stillCurrent)
+                root.projectError = root.describeError(xhr, "abandon project draft");
+        };
+        root.dispatch(xhr, "DELETE", root.projectRoute(draft.ghost, draft.id) + "/draft",
+            ({}), null, function () { return root.projectAbandonRequest === xhr; });
+    }
+
+    function performProjectReplacement(action: var): void {
+        if (!action) return;
+        if (action.kind === "newConversation") root.finishNewConversation();
+        else if (action.kind === "selectGhost") root.finishSelectGhost(action.name);
+        else if (action.kind === "openConversation") root.finishOpenConversation(action.id);
+        else if (action.kind === "createdGhost") root.finishCreatedGhostSelection(action.name);
+        else if (action.kind === "openConversationForGhost") {
+            if (action.name !== root.activeGhost) root.finishSelectGhost(action.name);
+            root.finishOpenConversation(action.id);
+        } else if (action.kind === "newConversationForGhost") {
+            if (action.name !== root.activeGhost) root.finishSelectGhost(action.name);
+            root.finishNewConversation();
+        }
+    }
+
+    function projectRenameSnapshot(): var {
+        return {
+            state: root.projectState,
+            preview: root.projectPreview,
+            error: root.projectError,
+            notice: root.projectNotice,
+            ghost: root.projectGhost,
+            sessionId: root.projectSessionId
+        };
+    }
+
+    function restoreProjectRenameSnapshot(snapshot: var): void {
+        if (!snapshot) return;
+        root.projectState = snapshot.state;
+        root.projectPreview = snapshot.preview;
+        root.projectError = snapshot.error;
+        root.projectNotice = snapshot.notice;
+        root.projectGhost = snapshot.ghost;
+        root.projectSessionId = snapshot.sessionId;
+        root.projectLoading = false;
+        root.projectPreviewLoading = false;
+        root.projectMutating = false;
+    }
+
+    /** Retire every request and every field owned by the previous conversation. */
+    function clearProject(): void {
+        root.retireProjectRequests();
+        root.projectState = ProjectModel.empty();
+        root.projectPreview = null;
+        root.projectError = "";
+        root.projectNotice = "";
+        root.projectGhost = "";
+        root.projectSessionId = "";
+    }
+
+    function applyProjectState(body: var, sessionId: string): bool {
+        const parsed = ProjectModel.state(body, sessionId);
+        if (!parsed.ok) {
+            root.projectError = "ghostd sent malformed project state: " + parsed.error;
+            return false;
+        }
+        root.projectState = parsed.state;
+        root.projectError = "";
+        return true;
+    }
+
+    /** Read the active conversation's explicit binding. `ensure` mints a blank id on click. */
+    function fetchProject(force: bool, ensure: bool): void {
+        const ghost = root.activeGhost;
+        if (ghost === "") {
+            root.clearProject();
+            return;
+        }
+        let sessionId = root.currentSessionId;
+        if (sessionId === "" && ensure) sessionId = root.ensureSession(ghost);
+        if (sessionId === "") {
+            root.clearProject();
+            return;
+        }
+        if (!force && root.projectGhost === ghost
+                && root.projectSessionId === sessionId
+                && (root.projectLoading || root.projectState.id === sessionId)) return;
+        if (root.projectRequest && root.projectRequest.readyState !== 4) {
+            if (!force) return;
+            const previous = root.projectRequest;
+            root.projectRequest = null;
+            previous.abort();
+        }
+        if (root.projectGhost !== ghost || root.projectSessionId !== sessionId) {
+            root.projectState = ProjectModel.empty();
+            root.projectPreview = null;
+            root.projectNotice = "";
+        }
+        const xhr = root.makeProjectRequest("get");
+        root.projectRequest = xhr;
+        root.projectGhost = ghost;
+        root.projectSessionId = sessionId;
+        root.projectLoading = true;
+        root.projectError = "";
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || xhr !== root.projectRequest) return;
+            root.projectRequest = null;
+            root.projectLoading = false;
+            if (!root.projectIdentityCurrent(ghost, sessionId)) return;
+            if (xhr.status === 200) {
+                try {
+                    if (root.applyProjectState(JSON.parse(xhr.responseText), sessionId))
+                        root.reachable = true;
+                } catch (error) {
+                    root.projectError = "ghostd sent malformed project state";
+                }
+            } else {
+                root.projectError = root.describeError(xhr, "GET project");
+            }
+        };
+        root.dispatch(xhr, "GET", root.projectRoute(ghost, sessionId), ({}), null,
+            function () { return xhr === root.projectRequest; });
+    }
+
+    /** Resolve and summarize a typed directory without trusting or loading it. */
+    function previewProject(path: string): void {
+        const candidate = path.trim();
+        const ghost = root.activeGhost;
+        const sessionId = root.currentSessionId || (ghost !== "" ? root.ensureSession(ghost) : "");
+        if (candidate === "" || !root.projectIdentityCurrent(ghost, sessionId)) return;
+        if (root.projectState.id !== sessionId) {
+            root.projectError = "Project state is still loading.";
+            root.fetchProject(true, true);
+            return;
+        }
+        if (root.projectPreviewRequest && root.projectPreviewRequest.readyState !== 4) {
+            const previous = root.projectPreviewRequest;
+            root.projectPreviewRequest = null;
+            previous.abort();
+        }
+        const xhr = root.makeProjectRequest("preview");
+        root.projectPreviewRequest = xhr;
+        root.projectPreview = null;
+        root.projectPreviewLoading = true;
+        root.projectError = "";
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || xhr !== root.projectPreviewRequest) return;
+            root.projectPreviewRequest = null;
+            root.projectPreviewLoading = false;
+            if (!root.projectIdentityCurrent(ghost, sessionId)) return;
+            if (xhr.status === 200) {
+                try {
+                    const parsed = ProjectModel.preview(JSON.parse(xhr.responseText));
+                    if (!parsed.ok) throw new Error(parsed.error);
+                    root.projectPreview = parsed.preview;
+                    root.projectError = "";
+                    root.projectPreviewFinished(true);
+                } catch (error) {
+                    root.projectError = "ghostd sent malformed project preview";
+                    root.projectPreviewFinished(false);
+                }
+            } else {
+                root.projectError = root.describeError(xhr, "preview project");
+                root.projectPreviewFinished(false);
+            }
+        };
+        root.dispatch(xhr, "POST", root.projectRoute(ghost, sessionId) + "/preview",
+            ({ "Content-Type": "application/json" }), JSON.stringify({ path: candidate }),
+            function () { return xhr === root.projectPreviewRequest; });
+    }
+
+    function mutateProject(action: string, method: string, suffix: string, body: var): void {
+        const ghost = root.activeGhost;
+        const sessionId = root.currentSessionId;
+        if (!root.projectIdentityCurrent(ghost, sessionId)
+                || root.projectState.id !== sessionId || root.projectMutating) return;
+        const xhr = root.makeProjectRequest("mutation");
+        root.projectMutationRequest = xhr;
+        root.projectMutating = true;
+        root.projectError = "";
+        root.projectNotice = "";
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || xhr !== root.projectMutationRequest) return;
+            root.projectMutationRequest = null;
+            root.projectMutating = false;
+            if (!root.projectIdentityCurrent(ghost, sessionId)) return;
+            if (xhr.status === 200) {
+                try {
+                    if (!root.applyProjectState(JSON.parse(xhr.responseText), sessionId))
+                        throw new Error("malformed state");
+                    if (action === "bind") root.projectPreview = null;
+                    root.projectNotice = action === "bind" ? "Project selected."
+                        : (action === "reload" ? "Project resources reloaded."
+                            : "This conversation now uses Home.");
+                    root.projectMutationFinished(action, true);
+                } catch (error) {
+                    if (root.projectError === "")
+                        root.projectError = "ghostd sent malformed project state";
+                    root.projectMutationFinished(action, false);
+                }
+                return;
+            }
+            const code = root.errorCode(xhr);
+            root.projectError = root.describeError(xhr, action + " project");
+            root.projectMutationFinished(action, false);
+            if (code === "stale_generation"
+                    || code === "project_rebind_requires_new_conversation") {
+                Qt.callLater(function () {
+                    if (root.projectIdentityCurrent(ghost, sessionId))
+                        root.fetchProject(true, false);
+                });
+            }
+        };
+        root.dispatch(xhr, method, root.projectRoute(ghost, sessionId) + suffix,
+            ({ "Content-Type": "application/json" }), JSON.stringify(body),
+            function () { return xhr === root.projectMutationRequest; });
+    }
+
+    function bindProject(): void {
+        const selected = root.projectPreview;
+        if (!selected || root.projectState.canRebind !== true) return;
+        root.mutateProject("bind", "PUT", "", {
+            root: selected.root,
+            cwd: selected.root,
+            trustToken: selected.trustToken,
+            expectedGeneration: root.projectState.generation
+        });
+    }
+
+    function reloadProject(): void {
+        if (root.projectState.root === null || root.projectState.canRebind !== true) return;
+        root.mutateProject("reload", "POST", "/reload", {
+            expectedGeneration: root.projectState.generation
+        });
+    }
+
+    function unbindProject(): void {
+        if (root.projectState.root === null || root.projectState.canRebind !== true) return;
+        const ownerHome = Quickshell.env("HOME") || "";
+        if (!ownerHome.startsWith("/")) {
+            root.projectError = "Owner Home is unavailable; the project was not changed.";
+            return;
+        }
+        const body = {
+            root: null,
+            cwd: ownerHome,
+            expectedGeneration: root.projectState.generation
+        };
+        root.mutateProject("unbind", "PUT", "", body);
+    }
+
+    // ---- Browsable ghost context -----------------------------------------
     // Plain files stay canonical. This is only the latest derived daemon
-    // snapshot used by the right-hand Docs/Memory/Helpers/Character surfaces.
+    // snapshot used by the right-hand Memory/inactive-agent/Character surfaces.
     property var contextCharacter: ({ path: "character.md", title: null })
-    property var contextDocs: []
     property var contextMemory: []
     property var contextAgents: []
     property var contextSkipped: []
@@ -87,6 +851,52 @@ Singleton {
     property string contextDeleteError: ""
     /** The ghost the current snapshot belongs to; "" means none is cached. */
     property string contextGhost: ""
+
+    // ---- Lifecycle-hook catalog ------------------------------------------
+    property var activeHooks: []
+    property var hookEvents: []
+    property int activeHookCount: 0
+    property int hookContinuationCap: 2
+    property bool hooksLoading: false
+    property bool hooksLoaded: false
+    /** A failed refresh may retain the last exact successful projection. */
+    property bool hooksStale: false
+    property string hooksError: ""
+    property int hooksEpoch: 0
+
+    // ---- Shared Documents -------------------------------------------------
+    // Machine Documents are deliberately not keyed by the active ghost. Each
+    // cache entry represents exactly one directory and one current-folder
+    // query; deeper folders arrive only when the owner opens them.
+    property string documentsRoot: ""
+    property var documentDirectories: DocumentModel.emptyMap()
+    property var documentRequests: DocumentModel.emptyMap()
+    /** Changes whenever an established daemon connection is lost. */
+    property int documentsEpoch: 0
+    property bool establishedConnection: false
+    property string documentContentPath: ""
+    property string documentContent: ""
+    property string documentContentModifiedAt: ""
+    property int documentContentSize: -1
+    property bool documentContentLoading: false
+    property bool documentContentReady: false
+    property string documentContentError: ""
+    property string documentDeletingPath: ""
+    property string documentDeleteError: ""
+
+    // ---- Conversation project binding ------------------------------------
+    // Project discovery is explicit and conversation-scoped. The ghost home
+    // remains the persona/memory/session store; this state changes only what
+    // the active runtime discovers from an owner-trusted working tree.
+    property var projectState: ProjectModel.empty()
+    property var projectPreview: null
+    property bool projectLoading: false
+    property bool projectPreviewLoading: false
+    property bool projectMutating: false
+    property string projectError: ""
+    property string projectNotice: ""
+    property string projectGhost: ""
+    property string projectSessionId: ""
 
     // ---- OMP commands -----------------------------------------------------
     // Effective commands are conversation-scoped: an extension can register
@@ -99,9 +909,9 @@ Singleton {
     property string commandsSessionId: ""
 
     // ---- Ghost MCP -------------------------------------------------------
-    // Only the active ghost's visible `mcp.json` is represented here. GET is
-    // sanitized by the daemon;
-    // secret-bearing values are write-only through mutation bodies.
+    // Only the active ghost's visible `<ghost-home>/mcp.json` is represented
+    // here. Explicitly bound external-project MCP remains session-owned. GET
+    // is sanitized; secret-bearing values are write-only through mutations.
     property var mcpServers: []
     property var mcpSkipped: []
     property bool mcpLoading: false
@@ -197,6 +1007,12 @@ Singleton {
     signal liveActionFinished(string action, bool ok)
     signal collabActionFinished(string action, bool writable, bool ok)
     signal contextDeleteFinished(string section, string path, bool ok)
+    signal documentDirectoryChanged(string path, string query)
+    signal documentDeleteFinished(string path, bool ok)
+    signal documentsConnectionReset(int epoch)
+    signal hooksConnectionReset(int epoch)
+    signal projectPreviewFinished(bool ok)
+    signal projectMutationFinished(string action, bool ok)
 
     // ---- Model login ------------------------------------------------------
     /** [{ id, name, subscription, authTypes, loginLabel, billingNote, configured, connectedVia }]. */
@@ -259,6 +1075,8 @@ Singleton {
     /** Test seam; production always constructs the native rename XHR. */
     property var renameGhostRequestFactory: null
     property var renameGhostSnapshot: null
+    /** Semantic project state held across an optimistic active-ghost rename. */
+    property var renameGhostProjectSnapshot: null
     property var renameSessionRequest: null
     /** Login requests have distinct owners so a poll cannot evict an input or
         provider fetch from the GC root, and every one can be retired on close. */
@@ -290,6 +1108,25 @@ Singleton {
     property string eventsFrameBuffer: ""
     property var contextRequest: null
     property var contextDeleteRequest: null
+    property var hooksRequest: null
+    /** Test seam; production always constructs a native status XHR. */
+    property var hooksRequestFactory: null
+    /** Test seams; production constructs native QML XHRs. */
+    property var documentRequestFactory: null
+    property var documentContentRequestFactory: null
+    property var documentDeleteRequestFactory: null
+    property var documentContentRequest: null
+    property var documentDeleteRequest: null
+    property var projectRequestFactory: null
+    property var projectPreviewRequestFactory: null
+    property var projectMutationRequestFactory: null
+    property var projectAbandonRequestFactory: null
+    property var projectRequest: null
+    property var projectPreviewRequest: null
+    property var projectMutationRequest: null
+    property var projectAbandonRequest: null
+    /** Owner navigation staged until a pre-turn binding is durably removed. */
+    property var pendingProjectReplacement: null
     property var commandsRequest: null
     property var mcpRequest: null
     property var mcpMutationRequest: null
@@ -417,9 +1254,39 @@ Singleton {
     Component.onCompleted: root.refresh()
     Component.onDestruction: root.retireClientRequests()
 
+    onReachableChanged: {
+        if (root.reachable) {
+            root.establishedConnection = true;
+            if (!root.hooksLoaded && !root.hooksLoading) {
+                Qt.callLater(function () {
+                    if (root.reachable && !root.hooksLoaded && !root.hooksLoading)
+                        root.fetchHooks(false);
+                });
+            }
+            if (root.documentsRoot === "") {
+                Qt.callLater(function () {
+                    if (root.reachable && root.documentsRoot === "")
+                        root.fetchDocuments("", "", false, true);
+                });
+            }
+        } else if (root.establishedConnection) {
+            root.beginHooksConnectionEpoch();
+            root.beginDocumentsConnectionEpoch();
+        }
+    }
+
     function retireClientRequests(): void {
         root.cancelLogin();
         root.cancelAllTranscriptLoads();
+        root.retireHooksRequest();
+        root.retireDocumentRequests();
+        for (const request of [root.projectRequest, root.projectPreviewRequest,
+                root.projectMutationRequest]) {
+            if (request && request.readyState !== 4) request.abort();
+        }
+        root.projectRequest = null;
+        root.projectPreviewRequest = null;
+        root.projectMutationRequest = null;
     }
     onActiveGhostChanged: {
         root.modelGeneration += 1;
@@ -428,6 +1295,8 @@ Singleton {
         // Any other selection change makes the old ghost's requests stale.
         if (root.loginGhost === "" || root.loginGhost !== root.activeGhost)
             root.cancelLogin();
+        if (root.projectGhost !== "" && root.projectGhost !== root.activeGhost)
+            root.clearProject();
         root.connectConversationEvents(root.activeGhost);
     }
 
@@ -503,6 +1372,7 @@ Singleton {
     // ---- Ghost roster -----------------------------------------------------
 
     function refresh(): void {
+        root.fetchHooks(false);
         const xhr = new XMLHttpRequest();
         root.listRequest = xhr;
         xhr.onreadystatechange = function () {
@@ -521,6 +1391,7 @@ Singleton {
                         root.fetchSessions(root.activeGhost);
                         root.fetchGreeting();
                         root.refreshCurrentTranscript();
+                        root.fetchProject(false, false);
                     }
                 } catch (error) {
                     root.fail("ghostd sent a malformed ghost list: " + error);
@@ -542,19 +1413,21 @@ Singleton {
         xhr.onreadystatechange = function () {
             if (xhr.readyState !== 4) return;
             if (xhr.status === 200 || xhr.status === 201) {
+                let created = null;
+                let createdName = trimmed;
                 try {
-                    root.activeGhost = JSON.parse(xhr.responseText).name;
+                    created = JSON.parse(xhr.responseText);
+                    if (created && typeof created.name === "string" && created.name !== "")
+                        createdName = created.name;
                 } catch (error) {
-                    root.activeGhost = trimmed;
+                    created = null;
                 }
-                root.currentSessionId = "";
-                root.sessions = [];
-                root.clearTranscript();
-                root.clearGreeting();
-                root.clearCommands();
-                root.clearMcp();
-                root.clearConnect();
-                root.refresh();
+                if (created && !root.ghosts.some(function (ghost) {
+                    return ghost && ghost.name === createdName;
+                })) root.ghosts = root.ghosts.concat([created]);
+                root.requestProjectReplacement(({
+                    kind: "createdGhost", name: createdName
+                }));
             } else {
                 root.fail(root.describeError(xhr, "POST /api/ghosts"));
             }
@@ -562,6 +1435,20 @@ Singleton {
         root.dispatch(xhr, "POST", "/api/ghosts",
             ({ "Content-Type": "application/json" }),
             JSON.stringify({ name: trimmed }));
+    }
+
+    function finishCreatedGhostSelection(name: string): void {
+        if (name === "") return;
+        root.activeGhost = name;
+        root.currentSessionId = "";
+        root.sessions = [];
+        root.clearTranscript();
+        root.clearGreeting();
+        root.clearCommands();
+        root.clearProject();
+        root.clearMcp();
+        root.clearConnect();
+        root.refresh();
     }
 
     /**
@@ -622,6 +1509,12 @@ Singleton {
             root.ghostRenameError = "Wait for the model login to start before renaming this ghost.";
             return false;
         }
+        // The daemon holds a project transition lease through its atomic write;
+        // a whole-home rename is guaranteed to answer ghost_busy in this state.
+        if (root.projectMutating && root.projectGhost === from) {
+            root.ghostRenameError = "Wait for the project change to finish before renaming this ghost.";
+            return false;
+        }
         const transaction = GhostRename.prepare(root.ghostRenameState(), from, next);
         if (!transaction.ok) {
             root.ghostRenameError = transaction.code === "already_exists"
@@ -632,6 +1525,11 @@ Singleton {
         root.renamingGhost = from;
         root.ghostRenameError = "";
         root.renameGhostSnapshot = transaction.before;
+        const projectBelongsToRename = root.projectGhost === from
+            || (root.projectGhost === "" && root.activeGhost === from);
+        root.renameGhostProjectSnapshot = projectBelongsToRename
+            ? root.projectRenameSnapshot() : null;
+        if (projectBelongsToRename) root.retireProjectRequests();
         root.pauseLoginRoute(from);
         root.installGhostRenameState(transaction.after);
         root.moveTurnStates(from, next);
@@ -644,6 +1542,7 @@ Singleton {
             root.renamingGhost = "";
             if (xhr.status === 200) {
                 root.renameGhostSnapshot = null;
+                root.renameGhostProjectSnapshot = null;
                 root.ghostRenameError = "";
                 // The daemon has the last word on the name it actually wrote.
                 let settled = next;
@@ -655,20 +1554,32 @@ Singleton {
                 }
                 if (settled !== next) root.applyGhostRename(next, settled);
                 root.moveLoginRoute(from, settled);
+                // Every retired request used the old route. Even if the
+                // semantic snapshot was current, the settled daemon name is
+                // authoritative and must own a fresh GET.
+                if (root.activeGhost === settled && root.currentSessionId !== "")
+                    root.fetchProject(true, false);
                 root.refresh();
             } else {
+                const projectBefore = root.renameGhostProjectSnapshot;
                 if (root.renameGhostSnapshot) {
                     root.moveTurnStates(next, from);
                     root.installGhostRenameState(GhostRename.rollback({
                         before: root.renameGhostSnapshot
                     }));
                 }
+                root.restoreProjectRenameSnapshot(projectBefore);
                 root.renameGhostSnapshot = null;
+                root.renameGhostProjectSnapshot = null;
                 const detail = root.errorDetail(xhr);
                 root.ghostRenameError = detail !== ""
                     ? detail
                     : root.describeError(xhr, "PUT ghost name");
                 root.resumeLoginRoute(from);
+                Qt.callLater(function () {
+                    if (root.activeGhost === from && root.currentSessionId !== "")
+                        root.fetchProject(true, false);
+                });
             }
         };
         root.dispatch(xhr, "PUT",
@@ -687,6 +1598,7 @@ Singleton {
             greetingGhost: root.greetingGhost,
             loginGhost: root.loginGhost,
             commandsGhost: root.commandsGhost,
+            projectGhost: root.projectGhost,
             mcpGhost: root.mcpGhost,
             liveGhost: root.liveGhost,
             collabGhost: root.collabGhost,
@@ -703,6 +1615,7 @@ Singleton {
         root.greetingGhost = state.greetingGhost;
         root.loginGhost = state.loginGhost;
         root.commandsGhost = state.commandsGhost;
+        root.projectGhost = state.projectGhost;
         root.mcpGhost = state.mcpGhost;
         root.liveGhost = state.liveGhost;
         root.collabGhost = state.collabGhost;
@@ -755,12 +1668,18 @@ Singleton {
         root.clearGreeting();
         root.clearContext();
         root.clearCommands();
+        root.clearProject();
         root.clearMcp();
         root.clearConnect();
     }
 
     function selectGhost(name: string): void {
         if (name === root.activeGhost) return;
+        root.requestProjectReplacement(({ kind: "selectGhost", name: name }));
+    }
+
+    function finishSelectGhost(name: string): void {
+        if (name === "" || name === root.activeGhost) return;
         const previous = root.activeTurnState(false);
         if (previous) {
             root.captureActiveTurn(previous);
@@ -780,11 +1699,29 @@ Singleton {
         root.clearGreeting();
         root.clearContext();
         root.clearCommands();
+        root.clearProject();
         root.clearMcp();
         root.clearConnect();
         root.fetchCurrentModel();
         root.fetchSessions(name);
         root.fetchGreeting();
+        root.fetchProject(false, false);
+    }
+
+    /** One atomic tray intent; selection must not outrun draft abandonment. */
+    function openConversationForGhost(name: string, id: string): void {
+        if (name === "" || id === "") return;
+        root.requestProjectReplacement(({
+            kind: "openConversationForGhost", name: name, id: id
+        }));
+    }
+
+    /** One atomic tray intent; New must apply to the selected destination. */
+    function newConversationForGhost(name: string): void {
+        if (name === "") return;
+        root.requestProjectReplacement(({
+            kind: "newConversationForGhost", name: name
+        }));
     }
 
     function conversationKey(ghost: string, sessionId: string): string {
@@ -855,8 +1792,13 @@ Singleton {
                 || (runtime !== "pi" && runtime !== "claude-code")) return null;
         const state = root.activeTurnState(false);
         if (!state || state.runtime === runtime || state.streaming) return state;
+        // A trusted binding belongs to this exact runtime-qualified draft. It
+        // is never silently transferred to another runtime.
+        if (root.projectState.id === state.sessionId && root.projectState.root !== null)
+            return state;
         root.captureActiveTurn(state);
         root.cancelTranscriptLoad(state);
+        root.clearProject();
         const id = root.conversationActionId(runtime, state.conversationId);
         root.sessionIds[ghost] = id;
         root.currentSessionId = id;
@@ -864,6 +1806,7 @@ Singleton {
         root.showTurnState(ghost, id);
         root.clearCommands();
         root.clearConnect();
+        root.fetchProject(false, false);
         return target;
     }
 
@@ -899,6 +1842,7 @@ Singleton {
             sessionId: sessionId,
             conversationId: conversationId,
             runtime: runtime,
+            published: false,
             rows: [],
             hydratedRowCount: 0,
             commandTurnKey: "",
@@ -1194,7 +2138,6 @@ Singleton {
         root.contextRequest = null;
         root.contextDeleteRequest = null;
         root.contextCharacter = ({ path: "character.md", title: null });
-        root.contextDocs = [];
         root.contextMemory = [];
         root.contextAgents = [];
         root.contextSkipped = [];
@@ -1235,7 +2178,6 @@ Singleton {
                     root.contextCharacter = body.character
                         && typeof body.character === "object"
                         ? body.character : ({ path: "character.md", title: null });
-                    root.contextDocs = Array.isArray(body.docs) ? body.docs : [];
                     root.contextMemory = Array.isArray(body.memory) ? body.memory : [];
                     root.contextAgents = Array.isArray(body.agents) ? body.agents : [];
                     root.contextSkipped = Array.isArray(body.skipped) ? body.skipped : [];
@@ -1253,11 +2195,11 @@ Singleton {
             "/api/ghosts/" + encodeURIComponent(ghost) + "/context", ({}), null);
     }
 
-    /** Move one doc or memory file to system Trash after the UI confirms it. */
+    /** Move one memory file to system Trash after the UI confirms it. */
     function deleteContextFile(section: string, path: string): void {
         const ghost = root.activeGhost;
         if (ghost === "" || path === "" || root.contextDeletingPath !== "") return;
-        if (section !== "docs" && section !== "memory") return;
+        if (section !== "memory") return;
         const xhr = new XMLHttpRequest();
         root.contextDeleteRequest = xhr;
         root.contextDeletingPath = path;
@@ -1360,7 +2302,7 @@ Singleton {
             + "/sessions/" + encodeURIComponent(sessionId) + "/commands", ({}), null);
     }
 
-    // ---- Project MCP management -----------------------------------------
+    // ---- Ghost MCP management -------------------------------------------
 
     function clearMcp(): void {
         if (root.mcpRequest && root.mcpRequest.readyState !== 4)
@@ -1840,8 +2782,11 @@ Singleton {
                         && typeof event.conversationId === "string"
                         && event.id === root.conversationActionId(
                             event.runtime, event.conversationId)
-                        && ghost === root.activeGhost)
+                        && ghost === root.activeGhost) {
                     root.fetchSessions(ghost);
+                    if (event.reason === "project" && event.id === root.currentSessionId)
+                        root.fetchProject(true, false);
+                }
             } catch (error) {
                 console.warn("ghost: unparseable conversation event:", line);
             }
@@ -1898,7 +2843,12 @@ Singleton {
                     // Contract is { sessions: [...] }; tolerate a bare array too.
                     const list = Array.isArray(body) ? body
                         : (Array.isArray(body.sessions) ? body.sessions : []);
-                    root.sessions = root.mergeSessionListing(g, root.validSessionRows(list));
+                    const valid = root.validSessionRows(list);
+                    for (const session of valid) {
+                        const state = root.turnStates[root.conversationKey(g, session.id)];
+                        if (state) state.published = true;
+                    }
+                    root.sessions = root.mergeSessionListing(g, valid);
                     root.sessionsError = "";
                     const current = root.sessions.find(function (session) {
                         return session && session.id === root.currentSessionId;
@@ -1925,6 +2875,11 @@ Singleton {
      * row exists yet — the composer is simply ready for a new thread.
      */
     function newConversation(): void {
+        if (root.activeGhost === "") return;
+        root.requestProjectReplacement(({ kind: "newConversation" }));
+    }
+
+    function finishNewConversation(): void {
         const ghost = root.activeGhost;
         if (ghost === "") return;
         const previous = root.activeTurnState(false);
@@ -1941,14 +2896,18 @@ Singleton {
         root.ensureTurnState(ghost, id, conversationId, runtime);
         root.showTurnState(ghost, id);
         root.clearCommands();
+        root.clearProject();
         root.clearConnect();
         // A blank chat is back on screen, so it earns a fresh opening line.
         root.clearGreeting();
         root.fetchGreeting();
+        root.fetchProject(false, false);
     }
 
     /** Keep a lazily-created live conversation navigable until ghostd lists it. */
     function ensureOptimisticSessionRow(ghost: string, id: string): void {
+        const state = root.turnStates[root.conversationKey(ghost, id)];
+        if (state) state.published = true;
         if (ghost !== root.activeGhost || root.sessions.some(function (session) {
             return session && session.id === id;
         })) return;
@@ -2002,6 +2961,7 @@ Singleton {
                         root.currentSessionId = "";
                         root.clearTurnProjection();
                         root.clearCommands();
+                        root.clearProject();
                         root.clearConnect();
                         root.clearGreeting();
                         root.fetchGreeting();
@@ -2136,6 +3096,7 @@ Singleton {
             root.captureActiveTurn(previous);
             if (previous.sessionId !== id) root.cancelTranscriptLoad(previous);
         }
+        root.clearProject();
         root.sessionIds[ghost] = id;
         root.currentSessionId = id;
         root.showTurnState(ghost, id);
@@ -2144,6 +3105,7 @@ Singleton {
         // A conversation with its own history needs no opening line; a greeting
         // would be answering a question nobody just asked.
         root.clearGreeting();
+        root.fetchProject(false, false);
     }
 
     /**
@@ -2157,7 +3119,16 @@ Singleton {
         // Clicking the selected title is navigation, not an interrupt button.
         // In particular it must not abort the XHR and then report that
         // client-initiated abort as ghostd becoming unreachable.
-        if (id === root.currentSessionId && root.streaming) return;
+        if (id === root.currentSessionId) {
+            if (!root.streaming) root.finishOpenConversation(id);
+            return;
+        }
+        root.requestProjectReplacement(({ kind: "openConversation", id: id }));
+    }
+
+    function finishOpenConversation(id: string): void {
+        const ghost = root.activeGhost;
+        if (ghost === "" || id === "") return;
         root.adoptConversation(ghost, id);
         root.markConversationRead(ghost, id);
         const state = root.ensureTurnState(ghost, id);
@@ -2306,6 +3277,7 @@ Singleton {
                 const body = JSON.parse(xhr.responseText);
                 if (!root.transcriptMatchesIdentity(body, state))
                     throw new Error("transcript identity mismatch");
+                state.published = true;
                 if (typeof body.total !== "number" || !Number.isFinite(body.total)
                         || Math.floor(body.total) !== body.total || body.total < 0)
                     throw new Error("invalid transcript total");
@@ -2486,6 +3458,9 @@ Singleton {
                 // toggle with the ordinary ones.
                 status: root.restoredToolStatus(part),
                 arguments: part.arguments || ({}),
+                // Per-call, not per-conversation: a transcript can contain
+                // writes on both sides of a persisted `!cd`.
+                cwd: typeof part.cwd === "string" ? part.cwd : "",
                 summary: "",
                 intent: "",
                 askBranch: part.ghostAsk || null,
@@ -2606,8 +3581,20 @@ Singleton {
         const ghost = root.activeGhost;
         let sessionId = root.ensureSession(ghost);
         let state = root.ensureTurnState(ghost, sessionId);
-        if (state && state.runtime !== root.runtimeForNewConversation()) {
-            state = root.adoptConversationRuntime(ghost, root.runtimeForNewConversation());
+        const desiredRuntime = root.runtimeForNewConversation();
+        if (state && state.runtime !== desiredRuntime
+                && root.projectState.id === state.sessionId
+                && root.projectState.root !== null) {
+            const message = "This draft’s trusted project is bound to "
+                + (state.runtime === "claude-code" ? "Claude Code" : "Pi")
+                + ". Use Home or start a new conversation before changing runtimes.";
+            root.projectError = message;
+            state.lastError = message;
+            root.projectTurnFields(state);
+            return;
+        }
+        if (state && state.runtime !== desiredRuntime) {
+            state = root.adoptConversationRuntime(ghost, desiredRuntime);
             sessionId = state ? state.sessionId : "";
         }
         if (!state || sessionId === "") return;
@@ -2970,6 +3957,7 @@ Singleton {
                 name: event.toolName,
                 status: "running",
                 arguments: event.arguments || ({}),
+                cwd: typeof event.cwd === "string" ? event.cwd : "",
                 intent: event.intent || ""
             });
             if (event.toolName === "ask") Qt.callLater(function () {
@@ -3053,6 +4041,7 @@ Singleton {
             name: patch.name || "tool",
             status: "preparing",
             arguments: ({}),
+            cwd: "",
             summary: "",
             intent: "",
             // A live ask has not settled yet; the card reads "" as unknown and

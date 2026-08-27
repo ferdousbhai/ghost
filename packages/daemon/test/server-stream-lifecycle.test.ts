@@ -20,10 +20,13 @@ describe("SSE turn lifecycle", () => {
     temp.registry.ensureRoot();
     seedGhost(temp.root, { name: "casper" });
     const host = {
-      async runTurn(_ghost: string, options: {
-        emit: (event: { type: "start" }) => void;
-      }) {
-        options.emit({ type: "start" });
+      async admitTurn() {
+        return {
+          async run(options: { emit: (event: { type: "start" }) => void }) {
+            options.emit({ type: "start" });
+          },
+          release() {},
+        };
       },
     } as unknown as SessionHost;
     listening = await startDaemonServer({

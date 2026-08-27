@@ -2,26 +2,28 @@
 
 ## Vision
 
-A ghost is an AI persona — character, memory, docs, tools — that lives
-entirely on its owner's machine as an Omarchy-native desktop app: an OMP
-engine over a folder of plain markdown files, summoned with a keystroke,
-and extended with OMP extensions and skills. It is an owner-local desktop
-application, not a network-facing agent service. No server holds a copy.
+A ghost is an AI persona — character, memory, tools, and access to the owner's
+Documents — that lives entirely on its owner's machine as an Omarchy-native
+desktop app: an OMP engine over owner-readable files, summoned with a keystroke,
+and extended with bounded declarative skills and project context. It is an
+owner-local desktop application, not a network-facing agent service. No server
+holds a copy.
 "Your ghost, not our copy of it."
 
 ## Design goal: modifiable, infinitely extensible
 
 **The ghost is modifiable and infinitely extensible. Oh My Pi showed the
 way.** The official repo is the point of collaboration on a narrow,
-opinionated core — ghost home, daemon, shell, the built-in extensions — but
-ghosts are meant to be modified: owners build on the plugin and extension
-interfaces (OMP extensions, skills, model roles, browser backends, tool
-factories) and grow their ghost to whatever their needs are. Core stays
-small and holds the contracts; everything else belongs in owner-supplied extensions.
-When a capability is generic enough for every ghost, it graduates into core
-(or upstream into OMP itself); until then it lives in the owner's ghost
-home. The measure of success is not what core ships — it is what owners
-can bolt on without asking.
+opinionated core — ghost home, daemon, shell, and built-in extensions. Today an
+owner can modify the visible instructions, skills, rules, Markdown commands and
+prompts, model roles, and MCP owned by a ghost or explicitly trusted project.
+Executable project plugins, hooks, custom tools, LSP, and Pi subagents stay
+disabled until #31 supplies a per-session isolation boundary; trusted visible
+ghost hook factories are the narrow in-process exception. Core stays small and
+holds the contracts. A capability generic enough for every ghost graduates into
+core or upstream OMP; safe private executable additions follow the isolation
+boundary rather than being discovered implicitly from cwd. The measure of
+success is what owners can extend without surrendering the local trust model.
 
 ## Positioning
 
@@ -37,12 +39,11 @@ and no cloud custody.
 ## Phases
 
 - **Owner-local (IN PROGRESS).** Feature-complete ghost:
-  multi-ghost plain-file homes, persona/memory/docs pi extensions, `ghostd`
-  daemon, Quickshell HUD (Super+G) + bar widget + notifications, import of
-  the hosted export, optional owner-local Claude Code plan runtime, AUR
-  packaging. Current status: workspace scaffolded;
-  `packages/extensions`, `packages/daemon`, `packages/shell` in parallel
-  construction; pi SDK path proven by spike (zero fork-risk).
+  multi-ghost plain-file homes, persona and memory extensions, a shared shallow
+  Documents index, explicit project snapshots, `ghostd`, the Quickshell HUD
+  (Super+G) + bar widget + notifications, hosted-export import, the optional
+  owner-local Claude Code runtime, and AUR packaging. The integrated workspace
+  remains pre-beta and the executable project-extension boundary is unfinished.
 - **Transition (predecessor platform).** summonghost.com → one-pager +
   sign-in-gated "Download my ghost" export (shipped); hosted stack frozen,
   then drained (W10 engine + residue verification). Details:
@@ -50,30 +51,35 @@ and no cloud custody.
 
 ## Contracts
 
-`../CONTRACTS.md` is binding: the **ghost-home/v1** layout and the localhost
+`../CONTRACTS.md` is binding: the **ghost-home/v2** layout and the localhost
 **pi-messages daemon API**. Change deliberately, one commit, all consumers.
 
 ## Key decisions (one-line rationales)
 
-- **Build on modern OMP by default, never fork; add official harnesses at explicit
-  runtime boundaries** — the spike proved `createAgentSession` + extensions
-  express the normal path. `claude-code/default` is the narrow exception: the
+- **Build on modern OMP by default, never maintain a fork; keep the pinned patch
+  set narrow and add official harnesses at explicit runtime boundaries** —
+  `createAgentSession` plus explicit Ghost snapshots express the normal path.
+  `claude-code/default` is the narrow exception: the
   official Claude Agent SDK invokes an installed, unmodified Claude Code so the
-  owner can use their own plan. Both consume the same Ghost system prompt,
-  tools, and pi-messages wire; neither dependency is forked.
+  owner can use their own plan. Both receive the same Ghost persona, memory,
+  Documents, and declarative layers and emit the pi-messages wire, while each
+  keeps its native tool harness. Neither dependency is maintained as a fork.
 - **Model-agnostic like OMP; bring any provider.** Two named requirements:
   existing **OpenAI Codex/ChatGPT subscriptions usable as auth**
   through OMP's Codex OAuth, **Claude plans through the Claude Code harness**
   (a separate runtime from OMP's Anthropic provider), and **OpenRouter
   first-class** with its free models as a zero-cost onboarding option.
-- **Files, not a database** — plain markdown + YAML frontmatter is the
-  store; owner-readable, greppable, git-friendly; the sync machinery a
-  server required simply disappears.
-- **No stored indexes** — memory index and doc catalog are derived per
-  session; files edited out-of-band can never go stale against an index.
-- **Docs and skills coexist** — docs are durable ghost-owned knowledge;
-  OMP-native skills are reusable procedural instructions. Sessions discover
-  both, including explicit `/skill:<name>` invocation.
+- **Owner-readable files, not an application database** — Markdown content and
+  inspectable JSON/YAML policy remain greppable and backup-friendly. OMP's
+  machine-only credential/catalog database stays isolated under `.pi/` rather
+  than becoming Ghost's content store.
+- **No stored indexes** — the memory index and shallow owner Documents index
+  are derived per session; files edited out-of-band cannot go stale against a
+  persisted catalog.
+- **Documents and skills coexist without sharing lifecycle** — Documents are
+  live owner-wide files, while OMP-native skills are bounded declarative
+  instructions from a ghost or trusted project. Pi supports explicit
+  `/skill:<name>` invocation without treating Documents as a package root.
 - **Two browser modes**: "My browser" (relay into the owner's real signed-in Chromium via MV3 extension + chrome.debugger) and "Ghost's browser" (per-ghost Playwright profile, isolated/autonomous), one backend-agnostic tool surface.
 - **Quickshell shell surfaces, not a webapp window** — Omarchy's own shell
   is Quickshell; a layer-shell HUD + bar widget is native in a way no app

@@ -13,6 +13,9 @@
  *
  * See ./harness.ts for the normalisation rules and the regeneration command.
  */
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { MachineDocuments } from "@ghost/extensions";
 import { afterEach, describe, expect, it } from "vitest";
 import { resolveGhostExtensions } from "../../src/extensions.js";
 import {
@@ -63,12 +66,11 @@ The Heidelberg cost more than it should have.
 `;
 
 /**
- * OMP natives beyond the documented minimum in
- * `OMP_NATIVE_TOOL_NAMES`. Ghost does not contract for these, but they
- * are part of the harness a strip is about to cut into, so the fixture records
- * whether each is still there.
+ * Additional OMP tools worth auditing beside the phase-1 minimum. Ghost does
+ * not contract for these. `task` is included specifically to pin the deliberate
+ * phase-1 subtraction while the fixture records the rest of the harness.
  */
-const OTHER_OMP_NATIVES = ["ask", "eval", "inspect_image", "todo"] as const;
+const OTHER_AUDITED_OMP_TOOLS = ["ask", "eval", "inspect_image", "task", "todo"] as const;
 
 describe("golden: session", () => {
   it("writes a memory mid-conversation and carries it into the next turn's persona", async () => {
@@ -93,12 +95,18 @@ describe("golden: session", () => {
     const dir = seedGhost(temp.root, {
       name: "casper",
       character: CHARACTER,
-      docs: { "press.md": PRESS_DOC, "ledger.md": LEDGER_DOC },
       provider: { baseUrl: provider.url, modelId: provider.modelId },
     });
+    const documentsRoot = join(temp.root, ".documents");
+    mkdirSync(documentsRoot);
+    writeFileSync(join(documentsRoot, "press.md"), PRESS_DOC);
+    writeFileSync(join(documentsRoot, "ledger.md"), LEDGER_DOC);
+    const documents = new MachineDocuments(documentsRoot);
     host = new SessionHost({
       registry: temp.registry,
+      ownerHome: temp.ownerHome,
       offline: true,
+      extensionOptions: { documents },
       // Titling is a background smol completion; pin it rather than let a
       // second model call race the fixture.
       title: { generate: async () => "Remembering how you like answers" },
@@ -109,6 +117,8 @@ describe("golden: session", () => {
     const normalizer = new Normalizer()
       .path(provider.url, "<mock-provider>")
       .path(dir, "<ghost-home>")
+      .path(documentsRoot, "<documents-root>")
+      .path(temp.ownerHome, "<owner-home>")
       .path(temp.root, "<ghosts-root>");
     const sections: GoldenSection[] = [];
 
@@ -144,14 +154,13 @@ describe("golden: session", () => {
 
     // The session's own registry is wider than the wire list: OMP mounts some
     // of Ghost's capabilities through its xd:// device registry rather than
-    // advertising them as functions. Recorded as a presence table because a
-    // session also discovers whatever the developer's own machine has
-    // configured — see the harness header.
+    // advertising them as functions. Record a presence table so OMP may change
+    // presentation without hiding a missing native or Ghost-owned capability.
     const handle = await host.open("casper", "conv-golden");
     const universe = [
       ...OMP_NATIVE_TOOL_NAMES,
-      ...OTHER_OMP_NATIVES,
-      ...resolveGhostExtensions({}, dir, { vision: false }).toolNames,
+      ...OTHER_AUDITED_OMP_TOOLS,
+      ...resolveGhostExtensions({ documents }, dir, { vision: false }).toolNames,
     ];
     sections.push({
       title: "tool surface",

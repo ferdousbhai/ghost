@@ -18,7 +18,7 @@
  *
  * Credentials therefore come from exactly two places, both per-ghost and
  * both inside the ghost home:
- *   - `<home>/models.json`     — provider definitions incl. `apiKey`
+ *   - `<home>/models.json` — provider definitions incl. `apiKey`
  *   - `<home>/.pi/agent.db`    — OMP's credential store
  *
  * ## What is removed
@@ -33,11 +33,34 @@
 
 /** Exact variable names, grouped by why they are dangerous. */
 export const PROVIDER_CREDENTIAL_ENV_VARS: readonly string[] = [
-  // Direct provider API keys read by pi-ai's built-in providers.
+  // Direct provider credentials read by pi-ai or the Claude Code HTTP agent.
   "AI_GATEWAY_API_KEY",
   "ANTHROPIC_API_KEY",
   "ANTHROPIC_AUTH_TOKEN",
+  // The pinned Anthropic SDK otherwise discovers profile files or synthesizes
+  // an OIDC-federation credential chain entirely from ambient state.
+  "ANTHROPIC_CONFIG_DIR",
+  "ANTHROPIC_FEDERATION_RULE_ID",
+  "ANTHROPIC_IDENTITY_TOKEN",
+  "ANTHROPIC_IDENTITY_TOKEN_FILE",
   "ANTHROPIC_OAUTH_TOKEN",
+  "ANTHROPIC_ORGANIZATION_ID",
+  "ANTHROPIC_PROFILE",
+  "ANTHROPIC_SCOPE",
+  "ANTHROPIC_SERVICE_ACCOUNT_ID",
+  "ANTHROPIC_WORKSPACE_ID",
+  // The pinned Claude CLI reads these mTLS values and alternate credential
+  // selectors/channels. CLAUDE_CONFIG_DIR is intentionally retained because
+  // it locates the OS owner's existing Claude plan login.
+  "CLAUDE_CODE_CLIENT_CERT",
+  "CLAUDE_CODE_CLIENT_KEY",
+  "CLAUDE_CODE_CLIENT_KEY_PASSPHRASE",
+  "CLAUDE_CODE_OAUTH_CLIENT_ID",
+  "CLAUDE_CODE_ORGANIZATION_UUID",
+  "CLAUDE_CODE_SESSION_ACCESS_TOKEN",
+  "CLAUDE_CODE_WEBSOCKET_AUTH_FILE_DESCRIPTOR",
+  "CLAUDE_SECURESTORAGE_CONFIG_DIR",
+  "CLAUDE_SESSION_INGRESS_TOKEN_FILE",
   "ANT_LING_API_KEY",
   "AZURE_OPENAI_API_KEY",
   "BASETEN_API_KEY",
@@ -47,8 +70,11 @@ export const PROVIDER_CREDENTIAL_ENV_VARS: readonly string[] = [
   "DEEPSEEK_API_KEY",
   "FIREWORKS_API_KEY",
   "GEMINI_API_KEY",
+  "GITLAB_TOKEN",
   "GOOGLE_CLOUD_API_KEY",
   "GROQ_API_KEY",
+  "HF_TOKEN",
+  "HUGGINGFACE_HUB_TOKEN",
   "KIMI_API_KEY",
   "MINIMAX_API_KEY",
   "MINIMAX_CN_API_KEY",
@@ -108,6 +134,8 @@ export const PROVIDER_ROUTING_ENV_VARS: readonly string[] = [
   "ANTHROPIC_FOUNDRY_RESOURCE",
   "ANTHROPIC_MODEL",
   "ANTHROPIC_SMALL_FAST_MODEL",
+  // Bypasses the configured Anthropic network route in favor of a local socket.
+  "ANTHROPIC_UNIX_SOCKET",
   "ANTHROPIC_VERTEX_BASE_URL",
   "ANTHROPIC_VERTEX_PROJECT_ID",
   "AWS_DEFAULT_REGION",
@@ -118,15 +146,25 @@ export const PROVIDER_ROUTING_ENV_VARS: readonly string[] = [
   "CLAUDE_CODE_API_BASE_URL",
   "CLAUDE_CODE_AUTO_MODE_MODEL",
   "CLAUDE_CODE_BG_CLASSIFIER_MODEL",
+  "CLAUDE_CODE_CUSTOM_OAUTH_URL",
   "CLAUDE_CODE_GB_BASE_URL",
+  "CLAUDE_CODE_REMOTE",
   "CLAUDE_CODE_SUBAGENT_MODEL",
+  "CLAUDE_CODE_SHELL_PREFIX",
   "CLAUDE_CODE_USE_ANTHROPIC_AWS",
   "CLAUDE_CODE_USE_BEDROCK",
   "CLAUDE_CODE_USE_FOUNDRY",
   "CLAUDE_CODE_USE_MANTLE",
   "CLAUDE_CODE_USE_VERTEX",
+  "CLAUDE_LOCAL_OAUTH_API_BASE",
+  "CLAUDE_LOCAL_OAUTH_APPS_BASE",
+  "CLAUDE_LOCAL_OAUTH_CONSOLE_BASE",
   // Retained for older Claude Code releases that used the unprefixed name.
   "USE_VERTEX",
+  // OMP settings and shell wrapping must remain session-scoped in the hosted
+  // runtime rather than inheriting overlays from ghostd's launcher.
+  "PI_CONFIG_FILES",
+  "PI_SHELL_PREFIX",
 ];
 
 /**

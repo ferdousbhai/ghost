@@ -7,11 +7,11 @@ pragma Singleton
 // not ours. `filePath` is always absolute once set, so every consumer can treat
 // it as a real path rather than re-deriving a base.
 //
-// Tool arguments are the main source of paths, and OMP hands the ghost a
-// session cwd of the ghost home (CONTRACTS.md), so a relative argument is
-// resolved against that home. When the home is unknown — no active ghost, or a
-// roster that has not landed yet — a relative path resolves to "" and the
-// caller is expected to offer nothing rather than guess a base.
+// Ghost-owned context paths are relative to the active ghost home. Model tool
+// paths are different: their activity carries the cwd in effect when the call
+// ran, and ToolCard supplies that base explicitly. Keeping those two bases
+// separate is what lets `!cd` move a conversation without making character.md
+// or memory follow it.
 //
 // The one thing here that does touch the disk is "open this in a real editor",
 // at the bottom: answering it means asking the filesystem where the project
@@ -79,12 +79,27 @@ Singleton {
         return resolved !== "" && root.kindOf(resolved) !== "";
     }
 
+    /** True when `path` is renderable after resolving it against `base`. */
+    function canOpenFrom(path: string, base: string): bool {
+        const resolved = root.absoluteFrom(path, base);
+        return resolved !== "" && root.kindOf(resolved) !== "";
+    }
+
     /**
      * `path` as an absolute, dot-free path, or "" when it cannot be made one.
      * Accepts a file:// URL and a leading `~` because both reach us from
      * outside; anything else relative needs `home` to be known.
      */
     function absolute(path: string): string {
+        return root.absoluteFrom(path, root.home);
+    }
+
+    /**
+     * Resolve `path` against one explicit absolute directory. Absolute paths
+     * and `~` do not need a base; a relative path with no trustworthy base is
+     * deliberately refused rather than guessed from the active ghost.
+     */
+    function absoluteFrom(path: string, base: string): string {
         let value = String(path || "").trim();
         if (value === "") return "";
         // A pseudo-path (conflict://N and friends) names no file on disk.
@@ -96,9 +111,9 @@ Singleton {
             value = userHome + value.slice(1);
         }
         if (!value.startsWith("/")) {
-            const base = String(root.home || "").trim();
-            if (base === "" || !base.startsWith("/")) return "";
-            value = base + "/" + value;
+            const directory = String(base || "").trim();
+            if (directory === "" || !directory.startsWith("/")) return "";
+            value = directory + "/" + value;
         }
         const segments = [];
         for (const segment of value.split("/")) {

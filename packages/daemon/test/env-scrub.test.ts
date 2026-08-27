@@ -1,11 +1,27 @@
+import { CATALOG_PROVIDERS } from "@oh-my-pi/pi-catalog/provider-models";
+import type { ProviderCatalogEntry } from "@oh-my-pi/pi-catalog/provider-models";
 import { describe, expect, it } from "vitest";
 import {
   findProviderCredentialEnv,
   PI_NO_TITLE_ENV_VAR,
   PI_OFFLINE_ENV_VAR,
+  PROVIDER_CREDENTIAL_ENV_VARS,
   PROVIDER_ROUTING_ENV_VARS,
   scrubProviderEnv,
 } from "../src/env-scrub.js";
+
+// Catalog envVars are credentials today. If a future descriptor deliberately
+// names a noncredential setting, it must be reviewed and listed here rather
+// than weakening the coverage assertion.
+const INTENTIONALLY_NON_CREDENTIAL_CATALOG_ENV_VARS: readonly string[] = [];
+
+function pinnedCatalogEnvVars(): string[] {
+  const providers: readonly ProviderCatalogEntry[] = CATALOG_PROVIDERS;
+  return [...new Set(providers.flatMap((provider) => [
+    ...(provider.envVars ?? []),
+    ...(provider.catalogDiscovery?.envVars ?? []),
+  ]))].sort();
+}
 
 describe("scrubProviderEnv", () => {
   it("removes the credentials the spike proved leak into a ghost's model list", () => {
@@ -28,6 +44,70 @@ describe("scrubProviderEnv", () => {
     expect(env.PATH).toBe("/usr/bin");
     expect(env.HOME).toBe("/home/u");
     expect(findProviderCredentialEnv(env)).toEqual([]);
+  });
+
+  it("classifies and scrubs every pinned provider-catalog environment fallback", () => {
+    const catalogEnvVars = pinnedCatalogEnvVars();
+    const parent = Object.fromEntries(
+      catalogEnvVars.map((name) => [name, `hostile-${name}`]),
+    );
+    const sessionEnv = { ...parent };
+
+    const { removed } = scrubProviderEnv(sessionEnv);
+    const intentionallyRetained = [...INTENTIONALLY_NON_CREDENTIAL_CATALOG_ENV_VARS].sort();
+
+    expect(intentionallyRetained.filter((name) => !catalogEnvVars.includes(name))).toEqual([]);
+    expect(removed).toEqual(
+      catalogEnvVars.filter((name) => !intentionallyRetained.includes(name)),
+    );
+    expect(catalogEnvVars.filter((name) =>
+      !removed.includes(name) && !intentionallyRetained.includes(name))).toEqual([]);
+    expect(catalogEnvVars.filter((name) => sessionEnv[name] !== undefined))
+      .toEqual(intentionallyRetained);
+    expect(parent).toEqual(Object.fromEntries(
+      catalogEnvVars.map((name) => [name, `hostile-${name}`]),
+    ));
+    expect(findProviderCredentialEnv(sessionEnv)).toEqual([]);
+  });
+
+  it("explicitly enumerates catalog token names that have no credential suffix", () => {
+    for (const name of ["GITLAB_TOKEN", "HUGGINGFACE_HUB_TOKEN", "HF_TOKEN"]) {
+      expect(PROVIDER_CREDENTIAL_ENV_VARS).toContain(name);
+      expect(findProviderCredentialEnv({ [name]: "hostile" })).toEqual([name]);
+    }
+  });
+
+  it("removes Claude transport, profile, federation, and credential selectors", () => {
+    const names = [
+      "ANTHROPIC_CONFIG_DIR",
+      "ANTHROPIC_FEDERATION_RULE_ID",
+      "ANTHROPIC_IDENTITY_TOKEN",
+      "ANTHROPIC_IDENTITY_TOKEN_FILE",
+      "ANTHROPIC_ORGANIZATION_ID",
+      "ANTHROPIC_PROFILE",
+      "ANTHROPIC_SCOPE",
+      "ANTHROPIC_SERVICE_ACCOUNT_ID",
+      "ANTHROPIC_UNIX_SOCKET",
+      "ANTHROPIC_WORKSPACE_ID",
+      "CLAUDE_CODE_CLIENT_CERT",
+      "CLAUDE_CODE_CLIENT_KEY",
+      "CLAUDE_CODE_CLIENT_KEY_PASSPHRASE",
+      "CLAUDE_CODE_OAUTH_CLIENT_ID",
+      "CLAUDE_CODE_ORGANIZATION_UUID",
+      "CLAUDE_CODE_SESSION_ACCESS_TOKEN",
+      "CLAUDE_CODE_WEBSOCKET_AUTH_FILE_DESCRIPTOR",
+      "CLAUDE_SECURESTORAGE_CONFIG_DIR",
+      "CLAUDE_SESSION_INGRESS_TOKEN_FILE",
+    ];
+    const env: NodeJS.ProcessEnv = Object.fromEntries(
+      names.map((name) => [name, `hostile-${name}`]),
+    );
+    env.CLAUDE_CONFIG_DIR = "/home/u/.claude-owner-plan";
+
+    expect(scrubProviderEnv(env).removed).toEqual([...names].sort());
+    expect(findProviderCredentialEnv(env)).toEqual([]);
+    for (const name of names) expect(env[name]).toBeUndefined();
+    expect(env.CLAUDE_CONFIG_DIR).toBe("/home/u/.claude-owner-plan");
   });
 
   it("catches provider variables no one enumerated, by name shape", () => {

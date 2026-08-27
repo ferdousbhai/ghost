@@ -106,7 +106,9 @@ describe("migrateHostedConversations", () => {
     const sourceBytes = `${JSON.stringify(hostedConversation(), null, 2)}\n`;
     writeFileSync(sourcePath, sourceBytes);
 
-    const result = await migrateHostedConversations(home);
+    const ownerHome = join(root, "owner");
+    mkdirSync(ownerHome);
+    const result = await migrateHostedConversations(home, ownerHome);
 
     expect(result).toEqual({ found: 1, imported: 1, existing: 0, failures: [] });
     expect(readFileSync(sourcePath, "utf8")).toBe(sourceBytes);
@@ -119,7 +121,8 @@ describe("migrateHostedConversations", () => {
       .map((line) => JSON.parse(line))
       .find((entry) => entry.type === "session");
     expect(header?.version).toBe(CURRENT_SESSION_VERSION);
-    const manager = await SessionManager.open(target, sessionDir, undefined, { initialCwd: home });
+    const manager = await SessionManager.open(target, sessionDir, undefined, { initialCwd: ownerHome });
+    expect(manager.getCwd()).toBe(ownerHome);
     try {
       expect(manager.getSessionId()).toBe("hosted-one");
       expect(manager.getSessionName()).toBe("A hosted conversation");

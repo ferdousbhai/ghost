@@ -1,4 +1,16 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import {
+  chmodSync,
+  existsSync,
+  linkSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import type {
   Options as ClaudeQueryOptions,
@@ -12,21 +24,38 @@ import {
   GHOST_BROWSER,
   GHOST_SCREEN,
 } from "@ghost/extensions";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   bridgeClaudeCodeTools,
   claudeSessionMetadataPath,
+  CLAUDE_SESSION_METADATA_MAX_BYTES,
   CLAUDE_CODE_TOOL_CAPABILITIES,
   ClaudeCodeProbe,
+  readClaudeSessionMetadataFile,
   type ClaudeCodeQueryInput,
 } from "../src/claude-code.js";
+import type {
+  MaintenanceIdentity,
+  SettledMaintenanceTurn,
+} from "../src/conversation-maintenance.js";
 import { ghostPaths } from "../src/ghosts.js";
-import { GhostHookRunner } from "../src/hooks.js";
+import {
+  GHOST_SESSION_STOP_CONTINUATION_CAP,
+  GhostHookRunner,
+} from "../src/hooks.js";
 import type { Logger } from "../src/log.js";
 import { ModelCatalog } from "../src/model-catalog.js";
 import { setChatModelRole } from "../src/models.js";
 import type { PiMessagesEvent } from "../src/pi-messages.js";
-import { SessionHost } from "../src/session-host.js";
+import {
+  loadProjectDeclarativeSnapshot,
+  PROJECT_SCAN_MAX_ENTRIES,
+} from "../src/project-resources.js";
+import {
+  declarativePromptSnapshot,
+  mergeProjectDeclarativeSnapshots,
+} from "../src/declarative-snapshot.js";
+import { SessionHost, type SessionHostOptions } from "../src/session-host.js";
 import { makeFakeCatalogRuntime } from "./helpers/fake-catalog-runtime.js";
 import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
 
@@ -42,6 +71,19 @@ afterEach(async () => {
 
 function sdkMessage(value: unknown): SDKMessage {
   return value as SDKMessage;
+}
+
+function filesystemTreeContains(root: string, needle: string): boolean {
+  if (!existsSync(root)) return false;
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    const path = join(root, entry.name);
+    if (entry.isDirectory()) {
+      if (filesystemTreeContains(path, needle)) return true;
+    } else if (entry.isFile() && readFileSync(path).includes(Buffer.from(needle))) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function fakeQuery(
@@ -163,6 +205,7 @@ function setupClaudeHost(options: {
   ) => Query;
   hooks?: GhostHookRunner;
   logger?: Logger;
+  maintenance?: SessionHostOptions["maintenance"];
 } = {}) {
   temp = makeTempGhosts();
   const dir = seedGhost(temp.root, {
@@ -178,9 +221,11 @@ function setupClaudeHost(options: {
   const lifecycle = { queries: 0, interrupted: 0, closed: 0 };
   host = new SessionHost({
     registry: temp.registry,
+    ownerHome: temp.ownerHome,
     offline: true,
     ...(options.logger ? { logger: options.logger } : {}),
     ...(options.hooks ? { hooks: options.hooks } : {}),
+    ...(options.maintenance ? { maintenance: options.maintenance } : {}),
     claudeCode: {
       ...(options.probe
         ? { probe: options.probe }
@@ -216,6 +261,85 @@ function deferred<T = void>(): {
     resolve = resolvePromise;
   });
   return { promise, resolve };
+}
+
+function storedClaudeV3(input: {
+  conversationId: string;
+  root: string;
+  cwd?: string;
+  mcpServers: Record<string, unknown>;
+  instruction?: string;
+  declarative?: Record<string, unknown>;
+}): string {
+  const identity = statSync(input.root, { bigint: true });
+  return `${JSON.stringify({
+    version: 3,
+    runtime: "claude-code",
+    conversationId: input.conversationId,
+    sessionId: `sdk-${input.conversationId}`,
+    created: "2026-01-01T00:00:00.000Z",
+    modified: "2026-01-01T00:00:00.000Z",
+    messageCount: 2,
+    ownerTurnCount: 1,
+    cwd: input.cwd ?? input.root,
+    projectSnapshot: {
+      root: input.root,
+      identity: { dev: String(identity.dev), ino: String(identity.ino) },
+      declarative: input.declarative ?? {
+        instructions: [{
+          path: join(input.root, "AGENTS.md"),
+          content: input.instruction ?? "PINNED-PROJECT-SNAPSHOT",
+        }],
+        skills: [],
+        rules: [],
+        prompts: [],
+        commands: [],
+      },
+      mcpServers: input.mcpServers,
+      resourceWarnings: [],
+      mcpWarnings: [],
+    },
+  })}\n`;
+}
+
+function storedClaudeV1(conversationId: string): string {
+  return `${JSON.stringify({
+    version: 1,
+    runtime: "claude-code",
+    conversationId,
+    sessionId: `sdk-${conversationId}`,
+    created: "2026-01-01T00:00:00.000Z",
+    modified: "2026-01-01T00:00:00.000Z",
+    messageCount: 2,
+    ownerTurnCount: 1,
+  })}\n`;
+}
+
+function storedUnboundClaudeV3(conversationId: string): Record<string, unknown> {
+  return {
+    version: 3,
+    runtime: "claude-code",
+    conversationId,
+    sessionId: `sdk-${conversationId}`,
+    created: "2026-01-01T00:00:00.000Z",
+    modified: "2026-01-01T00:00:00.000Z",
+    messageCount: 2,
+    ownerTurnCount: 1,
+    cwd: temp!.ownerHome,
+    projectSnapshot: {
+      root: null,
+      declarative: {
+        instructions: [],
+        skills: [],
+        rules: [],
+        prompts: [],
+        commands: [],
+      },
+      mcpServers: {},
+      resourceWarnings: [],
+      mcpWarnings: [],
+    },
+  };
 }
 
 describe("Claude Code executable/auth probe", () => {
@@ -325,10 +449,158 @@ describe("Claude Code executable/auth probe", () => {
   });
 });
 
+describe("Claude session sidecar confinement", () => {
+  it("accepts the exact byte boundary and rejects oversized, linked, and special files", async () => {
+    temp = makeTempGhosts();
+    const fixtureDir = join(temp.root, "claude-sidecar-reader");
+    mkdirSync(fixtureDir);
+
+    const exact = join(fixtureDir, "exact.json");
+    writeFileSync(exact, Buffer.alloc(CLAUDE_SESSION_METADATA_MAX_BYTES, 0x78), {
+      mode: 0o600,
+    });
+    await expect(readClaudeSessionMetadataFile(exact)).resolves.toHaveLength(
+      CLAUDE_SESSION_METADATA_MAX_BYTES,
+    );
+
+    const oversized = join(fixtureDir, "oversized.json");
+    writeFileSync(oversized, Buffer.alloc(CLAUDE_SESSION_METADATA_MAX_BYTES + 1, 0x78), {
+      mode: 0o600,
+    });
+    await expect(readClaudeSessionMetadataFile(oversized))
+      .rejects.toMatchObject({ code: "claude_session_invalid" });
+
+    const wrongMode = join(fixtureDir, "wrong-mode.json");
+    writeFileSync(wrongMode, "{}", { mode: 0o600 });
+    chmodSync(wrongMode, 0o640);
+    await expect(readClaudeSessionMetadataFile(wrongMode))
+      .rejects.toMatchObject({ code: "claude_session_invalid" });
+
+    const invalidUtf8 = join(fixtureDir, "invalid-utf8.json");
+    writeFileSync(invalidUtf8, Buffer.from([0xc3, 0x28]), { mode: 0o600 });
+    await expect(readClaudeSessionMetadataFile(invalidUtf8))
+      .rejects.toMatchObject({ code: "claude_session_invalid" });
+
+    const symlink = join(fixtureDir, "symlink.json");
+    symlinkSync(exact, symlink);
+    await expect(readClaudeSessionMetadataFile(symlink))
+      .rejects.toMatchObject({ code: "claude_session_invalid" });
+
+    const hardLinkSource = join(fixtureDir, "hard-link-source.json");
+    const hardLink = join(fixtureDir, "hard-link.json");
+    writeFileSync(hardLinkSource, "{}", { mode: 0o600 });
+    linkSync(hardLinkSource, hardLink);
+    await expect(readClaudeSessionMetadataFile(hardLink))
+      .rejects.toMatchObject({ code: "claude_session_invalid" });
+
+    const fifo = join(fixtureDir, "fifo.json");
+    execFileSync("mkfifo", [fifo]);
+    chmodSync(fifo, 0o600);
+    await expect(readClaudeSessionMetadataFile(fifo))
+      .rejects.toMatchObject({ code: "claude_session_invalid" });
+  });
+
+  it("rejects descriptor-time mutation and pathname replacement", async () => {
+    temp = makeTempGhosts();
+    const fixtureDir = join(temp.root, "claude-sidecar-races");
+    mkdirSync(fixtureDir);
+
+    const mutated = join(fixtureDir, "mutated.json");
+    writeFileSync(mutated, "pinned", { mode: 0o600 });
+    await expect(readClaudeSessionMetadataFile(mutated, (path) => {
+      writeFileSync(path, "changed-size", { mode: 0o600 });
+    })).rejects.toMatchObject({ code: "claude_session_invalid" });
+
+    const swapped = join(fixtureDir, "swapped.json");
+    const displaced = join(fixtureDir, "displaced.json");
+    writeFileSync(swapped, "pinned", { mode: 0o600 });
+    await expect(readClaudeSessionMetadataFile(swapped, (path) => {
+      renameSync(path, displaced);
+      writeFileSync(path, "pinned", { mode: 0o600 });
+    })).rejects.toMatchObject({ code: "claude_session_invalid" });
+  });
+});
+
 describe("Claude Code subscription runtime", () => {
+  it("removes the pinned SDK credential surface from query env without mutating parent env", async () => {
+    const { seenOptions } = setupClaudeHost();
+    const hostileNames = [
+      "ANTHROPIC_API_KEY",
+      "ANTHROPIC_AUTH_TOKEN",
+      "ANTHROPIC_BASE_URL",
+      "ANTHROPIC_CONFIG_DIR",
+      "ANTHROPIC_CUSTOM_HEADERS",
+      "ANTHROPIC_FEDERATION_RULE_ID",
+      "ANTHROPIC_IDENTITY_TOKEN",
+      "ANTHROPIC_IDENTITY_TOKEN_FILE",
+      "ANTHROPIC_OAUTH_TOKEN",
+      "ANTHROPIC_ORGANIZATION_ID",
+      "ANTHROPIC_PROFILE",
+      "ANTHROPIC_SCOPE",
+      "ANTHROPIC_SERVICE_ACCOUNT_ID",
+      "ANTHROPIC_UNIX_SOCKET",
+      "ANTHROPIC_WORKSPACE_ID",
+      "CLAUDE_CODE_CLIENT_CERT",
+      "CLAUDE_CODE_CLIENT_KEY",
+      "CLAUDE_CODE_CLIENT_KEY_PASSPHRASE",
+      "CLAUDE_CODE_CUSTOM_OAUTH_URL",
+      "CLAUDE_CODE_OAUTH_CLIENT_ID",
+      "CLAUDE_CODE_OAUTH_TOKEN",
+      "CLAUDE_CODE_ORGANIZATION_UUID",
+      "CLAUDE_CODE_REMOTE",
+      "CLAUDE_CODE_SESSION_ACCESS_TOKEN",
+      "CLAUDE_CODE_WEBSOCKET_AUTH_FILE_DESCRIPTOR",
+      "CLAUDE_LOCAL_OAUTH_API_BASE",
+      "CLAUDE_LOCAL_OAUTH_APPS_BASE",
+      "CLAUDE_LOCAL_OAUTH_CONSOLE_BASE",
+      "CLAUDE_SECURESTORAGE_CONFIG_DIR",
+      "CLAUDE_SESSION_INGRESS_TOKEN_FILE",
+      "GITLAB_TOKEN",
+      "HF_TOKEN",
+      "HUGGINGFACE_HUB_TOKEN",
+    ] as const;
+    const hostile = Object.fromEntries(
+      hostileNames.map((name) => [name, `hostile-${name}`]),
+    ) as Record<(typeof hostileNames)[number], string>;
+    const inherited = {
+      ...hostile,
+      CLAUDE_CONFIG_DIR: "/home/owner/.claude-owner-plan",
+    };
+    const previous = new Map(
+      Object.keys(inherited).map((name) => [name, process.env[name]]),
+    );
+    Object.assign(process.env, inherited);
+
+    try {
+      await host!.runTurn("casper", {
+        sessionId: "credential-free-query",
+        prompt: "Use only the owner's Claude plan.",
+        emit: () => {},
+      });
+
+      const queryEnv = seenOptions[0]?.env;
+      expect(queryEnv).toBeDefined();
+      for (const [name, value] of Object.entries(hostile)) {
+        expect(queryEnv?.[name]).toBeUndefined();
+        expect(process.env[name]).toBe(value);
+      }
+      expect(queryEnv?.CLAUDE_CONFIG_DIR).toBe(inherited.CLAUDE_CONFIG_DIR);
+      expect(process.env.CLAUDE_CONFIG_DIR).toBe(inherited.CLAUDE_CONFIG_DIR);
+    } finally {
+      for (const [name, value] of previous) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
+  });
+
   it("returns image blocks from screen and browser screenshots across the tool bridge", async () => {
     const { paths } = setupClaudeHost();
     let browserPage: { url: string; title: string } | undefined;
+    const resolver = vi.fn(async (hostname: string) => {
+      expect(hostname).toBe("example.com");
+      return [{ address: "1.1.1.1", family: 4 }] as const;
+    });
     const browser = {
       name: "claude-bridge-test",
       setHeadless: () => ({ applied: true }),
@@ -368,7 +640,7 @@ describe("Claude Code subscription runtime", () => {
         createBrowserExtension({
           home: paths.home,
           backend: () => browser,
-          browser: { idleTimeoutMs: 0 },
+          browser: { idleTimeoutMs: 0, resolver },
           capabilities: CLAUDE_CODE_TOOL_CAPABILITIES,
         }),
       ],
@@ -381,7 +653,15 @@ describe("Claude Code subscription runtime", () => {
     };
 
     const screen = await call(GHOST_SCREEN, { prompt: "What is visible?" });
-    await call(GHOST_BROWSER, { action: "open", url: "https://example.com" });
+    const opened = await call(GHOST_BROWSER, { action: "open", url: "https://example.com" });
+    // The session verifies both before and after navigation to close DNS
+    // rebinding; both checks stay on this injected, offline resolver.
+    expect(resolver).toHaveBeenCalledTimes(2);
+    expect(opened.content).toContainEqual({
+      type: "text",
+      text: "Opened https://example.com/\nBridge fixture",
+    });
+    expect(browserPage).toEqual({ url: "https://example.com/", title: "Bridge fixture" });
     const browserShot = await call(GHOST_BROWSER, { action: "screenshot" });
     await call(GHOST_BROWSER, { action: "close" });
 
@@ -398,7 +678,11 @@ describe("Claude Code subscription runtime", () => {
   });
 
   it("routes an explicit claude-code role through the isolated SDK harness and resumes it", async () => {
-    const { seenOptions, lifecycle } = setupClaudeHost();
+    const { paths, seenOptions, lifecycle } = setupClaudeHost();
+    mkdirSync(temp!.documentsDir, { recursive: true });
+    writeFileSync(join(temp!.documentsDir, "owner-plan.pdf"), "owner bytes");
+    mkdirSync(join(paths.home, "docs"), { recursive: true });
+    writeFileSync(join(paths.home, "docs", "legacy.md"), "# Legacy home doc\n");
     const first: PiMessagesEvent[] = [];
     await host!.runTurn("casper", {
       sessionId: "conversation-1",
@@ -410,25 +694,43 @@ describe("Claude Code subscription runtime", () => {
       && event.delta.includes("plan"))).toBe(true);
     expect(seenOptions).toHaveLength(1);
     expect(seenOptions[0]).toMatchObject({
-      cwd: expect.stringContaining("casper"),
+      cwd: temp!.ownerHome,
       tools: { type: "preset", preset: "claude_code" },
-      skills: "all",
+      skills: [],
+      settingSources: [],
       permissionMode: "bypassPermissions",
       allowDangerouslySkipPermissions: true,
       persistSession: true,
     });
-    expect(seenOptions[0]).not.toHaveProperty("settingSources");
     expect(seenOptions[0]).not.toHaveProperty("plugins");
     expect(seenOptions[0]).not.toHaveProperty("strictMcpConfig");
-    expect(seenOptions[0]?.systemPrompt).toMatchObject({
+    const systemPrompt = seenOptions[0]?.systemPrompt;
+    expect(systemPrompt).toMatchObject({
       type: "preset",
       preset: "claude_code",
       append: expect.stringContaining("letterpress printer"),
     });
+    if (
+      typeof systemPrompt !== "object"
+      || systemPrompt === null
+      || !("append" in systemPrompt)
+      || typeof systemPrompt.append !== "string"
+    ) throw new Error("Claude Code did not receive Ghost's appended persona.");
+    const appended = systemPrompt.append;
+    expect(appended).toContain(temp!.documentsDir);
+    expect(appended).toContain('file: "owner-plan.pdf"');
+    expect(appended).not.toContain("legacy.md");
     expect(seenOptions[0]?.allowedTools).toContain("mcp__ghost__ghost_memory_write");
     expect(lifecycle.closed).toBe(1);
     const sessionId = seenOptions[0]?.sessionId;
     expect(sessionId).toMatch(/^[0-9a-f-]{36}$/);
+    const sidecar = claudeSessionMetadataPath(paths.sessionDir, "conversation-1");
+    const firstStored = JSON.parse(readFileSync(sidecar, "utf8")) as {
+      created: string;
+      modified: string;
+    };
+    expect(new Date(firstStored.created).toISOString()).toBe(firstStored.created);
+    expect(new Date(firstStored.modified).toISOString()).toBe(firstStored.modified);
 
     await host!.runTurn("casper", {
       sessionId: "conversation-1",
@@ -449,11 +751,1043 @@ describe("Claude Code subscription runtime", () => {
         messageCount: 4,
       }),
     ]);
+    const stored = JSON.parse(readFileSync(sidecar, "utf8"));
+    expect(stored.created).toBe(firstStored.created);
+    expect(new Date(stored.created).toISOString()).toBe(stored.created);
+    expect(new Date(stored.modified).toISOString()).toBe(stored.modified);
+    expect(stored).toMatchObject({
+      version: 3,
+      cwd: temp!.ownerHome,
+      projectSnapshot: {
+        root: null,
+        declarative: {
+          instructions: [],
+          skills: [],
+          rules: [],
+          prompts: [],
+          commands: [],
+        },
+        mcpServers: {},
+        resourceWarnings: [],
+        mcpWarnings: [],
+      },
+    });
+  });
+
+  it("injects every accepted visible Ghost category while unbound", async () => {
+    const { paths, seenOptions } = setupClaudeHost();
+    mkdirSync(join(paths.home, "skills", "unbound"), { recursive: true });
+    mkdirSync(join(paths.home, "rules"), { recursive: true });
+    mkdirSync(join(paths.home, "prompts"), { recursive: true });
+    mkdirSync(join(paths.home, "commands"), { recursive: true });
+    mkdirSync(join(paths.home, "agents"), { recursive: true });
+    mkdirSync(join(paths.home, ".omp", "skills", "hidden"), { recursive: true });
+    writeFileSync(join(paths.home, "AGENTS.md"), "UNBOUND-GHOST-INSTRUCTION");
+    writeFileSync(
+      join(paths.home, "skills", "unbound", "SKILL.md"),
+      "---\nname: unbound\ndescription: visible unbound skill\n---\n\nUNBOUND-GHOST-SKILL\n",
+    );
+    writeFileSync(join(paths.home, "rules", "unbound.md"), "UNBOUND-GHOST-RULE");
+    writeFileSync(join(paths.home, "prompts", "unbound.md"), "UNBOUND-GHOST-PROMPT");
+    writeFileSync(join(paths.home, "commands", "unbound.md"), "UNBOUND-GHOST-COMMAND");
+    writeFileSync(join(paths.home, "agents", "inactive.md"), "UNBOUND-INACTIVE-AGENT");
+    writeFileSync(
+      join(paths.home, ".omp", "skills", "hidden", "SKILL.md"),
+      "---\nname: hidden\ndescription: hidden provider\n---\n\nUNBOUND-HIDDEN-SKILL\n",
+    );
+
+    await host!.runTurn("casper", {
+      sessionId: "unbound-declarative",
+      prompt: "use the Ghost resources",
+      emit: () => {},
+    });
+
+    const append = JSON.stringify(seenOptions[0]?.systemPrompt);
+    expect(append).toContain("UNBOUND-GHOST-INSTRUCTION");
+    expect(append).toContain("UNBOUND-GHOST-SKILL");
+    expect(append).toContain("UNBOUND-GHOST-RULE");
+    expect(append).toContain("UNBOUND-GHOST-PROMPT");
+    expect(append).toContain("UNBOUND-GHOST-COMMAND");
+    expect(append).not.toContain("UNBOUND-INACTIVE-AGENT");
+    expect(append).not.toContain("UNBOUND-HIDDEN-SKILL");
+    expect(JSON.parse(readFileSync(
+      claudeSessionMetadataPath(paths.sessionDir, "unbound-declarative"),
+      "utf8",
+    ))).toMatchObject({
+      projectSnapshot: {
+        root: null,
+        declarative: {
+          instructions: [],
+          skills: [],
+          rules: [],
+          prompts: [],
+          commands: [],
+        },
+      },
+    });
+  });
+
+  it("pins a trusted project before the first turn and injects only its declarative resources", async () => {
+    const { seenOptions } = setupClaudeHost();
+    const project = join(temp!.root, "claude-bound");
+    const projectCwd = join(project, "work");
+    const approvedSkill = join(project, ".omp", "skills", "approved");
+    mkdirSync(approvedSkill, { recursive: true });
+    mkdirSync(join(project, ".omp", "rules"), { recursive: true });
+    mkdirSync(projectCwd);
+    writeFileSync(join(project, "AGENTS.md"), "Always say PROJECT-SNAPSHOT.");
+    writeFileSync(
+      join(approvedSkill, "SKILL.md"),
+      "---\nname: approved\ndescription: approved\n---\n\nALWAYS-ACTIVE-SKILL-SNAPSHOT\n",
+    );
+    writeFileSync(
+      join(project, ".omp", "rules", "typed-rule.md"),
+      "---\nglobs: \"**/*.ts\"\ncondition: TYPED_RULE\ninterruptMode: always\n---\n\nTYPED-RULE-SNAPSHOT\n",
+    );
+    const hostile = join(temp!.root, "hostile-claude-resources");
+    mkdirSync(hostile);
+    writeFileSync(join(hostile, "SKILL.md"), "HOSTILE-SYMLINK-SKILL");
+    symlinkSync(hostile, join(project, ".omp", "skills", "escaped"));
+    writeFileSync(join(project, ".omp", "mcp.json"), JSON.stringify({
+      mcpServers: {
+        project_fixture: { type: "stdio", command: process.execPath, args: ["--version"] },
+        explicit_cwd: {
+          type: "stdio",
+          command: process.execPath,
+          args: ["--version"],
+          cwd: "work",
+        },
+      },
+    }));
+    const preview = await host!.previewProject(
+      "casper",
+      "bound-project",
+      "claude-code",
+      project,
+    );
+    expect(preview.resources.rules).toBe(1);
+    await host!.bindProject("casper", "bound-project", "claude-code", {
+      root: project,
+      cwd: projectCwd,
+      trustToken: preview.trustToken,
+      expectedGeneration: 0,
+    });
+
+    await host!.runTurn("casper", {
+      sessionId: "bound-project",
+      prompt: "use the project",
+      emit: () => {},
+    });
+    expect(seenOptions[0]).toMatchObject({
+      cwd: projectCwd,
+      skills: [],
+      settingSources: [],
+      mcpServers: {
+        project_fixture: { type: "stdio", command: process.execPath },
+        ghost: expect.any(Object),
+      },
+      systemPrompt: { append: expect.stringContaining("PROJECT-SNAPSHOT") },
+    });
+    expect(seenOptions[0]?.mcpServers).not.toHaveProperty("explicit_cwd");
+    expect(seenOptions[0]?.mcpServers?.project_fixture).not.toHaveProperty("cwd");
+    expect(JSON.stringify(seenOptions[0]?.systemPrompt)).toContain("ALWAYS-ACTIVE-SKILL-SNAPSHOT");
+    expect(JSON.stringify(seenOptions[0]?.systemPrompt)).toContain("TYPED-RULE-SNAPSHOT");
+    expect(JSON.stringify(seenOptions[0]?.systemPrompt)).not.toContain("HOSTILE-SYMLINK-SKILL");
+    writeFileSync(join(project, "AGENTS.md"), "MUTATED-AFTER-FIRST-TURN");
+    writeFileSync(join(project, ".omp", "rules", "typed-rule.md"), "MUTATED-LIVE-RULE");
+    writeFileSync(join(project, ".omp", "mcp.json"), JSON.stringify({
+      mcpServers: { replacement: { type: "stdio", command: "never-run" } },
+    }));
+    await host!.runTurn("casper", {
+      sessionId: "bound-project",
+      prompt: "resume without rereading",
+      emit: () => {},
+    });
+    expect(JSON.stringify(seenOptions[1]?.systemPrompt)).toContain("PROJECT-SNAPSHOT");
+    expect(JSON.stringify(seenOptions[1]?.systemPrompt)).toContain("TYPED-RULE-SNAPSHOT");
+    expect(JSON.stringify(seenOptions[1]?.systemPrompt)).not.toContain("MUTATED-AFTER-FIRST-TURN");
+    expect(JSON.stringify(seenOptions[1]?.systemPrompt)).not.toContain("MUTATED-LIVE-RULE");
+    expect(seenOptions[1]?.mcpServers).toMatchObject({
+      project_fixture: { type: "stdio", command: process.execPath },
+      ghost: expect.any(Object),
+    });
+    expect(seenOptions[1]?.mcpServers).not.toHaveProperty("replacement");
+    const persisted = JSON.parse(readFileSync(
+      claudeSessionMetadataPath(ghostPaths(temp!.registry.get("casper").dir).sessionDir, "bound-project"),
+      "utf8",
+    ));
+    expect(persisted).toMatchObject({
+      version: 3,
+      projectSnapshot: {
+        root: project,
+        declarative: {
+          instructions: [expect.objectContaining({ content: "Always say PROJECT-SNAPSHOT." })],
+          skills: [expect.objectContaining({ content: expect.stringContaining("ALWAYS-ACTIVE") })],
+          rules: [expect.objectContaining({ content: "TYPED-RULE-SNAPSHOT" })],
+        },
+        mcpServers: { project_fixture: { command: process.execPath } },
+        mcpWarnings: expect.arrayContaining([
+          "explicit_cwd: row rejected because Claude project MCP does not support an explicit cwd.",
+        ]),
+      },
+    });
+    await host!.disposeAll();
+    const restartedOptions: ClaudeQueryOptions[] = [];
+    const restartedLifecycle = { queries: 0, interrupted: 0, closed: 0 };
+    host = new SessionHost({
+      registry: temp!.registry,
+      ownerHome: temp!.ownerHome,
+      offline: true,
+      claudeCode: {
+        binaryPath: process.execPath,
+        readAuthStatus: async () => ({ loggedIn: true, authMethod: "claude.ai" }),
+        createQuery: (input) => {
+          restartedOptions.push(input.options);
+          const sessionId = input.options.resume;
+          if (!sessionId) throw new Error("restart must resume the persisted Claude id");
+          return fakeQuery(responseMessages(sessionId, "restarted"), restartedLifecycle);
+        },
+      },
+    });
+    await host.runTurn("casper", {
+      sessionId: "bound-project",
+      prompt: "resume after daemon restart",
+      emit: () => {},
+    });
+    expect(JSON.stringify(restartedOptions[0]?.systemPrompt)).toContain("PROJECT-SNAPSHOT");
+    expect(JSON.stringify(restartedOptions[0]?.systemPrompt)).toContain("TYPED-RULE-SNAPSHOT");
+    expect(JSON.stringify(restartedOptions[0]?.systemPrompt)).not.toContain("MUTATED-AFTER-FIRST-TURN");
+    expect(JSON.stringify(restartedOptions[0]?.systemPrompt)).not.toContain("MUTATED-LIVE-RULE");
+    expect(restartedOptions[0]?.mcpServers).toHaveProperty("project_fixture");
+    expect(restartedOptions[0]?.mcpServers).not.toHaveProperty("replacement");
+    expect(await host!.getProject("casper", "bound-project", "claude-code"))
+      .toMatchObject({ root: project, cwd: projectCwd, canRebind: false });
+    await expect(host!.reloadProject("casper", "bound-project", "claude-code", 1))
+      .rejects.toMatchObject({ code: "project_rebind_requires_new_conversation" });
+  });
+
+  it("preserves inherited-object MCP names through Claude launch, persistence, and resume", async () => {
+    const { paths, seenOptions } = setupClaudeHost();
+    const project = join(temp!.root, "claude-hostile-mcp-names");
+    mkdirSync(join(project, ".omp"), { recursive: true });
+    const hostileServers = Object.fromEntries([
+      ["__proto__", {
+        type: "stdio",
+        command: process.execPath,
+        args: ["--version"],
+        timeout: 1_000,
+      }],
+      ["constructor", {
+        type: "http",
+        url: "https://constructor.example.test/mcp",
+        timeout: 1_100,
+      }],
+      ["toString", {
+        type: "sse",
+        url: "https://tostring.example.test/mcp",
+        timeout: 1_200,
+      }],
+    ]);
+    writeFileSync(join(project, ".omp", "mcp.json"), JSON.stringify({
+      mcpServers: hostileServers,
+    }));
+    const preview = await host!.previewProject(
+      "casper",
+      "hostile-mcp-names",
+      "claude-code",
+      project,
+    );
+    expect(preview.resources.mcpServers).toBe(3);
+    await host!.bindProject("casper", "hostile-mcp-names", "claude-code", {
+      root: project,
+      trustToken: preview.trustToken,
+      expectedGeneration: 0,
+    });
+
+    await host!.runTurn("casper", {
+      sessionId: "hostile-mcp-names",
+      prompt: "use every admitted MCP server",
+      emit: () => {},
+    });
+
+    const launched = seenOptions[0]?.mcpServers as Record<string, unknown>;
+    for (const name of ["__proto__", "constructor", "toString"]) {
+      expect(Object.hasOwn(launched, name)).toBe(true);
+    }
+    const launchedByName = new Map(Object.entries(launched));
+    expect(launchedByName.get("__proto__")).toMatchObject({
+      type: "stdio",
+      command: process.execPath,
+      timeout: 1_000,
+    });
+    expect(launchedByName.get("constructor")).toMatchObject({
+      type: "http",
+      url: "https://constructor.example.test/mcp",
+      timeout: 1_100,
+    });
+    expect(launchedByName.get("toString")).toMatchObject({
+      type: "sse",
+      url: "https://tostring.example.test/mcp",
+      timeout: 1_200,
+    });
+    expect(Object.hasOwn(launched, "ghost")).toBe(true);
+    expect(await host!.getProject("casper", "hostile-mcp-names", "claude-code"))
+      .toMatchObject({ status: "ready", mcpStatus: "ready" });
+
+    const sidecar = claudeSessionMetadataPath(paths.sessionDir, "hostile-mcp-names");
+    const persisted = JSON.parse(readFileSync(sidecar, "utf8")) as {
+      projectSnapshot: { mcpServers: Record<string, unknown> };
+    };
+    for (const name of ["__proto__", "constructor", "toString"]) {
+      expect(Object.hasOwn(persisted.projectSnapshot.mcpServers, name)).toBe(true);
+    }
+
+    await host!.disposeAll();
+    const resumedOptions: ClaudeQueryOptions[] = [];
+    const resumedLifecycle = { interrupted: 0, closed: 0 };
+    host = new SessionHost({
+      registry: temp!.registry,
+      ownerHome: temp!.ownerHome,
+      offline: true,
+      claudeCode: {
+        binaryPath: process.execPath,
+        readAuthStatus: async () => ({ loggedIn: true, authMethod: "claude.ai" }),
+        createQuery: (input) => {
+          resumedOptions.push(input.options);
+          const sessionId = input.options.resume;
+          if (!sessionId) throw new Error("hostile-name fixture must resume its Claude id");
+          return fakeQuery(responseMessages(sessionId, "resumed"), resumedLifecycle);
+        },
+      },
+    });
+    await host.runTurn("casper", {
+      sessionId: "hostile-mcp-names",
+      prompt: "resume every admitted MCP server",
+      emit: () => {},
+    });
+    const resumed = resumedOptions[0]?.mcpServers as Record<string, unknown>;
+    const resumedByName = new Map(Object.entries(resumed));
+    for (const name of ["__proto__", "constructor", "toString"]) {
+      expect(Object.hasOwn(resumed, name)).toBe(true);
+      expect(resumedByName.get(name)).toEqual(launchedByName.get(name));
+    }
+  });
+
+  it("keeps Claude MCP counts, health, launch, and persistence on admitted rows only", async () => {
+    const { paths, seenOptions } = setupClaudeHost();
+    const disabledProject = join(temp!.root, "claude-disabled-only-mcp");
+    mkdirSync(join(disabledProject, ".omp"), { recursive: true });
+    writeFileSync(join(disabledProject, ".omp", "mcp.json"), JSON.stringify({
+      mcpServers: {
+        disabled_only: {
+          enabled: false,
+          type: "stdio",
+          command: process.execPath,
+        },
+      },
+    }));
+    const disabledPreview = await host!.previewProject(
+      "casper",
+      "disabled-only-mcp",
+      "claude-code",
+      disabledProject,
+    );
+    expect(disabledPreview.resources.mcpServers).toBe(0);
+    expect(disabledPreview.warnings).toEqual([]);
+    const disabledBound = await host!.bindProject(
+      "casper",
+      "disabled-only-mcp",
+      "claude-code",
+      {
+        root: disabledProject,
+        trustToken: disabledPreview.trustToken,
+        expectedGeneration: 0,
+      },
+    );
+    expect(disabledBound).toMatchObject({
+      resources: { mcpServers: 0 },
+      status: "ready",
+      mcpStatus: "off",
+    });
+    await host!.runTurn("casper", {
+      sessionId: "disabled-only-mcp",
+      prompt: "run without disabled MCP",
+      emit: () => {},
+    });
+    expect(Object.hasOwn(seenOptions[0]?.mcpServers ?? {}, "disabled_only")).toBe(false);
+    expect(await host!.getProject("casper", "disabled-only-mcp", "claude-code"))
+      .toMatchObject({ status: "ready", mcpStatus: "off" });
+    expect(JSON.parse(readFileSync(
+      claudeSessionMetadataPath(paths.sessionDir, "disabled-only-mcp"),
+      "utf8",
+    ))).toMatchObject({
+      projectSnapshot: { mcpServers: {}, mcpWarnings: [] },
+    });
+
+    const mixedProject = join(temp!.root, "claude-mixed-mcp");
+    mkdirSync(join(mixedProject, ".omp"), { recursive: true });
+    writeFileSync(join(mixedProject, ".omp", "mcp.json"), JSON.stringify({
+      mcpServers: {
+        valid_row: {
+          type: "stdio",
+          command: process.execPath,
+          args: ["--version"],
+        },
+        malformed_row: { type: "stdio", command: 42 },
+      },
+    }));
+    const mixedPreview = await host!.previewProject(
+      "casper",
+      "mixed-mcp",
+      "claude-code",
+      mixedProject,
+    );
+    expect(mixedPreview.resources.mcpServers).toBe(1);
+    expect(mixedPreview.warnings).toContainEqual(expect.stringContaining("malformed_row"));
+    const mixedBound = await host!.bindProject("casper", "mixed-mcp", "claude-code", {
+      root: mixedProject,
+      trustToken: mixedPreview.trustToken,
+      expectedGeneration: 0,
+    });
+    expect(mixedBound).toMatchObject({
+      resources: { mcpServers: 1 },
+      status: "degraded",
+      mcpStatus: "degraded",
+    });
+    await host!.runTurn("casper", {
+      sessionId: "mixed-mcp",
+      prompt: "run only admitted MCP",
+      emit: () => {},
+    });
+    expect(Object.hasOwn(seenOptions[1]?.mcpServers ?? {}, "valid_row")).toBe(true);
+    expect(Object.hasOwn(seenOptions[1]?.mcpServers ?? {}, "malformed_row")).toBe(false);
+    const mixedStored = JSON.parse(readFileSync(
+      claudeSessionMetadataPath(paths.sessionDir, "mixed-mcp"),
+      "utf8",
+    )) as {
+      projectSnapshot: { mcpServers: Record<string, unknown>; mcpWarnings: string[] };
+    };
+    expect(Object.hasOwn(mixedStored.projectSnapshot.mcpServers, "valid_row")).toBe(true);
+    expect(Object.hasOwn(mixedStored.projectSnapshot.mcpServers, "malformed_row")).toBe(false);
+    expect(mixedStored.projectSnapshot.mcpWarnings)
+      .toContainEqual(expect.stringContaining("malformed_row"));
+    expect(await host!.getProject("casper", "mixed-mcp", "claude-code"))
+      .toMatchObject({ status: "degraded", mcpStatus: "degraded" });
+  });
+
+  it("uses Pi's accepted-resource merge and project shadowing for Claude", async () => {
+    const { paths, seenOptions } = setupClaudeHost();
+    const ghostSkill = join(paths.home, "skills", "shared");
+    const retainedSkill = join(paths.home, "skills", "retained");
+    mkdirSync(ghostSkill, { recursive: true });
+    mkdirSync(retainedSkill, { recursive: true });
+    mkdirSync(join(paths.home, "rules"), { recursive: true });
+    mkdirSync(join(paths.home, "prompts"), { recursive: true });
+    mkdirSync(join(paths.home, "commands"), { recursive: true });
+    mkdirSync(join(paths.home, "agents"), { recursive: true });
+    writeFileSync(join(paths.home, "AGENTS.md"), "GHOST-VISIBLE-INSTRUCTION");
+    writeFileSync(
+      join(ghostSkill, "SKILL.md"),
+      "---\nname: shared\ndescription: ghost shared\n---\n\nGHOST-SHARED-SKILL\n",
+    );
+    writeFileSync(
+      join(retainedSkill, "SKILL.md"),
+      "---\nname: retained\ndescription: retained\n---\n\nGHOST-RETAINED-SKILL\n",
+    );
+    writeFileSync(join(paths.home, "rules", "shared.md"), "GHOST-SHARED-RULE");
+    writeFileSync(join(paths.home, "prompts", "shared.md"), "GHOST-SHARED-PROMPT");
+    writeFileSync(join(paths.home, "commands", "shared.md"), "GHOST-SHARED-COMMAND");
+    writeFileSync(join(paths.home, "agents", "inactive.md"), "GHOST-INACTIVE-AGENT");
+
+    mkdirSync(join(paths.home, ".claude", "skills", "ambient"), { recursive: true });
+    writeFileSync(join(paths.home, ".claude", "CLAUDE.md"), "AMBIENT-GHOST-CLAUDE");
+    writeFileSync(
+      join(paths.home, ".claude", "skills", "ambient", "SKILL.md"),
+      "---\nname: ambient\ndescription: ambient\n---\n\nAMBIENT-GHOST-SKILL\n",
+    );
+
+    const project = join(temp!.root, "claude-declarative-parity");
+    const projectSkill = join(project, ".omp", "skills", "shared");
+    const malformedSkill = join(project, ".omp", "skills", "retained");
+    const namelessCollision = join(project, ".claude", "skills", "retained");
+    mkdirSync(projectSkill, { recursive: true });
+    mkdirSync(malformedSkill, { recursive: true });
+    mkdirSync(namelessCollision, { recursive: true });
+    mkdirSync(join(project, ".omp", "rules"), { recursive: true });
+    mkdirSync(join(project, ".omp", "prompts"), { recursive: true });
+    mkdirSync(join(project, ".omp", "commands"), { recursive: true });
+    mkdirSync(join(project, ".omp", "agents"), { recursive: true });
+    mkdirSync(join(project, ".omp", "extensions"), { recursive: true });
+    writeFileSync(join(project, ".omp", "AGENTS.md"), "PROJECT-PREFERRED-INSTRUCTION");
+    writeFileSync(join(project, "AGENTS.md"), "PROJECT-SHADOWED-INSTRUCTION");
+    writeFileSync(
+      join(projectSkill, "SKILL.md"),
+      "---\nname: shared\ndescription: project shared\n---\n\nPROJECT-SHARED-SKILL\n",
+    );
+    writeFileSync(
+      join(malformedSkill, "SKILL.md"),
+      "---\nname: [unterminated\n---\n\nPROJECT-MALFORMED-SKILL\n",
+    );
+    writeFileSync(
+      join(namelessCollision, "SKILL.md"),
+      "---\ndescription: directory names are not skill names\n---\n\nPROJECT-NAMELESS-COLLISION\n",
+    );
+    writeFileSync(join(project, ".omp", "rules", "shared.md"), "PROJECT-SHARED-RULE");
+    writeFileSync(join(project, ".omp", "prompts", "shared.md"), "PROJECT-SHARED-PROMPT");
+    writeFileSync(join(project, ".omp", "commands", "shared.md"), "PROJECT-SHARED-COMMAND");
+    writeFileSync(join(project, ".omp", "agents", "inactive.md"), "PROJECT-INACTIVE-AGENT");
+    writeFileSync(join(project, ".omp", "extensions", "inactive.ts"), "PROJECT-EXECUTABLE");
+
+    const ghostSnapshot = await loadProjectDeclarativeSnapshot(paths.home, { level: "user" });
+    const projectSnapshot = await loadProjectDeclarativeSnapshot(project, { level: "project" });
+    const piEffective = declarativePromptSnapshot(mergeProjectDeclarativeSnapshots([
+      ghostSnapshot,
+      projectSnapshot,
+    ]));
+    expect(piEffective.instructions.map((entry) => entry.content)).toEqual([
+      "GHOST-VISIBLE-INSTRUCTION",
+      "PROJECT-PREFERRED-INSTRUCTION",
+    ]);
+    expect(piEffective.skills.map((entry) => [entry.name, entry.content])).toEqual([
+      ["retained", expect.stringContaining("GHOST-RETAINED-SKILL")],
+      ["shared", expect.stringContaining("PROJECT-SHARED-SKILL")],
+    ]);
+    expect(piEffective.rules).toEqual([
+      expect.objectContaining({ name: "shared", content: "PROJECT-SHARED-RULE" }),
+    ]);
+    expect(piEffective.prompts).toEqual([
+      expect.objectContaining({ name: "shared", content: "PROJECT-SHARED-PROMPT" }),
+    ]);
+    expect(piEffective.commands).toEqual([
+      expect.objectContaining({ name: "shared", content: "PROJECT-SHARED-COMMAND" }),
+    ]);
+    expect(projectSnapshot.warnings).toContainEqual(
+      expect.stringContaining("skill metadata is invalid"),
+    );
+    expect(projectSnapshot.warnings).toContainEqual(
+      expect.stringContaining("skill name or description is missing"),
+    );
+
+    const preview = await host!.previewProject(
+      "casper",
+      "declarative-parity",
+      "claude-code",
+      project,
+    );
+    expect(preview.resources).toMatchObject({
+      skills: 1,
+      rules: 1,
+      prompts: 1,
+      commands: 1,
+      agents: 1,
+      ignoredExecutable: 1,
+    });
+    await host!.bindProject("casper", "declarative-parity", "claude-code", {
+      root: project,
+      trustToken: preview.trustToken,
+      expectedGeneration: 0,
+    });
+    await host!.runTurn("casper", {
+      sessionId: "declarative-parity",
+      prompt: "use the admitted resources",
+      emit: () => {},
+    });
+
+    const systemPrompt = seenOptions[0]?.systemPrompt;
+    if (typeof systemPrompt !== "object"
+      || systemPrompt === null
+      || !("append" in systemPrompt)
+      || typeof systemPrompt.append !== "string") {
+      throw new Error("Claude Code did not receive its declarative prompt append.");
+    }
+    const append = systemPrompt.append;
+    for (const entry of [
+      ...piEffective.instructions,
+      ...piEffective.skills,
+      ...piEffective.rules,
+      ...piEffective.prompts,
+      ...piEffective.commands,
+    ]) expect(append).toContain(entry.content);
+    expect(append).not.toContain("GHOST-SHARED-SKILL");
+    expect(append).not.toContain("GHOST-SHARED-RULE");
+    expect(append).not.toContain("GHOST-SHARED-PROMPT");
+    expect(append).not.toContain("GHOST-SHARED-COMMAND");
+    expect(append).not.toContain("PROJECT-SHADOWED-INSTRUCTION");
+    expect(append).not.toContain("PROJECT-MALFORMED-SKILL");
+    expect(append).not.toContain("PROJECT-NAMELESS-COLLISION");
+    expect(append).not.toContain("AMBIENT-GHOST-CLAUDE");
+    expect(append).not.toContain("AMBIENT-GHOST-SKILL");
+    expect(append).not.toContain("GHOST-INACTIVE-AGENT");
+    expect(append).not.toContain("PROJECT-INACTIVE-AGENT");
+    expect(append).not.toContain("PROJECT-EXECUTABLE");
+  });
+
+  it("keeps invalid UTF-8 project instructions, skills, and MCP out of Claude", async () => {
+    const { seenOptions } = setupClaudeHost();
+    const project = join(temp!.root, "claude-invalid-project-utf8");
+    const invalidSkill = join(project, ".omp", "skills", "invalid");
+    const validSkill = join(project, ".omp", "skills", "valid");
+    mkdirSync(invalidSkill, { recursive: true });
+    mkdirSync(validSkill, { recursive: true });
+    writeFileSync(
+      join(project, ".omp", "AGENTS.md"),
+      Buffer.concat([Buffer.from("INVALID-CLAUDE-INSTRUCTION-"), Buffer.from([0x80])]),
+    );
+    writeFileSync(join(project, "AGENTS.md"), "VALID-CLAUDE-FALLBACK-INSTRUCTION");
+    writeFileSync(
+      join(invalidSkill, "SKILL.md"),
+      Buffer.concat([
+        Buffer.from("---\nname: invalid\ndescription: invalid\n---\n\nINVALID-CLAUDE-SKILL-"),
+        Buffer.from([0x80]),
+      ]),
+    );
+    writeFileSync(
+      join(validSkill, "SKILL.md"),
+      "---\nname: valid\ndescription: valid\n---\n\nVALID-CLAUDE-SKILL",
+    );
+    writeFileSync(
+      join(project, ".omp", "mcp.json"),
+      Buffer.concat([
+        Buffer.from('{"mcpServers":{"invalid":{"type":"stdio","command":"INVALID-CLAUDE-MCP-'),
+        Buffer.from([0x80]),
+        Buffer.from('"}}}'),
+      ]),
+    );
+    const preview = await host!.previewProject(
+      "casper",
+      "claude-invalid-utf8",
+      "claude-code",
+      project,
+    );
+    expect(preview.resources).toMatchObject({ instructions: 1, skills: 1, mcpServers: 0 });
+    expect(preview.warnings).toEqual(expect.arrayContaining([
+      expect.stringContaining(".omp/AGENTS.md was ignored because it is not valid UTF-8"),
+      expect.stringContaining(".omp/skills/invalid/SKILL.md was ignored because it is not valid UTF-8"),
+      expect.stringContaining(".omp/mcp.json was ignored because it is not valid UTF-8"),
+    ]));
+    await host!.bindProject("casper", "claude-invalid-utf8", "claude-code", {
+      root: project,
+      trustToken: preview.trustToken,
+      expectedGeneration: 0,
+    });
+
+    await host!.runTurn("casper", {
+      sessionId: "claude-invalid-utf8",
+      prompt: "use only valid project resources",
+      emit: () => {},
+    });
+
+    const prompt = JSON.stringify(seenOptions[0]?.systemPrompt);
+    expect(prompt).toContain("VALID-CLAUDE-FALLBACK-INSTRUCTION");
+    expect(prompt).toContain("VALID-CLAUDE-SKILL");
+    expect(prompt).not.toContain("\uFFFD");
+    expect(seenOptions[0]?.mcpServers).not.toHaveProperty("invalid");
+    expect(await host!.getProject("casper", "claude-invalid-utf8", "claude-code"))
+      .toMatchObject({ status: "degraded", mcpStatus: "degraded" });
+  });
+
+  it("degrades and omits project MCP timeouts below the Claude SDK floor", async () => {
+    const { paths, seenOptions } = setupClaudeHost();
+    const project = join(temp!.root, "claude-low-mcp-timeout");
+    mkdirSync(join(project, ".omp"), { recursive: true });
+    writeFileSync(join(project, ".omp", "mcp.json"), JSON.stringify({
+      mcpServers: {
+        zero: { type: "stdio", command: process.execPath, timeout: 0 },
+        below: { type: "stdio", command: process.execPath, timeout: 999 },
+        floor: { type: "stdio", command: process.execPath, timeout: 1_000 },
+        exact: { type: "stdio", command: process.execPath, timeout: 1_234 },
+      },
+    }));
+    const preview = await host!.previewProject(
+      "casper",
+      "low-mcp-timeout",
+      "claude-code",
+      project,
+    );
+    await host!.bindProject("casper", "low-mcp-timeout", "claude-code", {
+      root: project,
+      trustToken: preview.trustToken,
+      expectedGeneration: 0,
+    });
+
+    await host!.runTurn("casper", {
+      sessionId: "low-mcp-timeout",
+      prompt: "use representable MCP timeouts",
+      emit: () => {},
+    });
+
+    expect(seenOptions[0]?.mcpServers).not.toHaveProperty("zero");
+    expect(seenOptions[0]?.mcpServers).not.toHaveProperty("below");
+    expect(seenOptions[0]?.mcpServers).toMatchObject({
+      floor: { timeout: 1_000 },
+      exact: { timeout: 1_234 },
+    });
+    expect(await host!.getProject("casper", "low-mcp-timeout", "claude-code"))
+      .toMatchObject({ status: "degraded", mcpStatus: "degraded" });
+    const stored = JSON.parse(readFileSync(
+      claudeSessionMetadataPath(paths.sessionDir, "low-mcp-timeout"),
+      "utf8",
+    ));
+    expect(stored.projectSnapshot.mcpServers).toEqual(expect.objectContaining({
+      floor: expect.objectContaining({ timeout: 1_000 }),
+      exact: expect.objectContaining({ timeout: 1_234 }),
+    }));
+    expect(stored.projectSnapshot.mcpServers).not.toHaveProperty("zero");
+    expect(stored.projectSnapshot.mcpServers).not.toHaveProperty("below");
+    expect(stored.projectSnapshot.mcpWarnings).toEqual(expect.arrayContaining([
+      "zero: row rejected because Claude Code cannot preserve MCP timeouts below 1000 ms.",
+      "below: row rejected because Claude Code cannot preserve MCP timeouts below 1000 ms.",
+    ]));
+  });
+
+  it("revalidates stored MCP timeout semantics before a Claude resume", async () => {
+    const { paths, seenOptions, lifecycle } = setupClaudeHost();
+    const project = join(temp!.root, "claude-stored-low-mcp-timeout");
+    mkdirSync(project);
+    const preview = await host!.previewProject(
+      "casper",
+      "stored-low-timeout",
+      "claude-code",
+      project,
+    );
+    await host!.bindProject("casper", "stored-low-timeout", "claude-code", {
+      root: project,
+      trustToken: preview.trustToken,
+      expectedGeneration: 0,
+    });
+    const sidecar = claudeSessionMetadataPath(paths.sessionDir, "stored-low-timeout");
+    writeFileSync(sidecar, storedClaudeV3({
+      conversationId: "stored-low-timeout",
+      root: project,
+      mcpServers: Object.fromEntries([
+        ["__proto__", {
+          type: "http",
+          url: "https://mcp.example.test/below",
+          timeout: 999,
+          alwaysLoad: true,
+        }],
+        ["constructor", {
+          type: "http",
+          url: "https://mcp.example.test/floor",
+          timeout: 1_000,
+          alwaysLoad: true,
+        }],
+        ["toString", {
+          type: "http",
+          url: "https://mcp.example.test/exact",
+          timeout: 1_234,
+          alwaysLoad: true,
+        }],
+      ]),
+    }), { mode: 0o600 });
+
+    await host!.runTurn("casper", {
+      sessionId: "stored-low-timeout",
+      prompt: "resume with exact timeout semantics",
+      emit: () => {},
+    });
+
+    expect(lifecycle.queries).toBe(1);
+    expect(seenOptions[0]?.resume).toBe("sdk-stored-low-timeout");
+    const resumed = seenOptions[0]?.mcpServers as Record<string, unknown>;
+    expect(Object.hasOwn(resumed, "__proto__")).toBe(false);
+    expect(Object.hasOwn(resumed, "constructor")).toBe(true);
+    expect(Object.hasOwn(resumed, "toString")).toBe(true);
+    expect(resumed.constructor).toMatchObject({ timeout: 1_000 });
+    expect(resumed.toString).toMatchObject({ timeout: 1_234 });
+    const repaired = JSON.parse(readFileSync(sidecar, "utf8")) as {
+      projectSnapshot: {
+        mcpServers: Record<string, { timeout?: number }>;
+        mcpWarnings: string[];
+      };
+    };
+    expect(Object.hasOwn(repaired.projectSnapshot.mcpServers, "__proto__")).toBe(false);
+    const repairedByName = new Map(Object.entries(repaired.projectSnapshot.mcpServers));
+    expect(repairedByName.get("constructor")?.timeout).toBe(1_000);
+    expect(repairedByName.get("toString")?.timeout).toBe(1_234);
+    expect(repaired.projectSnapshot.mcpWarnings).toContain(
+      "__proto__: row rejected because Claude Code cannot preserve MCP timeouts below 1000 ms.",
+    );
+    expect(await host!.getProject("casper", "stored-low-timeout", "claude-code"))
+      .toMatchObject({ status: "degraded", mcpStatus: "degraded" });
+  });
+
+  it("round-trips the complete credential-free serializable SDK MCP union", async () => {
+    const { paths, seenOptions, lifecycle } = setupClaudeHost();
+    const project = join(temp!.root, "claude-sdk-mcp-roundtrip");
+    mkdirSync(project);
+    const preview = await host!.previewProject(
+      "casper",
+      "sdk-mcp-roundtrip",
+      "claude-code",
+      project,
+    );
+    await host!.bindProject("casper", "sdk-mcp-roundtrip", "claude-code", {
+      root: project,
+      cwd: project,
+      trustToken: preview.trustToken,
+      expectedGeneration: 0,
+    });
+    const mcpServers = {
+      local: {
+        type: "stdio",
+        command: process.execPath,
+        args: ["--version"],
+        env: {},
+        timeout: 1_000,
+        alwaysLoad: true,
+      },
+      remote_http: {
+        type: "http",
+        url: "https://mcp.example.test/http",
+        headers: {},
+        tools: [{ name: "read", permission_policy: "always_allow" }],
+        timeout: 2_000,
+        alwaysLoad: false,
+      },
+      remote_sse: {
+        type: "sse",
+        url: "http://127.0.0.1:9010/events",
+        tools: [{ name: "write", permission_policy: "always_ask" }],
+        timeout: 3_000,
+        alwaysLoad: true,
+      },
+    };
+    const sidecar = claudeSessionMetadataPath(paths.sessionDir, "sdk-mcp-roundtrip");
+    writeFileSync(sidecar, storedClaudeV3({
+      conversationId: "sdk-mcp-roundtrip",
+      root: project,
+      mcpServers,
+    }), { mode: 0o600 });
+
+    await host!.runTurn("casper", {
+      sessionId: "sdk-mcp-roundtrip",
+      prompt: "resume the pinned transports",
+      emit: () => {},
+    });
+
+    expect(lifecycle.queries).toBe(1);
+    expect(seenOptions[0]?.resume).toBe("sdk-sdk-mcp-roundtrip");
+    expect(seenOptions[0]?.mcpServers).toMatchObject(mcpServers);
+    expect(JSON.parse(readFileSync(sidecar, "utf8"))).toMatchObject({
+      version: 3,
+      projectSnapshot: { mcpServers },
+    });
+    expect(await host!.listSessions("casper")).toEqual([
+      expect.objectContaining({ conversationId: "sdk-mcp-roundtrip", runtime: "claude-code" }),
+    ]);
+  });
+
+  it("rejects malformed or secret-bearing stored MCP rows before SDK launch or logging", async () => {
+    const logs: string[] = [];
+    const logger: Logger = {
+      debug: (message, fields) => logs.push(JSON.stringify({ message, fields })),
+      info: (message, fields) => logs.push(JSON.stringify({ message, fields })),
+      warn: (message, fields) => logs.push(JSON.stringify({ message, fields })),
+      error: (message, fields) => logs.push(JSON.stringify({ message, fields })),
+    };
+    const { paths, lifecycle } = setupClaudeHost({ logger });
+    const project = join(temp!.root, "claude-malformed-stored-mcp");
+    mkdirSync(project);
+    const sentinel = "R4-SIDECAR-SECRET-MUST-NOT-LOG";
+    const cases: Array<[string, Record<string, unknown>]> = [
+      ["bad-command", { bad: { type: "stdio", command: 42 } }],
+      ["bad-transport", { bad: { type: "websocket", url: "https://example.test" } }],
+      ["extra-secret", { bad: { type: "stdio", command: "safe", token: sentinel } }],
+      ["env-secret", { bad: { type: "stdio", command: "safe", env: { TOKEN: sentinel } } }],
+      ["header-secret", {
+        bad: { type: "http", url: "https://example.test", headers: { authorization: sentinel } },
+      }],
+    ];
+
+    for (const [conversationId, mcpServers] of cases) {
+      const sidecar = claudeSessionMetadataPath(paths.sessionDir, conversationId);
+      mkdirSync(paths.sessionDir, { recursive: true });
+      writeFileSync(sidecar, storedClaudeV3({ conversationId, root: project, mcpServers }), {
+        mode: 0o600,
+      });
+      const events: PiMessagesEvent[] = [];
+      await expect(host!.runTurn("casper", {
+        sessionId: conversationId,
+        prompt: "must fail before launch",
+        emit: (event) => events.push(event),
+      })).rejects.toMatchObject({ code: "claude_session_invalid", status: 500 });
+      expect(events).toEqual([]);
+    }
+
+    expect(lifecycle.queries).toBe(0);
+    expect(await host!.listSessions("casper")).toEqual([]);
+    expect(logs.join("\n")).not.toContain(sentinel);
+  });
+
+  it("keeps non-MCP project scan warnings out of Claude MCP health", async () => {
+    setupClaudeHost();
+    const project = join(temp!.root, "claude-resource-warning-only");
+    const outside = join(temp!.root, "outside-skill");
+    mkdirSync(join(project, "skills"), { recursive: true });
+    mkdirSync(join(project, ".omp", "rules"), { recursive: true });
+    writeFileSync(join(project, ".omp", "mcp.json"), JSON.stringify({
+      mcpServers: {
+        bounded_fixture: { type: "stdio", command: process.execPath, args: ["--version"] },
+      },
+    }));
+    for (let index = 0; index < PROJECT_SCAN_MAX_ENTRIES + 10; index += 1) {
+      writeFileSync(join(project, ".omp", "rules", `wide-${index}.md`), `rule ${index}`);
+    }
+    mkdirSync(outside);
+    symlinkSync(outside, join(project, "skills", "escaped"));
+    const preview = await host!.previewProject(
+      "casper",
+      "resource-warning-only",
+      "claude-code",
+      project,
+    );
+    expect(preview.warnings).toEqual(expect.arrayContaining([
+      expect.stringContaining("symbolic links"),
+      expect.stringContaining("entry limit"),
+    ]));
+    await host!.bindProject("casper", "resource-warning-only", "claude-code", {
+      root: project,
+      trustToken: preview.trustToken,
+      expectedGeneration: 0,
+    });
+
+    await host!.runTurn("casper", {
+      sessionId: "resource-warning-only",
+      prompt: "use the safe project snapshot",
+      emit: () => {},
+    });
+
+    expect(await host!.getProject("casper", "resource-warning-only", "claude-code"))
+      .toMatchObject({ status: "ready", error: null, mcpStatus: "ready" });
+    const stored = JSON.parse(readFileSync(
+      claudeSessionMetadataPath(
+        ghostPaths(temp!.registry.get("casper").dir).sessionDir,
+        "resource-warning-only",
+      ),
+      "utf8",
+    ));
+    expect(stored.projectSnapshot.resourceWarnings)
+      .toContainEqual(expect.stringContaining("symbolic links"));
+    expect(stored.projectSnapshot.mcpWarnings).toEqual([]);
+  });
+
+  it("freezes one immutable project scan between admission and Claude execution", async () => {
+    const { seenOptions } = setupClaudeHost();
+    const project = join(temp!.root, "claude-single-project-scan");
+    mkdirSync(join(project, ".omp"), { recursive: true });
+    writeFileSync(join(project, "AGENTS.md"), "PINNED-BEFORE-QUERY");
+    writeFileSync(join(project, ".omp", "mcp.json"), JSON.stringify({
+      mcpServers: {
+        pinned: { type: "stdio", command: process.execPath, args: ["--version"] },
+      },
+    }));
+    const preview = await host!.previewProject("casper", "single-scan", "claude-code", project);
+    await host!.bindProject("casper", "single-scan", "claude-code", {
+      root: project,
+      trustToken: preview.trustToken,
+      expectedGeneration: 0,
+    });
+
+    const claudeRuntime = (host as unknown as {
+      claudeCode: { admitProjectSnapshot(...args: unknown[]): Promise<unknown> };
+    }).claudeCode;
+    const scan = vi.spyOn(claudeRuntime, "admitProjectSnapshot");
+    const admission = await host!.admitTurn("casper", {
+      sessionId: "single-scan",
+      prompt: "use the admitted snapshot",
+    });
+    expect(scan).toHaveBeenCalledTimes(1);
+    writeFileSync(join(project, "AGENTS.md"), "MUTATED-BEFORE-QUERY");
+    writeFileSync(join(project, ".omp", "mcp.json"), JSON.stringify({
+      mcpServers: { replacement: { type: "stdio", command: "changed" } },
+    }));
+    await admission.run({ emit: () => {} });
+    expect(scan).toHaveBeenCalledTimes(1);
+
+    expect(JSON.stringify(seenOptions[0]?.systemPrompt)).toContain("PINNED-BEFORE-QUERY");
+    expect(JSON.stringify(seenOptions[0]?.systemPrompt)).not.toContain("MUTATED-BEFORE-QUERY");
+    expect(seenOptions[0]?.mcpServers).toHaveProperty("pinned");
+    expect(seenOptions[0]?.mcpServers).not.toHaveProperty("replacement");
+  });
+
+  it("rejects secret-bearing project MCP before query or resume metadata publication", async () => {
+    const { paths, seenOptions } = setupClaudeHost();
+    const project = join(temp!.root, "claude-secret-mcp");
+    const sentinel = "GHOST_CLAUDE_PROJECT_SECRET_SENTINEL";
+    mkdirSync(join(project, ".omp"), { recursive: true });
+    writeFileSync(join(project, ".omp", "mcp.json"), JSON.stringify({
+      mcpServers: {
+        secret_stdio: {
+          type: "stdio",
+          command: process.execPath,
+          args: ["--version", `$${"{CLAUDE_PROJECT_TOKEN}"}`],
+          env: { CLAUDE_PROJECT_TOKEN: sentinel },
+        },
+      },
+    }));
+    const preview = await host!.previewProject(
+      "casper",
+      "secret-project-mcp",
+      "claude-code",
+      project,
+    );
+    await host!.bindProject("casper", "secret-project-mcp", "claude-code", {
+      root: project,
+      trustToken: preview.trustToken,
+      expectedGeneration: 0,
+    });
+
+    const events: PiMessagesEvent[] = [];
+    const before = await host!.getProject("casper", "secret-project-mcp", "claude-code");
+    await expect(host!.runTurn("casper", {
+      sessionId: "secret-project-mcp",
+      prompt: "must fail before Claude starts",
+      emit: (event) => events.push(event),
+    })).rejects.toMatchObject({
+      code: "claude_project_mcp_secrets_unsupported",
+      status: 409,
+    });
+    expect(events).toEqual([]);
+    expect(seenOptions).toHaveLength(0);
+    expect(existsSync(claudeSessionMetadataPath(
+      paths.sessionDir,
+      "secret-project-mcp",
+    ))).toBe(false);
+    expect(await host!.getProject("casper", "secret-project-mcp", "claude-code"))
+      .toMatchObject({
+        generation: before.generation,
+        status: before.status,
+        error: before.error,
+        mcpStatus: before.mcpStatus,
+        lastRefreshAt: before.lastRefreshAt,
+      });
+    // Project files stay outside the portable ghost home, and no expanded or
+    // literal credential may be copied into that home.
+    expect(filesystemTreeContains(paths.home, sentinel)).toBe(false);
+
+    writeFileSync(join(project, ".omp", "mcp.json"), JSON.stringify({
+      mcpServers: {
+        safe_stdio: { type: "stdio", command: process.execPath, args: ["--version"] },
+      },
+    }));
+    await host!.runTurn("casper", {
+      sessionId: "secret-project-mcp",
+      prompt: "retry the validated project",
+      emit: () => {},
+    });
+    expect(seenOptions).toHaveLength(1);
+    expect(seenOptions[0]?.mcpServers).toHaveProperty("safe_stdio");
+    expect(existsSync(claudeSessionMetadataPath(
+      paths.sessionDir,
+      "secret-project-mcp",
+    ))).toBe(true);
+    expect(filesystemTreeContains(paths.home, sentinel)).toBe(false);
   });
 
   it("uses SDK num_turns across resume while preserving an existing sidecar count", async () => {
     let queryNumber = 0;
-    const { paths } = setupClaudeHost({
+    const { paths, seenOptions } = setupClaudeHost({
       createQuery: (input, lifecycle) => {
         queryNumber += 1;
         const sessionId = input.options.sessionId ?? input.options.resume;
@@ -481,7 +1815,10 @@ describe("Claude Code subscription runtime", () => {
       prompt: "first resumed turn",
       emit: () => {},
     });
+    expect(seenOptions[0]?.cwd).toBe(paths.home);
     expect(JSON.parse(readFileSync(sidecar, "utf8"))).toMatchObject({
+      version: 3,
+      cwd: paths.home,
       sessionId: "existing-sdk-session",
       messageCount: 14,
       ownerTurnCount: 5,
@@ -596,16 +1933,118 @@ describe("Claude Code subscription runtime", () => {
 
     expect(await host!.listSessions("casper")).toEqual([]);
     const events: PiMessagesEvent[] = [];
-    await host!.runTurn("casper", {
+    await expect(host!.runTurn("casper", {
       sessionId: "conversation-odd-legacy",
       prompt: "must not guess",
       emit: (event) => events.push(event),
-    });
+    })).rejects.toMatchObject({ code: "claude_session_invalid", status: 500 });
     expect(lifecycle.queries).toBe(0);
-    expect(events.at(-1)).toMatchObject({
-      type: "error",
-      errorMessage: expect.stringContaining("metadata contract"),
+    expect(events).toEqual([]);
+  });
+
+  it.each([
+    ["created", "2026-01-01T00:00:00Z"],
+    ["created", "not-a-timestamp"],
+    ["modified", "2026-01-01T00:00:00.000+00:00"],
+    ["modified", "2026-02-30T00:00:00.000Z"],
+  ] as const)(
+    "rejects a noncanonical or invalid v3 %s timestamp before maintenance or Claude work",
+    async (field, timestamp) => {
+      let authReads = 0;
+      let maintenanceAdmissions = 0;
+      let maintenanceFinishes = 0;
+      let maintenanceReleases = 0;
+      const reservation = () => ({ drained: Promise.resolve(), release: () => {} });
+      const maintenance: NonNullable<SessionHostOptions["maintenance"]> = {
+        admitOwnerAction: () => {
+          maintenanceAdmissions += 1;
+          return {
+            ready: Promise.resolve(),
+            finish: async () => {
+              maintenanceFinishes += 1;
+            },
+            release: () => {
+              maintenanceReleases += 1;
+            },
+          };
+        },
+        recordOwnerActivity: async () => {},
+        reserveConversationDelete: reservation,
+        completeConversationDelete: () => {},
+        reserveGhostMove: reservation,
+        completeGhostRename: async () => {},
+        completeGhostDelete: () => {},
+        beginShutdown: async () => {},
+        disposeAll: async () => {},
+      };
+      const { paths, lifecycle } = setupClaudeHost({
+        maintenance,
+        readAuthStatus: async () => {
+          authReads += 1;
+          return { loggedIn: true, authMethod: "claude.ai" };
+        },
+      });
+      const conversationId = `invalid-${field}-${timestamp.length}`;
+      const sidecar = claudeSessionMetadataPath(paths.sessionDir, conversationId);
+      mkdirSync(paths.sessionDir, { recursive: true });
+      const metadata = storedUnboundClaudeV3(conversationId);
+      metadata[field] = timestamp;
+      const original = `${JSON.stringify(metadata)}\n`;
+      writeFileSync(sidecar, original, { mode: 0o600 });
+      const events: PiMessagesEvent[] = [];
+
+      await expect(host!.runTurn("casper", {
+        sessionId: conversationId,
+        prompt: "must fail without paid Claude work",
+        emit: (event) => events.push(event),
+      })).rejects.toMatchObject({ code: "claude_session_invalid", status: 500 });
+
+      expect(authReads).toBe(0);
+      expect(lifecycle.queries).toBe(0);
+      expect({ maintenanceAdmissions, maintenanceFinishes, maintenanceReleases }).toEqual({
+        maintenanceAdmissions: 0,
+        maintenanceFinishes: 0,
+        maintenanceReleases: 0,
+      });
+      expect(events).toEqual([]);
+      expect(readFileSync(sidecar, "utf8")).toBe(original);
+    },
+  );
+
+  it("revalidates resume timestamps after admission and before the Claude auth probe", async () => {
+    let authReads = 0;
+    const { paths, lifecycle } = setupClaudeHost({
+      readAuthStatus: async () => {
+        authReads += 1;
+        return { loggedIn: true, authMethod: "claude.ai" };
+      },
     });
+    const conversationId = "timestamp-swapped-after-admission";
+    const sidecar = claudeSessionMetadataPath(paths.sessionDir, conversationId);
+    mkdirSync(paths.sessionDir, { recursive: true });
+    writeFileSync(sidecar, `${JSON.stringify(storedUnboundClaudeV3(conversationId))}\n`, {
+      mode: 0o600,
+    });
+    const admission = await host!.admitTurn("casper", {
+      sessionId: conversationId,
+      prompt: "do not pay for corrupt resume state",
+    });
+    const changed = storedUnboundClaudeV3(conversationId);
+    changed.modified = "2026-01-01T00:00:00Z";
+    const invalid = `${JSON.stringify(changed)}\n`;
+    writeFileSync(sidecar, invalid, { mode: 0o600 });
+    const events: PiMessagesEvent[] = [];
+
+    await admission.run({ emit: (event) => events.push(event) });
+
+    expect(authReads).toBe(0);
+    expect(lifecycle.queries).toBe(0);
+    expect(events.filter((event) => event.type === "done" || event.type === "error"))
+      .toEqual([expect.objectContaining({
+        type: "error",
+        errorMessage: expect.stringContaining("metadata contract"),
+      })]);
+    expect(readFileSync(sidecar, "utf8")).toBe(invalid);
   });
 
   it("invalidates the cached external auth snapshot during auth refresh", async () => {
@@ -698,7 +2137,7 @@ describe("Claude Code subscription runtime", () => {
       emit: () => {},
     });
     const malformedPath = join(paths.sessionDir, "claude-malformed.json");
-    writeFileSync(malformedPath, "{ definitely not json\n", "utf8");
+    writeFileSync(malformedPath, "{ definitely not json\n", { encoding: "utf8", mode: 0o600 });
 
     expect(await host!.listSessions("casper")).toEqual([
       expect.objectContaining({
@@ -714,6 +2153,48 @@ describe("Claude Code subscription runtime", () => {
         error: expect.stringContaining("not valid Claude session metadata"),
       }),
     });
+  });
+
+  it("listSessions skips insecure sidecar entries without hiding a valid sibling", async () => {
+    const warnings: Array<{ message: string; fields?: Record<string, unknown> }> = [];
+    const logger: Logger = {
+      debug: () => {},
+      info: () => {},
+      warn: (message, fields) => warnings.push({ message, fields }),
+      error: () => {},
+    };
+    const { paths } = setupClaudeHost({ logger });
+    await host!.runTurn("casper", {
+      sessionId: "secure-listing",
+      prompt: "persist one valid row",
+      emit: () => {},
+    });
+
+    const wrongMode = claudeSessionMetadataPath(paths.sessionDir, "wrong-mode-listing");
+    writeFileSync(wrongMode, storedClaudeV1("wrong-mode-listing"), { mode: 0o600 });
+    chmodSync(wrongMode, 0o640);
+
+    const symlink = claudeSessionMetadataPath(paths.sessionDir, "symlink-listing");
+    symlinkSync(claudeSessionMetadataPath(paths.sessionDir, "secure-listing"), symlink);
+
+    const oversized = claudeSessionMetadataPath(paths.sessionDir, "oversized-listing");
+    writeFileSync(oversized, Buffer.alloc(CLAUDE_SESSION_METADATA_MAX_BYTES + 1, 0x78), {
+      mode: 0o600,
+    });
+
+    const fifo = claudeSessionMetadataPath(paths.sessionDir, "fifo-listing");
+    execFileSync("mkfifo", [fifo]);
+    chmodSync(fifo, 0o600);
+
+    expect(await host!.listSessions("casper")).toEqual([
+      expect.objectContaining({ conversationId: "secure-listing", runtime: "claude-code" }),
+    ]);
+    expect(warnings.map((entry) => entry.fields?.path)).toEqual(expect.arrayContaining([
+      wrongMode,
+      symlink,
+      oversized,
+      fifo,
+    ]));
   });
 
   it("never lists or resumes a Claude sidecar transplanted onto another id's hash", async () => {
@@ -732,7 +2213,7 @@ describe("Claude Code subscription runtime", () => {
     });
     const source = claudeSessionMetadataPath(paths.sessionDir, "conversation-a");
     const transplanted = claudeSessionMetadataPath(paths.sessionDir, "conversation-b");
-    writeFileSync(transplanted, readFileSync(source));
+    writeFileSync(transplanted, readFileSync(source), { mode: 0o600 });
 
     expect(await host!.listSessions("casper")).toEqual([
       expect.objectContaining({
@@ -749,17 +2230,13 @@ describe("Claude Code subscription runtime", () => {
     });
 
     const events: PiMessagesEvent[] = [];
-    await host!.runTurn("casper", {
+    await expect(host!.runTurn("casper", {
       sessionId: "conversation-b",
       prompt: "do not resume A",
       emit: (event) => events.push(event),
-    });
+    })).rejects.toMatchObject({ code: "session_identity_mismatch", status: 409 });
     expect(lifecycle.queries).toBe(1);
-    expect(events.at(-1)).toMatchObject({
-      type: "error",
-      reason: "error",
-      errorMessage: expect.stringContaining("does not match the requested resume id"),
-    });
+    expect(events).toEqual([]);
     expect(JSON.parse(readFileSync(transplanted, "utf8"))).toMatchObject({
       conversationId: "conversation-a",
     });
@@ -786,7 +2263,7 @@ describe("Claude Code subscription runtime", () => {
       modified: "2026-01-01T00:00:00.000Z",
       messageCount: 0,
       ownerTurnCount: 0,
-    })}\n`);
+    })}\n`, { mode: 0o600 });
     const boundedConversation = "conversation-invalid-session";
     const invalidSessionPath = claudeSessionMetadataPath(paths.sessionDir, boundedConversation);
     writeFileSync(invalidSessionPath, `${JSON.stringify({
@@ -798,20 +2275,17 @@ describe("Claude Code subscription runtime", () => {
       modified: "2026-01-01T00:00:00.000Z",
       messageCount: 0,
       ownerTurnCount: 0,
-    })}\n`);
+    })}\n`, { mode: 0o600 });
 
     expect(await host!.listSessions("casper")).toEqual([]);
     const events: PiMessagesEvent[] = [];
-    await host!.runTurn("casper", {
+    await expect(host!.runTurn("casper", {
       sessionId: boundedConversation,
       prompt: "must not resume malformed metadata",
       emit: (event) => events.push(event),
-    });
+    })).rejects.toMatchObject({ code: "claude_session_invalid", status: 500 });
     expect(lifecycle.queries).toBe(0);
-    expect(events.at(-1)).toMatchObject({
-      type: "error",
-      errorMessage: expect.stringContaining("metadata contract"),
-    });
+    expect(events).toEqual([]);
   });
 
   it("applies session_stop continuations before the Claude turn settles", async () => {
@@ -819,14 +2293,25 @@ describe("Claude Code subscription runtime", () => {
     const active: boolean[] = [];
     const beforeTurnIds: number[] = [];
     const turnIds: number[] = [];
+    const ownerPrompts: string[] = [];
+    const hookHomes: string[] = [];
+    const hookCwds: string[] = [];
+    const hookIdentities: string[] = [];
     await hooks.register((api) => {
       api.on("before_prompt", (event) => {
         beforeTurnIds.push(event.turn_id);
       });
       api.on("session_stop", (event) => {
+        const priorPasses = turnIds.filter((turnId) => turnId === event.turn_id).length;
         active.push(event.stop_hook_active);
         turnIds.push(event.turn_id);
-        if (!event.stop_hook_active) return { continue: true, additionalContext: "Revise it once." };
+        ownerPrompts.push(event.owner_prompt);
+        hookHomes.push(event.ghost_home);
+        hookCwds.push(event.cwd);
+        hookIdentities.push(`${event.runtime}:${event.conversation_runtime}:${event.conversation_id}`);
+        if (priorPasses < GHOST_SESSION_STOP_CONTINUATION_CAP) {
+          return { continue: true, additionalContext: "Revise it again." };
+        }
       });
     });
     let queryNumber = 0;
@@ -848,37 +2333,219 @@ describe("Claude Code subscription runtime", () => {
       emit: (event) => events.push(event),
     });
 
-    expect(lifecycle.queries).toBe(2);
-    expect(active).toEqual([false, true]);
+    expect(lifecycle.queries).toBe(3);
+    expect(active).toEqual([false, true, true]);
     expect(seenOptions[1]?.resume).toBe(seenOptions[0]?.sessionId);
     expect(events.filter((event) => event.type === "start")).toHaveLength(1);
     expect(events.filter((event) => event.type === "done")).toHaveLength(1);
-    expect(events.at(-1)).toMatchObject({ type: "done", usage: { totalTokens: 4 } });
+    expect(events.at(-1)).toMatchObject({ type: "done", usage: { totalTokens: 6 } });
 
     await host!.runTurn("casper", {
       sessionId: "conversation-hooks",
       prompt: "one more owner turn",
       emit: () => {},
     });
-    expect(lifecycle.queries).toBe(4);
-    expect(active).toEqual([false, true, false, true]);
+    expect(lifecycle.queries).toBe(6);
+    expect(active).toEqual([false, true, true, false, true, true]);
     expect(beforeTurnIds).toEqual([1, 2]);
-    expect(turnIds).toEqual([1, 1, 2, 2]);
+    expect(turnIds).toEqual([1, 1, 1, 2, 2, 2]);
+    expect(ownerPrompts).toEqual([
+      "hello",
+      "hello",
+      "hello",
+      "one more owner turn",
+      "one more owner turn",
+      "one more owner turn",
+    ]);
+    expect(hookHomes).toEqual(Array(6).fill(paths.home));
+    expect(hookCwds).toEqual(Array(6).fill(temp!.ownerHome));
+    expect(hookIdentities).toEqual(Array(6).fill(
+      "claude-code:claude-code:conversation-hooks",
+    ));
     expect(JSON.parse(readFileSync(
       claudeSessionMetadataPath(paths.sessionDir, "conversation-hooks"),
       "utf8",
     ))).toMatchObject({
-      messageCount: 20,
+      messageCount: 24,
       ownerTurnCount: 2,
     });
   });
 
+  it("records Claude v3 resume identity before releasing runtime ownership", async () => {
+    const finishEntered = deferred();
+    const allowFinish = deferred();
+    let identity: MaintenanceIdentity | undefined;
+    let settled: SettledMaintenanceTurn | undefined;
+    let releases = 0;
+    const reservation = () => ({ drained: Promise.resolve(), release: () => {} });
+    const maintenance: NonNullable<SessionHostOptions["maintenance"]> = {
+      admitOwnerAction: (value) => {
+        identity = value;
+        return {
+          ready: Promise.resolve(),
+          finish: async (turn) => {
+            settled = turn;
+            finishEntered.resolve();
+            await allowFinish.promise;
+          },
+          release: () => {
+            releases += 1;
+          },
+        };
+      },
+      recordOwnerActivity: async () => {},
+      reserveConversationDelete: reservation,
+      completeConversationDelete: () => {},
+      reserveGhostMove: reservation,
+      completeGhostRename: async () => {},
+      completeGhostDelete: () => {},
+      beginShutdown: async () => {},
+      disposeAll: async () => {},
+    };
+    const { paths } = setupClaudeHost({ maintenance });
+    const events: PiMessagesEvent[] = [];
+    const running = host!.runTurn("casper", {
+      sessionId: "conversation-maintenance-source",
+      prompt: "Keep the source exact.",
+      emit: (event) => events.push(event),
+    });
+
+    await finishEntered.promise;
+    expect(identity).toEqual({
+      ghostName: "casper",
+      runtime: "claude-code",
+      conversationId: "conversation-maintenance-source",
+    });
+    const metadata = JSON.parse(readFileSync(claudeSessionMetadataPath(
+      paths.sessionDir,
+      "conversation-maintenance-source",
+    ), "utf8")) as { created: string; sessionId: string };
+    expect(settled).toMatchObject({
+      source: {
+        runtime: "claude-code",
+        createdAt: metadata.created,
+        resumeId: metadata.sessionId,
+      },
+      sourceRevision: { kind: "claude-owner-turn", value: 1 },
+      cwd: temp!.ownerHome,
+      ownerPrompt: "Keep the source exact.",
+      assistantText: "Hello from the plan.",
+      outcome: "completed",
+    });
+    expect(releases).toBe(0);
+    expect(events.at(-1)?.type).not.toBe("done");
+    await expect(host!.runTurn("casper", {
+      sessionId: "conversation-maintenance-source",
+      prompt: "Must wait.",
+      emit: () => {},
+    })).rejects.toMatchObject({ code: "session_busy", status: 409 });
+
+    allowFinish.resolve();
+    await running;
+    expect(releases).toBe(1);
+    expect(events.at(-1)?.type).toBe("done");
+  });
+
+  it("emits one generic error when a durable Claude maintenance record rejects", async () => {
+    const finished: Array<SettledMaintenanceTurn | undefined> = [];
+    const warnings: Array<{ message: string; fields?: Record<string, unknown> }> = [];
+    let releases = 0;
+    let rejectNext = true;
+    const reservation = () => ({ drained: Promise.resolve(), release: () => {} });
+    const maintenance: NonNullable<SessionHostOptions["maintenance"]> = {
+      admitOwnerAction: () => ({
+        ready: Promise.resolve(),
+        finish: async (turn) => {
+          finished.push(turn);
+          if (turn && rejectNext) {
+            rejectNext = false;
+            throw new Error("sensitive Claude sidecar failure");
+          }
+        },
+        release: () => {
+          releases += 1;
+        },
+      }),
+      recordOwnerActivity: async () => {},
+      reserveConversationDelete: reservation,
+      completeConversationDelete: () => {},
+      reserveGhostMove: reservation,
+      completeGhostRename: async () => {},
+      completeGhostDelete: () => {},
+      beginShutdown: async () => {},
+      disposeAll: async () => {},
+    };
+    const { paths } = setupClaudeHost({
+      maintenance,
+      logger: {
+        debug: () => {},
+        info: () => {},
+        warn: (message, fields) => warnings.push({ message, fields }),
+        error: () => {},
+      },
+    });
+    const failedEvents: PiMessagesEvent[] = [];
+
+    await host!.runTurn("casper", {
+      sessionId: "strict-claude-maintenance",
+      prompt: "Persist this Claude owner turn.",
+      emit: (event) => failedEvents.push(event),
+    });
+
+    expect(failedEvents.filter((event) => event.type === "done" || event.type === "error"))
+      .toEqual([expect.objectContaining({
+        type: "error",
+        errorMessage: "Could not durably settle this owner turn.",
+      })]);
+    expect(JSON.stringify(failedEvents)).not.toContain("sensitive Claude sidecar failure");
+    expect(finished).toEqual([expect.objectContaining({
+      source: {
+        runtime: "claude-code",
+        createdAt: expect.any(String),
+        resumeId: expect.any(String),
+      },
+      sourceRevision: { kind: "claude-owner-turn", value: 1 },
+      assistantText: "Hello from the plan.",
+    })]);
+    expect(releases).toBe(1);
+    expect(warnings).toContainEqual({
+      message: "conversation maintenance turn record failed",
+      fields: { ghost: "casper", runtime: "claude-code" },
+    });
+    expect(JSON.stringify(warnings)).not.toContain("sensitive Claude sidecar failure");
+    expect(JSON.parse(readFileSync(
+      claudeSessionMetadataPath(paths.sessionDir, "strict-claude-maintenance"),
+      "utf8",
+    ))).toMatchObject({ ownerTurnCount: 1, messageCount: 2 });
+
+    const retryEvents: PiMessagesEvent[] = [];
+    await host!.runTurn("casper", {
+      sessionId: "strict-claude-maintenance",
+      prompt: "Retry after persistence failure.",
+      emit: (event) => retryEvents.push(event),
+    });
+    expect(retryEvents.at(-1)?.type).toBe("done");
+    expect(releases).toBe(2);
+    expect(JSON.parse(readFileSync(
+      claudeSessionMetadataPath(paths.sessionDir, "strict-claude-maintenance"),
+      "utf8",
+    ))).toMatchObject({ ownerTurnCount: 2, messageCount: 4 });
+  });
+
   it("injects before_prompt guidance into one Claude query", async () => {
     const hooks = new GhostHookRunner();
+    let sidecar = "";
+    let acknowledgedMetadata: unknown;
     await hooks.register((api) => {
-      api.on("before_prompt", () => ({ additionalContext: "Avoid the prior warning." }));
+      api.on("before_prompt", () => ({
+        additionalContext: "Avoid the prior warning.",
+        acknowledge: () => {
+          acknowledgedMetadata = JSON.parse(readFileSync(sidecar, "utf8"));
+        },
+      }));
     });
-    const { seenOptions, seenPrompts, lifecycle } = setupClaudeHost({ hooks });
+    const { seenOptions, seenPrompts, lifecycle, paths } = setupClaudeHost({ hooks });
+    sidecar = claudeSessionMetadataPath(paths.sessionDir, "conversation-before-prompt");
 
     await host!.runTurn("casper", {
       sessionId: "conversation-before-prompt",
@@ -892,6 +2559,49 @@ describe("Claude Code subscription runtime", () => {
     expect(seenPrompts[0]).toMatchObject({ isSynthetic: true, shouldQuery: false });
     expect(JSON.stringify(seenPrompts[0]?.message.content)).toContain("Avoid the prior warning.");
     expect(JSON.stringify(seenPrompts[1]?.message.content)).toContain("hello");
+    expect(acknowledgedMetadata).toMatchObject({
+      version: 3,
+      conversationId: "conversation-before-prompt",
+      ownerTurnCount: 1,
+    });
+  });
+
+  it("fails open when a persisted Claude notice acknowledgement fails", async () => {
+    const hooks = new GhostHookRunner();
+    const warnings: Array<{ message: string; fields?: Record<string, unknown> }> = [];
+    const logger: Logger = {
+      debug: () => {},
+      info: () => {},
+      warn: (message, fields) => warnings.push({ message, fields }),
+      error: () => {},
+    };
+    await hooks.register((api) => {
+      api.on("before_prompt", () => ({
+        additionalContext: "A durable maintenance notice.",
+        acknowledge: () => {
+          throw new Error("sensitive notice id");
+        },
+      }));
+    });
+    const { paths } = setupClaudeHost({ hooks, logger });
+    const events: PiMessagesEvent[] = [];
+
+    await host!.runTurn("casper", {
+      sessionId: "conversation-ack-failure",
+      prompt: "hello",
+      emit: (event) => events.push(event),
+    });
+
+    expect(events.at(-1)?.type).toBe("done");
+    expect(existsSync(claudeSessionMetadataPath(
+      paths.sessionDir,
+      "conversation-ack-failure",
+    ))).toBe(true);
+    expect(warnings).toContainEqual({
+      message: "before_prompt hook acknowledgement failed",
+      fields: { ghost: "casper", runtime: "claude-code" },
+    });
+    expect(JSON.stringify(warnings)).not.toContain("sensitive notice id");
   });
 
   it("fails closed without Claude.ai plan auth and never starts a query", async () => {

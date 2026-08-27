@@ -10,7 +10,12 @@
  * would otherwise be told it has, and the rules of a coding task.
  */
 import type { ExtensionAPI, ExtensionFactory } from "@oh-my-pi/pi-coding-agent";
-import { deriveDocCatalog } from "../catalog.js";
+import { deriveDocumentsIndex } from "../catalog.js";
+import {
+  DOCUMENT_INDEX_MAX_ENTRIES,
+  MachineDocuments,
+  openMachineDocuments,
+} from "../documents.js";
 import { deriveMemoryIndex } from "../memory-file.js";
 import { buildGhostSystemPrompt, stripHarnessSections } from "../prompt.js";
 import { resolveHome, type GhostExtensionOptions } from "./shared.js";
@@ -18,8 +23,15 @@ import { resolveHome, type GhostExtensionOptions } from "./shared.js";
 export interface PersonaExtensionOptions extends GhostExtensionOptions {
   /** Overrides the directory name as the ghost's name. */
   readonly ghostName?: string;
+  /** Shared machine Documents store. Defaults to the XDG Documents directory. */
+  readonly documents?: MachineDocuments | string;
   /** Extra sections appended after the derived ones. */
   readonly extraSections?: readonly string[];
+}
+
+function resolveDocuments(options: PersonaExtensionOptions): MachineDocuments {
+  if (options.documents instanceof MachineDocuments) return options.documents;
+  return openMachineDocuments(options.documents);
 }
 
 export function createPersonaExtension(
@@ -28,17 +40,19 @@ export function createPersonaExtension(
   return (pi: ExtensionAPI) => {
     pi.on("before_agent_start", async (event, ctx) => {
       const home = resolveHome(options, ctx);
-      const [character, memory, docs] = await Promise.all([
+      const [character, memory, documents] = await Promise.all([
         home.readCharacter(),
         home.listMemory(),
-        home.listDocs(),
+        resolveDocuments(options).listDirectory("", {
+          limit: DOCUMENT_INDEX_MAX_ENTRIES,
+        }),
       ]);
       return {
         systemPrompt: [...event.systemPrompt.map(stripHarnessSections), buildGhostSystemPrompt({
           ghostName: options.ghostName ?? home.name,
           character,
           memory: deriveMemoryIndex(memory.files),
-          docs: deriveDocCatalog(docs.docs),
+          docs: deriveDocumentsIndex(documents),
           ...(options.extraSections === undefined
             ? {}
             : { extraSections: options.extraSections }),

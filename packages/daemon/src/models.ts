@@ -111,8 +111,9 @@ export interface GhostModelRoleBinding {
  *   reading an image is quality work, not throwaway work, so the owner
  *   configures the role instead of inheriting the cheapest thing with eyes.
  * - `smol_model` — the cheap, fast lane for a ghost's throwaway completions:
- *   the name of a new conversation (`title.ts`) and the opening line of an empty
- *   chat (`greeting.ts`). Unbound, the daemon falls back to the cheapest USABLE
+ *   the name of a new conversation (`title.ts`), the opening line of an empty
+ *   chat (`greeting.ts`), and trusted command-hook classification
+ *   (`hook-smol-complete.ts`). Unbound, the daemon falls back to the cheapest USABLE
  *   model, subscription-aware: a capable model on an already-authenticated
  *   subscription (OAuth / included plan → zero marginal cost) is preferred over
  *   a cheaper metered model. Every use is a single, fire-and-forget completion;

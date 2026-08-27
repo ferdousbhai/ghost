@@ -13,18 +13,24 @@
  * environment. See env-scrub.ts for why.
  */
 import { pathToFileURL } from "node:url";
+import { homedir } from "node:os";
+import { openMachineDocuments } from "@ghost/extensions";
 import { apiTokenCommand } from "./api-token.js";
 import { LoginManager } from "./auth.js";
 import { ClaudeCodeProbe } from "./claude-code.js";
 import { importCommand } from "./import-command.js";
+import { legacyDocumentsPlacementCommand } from "./legacy-documents-placement.js";
 import { loginCommand } from "./login-command.js";
 import { loadConfig, type DaemonConfig, type DaemonConfigOverrides } from "./config.js";
 import { scrubProviderEnv } from "./env-scrub.js";
+import { DocumentsService } from "./documents.js";
+import { ConversationMaintenance } from "./conversation-maintenance.js";
 import { closeAllBrowserSessions, ensureGhostHomeLayout } from "./extensions.js";
 import { GhostRegistry } from "./ghosts.js";
 import { GhostHookRunner } from "./hooks.js";
 import { acquireHomeReservation, HomeReservationBusyError, type HomeReservation } from "./home-reservation.js";
 import { HomeOperationCoordinator } from "./home-operations.js";
+import { hookSmolCompleteCommand } from "./hook-smol-complete.js";
 import { migrateHostedConversations } from "./hosted-conversation-import.js";
 import { createLogger, type Logger, type LogLevel } from "./log.js";
 import { McpCatalog } from "./mcp-catalog.js";
@@ -39,13 +45,17 @@ const USAGE = `ghostd — your ghost, on your machine
 Usage:
   ghostd [options]
   ghostd import <archive> [--name <name>] [--overwrite] [options]
+  ghostd place-legacy-documents --source <legacy-docs> --documents-root <root> [--apply]
   ghostd login [<ghost>] [--provider <id>] [--api-key] [options]
   ghostd relay-token [--rotate] [--quiet]
   ghostd api-token [--rotate] [--quiet]
+  ghostd hook-smol-complete
 
 Subcommands:
   import                   Import a ghost from a "Download my ghost" archive
                            (zip or directory) into ~/ghosts/<name>.
+  place-legacy-documents   Dry-run or explicitly copy one retained legacy docs
+                           tree into Documents without following or overwriting.
   login                    Sign a ghost into a model provider from the terminal
                            (the same flow the shell drives over HTTP). Prompts
                            for the ghost and provider when not given; --api-key
@@ -57,6 +67,9 @@ Subcommands:
                            (minting one on first run). The shell reads the file
                            itself; this is for curl, scripts, and diagnosing a
                            401. --rotate mints a new one and invalidates the old.
+  hook-smol-complete       Internal command-hook bridge. Reads ghost_home and
+                           prompt as JSON on stdin and writes one smol-model
+                           completion as JSON on stdout.
 
 Options:
   -p, --port <port>        TCP port to bind on 127.0.0.1 (default 7717)
@@ -296,6 +309,10 @@ export async function main(argv: string[] = process.argv.slice(2), runtime: Main
   if (argv[0] === "api-token") return apiTokenCommand(argv.slice(1));
   if (argv[0] === "login") return loginCommand(argv.slice(1));
   if (argv[0] === "import") return importCommand(argv.slice(1));
+  if (argv[0] === "hook-smol-complete") return hookSmolCompleteCommand(argv.slice(1));
+  if (argv[0] === "place-legacy-documents") {
+    return legacyDocumentsPlacementCommand(argv.slice(1));
+  }
 
   let parsed: ParsedArgs;
   try {
@@ -376,11 +393,12 @@ async function serveDaemon(
   hooksPath: string,
 ): Promise<number> {
   const registry = new GhostRegistry(config.ghostsRoot);
+  const ownerHome = homedir();
   registry.ensureRoot();
   try {
     await Promise.all(registry.list().map(async (ghost) => {
       await ensureGhostHomeLayout(ghost.dir);
-      const conversations = await migrateHostedConversations(ghost.dir);
+      const conversations = await migrateHostedConversations(ghost.dir, ownerHome);
       if (conversations.imported > 0) {
         logger.info("activated hosted conversations as native sessions", {
           ghost: ghost.name,
@@ -409,19 +427,56 @@ async function serveDaemon(
   // is off, which also disables the relay browser mode (sessions fall back to
   // the per-ghost profile).
   const relay = createRelayHub({ logger });
+  const machineDocuments = openMachineDocuments();
+  const documents = new DocumentsService(machineDocuments);
   const homeOperations = new HomeOperationCoordinator(registry);
   const claudeCodeProbe = new ClaudeCodeProbe();
   const host = new SessionHost({
     registry,
+    homeOperations,
+    ownerHome,
     logger,
     offline: config.offline,
     browserMode: config.browserMode,
     compaction: config.compaction,
     askTimeoutSeconds: config.askTimeoutSeconds,
     hooks,
+    extensionOptions: { documents: machineDocuments },
     claudeCode: { probe: claudeCodeProbe },
     ...(relay ? { relayTransport: relay } : {}),
   });
+  const maintenance = new ConversationMaintenance({
+    registry,
+    homeOperations,
+    hooks,
+    logger,
+    withRuntime: (ghostName, use) => host.withMaintenanceRuntime(ghostName, use),
+  });
+  host.setConversationMaintenance(maintenance);
+  try {
+    await hooks.register(maintenance.hookFactory);
+    for (const ghost of registry.list()) {
+      const restored = await maintenance.restoreGhost(ghost.name);
+      if (restored.restored > 0) {
+        logger.info("restored conversation maintenance state", {
+          ghost: ghost.name,
+          conversations: restored.restored,
+        });
+      }
+      if (restored.invalid > 0) {
+        logger.warn("some conversation maintenance state stayed disabled", {
+          ghost: ghost.name,
+          conversations: restored.invalid,
+        });
+      }
+    }
+  } catch (error) {
+    logger.error("could not restore conversation maintenance", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    await host.disposeAll();
+    return 1;
+  }
   const login = new LoginManager({
     registry,
     logger,
@@ -445,10 +500,12 @@ async function serveDaemon(
     listening = await startDaemonServer({
       registry,
       host,
+      documents,
       homeOperations,
       login,
       catalog,
       mcp,
+      hooks,
       logger,
       port: config.port,
       address: config.host,

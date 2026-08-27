@@ -12,6 +12,9 @@ TestCase {
             ghostd: {
                 selectGhost: name => calls.push("ghost:" + name),
                 openConversation: id => calls.push("conversation:" + id),
+                openConversationForGhost: (name, id) =>
+                    calls.push("ghost-conversation:" + name + ":" + id),
+                newConversationForGhost: name => calls.push("ghost-new:" + name),
                 newConversation: () => calls.push("new")
             },
             hud: {
@@ -29,7 +32,7 @@ TestCase {
         verify(TrayActions.dispatch({
             action: "conversation", name: "casper", sessionId: "conv-2"
         }, h.ghostd, h.hud, h.quit));
-        compare(h.calls.join(","), "ghost:casper,conversation:conv-2,open");
+        compare(h.calls.join(","), "ghost-conversation:casper:conv-2,open");
     }
 
     function test_newConversationAndStandingActionsRouteOnce(): void {
@@ -38,7 +41,7 @@ TestCase {
             h.ghostd, h.hud, h.quit));
         verify(TrayActions.dispatch({ action: "switcher" }, h.ghostd, h.hud, h.quit));
         verify(TrayActions.dispatch({ action: "quit" }, h.ghostd, h.hud, h.quit));
-        compare(h.calls.join(","), "ghost:casper,new,open,open,switcher,quit");
+        compare(h.calls.join(","), "ghost-new:casper,open,open,switcher,quit");
     }
 
     function test_unknownActionIsRejectedWithoutSideEffects(): void {

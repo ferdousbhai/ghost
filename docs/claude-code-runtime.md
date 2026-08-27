@@ -70,13 +70,17 @@ For each turn Ghost:
    and turns, and invalidated after a successful login/auth refresh);
 2. requires Claude.ai plan auth rather than accepting an API-key-backed
    status;
-3. rebuilds the persona, memory index, and doc catalogue from the ghost home;
-4. captures the Ghost-specific `@ghost/extensions` tool definitions and
+3. rebuilds the persona, memory index, and visible user-level declarative
+   snapshot from the ghost home and the shallow index from the owner's shared
+   XDG Documents root;
+4. applies the conversation's pre-turn project binding: owner home when
+   unbound, or the trusted project cwd plus its approved declarative snapshot;
+5. captures the Ghost-specific `@ghost/extensions` tool definitions and
    exposes them as one in-process SDK MCP server;
-5. starts an Effect-scoped Agent SDK query and maps the SDK's async message
+6. starts an Effect-scoped Agent SDK query and maps the SDK's async message
    stream onto Ghost's existing pi-messages SSE protocol;
-6. persists only the opaque Claude session id and listing metadata before it
-   emits the terminal `done`, then closes the query process.
+7. persists the opaque Claude session id, listing metadata, and actual cwd
+   before it emits the terminal `done`, then closes the query process.
 
 The query is deliberately unrestricted for its local owner:
 
@@ -84,8 +88,27 @@ The query is deliberately unrestricted for its local owner:
   appended;
 - the native Claude Code tool preset, including Bash/Read/Edit/Write, web
   search, subagents, and background work, remains enabled;
-- user/project settings, instructions, skills, plugins, and MCP servers use
-  Claude Code's normal discovery;
+- filesystem setting sources are pinned to none, so changing cwd cannot admit
+  owner/project executable settings, hooks, plugins, or arbitrary MCP;
+- the visible ghost home contributes its accepted instructions, skills, rules,
+  Markdown commands, and prompts even while unbound; one explicitly trusted
+  project contributes its immutable accepted snapshot with the same exact-name
+  project-over-ghost shadowing as Pi. Malformed project resources cannot shadow
+  accepted ghost siblings. Native SDK skill discovery stays empty, and neither
+  cwd nor hidden ghost providers add resources;
+- because the first-turn MCP translation is persisted for resume, phase 1
+  rejects any project MCP row containing environment expansion, stdio env,
+  headers, auth/OAuth, or URL userinfo/query before starting Claude. It never
+  expands a secret into the sidecar; credential-free stdio/HTTP/SSE rows still
+  work. An omitted stdio cwd inherits the query's persisted project cwd; an
+  explicit stdio cwd cannot be represented by the SDK translation and is
+  rejected with a degraded-state warning rather than run in a different
+  directory. MCP timeout values below 1000 milliseconds are likewise rejected
+  with an MCP-specific degraded-state warning because the SDK cannot preserve
+  them; values at least 1000 are passed through exactly, including on resume;
+- project executable extensions, hooks, custom code tools, LSP, and ghost or
+  project agent definitions remain disabled pending the per-session isolation
+  work in #31. Agent-definition content is never appended to Claude's prompt;
 - Ghost's own browser, desktop, character, and structured memory writer are
   added through an in-process MCP server;
 - `bypassPermissions` is explicit because the HUD has no Claude approval UI;
@@ -103,8 +126,8 @@ Claude Code authentication.
 
 T3 Code keeps a long-lived query fed by an Effect queue. That is correct for a
 coding session whose system instructions are stable. A Ghost system prompt is
-not stable: memory files and the doc catalog are derived again before every
-turn. Keeping one query alive would freeze those indexes.
+not stable: memory files and the shallow owner Documents index are derived
+again before every turn. Keeping one query alive would freeze those indexes.
 
 Ghost therefore retains T3's important lifecycle—typed startup/stream
 failures, `Stream.fromAsyncIterable`, interruption through the SDK query, and
@@ -114,12 +137,32 @@ malformed resume metadata file is an explicit error; Ghost does not silently
 start a replacement conversation.
 
 Claude owns the actual transcript under its normal `~/.claude/projects/`
-storage. Ghost stores a `0600` metadata sidecar in `<ghost>/.sessions/` so a
+storage. Ghost stores a `0600` metadata sidecar in `<ghost>/sessions/` so a
 conversation can resume after daemon restart and can appear in the existing
-session list. This is an explicit exception to “the ghost directory is the
-whole backup”: backing up only the ghost home does not back up Claude's own
-transcript. We do not copy that transcript because doing so would couple Ghost
-to Claude Code's private storage format.
+session list. Every version requires exact canonical ISO `created` and
+`modified` timestamps and rejects invalid or noncanonical values before
+maintenance reservation or probing Claude. Version 3 records the actual runtime cwd and the exact bounded
+first-turn project declarative/MCP snapshot beside the opaque resume id. Every
+later turn and daemon restart reuses those stored project bytes without
+reopening the project, then merges them over that query's accepted visible
+ghost snapshot. A legacy version-1 sidecar resumes unbound at ghost home for
+relative-path history safety; version 2 has cwd but no project snapshot. Either
+may promote after a successful unbound turn, while a bound legacy sidecar fails
+closed and requires a new conversation. This is an explicit
+exception to “the ghost directory is the whole backup”: backing up only the
+ghost home does not back up Claude's own transcript. We do not copy that
+transcript because doing so would couple Ghost to Claude Code's private storage
+format.
+
+A new conversation must choose its trusted project before its first owner
+turn. The daemon scans and validates that project's declarative/MCP snapshot
+once during pre-stream turn admission, then carries the captured snapshot into
+the query without reopening project files. Unsupported secret-bearing MCP is a
+normal `409` response before SSE or query creation and leaves the draft
+unchanged for retry. A successful first turn fixes Claude's project/cwd for the SDK transcript;
+subsequent bind, unbind, and reload requests are rejected and require a new
+conversation. This prevents a resume id stored under one Claude project from
+silently changing the meaning of relative paths.
 
 The sidecar's `messageCount` remains message-shaped for compatibility with
 existing listings. Every SDK query that reaches a terminal result (success or
@@ -153,9 +196,15 @@ are:
 - T3's parent-tool-use filtering: subagent text/thinking is never merged into
   the parent response.
 
-The full T3 provider graph, approvals UI, and long-lived queue were not copied;
-Claude Code's own coding tools, project settings, plugins, skills, MCP, and
-subagents are used directly instead of reimplementing T3's surfaces.
+The full T3 provider graph, approvals UI, and long-lived queue were not copied.
+Claude Code's own coding tools and subagents remain native. Ghost passes
+`settingSources: []` and `skills: []`; declarative skills are not enabled
+through Claude's live discovery mechanism. Instead, Ghost supplies one
+always-active, bounded, descriptor-confined, already-read effective snapshot
+(the admitted ghost and project instruction, skill, rule, prompt, and
+Markdown-command text) in the system prompt append, plus scoped MCP explicitly.
+Symbolic links, hidden ghost providers, and ambient cwd resources never enter
+that snapshot, and executable settings remain disabled.
 The dependency versions match the reviewed T3 implementation:
 `@anthropic-ai/claude-agent-sdk@0.3.170`,
 `@anthropic-ai/sdk@0.93.0`, `@modelcontextprotocol/sdk@1.29.0`,

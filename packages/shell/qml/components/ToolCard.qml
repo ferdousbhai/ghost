@@ -40,12 +40,15 @@ Rectangle {
     readonly property string askPrompt: root.presentation.askPrompt
     readonly property string askDetail: root.presentation.askDetail
 
-    // The file this call wrote, ready for the workbench. Relative tool
-    // arguments resolve against the active ghost's home (the session cwd), so
-    // this is "" — and no affordance is offered — while that home is unknown or
-    // when nothing here can render the file.
+    // Native model-tool paths use the cwd captured when that exact call began.
+    // Ghost-owned legacy writers still use the selected ghost home. An older
+    // transcript with a relative native path and no cwd offers no chip rather
+    // than silently opening a similarly named file in the wrong directory.
     readonly property string workbenchPath: root.completed || root.running
-        ? Workbench.absolute(root.presentation.fileTarget) : ""
+        ? (root.presentation.fileBase === "ghost"
+            ? Workbench.absolute(root.presentation.fileTarget)
+            : Workbench.absoluteFrom(root.presentation.fileTarget,
+                root.presentation.fileCwd)) : ""
     readonly property bool openable: root.workbenchPath !== ""
         && Workbench.kindOf(root.workbenchPath) !== ""
 

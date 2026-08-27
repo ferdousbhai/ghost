@@ -16,6 +16,7 @@ import {
   utimes,
 } from "node:fs/promises";
 import { basename, join } from "node:path";
+import { homedir } from "node:os";
 import type {
   AssistantMessage,
   ImageContent,
@@ -89,6 +90,19 @@ export interface HostedConversationImportResult {
   existing: number;
   /** Fixtures that could not be projected; each source file remains untouched. */
   failures: HostedConversationImportFailure[];
+}
+
+/** Verify one retained/moved hosted fixture still names this conversation. */
+export async function hostedConversationSourceMatches(
+  path: string,
+  conversationId: string,
+): Promise<boolean> {
+  try {
+    const source = parseHostedConversation(JSON.parse(await readFile(path, "utf8")));
+    return source.id === conversationId;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -350,7 +364,7 @@ function fitTitle(title: string, updatedAt: string): { title: string; slot: stri
 function buildNativeSession(
   source: HostedConversation,
   sourceName: string,
-  ghostHome: string,
+  defaultCwd: string,
 ): string {
   const created = isoTimestamp(source.catalog.createdAt, "catalog.createdAt");
   const updated = isoTimestamp(source.catalog.updatedAt, "catalog.updatedAt");
@@ -362,7 +376,7 @@ function buildNativeSession(
     version: CURRENT_SESSION_VERSION,
     id: source.id,
     timestamp: created.iso,
-    cwd: ghostHome,
+    cwd: defaultCwd,
     ...(title ? { title, titleSource: "auto" } : {}),
   };
   const entries: SessionEntry[] = [];
@@ -595,6 +609,7 @@ async function writeNativeSession(
  */
 export async function migrateHostedConversations(
   ghostHome: string,
+  ownerHome: string = homedir(),
 ): Promise<HostedConversationImportResult> {
   const conversationsDir = join(ghostHome, HOSTED_CONVERSATIONS_DIRNAME);
   let sourceNames: string[];
@@ -624,10 +639,10 @@ export async function migrateHostedConversations(
       const source = parseHostedConversation(JSON.parse(await readFile(sourcePath, "utf8")));
       const target = join(sessionDir, sessionFileNameFor(source.id));
       const status = await writeNativeSession(
-        buildNativeSession(source, basename(sourceName), ghostHome),
+        buildNativeSession(source, basename(sourceName), ownerHome),
         target,
         sessionDir,
-        ghostHome,
+        ownerHome,
         source.catalog.updatedAt,
       );
       result[status] += 1;

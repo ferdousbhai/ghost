@@ -125,13 +125,21 @@ describe("real ghostd streaming lifecycle", () => {
     daemon = await startRealDaemonHarness({
       script: [{ kind: "text", text: "The real runtime completed." }],
     });
-    const originalRunTurn = daemon.host.runTurn.bind(daemon.host);
-    daemon.host.runTurn = (ghostName, options) => originalRunTurn(ghostName, {
-      ...options,
-      emit(event) {
-        if (event.type !== "done" && event.type !== "error") options.emit(event);
-      },
-    });
+    const originalAdmitTurn = daemon.host.admitTurn.bind(daemon.host);
+    daemon.host.admitTurn = async (ghostName, options) => {
+      const admission = await originalAdmitTurn(ghostName, options);
+      return {
+        release: admission.release,
+        async run(streamOptions) {
+          await admission.run({
+            ...streamOptions,
+            emit(event) {
+              if (event.type !== "done" && event.type !== "error") streamOptions.emit(event);
+            },
+          });
+        },
+      };
+    };
 
     const stream = await daemon.startTurn("conv-missing-terminal", "Complete normally.");
     await within(stream.completion, "the missing-terminal SSE stream to reach EOF");

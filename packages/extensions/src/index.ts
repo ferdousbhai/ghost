@@ -1,6 +1,7 @@
 /**
  * `@ghost/extensions` — the OMP extensions that make a plain-file ghost home
- * behave like a persona, plus the typed reader/writer for that layout.
+ * behave like a persona, plus typed readers for that layout and the owner's
+ * shared machine Documents tree.
  *
  * Boundary (CONTRACTS.md): no HTTP, no daemon lifecycle, no session management.
  * Anything about *how an agent runs* is OMP's; anything about *what a ghost is*
@@ -40,6 +41,7 @@ export {
   assertWritableMemory,
   coerceMemorySlug,
   deriveMemoryIndex,
+  MAX_MEMORY_FILE_BYTES,
   MAX_MEMORY_FILE_CONTENT_LENGTH,
   MAX_MEMORY_FILE_SLUG_LENGTH,
   MAX_MEMORY_FILES,
@@ -58,9 +60,30 @@ export {
 } from "./memory-file.js";
 
 export {
-  deriveDocCatalog,
+  deriveDocumentsIndex,
   DOC_CATALOG_BUDGET_CHARS,
 } from "./catalog.js";
+
+export {
+  DOCUMENT_INDEX_BUDGET_CHARS,
+  DOCUMENT_INDEX_MAX_ENTRIES,
+  DOCUMENT_INLINE_MAX_BYTES,
+  DOCUMENT_LIST_DEFAULT_LIMIT,
+  DOCUMENT_LIST_MAX_LIMIT,
+  DOCUMENT_QUERY_MAX_CHARS,
+  MachineDocuments,
+  normalizeDocumentsDirectoryPath,
+  normalizeDocumentsFilePath,
+  openMachineDocuments,
+  resolveDocumentsDirectory,
+  type DocumentDirectoryEntry,
+  type DocumentDirectoryPage,
+  type DocumentEntryKind,
+  type DocumentTextContent,
+  type ListDocumentDirectoryOptions,
+  type ResolveDocumentsDirectoryOptions,
+  type SkippedDocumentEntry,
+} from "./documents.js";
 
 export {
   CHARACTER_FILENAME,
@@ -68,27 +91,32 @@ export {
   EXPORT_MANIFEST_FILENAME,
   GhostHome,
   MEMORY_DIRNAME,
-  normalizeDocPath,
   DOCS_DIRNAME,
   openGhostHome,
+  type GhostHomeOptions,
+  type MemoryReadStage,
   type MemoryListing,
+  type MemoryWriteIntent,
   type MemoryWriteInput,
+  type MemoryWriteReceipt,
   type MemoryWriteResult,
-  type DocListing,
-  type DocSearchMatch,
-  type DocSearchOptions,
-  type DocSearchResult,
-  type DocWriteInput,
+  type MemoryWriteWithReceiptResult,
   type SkippedFile,
 } from "./home.js";
+
+export {
+  descriptorPath,
+  openConfinedDirectory,
+  openDirectoryNoFollow,
+  openRegularFileNoFollow,
+  withDescriptorLock,
+} from "./linux-fs.js";
 
 export {
   GHOST_HOME_FORMAT,
   type CharacterFile,
   type MemoryRecord,
-  type DocCatalog,
-  type DocFile,
-  type DocMeta,
+  type DocumentsIndex,
 } from "./types.js";
 
 export {

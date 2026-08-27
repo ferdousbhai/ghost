@@ -95,6 +95,16 @@ offers to answer it now on the branch the daemon kept. While a model
 is streaming, Enter steers the active run, Ctrl+Enter queues a follow-up, and
 Shift+Enter inserts a newline. The queued state is visible below the composer.
 
+A project bound before the first owner turn is still an unpublished draft. The
+shell keeps that runtime-qualified identity selected while it asks ghostd to
+abandon the draft before New conversation, another ghost, or another stored
+conversation replaces it; a failed abandon leaves the current draft intact and
+the same owner action retries it. Published conversations never use this draft
+operation. This protection covers the active in-memory draft identity: the
+shell does not persist a separate registry of unpublished draft IDs, and an
+unpublished binding is intentionally absent from the conversation listing, so
+a shell process restart cannot rediscover one by scanning project paths.
+
 A reply is the answer, not an account of how it was reached. Which tools ran is
 narrated by the activity line while it happens and then leaves: a settled turn
 shows only the calls a reader still needs — the ones that failed, and `ask`,
@@ -125,40 +135,46 @@ so a reload does not resurrect what streaming set aside.
 
 The restored 64px rail at the right edge is the successor to summon-ghost's
 final `AppSideNav` (`4852804cf4e09ca50c16e08e6106c06df82e2a94`): Chat,
-Docs, Memory, Helpers, Commands, MCP, Remote, and Character stay reachable without covering the
-content. Docs follows that version's Train layout — a document index on the
-left and the existing lossless markdown editor on the right — but deliberately
-omits Train's adjacent chat panel and Ghost's roster/conversation sidebar.
+Docs, Memory, Agent definitions, Commands, MCP, Remote, and Character stay
+reachable without covering the content. Docs preserves Ghost's visual language
+but uses an adaptive folder/list/detail hierarchy: wide windows show all three;
+narrow windows use a reversible stack.
 
-The daemon derives one authenticated context response from the live ghost home
-and OMP agent discovery whenever the surface opens or refreshes. It is never
-persisted. Docs and character remain real editable files; memory is shown
-read-only as atomic facts; helpers expose capability metadata but not their
-source paths. Documents and memory facts can be deleted only through explicit
-confirmation, and the daemon moves the underlying file to system Trash. An
-open document editor is synchronously flushed and closed before deletion, so a
-late autosave cannot recreate the file. Character and helper deletion are not
-offered.
+Documents is the one owner's machine-wide XDG Documents tree, not ghost-home
+state. The daemon returns metadata for one direct directory page at a time,
+folders first; expanding a folder is what loads its children, and neither the
+model nor the UI imposes a folder depth limit. Folder selection, search, scroll,
+and loaded pages survive ghost switches because renaming or deleting a ghost
+does not move, copy, or reset Documents.
 
-Docs are `docs/**/*.md` in canonical `ghost-home/v2` form: byte 0 is a
-non-empty `# Title`, and the optional final nonblank line is only lowercase
-hyphenated hashtag slugs (`#[a-z0-9]+(?:-[a-z0-9]+)*`). `#archived` removes a
-document from the default working set. The heading and tags stay in the raw
-Markdown; documents have no YAML frontmatter. The one-time migration first
-renames an unambiguous `notes/` directory to `docs/`, then atomically rewrites
-legacy files (first H1, then legacy `title`, then filename; slugified legacy
-tags; `archived: true` as `#archived`; merged trailing tags; discarded import
-`path`). It is idempotent after a partial run and keeps no marker or dual-format
-reader. New writes are v2 only.
-The document pane edits Markdown source in a monospace `TextEdit`, preserving
-exactly the bytes typed. Its `Reading` view is a read-only Markdown rendering;
-links open externally and rendering never serializes back into the file. Edits
-autosave atomically after an 800ms debounce, and closing, hiding, or switching
-files flushes first.
-If the file changes underneath a dirty buffer, the shell
-tries a line-based three-way merge; a clean merge autosaves silently, while a
-real conflict pauses autosave until the owner keeps either side. The daemon
-writer validates the complete v2 body and writes exactly that body.
+Regular files of any type appear in the list. The shell instantiates its inline
+viewer only for a supported text, code, or Markdown file with a validated size
+of at most 1 MiB (1,048,576 bytes). Content comes from ghostd's authenticated,
+descriptor-confined endpoint; the Documents surface never constructs a QML
+`FileView` or `FilePane` for the path. All admitted content, including Markdown
+and code, is shown as literal plain text: image syntax, raw HTML, links, data
+URLs, and local/network resource references are never resolved or fetched. A
+larger file, one without trustworthy size metadata, or content that is not
+strict UTF-8 text is not read inline; the detail pane says why and offers Open
+externally. Inline content is read-only and reloads explicitly. Opening
+externally deliberately hands the current absolute path to the owner's desktop
+outside the confined viewer boundary. Document deletion requires explicit
+confirmation and moves only a regular file to system Trash.
+
+Hosted imports may leave legacy `notes/` or `docs/` Markdown inside an imported
+ghost home. Those files are import-only: the Documents API, session context,
+and the Docs rail ignore them. Ghost performs no automatic migration and new
+ghost homes do not create `docs/`. Retaining one in live Documents is an
+explicit owner operation: choose a destination, refuse an existing-name
+collision rather than overwrite it, copy the selected source, verify the
+result, and only then decide separately whether to retain the legacy source.
+There is no generic multi-ghost migration path.
+
+The ghost-scoped context response remains derived rather than persisted. It
+contains character and read-only atomic memory; phase one exposes no runnable
+agent definitions because isolated task/subagent execution is disabled. Memory
+deletion is confirmed and recoverable. Character and agent-definition deletion
+are not offered.
 
 Commands is the effective, conversation-scoped OMP slash-command catalog:
 built-ins, extension/plugin commands, project commands, and explicit
@@ -170,14 +186,17 @@ Commands that OMP exposes but Ghost supports only partially (or not at all)
 remain discoverable with an availability badge and reason; selecting one still
 only stages text, so the palette never suggests that staging proved support.
 
-MCP manages only the selected ghost's visible `mcp.json`: list, add, replace,
-enable/disable, and delete. The daemon's catalog is sanitized before it reaches
-QML. Command arguments, environment/header values, authentication references,
-OAuth settings, and URL query values are never displayed. Safe placement and
-policy fields (`cwd`, `envPolicy`, and `headerPolicy`) remain visible so a
-replacement edit can preserve them. Add and edit use a full JSON configuration
-editor; replacing a server that has hidden fields is blocked until the owner
-confirms those values were re-entered. Deletion always uses a modal confirmation.
+MCP manages only the selected ghost's visible `<ghost-home>/mcp.json`: list,
+add, replace, enable/disable, and delete. An explicitly bound external project
+may separately contribute native `.omp/mcp.json` or legacy `.omp/.mcp.json` to
+that conversation, but this ghost-level manager never adopts or writes those
+files. The daemon's catalog is sanitized before it reaches QML. Command
+arguments, environment/header values, authentication references, OAuth
+settings, and URL query values are never displayed. Safe placement and policy
+fields (`cwd`, `envPolicy`, and `headerPolicy`) remain visible so a replacement
+edit can preserve them. Add and edit use a full JSON configuration editor;
+replacing a server that has hidden fields is blocked until the owner confirms
+those values were re-entered. Deletion always uses a modal confirmation.
 
 Remote collects only the capabilities which cross the local machine boundary.
 Live voice is scoped to the active conversation, uses the machine microphone

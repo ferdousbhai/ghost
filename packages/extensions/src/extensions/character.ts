@@ -50,14 +50,16 @@ export const MAX_CHARACTER_BODY_LENGTH = 20_000;
  * daemon, so a drifted seed simply reads as "populated", which is the safe way
  * to be wrong.
  */
-const SEED_MARKERS = [
-  "Write in the first person. Be specific and concrete;",
+const SEED_VOICE_MARKER = "Write in the first person. Be specific and concrete;";
+const SEED_KNOWLEDGE_MARKERS = [
+  "Your memory files are yours, and the owner's Documents are shared with you.",
   "Your docs and memory files are yours.",
 ] as const;
 
 /** True when the body still looks like the file a new ghost was seeded with. */
 export function isSeededCharacterBody(body: string): boolean {
-  return SEED_MARKERS.every((marker) => body.includes(marker));
+  return body.includes(SEED_VOICE_MARKER)
+    && SEED_KNOWLEDGE_MARKERS.some((marker) => body.includes(marker));
 }
 
 export type CharacterExtensionOptions = GhostExtensionOptions;
@@ -160,7 +162,7 @@ export function createCharacterExtension(
             "limit_exceeded",
             `A character file may be at most ${MAX_CHARACTER_BODY_LENGTH} characters; `
             + `that body is ${body.length}. It is loaded into every turn, so keep it `
-            + "to what is durable and put the rest in docs. Nothing was written.",
+            + "to what is durable and put the rest in Documents. Nothing was written.",
             { length: body.length, limit: MAX_CHARACTER_BODY_LENGTH },
           );
         }

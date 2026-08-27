@@ -20,6 +20,8 @@ export interface CollaborationStatus {
 export interface StartCollaborationInput {
   sessionKey: string;
   session: AgentSession;
+  /** SessionHost's admission wrapper for writable guest prompts. */
+  promptCustomMessage?: AgentSession["promptCustomMessage"];
   relayUrl: string;
   writable: boolean;
   confirmed: boolean;
@@ -77,7 +79,27 @@ function normalizedRelayUrl(value: string): string {
   return parsed.toString();
 }
 
-function contextFor(session: AgentSession): InteractiveModeContext {
+function collaborationSession(
+  session: AgentSession,
+  promptCustomMessage?: AgentSession["promptCustomMessage"],
+): AgentSession {
+  if (!promptCustomMessage) return session;
+  return new Proxy(session, {
+    get(target, property) {
+      if (property === "promptCustomMessage") return promptCustomMessage;
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+    set(target, property, value) {
+      return Reflect.set(target, property, value, target);
+    },
+  });
+}
+
+function contextFor(
+  session: AgentSession,
+  promptCustomMessage?: AgentSession["promptCustomMessage"],
+): InteractiveModeContext {
   const contextUsage = (): { usedTokens: number; contextWindow: number } => {
     const usage = session.getContextUsage();
     return {
@@ -86,7 +108,7 @@ function contextFor(session: AgentSession): InteractiveModeContext {
     };
   };
   const adapter = {
-    session,
+    session: collaborationSession(session, promptCustomMessage),
     sessionManager: session.sessionManager,
     settings: session.settings,
     eventBus: undefined,
@@ -165,7 +187,7 @@ export class CollaborationManager {
     return this.serialize(input.sessionKey, async () => {
       if (this.active.has(input.sessionKey)) return this.status(input.sessionKey);
 
-      const context = contextFor(input.session);
+      const context = contextFor(input.session, input.promptCustomMessage);
       const host = this.createHost(context);
       context.collabHost = host as CollabHost;
       const configuredWebUrl = input.session.settings.get("collab.webUrl");

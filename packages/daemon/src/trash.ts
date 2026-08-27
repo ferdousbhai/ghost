@@ -50,6 +50,8 @@ export interface TrashPathOptions {
   /** Test seams for XDG trash resolution. */
   env?: NodeJS.ProcessEnv;
   home?: string;
+  /** Original lexical location for `.trashinfo` when `inputPath` is descriptor-relative. */
+  originalPath?: string;
 }
 
 export interface TrashPathResult {
@@ -71,6 +73,7 @@ export function trashPath(
   options: TrashPathOptions = {},
 ): TrashPathResult {
   const source = resolve(inputPath);
+  const original = resolve(options.originalPath ?? inputPath);
   const now = options.now ?? new Date();
   const trashDir = homeTrashDir(options.env, options.home);
   const filesDir = join(trashDir, "files");
@@ -80,7 +83,7 @@ export function trashPath(
   }
 
   const baseName = basename(source);
-  const info = `[Trash Info]\nPath=${encodeTrashInfoPath(source)}\n`
+  const info = `[Trash Info]\nPath=${encodeTrashInfoPath(original)}\n`
     + `DeletionDate=${deletionDate(now)}\n`;
   let trashName = baseName;
   let infoPath = join(infoDir, `${trashName}.trashinfo`);

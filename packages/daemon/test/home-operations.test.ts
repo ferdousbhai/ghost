@@ -44,6 +44,102 @@ function jsonRequest(url: string, method: string, body?: unknown): Promise<Respo
 }
 
 describe("path-bound mutations during whole-home moves", () => {
+  it("synchronously reserves participants and awaits their drain before a move", async () => {
+    temp = makeTempGhosts();
+    temp.registry.ensureRoot();
+    seedGhost(temp.root, { name: "casper" });
+    const coordinator = new HomeOperationCoordinator(temp.registry);
+    const participantDrained = deferred<void>();
+    const homeDrained = coordinator.acquire("casper");
+    let participantReserved = false;
+    let participantReleased = false;
+    coordinator.registerMoveParticipant({
+      reserve: (ghostName) => {
+        expect(ghostName).toBe("casper");
+        participantReserved = true;
+        return {
+          drained: participantDrained.promise,
+          release: () => {
+            participantReleased = true;
+          },
+        };
+      },
+    });
+
+    let moveSettled = false;
+    const move = coordinator.reserveMove("casper").then((release) => {
+      moveSettled = true;
+      return release;
+    });
+    expect(participantReserved).toBe(true);
+    expect(moveSettled).toBe(false);
+
+    homeDrained();
+    await Promise.resolve();
+    expect(moveSettled).toBe(false);
+    participantDrained.resolve();
+    const releaseMove = await move;
+    expect(moveSettled).toBe(true);
+    expect(participantReleased).toBe(false);
+    releaseMove();
+    expect(participantReleased).toBe(true);
+    expect(coordinator.moveReservationCount).toBe(0);
+  });
+
+  it("unwinds earlier participant reservations when a later participant refuses", async () => {
+    temp = makeTempGhosts();
+    temp.registry.ensureRoot();
+    seedGhost(temp.root, { name: "casper" });
+    const coordinator = new HomeOperationCoordinator(temp.registry);
+    let released = false;
+    coordinator.registerMoveParticipant({
+      reserve: () => ({
+        drained: Promise.resolve(),
+        release: () => {
+          released = true;
+        },
+      }),
+    });
+    coordinator.registerMoveParticipant({
+      reserve: () => {
+        throw new Error("participant refused");
+      },
+    });
+
+    await expect(coordinator.reserveMove("casper")).rejects.toThrow("participant refused");
+    expect(released).toBe(true);
+    expect(coordinator.moveReservationCount).toBe(0);
+  });
+
+  it("runs every owner preclaim before reserving or changing move state", async () => {
+    temp = makeTempGhosts();
+    temp.registry.ensureRoot();
+    seedGhost(temp.root, { name: "casper" });
+    const coordinator = new HomeOperationCoordinator(temp.registry);
+    const order: string[] = [];
+    coordinator.registerMoveParticipant({
+      preclaim: () => order.push("preclaim-one"),
+      reserve: () => {
+        order.push("reserve-one");
+        return { drained: Promise.resolve(), release: () => {} };
+      },
+    });
+    coordinator.registerMoveParticipant({
+      preclaim: () => {
+        order.push("preclaim-two");
+        throw new Error("owner busy");
+      },
+      reserve: () => {
+        order.push("reserve-two");
+        return { drained: Promise.resolve(), release: () => {} };
+      },
+    });
+
+    await expect(coordinator.reserveMove("casper")).rejects.toThrow("owner busy");
+    expect(order).toEqual(["preclaim-one", "preclaim-two"]);
+    expect(coordinator.moveReservationCount).toBe(0);
+  });
+
   it("drains deferred model runtime construction before rename and moves the completed change", async () => {
     temp = makeTempGhosts();
     temp.registry.ensureRoot();
