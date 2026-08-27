@@ -67,6 +67,7 @@ afterEach(async () => {
   host = null;
   temp?.cleanup();
   temp = null;
+  vi.unstubAllEnvs();
 });
 
 function sdkMessage(value: unknown): SDKMessage {
@@ -596,6 +597,7 @@ describe("Claude Code subscription runtime", () => {
 
   it("returns image blocks from screen and browser screenshots across the tool bridge", async () => {
     const { paths } = setupClaudeHost();
+    vi.stubEnv("OMARCHY_SCREENSHOT_DIR", join(temp!.root, "screenshots"));
     let browserPage: { url: string; title: string } | undefined;
     const resolver = vi.fn(async (hostname: string) => {
       expect(hostname).toBe("example.com");

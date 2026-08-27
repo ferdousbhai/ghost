@@ -224,7 +224,7 @@ describe("memory", () => {
       "apprentice-question",
       "working-habit",
     ]);
-    expect(files[0]?.updated).toBe(new Date().toISOString().slice(0, 10));
+    expect(files[0]?.updated).toMatch(/^\d{4}-\d{2}-\d{2}T/u);
   });
 
   it("replaces an existing file rather than appending a second one", async () => {
@@ -236,6 +236,81 @@ describe("memory", () => {
     expect(files).toHaveLength(2);
     expect((await home.readMemory("working-habit")).content)
       .toBe("Updated: the press is cold until nine.");
+  });
+
+  it("redacts secrets before validation, slug derivation, and publication", async () => {
+    const result = await home.writeMemory({
+      content: `api_key=${"s".repeat(2_100)}`,
+    });
+    expect(result.slug).toBe("apikeyredactedsecret");
+    expect(await readFile(join(home.memoryDir, `${result.slug}.md`), "utf8"))
+      .toBe("api_key=[REDACTED_SECRET]\n");
+
+    await home.writeMemory({
+      name: "credentials",
+      content: "Use Bearer eyJhbGciOi.secret.signature and ghp_abcdefghijklmnopqrstuvwxyz123456.",
+    });
+    const stored = await readFile(join(home.memoryDir, "credentials.md"), "utf8");
+    expect(stored).toBe("Use Bearer [REDACTED_SECRET] and [REDACTED_SECRET].\n");
+  });
+
+  it("moves memories into collision-safe in-home trash under the write lock", async () => {
+    const first = await home.deleteMemory("working-habit");
+    expect(first).toEqual({
+      slug: "working-habit",
+      path: "memory/working-habit.md",
+      trash: ".trash/working-habit.md",
+    });
+    expect(await readFile(join(fixture.dir, first.trash), "utf8"))
+      .toContain("press");
+
+    await home.writeMemory({ name: "working-habit", content: "A replacement fact." });
+    const second = await home.deleteMemory("working-habit.md");
+    expect(second.trash).toBe(".trash/working-habit-2.md");
+    expect(await readFile(join(fixture.dir, first.trash), "utf8"))
+      .not.toBe(await readFile(join(fixture.dir, second.trash), "utf8"));
+    await expect(home.readMemory("working-habit")).rejects.toMatchObject({ code: "not_found" });
+
+    const longestSlug = "x".repeat(64);
+    await home.writeMemory({ name: longestSlug, content: "First longest-slug fact." });
+    await home.deleteMemory(longestSlug);
+    await home.writeMemory({ name: longestSlug, content: "Second longest-slug fact." });
+    const longestCollision = await home.deleteMemory(longestSlug);
+    expect(longestCollision.trash).toBe(`.trash/${longestSlug}-2.md`);
+    await expect(home.readTrashedMemorySource(longestCollision.trash))
+      .resolves.toBe("Second longest-slug fact.\n");
+  });
+
+  it("journals a delete before rename and confines every memory and trash name", async () => {
+    const source = await home.readMemorySource("working-habit");
+    let intent!: Parameters<typeof home.validateMemoryDeleteIntent>[0];
+    const result = await home.deleteMemoryWithReceipt("working-habit", async (journaled) => {
+      intent = journaled;
+      home.validateMemoryDeleteIntent(journaled);
+      expect(journaled.before).toBe(source);
+      expect(journaled.beforeSha256).toMatch(/^[0-9a-f]{64}$/u);
+      await expect(home.readMemory("working-habit")).resolves.toBeDefined();
+    });
+    expect(result.receipt).toMatchObject({ operation: "deleted", ...intent });
+    expect(await home.readTrashedMemorySource(result.receipt.trash)).toBe(source);
+    await expect(home.deleteMemory("../../character.md"))
+      .rejects.toBeInstanceOf(MemoryFileFormatError);
+    await expect(home.readTrashedMemorySource("../character.md"))
+      .rejects.toMatchObject({ code: "invalid_path" });
+
+    const outside = join(fixture.root, "outside-delete.md");
+    await writeFile(outside, "must stay outside\n");
+    await symlink(outside, join(home.memoryDir, "linked-delete.md"));
+    await expect(home.deleteMemory("linked-delete"))
+      .rejects.toMatchObject({ code: "invalid_path" });
+    expect(await readFile(outside, "utf8")).toBe("must stay outside\n");
+  });
+
+  it("does not move a memory when its delete journal fails", async () => {
+    await expect(home.deleteMemoryWithReceipt("working-habit", async () => {
+      throw new Error("journal unavailable");
+    })).rejects.toThrow("journal unavailable");
+    await expect(home.readMemory("working-habit")).resolves.toBeDefined();
   });
 
   it("journals exact memory bytes before publishing and returns the matching receipt", async () => {

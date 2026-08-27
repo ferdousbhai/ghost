@@ -12,7 +12,7 @@ export interface MemoryRecord {
   /** Compact index preview derived from `content`. */
   readonly description: string;
   readonly content: string;
-  /** Filesystem modification date, `YYYY-MM-DD`. */
+  /** Filesystem modification time as an ISO timestamp. */
   readonly updated: string;
 }
 

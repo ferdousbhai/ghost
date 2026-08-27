@@ -46,6 +46,7 @@ import {
   memoryIndexPreview,
   memorySlugForText,
   parseMemoryFile,
+  redactMemorySecrets,
   serializeMemoryFile,
 } from "./memory-file.js";
 import {
@@ -66,9 +67,12 @@ export const DOCS_DIRNAME = "docs";
 const LEGACY_NOTES_DIRNAME = "notes";
 const LEGACY_GHOST_HOME_FORMAT = "ghost-home/v1";
 export const MEMORY_DIRNAME = "memory";
+export const MEMORY_TRASH_DIRNAME = ".trash";
 export const CONVERSATIONS_DIRNAME = "conversations";
 export const CHARACTER_FILENAME = "character.md";
 export const EXPORT_MANIFEST_FILENAME = "export-manifest.json";
+
+const MEMORY_INTENT_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
 export interface SkippedFile {
   /** Path relative to the ghost home. */
@@ -114,6 +118,33 @@ export interface MemoryWriteWithReceiptResult {
   readonly receipt: MemoryWriteReceipt;
 }
 
+export interface MemoryDeleteResult {
+  readonly slug: string;
+  /** Former path relative to the ghost home. */
+  readonly path: `memory/${string}.md`;
+  /** Recoverable destination relative to the ghost home. */
+  readonly trash: `.trash/${string}.md`;
+}
+
+export interface MemoryDeleteIntent {
+  readonly id: string;
+  readonly path: `memory/${string}.md`;
+  /** Exact admitted UTF-8 Markdown present before the move. */
+  readonly before: string;
+  readonly beforeSha256: string;
+  /** Collision-free recoverable destination relative to the ghost home. */
+  readonly trash: `.trash/${string}.md`;
+}
+
+export interface MemoryDeleteReceipt extends MemoryDeleteIntent {
+  readonly operation: "deleted";
+}
+
+export interface MemoryDeleteWithReceiptResult {
+  readonly deleted: MemoryDeleteResult;
+  readonly receipt: MemoryDeleteReceipt;
+}
+
 export type MemoryReadStage = "opened" | "read";
 
 export interface GhostHomeOptions {
@@ -138,13 +169,66 @@ function memoryIntentName(intent: MemoryWriteIntent): { name: string; slug: stri
   if (intent.before !== null) assertAdmittedMemorySource(intent.before, intent.path);
   assertAdmittedMemorySource(intent.after, intent.path);
   if (intent.path !== `${prefix}${memoryFileName(slug)}`
-    || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(intent.id)
+    || !MEMORY_INTENT_UUID.test(intent.id)
     || intent.afterSha256 !== sha256(intent.after)
     || intent.beforeSha256 !== (intent.before === null ? null : sha256(intent.before))
     || serializeMemoryFile(parseMemoryFile(intent.after).content) !== intent.after) {
     throw new GhostError("invalid_format", "A memory replay intent failed exact validation.");
   }
   return { name, slug };
+}
+
+function parseMemoryTrashFileName(name: string): string {
+  if (!name.endsWith(".md")) {
+    throw new GhostError("invalid_format", "A memory trash entry must use the .md extension.");
+  }
+  const slug = name.slice(0, -".md".length);
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(slug) || slug.length > 240) {
+    throw new GhostError("invalid_format", "A memory trash entry has an invalid name.");
+  }
+  return slug;
+}
+
+/** Trash names are `<slug>.md`, then `<slug>-2.md` and upward. */
+function validMemoryTrashSlug(slug: string, trashSlug: string): boolean {
+  if (trashSlug === slug) return true;
+  if (!trashSlug.startsWith(`${slug}-`)) return false;
+  const suffixText = trashSlug.slice(slug.length + 1);
+  const suffix = Number(suffixText);
+  return Number.isSafeInteger(suffix) && suffix >= 2 && String(suffix) === suffixText;
+}
+
+function assertValidMemoryDeleteIntent(intent: MemoryDeleteIntent): void {
+  const prefix = `${MEMORY_DIRNAME}/`;
+  const trashPrefix = `${MEMORY_TRASH_DIRNAME}/`;
+  if (!intent.path.startsWith(prefix) || !intent.trash.startsWith(trashPrefix)) {
+    throw new GhostError("invalid_format", "A memory delete intent has an invalid path.");
+  }
+  const slug = coerceMemorySlug(intent.path.slice(prefix.length));
+  const trashSlug = parseMemoryTrashFileName(intent.trash.slice(trashPrefix.length));
+  assertAdmittedMemorySource(intent.before, intent.path);
+  if (intent.path !== `${prefix}${memoryFileName(slug)}`
+    || !validMemoryTrashSlug(slug, trashSlug)
+    || !MEMORY_INTENT_UUID.test(intent.id)
+    || intent.beforeSha256 !== sha256(intent.before)) {
+    throw new GhostError("invalid_format", "A memory delete intent failed exact validation.");
+  }
+}
+
+async function collisionFreeMemoryTrashName(
+  trashDirectory: FileHandle,
+  slug: string,
+): Promise<string> {
+  const entries = new Set(await readdir(descriptorPath(trashDirectory)));
+  // One more candidate than existing entries always leaves a free name.
+  for (let suffix = 1; suffix <= entries.size + 1; suffix += 1) {
+    const name = memoryFileName(suffix === 1 ? slug : `${slug}-${suffix}`);
+    if (!entries.has(name)) return name;
+  }
+  throw new GhostError(
+    "limit_exceeded",
+    `Memory trash already holds too many entries for ${memoryFileName(slug)}.`,
+  );
 }
 
 /** Serialize mutations to the same file while allowing unrelated files to proceed. */
@@ -582,6 +666,10 @@ export class GhostHome {
     return join(this.dir, MEMORY_DIRNAME);
   }
 
+  get memoryTrashDir(): string {
+    return join(this.dir, MEMORY_TRASH_DIRNAME);
+  }
+
   get conversationsDir(): string {
     return join(this.dir, CONVERSATIONS_DIRNAME);
   }
@@ -743,7 +831,7 @@ export class GhostHome {
           slug: coerceMemorySlug(entry.name),
           description: memoryIndexPreview(parsed.content),
           content: parsed.content,
-          updated: source.modified.toISOString().slice(0, 10),
+          updated: source.modified.toISOString(),
         });
       } catch (error) {
         skipped.push({ path: relativePath, reason: message(error) });
@@ -768,7 +856,7 @@ export class GhostHome {
       slug,
       description: memoryIndexPreview(parsed.content),
       content: parsed.content,
-      updated: source.modified.toISOString().slice(0, 10),
+      updated: source.modified.toISOString(),
     };
   }
 
@@ -833,13 +921,14 @@ export class GhostHome {
     input: MemoryWriteInput,
     beforePublish: (intent: MemoryWriteIntent) => Promise<void>,
   ): Promise<MemoryWriteWithReceiptResult> {
-    assertWritableMemory(input.content);
+    const content = redactMemorySecrets(input.content);
+    assertWritableMemory(content);
     const slug = input.name
       ? coerceMemorySlug(input.name)
-      : memorySlugForText(input.content);
+      : memorySlugForText(content);
     const dir = this.memoryDir;
     const full = resolveWithin(dir, memoryFileName(slug), "Memory file");
-    const text = serializeMemoryFile(input.content);
+    const text = serializeMemoryFile(content);
 
     // The quota spans the directory, so new names must share one queue. A
     // per-file queue lets parallel creates all observe the same free slot.
@@ -942,6 +1031,118 @@ export class GhostHome {
         await directory.close();
       }
     });
+  }
+
+  /** Move one admitted memory into this ghost's recoverable trash. */
+  async deleteMemory(name: string): Promise<MemoryDeleteResult> {
+    return (await this.deleteMemoryWithReceipt(name, async () => {})).deleted;
+  }
+
+  /**
+   * Move one admitted memory with an exact pre-rename journal boundary. The
+   * callback and rename share the write path's directory queue and lock.
+   */
+  async deleteMemoryWithReceipt(
+    inputName: string,
+    beforeDelete: (intent: MemoryDeleteIntent) => Promise<void>,
+  ): Promise<MemoryDeleteWithReceiptResult> {
+    const slug = coerceMemorySlug(inputName);
+    const name = memoryFileName(slug);
+    const dir = this.memoryDir;
+    resolveWithin(dir, name, "Memory file");
+    return withFileMutationQueue(dir, async () => {
+      const directory = await openConfinedDirectory(this.dir, dir, {
+        label: "Memory path",
+      });
+      const trashDirectory = await openConfinedDirectory(this.dir, this.memoryTrashDir, {
+        create: true,
+        label: "Memory trash path",
+      });
+      try {
+        return await withDescriptorLock(directory, async () => {
+          const path = `${MEMORY_DIRNAME}/${name}` as `memory/${string}.md`;
+          const before = (await readPinnedMemoryTextFile(
+            directory,
+            name,
+            path,
+            this.#memoryReadProbe,
+          ))?.text;
+          if (before === undefined) {
+            throw new GhostError(
+              "not_found",
+              `No memory file named ${name}.`,
+              { name },
+            );
+          }
+          assertAdmittedMemorySource(before, path);
+          const trashName = await collisionFreeMemoryTrashName(trashDirectory, slug);
+          const trash = `${MEMORY_TRASH_DIRNAME}/${trashName}` as `.trash/${string}.md`;
+          const intent: MemoryDeleteIntent = {
+            id: randomUUID(),
+            path,
+            before,
+            beforeSha256: sha256(before),
+            trash,
+          };
+          await beforeDelete(intent);
+          await rename(
+            descriptorPath(directory, name),
+            descriptorPath(trashDirectory, trashName),
+          );
+          await directory.sync();
+          await trashDirectory.sync();
+          return {
+            deleted: { slug, path, trash },
+            receipt: { ...intent, operation: "deleted" },
+          };
+        });
+      } finally {
+        await directory.close();
+        await trashDirectory.close();
+      }
+    });
+  }
+
+  /** Exact trashed bytes for delete receipt/recovery classification. */
+  async readTrashedMemorySource(trashPath: string): Promise<string> {
+    const prefix = `${MEMORY_TRASH_DIRNAME}/`;
+    if (!trashPath.startsWith(prefix)) {
+      throw new GhostError("invalid_path", "Expected a path under memory trash.");
+    }
+    const name = trashPath.slice(prefix.length);
+    parseMemoryTrashFileName(name);
+    resolveWithin(this.memoryTrashDir, name, "Memory trash file");
+    let directory: FileHandle;
+    try {
+      directory = await openConfinedDirectory(this.dir, this.memoryTrashDir, {
+        label: "Memory trash path",
+      });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        throw new GhostError("not_found", `No trashed memory file named ${name}.`, { name });
+      }
+      throw error;
+    }
+    try {
+      const source = await readPinnedMemoryTextFile(
+        directory,
+        name,
+        trashPath,
+        this.#memoryReadProbe,
+      );
+      if (source === null) {
+        throw new GhostError("not_found", `No trashed memory file named ${name}.`, { name });
+      }
+      assertAdmittedMemorySource(source.text, trashPath);
+      return source.text;
+    } finally {
+      await directory.close();
+    }
+  }
+
+  /** Validate a delete intent without moving anything during recovery. */
+  validateMemoryDeleteIntent(intent: MemoryDeleteIntent): void {
+    assertValidMemoryDeleteIntent(intent);
   }
 
   // ------------------------------------------------------- conversations/meta

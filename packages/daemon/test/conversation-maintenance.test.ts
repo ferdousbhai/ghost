@@ -1,11 +1,15 @@
 import { createHash, randomUUID } from "node:crypto";
-import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { openGhostHome } from "@ghost/extensions";
 import {
   ConversationMaintenance,
+  MEMORY_CONSOLIDATION_COOLDOWN_MS,
+  MEMORY_CONSOLIDATION_FILE_THRESHOLD,
   maintenanceStatePath,
+  memoryConsolidationStatePath,
+  memoryNeedsConsolidation,
   type ConversationMaintenanceStateV1,
   type MaintenanceIdentity,
   type SettledMaintenanceTurn,
@@ -52,6 +56,16 @@ function turn(position = 1): SettledMaintenanceTurn {
     assistantText: `I will remember fact ${position}.`,
     outcome: "completed",
   };
+}
+
+/** Enough valid memories to put this home under consolidation pressure. */
+function seedPressureMemories(prefix: string): void {
+  for (let position = 0; position < MEMORY_CONSOLIDATION_FILE_THRESHOLD; position += 1) {
+    writeFileSync(
+      join(homeDir, "memory", `${prefix}-${String(position).padStart(3, "0")}.md`),
+      `Stable fact ${position}.\n`,
+    );
+  }
 }
 
 function statePath(): string {
@@ -112,6 +126,17 @@ async function settle(maintenance: ConversationMaintenance, value = turn()): Pro
 }
 
 describe("ConversationMaintenance", () => {
+  it("detects index pressure before the hard memory-file threshold", () => {
+    const files = Array.from({ length: 62 }, (_, position) => ({
+      slug: `pressure-${String(position).padStart(3, "0")}`,
+      description: "x".repeat(32),
+      content: `Stable fact ${position}.`,
+      updated: "2026-08-27T08:00:00.000Z",
+    }));
+    expect(memoryNeedsConsolidation(files.slice(0, 61))).toBe(false);
+    expect(memoryNeedsConsolidation(files)).toBe(true);
+  });
+
   it("journals one exact plain-Markdown memory receipt and acknowledges its notice once", async () => {
     const update = vi.fn(async ({ transcript, writeMemory }) => {
       expect(transcript).toContain("Remember fact 1.");
@@ -182,6 +207,63 @@ describe("ConversationMaintenance", () => {
     expect(await openGhostHome(homeDir).listMemory()).toMatchObject({
       files: [{ slug: "first" }],
     });
+    await maintenance.disposeAll();
+  });
+
+  it("runs consolidation under file pressure and observes the persisted six-hour cooldown", async () => {
+    seedPressureMemories("pressure");
+    let nowMs = Date.parse("2026-08-27T08:00:00.000Z");
+    const modes: string[] = [];
+    const { maintenance, hooks } = await makeMaintenance(async ({ mode }) => {
+      modes.push(mode);
+    }, { now: () => new Date(nowMs) });
+
+    await settle(maintenance, turn(1));
+    await hooks.emitConversationIdle(idleEvent(readState()));
+    expect(modes).toEqual(["consolidation"]);
+    expect(JSON.parse(readFileSync(memoryConsolidationStatePath(homeDir), "utf8")))
+      .toEqual({ version: 1, lastRunAt: "2026-08-27T08:00:00.000Z" });
+    expect(statSync(memoryConsolidationStatePath(homeDir)).mode & 0o777).toBe(0o600);
+    expect(readState().notices.at(-1)?.context).toContain("no memory changes");
+
+    nowMs += 60_000;
+    await settle(maintenance, turn(2));
+    await hooks.emitConversationIdle(idleEvent(readState()));
+    expect(modes).toEqual(["consolidation", "normal"]);
+
+    nowMs += MEMORY_CONSOLIDATION_COOLDOWN_MS;
+    await settle(maintenance, turn(3));
+    await hooks.emitConversationIdle(idleEvent(readState()));
+    expect(modes).toEqual(["consolidation", "normal", "consolidation"]);
+    await maintenance.disposeAll();
+  });
+
+  it("enforces independent four-write and four-delete consolidation caps", async () => {
+    seedPressureMemories("cap");
+    const { maintenance, hooks } = await makeMaintenance(async ({
+      mode,
+      writeMemory,
+      deleteMemory,
+    }) => {
+      expect(mode).toBe("consolidation");
+      for (let position = 0; position < 4; position += 1) {
+        await writeMemory({ name: `new-${position}`, content: `New fact ${position}.` });
+        await deleteMemory(`cap-${String(position).padStart(3, "0")}`);
+      }
+      await expect(writeMemory({ name: "new-4", content: "A fifth write." }))
+        .rejects.toThrow("at most 4 successful writes");
+      await expect(deleteMemory("cap-004"))
+        .rejects.toThrow("at most 4 successful deletes");
+    });
+    await settle(maintenance);
+    await hooks.emitConversationIdle(idleEvent(readState()));
+    expect(readState()).toMatchObject({
+      retainedThroughSequence: 1,
+      activeRun: null,
+      activeMutation: null,
+      notices: [{ context: expect.stringContaining("deleted memory/cap-000.md") }],
+    });
+    expect(readState().notices[0]?.context).toContain("created memory/new-3.md");
     await maintenance.disposeAll();
   });
 
@@ -594,6 +676,78 @@ describe("ConversationMaintenance", () => {
     await maintenance.disposeAll();
   });
 
+  it("never re-deletes an ambiguous journaled delete during recovery", async () => {
+    const update = vi.fn(async () => {});
+    const { maintenance, hooks } = await makeMaintenance(update);
+    await settle(maintenance);
+    const before = "The owner still needs this fact.\n";
+    const path = join(homeDir, "memory", "delete-recovery.md");
+    writeFileSync(path, before);
+    const state = readState();
+    state.activeRun = {
+      id: randomUUID(),
+      throughSequence: 1,
+      mode: "consolidation",
+      receipts: [],
+    };
+    state.activeMutation = {
+      id: randomUUID(),
+      path: "memory/delete-recovery.md",
+      before,
+      beforeSha256: createHash("sha256").update(before).digest("hex"),
+      trash: ".trash/delete-recovery.md",
+    };
+    writeFileSync(statePath(), `${JSON.stringify(state)}\n`, { mode: 0o600 });
+
+    await hooks.emitConversationIdle(idleEvent(state));
+    expect(update).not.toHaveBeenCalled();
+    expect(readFileSync(path, "utf8")).toBe(before);
+    expect(readState()).toMatchObject({
+      retainedThroughSequence: 1,
+      pendingTurns: [],
+      activeRun: null,
+      activeMutation: null,
+      notices: [{ context: expect.stringContaining("Recovery did not move or delete anything") }],
+    });
+    expect(() => readFileSync(join(homeDir, ".trash", "delete-recovery.md"), "utf8"))
+      .toThrow();
+    await maintenance.disposeAll();
+  });
+
+  it("classifies an already-renamed journaled delete and publishes its exact receipt", async () => {
+    const update = vi.fn(async () => {});
+    const { maintenance, hooks } = await makeMaintenance(update);
+    await settle(maintenance);
+    const home = openGhostHome(homeDir);
+    await home.writeMemory({ name: "confirmed-delete", content: "A superseded fact." });
+    let intent!: NonNullable<ConversationMaintenanceStateV1["activeMutation"]>;
+    const deletion = await home.deleteMemoryWithReceipt("confirmed-delete", async (journaled) => {
+      intent = journaled;
+    });
+    const state = readState();
+    state.activeRun = {
+      id: randomUUID(),
+      throughSequence: 1,
+      mode: "consolidation",
+      receipts: [],
+    };
+    state.activeMutation = intent;
+    writeFileSync(statePath(), `${JSON.stringify(state)}\n`, { mode: 0o600 });
+
+    await hooks.emitConversationIdle(idleEvent(state));
+    expect(update).not.toHaveBeenCalled();
+    expect(readFileSync(join(homeDir, deletion.deleted.trash), "utf8"))
+      .toBe("A superseded fact.\n");
+    expect(readState()).toMatchObject({
+      retainedThroughSequence: 1,
+      pendingTurns: [],
+      activeRun: null,
+      activeMutation: null,
+      notices: [{ context: expect.stringContaining("deleted memory/confirmed-delete.md") }],
+    });
+    await maintenance.disposeAll();
+  });
+
   it("retains receipt recovery when the current memory exceeds its byte boundary", async () => {
     const update = vi.fn(async () => {});
     const { maintenance, hooks } = await makeMaintenance(update);
@@ -817,6 +971,22 @@ describe("ConversationMaintenance", () => {
           }],
         },
         activeMutation: null,
+      },
+      {
+        ...original,
+        activeRun: {
+          id: randomUUID(),
+          throughSequence: 1,
+          mode: "consolidation",
+          receipts: [],
+        },
+        activeMutation: {
+          id: randomUUID(),
+          path: "memory/forged-delete.md",
+          before: "Forged delete bytes.\n",
+          beforeSha256: "0".repeat(64),
+          trash: ".trash/forged-delete.md",
+        },
       },
     ];
     for (const variant of variants) {

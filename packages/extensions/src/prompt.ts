@@ -40,7 +40,8 @@ function memorySection(input: GhostSystemPromptInput): string[] {
     + "preview here is all you see until you read the file; grep and glob search the "
     + "rest. Save one with ghost_memory_write.";
   const doctrine = "Before writing, check this list: update the file that already covers it, "
-    + "and delete what is no longer true. Dates absolute (\"2026-08-24\"). Skip "
+    + "overwriting it when the fact changes; background maintenance retires memories that are no longer true. "
+    + "Dates absolute (\"2026-08-24\"). Skip "
     + "what character.md, the owner's Documents, or the files themselves already say. With "
     + "guidance, record why, so you can judge later whether it still holds. Link "
     + "a related memory as [[its-slug]]; a slug with no file marks one worth "
