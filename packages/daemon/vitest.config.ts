@@ -104,6 +104,7 @@ export default defineConfig({
   }],
   test: {
     include: ["test/**/*.test.ts"],
+    setupFiles: ["test/setup.ts"],
     // Session-host and server tests each stand up a real pi AgentSession
     // against a local mock provider; give them room without being generous.
     testTimeout: 30_000,

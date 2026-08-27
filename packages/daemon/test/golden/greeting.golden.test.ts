@@ -33,6 +33,7 @@ import { startDaemonServer, type ListeningServer } from "../../src/server.js";
 import { SessionHost, type GreetingGenerator } from "../../src/session-host.js";
 import type { SmolModel, SmolRuntime } from "../../src/smol.js";
 import { makeTempGhosts, seedGhost, type TempGhosts } from "../helpers/fixtures.js";
+import { fetchNoReuse as fetch } from "../helpers/http-fetch.js";
 import { expectGolden, Normalizer, type GoldenSection } from "./harness.js";
 
 let temp: TempGhosts | null = null;

@@ -25,6 +25,7 @@ import {
 import { startDaemonServer, type ListeningServer } from "../src/server.js";
 import { SessionHost } from "../src/session-host.js";
 import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
+import { fetchNoReuse as fetch } from "./helpers/http-fetch.js";
 
 const TOKEN = "a".repeat(64);
 const OTHER_TOKEN = "b".repeat(64);

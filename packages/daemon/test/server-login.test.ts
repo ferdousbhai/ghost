@@ -18,6 +18,7 @@ import { readGhostModels } from "../src/models.js";
 import { startDaemonServer, type ListeningServer } from "../src/server.js";
 import { SessionHost } from "../src/session-host.js";
 import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
+import { fetchNoReuse as fetch } from "./helpers/http-fetch.js";
 import {
   apiKeyCredential,
   deferred,

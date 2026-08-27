@@ -16,6 +16,7 @@ import type { PiMessagesEvent } from "../src/pi-messages.js";
 import { startDaemonServer, type ListeningServer } from "../src/server.js";
 import { SessionHost, sessionFileNameFor } from "../src/session-host.js";
 import { makeTempGhosts, parseSseStream, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
+import { fetchNoReuse as fetch } from "./helpers/http-fetch.js";
 import { startMockProvider, type MockProvider } from "./helpers/mock-provider.js";
 
 let temp: TempGhosts | null = null;

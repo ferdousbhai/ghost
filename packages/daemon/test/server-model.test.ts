@@ -24,6 +24,7 @@ import {
   type FakeCatalogModel,
 } from "./helpers/fake-catalog-runtime.js";
 import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
+import { fetchNoReuse as fetch } from "./helpers/http-fetch.js";
 
 let temp: TempGhosts | null = null;
 let host: SessionHost | null = null;
