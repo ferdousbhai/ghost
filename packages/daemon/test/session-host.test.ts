@@ -1992,12 +1992,12 @@ describe("multi-ghost", () => {
     });
     const casper = seedGhost(temp.root, {
       name: "casper",
-      character: "---\ntitle: casper\n---\n\n# casper\n\nYou set type.\n",
+      character: "# casper\n\nYou set type.\n",
       provider: { baseUrl: provider.url, modelId: provider.modelId },
     });
     const mina = seedGhost(temp.root, {
       name: "mina",
-      character: "---\ntitle: mina\n---\n\n# mina\n\nYou keep bees.\n",
+      character: "# mina\n\nYou keep bees.\n",
       provider: { baseUrl: provider.url, modelId: provider.modelId },
     });
     host = new SessionHost({ registry: temp.registry, offline: true });
@@ -2217,23 +2217,25 @@ describe("SessionHost.renameGhost", () => {
       .toBeGreaterThanOrEqual(4);
   });
 
-  it("follows the rename into a seeded character title and leaves a written one alone", async () => {
+  it("leaves owner-authored character Markdown unchanged across a rename", async () => {
     await setup([{ kind: "text", text: "hello" }]);
+    const casperBefore = readFileSync(
+      ghostPaths(temp!.registry.get("casper").dir).characterFile,
+      "utf8",
+    );
     const written = seedGhost(temp!.root, {
       name: "mina",
-      character: "---\ntitle: The Archivist\n---\n\n# mina\n\nYou are mina.\n",
+      character: "## The Archivist\n\nYou are mina.\n",
     });
+    const minaBefore = readFileSync(ghostPaths(written).characterFile, "utf8");
 
     const wisp = await host!.renameGhost("casper", "wisp");
     expect(readFileSync(ghostPaths(wisp.dir).characterFile, "utf8"))
-      .toContain("title: wisp");
-    // The rest of the persona is the ghost's own words and is untouched.
-    expect(readFileSync(ghostPaths(wisp.dir).characterFile, "utf8"))
-      .toContain("letterpress printer");
+      .toBe(casperBefore);
 
     const renamedMina = await host!.renameGhost("mina", "vera");
     expect(readFileSync(ghostPaths(renamedMina.dir).characterFile, "utf8"))
-      .toContain("title: The Archivist");
+      .toBe(minaBefore);
     expect(existsSync(written)).toBe(false);
   });
 

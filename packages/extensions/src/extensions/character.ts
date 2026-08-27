@@ -70,8 +70,8 @@ const DESCRIPTION =
   "Read and write your own character file (character.md). This file IS your "
   + "persona: it becomes your system prompt, rebuilt from disk at the start of "
   + "every session, so what you write here is who you are next time. "
-  + "read: what the file says now. write: replace it with a new body (the whole "
-  + "file, not a patch), keeping the title unless you give a new one. "
+  + "read: what the file says now. write: replace it with new Markdown (the whole "
+  + "file, not a patch). Put its title in the leading Markdown heading. "
   + "Write it in the first person, and keep it durable — who you are, how you "
   + "speak, what you care about, what you refuse. Never session state: a fact "
   + "about today's conversation belongs in ghost_memory_write, and something you "
@@ -102,11 +102,6 @@ export function createCharacterExtension(
             "For write: the whole character file body, in markdown, in the first "
             + `person. Required for write, at most ${MAX_CHARACTER_BODY_LENGTH} `
             + "characters. It replaces the current body outright.",
-        })),
-        title: Type.Optional(Type.String({
-          description:
-            "For write: a title for the file, usually your name. Omit it and the "
-            + "current title is kept.",
         })),
       }),
       // Serialized against other writes to the same file by the home writer's
@@ -170,20 +165,13 @@ export function createCharacterExtension(
           );
         }
 
-        // Frontmatter the model did not set is preserved: a write of the body
-        // alone must not drop the title.
-        const title = params.title ?? current?.title;
-        await home.writeCharacter({
-          body,
-          ...(title === undefined ? {} : { title }),
-        });
+        await home.writeCharacter({ body });
         return textResult(
           `${current ? "Replaced" : "Wrote"} ${CHARACTER_FILENAME} `
           + `(${body.length} characters). It becomes your system prompt from your `
           + "next turn on.",
           {
             created: current === null,
-            title: title ?? null,
             length: body.length,
           },
         );

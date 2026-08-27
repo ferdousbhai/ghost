@@ -30,9 +30,7 @@ describe("readGhostContext", () => {
   it("reads character, nested docs, atomic memory, and per-file diagnostics", async () => {
     const home = makeGhostHome();
     write(home, "character.md", [
-      "---",
-      "title: The Navigator",
-      "---",
+      "## The Navigator",
       "",
       "You keep the route.",
     ].join("\n"));

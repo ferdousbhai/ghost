@@ -197,10 +197,18 @@ The details.
 });
 
 describe("character", () => {
-  it("reads the persona body without the frontmatter", async () => {
+  it("reads the persona and derives its title from the leading heading", async () => {
     const character = await home.readCharacter();
     expect(character?.title).toBe("Casper");
     expect(character?.body.startsWith("# Casper")).toBe(true);
+  });
+
+  it("leaves the derived title empty when the body has no leading heading", async () => {
+    await writeFile(home.characterPath, "I keep the old ledgers.\n", "utf8");
+    expect(await home.readCharacter()).toEqual({
+      title: undefined,
+      body: "I keep the old ledgers.\n",
+    });
   });
 
   it("returns null when there is no character file", async () => {

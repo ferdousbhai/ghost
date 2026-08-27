@@ -39,12 +39,6 @@ import { isSafe } from "redos-detector";
 import { migrateDoc, parseDoc } from "./doc-format.js";
 import { GhostError } from "./errors.js";
 import {
-  parseDocument,
-  readString,
-  renderDocument,
-  yamlScalar,
-} from "./frontmatter.js";
-import {
   assertWritableMemory,
   coerceMemorySlug,
   MAX_MEMORY_FILES,
@@ -570,25 +564,31 @@ export class GhostHome {
 
   // ---------------------------------------------------------------- character
 
+  /** The leading Markdown heading is display metadata derived from the persona. */
+  private characterTitle(body: string): string | undefined {
+    const firstContentLine = body
+      .split("\n")
+      .map((line) => line.replace(/\r$/, ""))
+      .find((line) => line.trim().length > 0);
+    if (firstContentLine === undefined) return undefined;
+    const match = /^ {0,3}#{1,6}[ \t]+(.+?)[ \t]*$/.exec(firstContentLine);
+    if (!match) return undefined;
+    const title = (match[1] ?? "").replace(/[ \t]+#+[ \t]*$/, "").trim();
+    return title || undefined;
+  }
+
   async readCharacter(): Promise<CharacterFile | null> {
-    const text = await readConfinedText(this.dir, this.characterPath, "Character path");
-    if (text === null) return null;
-    const parsed = parseDocument(text);
+    const body = await readConfinedText(this.dir, this.characterPath, "Character path");
+    if (body === null) return null;
     return {
-      title: readString(parsed.frontmatter, "title"),
-      body: parsed.body,
+      title: this.characterTitle(body),
+      body,
     };
   }
 
-  async writeCharacter(input: {
-    body: string;
-    title?: string;
-  }): Promise<void> {
-    const lines: string[] = [];
-    if (input.title !== undefined) lines.push(`title: ${yamlScalar(input.title)}`);
-    const text = renderDocument(lines, input.body);
+  async writeCharacter(input: { body: string }): Promise<void> {
     await withFileMutationQueue(this.characterPath, async () => {
-      await atomicWriteFile(this.dir, this.characterPath, text);
+      await atomicWriteFile(this.dir, this.characterPath, input.body);
     });
   }
 

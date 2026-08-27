@@ -147,7 +147,7 @@ describe("persona extension", () => {
 
   it("takes the ghost home from the session cwd, so two ghosts do not share one", async () => {
     const other = await createGhostFixture("mina", {
-      "character.md": "---\ntitle: Mina\n---\n\n# Mina\n",
+      "character.md": "# Mina\n",
     });
     try {
       const factory = createPersonaExtension();

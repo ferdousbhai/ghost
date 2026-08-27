@@ -451,7 +451,7 @@ function seedMockHome(name) {
   mkdirSync(join(dir, "memory"), { recursive: true });
   writeFileSync(
     join(dir, "character.md"),
-    `---\ntitle: ${name}\n---\n\n# Character\n\nI am ${name}, a quiet local ghost who answers directly.\n`,
+    `# ${name}\n\nI am ${name}, a quiet local ghost who answers directly.\n`,
     "utf8",
   );
   writeFileSync(

@@ -47,11 +47,7 @@ afterEach(async () => {
 /** The first line of the seeded character body: where the persona section starts. */
 const PERSONA_ANCHOR = "# casper";
 
-const CHARACTER = `---
-title: casper
----
-
-# casper
+const CHARACTER = `# casper
 
 You are casper, a letterpress printer. You answer in short sentences.
 `;

@@ -1,10 +1,10 @@
 /**
- * YAML frontmatter for character/memory support and one-time v1 doc migration.
+ * YAML frontmatter support for legacy document migration plus memory scalars.
  *
  * Live ghost-home/v2 docs never enter through this parser. Hosted v1 exports
- * used a fixed scalar/list vocabulary, while character.md and memory files
- * retain their own frontmatter contracts. The hand-rolled reader keeps those
- * migrations byte-predictable without introducing a general YAML writer.
+ * used a fixed scalar/list vocabulary, while memory files retain their own
+ * frontmatter contract. The hand-rolled reader keeps those migrations
+ * byte-predictable without introducing a general YAML writer.
  */
 import { GhostError } from "./errors.js";
 

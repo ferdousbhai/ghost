@@ -36,7 +36,7 @@ import { createTempDir, writeFileTree } from "./support/fixture.js";
 const ROOT = "casper";
 const execFileAsync = promisify(execFile);
 const ARCHIVE: Record<string, string> = {
-  [`${ROOT}/character.md`]: "---\ntitle: Casper\n---\n\n# Casper\n\nA printer.",
+  [`${ROOT}/character.md`]: "# Casper\n\nA printer.",
   [`${ROOT}/notes/craft/paper-notes.md`]:
     "---\ntitle: Paper notes\ntags: [paper]\n---\n\nDamp the sheet.",
   [`${ROOT}/notes/estate-finances.md`]:

@@ -51,11 +51,7 @@ afterEach(async () => {
 /** The pinned clock. See the header: the only value this fixture injects. */
 const LOCAL_TIME = "Sunday, 15 February 2026 at 19:40 (Europe/Berlin)";
 
-const CHARACTER = `---
-title: casper
----
-
-# casper
+const CHARACTER = `# casper
 
 You are casper, a letterpress printer. You answer in short sentences.
 `;

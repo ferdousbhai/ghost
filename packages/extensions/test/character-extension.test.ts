@@ -11,11 +11,7 @@ import { createGhostFixture, type GhostFixture } from "./support/fixture.js";
 import { loadExtension, resultText } from "./support/harness.js";
 
 /** The file the daemon seeds a freshly summoned ghost with. */
-const SEEDED_CHARACTER = `---
-title: casper
----
-
-# casper
+const SEEDED_CHARACTER = `# casper
 
 You are casper.
 
@@ -50,7 +46,7 @@ describe("character extension", () => {
     expect(harness.toolNames()).toEqual([GHOST_CHARACTER]);
   });
 
-  it("reads the populated character file with its frontmatter", async () => {
+  it("derives the populated character title from its Markdown heading", async () => {
     const harness = await loadExtension(createCharacterExtension(), fixture.dir);
     const result = await harness.call(GHOST_CHARACTER, { action: "read" });
     expect(resultText(result)).toContain("You are Casper, the ghost of a working typographer");
@@ -73,7 +69,7 @@ describe("character extension", () => {
   });
 
   it("reports an empty body as empty rather than as a persona", async () => {
-    await writeFile(characterPath(), "---\ntitle: Casper\n---\n\n\n", "utf8");
+    await writeFile(characterPath(), "\n\n", "utf8");
     const harness = await loadExtension(createCharacterExtension(), fixture.dir);
     const result = await harness.call(GHOST_CHARACTER, { action: "read" });
     expect(resultText(result)).toContain("is empty");
@@ -94,7 +90,7 @@ describe("character extension", () => {
       action: "write",
       body: "# Casper\n\nI set type in the morning and answer plainly.",
     });
-    expect(result.details).toMatchObject({ created: false, title: "Casper" });
+    expect(result.details).toMatchObject({ created: false });
     const character = await openGhostHome(fixture.dir).readCharacter();
     expect(character).toMatchObject({
       title: "Casper",
@@ -102,26 +98,22 @@ describe("character extension", () => {
     });
   });
 
-  it("keeps the existing title and drops unrelated frontmatter", async () => {
-    await writeFile(
-      characterPath(),
-      "---\nmood: quiet\ntitle: Casper\n---\n\nOld body.\n",
-      "utf8",
-    );
-    const harness = await loadExtension(createCharacterExtension(), fixture.dir);
-    await harness.call(GHOST_CHARACTER, { action: "write", body: "New body." });
-    const text = await readFile(characterPath(), "utf8");
-    expect(text).not.toContain("mood:");
-    expect(text).toContain("title: Casper");
-    expect(text).toContain("New body.");
-  });
-
-  it("takes a new title when one is given", async () => {
+  it("writes the supplied plain Markdown without adding metadata", async () => {
+    await writeFile(characterPath(), "Old body.\n", "utf8");
     const harness = await loadExtension(createCharacterExtension(), fixture.dir);
     await harness.call(GHOST_CHARACTER, {
       action: "write",
-      body: "I am someone else now.",
-      title: "Casper the printer",
+      body: "# New self\n\nNew body.",
+    });
+    const text = await readFile(characterPath(), "utf8");
+    expect(text).toBe("# New self\n\nNew body.");
+  });
+
+  it("derives a title from any leading Markdown heading level", async () => {
+    const harness = await loadExtension(createCharacterExtension(), fixture.dir);
+    await harness.call(GHOST_CHARACTER, {
+      action: "write",
+      body: "## Casper the printer\n\nI am someone else now.",
     });
     expect(await openGhostHome(fixture.dir).readCharacter())
       .toMatchObject({ title: "Casper the printer" });
@@ -134,7 +126,7 @@ describe("character extension", () => {
       action: "write",
       body: "I am new here.",
     });
-    expect(result.details).toMatchObject({ created: true, title: null });
+    expect(result.details).toMatchObject({ created: true });
     expect(await openGhostHome(fixture.dir).readCharacter())
       .toMatchObject({ body: "I am new here." });
   });
@@ -166,7 +158,7 @@ describe("character extension", () => {
   it("caps an oversized body on the way to the model", async () => {
     await writeFile(
       characterPath(),
-      `---\ntitle: Casper\n---\n\n${"y".repeat(MAX_CHARACTER_BODY_LENGTH + 500)}\n`,
+      `${"y".repeat(MAX_CHARACTER_BODY_LENGTH + 500)}\n`,
       "utf8",
     );
     const harness = await loadExtension(createCharacterExtension(), fixture.dir);

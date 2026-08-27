@@ -7,11 +7,7 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 
-export const CHARACTER_MD = `---
-title: Casper
----
-
-# Casper
+export const CHARACTER_MD = `# Casper
 
 You are Casper, the ghost of a working typographer and letterpress printer.
 

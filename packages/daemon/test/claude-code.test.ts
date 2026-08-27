@@ -167,7 +167,7 @@ function setupClaudeHost(options: {
   temp = makeTempGhosts();
   const dir = seedGhost(temp.root, {
     name: "casper",
-    character: "---\ntitle: casper\n---\n\nYou are Casper, a letterpress printer.\n",
+    character: "# Casper\n\nYou are Casper, a letterpress printer.\n",
   });
   const paths = ghostPaths(dir);
   mkdirSync(paths.agentDir, { recursive: true });

@@ -31,7 +31,7 @@ function makeArchiveDir(parent: string, ghostname: string): string {
     exportedAt: "2026-08-22T00:00:00.000Z",
   };
   writeFileSync(join(dir, "export-manifest.json"), JSON.stringify(manifest));
-  writeFileSync(join(dir, "character.md"), "---\ntitle: imported\n---\n\nI am a ghost.\n");
+  writeFileSync(join(dir, "character.md"), "# imported\n\nI am a ghost.\n");
   writeFileSync(join(dir, "memory", "tone.md"), "---\ndescription: tone\n---\n\nTerse.\n");
   return dir;
 }

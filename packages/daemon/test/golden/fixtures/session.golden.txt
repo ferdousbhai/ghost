@@ -234,10 +234,6 @@ agent.db, models.db, models.omp.json
 --- sessions/ (contents not compared) ---
 conv-golden.jsonl
 --- character.md ---
----
-title: casper
----
-
 # casper
 
 You are casper, a letterpress printer. You answer in short sentences.

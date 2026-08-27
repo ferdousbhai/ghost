@@ -138,11 +138,7 @@ export function ghostPaths(dir: string): {
   };
 }
 
-const SEEDED_CHARACTER = (name: string) => `---
-title: ${name}
----
-
-# ${name}
+const SEEDED_CHARACTER = (name: string) => `# ${name}
 
 You are ${name}.
 
@@ -198,37 +194,11 @@ export function isSeededCharacter(name: string, text: string | null | undefined)
 }
 
 /**
- * Follow a rename into the persona file's frontmatter `title`, but only when
- * that title is the old name.
- *
- * `character.md` is the ghost's own words. A title that says something other
- * than the directory name is one of them — the owner wrote it, and a rename is
- * not a licence to rewrite it. A title that IS the old name is the seed's, and
- * leaving it behind would introduce the ghost by a name nothing else uses.
- * Only that one line is rewritten; every other byte of the file is preserved.
+ * Re-render the daemon-authored seed under its new name. Anything that differs
+ * from the seed is owner-authored character and remains byte-for-byte.
  */
-function retitledCharacter(text: string, previous: string, next: string): string | null {
-  const firstBreak = text.indexOf("\n");
-  const firstLine = text.slice(0, firstBreak < 0 ? text.length : firstBreak);
-  if (firstLine.trim() !== "---" || firstBreak < 0) return null;
-
-  let start = firstBreak + 1;
-  while (start <= text.length) {
-    const nextBreak = text.indexOf("\n", start);
-    const end = nextBreak < 0 ? text.length : nextBreak;
-    const rawLine = text.slice(start, end);
-    const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
-    const fence = line.trim();
-    if (fence === "---" || fence === "...") return null;
-    if (line.startsWith("title:")) {
-      if (line.slice("title:".length).trim() !== previous) return null;
-      const carriageReturn = rawLine.endsWith("\r") ? "\r" : "";
-      return `${text.slice(0, start)}title: ${next}${carriageReturn}${text.slice(end)}`;
-    }
-    if (nextBreak < 0) return null;
-    start = nextBreak + 1;
-  }
-  return null;
+function renamedSeed(text: string, previous: string, next: string): string | null {
+  return text === SEEDED_CHARACTER(previous) ? SEEDED_CHARACTER(next) : null;
 }
 
 /**
@@ -237,7 +207,7 @@ function retitledCharacter(text: string, previous: string, next: string): string
  * afterwards is another same-filesystem rename and cannot expose a partial
  * character file.
  */
-function prepareCharacterRetitle(dir: string, previous: string, next: string): string | null {
+function prepareRenamedSeed(dir: string, previous: string, next: string): string | null {
   const file = ghostPaths(dir).characterFile;
   let text: string;
   try {
@@ -247,7 +217,7 @@ function prepareCharacterRetitle(dir: string, previous: string, next: string): s
     // directory moved, which is what the rename was.
     return null;
   }
-  const replacement = retitledCharacter(text, previous, next);
+  const replacement = renamedSeed(text, previous, next);
   if (replacement === null) return null;
 
   const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
@@ -375,7 +345,7 @@ export class GhostRegistry {
         409,
       );
     }
-    const preparedCharacter = prepareCharacterRetitle(ghost.dir, name, nextName);
+    const preparedCharacter = prepareRenamedSeed(ghost.dir, name, nextName);
     try {
       renameSync(ghost.dir, target);
     } catch (error) {
@@ -403,7 +373,7 @@ export class GhostRegistry {
           throw new AggregateError(
             [error, rollbackError],
             `Ghost ${JSON.stringify(name)} moved to ${JSON.stringify(nextName)}, `
-              + "but its character title could not be published and the home move could not be rolled back.",
+              + "but its renamed character seed could not be published and the home move could not be rolled back.",
           );
         }
         try {
@@ -411,7 +381,7 @@ export class GhostRegistry {
         } catch (cleanupError) {
           throw new AggregateError(
             [error, cleanupError],
-            `Ghost ${JSON.stringify(name)} was moved back after its character title could not be published, `
+            `Ghost ${JSON.stringify(name)} was moved back after its renamed character seed could not be published, `
               + "but the staged character file could not be removed.",
           );
         }

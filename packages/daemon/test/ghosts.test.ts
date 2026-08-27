@@ -15,6 +15,7 @@ import {
   GhostError,
   ghostPaths,
   isGhostHome,
+  isSeededCharacter,
   isValidGhostName,
 } from "../src/ghosts.js";
 import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
@@ -81,7 +82,8 @@ describe("GhostRegistry.create", () => {
 
     expect(isGhostHome(ghost.dir)).toBe(true);
     const character = readFileSync(ghostPaths(ghost.dir).characterFile, "utf8");
-    expect(character).toMatch(/^---\ntitle: casper\n---/);
+    expect(character).toMatch(/^# casper\n/);
+    expect(character).not.toContain("title:");
     for (const sub of ["docs", "memory", "conversations"]) {
       expect(existsSync(join(ghost.dir, sub)), sub).toBe(true);
     }
@@ -110,55 +112,56 @@ describe("GhostRegistry.create", () => {
 });
 
 describe("GhostRegistry.rename", () => {
-  it("moves the home and follows the rename into a seeded frontmatter title", () => {
+  it("moves the home and re-renders an untouched seed under the new name", () => {
     temp = makeTempGhosts();
-    const dir = seedGhost(temp.root, {
-      name: "casper",
-      character: "---\ntitle: casper\ntags: [press]\n---\n\n# casper\n\nYou are casper.\n",
-    });
+    temp.registry.ensureRoot();
+    const dir = temp.registry.create("casper").dir;
 
     const renamed = temp.registry.rename("casper", "wisp");
 
     expect(renamed).toMatchObject({ name: "wisp", dir: join(temp.root, "wisp") });
     expect(existsSync(dir)).toBe(false);
     expect(temp.registry.list().map((ghost) => ghost.name)).toEqual(["wisp"]);
-    // Only the title line; the body is the ghost's own words either way.
-    expect(readFileSync(ghostPaths(renamed.dir).characterFile, "utf8"))
-      .toBe("---\ntitle: wisp\ntags: [press]\n---\n\n# casper\n\nYou are casper.\n");
+    const character = readFileSync(ghostPaths(renamed.dir).characterFile, "utf8");
+    expect(character).toMatch(/^# wisp\n/);
+    expect(character).toContain("You are wisp.");
+    expect(character).not.toContain("title:");
+    expect(isSeededCharacter("wisp", character)).toBe(true);
   });
 
-  it("leaves a title the owner wrote, and a body-only character file, alone", () => {
+  it("leaves owner-authored Markdown alone", () => {
     temp = makeTempGhosts();
-    seedGhost(temp.root, { name: "casper", character: "---\ntitle: The Archivist\n---\n\nHello.\n" });
-    seedGhost(temp.root, { name: "mina", character: "# mina\n\nNo frontmatter here.\n" });
+    const archivist = "## The Archivist\n\nHello.\n";
+    const markdown = "# mina\n\nNo frontmatter here.\n";
+    seedGhost(temp.root, { name: "casper", character: archivist });
+    seedGhost(temp.root, { name: "mina", character: markdown });
 
     expect(readFileSync(ghostPaths(temp.registry.rename("casper", "wisp").dir).characterFile, "utf8"))
-      .toContain("title: The Archivist");
+      .toBe(archivist);
     expect(readFileSync(ghostPaths(temp.registry.rename("mina", "vera").dir).characterFile, "utf8"))
-      .toBe("# mina\n\nNo frontmatter here.\n");
+      .toBe(markdown);
   });
 
-  it("preserves every other byte, including CRLF line endings", () => {
+  it("preserves every byte and the mode of an owner-authored character", () => {
     temp = makeTempGhosts();
+    const character = "## Letterpress\r\n\r\nKeep  two spaces.\r\n";
     const dir = seedGhost(temp.root, {
       name: "casper",
-      character: "---\r\ntitle: casper\r\ntags: [press]\r\n---\r\n\r\nKeep  two spaces.\r\n",
+      character,
     });
     chmodSync(ghostPaths(dir).characterFile, 0o640);
 
     const renamed = temp.registry.rename("casper", "wisp");
 
     expect(readFileSync(ghostPaths(renamed.dir).characterFile, "utf8"))
-      .toBe("---\r\ntitle: wisp\r\ntags: [press]\r\n---\r\n\r\nKeep  two spaces.\r\n");
+      .toBe(character);
     expect(statSync(ghostPaths(renamed.dir).characterFile).mode & 0o777).toBe(0o640);
   });
 
-  it("leaves the old home and character untouched when the retitle cannot be prepared", () => {
+  it("leaves the old home and character untouched when a renamed seed cannot be prepared", () => {
     temp = makeTempGhosts();
-    const dir = seedGhost(temp.root, {
-      name: "casper",
-      character: "---\ntitle: casper\n---\n\nOwner-authored body.\n",
-    });
+    temp.registry.ensureRoot();
+    const dir = temp.registry.create("casper").dir;
     const before = readFileSync(ghostPaths(dir).characterFile, "utf8");
     chmodSync(dir, 0o500);
 

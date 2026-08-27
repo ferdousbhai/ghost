@@ -23,7 +23,7 @@ refresh during startup causes OMP to discover skills again.
 
 ```
 ~/ghosts/<name>/
-  character.md                 persona → system prompt (optional title frontmatter)
+  character.md                 plain Markdown persona → system prompt
   docs/**/*.md                 first line `# Title`; optional final hashtag line
                                such as `#launch #product`
   memory/*.md                  atomic memory files: frontmatter description + updated,
@@ -45,6 +45,18 @@ refresh during startup causes OMP to discover skills again.
   export-manifest.json         present in imported archives; counts, pathRewrites,
                                notIncluded
 ```
+
+`character.md` has no frontmatter. Its leading Markdown heading (`#` through
+`######`) is the derived display title, while the complete Markdown body is the
+persona injected into the system prompt.
+
+Memory frontmatter is not duplicate presentation metadata. `description` is
+the bounded synopsis used in the per-session memory index instead of injecting
+every file body, and `updated` is the writer-stamped date that survives copies
+and imports. Documents already keep their title in the leading `#` heading and
+tags in a final hashtag line; legacy document frontmatter exists only at the
+import migration boundary. OMP skill `name`/`description` fields remain the
+upstream discovery contract.
 
 What lives in a ghost home and what lives in the machine's own directories is
 decided by lifecycle, not by which reads more natural. Mutable per-ghost state
@@ -318,12 +330,12 @@ one must not be a leak of both.
   docs, conversations, pins, and credentials are inside the directory that
   moved; every conversation id stored with its transcript stays valid,
   and every other route's `:name` changes with it. `character.md` is the ghost's
-  own words and its body is never touched — the one exception is a frontmatter
-  `title` byte-equal to the old name, which is the seed's and becomes the new
-  name. That one-line replacement is staged beside the character file before
-  the home moves and published atomically afterwards; a staging failure moves
-  nothing, and a publish failure rolls the home move back. Checked in this
-  order: the new name gets the same validation
+  own words and is never touched. The one exception is a character file
+  byte-equal to the daemon-authored seed: it is re-rendered in canonical
+  Markdown under the new name. That replacement is staged beside the character
+  file before the home moves and published atomically afterwards; a staging
+  failure moves nothing, and a publish failure rolls the home move back. Checked
+  in this order: the new name gets the same validation
   `POST /api/ghosts` applies (`400`); an unknown ghost is `404 not_found`;
   renaming to the ghost's current name is a no-op `200`; a name already taken in
   the root — by a ghost or by anything else — is `409 already_exists`; a ghost
@@ -336,7 +348,8 @@ one must not be a leak of both.
 - `GET  /api/ghosts/:name/context` → `{ character, docs, memory, agents,
   skipped }` — the owner's browseable ghost context and OMP capabilities,
   derived from disk for each request and never stored. `character` is
-  `{ path: "character.md", title }`. `docs` contains
+  `{ path: "character.md", title }`, where `title` is derived from its leading
+  Markdown heading. `docs` contains
   `{ path: "docs/<relative>.md", relativePath, title, tags, archived }`, derived
   from the document's first H1 and optional final hashtag line. `memory`
   contains `{ path: "memory/<slug>.md", slug, description, content, updated }`.
