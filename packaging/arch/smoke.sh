@@ -19,6 +19,30 @@ require_executable() {
   fi
 }
 
+require_unit_directive() {
+  local unit="$root$1"
+  local section="$2"
+  local directive="$3"
+  local value="$4"
+  local expected="[$section]"$'\t'"$directive=$value"
+  local matches=()
+  mapfile -t matches < <(awk -v directive="$directive" '
+    {
+      line = $0
+      sub(/^[[:space:]]+/, "", line)
+      if (line ~ /^\[[^]]+\]$/) {
+        section = line
+        next
+      }
+      if (index(line, directive "=") == 1) print section "\t" line
+    }
+  ' "$unit")
+  if (( ${#matches[@]} != 1 )) || [[ "${matches[0]-}" != "$expected" ]]; then
+    printf 'packaged unit has an invalid %s directive: %s\n' "$directive" "$1" >&2
+    return 1
+  fi
+}
+
 require_file /usr/lib/ghost/daemon/dist/main.js
 require_file /usr/lib/ghost/daemon/package.json
 require_file /usr/lib/ghost/desktop-helper/ghost_desktop_helper/__main__.py
@@ -83,15 +107,24 @@ if find "$root/usr/lib/ghost/desktop-helper" \
 fi
 bun "$root/usr/lib/ghost/daemon/dist/main.js" --version | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'
 
-grep -Fxq 'PartOf=graphical-session.target' "$root/usr/lib/systemd/user/ghostd.service"
-grep -Fxq 'WantedBy=graphical-session.target' "$root/usr/lib/systemd/user/ghostd.service"
-grep -Fxq 'ReadWritePaths=%h %t' "$root/usr/lib/systemd/user/ghostd.service"
-grep -Fxq 'ExecStart=/usr/bin/ghostd' "$root/usr/lib/systemd/user/ghostd.service"
-grep -Fxq 'NoNewPrivileges=yes' "$root/usr/lib/systemd/user/ghostd.service"
-if grep -q '^RestrictNamespaces=' "$root/usr/lib/systemd/user/ghostd.service"; then
+require_unit_directive /usr/lib/systemd/user/ghostd.service Unit PartOf \
+  graphical-session.target
+require_unit_directive /usr/lib/systemd/user/ghostd.service Install WantedBy \
+  graphical-session.target
+require_unit_directive /usr/lib/systemd/user/ghostd.service Service ReadWritePaths '%h %t'
+require_unit_directive /usr/lib/systemd/user/ghostd.service Service WorkingDirectory '%h'
+require_unit_directive /usr/lib/systemd/user/ghostd.service Service ExecStart /usr/bin/ghostd
+require_unit_directive /usr/lib/systemd/user/ghostd.service Service NoNewPrivileges yes
+if grep -Eq '^[[:space:]]*RestrictNamespaces=' \
+  "$root/usr/lib/systemd/user/ghostd.service"; then
   printf 'ghostd.service blocks namespaces required by the Chromium sandbox\n' >&2
   exit 1
 fi
+require_unit_directive /usr/lib/systemd/user/ghost-shell.service Service WorkingDirectory '%h'
+require_unit_directive /usr/lib/systemd/user/ghost-shell.service Service ExecStart \
+  '/usr/bin/qs -c ghost --no-duplicate'
+require_unit_directive /usr/lib/systemd/user/ghost-shell.service Service ExecReload \
+  '/usr/bin/qs -c ghost ipc call ghost refresh'
 
 # Every symlink in the installed payload must resolve inside that payload.
 # This catches pnpm workspace links back into the build checkout even while the

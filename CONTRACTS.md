@@ -1537,7 +1537,10 @@ whole model before any non-local exposure.
   extension factories and typed readers/writers.
 - `packages/daemon` — per-ghost OMP `AgentSession` and Claude Code query
   lifecycles, env scrubbing, model/runtime selection, the HTTP API, systemd
-  unit. Depends on `extensions`.
+  unit. Depends on `extensions`. Both installed user services declare
+  `WorkingDirectory=%h`; that sets process cwd only, while Ghost storage keeps
+  its explicit roots. Daemon CLI operands still resolve relative to the caller's
+  cwd when the CLI is launched directly.
 - `packages/shell` — the Omarchy/Quickshell HUD, model routing, ask/queue and
   branching UI, live tool cards, and summoning indicator.
 - `packages/chromium-extension` — the "my browser" relay, driving one tab of the

@@ -12,6 +12,7 @@ After=ghostd.service
 
 [Service]
 Type=simple
+WorkingDirectory=%h
 # `qs -c ghost` resolves ~/.config/quickshell/ghost/shell.qml.
 # --no-duplicate: a second start is a no-op rather than a second HUD.
 ExecStart=/usr/bin/qs -c ghost --no-duplicate

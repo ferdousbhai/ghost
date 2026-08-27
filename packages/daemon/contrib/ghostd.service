@@ -9,6 +9,7 @@ After=graphical-session.target network.target
 
 [Service]
 Type=simple
+WorkingDirectory=%h
 ExecStart=/usr/bin/ghostd
 Restart=on-failure
 RestartSec=2
@@ -21,12 +22,12 @@ SendSIGKILL=yes
 # The daemon scrubs inherited provider credentials itself (see env-scrub.ts),
 # but a service that never had them is better than one that drops them.
 # Do NOT add an EnvironmentFile with API keys here: a ghost's credentials
-# belong in %h/Ghosts/<name>/{models.json,.pi/agent.db}.
+# belong in its explicit home (%h/ghosts/<name> by default).
 Environment=GHOSTD_HOST=127.0.0.1
 
 # Local-only service; nothing here should reach outside the user's own files.
 # %h is ONE writable bind mount, not per-directory carve-outs: ghost deletion
-# renames %h/Ghosts/<name> into %h/.local/share/Trash, and rename(2) across
+# renames a default ghost home into %h/.local/share/Trash, and rename(2) across
 # two bind mounts fails EXDEV even on the same filesystem. (ProtectHome has no
 # "read-write" value — systemd ignores it with a warning; system directories
 # stay read-only via ProtectSystem=strict.)
