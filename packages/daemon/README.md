@@ -60,7 +60,9 @@ Everything Ghost owns for an OMP conversation stays inside the ghost home:
   .pi/
     models.omp.json        generated OMP-compatible provider projection
     models.db              derived OMP catalogue cache
-    agent.db               derived OMP runtime database; auth rows stay empty
+    agent.db               legacy OMP credential database; only in a home that
+                           predates the keyring, with its auth tables emptied
+                           and vacuumed. Nothing creates one any more.
   sessions/
     <conversation>.jsonl   OMP session tree
     claude-<sha256>.json   Claude resume metadata, when selected

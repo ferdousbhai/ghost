@@ -60,6 +60,15 @@ missing service, absent item, disallowed account,
 malformed item, or failed verification is reported as a keyring error and leaves
 plaintext migration sources available for retry.
 
+Nothing recreates `.pi/agent.db` afterwards, so a home created after the move
+never has one. An `mcp.json` server that Ghost's MCP schema rejects is a
+different kind of problem and gets a different answer: migration leaves that row
+byte-for-byte alone, `GET …/mcp` keeps listing it as skipped with its field-only
+reason, and a mutation on it keeps failing with `invalid_mcp_server`. A secret
+in such a row stays in plaintext because the row cannot be parsed safely, so fix
+the row — the next session open migrates it and the credential is worth rotating
+in the meantime.
+
 Migration cannot retract credentials from copies made earlier. Old backups,
 sync history, filesystem snapshots, and Trash may still contain `models.json`,
 `mcp.json`, `agent.db`, or `auth.json` plaintext. Remove those copies where

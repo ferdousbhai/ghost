@@ -424,7 +424,7 @@ describe("OMP compatibility", () => {
     runtime.close();
   });
 
-  it("imports legacy auth.json once and keeps the source intact", async () => {
+  it("imports legacy auth.json into the keyring and leaves no plaintext store behind", async () => {
     const agentDir = makeAgentDir();
     const authPath = ghostAuthPath(agentDir);
     writeFileSync(authPath, JSON.stringify({
@@ -440,10 +440,29 @@ describe("OMP compatibility", () => {
       type: "api_key",
       key: "legacy-secret",
     });
-    expect(existsSync(join(agentDir, "agent.db"))).toBe(true);
-    expect(existsSync(join(agentDir, ".auth-json-imported-v18"))).toBe(true);
-    expect(existsSync(authPath)).toBe(true);
+    // The keyring is the only credential store now. The verified import
+    // removes its plaintext source, and Ghost injects its own
+    // AuthCredentialStore instead of calling AuthStorage.create(agent.db), so
+    // nothing recreates a SQLite credential database in the ghost home.
+    expect(existsSync(authPath)).toBe(false);
+    expect(existsSync(join(agentDir, "agent.db"))).toBe(false);
+    expect(readGhostModels(agentDir)?.accounts).toEqual(["openrouter/personal"]);
     runtime.close();
+
+    // Idempotent: reopening with the source already gone resolves the same
+    // machine account rather than importing a second copy of it.
+    const reopened = await createGhostOmpRuntime({
+      authPath,
+      modelsPath: ghostModelsPath(agentDir),
+      allowModelNetwork: false,
+    });
+    expect(reopened.authStorage.get("openrouter")).toMatchObject({
+      type: "api_key",
+      key: "legacy-secret",
+    });
+    expect(readGhostModels(agentDir)?.accounts).toEqual(["openrouter/personal"]);
+    expect(existsSync(join(agentDir, "agent.db"))).toBe(false);
+    reopened.close();
   });
 
   it("is provider-agnostic: any OpenAI-compatible endpoint is one preset call", () => {

@@ -30,6 +30,7 @@ import {
   GhostSecretContext,
   validateAuthCredential,
 } from "./keyring-credential-store.js";
+import { mcpServerValidationErrors } from "./mcp-server-shape.js";
 import {
   formatSecretReference,
   isSecretReference,
@@ -46,13 +47,6 @@ const MAX_CONFIG_BYTES = 1_048_576;
 const SENSITIVE_ARGUMENT = /(?:^|[-_])(api[-_]?key|auth|bearer|credential|password|secret|token)(?:$|[-_])/i;
 const SENSITIVE_ARGUMENT_VALUE = /(?:authorization\s*:|bearer\s+|api[-_ ]?key\s*[:=])/i;
 const SENSITIVE_QUERY = /(?:^|[-_])(api[-_]?key|auth|bearer|credential|password|secret|token)(?:$|[-_])/i;
-const MCP_SHARED_FIELDS = ["enabled", "timeout", "requestIdFormat", "auth", "oauth"];
-const MCP_STDIO_FIELDS = new Set([...MCP_SHARED_FIELDS, "type", "command", "args", "env", "envPolicy", "cwd"]);
-const MCP_REMOTE_FIELDS = new Set([...MCP_SHARED_FIELDS, "type", "url", "headers", "headerPolicy"]);
-const MCP_AUTH_FIELDS = new Set(["type", "credentialId", "tokenUrl", "clientId", "clientSecret", "resource"]);
-const MCP_OAUTH_FIELDS = new Set([
-  "clientId", "clientSecret", "redirectUri", "callbackPort", "callbackPath", "prompt",
-]);
 
 interface PlainCredentialRow {
   provider: string;
@@ -62,62 +56,6 @@ interface PlainCredentialRow {
 interface McpConfigDocument {
   mcpServers?: Record<string, unknown>;
   [key: string]: unknown;
-}
-
-function record(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function stringRecord(value: unknown): value is Record<string, string> {
-  return record(value) && Object.values(value).every((entry) => typeof entry === "string");
-}
-
-function assertMigratableMcpServer(path: string, name: string, value: unknown): asserts value is MCPServerConfig {
-  const invalid = (): never => {
-    throw new SecretServiceError(
-      "secret_migration_failed",
-      `${path} MCP server ${JSON.stringify(name)} is malformed; fix it before credential migration.`,
-    );
-  };
-  if (!record(value)) invalid();
-  const config = value as Record<string, unknown>;
-  const type = config.type ?? "stdio";
-  if (type !== "stdio" && type !== "http" && type !== "sse") invalid();
-  const allowed = type === "stdio" ? MCP_STDIO_FIELDS : MCP_REMOTE_FIELDS;
-  if (!Object.keys(config).every((key) => allowed.has(key))) invalid();
-  if (config.enabled !== undefined && typeof config.enabled !== "boolean") invalid();
-  if (config.timeout !== undefined
-    && (typeof config.timeout !== "number" || !Number.isFinite(config.timeout) || config.timeout < 0)) invalid();
-  if (config.requestIdFormat !== undefined
-    && config.requestIdFormat !== "string" && config.requestIdFormat !== "number") invalid();
-  if (config.auth !== undefined) {
-    if (!record(config.auth)
-      || !Object.keys(config.auth).every((key) => MCP_AUTH_FIELDS.has(key))
-      || (config.auth.type !== "oauth" && config.auth.type !== "apikey")
-      || Object.entries(config.auth).some(([key, entry]) => key !== "type" && typeof entry !== "string")) {
-      invalid();
-    }
-  }
-  if (config.oauth !== undefined) {
-    if (!record(config.oauth) || !Object.keys(config.oauth).every((key) => MCP_OAUTH_FIELDS.has(key))) invalid();
-    for (const [key, entry] of Object.entries(config.oauth as Record<string, unknown>)) {
-      if (key === "callbackPort") {
-        if (typeof entry !== "number" || !Number.isSafeInteger(entry) || entry < 1 || entry > 65_535) invalid();
-      } else if (typeof entry !== "string") invalid();
-    }
-  }
-  if (type === "stdio") {
-    if (typeof config.command !== "string" || config.command.length === 0) invalid();
-    if (config.args !== undefined
-      && (!Array.isArray(config.args) || !config.args.every((entry) => typeof entry === "string"))) invalid();
-    if (config.env !== undefined && !stringRecord(config.env)) invalid();
-    if (config.envPolicy !== undefined && config.envPolicy !== "literal") invalid();
-    if (config.cwd !== undefined && (typeof config.cwd !== "string" || config.cwd.length === 0)) invalid();
-  } else {
-    if (typeof config.url !== "string" || config.url.length === 0) invalid();
-    if (config.headers !== undefined && !stringRecord(config.headers)) invalid();
-    if (config.headerPolicy !== undefined && config.headerPolicy !== "origin-locked") invalid();
-  }
 }
 
 export interface GhostSecretMigrationOptions {
@@ -534,8 +472,14 @@ function migrateMcpFile(
   let changed = false;
   const accounts = new Set<string>();
   for (const [name, value] of Object.entries(document.mcpServers ?? {})) {
-    assertMigratableMcpServer(path, name, value);
-    const migrated = materializeMcpSecretReferences(name, value, context);
+    // A row the MCP catalogue itself rejects is left exactly as written. Its
+    // taxonomy already owns that case (`invalid_mcp_server`/`skipped`), and a
+    // neighbour's typo is not the fail-closed condition this migration exists
+    // for: that is the keyring being locked or absent. Any secret such a row
+    // still holds stays plaintext and visibly invalid until the owner fixes
+    // the row, and the next open migrates it.
+    if (mcpServerValidationErrors(name, value).length > 0) continue;
+    const migrated = materializeMcpSecretReferences(name, value as MCPServerConfig, context);
     if (JSON.stringify(migrated.config) !== JSON.stringify(value)) {
       (document.mcpServers as Record<string, unknown>)[name] = migrated.config;
       changed = true;

@@ -247,7 +247,15 @@ removes `auth.json` and deletes and vacuums every `auth_credentials` row. No
 source is removed or replaced before its keyring writes verify; plaintext
 sources remain for retry. A conflicting literal never overwrites a Ghost-known
 schema item, even if secret-free metadata was lost: migration allocates
-`account-2`, `account-3`, and so on. Credentials
+`account-2`, `account-3`, and so on. An `mcp.json` row the MCP catalogue itself
+rejects is not a migration failure: migration skips it untouched, the catalogue
+keeps reporting it as `invalid_mcp_server`/skipped, and any secret it holds
+stays plaintext in that visibly invalid row until the owner corrects it, after
+which the next open migrates it. Fail-closed is about the keyring, not about a
+neighbouring row's shape. `.pi/agent.db` is read and scrubbed where an
+older home has one; no session, login, or model listing creates one, so a home
+migrated or created after this point holds only derived non-credential state
+there. Credentials
 already copied into backup, sync, or
 Trash history remain exposed there and may need provider-side rotation.
 
@@ -325,7 +333,9 @@ or launch, Ghost applies its own strict transport-discriminated schema: command,
 URL, cwd, arguments, records, flags, finite timeout, request-id, auth, and OAuth
 fields must have exactly their declared types, and unsupported fields are
 rejected. A malformed row is skipped with a generic field-only reason, cannot
-hide valid siblings, and no supplied value crosses HTTP or logging.
+hide valid siblings, and no supplied value crosses HTTP or logging. That one
+schema is also what the keyring migration recognizes, so a row is never valid
+to read and invalid to migrate, or the reverse.
 Accepted server names remain opaque own map keys through configuration,
 provenance, connection status, runtime translation, and durable metadata; a
 name matching a JavaScript Object prototype member is never inherited,
@@ -1601,7 +1611,10 @@ whole model before any non-local exposure.
 ## OMP 18 harness invariants
 
 - Construct `AuthStorage` with Ghost's `AuthCredentialStore`; never call
-  `AuthStorage.create(agent.db)`. Secret Service items use Ghost's schema and
+  `AuthStorage.create(agent.db)`, which is the only OMP path that opens
+  `SqliteAuthCredentialStore`. `Settings.loadReadOnly` and a null `MCPToolCache`
+  keep OMP's other `agent.db` consumers closed too, so the file is not created
+  in a ghost home at all. Secret Service items use Ghost's schema and
   exact configured service/account references only. OMP row identity, refresh
   leases, cooldowns, and usage/session cache live in Ghost's XDG-state metadata
   database so daemon and CLI opens coordinate without putting a bearer there.
