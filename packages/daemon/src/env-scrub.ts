@@ -16,10 +16,9 @@
  * (`main.ts`) and `SessionHost` runs it again in its constructor, which is
  * idempotent — the second call finds nothing left to remove.
  *
- * Credentials therefore come from exactly two places, both per-ghost and
- * both inside the ghost home:
- *   - `<home>/models.json` — provider definitions incl. `apiKey`
- *   - `<home>/.pi/agent.db`    — OMP's credential store
+ * Credentials therefore come only from Ghost's machine-scoped Secret Service
+ * schema. A ghost's `models.json` and `mcp.json` hold references plus an
+ * account allow-list, never values.
  *
  * ## What is removed
  *

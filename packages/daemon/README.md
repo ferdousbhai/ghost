@@ -60,9 +60,7 @@ Everything Ghost owns for an OMP conversation stays inside the ghost home:
   .pi/
     models.omp.json        generated OMP-compatible provider projection
     models.db              derived OMP catalogue cache
-    agent.db               canonical OMP credential store
-    auth.json              optional legacy import source; retained after import
-    .auth-json-imported-v18 one-time import marker
+    agent.db               derived OMP runtime database; auth rows stay empty
   sessions/
     <conversation>.jsonl   OMP session tree
     claude-<sha256>.json   Claude resume metadata, when selected
@@ -183,12 +181,15 @@ permanent unlink.
 `createAgentSession({ agentDir })` alone does not redirect transcripts.
 Credentials are never inherited from the daemon environment: `env-scrub.ts`
 removes provider keys and routing variables before OMP is loaded. Provider
-login writes `agent.db`; a previous `.pi/auth.json` is imported once, without
-being deleted.
+login writes Ghost's Linux Secret Service schema at machine scope. Portable
+config contains only service/account references; see
+[`docs/keyring.md`](../../docs/keyring.md). Existing `agent.db` credentials and
+`.pi/auth.json` are verified into Secret Service and then scrubbed.
 
-New sessions start with the owner's home as their operational cwd, while all
-transcripts, persona, memory, credentials, browser state, and configuration
-remain under the ghost home. The cwd alone grants no discovery authority. A
+New sessions start with the owner's home as their operational cwd, while
+transcripts, persona, memory, browser state, configuration, and keyring policy
+remain under the ghost home. Credentials are machine-wide service/account
+items. The cwd alone grants no discovery authority. A
 conversation may explicitly trust and bind one project, after which Ghost pins
 its data-only instructions, skills, rules, Markdown commands/prompts, and scoped
 MCP configuration. Project executable extensions, hooks, custom code tools,
@@ -259,9 +260,9 @@ ghostd login <ghost> --provider openai-codex
 ghostd login <ghost> --provider openrouter --api-key
 ```
 
-The TTY form writes credentials directly into the ghost home, so it also
-requires the daemon to be stopped and holds the same root reservation for the
-complete login. The shell's login flow already runs inside the serving daemon.
+The TTY form writes credentials through Ghost's Secret Service boundary. It
+still requires the daemon to be stopped and holds the same root reservation for
+the complete login. The shell's login flow already runs inside the serving daemon.
 
 A pasted code or key is resolved directly into the pending login interaction;
 it is not logged or returned from a GET response.

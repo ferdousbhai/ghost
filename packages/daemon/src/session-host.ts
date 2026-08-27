@@ -8,7 +8,7 @@
  * var, no child process — following the spike (`pi-spike/concurrent-ghosts.mjs`):
  *
  *   cwd        = owner home, or one explicitly bound project working directory
- *   agentDir   = ~/ghosts/<name>/.pi        credentials and OMP runtime state
+ *   agentDir   = ~/ghosts/<name>/.pi        derived OMP runtime state
  *   sessionDir = ~/ghosts/<name>/sessions  transcripts
  *
  * Four decisions that are easy to get wrong and are load-bearing here:
@@ -219,6 +219,7 @@ import {
   readEffectiveProjectMcp,
   type EffectiveProjectMcpRead,
 } from "./mcp-catalog.js";
+import { resolveMcpServerSecrets, type SecretResolver } from "./secret-resolution.js";
 import {
   projectBindingPath,
   ProjectBindingStore,
@@ -761,7 +762,7 @@ interface HostedSession extends GhostSessionHandle {
    * rebound after that exclusive owner releases the AgentSession.
    */
   pendingRebind?: boolean;
-  /** Credentials changed in agent.db; reload the borrowed OMP runtime once idle. */
+  /** Keyring credentials changed; reload the borrowed OMP runtime once idle. */
   pendingAuthRefresh?: boolean;
   /** Config changed during a turn or live voice; reconnect once idle. */
   pendingMcpReload?: boolean;
@@ -1468,6 +1469,7 @@ async function connectGhostProjectMCP(
   manager: MCPManager,
   input: {
     ghostRoot: string;
+    secretResolver: SecretResolver;
     project?: { root: string; mcp: EffectiveProjectMcpRead };
   },
   logger: Logger,
@@ -1513,7 +1515,8 @@ async function connectGhostProjectMCP(
       }
       const config = server.config as MCPServerConfig;
       if (config.enabled === false) continue;
-      configs.set(server.name, normalizeMcpStdioCwd(expandMcpServerConfig(config), root));
+      const resolved = resolveMcpServerSecrets(config, input.secretResolver);
+      configs.set(server.name, normalizeMcpStdioCwd(expandMcpServerConfig(resolved), root));
       sources.set(server.name, {
         provider: "native",
         providerName: "OMP",
@@ -2721,6 +2724,7 @@ export class SessionHost {
       mcp.manager,
       {
         ghostRoot: paths.home,
+        secretResolver: modelRuntime.secretResolver,
         ...(project.root && projectSnapshot
           ? { project: { root: project.root, mcp: projectSnapshot.mcp } }
           : {}),
@@ -3268,6 +3272,7 @@ export class SessionHost {
         candidate,
         {
           ghostRoot: hosted.ghost.dir,
+          secretResolver: hosted.modelRuntime.secretResolver,
           ...(hosted.project.root && hosted.projectSnapshot
             ? {
                 project: {
@@ -5012,7 +5017,7 @@ export class SessionHost {
    * A runtime to `complete()` on, outside any session.
    *
    * A live conversation already has one bound to this ghost's credentials, so
-   * reuse it rather than opening a second `agent.db` handle for one throwaway
+   * reuse it rather than opening a second keyring/metadata handle for one throwaway
    * call; with nothing open, build one exactly as `createSession` does and close
    * it again. (Reusing a live one can race a concurrent `closePi`, which closes
    * that runtime — the completion then fails and the greeting is null, which is

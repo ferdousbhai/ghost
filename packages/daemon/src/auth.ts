@@ -4,11 +4,12 @@
  *
  * OMP already owns the hard part. `GhostOmpRuntime.login(providerId, type,
  * interaction)` drives each provider's OAuth or API-key flow and persists the
- * result to the ghost's own `<home>/.pi/agent.db`. What OMP assumes is a TTY: an
- * `AuthInteraction` whose `prompt()` blocks for a typed answer and whose
- * `notify()` prints a URL or a device code. This module is the wrap that turns
- * that interactive, multi-step flow into a small pollable HTTP state machine so
- * the same `login()` can be driven over loopback by the Quickshell HUD.
+ * result through Ghost's service/account-scoped Secret Service store. What OMP
+ * assumes is a TTY: an `AuthInteraction` whose `prompt()` blocks for a typed
+ * answer and whose `notify()` prints a URL or a device code. This module is the
+ * wrap that turns that interactive, multi-step flow into a small pollable HTTP
+ * state machine so the same `login()` can be driven over loopback by the
+ * Quickshell HUD.
  *
  * ## The shape of a login
  *
@@ -34,9 +35,10 @@
  *
  * A pasted code or api key flows straight from `submitInput()` into the
  * `prompt()` promise OMP is awaiting; it is NEVER stored on the view, returned
- * from a GET, or written to a log. Tokens land in exactly one place — OMP's
- * `agent.db`, written by `AuthStorage`. Device codes and auth URLs are not
- * secrets (they are meant to be shown), but are not logged either.
+ * from a GET, or written to a log. Tokens land in exactly one place — Ghost's
+ * Secret Service schema through OMP's `AuthCredentialStore` boundary. Device
+ * codes and auth URLs are not secrets (they are meant to be shown), but are not
+ * logged either.
  *
  * The runtime is injected (`createRuntime`) so tests drive a fake `login()`
  * through every callback path without touching a real provider.
@@ -55,6 +57,7 @@ import {
   setChatModelRoleIfUnset,
 } from "./models.js";
 import { createGhostOmpRuntime } from "./omp-runtime.js";
+import { parseSecretAccountName, serviceForCredentialProvider } from "./secret-reference.js";
 
 export type AuthType = "oauth" | "api_key";
 export type Credential =
@@ -112,8 +115,15 @@ export interface LoginRuntime {
   isUsingOAuth(providerId: string): boolean;
   getModels(providerId?: string): readonly Model<Api>[];
   getAvailable(providerId?: string): Promise<readonly Model<Api>[]>;
-  login(providerId: string, type: AuthType, interaction: AuthInteraction): Promise<Credential>;
-  /** Release OMP's open SQLite/model-catalog handles once the flow settles. */
+  login(providerId: string, type: AuthType, interaction: AuthInteraction, account?: string): Promise<Credential>;
+  getProviderAccounts?(providerId: string): Array<{
+    account: string;
+    configured: boolean;
+    connectedVia?: AuthType;
+  }>;
+  logout?(providerId: string, account: string): Promise<void>;
+  authorizeAccount?(providerId: string, account: string, home: string): void;
+  /** Release OMP's open keyring/model-catalog handles once the flow settles. */
   close?(): void;
 }
 
@@ -141,6 +151,7 @@ export interface LoginPromptView {
 export interface LoginView {
   loginId: string;
   providerId: string;
+  account: string;
   authType: AuthType;
   status: LoginStatus;
   /** A progress/info line, when the flow last reported one. */
@@ -172,6 +183,7 @@ export interface ProviderInfo {
   billingNote?: string;
   /** How it is configured, when it is. */
   connectedVia?: AuthType;
+  accounts: Array<{ account: string; configured: boolean; connectedVia?: AuthType }>;
 }
 
 interface PendingPrompt {
@@ -392,6 +404,34 @@ export class LoginManager {
     }
   }
 
+  /** Remove one machine service/account item; ghost policy files stay untouched. */
+  async logout(ghostName: string, providerId: string, account: string): Promise<void> {
+    const ghost = this.registry.get(ghostName);
+    const runtime = await this.buildRuntime(ghost.dir);
+    try {
+      if (!runtime.logout) {
+        throw new GhostError("not_supported", "This credential runtime does not support logout.", 409);
+      }
+      const offered = this.providersFrom(runtime).find((provider) => provider.id === providerId);
+      if (!offered) {
+        throw new GhostError("unknown_provider", `No provider ${JSON.stringify(providerId)} to log out of.`, 400);
+      }
+      try {
+        parseSecretAccountName(`${serviceForCredentialProvider(providerId)}/${account}`);
+      } catch {
+        throw new GhostError(
+          "invalid_request",
+          '"account" must use lowercase letters, numbers, dots, underscores, or hyphens.',
+          400,
+        );
+      }
+      await runtime.logout(providerId, account);
+      await this.onLoginSucceeded(ghostName, new AbortController().signal);
+    } finally {
+      runtime.close?.();
+    }
+  }
+
   private providersFrom(runtime: LoginRuntime): ProviderInfo[] {
     const infos: ProviderInfo[] = [];
     for (const provider of runtime.getProviders()) {
@@ -415,6 +455,7 @@ export class LoginManager {
           : provider.auth.oauth?.isSubscription ?? false,
         authTypes,
         configured: status.configured,
+        accounts: runtime.getProviderAccounts?.(provider.id) ?? [],
       };
       if (provider.id === "anthropic") {
         info.loginLabel = "Sign in (extra usage)";
@@ -432,7 +473,12 @@ export class LoginManager {
    * Begin a login. Validates the provider/authType against OMP's registry,
    * then drives `runtime.login()` in the background. Returns the initial view.
    */
-  async start(ghostName: string, providerId: string, authType: AuthType): Promise<LoginView> {
+  async start(
+    ghostName: string,
+    providerId: string,
+    authType: AuthType,
+    account = "personal",
+  ): Promise<LoginView> {
     if (this.disposed) {
       throw new GhostError("shutting_down", "The daemon is shutting down.", 503);
     }
@@ -443,6 +489,15 @@ export class LoginManager {
     }
     if (!AUTH_TYPES.includes(authType)) {
       throw new GhostError("invalid_request", '"authType" must be "oauth" or "api_key".', 400);
+    }
+    try {
+      parseSecretAccountName(`${serviceForCredentialProvider(providerId)}/${account}`);
+    } catch {
+      throw new GhostError(
+        "invalid_request",
+        '"account" must use lowercase letters, numbers, dots, underscores, or hyphens.',
+        400,
+      );
     }
     const ghostHome = ghostHomeIdentity(ghost.dir);
     if ([...this.moving].some((movingHome) => sameGhostHome(movingHome, ghostHome))) {
@@ -485,7 +540,7 @@ export class LoginManager {
       const ownedSession: LoginSession = {
         ghostName: starting.ghostName,
         ghostHome: starting.ghostHome,
-        view: { loginId, providerId, authType, status: "starting" },
+        view: { loginId, providerId, account, authType, status: "starting" },
         controller,
         runtime,
         runtimeClosed: false,
@@ -513,13 +568,14 @@ export class LoginManager {
       );
 
       void runtime
-        .login(providerId, authType, interaction)
+        .login(providerId, authType, interaction, account)
         .then((credential) => this.onSuccess(ownedSession, credential))
         .catch((error: unknown) => this.onFailure(ownedSession, error));
 
       this.logger.info("ghost login started", {
         ghost: ownedSession.ghostName,
         provider: providerId,
+        account,
         authType,
       });
       return this.publicView(ownedSession);
@@ -678,6 +734,11 @@ export class LoginManager {
     session.view.prompt = undefined;
     session.view.status = "working";
     session.view.message = "Finishing sign-in.";
+    session.runtime.authorizeAccount?.(
+      session.view.providerId,
+      session.view.account,
+      ghost.dir,
+    );
     // Best-effort: give a freshly-signed-in ghost a chat model so the owner
     // lands ready to talk. Never fatal to the login itself.
     try {

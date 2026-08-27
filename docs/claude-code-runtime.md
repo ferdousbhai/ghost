@@ -15,7 +15,7 @@ Anthropic provider configured through OMP. The boundary is explicit:
 
 | selection | harness | authentication | accounting path |
 |---|---|---|---|
-| `anthropic/<model>` | OMP | per-ghost `.pi/agent.db` | the provider account's current API/OAuth terms |
+| `anthropic/<model>` | OMP | Ghost Secret Service item selected by the ghost's account policy | the provider account's current API/OAuth terms |
 | `claude-code/default` | official Claude Agent SDK + installed `claude` | owner's external Claude Code login | owner's Claude plan limits, subject to Anthropic's current policy and any enabled overage |
 
 Policy and product behavior can change. Before making a pricing promise, check
@@ -52,7 +52,7 @@ Equivalently, the resulting `<ghost>/models.json` role is:
 ```
 
 There is deliberately no `providers.claude-code` entry and no Claude token in
-Ghost's `.pi/agent.db`. `default` delegates model selection to the authenticated
+Ghost's Secret Service schema. `default` delegates model selection to the authenticated
 Claude Code installation. Set `GHOST_CLAUDE_BINARY` when `claude` is not on
 the daemon's `PATH`. On Omarchy systems where `~/.local/bin/claude` is a mise
 launcher, Ghost resolves and gives the Agent SDK the underlying executable;

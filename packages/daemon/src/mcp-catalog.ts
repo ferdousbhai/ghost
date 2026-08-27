@@ -40,6 +40,13 @@ import {
   openDirectoryNoFollow,
   openRegularFileNoFollow,
 } from "@ghost/extensions";
+import {
+  authorizeGhostAccounts,
+  materializeMcpSecretReferences,
+  openGhostSecretContext,
+} from "./secret-migration.js";
+import { resolveMcpServerSecrets } from "./secret-resolution.js";
+import { SecretServiceError } from "./secret-service.js";
 
 export type McpConfigSource = "canonical" | "legacy";
 export type McpTransport = "stdio" | "http" | "sse";
@@ -675,10 +682,15 @@ export class McpCatalog {
         throw new GhostError("mcp_server_exists", `MCP server ${JSON.stringify(name)} already exists.`, 409);
       }
       const [canonical] = this.sources(ghostName);
+      const context = openGhostSecretContext({ home: this.registry.get(ghostName).dir });
       try {
-        await this.writer.add(canonical.absolutePath, name, config);
+        const migrated = materializeMcpSecretReferences(name, config as MCPServerConfig, context);
+        authorizeGhostAccounts(this.registry.get(ghostName).dir, context, migrated.addedAccounts);
+        await this.writer.add(canonical.absolutePath, name, migrated.config);
       } catch (error) {
         translateWriterError(error, name);
+      } finally {
+        context.close();
       }
       return this.list(ghostName);
     });
@@ -693,10 +705,16 @@ export class McpCatalog {
       if (!server) {
         throw new GhostError("mcp_server_not_found", `No MCP server named ${JSON.stringify(name)}.`, 404);
       }
+      const home = this.registry.get(ghostName).dir;
+      const context = openGhostSecretContext({ home });
       try {
-        await this.writer.update(server.source.absolutePath, name, config);
+        const migrated = materializeMcpSecretReferences(name, config as MCPServerConfig, context);
+        authorizeGhostAccounts(home, context, migrated.addedAccounts);
+        await this.writer.update(server.source.absolutePath, name, migrated.config);
       } catch (error) {
         translateWriterError(error, name);
+      } finally {
+        context.close();
       }
       return this.list(ghostName);
     });
@@ -750,13 +768,20 @@ export class McpCatalog {
    */
   async test(ghostName: string, name: string): Promise<McpConnectionTest> {
     return this.withHomeLease(ghostName, async () => {
+      const home = this.registry.get(ghostName).dir;
+      const context = openGhostSecretContext({ home });
       const server = (await this.effective(ghostName)).configured
         .find((candidate) => candidate.name === name);
       if (!server) {
+        context.close();
         throw new GhostError("mcp_server_not_found", `No MCP server named ${JSON.stringify(name)}.`, 404);
       }
-      validateMutation(name, server.config);
-      const home = this.registry.get(ghostName).dir;
+      try {
+        validateMutation(name, server.config);
+      } catch (error) {
+        context.close();
+        throw error;
+      }
       const manager = new MCPManager(home, null, { redactErrors: true });
       const source: SourceMeta = {
         provider: "native",
@@ -765,7 +790,8 @@ export class McpCatalog {
         level: "user",
       };
       try {
-        const expanded = expandMcpServerConfig(server.config as MCPServerConfig);
+        const resolved = resolveMcpServerSecrets(server.config as MCPServerConfig, context);
+        const expanded = expandMcpServerConfig(resolved);
         const result = await manager.connectServers(
           { [name]: normalizeMcpStdioCwd(expanded, home) },
           { [name]: source },
@@ -779,7 +805,8 @@ export class McpCatalog {
           toolCount: manager.getTools().filter((tool) => tool.mcpServerName === name).length,
           message: connected ? "Connection succeeded." : "Connection failed; check the server configuration.",
         };
-      } catch {
+      } catch (error) {
+        if (error instanceof SecretServiceError) throw error;
         return {
           name,
           ok: false,
@@ -789,6 +816,7 @@ export class McpCatalog {
         };
       } finally {
         await manager.disconnectAll().catch(() => {});
+        context.close();
       }
     });
   }

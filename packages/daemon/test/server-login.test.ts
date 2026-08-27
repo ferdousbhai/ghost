@@ -7,14 +7,16 @@
  *   GET  /api/ghosts/:name/login/:loginId
  *   POST /api/ghosts/:name/login/:loginId/input
  */
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { AuthStorage } from "@oh-my-pi/pi-ai/auth-storage";
 import { afterEach, describe, expect, it } from "vitest";
 import type { AuthInteraction, LoginManagerOptions } from "../src/auth.js";
 import { LoginManager } from "../src/auth.js";
 import { ghostPaths } from "../src/ghosts.js";
+import { KeyringAuthCredentialStore } from "../src/keyring-credential-store.js";
 import { readGhostModels } from "../src/models.js";
+import { authorizeGhostAccounts, openGhostSecretContext } from "../src/secret-migration.js";
 import { startDaemonServer, type ListeningServer } from "../src/server.js";
 import { SessionHost } from "../src/session-host.js";
 import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
@@ -26,6 +28,7 @@ import {
   oauthCredential,
   type LoginImpl,
 } from "./helpers/fake-login-runtime.js";
+import { testSecretService } from "./setup.js";
 
 let temp: TempGhosts | null = null;
 let host: SessionHost | null = null;
@@ -191,6 +194,55 @@ describe("POST /api/ghosts/:name/login", () => {
     expect(readGhostModels(ghostPaths(join(temp!.root, "casper")).home)?.roles?.chat_model)
       .toEqual({ provider: "openrouter", modelId: "openai/gpt-5.5" });
   });
+
+  it("routes login, listing, and logout through one explicit account", async () => {
+    const logins: string[] = [];
+    const authorized: string[] = [];
+    const loggedOut: string[] = [];
+    const base = await serveWithRuntime(async () => ({
+      ...makeFakeRuntime({ login: async () => apiKeyCredential() }),
+      login: async (_providerId, _authType, _interaction, account = "personal") => {
+        logins.push(account);
+        return apiKeyCredential();
+      },
+      getProviderAccounts: providerId => providerId === "openrouter"
+        ? [{ account: "work", configured: true, connectedVia: "api_key" }]
+        : [],
+      authorizeAccount: (providerId, account) => authorized.push(`${providerId}/${account}`),
+      logout: async (providerId, account) => {
+        loggedOut.push(`${providerId}/${account}`);
+      },
+    }));
+
+    const providers = await fetch(`${base}/api/ghosts/casper/providers`);
+    expect(await providers.json()).toMatchObject({
+      providers: expect.arrayContaining([
+        expect.objectContaining({
+          id: "openrouter",
+          accounts: [{ account: "work", configured: true, connectedVia: "api_key" }],
+        }),
+      ]),
+    });
+
+    const response = await fetch(`${base}/api/ghosts/casper/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ providerId: "openrouter", authType: "api_key", account: "work" }),
+    });
+    expect(response.status).toBe(201);
+    const { loginId } = (await response.json()) as { loginId: string };
+    const done = await waitForStatus(base, loginId, "succeeded");
+    expect(done.account).toBe("work");
+    expect(logins).toEqual(["work"]);
+    expect(authorized).toEqual(["openrouter/work"]);
+
+    const logout = await fetch(`${base}/api/ghosts/casper/providers/openrouter/accounts/work`, {
+      method: "DELETE",
+    });
+    expect(logout.status).toBe(200);
+    expect(await logout.json()).toEqual({ ok: true, providerId: "openrouter", account: "work" });
+    expect(loggedOut).toEqual(["openrouter/work"]);
+  });
 });
 
 describe("the full url + paste state machine", () => {
@@ -233,8 +285,14 @@ describe("the full url + paste state machine", () => {
   });
 
   it("keeps the login and credential store attached to a renamed ghost home", async () => {
-    const base = await serveWithRuntime(async ({ authPath }) => {
-      const authStorage = await AuthStorage.create(join(dirname(authPath), "agent.db"));
+    const base = await serveWithRuntime(async ({ authPath, modelsPath }) => {
+      const context = openGhostSecretContext({
+        home: dirname(modelsPath),
+        authPath,
+        client: testSecretService,
+      });
+      const credentialStore = new KeyringAuthCredentialStore(context);
+      const authStorage = new AuthStorage(credentialStore);
       await authStorage.reload();
       return {
         ...makeFakeRuntime({
@@ -242,10 +300,18 @@ describe("the full url + paste state machine", () => {
           login: async (providerId, _authType, interaction) => {
             const key = await interaction.prompt({ type: "secret", message: "Paste the API key" });
             const credential = { type: "api_key" as const, key };
+            credentialStore.allowAccounts([`${providerId}/personal`]);
+            credentialStore.setWriteAccount(providerId, "personal");
             await authStorage.set(providerId, credential);
+            credentialStore.clearWriteAccount();
             return credential;
           },
         }),
+        getProviderAccounts: (providerId: string) => credentialStore.listProviderAccounts(providerId),
+        authorizeAccount: (providerId: string, account: string, home: string) => {
+          authorizeGhostAccounts(home, context, [`${providerId}/${account}`]);
+          credentialStore.allowAccounts([`${providerId}/${account}`]);
+        },
         close: () => authStorage.close(),
       };
     });
@@ -276,17 +342,23 @@ describe("the full url + paste state machine", () => {
     const done = await waitForStatus(base, loginId, "succeeded", "bob");
     expect(done.modelBound).toEqual({ provider: "openrouter", modelId: "m-1" });
 
-    const agentDir = ghostPaths(join(temp!.root, "bob")).agentDir;
-    const database = join(agentDir, "agent.db");
-    expect(existsSync(database)).toBe(true);
-    const stored = await AuthStorage.create(database);
+    const bob = ghostPaths(join(temp!.root, "bob"));
+    const context = openGhostSecretContext({
+      home: bob.home,
+      authPath: join(bob.agentDir, "auth.json"),
+      client: testSecretService,
+    });
+    const stored = new AuthStorage(new KeyringAuthCredentialStore(context));
     try {
       await stored.reload();
       expect(stored.get("openrouter")).toEqual({ type: "api_key", key: "sk-after-rename" });
     } finally {
       stored.close();
     }
-    expect(readGhostModels(ghostPaths(join(temp!.root, "bob")).home)?.roles?.chat_model)
+    const models = readFileSync(join(bob.home, "models.json"), "utf8");
+    expect(models).not.toContain("sk-after-rename");
+    expect(readGhostModels(bob.home)?.accounts).toContain("openrouter/personal");
+    expect(readGhostModels(bob.home)?.roles?.chat_model)
       .toEqual({ provider: "openrouter", modelId: "m-1" });
   });
 

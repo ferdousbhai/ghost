@@ -38,8 +38,9 @@ does not create task subagents. Claude Code retains its own native subagents.
   rules/, prompts/, tools/, hooks/
                                the remaining OMP package-root artifact directories
   settings.yml                 the ghost's OMP settings
-  models.json                  providers plus model roles and fallback chains
-  mcp.json                     the ghost's MCP servers
+  models.json                  providers, allowed keyring accounts, model roles,
+                               and fallback chains; secrets are references only
+  mcp.json                     the ghost's MCP servers; secrets are references only
   sessions/                    daemon-owned OMP transcripts and runtime sidecars
   sessions/<stem>.<runtime>.project.json
                                conversation project root, actual cwd, immutable
@@ -53,7 +54,7 @@ does not create task subagents. Claude Code retains its own native subagents.
                                conversation; never cloned by fork
   sessions/pins.json           v2 pinned state: { "version": 2, "pinned": ["<id>", …] }
   sessions/reads.json          v2 read state: { "version": 2, "reads": { "<id>": "<ISO timestamp>" } }
-  .pi/                         provider credentials and derived OMP machine runtime
+  .pi/                         derived OMP machine runtime; never credentials
   conversations/*.json         lossless source transcripts from the hosted export;
                                retained unchanged until that conversation is trashed
   export-manifest.json         present in imported archives; counts, pathRewrites,
@@ -205,28 +206,58 @@ or grown after admission is invalid state rather than an empty/default value.
 Recovery markers remain the authoritative owner of their id on such an error;
 the daemon neither erases them nor starts a replacement transaction.
 
-`.pi/` holds live provider credentials, and OMP stores them unencrypted: the
-`auth_credentials` row in `agent.db` is plain JSON behind nothing but 0600. That
-is an acceptable posture for a file that never leaves the machine, and the whole
-of it rests on that clause. **Nothing that copies a ghost home off this machine
-may include `.pi/`.** There is no export path today, only import, so this is a
-constraint on the one that gets built rather than a description of one that
-exists. Ghost moves that store to Secret Service in #23.
+Provider and MCP secrets are machine-wide Linux Secret Service items. Ghost
+uses only items with `xdg:schema=io.github.ferdousbhai.ghost.Secret`, plus exact
+`service` and `account` attributes; it never searches for, imports implicitly,
+shares, or mirrors pi/OMP items. One item is one `service/account` and its
+versioned secret payload may hold several named fields. `models.json` and
+`mcp.json` store only `keyring:<service>/<account>[#<field>]`. The no-fragment
+field is `value`. `models.json.accounts` is the ordered, duplicate-free policy
+list of bare `service/account` names this ghost may resolve. A reference outside
+that list is forbidden even when the item exists.
+`models.json` is read through `O_NOFOLLOW` from one single-link regular-file
+descriptor, with a 1 MiB cap, fatal UTF-8 decoding, and unchanged descriptor
+and live-path identity. Unsafe or changing input is invalid, never absent.
 
-A deleted ghost home leaves the root entirely, for the system trash; see the
-`DELETE` route. That carries `.pi/` with it, so an owner who excludes
-`~/ghosts` from a backup or sync tool has not excluded those credentials:
-deleting a ghost currently makes them more likely to leave the machine, not
-less. Nothing here fixes that; #23 does, by removing the plaintext store.
+References resolve in memory only, immediately before provider or MCP
+connection. OMP receives Ghost's `AuthCredentialStore`; no resolved value is
+projected to `.pi/models.omp.json`, a session sidecar, a log, or HTTP. Stable
+OMP row ids, keyring references, cross-process revisions, refresh leases,
+literal-account/migration coordination, session stickiness, usage cache, and
+credential cooldowns are secret-free and live in
+`$XDG_STATE_HOME/ghost/keyring-metadata.sqlite` (default
+`~/.local/state/ghost/keyring-metadata.sqlite`). The database is mode `0600` in
+a `0700` directory. Secret values never enter it.
+
+Opening any OMP runtime probes `org.freedesktop.secrets` and the default
+collection before migration or credential reads. A missing service, missing
+default collection, locked collection, forbidden account, absent field,
+malformed Ghost item, or failed read-after-write verification is a typed loud
+error before session-open stream headers; there is no plaintext, environment,
+pi/OMP-keyring, or keyless fallback around that failure. Secret Service protects
+at rest and keeps secrets out of copied homes. It is not isolation from another
+process already running as the same owner against the same unlocked service.
+
+Migration is idempotent and serialized per home. It imports active
+`.pi/agent.db` rows and legacy `.pi/auth.json`, replaces provider `apiKey` and
+header literals plus sensitive MCP environment/header/client-secret/URL and
+recognized credential-argument values with references, read-verifies every
+Secret Service write, atomically and durably replaces portable config, then
+removes `auth.json` and deletes and vacuums every `auth_credentials` row. No
+source is removed or replaced before its keyring writes verify; plaintext
+sources remain for retry. A conflicting literal never overwrites a Ghost-known
+schema item, even if secret-free metadata was lost: migration allocates
+`account-2`, `account-3`, and so on. Credentials
+already copied into backup, sync, or
+Trash history remain exposed there and may need provider-side rotation.
 
 One naming convention makes the boundary readable rather than remembered. A
 plain-named entry in a ghost home is part of that ghost's identity and travels
 with it, including `settings.yml`, `models.json`, and `mcp.json`. A dot-prefixed
-entry is bound to this machine and never leaves it: `.pi/` (credentials and
-derived OMP runtime), `.browser-profile/` (cookies and logins), and `.trash/`.
-Until #23 replaces inline secrets with Secret Service references, credential
-values may still appear inside the otherwise portable `models.json` and
-`mcp.json`; any future export must not copy those values as identity.
+entry is bound to this machine and never leaves it: `.pi/` (derived OMP
+runtime), `.browser-profile/` (cookies and logins), and `.trash/` (recoverable
+per-home deletion state). Export needs no credential exception: portable files
+contain references rather than values.
 
 ### Session capabilities
 
@@ -239,7 +270,7 @@ and never broaden another ghost or conversation.
 
 A Pi session uses OMP's runtime and native tools, but Ghost owns its roots. A
 new conversation's operational cwd is the OS account home (`os.homedir()`),
-while `agentDir`, `sessionDir`, character, memory, persona, credentials, tokens,
+while `agentDir`, `sessionDir`, character, memory, persona, keyring policy,
 browser profile, and MCP/config sources remain explicit paths under the ghost
 home. Cwd is not storage and is not authority to discover a project. Ghost
 keeps the operating half of OMP's system prompt, then appends the Ghost persona,
@@ -603,7 +634,9 @@ one must not be a leak of both.
   manager. The move is a same-filesystem rename; `EXDEV` falls back to
   `<root>/.trash/<name>-<YYYYMMDD-HHMMSS>[-<n>]/`, still a move, recovered with
   a plain `mv`. Nothing removes a trashed ghost — not the daemon, not on a
-  schedule; emptying the trash is the owner's. Checked in this order:
+  schedule; emptying the trash is the owner's. Delete never reads or removes a
+  machine keyring item, so restoring the home restores its references and
+  policy without losing the service/account login. Checked in this order:
   `confirm` must be present and byte-equal to `:name`
   (`400 confirmation_required`); an unknown ghost is `404 not_found`; a ghost
   with any conversation busy, opening, or mid-delete — pi or Claude Code — is
@@ -615,8 +648,10 @@ one must not be a leak of both.
 - `PUT  /api/ghosts/:name/name` `{ name: "<new>" }` → `{ ok: true, name }` — the
   ghost's name IS its home directory's name, so renaming one is anchored by a
   same-filesystem rename of `<root>/<old>/` to `<root>/<new>/`. Persona, memory,
-  conversations, pins, and credentials are inside the directory that
-  moved; every conversation id stored with its transcript stays valid,
+  conversations, pins, keyring references, and account policy are inside the
+  directory that moved; machine credentials are service/account scoped and the
+  rename never reads or writes Secret Service. Every conversation id stored
+  with its transcript stays valid,
   and every other route's `:name` changes with it. `character.md` is the ghost's
   own words and is never touched. The one exception is a character file
   byte-equal to the daemon-authored seed: it is re-rendered in
@@ -669,7 +704,13 @@ one must not be a leak of both.
   and query values become `[configured]` markers. Malformed, templated, opaque,
   and non-HTTP(S) strings are wholly `[configured]`.
   Before a live connection or isolated test, Ghost applies OMP's ordinary
-  environment interpolation to the rest of the validated server row. A stdio
+  environment interpolation to the rest of the validated server row. Before
+  that expansion it resolves allowed `keyring:` references into a fresh
+  in-memory row. Environment values, header values, OAuth/auth client secrets,
+  sensitive URL values, and recognized credential arguments written through
+  the management API are read-verified into Secret Service and the writer
+  receives their references; a supplied reference is accepted only when its
+  bare service/account is in `models.json.accounts`. A stdio
   `env` map with `envPolicy:"literal"` and a remote `headers` map with
   `headerPolicy:"origin-locked"` are excluded from that traversal and reach
   `MCPManager` value-for-value; ambient environment values never enter those
@@ -1441,25 +1482,32 @@ selection returns immediately and the shell closes the picker back to chat.
 ### Model login (`ghostd` drives OMP's provider OAuth / API-key flows)
 
 Signing a ghost into a provider is interactive and multi-step, so it is modeled
-as a short-lived, pollable login session. Credentials are written by OMP's
-`AuthStorage` to the ghost's `<home>/.pi/agent.db` and nowhere else; a pasted code
-or key is never echoed in a GET body or a log.
+as a short-lived, pollable login session. OMP's `AuthStorage` writes through
+Ghost's `AuthCredentialStore` into the Ghost Secret Service schema at the
+selected service/account; a pasted code, key, or token is never written below
+the ghost home, echoed in a GET body, or logged.
 
 - `GET  /api/ghosts/:name/providers` → `{ providers: [{ id, name, subscription,
   authTypes: ("oauth"|"api_key")[], loginLabel?, billingNote?, configured,
-  connectedVia? }] }`,
+  connectedVia?, accounts: [{ account, configured, connectedVia? }] }] }`,
   derived from OMP's registry (openai-codex, openrouter, anthropic, github-copilot,
   xai, …). Ambient-only providers and the externally authenticated
   `claude-code` runtime are omitted.
-- `POST /api/ghosts/:name/login` `{ providerId, authType }` → `201` with the
+- `POST /api/ghosts/:name/login` `{ providerId, authType, account? }` → `201` with the
   initial **login view** (below), including `loginId`.
 - `GET  /api/ghosts/:name/login/:loginId` → the current **login view**: the step
   to show. Poll it.
 - `POST /api/ghosts/:name/login/:loginId/input` `{ value }` → satisfy an awaiting
   prompt (a pasted code, an api key, or a selected option id) → the updated view.
+- `DELETE /api/ghosts/:name/providers/:provider/accounts/:account` →
+  `{ ok:true, providerId, account }` removes only that whole Ghost-schema
+  service/account item, then applies the ordinary credential refresh boundary
+  to live sessions. Another account and every ghost policy remain untouched;
+  every ghost referencing the removed machine account fails closed until it is
+  restored or logged in again.
 
 The **login view** is
-`{ loginId, providerId, authType, status, message?, authUrl?, authInstructions?,
+`{ loginId, providerId, account, authType, status, message?, authUrl?, authInstructions?,
 deviceCode?, verificationUrl?, deviceExpiresInSeconds?, prompt?, modelBound?,
 error? }` where `status` is one of `starting | working | awaiting_url |
 awaiting_device_code | awaiting_input | awaiting_select | succeeded | failed`,
@@ -1477,16 +1525,14 @@ Abandoned logins time out and are cleaned up server-side.
 A live login belongs to the ghost home's filesystem identity, not to the
 directory name captured when it started. Renaming the ghost therefore changes
 the login routes to the new `:name` without interrupting the provider flow;
-OMP's already-open credential store follows the same home move, so the
-credential and any default model binding land in the renamed home. Deleting a
-ghost cancels and forgets its live logins; reusing the deleted name cannot adopt
-one because it is a different home.
+the keyring write is name-independent, and the successful policy/model write
+resolves the current filesystem identity so it lands in the renamed home.
+Deleting a ghost cancels and forgets its live logins but does not touch the
+machine credential; reusing the deleted name cannot adopt the old live flow
+because it is a different home.
 
 The same flow runs in the terminal as `ghostd login [<ghost>] [--provider <id>]
-[--api-key]`.
-
-For an existing installation, `.pi/auth.json` is imported into `agent.db` once,
-without deleting the legacy file. After migration, `agent.db` is canonical.
+[--account <name>] [--api-key]`.
 
 ### Claude Code plan runtime (external auth)
 
@@ -1554,6 +1600,11 @@ whole model before any non-local exposure.
 
 ## OMP 18 harness invariants
 
+- Construct `AuthStorage` with Ghost's `AuthCredentialStore`; never call
+  `AuthStorage.create(agent.db)`. Secret Service items use Ghost's schema and
+  exact configured service/account references only. OMP row identity, refresh
+  leases, cooldowns, and usage/session cache live in Ghost's XDG-state metadata
+  database so daemon and CLI opens coordinate without putting a bearer there.
 - `createAgentSession({ agentDir })` does NOT redirect session storage — use
   `SessionManager.create(cwd, sessionDir)` or sessions land in global `~/.pi`.
 - Scrub inherited env before session creation: stray provider API keys
