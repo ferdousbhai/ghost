@@ -215,9 +215,10 @@ versioned secret payload may hold several named fields. `models.json` and
 field is `value`. `models.json.accounts` is the ordered, duplicate-free policy
 list of bare `service/account` names this ghost may resolve. A reference outside
 that list is forbidden even when the item exists.
-`models.json` is read through `O_NOFOLLOW` from one single-link regular-file
-descriptor, with a 1 MiB cap, fatal UTF-8 decoding, and unchanged descriptor
-and live-path identity. Unsafe or changing input is invalid, never absent.
+`models.json` and every plaintext migration source — `mcp.json`, `.pi/auth.json`
+— are read through `O_NOFOLLOW` from one single-link regular-file descriptor,
+with a 1 MiB cap, fatal UTF-8 decoding, and unchanged descriptor and live-path
+identity. Unsafe or changing input is invalid, never absent.
 
 References resolve in memory only, immediately before provider or MCP
 connection. OMP receives Ghost's `AuthCredentialStore`; no resolved value is
@@ -252,12 +253,11 @@ rejects is not a migration failure: migration skips it untouched, the catalogue
 keeps reporting it as `invalid_mcp_server`/skipped, and any secret it holds
 stays plaintext in that visibly invalid row until the owner corrects it, after
 which the next open migrates it. Fail-closed is about the keyring, not about a
-neighbouring row's shape. `.pi/agent.db` is read and scrubbed where an
-older home has one; no session, login, or model listing creates one, so a home
+neighbouring row's shape. `.pi/agent.db` is read and scrubbed where an older
+home has one; no session, login, or model listing creates one, so a home
 migrated or created after this point holds only derived non-credential state
-there. Credentials
-already copied into backup, sync, or
-Trash history remain exposed there and may need provider-side rotation.
+there. Credentials already copied into backup, sync, or Trash history remain
+exposed there and may need provider-side rotation.
 
 One naming convention makes the boundary readable rather than remembered. A
 plain-named entry in a ghost home is part of that ghost's identity and travels
@@ -660,24 +660,24 @@ one must not be a leak of both.
   same-filesystem rename of `<root>/<old>/` to `<root>/<new>/`. Persona, memory,
   conversations, pins, keyring references, and account policy are inside the
   directory that moved; machine credentials are service/account scoped and the
-  rename never reads or writes Secret Service. Every conversation id stored
-  with its transcript stays valid,
-  and every other route's `:name` changes with it. `character.md` is the ghost's
-  own words and is never touched. The one exception is a character file
-  byte-equal to the daemon-authored seed: it is re-rendered in
-  canonical Markdown under the new name. That replacement is staged beside the
-  character file before the home moves and published atomically afterwards; a
-  staging failure moves nothing, and a publish failure rolls the home move back.
-  Checked in this order: the new name gets the same validation
-  `POST /api/ghosts` applies (`400`); an unknown ghost is `404 not_found`;
-  renaming to the ghost's current name is a no-op `200`; a name already taken in
-  the root — by a ghost or by anything else — is `409 already_exists`; a ghost
-  with any conversation busy, opening, or mid-delete is `409 ghost_busy`, the
-  same gate `DELETE` uses, as is a second concurrent rename or delete. Idle
-  hosted sessions are closed and pending title work awaited first, so nothing
-  holds a path under the old name across the rename. A Claude Code conversation
-  keeps its resume sidecar, but that runtime stores the transcript itself under
-  its own `~/.claude/projects/<cwd>` path, which does not move with the home.
+  rename never reads or writes Secret Service. Every conversation id stored with
+  its transcript stays valid, and every other route's `:name` changes with it.
+  `character.md` is the ghost's own words and is never touched. The one
+  exception is a character file byte-equal to the daemon-authored seed: it is
+  re-rendered in canonical Markdown under the new name. That replacement is
+  staged beside the character file before the home moves and published
+  atomically afterwards; a staging failure moves nothing, and a publish failure
+  rolls the home move back. Checked in this order: the new name gets the same
+  validation `POST /api/ghosts` applies (`400`); an unknown ghost is
+  `404 not_found`; renaming to the ghost's current name is a no-op `200`; a name
+  already taken in the root — by a ghost or by anything else — is
+  `409 already_exists`; a ghost with any conversation busy, opening, or
+  mid-delete is `409 ghost_busy`, the same gate `DELETE` uses, as is a second
+  concurrent rename or delete. Idle hosted sessions are closed and pending title
+  work awaited first, so nothing holds a path under the old name across the
+  rename. A Claude Code conversation keeps its resume sidecar, but that runtime
+  stores the transcript itself under its own `~/.claude/projects/<cwd>` path,
+  which does not move with the home.
 - `GET  /api/ghosts/:name/context` → `{ character, memory, agents,
   skipped }` — the owner's browseable ghost context,
   derived from disk for each request and never stored. `character` is
@@ -717,10 +717,10 @@ one must not be a leak of both.
   environment interpolation to the rest of the validated server row. Before
   that expansion it resolves allowed `keyring:` references into a fresh
   in-memory row. Environment values, header values, OAuth/auth client secrets,
-  sensitive URL values, and recognized credential arguments written through
-  the management API are read-verified into Secret Service and the writer
-  receives their references; a supplied reference is accepted only when its
-  bare service/account is in `models.json.accounts`. A stdio
+  sensitive URL values, and recognized credential arguments written through the
+  management API are read-verified into Secret Service and the writer receives
+  their references; a supplied reference is accepted only when its bare
+  service/account is in `models.json.accounts`. A stdio
   `env` map with `envPolicy:"literal"` and a remote `headers` map with
   `headerPolicy:"origin-locked"` are excluded from that traversal and reach
   `MCPManager` value-for-value; ambient environment values never enter those
@@ -1503,8 +1503,8 @@ the ghost home, echoed in a GET body, or logged.
   derived from OMP's registry (openai-codex, openrouter, anthropic, github-copilot,
   xai, …). Ambient-only providers and the externally authenticated
   `claude-code` runtime are omitted.
-- `POST /api/ghosts/:name/login` `{ providerId, authType, account? }` → `201` with the
-  initial **login view** (below), including `loginId`.
+- `POST /api/ghosts/:name/login` `{ providerId, authType, account? }` → `201`
+  with the initial **login view** (below), including `loginId`.
 - `GET  /api/ghosts/:name/login/:loginId` → the current **login view**: the step
   to show. Poll it.
 - `POST /api/ghosts/:name/login/:loginId/input` `{ value }` → satisfy an awaiting
@@ -1517,11 +1517,12 @@ the ghost home, echoed in a GET body, or logged.
   restored or logged in again.
 
 The **login view** is
-`{ loginId, providerId, account, authType, status, message?, authUrl?, authInstructions?,
-deviceCode?, verificationUrl?, deviceExpiresInSeconds?, prompt?, modelBound?,
-error? }` where `status` is one of `starting | working | awaiting_url |
-awaiting_device_code | awaiting_input | awaiting_select | succeeded | failed`,
-and `prompt` (when present) is `{ kind: "text"|"secret"|"manual_code"|"select",
+`{ loginId, providerId, account, authType, status, message?, authUrl?,
+authInstructions?, deviceCode?, verificationUrl?, deviceExpiresInSeconds?,
+prompt?, modelBound?, error? }` where `status` is one of `starting | working |
+awaiting_url | awaiting_device_code | awaiting_input | awaiting_select |
+succeeded | failed`, and `prompt` (when present) is
+`{ kind: "text"|"secret"|"manual_code"|"select",
 message, placeholder?, secret, options? }`. A callback-server flow carries an
 `authUrl` AND a paste `prompt` at once (open the URL, or paste the code). On
 `succeeded`, `modelBound` is set when the ghost had no chat model and one was

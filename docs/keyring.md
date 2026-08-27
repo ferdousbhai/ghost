@@ -56,9 +56,9 @@ vacuumed, and `auth.json` is removed. Matching literals reuse an existing Ghost
 schema item; a conflicting value receives `account-2`, `account-3`, and so on
 rather than overwriting another login, even if the secret-free metadata database
 was lost. An interrupted run resumes from the source that remains. A locked or
-missing service, absent item, disallowed account,
-malformed item, or failed verification is reported as a keyring error and leaves
-plaintext migration sources available for retry.
+missing service, absent item, disallowed account, malformed item, or failed
+verification is reported as a keyring error and leaves plaintext migration
+sources available for retry.
 
 Nothing recreates `.pi/agent.db` afterwards, so a home created after the move
 never has one. An `mcp.json` server that Ghost's MCP schema rejects is a

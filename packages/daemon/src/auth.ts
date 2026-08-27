@@ -357,6 +357,19 @@ async function discoverAvailableModels(
   });
 }
 
+/** Reject an account label the machine keyring could never name. */
+function assertAccountName(providerId: string, account: string): void {
+  try {
+    parseSecretAccountName(`${serviceForCredentialProvider(providerId)}/${account}`);
+  } catch {
+    throw new GhostError(
+      "invalid_request",
+      '"account" must use lowercase letters, numbers, dots, underscores, or hyphens.',
+      400,
+    );
+  }
+}
+
 export class LoginManager {
   private readonly registry: GhostRegistry;
   private readonly logger: Logger;
@@ -416,15 +429,7 @@ export class LoginManager {
       if (!offered) {
         throw new GhostError("unknown_provider", `No provider ${JSON.stringify(providerId)} to log out of.`, 400);
       }
-      try {
-        parseSecretAccountName(`${serviceForCredentialProvider(providerId)}/${account}`);
-      } catch {
-        throw new GhostError(
-          "invalid_request",
-          '"account" must use lowercase letters, numbers, dots, underscores, or hyphens.',
-          400,
-        );
-      }
+      assertAccountName(providerId, account);
       await runtime.logout(providerId, account);
       await this.onLoginSucceeded(ghostName, new AbortController().signal);
     } finally {
@@ -490,15 +495,7 @@ export class LoginManager {
     if (!AUTH_TYPES.includes(authType)) {
       throw new GhostError("invalid_request", '"authType" must be "oauth" or "api_key".', 400);
     }
-    try {
-      parseSecretAccountName(`${serviceForCredentialProvider(providerId)}/${account}`);
-    } catch {
-      throw new GhostError(
-        "invalid_request",
-        '"account" must use lowercase letters, numbers, dots, underscores, or hyphens.',
-        400,
-      );
-    }
+    assertAccountName(providerId, account);
     const ghostHome = ghostHomeIdentity(ghost.dir);
     if ([...this.moving].some((movingHome) => sameGhostHome(movingHome, ghostHome))) {
       throw new GhostError(

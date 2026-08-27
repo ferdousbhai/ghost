@@ -28,15 +28,23 @@ export interface SecretServiceClient {
   clear(ref: SecretAccountRef): void;
 }
 
+const LOCKED_MESSAGE =
+  "Ghost cannot open credentials because the default Linux keyring is locked. Unlock it in this desktop session and retry.";
+
 function commandFailure(command: string, stderr: string): SecretServiceError {
   const detail = stderr.trim();
-  const locked = /locked|islocked/i.test(detail);
+  if (/locked|islocked/i.test(detail)) {
+    return new SecretServiceError("keyring_locked", LOCKED_MESSAGE);
+  }
   return new SecretServiceError(
-    locked ? "keyring_locked" : "keyring_unavailable",
-    locked
-      ? "Ghost cannot open credentials because the default Linux keyring is locked. Unlock it in this desktop session and retry."
-      : `Ghost cannot open credentials because Linux Secret Service is unavailable (${command} failed). Start an org.freedesktop.secrets service on the user bus and retry.`,
+    "keyring_unavailable",
+    `Ghost cannot open credentials because Linux Secret Service is unavailable (${command} failed). Start an org.freedesktop.secrets service on the user bus and retry.`,
   );
+}
+
+/** The exact attributes of one Ghost-owned item; never a search pattern. */
+function itemAttributes(ref: SecretAccountRef): string[] {
+  return ["xdg:schema", GHOST_SECRET_SCHEMA, "service", ref.service, "account", ref.account];
 }
 
 /**
@@ -66,30 +74,25 @@ export class SecretToolServiceClient implements SecretServiceClient {
       throw commandFailure("gdbus", result.stderr ?? String(result.error ?? ""));
     }
     if (/\btrue\b/i.test(result.stdout)) {
-      throw new SecretServiceError(
-        "keyring_locked",
-        "Ghost cannot open credentials because the default Linux keyring is locked. Unlock it in this desktop session and retry.",
-      );
+      throw new SecretServiceError("keyring_locked", LOCKED_MESSAGE);
     }
     if (!/\bfalse\b/i.test(result.stdout)) {
       throw commandFailure("gdbus", "Secret Service returned an invalid Locked property.");
     }
   }
 
-  read(input: SecretAccountRef): string | null {
+  /** Revalidate the caller's names and refuse before touching a locked service. */
+  private target(input: SecretAccountRef): SecretAccountRef {
     const ref = parseSecretAccountName(secretAccountName(input));
     this.assertAvailable();
+    return ref;
+  }
+
+  read(input: SecretAccountRef): string | null {
+    const ref = this.target(input);
     const result = spawnSync(
       "secret-tool",
-      [
-        "lookup",
-        "xdg:schema",
-        GHOST_SECRET_SCHEMA,
-        "service",
-        ref.service,
-        "account",
-        ref.account,
-      ],
+      ["lookup", ...itemAttributes(ref)],
       { encoding: "utf8", timeout: 5_000 },
     );
     if (result.error) throw commandFailure("secret-tool lookup", String(result.error));
@@ -99,20 +102,10 @@ export class SecretToolServiceClient implements SecretServiceClient {
   }
 
   write(input: SecretAccountRef, secret: string): void {
-    const ref = parseSecretAccountName(secretAccountName(input));
-    this.assertAvailable();
+    const ref = this.target(input);
     const result = spawnSync(
       "secret-tool",
-      [
-        "store",
-        `--label=Ghost secret: ${secretAccountName(ref)}`,
-        "xdg:schema",
-        GHOST_SECRET_SCHEMA,
-        "service",
-        ref.service,
-        "account",
-        ref.account,
-      ],
+      ["store", `--label=Ghost secret: ${secretAccountName(ref)}`, ...itemAttributes(ref)],
       { encoding: "utf8", input: secret, timeout: 5_000 },
     );
     if (result.error || result.status !== 0) {
@@ -121,19 +114,10 @@ export class SecretToolServiceClient implements SecretServiceClient {
   }
 
   clear(input: SecretAccountRef): void {
-    const ref = parseSecretAccountName(secretAccountName(input));
-    this.assertAvailable();
+    const ref = this.target(input);
     const result = spawnSync(
       "secret-tool",
-      [
-        "clear",
-        "xdg:schema",
-        GHOST_SECRET_SCHEMA,
-        "service",
-        ref.service,
-        "account",
-        ref.account,
-      ],
+      ["clear", ...itemAttributes(ref)],
       { encoding: "utf8", timeout: 5_000 },
     );
     if (result.error || (result.status !== 0 && result.status !== 1)) {

@@ -35,8 +35,11 @@ import type {
   LoginRuntime,
 } from "./auth.js";
 import type { ModelCatalogRuntime } from "./model-catalog.js";
-import { KeyringAuthCredentialStore } from "./keyring-credential-store.js";
-import { readGhostModels } from "./models.js";
+import {
+  KeyringAuthCredentialStore,
+  type GhostSecretContext,
+} from "./keyring-credential-store.js";
+import { readGhostModels, type GhostModelsFile } from "./models.js";
 import {
   authorizeGhostAccounts,
   openGhostSecretContext,
@@ -125,11 +128,51 @@ function authStorageProvider(providerId: string): string {
   return getProviderDefinition(providerId)?.storeCredentialsAs ?? providerId;
 }
 
+/** The machine account one provider's credential lives at, as policy names it. */
+function providerAccountName(providerId: string, account: string): string {
+  return secretAccountName({
+    service: serviceForCredentialProvider(authStorageProvider(providerId)),
+    account,
+  });
+}
+
+/**
+ * Resolve each provider's keyring references into the live registry, and report
+ * which of that provider's own accounts its configuration names.
+ *
+ * OMP's file loader only ever sees `KEYRING_PLACEHOLDER`; the values arrive
+ * here, in memory, and never touch the projected view on disk.
+ */
+function registerKeyringProviders(
+  registry: ModelRegistry,
+  models: GhostModelsFile,
+  resolver: GhostSecretContext,
+): ReadonlyMap<string, ReadonlySet<string>> {
+  const configAccounts = new Map<string, ReadonlySet<string>>();
+  for (const [provider, config] of Object.entries(models.providers)) {
+    const references = [config.apiKey, ...Object.values(config.headers ?? {})]
+      .filter((value): value is string => typeof value === "string" && isSecretReference(value))
+      .map(parseSecretReference);
+    if (references.length === 0) continue;
+    const service = serviceForCredentialProvider(authStorageProvider(provider));
+    const accounts = new Set(references
+      .filter((ref) => ref.service === service)
+      .map((ref) => ref.account));
+    if (accounts.size > 0) configAccounts.set(provider, accounts);
+    const resolved = resolveProviderSecrets(config, resolver);
+    registry.registerProvider(provider, {
+      ...(resolved.apiKey ? { apiKey: resolved.apiKey } : {}),
+      ...(resolved.headers ? { headers: resolved.headers } : {}),
+    }, "ghost-keyring");
+  }
+  return configAccounts;
+}
+
 /** A small old-shape facade so Ghost's stable HTTP/CLI contracts need not leak OMP internals. */
 export class GhostOmpRuntime implements LoginRuntime, ModelCatalogRuntime {
   readonly modelRegistry: ModelRegistry;
   readonly authStorage: AuthStorage;
-  readonly secretResolver: ReturnType<typeof openGhostSecretContext>;
+  readonly secretResolver: GhostSecretContext;
   private readonly credentialStore: KeyringAuthCredentialStore;
   private readonly providerConfigAccounts: ReadonlyMap<string, ReadonlySet<string>>;
 
@@ -137,7 +180,7 @@ export class GhostOmpRuntime implements LoginRuntime, ModelCatalogRuntime {
     authStorage: AuthStorage,
     modelRegistry: ModelRegistry,
     credentialStore: KeyringAuthCredentialStore,
-    secretResolver: ReturnType<typeof openGhostSecretContext>,
+    secretResolver: GhostSecretContext,
     providerConfigAccounts: ReadonlyMap<string, ReadonlySet<string>>,
   ) {
     this.authStorage = authStorage;
@@ -167,27 +210,7 @@ export class GhostOmpRuntime implements LoginRuntime, ModelCatalogRuntime {
         ...(input.settings ? { settings: input.settings } : {}),
         cacheDbPath: join(agentDir, "models.db"),
       });
-      const providerConfigAccounts = new Map<string, ReadonlySet<string>>();
-      for (const [provider, raw] of Object.entries(models.providers)) {
-        const storageProvider = authStorageProvider(provider);
-        const service = serviceForCredentialProvider(storageProvider);
-        const accounts = new Set<string>();
-        for (const value of [raw.apiKey, ...Object.values(raw.headers ?? {})]) {
-          if (typeof value === "string" && isSecretReference(value)) {
-            const ref = parseSecretReference(value);
-            if (ref.service === service) accounts.add(ref.account);
-          }
-        }
-        if (accounts.size > 0) providerConfigAccounts.set(provider, accounts);
-        const hasReferences = (typeof raw.apiKey === "string" && isSecretReference(raw.apiKey))
-          || Object.values(raw.headers ?? {}).some(isSecretReference);
-        if (!hasReferences) continue;
-        const resolved = resolveProviderSecrets(raw, secretResolver);
-        modelRegistry.registerProvider(provider, {
-          ...(resolved.apiKey ? { apiKey: resolved.apiKey } : {}),
-          ...(resolved.headers ? { headers: resolved.headers } : {}),
-        }, "ghost-keyring");
-      }
+      const providerConfigAccounts = registerKeyringProviders(modelRegistry, models, secretResolver);
       await modelRegistry.hydrateCredentialScopedModelCaches();
       await modelRegistry.refresh(input.allowModelNetwork ? "online-if-uncached" : "offline");
       return new GhostOmpRuntime(
@@ -305,17 +328,13 @@ export class GhostOmpRuntime implements LoginRuntime, ModelCatalogRuntime {
     account = "personal",
   ): Promise<Credential> {
     const storageProvider = authStorageProvider(providerId);
-    const accountName = secretAccountName({
-      service: serviceForCredentialProvider(storageProvider),
-      account,
-    });
+    const accountName = providerAccountName(providerId, account);
     // Make the selected row visible to this short-lived login runtime before
     // AuthStorage rebuilds its snapshot. Durable policy is written only after
     // the flow succeeds, against the ghost's current (possibly renamed) home.
     this.credentialStore.allowAccounts([accountName]);
     this.credentialStore.setWriteAccount(storageProvider, account);
     try {
-      let credential: Credential;
       if (type === "api_key") {
         const key = await interaction.prompt({
           type: "secret",
@@ -324,55 +343,47 @@ export class GhostOmpRuntime implements LoginRuntime, ModelCatalogRuntime {
           signal: interaction.signal,
         });
         if (!key) throw new Error("No API key was entered.");
-        credential = { type: "api_key", key };
+        const credential: Credential = { type: "api_key", key };
         await this.authStorage.set(storageProvider, credential);
-      } else {
-        await this.authStorage.login(providerId, {
-          signal: interaction.signal,
-          onAuth: info => interaction.notify({
-            type: "auth_url",
-            url: info.launchUrl ?? info.url,
-            ...(info.instructions ? { instructions: info.instructions } : {}),
-          }),
-          onProgress: message => interaction.notify({ type: "progress", message }),
-          onPrompt: prompt => interaction.prompt({
-            type: "text",
-            message: prompt.message,
-            ...(prompt.placeholder ? { placeholder: prompt.placeholder } : {}),
-            signal: interaction.signal,
-          }),
-          onManualCodeInput: () => interaction.prompt({
-            type: "manual_code",
-            message: "Paste the authorization code (or full redirect URL)",
-            signal: interaction.signal,
-          }),
-        });
-        const stored = this.authStorage.get(providerId) ?? this.authStorage.get(storageProvider);
-        if (!stored) throw new Error(`OMP completed ${providerId} login without storing a credential.`);
-        credential = stored;
+        return credential;
       }
-      return credential;
+      await this.authStorage.login(providerId, {
+        signal: interaction.signal,
+        onAuth: info => interaction.notify({
+          type: "auth_url",
+          url: info.launchUrl ?? info.url,
+          ...(info.instructions ? { instructions: info.instructions } : {}),
+        }),
+        onProgress: message => interaction.notify({ type: "progress", message }),
+        onPrompt: prompt => interaction.prompt({
+          type: "text",
+          message: prompt.message,
+          ...(prompt.placeholder ? { placeholder: prompt.placeholder } : {}),
+          signal: interaction.signal,
+        }),
+        onManualCodeInput: () => interaction.prompt({
+          type: "manual_code",
+          message: "Paste the authorization code (or full redirect URL)",
+          signal: interaction.signal,
+        }),
+      });
+      const stored = this.authStorage.get(providerId) ?? this.authStorage.get(storageProvider);
+      if (!stored) throw new Error(`OMP completed ${providerId} login without storing a credential.`);
+      return stored;
     } finally {
       this.credentialStore.clearWriteAccount();
     }
   }
 
   authorizeAccount(providerId: string, account: string, home: string): void {
-    const storageProvider = authStorageProvider(providerId);
-    const accountName = secretAccountName({
-      service: serviceForCredentialProvider(storageProvider),
-      account,
-    });
+    const accountName = providerAccountName(providerId, account);
     authorizeGhostAccounts(home, this.secretResolver, [accountName]);
     this.credentialStore.allowAccounts([accountName]);
   }
 
   async logout(providerId: string, account: string): Promise<void> {
     const storageProvider = authStorageProvider(providerId);
-    const accountName = secretAccountName({
-      service: serviceForCredentialProvider(storageProvider),
-      account,
-    });
+    const accountName = providerAccountName(providerId, account);
     if (!this.secretResolver.allowedAccounts.has(accountName)) {
       throw new SecretServiceError(
         "secret_not_authorized",

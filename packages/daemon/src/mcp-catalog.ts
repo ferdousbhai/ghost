@@ -529,6 +529,36 @@ export class McpCatalog {
     return { servers, skipped };
   }
 
+  /**
+   * Move a row's literal secrets into the machine keyring, authorize the
+   * accounts they landed in, then write the reference-only row.
+   *
+   * `add` and `update` share this because they must not drift on its ordering:
+   * policy is widened only after a verified keyring write, and the secret
+   * context is closed on every path out.
+   */
+  private async writeMigratedServer(
+    mutation: "add" | "update",
+    ghostName: string,
+    absolutePath: string,
+    name: string,
+    config: unknown,
+  ): Promise<void> {
+    const home = this.registry.get(ghostName).dir;
+    const context = openGhostSecretContext({ home });
+    try {
+      const migrated = materializeMcpSecretReferences(name, config as MCPServerConfig, context);
+      authorizeGhostAccounts(home, context, migrated.addedAccounts);
+      try {
+        await this.writer[mutation](absolutePath, name, migrated.config);
+      } catch (error) {
+        translateWriterError(error, name);
+      }
+    } finally {
+      context.close();
+    }
+  }
+
   /** Add a new server to the visible ghost file. */
   async add(ghostName: string, name: string, config: unknown): Promise<McpCatalogSnapshot> {
     validateMutation(name, config);
@@ -538,16 +568,7 @@ export class McpCatalog {
         throw new GhostError("mcp_server_exists", `MCP server ${JSON.stringify(name)} already exists.`, 409);
       }
       const [canonical] = this.sources(ghostName);
-      const context = openGhostSecretContext({ home: this.registry.get(ghostName).dir });
-      try {
-        const migrated = materializeMcpSecretReferences(name, config as MCPServerConfig, context);
-        authorizeGhostAccounts(this.registry.get(ghostName).dir, context, migrated.addedAccounts);
-        await this.writer.add(canonical.absolutePath, name, migrated.config);
-      } catch (error) {
-        translateWriterError(error, name);
-      } finally {
-        context.close();
-      }
+      await this.writeMigratedServer("add", ghostName, canonical.absolutePath, name, config);
       return this.list(ghostName);
     });
   }
@@ -561,17 +582,7 @@ export class McpCatalog {
       if (!server) {
         throw new GhostError("mcp_server_not_found", `No MCP server named ${JSON.stringify(name)}.`, 404);
       }
-      const home = this.registry.get(ghostName).dir;
-      const context = openGhostSecretContext({ home });
-      try {
-        const migrated = materializeMcpSecretReferences(name, config as MCPServerConfig, context);
-        authorizeGhostAccounts(home, context, migrated.addedAccounts);
-        await this.writer.update(server.source.absolutePath, name, migrated.config);
-      } catch (error) {
-        translateWriterError(error, name);
-      } finally {
-        context.close();
-      }
+      await this.writeMigratedServer("update", ghostName, server.source.absolutePath, name, config);
       return this.list(ghostName);
     });
   }
@@ -626,52 +637,49 @@ export class McpCatalog {
     return this.withHomeLease(ghostName, async () => {
       const home = this.registry.get(ghostName).dir;
       const context = openGhostSecretContext({ home });
-      const server = (await this.effective(ghostName)).configured
-        .find((candidate) => candidate.name === name);
-      if (!server) {
-        context.close();
-        throw new GhostError("mcp_server_not_found", `No MCP server named ${JSON.stringify(name)}.`, 404);
-      }
       try {
+        const server = (await this.effective(ghostName)).configured
+          .find((candidate) => candidate.name === name);
+        if (!server) {
+          throw new GhostError("mcp_server_not_found", `No MCP server named ${JSON.stringify(name)}.`, 404);
+        }
         validateMutation(name, server.config);
-      } catch (error) {
-        context.close();
-        throw error;
-      }
-      const manager = new MCPManager(home, null, { redactErrors: true });
-      const source: SourceMeta = {
-        provider: "native",
-        providerName: "OMP",
-        path: server.source.absolutePath,
-        level: "user",
-      };
-      try {
-        const resolved = resolveMcpServerSecrets(server.config as MCPServerConfig, context);
-        const expanded = expandMcpServerConfig(resolved);
-        const result = await manager.connectServers(
-          { [name]: normalizeMcpStdioCwd(expanded, home) },
-          { [name]: source },
-        );
-        const connected = result.connectedServers.includes(name)
-          || manager.getConnectionStatus(name) === "connected";
-        return {
-          name,
-          ok: connected,
-          status: connected ? "connected" : "failed",
-          toolCount: manager.getTools().filter((tool) => tool.mcpServerName === name).length,
-          message: connected ? "Connection succeeded." : "Connection failed; check the server configuration.",
+        const manager = new MCPManager(home, null, { redactErrors: true });
+        const source: SourceMeta = {
+          provider: "native",
+          providerName: "OMP",
+          path: server.source.absolutePath,
+          level: "user",
         };
-      } catch (error) {
-        if (error instanceof SecretServiceError) throw error;
-        return {
-          name,
-          ok: false,
-          status: "failed",
-          toolCount: 0,
-          message: "Connection failed; check the server configuration.",
-        };
+        try {
+          const resolved = resolveMcpServerSecrets(server.config as MCPServerConfig, context);
+          const expanded = expandMcpServerConfig(resolved);
+          const result = await manager.connectServers(
+            { [name]: normalizeMcpStdioCwd(expanded, home) },
+            { [name]: source },
+          );
+          const connected = result.connectedServers.includes(name)
+            || manager.getConnectionStatus(name) === "connected";
+          return {
+            name,
+            ok: connected,
+            status: connected ? "connected" : "failed",
+            toolCount: manager.getTools().filter((tool) => tool.mcpServerName === name).length,
+            message: connected ? "Connection succeeded." : "Connection failed; check the server configuration.",
+          };
+        } catch (error) {
+          if (error instanceof SecretServiceError) throw error;
+          return {
+            name,
+            ok: false,
+            status: "failed",
+            toolCount: 0,
+            message: "Connection failed; check the server configuration.",
+          };
+        } finally {
+          await manager.disconnectAll().catch(() => {});
+        }
       } finally {
-        await manager.disconnectAll().catch(() => {});
         context.close();
       }
     });

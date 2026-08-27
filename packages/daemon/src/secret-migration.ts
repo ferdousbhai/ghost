@@ -3,13 +3,10 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   chmodSync,
   closeSync,
-  constants,
   existsSync,
-  fstatSync,
   fsyncSync,
   lstatSync,
   openSync,
-  readFileSync,
   renameSync,
   rmSync,
   unlinkSync,
@@ -25,16 +22,24 @@ import {
   readGhostModels,
   writeGhostModels,
   type GhostModelsFile,
+  type GhostProviderConfig,
 } from "./models.js";
 import {
+  authorizedSecretReference,
   GhostSecretContext,
   validateAuthCredential,
 } from "./keyring-credential-store.js";
 import { mcpServerValidationErrors } from "./mcp-server-shape.js";
 import {
+  fsyncPath,
+  MAX_PRIVATE_FILE_BYTES,
+  PrivateReadError,
+  readPrivateFileText,
+} from "./private-file.js";
+import {
+  DEFAULT_SECRET_FIELD,
   formatSecretReference,
   isSecretReference,
-  parseSecretReference,
   SECRET_REFERENCE_PREFIX,
   secretAccountName,
   serviceForCredentialProvider,
@@ -43,10 +48,9 @@ import {
 import { SecretServiceError, type SecretServiceClient } from "./secret-service.js";
 
 const MCP_FILENAME = "mcp.json";
-const MAX_CONFIG_BYTES = 1_048_576;
-const SENSITIVE_ARGUMENT = /(?:^|[-_])(api[-_]?key|auth|bearer|credential|password|secret|token)(?:$|[-_])/i;
+/** A credential-shaped name: an argument flag, or a URL query key. */
+const SENSITIVE_NAME = /(?:^|[-_])(api[-_]?key|auth|bearer|credential|password|secret|token)(?:$|[-_])/i;
 const SENSITIVE_ARGUMENT_VALUE = /(?:authorization\s*:|bearer\s+|api[-_ ]?key\s*[:=])/i;
-const SENSITIVE_QUERY = /(?:^|[-_])(api[-_]?key|auth|bearer|credential|password|secret|token)(?:$|[-_])/i;
 
 interface PlainCredentialRow {
   provider: string;
@@ -65,51 +69,40 @@ export interface GhostSecretMigrationOptions {
   metadataPath?: string;
 }
 
-function privateJson(path: string): unknown {
-  let fd: number;
-  try {
-    fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-  } catch (error) {
-    throw new SecretServiceError(
-      "secret_migration_failed",
-      `Ghost refused to migrate unsafe plaintext source ${path}: ${(error as Error).message}`,
-    );
-  }
-  let bytes: Buffer;
-  try {
-    const before = fstatSync(fd);
-    if (!before.isFile() || before.nlink !== 1) {
-      throw new SecretServiceError(
+function refusedSource(path: string, error: PrivateReadError): SecretServiceError {
+  switch (error.refusal) {
+    case "open":
+      return new SecretServiceError(
+        "secret_migration_failed",
+        `Ghost refused to migrate unsafe plaintext source ${path}: ${(error.cause as Error).message}`,
+      );
+    case "unsafe":
+      return new SecretServiceError(
         "secret_migration_failed",
         `Ghost refused to migrate unsafe plaintext source ${path}.`,
       );
-    }
-    if (before.size > MAX_CONFIG_BYTES) {
-      throw new SecretServiceError(
+    case "too_large":
+      return new SecretServiceError(
         "secret_migration_failed",
         `Ghost refused to migrate ${path} because it exceeds 1 MiB.`,
       );
-    }
-    bytes = readFileSync(fd);
-    const after = fstatSync(fd);
-    const current = lstatSync(path);
-    if (before.dev !== after.dev || before.ino !== after.ino
-      || before.size !== after.size || before.mtimeMs !== after.mtimeMs
-      || current.dev !== after.dev || current.ino !== after.ino
-      || current.isSymbolicLink() || current.nlink !== 1) {
-      throw new SecretServiceError(
+    case "changed":
+      return new SecretServiceError(
         "secret_migration_failed",
         `Ghost refused to migrate ${path} because it changed while being read.`,
       );
-    }
-  } finally {
-    closeSync(fd);
+    case "encoding":
+      return new SecretServiceError("secret_migration_failed", `${path} is not valid UTF-8.`);
   }
+}
+
+function privateJson(path: string): unknown {
   let text: string;
   try {
-    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  } catch {
-    throw new SecretServiceError("secret_migration_failed", `${path} is not valid UTF-8.`);
+    text = readPrivateFileText(path);
+  } catch (error) {
+    if (!(error instanceof PrivateReadError)) throw error;
+    throw refusedSource(path, error);
   }
   try {
     return JSON.parse(text) as unknown;
@@ -120,7 +113,7 @@ function privateJson(path: string): unknown {
 
 function atomicPrivateJson(path: string, value: unknown): void {
   const rendered = `${JSON.stringify(value, null, 2)}\n`;
-  if (Buffer.byteLength(rendered, "utf8") > MAX_CONFIG_BYTES) {
+  if (Buffer.byteLength(rendered, "utf8") > MAX_PRIVATE_FILE_BYTES) {
     throw new SecretServiceError("secret_migration_failed", `${path} would exceed 1 MiB after migration.`);
   }
   const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
@@ -133,12 +126,7 @@ function atomicPrivateJson(path: string, value: unknown): void {
     fd = undefined;
     chmodSync(temporary, 0o600);
     renameSync(temporary, path);
-    const parent = openSync(dirname(path), "r");
-    try {
-      fsyncSync(parent);
-    } finally {
-      closeSync(parent);
-    }
+    fsyncPath(dirname(path));
   } catch (error) {
     if (fd !== undefined) closeSync(fd);
     rmSync(temporary, { force: true });
@@ -154,7 +142,7 @@ function parseStoredCredential(type: unknown, data: unknown): AuthCredential {
   try {
     parsed = JSON.parse(data);
   } catch {
-    throw new SecretServiceError("secret_migration_failed", "agent.db contains malformed credential JSON.");
+    parsed = null;
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new SecretServiceError("secret_migration_failed", "agent.db contains malformed credential JSON.");
@@ -230,7 +218,35 @@ function fieldToken(value: string): string {
     : `sha256-${createHash("sha256").update(value).digest("hex")}`;
 }
 
-export function mcpSecretService(serverName: string): string {
+function modelsHeaderField(name: string): string {
+  return `models.header.${fieldToken(name)}`;
+}
+
+/**
+ * Every provider field that may hold a credential, in a stable order, rewritten
+ * in place with whatever the visitor returns.
+ *
+ * Planning, conversion, and connection-time resolution all drive this one walk,
+ * for the same reason the MCP walk below does: a field only one of them knew
+ * about would either keep a plaintext secret on disk or hand a provider the
+ * reference text instead of the credential. Deriving the envelope field here
+ * also keeps the account chosen for a header the account it is written into.
+ */
+export function visitProviderSecretFields(
+  config: GhostProviderConfig,
+  visit: (value: string, field: string, purpose: string) => string,
+): void {
+  if (typeof config.apiKey === "string") {
+    config.apiKey = visit(config.apiKey, DEFAULT_SECRET_FIELD, "models.apiKey");
+  }
+  if (config.headers) {
+    for (const [name, value] of Object.entries(config.headers)) {
+      config.headers[name] = visit(value, modelsHeaderField(name), "models.header");
+    }
+  }
+}
+
+function mcpSecretService(serverName: string): string {
   const slug = serverName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 72)
     || "server";
   const digest = createHash("sha256").update(serverName).digest("hex").slice(0, 12);
@@ -246,7 +262,7 @@ function sensitiveUrl(value: string): boolean {
       || url.hash.length > 1
       || /(?:^|\/)(?:api[-_]?key|auth|bearer|credential|password|secret|token)(?:\/|=|:)/i
         .test(url.pathname)
-      || [...url.searchParams.keys()].some((key) => SENSITIVE_QUERY.test(key)),
+      || [...url.searchParams.keys()].some((key) => SENSITIVE_NAME.test(key)),
     );
   } catch {
     return false;
@@ -258,31 +274,10 @@ function sensitiveCommandArgument(args: readonly string[], index: number): boole
   const previous = index > 0 ? args[index - 1] : undefined;
   const equals = value.indexOf("=");
   const flag = equals > 0 ? value.slice(0, equals) : value;
-  return (equals > 0 && SENSITIVE_ARGUMENT.test(flag))
-    || (typeof previous === "string" && SENSITIVE_ARGUMENT.test(previous))
+  return (equals > 0 && SENSITIVE_NAME.test(flag))
+    || (typeof previous === "string" && SENSITIVE_NAME.test(previous))
     || SENSITIVE_ARGUMENT_VALUE.test(value)
     || sensitiveUrl(value);
-}
-
-function requireAuthorizedReference(value: string, allowed: ReadonlySet<string>): void {
-  let ref: ReturnType<typeof parseSecretReference>;
-  try {
-    ref = parseSecretReference(value);
-  } catch {
-    throw new SecretServiceError(
-      "invalid_secret_reference",
-      "Ghost encountered a malformed keyring reference in portable configuration.",
-      400,
-    );
-  }
-  const account = secretAccountName(ref);
-  if (!allowed.has(account)) {
-    throw new SecretServiceError(
-      "secret_not_authorized",
-      `Ghost policy does not allow keyring account ${account}; add it to models.json "accounts" before retrying.`,
-      403,
-    );
-  }
 }
 
 function storeLiteral(
@@ -312,44 +307,77 @@ function migrateModels(
     const storageProvider = getProviderDefinition(provider)?.storeCredentialsAs ?? provider;
     const service = serviceForCredentialProvider(storageProvider);
     const planned: Record<string, string> = {};
-    if (typeof config.apiKey === "string" && !isSecretReference(config.apiKey)) {
-      planned.value = config.apiKey;
-    }
-    for (const [name, value] of Object.entries(config.headers ?? {})) {
-      if (!isSecretReference(value)) planned[`models.header.${fieldToken(name)}`] = value;
-    }
+    visitProviderSecretFields(config, (value, field) => {
+      if (!isSecretReference(value)) planned[field] = value;
+      return value;
+    });
+    const plannedApiKey = planned[DEFAULT_SECRET_FIELD];
     const account = context.selectLiteralAccount(service, planned, {
-      ...(planned.value === undefined ? {} : { apiKey: planned.value }),
+      ...(plannedApiKey === undefined ? {} : { apiKey: plannedApiKey }),
     });
     try {
-      if (typeof config.apiKey === "string") {
-        if (isSecretReference(config.apiKey)) requireAuthorizedReference(config.apiKey, allowed);
-        else {
-          config.apiKey = storeLiteral(context, account, "value", config.apiKey, "models.apiKey", addedAccounts);
-          changed = true;
+      visitProviderSecretFields(config, (value, field, purpose) => {
+        if (isSecretReference(value)) {
+          authorizedSecretReference(value, allowed);
+          return value;
         }
-      }
-      if (config.headers) {
-        for (const [name, value] of Object.entries(config.headers)) {
-          if (isSecretReference(value)) requireAuthorizedReference(value, allowed);
-          else {
-            config.headers[name] = storeLiteral(
-              context,
-              account,
-              `models.header.${fieldToken(name)}`,
-              value,
-              "models.header",
-              addedAccounts,
-            );
-            changed = true;
-          }
-        }
-      }
+        const reference = storeLiteral(context, account, field, value, purpose, addedAccounts);
+        changed = true;
+        return reference;
+      });
     } finally {
       context.releaseLiteralAccount(account);
     }
   }
   return changed;
+}
+
+/**
+ * Every MCP field that may hold a credential, in a stable order, rewritten in
+ * place with whatever the visitor returns. `capture` is this traversal's own
+ * judgement that a literal there is a secret; a value already written as a
+ * reference is offered whatever that judgement is, because an unauthorized
+ * reference is refused wherever it appears.
+ *
+ * Planning, conversion, and connection-time resolution all drive this one walk.
+ * A field only one of them knew about would either keep a plaintext secret on
+ * disk or hand an MCP server the reference text instead of the credential.
+ */
+export function visitMcpSecretFields(
+  config: MCPServerConfig & Record<string, unknown>,
+  visit: (value: string, field: string, purpose: string, capture: boolean) => string,
+): void {
+  if ((config.type ?? "stdio") === "stdio") {
+    const stdio = config as MCPServerConfig & { args?: string[]; env?: Record<string, string> };
+    if (stdio.env) {
+      for (const [key, value] of Object.entries(stdio.env)) {
+        stdio.env[key] = visit(value, `env.${fieldToken(key)}`, "mcp.env", true);
+      }
+    }
+    if (stdio.args) {
+      for (let index = 0; index < stdio.args.length; index += 1) {
+        const value = stdio.args[index] as string;
+        const capture = sensitiveCommandArgument(stdio.args, index);
+        stdio.args[index] = visit(value, `arg.${index}`, "mcp.argument", capture);
+      }
+    }
+  } else {
+    const remote = config as MCPServerConfig & { url: string; headers?: Record<string, string> };
+    if (remote.headers) {
+      for (const [key, value] of Object.entries(remote.headers)) {
+        remote.headers[key] = visit(value, `header.${fieldToken(key)}`, "mcp.header", true);
+      }
+    }
+    remote.url = visit(remote.url, "url", "mcp.url", sensitiveUrl(remote.url));
+  }
+  const auth = config.auth as (Record<string, unknown> & { clientSecret?: string }) | undefined;
+  if (typeof auth?.clientSecret === "string") {
+    auth.clientSecret = visit(auth.clientSecret, "auth.clientSecret", "mcp.client-secret", true);
+  }
+  const oauth = config.oauth as (Record<string, unknown> & { clientSecret?: string }) | undefined;
+  if (typeof oauth?.clientSecret === "string") {
+    oauth.clientSecret = visit(oauth.clientSecret, "oauth.clientSecret", "mcp.client-secret", true);
+  }
 }
 
 /** Convert one MCP server config before it is allowed onto portable disk. */
@@ -359,95 +387,28 @@ export function materializeMcpSecretReferences(
   context: GhostSecretContext,
 ): { config: MCPServerConfig; addedAccounts: string[] } {
   const config = structuredClone(input) as MCPServerConfig & Record<string, unknown>;
-  const service = mcpSecretService(serverName);
   const added = new Set<string>();
   const allowed = context.allowedAccounts;
+
+  // The account is chosen from everything this row wants to store, so the whole
+  // row is planned before any of it is written.
   const planned: Record<string, string> = {};
-  const plan = (value: string, field: string): void => {
-    if (value.startsWith(SECRET_REFERENCE_PREFIX)) {
-      requireAuthorizedReference(value, allowed);
-      return;
-    }
-    planned[field] = value;
-  };
+  visitMcpSecretFields(config, (value, field, _purpose, capture) => {
+    if (value.startsWith(SECRET_REFERENCE_PREFIX)) authorizedSecretReference(value, allowed);
+    else if (capture) planned[field] = value;
+    return value;
+  });
 
-  const type = config.type ?? "stdio";
-  if (type === "stdio") {
-    const stdio = config as MCPServerConfig & { args?: string[]; env?: Record<string, string> };
-    for (const [key, value] of Object.entries(stdio.env ?? {})) {
-      plan(value, `env.${fieldToken(key)}`);
-    }
-    const args = stdio.args ?? [];
-    for (let index = 0; index < args.length; index += 1) {
-      const value = args[index] as string;
-      if (sensitiveCommandArgument(args, index)) plan(value, `arg.${index}`);
-      else if (value.startsWith(SECRET_REFERENCE_PREFIX)) requireAuthorizedReference(value, allowed);
-    }
-  } else {
-    const remote = config as MCPServerConfig & { url: string; headers?: Record<string, string> };
-    for (const [key, value] of Object.entries(remote.headers ?? {})) {
-      plan(value, `header.${fieldToken(key)}`);
-    }
-    if (remote.url.startsWith(SECRET_REFERENCE_PREFIX)) requireAuthorizedReference(remote.url, allowed);
-    else if (sensitiveUrl(remote.url)) plan(remote.url, "url");
-  }
-  const plannedAuth = config.auth as (Record<string, unknown> & { clientSecret?: string }) | undefined;
-  if (typeof plannedAuth?.clientSecret === "string") {
-    plan(plannedAuth.clientSecret, "auth.clientSecret");
-  }
-  const plannedOauth = config.oauth as (Record<string, unknown> & { clientSecret?: string }) | undefined;
-  if (typeof plannedOauth?.clientSecret === "string") {
-    plan(plannedOauth.clientSecret, "oauth.clientSecret");
-  }
-  const account = context.selectLiteralAccount(service, planned);
-  const convert = (value: string, field: string, purpose: string): string => {
-    if (value.startsWith(SECRET_REFERENCE_PREFIX)) {
-      requireAuthorizedReference(value, allowed);
-      return value;
-    }
-    return storeLiteral(context, account, field, value, purpose, added);
-  };
-
+  const account = context.selectLiteralAccount(mcpSecretService(serverName), planned);
   try {
-    if (type === "stdio") {
-      const stdio = config as MCPServerConfig & {
-        args?: string[];
-        env?: Record<string, string>;
-      };
-      if (stdio.env) {
-        for (const [key, value] of Object.entries(stdio.env)) {
-          stdio.env[key] = convert(value, `env.${fieldToken(key)}`, "mcp.env");
-        }
+    visitMcpSecretFields(config, (value, field, purpose, capture) => {
+      if (value.startsWith(SECRET_REFERENCE_PREFIX)) {
+        authorizedSecretReference(value, allowed);
+        return value;
       }
-      if (stdio.args) {
-        for (let index = 0; index < stdio.args.length; index += 1) {
-          const value = stdio.args[index] as string;
-          if (sensitiveCommandArgument(stdio.args, index)) {
-            stdio.args[index] = convert(value, `arg.${index}`, "mcp.argument");
-          } else if (value.startsWith(SECRET_REFERENCE_PREFIX)) {
-            requireAuthorizedReference(value, allowed);
-          }
-        }
-      }
-    } else {
-      const remote = config as MCPServerConfig & { url: string; headers?: Record<string, string> };
-      if (remote.headers) {
-        for (const [key, value] of Object.entries(remote.headers)) {
-          remote.headers[key] = convert(value, `header.${fieldToken(key)}`, "mcp.header");
-        }
-      }
-      if (isSecretReference(remote.url)) requireAuthorizedReference(remote.url, allowed);
-      else if (sensitiveUrl(remote.url)) remote.url = convert(remote.url, "url", "mcp.url");
-    }
-
-    const auth = config.auth as (Record<string, unknown> & { clientSecret?: string }) | undefined;
-    if (typeof auth?.clientSecret === "string") {
-      auth.clientSecret = convert(auth.clientSecret, "auth.clientSecret", "mcp.client-secret");
-    }
-    const oauth = config.oauth as (Record<string, unknown> & { clientSecret?: string }) | undefined;
-    if (typeof oauth?.clientSecret === "string") {
-      oauth.clientSecret = convert(oauth.clientSecret, "oauth.clientSecret", "mcp.client-secret");
-    }
+      if (!capture) return value;
+      return storeLiteral(context, account, field, value, purpose, added);
+    });
     return { config, addedAccounts: [...added] };
   } finally {
     context.releaseLiteralAccount(account);
@@ -538,23 +499,13 @@ function scrubAgentDb(path: string): void {
     db.close();
   }
   for (const suffix of ["-journal", "-wal", "-shm"]) rmSync(`${path}${suffix}`, { force: true });
-  const fd = openSync(path, "r");
-  try {
-    fsyncSync(fd);
-  } finally {
-    closeSync(fd);
-  }
+  fsyncPath(path);
 }
 
 function removePlainFile(path: string): void {
   if (!existsSync(path)) return;
   unlinkSync(path);
-  const parent = openSync(dirname(path), "r");
-  try {
-    fsyncSync(parent);
-  } finally {
-    closeSync(parent);
-  }
+  fsyncPath(dirname(path));
 }
 
 function migrateWithContext(
@@ -574,14 +525,7 @@ function migrateWithContext(
   importCredentials([...database.credentials, ...legacy], context, addedAccounts);
 
   const previousAccounts = models.accounts ?? [];
-  const mergedAccounts = [...previousAccounts];
-  const seen = new Set(previousAccounts);
-  for (const account of addedAccounts) {
-    if (!seen.has(account)) {
-      seen.add(account);
-      mergedAccounts.push(account);
-    }
-  }
+  const mergedAccounts = [...new Set([...previousAccounts, ...addedAccounts])];
   if (mergedAccounts.length > 0) models.accounts = mergedAccounts;
   context.allowAccounts(mergedAccounts);
 

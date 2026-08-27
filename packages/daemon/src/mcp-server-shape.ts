@@ -26,7 +26,7 @@ const MCP_BASE_FIELDS = new Set([
   "auth",
   "oauth",
 ]);
-export const MCP_STDIO_FIELDS = new Set([
+const MCP_STDIO_FIELDS = new Set([
   ...MCP_BASE_FIELDS,
   "type",
   "command",
@@ -35,14 +35,14 @@ export const MCP_STDIO_FIELDS = new Set([
   "envPolicy",
   "cwd",
 ]);
-export const MCP_REMOTE_FIELDS = new Set([
+const MCP_REMOTE_FIELDS = new Set([
   ...MCP_BASE_FIELDS,
   "type",
   "url",
   "headers",
   "headerPolicy",
 ]);
-export const MCP_AUTH_FIELDS = new Set([
+const MCP_AUTH_FIELDS = new Set([
   "type",
   "credentialId",
   "tokenUrl",
@@ -50,7 +50,7 @@ export const MCP_AUTH_FIELDS = new Set([
   "clientSecret",
   "resource",
 ]);
-export const MCP_OAUTH_FIELDS = new Set([
+const MCP_OAUTH_FIELDS = new Set([
   "clientId",
   "clientSecret",
   "redirectUri",
@@ -71,7 +71,7 @@ function isStringRecord(value: unknown): value is Record<string, string> {
  * Validate Ghost's owned MCP boundary before OMP or an HTTP sanitizer sees a
  * value.
  */
-export function ownedMcpValidationErrors(value: unknown): string[] {
+function ownedMcpValidationErrors(value: unknown): string[] {
   if (!isRecord(value)) return ["MCP server configuration must be a JSON object."];
   const type = value.type === undefined ? "stdio" : value.type;
   if (type !== "stdio" && type !== "http" && type !== "sse") {

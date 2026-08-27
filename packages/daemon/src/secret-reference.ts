@@ -57,9 +57,10 @@ export function formatSecretReference(
   ref: SecretAccountRef,
   field = DEFAULT_SECRET_FIELD,
 ): string {
-  const account = parseSecretAccountName(secretAccountName(ref));
+  const account = secretAccountName(ref);
+  parseSecretAccountName(account);
   if (!FIELD_PATTERN.test(field)) throw new Error(`Invalid keyring field ${JSON.stringify(field)}.`);
-  return `${SECRET_REFERENCE_PREFIX}${secretAccountName(account)}`
+  return `${SECRET_REFERENCE_PREFIX}${account}`
     + (field === DEFAULT_SECRET_FIELD ? "" : `#${field}`);
 }
 
@@ -73,8 +74,9 @@ export function isSecretReference(value: unknown): boolean {
   }
 }
 
-export function assertSecretReference(value: string): SecretReference {
-  return parseSecretReference(value);
+/** Throw unless `field` can be written as a reference into `ref`. */
+export function assertSecretReference(ref: SecretAccountRef, field: string): void {
+  formatSecretReference(ref, field);
 }
 
 /** Keep ordinary provider ids readable and confine opaque MCP credential ids. */

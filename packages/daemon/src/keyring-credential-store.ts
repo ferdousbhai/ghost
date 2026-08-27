@@ -16,6 +16,7 @@ import type {
   StoredCredentialBlock,
 } from "@oh-my-pi/pi-ai/auth-storage";
 import {
+  assertSecretReference,
   formatSecretReference,
   parseSecretAccountName,
   parseSecretReference,
@@ -39,7 +40,9 @@ interface SecretEnvelope {
   fields: Record<string, unknown>;
 }
 
-interface CredentialRow {
+const CREDENTIAL_ROW_COLUMNS = "id, provider, service, account, field, credential_type, active";
+
+export interface CredentialRow {
   id: number;
   provider: string;
   service: string;
@@ -54,13 +57,12 @@ interface CacheRow {
   expires_at_sec: number;
 }
 
-function defaultStateHome(env: NodeJS.ProcessEnv = process.env): string {
-  const configured = env.XDG_STATE_HOME;
-  return configured && configured.length > 0 ? configured : join(homedir(), ".local", "state");
-}
-
-export function defaultSecretMetadataPath(env: NodeJS.ProcessEnv = process.env): string {
-  return join(defaultStateHome(env), "ghost", SECRET_METADATA_FILENAME);
+function defaultSecretMetadataPath(): string {
+  const configured = process.env.XDG_STATE_HOME;
+  const stateHome = configured && configured.length > 0
+    ? configured
+    : join(homedir(), ".local", "state");
+  return join(stateHome, "ghost", SECRET_METADATA_FILENAME);
 }
 
 function ensurePrivateStatePath(path: string): void {
@@ -99,10 +101,7 @@ function parseEnvelope(raw: string, ref: SecretAccountRef): SecretEnvelope {
   try {
     parsed = JSON.parse(raw);
   } catch {
-    throw new SecretServiceError(
-      "keyring_unavailable",
-      `Ghost keyring item ${secretAccountName(ref)} is not valid Ghost secret data.`,
-    );
+    parsed = null;
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new SecretServiceError(
@@ -122,7 +121,7 @@ function parseEnvelope(raw: string, ref: SecretAccountRef): SecretEnvelope {
     );
   }
   for (const field of Object.keys(record.fields as Record<string, unknown>)) {
-    formatSecretReference(ref, field);
+    assertSecretReference(ref, field);
   }
   return { version: 1, fields: record.fields as Record<string, unknown> };
 }
@@ -200,6 +199,40 @@ export function validateAuthCredential(value: unknown): AuthCredential {
     return credential as AuthCredential;
   }
   throw new SecretServiceError("keyring_unavailable", "A Ghost keyring credential is malformed.");
+}
+
+/**
+ * Parse one portable reference and refuse it unless `allowed` names its
+ * account.
+ *
+ * Migration and connection-time resolution check the same rule against
+ * different allow-sets — migration validates a pre-existing reference against
+ * the policy as written, before its own writes widen it — so the set is a
+ * parameter while the two refusals stay a single definition.
+ */
+export function authorizedSecretReference(
+  reference: string,
+  allowed: ReadonlySet<string>,
+): SecretReference {
+  let ref: SecretReference;
+  try {
+    ref = parseSecretReference(reference);
+  } catch {
+    throw new SecretServiceError(
+      "invalid_secret_reference",
+      "Ghost encountered a malformed keyring reference in portable configuration.",
+      400,
+    );
+  }
+  const account = secretAccountName(ref);
+  if (!allowed.has(account)) {
+    throw new SecretServiceError(
+      "secret_not_authorized",
+      `Ghost policy does not allow keyring account ${account}; add it to models.json "accounts" before retrying.`,
+      403,
+    );
+  }
+  return ref;
 }
 
 export class SecretMetadata {
@@ -325,7 +358,7 @@ export class GhostSecretContext {
   }
 
   private putFieldLocked(ref: SecretReference, value: unknown, purpose: string): void {
-    formatSecretReference(ref, ref.field);
+    assertSecretReference(ref, ref.field);
     const reservationOwner = this.literalReservations.get(secretAccountName(ref));
     if (reservationOwner) {
       this.metadata.db.query(`
@@ -359,24 +392,7 @@ export class GhostSecretContext {
   }
 
   resolve(reference: string): string {
-    let ref: SecretReference;
-    try {
-      ref = parseSecretReference(reference);
-    } catch {
-      throw new SecretServiceError(
-        "invalid_secret_reference",
-        "Ghost encountered a malformed keyring reference in portable configuration.",
-        400,
-      );
-    }
-    const account = secretAccountName(ref);
-    if (!this.allowedAccounts.has(account)) {
-      throw new SecretServiceError(
-        "secret_not_authorized",
-        `Ghost policy does not allow keyring account ${account}; add it to models.json "accounts" before retrying.`,
-        403,
-      );
-    }
+    const ref = authorizedSecretReference(reference, this.allowedAccounts);
     const value = this.readField(ref);
     if (value === undefined) {
       throw new SecretServiceError(
@@ -401,7 +417,7 @@ export class GhostSecretContext {
   ): SecretAccountRef {
     parseSecretAccountName(`${service}/personal`);
     for (const field of Object.keys(fields)) {
-      formatSecretReference({ service, account: "personal" }, field);
+      assertSecretReference({ service, account: "personal" }, field);
     }
     if (Object.keys(fields).length === 0
       && options.apiKey === undefined
@@ -439,7 +455,7 @@ export class GhostSecretContext {
           || envelope.fields[field] === value);
         if (!fieldsMatch) return false;
         if (!envelope || !Object.hasOwn(envelope.fields, "auth")) return true;
-          const auth = validateAuthCredential(envelope.fields.auth);
+        const auth = validateAuthCredential(envelope.fields.auth);
         if (options.apiKey !== undefined && (auth.type !== "api_key" || auth.key !== options.apiKey)) {
           return false;
         }
@@ -522,6 +538,36 @@ export class GhostSecretContext {
     });
   }
 
+  /**
+   * The active row for `id`, but only while its stored secret still hashes to
+   * `expectedData` and `lease` — when one is supplied — is still the live
+   * refresh lease. Callers hold the metadata transaction across the check and
+   * their write, so a losing writer sees `null` rather than a stale row.
+   */
+  private matchedCredential(
+    id: number,
+    expectedData: string,
+    lease: CredentialRefreshLeaseFence | undefined,
+  ): CredentialRow | null {
+    const row = this.metadata.db.query(
+      `SELECT ${CREDENTIAL_ROW_COLUMNS} FROM ghost_auth_credentials WHERE id = ?`,
+    ).get(id) as CredentialRow | null;
+    if (row?.active !== 1) return null;
+    const current = this.readField(row);
+    if (current === undefined || credentialData(validateAuthCredential(current)) !== expectedData) {
+      return null;
+    }
+    if (lease) {
+      const currentLease = this.metadata.db.query(
+        "SELECT owner, expires_at_ms FROM ghost_refresh_leases WHERE credential_id = ?",
+      ).get(id) as { owner: string; expires_at_ms: number } | null;
+      if (currentLease?.owner !== lease.owner || currentLease.expires_at_ms <= lease.nowMs) {
+        return null;
+      }
+    }
+    return row;
+  }
+
   tryUpdateCredential(
     id: number,
     expectedData: string,
@@ -530,23 +576,8 @@ export class GhostSecretContext {
   ): boolean {
     const checked = validateAuthCredential(credential);
     return this.metadata.transaction(() => {
-      const row = this.metadata.db.query(`
-        SELECT id, provider, service, account, field, credential_type, active
-        FROM ghost_auth_credentials WHERE id = ?
-      `).get(id) as CredentialRow | null;
-      if (row?.active !== 1) return false;
-      const current = this.readField(row);
-      if (current === undefined || credentialData(validateAuthCredential(current)) !== expectedData) {
-        return false;
-      }
-      if (lease) {
-        const currentLease = this.metadata.db.query(
-          "SELECT owner, expires_at_ms FROM ghost_refresh_leases WHERE credential_id = ?",
-        ).get(id) as { owner: string; expires_at_ms: number } | null;
-        if (currentLease?.owner !== lease.owner || currentLease.expires_at_ms <= lease.nowMs) {
-          return false;
-        }
-      }
+      const row = this.matchedCredential(id, expectedData, lease);
+      if (!row) return false;
       this.putFieldLocked(row, checked, "provider-credential");
       this.metadata.db.query(`
         UPDATE ghost_auth_credentials SET credential_type = ?, active = 1 WHERE id = ?
@@ -562,23 +593,7 @@ export class GhostSecretContext {
     lease?: CredentialRefreshLeaseFence,
   ): boolean {
     return this.metadata.transaction(() => {
-      const row = this.metadata.db.query(`
-        SELECT id, provider, service, account, field, credential_type, active
-        FROM ghost_auth_credentials WHERE id = ?
-      `).get(id) as CredentialRow | null;
-      if (row?.active !== 1) return false;
-      const current = this.readField(row);
-      if (current === undefined || credentialData(validateAuthCredential(current)) !== expectedData) {
-        return false;
-      }
-      if (lease) {
-        const currentLease = this.metadata.db.query(
-          "SELECT owner, expires_at_ms FROM ghost_refresh_leases WHERE credential_id = ?",
-        ).get(id) as { owner: string; expires_at_ms: number } | null;
-        if (currentLease?.owner !== lease.owner || currentLease.expires_at_ms <= lease.nowMs) {
-          return false;
-        }
-      }
+      if (!this.matchedCredential(id, expectedData, lease)) return false;
       this.metadata.db.query("UPDATE ghost_auth_credentials SET active = 0 WHERE id = ?").run(id);
       this.metadata.bumpRevision();
       return true;
@@ -645,13 +660,23 @@ export class GhostSecretContext {
     }
   }
 
-  findCredentialReference(provider: string, credential: AuthCredential): SecretReference | undefined {
-    const rows = this.metadata.db.query(`
-      SELECT id, provider, service, account, field, credential_type, active
-      FROM ghost_auth_credentials WHERE provider = ? AND active = 1 ORDER BY id
+  /** Active rows, oldest first. Each caller applies its own account policy. */
+  activeCredentialRows(provider?: string): CredentialRow[] {
+    if (provider === undefined) {
+      return this.metadata.db.query(`
+        SELECT ${CREDENTIAL_ROW_COLUMNS} FROM ghost_auth_credentials
+        WHERE active = 1 ORDER BY id
+      `).all() as CredentialRow[];
+    }
+    return this.metadata.db.query(`
+      SELECT ${CREDENTIAL_ROW_COLUMNS} FROM ghost_auth_credentials
+      WHERE active = 1 AND provider = ? ORDER BY id
     `).all(provider) as CredentialRow[];
+  }
+
+  findCredentialReference(provider: string, credential: AuthCredential): SecretReference | undefined {
     const expected = credentialData(credential);
-    for (const row of rows) {
+    for (const row of this.activeCredentialRows(provider)) {
       const value = this.readField(row);
       if (value !== undefined && credentialData(validateAuthCredential(value)) === expected) {
         return { service: row.service, account: row.account, field: row.field };
@@ -706,25 +731,17 @@ export class KeyringAuthCredentialStore implements AuthCredentialStore {
     configured: boolean;
     connectedVia?: "oauth" | "api_key";
   }> {
-    const service = serviceForCredentialProvider(provider);
-    const rows = this.context.metadata.db.query(`
-      SELECT id, provider, service, account, field, credential_type, active
-      FROM ghost_auth_credentials WHERE provider = ? AND active = 1 ORDER BY id
-    `).all(provider) as CredentialRow[];
-    const byAccount = new Map(rows
+    const byAccount = new Map(this.context.activeCredentialRows(provider)
       .filter((row) => this.context.allowedAccounts.has(secretAccountName(row)))
       .map((row) => [row.account, row]));
-    return [...this.context.allowedAccounts]
-      .map(parseSecretAccountName)
-      .filter((ref) => ref.service === service)
-      .map((ref) => {
-        const row = byAccount.get(ref.account);
-        return {
-          account: ref.account,
-          configured: Boolean(row),
-          ...(row ? { connectedVia: row.credential_type } : {}),
-        };
-      });
+    return this.allowedProviderAccounts(provider).map((ref) => {
+      const row = byAccount.get(ref.account);
+      return {
+        account: ref.account,
+        configured: Boolean(row),
+        ...(row ? { connectedVia: row.credential_type } : {}),
+      };
+    });
   }
 
   private allowedProviderAccounts(provider: string): SecretAccountRef[] {
@@ -762,7 +779,7 @@ export class KeyringAuthCredentialStore implements AuthCredentialStore {
 
   private row(id: number): CredentialRow | null {
     return this.context.metadata.db.query(
-      "SELECT id, provider, service, account, field, credential_type, active FROM ghost_auth_credentials WHERE id = ?",
+      `SELECT ${CREDENTIAL_ROW_COLUMNS} FROM ghost_auth_credentials WHERE id = ?`,
     ).get(id) as CredentialRow | null;
   }
 
@@ -786,16 +803,7 @@ export class KeyringAuthCredentialStore implements AuthCredentialStore {
   }
 
   listAuthCredentials(provider?: string): StoredAuthCredential[] {
-    const rows = (provider
-      ? this.context.metadata.db.query(`
-          SELECT id, provider, service, account, field, credential_type, active
-          FROM ghost_auth_credentials WHERE active = 1 AND provider = ? ORDER BY id
-        `).all(provider)
-      : this.context.metadata.db.query(`
-          SELECT id, provider, service, account, field, credential_type, active
-          FROM ghost_auth_credentials WHERE active = 1 ORDER BY id
-        `).all()) as CredentialRow[];
-    return rows
+    return this.context.activeCredentialRows(provider)
       .filter((row) => this.context.allowedAccounts.has(secretAccountName(row)))
       .map((row) => ({
         id: row.id,
@@ -896,12 +904,20 @@ export class KeyringAuthCredentialStore implements AuthCredentialStore {
       .run(Math.floor(Date.now() / 1000));
   }
 
-  getCredentialBlock(credentialId: number, providerKey: string, blockScope: string): number | undefined {
-    const row = this.context.metadata.db.query(`
-      SELECT blocked_until_ms FROM ghost_credential_blocks
+  private credentialBlock(
+    credentialId: number,
+    providerKey: string,
+    blockScope: string,
+  ): { blocked_until_ms: number; updated_at_ms: number } | null {
+    return this.context.metadata.db.query(`
+      SELECT blocked_until_ms, updated_at_ms FROM ghost_credential_blocks
       WHERE credential_id = ? AND provider_key = ? AND block_scope = ?
-    `).get(credentialId, providerKey, blockScope) as { blocked_until_ms: number } | null;
-    return row?.blocked_until_ms;
+    `).get(credentialId, providerKey, blockScope) as
+      { blocked_until_ms: number; updated_at_ms: number } | null;
+  }
+
+  getCredentialBlock(credentialId: number, providerKey: string, blockScope: string): number | undefined {
+    return this.credentialBlock(credentialId, providerKey, blockScope)?.blocked_until_ms;
   }
 
   getCredentialBlockReconcileAfter(
@@ -909,11 +925,7 @@ export class KeyringAuthCredentialStore implements AuthCredentialStore {
     providerKey: string,
     blockScope: string,
   ): number | undefined {
-    const row = this.context.metadata.db.query(`
-      SELECT updated_at_ms FROM ghost_credential_blocks
-      WHERE credential_id = ? AND provider_key = ? AND block_scope = ?
-    `).get(credentialId, providerKey, blockScope) as { updated_at_ms: number } | null;
-    return row?.updated_at_ms;
+    return this.credentialBlock(credentialId, providerKey, blockScope)?.updated_at_ms;
   }
 
   upsertCredentialBlock(block: StoredCredentialBlock): void {

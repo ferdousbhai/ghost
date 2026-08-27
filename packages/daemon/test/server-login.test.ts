@@ -200,11 +200,12 @@ describe("POST /api/ghosts/:name/login", () => {
     const authorized: string[] = [];
     const loggedOut: string[] = [];
     const base = await serveWithRuntime(async () => ({
-      ...makeFakeRuntime({ login: async () => apiKeyCredential() }),
-      login: async (_providerId, _authType, _interaction, account = "personal") => {
-        logins.push(account);
-        return apiKeyCredential();
-      },
+      ...makeFakeRuntime({
+        login: async (_providerId, _authType, _interaction, account = "personal") => {
+          logins.push(account);
+          return apiKeyCredential();
+        },
+      }),
       getProviderAccounts: providerId => providerId === "openrouter"
         ? [{ account: "work", configured: true, connectedVia: "api_key" }]
         : [],

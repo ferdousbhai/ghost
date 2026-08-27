@@ -15,6 +15,7 @@ export type LoginImpl = (
   providerId: string,
   authType: AuthType,
   interaction: AuthInteraction,
+  account?: string,
 ) => Promise<Credential>;
 
 export interface FakeProvider {

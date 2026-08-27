@@ -45,13 +45,7 @@
 import { randomUUID } from "node:crypto";
 import {
   chmodSync,
-  closeSync,
-  constants,
-  fstatSync,
-  fsyncSync,
-  lstatSync,
   mkdirSync,
-  openSync,
   readFileSync,
   renameSync,
   rmSync,
@@ -64,6 +58,12 @@ import {
   pickDefaultAvailableModel,
   resolveModelRoleValue,
 } from "@oh-my-pi/pi-coding-agent/config/model-resolver";
+import {
+  fsyncPath,
+  PrivateReadError,
+  readPrivateFileText,
+  type PrivateReadRefusal,
+} from "./private-file.js";
 import {
   parseSecretAccountName,
   parseSecretReference,
@@ -261,7 +261,12 @@ export const AUTH_FILENAME = "auth.json";
 const MODELS_LOCK_SUFFIX = ".lock";
 const MODELS_LOCK_WAIT_MS = 500;
 const MODELS_LOCK_POLL_MS = 10;
-const MODELS_MAX_BYTES = 1_048_576;
+const MODELS_READ_REFUSAL: Record<Exclude<PrivateReadRefusal, "open">, string> = {
+  unsafe: "must be a single-link regular file",
+  too_large: "exceeds the 1 MiB limit",
+  changed: "changed while it was being read",
+  encoding: "is not valid UTF-8",
+};
 const lockSleepCell = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
 
 interface GhostModelsLockOwner {
@@ -428,19 +433,9 @@ function persistGhostModels(path: string, file: GhostModelsFile): void {
     writeFileSync(temporary, text, { encoding: "utf8", flag: "wx", mode: 0o600 });
     // Creation mode is filtered through umask; force the promised final mode.
     chmodSync(temporary, 0o600);
-    const temporaryFd = openSync(temporary, "r");
-    try {
-      fsyncSync(temporaryFd);
-    } finally {
-      closeSync(temporaryFd);
-    }
+    fsyncPath(temporary);
     renameSync(temporary, path);
-    const directoryFd = openSync(dirname(path), "r");
-    try {
-      fsyncSync(directoryFd);
-    } finally {
-      closeSync(directoryFd);
-    }
+    fsyncPath(dirname(path));
   } catch (error) {
     try {
       // `writeFileSync` may create and partially populate the temporary before
@@ -478,39 +473,73 @@ function migrateLegacySmolRole<T>(
   return migrated;
 }
 
+/** Re-throw a name parser's own message against the file that carried the name. */
+function assertParses(path: string, value: string, parse: (input: string) => unknown): void {
+  try {
+    parse(value);
+  } catch (error) {
+    throw new Error(`${path}: ${(error as Error).message}`);
+  }
+}
+
+/** A configured value is either a literal or a well-formed keyring reference. */
+function assertSecretValue(path: string, value: string): void {
+  if (!value.startsWith(SECRET_REFERENCE_PREFIX)) return;
+  assertParses(path, value, parseSecretReference);
+}
+
+/** The machine accounts this ghost may resolve, each named once and parseable. */
+function assertAccountPolicy(path: string, accounts: unknown): void {
+  if (accounts === undefined) return;
+  if (!Array.isArray(accounts) || !accounts.every((entry) => typeof entry === "string")) {
+    throw new Error(`${path}: "accounts" must be an array of service/account strings.`);
+  }
+  const seen = new Set<string>();
+  for (const account of accounts as string[]) {
+    assertParses(path, account, parseSecretAccountName);
+    if (seen.has(account)) throw new Error(`${path}: "accounts" must not contain duplicates.`);
+    seen.add(account);
+  }
+}
+
+/** Provider entries carry only strings, and only well-formed references. */
+function assertProviderShape(path: string, providers: Record<string, unknown>): void {
+  for (const [provider, value] of Object.entries(providers)) {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) {
+      throw new Error(`${path}: provider ${JSON.stringify(provider)} must be an object.`);
+    }
+    const config = value as Record<string, unknown>;
+    if (config.apiKey !== undefined && typeof config.apiKey !== "string") {
+      throw new Error(`${path}: provider ${JSON.stringify(provider)} "apiKey" must be a string.`);
+    }
+    if (typeof config.apiKey === "string") assertSecretValue(path, config.apiKey);
+    if (config.headers === undefined) continue;
+    if (config.headers === null || typeof config.headers !== "object" || Array.isArray(config.headers)) {
+      throw new Error(`${path}: provider ${JSON.stringify(provider)} "headers" must be an object.`);
+    }
+    for (const header of Object.values(config.headers as Record<string, unknown>)) {
+      if (typeof header !== "string") {
+        throw new Error(`${path}: provider ${JSON.stringify(provider)} header values must be strings.`);
+      }
+      assertSecretValue(path, header);
+    }
+  }
+}
+
 /** Read `<home>/models.json`, or null when absent. Throws on malformed. */
 export function readGhostModels(configDir: string): GhostModelsFile | null {
   const path = ghostModelsPath(configDir);
-  let fd: number;
-  try {
-    fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw error;
-  }
   let text: string;
   try {
-    const before = fstatSync(fd);
-    if (!before.isFile() || before.nlink !== 1) {
-      throw new Error(`${path} must be a single-link regular file.`);
+    text = readPrivateFileText(path);
+  } catch (error) {
+    if (!(error instanceof PrivateReadError)) throw error;
+    if (error.refusal === "open") {
+      const cause = error.cause as NodeJS.ErrnoException;
+      if (cause.code === "ENOENT") return null;
+      throw cause;
     }
-    if (before.size > MODELS_MAX_BYTES) throw new Error(`${path} exceeds the 1 MiB limit.`);
-    const bytes = readFileSync(fd);
-    const after = fstatSync(fd);
-    const current = lstatSync(path);
-    if (before.dev !== after.dev || before.ino !== after.ino
-      || before.size !== after.size || before.mtimeMs !== after.mtimeMs
-      || current.dev !== after.dev || current.ino !== after.ino
-      || current.isSymbolicLink() || current.nlink !== 1) {
-      throw new Error(`${path} changed while it was being read.`);
-    }
-    try {
-      text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-    } catch {
-      throw new Error(`${path} is not valid UTF-8.`);
-    }
-  } finally {
-    closeSync(fd);
+    throw new Error(`${path} ${MODELS_READ_REFUSAL[error.refusal]}.`);
   }
   let parsed: unknown;
   try {
@@ -539,55 +568,9 @@ export function readGhostModels(configDir: string): GhostModelsFile | null {
     && (file.fallbacks === null || typeof file.fallbacks !== "object" || Array.isArray(file.fallbacks))) {
     throw new Error(`${path}: "fallbacks" must be an object.`);
   }
-  if (file.accounts !== undefined) {
-    if (!Array.isArray(file.accounts) || !file.accounts.every((entry) => typeof entry === "string")) {
-      throw new Error(`${path}: "accounts" must be an array of service/account strings.`);
-    }
-    const seen = new Set<string>();
-    for (const account of file.accounts) {
-      try {
-        parseSecretAccountName(account);
-      } catch (error) {
-        throw new Error(`${path}: ${(error as Error).message}`);
-      }
-      if (seen.has(account)) throw new Error(`${path}: "accounts" must not contain duplicates.`);
-      seen.add(account);
-    }
-  }
+  assertAccountPolicy(path, file.accounts);
   const providers = (file.providers as Record<string, unknown>) ?? {};
-  for (const [provider, value] of Object.entries(providers)) {
-    if (value === null || typeof value !== "object" || Array.isArray(value)) {
-      throw new Error(`${path}: provider ${JSON.stringify(provider)} must be an object.`);
-    }
-    const config = value as Record<string, unknown>;
-    if (config.apiKey !== undefined && typeof config.apiKey !== "string") {
-      throw new Error(`${path}: provider ${JSON.stringify(provider)} "apiKey" must be a string.`);
-    }
-    if (typeof config.apiKey === "string" && config.apiKey.startsWith(SECRET_REFERENCE_PREFIX)) {
-      try {
-        parseSecretReference(config.apiKey);
-      } catch (error) {
-        throw new Error(`${path}: ${(error as Error).message}`);
-      }
-    }
-    if (config.headers !== undefined) {
-      if (config.headers === null || typeof config.headers !== "object" || Array.isArray(config.headers)) {
-        throw new Error(`${path}: provider ${JSON.stringify(provider)} "headers" must be an object.`);
-      }
-      for (const header of Object.values(config.headers as Record<string, unknown>)) {
-        if (typeof header !== "string") {
-          throw new Error(`${path}: provider ${JSON.stringify(provider)} header values must be strings.`);
-        }
-        if (header.startsWith(SECRET_REFERENCE_PREFIX)) {
-          try {
-            parseSecretReference(header);
-          } catch (error) {
-            throw new Error(`${path}: ${(error as Error).message}`);
-          }
-        }
-      }
-    }
-  }
+  assertProviderShape(path, providers);
   return {
     ...file,
     providers: providers as Record<string, GhostProviderConfig>,
@@ -599,23 +582,12 @@ export function readGhostModels(configDir: string): GhostModelsFile | null {
 
 /** Add allowed machine accounts without replacing another models.json mutation. */
 export function addGhostAccounts(configDir: string, additions: readonly string[]): GhostModelsFile {
-  const normalized = additions.map((account) => {
-    parseSecretAccountName(account);
-    return account;
-  });
+  for (const account of additions) parseSecretAccountName(account);
   mkdirSync(configDir, { recursive: true });
   const path = ghostModelsPath(configDir);
   return withSerializedModelsWrite(path, () => {
     const file = readGhostModels(configDir) ?? { providers: {} };
-    const accounts = [...(file.accounts ?? [])];
-    const seen = new Set(accounts);
-    for (const account of normalized) {
-      if (!seen.has(account)) {
-        seen.add(account);
-        accounts.push(account);
-      }
-    }
-    file.accounts = accounts;
+    file.accounts = [...new Set([...(file.accounts ?? []), ...additions])];
     persistGhostModels(path, file);
     return file;
   });

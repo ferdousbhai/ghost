@@ -3,7 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
-import { KeyringAuthCredentialStore } from "../src/keyring-credential-store.js";
+import {
+  KeyringAuthCredentialStore,
+  type GhostSecretContext,
+} from "../src/keyring-credential-store.js";
 import { openGhostSecretContext } from "../src/secret-migration.js";
 import {
   formatSecretReference,
@@ -23,6 +26,25 @@ function root(): string {
 afterEach(() => {
   for (const path of roots.splice(0)) rmSync(path, { recursive: true, force: true });
 });
+
+/** Machine metadata defaults beside the home; tests that share one pass it. */
+function openContext(
+  home: string,
+  client: MemorySecretServiceClient,
+  metadataPath = join(home, "state.sqlite"),
+): GhostSecretContext {
+  return openGhostSecretContext({ home, client, metadataPath });
+}
+
+/** A machine home holding one plaintext provider key. */
+function literalHome(machine: string, name: string, apiKey: string): string {
+  const home = join(machine, name);
+  mkdirSync(home);
+  writeFileSync(join(home, "models.json"), JSON.stringify({
+    providers: { openrouter: { apiKey } },
+  }));
+  return home;
+}
 
 describe("keyring references", () => {
   it("round-trips service/account with an optional field", () => {
@@ -51,26 +73,16 @@ describe("Secret Service boundary", () => {
     const dir = root();
     const client = new MemorySecretServiceClient();
     client.available = false;
-    expect(() => openGhostSecretContext({
-      home: dir,
-      client,
-      metadataPath: join(dir, "state.sqlite"),
-    })).toThrowError(expect.objectContaining({ code: "keyring_unavailable" }));
+    expect(() => openContext(dir, client))
+      .toThrowError(expect.objectContaining({ code: "keyring_unavailable" }));
 
     client.available = true;
     client.locked = true;
-    expect(() => openGhostSecretContext({
-      home: dir,
-      client,
-      metadataPath: join(dir, "state.sqlite"),
-    })).toThrowError(expect.objectContaining({ code: "keyring_locked" }));
+    expect(() => openContext(dir, client))
+      .toThrowError(expect.objectContaining({ code: "keyring_locked" }));
 
     client.locked = false;
-    const context = openGhostSecretContext({
-      home: dir,
-      client,
-      metadataPath: join(dir, "state.sqlite"),
-    });
+    const context = openContext(dir, client);
     expect(() => context.resolve("keyring:openrouter/personal"))
       .toThrowError(expect.objectContaining({ code: "secret_not_authorized" }));
     context.allowAccounts(["openrouter/personal"]);
@@ -82,9 +94,8 @@ describe("Secret Service boundary", () => {
   it("preserves two provider accounts and stable row ids across opens", () => {
     const dir = root();
     const client = new MemorySecretServiceClient();
-    const metadataPath = join(dir, "state.sqlite");
     const allowed = ["openrouter/personal", "openrouter/work"];
-    const first = openGhostSecretContext({ home: dir, client, metadataPath });
+    const first = openContext(dir, client);
     first.allowAccounts(allowed);
     const personalId = first.registerCredential(
       "openrouter",
@@ -98,7 +109,7 @@ describe("Secret Service boundary", () => {
     );
     first.close();
 
-    const second = openGhostSecretContext({ home: dir, client, metadataPath });
+    const second = openContext(dir, client);
     second.allowAccounts(allowed);
     const store = new KeyringAuthCredentialStore(second);
     expect(store.listAuthCredentials("openrouter")).toMatchObject([
@@ -111,9 +122,8 @@ describe("Secret Service boundary", () => {
   it("serializes refresh CAS, lease fencing, and shared cooldown maxima", () => {
     const dir = root();
     const client = new MemorySecretServiceClient();
-    const metadataPath = join(dir, "state.sqlite");
-    const firstContext = openGhostSecretContext({ home: dir, client, metadataPath });
-    const secondContext = openGhostSecretContext({ home: dir, client, metadataPath });
+    const firstContext = openContext(dir, client);
+    const secondContext = openContext(dir, client);
     firstContext.allowAccounts(["openrouter/personal"]);
     secondContext.allowAccounts(["openrouter/personal"]);
     const first = new KeyringAuthCredentialStore(firstContext);
@@ -165,8 +175,8 @@ describe("Secret Service boundary", () => {
     const dir = root();
     const client = new MemorySecretServiceClient();
     const metadataPath = join(dir, "state.sqlite");
-    const first = openGhostSecretContext({ home: join(dir, "one"), client, metadataPath });
-    const second = openGhostSecretContext({ home: join(dir, "two"), client, metadataPath });
+    const first = openContext(join(dir, "one"), client, metadataPath);
+    const second = openContext(join(dir, "two"), client, metadataPath);
     const personal = first.selectLiteralAccount("openrouter", { value: "first" });
     const other = second.selectLiteralAccount("openrouter", { value: "second" });
     expect(personal).toEqual({ service: "openrouter", account: "personal" });
@@ -180,11 +190,7 @@ describe("Secret Service boundary", () => {
   it("logs out exactly one whole service/account item", () => {
     const dir = root();
     const client = new MemorySecretServiceClient();
-    const context = openGhostSecretContext({
-      home: dir,
-      client,
-      metadataPath: join(dir, "state.sqlite"),
-    });
+    const context = openContext(dir, client);
     context.allowAccounts(["openrouter/personal", "openrouter/work"]);
     context.putField(
       { service: "openrouter", account: "personal", field: "value" },
@@ -216,20 +222,12 @@ describe("Secret Service boundary", () => {
 describe("plaintext migration", () => {
   it("allocates distinct machine accounts instead of overwriting another literal", () => {
     const machine = root();
-    const firstHome = join(machine, "one");
-    const secondHome = join(machine, "two");
-    mkdirSync(firstHome);
-    mkdirSync(secondHome);
-    writeFileSync(join(firstHome, "models.json"), JSON.stringify({
-      providers: { openrouter: { apiKey: "first-key" } },
-    }));
-    writeFileSync(join(secondHome, "models.json"), JSON.stringify({
-      providers: { openrouter: { apiKey: "second-key" } },
-    }));
+    const firstHome = literalHome(machine, "one", "first-key");
+    const secondHome = literalHome(machine, "two", "second-key");
     const client = new MemorySecretServiceClient();
     const metadataPath = join(machine, "state.sqlite");
-    openGhostSecretContext({ home: firstHome, client, metadataPath }).close();
-    openGhostSecretContext({ home: secondHome, client, metadataPath }).close();
+    openContext(firstHome, client, metadataPath).close();
+    openContext(secondHome, client, metadataPath).close();
 
     expect(JSON.parse(readFileSync(join(firstHome, "models.json"), "utf8"))).toMatchObject({
       accounts: ["openrouter/personal"],
@@ -245,27 +243,11 @@ describe("plaintext migration", () => {
 
   it("does not overwrite Ghost-schema items when secret-free metadata was lost", () => {
     const machine = root();
-    const firstHome = join(machine, "one");
-    const secondHome = join(machine, "two");
-    mkdirSync(firstHome);
-    mkdirSync(secondHome);
-    writeFileSync(join(firstHome, "models.json"), JSON.stringify({
-      providers: { openrouter: { apiKey: "first-key" } },
-    }));
-    writeFileSync(join(secondHome, "models.json"), JSON.stringify({
-      providers: { openrouter: { apiKey: "second-key" } },
-    }));
+    const firstHome = literalHome(machine, "one", "first-key");
+    const secondHome = literalHome(machine, "two", "second-key");
     const client = new MemorySecretServiceClient();
-    openGhostSecretContext({
-      home: firstHome,
-      client,
-      metadataPath: join(machine, "first-state.sqlite"),
-    }).close();
-    openGhostSecretContext({
-      home: secondHome,
-      client,
-      metadataPath: join(machine, "replacement-state.sqlite"),
-    }).close();
+    openContext(firstHome, client, join(machine, "first-state.sqlite")).close();
+    openContext(secondHome, client, join(machine, "replacement-state.sqlite")).close();
 
     expect(client.items.get("openrouter/personal")).toContain("first-key");
     expect(client.items.get("openrouter/account-2")).toContain("second-key");
@@ -326,11 +308,7 @@ describe("plaintext migration", () => {
     db.close();
 
     const client = new MemorySecretServiceClient();
-    const context = openGhostSecretContext({
-      home,
-      client,
-      metadataPath: join(home, "state.sqlite"),
-    });
+    const context = openContext(home, client);
     const modelsText = readFileSync(join(home, "models.json"), "utf8");
     const mcpText = readFileSync(join(home, "mcp.json"), "utf8");
     for (const secret of [
@@ -366,11 +344,7 @@ describe("plaintext migration", () => {
     }));
     const client = new MemorySecretServiceClient();
     client.write = () => {};
-    expect(() => openGhostSecretContext({
-      home,
-      client,
-      metadataPath: join(home, "state.sqlite"),
-    })).toThrow(SecretServiceError);
+    expect(() => openContext(home, client)).toThrow(SecretServiceError);
     expect(readFileSync(join(home, "models.json"), "utf8")).toContain("keep-me");
   });
 });
