@@ -1,18 +1,51 @@
 import { randomUUID } from "node:crypto";
-import type {
-  ExtensionAskDialogQuestion,
-  ExtensionAskDialogResult,
-  ExtensionAskDialogResultItem,
-  ExtensionUIDialogOptions,
-  ExtensionUIContext,
-} from "@oh-my-pi/pi-coding-agent/extensibility/extensions/types";
+import type { ExtensionUIContext } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/types";
 import { silentLogger, type Logger } from "./log.js";
+
+/** One choice the model offers the owner. */
+export interface AskOption {
+  label: string;
+  description?: string;
+  preview?: string;
+}
+
+/** One question of an ask interaction, as the shell renders it. */
+export interface AskQuestion {
+  id: string;
+  question: string;
+  header?: string;
+  options: AskOption[];
+  multi?: boolean;
+  /** Index into `options` of the model's own default; taken when the ask times out. */
+  recommended?: number;
+}
+
+export interface AskResultItem {
+  id: string;
+  question: string;
+  options: string[];
+  multi: boolean;
+  selectedOptions: string[];
+  customInput?: string;
+  note?: string;
+  timedOut?: boolean;
+}
+
+export type AskResult =
+  | { kind: "submit"; results: AskResultItem[] }
+  | { kind: "chat" };
+
+export interface AskOpenOptions {
+  signal?: AbortSignal;
+  /** Milliseconds until the ask answers itself; absent or 0 means wait forever. */
+  timeout?: number;
+}
 
 export interface PendingAsk {
   id: string;
   createdAt: string;
   timeoutAt?: string;
-  questions: ExtensionAskDialogQuestion[];
+  questions: AskQuestion[];
 }
 
 export class AskBrokerError extends Error {
@@ -33,7 +66,7 @@ export class HeadlessUIUnavailableError extends Error {
 }
 
 interface ActiveAsk extends PendingAsk {
-  resolve: (result: ExtensionAskDialogResult | undefined) => void;
+  resolve: (result: AskResult | undefined) => void;
   signal?: AbortSignal;
   onAbort?: () => void;
   timer?: ReturnType<typeof setTimeout>;
@@ -46,7 +79,7 @@ interface RawAnswerItem {
   note?: unknown;
 }
 
-function cloneQuestions(questions: ExtensionAskDialogQuestion[]): ExtensionAskDialogQuestion[] {
+function cloneQuestions(questions: AskQuestion[]): AskQuestion[] {
   return questions.map((question) => ({
     ...question,
     options: question.options.map((option) => ({ ...option })),
@@ -66,15 +99,14 @@ function stringField(
 }
 
 /**
- * Turns OMP's synchronous ExtensionUIContext.askDialog contract into a small,
- * pollable HTTP interaction. The provider turn remains paused in the harness;
- * the shell may reconnect to the same daemon and the first valid response wins.
+ * Turns the model's `ask` into a small, pollable HTTP interaction. The
+ * provider turn remains paused in the harness; the shell may reconnect to the
+ * same daemon and the first valid response wins.
  *
- * The deadline is entirely OMP's to decide. `askDialog` is handed a `timeout`
- * only when OMP resolved one from `ask.timeout` — which the daemon projects its
- * own `askTimeoutSeconds` onto (see session-host's settings overrides) — and no
- * timeout at all when the owner disabled auto-answering or plan mode suspended
- * it. Those three states arrive here as one `undefined`, so a default of the
+ * The deadline is the caller's to decide. `open` is handed a `timeout` only
+ * when one applies — the daemon's `askTimeoutSeconds`, unless the owner
+ * disabled auto-answering or plan mode suspended it — and no timeout at all
+ * otherwise. Those states arrive here as one `undefined`, so a default of the
  * broker's own could only override decisions it cannot see.
  */
 export class AskBroker {
@@ -95,10 +127,7 @@ export class AskBroker {
       select: async () => unavailable("show a selection dialog"),
       confirm: async () => unavailable("show a confirmation dialog"),
       input: async () => unavailable("show a text input dialog"),
-      askDialog: (
-        questions: ExtensionAskDialogQuestion[],
-        options?: ExtensionUIDialogOptions,
-      ) => this.#open(questions, options),
+      askDialog: (questions, options) => this.open(questions, options),
       notify: (message, type = "info") => {
         const fields = { type, message };
         if (type === "error") logger.error("OMP UI notification", fields);
@@ -183,16 +212,17 @@ export class AskBroker {
     if (this.#active) this.#settle(this.#active, undefined);
   }
 
-  #open(
-    questions: ExtensionAskDialogQuestion[],
-    options?: ExtensionUIDialogOptions,
-  ): Promise<ExtensionAskDialogResult | undefined> {
-    // Ask is exclusive in OMP, but fail closed if an integration error ever
-    // manages to overlap two dialogs instead of orphaning the first promise.
+  /**
+   * Publish one ask and resolve with the owner's answer, `{ kind: "chat" }`
+   * when they chose to talk instead, or `undefined` when it was cancelled.
+   */
+  open(questions: AskQuestion[], options?: AskOpenOptions): Promise<AskResult | undefined> {
+    // Ask is exclusive, but fail closed if an integration error ever manages
+    // to overlap two dialogs instead of orphaning the first promise.
     this.close();
     const now = Date.now();
     const timeout = options?.timeout && options.timeout > 0 ? options.timeout : undefined;
-    const { promise, resolve } = Promise.withResolvers<ExtensionAskDialogResult | undefined>();
+    const { promise, resolve } = Promise.withResolvers<AskResult | undefined>();
     const active: ActiveAsk = {
       id: randomUUID(),
       createdAt: new Date(now).toISOString(),
@@ -210,9 +240,7 @@ export class AskBroker {
       else options.signal.addEventListener("abort", onAbort, { once: true });
     }
     if (timeout && this.#active === active) {
-      options?.onTimeoutStart?.();
       active.timer = setTimeout(() => {
-        options?.onTimeout?.();
         this.#settle(active, {
           kind: "submit",
           results: active.questions.map((question) => this.#timedOutResult(question)),
@@ -222,10 +250,7 @@ export class AskBroker {
     return promise;
   }
 
-  #validateResult(
-    question: ExtensionAskDialogQuestion,
-    raw: unknown,
-  ): ExtensionAskDialogResultItem {
+  #validateResult(question: AskQuestion, raw: unknown): AskResultItem {
     if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
       throw new AskBrokerError("invalid_ask_answer", `Answer for ${question.id} must be an object.`);
     }
@@ -292,7 +317,7 @@ export class AskBroker {
    * (The timeout path bypasses #validateResult, which would otherwise insist a
    * single-select question carry an answer.)
    */
-  #timedOutResult(question: ExtensionAskDialogQuestion): ExtensionAskDialogResultItem {
+  #timedOutResult(question: AskQuestion): AskResultItem {
     const recommended = typeof question.recommended === "number"
       ? question.options[question.recommended]
       : undefined;
@@ -306,7 +331,7 @@ export class AskBroker {
     };
   }
 
-  #settle(active: ActiveAsk, result: ExtensionAskDialogResult | undefined): void {
+  #settle(active: ActiveAsk, result: AskResult | undefined): void {
     if (this.#active !== active) return;
     this.#active = null;
     if (active.timer) clearTimeout(active.timer);
