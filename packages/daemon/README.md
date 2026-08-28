@@ -343,8 +343,8 @@ ghostd remote on
 It prints the URL to open from any device on your tailnet. The built-in viewer
 shows your ghosts and conversations live and lets the owner type. The shell
 will offer the same switch. `ghostd remote status` shows the URL, owner, guest
-policy, and any action needed; `ghostd remote off` removes both of Ghost's
-managed Serve listeners.
+policy, and any action needed; `ghostd remote off` removes Ghost's Serve
+listener.
 
 Tailscale stamps your identity on each request; the
 login this node is signed in as owns the ghosts (set `remote.owner` in

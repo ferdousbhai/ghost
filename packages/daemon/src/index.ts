@@ -341,14 +341,7 @@ export {
   type ListeningServer,
   type ServerOptions,
 } from "./server.js";
-export {
-  RemoteServe,
-  type CommandResult as RemoteCommandResult,
-  type CommandRunner as RemoteCommandRunner,
-  type RemoteProblem,
-  type RemoteServeOptions,
-  type RemoteStatus,
-} from "./remote-serve.js";
+export { RemoteServe, type RemoteProblem, type RemoteServeOptions, type RemoteStatus } from "./remote-serve.js";
 export {
   conversationIdFromSessionFile,
   DEFAULT_TRANSCRIPT_LIMIT,

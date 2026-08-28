@@ -8,15 +8,14 @@ import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { DEFAULT_COMPACTION_CONFIG, type CompactionConfig } from "./compaction.js";
 import { writePrivateJsonAtomic } from "./private-file.js";
+import { serializeByKey } from "./promise-chain.js";
 import type { RemoteAccessOptions } from "./tailscale-identity.js";
 
 export type RemoteConfig = Pick<RemoteAccessOptions, "owner" | "guests"> & {
   enabled: boolean;
 };
 
-export type RemoteConfigFile = Pick<RemoteAccessOptions, "owner" | "guests"> & {
-  enabled?: boolean;
-};
+export type RemoteConfigFile = Partial<RemoteConfig>;
 
 export interface DaemonConfig {
   port: number;
@@ -44,7 +43,8 @@ export interface DaemonConfig {
    * says what other tailnet members may do (default read-only).
    */
   remote: RemoteConfig;
-  configPath: string | null;
+  /** The config file read, or the one that would be written; it need not exist. */
+  configPath: string;
   hooksPath: string;
 }
 
@@ -330,7 +330,7 @@ export function loadConfig(overrides: DaemonConfigOverrides = {}): DaemonConfig 
     compaction,
     askTimeoutSeconds,
     remote: { ...file?.remote, enabled: file?.remote?.enabled ?? false },
-    configPath: file ? configPath : null,
+    configPath,
     hooksPath,
   };
 }
@@ -339,23 +339,25 @@ function plainObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-/** Merge a config patch without discarding fields this daemon version does not understand. */
-export async function writeConfigFile(path: string, patch: Partial<DaemonConfigFile>): Promise<void> {
-  let existing: Record<string, unknown> = {};
-  try {
-    const parsed = JSON.parse(await readFile(path, "utf8")) as unknown;
-    if (!plainObject(parsed)) throw new Error(`${path} must contain a JSON object.`);
-    existing = parsed;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-  }
-  const merged: Record<string, unknown> = { ...existing };
-  for (const [key, value] of Object.entries(patch)) {
-    if (value === undefined) continue;
-    merged[key] = plainObject(value) && plainObject(existing[key])
-      ? { ...existing[key], ...value }
-      : value;
-  }
-  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-  await writePrivateJsonAtomic(path, merged);
+const configWrites = new Map<string, Promise<unknown>>();
+
+/** Merge a config patch, one section deep, without discarding fields this daemon version does not understand. */
+export function writeConfigFile(path: string, patch: Partial<DaemonConfigFile>): Promise<void> {
+  return serializeByKey(configWrites, path, async () => {
+    let existing: Record<string, unknown> = {};
+    try {
+      const parsed = JSON.parse(await readFile(path, "utf8")) as unknown;
+      if (!plainObject(parsed)) throw new Error(`${path} must contain a JSON object.`);
+      existing = parsed;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    const merged: Record<string, unknown> = { ...existing };
+    for (const [key, value] of Object.entries(patch)) {
+      if (value === undefined) continue;
+      merged[key] = plainObject(value) && plainObject(existing[key]) ? { ...existing[key], ...value } : value;
+    }
+    await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+    await writePrivateJsonAtomic(path, merged);
+  });
 }

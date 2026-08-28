@@ -1,13 +1,15 @@
 import { homedir } from "node:os";
-import { defaultConfigPath, loadConfig, writeConfigFile } from "./config.js";
+import { loadConfig } from "./config.js";
 import { RemoteServe, type RemoteStatus } from "./remote-serve.js";
+import type { CommandRunner } from "./tailscale-identity.js";
 
 export interface RemoteCommandOptions {
   env?: NodeJS.ProcessEnv;
   home?: string;
   stdout?: (text: string) => void;
   stderr?: (text: string) => void;
-  createRemoteServe?: (port: number, options: ConstructorParameters<typeof RemoteServe>[1]) => RemoteServe;
+  /** Test seam over `tailscale`. */
+  run?: CommandRunner;
 }
 
 function statusScreen(status: RemoteStatus): string {
@@ -34,31 +36,17 @@ export async function remoteCommand(
     stderr("Usage: ghostd remote [on|off|status]\n");
     return 2;
   }
-
-  const env = options.env ?? process.env;
-  const home = options.home ?? homedir();
   try {
-    const config = loadConfig({ env, home });
-    const remoteServe = options.createRemoteServe?.(config.port, config.remote)
-      ?? new RemoteServe(config.port, config.remote);
-    let status: RemoteStatus;
-    if (action === "on") {
-      status = await remoteServe.enable();
-      await writeConfigFile(config.configPath ?? defaultConfigPath(env, home), {
-        remote: { enabled: true },
-      });
-      if (status.url && !status.problem) stdout(`${status.url}\n`);
-      else stdout(statusScreen(status));
-    } else if (action === "off") {
-      status = await remoteServe.disable();
-      await writeConfigFile(config.configPath ?? defaultConfigPath(env, home), {
-        remote: { enabled: false },
-      });
-      stdout(status.problem ? statusScreen(status) : "Remote access is off.\n");
-    } else {
-      status = await remoteServe.status();
-      stdout(statusScreen(status));
-    }
+    const config = loadConfig({ env: options.env ?? process.env, home: options.home ?? homedir() });
+    const remote = new RemoteServe(config.port, {
+      ...config.remote,
+      configPath: config.configPath,
+      ...(options.run ? { run: options.run } : {}),
+    });
+    const status = action === "status" ? await remote.status() : await remote.setEnabled(action === "on");
+    if (action === "on" && status.url && !status.problem) stdout(`${status.url}\n`);
+    else if (action === "off" && !status.problem) stdout("Remote access is off.\n");
+    else stdout(statusScreen(status));
     return status.problem ? 1 : 0;
   } catch (error) {
     stderr(`ghostd remote: ${(error as Error).message}\n`);

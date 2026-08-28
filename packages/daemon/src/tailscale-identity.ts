@@ -7,12 +7,67 @@
  * that could forge the header could already read the API token file, so the
  * header is exactly as trustworthy as Tailscale documents it to be.
  */
-import { execFile } from "node:child_process";
+import { execFile, type ExecFileException } from "node:child_process";
 import type { IncomingMessage } from "node:http";
 import { promisify } from "node:util";
 import { LOOPBACK_ADDRESSES } from "./relay-protocol.js";
 
-const run = promisify(execFile);
+const exec = promisify(execFile);
+
+export interface CommandResult {
+  stdout: string;
+  stderr: string;
+  code: number;
+}
+
+/** Runs one binary; a non-zero exit is a result, a missing binary (ENOENT) rejects. */
+export type CommandRunner = (args: readonly string[]) => Promise<CommandResult>;
+
+export function commandRunner(binary: string): CommandRunner {
+  return async (args) => {
+    try {
+      const { stdout, stderr } = await exec(binary, [...args], { encoding: "utf8", timeout: 10_000 });
+      return { stdout, stderr, code: 0 };
+    } catch (error) {
+      const failed = error as ExecFileException & { stdout?: string; stderr?: string };
+      if (failed.code === "ENOENT") throw error;
+      return { stdout: failed.stdout ?? "", stderr: failed.stderr ?? "", code: typeof failed.code === "number" ? failed.code : 1 };
+    }
+  };
+}
+
+export interface TailscaleNode {
+  /** `Running`, `NeedsLogin`, `Stopped`, ... as `tailscale status` reports it. */
+  backendState: string;
+  /** The login this node is signed in as. */
+  login: string | null;
+  /** The node's MagicDNS name, without the trailing dot. */
+  hostname: string | null;
+  /** Whether the tailnet has HTTPS certificates enabled. */
+  certs: boolean;
+}
+
+/** `tailscale status --json`, reduced to what Ghost asks of it; rejects when tailscale is missing or does not answer. */
+export async function readTailscaleNode(run: CommandRunner = commandRunner("tailscale")): Promise<TailscaleNode> {
+  const result = await run(["status", "--json"]);
+  if (result.code !== 0) {
+    throw new Error(result.stderr.trim() || result.stdout.trim() || `tailscale exited with code ${result.code}`);
+  }
+  const status = JSON.parse(result.stdout) as {
+    BackendState?: unknown;
+    CertDomains?: unknown;
+    Self?: { DNSName?: unknown; UserID?: unknown };
+    User?: Record<string, { LoginName?: unknown }>;
+  };
+  const login = status.User?.[String(status.Self?.UserID)]?.LoginName;
+  const dnsName = status.Self?.DNSName;
+  return {
+    backendState: typeof status.BackendState === "string" ? status.BackendState : "",
+    login: typeof login === "string" && login.trim() ? login.trim() : null,
+    hostname: typeof dnsName === "string" ? dnsName.trim().replace(/\.$/, "") || null : null,
+    certs: Array.isArray(status.CertDomains) && status.CertDomains.some((domain) => typeof domain === "string" && domain !== ""),
+  };
+}
 
 export type RemoteRole = "owner" | "guest";
 
@@ -31,13 +86,10 @@ export interface RemoteAccessOptions {
   selfLogin?: () => Promise<string | null>;
 }
 
-/** The login this node is signed in as, from `tailscale status --json`. */
+/** The login this node is signed in as, or null when Tailscale does not say. */
 export async function tailscaleSelfLogin(): Promise<string | null> {
   try {
-    const { stdout } = await run("tailscale", ["status", "--json"], { timeout: 5_000 });
-    const status = JSON.parse(stdout) as { Self?: { UserID?: unknown }; User?: Record<string, { LoginName?: unknown }> };
-    const login = status.User?.[String(status.Self?.UserID)]?.LoginName;
-    return typeof login === "string" ? login : null;
+    return (await readTailscaleNode()).login;
   } catch {
     return null;
   }

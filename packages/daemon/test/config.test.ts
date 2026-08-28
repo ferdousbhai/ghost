@@ -43,7 +43,7 @@ describe("loadConfig", () => {
       offline: false,
       browserMode: "relay",
       remote: { enabled: false },
-      configPath: null,
+      configPath: join(root, ".config", "ghost", "config.json"),
     });
   });
 

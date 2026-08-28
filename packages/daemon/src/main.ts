@@ -9,12 +9,7 @@ import { ClaudeCodeProbe } from "./claude-code.js";
 import { importCommand } from "./import-command.js";
 import { legacyDocumentsPlacementCommand } from "./legacy-documents-placement.js";
 import { loginCommand } from "./login-command.js";
-import {
-  defaultConfigPath,
-  loadConfig,
-  type DaemonConfig,
-  type DaemonConfigOverrides,
-} from "./config.js";
+import { loadConfig, type DaemonConfig, type DaemonConfigOverrides } from "./config.js";
 import { scrubProviderEnv } from "./env-scrub.js";
 import { DocumentsService } from "./documents.js";
 import { ConversationMaintenance, MEMORY_UPKEEP_SETTINGS_KEY } from "./conversation-maintenance.js";
@@ -492,7 +487,7 @@ async function serveDaemon(
     onModelRoutingChanged: (name) => host.rebindModel(name),
   });
   const mcp = new McpCatalog({ registry, homeOperations });
-  const remoteServe = new RemoteServe(config.port, config.remote);
+  const remoteServe = new RemoteServe(config.port, { ...config.remote, configPath: config.configPath });
 
   let listening: ListeningServer;
   try {
@@ -511,7 +506,6 @@ async function serveDaemon(
       relay: relay ?? null,
       remote: new RemoteAccess(config.remote),
       remoteServe,
-      configPath: config.configPath ?? defaultConfigPath(process.env, homedir()),
     });
   } catch (error) {
     logger.error("could not bind", {
@@ -522,15 +516,10 @@ async function serveDaemon(
     return 1;
   }
 
-  remoteServe.setPort(listening.port);
   if (config.remote.enabled) {
-    try {
-      const status = await remoteServe.ensure(config.remote.enabled);
-      if (status.url && !status.problem) logger.info("remote access ready", { url: status.url });
-      else logger.warn("remote access is unavailable", { problem: status.problem });
-    } catch (error) {
-      logger.warn("could not configure remote access", { error: (error as Error).message });
-    }
+    const status = await remoteServe.ensure();
+    if (status.url && !status.problem) logger.info("remote access ready", { url: status.url });
+    else logger.warn("remote access is unavailable", { problem: status.problem });
   }
 
   logger.info("listening", {

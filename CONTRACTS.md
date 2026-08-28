@@ -738,19 +738,22 @@ and `{ login: null, role: "owner" }` for the token.
 
 **Remote access** is configured by `remote.enabled` (default `false`) and
 owned by `packages/daemon/src/remote-serve.ts`. `GET /api/remote` reports the
-Tailscale and Serve state; an owner-only `POST /api/remote { enabled }`
-changes it and durably updates the config file. `GET /api/remote/qr.svg`
-returns a no-store QR code for the active URL, while the unauthenticated
-`GET /manifest.webmanifest` makes the viewer installable. When the tailnet
-advertises certificate domains Ghost serves HTTPS on port 443; otherwise it
-serves HTTP on port 80. A configured exposure is idempotently re-applied after
-ghostd starts listening, including a change from HTTP to HTTPS when
-certificates become available. Status problems are `tailscale_missing`
-(`omarchy-install-service-tailscale`), `tailscale_stopped`, `not_logged_in`
-(`tailscale up`), `operator_required`
-(`sudo tailscale set --operator=$USER`), `serve_failed`, or
-`remote_unsupported`; codes without a parenthesized command have no automatic
-action to offer.
+Tailscale and Serve state, read from Tailscale on every call; an owner-only
+`POST /api/remote { enabled }` changes it and durably updates the config file.
+`GET /api/remote/qr.svg` returns a no-store QR code for the active URL, while
+the unauthenticated `GET /manifest.webmanifest` makes the viewer installable.
+When the tailnet advertises certificate domains Ghost serves HTTPS on port
+443; otherwise it serves HTTP on port 80. A configured exposure is
+idempotently re-applied after ghostd starts listening, moving from HTTP to
+HTTPS once certificates become available. Status problems are
+`tailscale_missing` (`omarchy-install-service-tailscale`), `tailscale_stopped`,
+`not_logged_in` (`tailscale up`), `operator_required`
+(`sudo tailscale set --operator=$USER`), or `serve_failed`; codes without a
+parenthesized command have no automatic action to offer. A failed change is
+the problem of the response that reports it; only an operator refusal is
+remembered (`tailscale.operator: false`, and the problem on later status
+reads) until Tailscale accepts a Serve change, because only a write reveals
+it.
 
 The daemon serves a built-in viewer page at `GET /`
 (`packages/daemon/src/remote-viewer.ts`: one HTML file, no framework; its CSP

@@ -5,6 +5,7 @@ import { DocumentsService } from "../src/documents.js";
 import { HomeOperationCoordinator } from "../src/home-operations.js";
 import { startDaemonServer, type ListeningServer } from "../src/server.js";
 import { RemoteServe, type RemoteStatus } from "../src/remote-serve.js";
+import { REMOTE_MANIFEST } from "../src/remote-viewer.js";
 import { SessionHost } from "../src/session-host.js";
 import { RemoteAccess, type RemoteAccessOptions } from "../src/tailscale-identity.js";
 import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
@@ -26,7 +27,7 @@ afterEach(stop);
 
 async function serve(
   remote: RemoteAccessOptions | null = {},
-  remoteServe: RemoteServe | null = null,
+  remoteServe?: (root: string) => RemoteServe,
 ): Promise<string> {
   temp = makeTempGhosts();
   temp.registry.ensureRoot();
@@ -41,8 +42,7 @@ async function serve(
     port: 0,
     apiToken: TOKEN,
     remote: remote === null ? null : new RemoteAccess({ selfLogin: async () => "Owner@Example.com", ...remote }),
-    remoteServe,
-    configPath: join(temp.root, "config.json"),
+    ...(remoteServe ? { remoteServe: remoteServe(temp.root) } : {}),
   });
   return `http://127.0.0.1:${listening.port}`;
 }
@@ -77,8 +77,8 @@ class FakeRemoteServe extends RemoteServe {
   readonly mutations: boolean[] = [];
   current: RemoteStatus;
 
-  constructor(enabled: boolean) {
-    super(7717, { run: async () => { throw new Error("fake runner should not be called"); } });
+  constructor(enabled: boolean, configPath: string) {
+    super(7717, { configPath, run: async () => { throw new Error("fake runner should not be called"); } });
     this.current = remoteStatus(enabled);
   }
 
@@ -101,6 +101,16 @@ class FakeRemoteServe extends RemoteServe {
   override async qrSvg(url: string): Promise<string> {
     return `<svg data-url="${url}"></svg>`;
   }
+}
+
+/** A server over a fake RemoteServe that persists `remote.enabled` into the temp root. */
+async function serveFake(enabled: boolean): Promise<{ fake: FakeRemoteServe; base: string }> {
+  let fake!: FakeRemoteServe;
+  const base = await serve({}, (root) => {
+    fake = new FakeRemoteServe(enabled, join(root, "config.json"));
+    return fake;
+  });
+  return { fake, base };
 }
 
 describe("tailnet identity", () => {
@@ -161,21 +171,13 @@ describe("tailnet identity", () => {
     const response = await fetch(`${base}/manifest.webmanifest`);
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toContain("application/manifest+json");
-    expect(await response.json()).toEqual({
-      name: "Ghost",
-      short_name: "Ghost",
-      start_url: "/",
-      display: "standalone",
-      background_color: "#111318",
-      theme_color: "#111318",
-    });
+    expect(await response.json()).toEqual(REMOTE_MANIFEST);
   });
 });
 
 describe("remote management", () => {
   it("gets status and persists owner POST changes", async () => {
-    const fake = new FakeRemoteServe(false);
-    const base = await serve({}, fake);
+    const { fake, base } = await serveFake(false);
     const headers = { authorization: `Bearer ${TOKEN}` };
 
     expect(await (await fetch(`${base}/api/remote`, { headers })).json())
@@ -193,8 +195,7 @@ describe("remote management", () => {
   });
 
   it("rejects malformed changes and guest writes", async () => {
-    const fake = new FakeRemoteServe(false);
-    const base = await serve({}, fake);
+    const { fake, base } = await serveFake(false);
     const invalid = await fetch(`${base}/api/remote`, {
       method: "POST",
       headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
@@ -214,8 +215,7 @@ describe("remote management", () => {
   });
 
   it("serves a no-store QR only while remote access is on", async () => {
-    const fake = new FakeRemoteServe(true);
-    const base = await serve({}, fake);
+    const { fake, base } = await serveFake(true);
     const headers = { authorization: `Bearer ${TOKEN}` };
     const qr = await fetch(`${base}/api/remote/qr.svg`, { headers });
     expect(qr.status).toBe(200);
@@ -229,24 +229,10 @@ describe("remote management", () => {
     expect(await off.json()).toMatchObject({ error: { code: "not_found" } });
   });
 
-  it("returns the stable unsupported status and refuses POST without RemoteServe", async () => {
-    const base = await serve({}, null);
+  it("has no remote routes on a server built without a RemoteServe", async () => {
+    const base = await serve();
     const headers = { authorization: `Bearer ${TOKEN}` };
-    const status = await fetch(`${base}/api/remote`, { headers });
-    expect(await status.json()).toMatchObject({
-      enabled: false,
-      state: "unavailable",
-      scheme: null,
-      hostname: null,
-      url: null,
-      problem: { code: "remote_unsupported" },
-    });
-    const post = await fetch(`${base}/api/remote`, {
-      method: "POST",
-      headers: { ...headers, "content-type": "application/json" },
-      body: JSON.stringify({ enabled: true }),
-    });
-    expect(post.status).toBe(409);
-    expect(await post.json()).toMatchObject({ error: { code: "not_supported" } });
+    expect((await fetch(`${base}/api/remote`, { headers })).status).toBe(404);
+    expect((await fetch(`${base}/api/remote/qr.svg`, { headers })).status).toBe(404);
   });
 });
