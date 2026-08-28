@@ -303,6 +303,12 @@ ad-hoc prompts:
 - Tool lifecycle events include start, update, completion, error, bounded
   result summaries, and model-fallback state so the shell can render durable
   activity cards rather than a transient name.
+- Background jobs: `bash` with `background: true` starts a command as a job of
+  the conversation, and a foreground command that runs longer than the
+  auto-background budget (60 s by default) continues as one. The model's `jobs`
+  tool and `/jobs` list, wait for, and cancel them; a settled job reports back
+  into the conversation as a follow-up turn. `GET …/sessions/:id/jobs` and
+  `POST …/sessions/:id/jobs/:jobId/cancel` expose them to the shell.
 - Branching off a message forks the conversation: the transcript is copied to a
   new conversation, rewound to just before that message, and its text handed
   back as a draft, leaving the original untouched. Re-answering a historical

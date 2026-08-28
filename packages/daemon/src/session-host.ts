@@ -12,6 +12,7 @@ import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { collectGhostExtension, openGhostHome } from "@ghost/extensions";
 import {
   createAgentSession,
+  createLocalBashOperations,
   createSyntheticSourceInfo,
   DefaultResourceLoader,
   SessionManager,
@@ -133,6 +134,17 @@ import { loadGhostHookExtensions } from "./artifact-root.js";
 import { AskBroker, AskBrokerError, type PendingAsk } from "./ask-broker.js";
 import { AskCancelledError, createAskTool, type AskToolDetails } from "./ask-tool.js";
 import type { AskResultItem } from "./ask-broker.js";
+import {
+  type CancelJobOutcome,
+  createBashTool,
+  createJobsTool,
+  formatJobResult,
+  type GhostJob,
+  GhostJobManager,
+  type GhostJobSnapshot,
+  JOB_RESULT_MESSAGE_TYPE,
+  jobSnapshot,
+} from "./jobs.js";
 import { piExtensionFromGhost, renderPersonaPrompt } from "./pi-extension-bridge.js";
 import { GhostMcpManager } from "./mcp-manager.js";
 import { validateServerName, type MCPServerConfig } from "./mcp-config.js";
@@ -349,6 +361,7 @@ function persistedPiOwnerTurnCount(entries: readonly SessionEntry[]): number {
 type PiOwnerPassKind = "direct" | "steer" | "followUp" | "collaboration" | "voice" | "reanswer";
 
 const ASK_REANSWER_OWNER_MESSAGE_TYPE = "ghost-ask-reanswer-owner";
+const DEFAULT_AUTO_BACKGROUND_MS = 60_000;
 const MODEL_TURN_PERSISTENCE_ERROR = "Could not durably settle this owner turn.";
 
 interface PendingPiOwnerPass {
@@ -590,6 +603,11 @@ export interface SessionHostOptions {
    */
   compaction?: CompactionConfig;
   /**
+   * Background jobs: a foreground `bash` call that runs longer than
+   * `autoBackgroundMs` continues as a job (default 60s; 0 disables).
+   */
+  jobs?: { autoBackgroundMs?: number };
+  /**
    * Owner-local Claude Code harness. It is dormant unless
    * `roles.chat_model.provider` is `claude-code`; options are chiefly the
    * executable override and test seams.
@@ -720,6 +738,9 @@ interface HostedSession extends GhostSessionHandle {
   /** Lets a concurrent stop wait for an admitted startup. */
   liveVoiceStart?: Promise<LiveVoiceStatus>;
   ask: AskBroker;
+  jobs: GhostJobManager;
+  /** Jobs that settled while an owner held the session without streaming. */
+  pendingJobResults: GhostJob[];
   /**
    * The runtime this session's model was bound from, kept so a later model
    * switch can re-resolve against the same catalogue the session was built
@@ -1470,6 +1491,7 @@ export class SessionHost {
   private readonly browserMode: "relay" | "profile";
   private readonly relayTransport: RelayTransport | undefined;
   private readonly compactionConfig: CompactionConfig;
+  private readonly autoBackgroundMs: number;
   private readonly titleEnabled: boolean;
   private readonly titleTimeoutMs: number;
   private readonly titleTimeoutScheduler: NonNullable<TitleConfig["scheduleTimeout"]>;
@@ -1537,6 +1559,7 @@ export class SessionHost {
     this.browserMode = options.browserMode ?? "relay";
     this.relayTransport = options.relayTransport;
     this.compactionConfig = options.compaction ?? DEFAULT_COMPACTION_CONFIG;
+    this.autoBackgroundMs = options.jobs?.autoBackgroundMs ?? DEFAULT_AUTO_BACKGROUND_MS;
     this.titleEnabled = options.title?.enabled ?? true;
     this.titleTimeoutMs = options.title?.timeoutMs ?? DEFAULT_TITLE_TIMEOUT_MS;
     if (!Number.isFinite(this.titleTimeoutMs) || this.titleTimeoutMs <= 0) {
@@ -1689,6 +1712,7 @@ export class SessionHost {
   private sessionProtectedFromRetention(hosted: HostedSession): boolean {
     const [, conversationId] = sessionKeyParts(hosted.sessionKey);
     return this.sessionOwned(hosted)
+      || hosted.jobs.hasRunning()
       || hosted.session.isCompacting
       || hosted.title !== undefined
       || hosted.settlingDeferred !== undefined
@@ -2563,6 +2587,10 @@ export class SessionHost {
     this.promoteLegacySessionTitle(sessionManager, ghostName, sessionKey);
 
     const ask = new AskBroker();
+    const jobs = new GhostJobManager({
+      operations: createLocalBashOperations(),
+      onSettled: (job) => this.deliverJobResult(key, job),
+    });
     const hookExtensions = await loadGhostHookExtensions(paths.home);
     extensionFactories.push(...hookExtensions.factories);
     for (const error of hookExtensions.errors) {
@@ -2628,7 +2656,11 @@ export class SessionHost {
       sessionManager,
       settingsManager,
       resourceLoader,
-      customTools: [askTool as ToolDefinition],
+      customTools: [
+        askTool as ToolDefinition,
+        createBashTool({ cwd: runtimeCwd, manager: jobs, autoBackgroundMs: this.autoBackgroundMs }) as ToolDefinition,
+        createJobsTool(jobs) as ToolDefinition,
+      ],
     });
     const { session, extensionsResult } = created;
     createdSession = session;
@@ -2673,6 +2705,8 @@ export class SessionHost {
       pendingOwnerPasses: [],
       nextOwnerTurnId: persistedPiOwnerTurnCount(sessionManager.getBranch()),
       ask,
+      jobs,
+      pendingJobResults: [],
       settings,
       skills: effectiveDeclarative.skills,
       rules: effectiveDeclarative.rules,
@@ -2700,6 +2734,57 @@ export class SessionHost {
       }
       throw error;
     }
+  }
+
+  /**
+   * A settled job reports back into its conversation as an agent-attributed
+   * follow-up. pi queues it behind a live turn and otherwise starts a turn of
+   * its own, which `watchExternalTurns` settles; only a session an owner holds
+   * without streaming waits, until `releaseSessionClaim` calls back here.
+   */
+  private deliverJobResult(key: string, job: GhostJob): void {
+    const hosted = this.sessions.get(key);
+    if (!hosted || hosted.sessionDisposed) return;
+    if (hosted.busy && !hosted.session.isStreaming) {
+      hosted.pendingJobResults.push(job);
+      return;
+    }
+    hosted.session.sendCustomMessage({
+      customType: JOB_RESULT_MESSAGE_TYPE,
+      content: formatJobResult(job),
+      display: true,
+      details: { attribution: "agent", jobId: job.id, status: job.status, exitCode: job.exitCode ?? null },
+    }, { triggerTurn: true, deliverAs: "followUp" }).catch((error) => {
+      this.logger.warn("background job result could not be delivered", {
+        session: key,
+        job: job.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+  }
+
+  /** The background jobs of one open conversation; a closed one has none. */
+  listJobs(ghostName: string, sessionId?: string | null, runtime: ConversationRuntime = "pi"): GhostJobSnapshot[] {
+    assertPiConversation(runtime, "Background jobs");
+    this.registry.get(ghostName);
+    const hosted = this.sessions.get(this.keyOf(ghostName, sessionId));
+    const now = Date.now();
+    return hosted ? hosted.jobs.list().map((job) => jobSnapshot(job, now)) : [];
+  }
+
+  cancelJob(
+    ghostName: string,
+    sessionId: string | null | undefined,
+    jobId: string,
+    runtime: ConversationRuntime = "pi",
+  ): { outcome: CancelJobOutcome; job: GhostJobSnapshot | null } {
+    assertPiConversation(runtime, "Background jobs");
+    this.registry.get(ghostName);
+    const hosted = this.sessions.get(this.keyOf(ghostName, sessionId));
+    if (!hosted) return { outcome: "not_found", job: null };
+    const outcome = hosted.jobs.cancel(jobId);
+    const job = hosted.jobs.get(jobId);
+    return { outcome, job: job ? jobSnapshot(job) : null };
   }
 
   /**
@@ -3817,6 +3902,7 @@ export class SessionHost {
     } finally {
       hosted.busy = false;
       this.touchSession(hosted);
+      for (const job of hosted.pendingJobResults.splice(0)) this.deliverJobResult(hosted.sessionKey, job);
     }
   }
 
@@ -4079,6 +4165,7 @@ export class SessionHost {
     try {
       const output = await executeGhostBuiltin(dispatch, {
         session: hosted.session,
+        jobs: hosted.jobs,
         cwd: hosted.session.sessionManager.getCwd(),
         projectRoot: hosted.project.root,
         ghostHome: hosted.ghost.dir,
@@ -6886,6 +6973,7 @@ export class SessionHost {
       await this.collectCleanupFailure(failures, () => this.settleHostedMcpRefresh(hosted));
     }
     await this.collectCleanupFailure(failures, () => this.disposeHostedAgentSession(hosted));
+    await this.collectCleanupFailure(failures, () => hosted.jobs.dispose());
     await this.collectCleanupFailure(failures, () => this.closeModelRuntime(hosted));
     if (failures.length > 0) {
       throw new AggregateError(failures, `Failed to fully dispose session ${hosted.sessionKey}.`);
@@ -6985,6 +7073,7 @@ export class SessionHost {
           () => this.disconnectHostedMcp(entry),
         );
       }
+      this.launchCleanupStep(entry, "force cancel jobs", () => entry.jobs.dispose());
       this.launchCleanupStep(entry, "force close model runtime", () => this.closeModelRuntime(entry));
       if (!entry.sessionDisposed && !entry.forceDisposeStarted) {
         entry.forceDisposeStarted = true;

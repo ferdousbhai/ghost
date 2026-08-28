@@ -434,16 +434,38 @@ canonicalizes staged legacy `notes/`/`docs/` Markdown. It exposes no live
 legacy document list, read, find, write, or search API; live Documents are
 exclusively the machine-wide `MachineDocuments` boundary and daemon route.
 
+Background jobs are Ghost-owned (`packages/daemon/src/jobs.ts`) and
+conversation-scoped. Ghost's own `bash` tool replaces pi's by name and runs
+every command as a job of the session over pi's local shell operations:
+`background: true` answers with the job id at once, and a foreground command
+waits up to the daemon's auto-background budget (`jobs.autoBackgroundMs`,
+default 60 s, `0` disables; never past the call's own `timeout`) and then
+keeps running as a job while the model gets the output so far and the id. A
+foreground command that settles in time answers like pi's tool: its output, or
+an error carrying the output plus `Command exited with code N` /
+`Command aborted`. The `jobs` tool lists, waits for (default 30 s, at most
+300 s), or cancels jobs; `/jobs` lists them without a model. Every job belongs
+to the session that started it: it survives the turn but not the session
+(`close`, retention eviction — which a running job prevents — and daemon
+shutdown cancel it), it keeps a bounded output tail (the newest 64,000 bytes
+of whole chunks) in memory only, and the newest 50 settled jobs stay listed.
+When a job settles, its report enters the conversation as an agent-attributed
+`ghost-job-result` custom message (`details.jobId/status/exitCode`) delivered
+through pi's own queue: behind the live turn when one is streaming, otherwise
+as a follow-up turn of its own; a session an owner holds without streaming
+receives it at the release boundary. A job cancelled before delivery still
+reports (`was cancelled`); jobs cancelled by session teardown do not.
+
 Slash commands are a Ghost-owned catalog
 (`packages/daemon/src/slash-commands.ts`), session-scoped and built from the
 conversation's pinned declarative snapshot. It holds the headless builtins Ghost
-answers without a model — `/context`, `/tools`, `/dirs`, and
+answers without a model — `/context`, `/tools`, `/dirs`, `/jobs`, and
 `/compact [instructions]` (`available`), plus the informational forms of
 `/model`, `/session [info]`, and `/usage [show]` (`partial`) — the
 conversation's admitted Markdown commands and prompt templates, expanded into
 the user turn with pi's `$ARGUMENTS`/`$1`/`${@:2}` placeholders, and
 `/skill:<name> [args]` force-invocation. Every known command from another
-harness (`/jobs`, `/todo`, `/browser`, `/computer`, `/memory`, `/mcp`, `/move`,
+harness (`/todo`, `/browser`, `/computer`, `/memory`, `/mcp`, `/move`,
 `/add-dir`, `/remove-dir`, `/pin`, `/rename`, `/share`, `/export`, `/dump`,
 `/stats`, and TUI-only ones such as `/plan`, `/help`, `/clear`, `/new`,
 `/resume`, `/exit`, `/quit`, `/settings`, `/theme`, `/keybindings`, `/login`,
@@ -1229,6 +1251,14 @@ one must not be a leak of both.
   Claude Code returns `409 not_supported`, because opening an unrelated pi
   session just to discover commands would lie about the active runtime;
   non-GET methods return `405`.
+- `GET  /api/ghosts/:name/sessions/:id/jobs` → `{ jobs }` — the background
+  jobs of that conversation as `{ id, label, command, status, startedAt,
+  endedAt?, durationMs, exitCode?, output, outputTruncated }` rows, where
+  `status` is `running`, `completed`, `failed`, or `cancelled`; a conversation
+  that is not open has none (`[]`). Never opens a session.
+- `POST /api/ghosts/:name/sessions/:id/jobs/:jobId/cancel` → `{ outcome, job }`
+  — `outcome` is `cancelled` or `already_settled` with the job's current row;
+  an unknown job or a conversation that is not open is `404 not_found`.
 - A standalone builtin sent through `POST …/messages` produces exactly
   `start`, one or more `command_output` events, then `done` with zero usage.
   Unsupported and failed commands set `isError` and `code` on their output but
