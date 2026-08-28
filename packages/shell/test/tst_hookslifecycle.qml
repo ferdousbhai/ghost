@@ -54,9 +54,10 @@ TestCase {
                 { event: "conversation_idle", count: 1 }
             ],
             hooks: [
-                { event: "before_prompt", name, description: "Adds bounded context." },
+                { event: "before_prompt", source: "config", name, description: "Adds bounded context." },
                 {
                     event: "conversation_idle",
+                    source: "builtin",
                     name: "Memory upkeep",
                     description: "Runs after inactivity.",
                     idleSeconds: 60
@@ -201,6 +202,69 @@ TestCase {
         requests[1].complete(200, status("After reconnect"));
         verify(Ghostd.hooksLoaded);
         compare(Ghostd.activeHooks[0].name, "After reconnect");
+    }
+
+    function test_configIsReadWrittenAndRefusedThroughTheDaemon(): void {
+        const document = {
+            hooks: { before_prompt: [{ hooks: [{ type: "command", command: "/bin/true" }] }] }
+        };
+        let finished = [];
+        const watcher = function (ok) { finished.push(ok); };
+        Ghostd.hookConfigWriteFinished.connect(watcher);
+        try {
+            Ghostd.fetchHookConfig(false);
+            compare(requests.length, 1);
+            compare(requests[0].method, "GET");
+            verify(requests[0].url.endsWith("/api/hooks/config"));
+            verify(Ghostd.hookConfigLoading);
+            requests[0].complete(200, { path: "/owner/.config/ghost/hooks.json", document });
+            verify(Ghostd.hookConfigLoaded);
+            verify(Ghostd.hookConfigAvailable);
+            compare(Ghostd.hookConfigPath, "/owner/.config/ghost/hooks.json");
+            compare(Ghostd.hookConfig.hooks.before_prompt[0].hooks[0].command, "/bin/true");
+
+            const next = { hooks: {} };
+            Ghostd.writeHookConfig(next);
+            compare(requests.length, 2);
+            compare(requests[1].method, "PUT");
+            verify(requests[1].url.endsWith("/api/hooks/config"));
+            compare(requests[1].headers["Content-Type"], "application/json");
+            compare(JSON.parse(requests[1].body), next);
+            verify(Ghostd.hookConfigBusy);
+            requests[1].complete(200, { path: "/owner/.config/ghost/hooks.json", document: next });
+            verify(!Ghostd.hookConfigBusy);
+            compare(finished, [true]);
+            compare(Object.keys(Ghostd.hookConfig.hooks).length, 0);
+            // An admitted write is live at once, so the status is re-read.
+            compare(requests.length, 3);
+            compare(requests[2].method, "GET");
+            verify(requests[2].url.endsWith("/api/hooks"));
+
+            Ghostd.writeHookConfig({ hooks: { session_stop: [{ hooks: [{ type: "command", command: "" }] }] } });
+            requests[3].complete(400, {
+                error: {
+                    code: "invalid_request",
+                    message: "/owner/.config/ghost/hooks.json: hooks.session_stop[0].hooks[0] must be a command hook with a non-empty NUL-free command."
+                }
+            });
+            compare(finished, [true, false]);
+            verify(Ghostd.hookConfigError.indexOf("hooks.session_stop[0].hooks[0]") === 0
+                || Ghostd.hookConfigError.indexOf("hooks.json: hooks.session_stop[0]") > 0);
+            compare(Object.keys(Ghostd.hookConfig.hooks).length, 0);
+            compare(requests.length, 4);
+        } finally {
+            Ghostd.hookConfigWriteFinished.disconnect(watcher);
+        }
+    }
+
+    function test_configIsUnavailableOnADaemonWithoutAFile(): void {
+        Ghostd.fetchHookConfig(false);
+        requests[0].complete(404, { error: { code: "not_found", message: "Hook configuration is not available." } });
+        verify(Ghostd.hookConfigLoaded);
+        verify(!Ghostd.hookConfigAvailable);
+        compare(Ghostd.hookConfigError, "");
+        Ghostd.writeHookConfig({ hooks: {} });
+        compare(requests.length, 1);
     }
 
     function test_ghostSessionProjectAndDocumentsChangesDoNotOwnCatalog(): void {

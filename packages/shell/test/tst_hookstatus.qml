@@ -15,11 +15,12 @@ TestCase {
                 { event: "conversation_idle", count: 1 }
             ],
             hooks: [
-                { event: "before_prompt", name: "Prompt policy", description: "Adds policy." },
-                { event: "session_stop", name: "Continuity", description: "Checks completion." },
-                { event: "session_stop", name: "Style", description: "Checks prose." },
+                { event: "before_prompt", source: "config", name: "Prompt policy", description: "Adds policy." },
+                { event: "session_stop", source: "builtin", name: "Continuity", description: "Checks completion." },
+                { event: "session_stop", source: "config", name: "Style", description: "Checks prose." },
                 {
                     event: "conversation_idle",
+                    source: "builtin",
                     name: "Memory upkeep",
                     description: "Updates durable context.",
                     idleSeconds: 600
@@ -118,6 +119,27 @@ TestCase {
         const zeroCap = validStatus();
         zeroCap.sessionStopContinuationCap = 0;
         compare(HookStatus.normalize(zeroCap), null);
+
+        const tunedConfig = validStatus();
+        tunedConfig.hooks[0].settingsKey = "prompt";
+        compare(HookStatus.normalize(tunedConfig), null);
+
+        const badKey = validStatus();
+        badKey.hooks[3].settingsKey = "Memory-Upkeep";
+        compare(HookStatus.normalize(badKey), null);
+
+        const tuned = validStatus();
+        tuned.hooks[3].settingsKey = "memory_upkeep";
+        compare(HookStatus.normalize(tuned).hooks[3].settingsKey, "memory_upkeep");
+        compare(HookStatus.normalize(tuned).hooks[1].settingsKey, undefined);
+
+        const badSource = validStatus();
+        badSource.hooks[0].source = "extension";
+        compare(HookStatus.normalize(badSource), null);
+
+        const noSource = validStatus();
+        delete noSource.hooks[0].source;
+        compare(HookStatus.normalize(noSource), null);
 
         const hugeCap = validStatus();
         hugeCap.sessionStopContinuationCap = 101;

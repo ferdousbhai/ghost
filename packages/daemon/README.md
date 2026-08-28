@@ -62,7 +62,7 @@ Everything Ghost owns for a pi conversation stays inside the ghost home:
 ```text
 ~/ghosts/<name>/
   character.md             persona
-  memory/*.md              one durable fact per plain Markdown file
+  memory/*.md              one stable fact per plain Markdown file
   settings.yml             the ghost's own plain YAML settings
   models.json              providers, keyring policy, roles, and fallbacks;
                            secret references only

@@ -3,8 +3,10 @@
 const EVENT_ORDER = ["before_prompt", "session_stop", "conversation_idle"];
 const ROOT_KEYS = ["active", "events", "hooks", "sessionStopContinuationCap", "total"];
 const EVENT_KEYS = ["count", "event"];
-const HOOK_KEYS = ["description", "event", "name"];
-const IDLE_HOOK_KEYS = ["description", "event", "idleSeconds", "name"];
+const HOOK_KEYS = ["description", "event", "name", "source"];
+const IDLE_HOOK_KEYS = ["description", "event", "idleSeconds", "name", "source"];
+const SOURCES = ["builtin", "config"];
+const SETTINGS_KEY = /^[a-z][a-z0-9_]*$/;
 
 function isObject(value) {
     return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -69,24 +71,31 @@ function normalize(body) {
     for (let index = 0; index < body.hooks.length; index += 1) {
         const hook = body.hooks[index];
         if (!isObject(hook) || !boundedDisplayText(hook.name, 80)
-                || !boundedDisplayText(hook.description, 240)) return null;
+                || !boundedDisplayText(hook.description, 240)
+                || SOURCES.indexOf(hook.source) < 0) return null;
         const order = eventIndex(hook.event);
         if (order < 0 || order < previousHookEventIndex) return null;
         previousHookEventIndex = order;
+        // Only a built-in row may name the hooks.json entry that tunes it.
+        const tuned = hasOwn(hook, "settingsKey");
+        if (tuned && (hook.source !== "builtin" || typeof hook.settingsKey !== "string"
+                || !SETTINGS_KEY.test(hook.settingsKey))) return null;
+        const expected = (hook.event === "conversation_idle" ? IDLE_HOOK_KEYS : HOOK_KEYS)
+            .concat(tuned ? ["settingsKey"] : []);
+        if (!exactKeys(hook, expected)) return null;
         if (hook.event === "conversation_idle") {
-            if (!exactKeys(hook, IDLE_HOOK_KEYS)
-                    || !Number.isSafeInteger(hook.idleSeconds)
+            if (!Number.isSafeInteger(hook.idleSeconds)
                     || hook.idleSeconds < 1 || hook.idleSeconds > 86400) return null;
-        } else if (!exactKeys(hook, HOOK_KEYS) || hasOwn(hook, "idleSeconds")) {
-            return null;
         }
         observed[hook.event] = (observed[hook.event] || 0) + 1;
         const normalized = {
             event: hook.event,
+            source: hook.source,
             name: hook.name,
             description: hook.description
         };
         if (hook.event === "conversation_idle") normalized.idleSeconds = hook.idleSeconds;
+        if (tuned) normalized.settingsKey = hook.settingsKey;
         hooks.push(normalized);
     }
 

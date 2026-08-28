@@ -827,6 +827,111 @@ const json = (res, status, body) => {
   res.end(payload);
 };
 
+// The daemon's hooks.json, kept as one document the way ghostd does, with
+// its status projection derived from it. The loader's shape check is the
+// small subset a pane edit can plausibly trip, worded the way ghostd words it.
+const HOOKS_CONFIG_PATH = "/home/owner/.config/ghost/hooks.json";
+const HOOK_EVENTS = ["before_prompt", "session_stop", "conversation_idle"];
+let hooksDocument = {
+  hooks: {
+    before_prompt: [{ hooks: [{
+      type: "command",
+      command: "/home/owner/.local/bin/prompt-context",
+      name: "Prompt context",
+      description: "Adds bounded guidance before an owner prompt.",
+      timeout: 10,
+    }] }],
+    session_stop: [{ hooks: [{
+      type: "command",
+      command: "/home/owner/.local/bin/completion-check",
+      name: "Completion check",
+      description: "Reviews the current assistant pass before it settles.",
+    }] }],
+  },
+};
+const BUILTIN_HOOKS = [{
+  event: "conversation_idle",
+  source: "builtin",
+  name: "Idle upkeep",
+  description: "Runs after the current conversation remains inactive.",
+  idleSeconds: 60,
+  settingsKey: "memory_upkeep",
+}];
+
+function hooksDocumentProblem(document) {
+  const path = HOOKS_CONFIG_PATH;
+  if (document === null || typeof document !== "object" || Array.isArray(document)) {
+    return `${path} must contain a JSON object.`;
+  }
+  const builtin = document.builtin;
+  if (builtin !== undefined) {
+    if (builtin === null || typeof builtin !== "object" || Array.isArray(builtin)) return `${path}: "builtin" must be an object.`;
+    for (const [key, raw] of Object.entries(builtin)) {
+      if (!/^[a-z][a-z0-9_]*$/u.test(key)) return `${path}: builtin key ${JSON.stringify(key)} must match [a-z][a-z0-9_]*.`;
+      if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return `${path}: builtin.${key} must be an object.`;
+      for (const field of Object.keys(raw)) {
+        if (field !== "idleSeconds") return `${path}: builtin.${key}.${field} is not a setting.`;
+      }
+      if (raw.idleSeconds !== undefined
+          && !(Number.isSafeInteger(raw.idleSeconds) && raw.idleSeconds >= 1 && raw.idleSeconds <= 86_400)) {
+        return `${path}: builtin.${key}.idleSeconds must be an integer in [1, 86400].`;
+      }
+    }
+  }
+  const hooks = document.hooks;
+  if (hooks === undefined) return null;
+  if (hooks === null || typeof hooks !== "object" || Array.isArray(hooks)) return `${path}: "hooks" must be an object.`;
+  for (const event of Object.keys(hooks)) {
+    if (!HOOK_EVENTS.includes(event)) return `${path}: unsupported hook event ${JSON.stringify(event)}.`;
+    if (!Array.isArray(hooks[event])) return `${path}: "hooks.${event}" must be an array.`;
+    for (const [g, group] of hooks[event].entries()) {
+      if (!group || !Array.isArray(group.hooks)) return `${path}: hooks.${event}[${g}].hooks must be an array.`;
+      for (const [h, handler] of group.hooks.entries()) {
+        const label = `hooks.${event}[${g}].hooks[${h}]`;
+        if (handler?.type !== "command" || typeof handler.command !== "string" || !handler.command.trim()) {
+          return `${path}: ${label} must be a command hook with a non-empty NUL-free command.`;
+        }
+        if (handler.timeout !== undefined && !(typeof handler.timeout === "number" && handler.timeout > 0 && handler.timeout <= 600)) {
+          return `${path}: ${label}.timeout must be a number in (0, 600].`;
+        }
+        if (event === "conversation_idle" && handler.idleSeconds !== undefined
+            && !(Number.isSafeInteger(handler.idleSeconds) && handler.idleSeconds >= 1 && handler.idleSeconds <= 86_400)) {
+          return `${path}: ${label}.idleSeconds must be an integer in [1, 86400].`;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+function hooksStatus() {
+  const rows = [];
+  for (const event of HOOK_EVENTS) {
+    rows.push(...BUILTIN_HOOKS.filter((row) => row.event === event));
+    for (const group of hooksDocument.hooks?.[event] ?? []) {
+      for (const handler of group.hooks) {
+        const trigger = event === "before_prompt" ? "Before-prompt"
+          : event === "session_stop" ? "Session-stop" : "Conversation-idle";
+        rows.push({
+          event,
+          source: "config",
+          name: handler.name ?? `${trigger} command hook`,
+          description: handler.description ?? (event === "before_prompt"
+            ? "Adds context before the owner prompt is sent."
+            : event === "session_stop"
+              ? "Reviews the current assistant pass and may continue it."
+              : "Runs in the background after the configured idle interval."),
+          ...(event === "conversation_idle" ? { idleSeconds: handler.idleSeconds ?? 60 } : {}),
+        });
+      }
+    }
+  }
+  const events = HOOK_EVENTS
+    .map((event) => ({ event, count: rows.filter((row) => row.event === event).length }))
+    .filter(({ count }) => count > 0);
+  return { active: rows.length > 0, total: rows.length, events, hooks: rows, sessionStopContinuationCap: 10 };
+}
+
 const readBody = (req) =>
   new Promise((resolve, reject) => {
     let raw = "";
@@ -1793,38 +1898,22 @@ const mockServer = createServer(async (req, res) => {
   const parts = url.pathname.split("/").filter(Boolean); // ["api","ghosts",...]
   console.error(`${req.method} ${url.pathname}`);
 
+  if (parts.length === 3 && parts[0] === "api" && parts[1] === "hooks" && parts[2] === "config") {
+    if (req.method === "GET") return json(res, 200, { path: HOOKS_CONFIG_PATH, document: hooksDocument });
+    if (req.method !== "PUT") return json(res, 405, {
+      error: { code: "method_not_allowed", message: `${req.method} is not allowed here.` },
+    });
+    const body = await readBody(req).catch(() => null);
+    const problem = hooksDocumentProblem(body);
+    if (problem) return json(res, 400, { error: { code: "invalid_request", message: problem } });
+    hooksDocument = body;
+    return json(res, 200, { path: HOOKS_CONFIG_PATH, document: hooksDocument });
+  }
   if (parts.length === 2 && parts[0] === "api" && parts[1] === "hooks") {
     if (req.method !== "GET") return json(res, 405, {
       error: { code: "method_not_allowed", message: `${req.method} is not allowed here.` },
     });
-    return json(res, 200, {
-      active: true,
-      total: 3,
-      events: [
-        { event: "before_prompt", count: 1 },
-        { event: "session_stop", count: 1 },
-        { event: "conversation_idle", count: 1 },
-      ],
-      hooks: [
-        {
-          event: "before_prompt",
-          name: "Prompt context",
-          description: "Adds bounded guidance before an owner prompt.",
-        },
-        {
-          event: "session_stop",
-          name: "Completion check",
-          description: "Reviews the current assistant pass before it settles.",
-        },
-        {
-          event: "conversation_idle",
-          name: "Idle upkeep",
-          description: "Runs after the current conversation remains inactive.",
-          idleSeconds: 60,
-        },
-      ],
-      sessionStopContinuationCap: 10,
-    });
+    return json(res, 200, hooksStatus());
   }
 
   if (parts.length === 2 && parts[0] === "api" && parts[1] === "documents"

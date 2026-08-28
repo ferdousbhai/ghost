@@ -230,13 +230,15 @@ describe("GET /api/hooks", () => {
         { event: "conversation_idle", count: 1 },
       ],
       hooks: [
-        { event: "before_prompt", name: "Prompt policy", description: "Adds policy." },
-        { event: "session_stop", name: "Completion", description: "Checks completion." },
+        { event: "before_prompt", source: "builtin", name: "Prompt policy", description: "Adds policy." },
+        { event: "session_stop", source: "config", name: "Completion", description: "Checks completion." },
         {
           event: "conversation_idle",
+          source: "builtin",
           name: "Idle upkeep",
           description: "Runs after inactivity.",
           idleSeconds: 60,
+          settingsKey: "memory_upkeep",
         },
       ],
       sessionStopContinuationCap: GHOST_SESSION_STOP_CONTINUATION_CAP,
@@ -273,13 +275,15 @@ describe("GET /api/hooks", () => {
         { event: "conversation_idle", count: 1 },
       ],
       hooks: [
-        { event: "before_prompt", name: "Prompt policy", description: "Adds policy." },
-        { event: "session_stop", name: "Completion", description: "Checks completion." },
+        { event: "before_prompt", source: "builtin", name: "Prompt policy", description: "Adds policy." },
+        { event: "session_stop", source: "config", name: "Completion", description: "Checks completion." },
         {
           event: "conversation_idle",
+          source: "builtin",
           name: "Idle upkeep",
           description: "Runs after inactivity.",
           idleSeconds: 60,
+          settingsKey: "memory_upkeep",
         },
       ],
       sessionStopContinuationCap: GHOST_SESSION_STOP_CONTINUATION_CAP,
@@ -321,6 +325,63 @@ describe("GET /api/hooks", () => {
       error: { code: "method_not_allowed", message: "POST is not allowed here." },
     });
     expect(status).not.toHaveBeenCalled();
+  });
+});
+
+describe("/api/hooks/config", () => {
+  const empty = () => ({
+    active: false,
+    total: 0,
+    events: [],
+    hooks: [],
+    sessionStopContinuationCap: GHOST_SESSION_STOP_CONTINUATION_CAP,
+  });
+
+  it("is absent when the runner has no configuration file", async () => {
+    const base = await serve(undefined, { hooks: { status: empty } });
+    const response = await fetch(`${base}/api/hooks/config`);
+    expect(response.status).toBe(404);
+  });
+
+  it("reads and replaces the whole document through the runner", async () => {
+    const path = join(temp?.root ?? "", "hooks.json");
+    let document: Record<string, unknown> = { hooks: {} };
+    const replaceConfig = vi.fn(async (next: unknown) => {
+      if (typeof next !== "object" || next === null || Array.isArray(next)) {
+        throw new Error(`${path} must contain a JSON object.`);
+      }
+      document = next as Record<string, unknown>;
+      return { path, document };
+    });
+    const base = await serve(undefined, {
+      hooks: { status: empty, config: () => ({ path, document }), replaceConfig },
+    });
+
+    const read = await fetch(`${base}/api/hooks/config`);
+    expect(await read.json()).toEqual({ path, document: { hooks: {} } });
+
+    const next = { hooks: { session_stop: [{ hooks: [{ type: "command", command: "/bin/true" }] }] } };
+    const written = await fetch(`${base}/api/hooks/config`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(next),
+    });
+    expect(written.status).toBe(200);
+    expect(await written.json()).toEqual({ path, document: next });
+    expect(replaceConfig).toHaveBeenCalledWith(next);
+
+    const rejected = await fetch(`${base}/api/hooks/config`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: "[]",
+    });
+    expect(rejected.status).toBe(400);
+    expect(await rejected.json()).toEqual({
+      error: { code: "invalid_request", message: `${path} must contain a JSON object.` },
+    });
+
+    const posted = await fetch(`${base}/api/hooks/config`, { method: "POST" });
+    expect(posted.status).toBe(405);
   });
 });
 

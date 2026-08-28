@@ -1095,8 +1095,9 @@ FloatingWindow {
                 }
             }
 
-            // Machine-level hook configuration is global and display-only. It
-            // never creates or selects a conversation merely to show status.
+            // Machine-level hook configuration is global: built-in hooks are
+            // shown, the owner's command hooks are edited in place. It never
+            // creates or selects a conversation merely to show status.
             HooksBrowser {
                 id: hooksBrowser
                 visible: hud.currentSection === "hooks"

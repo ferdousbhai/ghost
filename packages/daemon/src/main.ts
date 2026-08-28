@@ -12,7 +12,7 @@ import { loginCommand } from "./login-command.js";
 import { loadConfig, type DaemonConfig, type DaemonConfigOverrides } from "./config.js";
 import { scrubProviderEnv } from "./env-scrub.js";
 import { DocumentsService } from "./documents.js";
-import { ConversationMaintenance } from "./conversation-maintenance.js";
+import { ConversationMaintenance, MEMORY_UPKEEP_SETTINGS_KEY } from "./conversation-maintenance.js";
 import { closeAllBrowserSessions, ensureGhostHomeLayout } from "./extensions.js";
 import { GhostRegistry } from "./ghosts.js";
 import { GhostHookRunner } from "./hooks.js";
@@ -430,11 +430,13 @@ async function serveDaemon(
     claudeCode: { probe: claudeCodeProbe },
     ...(relay ? { relayTransport: relay } : {}),
   });
+  const memoryUpkeep = hooks.builtinSettings(MEMORY_UPKEEP_SETTINGS_KEY);
   const maintenance = new ConversationMaintenance({
     registry,
     homeOperations,
     hooks,
     logger,
+    ...(memoryUpkeep.idleSeconds === undefined ? {} : { idleSeconds: memoryUpkeep.idleSeconds }),
     withRuntime: (ghostName, use) => host.withMaintenanceRuntime(ghostName, use),
   });
   host.setConversationMaintenance(maintenance);
