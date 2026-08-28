@@ -213,8 +213,9 @@ isolated per-session boundary. A pi session has no `task` tool, so no
 bundled, project, ghost-file, or ambient subagent is invokable in phase 1.
 pi's native `bash`, `edit`, `find`, `grep`, `ls`, `read`, and `write` plus
 Ghost's own tools (registered directly as pi custom tools) remain available;
-background jobs, web search, and image inspection are planned Ghost ports
-(issue #3). There is no tool approval; `ask` is not an approval prompt.
+Ghost's own `bash`/`jobs` (background jobs) and `web_search` join them; image
+inspection is a planned Ghost port (issue #3). There is no tool approval;
+`ask` is not an approval prompt.
 
 Claude Code sessions retain Claude's native subagents.
 
@@ -303,6 +304,10 @@ ad-hoc prompts:
 - Tool lifecycle events include start, update, completion, error, bounded
   result summaries, and model-fallback state so the shell can render durable
   activity cards rather than a transient name.
+- `web_search` tries Brave Search, Firecrawl, then DuckDuckGo, skipping a
+  provider without its key — so it works keyless out of the box. A
+  `keyring:<service>/<account>` reference under `web.search.<provider>.apiKey`
+  in `settings.yml` supplies a key; `web.search.providers` orders the chain.
 - Background jobs: `bash` with `background: true` starts a command as a job of
   the conversation, and a foreground command that runs longer than the
   auto-background budget (60 s by default) continues as one. The model's `jobs`

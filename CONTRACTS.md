@@ -354,10 +354,10 @@ pi's native tools in a Ghost session are `bash`, `edit`, `find`, `grep`, `ls`,
 tools named `mcp__<server>_<tool>` — are registered directly as pi custom
 tools and appear in `getActiveToolNames()`; there is no separate mount. There
 is no `task` tool; no bundled, custom, or ambient subagent can be spawned.
-Claude Code retains its own native subagent behavior. Background jobs (`hub`),
-`web_search`, `inspect_image`/vision, live voice, the encrypted collaboration
-relay, and a Ghost-owned plan/goal/todo surface are planned Ghost ports
-(issue #3), not present in a pi session today. Ghost's `settings.yml`,
+Claude Code retains its own native subagent behavior. `inspect_image`/vision,
+live voice, the encrypted collaboration relay, and a Ghost-owned
+plan/goal/todo surface are planned Ghost ports (issue #3), not present in a pi
+session today. Ghost's `settings.yml`,
 `models.json`, and `mcp.json` are read from the ghost home, never the live cwd.
 pi's `DefaultResourceLoader` runs with `noExtensions`, `noSkills`,
 `noPromptTemplates`, `noThemes`, and `noContextFiles`; Ghost supplies every
@@ -433,6 +433,22 @@ discovery path.
 canonicalizes staged legacy `notes/`/`docs/` Markdown. It exposes no live
 legacy document list, read, find, write, or search API; live Documents are
 exclusively the machine-wide `MachineDocuments` boundary and daemon route.
+
+`web_search` is Ghost-owned (`packages/daemon/src/web-search.ts`): a provider
+chain read from `settings.yml`. The default order is Brave Search, Firecrawl's
+search API, then DuckDuckGo's no-JS HTML frontend (one page; a bot challenge
+is that provider's failure); a provider without its key is skipped, so the
+keyless default is Firecrawl then DuckDuckGo. `web.search.<provider>.apiKey`
+holds a `keyring:` reference (never a literal) per keyed provider — `brave`
+needs one, `firecrawl` lifts its rate limit with one — resolved through the
+ghost's secret policy on every call, and `web.search.providers` orders the
+chain explicitly. Titles and snippets are decoded and tag-stripped once, in
+the chain, before the model sees them. The tool takes `query`, `limit` (default 8, max 20), and
+`recency` (`day`/`week`/`month`/`year`), tries providers in order, and answers
+with numbered title/URL/snippet rows inside an `<untrusted>` fence; when every
+provider fails the error lists each failure. Keys are resolved through the
+ghost's secret resolver at call time and never enter settings, transcripts, or
+tool results.
 
 Background jobs are Ghost-owned (`packages/daemon/src/jobs.ts`) and
 conversation-scoped. Ghost's own `bash` tool replaces pi's by name and runs

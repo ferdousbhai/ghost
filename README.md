@@ -9,8 +9,8 @@ Ghost pins pi 0.84.3. pi sessions keep its native filesystem tools and Bash,
 steering/follow-ups, and branchable conversations; Ghost adds its own `ask`
 tool, model roles and fallback chains, bounded declarative skills, rules,
 Markdown commands/prompts, and MCP from the visible ghost home plus one
-explicitly trusted project. Background jobs, web search, image inspection, live
-voice, and the collaboration relay are planned Ghost ports (issue #3). There is
+explicitly trusted project. Image inspection, live voice, and the collaboration
+relay are planned Ghost ports (issue #3). There is
 no `task` tool and every subagent definition is disabled in phase 1; project
 plugins, hooks, custom code tools, and LSP are also disabled pending a
 per-session isolation boundary. Trusted visible `hooks/pre` and `hooks/post`

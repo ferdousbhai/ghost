@@ -1,16 +1,19 @@
 /**
- * Ghost's `web_search` tool: a keyless DuckDuckGo search over its no-JS HTML
- * frontend (the parser follows Oh My Pi's MIT-licensed `duckduckgo.ts`), and
+ * Ghost's `web_search` tool over a provider chain: Firecrawl's search API
+ * (keyless, or keyed for higher limits), DuckDuckGo's no-JS HTML frontend
+ * (keyless; the parser follows Oh My Pi's MIT-licensed `duckduckgo.ts`), and
  * Brave Search when the ghost's `settings.yml` names a keyring reference for
  * its API key. Providers run in the configured order; the first that answers
  * wins, and every failure is reported when none does.
  */
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { fenceUntrusted, stringEnum } from "@ghost/extensions";
 import { Type } from "typebox";
 import type { GhostSettings } from "./ghost-settings.js";
 import type { SecretResolver } from "./secret-resolution.js";
 
-export type SearchRecency = "day" | "week" | "month" | "year";
+export const SEARCH_RECENCY = ["day", "week", "month", "year"] as const;
+export type SearchRecency = (typeof SEARCH_RECENCY)[number];
 
 export interface SearchResult {
   title: string;
@@ -31,6 +34,7 @@ export interface SearchProvider {
   readonly id: string;
   /** Whether the provider can run now; a missing credential is the usual "no". */
   available(): boolean;
+  /** Raw rows; `searchWeb` decodes entities and strips tags from titles and snippets. */
   search(request: SearchRequest): Promise<SearchResult[]>;
 }
 
@@ -59,17 +63,17 @@ function withTimeout(signal: AbortSignal | undefined): AbortSignal {
 const DUCKDUCKGO_HTML_URL = "https://html.duckduckgo.com/html/";
 const DDG_RECENCY: Record<SearchRecency, string> = { day: "d", week: "w", month: "m", year: "y" };
 
-function decodeHtmlText(value: string): string {
+const NAMED_ENTITIES: Record<string, string> = { nbsp: " ", amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };
+
+/** Provider text as one line: tags stripped, entities decoded, whitespace collapsed. */
+export function decodeHtmlText(value: string): string {
   return value
     .replace(/<[^>]*>/g, " ")
-    .replace(/&#(\d+);/g, (_, code: string) => String.fromCharCode(Number(code)))
-    .replace(/&#x([0-9a-f]+);/gi, (_, code: string) => String.fromCharCode(Number.parseInt(code, 16)))
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/gi, "&")
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">")
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (entity, code: string) => {
+      if (code.startsWith("#x") || code.startsWith("#X")) return String.fromCodePoint(Number.parseInt(code.slice(2), 16));
+      if (code.startsWith("#")) return String.fromCodePoint(Number(code.slice(1)));
+      return NAMED_ENTITIES[code.toLowerCase()] ?? entity;
+    })
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -110,12 +114,11 @@ export function parseDuckDuckGoResults(html: string): SearchResult[] {
     const title = titleRe.exec(block);
     if (!title) continue;
     const url = unwrapResultUrl(title[1] ?? "");
-    const text = decodeHtmlText(title[2] ?? "");
-    if (!url || !text) continue;
-    const snippet = decodeHtmlText(snippetRe.exec(block)?.[1] ?? "");
+    if (!url) continue;
+    const snippet = snippetRe.exec(block)?.[1];
     const published = publishedDate(block);
     results.push({
-      title: text,
+      title: title[2] ?? "",
       url,
       ...(snippet ? { snippet } : {}),
       ...(published ? { published } : {}),
@@ -124,59 +127,30 @@ export function parseDuckDuckGoResults(html: string): SearchResult[] {
   return results;
 }
 
-/** The hidden fields of DDG's next-page form, when the page has one. */
-function continuationForm(html: string): URLSearchParams | undefined {
-  for (const form of html.matchAll(/<form\b[^>]*>([\s\S]*?)<\/form>/gi)) {
-    const fields = new URLSearchParams();
-    for (const input of (form[1] ?? "").matchAll(/<input\b[^>]*>/gi)) {
-      const name = /\bname\s*=\s*(["'])(.*?)\1/i.exec(input[0])?.[2];
-      const value = /\bvalue\s*=\s*(["'])(.*?)\1/i.exec(input[0])?.[2];
-      if (name && value !== undefined) fields.append(decodeHtmlText(name), decodeHtmlText(value));
-    }
-    if (fields.has("s") && fields.has("vqd")) return fields;
-  }
-  return undefined;
-}
-
 export function createDuckDuckGoProvider(fetchImpl: FetchLike = fetch): SearchProvider {
   return {
     id: "duckduckgo",
     available: () => true,
     async search(request) {
-      const signal = withTimeout(request.signal);
-      const results: SearchResult[] = [];
-      const seen = new Set<string>();
-      let form: URLSearchParams | undefined = new URLSearchParams({ q: request.query, kl: "us-en", b: "" });
+      const form = new URLSearchParams({ q: request.query, kl: "us-en", b: "" });
       if (request.recency) form.set("df", DDG_RECENCY[request.recency]);
-      while (form && results.length < request.limit) {
-        const response = await fetchImpl(DUCKDUCKGO_HTML_URL, {
-          method: "POST",
-          body: form.toString(),
-          signal,
-          headers: {
-            "Content-Type": "application/x-www-form-urlencoded",
-            "User-Agent": USER_AGENT,
-            Referer: DUCKDUCKGO_HTML_URL,
-          },
-        });
-        const html = await response.text();
-        if (!response.ok) throw new SearchProviderError("duckduckgo", `DuckDuckGo answered ${response.status}.`);
-        if (html.includes("anomaly-modal") || html.includes("anomaly.js")) {
-          throw new SearchProviderError(
-            "duckduckgo",
-            "DuckDuckGo blocked the request with a bot-detection challenge; configure Brave Search in settings.yml for reliable results.",
-          );
-        }
-        const before = results.length;
-        for (const result of parseDuckDuckGoResults(html)) {
-          if (seen.has(result.url)) continue;
-          seen.add(result.url);
-          results.push(result);
-          if (results.length >= request.limit) break;
-        }
-        form = results.length === before ? undefined : continuationForm(html);
+      const response = await fetchImpl(DUCKDUCKGO_HTML_URL, {
+        method: "POST",
+        body: form.toString(),
+        signal: withTimeout(request.signal),
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "User-Agent": USER_AGENT,
+          Referer: DUCKDUCKGO_HTML_URL,
+        },
+      });
+      const html = await response.text();
+      if (!response.ok) throw new SearchProviderError("duckduckgo", `DuckDuckGo answered ${response.status}.`);
+      if (html.includes("anomaly-modal") || html.includes("anomaly.js")) {
+        throw new SearchProviderError("duckduckgo", "DuckDuckGo blocked the request with a bot-detection challenge.");
       }
-      return results;
+      // One page holds ~30 rows, more than the tool's largest limit.
+      return parseDuckDuckGoResults(html).slice(0, request.limit);
     },
   };
 }
@@ -215,9 +189,9 @@ export function createBraveProvider(
         if (!row.url || !row.title) return [];
         const published = row.page_age ?? row.age;
         return [{
-          title: decodeHtmlText(row.title),
+          title: row.title,
           url: row.url,
-          ...(row.description ? { snippet: decodeHtmlText(row.description) } : {}),
+          ...(row.description ? { snippet: row.description } : {}),
           ...(published ? { published } : {}),
         }];
       });
@@ -226,9 +200,68 @@ export function createBraveProvider(
 }
 
 // ---------------------------------------------------------------------------
+// Firecrawl
+
+const FIRECRAWL_SEARCH_URL = "https://api.firecrawl.dev/v2/search";
+const FIRECRAWL_RECENCY: Record<SearchRecency, string> = { day: "qdr:d", week: "qdr:w", month: "qdr:m", year: "qdr:y" };
+
+interface FirecrawlResult {
+  title?: string | null;
+  url?: string | null;
+  description?: string | null;
+  snippet?: string | null;
+  markdown?: string | null;
+}
+
+interface FirecrawlResponse {
+  success?: boolean;
+  error?: string | null;
+  data?: FirecrawlResult[] | { web?: FirecrawlResult[] | null } | null;
+  results?: FirecrawlResult[] | null;
+}
+
+/** Firecrawl answers without a key at a lower rate limit; a key lifts it. */
+export function createFirecrawlProvider(
+  apiKey: () => string | undefined,
+  fetchImpl: FetchLike = fetch,
+): SearchProvider {
+  return {
+    id: "firecrawl",
+    available: () => true,
+    async search(request) {
+      const key = apiKey();
+      const response = await fetchImpl(FIRECRAWL_SEARCH_URL, {
+        method: "POST",
+        signal: withTimeout(request.signal),
+        headers: {
+          "Content-Type": "application/json",
+          ...(key ? { Authorization: `Bearer ${key}` } : {}),
+        },
+        body: JSON.stringify({
+          query: request.query,
+          limit: request.limit,
+          sources: [{ type: "web" }],
+          ...(request.recency ? { tbs: FIRECRAWL_RECENCY[request.recency] } : {}),
+        }),
+      });
+      if (!response.ok) throw new SearchProviderError("firecrawl", `Firecrawl answered ${response.status}.`);
+      const body = (await response.json()) as FirecrawlResponse;
+      if (body.success === false) throw new SearchProviderError("firecrawl", body.error?.trim() || "Firecrawl request failed.");
+      const rows = Array.isArray(body.data) ? body.data : body.data?.web ?? body.results ?? [];
+      return rows.flatMap((row) => {
+        if (!row.url) return [];
+        const snippet = row.description ?? row.snippet ?? row.markdown;
+        return [{ title: row.title || row.url, url: row.url, ...(snippet ? { snippet } : {}) }];
+      }).slice(0, request.limit);
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Provider chain from the ghost's settings
 
-export const DEFAULT_SEARCH_PROVIDERS = ["duckduckgo"];
+/** Keyed providers first; `available()` skips one without its key. */
+export const DEFAULT_SEARCH_PROVIDERS = ["brave", "firecrawl", "duckduckgo"];
 
 export interface WebSearchOptions {
   settings: GhostSettings;
@@ -236,25 +269,25 @@ export interface WebSearchOptions {
   fetch?: FetchLike;
 }
 
+const PROVIDER_FACTORIES: Record<string, (apiKey: () => string | undefined, fetchImpl: FetchLike) => SearchProvider> = {
+  brave: createBraveProvider,
+  firecrawl: createFirecrawlProvider,
+  duckduckgo: (_apiKey, fetchImpl) => createDuckDuckGoProvider(fetchImpl),
+};
+
 /**
- * The provider order `web.search.providers` names (default DuckDuckGo only);
- * Brave joins when `web.search.brave.apiKey` holds a `keyring:` reference.
+ * The providers `web.search.providers` names, in that order (default:
+ * `DEFAULT_SEARCH_PROVIDERS`). `web.search.<provider>.apiKey` holds a
+ * `keyring:` reference, resolved through the ghost's secret policy per call.
  */
 export function searchProvidersFromSettings(options: WebSearchOptions): SearchProvider[] {
   const fetchImpl = options.fetch ?? fetch;
-  const braveKeyReference = options.settings.getString("web.search.brave.apiKey");
-  const providers: Record<string, SearchProvider> = {
-    duckduckgo: createDuckDuckGoProvider(fetchImpl),
-    brave: createBraveProvider(
-      () => (braveKeyReference ? options.secrets.resolve(braveKeyReference) : undefined),
-      fetchImpl,
-    ),
-  };
-  const order = options.settings.getStringList("web.search.providers")
-    ?? (braveKeyReference ? ["brave", "duckduckgo"] : DEFAULT_SEARCH_PROVIDERS);
+  const order = options.settings.getStringList("web.search.providers") ?? DEFAULT_SEARCH_PROVIDERS;
   return order.flatMap((id) => {
-    const provider = providers[id];
-    return provider ? [provider] : [];
+    const factory = PROVIDER_FACTORIES[id];
+    if (!factory) return [];
+    const reference = options.settings.getString(`web.search.${id}.apiKey`);
+    return [factory(() => (reference ? options.secrets.resolve(reference) : undefined), fetchImpl)];
   });
 }
 
@@ -263,7 +296,13 @@ export async function searchWeb(providers: readonly SearchProvider[], request: S
   for (const provider of providers) {
     if (!provider.available()) continue;
     try {
-      return { provider: provider.id, results: await provider.search(request) };
+      const results = (await provider.search(request)).flatMap((result) => {
+        const title = decodeHtmlText(result.title);
+        if (!title) return [];
+        const snippet = result.snippet === undefined ? undefined : decodeHtmlText(result.snippet);
+        return [{ ...result, title, ...(snippet ? { snippet } : {}) }];
+      });
+      return { provider: provider.id, results };
     } catch (error) {
       if (request.signal?.aborted) throw error;
       failures.push(`${provider.id}: ${error instanceof Error ? error.message : String(error)}`);
@@ -287,12 +326,7 @@ export function formatSearchResults(results: readonly SearchResult[]): string {
 export const webSearchSchema = Type.Object({
   query: Type.String({ description: "The search query. Quotes, -exclusions, and site: work with most providers." }),
   limit: Type.Optional(Type.Number({ description: `How many results to return (default ${DEFAULT_LIMIT}, max ${MAX_LIMIT}).` })),
-  recency: Type.Optional(Type.Union([
-    Type.Literal("day"),
-    Type.Literal("week"),
-    Type.Literal("month"),
-    Type.Literal("year"),
-  ], { description: "Only results from the last day, week, month, or year." })),
+  recency: Type.Optional(stringEnum(SEARCH_RECENCY, { description: "Only results from the last day, week, month, or year." })),
 });
 
 export interface WebSearchDetails {
@@ -317,7 +351,7 @@ export function createWebSearchTool(options: WebSearchOptions): ToolDefinition<t
         ...(signal ? { signal } : {}),
       });
       return {
-        content: [{ type: "text", text: `<untrusted source="web search via ${provider}">\n${formatSearchResults(results)}\n</untrusted>` }],
+        content: [{ type: "text", text: fenceUntrusted(formatSearchResults(results), { source: `web search via ${provider}` }) }],
         details: { provider, results },
       };
     },
