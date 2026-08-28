@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-source_root="${1:?usage: install-payload.sh <source-root> <runtime-daemon> <pkgdir> <pkgname>}"
-runtime_daemon="${2:?usage: install-payload.sh <source-root> <runtime-daemon> <pkgdir> <pkgname>}"
-pkgdir="${3:?usage: install-payload.sh <source-root> <runtime-daemon> <pkgdir> <pkgname>}"
-pkgname="${4:?usage: install-payload.sh <source-root> <runtime-daemon> <pkgdir> <pkgname>}"
+source_root="${1:?usage: install-payload.sh <source-root> <runtime-binary> <pkgdir> <pkgname>}"
+runtime_binary="${2:?usage: install-payload.sh <source-root> <runtime-binary> <pkgdir> <pkgname>}"
+pkgdir="${3:?usage: install-payload.sh <source-root> <runtime-binary> <pkgdir> <pkgname>}"
+pkgname="${4:?usage: install-payload.sh <source-root> <runtime-binary> <pkgdir> <pkgname>}"
 
 source_root="$(realpath "$source_root")"
-runtime_daemon="$(realpath "$runtime_daemon")"
+runtime_binary="$(realpath "$runtime_binary")"
 
 install_tree() {
   local source_dir="$1"
   local destination_dir="$2"
-  local directory file link relative mode target
+  local directory file relative mode
 
   install -d -m755 -o root -g root "$destination_dir"
   while IFS= read -r -d '' directory; do
@@ -25,19 +25,12 @@ install_tree() {
     [[ -x "$file" ]] && mode=755
     install -Dm"$mode" -o root -g root "$file" "$destination_dir/$relative"
   done < <(find "$source_dir" -type f -print0)
-  while IFS= read -r -d '' link; do
-    relative="${link#"$source_dir"/}"
-    target="$(readlink "$link")"
-    ln -s "$target" "$destination_dir/$relative"
-  done < <(find "$source_dir" -type l -print0)
 }
 
 appdir="$pkgdir/usr/lib/ghost"
 sharedir="$pkgdir/usr/share/ghost"
 
-install_tree "$runtime_daemon" "$appdir/daemon"
-
-install -Dm755 "$source_root/packaging/arch/ghostd" "$pkgdir/usr/bin/ghostd"
+install -Dm755 "$runtime_binary" "$pkgdir/usr/bin/ghostd"
 install -Dm755 "$source_root/packaging/arch/ghost-desktop-helper" \
   "$pkgdir/usr/bin/ghost-desktop-helper"
 install -Dm755 "$source_root/packages/shell/contrib/bin/ghost-launch" \
@@ -64,15 +57,11 @@ install -Dm644 "$source_root/packages/shell/contrib/ghost.desktop" \
   "$pkgdir/usr/share/applications/ghost.desktop"
 install -Dm755 "$source_root/packaging/arch/service-browser-smoke.sh" \
   "$pkgdir/usr/lib/ghost/package-smoke/service-browser-smoke.sh"
-install -Dm755 "$source_root/packaging/release/smoke-native-runtime.sh" \
-  "$pkgdir/usr/lib/ghost/package-smoke/native-runtime-smoke.sh"
 
 install_tree "$source_root/packages/shell/contrib" \
   "$pkgdir/usr/share/doc/ghost/shell-contrib"
 install -Dm644 "$source_root/packaging/arch/README.md" \
   "$pkgdir/usr/share/doc/ghost/ARCH.md"
-install -Dm644 "$source_root/packaging/release/README.md" \
-  "$pkgdir/usr/share/doc/ghost/RELEASE-SOURCE.md"
 install -Dm644 "$source_root/README.md" "$pkgdir/usr/share/doc/ghost/README.md"
 install -Dm644 "$source_root/CONTRACTS.md" "$pkgdir/usr/share/doc/ghost/CONTRACTS.md"
 # The installed README, CONTRACTS.md, and ARCH.md link into docs/. Ship those

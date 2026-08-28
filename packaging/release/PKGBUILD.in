@@ -18,6 +18,7 @@ depends=(
   'python-dbus>=1.4'
   'python-gobject>=3.50'
   'python-pillow>=10'
+  'qrencode'
   'qt6-5compat>=6.8'
   'quickshell>=0.3'
   'wtype>=0.4'
@@ -89,7 +90,7 @@ check() {
 
 package() {
   local source_root="$srcdir/ghost-${pkgver}"
-  local runtime_daemon="$srcdir/runtime/ghost-runtime-${pkgver}-linux-${CARCH}/daemon"
+  local runtime_binary="$srcdir/runtime/ghost-runtime-${pkgver}-linux-${CARCH}/bin/ghostd"
   bash "$source_root/packaging/release/install-payload.sh" \
-    "$source_root" "$runtime_daemon" "$pkgdir" "$pkgname"
+    "$source_root" "$runtime_binary" "$pkgdir" "$pkgname"
 }

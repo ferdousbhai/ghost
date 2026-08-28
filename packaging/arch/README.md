@@ -7,7 +7,7 @@ self-contained x86_64 executable at `/usr/bin/ghostd`, with Bun embedded and no
 installed source or JavaScript dependency tree. Bun remains a package runtime
 dependency only because the installed service-context Chromium smoke test uses
 it. The stable `ghost-ai` template and release-source machinery live under
-`packaging/release/` and are installed for reference as `RELEASE-SOURCE.md`.
+`packaging/release/`; its runtime source carries the same compiled daemon.
 
 Build and install from this directory:
 
@@ -25,14 +25,13 @@ blank-password/autologin caveat.
 This remains the rolling development package: `pnpm install` may populate its
 store during `build()`, so it is not the AUR release recipe. Release CI now
 constructs a deterministic, architecture-specific runtime source from the
-frozen lock/vendor inputs, pairs it with the exact tagged source archive, and
-renders a fixed-checksum stable `ghost-ai` PKGBUILD whose package phases are
-fully offline. Nothing is published automatically. Issue #17 still requires an
-actual version tag and GitHub release, inspection of those attached artifacts,
-and a human upload of the rendered bundle to the `ghost-ai` AUR package.
-
-TODO (#17): the stable release recipe still deploys the daemon source tree and
-must make the same switch to the compiled executable.
+frozen workspace inputs and compiler recipe, pairs it with the exact tagged
+source archive, and renders a fixed-checksum stable `ghost-ai` PKGBUILD whose
+package phases are fully offline. The stable package also installs only the
+compiled `/usr/bin/ghostd`, with no source or JavaScript dependency tree.
+Nothing is published automatically: a release still requires an actual version
+tag, inspection of the attached artifacts, and a human upload of the rendered
+bundle to the `ghost-ai` AUR package.
 
 The shell is installed at `/usr/share/ghost/quickshell` and exposed as the
 system Quickshell config `ghost`, so the existing `qs -c ghost` integration and
