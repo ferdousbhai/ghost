@@ -1823,7 +1823,7 @@ const mockServer = createServer(async (req, res) => {
           idleSeconds: 60,
         },
       ],
-      sessionStopContinuationCap: 2,
+      sessionStopContinuationCap: 10,
     });
   }
 

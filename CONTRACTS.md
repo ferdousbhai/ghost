@@ -717,8 +717,10 @@ one must not be a leak of both.
   `conversation_idle`. `active` is
   `total > 0`, and `total` equals both event counts and row count. The body
   never exposes commands, source paths, arguments, prompts, injected context,
-  errors, receipts, or scheduler state. `sessionStopContinuationCap` is the
-  exact value `10`, the consecutive hidden-continuation cap.
+  errors, receipts, or scheduler state. `sessionStopContinuationCap` is an
+  integer in `1..100`, the daemon's consecutive hidden-continuation cap
+  (`GHOST_SESSION_STOP_CONTINUATION_CAP`, default 10); clients display it and
+  never assume its value.
 - `GET  /api/ghosts` → `[{ name, dir, createdAt }]`
 - `POST /api/ghosts` `{ name }` → creates `~/ghosts/<name>/` with a seeded
   `character.md`

@@ -285,7 +285,7 @@ durable cwd change.
 Authenticated `GET /api/hooks` returns only `{ active, total, events, hooks,
 sessionStopContinuationCap }`. Event rows contain `{ event, count }`; hook rows
 contain `{ event, name, description }` plus `idleSeconds` only for an idle hook.
-The continuation cap is exactly 2. Commands, source paths, arguments, prompts,
+The continuation cap is an integer in `1..100` (default 10). Commands, source paths, arguments, prompts,
 injected context, errors, receipts, and scheduler state never cross that route.
 
 ## In-process API

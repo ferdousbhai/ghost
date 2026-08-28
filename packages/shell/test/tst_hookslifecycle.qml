@@ -62,7 +62,7 @@ TestCase {
                     idleSeconds: 60
                 }
             ],
-            sessionStopContinuationCap: 2
+            sessionStopContinuationCap: 10
         };
     }
 
@@ -127,7 +127,7 @@ TestCase {
             total: 0,
             events: [],
             hooks: [],
-            sessionStopContinuationCap: 2
+            sessionStopContinuationCap: 10
         });
         verify(Ghostd.hooksLoaded);
         compare(Ghostd.activeHookCount, 0);

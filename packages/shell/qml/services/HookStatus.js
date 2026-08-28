@@ -43,7 +43,9 @@ function normalize(body) {
             || typeof body.active !== "boolean"
             || !Number.isSafeInteger(body.total) || body.total < 0
             || !Array.isArray(body.events) || !Array.isArray(body.hooks)
-            || body.sessionStopContinuationCap !== 2) return null;
+            || !Number.isSafeInteger(body.sessionStopContinuationCap)
+            || body.sessionStopContinuationCap < 1
+            || body.sessionStopContinuationCap > 100) return null;
 
     const counts = Object.create(null);
     let previousEventIndex = -1;

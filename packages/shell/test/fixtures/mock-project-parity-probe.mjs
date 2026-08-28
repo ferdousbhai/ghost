@@ -160,7 +160,7 @@ try {
     { event: "conversation_idle", count: 1 },
   ]);
   assert.equal(hooks.hooks.length, hooks.total);
-  assert.equal(hooks.sessionStopContinuationCap, 2);
+  assert.equal(hooks.sessionStopContinuationCap, 10);
   assert.deepEqual(Object.keys(hooks.hooks[0]), ["event", "name", "description"]);
   assert.deepEqual(Object.keys(hooks.hooks[2]), [
     "event", "name", "description", "idleSeconds",
