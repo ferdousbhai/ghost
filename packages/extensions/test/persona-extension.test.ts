@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createPersonaExtension } from "../src/extensions/persona.js";
 import { deriveDocumentsIndex } from "../src/catalog.js";
@@ -56,11 +56,24 @@ describe("persona extension", () => {
   });
 
   it("assembles character, derived memory index, and shallow Documents index", async () => {
+    await utimes(
+      join(fixture.dir, "memory", "apprentice-question.md"),
+      new Date("2026-08-26T08:00:00.000Z"),
+      new Date("2026-08-26T08:00:00.000Z"),
+    );
+    await utimes(
+      join(fixture.dir, "memory", "working-habit.md"),
+      new Date("2026-08-27T08:00:00.000Z"),
+      new Date("2026-08-27T08:00:00.000Z"),
+    );
     const harness = await loadExtension(persona(), fixture.dir);
     const prompt = (await harness.beforeAgentStart()) ?? "";
     expect(prompt).toContain("the ghost of a working typographer");
     expect(prompt).toContain("## Memory");
     expect(prompt).toContain("- apprentice-question.md: I explained how to start");
+    expect(prompt.indexOf("- working-habit.md:")).toBeLessThan(
+      prompt.indexOf("- apprentice-question.md:"),
+    );
     expect(prompt).toContain("## Docs");
     expect(prompt).toContain('directory: "craft"');
     expect(prompt).toContain(`file: "${FINANCE_DOC_PATH}"`);
@@ -134,7 +147,7 @@ describe("persona extension", () => {
   it("carries the memory hygiene doctrine", async () => {
     const harness = await loadExtension(persona(), fixture.dir);
     const prompt = (await harness.beforeAgentStart()) ?? "";
-    expect(prompt).toContain("delete what is no longer true");
+    expect(prompt).toContain("background maintenance retires memories that are no longer true");
     expect(prompt).toContain("[[its-slug]]");
     // The dividing line: docs are written down on purpose, memory is remembered.
     expect(prompt).toContain("a doc is what someone sat down and wrote");

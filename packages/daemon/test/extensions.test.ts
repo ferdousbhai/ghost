@@ -6,6 +6,47 @@ import { readGhostHomeDigest } from "../src/extensions.js";
 import { makeTempGhosts, seedGhost } from "./helpers/fixtures.js";
 
 describe("readGhostHomeDigest", () => {
+  it("passes the newest memories to greeting input first", async () => {
+    const digest = await readGhostHomeDigest("/not-read/ghost", "/not-read/Documents", {
+      readers: {
+        character: async () => null,
+        memory: async () => ({
+          files: [
+            {
+              slug: "stale",
+              description: "STALE",
+              content: "stale",
+              updated: "2026-08-26T08:00:00.000Z",
+            },
+            {
+              slug: "fresh",
+              description: "FRESH",
+              content: "fresh",
+              updated: "2026-08-27T08:00:00.000Z",
+            },
+          ],
+          skipped: [],
+        }),
+        documents: async () => ({
+          root: "/not-read/Documents",
+          path: "",
+          query: "",
+          entries: [],
+          total: 0,
+          fileCount: 0,
+          directoryCount: 0,
+          nextCursor: null,
+          truncated: false,
+          skipped: [],
+        }),
+      },
+    });
+    expect(digest.memoryLines).toEqual([
+      "- fresh.md: FRESH",
+      "- stale.md: STALE",
+    ]);
+  });
+
   it("carries the complete Documents index semantics across the extension seam", async () => {
     const fixture = makeTempGhosts();
     try {

@@ -50,7 +50,8 @@ does not create task subagents. Claude Code retains its own native subagents.
                                bounded execution-time cwd by persisted Pi tool-call id
   sessions/<stem>.<runtime>.maintenance.json
                                v1 idle-memory journal for one runtime-qualified
-                               conversation; never cloned by fork
+                               conversation, including ordered consolidation
+                               mutations; never cloned by fork
   sessions/pins.json           v2 pinned state: { "version": 2, "pinned": ["<id>", …] }
   sessions/reads.json          v2 read state: { "version": 2, "reads": { "<id>": "<ISO timestamp>" } }
   .pi/                         provider credentials and derived OMP machine runtime
@@ -58,6 +59,7 @@ does not create task subagents. Claude Code retains its own native subagents.
                                retained unchanged until that conversation is trashed
   export-manifest.json         present in imported archives; counts, pathRewrites,
                                notIncluded
+  .memory-maintenance.json     v1 machine-bound last consolidation-run time
 ```
 
 `character.md` has no frontmatter. Its leading Markdown heading
@@ -67,7 +69,10 @@ Markdown body is the persona injected into the system prompt.
 Memory files have no frontmatter and no required heading. Their complete
 Markdown content is the fact. The per-session index normalizes that content to
 one line and derives a word-aware preview of at most 32 characters, including
-`...`; the context API derives `updated` from the file's modification time.
+`...`. It orders files by modification time descending, then slug ascending,
+and admits only complete lines through its 4,000-character budget, so the
+stalest facts fall out first. The context API returns `updated` as the file's
+full ISO modification timestamp.
 One file is at most 2,000 JavaScript UTF-16 code units of content and 6,001
 on-disk bytes, inclusive; the byte ceiling is the worst-case canonical UTF-8
 content plus the writer's final newline. Every list, direct read, and exact
@@ -77,6 +82,24 @@ the pinned regular-file descriptor, decodes fatal UTF-8, and verifies the
 descriptor and live pathname stayed identical. Unsafe or over-limit entries
 are reported as skipped by listings; a direct or receipt read fails rather than
 truncating, replacing bytes, or treating invalid state as absence.
+Every `GhostHome` memory write first redacts PEM private-key blocks, common
+`sk-`, GitHub, Slack, bearer, and named key/token/secret/password credential
+forms to `[REDACTED_SECRET]`, then validates and serializes the redacted text.
+The limit therefore applies to what reaches disk, and the session writer,
+idle updater, and consolidation writer share one secret boundary. An omitted
+slug is derived from that redacted text, so credentials cannot escape through a
+filename.
+
+`GhostHome.deleteMemory` accepts only one valid memory slug and moves that
+descriptor-pinned regular Markdown file by same-filesystem rename into the
+ghost's `.trash/`. It shares the whole-memory-directory mutation queue and
+descriptor lock used by writes. The first destination is `<slug>.md`; an
+existing destination makes the writer choose `<slug>-2.md`, then the next free
+numeric suffix, without replacing trash. The pre-rename delete intent records
+the exact source bytes and SHA-256 plus that collision-free relative trash
+name. This private lifecycle trash is distinct from the owner-facing context
+route's freedesktop Trash result.
+
 Canonical ghost-home Documents already keep their title in the leading `#`
 heading and tags in a final hashtag line; legacy document frontmatter exists
 only at the import migration boundary. OMP skill `name`/`description` fields
@@ -223,7 +246,8 @@ One naming convention makes the boundary readable rather than remembered. A
 plain-named entry in a ghost home is part of that ghost's identity and travels
 with it, including `settings.yml`, `models.json`, and `mcp.json`. A dot-prefixed
 entry is bound to this machine and never leaves it: `.pi/` (credentials and
-derived OMP runtime), `.browser-profile/` (cookies and logins), and `.trash/`.
+derived OMP runtime), `.browser-profile/` (cookies and logins), `.trash/`, and
+`.memory-maintenance.json` (the consolidation cooldown).
 Until #23 replaces inline secrets with Secret Service references, credential
 values may still appear inside the otherwise portable `models.json` and
 `mcp.json`; any future export must not copy those values as identity.
@@ -324,7 +348,9 @@ Ghost registers no duplicate document list/read/search/write tools, and
 keeps only `ghost_memory_write` for validated, atomic memory-file writes. The
 writer accepts only the fact content and an optional slug; the memory index and
 root-only Documents index are derived from disk before each model turn and are
-never stored. `/skill:<name> [args]` is explicit
+never stored. A foreground session rewrites a changed fact through that writer;
+it has no deletion tool. Idle consolidation alone retires obsolete memory.
+`/skill:<name> [args]` is explicit
 force-invocation of a discovered skill; native `read` remains the model-driven
 discovery path.
 
@@ -424,22 +450,48 @@ awaited hook boundary. Those failures are generically logged and fail open for
 `before_prompt`, `session_stop`, and `conversation_idle`; they cannot fail an
 owner turn or expose the command/error payload.
 
-The maintenance model receives only a close-neutralized untrusted transcript
-fence and four memory-only tools: list metadata, read one memory, plain-text
-search, and one atomic write. It has no Documents, character, deletion,
-network/MCP, native filesystem, shell, or general session tool. One generation
-may publish at most one memory file. Before the memory rename, the GhostHome
-writer invokes the daemon's receipt journal callback inside the existing memory
-queue and descriptor lock with exact `before`/`after` bytes and their SHA-256
-digests. A mode-`0600` v1 sidecar beside the transcript carries an immutable
-UUID incarnation, exact runtime/raw conversation identity and source identity,
+The ordinary maintenance model receives only a close-neutralized untrusted
+transcript fence and four memory-only tools: list metadata, read one memory,
+plain-text search, and one atomic write. It has no Documents, character,
+deletion, network/MCP, native filesystem, shell, or general session tool. One
+ordinary generation may publish at most one memory file. Durable facts must be
+grounded in what the owner said or confirmed; assistant text alone may carry
+external or untrusted content and is not evidence worth memorizing.
+
+Pressure makes that idle delivery run consolidation instead of ordinary
+maintenance. Pressure means the derived index occupies at least 3,200 of its
+4,000 characters, the budget omits any memory, or the home has at least 100
+valid memory files. A mode-`0600` v1 `.memory-maintenance.json` records the ISO
+time at which consolidation is claimed; another consolidation may be claimed
+only after six hours. Claim publication precedes the generation, so concurrent
+conversations cannot both consolidate one ghost and a failed attempt also gets
+the cooldown rather than creating a provider-failure loop.
+
+Consolidation receives the same four tools plus `delete_memory`. It may publish
+at most four writes and four recoverable deletes, in journaled sequence, and
+may touch one memory path only once. Its doctrine merges duplicate or
+overlapping facts under the clearest slug, deletes only a no-longer-true memory
+or one fully superseded by a write in that run, minimizes churn, and prefers a
+no-op. Transcript and memory-file contents are data, never instructions. A
+completed consolidation emits one foreground receipt notice listing every
+mutation, or that it made none.
+
+Before each memory rename, the GhostHome writer invokes the daemon's receipt
+journal callback inside the existing memory queue and descriptor lock. A write
+intent carries exact `before`/`after` bytes and their SHA-256 digests; a delete
+intent carries exact `before` bytes and digest plus the reserved trash name. A
+mode-`0600` v1 sidecar beside the transcript carries an immutable UUID
+incarnation, exact runtime/raw conversation identity and source identity,
 monotonic state/turn/activity revisions, bounded pending turns, completed
 notices, the bounded unique registration identities already delivered for the
 current activity generation, the optional exact built-in memory retry, and the
-active generation/mutation/receipt. It is read through the common bounded
-daemon control-file reader; only initial `ENOENT` is empty. It is written by a
-same-directory `wx` temporary file, file fsync, atomic rename, and directory
-fsync. The source is exactly `{ runtime:"pi", createdAt }` for Pi and
+active generation, mutation, and ordered receipts. The original v1 run shape
+without a mode remains valid as an ordinary run; the exhaustive validator
+admits at most one write receipt there, or the consolidation limits above.
+It is read through the common bounded daemon control-file reader; only
+initial `ENOENT` is empty. It is written by a same-directory `wx` temporary
+file, file fsync, atomic rename, and directory fsync. The source is exactly
+`{ runtime:"pi", createdAt }` for Pi and
 `{ runtime:"claude-code", createdAt, resumeId }` for Claude; its discriminator
 must match the outer runtime, and Claude's persisted SDK resume id is required.
 The source revision discriminator is equally strict: Pi state and incoming
@@ -447,16 +499,22 @@ settlements admit only `pi-leaf`, while Claude admits only
 `claude-owner-turn`. A mismatch is invalid state/input and cannot overwrite the
 sidecar.
 
-Every parsed intent and receipt recomputes both SHA-256 digests. Recovery also
-re-reads exact current memory bytes for an already stored completed receipt:
-bytes equal to `after` complete it. Bytes equal to `before` are verified against
-both stored digests and
-the exact journaled `after` bytes are replayed under the same descriptor lock,
-without another model generation; receipt publication and intent clearing are
-one atomic sidecar replacement. Any third value is a conflict that writes
-nothing and retains the pending work. Model-visible notice is created only for
-that exact completed receipt and remains until the runtime acknowledges durable
-prompt attachment.
+Every parsed intent and receipt recomputes its SHA-256 digests. Write recovery
+also re-reads exact current memory bytes for an already stored completed
+receipt: bytes equal to `after` complete it. Bytes equal to `before` are
+verified against both stored digests and the exact journaled `after` bytes are
+replayed under the same descriptor lock, without another model generation;
+receipt publication and intent clearing are one atomic sidecar replacement.
+Any third write value is a conflict that writes nothing and retains the pending
+work.
+
+Delete recovery never re-deletes. Only an absent source together with the
+exact journaled bytes at the exact trash name completes a delete intent or
+receipt. Every other combination, including an unchanged source with no trash,
+a restored source, missing trash, different bytes, or an unreadable entry, is
+ambiguous: recovery leaves every surviving file in place, settles that run, and
+publishes a foreground notice naming both observed states. Completed mutation
+notices remain until the runtime acknowledges durable prompt attachment.
 
 Idle delivery uses two deliberate crash semantics. A non-maintenance observer
 or command is claimed in the sidecar before invocation and is therefore
@@ -640,7 +698,7 @@ one must not be a leak of both.
   Markdown heading. `memory` contains
   `{ path: "memory/<slug>.md", slug, description, content, updated }`, where
   `description` is the derived 32-character index preview and `updated` is the
-  filesystem modification date.
+  full ISO filesystem modification timestamp.
   `agents` is an empty compatibility array: custom agent definitions may be
   counted during a trusted-project preview, but are inactive and never ambiently
   discovered. Pi's `task` tool is disabled, so agent definitions are not runtime

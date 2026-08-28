@@ -12,6 +12,8 @@ import {
   memorySlugForText,
   parseMemoryFile,
   parseMemoryFileName,
+  redactMemorySecrets,
+  REDACTED_MEMORY_SECRET,
   serializeMemoryFile,
 } from "../src/memory-file.js";
 
@@ -69,6 +71,25 @@ describe("plain Markdown memory", () => {
   });
 });
 
+describe("redactMemorySecrets", () => {
+  it("redacts private keys, provider tokens, bearer credentials, and assigned secrets", () => {
+    const input = [
+      "-----BEGIN PRIVATE KEY-----\nvery-private-bytes\n-----END PRIVATE KEY-----",
+      "sk-abcdefghijklmnopqrstuvwxyz",
+      "ghp_abcdefghijklmnopqrstuvwxyz123456",
+      "xoxb-1234567890-secret-value",
+      "Authorization: Bearer eyJhbGciOi.secret.signature",
+      "api_key = open-sesame",
+      "password: \"correct horse battery staple\"",
+    ].join("\n");
+    const redacted = redactMemorySecrets(input);
+    expect(redacted).not.toMatch(/very-private|sk-|ghp_|xoxb-|eyJhbGci|open-sesame|correct horse/u);
+    expect(redacted.match(/\[REDACTED_SECRET\]/gu)?.length).toBe(7);
+    expect(redacted).toContain(`Bearer ${REDACTED_MEMORY_SECRET}`);
+    expect(redacted).toContain(`api_key = ${REDACTED_MEMORY_SECRET}`);
+  });
+});
+
 describe("memoryIndexPreview", () => {
   it("keeps a concise fact whole", () => {
     expect(memoryIndexPreview("Owner likes tea.")).toBe("Owner likes tea.");
@@ -90,27 +111,32 @@ describe("memoryIndexPreview", () => {
 });
 
 describe("deriveMemoryIndex", () => {
-  it("sorts by slug and formats one line per file", () => {
+  it("sorts newest first with slug as the deterministic tie-break", () => {
     const index = deriveMemoryIndex([
-      { slug: "working-habit", description: "second" },
-      { slug: "apprentice-question", description: "first" },
+      { slug: "working-habit", description: "second", updated: "2026-08-26" },
+      { slug: "zebra", description: "new tie", updated: "2026-08-27" },
+      { slug: "apprentice-question", description: "first", updated: "2026-08-27" },
     ]);
     expect(index.lines).toEqual([
       "- apprentice-question.md: first",
+      "- zebra.md: new tie",
       "- working-habit.md: second",
     ]);
     expect(index.omitted).toBe(0);
-    expect(index.total).toBe(2);
+    expect(index.total).toBe(3);
   });
 
-  it("cuts off at the injection budget and reports the remainder", () => {
+  it("cuts off at the injection budget and omits the stalest remainder", () => {
     const files = Array.from({ length: 400 }, (_, position) => ({
       slug: `memory-${String(position).padStart(4, "0")}`,
       description: "x".repeat(32),
+      updated: position === 0 ? "2020-01-01" : "2026-08-27",
     }));
     const index = deriveMemoryIndex(files);
     expect(index.chars).toBeLessThanOrEqual(MEMORY_INDEX_BUDGET_CHARS);
     expect(index.omitted).toBeGreaterThan(0);
     expect(index.lines.length + index.omitted).toBe(400);
+    expect(index.lines.some((line) => line.startsWith("- memory-0000.md:"))).toBe(false);
+    expect(index.lines[0]).toBe(`- memory-0001.md: ${"x".repeat(32)}`);
   });
 });

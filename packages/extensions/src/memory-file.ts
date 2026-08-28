@@ -20,6 +20,7 @@ export const MAX_MEMORY_FILES = 500;
 export const MEMORY_INDEX_PREVIEW_CHARS = 32;
 /** Injection budget for the per-session memory index, in characters. */
 export const MEMORY_INDEX_BUDGET_CHARS = 4_000;
+export const REDACTED_MEMORY_SECRET = "[REDACTED_SECRET]";
 
 const MEMORY_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
@@ -31,6 +32,8 @@ export interface MemoryFileMeta {
   readonly slug: string;
   /** A preview derived from the memory content, never stored separately. */
   readonly description: string;
+  /** Filesystem modification time as an ISO timestamp. */
+  readonly updated: string;
 }
 
 /** Validate `<slug>.md` and return the slug. */
@@ -58,6 +61,27 @@ export function coerceMemorySlug(name: string): string {
 
 export function normalizeMemoryText(value: string): string {
   return value.replace(/\s+/g, " ").trim();
+}
+
+/** Remove common credential forms before memory content reaches validation or disk. */
+export function redactMemorySecrets(value: string): string {
+  return value
+    .replace(
+      /-----BEGIN(?: [A-Z0-9]+)* PRIVATE KEY-----[\s\S]*?-----END(?: [A-Z0-9]+)* PRIVATE KEY-----/gu,
+      REDACTED_MEMORY_SECRET,
+    )
+    .replace(
+      /\bBearer[ \t]+[A-Za-z0-9._~+/-]+={0,2}\b/giu,
+      `Bearer ${REDACTED_MEMORY_SECRET}`,
+    )
+    .replace(
+      /\b(?:sk-[A-Za-z0-9_-]{8,}|gh[po]_[A-Za-z0-9]{8,}|xox[baprs]-[A-Za-z0-9-]{8,})\b/gu,
+      REDACTED_MEMORY_SECRET,
+    )
+    .replace(
+      /(\b(?:api[_-]?key|token|secret|password)\b[ \t]*[:=][ \t]*)(?:"[^"\r\n]+"|'[^'\r\n]+'|[^\s,;]+)/giu,
+      `$1${REDACTED_MEMORY_SECRET}`,
+    );
 }
 
 /**
@@ -122,7 +146,7 @@ export function parseMemoryFile(markdown: string): ParsedMemoryFile {
 }
 
 export interface MemoryIndex {
-  /** Budgeted index lines, a contiguous prefix of the slug-sorted index. */
+  /** Budgeted index lines, newest first. */
   readonly lines: readonly string[];
   /** Characters the included lines occupy (one newline each). */
   readonly chars: number;
@@ -133,12 +157,14 @@ export interface MemoryIndex {
 }
 
 /**
- * The per-session memory index: one line per file in stable slug order, cut off
- * at the injection budget. Derived on every session start and never stored.
+ * The per-session memory index: one line per file in newest-first order, with
+ * slug as the deterministic tie-break, cut off at the injection budget.
+ * Derived on every session start and never stored.
  */
 export function deriveMemoryIndex(files: readonly MemoryFileMeta[]): MemoryIndex {
   const sorted = [...files]
-    .sort((left, right) => left.slug.localeCompare(right.slug))
+    .sort((left, right) =>
+      right.updated.localeCompare(left.updated) || left.slug.localeCompare(right.slug))
     .map((file) => `- ${memoryFileName(file.slug)}: ${file.description}`);
   const lines: string[] = [];
   let chars = 0;
