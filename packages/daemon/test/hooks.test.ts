@@ -183,6 +183,7 @@ describe("GhostHookRunner", () => {
       events: [{ event: "conversation_idle", count: 1 }],
       hooks: [{
         event: "conversation_idle",
+        source: "builtin",
         name: "Memory upkeep",
         description: "One memory write after idle.",
         idleSeconds: 60,
@@ -259,6 +260,65 @@ describe("GhostHookRunner", () => {
     }));
     expect(GhostHookRunner.fromConfig(config).conversationIdleRegistrations())
       .toEqual(GhostHookRunner.fromConfig(config).conversationIdleRegistrations());
+  });
+
+  it("replaces the command configuration live and retires its old idle registrations", async () => {
+    const directory = temporaryDirectory();
+    const config = join(directory, "nested", "hooks.json");
+    const runner = GhostHookRunner.fromConfig(config);
+    expect(runner.config()).toEqual({ path: config, document: {} });
+    expect(runner.hasHandlers("session_stop")).toBe(false);
+
+    const observed: string[] = [];
+    await runner.register((api) => {
+      api.on("conversation_idle", () => { observed.push("builtin"); }, {
+        name: "Builtin upkeep",
+        idleSeconds: 60,
+        registrationId: "ghost.test.builtin",
+      });
+    });
+
+    const first = {
+      hooks: {
+        session_stop: [{ hooks: [{
+          type: "command",
+          command: "echo '{\"decision\":\"block\",\"reason\":\"Revise.\"}'",
+          name: "Reviewer",
+        }] }],
+        conversation_idle: [{ hooks: [{ type: "command", command: "/bin/true", idleSeconds: 30, name: "Idle command" }] }],
+      },
+    };
+    await expect(runner.replaceConfig(first)).resolves.toEqual({ path: config, document: first });
+    expect(JSON.parse(readFileSync(config, "utf8"))).toEqual(first);
+    expect(runner.hasHandlers("session_stop")).toBe(true);
+    expect(ghostSessionStopContinuation(await runner.emitSessionStop(event()))).toBe("Revise.");
+    const retired = runner.conversationIdleRegistrations().find(({ idleMs }) => idleMs === 30_000);
+    expect(retired).toBeDefined();
+    expect(runner.status().hooks.map(({ source, name }) => `${source}:${name}`))
+      .toEqual(["config:Reviewer", "builtin:Builtin upkeep", "config:Idle command"]);
+
+    const invalid = { hooks: { session_stop: [{ hooks: [{ type: "command", command: "" }] }] } };
+    await expect(runner.replaceConfig(invalid)).rejects.toThrow(/non-empty NUL-free command/u);
+    expect(JSON.parse(readFileSync(config, "utf8"))).toEqual(first);
+    expect(runner.hasHandlers("session_stop")).toBe(true);
+
+    const second = { hooks: {} };
+    await runner.replaceConfig(second);
+    expect(JSON.parse(readFileSync(config, "utf8"))).toEqual(second);
+    expect(runner.hasHandlers("session_stop")).toBe(false);
+    expect(runner.conversationIdleRegistrations().map(({ id }) => id)).toEqual(["ghost.test.builtin"]);
+    // A deadline armed against the retired registration settles as a no-op.
+    await expect(runner.emitConversationIdleRegistration(idleEvent(), retired as NonNullable<typeof retired>))
+      .resolves.toBeUndefined();
+    await expect(runner.emitConversationIdleRegistration(idleEvent(), { id: "never", idleMs: 1_000 }))
+      .rejects.toThrow(/Unknown conversation_idle registration/u);
+    expect(observed).toEqual([]);
+  });
+
+  it("has no configuration to replace when built without a file", async () => {
+    const runner = new GhostHookRunner();
+    expect(runner.config()).toBeUndefined();
+    await expect(runner.replaceConfig({ hooks: {} })).rejects.toThrow(/no configuration file/u);
   });
 
   it("rejects fractional, zero, and out-of-range conversation idle delays", async () => {

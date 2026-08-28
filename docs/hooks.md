@@ -59,7 +59,10 @@ User hooks live in `$XDG_CONFIG_HOME/ghost/hooks.json` (normally
 }
 ```
 
-Restart `ghostd` after changing the file. Groups and handlers run in file order.
+Ghost reads the file at startup and again whenever `PUT /api/hooks/config`
+replaces it; the shell's Hooks pane edits it through that route, and no
+restart is needed for those edits. An edit made to the file by hand still
+needs a restart. Groups and handlers run in file order.
 Configured command strings must be non-empty and contain no NUL byte.
 All non-empty `before_prompt` contexts are combined. The first `session_stop`
 handler that requests a continuation wins. `idleSeconds` is a safe integer from
@@ -284,9 +287,23 @@ durable cwd change.
 
 Authenticated `GET /api/hooks` returns only `{ active, total, events, hooks,
 sessionStopContinuationCap }`. Event rows contain `{ event, count }`; hook rows
-contain `{ event, name, description }` plus `idleSeconds` only for an idle hook.
-The continuation cap is an integer in `1..100` (default 10). Commands, source paths, arguments, prompts,
-injected context, errors, receipts, and scheduler state never cross that route.
+contain `{ event, source, name, description }` plus `idleSeconds` only for an
+idle hook, where `source` is `builtin` for an in-process registration and
+`config` for a `hooks.json` command. The continuation cap is an integer in
+`1..100` (default 10). Commands, source paths, arguments, prompts, injected
+context, errors, receipts, and scheduler state never cross that route.
+
+## Editing
+
+Authenticated `GET /api/hooks/config` returns `{ path, document }`: the
+admitted `hooks.json` as one object and its absolute path. `PUT
+/api/hooks/config` with a whole document validates it with the same loader,
+writes it atomically, and swaps the live command hooks. A rejected document
+is a 400 naming the offending field and changes nothing. `before_prompt` and
+`session_stop` changes apply at the next boundary. A changed idle registration
+arms from the next owner activity; a deadline already armed against a retired
+registration settles as a no-op rather than an error. Built-in hooks such as
+memory upkeep are registered in code and are not in the document.
 
 ## In-process API
 

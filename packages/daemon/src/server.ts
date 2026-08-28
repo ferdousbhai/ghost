@@ -27,6 +27,7 @@ import {
 import { assertValidGhostName, GhostError, type GhostRegistry } from "./ghosts.js";
 import {
   GHOST_SESSION_STOP_CONTINUATION_CAP,
+  type GhostHookCommandConfig,
   type GhostHookStatus,
   type GhostHookRunner,
 } from "./hooks.js";
@@ -63,7 +64,7 @@ export interface ServerOptions {
    */
   catalog?: ModelCatalog;
   mcp?: McpCatalog;
-  hooks?: Pick<GhostHookRunner, "status">;
+  hooks?: Pick<GhostHookRunner, "status"> & Partial<Pick<GhostHookRunner, "config" | "replaceConfig">>;
   logger?: Logger;
   maxBodyBytes?: number;
   includeThinking?: boolean;
@@ -134,8 +135,9 @@ function publicHookStatus(status: GhostHookStatus): GhostHookStatus {
     active: status.active,
     total: status.total,
     events: status.events.map(({ event, count }) => ({ event, count })),
-    hooks: status.hooks.map(({ event, name, description, idleSeconds }) => ({
+    hooks: status.hooks.map(({ event, source, name, description, idleSeconds }) => ({
       event,
+      source,
       name,
       description,
       ...(event === "conversation_idle" && idleSeconds !== undefined ? { idleSeconds } : {}),
@@ -315,6 +317,43 @@ export function createDaemonServer(options: ServerOptions): Server {
 
   const handleListGhosts = (response: ServerResponse): void => {
     jsonResponse(response, 200, options.registry.list());
+  };
+
+  /**
+   * The owner's `hooks.json`, read and replaced whole. Whole-document
+   * replacement keeps "groups run in file order" honest: there are no per-hook
+   * ids to invent for a file that has none. The daemon's loader is the only
+   * validator; a client shows its message rather than re-implementing the
+   * schema.
+   */
+  const handleHookConfig = async (
+    method: string,
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): Promise<void> => {
+    const config = options.hooks?.config?.();
+    const replaceConfig = options.hooks?.replaceConfig;
+    if (!config || !replaceConfig) {
+      errorResponse(response, 404, "not_found", "Hook configuration is not available.");
+      return;
+    }
+    if (method === "GET") {
+      jsonResponse(response, 200, { path: config.path, document: config.document });
+      return;
+    }
+    if (method !== "PUT") {
+      errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+      return;
+    }
+    const document = await readJsonBody(request, maxBodyBytes);
+    let replaced: GhostHookCommandConfig;
+    try {
+      replaced = await replaceConfig.call(options.hooks, document);
+    } catch (error) {
+      errorResponse(response, 400, "invalid_request", (error as Error).message);
+      return;
+    }
+    jsonResponse(response, 200, { path: replaced.path, document: replaced.document });
   };
 
   const handleCreateGhost = async (
@@ -1703,6 +1742,9 @@ export function createDaemonServer(options: ServerOptions): Server {
             ? { enabled: true, ...relay.status() }
             : { enabled: false, connected: false, reason: "The relay is off (GHOSTD_RELAY)." });
           return;
+        }
+        if (segments.length === 3 && segments[1] === "hooks" && segments[2] === "config") {
+          return await handleHookConfig(method, request, response);
         }
         if (segments.length === 2 && segments[1] === "hooks") {
           if (method !== "GET") {

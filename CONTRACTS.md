@@ -737,13 +737,30 @@ one must not be a leak of both.
 - `GET /api/hooks` → `{ active, total, events, hooks,
   sessionStopContinuationCap }` — authenticated, redacted hook diagnostics.
   `events` is the nonzero canonical-order list of `{ event, count }`; `hooks`
-  has one canonical-order `{ event, name, description }` row per registration,
-  where `event` is exactly `before_prompt`, `session_stop`, or
-  `conversation_idle`, with integer `idleSeconds` only on
+  has one canonical-order `{ event, source, name, description }` row per
+  registration, where `event` is exactly `before_prompt`, `session_stop`, or
+  `conversation_idle`, `source` is `builtin` (registered in-process) or
+  `config` (a `hooks.json` command), with integer `idleSeconds` only on
   `conversation_idle`. `active` is
   `total > 0`, and `total` equals both event counts and row count. The body
   never exposes commands, source paths, arguments, prompts, injected context,
-  errors, receipts, or scheduler state. `sessionStopContinuationCap` is an
+  errors, receipts, or scheduler state; the owner's commands live on the
+  config route below.
+- `GET /api/hooks/config` → `{ path, document }` — the admitted `hooks.json`
+  as one object (`{}` when the file does not exist) and its absolute path.
+  404 on a daemon built without a hooks file.
+- `PUT /api/hooks/config` with the whole document → `{ path, document }`.
+  The daemon's loader is the only validator: a rejected document is a 400
+  whose message names the offending field, the file and the live hooks are
+  untouched. An admitted document is written through a temporary file and
+  one rename, then the running command hooks are swapped without a restart:
+  `before_prompt` and `session_stop` changes apply at the next boundary; a
+  changed `conversation_idle` registration arms from the next owner activity
+  and a deadline already armed against a retired registration settles as a
+  no-op. Built-in hooks are not in the document and cannot be edited here.
+  The document is replaced whole, never patched per hook, because group and
+  handler order is file order. An edit made to the file outside this route
+  still needs a daemon restart. `sessionStopContinuationCap` is an
   integer in `1..100`, the daemon's consecutive hidden-continuation cap
   (`GHOST_SESSION_STOP_CONTINUATION_CAP`, default 10); clients display it and
   never assume its value.

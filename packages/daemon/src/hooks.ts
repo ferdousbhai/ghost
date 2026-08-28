@@ -1,8 +1,10 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
+import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
+import { randomUUID } from "node:crypto";
 import type { Logger } from "./log.js";
 import { silentLogger } from "./log.js";
 
@@ -82,11 +84,21 @@ export interface GhostHookEventStatus {
   count: number;
 }
 
+/** `builtin` is an in-process registration; `config` comes from `hooks.json`. */
+export type GhostHookSource = "builtin" | "config";
+
 export interface GhostHookStatusItem {
   event: GhostHookEvent["type"];
+  source: GhostHookSource;
   name: string;
   description: string;
   idleSeconds?: number;
+}
+
+/** The admitted `hooks.json` document and where it lives. */
+export interface GhostHookCommandConfig {
+  path: string;
+  document: Record<string, unknown>;
 }
 
 export interface GhostHookStatus {
@@ -261,13 +273,23 @@ function timeoutMs(value: unknown, fallbackMs: number, label: string): number {
   return Math.floor(value * 1_000);
 }
 
-function parseCommandHooks(path: string): CommandHook[] {
+function readCommandHooksDocument(path: string): Record<string, unknown> {
+  if (!existsSync(path)) return {};
   let parsed: unknown;
   try {
     parsed = JSON.parse(readFileSync(path, "utf8"));
   } catch (error) {
     throw new Error(`Cannot load Ghost hooks from ${path}: ${(error as Error).message}`);
   }
+  if (!isObject(parsed)) throw new Error(`${path} must contain a JSON object.`);
+  return parsed;
+}
+
+/**
+ * Admit one `hooks.json` document. Every error names the offending field the
+ * same way whether the document came from disk or from `PUT /api/hooks/config`.
+ */
+export function parseCommandHooks(parsed: unknown, path: string): CommandHook[] {
   if (!isObject(parsed)) throw new Error(`${path} must contain a JSON object.`);
   const hooks = parsed.hooks;
   if (hooks === undefined) return [];
@@ -563,12 +585,22 @@ export class GhostHookRunner {
     session_stop: [],
     conversation_idle: [],
   };
-  private readonly commands: CommandHook[];
+  private commands: CommandHook[];
   private readonly commandRunner: NonNullable<GhostHookRunnerOptions["commandRunner"]>;
   private readonly idleTargets = new Map<string, IdleTarget>();
   private readonly idleDuplicates = new Map<string, number>();
+  /**
+   * Idle registrations a replaced configuration retired. A deadline armed
+   * against one of them still fires; it must settle as a no-op, not as the
+   * "unknown registration" invariant violation reserved for corrupt state.
+   */
+  private readonly retiredIdleRegistrations = new Set<string>();
+  private commandConfig?: GhostHookCommandConfig;
+  private configReplacement: Promise<unknown> = Promise.resolve();
 
-  constructor(options: GhostHookRunnerOptions & { commands?: CommandHook[] } = {}) {
+  constructor(
+    options: GhostHookRunnerOptions & { commands?: CommandHook[]; commandConfig?: GhostHookCommandConfig } = {},
+  ) {
     this.logger = options.logger ?? silentLogger;
     this.handlerTimeoutMs = options.handlerTimeoutMs ?? GHOST_HOOK_HANDLER_TIMEOUT_MS;
     this.conversationIdleDelayMs = options.conversationIdleDelayMs ?? GHOST_CONVERSATION_IDLE_DELAY_MS;
@@ -580,22 +612,80 @@ export class GhostHookRunner {
         "conversationIdleDelayMs must be a whole-second integer in [1000, 86400000]",
       );
     }
-    this.commands = options.commands ?? [];
+    this.commands = [];
+    this.commandConfig = options.commandConfig;
     this.commandRunner = options.commandRunner ?? runCommandHook;
-    for (const command of this.commands) {
-      if (!command.idleRegistration) continue;
-      if (this.idleTargets.has(command.idleRegistration.id)) {
-        throw new Error(`Duplicate conversation_idle registration ${JSON.stringify(command.idleRegistration.id)}.`);
-      }
-      this.idleTargets.set(command.idleRegistration.id, {
-        registration: command.idleRegistration,
-        command,
-      });
-    }
+    this.installCommands(options.commands ?? []);
   }
 
   static fromConfig(path: string, options: GhostHookRunnerOptions = {}): GhostHookRunner {
-    return new GhostHookRunner({ ...options, commands: existsSync(path) ? parseCommandHooks(path) : [] });
+    const document = readCommandHooksDocument(path);
+    return new GhostHookRunner({
+      ...options,
+      commands: parseCommandHooks(document, path),
+      commandConfig: { path, document },
+    });
+  }
+
+  private installCommands(commands: CommandHook[]): void {
+    const targets = new Map<string, IdleTarget>();
+    for (const command of commands) {
+      if (!command.idleRegistration) continue;
+      const id = command.idleRegistration.id;
+      const existing = this.idleTargets.get(id);
+      if (targets.has(id) || (existing !== undefined && "handler" in existing)) {
+        throw new Error(`Duplicate conversation_idle registration ${JSON.stringify(id)}.`);
+      }
+      targets.set(id, { registration: command.idleRegistration, command });
+    }
+    for (const command of this.commands) {
+      const id = command.idleRegistration?.id;
+      if (id === undefined) continue;
+      this.idleTargets.delete(id);
+      if (!targets.has(id)) this.retiredIdleRegistrations.add(id);
+    }
+    for (const [id, target] of targets) {
+      this.idleTargets.set(id, target);
+      this.retiredIdleRegistrations.delete(id);
+    }
+    this.commands = commands;
+  }
+
+  /** The admitted `hooks.json`, or undefined for a runner built without one. */
+  config(): GhostHookCommandConfig | undefined {
+    return this.commandConfig;
+  }
+
+  /**
+   * Admit `document` as the new `hooks.json`, write it through a temporary
+   * file and one rename, then swap the live command hooks. Handlers registered
+   * in-process are untouched. `before_prompt` and `session_stop` changes apply
+   * to the next boundary; a changed idle registration arms from the next owner
+   * activity, and a deadline already armed against a retired one settles as a
+   * no-op. Replacements are serialized so two writers cannot interleave the
+   * file and the live set.
+   */
+  async replaceConfig(document: unknown): Promise<GhostHookCommandConfig> {
+    const config = this.commandConfig;
+    if (!config) throw new Error("This hook runner has no configuration file.");
+    const commands = parseCommandHooks(document, config.path);
+    const admitted = document as Record<string, unknown>;
+    const run = this.configReplacement.then(async () => {
+      await mkdir(dirname(config.path), { recursive: true });
+      const temporary = `${config.path}.${process.pid}.${randomUUID()}.tmp`;
+      try {
+        await writeFile(temporary, `${JSON.stringify(admitted, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
+        await rename(temporary, config.path);
+      } catch (error) {
+        await rm(temporary, { force: true }).catch(() => {});
+        throw error;
+      }
+      this.installCommands(commands);
+      this.commandConfig = { path: config.path, document: admitted };
+      return this.commandConfig;
+    });
+    this.configReplacement = run.catch(() => {});
+    return run;
   }
 
   async register(factory: GhostHookFactory): Promise<void> {
@@ -693,6 +783,7 @@ export class GhostHookRunner {
       for (const hook of this.handlers[event]) {
         hooks.push({
           event,
+          source: "builtin",
           name: hook.name,
           description: hook.description,
           ...(hook.idleMs === undefined ? {} : { idleSeconds: hook.idleMs / 1_000 }),
@@ -701,6 +792,7 @@ export class GhostHookRunner {
       for (const hook of this.commands.filter((command) => command.eventName === event)) {
         hooks.push({
           event,
+          source: "config",
           name: hook.name,
           description: hook.description,
           ...(hook.idleMs === undefined ? {} : { idleSeconds: hook.idleMs / 1_000 }),
@@ -856,6 +948,7 @@ export class GhostHookRunner {
     if (event.signal.aborted) return;
     const target = this.idleTargets.get(registration.id);
     if (!target || target.registration.idleMs !== registration.idleMs) {
+      if (this.retiredIdleRegistrations.has(registration.id)) return;
       throw new Error("Unknown conversation_idle registration.");
     }
     if ("handler" in target) {
