@@ -1,20 +1,16 @@
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { keyringModelsDocument } from "../src/model-config-view.js";
 import { openAiCompatiblePreset, writeGhostModels } from "../src/models.js";
 import { GhostPiCredentialStore } from "../src/pi-credential-store.js";
 import { GhostPiRuntime } from "../src/pi-runtime.js";
 import { openGhostSecretContext } from "../src/secret-migration.js";
 import { MemorySecretServiceClient } from "../src/secret-service.js";
-import { makeTempGhosts } from "./helpers/fixtures.js";
+import { makeTempGhosts, useCleanups } from "./helpers/fixtures.js";
 import { startMockProvider, type MockProvider } from "./helpers/mock-provider.js";
 
-const cleanups: Array<() => void | Promise<void>> = [];
-
-afterEach(async () => {
-  for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
-});
+const cleanups = useCleanups();
 
 function tempRoot(): string {
   const temp = makeTempGhosts();

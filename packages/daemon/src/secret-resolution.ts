@@ -1,4 +1,4 @@
-import type { MCPServerConfig } from "@oh-my-pi/pi-coding-agent/mcp/types";
+import type { MCPServerConfig } from "./mcp-config.js";
 import type { GhostProviderConfig } from "./models.js";
 import { visitMcpSecretFields, visitProviderSecretFields } from "./secret-migration.js";
 import { SECRET_REFERENCE_PREFIX } from "./secret-reference.js";

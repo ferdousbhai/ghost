@@ -23,6 +23,7 @@ import {
   type GhostSecretContext,
   type ProviderAccountStatus,
 } from "./keyring-credential-store.js";
+import { serializeByKey } from "./promise-chain.js";
 import {
   parseSecretAccountName,
   secretAccountName,
@@ -100,16 +101,7 @@ export class GhostPiCredentialStore implements CredentialStore {
   }
 
   private enqueue<T>(providerId: string, task: () => Promise<T>): Promise<T> {
-    const previous = this.chains.get(providerId) ?? Promise.resolve();
-    const next = previous.then(task, task);
-    const tail = next.then(
-      () => undefined,
-      () => undefined,
-    ).then(() => {
-      if (this.chains.get(providerId) === tail) this.chains.delete(providerId);
-    });
-    this.chains.set(providerId, tail);
-    return next;
+    return serializeByKey(this.chains, providerId, task);
   }
 
   /**

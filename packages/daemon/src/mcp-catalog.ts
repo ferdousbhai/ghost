@@ -1,21 +1,19 @@
 import { isAbsolute, join, resolve } from "node:path";
-import { expandEnvVarsDeep } from "@oh-my-pi/pi-coding-agent/discovery/helpers";
-import { MCPManager } from "@oh-my-pi/pi-coding-agent/mcp/manager";
+import { GhostError, type GhostRegistry } from "./ghosts.js";
 import {
   addMCPServer,
+  expandEnvVarsDeep,
   removeMCPServer,
   updateMCPServer,
-} from "@oh-my-pi/pi-coding-agent/mcp/config-writer";
-import type {
-  MCPAuthConfig,
-  MCPConfigFile,
-  MCPHttpServerConfig,
-  MCPServerConfig,
-  MCPSseServerConfig,
-  MCPStdioServerConfig,
-} from "@oh-my-pi/pi-coding-agent/mcp/types";
-import type { SourceMeta } from "@oh-my-pi/pi-coding-agent/capability/types";
-import { GhostError, type GhostRegistry } from "./ghosts.js";
+  type MCPAuthConfig,
+  type MCPConfigFile,
+  type MCPHttpServerConfig,
+  type MCPRequestIdFormat,
+  type MCPServerConfig,
+  type MCPSseServerConfig,
+  type MCPStdioServerConfig,
+} from "./mcp-config.js";
+import { GhostMcpManager } from "./mcp-manager.js";
 import {
   homeOperationsFor,
   type HomeOperationCoordinator,
@@ -59,7 +57,7 @@ export interface McpOAuthView {
 interface McpServerConfigViewBase {
   type: McpTransport;
   timeout?: number;
-  requestIdFormat?: "string" | "number";
+  requestIdFormat?: MCPRequestIdFormat;
   auth?: McpAuthView;
   oauth?: McpOAuthView;
 }
@@ -113,7 +111,7 @@ export interface McpConnectionTest {
 export interface McpCatalogOptions {
   registry: GhostRegistry;
   homeOperations?: HomeOperationCoordinator;
-  /** Test seam around OMP's locked atomic project-config writer. */
+  /** Test seam around the locked atomic config writer. */
   writer?: Partial<McpCatalogWriter>;
 }
 
@@ -174,9 +172,9 @@ export function normalizeMcpStdioCwd(
 }
 
 /**
- * Apply OMP's ordinary environment interpolation without pre-expanding maps
- * whose transport policy makes their values opaque. MCPManager remains the
- * authority for those policies and receives the literal protected values.
+ * Apply ordinary environment interpolation without pre-expanding maps whose
+ * transport policy makes their values opaque; the manager receives those
+ * literal protected values.
  */
 export function expandMcpServerConfig(config: MCPServerConfig): MCPServerConfig {
   const type = config.type ?? "stdio";
@@ -228,7 +226,7 @@ function sanitizeRemoteUrl(value: string): string {
     }
     return url.toString();
   } catch {
-    // A templated URL may not parse until OMP expands it. The opaque input can
+    // A templated URL may not parse until it is expanded. The opaque input can
     // carry credentials anywhere, so no part of it is safe to return.
     return "[configured]";
   }
@@ -458,8 +456,8 @@ function translateWriterError(error: unknown, name: string): never {
 /**
  * CRUD and sanitized discovery for the MCP files owned by one ghost.
  *
- * No method calls OMP capability discovery or `getMCPConfigPath("user")`.
- * That negative guarantee is the sovereignty boundary of this class.
+ * No method discovers MCP configuration outside the ghost home. That negative
+ * guarantee is the sovereignty boundary of this class.
  */
 export class McpCatalog {
   private readonly registry: GhostRegistry;
@@ -617,22 +615,12 @@ export class McpCatalog {
           throw new GhostError("mcp_server_not_found", `No MCP server named ${JSON.stringify(name)}.`, 404);
         }
         validateMutation(name, server.config);
-        const manager = new MCPManager(home, null, { redactErrors: true });
-        const source: SourceMeta = {
-          provider: "native",
-          providerName: "OMP",
-          path: server.source.absolutePath,
-          level: "user",
-        };
+        const manager = new GhostMcpManager({ cwd: home });
         try {
           const resolved = resolveMcpServerSecrets(server.config as MCPServerConfig, context);
           const expanded = expandMcpServerConfig(resolved);
-          const result = await manager.connectServers(
-            { [name]: normalizeMcpStdioCwd(expanded, home) },
-            { [name]: source },
-          );
-          const connected = result.connectedServers.includes(name)
-            || manager.getConnectionStatus(name) === "connected";
+          const result = await manager.connectServers({ [name]: normalizeMcpStdioCwd(expanded, home) });
+          const connected = result.connectedServers.includes(name);
           return {
             name,
             ok: connected,

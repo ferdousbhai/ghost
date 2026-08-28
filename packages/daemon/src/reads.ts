@@ -1,6 +1,6 @@
-import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { writePrivateJsonAtomic } from "./private-file.js";
 
 export const READS_FILENAME = "reads.json";
 export const READS_VERSION = 2;
@@ -56,17 +56,5 @@ export async function writeReads(
   reads: Readonly<ConversationReads>,
 ): Promise<void> {
   await mkdir(sessionDir, { recursive: true });
-  const path = readsPath(sessionDir);
-  const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
-  try {
-    await writeFile(temporary, `${JSON.stringify({ version: READS_VERSION, reads }, null, 2)}\n`, {
-      encoding: "utf8",
-      flag: "wx",
-      mode: 0o600,
-    });
-    await rename(temporary, path);
-  } catch (error) {
-    await rm(temporary, { force: true }).catch(() => {});
-    throw error;
-  }
+  await writePrivateJsonAtomic(readsPath(sessionDir), { version: READS_VERSION, reads });
 }

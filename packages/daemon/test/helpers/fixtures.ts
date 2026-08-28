@@ -2,6 +2,7 @@
  * Temp-directory fixtures: a ghosts root, a ghost home, and the SSE reader
  * the pinned pi-messages client uses.
  */
+import { afterEach } from "vitest";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -126,4 +127,19 @@ export function parseSseStream(body: string): PiMessagesEvent[] {
     events.push(JSON.parse(data) as PiMessagesEvent);
   }
   return events;
+}
+
+/** A LIFO cleanup stack drained after each test in the calling file. */
+export function useCleanups(): { push(cleanup: () => void | Promise<void>): void } {
+  const cleanups: Array<() => void | Promise<void>> = [];
+  afterEach(async () => {
+    for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
+  });
+  return { push: (cleanup) => cleanups.push(cleanup) };
+}
+
+/** A private temporary directory, removed by `cleanup`. */
+export function tempDir(prefix = "ghostd-test-"): { path: string; cleanup(): void } {
+  const path = mkdtempSync(join(tmpdir(), prefix));
+  return { path, cleanup: () => rmSync(path, { recursive: true, force: true }) };
 }

@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { MCPManager } from "@oh-my-pi/pi-coding-agent/mcp/manager";
+import { GhostMcpManager } from "../src/mcp-manager.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GhostError } from "../src/ghosts.js";
 import { homeOperationsFor } from "../src/home-operations.js";
@@ -487,17 +487,6 @@ describe("McpCatalog mutations", () => {
 
   it("tests one server without opening a session or exposing transport errors", async () => {
     const { catalog, home } = setup();
-    let observedSource: unknown;
-    const originalConnectServers = MCPManager.prototype.connectServers;
-    vi.spyOn(MCPManager.prototype, "connectServers").mockImplementation(function (
-      this: MCPManager,
-      configs,
-      sources,
-      onStatus,
-    ) {
-      observedSource = sources.probe;
-      return originalConnectServers.call(this, configs, sources, onStatus);
-    });
     const serverPath = join(home, "probe-mcp.mjs");
     writeFileSync(
       serverPath,
@@ -533,10 +522,6 @@ lines.on("line", (line) => {
       toolCount: 1,
       message: "Connection succeeded.",
     });
-    expect(observedSource).toMatchObject({
-      level: "user",
-      path: join(home, "mcp.json"),
-    });
   });
 
   for (const scenario of [
@@ -555,18 +540,15 @@ lines.on("line", (line) => {
       const disconnectGate = Promise.withResolvers<void>();
       const disconnectEntered = Promise.withResolvers<void>();
       const order: string[] = [];
-      let connectManager: MCPManager | undefined;
-      let disconnectManager: MCPManager | undefined;
+      let connectManager: GhostMcpManager | undefined;
+      let disconnectManager: GhostMcpManager | undefined;
       let observedConfigs: unknown;
-      let observedSources: unknown;
-      vi.spyOn(MCPManager.prototype, "connectServers").mockImplementation(async function (
-        this: MCPManager,
+      vi.spyOn(GhostMcpManager.prototype, "connectServers").mockImplementation(async function (
+        this: GhostMcpManager,
         configs,
-        sources,
       ) {
         connectManager = this;
         observedConfigs = configs;
-        observedSources = sources;
         order.push("connect-entered");
         connectEntered.resolve();
         await connectGate.promise;
@@ -582,8 +564,8 @@ lines.on("line", (line) => {
           exaApiKeys: [],
         };
       });
-      vi.spyOn(MCPManager.prototype, "disconnectAll").mockImplementation(async function (
-        this: MCPManager,
+      vi.spyOn(GhostMcpManager.prototype, "disconnectAll").mockImplementation(async function (
+        this: GhostMcpManager,
       ) {
         disconnectManager = this;
         order.push("disconnect-entered");
@@ -633,14 +615,6 @@ lines.on("line", (line) => {
       expect(disconnectManager).toBe(connectManager);
       expect(observedConfigs).toEqual({
         probe: { type: "stdio", command: "/bin/true", cwd: home },
-      });
-      expect(observedSources).toEqual({
-        probe: {
-          provider: "native",
-          providerName: "OMP",
-          path: join(home, "mcp.json"),
-          level: "user",
-        },
       });
       const disconnectFinished = scenario.disconnectFails
         ? order.indexOf("disconnect-failed")
@@ -698,15 +672,12 @@ lines.on("line", (line) => {
       },
     });
     const observed = new Map<string, unknown>();
-    vi.spyOn(MCPManager.prototype, "connectServers").mockImplementation(async (
-      configs,
-    ) => {
+    vi.spyOn(GhostMcpManager.prototype, "connectServers").mockImplementation(async (configs) => {
       for (const [name, config] of Object.entries(configs)) observed.set(name, config);
       return {
         connectedServers: Object.keys(configs),
         errors: new Map(),
         tools: [],
-        exaApiKeys: [],
       };
     });
 

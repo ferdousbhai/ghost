@@ -7,6 +7,8 @@
  * fatally. Callers translate a refusal into their own typed error rather than
  * restating the rule.
  */
+import { randomUUID } from "node:crypto";
+import { rename, rm, writeFile } from "node:fs/promises";
 import {
   closeSync,
   constants,
@@ -69,5 +71,21 @@ export function fsyncPath(path: string): void {
     fsyncSync(fd);
   } finally {
     closeSync(fd);
+  }
+}
+
+/**
+ * Replace `path` with `value` as pretty JSON, private (0600), through a
+ * per-writer temporary file and one rename, so a reader never sees a torn
+ * file and two concurrent writers never share a temporary name.
+ */
+export async function writePrivateJsonAtomic(path: string, value: unknown): Promise<void> {
+  const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
+    await rename(temporary, path);
+  } catch (error) {
+    await rm(temporary, { force: true }).catch(() => {});
+    throw error;
   }
 }

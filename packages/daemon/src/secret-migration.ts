@@ -16,7 +16,7 @@ import { dirname, join } from "node:path";
 import { Database } from "bun:sqlite";
 import type { AuthCredential } from "@oh-my-pi/pi-ai/auth-storage";
 import { getProviderDefinition } from "@oh-my-pi/pi-ai/registry";
-import type { MCPServerConfig } from "@oh-my-pi/pi-coding-agent/mcp/types";
+import type { MCPServerConfig } from "./mcp-config.js";
 import {
   addGhostAccounts,
   readGhostModels,

@@ -45,7 +45,8 @@ import type {
   MCPSseServerConfig as OmpMcpSseServerConfig,
   MCPServerConfig as OmpMcpServerConfig,
   MCPStdioServerConfig as OmpMcpStdioServerConfig,
-} from "@oh-my-pi/pi-coding-agent/mcp/types";
+} from "./mcp-config.js";
+import { validateServerName } from "./mcp-config.js";
 import {
   buildGhostSystemPrompt,
   collectGhostExtension,
@@ -544,7 +545,6 @@ const CLAUDE_MCP_REMOTE_FIELDS = new Set([
   "alwaysLoad",
 ]);
 const CLAUDE_MCP_TOOL_POLICY_FIELDS = new Set(["name", "permission_policy"]);
-const CLAUDE_MCP_SERVER_NAME_PATTERN = /^[a-zA-Z0-9_.:-]{1,100}$/u;
 const CLAUDE_MCP_PERMISSION_POLICIES = new Set([
   "always_allow",
   "always_ask",
@@ -788,7 +788,7 @@ function validPersistedProjectSnapshot(value: unknown): value is ClaudePersisted
   }
   if (!Object.entries(snapshot.mcpServers).every(([name, config]) =>
     name !== "ghost"
-    && CLAUDE_MCP_SERVER_NAME_PATTERN.test(name)
+    && validateServerName(name) === undefined
     && validPersistedClaudeMcpConfig(config))) {
     return false;
   }
