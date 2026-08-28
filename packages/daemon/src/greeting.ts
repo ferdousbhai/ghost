@@ -1,4 +1,4 @@
-import type { AssistantMessage, Context, Model } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, Context, Model } from "@earendil-works/pi-ai";
 import { fenceUntrusted, type DocumentsIndex } from "@ghost/extensions";
 import type { GhostModelRoleBinding } from "./models.js";
 import {

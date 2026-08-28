@@ -12,7 +12,7 @@ Local Omarchy-native AI persona with file-backed state, a daemon API, desktop sh
 - `packages/daemon/src/session-host.ts` — session lifecycle and runtime orchestration
 - `packages/daemon/src/models.ts` and `packages/daemon/src/model-catalog.ts` — model selection and catalog
 - `packages/daemon/src/hooks.ts` and `packages/daemon/src/claude-code.ts` — harness hooks and Claude Code runtime
-- `packages/extensions/src/` — pure OMP extensions and ghost-home file operations
+- `packages/extensions/src/` — pure Ghost extensions (the `extension-api.ts` seam) and ghost-home file operations; `packages/daemon/src/pi-extension-bridge.ts` adapts them to pi
 - `packages/shell/qml/` — Quickshell HUD and desktop UI
 - `packages/chromium-extension/extension/` — opt-in browser relay
 - `packages/desktop-helper/src/ghost_desktop_helper/` — Python computer-use sidecar

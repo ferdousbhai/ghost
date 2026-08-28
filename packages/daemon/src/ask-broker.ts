@@ -1,6 +1,4 @@
 import { randomUUID } from "node:crypto";
-import type { ExtensionUIContext } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/types";
-import { silentLogger, type Logger } from "./log.js";
 
 /** One choice the model offers the owner. */
 export interface AskOption {
@@ -58,13 +56,6 @@ export class AskBrokerError extends Error {
   }
 }
 
-export class HeadlessUIUnavailableError extends Error {
-  constructor(operation: string) {
-    super(`Ghost's headless daemon cannot ${operation}.`);
-    this.name = "HeadlessUIUnavailableError";
-  }
-}
-
 interface ActiveAsk extends PendingAsk {
   resolve: (result: AskResult | undefined) => void;
   signal?: AbortSignal;
@@ -111,53 +102,6 @@ function stringField(
  */
 export class AskBroker {
   #active: ActiveAsk | null = null;
-
-  readonly uiContext: ExtensionUIContext;
-
-  constructor(logger: Logger = silentLogger) {
-    // OMP exposes one UI context to every tool. Ask needs that context and
-    // `hasUI: true`, so the daemon must honestly implement the whole surface:
-    // passive display state is a headless no-op, while anything that would
-    // require an owner's interactive answer rejects explicitly.
-    const unavailable = (operation: string): never => {
-      throw new HeadlessUIUnavailableError(operation);
-    };
-    this.uiContext = {
-      timeoutStartsOnPresentation: true,
-      select: async () => unavailable("show a selection dialog"),
-      confirm: async () => unavailable("show a confirmation dialog"),
-      input: async () => unavailable("show a text input dialog"),
-      askDialog: (questions, options) => this.open(questions, options),
-      notify: (message, type = "info") => {
-        const fields = { type, message };
-        if (type === "error") logger.error("OMP UI notification", fields);
-        else if (type === "warning") logger.warn("OMP UI notification", fields);
-        else logger.info("OMP UI notification", fields);
-      },
-      onTerminalInput: () => () => {},
-      setStatus: () => {},
-      setWorkingMessage: () => {},
-      setWidget: () => {},
-      setFooter: () => {},
-      setHeader: () => {},
-      setTitle: () => {},
-      custom: async <T>(): Promise<T> => unavailable("show a custom interactive UI"),
-      setEditorText: () => unavailable("set text in an interactive editor"),
-      pasteToEditor: () => unavailable("paste text into an interactive editor"),
-      getEditorText: () => unavailable("read text from an interactive editor"),
-      editor: async () => unavailable("show a text editor"),
-      addAutocompleteProvider: () => {},
-      setEditorComponent: () => {},
-      get theme() {
-        return unavailable("read an interactive UI theme");
-      },
-      getAllThemes: async () => [],
-      getTheme: async () => undefined,
-      setTheme: async () => ({ success: false, error: "UI not available in Ghost's daemon" }),
-      getToolsExpanded: () => false,
-      setToolsExpanded: () => {},
-    };
-  }
 
   get pending(): PendingAsk | null {
     const active = this.#active;

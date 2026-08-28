@@ -626,7 +626,7 @@ Rectangle {
                             Text {
                                 width: parent.width
                                 text: root.adding
-                                    ? "Paste the complete OMP MCP configuration. Secret values are sent only when you save."
+                                    ? "Paste the complete MCP configuration. Secret values are sent only when you save."
                                     : "GET never returns credentials. This editor starts from safe fields only and replaces the complete configuration."
                                 color: Theme.foregroundDim
                                 font.family: Theme.fontFamily

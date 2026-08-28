@@ -18,14 +18,15 @@ by Fabio Pauli:
 - **Hyprland dispatcher-grammar correctness** — auto-detected 0.55 string vs
   0.56+ `hl.dsp.*` Lua grammar (see below).
 
-Vision is **not** here: semantic (AT-SPI) access is preferred where it exists;
-OMP's native `inspect_image` — resolving the `vision` role the ghost binds in
-`models.json` — is the universal fallback for canvas / Qt-without-a11y / web /
-games. The strongest path uses both — try semantic, fall back to a screenshot +
-vision.
+Vision is **not** here: semantic (AT-SPI) access is preferred where it exists.
+Under Claude Code, `ghost_screen` returns the image block and the model reads
+it directly; an image-inspection tool for pi sessions, resolving the
+`vision_model` the ghost binds in `models.json`, is a planned Ghost port
+(issue #3). The strongest path uses both — try semantic, fall back to a
+screenshot + vision.
 
 There is deliberately **no `exec` op**: this is desktop control only. The ghost
-already has OMP's native Bash.
+already has the harness's native Bash.
 
 ## Transport
 

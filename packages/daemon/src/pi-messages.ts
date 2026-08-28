@@ -408,7 +408,7 @@ export function createPiMessagesAdapter(
         return;
       case "toolcall_start": {
         if (stepIndex === undefined) return;
-        // OMP's toolcall_start carries no id/name of its own; they are already
+        // pi's toolcall_start carries no id/name of its own; they are already
         // set on the partial message's content block.
         const block = event.partial?.content?.[stepIndex];
         if (block?.type !== "toolCall") return;

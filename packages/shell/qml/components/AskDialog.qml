@@ -1,6 +1,6 @@
 pragma ComponentBehavior: Bound
 
-// AskDialog — OMP's built-in `ask`, rendered where the composer normally sits.
+// AskDialog — the daemon's `ask` tool, rendered where the composer normally sits.
 // That placement is the whole design constraint: while this is up there is no
 // text field anywhere in the HUD, so anything the mouse can do here the
 // keyboard has to do too. Enter answers, Esc gives up, 1–9 pick an option,

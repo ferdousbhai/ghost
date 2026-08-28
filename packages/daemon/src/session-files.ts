@@ -1,13 +1,13 @@
 import { createHash } from "node:crypto";
 import { basename, join } from "node:path";
-import type { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import { visitEntriesFromFileStream } from "@oh-my-pi/pi-coding-agent/session/session-loader";
+import type { SessionManager } from "@earendil-works/pi-coding-agent";
 import {
   isValidConversationId,
   MAX_CONVERSATION_ID_SCALARS,
   requireRawConversationId,
 } from "./conversation-identity.js";
 import { GhostError } from "./ghosts.js";
+import { visitLeadingEntries } from "./session-transcript.js";
 
 const HASHED_SESSION_PREFIX = "ghost~";
 const HASHED_SESSION_PATTERN = /^ghost~[0-9a-f]{64}\.jsonl$/u;
@@ -15,6 +15,8 @@ const CONVERSATION_ID_ENTRY = "ghost_conversation_identity";
 const HOSTED_IMPORT_ENTRY = "ghost_hosted_conversation_import";
 const CLAUDE_SESSION_PREFIX = "claude-";
 const CLAUDE_SESSION_SUFFIX = ".json";
+/** How many leading entries may separate the header from the identity marker. */
+const IDENTITY_SCAN_LIMIT = 64;
 
 function conversationIdFitsFileName(conversationId: string): boolean {
   return conversationId.length > 0
@@ -95,9 +97,11 @@ export async function conversationIdFromSessionFile(
   }
 
   let conversationId: string | null = null;
-  await visitEntriesFromFileStream(sessionFile, (entry) => {
+  let scanned = 0;
+  await visitLeadingEntries(sessionFile, (entry) => {
     conversationId = conversationIdFromCustomEntry(entry);
-    return conversationId === null;
+    scanned += 1;
+    return conversationId === null && scanned < IDENTITY_SCAN_LIMIT;
   });
   if (conversationId === null || sessionFileNameFor(conversationId) !== fileName) return null;
   return conversationId;

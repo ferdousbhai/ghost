@@ -1066,7 +1066,7 @@ FloatingWindow {
                 Layout.fillHeight: true
             }
 
-            // The effective OMP command palette is conversation-scoped. A pick
+            // The effective command palette is conversation-scoped. A pick
             // returns to chat with the command staged, never already running.
             CommandsBrowser {
                 id: commandsBrowser

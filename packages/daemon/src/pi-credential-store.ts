@@ -15,7 +15,7 @@ import type {
   CredentialInfo,
   CredentialStore,
 } from "@earendil-works/pi-ai";
-import type { AuthCredential } from "@oh-my-pi/pi-ai/auth-storage";
+import type { Credential as AuthCredential } from "@earendil-works/pi-ai";
 import {
   credentialData,
   validateAuthCredential,

@@ -20,18 +20,18 @@ import type {
   ToolResultMessage,
   Usage,
   UserMessage,
-} from "@oh-my-pi/pi-ai";
+} from "@earendil-works/pi-ai";
 import {
   CURRENT_SESSION_VERSION,
+  SessionManager,
   type CustomEntry,
   type SessionEntry,
   type SessionHeader,
+  type SessionInfoEntry,
   type SessionMessageEntry,
-  type TitleChangeEntry,
-} from "@oh-my-pi/pi-coding-agent/session/session-entries";
-import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import { serializeTitleSlot } from "@oh-my-pi/pi-coding-agent/session/session-title-slot";
+} from "@earendil-works/pi-coding-agent";
 import { sessionFileNameFor } from "./session-files.js";
+import { normalizeTitle } from "./session-transcript.js";
 
 const HOSTED_CONVERSATIONS_DIRNAME = "conversations";
 const NATIVE_SESSIONS_DIRNAME = "sessions";
@@ -325,29 +325,9 @@ function stopReasonFor(message: HostedMessage, hasTools: boolean): StopReason {
   }
 }
 
-function fitTitle(title: string, updatedAt: string): { title: string; slot: string } {
-  let fitted = Array.from(title, (character) => {
-    const codePoint = character.codePointAt(0) ?? 0;
-    return codePoint <= 0x1f || (codePoint >= 0x7f && codePoint <= 0x9f)
-      ? " "
-      : character;
-  }).join("").trim().split(/ +/).join(" ");
-  fitted = Array.from(fitted)
-    .slice(0, 120)
-    .join("");
-  while (true) {
-    try {
-      return {
-        title: fitted,
-        slot: serializeTitleSlot({ title: fitted, source: "auto", updatedAt }),
-      };
-    } catch (error) {
-      const characters = Array.from(fitted);
-      if (characters.length === 0) throw error;
-      characters.pop();
-      fitted = characters.join("").trimEnd();
-    }
-  }
+/** The hosted title as one printable line of at most 120 characters. */
+function fitTitle(title: string): string {
+  return Array.from(normalizeTitle(title) ?? "").slice(0, 120).join("");
 }
 
 function buildNativeSession(
@@ -357,14 +337,13 @@ function buildNativeSession(
 ): string {
   const created = isoTimestamp(source.catalog.createdAt, "catalog.createdAt");
   const updated = isoTimestamp(source.catalog.updatedAt, "catalog.updatedAt");
-  const { title, slot } = fitTitle(source.catalog.title, updated.iso);
+  const title = fitTitle(source.catalog.title);
   const header: SessionHeader = {
     type: "session",
     version: CURRENT_SESSION_VERSION,
     id: source.id,
     timestamp: created.iso,
     cwd: defaultCwd,
-    ...(title ? { title, titleSource: "auto" } : {}),
   };
   const entries: SessionEntry[] = [];
   const reserved = new Set(source.messages.map((message) => message.id));
@@ -396,7 +375,7 @@ function buildNativeSession(
       updated.ms,
     );
     if (hosted.role === "user") {
-      const message: UserMessage = {
+      const message: UserMessage & { attribution: "user" } = {
         role: "user",
         content: userContent(hosted.parts),
         attribution: "user",
@@ -484,7 +463,7 @@ function buildNativeSession(
         const isError = part.state === "output-error" || part.errorText !== undefined;
         const output = isError ? part.errorText : part.output;
         const resultTimestamp = timestamp + resultIndex + 1;
-        const result: ToolResultMessage = {
+        const result: ToolResultMessage & { attribution: "agent" } = {
           role: "toolResult",
           toolCallId: call.id,
           toolName: call.name,
@@ -520,19 +499,17 @@ function buildNativeSession(
   };
   append(marker);
   if (title) {
-    const titleChange: TitleChangeEntry = {
-      type: "title_change",
+    const info: SessionInfoEntry = {
+      type: "session_info",
       id: derivedId(`hosted-title-${source.id}`),
       parentId,
       timestamp: updated.iso,
-      title,
-      source: "auto",
-      trigger: "ghost-hosted-import",
+      name: title,
     };
-    append(titleChange);
+    append(info);
   }
 
-  return `${slot}${[header, ...entries].map((entry) => JSON.stringify(entry)).join("\n")}\n`;
+  return `${[header, ...entries].map((entry) => JSON.stringify(entry)).join("\n")}\n`;
 }
 
 async function exists(path: string): Promise<boolean> {
@@ -563,14 +540,9 @@ async function writeNativeSession(
       await handle.close();
     }
 
-    // Validate the exact bytes before publishing them into SessionManager.list.
-    const manager = await SessionManager.open(
-      temporary,
-      sessionDir,
-      undefined,
-      { initialCwd: ghostHome, suppressBreadcrumb: true },
-    );
-    await manager.close();
+    // Validate the exact bytes before publishing them into the session listing.
+    const manager = SessionManager.open(temporary, sessionDir, ghostHome);
+    if (!manager.getHeader()) throw new Error("The projected transcript has no session header.");
     const modified = isoTimestamp(updatedAt, "catalog.updatedAt");
     await utimes(temporary, modified.ms / 1_000, modified.ms / 1_000);
 

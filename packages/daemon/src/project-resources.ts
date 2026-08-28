@@ -1,13 +1,14 @@
 import { opendir, type FileHandle } from "node:fs/promises";
 import { basename, isAbsolute, join, posix, resolve } from "node:path";
-import { YAML } from "bun";
-import type { Rule } from "@oh-my-pi/pi-coding-agent/capability/rule";
-import type { PromptTemplate } from "@oh-my-pi/pi-coding-agent/config/prompt-templates";
-import type { SourceMeta } from "@oh-my-pi/pi-coding-agent/capability/types";
-import { buildRuleFromMarkdown } from "@oh-my-pi/pi-coding-agent/discovery/helpers";
-import type { Skill } from "@oh-my-pi/pi-coding-agent/extensibility/skills";
-import type { FileSlashCommand } from "@oh-my-pi/pi-coding-agent/extensibility/slash-commands";
-import { parseFrontmatter } from "@oh-my-pi/pi-utils";
+import {
+  buildRuleFromMarkdown,
+  parseFrontmatter,
+  type FileSlashCommand,
+  type PromptTemplate,
+  type Rule,
+  type Skill,
+  type SourceMeta,
+} from "./declarative-types.js";
 import {
   descriptorPath,
   openDirectoryNoFollow,
@@ -72,28 +73,6 @@ interface MarkdownFile {
   relativePath: string;
   absolutePath: string;
   content: string;
-}
-
-function parseTypedFrontmatter(
-  content: string,
-  source: string,
-): ReturnType<typeof parseFrontmatter> {
-  const normalized = content.replace(/\r\n?/g, "\n");
-  if (normalized.startsWith("---")) {
-    const endIndex = normalized.indexOf("\n---", 3);
-    if (endIndex !== -1) {
-      const parsed = YAML.parse(normalized.slice(4, endIndex));
-      if (parsed !== null && parsed !== undefined
-        && (typeof parsed !== "object" || Array.isArray(parsed))) {
-        throw new TypeError("Frontmatter must be a mapping.");
-      }
-    }
-  }
-  return parseFrontmatter(content, {
-    source,
-    level: "off",
-    repair: false,
-  });
 }
 
 const PROJECT_INSTRUCTION_FILES = [
@@ -573,7 +552,7 @@ export async function loadProjectDeclarativeSnapshot(
     for (const file of skillFiles) {
       let parsed: ReturnType<typeof parseFrontmatter>;
       try {
-        parsed = parseTypedFrontmatter(file.content, file.absolutePath);
+        parsed = parseFrontmatter(file.content);
       } catch {
         budget.warnings.push(`${file.relativePath} was ignored because its skill metadata is invalid.`);
         continue;
@@ -604,7 +583,7 @@ export async function loadProjectDeclarativeSnapshot(
     const ruleEntries = new Map<string, Rule>();
     for (const file of ruleFiles) {
       try {
-        parseTypedFrontmatter(file.content, file.absolutePath);
+        parseFrontmatter(file.content);
       } catch {
         budget.warnings.push(`${file.relativePath} was ignored because its rule metadata is invalid.`);
         continue;
@@ -615,7 +594,6 @@ export async function loadProjectDeclarativeSnapshot(
         file.content,
         file.absolutePath,
         sourceFor(file.absolutePath, options.level),
-        { ruleName: name },
       ));
     }
     const rules = [...ruleEntries.values()];
@@ -623,7 +601,7 @@ export async function loadProjectDeclarativeSnapshot(
     for (const file of promptFiles) {
       let parsed: ReturnType<typeof parseFrontmatter>;
       try {
-        parsed = parseTypedFrontmatter(file.content, file.absolutePath);
+        parsed = parseFrontmatter(file.content);
       } catch {
         budget.warnings.push(`${file.relativePath} was ignored because its prompt metadata is invalid.`);
         continue;
@@ -644,7 +622,7 @@ export async function loadProjectDeclarativeSnapshot(
     for (const file of commandFiles) {
       let parsed: ReturnType<typeof parseFrontmatter>;
       try {
-        parsed = parseTypedFrontmatter(file.content, file.absolutePath);
+        parsed = parseFrontmatter(file.content);
       } catch {
         budget.warnings.push(`${file.relativePath} was ignored because its command metadata is invalid.`);
         continue;

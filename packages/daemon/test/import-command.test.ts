@@ -311,7 +311,7 @@ describe("importCommand", () => {
     expect(out.join("")).toMatch(/1 hosted conversation activated/);
     expect(readFileSync(join(ghostsRoot, "casper", "conversations", "old-chat.json"), "utf8")).toBe(source);
     expect(readFileSync(join(ghostsRoot, "casper", "sessions", "old-chat.jsonl"), "utf8")).toContain(
-      '"title":"Old chat title"',
+      '"name":"Old chat title"',
     );
   });
 

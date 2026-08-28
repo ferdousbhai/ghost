@@ -1,6 +1,6 @@
 
 /**
- * The summary instructions handed to OMP's compaction. Modeled on Anthropic's
+ * The summary instructions handed to pi's compaction. Modeled on Anthropic's
  * context-compaction approach (a structured, faithful hand-off of the load-
  * bearing state of a conversation), but kept deliberately provider-neutral —
  * no Anthropic/Claude-specific tokens or formatting — because a ghost may run
@@ -22,41 +22,26 @@ export const DEFAULT_THRESHOLD_FRACTION = 0.8;
 
 export interface CompactionConfig {
   enabled: boolean;
-  /**
-   * Absolute token threshold. OMP gives this precedence over the percentage,
-   * matching Ghost's existing owner-facing configuration.
-   */
+  /** Absolute token threshold; takes precedence over the fraction. */
   thresholdTokens?: number;
+  /** Fraction of the model's context window at which compaction triggers. */
   thresholdFraction?: number;
 }
 
 export const DEFAULT_COMPACTION_CONFIG: CompactionConfig = { enabled: true };
 
-export interface NativeCompactionSettings {
-  "compaction.enabled": boolean;
-  "compaction.asyncEnabled": true;
-  "compaction.thresholdTokens": number;
-  "compaction.thresholdPercent": number;
-}
-
 /**
- * Translate daemon config into OMP settings. The old implicit
- * `min(80% of window, 100k)` rule cannot be represented by one native setting,
- * so the default is deliberately the model-relative 80%. This stays correct
- * across OMP-owned model changes without a second settings mutation path.
+ * The `compaction` block of pi's settings for one model. pi triggers when the
+ * context exceeds the window minus `reserveTokens`, so the owner's threshold
+ * is projected against the bound model's window.
  */
 export function nativeCompactionSettings(
   config: CompactionConfig,
-): NativeCompactionSettings {
-  const native: NativeCompactionSettings = {
-    "compaction.enabled": config.enabled,
-    "compaction.asyncEnabled": true,
-    // OMP uses -1 as the native "unset" value. Project it explicitly so a
-    // ghost-home OMP setting cannot silently override the daemon policy.
-    "compaction.thresholdTokens": config.thresholdTokens ?? -1,
-    "compaction.thresholdPercent": (
-      config.thresholdFraction ?? DEFAULT_THRESHOLD_FRACTION
-    ) * 100,
-  };
-  return native;
+  contextWindow: number | undefined,
+): { enabled: boolean; reserveTokens?: number } {
+  if (!config.enabled || !contextWindow) return { enabled: config.enabled };
+  const threshold = config.thresholdTokens !== undefined
+    ? Math.min(config.thresholdTokens, contextWindow)
+    : contextWindow * (config.thresholdFraction ?? DEFAULT_THRESHOLD_FRACTION);
+  return { enabled: true, reserveTokens: Math.max(1, Math.round(contextWindow - threshold)) };
 }

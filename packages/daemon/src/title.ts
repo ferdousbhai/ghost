@@ -1,4 +1,4 @@
-import type { Context, Model } from "@oh-my-pi/pi-ai";
+import type { Context, Model } from "@earendil-works/pi-ai";
 import type { GhostModelRoleBinding } from "./models.js";
 import {
   assistantText,

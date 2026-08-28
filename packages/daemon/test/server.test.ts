@@ -1415,7 +1415,7 @@ describe("ghost MCP routes", () => {
       })],
     });
     expect(host!.mcpConnectionStatus("casper", "route_fixture")).toBe("connected");
-    expect(opened.session.getToolByName(firstTool)).toBeDefined();
+    expect(opened.session.getToolDefinition(firstTool)).toBeDefined();
 
     const disabled = await jsonRequest(`${collection}/route_fixture/enabled`, "PUT", {
       enabled: false,
@@ -1427,7 +1427,7 @@ describe("ghost MCP routes", () => {
         connectionStatus: "disabled",
       })],
     });
-    expect(opened.session.getToolByName(firstTool)).toBeUndefined();
+    expect(opened.session.getToolDefinition(firstTool)).toBeUndefined();
 
     const enabled = await jsonRequest(`${collection}/route_fixture/enabled`, "PUT", {
       enabled: true,
@@ -1440,7 +1440,7 @@ describe("ghost MCP routes", () => {
       })],
     });
     expect(host!.mcpConnectionStatus("casper", "route_fixture")).toBe("connected");
-    expect(opened.session.getToolByName(firstTool)).toBeDefined();
+    expect(opened.session.getToolDefinition(firstTool)).toBeDefined();
 
     const replaced = await jsonRequest(`${collection}/route_fixture`, "PUT", {
       config: { type: "stdio", command: process.execPath, args: [secondServer] },
@@ -1453,13 +1453,13 @@ describe("ghost MCP routes", () => {
       })],
     });
     expect(host!.mcpConnectionStatus("casper", "route_fixture")).toBe("connected");
-    expect(opened.session.getToolByName(firstTool)).toBeUndefined();
-    expect(opened.session.getToolByName(secondTool)).toBeDefined();
+    expect(opened.session.getToolDefinition(firstTool)).toBeUndefined();
+    expect(opened.session.getToolDefinition(secondTool)).toBeDefined();
 
     const removed = await jsonRequest(`${collection}/route_fixture`, "DELETE");
     expect(removed.status).toBe(200);
     expect(await removed.json()).toMatchObject({ servers: [] });
-    expect(opened.session.getToolByName(secondTool)).toBeUndefined();
+    expect(opened.session.getToolDefinition(secondTool)).toBeUndefined();
     expect(host!.mcpConnectionStatus("casper", "route_fixture")).toBe("disconnected");
   });
 
@@ -1478,9 +1478,9 @@ describe("ghost MCP routes", () => {
       config: { type: "stdio", command: process.execPath, args: [firstServer] },
     });
     expect(added.status).toBe(201);
-    expect(opened.session.getToolByName(stableTool)).toBeDefined();
+    expect(opened.session.getToolDefinition(stableTool)).toBeDefined();
 
-    vi.spyOn(opened.session, "refreshMCPTools")
+    vi.spyOn(opened.session, "reload")
       .mockRejectedValueOnce(new Error("injected live MCP publication failure"));
     const failed = await jsonRequest(`${collection}/route_fixture`, "PUT", {
       config: {
@@ -1492,8 +1492,8 @@ describe("ghost MCP routes", () => {
     });
     expect(failed.status).toBe(500);
     expect(await failed.json()).toMatchObject({ error: { code: "internal_error" } });
-    expect(opened.session.getToolByName(stableTool)).toBeDefined();
-    expect(opened.session.getToolByName(nextTool)).toBeUndefined();
+    expect(opened.session.getToolDefinition(stableTool)).toBeDefined();
+    expect(opened.session.getToolDefinition(nextTool)).toBeUndefined();
     expect(host!.mcpConnectionStatus("casper", "route_fixture")).toBe("connected");
 
     const durable = await fetch(collection);
@@ -1518,8 +1518,8 @@ describe("ghost MCP routes", () => {
     expect(await retried.json()).toMatchObject({
       servers: [expect.objectContaining({ connectionStatus: "connected" })],
     });
-    expect(opened.session.getToolByName(stableTool)).toBeUndefined();
-    expect(opened.session.getToolByName(nextTool)).toBeDefined();
+    expect(opened.session.getToolDefinition(stableTool)).toBeUndefined();
+    expect(opened.session.getToolDefinition(nextTool)).toBeDefined();
   });
 });
 

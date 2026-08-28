@@ -2,7 +2,7 @@
  * The runtime-neutral half of a Ghost model runtime: how a ghost's
  * `models.json` is projected into the file the hosting runtime reads, how its
  * keyring references are resolved into in-memory provider registrations, and
- * how account policy is reported. Both the OMP and the pi runtime compose this.
+ * how account policy is reported; the pi runtime composes it.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";

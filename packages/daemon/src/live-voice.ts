@@ -1,14 +1,15 @@
-import type { AssistantMessage } from "@oh-my-pi/pi-ai";
-import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
-import {
-  LiveSessionController,
-  type LiveSessionControllerOptions,
-  type LiveTranscript,
-} from "@oh-my-pi/pi-coding-agent/live/controller";
-import type { LivePhase } from "@oh-my-pi/pi-coding-agent/live/visualizer";
+import type { AssistantMessage } from "@earendil-works/pi-ai";
+import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import { GhostError } from "./ghosts.js";
 
-export interface LiveTranscriptRow extends LiveTranscript {}
+export type LivePhase = "connecting" | "listening" | "thinking" | "speaking" | "muted" | "error";
+
+export interface LiveTranscriptRow {
+  role: "user" | "assistant";
+  text: string;
+  turn: number;
+  final: boolean;
+}
 
 export interface LiveVoiceStatus {
   supported: true;
@@ -21,7 +22,22 @@ export interface LiveVoiceStatus {
   error?: string;
 }
 
-interface LiveController {
+export interface LiveSessionCallbacks {
+  onPhase(phase: LivePhase): void;
+  onLevels(input: number, output: number): void;
+  onTranscript(transcript: LiveTranscriptRow | undefined): void;
+  onTerminal(error?: Error): void;
+}
+
+/** What a realtime voice controller is built from. */
+export interface LiveSessionControllerOptions {
+  session: AgentSession;
+  callbacks: LiveSessionCallbacks;
+  extractAssistantText: (message: AssistantMessage) => string;
+  voice: string | undefined;
+}
+
+export interface LiveController {
   readonly phase: LivePhase;
   readonly muted: boolean;
   start(): Promise<void>;
@@ -29,8 +45,8 @@ interface LiveController {
   stop(): Promise<void>;
 }
 
-type LiveControllerFactory = (options: LiveSessionControllerOptions) => LiveController;
-type SendCustomMessage = AgentSession["sendCustomMessage"];
+export type LiveControllerFactory = (options: LiveSessionControllerOptions) => LiveController;
+export type SendCustomMessage = AgentSession["sendCustomMessage"];
 
 interface LiveVoiceRecord {
   controller?: LiveController;
@@ -39,6 +55,8 @@ interface LiveVoiceRecord {
 
 export interface LiveVoiceManagerOptions {
   createController?: LiveControllerFactory;
+  /** The voice the realtime provider speaks with, from the ghost's settings. */
+  voice?: (session: AgentSession) => string | undefined;
 }
 
 function emptyStatus(): LiveVoiceStatus {
@@ -58,7 +76,6 @@ function cloneStatus(status: LiveVoiceStatus): LiveVoiceStatus {
 }
 
 function assistantText(message: AssistantMessage): string {
-  if (typeof message.content === "string") return message.content;
   return message.content
     .filter((part) => part.type === "text")
     .map((part) => part.text)
@@ -66,14 +83,27 @@ function assistantText(message: AssistantMessage): string {
     .trim();
 }
 
+/**
+ * The realtime voice controller is being ported from Oh My Pi to Ghost; until
+ * it lands, starting live voice reports that honestly.
+ */
+const unavailableController: LiveControllerFactory = () => {
+  throw new GhostError(
+    "not_supported",
+    "Live voice is not available in this build of Ghost yet.",
+    501,
+  );
+};
+
 export class LiveVoiceManager {
   private readonly records = new Map<string, LiveVoiceRecord>();
   private readonly createController: LiveControllerFactory;
+  private readonly voiceFor: (session: AgentSession) => string | undefined;
   private onInactive?: (sessionKey: string) => void | Promise<void>;
 
   constructor(options: LiveVoiceManagerOptions = {}) {
-    this.createController = options.createController
-      ?? ((controllerOptions) => new LiveSessionController(controllerOptions));
+    this.createController = options.createController ?? unavailableController;
+    this.voiceFor = options.voice ?? (() => undefined);
   }
 
   status(sessionKey: string): LiveVoiceStatus {
@@ -108,7 +138,7 @@ export class LiveVoiceManager {
     this.records.set(sessionKey, record);
 
     let controller: LiveController;
-    const callbacks: LiveSessionControllerOptions["callbacks"] = {
+    const callbacks: LiveSessionCallbacks = {
       onPhase: (phase) => {
         if (record.controller !== controller) return;
         status.phase = phase;
@@ -151,12 +181,17 @@ export class LiveVoiceManager {
           },
         })
       : session;
-    controller = this.createController({
-      session: controllerSession,
-      callbacks,
-      extractAssistantText: assistantText,
-      voice: session.settings.get("live.voice"),
-    });
+    try {
+      controller = this.createController({
+        session: controllerSession,
+        callbacks,
+        extractAssistantText: assistantText,
+        voice: this.voiceFor(session),
+      });
+    } catch (error) {
+      this.records.delete(sessionKey);
+      throw error;
+    }
     record.controller = controller;
     try {
       await controller.start();

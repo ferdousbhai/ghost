@@ -338,7 +338,7 @@ export {
   conversationIdFromSessionFile,
   DEFAULT_TRANSCRIPT_LIMIT,
   MAX_TRANSCRIPT_LIMIT,
-  OMP_NATIVE_TOOL_NAMES,
+  PI_NATIVE_TOOL_NAMES,
   SessionHost,
   sessionFileNameFor,
   type AdmittedTurnOptions,

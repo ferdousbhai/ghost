@@ -5,7 +5,7 @@
  * filters, the cap) without a real OMP registry, a provider, or a network
  * call.
  */
-import type { Api, Model } from "@oh-my-pi/pi-ai";
+import type { Api, Model } from "@earendil-works/pi-ai";
 import type { CatalogModel, ModelCatalogRuntime } from "../../src/model-catalog.js";
 
 export interface FakeCatalogModel extends CatalogModel {
@@ -19,7 +19,7 @@ export interface FakeCatalogOptions {
   oauth?: string[];
 }
 
-export function fakeOmpModel(model: FakeCatalogModel): Model<Api> {
+export function fakePiModel(model: FakeCatalogModel): Model<Api> {
   return {
     id: model.id,
     name: model.name ?? model.id,
@@ -29,15 +29,14 @@ export function fakeOmpModel(model: FakeCatalogModel): Model<Api> {
     reasoning: false,
     input: [...(model.input ?? ["text"])],
     cost: model.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: model.contextWindow ?? null,
-    maxTokens: null,
+    contextWindow: model.contextWindow ?? 128_000,
+    maxTokens: 8_192,
     ...(model.priority === undefined ? {} : { priority: model.priority }),
-    compat: undefined,
-  };
+  } as Model<Api>;
 }
 
 export function makeFakeCatalogRuntime(options: FakeCatalogOptions): ModelCatalogRuntime {
-  const models = options.models.map(fakeOmpModel);
+  const models = options.models.map(fakePiModel);
   const credentialed = new Set(options.credentialed ?? []);
   const oauth = new Set(options.oauth ?? []);
   const scoped = (providerId?: string) =>

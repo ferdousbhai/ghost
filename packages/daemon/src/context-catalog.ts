@@ -1,5 +1,5 @@
 import { openGhostHome } from "@ghost/extensions";
-import type { AgentSource } from "@oh-my-pi/pi-coding-agent/task/types";
+import type { AgentSource } from "./declarative-types.js";
 
 export interface GhostContextCharacter {
   path: "character.md";

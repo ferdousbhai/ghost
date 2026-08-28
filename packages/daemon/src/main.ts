@@ -62,7 +62,7 @@ Options:
   -p, --port <port>        TCP port to bind on 127.0.0.1 (default 7717)
       --ghosts-root <dir>  Directory holding one sub-directory per ghost
       --config <file>      Config file (default ~/.config/ghost/config.json)
-      --offline            Forbid OMP's catalogue network calls (refresh off)
+      --offline            Forbid pi's catalogue network calls (refresh off)
       --log-level <level>  debug | info | warn | error (default info)
   -h, --help               Show this message
   -v, --version            Show the version
@@ -146,8 +146,8 @@ export async function waitForShutdownSignal(options: ShutdownSignalOptions): Pro
     on(event: "SIGINT" | "SIGTERM", listener: (...args: unknown[]) => void): void;
     off(event: "SIGINT" | "SIGTERM", listener: (...args: unknown[]) => void): void;
   };
-  // OMP's CLI-oriented postmortem module installs eager signal handlers that
-  // hard-exit after its own cleanup. ghostd owns process teardown instead: its
+  // A CLI-oriented dependency may install eager signal handlers that hard-exit
+  // after its own cleanup. ghostd owns process teardown instead: its
   // sessions/providers are drained below, under shorter bounded deadlines.
   const inherited = {
     SIGINT: signalProcess.listeners("SIGINT"),
@@ -321,7 +321,7 @@ export async function main(argv: string[] = process.argv.slice(2), runtime: Main
     return 1;
   }
 
-  // Before OMP, before any session. Idempotent, but this is the call that
+  // Before pi, before any session. Idempotent, but this is the call that
   // matters: everything downstream inherits this environment.
   const { removed } = scrubProviderEnv(process.env, { offline: config.offline });
   if (removed.length > 0) {

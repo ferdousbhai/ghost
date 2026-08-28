@@ -20,7 +20,7 @@ qs -p ~/.config/quickshell/ghost/shell.qml kill   # then start it again as usual
       mid-flight. The steered text must join the transcript at the moment the
       ghost consumes it, in order, without reopening the conversation. It moves
       out of the queue line as it lands. This is the bug that started the work:
-      the daemon was dropping OMP's owner-authored dequeue event.
+      the daemon was dropping the harness's owner-authored dequeue event.
 - [ ] **A turn ends when it ends.** After the final answer, the orb stops, the
       composer returns, and nothing keeps streaming. A turn that looks finished
       but still says it is working means a terminal event went missing.
@@ -74,8 +74,9 @@ qs -p ~/.config/quickshell/ghost/shell.qml kill   # then start it again as usual
 - [ ] **Pick a model for a provider you have not logged into.** The switcher
       shows it dimmed as "waiting for login" rather than showing nothing, and
       clears once the login finishes or the panel closes.
-- [ ] **Migrate an old credential home.** On first session open, `.pi/agent.db`
-      is scrubbed and vacuumed, `models.json` contains `keyring:` references,
+- [ ] **Migrate an old credential home.** On first session open, legacy
+      `.pi/auth.json` is removed (and an older home's `.pi/agent.db` is scrubbed
+      and vacuumed), `models.json` contains `keyring:` references,
       and the next turn still works. Lock a passworded keyring and try again:
       session open must report a keyring error, with no plaintext fallback. A
       blank-password login keyring cannot be observed locked; that case is

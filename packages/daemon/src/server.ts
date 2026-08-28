@@ -99,8 +99,7 @@ export interface ListeningServer {
 const DEFAULT_MAX_BODY_BYTES = 1_048_576;
 /**
  * A conversation name is a label in a sidebar, not a description. The cap is
- * generous for a sentence and short enough that OMP's fixed-width title slot
- * still holds it.
+ * generous for a sentence and short enough to stay a label.
  */
 const MAX_CONVERSATION_TITLE_LENGTH = 120;
 const TURN_ID_PATTERN = /^[A-Za-z0-9_.:-]{1,64}$/;
@@ -416,7 +415,7 @@ export function createDaemonServer(options: ServerOptions): Server {
 
   /**
    * Everything the owner's right-hand context rail can browse. The catalog is
-   * rebuilt from the ghost home and OMP discovery on every request; no second
+   * rebuilt from the ghost home and the project snapshot on every request; no second
    * index is stored beside the plain files.
    */
   const handleGhostContext = async (

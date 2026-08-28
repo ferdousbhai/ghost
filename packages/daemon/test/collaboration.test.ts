@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
+import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import { CollaborationManager } from "../src/collaboration.js";
 
 function session(): AgentSession {
@@ -44,6 +44,7 @@ describe("CollaborationManager", () => {
       sessionKey: "ghost/session",
       session: session(),
       relayUrl: "relay.example/socket",
+      webUrl: "https://collab.example/view",
       writable: false,
       confirmed: false,
     });

@@ -3,7 +3,7 @@
  *
  * Both the visible MCP catalogue and the keyring migration have to agree on
  * this, and for opposite reasons: the catalogue rejects an invalid row so a
- * malformed value never reaches OMP or an HTTP sanitizer, while migration must
+ * malformed value never reaches the MCP manager or an HTTP sanitizer, while migration must
  * recognise exactly the same rows in order to leave everything else untouched.
  * Two independent copies of the rule would eventually disagree, and the
  * disagreement would show up as migration refusing a server the catalogue is
@@ -66,7 +66,7 @@ function isStringRecord(value: unknown): value is Record<string, string> {
 }
 
 /**
- * Validate Ghost's owned MCP boundary before OMP or an HTTP sanitizer sees a
+ * Validate Ghost's owned MCP boundary before the MCP manager or an HTTP sanitizer sees a
  * value.
  */
 function ownedMcpValidationErrors(value: unknown): string[] {

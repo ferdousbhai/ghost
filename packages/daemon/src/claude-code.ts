@@ -62,8 +62,6 @@ import {
   type GhostToolContext,
   type GhostToolResult,
 } from "@ghost/extensions";
-import * as Effect from "effect/Effect";
-import * as Stream from "effect/Stream";
 import * as z from "zod";
 import { createClaudePiMessagesAdapter } from "./claude-pi-messages.js";
 import {
@@ -1337,10 +1335,10 @@ function requireMatchingClaudeProjectSnapshot(
 
 /**
  * Effect owns the subprocess stream and its finalizer. This is the portable
- * core copied from T3: SDK AsyncIterable -> Effect Stream, query interrupt on
+ * core: SDK AsyncIterable consumed to completion, query interrupt on
  * cancellation, and query close on every exit path.
  */
-function runQueryEffect(input: {
+async function runQuery(input: {
   createQuery: ClaudeCodeQueryFactory;
   prompt: string;
   additionalContext?: string;
@@ -1349,46 +1347,35 @@ function runQueryEffect(input: {
   signal: AbortSignal | undefined;
   onQuery: (query: Query | null) => void;
   onMessage: (message: SDKMessage) => void;
-}): Effect.Effect<void, ClaudeCodeProcessError> {
-  return Effect.scoped(Effect.gen(function* () {
-    const runtime = yield* Effect.acquireRelease(
-      Effect.try({
-        try: () => input.createQuery({
-          prompt: promptMessages(input.prompt, input.additionalContext),
-          options: input.options,
-        }),
-        catch: (cause) => new ClaudeCodeProcessError(
-          "Failed to start the Claude Code runtime.",
-          { cause },
-        ),
-      }),
-      (active) => Effect.sync(() => {
-        input.onQuery(null);
-        active.close();
-      }),
-    );
-    input.onQuery(runtime);
-
-    const interrupt = () => {
-      input.abortController.abort();
-      void runtime.interrupt().catch(() => {
-        // The scoped finalizer still closes the process. An interrupt racing a
-        // natural result is not itself a second user-visible failure.
-      });
-    };
-    if (input.signal?.aborted) interrupt();
-    input.signal?.addEventListener("abort", interrupt, { once: true });
-    yield* Effect.addFinalizer(() => Effect.sync(() => {
-      input.signal?.removeEventListener("abort", interrupt);
-    }));
-
-    yield* Stream.fromAsyncIterable(
-      runtime,
-      (cause) => new ClaudeCodeProcessError("Claude Code's message stream failed.", { cause }),
-    ).pipe(
-      Stream.runForEach((message) => Effect.sync(() => input.onMessage(message))),
-    );
-  }));
+}): Promise<void> {
+  let runtime: Query;
+  try {
+    runtime = input.createQuery({
+      prompt: promptMessages(input.prompt, input.additionalContext),
+      options: input.options,
+    });
+  } catch (cause) {
+    throw new ClaudeCodeProcessError("Failed to start the Claude Code runtime.", { cause });
+  }
+  input.onQuery(runtime);
+  const interrupt = () => {
+    input.abortController.abort();
+    void runtime.interrupt().catch(() => {
+      // The finally block still closes the process. An interrupt racing a
+      // natural result is not itself a second user-visible failure.
+    });
+  };
+  if (input.signal?.aborted) interrupt();
+  input.signal?.addEventListener("abort", interrupt, { once: true });
+  try {
+    for await (const message of runtime) input.onMessage(message);
+  } catch (cause) {
+    throw new ClaudeCodeProcessError("Claude Code's message stream failed.", { cause });
+  } finally {
+    input.signal?.removeEventListener("abort", interrupt);
+    input.onQuery(null);
+    runtime.close();
+  }
 }
 
 function runtimeKeyGhost(key: string): string {
@@ -1718,7 +1705,7 @@ export class ClaudeCodeRuntime {
 
         let terminalResult: SDKResultMessage | null = null;
         let observedProjectMcpFailure = false;
-        await Effect.runPromise(runQueryEffect({
+        await runQuery({
           createQuery: this.createQuery,
           prompt,
           ...(continuationCount === 0 && beforePromptContext
@@ -1748,7 +1735,7 @@ export class ClaudeCodeRuntime {
               adapter.handle(message);
             }
           },
-        }));
+        });
         await publishProjectMcpStatus(
           approvedProject.mcpWarnings.length > 0 || observedProjectMcpFailure,
         );

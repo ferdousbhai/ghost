@@ -27,7 +27,7 @@ interface GhostHookEventBase {
   ghost_name: string;
   ghost_home: string;
   cwd: string;
-  runtime: "omp" | "claude-code";
+  runtime: "pi" | "claude-code";
   conversation_id: string;
   conversation_runtime: "pi" | "claude-code";
 }
@@ -52,7 +52,7 @@ export interface GhostSessionStopEvent extends GhostHookEventBase {
   stop_hook_active: boolean;
   /**
    * The runtime's native transcript when one exists on disk: the Pi session file
-   * for OMP conversations, the Claude Code SDK session file for Claude Code
+   * for pi conversations, the Claude Code SDK session file for Claude Code
    * conversations. `messages` still carries only the current pass.
    */
   transcript_path?: string;
@@ -100,7 +100,7 @@ export interface GhostHookStatus {
 export interface GhostHookContext {
   ghostName: string;
   cwd: string;
-  runtime: "omp" | "claude-code";
+  runtime: "pi" | "claude-code";
   signal: AbortSignal;
 }
 

@@ -14,8 +14,7 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { Database } from "bun:sqlite";
-import type { AuthCredential } from "@oh-my-pi/pi-ai/auth-storage";
-import { getProviderDefinition } from "@oh-my-pi/pi-ai/registry";
+import type { Credential as AuthCredential } from "@earendil-works/pi-ai";
 import type { MCPServerConfig } from "./mcp-config.js";
 import {
   addGhostAccounts,
@@ -305,8 +304,7 @@ function migrateModels(
   let changed = false;
   const allowed = new Set(models.accounts ?? []);
   for (const [provider, config] of Object.entries(models.providers)) {
-    const storageProvider = getProviderDefinition(provider)?.storeCredentialsAs ?? provider;
-    const service = serviceForCredentialProvider(storageProvider);
+    const service = serviceForCredentialProvider(provider);
     const planned: Record<string, string> = {};
     visitProviderSecretFields(config, (value, field) => {
       if (!isSecretReference(value)) planned[field] = value;

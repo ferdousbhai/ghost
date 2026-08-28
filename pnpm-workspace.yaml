@@ -1,17 +1,5 @@
 packages:
   - packages/*
-  - vendor/pi-catalog
-
-# Every consumer of the model catalog (pi-coding-agent, pi-ai, pi-agent-core, and
-# ghost's own packages) resolves the in-tree vendored copy. See issue #3 and
-# vendor/pi-catalog/GHOST-VENDOR.md.
-overrides:
-  "@oh-my-pi/pi-catalog": "workspace:*"
-
-# Ghost pins three explicit, content-free discovery inputs at the OMP SDK
-# boundary so a session cwd never admits ambient repo/watchdog/advisor files.
-patchedDependencies:
-  "@oh-my-pi/pi-coding-agent@18.0.3": patches/@oh-my-pi__pi-coding-agent@18.0.3.patch
 
 # pnpm's shared-lockfile deploy is the only deploy path that remains fully
 # frozen and offline. Keep injected workspace copies synchronized after each

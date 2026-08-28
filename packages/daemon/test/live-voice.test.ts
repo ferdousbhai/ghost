@@ -1,7 +1,6 @@
-import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
-import type { LiveSessionControllerOptions } from "@oh-my-pi/pi-coding-agent/live/controller";
+import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it, vi } from "vitest";
-import { LiveVoiceManager } from "../src/live-voice.js";
+import { LiveVoiceManager, type LiveSessionControllerOptions } from "../src/live-voice.js";
 
 function session(): AgentSession {
   return {

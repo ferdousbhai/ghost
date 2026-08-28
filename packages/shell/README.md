@@ -58,9 +58,9 @@ because a layer surface is invisible to the WM's own window binds.
 
 ## Harness interaction
 
-The HUD follows modern OMP's interaction model. A model selection closes the
+The HUD follows the daemon's interaction model. A model selection closes the
 switcher immediately and returns focus to chat. The advanced routing view binds
-all of OMP's built-in roles, shows whether each primary is explicit or which
+all of Ghost's model roles, shows whether each primary is explicit or which
 effective model Auto resolves, and edits the complete ordered retry chain.
 General and Research remain available only for older homes that configured
 them. Within each provider, current model families sort ahead of older versions.
@@ -72,7 +72,7 @@ provider choice; API-key login accepts the pasted key. Completion returns to
 chat, while login opened from the switcher returns there. The switcher itself
 closes on a model selection and restores chat focus.
 
-OMP's built-in `ask` appears as a structured in-chat form, taking the composer's
+Ghost's `ask` tool appears as a structured in-chat form, taking the composer's
 place while a question stands. It supports offered options, custom input, notes,
 multiple selection, chat-about-this, and dismissal; it is separate from tool
 approval, which Ghost does not expose. Because it replaces the composer, it also
@@ -83,7 +83,7 @@ would submit if the ask timed out. Answering or dismissing hands focus back.
 When the HUD is shut, a completed turn keeps the active ghost's name and an
 excerpt of its answer. If a turn pauses instead, Ghost raises the actual
 question under that same identity; clicking either Omarchy notification opens
-the HUD. OMP's hard-coded "Oh My Pi / Waiting for input" toast stays disabled.
+the HUD. No harness-owned toast is shown.
 
 Dismissal is not a nicety. Until it existed, a question the user did not want to
 answer had no exit but closing the app, which left the conversation holding a
@@ -178,13 +178,13 @@ agent definitions because isolated task/subagent execution is disabled. Memory
 deletion is confirmed and recoverable. Character and agent-definition deletion
 are not offered.
 
-Commands is the effective, conversation-scoped OMP slash-command catalog:
-built-ins, extension/plugin commands, project commands, and explicit
-`/skill:<name>` entries use the same discovery and precedence as the harness.
+Commands is the effective, conversation-scoped Ghost slash-command catalog:
+headless builtins, admitted Markdown commands and prompt templates, and
+explicit `/skill:<name>` entries, exactly as the daemon reports them.
 It is searchable by name, alias, description, input, and source. Choosing a row
 returns to chat with `/name ` staged in the composer; it never runs on selection.
 Typing `/` in the composer opens the same catalog as a compact autocomplete.
-Commands that OMP exposes but Ghost supports only partially (or not at all)
+Commands known from other harnesses that Ghost supports only partially (or not at all)
 remain discoverable with an availability badge and reason; selecting one still
 only stages text, so the palette never suggests that staging proved support.
 

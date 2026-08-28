@@ -1,19 +1,12 @@
 import type { Dirent } from "node:fs";
 import { readdir, type FileHandle } from "node:fs/promises";
 import { join } from "node:path";
-import type { ExtensionFactory } from "@oh-my-pi/pi-coding-agent";
-import { withOmpExtensionRootScope } from "@oh-my-pi/pi-coding-agent/discovery/omp-extension-roots";
-import { withHostGuard } from "@oh-my-pi/pi-coding-agent/extensibility/utils";
-import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
+import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import {
   descriptorPath,
   openDirectoryNoFollow,
   openRegularFileNoFollow,
 } from "@ghost/extensions";
-
-export function withGhostArtifactRoot<T>(homeDir: string, operation: () => T): T {
-  return withOmpExtensionRootScope([homeDir], "explicit-only", operation);
-}
 
 export interface GhostHookExtensionLoad {
   factories: ExtensionFactory[];
@@ -97,8 +90,7 @@ export async function loadGhostHookExtensions(
             await options.afterOpen?.(logicalPath);
             hookImportSequence += 1;
             const importTag = hookImportSequence;
-            const imported = await withHostGuard(() =>
-              import(`${descriptorPath(openedFile)}?ghost-hook=${importTag}`));
+            const imported: unknown = await import(`${descriptorPath(openedFile)}?ghost-hook=${importTag}`);
             const after = await openedFile.stat({ bigint: true });
             if (!after.isFile() || before.dev !== after.dev || before.ino !== after.ino) {
               throw new Error("Hook entry changed filesystem identity while loading.");
@@ -124,15 +116,4 @@ export async function loadGhostHookExtensions(
     await close(hooks);
     await close(root);
   }
-}
-
-export function scopeGhostSessionArtifactRediscovery(
-  session: AgentSession,
-  homeDir: string,
-): void {
-  const refreshSkills = session.refreshSkills.bind(session);
-  session.refreshSkills = () => withGhostArtifactRoot(homeDir, refreshSkills);
-
-  const prompt = session.prompt.bind(session);
-  session.prompt = (...args) => withGhostArtifactRoot(homeDir, () => prompt(...args));
 }

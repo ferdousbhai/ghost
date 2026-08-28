@@ -8,13 +8,13 @@ import {
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { Database } from "bun:sqlite";
-import type {
-  AuthCredential,
-  AuthCredentialStore,
-  CredentialRefreshLeaseFence,
-  StoredAuthCredential,
-  StoredCredentialBlock,
-} from "@oh-my-pi/pi-ai/auth-storage";
+import type { Credential as AuthCredential } from "@earendil-works/pi-ai";
+
+/** A credential write fenced by the refresh lease its owner holds. */
+export interface CredentialRefreshLeaseFence {
+  owner: string;
+  nowMs: number;
+}
 import {
   assertSecretReference,
   formatSecretReference,
@@ -58,10 +58,6 @@ export interface ProviderAccountStatus {
   connectedVia?: "oauth" | "api_key";
 }
 
-interface CacheRow {
-  value: string;
-  expires_at_sec: number;
-}
 
 function defaultSecretMetadataPath(): string {
   const configured = process.env.XDG_STATE_HOME;
@@ -145,9 +141,8 @@ function renderEnvelope(envelope: SecretEnvelope): string {
 
 export function credentialData(credential: AuthCredential): string {
   if (credential.type === "api_key") {
-    return JSON.stringify(credential.source === "login"
-      ? { key: credential.key, source: "login" }
-      : { key: credential.key });
+    const source = (credential as { source?: unknown }).source;
+    return JSON.stringify(source === "login" ? { key: credential.key, source } : { key: credential.key });
   }
   const { type: _type, ...data } = credential;
   return JSON.stringify(data);
@@ -772,300 +767,5 @@ export class GhostSecretContext {
     }
     this.literalReservations.clear();
     this.metadata.close();
-  }
-}
-
-export class KeyringAuthCredentialStore implements AuthCredentialStore {
-  private readonly context: GhostSecretContext;
-  private readonly authorizeAccounts?: (accounts: readonly string[]) => void;
-  private writeAccount: SecretAccountRef | undefined;
-  private observedRevision: number;
-  private closed = false;
-
-  constructor(
-    context: GhostSecretContext,
-    options: { authorizeAccounts?: (accounts: readonly string[]) => void } = {},
-  ) {
-    this.context = context;
-    this.authorizeAccounts = options.authorizeAccounts;
-    this.observedRevision = context.metadata.revision();
-  }
-
-  setWriteAccount(provider: string, account: string): void {
-    this.writeAccount = parseSecretAccountName(`${serviceForCredentialProvider(provider)}/${account}`);
-  }
-
-  clearWriteAccount(): void {
-    this.writeAccount = undefined;
-  }
-
-  allowAccounts(accounts: readonly string[]): void {
-    this.context.allowAccounts(accounts);
-  }
-
-  listProviderAccounts(provider: string): ProviderAccountStatus[] {
-    return this.context.listProviderAccounts(provider);
-  }
-
-  private allowedProviderAccounts(provider: string): SecretAccountRef[] {
-    return this.context.allowedProviderAccounts(provider);
-  }
-
-  private targetAccounts(provider: string, count: number): SecretAccountRef[] {
-    if (count === 0) return [];
-    if (this.writeAccount) {
-      if (this.writeAccount.service !== serviceForCredentialProvider(provider) || count !== 1) {
-        throw new Error(`A login may write exactly one ${provider} account at a time.`);
-      }
-      return [this.writeAccount];
-    }
-    const allowed = this.allowedProviderAccounts(provider);
-    if (allowed.length >= count) return allowed.slice(0, count);
-    if (count === 1 && allowed.length === 0) {
-      return [{ service: serviceForCredentialProvider(provider), account: "personal" }];
-    }
-    throw new Error(`Choose explicit accounts before storing ${count} credentials for ${provider}.`);
-  }
-
-  private admitImplicitAccounts(accounts: readonly SecretAccountRef[]): void {
-    if (this.writeAccount) return;
-    const additions = accounts
-      .map(secretAccountName)
-      .filter((account) => !this.context.allowedAccounts.has(account));
-    if (additions.length === 0) return;
-    this.authorizeAccounts?.(additions);
-    this.context.allowAccounts(additions);
-  }
-
-  private row(id: number): CredentialRow | null {
-    return this.context.metadata.db.query(
-      `SELECT ${CREDENTIAL_ROW_COLUMNS} FROM ghost_auth_credentials WHERE id = ?`,
-    ).get(id) as CredentialRow | null;
-  }
-
-  listAuthCredentials(provider?: string): StoredAuthCredential[] {
-    return this.context.allowedCredentialRows(provider).map((row) => ({
-      id: row.id,
-      provider: row.provider,
-      credential: this.context.credentialForRow(row),
-      disabledCause: null,
-    }));
-  }
-
-  updateAuthCredential(id: number, credential: AuthCredential): void {
-    const row = this.row(id);
-    if (row?.active !== 1) return;
-    this.context.registerCredential(row.provider, row, credential);
-  }
-
-  tryUpdateAuthCredentialIfMatches(
-    id: number,
-    expectedData: string,
-    credential: AuthCredential,
-    lease?: CredentialRefreshLeaseFence,
-  ): boolean {
-    return this.context.tryUpdateCredential(id, expectedData, credential, lease);
-  }
-
-  deleteAuthCredential(id: number, _disabledCause: string): void {
-    this.context.metadata.transaction(() => {
-      this.context.metadata.db.query("UPDATE ghost_auth_credentials SET active = 0 WHERE id = ?").run(id);
-      this.context.metadata.bumpRevision();
-    });
-  }
-
-  tryDisableAuthCredentialIfMatches(
-    id: number,
-    expectedData: string,
-    _disabledCause: string,
-    lease?: CredentialRefreshLeaseFence,
-  ): boolean {
-    return this.context.tryDisableCredential(id, expectedData, lease);
-  }
-
-  replaceAuthCredentialsForProvider(provider: string, credentials: AuthCredential[]): StoredAuthCredential[] {
-    const accounts = this.targetAccounts(provider, credentials.length);
-    credentials.forEach((credential, index) => {
-      const account = accounts[index] as SecretAccountRef;
-      this.context.registerCredential(provider, { ...account, field: "auth" }, credential);
-    });
-    this.admitImplicitAccounts(accounts);
-    return this.listAuthCredentials(provider);
-  }
-
-  upsertAuthCredentialForProvider(provider: string, credential: AuthCredential): StoredAuthCredential[] {
-    const [account] = this.targetAccounts(provider, 1);
-    this.context.registerCredential(provider, { ...account as SecretAccountRef, field: "auth" }, credential);
-    this.admitImplicitAccounts([account as SecretAccountRef]);
-    return this.listAuthCredentials(provider);
-  }
-
-  deleteAuthCredentialsForProvider(provider: string, _disabledCause: string): void {
-    const account = this.writeAccount;
-    if (account) {
-      this.context.removeAccount(account);
-      return;
-    }
-    for (const allowed of this.allowedProviderAccounts(provider)) {
-      this.context.removeAccount(allowed);
-    }
-  }
-
-  getCache(key: string, options: { includeExpired?: boolean } = {}): string | null {
-    const row = this.context.metadata.db.query(
-      "SELECT value, expires_at_sec FROM ghost_auth_cache WHERE key = ?",
-    ).get(key) as CacheRow | null;
-    if (!row) return null;
-    if (!options.includeExpired && row.expires_at_sec <= Math.floor(Date.now() / 1000)) return null;
-    return row.value;
-  }
-
-  setCache(key: string, value: string, expiresAtSec: number): void {
-    this.context.metadata.transaction(() => {
-      this.context.metadata.db.query(`
-        INSERT INTO ghost_auth_cache(key, value, expires_at_sec) VALUES (?, ?, ?)
-        ON CONFLICT(key) DO UPDATE SET value = excluded.value, expires_at_sec = excluded.expires_at_sec
-      `).run(key, value, expiresAtSec);
-      this.context.metadata.bumpRevision();
-    });
-  }
-
-  deleteCachePrefix(prefix: string): void {
-    this.context.metadata.transaction(() => {
-      this.context.metadata.db.query("DELETE FROM ghost_auth_cache WHERE key LIKE ? ESCAPE '\\'")
-        .run(`${prefix.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_")}%`);
-      this.context.metadata.bumpRevision();
-    });
-  }
-
-  cleanExpiredCache(): void {
-    this.context.metadata.db.query("DELETE FROM ghost_auth_cache WHERE expires_at_sec <= ?")
-      .run(Math.floor(Date.now() / 1000));
-  }
-
-  private credentialBlock(
-    credentialId: number,
-    providerKey: string,
-    blockScope: string,
-  ): { blocked_until_ms: number; updated_at_ms: number } | null {
-    return this.context.metadata.db.query(`
-      SELECT blocked_until_ms, updated_at_ms FROM ghost_credential_blocks
-      WHERE credential_id = ? AND provider_key = ? AND block_scope = ?
-    `).get(credentialId, providerKey, blockScope) as
-      { blocked_until_ms: number; updated_at_ms: number } | null;
-  }
-
-  getCredentialBlock(credentialId: number, providerKey: string, blockScope: string): number | undefined {
-    return this.credentialBlock(credentialId, providerKey, blockScope)?.blocked_until_ms;
-  }
-
-  getCredentialBlockReconcileAfter(
-    credentialId: number,
-    providerKey: string,
-    blockScope: string,
-  ): number | undefined {
-    return this.credentialBlock(credentialId, providerKey, blockScope)?.updated_at_ms;
-  }
-
-  upsertCredentialBlock(block: StoredCredentialBlock): void {
-    const updatedAt = block.updatedAtMs ?? Date.now();
-    this.context.metadata.transaction(() => {
-      this.context.metadata.db.query(`
-        INSERT INTO ghost_credential_blocks(
-          credential_id, provider_key, block_scope, blocked_until_ms, updated_at_ms
-        ) VALUES (?, ?, ?, ?, ?)
-        ON CONFLICT(credential_id, provider_key, block_scope) DO UPDATE SET
-          blocked_until_ms = MAX(blocked_until_ms, excluded.blocked_until_ms),
-          updated_at_ms = excluded.updated_at_ms
-      `).run(block.credentialId, block.providerKey, block.blockScope, block.blockedUntilMs, updatedAt);
-      this.context.metadata.bumpRevision();
-    });
-  }
-
-  deleteCredentialBlock(credentialId: number, providerKey: string, blockScope: string): void {
-    this.context.metadata.transaction(() => {
-      const result = this.context.metadata.db.query(`
-        DELETE FROM ghost_credential_blocks
-        WHERE credential_id = ? AND provider_key = ? AND block_scope = ?
-      `).run(credentialId, providerKey, blockScope);
-      if (result.changes > 0) this.context.metadata.bumpRevision();
-    });
-  }
-
-  deleteCredentialBlocks(credentialId: number): void {
-    this.context.metadata.transaction(() => {
-      const result = this.context.metadata.db.query(
-        "DELETE FROM ghost_credential_blocks WHERE credential_id = ?",
-      ).run(credentialId);
-      if (result.changes > 0) this.context.metadata.bumpRevision();
-    });
-  }
-
-  cleanExpiredCredentialBlocks(nowMs: number): void {
-    this.context.metadata.transaction(() => {
-      const result = this.context.metadata.db.query(
-        "DELETE FROM ghost_credential_blocks WHERE blocked_until_ms <= ?",
-      ).run(nowMs);
-      if (result.changes > 0) this.context.metadata.bumpRevision();
-    });
-  }
-
-  listCredentialBlocks(credentialIds: readonly number[]): StoredCredentialBlock[] {
-    if (credentialIds.length === 0) return [];
-    const allowed = new Set(credentialIds);
-    const rows = this.context.metadata.db.query(`
-      SELECT credential_id, provider_key, block_scope, blocked_until_ms, updated_at_ms
-      FROM ghost_credential_blocks WHERE blocked_until_ms > ?
-    `).all(Date.now()) as Array<{
-      credential_id: number;
-      provider_key: string;
-      block_scope: string;
-      blocked_until_ms: number;
-      updated_at_ms: number;
-    }>;
-    return rows.filter((row) => allowed.has(row.credential_id)).map((row) => ({
-      credentialId: row.credential_id,
-      providerKey: row.provider_key,
-      blockScope: row.block_scope,
-      blockedUntilMs: row.blocked_until_ms,
-      updatedAtMs: row.updated_at_ms,
-    }));
-  }
-
-  tryAcquireCredentialRefreshLease(id: number, owner: string, expiresAtMs: number): boolean {
-    return this.context.tryAcquireRefreshLease(id, owner, expiresAtMs);
-  }
-
-  getCredentialRefreshLeaseExpiresAt(id: number): number | undefined {
-    return this.context.refreshLeaseExpiresAt(id);
-  }
-
-  releaseCredentialRefreshLease(id: number, owner: string): void {
-    this.context.releaseRefreshLease(id, owner);
-  }
-
-  renewCredentialRefreshLease(id: number, owner: string, expiresAtMs: number): boolean {
-    const result = this.context.metadata.db.query(`
-      UPDATE ghost_refresh_leases SET expires_at_ms = ?
-      WHERE credential_id = ? AND owner = ? AND expires_at_ms > ?
-    `).run(expiresAtMs, id, owner, Date.now());
-    return result.changes === 1;
-  }
-
-  pollExternalChanges(): boolean {
-    const current = this.context.metadata.revision();
-    if (current === this.observedRevision) return false;
-    this.observedRevision = current;
-    return true;
-  }
-
-  acknowledgeLocalChanges(): void {
-    this.observedRevision = this.context.metadata.revision();
-  }
-
-  close(): void {
-    if (this.closed) return;
-    this.closed = true;
-    this.context.close();
   }
 }

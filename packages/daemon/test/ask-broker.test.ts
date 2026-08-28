@@ -1,9 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-  AskBroker,
-  AskBrokerError,
-  HeadlessUIUnavailableError,
-} from "../src/ask-broker.js";
+import { AskBroker, AskBrokerError } from "../src/ask-broker.js";
 
 const QUESTIONS = [{
   id: "shape",
@@ -17,35 +13,6 @@ const QUESTIONS = [{
 }];
 
 describe("AskBroker", () => {
-  it("implements OMP's full UI contract and refuses surfaces the daemon does not have", async () => {
-    const warn = vi.fn();
-    const broker = new AskBroker({
-      debug: vi.fn(),
-      info: vi.fn(),
-      warn,
-      error: vi.fn(),
-    });
-    const ui = broker.uiContext;
-
-    await expect(ui.select("Choose", [{ label: "One" }]))
-      .rejects.toBeInstanceOf(HeadlessUIUnavailableError);
-    await expect(ui.confirm("Confirm", "Continue?"))
-      .rejects.toBeInstanceOf(HeadlessUIUnavailableError);
-    await expect(ui.input("Input"))
-      .rejects.toBeInstanceOf(HeadlessUIUnavailableError);
-    const factory = vi.fn();
-    await expect(ui.custom(factory))
-      .rejects.toThrow("cannot show a custom interactive UI");
-    expect(factory).not.toHaveBeenCalled();
-    expect(() => ui.setEditorText("unreachable"))
-      .toThrow(HeadlessUIUnavailableError);
-    ui.notify("A warning the owner should see", "warning");
-    expect(warn).toHaveBeenCalledWith("OMP UI notification", {
-      type: "warning",
-      message: "A warning the owner should see",
-    });
-  });
-
   it("publishes a pending dialog and resolves the exact result shape", async () => {
     const broker = new AskBroker();
     const result = broker.open(QUESTIONS);

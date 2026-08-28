@@ -7,7 +7,7 @@
  * token refresh, streaming, subscription classification, and the catalog.
  */
 import { mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type {
   Api,
   AssistantMessage,
@@ -59,7 +59,8 @@ export interface GhostProviderSummary {
 
 export class GhostPiRuntime {
   readonly secretResolver: GhostSecretContext;
-  private readonly runtime: ModelRuntime;
+  /** pi's own runtime, for the session that streams through it. */
+  readonly runtime: ModelRuntime;
   private readonly credentialStore: GhostPiCredentialStore;
   private readonly providerConfigAccounts: ReadonlyMap<string, ReadonlySet<string>>;
   private closed = false;
@@ -124,6 +125,11 @@ export class GhostPiRuntime {
 
   getAvailable(providerId?: string): Promise<readonly Model<Api>[]> {
     return this.runtime.getAvailable(providerId);
+  }
+
+  /** The availability pass the last `refresh` computed; no provider or keyring work. */
+  getAvailableSnapshot(): readonly Model<Api>[] {
+    return this.runtime.getAvailableSnapshot();
   }
 
   getProviderAuthStatus(providerId: string): { configured: boolean } {
@@ -213,4 +219,18 @@ export class GhostPiRuntime {
     this.closed = true;
     this.secretResolver.close();
   }
+}
+
+/** The paths every daemon caller already holds, resolved to a runtime input. */
+export function createGhostPiRuntime(input: {
+  authPath: string;
+  modelsPath: string;
+  allowModelNetwork: boolean;
+}): Promise<GhostPiRuntime> {
+  return GhostPiRuntime.create({
+    agentDir: dirname(input.authPath),
+    home: dirname(input.modelsPath),
+    authPath: input.authPath,
+    allowModelNetwork: input.allowModelNetwork,
+  });
 }

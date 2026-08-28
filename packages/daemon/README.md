@@ -1,13 +1,15 @@
 # `@ghost/daemon` — `ghostd`
 
 The local process that hosts Ghost personas behind one authenticated loopback
-API. Provider-agnostic conversations run on modern Oh My Pi 18.0.3; selecting
+API. Provider-agnostic conversations run on pi (`@earendil-works/pi-coding-agent`,
+`pi-agent-core`, and `pi-ai` 0.84.3); selecting
 `claude-code/default` uses the owner-local Claude Agent SDK boundary documented
 in [`docs/claude-code-runtime.md`](../../docs/claude-code-runtime.md).
 
 ## Run it
 
-Ghost's OMP packages require Bun 1.3.14 or newer.
+Ghost runs on Bun 1.3.14 or newer (`bun --bun`); a `bun build --compile`
+single-binary `ghostd` is a planned follow-up.
 
 ```bash
 pnpm --filter @ghost/extensions build
@@ -24,21 +26,22 @@ ghostd [options]
   -p, --port <port>        port on 127.0.0.1 (default 7717)
       --ghosts-root <dir>  directory containing ghosts
       --config <file>      default ~/.config/ghost/config.json
-      --offline            disable OMP catalogue network refresh
+      --offline            disable pi catalogue network refresh
       --log-level <level>  debug | info | warn | error
 ```
 
 `config.json` carries the same settings plus `browserMode`, `compaction`, and
-`askTimeoutSeconds`. Compaction is OMP-native and asynchronously speculative:
-`enabled` defaults to true, `thresholdFraction` defaults to `0.8` and maps to
-OMP's percentage threshold, and `thresholdTokens` selects a fixed native
-threshold and takes precedence when both are present. The last setting is how
+`askTimeoutSeconds`. Compaction is pi's native compaction: `enabled` defaults
+to true, `thresholdFraction` defaults to `0.8`, and `thresholdTokens` selects a
+fixed threshold and takes precedence when both are present; Ghost projects the
+threshold onto pi's `reserveTokens` for the bound model's context window and
+supplies its own summary instructions. The last setting is how
 long a question waits before it settles
 itself — with the option its asker marked recommended, or with no selection
 when it marked none — so that a turn nobody is watching resumes instead of
 stalling; `0` waits forever. It is daemon-wide rather than per-ghost because how
 long a dialog sits is a property of the person at the keyboard, not of the
-persona asking, and each session carries it as OMP's own `ask.timeout` so plan
+persona asking, and Ghost's own `ask` tool hands it to each question so plan
 mode and a per-question deadline still win. Every setting also has an
 environment override (`GHOSTD_ASK_TIMEOUT` here); see `loadConfig` for the
 compaction overrides as well.
@@ -48,24 +51,22 @@ stop new requests, end live streams, dispose hosted sessions, and exit cleanly.
 
 ## Storage and isolation
 
-Everything Ghost owns for an OMP conversation stays inside the ghost home:
+Everything Ghost owns for a pi conversation stays inside the ghost home:
 
 ```text
 ~/ghosts/<name>/
   character.md             persona
   memory/*.md              one durable fact per plain Markdown file
-  settings.yml             per-ghost OMP settings
+  settings.yml             the ghost's own plain YAML settings
   models.json              providers, keyring policy, roles, and fallbacks;
                            secret references only
   mcp.json                 ghost-owned MCP servers; secret references only
-  .pi/                     derived OMP machine runtime; never credentials
-    models.omp.json        generated secret-free provider projection
-    models.db              derived OMP catalogue cache
-    agent.db               legacy OMP database shell; only in a home that
-                           predates the keyring, with its credential table
-                           emptied and vacuumed. Nothing creates one any more.
+  .pi/                     derived pi machine runtime; never credentials
+    models.pi.json         secret-free provider/models view synced from
+                           models.json
+    models-store.json      pi's catalogue cache
   sessions/
-    <conversation>.jsonl   OMP session tree
+    <conversation>.jsonl   pi session file
     claude-<sha256>.json   Claude resume metadata, when selected
     <stem>.<runtime>.project.json
                            conversation project root, cwd, and snapshot status
@@ -160,14 +161,14 @@ forms before validation, slug derivation, or disk.
 
 ### Ghost and conversation-project MCP
 
-Ghost deliberately narrows OMP's MCP discovery to the ghost home's visible
+Ghost's own `GhostMcpManager` connects only the ghost home's visible
 `mcp.json`, plus `.omp/mcp.json` and legacy `.omp/.mcp.json` under one
 explicitly trusted conversation project. The ghost MCP management API reads and
 writes only the visible ghost-owned file. Its list response redacts every credential-
 bearing value and does not open a conversation merely to report connection
 status.
 
-Ghost MCP mutations are live: every idle OMP conversation reconnects from the
+Ghost MCP mutations are live: every idle pi conversation reconnects from the
 visible ghost file while reusing the exact project MCP rows admitted with that
 conversation's immutable declarative snapshot. It connects a candidate manager
 before replacing the mounted MCP tools; a busy conversation defers one
@@ -179,10 +180,9 @@ targets managers that are already loaded.
 ### Connect and recoverable deletion
 
 The session-scoped live-voice and collaboration routes deliberately cross the
-owner-local boundary. Live voice uses the local microphone and OpenAI Codex
-Realtime with the ghost's Codex OAuth. Collaboration exposes distinct encrypted
-read-only and confirmed writable relay links; the latter can drive the host
-session and its local tools. Links are never logged.
+owner-local boundary. Their daemon API and interfaces (`LiveVoiceManager`,
+`CollaborationManager`) are in place, but the default implementations answer
+`501 not_supported` until the Ghost-owned ports land (issue #3).
 
 Whole ghosts, documents, and memory files move to freedesktop Trash, with a
 same-filesystem fallback when needed. Conversation deletion pre-journals every
@@ -191,14 +191,15 @@ Trash root so a crash after rename can recover the complete receipt. Only
 rollback of a fork or project draft that was never shown to the owner remains a
 permanent unlink.
 
-`SessionManager.open` receives the explicit per-ghost session directory;
-`createAgentSession({ agentDir })` alone does not redirect transcripts.
+`SessionManager.open` receives the explicit transcript file, per-ghost session
+directory, and cwd, so nothing lands in `~/.pi`.
 Credentials are never inherited from the daemon environment: `env-scrub.ts`
-removes provider keys and routing variables before OMP is loaded. Provider
-login writes Ghost's Linux Secret Service schema at machine scope. Portable
-config contains only service/account references; see
-[`docs/keyring.md`](../../docs/keyring.md). Existing `agent.db` credentials and
-`.pi/auth.json` are verified into Secret Service and then scrubbed.
+removes provider keys and routing variables before a session is created.
+Provider login writes Ghost's Linux Secret Service schema at machine scope.
+Portable config contains only service/account references; see
+[`docs/keyring.md`](../../docs/keyring.md). Legacy plaintext `.pi/auth.json`
+(and an older home's `agent.db` credential rows) are verified into Secret
+Service and then scrubbed.
 
 New sessions start with the owner's home as their operational cwd, while
 transcripts, persona, memory, browser state, configuration, and keyring policy
@@ -208,20 +209,22 @@ conversation may explicitly trust and bind one project, after which Ghost pins
 its data-only instructions, skills, rules, Markdown commands/prompts, and scoped
 MCP configuration. Project executable extensions, hooks, custom code tools,
 LSP, and custom agent definitions stay disabled until they can run through an
-isolated per-session boundary. Pi explicitly disables OMP's `task` tool, so no
+isolated per-session boundary. A pi session has no `task` tool, so no
 bundled, project, ghost-file, or ambient subagent is invokable in phase 1.
-Native filesystem/Bash, hub, web search, background jobs, and Ghost's explicit
-extensions remain available. Tool
-approval UI is disabled (`approvalMode: yolo`, `autoApprove: true`); `ask` is
-not an approval prompt.
+pi's native `bash`, `edit`, `find`, `grep`, `ls`, `read`, and `write` plus
+Ghost's own tools (registered directly as pi custom tools) remain available;
+background jobs, web search, and image inspection are planned Ghost ports
+(issue #3). There is no tool approval; `ask` is not an approval prompt.
 
 Claude Code sessions retain Claude's native subagents.
 
 
 ## Models and routing
 
-The catalogue and provider authentication come from OMP's `ModelRegistry` and
-`AuthStorage`. `models.json` remains Ghost's durable, inspectable policy file:
+The catalogue comes from pi (`@earendil-works/pi-ai`, cached in
+`.pi/models-store.json`) and provider authentication from pi's `ModelRuntime`
+over Ghost's `GhostPiCredentialStore`. `models.json` remains Ghost's durable,
+inspectable policy file:
 
 ```jsonc
 {
@@ -238,9 +241,10 @@ The catalogue and provider authentication come from OMP's `ModelRegistry` and
 }
 ```
 
-Ghost maps its roles to OMP as follows:
+Model roles are Ghost-owned. Each role's short name (the `ompRole` field of
+the routing API) is:
 
-| Ghost | OMP |
+| Ghost | short name |
 |---|---|
 | `chat_model` | `default` |
 | `smol_model` | `smol` |
@@ -255,19 +259,23 @@ Ghost maps its roles to OMP as follows:
 | `general_purpose_model` | `general` |
 | `research_model` | `research` |
 
-`task_model` and `advisor_model` remain OMP routing-policy roles. They do not
-make either kind of subagent available while Pi spawning is disabled in phase 1.
+`chat_model` is explicit or the catalogue default (the first catalogue
+provider's best-ranked model). `task_model`, `smol_model`, `slow_model`, and
+`designer_model` inherit the chat default when unbound; `tiny_model` and
+`advisor_model` follow Ghost's preference lists; `vision_model`, `plan_model`,
+and `commit_model` stay unset until bound. `task_model` and `advisor_model` do
+not make any subagent available while spawning is disabled in phase 1.
 
-Fallback arrays are ordered and projected to `retry.fallbackChains`; OMP owns
-retry classification, cooldowns, and fallback execution. The switcher orders a
-provider's models using OMP's priority and then descending semantic
-version/date, so the newest family appears first. `claude-code/default` can be
-the primary chat runtime but cannot be an OMP fallback or a non-chat role.
-General and Research are compatibility-only rows and appear only when an older
-home has configured them.
+Fallback arrays are ordered Ghost policy stored in `models.json`. The switcher
+orders a provider's models using provider priority and then descending
+semantic version/date, so the newest family appears first.
+`claude-code/default` can be the primary chat runtime but cannot be a fallback
+or a non-chat role. General and Research are compatibility-only rows and appear
+only when an older home has configured them.
 
-Interactive provider login is a pollable wrapper around OMP's registry login.
-The same flow is available in the shell and in a TTY:
+Interactive provider login is a pollable wrapper around pi's
+`ModelRuntime.login`/`logout`. The same flow is available in the shell and in a
+TTY:
 
 ```bash
 ghostd login <ghost> --provider openai-codex
@@ -281,12 +289,12 @@ the complete login. The shell's login flow already runs inside the serving daemo
 A pasted code or key is resolved directly into the pending login interaction;
 it is not logged or returned from a GET response.
 
-## OMP interaction features
+## Interaction features
 
-The daemon exposes OMP's interaction primitives without translating them into
+The daemon exposes these interaction primitives without translating them into
 ad-hoc prompts:
 
-- `ask` pauses the harness on structured questions. The HTTP bridge supports
+- Ghost's own `ask` tool pauses the harness on structured questions. The HTTP bridge supports
   submit, chat-about-this, and cancel outcomes; validates all option ids; is
   first-response-wins; and remains pollable across a shell reconnect.
 - `steer` injects text into the active generation. `followUp` queues a new turn
@@ -335,7 +343,7 @@ The authoritative route and payload contract is
 Every `/api` route except the deliberately public relay status requires the
 machine-local bearer token, rejects non-loopback browser origins, and requires
 JSON for POST/PUT. The pi-messages SSE response remains the client wire format;
-OMP is the harness behind it.
+pi is the harness behind it.
 
 ## Validate
 

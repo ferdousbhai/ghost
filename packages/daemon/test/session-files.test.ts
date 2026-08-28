@@ -1,7 +1,7 @@
-import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   bindConversationId,
@@ -42,15 +42,9 @@ describe("Pi conversation transcript identity", () => {
     mkdirSync(sessionDir);
     const conversationId = "unsafe/folder?query=#fragment and spaces";
     const path = join(sessionDir, sessionFileNameFor(conversationId));
-    const manager = await SessionManager.open(
-      path,
-      sessionDir,
-      undefined,
-      { initialCwd: root },
-    );
+    writeFileSync(path, "");
+    const manager = SessionManager.open(path, sessionDir, root);
     bindConversationId(manager, conversationId);
-    await manager.ensureOnDisk();
-    await manager.close();
 
     await expect(conversationIdFromSessionFile(path)).resolves.toBe(conversationId);
   });
@@ -61,18 +55,12 @@ describe("Pi conversation transcript identity", () => {
     mkdirSync(sessionDir);
     const conversationId = "hosted/unsafe id";
     const path = join(sessionDir, sessionFileNameFor(conversationId));
-    const manager = await SessionManager.open(
-      path,
-      sessionDir,
-      undefined,
-      { initialCwd: root },
-    );
+    writeFileSync(path, "");
+    const manager = SessionManager.open(path, sessionDir, root);
     manager.appendCustomEntry("ghost_hosted_conversation_import", {
       version: 1,
       sourceConversationId: conversationId,
     });
-    await manager.ensureOnDisk();
-    await manager.close();
 
     await expect(conversationIdFromSessionFile(path)).resolves.toBe(conversationId);
   });
@@ -84,15 +72,9 @@ describe("Pi conversation transcript identity", () => {
     const requested = "unsafe/requested id";
     const stored = "unsafe/stored id";
     const path = join(sessionDir, sessionFileNameFor(requested));
-    const manager = await SessionManager.open(
-      path,
-      sessionDir,
-      undefined,
-      { initialCwd: root },
-    );
+    writeFileSync(path, "");
+    const manager = SessionManager.open(path, sessionDir, root);
     bindConversationId(manager, stored);
-    await manager.ensureOnDisk();
-    await manager.close();
 
     await expect(conversationIdFromSessionFile(path)).resolves.toBeNull();
     await expect(requireSessionFileConversationId(path, requested)).rejects.toMatchObject({
@@ -101,15 +83,9 @@ describe("Pi conversation transcript identity", () => {
     });
 
     const storedPath = join(sessionDir, sessionFileNameFor(stored));
-    const storedManager = await SessionManager.open(
-      storedPath,
-      sessionDir,
-      undefined,
-      { initialCwd: root },
-    );
+    writeFileSync(storedPath, "");
+    const storedManager = SessionManager.open(storedPath, sessionDir, root);
     bindConversationId(storedManager, stored);
-    await storedManager.ensureOnDisk();
-    await storedManager.close();
     await expect(conversationIdFromSessionFile(storedPath)).resolves.toBe(stored);
     await expect(requireSessionFileConversationId(storedPath, stored)).resolves.toBe(stored);
   });

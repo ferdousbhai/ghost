@@ -1,7 +1,7 @@
 pragma ComponentBehavior: Bound
 
 // The fixed context rail: one quiet, full-height edge shared by chat, the
-// ghost's home, and OMP capabilities. The host owns routing; this component
+// ghost's home, and runtime capabilities. The host owns routing; this component
 // owns only selection, keyboard traversal, and the active/hover treatment.
 import QtQuick
 import QtQuick.Shapes

@@ -7,17 +7,17 @@
  * that: it resolves which model answers a ghost's turns, lists the usable and
  * the catalogue-wide models, and writes a new `roles.chat_model` selection.
  *
- * ## Provider catalogue is OMP's; harness entries are ours
+ * ## Provider catalogue is pi's; harness entries are ours
  *
- * Every provider model this module reports comes from OMP's `ModelRegistry`:
+ * Every provider model this module reports comes from pi's `ModelRuntime`:
  * `getModels` for the full models.dev-backed catalogue and `getAvailable` for
  * models a credentialed provider can serve now. The daemon hardcodes no model
  * list, so registry updates appear without Ghost code changes. A
- * `GhostOmpRuntime` is scoped to the ghost's own model/account policy plus the
+ * `GhostPiRuntime` is scoped to the ghost's own model/account policy plus the
  * machine keyring, so "usable" is per-ghost by construction. The
  * single code-owned row, `claude-code/default`, is a runtime selector rather
  * than a model id: its usability is the external Claude Code plan-login
- * status, and selecting it bypasses OMP's model lookup.
+ * status, and selecting it bypasses pi's model lookup.
  *
  * ## Secrets
  *
@@ -28,12 +28,8 @@
  * The runtime is injected (`createRuntime`) so tests drive a fake catalogue
  * without a real provider or a network call, exactly as `LoginManager` does.
  */
-import type { Api, Model } from "@oh-my-pi/pi-ai";
-import { resolveModelRoleValue } from "@oh-my-pi/pi-coding-agent/config/model-resolver";
-import {
-  buildBrowserItems,
-  sortModelItems,
-} from "@oh-my-pi/pi-coding-agent/modes/components/model-browser";
+import type { Api, Model } from "@earendil-works/pi-ai";
+import { preferredRoleModel, resolveChatModel, sortCatalogModels } from "./model-routing.js";
 import {
   CLAUDE_CODE_BINARY_ENV,
   CLAUDE_CODE_DEFAULT_MODEL_ID,
@@ -54,22 +50,20 @@ import {
   GHOST_MODEL_ROLES,
   GHOST_TO_OMP_MODEL_ROLE,
   ghostAuthPath,
-  ghostModelSelector,
   ghostModelsPath,
   readGhostModels,
   replaceGhostModelFallbacks,
   resolveChatModelRef,
-  resolveOmpChatModel,
   setChatModelRole,
   setGhostModelRole,
   type GhostModelRole,
   type GhostModelRoleBinding,
   type GhostModelsFile,
 } from "./models.js";
-import { createGhostOmpRuntime, type GhostOmpRuntime } from "./omp-runtime.js";
+import { createGhostPiRuntime, type GhostPiRuntime } from "./pi-runtime.js";
 
 /**
- * The compatibility slice of OMP's registry/auth storage this module reads;
+ * The slice of `GhostPiRuntime` this module reads;
  * tests pass a fake catalogue through the same boundary.
  */
 export interface ModelCatalogRuntime {
@@ -83,7 +77,8 @@ export interface ModelCatalogRuntime {
 }
 
 export type CatalogModel = Pick<Model<Api>, "provider" | "id">
-  & Partial<Pick<Model<Api>, "name" | "priority" | "input" | "contextWindow" | "cost">>;
+  & Partial<Pick<Model<Api>, "name" | "input" | "contextWindow" | "cost">>
+  & { priority?: number };
 
 export interface ModelView {
   provider: string;
@@ -99,7 +94,7 @@ export interface CurrentModel {
   current: ModelView | null;
   /**
    * How it was chosen. `role` — `roles.chat_model` is set and resolves.
-   * `default` — OMP's provider-default-aware fallback. `none` — nothing usable,
+   * `default` — the catalogue default (`model-routing.ts`). `none` — nothing usable,
    * `current` is null.
    */
   source: CurrentModelSource;
@@ -247,7 +242,7 @@ async function defaultCreateRuntime(input: {
   modelsPath: string;
   allowModelNetwork: boolean;
 }): Promise<ModelCatalogRuntime> {
-  return createGhostOmpRuntime({
+  return createGhostPiRuntime({
     authPath: input.authPath,
     modelsPath: input.modelsPath,
     allowModelNetwork: input.allowModelNetwork,
@@ -270,24 +265,13 @@ function clampLimit(limit: number | undefined): number {
   return Math.max(1, Math.min(MAX_MODELS_LIMIT, Math.floor(limit)));
 }
 
-/**
- * Keep registry provider order while delegating every within-provider ranking
- * rule to OMP's model browser.
- */
-function sortCatalogModels(models: readonly Model<Api>[]): Model<Api>[] {
-  const byProvider = new Map<string, Model<Api>[]>();
-  for (const model of models) {
-    const group = byProvider.get(model.provider);
-    if (group) group.push(model);
-    else byProvider.set(model.provider, [model]);
-  }
-
-  return [...byProvider.values()].flatMap((group) => {
-    const items = buildBrowserItems(group);
-    sortModelItems(items);
-    return items.map((item) => item.model);
-  });
-}
+const CHAT_INHERITING_ROLES: ReadonlySet<GhostModelRole> = new Set([
+  "chat_model",
+  "task_model",
+  "smol_model",
+  "slow_model",
+  "designer_model",
+]);
 
 function clampOffset(offset: number | undefined): number {
   if (typeof offset !== "number" || !Number.isFinite(offset) || offset < 0) return 0;
@@ -381,48 +365,33 @@ export class ModelCatalog {
     available: readonly Model<Api>[],
   ): ModelRouteModel | null {
     const ref = resolveChatModelRef(file);
-    const model = resolveOmpChatModel(ref, available);
+    const model = resolveChatModel(ref, available);
     return model
       ? { ...modelView(model), resolved: true, usable: true }
       : null;
   }
 
   /**
-   * Resolve an unassigned role using OMP's own `@role` expansion and priority
-   * rules. `@task` is special in OMP's agent executor: it inherits the active
-   * session model, so mirror that functional behavior in the routing view.
+   * Resolve an unassigned role. Working roles inherit the chat default;
+   * `tiny` and `advisor` follow Ghost's own preference lists; the rest stay
+   * unset until the owner binds them.
    */
   private automaticRoleView(
     file: GhostModelsFile | null,
     role: GhostModelRole,
     available: readonly Model<Api>[],
   ): ModelRouteModel | null {
-    if (role === "chat_model" || role === "task_model") {
+    if (CHAT_INHERITING_ROLES.has(role)) {
       const effectiveDefault = this.automaticDefaultView(file, available);
-      // Claude Code is a separate harness, not an OMP model a task role can invoke.
+      // Claude Code is a separate harness, not a model a task role can invoke.
       if (role === "task_model" && effectiveDefault?.provider === CLAUDE_CODE_PROVIDER_ID) return null;
       return effectiveDefault;
     }
-
-    const ompRole = GHOST_TO_OMP_MODEL_ROLE[role];
-    const roleLookup = {
-      getModelRole: (candidate: string): string | undefined => {
-        const ghostRole = GHOST_MODEL_ROLES.find(
-          (known) => GHOST_TO_OMP_MODEL_ROLE[known] === candidate,
-        );
-        if (!ghostRole) return undefined;
-        const binding = ghostRole === "chat_model"
-          ? resolveChatModelRef(file)
-          : file?.roles?.[ghostRole] ?? null;
-        return binding ? ghostModelSelector(binding) : undefined;
-      },
-    };
-    const resolved = resolveModelRoleValue(
-      `@${ompRole}`,
-      [...available],
-      { roleLookup },
-    );
-    const model = resolved.model;
+    const model = role === "tiny_model"
+      ? preferredRoleModel("tiny", available)
+      : role === "advisor_model"
+        ? preferredRoleModel("advisor", available)
+        : undefined;
     return model
       ? { ...modelView(model), resolved: true, usable: true }
       : null;
@@ -442,9 +411,8 @@ export class ModelCatalog {
     ]);
     const roles: ModelRouteView[] = [];
     for (const role of GHOST_MODEL_ROLES) {
-      // General/Research predate OMP's complete built-in role set. Keep an
-      // existing binding editable without presenting empty custom roles to a
-      // new owner as if OMP itself required them.
+      // General/Research predate the current role set. Keep an existing
+      // binding editable without presenting empty custom roles to a new owner.
       if (LEGACY_COMPATIBILITY_ROLES.has(role)
         && !file?.roles?.[role]
         && !(file?.fallbacks?.[role]?.length)) {
@@ -470,7 +438,7 @@ export class ModelCatalog {
     return { roles };
   }
 
-  /** All durable Ghost roles and their ordered OMP retry chains. */
+  /** All durable Ghost roles and their ordered fallback chains. */
   async getModelRouting(ghostName: string): Promise<ModelRoutingView> {
     return this.withRuntime(ghostName, ({ runtime, configDir }) =>
       this.resolveModelRouting(ghostName, runtime, configDir));
@@ -489,7 +457,7 @@ export class ModelCatalog {
       }
       throw new GhostError(
         "unsupported_model_route",
-        "Claude Code can only be the primary chat model; OMP cannot invoke it as a role fallback.",
+        "Claude Code can only be the primary chat model; it cannot be a role fallback.",
         400,
       );
     }
@@ -650,7 +618,7 @@ export class ModelCatalog {
       return readGhostModels(configDir);
     } catch (error) {
       // A broken models.json is not fatal to *reading* the catalogue: report as
-      // if unconfigured (OMP's default applies) and log it, mirroring how
+      // if unconfigured (the catalogue default applies) and log it, mirroring how
       // session-host tolerates the same file.
       this.logger.warn("models.json is unusable", { ghost: ghostName, error: (error as Error).message });
       return null;
@@ -682,7 +650,7 @@ export class ModelCatalog {
         };
       }
       const available = availableModels ?? await runtime.getAvailable();
-      const model = resolveOmpChatModel(role, available);
+      const model = resolveChatModel(role, available);
       if (model?.provider === role.provider && model.id === role.modelId) {
         return { current: modelView(model), source: "role" };
       }
@@ -690,13 +658,13 @@ export class ModelCatalog {
       return { current: null, source: "none" };
     }
     const available = availableModels ?? await runtime.getAvailable();
-    const model = resolveOmpChatModel(resolveChatModelRef(file), available);
+    const model = resolveChatModel(resolveChatModelRef(file), available);
     if (model) return { current: modelView(model), source: "default" };
     return { current: null, source: "none" };
   }
 
   /**
-   * List models the ghost can use now (`available`) or the whole OMP catalogue
+   * List models the ghost can use now (`available`) or the whole pi catalogue
    * (`catalog`). Both honour `provider` and `q` filters and are paginated; the
    * current selection is flagged, and `catalog` rows carry `usable`.
    */
@@ -889,5 +857,4 @@ export class ModelCatalog {
   }
 }
 
-const _runtimeShapeCheck: (r: GhostOmpRuntime) => ModelCatalogRuntime = (r) => r;
-void _runtimeShapeCheck;
+({}) as GhostPiRuntime satisfies ModelCatalogRuntime;

@@ -76,13 +76,13 @@ export interface ResolvedGhostExtensions {
   toolNames: string[];
 }
 
-export const ompToolCapabilities: GhostToolCapabilitiesResolver = (context) => ({
+export const piToolCapabilities: GhostToolCapabilitiesResolver = (context) => ({
   vision: context.model?.input?.includes("image") ?? false,
 });
 
 /**
  * Build the extension set for one session. `homeDir` pins Ghost-owned files to
- * the ghost home even when OMP's native `!cd` changes the conversation cwd.
+ * the ghost home even when a direct `!cd` changes the conversation cwd.
  * It is still per-session data, never a process-global value, so concurrent
  * ghosts cannot race or share a home.
  */

@@ -9,11 +9,6 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
-import type { Api, Model } from "@oh-my-pi/pi-ai";
-import {
-  pickDefaultAvailableModel,
-  resolveModelRoleValue,
-} from "@oh-my-pi/pi-coding-agent/config/model-resolver";
 import {
   fsyncPath,
   PrivateReadError,
@@ -64,11 +59,8 @@ export interface GhostModelRoleBinding {
  *
  * - `chat_model` — answers the turn.
  * - `vision_model` — reads images when `chat_model` cannot; must be a model
- *   whose `input` includes `"image"`. The role is consumed natively: it
- *   projects onto OMP's `modelRoles.vision`, OMP's `inspect_image` resolves
- *   `@vision` first, and OMP's attachment describe-fallback prefers it too.
- *   When the resolved model cannot accept images, OMP raises its own
- *   actionable error rather than dropping the image in silence. Unbound, there
+ *   whose `input` includes `"image"`. Image inspection in a pi session is a
+ *   planned port (issue #3); Claude Code reads images natively. Unbound, there
  *   is no ghost-side cheapest-model default — that was removed deliberately:
  *   reading an image is quality work, not throwaway work, so the owner
  *   configures the role instead of inheriting the cheapest thing with eyes.
@@ -81,9 +73,9 @@ export interface GhostModelRoleBinding {
  *   a cheaper metered model. Every use is a single, fire-and-forget completion;
  *   a failure never affects the conversation.
  * - `slow_model`, `plan_model`, `designer_model`, `commit_model`,
- *   `tiny_model`, `task_model`, `advisor_model` — OMP's remaining built-in
- *   roles. Keeping their native role identities lets bundled agents and modes
- *   resolve the same `@role` aliases they do in the terminal client.
+ *   `tiny_model`, `task_model`, `advisor_model` — the remaining working
+ *   roles. Unbound, `slow`/`designer`/`task` inherit the chat default and
+ *   `tiny`/`advisor` follow Ghost's preference lists (`model-routing.ts`).
  * - `general_purpose_model`, `research_model` — older Ghost custom roles,
  *   retained so an existing home keeps its routing.
  */
@@ -117,9 +109,9 @@ export const GHOST_MODEL_ROLES: readonly GhostModelRole[] = [
 ];
 
 /**
- * Keep Ghost's public role vocabulary stable and translate only at the harness
- * boundary. Every OMP built-in retains its native id; `general` and `research`
- * remain custom roles solely for compatibility with earlier Ghost homes.
+ * The short role names the HTTP API reports beside Ghost's role keys (the
+ * `ompRole` field is a compatibility name); `general` and `research` remain
+ * custom roles solely for compatibility with earlier Ghost homes.
  */
 export const GHOST_TO_OMP_MODEL_ROLE: Readonly<Record<GhostModelRole, string>> = {
   chat_model: "default",
@@ -151,59 +143,8 @@ export interface GhostModelsFile {
   [key: string]: unknown;
 }
 
-export interface GhostOmpModelRouting {
-  modelRoles: Record<string, string>;
-  fallbackChains: Record<string, string[]>;
-}
-
 export function ghostModelSelector(binding: GhostModelRoleBinding): string {
   return `${binding.provider}/${binding.modelId}`;
-}
-
-/**
- * Resolve OMP's initial chat/default choice from Ghost's projected role.
- *
- * This is the shared daemon-side mirror of `createAgentSession`: a usable
- * configured default role wins, otherwise OMP's provider-default-aware picker
- * chooses from the same availability-ordered candidates.
- */
-export function resolveOmpChatModel(
-  binding: GhostModelRoleBinding | null | undefined,
-  availableModels: readonly Model<Api>[],
-): Model<Api> | undefined {
-  const candidates = [...availableModels];
-  const roleValue = binding ? ghostModelSelector(binding) : undefined;
-  return resolveModelRoleValue(roleValue, candidates).model
-    ?? pickDefaultAvailableModel(candidates);
-}
-
-/**
- * Project Ghost's durable model routing onto modern OMP settings.
- *
- * The implicit first declared chat model remains supported for hand-written
- * one-provider files. Other roles are explicit: silently borrowing the chat
- * model for vision/smol/research would defeat the reason those roles exist.
- */
-export function ghostOmpModelRouting(file: GhostModelsFile | null): GhostOmpModelRouting {
-  const modelRoles: Record<string, string> = {};
-  const fallbackChains: Record<string, string[]> = {};
-  const chat = resolveChatModelRef(file);
-  if (chat) modelRoles.default = ghostModelSelector(chat);
-  if (!file) return { modelRoles, fallbackChains };
-
-  for (const role of GHOST_MODEL_ROLES) {
-    if (role !== "chat_model") {
-      const primary = file.roles?.[role];
-      if (primary?.provider && primary.modelId) {
-        modelRoles[GHOST_TO_OMP_MODEL_ROLE[role]] = ghostModelSelector(primary);
-      }
-    }
-    const chain = file.fallbacks?.[role];
-    if (chain?.length) {
-      fallbackChains[GHOST_TO_OMP_MODEL_ROLE[role]] = chain.map(ghostModelSelector);
-    }
-  }
-  return { modelRoles, fallbackChains };
 }
 
 export const MODELS_FILENAME = "models.json";
@@ -751,8 +692,8 @@ export interface OpenRouterPresetOptions {
 /**
  * OpenRouter as a fully declared provider.
  *
- * OMP has a built-in `openrouter` provider whose catalog is fetched over the
- * network; declaring the model statically here means the ghost works with
+ * pi's built-in `openrouter` provider fetches its catalog over the network;
+ * declaring the model statically here means the ghost works with
  * `offline: true` and on first run, before any catalog has been cached.
  * Cost is zeroed because the intended entry point is a `:free` model —
  * "try the ghost for nothing" needs only an OpenRouter account.
@@ -828,8 +769,8 @@ export function openAiCompatiblePreset(
 }
 
 /**
- * Bind a model served by a provider OMP already knows, authenticated from the
- * Ghost keyring store. No `providers` entry is emitted: OMP supplies the
+ * Bind a model served by a provider pi already knows, authenticated from the
+ * Ghost keyring store. No `providers` entry is emitted: pi supplies the
  * endpoint and catalogue.
  */
 export function builtinProviderPreset(

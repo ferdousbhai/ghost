@@ -37,7 +37,7 @@ Item {
     /**
      * Put a command at the front without losing an existing draft. A previous
      * slash token is replaced; ordinary draft text becomes the command's
-     * arguments. The trailing space is intentional and mirrors OMP's palette.
+     * arguments. The trailing space is intentional so arguments can follow.
      */
     function stageCommand(invocation: string): void {
         const prefix = String(invocation || "");
@@ -109,7 +109,7 @@ Item {
         Text {
             anchors.centerIn: parent
             visible: Ghostd.commandsLoading && root.slashMatches.length === 0
-            text: "Discovering OMP commands…"
+            text: "Discovering commands…"
             color: Theme.foregroundDim
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontSizeSmall

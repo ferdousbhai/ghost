@@ -1,6 +1,6 @@
 .pragma library
 
-// Pure shaping for the advanced OMP role picker. The daemon owns role
+// Pure shaping for the advanced model-role picker. The daemon owns role
 // semantics and validation; these helpers group its rows and construct one
 // complete fallback replacement for every remove/reorder gesture.
 
