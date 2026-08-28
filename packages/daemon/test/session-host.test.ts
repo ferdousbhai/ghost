@@ -2054,6 +2054,49 @@ lines.on("line", (line) => {
     expect(handle.session.skills.map((skill) => skill.name)).toEqual(["inking"]);
   });
 
+  it("holds an unbound session's pinned skills across a mid-session refresh", async () => {
+    const { dir } = await setup([{ kind: "text", text: "hello" }]);
+    mkdirSync(join(dir, "skills", "inking"), { recursive: true });
+    writeFileSync(
+      join(dir, "skills", "inking", "SKILL.md"),
+      "---\nname: inking\ndescription: Ink a forme evenly.\n---\n\nInk it.\n",
+      "utf8",
+    );
+
+    const handle = await host!.open("casper", "conv-refresh-skills");
+
+    expect(handle.session.skills.map((skill) => skill.name)).toEqual(["inking"]);
+
+    // The failure mode behind #37: `scopeGhostSessionArtifactRediscovery`
+    // rebinds `refreshSkills` so anything it rediscovers re-enters the Ghost
+    // artifact root. Lose that rebind and OMP falls back to native cwd
+    // discovery, whose cwd for an unbound conversation is the owner home —
+    // where this skill sits.
+    const cwdSkill = join(temp!.ownerHome, ".omp", "skills", "ambient-cwd");
+    mkdirSync(cwdSkill, { recursive: true });
+    writeFileSync(
+      join(cwdSkill, "SKILL.md"),
+      "---\nname: ambient-cwd\ndescription: Must stay outside the Ghost.\n---\n\nLeak.\n",
+      "utf8",
+    );
+    // A late ghost-home skill is planted too, and is equally not expected:
+    // every declarative category "is passed as an explicit immutable snapshot
+    // from ghost root plus one trusted project root" (CONTRACTS.md), so a
+    // conversation's skills are pinned at open and this one belongs to the
+    // next conversation. Refreshing must move the set in neither direction.
+    const lateGhostSkill = join(dir, "skills", "engraving");
+    mkdirSync(lateGhostSkill, { recursive: true });
+    writeFileSync(
+      join(lateGhostSkill, "SKILL.md"),
+      "---\nname: engraving\ndescription: Cut an engraving.\n---\n\nCut it.\n",
+      "utf8",
+    );
+
+    await handle.session.refreshSkills();
+
+    expect(handle.session.skills.map((skill) => skill.name)).toEqual(["inking"]);
+  });
+
   it("keeps owner-home coding-agent instructions out of an unbound prompt", async () => {
     await setup([{ kind: "text", text: "hello" }]);
     mkdirSync(join(temp!.ownerHome, ".claude"), { recursive: true });
