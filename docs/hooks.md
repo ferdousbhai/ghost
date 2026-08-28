@@ -75,6 +75,18 @@ conversation's durable last-activity time. An optional `registrationId` on a
 stable when its delivery identity must survive configuration reordering;
 otherwise Ghost derives a stable identity from the admitted command fields.
 
+An optional top-level `builtin` object tunes hooks that Ghost registers in
+code. Each key names one built-in hook — the `settingsKey` on its status row
+— and holds `{ "idleSeconds": <integer 1..86400> }`. Today the one key is
+`memory_upkeep`, the idle interval before memory maintenance runs (default
+60). The section is validated with the rest of the file and applies at the
+next daemon start, not live: a built-in idle registration's identity includes
+its interval and persisted retry state refers to that identity.
+
+```json
+{ "hooks": {}, "builtin": { "memory_upkeep": { "idleSeconds": 900 } } }
+```
+
 This file configures Ghost's machine-level awaited command hooks. They run for
 both pi and Claude Code conversations, above either model harness, and commands
 run with the daemon user's permissions. It is therefore a trusted machine
@@ -303,7 +315,8 @@ is a 400 naming the offending field and changes nothing. `before_prompt` and
 `session_stop` changes apply at the next boundary. A changed idle registration
 arms from the next owner activity; a deadline already armed against a retired
 registration settles as a no-op rather than an error. Built-in hooks such as
-memory upkeep are registered in code and are not in the document.
+memory upkeep are registered in code; the document's `builtin` section tunes
+them and applies at the next start.
 
 ## In-process API
 

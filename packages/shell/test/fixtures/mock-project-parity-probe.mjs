@@ -163,7 +163,7 @@ try {
   assert.equal(hooks.sessionStopContinuationCap, 10);
   assert.deepEqual(Object.keys(hooks.hooks[0]), ["event", "source", "name", "description"]);
   assert.deepEqual(Object.keys(hooks.hooks[2]), [
-    "event", "source", "name", "description", "idleSeconds",
+    "event", "source", "name", "description", "idleSeconds", "settingsKey",
   ]);
   assert.equal(hooks.hooks[2].idleSeconds, 60);
   const serializedHooks = JSON.stringify(hooks);

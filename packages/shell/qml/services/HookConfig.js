@@ -5,7 +5,9 @@
 // handler is `{ type: "command", command, name?, description?, timeout?,
 // idleSeconds?, ... }`. These helpers flatten that into the pane's cards and
 // apply one edit back onto a copy of the document, keeping every key they do
-// not know about. The daemon's loader is the only validator: a refused
+// not know about. A `builtin.<key>` object tunes a hook the daemon registers
+// in code; the daemon reads it at startup, so such an edit is pending until
+// ghostd restarts. The daemon's loader is the only validator: a refused
 // document comes back as its message, never as a rule re-implemented here.
 
 const EVENT_ORDER = ["before_prompt", "session_stop", "conversation_idle"];
@@ -93,6 +95,11 @@ function cards(statusHooks, document) {
         for (let b = 0; b < builtin.length; b += 1) {
             const row = builtin[b];
             if (row.event !== event) continue;
+            const settingsKey = typeof row.settingsKey === "string" ? row.settingsKey : "";
+            const tuning = builtinTuning(document, settingsKey);
+            const fields = blankFields();
+            fields.idleSeconds = text(tuning.idleSeconds);
+            const configured = Number(fields.idleSeconds);
             out.push({
                 key: "builtin:" + event + ":" + b,
                 source: "builtin",
@@ -100,8 +107,13 @@ function cards(statusHooks, document) {
                 name: row.name,
                 description: row.description,
                 idleSeconds: row.idleSeconds || 0,
+                settingsKey,
+                // The file says one thing and the running daemon another: a
+                // restart is what applies it.
+                pendingIdleSeconds: settingsKey !== "" && fields.idleSeconds !== ""
+                    && configured !== (row.idleSeconds || 0) ? configured : 0,
                 command: "",
-                fields: blankFields(),
+                fields,
                 groupIndex: -1,
                 handlerIndex: -1
             });
@@ -116,6 +128,8 @@ function cards(statusHooks, document) {
                 key: "config:" + event + ":" + entry.groupIndex + ":" + entry.handlerIndex,
                 source: "config",
                 event,
+                settingsKey: "",
+                pendingIdleSeconds: 0,
                 name: status ? status.name : (fields.name === "" ? "Command hook" : fields.name),
                 description: status ? status.description : fields.description,
                 idleSeconds: status ? status.idleSeconds || 0
@@ -128,6 +142,33 @@ function cards(statusHooks, document) {
         }
     }
     return out;
+}
+
+/** The `builtin.<key>` object of `document`, or `{}`. */
+function builtinTuning(document, key) {
+    if (key === "" || !isObject(document) || !isObject(document.builtin)
+            || !isObject(document.builtin[key])) return {};
+    return document.builtin[key];
+}
+
+/**
+ * `document` with `builtin.<key>.idleSeconds` set from `fields`; an emptied
+ * field removes the tuning so the daemon's default applies, and an emptied
+ * section goes with it.
+ */
+function withBuiltinIdle(document, key, fields) {
+    const next = clone(document);
+    if (!isObject(next.builtin)) next.builtin = {};
+    const value = text(fields.idleSeconds).trim();
+    if (value === "") {
+        delete next.builtin[key];
+        if (Object.keys(next.builtin).length === 0) delete next.builtin;
+        return next;
+    }
+    const number = Number(value);
+    next.builtin[key] = Object.assign(isObject(next.builtin[key]) ? next.builtin[key] : {},
+        { idleSeconds: Number.isFinite(number) ? number : value });
+    return next;
 }
 
 function find(cardList, key) {

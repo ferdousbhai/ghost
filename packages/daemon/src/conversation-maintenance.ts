@@ -45,6 +45,8 @@ import {
 } from "./smol.js";
 
 export const CONVERSATION_MAINTENANCE_IDLE_SECONDS = 60;
+/** The `builtin.<key>` entry of `hooks.json` that tunes memory upkeep. */
+export const MEMORY_UPKEEP_SETTINGS_KEY = "memory_upkeep";
 export const CONVERSATION_MAINTENANCE_RETRY_SECONDS = 60;
 export const CONVERSATION_MAINTENANCE_STATE_MAX_BYTES = 16 * 1_048_576;
 export const CONVERSATION_MAINTENANCE_MAX_TOOL_ROUNDS = 8;
@@ -878,6 +880,7 @@ export class ConversationMaintenance {
       idleSeconds: this.idleSeconds,
       timeoutSeconds: 120,
       registrationId: MAINTENANCE_IDLE_REGISTRATION_ID,
+      settingsKey: MEMORY_UPKEEP_SETTINGS_KEY,
     });
   };
 

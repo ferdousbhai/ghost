@@ -1,10 +1,12 @@
 pragma ComponentBehavior: Bound
 
 // Ghost's lifecycle hooks: the ones the daemon registers in code, and the
-// owner's own command hooks from hooks.json. A built-in row is read-only. A
-// command hook is the owner's: click it to edit its fields in place, × removes
-// it, "+ New" adds one. Every edit replaces the whole file through the
-// daemon's validating loader, so a refused edit reopens with the daemon's
+// owner's own command hooks from hooks.json. A built-in row shows what the
+// daemon runs; when hooks.json can tune it (memory upkeep's idle interval),
+// clicking it edits that one number, applied when ghostd next starts. A
+// command hook is the owner's: click it to edit its fields in place, ×
+// removes it, "+ New" adds one. Every edit replaces the whole file through
+// the daemon's validating loader, so a refused edit reopens with the daemon's
 // reason and nothing is half-written. Model context stays private either way.
 //
 // While a card is being edited the list is frozen on the cards it had, so a
@@ -54,14 +56,20 @@ Rectangle {
             description: "",
             idleSeconds: 0,
             command: "",
+            settingsKey: "",
+            pendingIdleSeconds: 0,
             fields: HookConfig.blankFields(),
             groupIndex: -1,
             handlerIndex: -1
         };
     }
 
+    function canEdit(card: var): bool {
+        return !!card && (card.source === "config" || card.settingsKey !== "");
+    }
+
     function beginEdit(card: var): void {
-        if (root.busy || root.editing || !card || card.source !== "config") return;
+        if (root.busy || root.editing || !root.editable || !root.canEdit(card)) return;
         root.frozenCards = root.liveCards;
         root.fields = Object.assign(HookConfig.blankFields(), card.fields);
         root.editingKey = card.key;
@@ -98,7 +106,9 @@ Rectangle {
                 document = HookConfig.withNewHandler(current, attempt.event, attempt.fields);
         } else {
             const card = HookConfig.find(root.frozenCards, attempt.key);
-            if (card) {
+            if (card && card.source === "builtin") {
+                document = HookConfig.withBuiltinIdle(current, card.settingsKey, attempt.fields);
+            } else if (card) {
                 document = HookConfig.withHandler(current, card.event, card.groupIndex,
                     card.handlerIndex, attempt.fields);
             }
@@ -447,6 +457,7 @@ Rectangle {
             id: hookCard
             required property var modelData
             readonly property bool config: hookCard.modelData.source === "config"
+            readonly property bool tunable: root.canEdit(hookCard.modelData)
             readonly property bool editing: root.editingKey === hookCard.modelData.key
             readonly property bool draft: hookCard.modelData.key === HookConfig.DRAFT_KEY
             readonly property string event: hookCard.draft ? root.draftEvent : hookCard.modelData.event
@@ -460,7 +471,7 @@ Rectangle {
             border.width: 1
             border.color: hookCard.editing ? Theme.amber(0.35) : Theme.border
 
-            Accessible.role: hookCard.config ? Accessible.ListItem : Accessible.StaticText
+            Accessible.role: hookCard.tunable ? Accessible.ListItem : Accessible.StaticText
             Accessible.name: hookCard.draft ? "New command hook" : hookCard.modelData.name
             Accessible.description: hookCard.modelData.description + ". "
                 + HookStatus.trigger(hookCard.event,
@@ -474,7 +485,7 @@ Rectangle {
             MouseArea {
                 id: cardArea
                 anchors.fill: parent
-                enabled: hookCard.config && !hookCard.editing && !root.editing && !root.busy
+                enabled: hookCard.tunable && !hookCard.editing && !root.editing && !root.busy
                 hoverEnabled: true
                 cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
                 onClicked: root.beginEdit(hookCard.modelData)
@@ -586,6 +597,10 @@ Rectangle {
                     width: parent.width
                     text: HookStatus.trigger(hookCard.event,
                         Ghostd.hookContinuationCap, hookCard.modelData.idleSeconds || 0)
+                        + (hookCard.modelData.pendingIdleSeconds > 0
+                            ? " · " + HookStatus.duration(hookCard.modelData.pendingIdleSeconds)
+                                + " once ghostd restarts"
+                            : "")
                     textFormat: Text.PlainText
                     color: Theme.ghostAmber
                     font.family: Theme.fontFamily
@@ -656,20 +671,23 @@ Rectangle {
                     }
 
                     Field {
+                        visible: hookCard.config
                         label: "Command"
                         name: "command"
                         placeholder: "/absolute/path/to/hook --flag"
                         mono: true
-                        takeFocus: true
+                        takeFocus: hookCard.config
                     }
 
                     Field {
+                        visible: hookCard.config
                         label: "Name"
                         name: "name"
                         placeholder: "Shown here; the daemon names it if blank"
                     }
 
                     Field {
+                        visible: hookCard.config
                         label: "Description"
                         name: "description"
                         placeholder: "One line on what it does"
@@ -681,6 +699,7 @@ Rectangle {
 
                         Field {
                             width: (parent.width - Theme.gap) / 2
+                            visible: hookCard.config
                             label: "Timeout (seconds, default 30)"
                             name: "timeout"
                             placeholder: "30"
@@ -692,7 +711,20 @@ Rectangle {
                             label: "Idle interval (seconds, default 60)"
                             name: "idleSeconds"
                             placeholder: "60"
+                            takeFocus: !hookCard.config
                         }
+                    }
+
+                    Text {
+                        objectName: "hookRestartNote"
+                        width: parent.width
+                        visible: !hookCard.config
+                        text: "Built into ghostd; the interval is saved to hooks.json and applies when ghostd next starts."
+                        textFormat: Text.PlainText
+                        color: Theme.foregroundDim
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSizeSmall
+                        wrapMode: Text.WordWrap
                     }
 
                     Row {
@@ -702,7 +734,7 @@ Rectangle {
                             objectName: "hookSaveButton"
                             label: "Save"
                             primary: true
-                            enabled: root.fields.command.trim() !== ""
+                            enabled: !hookCard.config || root.fields.command.trim() !== ""
                             onActivated: root.commitEdit()
                         }
 

@@ -6,6 +6,7 @@ const EVENT_KEYS = ["count", "event"];
 const HOOK_KEYS = ["description", "event", "name", "source"];
 const IDLE_HOOK_KEYS = ["description", "event", "idleSeconds", "name", "source"];
 const SOURCES = ["builtin", "config"];
+const SETTINGS_KEY = /^[a-z][a-z0-9_]*$/;
 
 function isObject(value) {
     return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -75,12 +76,16 @@ function normalize(body) {
         const order = eventIndex(hook.event);
         if (order < 0 || order < previousHookEventIndex) return null;
         previousHookEventIndex = order;
+        // Only a built-in row may name the hooks.json entry that tunes it.
+        const tuned = hasOwn(hook, "settingsKey");
+        if (tuned && (hook.source !== "builtin" || typeof hook.settingsKey !== "string"
+                || !SETTINGS_KEY.test(hook.settingsKey))) return null;
+        const expected = (hook.event === "conversation_idle" ? IDLE_HOOK_KEYS : HOOK_KEYS)
+            .concat(tuned ? ["settingsKey"] : []);
+        if (!exactKeys(hook, expected)) return null;
         if (hook.event === "conversation_idle") {
-            if (!exactKeys(hook, IDLE_HOOK_KEYS)
-                    || !Number.isSafeInteger(hook.idleSeconds)
+            if (!Number.isSafeInteger(hook.idleSeconds)
                     || hook.idleSeconds < 1 || hook.idleSeconds > 86400) return null;
-        } else if (!exactKeys(hook, HOOK_KEYS) || hasOwn(hook, "idleSeconds")) {
-            return null;
         }
         observed[hook.event] = (observed[hook.event] || 0) + 1;
         const normalized = {
@@ -90,6 +95,7 @@ function normalize(body) {
             description: hook.description
         };
         if (hook.event === "conversation_idle") normalized.idleSeconds = hook.idleSeconds;
+        if (tuned) normalized.settingsKey = hook.settingsKey;
         hooks.push(normalized);
     }
 

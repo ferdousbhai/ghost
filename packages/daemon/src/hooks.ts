@@ -93,6 +93,13 @@ export interface GhostHookStatusItem {
   name: string;
   description: string;
   idleSeconds?: number;
+  /** The `builtin.<key>` entry of `hooks.json` that tunes this built-in hook. */
+  settingsKey?: string;
+}
+
+/** What `hooks.json` may tune on one built-in hook; read at startup only. */
+export interface GhostBuiltinHookSettings {
+  idleSeconds?: number;
 }
 
 /** The admitted `hooks.json` document and where it lives. */
@@ -148,6 +155,8 @@ export interface GhostHookRegistrationOptions {
   idleSeconds?: number;
   timeoutSeconds?: number;
   registrationId?: string;
+  /** Names the `builtin.<key>` entry of `hooks.json` that tunes this hook. */
+  settingsKey?: string;
 }
 
 export interface GhostHookAPI {
@@ -189,6 +198,39 @@ interface RegisteredHook {
   idleMs?: number;
   timeoutMs: number;
   idleRegistration?: GhostConversationIdleRegistration;
+  settingsKey?: string;
+}
+
+const SETTINGS_KEY = /^[a-z][a-z0-9_]*$/u;
+
+/**
+ * Admit the `builtin` section of a `hooks.json` document: per-key tuning for
+ * hooks registered in code. The section is read at startup and applies at
+ * the next start, because a built-in idle registration's identity includes
+ * its interval and persisted retry state refers to that identity.
+ */
+export function parseBuiltinHookSettings(
+  parsed: unknown,
+  path: string,
+): Record<string, GhostBuiltinHookSettings> {
+  if (!isObject(parsed)) throw new Error(`${path} must contain a JSON object.`);
+  const builtin = parsed.builtin;
+  if (builtin === undefined) return {};
+  if (!isObject(builtin)) throw new Error(`${path}: "builtin" must be an object.`);
+  const settings: Record<string, GhostBuiltinHookSettings> = {};
+  for (const [key, raw] of Object.entries(builtin)) {
+    if (!SETTINGS_KEY.test(key)) {
+      throw new Error(`${path}: builtin key ${JSON.stringify(key)} must match [a-z][a-z0-9_]*.`);
+    }
+    if (!isObject(raw)) throw new Error(`${path}: builtin.${key} must be an object.`);
+    for (const field of Object.keys(raw)) {
+      if (field !== "idleSeconds") throw new Error(`${path}: builtin.${key}.${field} is not a setting.`);
+    }
+    settings[key] = raw.idleSeconds === undefined
+      ? {}
+      : { idleSeconds: idleDelayMs(raw.idleSeconds, 0, `${path}: builtin.${key}.idleSeconds`) / 1_000 };
+  }
+  return settings;
 }
 
 type IdleTarget =
@@ -595,11 +637,16 @@ export class GhostHookRunner {
    * "unknown registration" invariant violation reserved for corrupt state.
    */
   private readonly retiredIdleRegistrations = new Set<string>();
+  private readonly builtin: Record<string, GhostBuiltinHookSettings>;
   private commandConfig?: GhostHookCommandConfig;
   private configReplacement: Promise<unknown> = Promise.resolve();
 
   constructor(
-    options: GhostHookRunnerOptions & { commands?: CommandHook[]; commandConfig?: GhostHookCommandConfig } = {},
+    options: GhostHookRunnerOptions & {
+      commands?: CommandHook[];
+      commandConfig?: GhostHookCommandConfig;
+      builtin?: Record<string, GhostBuiltinHookSettings>;
+    } = {},
   ) {
     this.logger = options.logger ?? silentLogger;
     this.handlerTimeoutMs = options.handlerTimeoutMs ?? GHOST_HOOK_HANDLER_TIMEOUT_MS;
@@ -613,6 +660,7 @@ export class GhostHookRunner {
       );
     }
     this.commands = [];
+    this.builtin = options.builtin ?? {};
     this.commandConfig = options.commandConfig;
     this.commandRunner = options.commandRunner ?? runCommandHook;
     this.installCommands(options.commands ?? []);
@@ -623,8 +671,14 @@ export class GhostHookRunner {
     return new GhostHookRunner({
       ...options,
       commands: parseCommandHooks(document, path),
+      builtin: parseBuiltinHookSettings(document, path),
       commandConfig: { path, document },
     });
+  }
+
+  /** The startup `builtin.<key>` tuning for one built-in hook; `{}` when absent. */
+  builtinSettings(key: string): GhostBuiltinHookSettings {
+    return this.builtin[key] ?? {};
   }
 
   private installCommands(commands: CommandHook[]): void {
@@ -669,6 +723,7 @@ export class GhostHookRunner {
     const config = this.commandConfig;
     if (!config) throw new Error("This hook runner has no configuration file.");
     const commands = parseCommandHooks(document, config.path);
+    parseBuiltinHookSettings(document, config.path);
     const admitted = document as Record<string, unknown>;
     const run = this.configReplacement.then(async () => {
       await mkdir(dirname(config.path), { recursive: true });
@@ -711,6 +766,12 @@ export class GhostHookRunner {
         };
         if (event !== "conversation_idle" && options.registrationId !== undefined) {
           throw new Error("registrationId is supported only for conversation_idle hooks.");
+        }
+        if (options.settingsKey !== undefined) {
+          if (!SETTINGS_KEY.test(options.settingsKey)) {
+            throw new Error("settingsKey must match [a-z][a-z0-9_]*.");
+          }
+          registered.settingsKey = options.settingsKey;
         }
         if (event === "conversation_idle") {
           const idleMs = registered.idleMs as number;
@@ -787,6 +848,7 @@ export class GhostHookRunner {
           name: hook.name,
           description: hook.description,
           ...(hook.idleMs === undefined ? {} : { idleSeconds: hook.idleMs / 1_000 }),
+          ...(hook.settingsKey === undefined ? {} : { settingsKey: hook.settingsKey }),
         });
       }
       for (const hook of this.commands.filter((command) => command.eventName === event)) {

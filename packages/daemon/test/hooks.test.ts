@@ -315,6 +315,57 @@ describe("GhostHookRunner", () => {
     expect(observed).toEqual([]);
   });
 
+  it("reads builtin tuning at startup, names it on status, and rejects bad tuning", async () => {
+    const directory = temporaryDirectory();
+    const config = join(directory, "hooks.json");
+    writeFileSync(config, JSON.stringify({
+      hooks: {},
+      builtin: { memory_upkeep: { idleSeconds: 900 }, other: {} },
+    }));
+    const runner = GhostHookRunner.fromConfig(config);
+    expect(runner.builtinSettings("memory_upkeep")).toEqual({ idleSeconds: 900 });
+    expect(runner.builtinSettings("other")).toEqual({});
+    expect(runner.builtinSettings("absent")).toEqual({});
+    expect(new GhostHookRunner().builtinSettings("memory_upkeep")).toEqual({});
+
+    await runner.register((api) => {
+      api.on("conversation_idle", () => {}, {
+        name: "Memory upkeep",
+        idleSeconds: runner.builtinSettings("memory_upkeep").idleSeconds,
+        settingsKey: "memory_upkeep",
+      });
+    });
+    expect(runner.status().hooks).toEqual([{
+      event: "conversation_idle",
+      source: "builtin",
+      name: "Memory upkeep",
+      description: "Runs in the background after the configured idle interval.",
+      idleSeconds: 900,
+      settingsKey: "memory_upkeep",
+    }]);
+
+    // A replaced document is admitted with its builtin section, but the
+    // startup tuning stands until the next start.
+    await runner.replaceConfig({ hooks: {}, builtin: { memory_upkeep: { idleSeconds: 30 } } });
+    expect(runner.builtinSettings("memory_upkeep")).toEqual({ idleSeconds: 900 });
+    for (const [document, message] of [
+      [{ hooks: {}, builtin: [] }, /"builtin" must be an object/u],
+      [{ hooks: {}, builtin: { "Bad-Key": {} } }, /must match \[a-z\]/u],
+      [{ hooks: {}, builtin: { memory_upkeep: 5 } }, /builtin\.memory_upkeep must be an object/u],
+      [{ hooks: {}, builtin: { memory_upkeep: { timeout: 5 } } }, /builtin\.memory_upkeep\.timeout is not a setting/u],
+      [{ hooks: {}, builtin: { memory_upkeep: { idleSeconds: 0 } } }, /idleSeconds must be an integer in \[1, 86400\]/u],
+    ] as const) {
+      await expect(runner.replaceConfig(document)).rejects.toThrow(message);
+    }
+    expect(JSON.parse(readFileSync(config, "utf8"))).toEqual({
+      hooks: {},
+      builtin: { memory_upkeep: { idleSeconds: 30 } },
+    });
+    await expect(new GhostHookRunner().register((api) => {
+      api.on("before_prompt", () => {}, { settingsKey: "Nope" });
+    })).rejects.toThrow(/settingsKey must match/u);
+  });
+
   it("has no configuration to replace when built without a file", async () => {
     const runner = new GhostHookRunner();
     expect(runner.config()).toBeUndefined();

@@ -741,7 +741,8 @@ one must not be a leak of both.
   registration, where `event` is exactly `before_prompt`, `session_stop`, or
   `conversation_idle`, `source` is `builtin` (registered in-process) or
   `config` (a `hooks.json` command), with integer `idleSeconds` only on
-  `conversation_idle`. `active` is
+  `conversation_idle` and `settingsKey` only on a `builtin` row that
+  `hooks.json`'s `builtin.<key>` section tunes. `active` is
   `total > 0`, and `total` equals both event counts and row count. The body
   never exposes commands, source paths, arguments, prompts, injected context,
   errors, receipts, or scheduler state; the owner's commands live on the
@@ -757,10 +758,15 @@ one must not be a leak of both.
   `before_prompt` and `session_stop` changes apply at the next boundary; a
   changed `conversation_idle` registration arms from the next owner activity
   and a deadline already armed against a retired registration settles as a
-  no-op. Built-in hooks are not in the document and cannot be edited here.
-  The document is replaced whole, never patched per hook, because group and
-  handler order is file order. An edit made to the file outside this route
-  still needs a daemon restart. `sessionStopContinuationCap` is an
+  no-op. Built-in hooks are registered in code, not in the document; the
+  document's optional `builtin.<key>` object (`{ idleSeconds }`, integer
+  `1..86400`) tunes the built-in hook whose status row carries that
+  `settingsKey`, is validated by the same loader, and applies at the next
+  daemon start — never live, because a built-in idle registration's identity
+  includes its interval and persisted retry state refers to that identity.
+  Today `memory_upkeep` is the one such key. The document is replaced whole,
+  never patched per hook, because group and handler order is file order. An
+  edit made to the file outside this route still needs a daemon restart. `sessionStopContinuationCap` is an
   integer in `1..100`, the daemon's consecutive hidden-continuation cap
   (`GHOST_SESSION_STOP_CONTINUATION_CAP`, default 10); clients display it and
   never assume its value.

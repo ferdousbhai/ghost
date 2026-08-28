@@ -135,12 +135,13 @@ function publicHookStatus(status: GhostHookStatus): GhostHookStatus {
     active: status.active,
     total: status.total,
     events: status.events.map(({ event, count }) => ({ event, count })),
-    hooks: status.hooks.map(({ event, source, name, description, idleSeconds }) => ({
+    hooks: status.hooks.map(({ event, source, name, description, idleSeconds, settingsKey }) => ({
       event,
       source,
       name,
       description,
       ...(event === "conversation_idle" && idleSeconds !== undefined ? { idleSeconds } : {}),
+      ...(source === "builtin" && settingsKey !== undefined ? { settingsKey } : {}),
     })),
     sessionStopContinuationCap: status.sessionStopContinuationCap,
   };

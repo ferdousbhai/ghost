@@ -26,7 +26,7 @@ TestCase {
             { event: "before_prompt", source: "builtin", name: "Receipt", description: "Shows receipts." },
             { event: "session_stop", source: "config", name: "Review", description: "Reviews." },
             { event: "session_stop", source: "config", name: "Session-stop command hook", description: "Default." },
-            { event: "conversation_idle", source: "builtin", name: "Memory upkeep", description: "Upkeep.", idleSeconds: 60 },
+            { event: "conversation_idle", source: "builtin", name: "Memory upkeep", description: "Upkeep.", idleSeconds: 60, settingsKey: "memory_upkeep" },
             { event: "conversation_idle", source: "config", name: "Conversation-idle command hook", description: "Idle.", idleSeconds: 120 }
         ];
     }
@@ -100,6 +100,31 @@ TestCase {
         });
         compare(appended.hooks.session_stop.length, 2);
         compare(appended.hooks.session_stop[1].hooks[0].command, "/bin/more");
+    }
+
+    function test_builtinTuningIsReadFromTheDocumentAndPendingUntilRestart(): void {
+        const untuned = HookConfig.cards(status(), document());
+        compare(untuned[3].settingsKey, "memory_upkeep");
+        compare(untuned[3].fields.idleSeconds, "");
+        compare(untuned[3].pendingIdleSeconds, 0);
+        compare(untuned[0].settingsKey, "");
+
+        const tunedDocument = document();
+        tunedDocument.builtin = { memory_upkeep: { idleSeconds: 900 } };
+        const tuned = HookConfig.cards(status(), tunedDocument);
+        compare(tuned[3].fields.idleSeconds, "900");
+        compare(tuned[3].idleSeconds, 60);
+        compare(tuned[3].pendingIdleSeconds, 900);
+        tunedDocument.builtin.memory_upkeep.idleSeconds = 60;
+        compare(HookConfig.cards(status(), tunedDocument)[3].pendingIdleSeconds, 0);
+
+        const set = HookConfig.withBuiltinIdle(document(), "memory_upkeep", { idleSeconds: " 900 " });
+        compare(set.builtin, { memory_upkeep: { idleSeconds: 900 } });
+        compare(set.hooks.session_stop.length, 1);
+        const asTyped = HookConfig.withBuiltinIdle(set, "memory_upkeep", { idleSeconds: "15m" });
+        compare(asTyped.builtin.memory_upkeep.idleSeconds, "15m");
+        const cleared = HookConfig.withBuiltinIdle(set, "memory_upkeep", { idleSeconds: "" });
+        verify(cleared.builtin === undefined);
     }
 
     function test_withoutHandlerPrunesEmptyGroupsAndEvents(): void {

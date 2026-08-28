@@ -855,12 +855,28 @@ const BUILTIN_HOOKS = [{
   name: "Idle upkeep",
   description: "Runs after the current conversation remains inactive.",
   idleSeconds: 60,
+  settingsKey: "memory_upkeep",
 }];
 
 function hooksDocumentProblem(document) {
   const path = HOOKS_CONFIG_PATH;
   if (document === null || typeof document !== "object" || Array.isArray(document)) {
     return `${path} must contain a JSON object.`;
+  }
+  const builtin = document.builtin;
+  if (builtin !== undefined) {
+    if (builtin === null || typeof builtin !== "object" || Array.isArray(builtin)) return `${path}: "builtin" must be an object.`;
+    for (const [key, raw] of Object.entries(builtin)) {
+      if (!/^[a-z][a-z0-9_]*$/u.test(key)) return `${path}: builtin key ${JSON.stringify(key)} must match [a-z][a-z0-9_]*.`;
+      if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return `${path}: builtin.${key} must be an object.`;
+      for (const field of Object.keys(raw)) {
+        if (field !== "idleSeconds") return `${path}: builtin.${key}.${field} is not a setting.`;
+      }
+      if (raw.idleSeconds !== undefined
+          && !(Number.isSafeInteger(raw.idleSeconds) && raw.idleSeconds >= 1 && raw.idleSeconds <= 86_400)) {
+        return `${path}: builtin.${key}.idleSeconds must be an integer in [1, 86400].`;
+      }
+    }
   }
   const hooks = document.hooks;
   if (hooks === undefined) return null;
