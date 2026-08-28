@@ -285,10 +285,8 @@ TestCase {
         verify(timer.running);
 
         timer.triggered();
-        tryCompare(requests, "length", 4);
-        const planRequest = requestEnding("/plan", 2);
+        tryCompare(requests, "length", 3);
         const jobsRequest = requestEnding("/jobs", 2);
-        planRequest.complete(200, planState({ todo: todo() }));
         jobsRequest.complete(200, {
             jobs: [job("poll", "completed", {
                 endedAt: "2026-08-28T10:00:01.200Z",
@@ -310,7 +308,7 @@ TestCase {
             error: { code: "session_busy", message: "Wait for this answer to finish." }
         });
         const error = findChild(strip, "workErrorLine");
-        compare(error.text, "Wait for this answer to finish.");
+        compare(error.text, "POST plan → 409: Wait for this answer to finish.");
         verify(error.visible);
     }
 

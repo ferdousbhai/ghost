@@ -168,6 +168,7 @@ Singleton {
     readonly property int gap: 8
     readonly property int sectionGap: 24
     readonly property int controlHeight: 36
+    readonly property int compactControlHeight: root.controlHeight - root.gap
     readonly property int durFast: 200
     readonly property int durMed: 300
     readonly property int durSlow: 500

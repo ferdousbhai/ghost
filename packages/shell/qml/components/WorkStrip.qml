@@ -11,18 +11,82 @@ Rectangle {
     id: root
     objectName: "workStrip"
 
+    component DisclosureRow: Rectangle {
+        id: disclosure
+
+        property string summary: ""
+        property string summaryObjectName: ""
+        property bool expanded: false
+        property color accent: Theme.foreground
+        property string description: ""
+        property bool customContent: false
+        signal toggled()
+
+        implicitHeight: Theme.compactControlHeight
+        radius: Theme.radius
+        color: disclosureArea.containsMouse || activeFocus
+            ? Theme.film(0.09) : Theme.film(0.04)
+        activeFocusOnTab: true
+
+        Accessible.role: Accessible.Button
+        Accessible.name: disclosure.summary
+        Accessible.description: disclosure.description
+
+        Text {
+            objectName: disclosure.summaryObjectName
+            visible: !disclosure.customContent
+            anchors.left: parent.left
+            anchors.leftMargin: Theme.gap
+            anchors.right: disclosureChevron.left
+            anchors.rightMargin: Theme.gap
+            anchors.verticalCenter: parent.verticalCenter
+            text: disclosure.summary
+            color: disclosure.accent
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontSizeSmall
+            elide: Text.ElideRight
+        }
+
+        Text {
+            id: disclosureChevron
+            visible: !disclosure.customContent
+            anchors.right: parent.right
+            anchors.rightMargin: Theme.gap
+            anchors.verticalCenter: parent.verticalCenter
+            text: disclosure.expanded ? "⌃" : "⌄"
+            color: Theme.foregroundDim
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontSizeSmall
+        }
+
+        MouseArea {
+            id: disclosureArea
+            anchors.fill: parent
+            z: 0
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: disclosure.toggled()
+        }
+
+        Keys.onPressed: event => {
+            if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter
+                    || event.key === Qt.Key_Space) {
+                disclosure.toggled();
+                event.accepted = true;
+            }
+        }
+    }
+
     property bool todoExpanded: false
     property bool jobsExpanded: false
     property var expandedOutputs: ({})
 
-    readonly property int taskCount: root.countTasks("")
-    readonly property int completedTaskCount: root.countTasks("completed")
-    readonly property string currentTaskTitle: root.findCurrentTask()
+    readonly property var todo: root.todoDigest()
     readonly property int runningJobCount: root.countJobs("running")
     readonly property int settledJobCount: Ghostd.workJobs.length - root.runningJobCount
-    readonly property string todoSummary: "Todo · " + root.completedTaskCount
-        + "/" + root.taskCount + " done"
-        + (root.currentTaskTitle === "" ? "" : " · Now: " + root.currentTaskTitle)
+    readonly property string todoSummary: "Todo · " + root.todo.done
+        + "/" + root.todo.total + " done"
+        + (root.todo.now === "" ? "" : " · Now: " + root.todo.now)
     readonly property string jobsSummary: "Jobs · " + root.runningJobCount
         + " running · " + root.settledJobCount + " done"
 
@@ -34,26 +98,21 @@ Rectangle {
     border.color: Theme.border
     clip: true
 
-    function countTasks(status: string): int {
-        let count = 0;
+    function todoDigest(): var {
+        const digest = { total: 0, done: 0, now: "" };
         for (const phase of (Ghostd.workTodo || [])) {
             for (const task of (phase && Array.isArray(phase.tasks) ? phase.tasks : [])) {
-                if (status === "" || task.status === status) count += 1;
+                digest.total += 1;
+                if (task.status === "completed") digest.done += 1;
+                if (digest.now === "" && task.status === "in_progress")
+                    digest.now = String(task.content || "");
             }
         }
-        return count;
-    }
-
-    function findCurrentTask(): string {
-        for (const phase of (Ghostd.workTodo || [])) {
-            for (const task of (phase && Array.isArray(phase.tasks) ? phase.tasks : [])) {
-                if (task.status === "in_progress") return String(task.content || "");
-            }
-        }
-        return "";
+        return digest;
     }
 
     function countJobs(status: string): int {
+        if (status === "running") return Ghostd.workRunningJobCount;
         return (Ghostd.workJobs || []).filter(function (job) {
             return job && job.status === status;
         }).length;
@@ -159,7 +218,7 @@ Rectangle {
         interval: 3000
         repeat: true
         running: Ghostd.hudVisible && root.visible && Ghostd.workHasRunningJobs
-        onTriggered: Ghostd.fetchWork(true)
+        onTriggered: Ghostd.fetchWorkJobs(true, Ghostd.workGhost, Ghostd.workSessionId)
     }
 
     ColumnLayout {
@@ -183,7 +242,7 @@ Rectangle {
                 objectName: "workPlanChip"
                 visible: Ghostd.workPlanning || Ghostd.workPlan !== null
                 Layout.fillWidth: true
-                implicitHeight: 28
+                implicitHeight: Theme.compactControlHeight
                 radius: Theme.radius
                 color: Ghostd.workPlanning ? Theme.amber(0.13) : Theme.film(0.05)
                 border.width: 1
@@ -253,62 +312,18 @@ Rectangle {
             }
         }
 
-        Rectangle {
+        DisclosureRow {
             id: todoToggle
             objectName: "workTodoToggle"
             visible: Ghostd.workTodo.length > 0
             Layout.fillWidth: true
-            implicitHeight: 28
-            radius: Theme.radius
-            color: todoArea.containsMouse || activeFocus ? Theme.film(0.09) : Theme.film(0.04)
-            activeFocusOnTab: true
-
-            Accessible.role: Accessible.Button
-            Accessible.name: root.todoSummary
-            Accessible.description: root.todoExpanded
+            summary: root.todoSummary
+            summaryObjectName: "workTodoSummary"
+            expanded: root.todoExpanded
+            accent: Theme.foreground
+            description: root.todoExpanded
                 ? "Collapse todo phases and tasks." : "Expand todo phases and tasks."
-
-            Text {
-                id: todoSummaryText
-                objectName: "workTodoSummary"
-                anchors.left: parent.left
-                anchors.leftMargin: Theme.gap
-                anchors.right: todoChevron.left
-                anchors.rightMargin: Theme.gap
-                anchors.verticalCenter: parent.verticalCenter
-                text: root.todoSummary
-                color: Theme.foreground
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSizeSmall
-                elide: Text.ElideRight
-            }
-
-            Text {
-                id: todoChevron
-                anchors.right: parent.right
-                anchors.rightMargin: Theme.gap
-                anchors.verticalCenter: parent.verticalCenter
-                text: root.todoExpanded ? "⌃" : "⌄"
-                color: Theme.foregroundDim
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSizeSmall
-            }
-
-            MouseArea {
-                id: todoArea
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: root.todoExpanded = !root.todoExpanded
-            }
-
-            Keys.onPressed: event => {
-                if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter
-                        || event.key === Qt.Key_Space) {
-                    root.todoExpanded = !root.todoExpanded;
-                    event.accepted = true;
-                }
-            }
+            onToggled: root.todoExpanded = !root.todoExpanded
         }
 
         ColumnLayout {
@@ -389,62 +404,18 @@ Rectangle {
             }
         }
 
-        Rectangle {
+        DisclosureRow {
             id: jobsToggle
             objectName: "workJobsToggle"
             visible: Ghostd.workJobs.length > 0
             Layout.fillWidth: true
-            implicitHeight: 28
-            radius: Theme.radius
-            color: jobsArea.containsMouse || activeFocus ? Theme.film(0.09) : Theme.film(0.04)
-            activeFocusOnTab: true
-
-            Accessible.role: Accessible.Button
-            Accessible.name: root.jobsSummary
-            Accessible.description: root.jobsExpanded
+            summary: root.jobsSummary
+            summaryObjectName: "workJobsSummary"
+            expanded: root.jobsExpanded
+            accent: root.runningJobCount > 0 ? Theme.ghostAmber : Theme.foreground
+            description: root.jobsExpanded
                 ? "Collapse background jobs." : "Expand background jobs."
-
-            Text {
-                id: jobsSummaryText
-                objectName: "workJobsSummary"
-                anchors.left: parent.left
-                anchors.leftMargin: Theme.gap
-                anchors.right: jobsChevron.left
-                anchors.rightMargin: Theme.gap
-                anchors.verticalCenter: parent.verticalCenter
-                text: root.jobsSummary
-                color: root.runningJobCount > 0 ? Theme.ghostAmber : Theme.foreground
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSizeSmall
-                elide: Text.ElideRight
-            }
-
-            Text {
-                id: jobsChevron
-                anchors.right: parent.right
-                anchors.rightMargin: Theme.gap
-                anchors.verticalCenter: parent.verticalCenter
-                text: root.jobsExpanded ? "⌃" : "⌄"
-                color: Theme.foregroundDim
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSizeSmall
-            }
-
-            MouseArea {
-                id: jobsArea
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: root.jobsExpanded = !root.jobsExpanded
-            }
-
-            Keys.onPressed: event => {
-                if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter
-                        || event.key === Qt.Key_Space) {
-                    root.jobsExpanded = !root.jobsExpanded;
-                    event.accepted = true;
-                }
-            }
+            onToggled: root.jobsExpanded = !root.jobsExpanded
         }
 
         ColumnLayout {
@@ -463,30 +434,19 @@ Rectangle {
                     Layout.fillWidth: true
                     spacing: 2
 
-                    Rectangle {
+                    DisclosureRow {
                         id: jobRow
                         objectName: "workJobRow-" + String(jobDelegate.modelData.id || "")
                         Layout.fillWidth: true
                         implicitHeight: Theme.controlHeight
-                        radius: Theme.radius
-                        color: jobArea.containsMouse || activeFocus
-                            ? Theme.film(0.09) : Theme.film(0.04)
-                        activeFocusOnTab: true
-
-                        Accessible.role: Accessible.Button
-                        Accessible.name: String(jobDelegate.modelData.label
+                        summary: String(jobDelegate.modelData.label
                             || jobDelegate.modelData.command || "Background job")
-                        Accessible.description: root.outputExpanded(jobDelegate.modelData.id)
+                        expanded: root.outputExpanded(jobDelegate.modelData.id)
+                        accent: Theme.foreground
+                        description: root.outputExpanded(jobDelegate.modelData.id)
                             ? "Hide this job's output." : "Show this job's output."
-
-                        MouseArea {
-                            id: jobArea
-                            anchors.fill: parent
-                            z: 0
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: root.toggleOutput(jobDelegate.modelData.id)
-                        }
+                        customContent: true
+                        onToggled: root.toggleOutput(jobDelegate.modelData.id)
 
                         RowLayout {
                             anchors.fill: parent
@@ -532,14 +492,6 @@ Rectangle {
                                 enabled: !Ghostd.streaming && !Ghostd.workMutating
                                 Accessible.description: "Cancel this background job."
                                 onClicked: Ghostd.cancelWorkJob(jobDelegate.modelData.id)
-                            }
-                        }
-
-                        Keys.onPressed: event => {
-                            if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter
-                                    || event.key === Qt.Key_Space) {
-                                root.toggleOutput(jobDelegate.modelData.id);
-                                event.accepted = true;
                             }
                         }
                     }
