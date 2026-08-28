@@ -1,12 +1,6 @@
 /**
- * Daemon configuration: an XDG config file with environment overrides.
- *
- * Precedence (lowest → highest):
- *   built-in defaults  <  ~/.config/ghost/config.json  <  environment  <  CLI flags
- *
- * The config file is optional; a missing file is not an error. A malformed
- * file IS an error — silently falling back to defaults would move a user's
- * ghosts without telling them.
+ * A missing config file is not an error; a malformed one is. Falling back to
+ * defaults would silently move the owner's ghosts instead of telling them.
  */
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -30,33 +24,8 @@ export interface DaemonConfig {
    * env-scrub.ts, which is unconditional.
    */
   offline: boolean;
-  /**
-   * Which browser a ghost's `ghost_browser` tool drives:
-   * - `"relay"` (default): the owner's signed-in Chromium, via the MV3
-   *   relay extension. The flagship "my browser" mode — the ghost acts as you.
-   *   Until the extension is installed and connected, the tool returns an
-   *   actionable "open your browser / install the relay" error.
-   * - `"profile"`: a dedicated per-ghost Chromium profile under the ghost home
-   *   (Playwright). Works with no extension; isolated from your real sessions.
-   */
   browserMode: "relay" | "profile";
-  /**
-   * OMP-native context-compaction policy. Enabled by default at 80% of the
-   * active model's window; an absolute token threshold takes precedence.
-   */
   compaction: CompactionConfig;
-  /**
-   * Seconds a question waits before it settles itself and lets the turn carry
-   * on. `0` waits forever.
-   *
-   * This is daemon-wide rather than per-ghost on purpose. How long a dialog
-   * sits before giving up is a property of the person at the keyboard, not of
-   * the persona asking; a ghost home holds what makes that ghost that ghost.
-   * Ghost keeps the setting in its own config, so it survives the move off
-   * OMP's config namespace (issue #14), and projects it onto OMP's
-   * `ask.timeout` per session — which is what puts it above a ghost home's own
-   * settings and still beneath plan mode.
-   */
   askTimeoutSeconds: number;
   configPath: string | null;
   hooksPath: string;
@@ -247,23 +216,6 @@ function expandHome(path: string, home: string): string {
   return path;
 }
 
-/**
- * Resolve the effective configuration.
- *
- * Environment overrides:
- * - `GHOSTD_PORT`       → port
- * - `GHOSTD_HOST`       → host (must stay loopback)
- * - `GHOSTS_ROOT`       → ghostsRoot
- * - `GHOSTD_OFFLINE`    → offline
- * - `GHOST_BROWSER_MODE`→ browserMode ("relay" | "profile")
- * - `GHOSTD_COMPACTION` → compaction.enabled
- * - `GHOSTD_COMPACTION_THRESHOLD_TOKENS`   → compaction.thresholdTokens
- * - `GHOSTD_COMPACTION_THRESHOLD_FRACTION` → compaction.thresholdFraction
- * - `GHOSTD_ASK_TIMEOUT` → askTimeoutSeconds (0 waits forever)
- * - `GHOSTD_CONFIG`     → config file path
- * - `GHOSTD_HOOKS`      → trusted user command-hook file
- * - `XDG_CONFIG_HOME`   → config and hook directory
- */
 export function loadConfig(overrides: DaemonConfigOverrides = {}): DaemonConfig {
   const env = overrides.env ?? process.env;
   const home = overrides.home ?? homedir();

@@ -1,36 +1,3 @@
-/**
- * `ghost_desktop` — one tool, one enum of actions, for the Hyprland session the
- * ghost lives in.
- *
- * One tool rather than a dozen: a persona's tool list is its working memory, and
- * `ghost_desktop_focus_window` / `ghost_desktop_ax_query` / … would cost a slot
- * each to say one thing. The action is an **enum**, never an open string, so the
- * model picks from a closed set instead of inventing a verb.
- *
- * Everything except `notify` routes through the `ghost-desktop-helper` sidecar
- * (docs/DESKTOP_HELPER.md, packages/desktop-helper) over its JSON line protocol.
- * The sidecar is where the hard capabilities live:
- *
- * - **AT-SPI accessibility** (`ax_query` → `ref`, then `ax_perform` / `ax_set` /
- *   `click{ref}` / `type{ref}`) — the semantic path, and the big new capability.
- * - **Correct Hyprland dispatch** — `focus` / `workspace` now work on 0.56.2,
- *   whose Lua-table grammar the old direct-`hyprctl` path got wrong.
- * - **Layout-safe input** — `key` prefers `hyprctl sendshortcut`, `type` prefers
- *   AT-SPI or `wtype`; each result carries honesty metadata saying whether it
- *   disturbed the desktop.
- *
- * The model never reaches a shell: every value crosses as a JSON value inside
- * the request `args`. There is no `exec`, and deliberately so — the sidecar
- * stays scoped to desktop control (AT-SPI, compositor dispatch, capture), not
- * process launch. An OMP session already inherits OMP's native Bash for
- * arbitrary execution; the sidecar's value is the GUI/Wayland/accessibility
- * reach a shell lacks, with honesty metadata and lock-safe routing. `notify`
- * stays local (`notify-send`), the one thing that is not desktop *control*.
- *
- * Off Hyprland, or with a backend missing, actions degrade with a structured
- * error that names the reason and the remedy — never a stack trace.
- *
- */
 import type {
   ExtensionAPI,
   ExtensionFactory,

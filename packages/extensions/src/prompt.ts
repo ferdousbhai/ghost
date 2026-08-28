@@ -1,9 +1,3 @@
-/**
- * The ghost's system prompt.
- *
- * The two derived sections are assembled from the ghost home before every
- * agent turn. They are context, not storage: no MEMORY.md, no catalog file.
- */
 import type { MemoryIndex } from "./memory-file.js";
 import type { CharacterFile, DocumentsIndex } from "./types.js";
 import { fenceUntrusted } from "./untrusted.js";

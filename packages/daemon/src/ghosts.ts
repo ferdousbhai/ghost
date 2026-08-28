@@ -1,15 +1,3 @@
-/**
- * Ghost registry — discovery, creation, and validation of ghost homes.
- *
- * A ghost is one directory under the ghosts root (default `~/ghosts/`), laid
- * out per `ghost-home/v2` in CONTRACTS.md. The registry owns only the shape
- * of that directory; reading its *contents* (character and memory) is
- * `@ghost/extensions`' job.
- *
- * A ghost home is plain files the owner can open, `sessions/` included. `.pi/`
- * contains only derived OMP runtime state; credentials live in Ghost's
- * machine-scoped Secret Service schema.
- */
 import { randomUUID } from "node:crypto";
 import {
   chmodSync,

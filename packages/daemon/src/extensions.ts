@@ -1,17 +1,3 @@
-/**
- * The daemon's seam onto `@ghost/extensions`.
- *
- * `packages/extensions` owns what a ghost *is* — the persona and memory
- * extensions, the machine Documents reader, and the `ghost-home/v2` reader.
- * The daemon owns how one *runs*. This module centralizes the session extension
- * composition seam; daemon services import typed filesystem helpers only where
- * their own lifecycle or HTTP boundary needs them.
- *
- * Two things come across the seam per session:
- *
- * - the composed extension factory (persona + memory over one home), and
- * - Ghost's additive tool names.
- */
 import type { ExtensionFactory } from "@oh-my-pi/pi-coding-agent";
 import {
   closeAllBrowserSessions as closeAllExtensionBrowserSessions,

@@ -1975,7 +1975,6 @@ export class ClaudeCodeRuntime {
         };
         const emitsSessionStop = completed.subtype === "success"
           && this.hooks.hasHandlers("session_stop");
-        // Only worth locating when a handler will actually read it.
         const sdkTranscript = emitsSessionStop
           ? claudeSdkTranscriptPath(completed.session_id)
           : undefined;

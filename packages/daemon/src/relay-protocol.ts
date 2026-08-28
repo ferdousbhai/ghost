@@ -1,26 +1,3 @@
-/**
- * The frames that cross the relay socket, and the upgrade check that lets one be
- * opened at all.
- *
- * Pure and dependency-free on purpose: the interesting failures of a relay are
- * "a page in the owner's browser tried to connect" and "the extension sent a
- * frame the daemon did not understand", and both are decidable from bytes. Keeping
- * them here means they are unit-testable without a socket, a browser, or a daemon.
- *
- * The wire is JSON text frames, one object per WebSocket message:
- *
- *   extension → daemon   { t: "hello",  protocol, agent?, browser? }
- *   daemon → extension   { t: "welcome", protocol, daemon }
- *   daemon → extension   { t: "req",  id, op, args, timeoutMs }
- *   extension → daemon   { t: "res",  id, ok: true,  result }
- *                        { t: "res",  id, ok: false, error: { failure, message, details? } }
- *   extension → daemon   { t: "event", event, data? }
- *
- * `id` correlates a reply with its request and is minted by the daemon, which is
- * the only side that initiates. `op` is the closed `RELAY_OPS` set — there is no
- * "run this script" frame, so a compromised daemon socket still cannot execute
- * arbitrary code in the owner's authenticated browser.
- */
 import {
   RELAY_OPS,
   RELAY_PROTOCOL_VERSION,

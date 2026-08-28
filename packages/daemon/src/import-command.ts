@@ -1,20 +1,3 @@
-/**
- * `ghostd import` — turn a `ghost-home/v1` archive into a ghost.
- *
- * The archive is the zip the hosted app's "Download my ghost" produces (or an
- * already-extracted directory): character file, legacy documents, memory, and
- * conversations, all as plain files. The hosted archive's `notes/` entries are
- * retained under the imported home's compatibility `docs/` tree; they are not
- * automatically placed into the owner's live Documents directory. Hosted
- * conversation fixtures are then copied into native, resumable OMP sessions;
- * the source JSON is retained unchanged.
- *
- * The heavy lifting is `importGhostArchive` in `@ghost/extensions`, which
- * validates the manifest, guards against zip-slip, and never overwrites a
- * non-empty ghost home unless asked. This file is only the terminal wrapper:
- * argument parsing, ghostsRoot resolution (honouring the same config/env/flags
- * as the daemon), and a readable summary.
- */
 import { importGhostArchive, GhostError } from "@ghost/extensions";
 import { createServer, type Server } from "node:net";
 import { loadConfig, type DaemonConfigOverrides } from "./config.js";

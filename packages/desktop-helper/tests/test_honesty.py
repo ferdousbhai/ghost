@@ -22,14 +22,12 @@ def _desktop(locked=False, clients=None):
 
 def test_focus_carries_honesty_and_correct_grammar():
     desktop, hyprctl = _desktop()
-    # target a *different* window so focus counts as a change
     hyprctl._clients = [sample_window(address="0xaaaa"),
                         sample_window(address="0xbbbb", pid=5)]
     result = desktop.focus(address="0xbbbb")
     assert _HONESTY <= set(result)
     assert result["background_safe"] is False
     assert "focus-change" in result["interference"]
-    # the emitted dispatch is the 0.56 Lua grammar, not the broken string form
     assert hyprctl.dispatched[-1] == ['hl.dsp.focus{ window = "address:0xbbbb" }']
 
 

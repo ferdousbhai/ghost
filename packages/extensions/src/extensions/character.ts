@@ -1,18 +1,3 @@
-/**
- * `ghost_character` — the one tool a ghost has for its own character file.
- *
- * `character.md` is not a doc and not a memory: it is the persona the next
- * session's system prompt is built from (`prompt.ts`, via the persona
- * extension). A freshly summoned ghost starts on a seeded file, interviews its
- * owner, and then writes the file that says who it is — which is the only reason
- * this tool exists.
- *
- * One tool with an action enum rather than `ghost_character_read` /
- * `ghost_character_write`: a persona's tool list is its working memory, and two
- * slots to say one thing is a poor trade (the same argument `ghost_desktop`
- * makes).
- *
- */
 import type {
   ExtensionAPI,
   ExtensionFactory,

@@ -1,25 +1,7 @@
 /**
- * Everything about browsing that is *not* about which browser.
- *
- * URL policy, ref bookkeeping and invalidation, the read budget, the idle
- * shutdown timer, and the serialization of parallel tool calls all live here,
- * above the `GhostBrowserBackend` seam, so the Playwright backend and the
- * coming relay backend for the owner's Chromium get exactly one
- * implementation of each and cannot drift apart on any of them. A backend that
- * forgot to check a URL would be a backend that could open `file:///`; there is
- * no way to forget from down there, because backends never see an unchecked URL.
- *
- * Two details worth keeping:
- *
- * **Actions are serialized.** pi runs tool calls in parallel by default, and two
- * of them interleaving on one page is how you get a click that lands on the page
- * a different call just navigated away from.
- *
- * **One session per ghost home, process-wide.** A launched Chromium takes an
- * exclusive lock on its user-data-dir, so two sessions over one ghost home
- * cannot each start their own. The registry below is global state, but *keyed*
- * state, which is the distinction `shared.ts` cares about: nothing here is
- * configured by a process-global, only found by one.
+ * Browser actions are serialized because parallel tool calls cannot safely
+ * navigate and act on the same page. Sessions are keyed by ghost home because
+ * Chromium exclusively locks each persistent profile directory.
  */
 import { writeFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
@@ -66,8 +48,6 @@ import {
   withScreenshotDirectory,
   writeScreenshotFile,
 } from "./screenshot-retention.js";
-
-/** Backwards-compatible singular export; storage is shared with ghost_screen. */
 
 export const DEFAULT_BROWSER_SCREENSHOT_RETENTION = DEFAULT_SCREENSHOT_RETENTION;
 

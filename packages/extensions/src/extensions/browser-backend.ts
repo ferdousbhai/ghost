@@ -1,45 +1,19 @@
 /**
- * The seam between "what the ghost can do in a browser" and "which browser".
- *
- * There will be two backends. The first, shipping here, is a dedicated Chromium
- * profile driven by Playwright: the ghost's own browser, its own logins, nothing
- * inherited from the owner. The second, later, is a relay into the owner's
- * *real* signed-in Chromium through an MV3 extension and `chrome.debugger` —
- * which is a completely different mechanism (no profile to own, no process to
- * launch, refs that cannot be a DOM attribute we stamped) but exactly the same
- * eight verbs.
- *
- * So the verbs live behind this interface and everything *around* them —
- * URL policy, ref bookkeeping and invalidation, read truncation, the idle timer,
- * serialization of parallel tool calls, the tool schema itself — lives above it
- * in `browser-session.ts`, once, for both. A backend gets asked to do one small
- * thing at a time; the session also supplies its URL/peer checks to backends that
- * can enforce them at the network boundary.
- *
- * The rule for adding to this interface: if a relay into someone's real browser
- * could not honestly implement it, it does not belong here.
+ * The rule for this interface: if a relay into the owner's own signed-in
+ * Chromium could not honestly implement a verb, it does not belong here. A
+ * backend that has to stub one fails at runtime, not at compile time.
  */
 import { GhostError } from "../errors.js";
 
-/**
- * Why a browser action failed, precisely. `GhostErrorCode` is deliberately small
- * and shared by every ghost tool, so the exact browser reason rides along in
- * `details.failure` rather than widening that union for one extension.
- */
 export type BrowserFailure =
   | "browser_unavailable"
   | "blocked_url"
-  /** The navigation itself failed. */
   | "navigation_failed"
   | "timeout"
   | "no_page"
   | "unknown_ref"
   | "element_not_found"
   | "invalid_input"
-  /**
-   * A consequential action (click/type) was aimed at a page off the
-   * owner-opened origin's registrable domain — the prompt-injection guardrail.
-   */
   | "blocked_action"
   | "action_budget";
 

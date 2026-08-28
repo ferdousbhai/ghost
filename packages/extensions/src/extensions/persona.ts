@@ -1,10 +1,3 @@
-/**
- * The persona extension: the ghost's system prompt.
- *
- * Ghost replaces OMP's assembled prompt. The prompt is rebuilt before every
- * agent start, so a doc or memory written mid-session is reflected on the next
- * turn without a session restart.
- */
 import type { ExtensionAPI, ExtensionFactory } from "@oh-my-pi/pi-coding-agent";
 import { deriveDocumentsIndex } from "../catalog.js";
 import {

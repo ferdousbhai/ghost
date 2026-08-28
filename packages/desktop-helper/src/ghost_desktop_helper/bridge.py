@@ -628,7 +628,6 @@ class GhostDesktop:
         if isinstance(attributes, str):
             return [attributes]
         if isinstance(attributes, dict):
-            # {"states": [...]} or {state: True}
             if "states" in attributes:
                 return list(attributes["states"])
             return [k for k, v in attributes.items() if v]
@@ -869,7 +868,6 @@ class GhostDesktop:
             states = {s.casefold() for s in node.get("states", [])}
             if "editable" in states and {"focused", "active"} & states:
                 return tree.elements.get(index)
-        # Fall back to any single editable field.
         editable = [
             index
             for index, node in enumerate(nodes)

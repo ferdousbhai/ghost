@@ -1,39 +1,3 @@
-/**
- * Per-ghost chat-runtime lifecycle.
- *
- * Modern Oh My Pi is the default provider-agnostic `AgentSession` harness. An explicit
- * `claude-code` role instead uses the owner-local, Effect-scoped Agent SDK
- * backend in `claude-code.ts`. One daemon process hosts many ghosts
- * concurrently; the OMP path is scoped entirely through SDK options — no env
- * var, no child process — following the spike (`pi-spike/concurrent-ghosts.mjs`):
- *
- *   cwd        = owner home, or one explicitly bound project working directory
- *   agentDir   = ~/ghosts/<name>/.pi        derived OMP runtime state
- *   sessionDir = ~/ghosts/<name>/sessions  transcripts
- *
- * Four decisions that are easy to get wrong and are load-bearing here:
- *
- * 1. **Sessions must be redirected explicitly.** `createAgentSession({
- *    agentDir })` does NOT move session storage; only
- *    `SessionManager.create/open(cwd, sessionDir)` does. Without it a ghost's
- *    transcripts land in the global `~/.pi/agent/sessions/`, breaking the
- *    "one directory is the whole ghost" property that backup and future
- *    per-ghost encryption depend on.
- *
- * 2. **Sessions use the native OMP runtime through explicit roots.** Its
- *    filesystem, Bash, declarative resources, web search, hub, and
- *    background-job machinery stay enabled. Ghost replaces OMP's coding
- *    prompt with its own character-led prompt.
- *    Pi subagents stay disabled in phase 1, and Ghost does not admit ambient,
- *    ghost-file, or project agent definitions. Ghost builds the prompt and
- *    adds the capabilities that are genuinely Ghost-specific. Executable
- *    discovery is ghost-only; MCP is
- *    narrowed to ghost config plus one explicitly bound project, never
- *    ambient user config belonging to OMP or another coding agent.
- *
- * 3. **Ghost has no approval UI.** Sessions are deliberately local and
- *    unrestricted. OMP's `ask` remains the human-input bridge.
- */
 import { existsSync, mkdirSync } from "node:fs";
 import {
   lstat,
@@ -627,6 +591,7 @@ export interface RunTurnOptions {
   prompt: string;
   emit: (event: PiMessagesEvent) => void;
   signal?: AbortSignal;
+  /** Off by default because reasoning blocks are private. */
   includeThinking?: boolean;
 }
 
@@ -691,7 +656,9 @@ export type QueueMode = "steer" | "followUp";
 
 interface HostedMCP {
   manager: MCPManager;
+  /** Serialized dynamic tool refreshes; never rejects. */
   refresh?: Promise<void>;
+  /** Serialized config reconnects; concurrent mutations must not interleave. */
   reload?: Promise<void>;
 }
 
@@ -708,11 +675,13 @@ interface HostedSession extends GhostSessionHandle {
   lastUsedAt: number;
   unsubscribeOwnership?: () => void;
   pendingOwnerPasses: PendingPiOwnerPass[];
+  /** Serial durability and hook drain shared by every owner-action path. */
   ownerPassSettlement?: Promise<void>;
   /** Reconstructed from the persisted branch and reserved synchronously per owner action. */
   nextOwnerTurnId: number;
   settlingDeferred?: Promise<void>;
   liveVoiceTransitions?: number;
+  /** Lets a concurrent stop wait for an admitted startup. */
   liveVoiceStart?: Promise<LiveVoiceStatus>;
   ask: AskBroker;
   /**
@@ -1546,6 +1515,7 @@ export class SessionHost {
   private readonly collaboration: CollaborationManager;
   private readonly sessions = new Map<string, HostedSession>();
   private readonly conversationListeners = new Map<string, Set<ConversationEventListener>>();
+  /** Prevents parallel turns from constructing duplicate sessions. */
   private readonly opening = new Map<string, Promise<HostedSession>>();
   /** In-flight closes, so a reopen cannot race a still-disposing session. */
   private readonly closing = new Map<
@@ -1554,14 +1524,18 @@ export class SessionHost {
   >();
   private readonly cleanupRetries = new Map<string, HostedSession>();
   private readonly deleting = new Set<string>();
+  /** Turn calls reserve a conversation before their first asynchronous open. */
   private readonly turnAdmissions = new Set<string>();
+  /** External open/close calls hold a conversation reservation across awaits. */
   private readonly lifecycleAdmissions = new Map<string, number>();
   /** Fork markers owned by this process are not crash-recovered mid-publication. */
   private readonly activeForks = new Set<string>();
   private readonly forkRecoveries = new Map<string, Promise<void>>();
   private readonly projectTransitions = new Set<string>();
   private readonly mcpReloadGhosts = new Set<string>();
+  /** Whole-home delete and rename reserve a ghost name across every await. */
   private readonly reservedGhosts = new Set<string>();
+  /** Route-level claims bridge preclaim and host mutation admission. */
   private readonly homeMoveClaims = new Set<string>();
   private readonly unregisterHomeMoveParticipant: (() => void) | undefined;
   /** Read-through cache for legacy titles that have not had a writable open yet. */
@@ -3391,7 +3365,6 @@ export class SessionHost {
     while (!pass.signal.aborted) {
       const assistant = latestAssistantEntry.message;
       if (assistant.role !== "assistant") return latestAssistantEntry;
-      // Pi's own session file is the OMP runtime's native transcript.
       const sessionFile = hosted.session.sessionFile;
       const result = await this.hooks.emitSessionStop({
         type: "session_stop",
@@ -4797,17 +4770,6 @@ export class SessionHost {
     hosted.title = tracked;
   }
 
-  /**
-   * The line the shell opens an empty chat with, and whether this ghost has
-   * been met yet.
-   *
-   * A generation failure is never an HTTP failure: `greeting: null` is the
-   * contract, and the shell keeps its own static line. An unknown ghost is
-   * still a 404 — that is a client bug, not a model that was busy.
-   *
-   * The onboarding flag is computed from character.md on every request, not
-   * from the cached entry, so it is correct even when generation fails.
-   */
   async greeting(ghostName: string): Promise<GreetingResult> {
     const ghost = this.registry.get(ghostName);
     const unavailable = new Set<GhostHomeDigestInput>();

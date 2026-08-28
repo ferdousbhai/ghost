@@ -1,18 +1,11 @@
 pragma Singleton
 
-// Ghostd — the shell's client for the local `ghostd` HTTP API (CONTRACTS.md).
-//
 // Streaming: Qt's QML XMLHttpRequest fires onreadystatechange repeatedly at
 // readyState 3 (LOADING), once per network chunk, and exposes the *cumulative*
 // partial body in responseText. That was measured on this stack (Quickshell
 // 0.3.0 / Qt 6.11.2) against a chunked SSE server, both GET and POST — see
 // dev/README.md. So SSE needs no helper process: we track a consumed offset,
 // buffer the trailing partial frame, and parse `data:` frames ourselves.
-//
-// The wire format is pi-messages as fixed in CONTRACTS.md. Deltas are INCREMENTAL
-// fragments, not cumulative snapshots; `text_end` carries the authoritative
-// full block and we replace with it. There is no tool-*result* event in the
-// vocabulary — tool activity is start/delta/end only.
 //
 // Auth: the daemon binds loopback, which is not the same as being private —
 // every browser on this machine can reach 127.0.0.1 too, and a page the user
@@ -3682,15 +3675,8 @@ Singleton {
         if (xhr && xhr.readyState !== 4) xhr.abort();
     }
 
-    /**
-     * The pi-messages request body.
-     *
-     * We send only the new user message and let ghostd's per-ghost AgentSession
-     * own the history — CONTRACTS.md puts the daemon's sessions in pi session
-     * storage, and `options.sessionId` selects which one. If a daemon build
-     * turns out to be stateless per request, set GHOST_HUD_REPLAY=1 and we
-     * replay the local transcript instead.
-     */
+    // GHOST_HUD_REPLAY is a diagnostic fallback for stateless daemon builds;
+    // normal requests send only the new message because ghostd owns history.
     function buildBody(ghost: string, prompt: string, turnState: var): var {
         const sessionId = turnState ? turnState.sessionId : root.ensureSession(ghost);
         const state = turnState || root.ensureTurnState(ghost, sessionId);

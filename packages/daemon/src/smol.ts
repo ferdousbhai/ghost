@@ -1,35 +1,3 @@
-/**
- * The smol lane: which cheap, fast model does a ghost's throwaway work.
- *
- * A ghost has exactly one such lane, OMP's conventional `smol` role, and three
- * things ride on it: the conversation title written after a first turn
- * (`title.ts`), the opening line the shell asks for on an empty chat
- * (`greeting.ts`), and trusted command-hook classification
- * (`hook-smol-complete.ts`). All are the same shape of work — one raw `complete()` call,
- * no `AgentSession`, no tools, no transcript — so they share one resolution
- * rule and one role rather than each growing a setting of its own.
- *
- * ## The smol_model role and its resolution
- *
- * `smol_model` is the one role Ghost still resolves itself, and it resolves on
- * cost — but cost that is **subscription-aware** (issue #484), which is the
- * deliberate difference from a plain price ranking. Smol work is a throwaway
- * nicety, so the cheapest EFFECTIVE cost wins — and a capable model on an
- * already-authenticated subscription (OAuth or
- * an included plan) has zero marginal cost, so it is preferred over a cheaper
- * metered model. "Cheapest effective cost, subscription = free."
- *
- *   1. `roles.smol_model` — the owner's explicit choice. If it names a model
- *      that is missing or uncredentialed, that is a loud error, not a reason to
- *      quietly pick something else.
- *   2. otherwise the cheapest USABLE model by effective cost (subscription
- *      models rank as zero), ranked stably so the choice does not flap.
- *   3. otherwise a loud error naming `roles.smol_model` — but only when there
- *      is genuinely no usable model at all.
- *
- * The claude-code runtime is never a smol candidate: it is not reachable
- * through a plain `complete()` call, and `getModels()` never lists it.
- */
 import type { Api, AssistantMessage, Model } from "@oh-my-pi/pi-ai";
 import type { GhostModelRoleBinding } from "./models.js";
 import type { GhostOmpRuntime } from "./omp-runtime.js";

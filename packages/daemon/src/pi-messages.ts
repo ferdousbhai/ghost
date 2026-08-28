@@ -1,27 +1,3 @@
-/**
- * The pi-messages wire protocol, daemon side.
- *
- * This is Ghost's preserved pi-messages compatibility contract, originally
- * spoken by summon-ghost and now translated from OMP's native session events.
- * Its contract, restated so the code below can be checked against it:
- *
- * - Request: `POST <baseUrl>/messages` with a JSON body
- *   `{ model, context: { systemPrompt?, messages, tools? }, options }`,
- *   `accept: text/event-stream`, `authorization: Bearer <key>`.
- * - Response: SSE. Frames are separated by a blank line and parsed by taking
- *   the FIRST line that starts with `data:`; a frame with no such line (an
- *   SSE comment like `: keepalive`) is skipped, and a `data: [DONE]` payload
- *   is ignored. So keepalive comments are free and `event:` names are
- *   invisible to the client — the type lives in the JSON.
- * - The client's converter rebuilds one assistant message from the stream:
- *   exactly one `start`, content blocks addressed by `contentIndex`, and
- *   exactly one terminal `done` or `error`. A stream that ends without a
- *   terminal event is an error on the client side.
- * - `contentIndex` indexes into a single array, so indices must be dense and
- *   monotonic across the WHOLE response, not per provider step.
- *
- * Everything here is pure: no HTTP, no pi session. `server.ts` wires it up.
- */
 import type { Usage } from "@oh-my-pi/pi-ai";
 import type { AgentSessionEvent } from "@oh-my-pi/pi-coding-agent";
 import {

@@ -1,15 +1,3 @@
-/**
- * Ghost's structured memory writer.
- *
- * Memory is atomic files — one concise fact per plain Markdown file. A write
- * creates or replaces exactly one file; the compact index preview is derived
- * from its content per session and never stored.
- *
- * Sessions use OMP's native read/grep/glob tools for discovery and
- * retrieval, avoiding duplicate filesystem-shaped tools. They retain the
- * structured writer because it validates and serializes the atomic memory-file
- * format used by the derived index.
- */
 import type { ExtensionAPI, ExtensionFactory } from "@oh-my-pi/pi-coding-agent";
 import { Type } from "@oh-my-pi/pi-coding-agent/extensibility/legacy-typebox";
 import {
@@ -24,11 +12,6 @@ export const GHOST_MEMORY_TOOL_NAMES = [GHOST_MEMORY_WRITE] as const;
 
 export type MemoryExtensionOptions = GhostExtensionOptions;
 
-/**
- * Build the memory extension. The returned factory is a pi extension: pass it as
- * an inline `extensionFactories` entry, or default-export it from a file on
- * `additionalExtensionPaths`.
- */
 export function createMemoryExtension(
   options: MemoryExtensionOptions = {},
 ): ExtensionFactory {

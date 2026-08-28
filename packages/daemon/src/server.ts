@@ -1,75 +1,3 @@
-/**
- * The daemon's HTTP API — the routes in CONTRACTS.md, on loopback, behind a
- * machine-local bearer token, plus the browser relay.
- *
- *   GET  /api/ghosts                  → [{ name, dir, createdAt }]
- *   GET|DELETE /api/documents         → browse one shared directory or trash one file
- *   GET /api/documents/content        → bounded, confined inline text content
- *   POST /api/ghosts                  { name } → creates ~/ghosts/<name>/
- *   DELETE /api/ghosts/:name?confirm=<name> → moves the home into the XDG trash
- *   PUT  /api/ghosts/:name/name       { name } → renames the ghost (and its home)
- *   POST /api/ghosts/:name/messages   pi-messages request → SSE of pi-messages events
- *   POST /api/ghosts/:name/greeting   → { greeting, onboarding } — the empty-chat opener
- *   GET|DELETE /api/ghosts/:name/context → browse context or trash one memory file
- *   GET|POST /api/ghosts/:name/mcp    → list or add ghost-owned MCP servers
- *   PUT|DELETE /api/ghosts/:name/mcp/:server → replace or remove one server
- *   GET  /api/ghosts/:name/sessions   → { sessions } — conversation listing for that ghost
- *   GET  /api/ghosts/:name/events     → SSE conversation-list invalidations
- *   DELETE /api/ghosts/:name/sessions/:id → trash Ghost-owned conversation artifacts
- *   PUT  /api/ghosts/:name/sessions/:id/pin → { pinned } — pin or unpin it
- *   PUT  /api/ghosts/:name/sessions/:id/title → { title } — rename it
- *   GET  /api/ghosts/:name/sessions/:id/commands → OMP's session command catalog
- *   GET|POST /api/ghosts/:name/sessions/:id/live → realtime voice lifecycle
- *   GET|POST /api/ghosts/:name/sessions/:id/collab → encrypted relay collaboration
- *   GET  /api/ghosts/:name/sessions/:id/transcript → stored messages for resume
- *   GET|PUT /api/ghosts/:name/sessions/:id/project → conversation project binding
- *   POST /api/ghosts/:name/sessions/:id/project/preview|reload → trust/reload
- *   DELETE /api/ghosts/:name/sessions/:id/project/draft → abandon unpublished binding
- *   GET  /api/ghosts/:name/sessions/:id/ask → { ask } — current OMP ask, if any
- *   POST /api/ghosts/:name/sessions/:id/ask → resolve that ask
- *   GET  /api/ghosts/:name/sessions/:id/queue → OMP steering/follow-up queues
- *   POST /api/ghosts/:name/sessions/:id/queue → enqueue a steer or follow-up
- *   POST /api/ghosts/:name/sessions/:id/branch → branch off into a new conversation
- *   POST /api/ghosts/:name/sessions/:id/reanswer → branch an ask result + SSE resume
- *   GET  /api/ghosts/:name/model-routing → Ghost roles + OMP fallback chains
- *   PUT  /api/ghosts/:name/model-routing → set/clear a primary or replace a retry chain
- *   GET  /api/hooks                     → redacted daemon-global lifecycle-hook status
- *   GET  /api/relay/status            → whether the owner's Chromium is paired
- *   WS   /relay                       → the MV3 extension's socket (token-gated)
- *
- * Node's built-in `http` plus a twenty-line router: the surface is small and one
- * route is a stream, which is precisely the shape a framework would add weight to
- * without adding clarity.
- *
- * Binding to loopback is not authentication (issue #485). Every browser on the
- * machine can reach `127.0.0.1`, and a page can send a `text/plain` POST there
- * with no preflight at all — CORS governs reading the *response*, not sending
- * the request, so a visited web page could otherwise drive a ghost's browser
- * and desktop tools. Three checks, applied before routing, close that:
- *
- *   1. A present `Origin` must be loopback. A browser always sends one on a
- *      cross-site request; a file-reading client sends none.
- *   2. `Authorization: Bearer <token>` must match the machine-local token in
- *      `$XDG_STATE_HOME/ghost/api-token` (api-token.ts). A page cannot read a
- *      file, so it cannot forge this.
- *   3. `POST`/`PUT` must be `application/json`, which no simple-request form
- *      post can be — belt to the Origin check's braces.
- *
- * `OPTIONS` answers 204 unauthenticated (a preflight carries no credentials by
- * definition) and `GET /api/relay/status` is exempt on purpose: it returns no
- * secret, and it is the one thing a client with no token yet may need to read.
- *
- * The relay is authenticated separately, and the reason is worth stating: the
- * peer is a browser, and a browser runs code written by strangers. `/relay`
- * therefore carries its own pairing token, refuses any `Origin` that is not a
- * browser extension, and accepts one connection at a time.
- * `/api/relay/status` never returns that token — `ghostd relay-token` does.
- *
- * Error bodies are `{ "error": { "message", "code" } }` — the shape the
- * pinned pi-messages client parses out of a non-2xx response
- * (`parsed.error.message` / `parsed.error.code`), and the same shape the
- * hosted relay returns, so a client needs no daemon-specific branch.
- */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { isAbsolute } from "node:path";
@@ -217,6 +145,13 @@ function publicHookStatus(status: GhostHookStatus): GhostHookStatus {
   };
 }
 
+/**
+ * The `{ error: { message, code } }` envelope is fixed by its consumers, not
+ * chosen here: the pinned pi-messages client parses `parsed.error.message` /
+ * `parsed.error.code` out of a non-2xx response, and the hosted relay returns
+ * the same shape, so a client needs no daemon-specific branch. Flattening it
+ * breaks both silently.
+ */
 function errorResponse(
   response: ServerResponse,
   status: number,
@@ -594,12 +529,6 @@ export function createDaemonServer(options: ServerOptions): Server {
     jsonResponse(response, 200, { ok: true, ...trashed });
   };
 
-  /**
-   * The opening line for an empty chat. `greeting` is null whenever one could
-   * not be written — no usable model, a provider hiccup, output that did not
-   * survive cleaning — and that is a 200, not a 5xx: the shell renders its own
-   * static line and the window still opens. Only an unknown ghost fails.
-   */
   const handleGreeting = async (
     ghostName: string,
     request: IncomingMessage,
@@ -608,8 +537,7 @@ export function createDaemonServer(options: ServerOptions): Server {
     try {
       await readJsonBody(request, maxBodyBytes);
     } catch (error) {
-      // The body is `{}` by contract and carries nothing; an absent or
-      // malformed one means the same thing. An oversized one is still refused.
+      // Greeting has no request fields; only a size violation is meaningful.
       if (error instanceof PiMessagesRequestError && error.code === "payload_too_large") throw error;
     }
     jsonResponse(response, 200, await options.host.greeting(ghostName));

@@ -1,9 +1,3 @@
-/**
- * Materialize the hosted export's `conversations/*.json` fixtures as native
- * OMP sessions. The fixture remains the lossless hosted wire shape while its
- * `sessions/` projection exists; user-triggered conversation deletion moves
- * both artifacts to trash so the fixture cannot recreate a deleted chat.
- */
 import { randomUUID } from "node:crypto";
 import {
   link,
@@ -364,8 +358,6 @@ function buildNativeSession(
   const created = isoTimestamp(source.catalog.createdAt, "catalog.createdAt");
   const updated = isoTimestamp(source.catalog.updatedAt, "catalog.updatedAt");
   const { title, slot } = fitTitle(source.catalog.title, updated.iso);
-  // See CONTRACTS.md's ghost-home section for the reviewed OMP session-format
-  // writer exception and the invariant required before publication.
   const header: SessionHeader = {
     type: "session",
     version: CURRENT_SESSION_VERSION,

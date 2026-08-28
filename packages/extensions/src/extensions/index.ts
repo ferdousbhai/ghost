@@ -1,8 +1,3 @@
-/**
- * The ghost extensions, and the composition the daemon actually wants: one
- * factory that installs persona, character, memory, and the computer-use set
- * (screen, desktop, browser) over the same ghost home.
- */
 import type { ExtensionFactory } from "@oh-my-pi/pi-coding-agent";
 import { browserToolNames, createBrowserExtension, type BrowserExtensionOptions } from "./browser.js";
 import {
@@ -24,10 +19,6 @@ export type GhostExtensionSetOptions = PersonaExtensionOptions
   & HyprlandExtensionOptions
   & BrowserExtensionOptions;
 
-/**
- * Every Ghost-specific tool this package registers. OMP sessions layer these
- * onto the native tool set.
- */
 export function ghostToolNames(): string[] {
   const names = [GHOST_MEMORY_WRITE];
   names.push(...characterToolNames());
@@ -39,10 +30,6 @@ export function ghostToolNames(): string[] {
   return names;
 }
 
-/**
- * Persona + character + memory + computer use (screen, desktop, browser),
- * sharing one home.
- */
 export function createGhostExtension(
   options: GhostExtensionSetOptions = {},
 ): ExtensionFactory {
@@ -64,10 +51,6 @@ export function createGhostExtension(
 
 export * from "./browser.js";
 export * from "./browser-relay-backend.js";
-/**
- * `browser.js` re-exports the seam's *shapes*; the relay needs its error class and
- * failure vocabulary too, because the daemon translates socket frames into them.
- */
 export {
   GhostBrowserError,
   type BackendActionOptions,

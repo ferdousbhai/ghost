@@ -1,11 +1,3 @@
-/**
- * Owner read state for conversations — `sessions/reads.json`.
- *
- * Like pins, this is deliberately stored in the daemon-owned session
- * directory because no transcript can say when the owner last opened it.
- * Reads tolerate missing or hand-edited state, and writes publish by atomic
- * replacement so a listing never observes a partial JSON document.
- */
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";

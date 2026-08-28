@@ -29,7 +29,6 @@ def test_hello_reports_required_fields():
     assert "hyprland-version" in payload
     assert "detected-dispatch-grammar" in payload
     assert "available-backends" in payload
-    # every contract op is advertised
     for op in ("see", "state", "layers", "toplevels", "ax_query", "ax_roles",
                "ax_perform", "ax_set", "hit_test", "key", "type", "click",
                "drag", "scroll", "mouse_move", "capture", "focus", "workspace"):

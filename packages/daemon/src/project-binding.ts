@@ -1,10 +1,3 @@
-/**
- * Conversation-scoped project binding and machine-local trust.
- *
- * A binding is durable ghost state because it determines what a resumed
- * conversation may discover. Trust is deliberately not: it describes this
- * machine's filesystem inode and lives under the machine's XDG state root.
- */
 import { randomBytes, randomUUID } from "node:crypto";
 import {
   lstat,

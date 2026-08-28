@@ -1,9 +1,3 @@
-/**
- * `@ghost/daemon` — the local process that hosts a user's ghosts.
- *
- * The binary is `ghostd` (`src/main.ts`); everything below is the library
- * surface, so a UI shell or a test can drive the same pieces in-process.
- */
 export {
   API_TOKEN_FILENAME,
   API_TOKEN_PATTERN,

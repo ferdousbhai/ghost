@@ -2082,11 +2082,10 @@ lines.on("line", (line) => {
       "---\nname: ambient-cwd\ndescription: Must stay outside the Ghost.\n---\n\nLeak.\n",
       "utf8",
     );
-    // A late ghost-home skill is planted too, and is equally not expected:
-    // every declarative category "is passed as an explicit immutable snapshot
-    // from ghost root plus one trusted project root" (CONTRACTS.md), so a
-    // conversation's skills are pinned at open and this one belongs to the
-    // next conversation. Refreshing must move the set in neither direction.
+    // A late ghost-home skill is equally not expected: declarative inputs are
+    // immutable snapshots captured when the conversation opens, so this skill
+    // belongs to the next conversation. Refreshing must move the set in neither
+    // direction.
     const lateGhostSkill = join(dir, "skills", "engraving");
     mkdirSync(lateGhostSkill, { recursive: true });
     writeFileSync(

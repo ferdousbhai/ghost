@@ -1,76 +1,11 @@
 #!/usr/bin/env node
 /**
- * mock-ghostd — just enough of the CONTRACTS.md daemon API to build and demo
- * the Quickshell surfaces without pi, models, or a real ghost home.
+ * In-memory shell demo backend. Only an owned temporary Markdown fixture
+ * touches disk, and it is removed on exit. Authentication is intentionally not
+ * enforced here; auth behavior is tested against the real daemon.
  *
- * Implements:
- *   GET  /api/hooks                           → redacted daemon-global hook status
- *   GET  /api/ghosts                          → [{ name, dir, createdAt }]
- *   POST /api/ghosts { name }                 → 201 + the new ghost
- *   DELETE /api/ghosts/:name?confirm=:name    → 200 { ok, trash } | 400 | 404 | 409
- *   GET  /api/documents                       → one shared direct-directory page
- *   GET  /api/documents/content               → bounded confined UTF-8 content
- *   DELETE /api/documents                     → move one shared file to mock Trash
- *   GET  /api/ghosts/:name/context            → memory, character; agents empty in phase 1
- *   DELETE /api/ghosts/:name/context          → move one memory file to mock Trash
- *   GET  /api/ghosts/:name/mcp                → sanitized project MCP catalog
- *   POST/PUT/DELETE /api/ghosts/:name/mcp/... → manage project MCP servers
- *   GET/POST /api/ghosts/:name/sessions/:id/live   → remote live-voice status/actions
- *   GET/POST /api/ghosts/:name/sessions/:id/collab → relay collaboration status/actions
- *   POST /api/ghosts/:name/messages           → pi-messages SSE (canned reply)
- *   POST /api/ghosts/:name/greeting           → { greeting, onboarding }, ~800ms late
- *   PUT  /api/ghosts/:name/name { name }      → { ok, name } | 400 | 404 | 409
- *   GET  /api/ghosts/:name/sessions           → { sessions: [...] }, newest first
- *   GET  /api/ghosts/:name/events             → conversation invalidation SSE
- *   GET  /api/ghosts/:name/sessions/:id/commands → effective OMP slash commands
- *   GET/PUT /api/ghosts/:name/sessions/:id/project → explicit project binding
- *   POST /api/ghosts/:name/sessions/:id/project/preview|reload → staged project actions
- *   DELETE /api/ghosts/:name/sessions/:id/project/draft → abandon an unpublished binding
- *   DELETE /api/ghosts/:name/sessions/:id     → delete one conversation
- *   PUT  /api/ghosts/:name/sessions/:id/read  → mark one conversation read
- *   GET  /api/ghosts/:name/sessions/:id/transcript → { id, title, messages, … }
- *   PUT  /api/ghosts/:name/sessions/:id/title → { ok, title } | 400 | 404 | 409
- *   POST /api/ghosts/:name/sessions/:id/branch → { action: "fork", entryId }
- *   GET  /api/ghosts/:name/sessions/:id/ask   → { ask } while a turn is paused
- *   POST /api/ghosts/:name/sessions/:id/ask   → resolve it | 409 ask_not_pending
- *   POST /api/ghosts/:name/sessions/:id/reanswer → SSE: branch_changed, then the
- *                                               same question asked live again
- *   GET  /api/ghosts/:name/providers          → loginable providers
- *   POST /api/ghosts/:name/login              → start a login → { loginId, status }
- *   GET  /api/ghosts/:name/login/:loginId     → current login step
- *   POST /api/ghosts/:name/login/:loginId/input → satisfy an awaiting prompt
- *
- * The login flows are scripted (no real provider): openai-codex OAuth offers a
- * select (browser callback vs device code), openrouter OAuth shows an auth URL
- * plus a paste field, and api-key flows ask for a masked key. Ghosts, sessions,
- * and logins live in memory; only an owned temporary markdown fixture touches
- * disk so the context editors have real files. It vanishes on exit.
- *
- * A turn stops to ask a question when the prompt contains the word "ask" —
- * the dialog has no other way to open with no model in the loop, and a word
- * the demoer types on purpose beats a random one in ten turns. Every other
- * prompt runs the plain scripted turn.
- *
- * Auth: none. The real daemon requires `Authorization: Bearer <token>` on
- * every /api route (CONTRACTS.md); the mock accepts and ignores the header so
- * the surfaces can be driven on a machine where `ghostd` has never run and no
- * token file exists. Ghostd.qml sends no header when it cannot read one, so
- * both paths work. Anything testing the *auth* itself belongs against the real
- * daemon, not here.
- *
- * Usage:  node dev/mock-ghostd.mjs [--port 7717] [--slow] [--fail]
- *                                  [--ask-timeout 120] [--tool-steps 1]
- *                                  [--omit-terminal] [--stall-stream]
- *   --slow         30ms between text deltas instead of 12ms
- *   --fail         terminate the next turn with a pi-messages `error` event
- *   --ask-timeout  seconds a pending ask waits before answering itself; 0 waits
- *                  forever. The dialog keeps a static line until 30s remain and
- *                  only counts down inside that, so 40 is the demo value.
- *   --tool-steps    tool-call steps before the answer; 14 mirrors the owner's
- *                  reported long-turn shape and leaves time to steer it.
- *   --omit-terminal end the HTTP response without `done`/`error`.
- *   --stall-stream  leave the response open after the script, without a terminal
- *                  event or keepalive; the shell watchdog must settle it.
+ * A prompt containing "ask" opens the dialog deterministically because no
+ * model is present to decide when to ask.
  */
 import {
   closeSync,

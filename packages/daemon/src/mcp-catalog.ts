@@ -1,16 +1,3 @@
-/**
- * Ghost-owned MCP configuration plus confined bound-project inputs.
- *
- * OMP normally discovers MCP servers from several user-level and third-party
- * coding-agent locations. Ghost deliberately does not call that discovery
- * path here: the management API owns only visible `mcp.json` in the selected
- * ghost home. Explicitly trusted external projects hand their already-confined
- * `.omp/mcp.json` and `.omp/.mcp.json` bytes to the parser below.
- *
- * The list view is safe to send to a UI. It never returns header or environment
- * values, command arguments, OAuth client secrets, or URL query values.
- * Mutations use OMP's locked, atomic config writer and its native validation.
- */
 import { isAbsolute, join, resolve } from "node:path";
 import { expandEnvVarsDeep } from "@oh-my-pi/pi-coding-agent/discovery/helpers";
 import { MCPManager } from "@oh-my-pi/pi-coding-agent/mcp/manager";

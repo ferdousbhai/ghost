@@ -1,25 +1,3 @@
-/**
- * The bearer token for the daemon's HTTP API.
- *
- * Binding to `127.0.0.1` is not authentication. Every browser on the machine
- * can reach loopback, and a page the owner visits can send a form-style
- * `text/plain` POST to `http://127.0.0.1:7717/api/ghosts/<name>/messages`
- * without a preflight — CORS never sees it, because CORS governs *reading* a
- * response, not *sending* a request. That is a cross-site request forgery
- * against the ghost, and it would let any web page drive the browser and
- * desktop tools the ghost owns (issue #485).
- *
- * So the API gets a secret of its own: 64 hex characters at
- * `$XDG_STATE_HOME/ghost/api-token` (override with `GHOSTD_API_TOKEN_FILE`),
- * mode 0600 in a 0700 directory, minted when the server starts. Local clients
- * read the file — that is what the Quickshell surfaces do — and present it as
- * `Authorization: Bearer <token>`. A page in a browser cannot read a file, so
- * it cannot forge the header.
- *
- * `ghostd api-token` prints it for debugging and shell scripts; `--rotate`
- * invalidates the old one. The file/compare/rotate/print machinery is shared
- * with the relay's pairing token; see token-store.ts.
- */
 import {
   createTokenStore,
   tokenMatches,

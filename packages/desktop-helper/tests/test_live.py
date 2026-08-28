@@ -80,8 +80,6 @@ def test_capture_active_window_background_safe(desktop):
     active = desktop.hyprctl.active_window()
     if active is None:
         pytest.skip("no active window to capture")
-    # allow_headless_capture off + capturing the already-focused, visible window
-    # keeps this non-disruptive.
     desktop.allow_headless_capture = False
     result = desktop.capture(target="window", address=active["address"])
     png = base64.b64decode(result["png_base64"])
@@ -130,11 +128,10 @@ def test_ax_ref_resolves_then_stales_on_the_real_bus(desktop):
         if result["count"] < 1:
             continue
         ref = result["elements"][0]["ref"]
-        assert ":" in str(ref)  # epoch-qualified, not a bare index
-        assert d._ax_element(ref) is not None  # resolves on the live bus
+        assert ":" in str(ref)
+        assert d._ax_element(ref) is not None
         epoch = d._ax_epoch
 
-        # A second snapshot bumps the epoch; the earlier ref is now stale.
         d.ax_roles(app=client["address"])
         assert d._ax_epoch == epoch + 1
         with pytest.raises(UnknownRefError) as exc:

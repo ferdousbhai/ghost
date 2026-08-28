@@ -44,7 +44,6 @@ class FakeHyprctl:
 
         self._encoder = dispatch_grammar.DispatchEncoder(self.generation)
 
-    # inspection
     def clients(self) -> list[dict[str, Any]]:
         return [dict(c) for c in self._clients]
 
@@ -74,7 +73,6 @@ class FakeHyprctl:
     def cursor_position(self) -> tuple[float, float]:
         return (0.0, 0.0)
 
-    # dispatch
     @property
     def encoder(self):  # noqa: ANN201 - fake
         return self._encoder

@@ -66,7 +66,6 @@ def test_positional_selector_guard_refuses_silent_wrong_window():
 
 
 def test_positional_selector_guard_allows_named_table():
-    # named-field form must NOT trip the guard
     dg.guard_positional_selector(
         dg.LUA, ['hl.dsp.window.close{ window = "address:0xdead" }']
     )

@@ -1,25 +1,3 @@
-/**
- * The pairing token for the browser relay.
- *
- * Every route of the daemon's HTTP API but `GET /api/relay/status` already
- * requires its own bearer token (see api-token.ts). The relay needs a *second*
- * secret rather than sharing that one, because the thing on the other end of it
- * is a *browser*, and a browser runs code written by strangers: the extension
- * is paired by pasting a token into a popup, which puts the secret inside a
- * process the owner does not fully control, and a leak there must not also
- * hand out the API. Any page the owner visits can open
- * `ws://127.0.0.1:7717/relay`; without a secret, the first tab with a malicious
- * script would inherit the ghost's ability to drive every signed-in tab.
- *
- * It lives under XDG state rather than config — it is machine-local,
- * regenerable, and nothing a user should be editing — at
- * `$XDG_STATE_HOME/ghost/relay-token`, mode 0600 in a 0700 directory. Minted on
- * first need, printed by `ghostd relay-token`, pasted once into the extension's
- * popup, and kept in `chrome.storage.local` from then on.
- *
- * The file/compare/rotate/print machinery is shared with the API token; see
- * token-store.ts. This module is the relay's half of the parameters.
- */
 import {
   createTokenStore,
   tokenMatches,

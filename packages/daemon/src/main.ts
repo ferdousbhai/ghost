@@ -1,17 +1,4 @@
 #!/usr/bin/env bun
-/**
- * `ghostd` — the Ghost daemon.
- *
- *   ghostd                    serve on the configured port (default 7717)
- *   ghostd --port 7788        serve on an explicit port
- *   ghostd --ghosts-root DIR  serve ghosts from DIR instead of ~/ghosts
- *   ghostd --offline          forbid OMP's catalogue network calls (see README)
- *   ghostd --version | --help
- *
- * The very first thing this does — before OMP is touched, before a session
- * exists — is scrub inherited provider credentials out of the process
- * environment. See env-scrub.ts for why.
- */
 import { pathToFileURL } from "node:url";
 import { homedir } from "node:os";
 import { openMachineDocuments } from "@ghost/extensions";

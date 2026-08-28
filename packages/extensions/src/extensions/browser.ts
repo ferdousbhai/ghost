@@ -1,16 +1,3 @@
-/**
- * `ghost_browser` — the ghost's web browser.
- *
- * One tool with an action enum, not eight micro-tools: browsing is a sequence
- * (open → find → click → read) and a single tool keeps that sequence legible in
- * the transcript and keeps the tool list short. The actions are a closed enum
- * with no free-form escape hatch, per
- * the schema rules — a model that invents `action: "eval"` gets a validation
- * error, not a surprise capability.
- *
- * The browser itself lives in `browser-session.ts`: a dedicated persistent
- * Chromium profile under the ghost home, launched lazily, shut down when idle.
- */
 import type {
   ExtensionAPI,
   ExtensionFactory,

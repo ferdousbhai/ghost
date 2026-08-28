@@ -1,27 +1,7 @@
 /**
- * The ghost-home/v2 reader/writer and retained hosted-document compatibility.
- *
- * A ghost is a directory (CONTRACTS.md):
- *
- *     <ghostsRoot>/<name>/
- *       character.md
- *       docs/**\/*.md              (legacy hosted import input only)
- *       memory/*.md
- *       conversations/*.json
- *       export-manifest.json      (only in imported archives)
- *
- * Two rules run through everything here:
- *
- * 1. **Bodies are bytes.** A legacy imported doc read and written back unchanged is
- *    byte-identical. No trimming, no newline normalization, no "tidying".
- * 2. **Nothing derived is stored.** The memory index is computed per session,
- *    and the separate owner-wide Documents index is read from the machine.
- *    There is no MEMORY.md or catalog file, by contract.
- *
- * Mutations use a path-keyed in-process queue plus descriptor locks and atomic
- * rename: OMP runs tool calls in parallel, and ghostd import can be a separate
- * process, so neither shared quotas nor file publication may rely on one event
- * loop.
+ * Mutations pair the path-keyed in-process queue with descriptor locks and
+ * atomic rename because `ghostd import` mutates a home from a separate process:
+ * neither shared quotas nor file publication may rely on one event loop.
  */
 import {
   lstat,

@@ -1,10 +1,3 @@
-/**
- * The per-turn machine Documents index.
- *
- * Only names and kinds of immediate, non-hidden root children enter a model
- * prompt. File contents and descendants remain on disk until a model explicitly
- * asks a native filesystem tool for them.
- */
 import {
   DOCUMENT_INDEX_BUDGET_CHARS,
   DOCUMENT_INDEX_MAX_ENTRIES,
@@ -19,11 +12,6 @@ function catalogLine(entry: DocumentDirectoryEntry): string {
   return `- ${entry.kind}: ${JSON.stringify(entry.name)}`;
 }
 
-/**
- * One escaped line per immediate root entry, cut off at both count and prompt
- * budgets. `page.total` keeps truncation truthful even though the caller never
- * asks this automatic path for descendants or later pages.
- */
 export function deriveDocumentsIndex(
   page: Pick<DocumentDirectoryPage, "root" | "entries" | "total">,
 ): DocumentsIndex {

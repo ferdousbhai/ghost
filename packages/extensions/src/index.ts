@@ -1,12 +1,3 @@
-/**
- * `@ghost/extensions` — the OMP extensions that make a plain-file ghost home
- * behave like a persona, plus typed readers for that layout and the owner's
- * shared machine Documents tree.
- *
- * Boundary (CONTRACTS.md): no HTTP, no daemon lifecycle, no session management.
- * Anything about *how an agent runs* is OMP's; anything about *what a ghost is*
- * lives here.
- */
 export {
   GhostError,
   isGhostError,

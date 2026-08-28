@@ -1,10 +1,3 @@
-/**
- * The atomic memory-file format.
- *
- * One file is one concise fact, stored as plain Markdown with no metadata.
- * The per-session index preview is derived from the fact each time and never
- * written to disk.
- */
 import { MemoryFileFormatError } from "./errors.js";
 
 export const MAX_MEMORY_FILE_CONTENT_LENGTH = 2_000;

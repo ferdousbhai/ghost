@@ -1,14 +1,3 @@
-/**
- * Conversation titles: how a new chat gets a short human-readable name.
- *
- * After the first turn of a conversation completes, the daemon generates a
- * 3-6 word title from the first user message with a single, cheap completion
- * (see `SessionHost.startBackgroundTitle`). This module turns one completion
- * into a clean title string; WHICH model writes it is the ghost's smol lane
- * (`smol.ts`), shared with the greeting generator. It is pure and
- * runtime-injectable, so titling can be tested against a fixture catalogue with
- * no real model.
- */
 import type { Context, Model } from "@oh-my-pi/pi-ai";
 import type { GhostModelRoleBinding } from "./models.js";
 import {

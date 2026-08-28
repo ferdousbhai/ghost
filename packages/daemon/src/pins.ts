@@ -1,25 +1,3 @@
-/**
- * Pinned conversations — `sessions/pins.json`.
- *
- * Pin state is the one thing in the daemon-owned session dir that is *not*
- * derivable: nothing on disk says a conversation matters to its owner. It is
- * therefore stored, and stored the way the other sidecars in that directory
- * are — one small JSON file, replaced atomically, never appended to.
- *
- * Two properties the listing depends on:
- *
- * 1. **Reading never throws.** A missing, truncated, or hand-edited file reads
- *    as "nothing is pinned". A conversation listing must not fail because of
- *    a file the user could have opened in an editor.
- *
- * 2. **Writing is a rename.** Two daemon processes pinning at the same time
- *    can lose one edit, but neither can leave a half-written file behind for
- *    the next read to trip over.
- *
- * Version 2 ids are runtime-qualified public conversation ids. Version 1 had
- * raw resume ids; SessionHost expands those across matching runtime rows on
- * read and publishes version 2 on the next owner-state mutation.
- */
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";

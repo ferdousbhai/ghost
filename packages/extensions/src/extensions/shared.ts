@@ -1,11 +1,3 @@
-/**
- * Shared plumbing for the ghost extensions.
- *
- * The ghost home is derived from `ctx.cwd` by default. The spike proved this is
- * the shape that survives two ghosts running concurrently in one process:
- * extension module scope is per-loader but caching makes it unreliable, and a
- * process-global env var is shared by definition (report §4).
- */
 import { execFile } from "node:child_process";
 import type { AgentToolResult, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { GhostError } from "../errors.js";
@@ -14,8 +6,10 @@ import { detectInjection, fenceUntrusted } from "../untrusted.js";
 
 export interface GhostExtensionOptions {
   /**
-   * The ghost home this extension serves. A string is a directory path.
-   * Omitted, each call resolves the home from the session's own `cwd`.
+   * The ghost home this extension serves; a string is a directory path.
+   * Omitted, every call resolves it from the session's own `cwd`. One process
+   * hosts several ghosts at once, so the home may never come from module scope
+   * or a process-global env var — both are shared across those sessions.
    */
   readonly home?: GhostHome | string;
   readonly capabilities?: GhostToolCapabilitiesSource;

@@ -1,18 +1,3 @@
-/**
- * `ghostd login` — the same provider login the shell drives over HTTP, but on
- * a TTY, for headless setups and for anyone who would rather stay in the
- * terminal.
- *
- * It talks to OMP directly rather than through `LoginManager`: the manager
- * exists to make an interactive flow *pollable* over HTTP, which a terminal
- * does not need — here `readline` supplies the same `AuthInteraction` OMP's
- * `auth-command` builds from a TTY. The one thing shared with the HTTP path is
- * `bindDefaultChatModelIfUnset`, so both leave a signed-in ghost ready to chat.
- *
- * Credentials are written by `login()` to Ghost's service/account-scoped
- * Secret Service store and nowhere else. Pasted codes and keys are read
- * straight into the flow and never logged.
- */
 import { createInterface, type Interface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import {

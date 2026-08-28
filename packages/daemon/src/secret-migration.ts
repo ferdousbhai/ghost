@@ -160,7 +160,7 @@ function parseStoredCredential(type: unknown, data: unknown): AuthCredential {
 /**
  * A row OMP disabled is skipped rather than migrated: the keyring store has no
  * disabled state to carry it into, and the scrub below deletes it with the rest
- * of the file. CONTRACTS.md states that outcome and the answer to it.
+ * of the file.
  */
 function readAgentDb(path: string): PlainCredentialRow[] {
   if (!existsSync(path)) return [];
@@ -485,7 +485,7 @@ const AGENT_DB_SCHEMA_TABLES = new Set(["auth_schema_version", "auth_change_revi
  * the credential tables left the identity sitting beside them, and nothing
  * creates or reads `agent.db` after migration — the injected credential store
  * bypasses it entirely — so deleting every table not named here covers whatever
- * OMP adds later by default. CONTRACTS.md lists what the narrow scrub left.
+ * OMP adds later by default.
  */
 function scrubAgentDb(path: string): void {
   if (!existsSync(path)) return;

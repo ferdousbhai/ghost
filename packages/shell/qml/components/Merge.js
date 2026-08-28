@@ -16,11 +16,7 @@
 // nothing has to remember a flag; concatenating the line array is the exact
 // original bytes back.
 //
-// Nothing here is a CRDT and nothing here is meant to become one: a ghost home
-// is plain files (CONTRACTS.md), which means the only state a merge may rely on
-// is the three texts it is handed.
-//
-// The one hard contract, pinned in test/tst_merge.qml: every line of the result
+// The one hard invariant, pinned in test/tst_merge.qml: every line of the result
 // is a line of base, mine or theirs, emitted by slicing those arrays. No branch
 // joins, trims, or re-splits a line, so a clean merge cannot invent or lose a
 // character.

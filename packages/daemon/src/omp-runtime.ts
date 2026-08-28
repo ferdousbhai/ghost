@@ -1,10 +1,3 @@
-/**
- * Ghost's compatibility boundary onto the modern Oh My Pi runtime.
- *
- * OMP 18 exposes AuthCredentialStore beneath AuthStorage. Ghost injects its
- * machine Secret Service implementation and projects only secret-free provider
- * placeholders to OMP's file loader; actual values are registered in memory.
- */
 import { randomUUID } from "node:crypto";
 import {
   chmodSync,

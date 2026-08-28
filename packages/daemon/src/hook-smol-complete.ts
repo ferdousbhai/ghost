@@ -1,8 +1,3 @@
-/**
- * A narrow stdin/stdout bridge for command hooks that need Ghost's configured
- * smol lane. It performs one raw completion: no session, tools, transcript, or
- * reasoning-effort override.
- */
 import type { Context, Model } from "@oh-my-pi/pi-ai";
 import { isAbsolute, resolve } from "node:path";
 import { realpath } from "node:fs/promises";
