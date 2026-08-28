@@ -649,6 +649,20 @@ describe("SessionHost.open", () => {
       cwd: dir,
     });
 
+    // Keep ahead of the padded transcripts below: the snapshot bracketing this
+    // read base64s every file in the session directory, and 384 MiB fixtures
+    // would cost three quarters of a gigabyte twice to prove nothing extra.
+    const nulPrefix = join(temp!.root, "must-not-become-a-cwd");
+    writeTranscript("nul-cwd-legacy", [{
+      ...header("nul-cwd-legacy"),
+      cwd: `${nulPrefix}\0escape`,
+    }]);
+    const beforeNulRead = directoryBytesSnapshot(paths.sessionDir);
+    await expect(host!.getProject("casper", "nul-cwd-legacy", "pi"))
+      .resolves.toMatchObject({ cwd: temp!.ownerHome, reason: "default" });
+    expect(directoryBytesSnapshot(paths.sessionDir)).toEqual(beforeNulRead);
+    expect(existsSync(nulPrefix)).toBe(false);
+
     const sparse = writeTranscript("sparse-legacy", [header("sparse-legacy")]);
     truncateSync(sparse, 384 * 1024 * 1024);
     await expect(host!.getProject("casper", "sparse-legacy", "pi"))
@@ -661,17 +675,6 @@ describe("SessionHost.open", () => {
     truncateSync(titleFirst, 384 * 1024 * 1024);
     await expect(host!.getProject("casper", "title-first-legacy", "pi"))
       .resolves.toMatchObject({ cwd: dir, reason: "legacy" });
-
-    const nulPrefix = join(temp!.root, "must-not-become-a-cwd");
-    writeTranscript("nul-cwd-legacy", [{
-      ...header("nul-cwd-legacy"),
-      cwd: `${nulPrefix}\0escape`,
-    }]);
-    const beforeNulRead = directoryBytesSnapshot(paths.sessionDir);
-    await expect(host!.getProject("casper", "nul-cwd-legacy", "pi"))
-      .resolves.toMatchObject({ cwd: temp!.ownerHome, reason: "default" });
-    expect(directoryBytesSnapshot(paths.sessionDir)).toEqual(beforeNulRead);
-    expect(existsSync(nulPrefix)).toBe(false);
 
     const longLine = join(paths.sessionDir, sessionFileNameFor("long-header"));
     writeFileSync(longLine, `${"x".repeat(64 * 1024 + 1)}\n`, {

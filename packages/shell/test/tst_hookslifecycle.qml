@@ -8,8 +8,9 @@ TestCase {
     name: "HooksLifecycle"
 
     property var requests: []
+    property var documentRequests: []
 
-    function fakeRequest(): var {
+    function fakeRequest(bucket: var): var {
         const xhr = {
             readyState: 0,
             status: 0,
@@ -40,7 +41,7 @@ TestCase {
                 if (this.onreadystatechange) this.onreadystatechange();
             }
         };
-        requests.push(xhr);
+        bucket.push(xhr);
         return xhr;
     }
 
@@ -67,8 +68,24 @@ TestCase {
 
     function init(): void {
         requests = [];
-        Ghostd.hooksRequestFactory = function () { return tc.fakeRequest(); };
+        documentRequests = [];
+        Ghostd.hooksRequestFactory = function () { return tc.fakeRequest(tc.requests); };
         Ghostd.beginHooksConnectionEpoch();
+        // The catalog is the only daemon connection this file asserts on, but
+        // every connection on the shared singleton drives one `reachable` latch,
+        // and a false latch retires the hooks epoch through onReachableChanged.
+        // Ghostd's other connections open real sockets to the unreachable test
+        // port; their status-0 failures land whenever the event loop reaches
+        // them, which on a loaded machine is inside some later test. Disown the
+        // ones a neighbouring test file can leave in flight, and give Documents
+        // — the one a reachable Ghostd starts by itself — a fake transport so
+        // this file opens no socket of its own either.
+        Ghostd.listRequest = null;
+        Ghostd.cancelAllTranscriptLoads();
+        Ghostd.documentRequestFactory = function () {
+            return tc.fakeRequest(tc.documentRequests);
+        };
+        Ghostd.beginDocumentsConnectionEpoch();
         Ghostd.establishedConnection = false;
         Ghostd.reachable = false;
         Ghostd.activeGhost = "casper";
@@ -81,6 +98,9 @@ TestCase {
         Ghostd.retireHooksRequest();
         Ghostd.hooksRequestFactory = null;
         Ghostd.beginHooksConnectionEpoch();
+        // Retire before dropping the factory: the epoch bump aborts the fakes.
+        Ghostd.beginDocumentsConnectionEpoch();
+        Ghostd.documentRequestFactory = null;
     }
 
     function test_initialLoadingReadyAndEmptyStates(): void {
@@ -167,7 +187,17 @@ TestCase {
         // A healthy daemon response elsewhere starts a fresh catalog request.
         Ghostd.documentsRoot = "/owner/Documents";
         Ghostd.reachable = true;
-        tryVerify(function () { return requests.length === 2; });
+        // The catalog request is deferred with Qt.callLater, so poll for it;
+        // the timeout is a deadlock guard, not an expected wait. `reachable` is
+        // machine-wide state on a singleton every test file shares, so a
+        // status-0 socket belonging to some other connection can drop it at any
+        // point this test yields — which would leave the catalog waiting on an
+        // edge that never comes back. Re-latch it rather than lose the premise.
+        tryVerify(function () {
+            if (!Ghostd.reachable) Ghostd.reachable = true;
+            return requests.length === 2;
+        }, 30000, "reachability should start exactly one fresh catalog request");
+        compare(requests.length, 2);
         requests[1].complete(200, status("After reconnect"));
         verify(Ghostd.hooksLoaded);
         compare(Ghostd.activeHooks[0].name, "After reconnect");
