@@ -49,6 +49,9 @@ cd packages/shell
 
 # Terminal 1: two ghosts, owned temporary context, and canned streamed replies.
 node dev/mock-ghostd.mjs --port 17717
+# Shape a preview: --slow (30ms deltas), --tool-steps N, --ask-timeout S,
+# --fail (turn ends in an error), --omit-terminal (no terminal event),
+# --stall-stream (stream never settles).
 
 # Terminal 2: the one supported HUD preview command.
 bash dev/preview.sh qml/shell.qml 17717
