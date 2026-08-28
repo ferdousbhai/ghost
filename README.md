@@ -14,8 +14,11 @@ disabled in phase 1; project plugins, hooks, custom code tools, and LSP are also
 disabled pending a per-session isolation boundary. Trusted visible
 `hooks/pre` and `hooks/post` files in the ghost home remain the explicit
 in-process extension surface. The optional Claude Code runtime retains Claude's
-native subagents. Ghost layers its persona, memory, shallow owner Documents
-index, browser, and desktop capabilities on top. The Quickshell client renders
+native subagents. Ghost replaces Pi's coding-oriented system prompt with its
+character, bounded memory and shallow owner Documents indexes, and minimal
+runtime guidance; Claude keeps its native preset and receives the same
+Ghost-owned context as an append. Browser and desktop capabilities remain
+available. The Quickshell client renders
 live tool activity and the recovered summoning orb from the earlier
 summon-ghost interface.
 

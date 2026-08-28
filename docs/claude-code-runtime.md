@@ -70,9 +70,9 @@ For each turn Ghost:
    and turns, and invalidated after a successful login/auth refresh);
 2. requires Claude.ai plan auth rather than accepting an API-key-backed
    status;
-3. rebuilds the persona, memory index, and visible user-level declarative
-   snapshot from the ghost home and the shallow index from the owner's shared
-   XDG Documents root;
+3. rebuilds the persona and memory index from the ghost home, the shallow index
+   from the owner's shared XDG Documents root, and the always-active
+   declarative instructions;
 4. applies the conversation's pre-turn project binding: owner home when
    unbound, or the trusted project cwd plus its approved declarative snapshot;
 5. captures the Ghost-specific `@ghost/extensions` tool definitions and
@@ -90,12 +90,14 @@ The query is deliberately unrestricted for its local owner:
   search, subagents, and background work, remains enabled;
 - filesystem setting sources are pinned to none, so changing cwd cannot admit
   owner/project executable settings, hooks, plugins, or arbitrary MCP;
-- the visible ghost home contributes its accepted instructions, skills, rules,
-  Markdown commands, and prompts even while unbound; one explicitly trusted
-  project contributes its immutable accepted snapshot with the same exact-name
-  project-over-ghost shadowing as Pi. Malformed project resources cannot shadow
-  accepted ghost siblings. Native SDK skill discovery stays empty, and neither
-  cwd nor hidden ghost providers add resources;
+- the visible ghost home contributes accepted instruction files and rules
+  explicitly marked `alwaysApply`; one explicitly trusted project contributes
+  the same subset from its immutable snapshot with Pi's exact-name
+  project-over-ghost shadowing. Skill, conditional-rule, prompt, and
+  Markdown-command bodies do not become always-active instructions. Malformed
+  project resources cannot shadow accepted ghost siblings. Native SDK skill
+  discovery stays empty, and neither cwd nor hidden ghost providers add
+  resources;
 - because the first-turn MCP translation is persisted for resume, phase 1
   rejects any project MCP row containing environment expansion, stdio env,
   headers, auth/OAuth, or URL userinfo/query before starting Claude. It never
@@ -199,10 +201,10 @@ are:
 The full T3 provider graph, approvals UI, and long-lived queue were not copied.
 Claude Code's own coding tools and subagents remain native. Ghost passes
 `settingSources: []` and `skills: []`; declarative skills are not enabled
-through Claude's live discovery mechanism. Instead, Ghost supplies one
-always-active, bounded, descriptor-confined, already-read effective snapshot
-(the admitted ghost and project instruction, skill, rule, prompt, and
-Markdown-command text) in the system prompt append, plus scoped MCP explicitly.
+through Claude's live discovery mechanism. Ghost appends only the admitted
+ghost/project instruction files and `alwaysApply` rules from its bounded,
+descriptor-confined snapshot, plus scoped MCP explicitly. Other declarative
+project categories remain stored for resume parity but do not enter every query.
 Symbolic links, hidden ghost providers, and ambient cwd resources never enter
 that snapshot, and executable settings remain disabled.
 The dependency versions match the reviewed T3 implementation:

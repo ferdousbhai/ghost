@@ -16,7 +16,7 @@ export interface EffectiveDeclarativeSnapshot {
 export interface DeclarativePromptSnapshot {
   instructions: Array<{ path: string; content: string }>;
   skills: Array<{ name: string; path: string; content: string }>;
-  rules: Array<{ name: string; path: string; content: string }>;
+  rules: Array<{ name: string; path: string; content: string; alwaysApply?: boolean }>;
   prompts: Array<{ name: string; content: string }>;
   commands: Array<{ name: string; content: string }>;
 }
@@ -51,7 +51,7 @@ export function mergeProjectDeclarativeSnapshots(
   };
 }
 
-/** Keep only the accepted typed bytes that a non-OMP prompt runtime consumes. */
+/** Freeze accepted declarative bytes for a non-OMP runtime and its resume sidecar. */
 export function declarativePromptSnapshot(
   snapshot: EffectiveDeclarativeSnapshot,
 ): DeclarativePromptSnapshot {
@@ -66,6 +66,7 @@ export function declarativePromptSnapshot(
       name: rule.name,
       path: rule.path,
       content: requiredContent(rule.content, "rule"),
+      ...(rule.alwaysApply === true ? { alwaysApply: true } : {}),
     })),
     prompts: snapshot.promptTemplates.map((prompt) => ({
       name: prompt.name,
@@ -90,39 +91,80 @@ export function mergeDeclarativePromptSnapshots(
   };
 }
 
-export function renderDeclarativePrompt(snapshot: DeclarativePromptSnapshot): string {
+/** Always-active declarative text for Claude's native system-prompt preset. */
+export function renderClaudeDeclarativePrompt(snapshot: DeclarativePromptSnapshot): string {
   const sections = [
     ...snapshot.instructions.map((item) => ({
       kind: "instruction",
       label: `path=${JSON.stringify(item.path)}`,
       content: item.content,
     })),
-    ...snapshot.skills.map((item) => ({
-      kind: "skill",
-      label: `name=${JSON.stringify(item.name)} path=${JSON.stringify(item.path)}`,
-      content: item.content,
-    })),
-    ...snapshot.rules.map((item) => ({
+    ...snapshot.rules.filter((item) => item.alwaysApply === true).map((item) => ({
       kind: "rule",
       label: `name=${JSON.stringify(item.name)} path=${JSON.stringify(item.path)}`,
-      content: item.content,
-    })),
-    ...snapshot.prompts.map((item) => ({
-      kind: "prompt",
-      label: `name=${JSON.stringify(item.name)}`,
-      content: item.content,
-    })),
-    ...snapshot.commands.map((item) => ({
-      kind: "command",
-      label: `name=${JSON.stringify(item.name)}`,
       content: item.content,
     })),
   ];
   if (sections.length === 0) return "";
   return [
-    "<ghost-declarative-resources>",
+    "## Instructions",
     ...sections.map((item) =>
       `<${item.kind} ${item.label}>\n${item.content}\n</${item.kind}>`),
-    "</ghost-declarative-resources>",
   ].join("\n");
+}
+
+export interface PiDeclarativePromptOptions {
+  readonly disabledRules?: readonly string[];
+}
+
+/** Only declarative material the Pi model can act on before an explicit invocation. */
+export function renderPiDeclarativePrompt(
+  snapshot: EffectiveDeclarativeSnapshot,
+  options: PiDeclarativePromptOptions = {},
+): string {
+  const disabledRules = new Set(options.disabledRules ?? []);
+  const unconditionalRules = snapshot.rules.filter((rule) =>
+    !disabledRules.has(rule.name)
+    && rule.alwaysApply === true
+    && !rule.condition?.length
+    && !rule.astCondition?.length);
+  const discoverableRules = snapshot.rules.filter((rule) =>
+    !disabledRules.has(rule.name)
+    && rule.alwaysApply !== true
+    && !rule.condition?.length
+    && !rule.astCondition?.length
+    && Boolean(rule.description));
+  const skills = snapshot.skills.filter((skill) => skill.hide !== true);
+  const sections: string[] = [];
+
+  if (snapshot.contextFiles.length > 0 || unconditionalRules.length > 0) {
+    sections.push([
+      "## Instructions",
+      ...snapshot.contextFiles.map((file) =>
+        `<instruction path=${JSON.stringify(file.path)}>\n${file.content}\n</instruction>`),
+      ...unconditionalRules.map((rule) =>
+        `<rule name=${JSON.stringify(rule.name)} path=${JSON.stringify(rule.path)}>\n${rule.content}\n</rule>`),
+    ].join("\n\n"));
+  }
+
+  if (skills.length > 0) {
+    sections.push([
+      "## Skills",
+      "When a skill matches, read `skill://<name>` before acting.",
+      ...skills.map((skill) => `- ${skill.name}: ${skill.description}`),
+    ].join("\n"));
+  }
+
+  if (discoverableRules.length > 0) {
+    sections.push([
+      "## Rules",
+      "When a rule matches, read `rule://<name>` before acting.",
+      ...discoverableRules.map((rule) => {
+        const globs = rule.globs?.length ? ` (${rule.globs.join(", ")})` : "";
+        return `- ${rule.name}${globs}: ${rule.description}`;
+      }),
+    ].join("\n"));
+  }
+
+  return sections.join("\n\n");
 }

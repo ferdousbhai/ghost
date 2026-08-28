@@ -16,8 +16,7 @@
  *
  * Only surfaces Ghost owns or can pin:
  *
- * - **The Ghost persona section** of the assembled system prompt, sliced off
- *   the tail of what actually went over the wire to the model.
+ * - **The complete system prompt** sent through the provider-neutral Pi path.
  * - **The tool surface**, both as advertised on the wire and as the session's
  *   active registry reports it.
  * - **The pi-messages event stream** of every turn, canonicalised.
@@ -27,11 +26,6 @@
  *
  * ## What is deliberately excluded, and why
  *
- * - **OMP's own system prompt** (everything before the persona section). It
- *   embeds workstation details such as the kernel, CPU, GPU, and `$TERM`, so it
- *   cannot be byte-stable across machines. `personaOf()` below slices it away;
- *   focused tests separately pin the explicit ghost/project snapshots and the
- *   absence of ambient owner-home resources.
  * - **`agentDir` internals** — `.pi/models.db`, the `sessions/*.jsonl`
  *   transcripts. Binary/SQLite and full of ids and clock values; the rendered
  *   transcript is the same information in a stable shape.
@@ -185,34 +179,6 @@ export class Normalizer {
   json(input: unknown): string {
     return JSON.stringify(this.value(input), null, 2);
   }
-}
-
-// ---------------------------------------------------------------------------
-// Extraction helpers
-// ---------------------------------------------------------------------------
-
-/**
- * The Ghost persona section of an assembled system prompt.
- *
- * The persona extension appends `buildGhostSystemPrompt()` as the last element
- * of OMP's `systemPrompt` array, and its first line is the ghost's character
- * body. So the persona is the suffix beginning at the last occurrence of the
- * character body's opening line — everything before it is the harness prompt,
- * which is machine-dependent and excluded on purpose (see the header).
- *
- * Throws rather than returning a best guess: a persona that stopped being
- * appended is exactly the silent breakage these fixtures exist to catch.
- */
-export function personaOf(systemPrompt: string, anchor: string): string {
-  const at = systemPrompt.lastIndexOf(anchor);
-  if (at === -1) {
-    throw new Error(
-      `The persona anchor ${JSON.stringify(anchor)} is not in the system prompt that reached `
-      + "the model. Either the persona extension stopped appending its section, or the "
-      + `character body changed and the fixture's anchor needs updating.\n${REGENERATE_HINT}`,
-    );
-  }
-  return systemPrompt.slice(at).trimEnd();
 }
 
 /**

@@ -156,15 +156,17 @@ describe("character extension", () => {
       .toContain("You are Casper, the ghost of a working typographer");
   });
 
-  it("caps an oversized body on the way to the model", async () => {
+  it("rejects a hand-edited oversized body before it reaches the model", async () => {
     await writeFile(
       characterPath(),
       `${"y".repeat(MAX_CHARACTER_BODY_LENGTH + 500)}\n`,
       "utf8",
     );
     const harness = await loadExtension(createCharacterExtension(), fixture.dir);
-    const result = await harness.call(GHOST_CHARACTER, { action: "read" });
-    expect(result.details).toMatchObject({ truncated: true });
-    expect(resultText(result)).toContain("showing the first");
+    await expect(harness.call(GHOST_CHARACTER, { action: "read" }))
+      .rejects.toMatchObject({
+        code: "limit_exceeded",
+        details: { limit: MAX_CHARACTER_BODY_LENGTH },
+      });
   });
 });

@@ -65,14 +65,18 @@ does not create task subagents. Claude Code retains its own native subagents.
 
 `character.md` has no frontmatter. Its leading Markdown heading
 (`#` through `######`) is the derived display title, while the complete
-Markdown body is the persona injected into the system prompt.
+Markdown body is the persona injected into the system prompt. The body is at
+most 20,000 JavaScript UTF-16 code units. Tool writes and direct home writes
+reject a larger body, and a larger hand-edited file fails session construction
+rather than being truncated into the prompt.
 
 Memory files have no frontmatter and no required heading. Their complete
 Markdown content is the fact. The per-session index normalizes that content to
 one line and derives a word-aware preview of at most 32 characters, including
 `...`. It orders files by modification time descending, then slug ascending,
 and admits only complete lines through its 4,000-character budget, so the
-stalest facts fall out first. The context API returns `updated` as the file's
+stalest facts fall out first. Index lines are fenced as untrusted data. The
+context API returns `updated` as the file's
 full ISO modification timestamp.
 One file is at most 2,000 JavaScript UTF-16 code units of content and 6,001
 on-disk bytes, inclusive; the byte ceiling is the worst-case canonical UTF-8
@@ -300,34 +304,37 @@ are the only
 deliberate exceptions. They are explicitly initiated off-machine capabilities
 and never broaden another ghost or conversation.
 
-A Pi session uses OMP's runtime and native tools, but Ghost owns its roots. A
-new conversation's operational cwd is the OS account home (`os.homedir()`),
-while `agentDir`, `sessionDir`, character, memory, persona, keyring policy,
-browser profile, and MCP/config sources remain explicit paths under the ghost
-home. Cwd is not storage and is not authority to discover a project. Ghost
-keeps the operating half of OMP's system prompt, then appends the Ghost persona,
-derived memory section, and shallow machine Documents index.
+A Pi session uses OMP's runtime and native tools, but Ghost owns its roots and
+provider-facing system prompt. A new conversation's operational cwd is the OS
+account home (`os.homedir()`), while `agentDir`, `sessionDir`, character,
+memory, persona, keyring policy, browser profile, and MCP/config sources remain
+explicit paths under the ghost home. Cwd is not storage and is not authority to
+discover a project. Ghost passes an explicit system-prompt override to OMP,
+then its persona extension replaces that prompt before every model turn. No OMP
+convention, role, personality, workflow, delivery, tool-policy, project,
+hardware, AutoQA, or device-schema prose is retained or subtracted by marker.
 
-Deliberate subtractions from the harness prompt. The persona extension removes
-`§ Role`, `§ Workflow`, `§ Delivery`, and `§ Critical`: the first casts the
-model as a coding assistant and sets its voice twenty thousand characters
-before `character.md` is reached, and the rest are the rules of a coding task,
-which a conversation is often not. None of the four has a setting.
-`personality: "none"` drops the voice rules that do. `tools.xdevDocs: "catalog"`
-moves the built-in device schemas (`ast_edit`, `debug`, `lsp`, `inspect_image`)
-out of the prompt, leaving the catalog that names them and one `xd://<name>`
-read before first use.
+The Ghost-owned Pi prompt is ordered: the complete `character.md` body (or a
+two-line unwritten-character fallback); the fenced, bounded memory index; the
+fenced, shallow Documents index; one sentence explaining `xd://`; accepted
+instruction files and unconditional `alwaysApply` rules; compact name and
+description indexes for visible skills and discoverable rules; then the seeded
+first-meeting section when applicable. Skill bodies, conditional-rule bodies,
+Markdown prompts, and Markdown commands enter model context only through their
+explicit OMP invocation paths. The golden session fixture records the complete
+provider-facing prompt and rejects known OMP prompt markers. OMP still adds its
+date/cwd reminder to the first user message, outside the system prompt. A
+provider adapter may add protocol-required blocks after this boundary; in
+particular Anthropic OAuth adds its billing/fingerprint and Claude Agent SDK
+identity blocks.
 
-What stays is everything about operating the machine: `§ Runtime` with its
-skills, rules, and internal URLs, the tool inventory, and `§ Tool Policy`. A
-seeded ghost's first turn carries about 10.2k characters of system prompt where
-it carried 23.8k.
 Native filesystem and search (`read`, `glob`, `grep`), mutation (`write`,
 `edit`), Bash, web search, hub coordination, background jobs, and Ghost's
 explicit declarative snapshot remain available under OMP's normal xd://
 presentation. The Pi runtime explicitly denies `task`; no bundled, custom, or
 ambient subagent can be spawned. Claude Code retains its own native subagent
-behavior. OMP settings and
+behavior. OMP AutoQA is forced off so it cannot add a grievance instruction,
+database, or network route. OMP settings and
 model/config discovery use the ghost home, never
 the live cwd. OMP extension discovery receives explicit empty additional and
 preloaded path lists. Ghost imports only its descriptor-pinned visible
@@ -969,16 +976,18 @@ one must not be a leak of both.
   following links. At the bound project root, instruction providers shadow in
   Pi order: `.omp/AGENTS.md`, `.claude/CLAUDE.md`, `.agents/AGENTS.md`,
   `AGENTS.md`, then `CLAUDE.md`; Ghost injects the first admitted regular file
-  only. Pi injects the resulting context/skills/rules/prompts/
-  commands as exact arrays and injects null/empty active-repository, watchdog,
-  and passive-advisor inputs; no lexical post-load filter is an authority boundary.
+  only. Pi receives the resulting context/skills/rules/prompts/commands as exact
+  arrays and null/empty active-repository, watchdog, and passive-advisor inputs;
+  its baseline system prompt includes only instruction bodies, unconditional
+  `alwaysApply` rule bodies, and compact skill/discoverable-rule indexes. No
+  lexical post-load filter is an authority boundary.
   Project and ghost-file agent definitions are counted but inactive. Pi's
   `task` tool is explicitly disabled and performs no live/ambient agent
   discovery. Claude keeps
-  native `skills:[]` and `settingSources:[]`: instead, its
-  always-active system-prompt append combines the visible ghost home's bounded
-  user-level instruction/skill/rule/prompt/Markdown-command snapshot with the
-  same already-read project categories Pi receives. Exact resource names use
+  native `skills:[]` and `settingSources:[]`. Its system-prompt append includes
+  accepted ghost/project instruction files and only rules explicitly marked
+  `alwaysApply`; skill, conditional-rule, prompt, and Markdown-command bodies do
+  not become always-active Claude instructions. Exact resource names still use
   Pi's project-over-ghost shadowing; a malformed project resource is rejected
   before that merge and cannot hide an accepted ghost sibling. Agent-definition
   content and executable project code enter neither runtime. This is
@@ -1469,10 +1478,9 @@ are read as `smol_model` when the new key is absent; writers persist only
 
 While `character.md` is missing, blank, or byte-equal to the seed, sessions —
 OMP and Claude Code runtimes alike — get a
-"first meeting" system-prompt section: interview the owner with genuine
-curiosity (one question at a time, the owner's request always first), save
-durable facts as declarative memories, offer docs for ongoing projects, and
-eventually draft and write the character with the
+"first meeting" system-prompt section: help with the owner's request first,
+learn about them one question at a time during quiet moments, save durable facts
+as memory, and eventually draft and write the character with the
 `ghost_character` tool (read/write `character.md`). The populated character
 file IS the completion latch — there is no separate onboarding state — and the
 section stops being injected on the first session after the file deviates from
@@ -1615,11 +1623,12 @@ The runtime uses the owner's local Claude Code authentication, native system
 prompt, built-in tools, and web search in bypass-permissions mode. Filesystem
 setting sources are pinned to `[]`: neither owner-home cwd nor a trusted project
 may inject executable settings, hooks, or plugins. Every query appends the
-visible ghost home's bounded user-level instruction/skill/rule/prompt/
-Markdown-command snapshot while keeping SDK `skills:[]`; a bound project adds
-its stored accepted snapshot with Pi's exact-name project-over-ghost shadowing
-and translates only its validated native MCP rows into the SDK config. Unbound
-sessions enable no cwd-discovered skills. Existing Ghost extension
+Ghost character, derived indexes, accepted instruction files, and rules marked
+`alwaysApply`, while keeping SDK `skills:[]`; skill, conditional-rule, prompt,
+and Markdown-command bodies are not injected into every turn. A bound project
+adds its stored accepted snapshot with Pi's exact-name project-over-ghost
+shadowing and translates only its validated native MCP rows into the SDK config.
+Unbound sessions enable no cwd-discovered skills. Existing Ghost extension
 tools are added through one in-process SDK MCP server, and output is normalized
 back to pi-messages. Ambient provider credentials remain scrubbed.
 
@@ -1685,6 +1694,9 @@ whole model before any non-local exposure.
   `CLAUDE_CODE_SHELL_PREFIX`. Hosted settings pass an explicit empty overlay
   list, and every Bash/PTY path receives that conversation's Settings instance;
   neither surface may fall back to an OMP process singleton.
+- Pass an explicit OMP system-prompt override and replace it wholesale in the
+  persona extension before every turn. Never reintroduce inherited prompt prose
+  or marker-based subtraction. Keep `dev.autoqa` false.
 - Parallel tool calls: wrap shared-file mutations in a file mutation queue.
 - Tools should throw structured errors, not return `isError` payloads.
 - Sessions load read-only OMP settings only from the ghost home's visible

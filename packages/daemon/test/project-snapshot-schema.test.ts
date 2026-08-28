@@ -12,7 +12,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   declarativePromptSnapshot,
   mergeProjectDeclarativeSnapshots,
-  renderDeclarativePrompt,
+  renderClaudeDeclarativePrompt,
+  renderPiDeclarativePrompt,
 } from "../src/declarative-snapshot.js";
 import { loadProjectDeclarativeSnapshot } from "../src/project-resources.js";
 import {
@@ -45,25 +46,36 @@ describe("Pi project snapshot schema", () => {
       join(project, ".omp", "skills", "typed", "SKILL.md"),
       "---\nname: typed\ndescription: typed\n---\n\nTYPED-SKILL-SENTINEL",
     );
-    writeFileSync(join(project, ".omp", "rules", "typed.md"), "TYPED-RULE-SENTINEL");
+    writeFileSync(
+      join(project, ".omp", "rules", "typed.md"),
+      "---\nalwaysApply: true\n---\n\nTYPED-RULE-SENTINEL",
+    );
     writeFileSync(join(project, ".omp", "prompts", "typed.md"), "TYPED-PROMPT-SENTINEL");
     writeFileSync(join(project, ".omp", "commands", "typed.md"), "TYPED-COMMAND-SENTINEL");
 
     const snapshot = await loadProjectDeclarativeSnapshot(project, {
       level: "project",
     });
-    const rendered = renderDeclarativePrompt(
-      declarativePromptSnapshot(mergeProjectDeclarativeSnapshots([snapshot])),
-    );
+    const effective = mergeProjectDeclarativeSnapshots([snapshot]);
+    const rendered = renderClaudeDeclarativePrompt(declarativePromptSnapshot(effective));
     for (const sentinel of [
       "TYPED-INSTRUCTION-SENTINEL",
-      "TYPED-SKILL-SENTINEL",
       "TYPED-RULE-SENTINEL",
-      "TYPED-PROMPT-SENTINEL",
-      "TYPED-COMMAND-SENTINEL",
     ]) {
       expect(rendered).toContain(sentinel);
     }
+    for (const sentinel of [
+      "TYPED-SKILL-SENTINEL",
+      "TYPED-PROMPT-SENTINEL",
+      "TYPED-COMMAND-SENTINEL",
+    ]) expect(rendered).not.toContain(sentinel);
+    const piRendered = renderPiDeclarativePrompt(effective);
+    expect(piRendered).toContain("TYPED-INSTRUCTION-SENTINEL");
+    expect(piRendered).toContain("TYPED-RULE-SENTINEL");
+    expect(piRendered).toContain("- typed: typed");
+    expect(piRendered).not.toContain("TYPED-SKILL-SENTINEL");
+    expect(piRendered).not.toContain("TYPED-PROMPT-SENTINEL");
+    expect(piRendered).not.toContain("TYPED-COMMAND-SENTINEL");
 
     const stats = statSync(project, { bigint: true });
     const identity = { dev: stats.dev.toString(), ino: stats.ino.toString() };
@@ -117,7 +129,7 @@ describe("Pi project snapshot schema", () => {
       root: project,
       identity,
     });
-    const restoredRendering = renderDeclarativePrompt(
+    const restoredRendering = renderClaudeDeclarativePrompt(
       declarativePromptSnapshot(mergeProjectDeclarativeSnapshots([restored])),
     );
     expect(restoredRendering).toBe(rendered);

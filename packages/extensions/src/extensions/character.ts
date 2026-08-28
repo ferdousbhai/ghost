@@ -19,11 +19,12 @@ import type {
 } from "@oh-my-pi/pi-coding-agent";
 import { Type } from "@oh-my-pi/pi-coding-agent/extensibility/legacy-typebox";
 import { GhostError } from "../errors.js";
-import { CHARACTER_FILENAME } from "../home.js";
+import {
+  CHARACTER_FILENAME,
+  MAX_CHARACTER_BODY_LENGTH,
+} from "../home.js";
 import { stringEnum } from "../tool-schema.js";
 import {
-  budgeted,
-  budgetFooter,
   resolveHome,
   textResult,
   type GhostExtensionOptions,
@@ -37,12 +38,7 @@ export type CharacterAction = "read" | "write";
 
 export const CHARACTER_ACTIONS = ["read", "write"] as const satisfies CharacterAction[];
 
-/**
- * Cap on a character body, in characters. A persona is loaded into *every*
- * turn's system prompt, so an unbounded one is a permanent tax on the context
- * window rather than a one-off large tool result.
- */
-export const MAX_CHARACTER_BODY_LENGTH = 20_000;
+export { MAX_CHARACTER_BODY_LENGTH } from "../home.js";
 
 /**
  * Lines from the character file a freshly created ghost is seeded with (the
@@ -130,21 +126,17 @@ export function createCharacterExtension(
           }
 
           const seeded = isSeededCharacterBody(current.body);
-          // A hand-edited character file has no size ceiling of its own; cap it
-          // before handing it to the model.
-          const shown = budgeted(current.body, MAX_CHARACTER_BODY_LENGTH);
-          const footer = budgetFooter(shown);
           const header = `${CHARACTER_FILENAME} — title: ${current.title ?? "(none)"}`
             + (seeded ? "; still the seeded file you were summoned with" : "");
           return textResult(
-            `${header}\n\n${shown.text}${footer ? `\n\n${footer}` : ""}`,
+            `${header}\n\n${current.body}`,
             {
               exists: true,
               empty: false,
               seeded,
               title: current.title ?? null,
-              length: shown.totalLength,
-              truncated: shown.truncated,
+              length: current.body.length,
+              truncated: false,
             },
           );
         }

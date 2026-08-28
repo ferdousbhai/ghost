@@ -87,7 +87,6 @@ import {
   GhostError,
   ghostPaths,
   isSeededCharacter,
-  readCharacterFile,
   type Ghost,
 } from "./ghosts.js";
 import { silentLogger, type Logger } from "./log.js";
@@ -103,7 +102,7 @@ import {
   declarativePromptSnapshot,
   mergeDeclarativePromptSnapshots,
   mergeProjectDeclarativeSnapshots,
-  renderDeclarativePrompt,
+  renderClaudeDeclarativePrompt,
   type DeclarativePromptSnapshot,
 } from "./declarative-snapshot.js";
 
@@ -633,6 +632,12 @@ const CLAUDE_DECLARATIVE_FIELDS = new Set([
 ]);
 const CLAUDE_DECLARATIVE_INSTRUCTION_FIELDS = new Set(["path", "content"]);
 const CLAUDE_DECLARATIVE_NAMED_PATH_FIELDS = new Set(["name", "path", "content"]);
+const CLAUDE_DECLARATIVE_RULE_FIELDS = new Set([
+  "name",
+  "path",
+  "content",
+  "alwaysApply",
+]);
 const CLAUDE_DECLARATIVE_NAMED_FIELDS = new Set(["name", "content"]);
 
 function uniqueNamedResources(values: readonly unknown[]): boolean {
@@ -680,12 +685,16 @@ function validDeclarativePromptSnapshot(value: unknown, root: string | null): bo
       && row.name.length > 0
       && typeof row.content === "string");
   };
+  const validRule = (entry: unknown): boolean => {
+    const row = objectRecord(entry);
+    return validPathResource(entry, CLAUDE_DECLARATIVE_RULE_FIELDS, true)
+      && (row?.alwaysApply === undefined || typeof row.alwaysApply === "boolean");
+  };
   if (!snapshot.instructions.every((entry) =>
     validPathResource(entry, CLAUDE_DECLARATIVE_INSTRUCTION_FIELDS, false))
     || !snapshot.skills.every((entry) =>
       validPathResource(entry, CLAUDE_DECLARATIVE_NAMED_PATH_FIELDS, true))
-    || !snapshot.rules.every((entry) =>
-      validPathResource(entry, CLAUDE_DECLARATIVE_NAMED_PATH_FIELDS, true))
+    || !snapshot.rules.every(validRule)
     || !snapshot.prompts.every(validNamedResource)
     || !snapshot.commands.every(validNamedResource)
     || !uniqueNamedResources(snapshot.skills)
@@ -937,10 +946,11 @@ async function buildPersona(
   return buildGhostSystemPrompt({
     ghostName,
     character,
+    memoryRoot: home.memoryDir,
     memory: deriveMemoryIndex(memory.files),
     docs: deriveDocumentsIndex(documentPage),
     // A seeded character.md means this ghost has not met its owner yet.
-    extraSections: isSeededCharacter(ghostName, readCharacterFile(homeDir))
+    extraSections: isSeededCharacter(ghostName, character?.body ?? null)
       ? [FIRST_MEETING_SECTION]
       : [],
   });
@@ -1764,7 +1774,7 @@ export class ClaudeCodeRuntime {
         declarativePromptSnapshot(mergeProjectDeclarativeSnapshots([ghostDeclarative])),
         approvedProject.declarative,
       ]);
-      const declarativeAppend = renderDeclarativePrompt(effectiveDeclarative);
+      const declarativeAppend = renderClaudeDeclarativePrompt(effectiveDeclarative);
       const systemPrompt = declarativeAppend ? `${persona}\n\n${declarativeAppend}` : persona;
       for (const warning of ghostDeclarative.warnings) {
         this.logger.warn("Claude Ghost resource stayed disabled", {

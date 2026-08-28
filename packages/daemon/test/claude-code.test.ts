@@ -776,7 +776,7 @@ describe("Claude Code subscription runtime", () => {
     });
   });
 
-  it("injects every accepted visible Ghost category while unbound", async () => {
+  it("injects only always-active Ghost instructions while unbound", async () => {
     const { paths, seenOptions } = setupClaudeHost();
     mkdirSync(join(paths.home, "skills", "unbound"), { recursive: true });
     mkdirSync(join(paths.home, "rules"), { recursive: true });
@@ -806,10 +806,10 @@ describe("Claude Code subscription runtime", () => {
 
     const append = JSON.stringify(seenOptions[0]?.systemPrompt);
     expect(append).toContain("UNBOUND-GHOST-INSTRUCTION");
-    expect(append).toContain("UNBOUND-GHOST-SKILL");
-    expect(append).toContain("UNBOUND-GHOST-RULE");
-    expect(append).toContain("UNBOUND-GHOST-PROMPT");
-    expect(append).toContain("UNBOUND-GHOST-COMMAND");
+    expect(append).not.toContain("UNBOUND-GHOST-SKILL");
+    expect(append).not.toContain("UNBOUND-GHOST-RULE");
+    expect(append).not.toContain("UNBOUND-GHOST-PROMPT");
+    expect(append).not.toContain("UNBOUND-GHOST-COMMAND");
     expect(append).not.toContain("UNBOUND-INACTIVE-AGENT");
     expect(append).not.toContain("UNBOUND-HIDDEN-SKILL");
     expect(JSON.parse(readFileSync(
@@ -844,7 +844,7 @@ describe("Claude Code subscription runtime", () => {
     );
     writeFileSync(
       join(project, ".omp", "rules", "typed-rule.md"),
-      "---\nglobs: \"**/*.ts\"\ncondition: TYPED_RULE\ninterruptMode: always\n---\n\nTYPED-RULE-SNAPSHOT\n",
+      "---\nalwaysApply: true\n---\n\nTYPED-RULE-SNAPSHOT\n",
     );
     const hostile = join(temp!.root, "hostile-claude-resources");
     mkdirSync(hostile);
@@ -892,7 +892,7 @@ describe("Claude Code subscription runtime", () => {
     });
     expect(seenOptions[0]?.mcpServers).not.toHaveProperty("explicit_cwd");
     expect(seenOptions[0]?.mcpServers?.project_fixture).not.toHaveProperty("cwd");
-    expect(JSON.stringify(seenOptions[0]?.systemPrompt)).toContain("ALWAYS-ACTIVE-SKILL-SNAPSHOT");
+    expect(JSON.stringify(seenOptions[0]?.systemPrompt)).not.toContain("ALWAYS-ACTIVE-SKILL-SNAPSHOT");
     expect(JSON.stringify(seenOptions[0]?.systemPrompt)).toContain("TYPED-RULE-SNAPSHOT");
     expect(JSON.stringify(seenOptions[0]?.systemPrompt)).not.toContain("HOSTILE-SYMLINK-SKILL");
     writeFileSync(join(project, "AGENTS.md"), "MUTATED-AFTER-FIRST-TURN");
@@ -1177,7 +1177,7 @@ describe("Claude Code subscription runtime", () => {
       .toMatchObject({ status: "degraded", mcpStatus: "degraded" });
   });
 
-  it("uses Pi's accepted-resource merge and project shadowing for Claude", async () => {
+  it("uses Pi's instruction merge while keeping invoked resources out of Claude's prompt", async () => {
     const { paths, seenOptions } = setupClaudeHost();
     const ghostSkill = join(paths.home, "skills", "shared");
     const retainedSkill = join(paths.home, "skills", "retained");
@@ -1303,13 +1303,13 @@ describe("Claude Code subscription runtime", () => {
       throw new Error("Claude Code did not receive its declarative prompt append.");
     }
     const append = systemPrompt.append;
+    for (const entry of piEffective.instructions) expect(append).toContain(entry.content);
     for (const entry of [
-      ...piEffective.instructions,
       ...piEffective.skills,
       ...piEffective.rules,
       ...piEffective.prompts,
       ...piEffective.commands,
-    ]) expect(append).toContain(entry.content);
+    ]) expect(append).not.toContain(entry.content);
     expect(append).not.toContain("GHOST-SHARED-SKILL");
     expect(append).not.toContain("GHOST-SHARED-RULE");
     expect(append).not.toContain("GHOST-SHARED-PROMPT");
@@ -1381,7 +1381,7 @@ describe("Claude Code subscription runtime", () => {
 
     const prompt = JSON.stringify(seenOptions[0]?.systemPrompt);
     expect(prompt).toContain("VALID-CLAUDE-FALLBACK-INSTRUCTION");
-    expect(prompt).toContain("VALID-CLAUDE-SKILL");
+    expect(prompt).not.toContain("VALID-CLAUDE-SKILL");
     expect(prompt).not.toContain("\uFFFD");
     expect(seenOptions[0]?.mcpServers).not.toHaveProperty("invalid");
     expect(await host!.getProject("casper", "claude-invalid-utf8", "claude-code"))

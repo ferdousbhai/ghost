@@ -21,10 +21,11 @@
  *    per-ghost encryption depend on.
  *
  * 2. **Sessions use the native OMP runtime through explicit roots.** Its
- *    prompt, filesystem, Bash, declarative skills/rules/context/Markdown
- *    commands, web search, hub, and background-job machinery stay enabled.
+ *    filesystem, Bash, declarative resources, web search, hub, and
+ *    background-job machinery stay enabled. Ghost replaces OMP's coding
+ *    prompt with its own character-led prompt.
  *    Pi subagents stay disabled in phase 1, and Ghost does not admit ambient,
- *    ghost-file, or project agent definitions. Ghost appends its persona and
+ *    ghost-file, or project agent definitions. Ghost builds the prompt and
  *    adds the capabilities that are genuinely Ghost-specific. Executable
  *    discovery is ghost-only; MCP is
  *    narrowed to ghost config plus one explicitly bound project, never
@@ -44,6 +45,7 @@ import {
 import { createHash, randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { openGhostHome } from "@ghost/extensions";
 import {
   createAgentSession,
 } from "@oh-my-pi/pi-coding-agent/sdk";
@@ -230,7 +232,10 @@ import {
   loadProjectDeclarativeSnapshot,
   type ProjectDeclarativeSnapshot,
 } from "./project-resources.js";
-import { mergeProjectDeclarativeSnapshots } from "./declarative-snapshot.js";
+import {
+  mergeProjectDeclarativeSnapshots,
+  renderPiDeclarativePrompt,
+} from "./declarative-snapshot.js";
 import {
   piProjectSnapshotPath,
   piProjectSnapshotPaths,
@@ -266,6 +271,13 @@ export const OMP_NATIVE_TOOL_NAMES: readonly string[] = [
   "web_search",
   "write",
 ];
+
+/** The only OMP-specific instruction retained in a Pi conversation. */
+export const PI_RUNTIME_SYSTEM_SECTION = [
+  "## Tools",
+  "`xd://` mounts additional tools: read `xd://` to list them, read `xd://<name>` for "
+    + "instructions, and write JSON there to call one.",
+].join("\n");
 
 export function phase1PiSubagentSessionOptions(): Pick<
   CreateAgentSessionOptions,
@@ -2613,17 +2625,9 @@ export class SessionHost {
       "memory.backend": "off",
       "memories.enabled": false,
       "autolearn.enabled": false,
-      // OMP's harness prompt opens by casting the model as a coding assistant
-      // and spends ~900 characters on how that assistant should talk. A ghost
-      // speaks from character.md instead, so the personality block is off and
-      // the persona extension drops what remains of the role section.
-      "personality": "none",
-      // Device docs on demand rather than inline. The four built-in devices
-      // (ast_edit, debug, lsp, inspect_image) carry ~180 lines of prose and
-      // TypeScript schemas that a conversation almost never reaches for. The
-      // catalog still names every device; the model reads `xd://<name>` when
-      // it wants one, at the cost of one extra read before first use.
-      "tools.xdevDocs": "catalog",
+      // OMP's developer grievance collector is unrelated to a ghost and must
+      // never add a prompt instruction, local database, or network route.
+      "dev.autoqa": false,
       // OMP's declarative loaders know about user-level providers even when
       // called for one explicit root. Disable the highest-priority ambient
       // identity source before loading; the immutable snapshot below then
@@ -2656,31 +2660,10 @@ export class SessionHost {
         error: (error as Error).message,
       });
     }
-    // A ghost whose character.md is still the seed has been summoned but never
-    // met, so its conversations carry the first-meeting section until that file
-    // is written.
-    const extraSections = [
-      ...(this.extensionOptions.extraSections ?? []),
-      ...(this.isFirstMeeting(ghost) ? [FIRST_MEETING_SECTION] : []),
-    ];
-    const extensions = resolveGhostExtensions(
-      {
-        ghostName,
-        browserMode: this.browserMode,
-        ...(this.relayTransport ? { relayTransport: this.relayTransport } : {}),
-        ...this.extensionOptions,
-        ...(extraSections.length > 0 ? { extraSections } : {}),
-      },
-      paths.home,
-      ompToolCapabilities,
-    );
-    extensions.factories.push((api) => {
-      api.on("session.compacting", () => ({ prompt: GHOST_COMPACTION_PROMPT }));
-    });
-
-    const ghostSnapshot = await loadProjectDeclarativeSnapshot(paths.home, {
-      level: "user",
-    });
+    const [sessionCharacter, ghostSnapshot] = await Promise.all([
+      openGhostHome(paths.home).readCharacter(),
+      loadProjectDeclarativeSnapshot(paths.home, { level: "user" }),
+    ]);
     const projectSnapshot = project.root && projectIdentity
       ? await readPiProjectSnapshot({
           sessionDir: paths.sessionDir,
@@ -2694,13 +2677,41 @@ export class SessionHost {
       ghostSnapshot,
       ...(projectSnapshot ? [projectSnapshot] : []),
     ];
+    const effectiveDeclarative = mergeProjectDeclarativeSnapshots(rootSnapshots);
+    const declarativeSection = renderPiDeclarativePrompt(effectiveDeclarative, {
+      disabledRules: settings.get("ttsr.disabledRules"),
+    });
+    // A seeded character marks a first meeting until the ghost writes its own.
+    const extraSections = [
+      ...(this.extensionOptions.extraSections ?? []),
+      PI_RUNTIME_SYSTEM_SECTION,
+      ...(declarativeSection ? [declarativeSection] : []),
+      ...(isSeededCharacter(ghostName, sessionCharacter?.body ?? null)
+        ? [FIRST_MEETING_SECTION]
+        : []),
+    ];
+    const extensions = resolveGhostExtensions(
+      {
+        ghostName,
+        browserMode: this.browserMode,
+        ...(this.relayTransport ? { relayTransport: this.relayTransport } : {}),
+        ...this.extensionOptions,
+        extraSections,
+      },
+      paths.home,
+      ompToolCapabilities,
+    );
+    extensions.factories.push((api) => {
+      api.on("session.compacting", () => ({ prompt: GHOST_COMPACTION_PROMPT }));
+    });
+
     const {
       contextFiles,
       skills,
       promptTemplates,
       slashCommands,
       rules,
-    } = mergeProjectDeclarativeSnapshots(rootSnapshots);
+    } = effectiveDeclarative;
 
     const modelRuntime = await createGhostOmpRuntime({
       authPath: ghostAuthPath(paths.agentDir),
@@ -2814,6 +2825,9 @@ export class SessionHost {
         // transcript stable across daemon restarts.
         sessionManager,
         mcpManager: mcp.manager,
+        // The persona extension supplies the complete provider-facing prompt
+        // before every turn. No OMP prose crosses this boundary.
+        systemPrompt: [],
       });
     const { session, extensionsResult, setToolUIContext } = created;
     createdSession = session;
@@ -4883,26 +4897,6 @@ export class SessionHost {
       void this.sweepRetainedSessions();
     });
     hosted.title = tracked;
-  }
-
-  /**
-   * Whether a session for this ghost should carry the first-meeting section:
-   * the owner's conversation with a ghost that is still the seed.
-   *
-   * An unreadable character.md answers "no". Being wrong the other way would
-   * push a written ghost back through an interview it has already had, which
-   * reads as amnesia rather than as a first meeting.
-   */
-  private isFirstMeeting(ghost: Ghost): boolean {
-    try {
-      return isSeededCharacter(ghost.name, readCharacterFile(ghost.dir));
-    } catch (error) {
-      this.logger.warn("could not read character.md", {
-        ghost: ghost.name,
-        error: (error as Error).message,
-      });
-      return false;
-    }
   }
 
   /**

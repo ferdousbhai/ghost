@@ -70,6 +70,8 @@ export const MEMORY_DIRNAME = "memory";
 export const MEMORY_TRASH_DIRNAME = ".trash";
 export const CONVERSATIONS_DIRNAME = "conversations";
 export const CHARACTER_FILENAME = "character.md";
+/** A character is injected into every model turn, so it has a hard context budget. */
+export const MAX_CHARACTER_BODY_LENGTH = 20_000;
 export const EXPORT_MANIFEST_FILENAME = "export-manifest.json";
 
 const MEMORY_INTENT_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -774,6 +776,14 @@ export class GhostHome {
   async readCharacter(): Promise<CharacterFile | null> {
     const body = await readConfinedText(this.dir, this.characterPath, "Character path");
     if (body === null) return null;
+    if (body.length > MAX_CHARACTER_BODY_LENGTH) {
+      throw new GhostError(
+        "limit_exceeded",
+        `${CHARACTER_FILENAME} may be at most ${MAX_CHARACTER_BODY_LENGTH} characters; `
+        + `it contains ${body.length}. Shorten the file before starting a session.`,
+        { length: body.length, limit: MAX_CHARACTER_BODY_LENGTH },
+      );
+    }
     return {
       title: this.characterTitle(body),
       body,
@@ -781,6 +791,14 @@ export class GhostHome {
   }
 
   async writeCharacter(input: { body: string }): Promise<void> {
+    if (input.body.length > MAX_CHARACTER_BODY_LENGTH) {
+      throw new GhostError(
+        "limit_exceeded",
+        `${CHARACTER_FILENAME} may be at most ${MAX_CHARACTER_BODY_LENGTH} characters; `
+        + `that body is ${input.body.length}. Nothing was written.`,
+        { length: input.body.length, limit: MAX_CHARACTER_BODY_LENGTH },
+      );
+    }
     await withFileMutationQueue(this.characterPath, async () => {
       await atomicWriteFile(this.dir, this.characterPath, input.body);
     });

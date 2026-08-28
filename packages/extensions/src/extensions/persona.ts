@@ -1,13 +1,9 @@
 /**
  * The persona extension: the ghost's system prompt.
  *
- * The Ghost persona is appended to OMP's assembled prompt, preserving the
- * harness's native tool, skill, rule, and project-context guidance. The Ghost
- * section is rebuilt before every agent start, so a doc or memory written
- * mid-session is reflected on the next turn without a session restart.
- *
- * The same pass drops the harness sections a ghost does not carry: the role it
- * would otherwise be told it has, and the rules of a coding task.
+ * Ghost replaces OMP's assembled prompt. The prompt is rebuilt before every
+ * agent start, so a doc or memory written mid-session is reflected on the next
+ * turn without a session restart.
  */
 import type { ExtensionAPI, ExtensionFactory } from "@oh-my-pi/pi-coding-agent";
 import { deriveDocumentsIndex } from "../catalog.js";
@@ -17,7 +13,7 @@ import {
   openMachineDocuments,
 } from "../documents.js";
 import { deriveMemoryIndex } from "../memory-file.js";
-import { buildGhostSystemPrompt, stripHarnessSections } from "../prompt.js";
+import { buildGhostSystemPrompt } from "../prompt.js";
 import { resolveHome, type GhostExtensionOptions } from "./shared.js";
 
 export interface PersonaExtensionOptions extends GhostExtensionOptions {
@@ -38,7 +34,7 @@ export function createPersonaExtension(
   options: PersonaExtensionOptions = {},
 ): ExtensionFactory {
   return (pi: ExtensionAPI) => {
-    pi.on("before_agent_start", async (event, ctx) => {
+    pi.on("before_agent_start", async (_event, ctx) => {
       const home = resolveHome(options, ctx);
       const [character, memory, documents] = await Promise.all([
         home.readCharacter(),
@@ -48,9 +44,10 @@ export function createPersonaExtension(
         }),
       ]);
       return {
-        systemPrompt: [...event.systemPrompt.map(stripHarnessSections), buildGhostSystemPrompt({
+        systemPrompt: [buildGhostSystemPrompt({
           ghostName: options.ghostName ?? home.name,
           character,
+          memoryRoot: home.memoryDir,
           memory: deriveMemoryIndex(memory.files),
           docs: deriveDocumentsIndex(documents),
           ...(options.extraSections === undefined

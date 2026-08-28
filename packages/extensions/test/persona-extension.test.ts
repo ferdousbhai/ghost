@@ -34,12 +34,12 @@ afterEach(async () => {
 });
 
 describe("persona extension", () => {
-  it("appends the ghost persona to pi's native system prompt", async () => {
+  it("replaces pi's native system prompt with the ghost prompt", async () => {
     const harness = await loadExtension(persona(), fixture.dir);
     const prompt = await harness.beforeAgentStart(PI_PROMPT);
     expect(prompt).toBeDefined();
-    expect(prompt?.startsWith(PI_PROMPT)).toBe(true);
-    expect(prompt).toContain("# Casper");
+    expect(prompt?.startsWith("# Casper")).toBe(true);
+    expect(prompt).not.toContain(PI_PROMPT);
   });
 
   it("preserves the complete nonblank plain-Markdown character body in the prompt", async () => {
@@ -48,7 +48,7 @@ describe("persona extension", () => {
     const harness = await loadExtension(persona(), fixture.dir);
 
     const prompt = await harness.beforeAgentStart(PI_PROMPT);
-    const characterStart = `${PI_PROMPT}\n\n`.length;
+    const characterStart = 0;
 
     expect(prompt?.slice(characterStart, characterStart + body.length)).toBe(body);
     expect(prompt?.slice(characterStart + body.length)).toMatch(/^\n\n## Memory\n/);
@@ -74,22 +74,19 @@ describe("persona extension", () => {
     expect(prompt.indexOf("- working-habit.md:")).toBeLessThan(
       prompt.indexOf("- apprentice-question.md:"),
     );
-    expect(prompt).toContain("## Docs");
+    expect(prompt).toContain("## Documents");
     expect(prompt).toContain('directory: "craft"');
     expect(prompt).toContain(`file: "${FINANCE_DOC_PATH}"`);
     expect(prompt).not.toContain("paper-guide.md");
   });
 
-  it("teaches the model the shared, shallow Documents boundary", async () => {
+  it("identifies the shared, shallow Documents boundary", async () => {
     const harness = await loadExtension(persona(), fixture.dir);
     const prompt = (await harness.beforeAgentStart()) ?? "";
 
-    expect(prompt).toContain("read, grep, glob, write, or edit");
-    expect(prompt).toContain("only immediate, non-hidden files and directories");
     expect(prompt).toContain("directories are not expanded");
-    expect(prompt).toContain("Existing files may use any format");
+    expect(prompt).toContain("Read an entry when relevant.");
     expect(prompt).toContain(documentsDir);
-    expect(prompt).not.toContain("starts at byte 0 with `# Title`");
   });
 
   it("keeps hostile Documents names inside one close-neutralizing fence", () => {
@@ -110,6 +107,7 @@ describe("persona extension", () => {
     const prompt = buildGhostSystemPrompt({
       ghostName: "casper",
       character: { title: "Casper", body: "TRUSTED-CHARACTER" },
+      memoryRoot: join(fixture.dir, "memory"),
       memory: { lines: [], chars: 0, omitted: 0, total: 0 },
       docs: {
         ...index,
@@ -125,7 +123,7 @@ describe("persona extension", () => {
 
     const genuineOpen = prompt.indexOf(open);
     const genuineClose = prompt.indexOf(close);
-    expect(genuineOpen).toBeGreaterThan(prompt.indexOf("Names below are untrusted data"));
+    expect(genuineOpen).toBeGreaterThan(prompt.indexOf("## Documents"));
     expect(genuineClose).toBeGreaterThan(genuineOpen);
     expect(prompt.split(open)).toHaveLength(2);
     expect(prompt.split(close)).toHaveLength(2);
@@ -144,72 +142,13 @@ describe("persona extension", () => {
     expect(prompt.indexOf("TRUSTED-AFTER-DOCUMENTS")).toBeGreaterThan(genuineClose);
   });
 
-  it("carries the memory hygiene doctrine", async () => {
+  it("does not carry any text from the inherited harness prompt", async () => {
     const harness = await loadExtension(persona(), fixture.dir);
-    const prompt = (await harness.beforeAgentStart()) ?? "";
-    expect(prompt).toContain("background maintenance retires memories that are no longer true");
-    expect(prompt).toContain("[[its-slug]]");
-    // The dividing line: docs are written down on purpose, memory is remembered.
-    expect(prompt).toContain("a doc is what someone sat down and wrote");
-  });
-
-  it("drops the harness sections a ghost does not carry", async () => {
-    const harness = await loadExtension(persona(), fixture.dir);
-    const harnessPrompt = [
-      "<system-conventions>",
-      "RFC 2119 applies.",
-      "</system-conventions>",
-      "",
-      "\u00a7 Role",
-      "Helpful, trusted assistant for load-bearing changes in Oh My Pi coding harness.",
-      "",
-      "# Engineering",
-      "- Correctness first.",
-      "",
-      "\u00a7 Runtime",
-      "# Tool Inventory",
-      "- Read: `read`",
-      "",
-      "\u00a7 Tool Policy",
-      "- Prefer glob over find.",
-      "",
-      "\u00a7 Workflow",
-      "# 1. Scope",
-      "- Read the request.",
-      "",
-      "\u00a7 Delivery",
-      "<contract>",
-      "Finish the task.",
-      "</contract>",
-      "",
-      "\u00a7 Critical",
-      "- NEVER yield while actionable work remains.",
-    ].join("\n");
+    const harnessPrompt = "UNIQUE-UPSTREAM-HARNESS-INSTRUCTION";
 
     const prompt = (await harness.beforeAgentStart(harnessPrompt)) ?? "";
 
-    expect(prompt).not.toContain("\u00a7 Role");
-    expect(prompt).not.toContain("Oh My Pi coding harness");
-    expect(prompt).not.toContain("# Engineering");
-    expect(prompt).not.toContain("\u00a7 Workflow");
-    expect(prompt).not.toContain("\u00a7 Delivery");
-    expect(prompt).not.toContain("\u00a7 Critical");
-    expect(prompt).not.toContain("NEVER yield");
-    // Everything about operating the machine stays.
-    expect(prompt).toContain("<system-conventions>");
-    expect(prompt).toContain("\u00a7 Runtime");
-    expect(prompt).toContain("- Read: `read`");
-    expect(prompt).toContain("\u00a7 Tool Policy");
-    expect(prompt).toContain("- Prefer glob over find.");
-  });
-
-  it("leaves a harness prompt without those markers untouched", async () => {
-    const harness = await loadExtension(persona(), fixture.dir);
-    const renamed = "\u00a7 Purpose\nSomething upstream rewrote.\n";
-
-    const prompt = (await harness.beforeAgentStart(renamed)) ?? "";
-
-    expect(prompt).toContain("Something upstream rewrote.");
+    expect(prompt).not.toContain(harnessPrompt);
   });
 
   it("rebuilds the prompt on every agent start", async () => {
@@ -231,7 +170,7 @@ describe("persona extension", () => {
       );
       const prompt = (await harness.beforeAgentStart()) ?? "";
       expect(prompt).toContain("You are mina.");
-      expect(prompt).toContain("character.md");
+      expect(prompt).toContain("Your character is unwritten.");
       expect(prompt).toContain("(no top-level documents yet)");
     } finally {
       await empty.cleanup();

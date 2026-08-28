@@ -7,9 +7,9 @@
  * must show that memory in the index, because the persona is rebuilt from the
  * ghost home before every agent start.
  *
- * The fixture pins, per turn: the persona that reached the model, the tool
- * surface on the wire, and the whole pi-messages event stream; then the
- * rendered transcript, the conversation listing, and the ghost home on disk.
+ * The fixture pins, per turn: the complete system prompt that reached the
+ * model, the tool surface on the wire, and the whole pi-messages event stream;
+ * then the rendered transcript, conversation listing, and ghost home on disk.
  *
  * See ./harness.ts for the normalisation rules and the regeneration command.
  */
@@ -29,7 +29,6 @@ import {
   expectGolden,
   ghostHomeSnapshot,
   Normalizer,
-  personaOf,
   toolSurfaceTable,
   type GoldenSection,
 } from "./harness.js";
@@ -47,9 +46,7 @@ afterEach(async () => {
   temp = null;
 });
 
-/** The first line of the seeded character body: where the persona section starts. */
-const PERSONA_ANCHOR = "# casper";
-
+/** The complete character body that must lead the system prompt. */
 const CHARACTER = `# casper
 
 You are casper, a letterpress printer. You answer in short sentences.
@@ -73,7 +70,7 @@ The Heidelberg cost more than it should have.
 const OTHER_AUDITED_OMP_TOOLS = ["ask", "eval", "inspect_image", "task", "todo"] as const;
 
 describe("golden: session", () => {
-  it("writes a memory mid-conversation and carries it into the next turn's persona", async () => {
+  it("writes a memory mid-conversation and carries it into the next system prompt", async () => {
     temp = makeTempGhosts();
     provider = await startMockProvider({
       script: [
@@ -136,9 +133,18 @@ describe("golden: session", () => {
       expect(requests.length, `turn ${turn} must reach the provider`).toBeGreaterThan(0);
 
       sections.push({ title: `turn ${turn}: user prompt`, body: prompt });
+      const systemPrompt = requests[0]!.system.trimEnd();
+      expect(systemPrompt).toContain(CHARACTER.trim());
+      for (const inherited of [
+        "Oh My Pi",
+        "§ Runtime",
+        "§ Tool Policy",
+        "<system-conventions>",
+        "report_issue",
+      ]) expect(systemPrompt).not.toContain(inherited);
       sections.push({
-        title: `turn ${turn}: persona section of the system prompt`,
-        body: normalizer.text(personaOf(requests[0]!.system, PERSONA_ANCHOR)),
+        title: `turn ${turn}: complete system prompt`,
+        body: normalizer.text(systemPrompt),
       });
       sections.push({
         title: `turn ${turn}: provider round-trips`,

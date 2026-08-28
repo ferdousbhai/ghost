@@ -229,6 +229,17 @@ async function setup(
   return { dir, host, provider, temp };
 }
 
+async function modelSystemPrompt(
+  sessionId: string,
+  prompt = "Show that this conversation is ready.",
+): Promise<string> {
+  const before = provider?.requests.length ?? 0;
+  await host!.runTurn("casper", { sessionId, prompt, emit: () => {} });
+  const request = provider?.requests[before];
+  if (!request) throw new Error("Expected the turn to reach the mock provider.");
+  return request.system;
+}
+
 class ReanswerPreparationHooks extends GhostHookRunner {
   failPreparation = false;
 
@@ -709,6 +720,7 @@ describe("SessionHost.open", () => {
     expect(handle.session.systemPrompt.join("\n")).not.toContain("HOSTILE-OWNER-PROJECT");
     expect(handle.session.getToolByName("hostile_home_tool")).toBeUndefined();
     expect(handle.session.settings.get("retry.modelFallback")).toBe(true);
+    expect(handle.session.settings.get("dev.autoqa")).toBe(false);
     expect(handle.sessionFile?.startsWith(ghostPaths(dir).sessionDir + sep)).toBe(true);
   });
 
@@ -772,11 +784,8 @@ describe("SessionHost.open", () => {
 
     const handle = await host!.open("casper", "conv-project");
     expect(handle.session.sessionManager.getCwd()).toBe(project);
-    expect(handle.session.systemPrompt.join("\n")).toContain("TRUSTED-PROJECT-INSTRUCTION");
-    expect(handle.session.systemPrompt.join("\n")).not.toContain("HOSTILE-LIVE-INSTRUCTION");
     expect(handle.session.skills.map((skill) => skill.name)).toContain("trusted-skill");
     expect(handle.session.skills.map((skill) => skill.name)).not.toContain("invalid-skill");
-    expect(handle.session.systemPrompt.join("\n")).not.toContain("INVALID-SKILL-MUST-NOT-ENTER-PI");
     expect(handle.session.getToolByName("blocked_project_tool")).toBeUndefined();
     const expectProjectRules = (session: typeof handle.session) => {
       const rules = new Map(
@@ -810,6 +819,13 @@ describe("SessionHost.open", () => {
       prompt: "/skill:trusted-skill plate one",
       emit: () => {},
     });
+    const projectSystem = provider!.requests.at(-1)!.system;
+    expect(projectSystem).toContain("TRUSTED-PROJECT-INSTRUCTION");
+    expect(projectSystem).not.toContain("HOSTILE-LIVE-INSTRUCTION");
+    expect(projectSystem).not.toContain("INVALID-SKILL-MUST-NOT-ENTER-PI");
+    expect(projectSystem).not.toContain("Trusted skill body");
+    expect(projectSystem).not.toContain("Use the trusted project brief");
+    expect(projectSystem).not.toContain("Use the trusted proof command");
     expect(JSON.stringify(provider!.requests.at(-1)?.messages)).toContain("Trusted skill body");
     expect(JSON.stringify(provider!.requests.at(-1)?.messages)).not.toContain("HOSTILE-LIVE-SKILL");
 
@@ -856,9 +872,10 @@ describe("SessionHost.open", () => {
     await host!.open("casper", "cache-evictor");
     expect(handle.session.isDisposed).toBe(true);
     const reopened = await host!.open("casper", "conv-project");
-    expect(reopened.session.systemPrompt.join("\n")).toContain("TRUSTED-PROJECT-INSTRUCTION");
-    expect(reopened.session.systemPrompt.join("\n")).not.toContain("HOSTILE-AFTER-CACHE-EVICTION");
     expectProjectRules(reopened.session);
+    const reopenedSystem = await modelSystemPrompt("conv-project");
+    expect(reopenedSystem).toContain("TRUSTED-PROJECT-INSTRUCTION");
+    expect(reopenedSystem).not.toContain("HOSTILE-AFTER-CACHE-EVICTION");
 
     await host!.disposeAll();
     host = new SessionHost({
@@ -867,9 +884,10 @@ describe("SessionHost.open", () => {
       offline: true,
     });
     const afterRestart = await host.open("casper", "conv-project");
-    expect(afterRestart.session.systemPrompt.join("\n")).toContain("TRUSTED-PROJECT-INSTRUCTION");
-    expect(afterRestart.session.systemPrompt.join("\n")).not.toContain("HOSTILE-AFTER-CACHE-EVICTION");
     expectProjectRules(afterRestart.session);
+    const restartedSystem = await modelSystemPrompt("conv-project");
+    expect(restartedSystem).toContain("TRUSTED-PROJECT-INSTRUCTION");
+    expect(restartedSystem).not.toContain("HOSTILE-AFTER-CACHE-EVICTION");
   });
 
   it("keeps invalid UTF-8 project instructions, skills, and MCP out of Pi", async () => {
@@ -930,7 +948,7 @@ describe("SessionHost.open", () => {
     });
 
     const opened = await host!.open("casper", "pi-invalid-utf8");
-    const prompt = opened.session.systemPrompt.join("\n");
+    const prompt = await modelSystemPrompt("pi-invalid-utf8");
     expect(prompt).toContain("VALID-PI-FALLBACK-INSTRUCTION");
     expect(opened.session.skills.map((skill) => skill.name)).toEqual(
       expect.arrayContaining(["retained", "valid"]),
@@ -1152,19 +1170,21 @@ describe("SessionHost.open", () => {
       secondProject,
       firstFailures,
     );
-    expect(second.session.systemPrompt.join("\n")).toContain("SECOND-PROJECT-SNAPSHOT");
+    expect(await modelSystemPrompt("post-commit-cleanup"))
+      .toContain("SECOND-PROJECT-SNAPSHOT");
 
     writeFileSync(join(secondProject, "AGENTS.md"), "RELOADED-PROJECT-SNAPSHOT");
     const reloadFailures = injectOneCleanupFailureSet(second);
     await expect(host!.reloadProject("casper", "post-commit-cleanup", "pi", 2))
       .resolves.toMatchObject({ generation: 3, root: secondProject });
-    const reloaded = await expectCommittedCleanupRetry(
+    await expectCommittedCleanupRetry(
       second.session,
       3,
       secondProject,
       reloadFailures,
     );
-    expect(reloaded.session.systemPrompt.join("\n")).toContain("RELOADED-PROJECT-SNAPSHOT");
+    expect(await modelSystemPrompt("post-commit-cleanup"))
+      .toContain("RELOADED-PROJECT-SNAPSHOT");
     expect(cleanupLogs.filter((entry) =>
       entry.message === "committed project session cleanup is pending retry"
       && entry.fields?.code === "project_cleanup_pending")).toHaveLength(2);
@@ -2073,15 +2093,16 @@ lines.on("line", (line) => {
 
     const handle = await host!.open("casper", "conv-skill");
     expect(handle.session.skills.map((skill) => skill.name)).toContain("press-review");
-    expect(handle.session.systemPrompt.join("\n")).toContain(
-      "Always identify the composing stick",
-    );
-
     await host!.runTurn("casper", {
       sessionId: "conv-skill",
       prompt: "/skill:press-review focus on the rollers",
       emit: () => {},
     });
+    expect(provider!.requests[0]?.system).toContain("Always identify the composing stick");
+    expect(provider!.requests[0]?.system).toContain(
+      "press-review: Review a printing press repair plan.",
+    );
+    expect(provider!.requests[0]?.system).not.toContain("Check the tympan and packing");
     expect(JSON.stringify(provider!.requests[0]?.messages)).toContain(
       "Check the tympan and packing",
     );
@@ -6358,9 +6379,10 @@ describe("conversation branching", () => {
       forked.sessionId,
       forkProject.generation,
     ))).toBe(true);
-    const child = await host!.open("casper", forked.sessionId);
-    expect(child.session.systemPrompt.join("\n")).toContain("PINNED-FORK-INSTRUCTION");
-    expect(child.session.systemPrompt.join("\n")).not.toContain("HOSTILE-LIVE-FORK-INSTRUCTION");
+    await host!.open("casper", forked.sessionId);
+    const childSystem = await modelSystemPrompt(forked.sessionId);
+    expect(childSystem).toContain("PINNED-FORK-INSTRUCTION");
+    expect(childSystem).not.toContain("HOSTILE-LIVE-FORK-INSTRUCTION");
   });
 
   it("names each copy with the next free counter and never stacks counters", async () => {
@@ -6521,8 +6543,8 @@ describe("conversation branching", () => {
     expect((await host!.listSessions("casper")).map((row) => row.id)).toContain(forked.id);
     expect((await host!.readTranscript("casper", forked.sessionId)).messages).toEqual([]);
     expect(existsSync(snapshot)).toBe(true);
-    expect((await host!.open("casper", forked.sessionId)).session.systemPrompt.join("\n"))
-      .toContain("PINNED-RECOVERED-FORK");
+    await host!.open("casper", forked.sessionId);
+    expect(await modelSystemPrompt(forked.sessionId)).toContain("PINNED-RECOVERED-FORK");
     expect(readdirSync(sessionDir).some((name) => name.includes(".pending"))).toBe(false);
   });
 
@@ -8933,12 +8955,12 @@ describe("the first meeting", () => {
   it("interviews the owner while the character file is still the seed", async () => {
     await setupSeeded();
     const system = await systemPromptFor("wisp");
-    expect(system).toContain("## Your first meeting");
+    expect(system).toContain("## First meeting");
     expect(system).toContain("one question at a time");
     // The interview ends by writing the character file with the ghost's own tool.
     expect(system).toContain("ghost_character");
     // And it is a ritual, not a gate.
-    expect(system).toContain("Their request always comes first");
+    expect(system).toContain("Help with the owner's request first");
   });
 
   it("stops once the character file has been written", async () => {
@@ -8946,6 +8968,6 @@ describe("the first meeting", () => {
     // `setup` seeds a ghost whose character.md the owner wrote.
     const system = await systemPromptFor("casper");
     expect(system).toContain("letterpress printer");
-    expect(system).not.toContain("## Your first meeting");
+    expect(system).not.toContain("## First meeting");
   });
 });

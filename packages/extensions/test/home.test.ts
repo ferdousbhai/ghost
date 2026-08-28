@@ -13,7 +13,11 @@ import {
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { GhostError, MemoryFileFormatError } from "../src/errors.js";
-import { type GhostHome, openGhostHome } from "../src/home.js";
+import {
+  type GhostHome,
+  MAX_CHARACTER_BODY_LENGTH,
+  openGhostHome,
+} from "../src/home.js";
 import { deriveMemoryIndex, MAX_MEMORY_FILE_BYTES } from "../src/memory-file.js";
 import { createGhostFixture, type GhostFixture } from "./support/fixture.js";
 
@@ -213,6 +217,14 @@ describe("character", () => {
 
   it("returns null when there is no character file", async () => {
     expect(await openGhostHome(fixture.root).readCharacter()).toBeNull();
+  });
+
+  it("rejects an oversized direct write without replacing the character", async () => {
+    const before = await readFile(home.characterPath, "utf8");
+    await expect(home.writeCharacter({
+      body: "x".repeat(MAX_CHARACTER_BODY_LENGTH + 1),
+    })).rejects.toMatchObject({ code: "limit_exceeded" });
+    expect(await readFile(home.characterPath, "utf8")).toBe(before);
   });
 });
 
