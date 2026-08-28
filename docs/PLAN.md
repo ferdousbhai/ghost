@@ -42,9 +42,10 @@ accounts, no ambient credential discovery, and no cloud custody.
   multi-ghost plain-file homes, persona and memory extensions, a shared shallow
   Documents index, explicit project snapshots, `ghostd`, the Quickshell HUD
   (Super+Ctrl+G) + bar widget + notifications, hosted-export import, the optional
-  owner-local Claude Code runtime, and AUR packaging. Documentation sync (#17)
-  is the beta gate. OMP independence (#3) is the top post-beta priority; the
-  executable project-extension boundary (#31) remains unfinished.
+  owner-local Claude Code runtime, and AUR packaging. #17 (release, hosted
+  migration, rollout) is the beta gate. OMP independence (#3) is the top
+  post-beta priority; the executable project-extension boundary (#31) remains
+  unfinished.
 - **Transition (predecessor platform).** summonghost.com → one-pager +
   sign-in-gated "Download my ghost" export (shipped); hosted stack frozen,
   then drained (W10 engine + residue verification). Details:
