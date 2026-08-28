@@ -111,9 +111,11 @@ shows only the calls a reader still needs — the ones that failed, and `ask`,
 whose card carries the re-answer branch — behind a quiet "3 steps" toggle that
 restores the full trail. Those traces are unchanged: purpose while active,
 outcome when one is available, implementation details only when expanded. User
-messages expose editable branch points and sibling navigation; historical ask
-cards can be re-answered to create a sibling branch and resume generation from
-it.
+messages expose a hover-revealed edit action that forks a new conversation and
+returns that text to the composer; ghost replies keep their copy action beside
+the final text line. There is no sibling navigator: the fork is another thread
+in the sidebar. Historical ask cards can still be re-answered to create a
+sibling branch and resume generation from it.
 
 The activity line uses the recovered summon-ghost spectral orb and rotating,
 tool-aware summoning copy. The QML port traces to summon-ghost commit

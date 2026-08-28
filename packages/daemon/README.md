@@ -53,16 +53,17 @@ Everything Ghost owns for an OMP conversation stays inside the ghost home:
 ```text
 ~/ghosts/<name>/
   character.md             persona
-  memory/*.md              per-ghost durable facts
+  memory/*.md              one durable fact per plain Markdown file
   settings.yml             per-ghost OMP settings
-  models.json              providers plus Ghost roles/fallbacks
-  mcp.json                 ghost-owned MCP servers
-  .pi/
-    models.omp.json        generated OMP-compatible provider projection
+  models.json              providers, keyring policy, roles, and fallbacks;
+                           secret references only
+  mcp.json                 ghost-owned MCP servers; secret references only
+  .pi/                     derived OMP machine runtime; never credentials
+    models.omp.json        generated secret-free provider projection
     models.db              derived OMP catalogue cache
-    agent.db               legacy OMP credential database; only in a home that
-                           predates the keyring, with its auth tables emptied
-                           and vacuumed. Nothing creates one any more.
+    agent.db               legacy OMP database shell; only in a home that
+                           predates the keyring, with its credential table
+                           emptied and vacuumed. Nothing creates one any more.
   sessions/
     <conversation>.jsonl   OMP session tree
     claude-<sha256>.json   Claude resume metadata, when selected
@@ -74,6 +75,8 @@ Everything Ghost owns for an OMP conversation stays inside the ghost home:
                            execution cwd for persisted Pi tool calls
     <stem>.<runtime>.maintenance.json
                            durable idle-maintenance state
+  .trash/                  recoverable per-home deletion state
+  .memory-maintenance.json last consolidation claim time
 ```
 
 ### Owner-wide Documents
@@ -145,6 +148,15 @@ older daemon's effective loopback listener.
 
 Ghost-home context listings are derived from disk for each request and never
 persist a catalog. Documents use their separate machine-level route.
+
+The memory index is likewise derived, newest modification first, before each
+model turn. After a settled turn has been idle for 60 seconds, ordinary
+maintenance may write one owner-grounded fact. Only index pressure switches
+that delivery to consolidation: at least 3,200 of 4,000 index characters, any
+omitted memory, or 100 valid files. Consolidation is limited to four writes and
+four recoverable `.trash/` deletions and has a six-hour claimed cooldown.
+Foreground turns cannot delete memory. Every write path redacts common secret
+forms before validation, slug derivation, or disk.
 
 ### Ghost and conversation-project MCP
 

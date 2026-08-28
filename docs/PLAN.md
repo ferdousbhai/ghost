@@ -32,18 +32,19 @@ messenger UI, per-bot screens, teach-by-demonstration — but **local, private,
 open source (Apache-2.0), and on the OS they skipped (Linux/Omarchy)**.
 Ghosts are hired teammates, not configured assistants: name, job, a chat
 thread, check-ins. Where Grok Bot gives every bot one shared cloud computer
-and pooled credentials, each ghost gets a real Hyprland workspace on your
-actual machine, with per-ghost homes and credentials, no credential pooling,
-and no cloud custody.
+and pooled credentials, each ghost works on your actual Hyprland desktop, with
+a per-ghost home and explicit credential policy over machine Secret Service
+accounts, no ambient credential discovery, and no cloud custody.
 
 ## Phases
 
-- **Owner-local (IN PROGRESS).** Feature-complete ghost:
+- **Owner-local (BETA RELEASE CANDIDATE).** Feature-complete ghost:
   multi-ghost plain-file homes, persona and memory extensions, a shared shallow
   Documents index, explicit project snapshots, `ghostd`, the Quickshell HUD
-  (Super+G) + bar widget + notifications, hosted-export import, the optional
-  owner-local Claude Code runtime, and AUR packaging. The integrated workspace
-  remains pre-beta and the executable project-extension boundary is unfinished.
+  (Super+Ctrl+G) + bar widget + notifications, hosted-export import, the optional
+  owner-local Claude Code runtime, and AUR packaging. Documentation sync (#17)
+  is the beta gate. OMP independence (#3) is the top post-beta priority; the
+  executable project-extension boundary (#31) remains unfinished.
 - **Transition (predecessor platform).** summonghost.com → one-pager +
   sign-in-gated "Download my ghost" export (shipped); hosted stack frozen,
   then drained (W10 engine + residue verification). Details:
@@ -56,23 +57,25 @@ and no cloud custody.
 
 ## Key decisions (one-line rationales)
 
-- **Build on modern OMP by default, never maintain a fork; keep the pinned patch
-  set narrow and add official harnesses at explicit runtime boundaries** —
+- **Build on pinned modern OMP at explicit runtime boundaries; keep the patch
+  and vendor surface narrow while #3 makes the runtime self-contained** —
   `createAgentSession` plus explicit Ghost snapshots express the normal path.
   `claude-code/default` is the narrow exception: the
   official Claude Agent SDK invokes an installed, unmodified Claude Code so the
   owner can use their own plan. Both receive the same Ghost persona, memory,
   Documents, and declarative layers and emit the pi-messages wire, while each
-  keeps its native tool harness. Neither dependency is maintained as a fork.
+  keeps its native tool harness. Claude Code remains unmodified; Ghost's OMP
+  patch and vendor deviations stay explicit and reviewable.
 - **Model-agnostic like OMP; bring any provider.** Two named requirements:
   existing **OpenAI Codex/ChatGPT subscriptions usable as auth**
   through OMP's Codex OAuth, **Claude plans through the Claude Code harness**
   (a separate runtime from OMP's Anthropic provider), and **OpenRouter
   first-class** with its free models as a zero-cost onboarding option.
 - **Owner-readable files, not an application database** — Markdown content and
-  inspectable JSON/YAML policy remain greppable and backup-friendly. OMP's
-  machine-only credential/catalog database stays isolated under `.pi/` rather
-  than becoming Ghost's content store.
+  inspectable JSON/YAML policy remain greppable and backup-friendly. Derived
+  OMP runtime/catalog state stays isolated under `.pi/`; credential values live
+  in Linux Secret Service and secret-free coordination metadata lives under
+  Ghost's XDG state, never in the content store.
 - **No stored indexes** — the memory index and shallow owner Documents index
   are derived per session; files edited out-of-band cannot go stale against a
   persisted catalog.
@@ -82,12 +85,12 @@ and no cloud custody.
   `/skill:<name>` invocation without treating Documents as a package root.
 - **Two browser modes**: "My browser" (relay into the owner's real signed-in Chromium via MV3 extension + chrome.debugger) and "Ghost's browser" (per-ghost Playwright profile, isolated/autonomous), one backend-agnostic tool surface.
 - **Quickshell shell surfaces, not a webapp window** — Omarchy's own shell
-  is Quickshell; a layer-shell HUD + bar widget is native in a way no app
-  window is. A chromium "deep workspace" view must earn its way in.
+  is Quickshell; an xdg-toplevel HUD plus a layer-shell bar widget stays native
+  to the desktop. A chromium "deep workspace" view must earn its way in.
 - **Owner-local product boundary** — core does not expose ghosts to remote
   users, meter calls, or operate a money path.
-- **Env scrubbing** — a ghost only sees credentials deliberately configured
-  in its models.json; stray shell API keys must never leak cloud models
+- **Env scrubbing** — a ghost only sees credentials deliberately referenced and
+  allowed by its `models.json`; stray shell API keys must never leak cloud models
   into a sovereign ghost.
 - **No Obsidian integration promises** — plain files make it unnecessary.
 - **Apache-2.0, fresh repo** — the predecessor repo's history carries
@@ -95,11 +98,11 @@ and no cloud custody.
 
 ## Onboarding
 
-Install from AUR → create a ghost (name + job → seeded `character.md`) →
+Install the Arch package → create a ghost (name + job → seeded `character.md`) →
 pick a model: OpenRouter free model (zero cost, just an account), an OpenAI
 Codex/ChatGPT subscription sign-in, an externally authenticated Claude Code
 plan, any API key, or a local model — →
-Super+G, start talking. Existing summonghost.com users: sign in there,
+Super+Ctrl+G, start talking. Existing summonghost.com users: sign in there,
 "Download my ghost", import.
 
 ## Open questions

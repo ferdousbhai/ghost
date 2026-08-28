@@ -19,7 +19,12 @@ index, browser, and desktop capabilities on top. The Quickshell client renders
 live tool activity and the recovered summoning orb from the earlier
 summon-ghost interface.
 
-Status: early construction. See CONTRACTS.md for the data and API contracts,
-and [docs/hooks.md](docs/hooks.md) for awaited model-harness hooks.
+Idle maintenance may write owner-grounded memory and consolidates it only under
+index pressure; every memory write redacts common credential forms before disk.
+Provider and MCP secrets live in Linux Secret Service, while portable config
+holds only keyring references; see [docs/keyring.md](docs/keyring.md).
+
+Status: beta release candidate. See CONTRACTS.md for the data and API
+contracts, and [docs/hooks.md](docs/hooks.md) for awaited model-harness hooks.
 
 License: Apache-2.0
