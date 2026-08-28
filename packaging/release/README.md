@@ -17,48 +17,12 @@ new daemon.
 
 ## Reproducibility boundary
 
-Release CI verifies the repository's pnpm engine and populates pnpm's
-content-addressed store before closing the network boundary.
-`build-runtime-source.sh` then forces a frozen offline install from that
-store, disables dependency lifecycle scripts, runs the repository build, and
-invokes the daemon's `bun build --compile` recipe. Reconstructing dependencies
-means a preceding development install cannot hide a missing input.
-`ONNXRUNTIME_NODE_INSTALL=skip` and `--ignore-scripts` prevent dependency
-installers from downloading optional native payloads. CI also supplies dead
-network proxies for defense in depth. This is a package-manager/lifecycle
-offline guarantee, not a claim that the hosted runner has a separate kernel
-network namespace.
-
-The archive records:
-
-- the exact version, 40-character source commit, architecture, and commit time;
-- SHA-256 for the root and every workspace `package.json`,
-  `pnpm-workspace.yaml`, `pnpm-lock.yaml`, an optional root `.npmrc`, and
-  `packages/daemon/scripts/build-binary.sh`;
-- SHA-256 and the normalized mode inventory for `bin/ghostd`.
-
-The source archive carries its own version/commit/epoch manifest. Release CI
-requires the event tag, its dereferenced commit, the checkout, the development
-package source, the source manifest, and the runtime manifest to agree. The
-source archive's fixed outer SHA-256 binds every build helper, UI, extension,
-service, and documentation byte to that identity.
-
-The runtime archive is emitted with sorted paths, a fixed mtime, numeric root
-ownership, normalized safe modes, and single-threaded deterministic zstd
-output. `smoke-runtime-source.sh` extracts, verifies, and repacks it
-byte-for-byte. Verification requires the exact v2 layout, recomputes the frozen
-input and payload manifests, rejects special entries, checks that
-`bin/ghostd` is an executable x86-64 ELF, and runs its `--help` and
-`--version` paths with the release CI network-blocking environment. The
-stable PKGBUILD verifies both downloaded source archives by fixed SHA-256,
-checks their internal manifests against the tagged checkout, and performs
-`prepare()`, `build()`, `check()`, and `package()` without fetching.
-
-Compiler or dependency updates can still change the binary; that is why each
-release records and publishes the artifact checksum rather than claiming that
-a different toolchain can regenerate identical bytes forever. Repacking the
-same staged tree is byte-reproducible, and all staged bytes are traceable to
-fixed inputs.
+The v2 runtime archive is `bin/ghostd` compiled by `bun build --compile` at the
+`bun_version` recorded in `MANIFEST`, with `compile_target=bun-linux-x64` and
+the payload checksum bound to the exact `source_commit`. Release CI builds it
+from a frozen offline pnpm install behind dead proxies; the stable package then
+verifies the archive's fixed checksum, manifest, single-binary layout,
+executable x86-64 ELF, and `--help`/`--version` behavior before installation.
 
 ## Release procedure
 

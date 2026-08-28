@@ -18,12 +18,11 @@ artifact directly as `/usr/bin/ghostd`; it does not install the daemon source
 tree or JavaScript dependencies.
 
 ```bash
-pnpm --filter @ghost/extensions build
-pnpm --filter @ghost/daemon build
-bun packages/daemon/dist/main.js
-
 # development
 bun packages/daemon/src/main.ts --port 7788
+
+# built binary
+packages/daemon/dist/ghostd --port 7788
 ```
 
 ```text

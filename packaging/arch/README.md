@@ -23,15 +23,10 @@ collection must be available to `ghostd`. See
 blank-password/autologin caveat.
 
 This remains the rolling development package: `pnpm install` may populate its
-store during `build()`, so it is not the AUR release recipe. Release CI now
-constructs a deterministic, architecture-specific runtime source from the
-frozen workspace inputs and compiler recipe, pairs it with the exact tagged
-source archive, and renders a fixed-checksum stable `ghost-ai` PKGBUILD whose
-package phases are fully offline. The stable package also installs only the
-compiled `/usr/bin/ghostd`, with no source or JavaScript dependency tree.
-Nothing is published automatically: a release still requires an actual version
-tag, inspection of the attached artifacts, and a human upload of the rendered
-bundle to the `ghost-ai` AUR package.
+store during `build()`, so it is not the AUR release recipe. The stable package
+uses the [v2 runtime-source mechanism](../release/README.md#reproducibility-boundary)
+and also installs only `/usr/bin/ghostd`; publishing still requires a version
+tag, artifact inspection, and a human upload to the `ghost-ai` AUR package.
 
 The shell is installed at `/usr/share/ghost/quickshell` and exposed as the
 system Quickshell config `ghost`, so the existing `qs -c ghost` integration and

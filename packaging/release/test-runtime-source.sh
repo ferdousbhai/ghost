@@ -17,32 +17,22 @@ epoch=1
 runtime_root="$work/runtime"
 mkdir -p "$runtime_root/bin"
 
-cat > "$work/ghostd.c" <<'EOF'
-#include <stdio.h>
-#include <string.h>
-
-int main(int argc, char **argv) {
-  if (argc == 2 && strcmp(argv[1], "--help") == 0) {
-    puts("Usage:\n  ghostd [options]");
-    return 0;
-  }
-  if (argc == 2 && strcmp(argv[1], "--version") == 0) {
-    puts(GHOST_TEST_VERSION);
-    return 0;
-  }
-  return 2;
+cat > "$work/ghostd.ts" <<EOF
+if (process.argv.includes("--help")) {
+  console.log("Usage:\\n  ghostd [options]");
+} else if (process.argv.includes("--version")) {
+  console.log("$version");
+} else {
+  process.exitCode = 2;
 }
 EOF
-cc -O2 -DGHOST_TEST_VERSION="\"$version\"" "$work/ghostd.c" \
-  -o "$runtime_root/bin/ghostd"
+bun build --compile --target=bun-linux-x64 "$work/ghostd.ts" \
+  --outfile "$runtime_root/bin/ghostd"
 chmod 755 "$runtime_root/bin/ghostd"
 
-bash "$script_dir/frozen-inputs.sh" "$source_root" \
-  > "$runtime_root/FROZEN-INPUTS.SHA256"
 (
   cd "$runtime_root"
   sha256sum bin/ghostd > PAYLOAD.SHA256
-  printf '755\td\tbin\n755\tf\tbin/ghostd\n' > PAYLOAD.MODES
 )
 cat > "$runtime_root/MANIFEST" <<EOF
 format=ghost-runtime-source/v2
@@ -51,11 +41,11 @@ os=linux
 arch=x86_64
 source_commit=$commit
 source_date_epoch=$epoch
-frozen_inputs_sha256=$(sha256sum "$runtime_root/FROZEN-INPUTS.SHA256" | cut -d' ' -f1)
+bun_version=$(bun --version)
+compile_target=bun-linux-x64
 payload_manifest_sha256=$(sha256sum "$runtime_root/PAYLOAD.SHA256" | cut -d' ' -f1)
-modes_manifest_sha256=$(sha256sum "$runtime_root/PAYLOAD.MODES" | cut -d' ' -f1)
 EOF
-chmod 644 "$runtime_root"/{FROZEN-INPUTS.SHA256,MANIFEST,PAYLOAD.MODES,PAYLOAD.SHA256}
+chmod 644 "$runtime_root"/{MANIFEST,PAYLOAD.SHA256}
 
 verify() {
   GHOST_RELEASE_WORK_ROOT="$work/verify-work" \
@@ -80,14 +70,16 @@ cp -a "$runtime_root" "$tampered"
 printf 'tampered\n' >> "$tampered/bin/ghostd"
 assert_rejected "$tampered" 'runtime payload hashes do not match'
 
-forged_inputs="$work/forged-inputs"
-cp -a "$runtime_root" "$forged_inputs"
-sed -i '1d' "$forged_inputs/FROZEN-INPUTS.SHA256"
-frozen_hash="$(sha256sum "$forged_inputs/FROZEN-INPUTS.SHA256" | cut -d' ' -f1)"
-sed -i "s/^frozen_inputs_sha256=.*/frozen_inputs_sha256=$frozen_hash/" \
-  "$forged_inputs/MANIFEST"
-assert_rejected "$forged_inputs" \
-  'runtime frozen inputs do not match the tagged source'
+wrong_target="$work/wrong-target"
+cp -a "$runtime_root" "$wrong_target"
+sed -i 's/^compile_target=.*/compile_target=bun-linux-arm64/' \
+  "$wrong_target/MANIFEST"
+assert_rejected "$wrong_target" 'unsupported compile_target'
+
+non_executable="$work/non-executable"
+cp -a "$runtime_root" "$non_executable"
+chmod 644 "$non_executable/bin/ghostd"
+assert_rejected "$non_executable" 'runtime binary is not executable'
 
 linked="$work/linked"
 cp -a "$runtime_root" "$linked"

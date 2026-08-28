@@ -69,7 +69,7 @@ jobs:
           exec /usr/bin/runuser -u builder -- /usr/bin/env -i \
             HOME=/home/builder PATH=/usr/bin TMPDIR=/home/builder \
             GHOST_ARCH_DEPENDENCY_TEST_ROOT=/home/builder \
-            /usr/bin/bash packaging/arch/test-check-dependencies.sh
+            /usr/bin/bash -c 'set -euo pipefail; /usr/bin/bash packaging/arch/test-check-dependencies.sh; /usr/bin/bash packaging/release/test-runtime-source.sh'
 
       - name: Build and smoke-test the package
         shell: bash

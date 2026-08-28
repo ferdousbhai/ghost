@@ -44,14 +44,24 @@ fi
 ) > "$temporary/layout.actual"
 printf '%s\n' \
   $'d\tbin' \
-  $'f\tFROZEN-INPUTS.SHA256' \
   $'f\tMANIFEST' \
-  $'f\tPAYLOAD.MODES' \
   $'f\tPAYLOAD.SHA256' \
   $'f\tbin/ghostd' \
   | LC_ALL=C sort > "$temporary/layout.expected"
 require_identical "$temporary/layout.expected" "$temporary/layout.actual" \
   'runtime source does not have the v2 single-binary layout'
+
+bun_version="$(sed -n 's/^bun_version=//p' "$manifest")"
+[[ "$bun_version" =~ ^[^[:space:]=]+$ ]] || {
+  printf 'runtime manifest has an invalid bun_version\n' >&2
+  exit 1
+}
+compile_target="$(sed -n 's/^compile_target=//p' "$manifest")"
+[[ "$compile_target" == bun-linux-x64 ]] || {
+  printf 'runtime manifest has an unsupported compile_target: %s\n' \
+    "$compile_target" >&2
+  exit 1
+}
 
 cat > "$temporary/MANIFEST.expected" <<EOF
 format=ghost-runtime-source/v2
@@ -60,37 +70,24 @@ os=linux
 arch=$arch
 source_commit=$commit
 source_date_epoch=$epoch
-frozen_inputs_sha256=$(sha256sum "$runtime_root/FROZEN-INPUTS.SHA256" | cut -d' ' -f1)
+bun_version=$bun_version
+compile_target=$compile_target
 payload_manifest_sha256=$(sha256sum "$runtime_root/PAYLOAD.SHA256" | cut -d' ' -f1)
-modes_manifest_sha256=$(sha256sum "$runtime_root/PAYLOAD.MODES" | cut -d' ' -f1)
 EOF
 require_identical "$temporary/MANIFEST.expected" "$manifest" \
   'runtime manifest does not match the expected v2 identity'
+printf 'Runtime compiler: bun_version=%s compile_target=%s\n' \
+  "$bun_version" "$compile_target"
 
-bash "$source_root/packaging/release/frozen-inputs.sh" "$source_root" \
-  > "$temporary/FROZEN-INPUTS.SHA256"
-require_identical "$temporary/FROZEN-INPUTS.SHA256" \
-  "$runtime_root/FROZEN-INPUTS.SHA256" \
-  'runtime frozen inputs do not match the tagged source'
-
-(
-  cd "$runtime_root"
-  find bin -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum
-) > "$temporary/PAYLOAD.SHA256"
-require_identical "$temporary/PAYLOAD.SHA256" \
-  "$runtime_root/PAYLOAD.SHA256" \
-  'runtime payload hashes do not match the staged binary'
-
-(
-  cd "$runtime_root"
-  while IFS= read -r -d '' path; do
-    kind=f
-    [[ -d "$path" ]] && kind=d
-    printf '%s\t%s\t%s\n' "$(stat -c '%a' "$path")" "$kind" "$path"
-  done < <(find bin -print0 | LC_ALL=C sort -z)
-) > "$temporary/PAYLOAD.MODES"
-require_identical "$temporary/PAYLOAD.MODES" "$runtime_root/PAYLOAD.MODES" \
-  'runtime payload modes do not match the staged binary'
+[[ "$(wc -l < "$runtime_root/PAYLOAD.SHA256")" -eq 1 ]] \
+  && grep -Eq '^[0-9a-f]{64}  bin/ghostd$' "$runtime_root/PAYLOAD.SHA256" || {
+  printf 'runtime payload checksum manifest is invalid\n' >&2
+  exit 1
+}
+if ! (cd "$runtime_root" && sha256sum -c PAYLOAD.SHA256); then
+  printf 'runtime payload hashes do not match the staged binary\n' >&2
+  exit 1
+fi
 
 [[ -x "$binary" ]] || {
   printf 'runtime binary is not executable: %s\n' "$binary" >&2

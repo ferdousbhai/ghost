@@ -14,7 +14,7 @@ from yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
 from yaml.tokens import AliasToken, AnchorToken
 
 
-PACKAGE_SHA256 = "97e42353557db8e112d18be7fd659a18e62ac045860edc940a88764120a9c98a"
+PACKAGE_SHA256 = "aef2e84fe5e2d7dceb71af79e1b0f8644838e9fb4d8d3e751b90057537820047"
 EXPECTED_STEP_NAMES = [
     "Update package database and install checkout dependency",
     None,

@@ -58,17 +58,14 @@ SOURCE_DATE_EPOCH="$epoch" \
     "$source_tree" "$source_archive" "$version" HEAD
 bash "$source_tree/packaging/release/prepare-pnpm-engine.sh" "$source_tree"
 pnpm --dir "$source_tree" fetch --frozen-lockfile
-env \
-  ALL_PROXY=http://127.0.0.1:9 \
-  FTP_PROXY=http://127.0.0.1:9 \
-  GLOBAL_AGENT_HTTPS_PROXY=http://127.0.0.1:9 \
-  HTTPS_PROXY=http://127.0.0.1:9 \
-  HTTP_PROXY=http://127.0.0.1:9 \
-  NO_PROXY= \
+(
+  # shellcheck source=offline-env.sh
+  source "$source_tree/packaging/release/offline-env.sh"
   GHOST_RELEASE_WORK_ROOT="$release_work" \
-  SOURCE_DATE_EPOCH="$epoch" \
-  bash "$source_tree/packaging/release/build-runtime-source.sh" \
-    "$source_tree" "$release_out" "$version" x86_64 "$commit"
+    SOURCE_DATE_EPOCH="$epoch" \
+    bash "$source_tree/packaging/release/build-runtime-source.sh" \
+      "$source_tree" "$release_out" "$version" x86_64 "$commit"
+)
 
 GHOST_RELEASE_WORK_ROOT="$release_work" \
   bash "$source_tree/packaging/release/smoke-runtime-source.sh" \
@@ -86,20 +83,17 @@ bash "$source_tree/packaging/release/render-arch-package.sh" \
 
 install -d -m700 -- \
   "$release_work/makepkg-build" "$release_work/makepkg-sources"
-env \
-  ALL_PROXY=http://127.0.0.1:9 \
-  FTP_PROXY=http://127.0.0.1:9 \
-  GLOBAL_AGENT_HTTPS_PROXY=http://127.0.0.1:9 \
-  HTTPS_PROXY=http://127.0.0.1:9 \
-  HTTP_PROXY=http://127.0.0.1:9 \
-  NO_PROXY= \
+(
+  # shellcheck source=offline-env.sh
+  source "$source_tree/packaging/release/offline-env.sh"
   GHOST_RELEASE_SOURCE_URL="file://$source_archive" \
-  GHOST_RELEASE_RUNTIME_URL="file://$release_out/$runtime" \
-  GHOST_RELEASE_WORK_ROOT="$release_work" \
-  BUILDDIR="$release_work/makepkg-build" \
-  SRCDEST="$release_work/makepkg-sources" \
-  PKGDEST="$release_out" \
-  makepkg --dir "$aur_dir" --cleanbuild --noconfirm
+    GHOST_RELEASE_RUNTIME_URL="file://$release_out/$runtime" \
+    GHOST_RELEASE_WORK_ROOT="$release_work" \
+    BUILDDIR="$release_work/makepkg-build" \
+    SRCDEST="$release_work/makepkg-sources" \
+    PKGDEST="$release_out" \
+    makepkg --dir "$aur_dir" --cleanbuild --noconfirm
+)
 
 (
   cd -- "$aur_dir"

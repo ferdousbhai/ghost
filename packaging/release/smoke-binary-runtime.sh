@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+script_dir="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+# shellcheck source=offline-env.sh
+source "$script_dir/offline-env.sh"
+
 binary="${1:?usage: smoke-binary-runtime.sh <ghostd-binary> <version> <scratch-root>}"
 version="${2:?usage: smoke-binary-runtime.sh <ghostd-binary> <version> <scratch-root>}"
 scratch="${3:?usage: smoke-binary-runtime.sh <ghostd-binary> <version> <scratch-root>}"
@@ -13,17 +17,6 @@ install -d -m700 \
   "$scratch/cache"
 
 offline_env=(
-  ALL_PROXY=http://127.0.0.1:9
-  FTP_PROXY=http://127.0.0.1:9
-  GLOBAL_AGENT_HTTPS_PROXY=http://127.0.0.1:9
-  HTTPS_PROXY=http://127.0.0.1:9
-  HTTP_PROXY=http://127.0.0.1:9
-  NO_PROXY=
-  all_proxy=http://127.0.0.1:9
-  ftp_proxy=http://127.0.0.1:9
-  https_proxy=http://127.0.0.1:9
-  http_proxy=http://127.0.0.1:9
-  no_proxy=
   HOME="$scratch/home"
   XDG_STATE_HOME="$scratch/state"
   XDG_CONFIG_HOME="$scratch/config"
