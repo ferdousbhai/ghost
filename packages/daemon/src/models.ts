@@ -6,9 +6,9 @@
  * has different auth/accounting semantics than OMP's Anthropic provider.
  * Durable model/runtime choice lives in the ghost's own
  * `<home>/models.json`. `omp-runtime.ts` projects the provider portion to
- * OMP while retaining Ghost's role and fallback metadata. OMP's canonical
- * credential store is `<home>/.pi/agent.db`; a legacy `auth.json` is imported
- * once and retained as a recoverable migration source.
+ * OMP while retaining Ghost's role and fallback metadata. Provider and MCP
+ * values are service/account references into Ghost's Secret Service schema;
+ * legacy plaintext sources are imported, verified, and scrubbed once.
  *
  * ## The file
  *
@@ -30,14 +30,11 @@
  *
  * ## Credentials
  *
- * Never from the environment — see env-scrub.ts. Two supported sources, both
- * per-ghost:
- *
- * 1. `apiKey` in `models.json` (device-local; fine for keyless local servers
- *    and for a key the user pastes into their own ghost).
- * 2. `agent.db`, OMP's SQLite credential store, which holds OAuth credentials
- *    and API keys. The daemon does not implement provider OAuth itself; its
- *    login broker drives OMP's registry and `AuthStorage` interaction.
+ * Never from the environment or a ghost-home literal — see env-scrub.ts.
+ * `models.json` contains only `keyring:<service>/<account>[#<field>]`
+ * references and an `accounts` policy list. Secret values live at machine
+ * scope in Linux Secret Service and are injected through OMP's
+ * `AuthCredentialStore` boundary.
  *
  * `claude-code/default` uses neither source: the official Agent SDK invokes
  * the installed `claude`, and that unmodified executable reads the owner's
@@ -55,12 +52,23 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { Api, Model } from "@oh-my-pi/pi-ai";
 import {
   pickDefaultAvailableModel,
   resolveModelRoleValue,
 } from "@oh-my-pi/pi-coding-agent/config/model-resolver";
+import {
+  fsyncPath,
+  PrivateReadError,
+  readPrivateFileText,
+  type PrivateReadRefusal,
+} from "./private-file.js";
+import {
+  parseSecretAccountName,
+  parseSecretReference,
+  SECRET_REFERENCE_PREFIX,
+} from "./secret-reference.js";
 
 /** One model entry, a subset of OMP's models-file model. */
 export interface GhostModelDefinition {
@@ -183,6 +191,8 @@ const LEGACY_SMOL_MODEL_ROLE = "title_model";
 
 export interface GhostModelsFile {
   providers: Record<string, GhostProviderConfig>;
+  /** Machine-keyring accounts this ghost is allowed to resolve. */
+  accounts?: string[];
   roles?: Partial<Record<GhostModelRole, GhostModelRoleBinding>>;
   /** Ordered retry choices, projected to OMP's `retry.fallbackChains`. */
   fallbacks?: Partial<Record<GhostModelRole, GhostModelRoleBinding[]>>;
@@ -251,6 +261,12 @@ export const AUTH_FILENAME = "auth.json";
 const MODELS_LOCK_SUFFIX = ".lock";
 const MODELS_LOCK_WAIT_MS = 500;
 const MODELS_LOCK_POLL_MS = 10;
+const MODELS_READ_REFUSAL: Record<Exclude<PrivateReadRefusal, "open">, string> = {
+  unsafe: "must be a single-link regular file",
+  too_large: "exceeds the 1 MiB limit",
+  changed: "changed while it was being read",
+  encoding: "is not valid UTF-8",
+};
 const lockSleepCell = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
 
 interface GhostModelsLockOwner {
@@ -408,7 +424,7 @@ function withSerializedModelsWrite<T>(path: string, mutation: () => T): T {
  * The temporary lives beside the destination so `renameSync` cannot cross a
  * filesystem boundary. Its random, exclusive name prevents concurrent daemon
  * processes from sharing a staging file; mode 0600 protects an embedded
- * provider key during staging as well as after rename.
+ * keyring reference during staging as well as after rename.
  */
 function persistGhostModels(path: string, file: GhostModelsFile): void {
   const text = `${JSON.stringify(file, null, 2)}\n`;
@@ -417,7 +433,9 @@ function persistGhostModels(path: string, file: GhostModelsFile): void {
     writeFileSync(temporary, text, { encoding: "utf8", flag: "wx", mode: 0o600 });
     // Creation mode is filtered through umask; force the promised final mode.
     chmodSync(temporary, 0o600);
+    fsyncPath(temporary);
     renameSync(temporary, path);
+    fsyncPath(dirname(path));
   } catch (error) {
     try {
       // `writeFileSync` may create and partially populate the temporary before
@@ -455,15 +473,73 @@ function migrateLegacySmolRole<T>(
   return migrated;
 }
 
+/** Re-throw a name parser's own message against the file that carried the name. */
+function assertParses(path: string, value: string, parse: (input: string) => unknown): void {
+  try {
+    parse(value);
+  } catch (error) {
+    throw new Error(`${path}: ${(error as Error).message}`);
+  }
+}
+
+/** A configured value is either a literal or a well-formed keyring reference. */
+function assertSecretValue(path: string, value: string): void {
+  if (!value.startsWith(SECRET_REFERENCE_PREFIX)) return;
+  assertParses(path, value, parseSecretReference);
+}
+
+/** The machine accounts this ghost may resolve, each named once and parseable. */
+function assertAccountPolicy(path: string, accounts: unknown): void {
+  if (accounts === undefined) return;
+  if (!Array.isArray(accounts) || !accounts.every((entry) => typeof entry === "string")) {
+    throw new Error(`${path}: "accounts" must be an array of service/account strings.`);
+  }
+  const seen = new Set<string>();
+  for (const account of accounts as string[]) {
+    assertParses(path, account, parseSecretAccountName);
+    if (seen.has(account)) throw new Error(`${path}: "accounts" must not contain duplicates.`);
+    seen.add(account);
+  }
+}
+
+/** Provider entries carry only strings, and only well-formed references. */
+function assertProviderShape(path: string, providers: Record<string, unknown>): void {
+  for (const [provider, value] of Object.entries(providers)) {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) {
+      throw new Error(`${path}: provider ${JSON.stringify(provider)} must be an object.`);
+    }
+    const config = value as Record<string, unknown>;
+    if (config.apiKey !== undefined && typeof config.apiKey !== "string") {
+      throw new Error(`${path}: provider ${JSON.stringify(provider)} "apiKey" must be a string.`);
+    }
+    if (typeof config.apiKey === "string") assertSecretValue(path, config.apiKey);
+    if (config.headers === undefined) continue;
+    if (config.headers === null || typeof config.headers !== "object" || Array.isArray(config.headers)) {
+      throw new Error(`${path}: provider ${JSON.stringify(provider)} "headers" must be an object.`);
+    }
+    for (const header of Object.values(config.headers as Record<string, unknown>)) {
+      if (typeof header !== "string") {
+        throw new Error(`${path}: provider ${JSON.stringify(provider)} header values must be strings.`);
+      }
+      assertSecretValue(path, header);
+    }
+  }
+}
+
 /** Read `<home>/models.json`, or null when absent. Throws on malformed. */
 export function readGhostModels(configDir: string): GhostModelsFile | null {
   const path = ghostModelsPath(configDir);
   let text: string;
   try {
-    text = readFileSync(path, "utf8");
+    text = readPrivateFileText(path);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw error;
+    if (!(error instanceof PrivateReadError)) throw error;
+    if (error.refusal === "open") {
+      const cause = error.cause as NodeJS.ErrnoException;
+      if (cause.code === "ENOENT") return null;
+      throw cause;
+    }
+    throw new Error(`${path} ${MODELS_READ_REFUSAL[error.refusal]}.`);
   }
   let parsed: unknown;
   try {
@@ -474,7 +550,12 @@ export function readGhostModels(configDir: string): GhostModelsFile | null {
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new Error(`${path} must contain a JSON object.`);
   }
-  const file = parsed as Record<string, unknown> & { providers?: unknown; roles?: unknown; fallbacks?: unknown };
+  const file = parsed as Record<string, unknown> & {
+    providers?: unknown;
+    accounts?: unknown;
+    roles?: unknown;
+    fallbacks?: unknown;
+  };
   if (file.providers !== undefined
     && (file.providers === null || typeof file.providers !== "object" || Array.isArray(file.providers))) {
     throw new Error(`${path}: "providers" must be an object.`);
@@ -487,12 +568,29 @@ export function readGhostModels(configDir: string): GhostModelsFile | null {
     && (file.fallbacks === null || typeof file.fallbacks !== "object" || Array.isArray(file.fallbacks))) {
     throw new Error(`${path}: "fallbacks" must be an object.`);
   }
+  assertAccountPolicy(path, file.accounts);
+  const providers = (file.providers as Record<string, unknown>) ?? {};
+  assertProviderShape(path, providers);
   return {
     ...file,
-    providers: (file.providers as Record<string, GhostProviderConfig>) ?? {},
+    providers: providers as Record<string, GhostProviderConfig>,
+    accounts: file.accounts as string[] | undefined,
     roles: migrateLegacySmolRole(file.roles as GhostModelsFile["roles"]),
     fallbacks: migrateLegacySmolRole(file.fallbacks as GhostModelsFile["fallbacks"]),
   };
+}
+
+/** Add allowed machine accounts without replacing another models.json mutation. */
+export function addGhostAccounts(configDir: string, additions: readonly string[]): GhostModelsFile {
+  for (const account of additions) parseSecretAccountName(account);
+  mkdirSync(configDir, { recursive: true });
+  const path = ghostModelsPath(configDir);
+  return withSerializedModelsWrite(path, () => {
+    const file = readGhostModels(configDir) ?? { providers: {} };
+    file.accounts = [...new Set([...(file.accounts ?? []), ...additions])];
+    persistGhostModels(path, file);
+    return file;
+  });
 }
 
 export function writeGhostModels(configDir: string, file: GhostModelsFile): void {
@@ -798,9 +896,9 @@ export function openAiCompatiblePreset(
 }
 
 /**
- * Bind a model served by a provider OMP already knows, authenticated from its
- * `agent.db` store. No `providers` entry is emitted: OMP supplies the endpoint
- * and catalogue.
+ * Bind a model served by a provider OMP already knows, authenticated from the
+ * Ghost keyring store. No `providers` entry is emitted: OMP supplies the
+ * endpoint and catalogue.
  */
 export function builtinProviderPreset(
   providerId: string,

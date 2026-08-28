@@ -9,9 +9,9 @@
  * `auth-command` builds from a TTY. The one thing shared with the HTTP path is
  * `bindDefaultChatModelIfUnset`, so both leave a signed-in ghost ready to chat.
  *
- * Credentials are written by `login()` to the ghost's `<home>/.pi/agent.db`
- * and nowhere else. Pasted codes and keys are read straight into the flow and
- * never logged.
+ * Credentials are written by `login()` to Ghost's service/account-scoped
+ * Secret Service store and nowhere else. Pasted codes and keys are read
+ * straight into the flow and never logged.
  */
 import { createInterface, type Interface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
@@ -42,6 +42,7 @@ Usage:
 Options:
   --provider <id>      Provider to log into (e.g. openai-codex, openrouter).
                        Prompted from the list when omitted.
+  --account <name>     Machine keyring account (default: personal).
       --api-key        Use the api-key flow (paste a key) instead of OAuth.
       --oauth          Force the OAuth flow (the default when both are offered).
       --ghosts-root <dir>  Directory holding one sub-directory per ghost.
@@ -53,6 +54,7 @@ Options:
 interface LoginArgs {
   ghost?: string;
   provider?: string;
+  account: string;
   authType?: AuthType;
   overrides: DaemonConfigOverrides;
   offline: boolean;
@@ -61,7 +63,7 @@ interface LoginArgs {
 
 function parseLoginArgs(argv: string[]): LoginArgs {
   const overrides: DaemonConfigOverrides = {};
-  const args: LoginArgs = { overrides, offline: false, help: false };
+  const args: LoginArgs = { account: "personal", overrides, offline: false, help: false };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index] as string;
     const value = (): string => {
@@ -77,6 +79,9 @@ function parseLoginArgs(argv: string[]): LoginArgs {
         break;
       case "--provider":
         args.provider = value();
+        break;
+      case "--account":
+        args.account = value();
         break;
       case "--api-key":
         args.authType = "api_key";
@@ -290,10 +295,11 @@ export async function loginCommand(
     const choice = await resolveProvider(rl, runtime, args);
 
     out(`\nSigning ${ghost.name} in to ${choice.name} (${choice.authType})...`);
-    await runtime.login(choice.id, choice.authType, terminalInteraction(rl));
+    await runtime.login(choice.id, choice.authType, terminalInteraction(rl), args.account);
+    runtime.authorizeAccount?.(choice.id, args.account, paths.home);
 
     const bound = await bindDefaultChatModelIfUnset(paths.home, runtime, choice.id);
-    out(`\n✓ ${ghost.name} is signed in to ${choice.name}.`);
+    out(`\n✓ ${ghost.name} is signed in to ${choice.name} (${args.account}).`);
     if (bound) out(`  Chat model set to ${bound.provider}/${bound.modelId}.`);
     else out("  Pick a model in the shell, or set roles.chat_model in models.json.");
     return 0;

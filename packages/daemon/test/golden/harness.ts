@@ -32,7 +32,7 @@
  *   cannot be byte-stable across machines. `personaOf()` below slices it away;
  *   focused tests separately pin the explicit ghost/project snapshots and the
  *   absence of ambient owner-home resources.
- * - **`agentDir` internals** — `.pi/agent.db`, the `sessions/*.jsonl`
+ * - **`agentDir` internals** — `.pi/models.db`, the `sessions/*.jsonl`
  *   transcripts. Binary/SQLite and full of ids and clock values; the rendered
  *   transcript is the same information in a stable shape.
  * - **Wall-clock everything**: entry timestamps, `createdAt`/`updatedAt`, the
@@ -220,11 +220,12 @@ export function personaOf(systemPrompt: string, anchor: string): string {
  * sorted by path.
  *
  * Two directories are listed by name only, never by content:
- * `.pi/` (OMP's agent dir — `agent.db` is SQLite, plus WAL/shm files that
+ * `.pi/` (OMP's agent dir — `models.db` is SQLite, plus WAL/shm files that
  * differ byte-for-byte every run) and `sessions/` (raw OMP transcripts, full
  * of ids and clock values; the rendered transcript covers the same ground in a
  * stable shape). Listing their *filenames* still pins the contract that
- * sessions and agent state live inside the ghost home.
+ * sessions and derived agent state live inside the ghost home — and that
+ * credentials do not: no `agent.db` is created there any more.
  *
  * The remaining visible files pin this fixture's ghost-owned persona, memory,
  * and policy state. Owner Documents and Claude's native transcript have

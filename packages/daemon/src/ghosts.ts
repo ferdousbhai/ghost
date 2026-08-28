@@ -6,9 +6,9 @@
  * of that directory; reading its *contents* (character and memory) is
  * `@ghost/extensions`' job.
  *
- * A ghost home is plain files the owner can open, `sessions/` included. The
- * one exception is `.pi/`, which holds provider credentials and OMP's
- * machine-bound runtime state until those move out of the home entirely.
+ * A ghost home is plain files the owner can open, `sessions/` included. `.pi/`
+ * contains only derived OMP runtime state; credentials live in Ghost's
+ * machine-scoped Secret Service schema.
  */
 import { randomUUID } from "node:crypto";
 import {
@@ -327,9 +327,9 @@ export class GhostRegistry {
   /**
    * Rename `<root>/<name>/` to `<root>/<nextName>/` — which renames the ghost,
    * because the directory name is the name. One same-filesystem rename carries
-   * the persona, memory, conversations, pins, and credentials across
-   * together, and leaves every conversation id (a transcript filename inside
-   * the home) valid.
+   * the persona, memory, conversations, and pins together, and leaves every
+   * conversation id (a transcript filename inside the home) valid. Machine
+   * credentials are service/account scoped and are not renamed.
    *
    * The target must not exist at all, not merely "not be a ghost": renaming
    * onto an occupied path would either fail deep in `rename` or bury whatever

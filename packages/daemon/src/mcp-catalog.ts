@@ -12,14 +12,12 @@
  * Mutations use OMP's locked, atomic config writer and its native validation.
  */
 import { isAbsolute, join, resolve } from "node:path";
-import { validateServerConfig } from "@oh-my-pi/pi-coding-agent/mcp/config";
 import { expandEnvVarsDeep } from "@oh-my-pi/pi-coding-agent/discovery/helpers";
 import { MCPManager } from "@oh-my-pi/pi-coding-agent/mcp/manager";
 import {
   addMCPServer,
   removeMCPServer,
   updateMCPServer,
-  validateServerName,
 } from "@oh-my-pi/pi-coding-agent/mcp/config-writer";
 import type {
   MCPAuthConfig,
@@ -40,6 +38,17 @@ import {
   openDirectoryNoFollow,
   openRegularFileNoFollow,
 } from "@ghost/extensions";
+import {
+  isRecord,
+  mcpServerValidationErrors,
+} from "./mcp-server-shape.js";
+import {
+  authorizeGhostAccounts,
+  materializeMcpSecretReferences,
+  openGhostSecretContext,
+} from "./secret-migration.js";
+import { resolveMcpServerSecrets } from "./secret-resolution.js";
+import { SecretServiceError } from "./secret-service.js";
 
 export type McpConfigSource = "canonical" | "legacy";
 export type McpTransport = "stdio" | "http" | "sse";
@@ -172,140 +181,6 @@ interface ParsedProjectMcpInputs {
   configured: EffectiveProjectMcpServer[];
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-const MCP_BASE_FIELDS = new Set([
-  "enabled",
-  "timeout",
-  "requestIdFormat",
-  "auth",
-  "oauth",
-]);
-const MCP_STDIO_FIELDS = new Set([
-  ...MCP_BASE_FIELDS,
-  "type",
-  "command",
-  "args",
-  "env",
-  "envPolicy",
-  "cwd",
-]);
-const MCP_REMOTE_FIELDS = new Set([
-  ...MCP_BASE_FIELDS,
-  "type",
-  "url",
-  "headers",
-  "headerPolicy",
-]);
-const MCP_AUTH_FIELDS = new Set([
-  "type",
-  "credentialId",
-  "tokenUrl",
-  "clientId",
-  "clientSecret",
-  "resource",
-]);
-const MCP_OAUTH_FIELDS = new Set([
-  "clientId",
-  "clientSecret",
-  "redirectUri",
-  "callbackPort",
-  "callbackPath",
-  "prompt",
-]);
-
-function hasOnlyFields(value: Record<string, unknown>, allowed: ReadonlySet<string>): boolean {
-  return Object.keys(value).every((key) => allowed.has(key));
-}
-
-function isStringRecord(value: unknown): value is Record<string, string> {
-  return isRecord(value) && Object.values(value).every((entry) => typeof entry === "string");
-}
-
-/**
- * Validate Ghost's owned MCP boundary before OMP or an HTTP sanitizer sees a
- * value. Messages name fields but never interpolate their values.
- */
-function ownedMcpValidationErrors(value: unknown): string[] {
-  if (!isRecord(value)) return ["MCP server configuration must be a JSON object."];
-  const type = value.type === undefined ? "stdio" : value.type;
-  if (type !== "stdio" && type !== "http" && type !== "sse") {
-    return ['MCP server "type" must be "stdio", "http", or "sse".'];
-  }
-  const allowed = type === "stdio" ? MCP_STDIO_FIELDS : MCP_REMOTE_FIELDS;
-  if (!hasOnlyFields(value, allowed)) {
-    return ["MCP server configuration contains unsupported fields."];
-  }
-  if (value.enabled !== undefined && typeof value.enabled !== "boolean") {
-    return ['MCP server "enabled" must be a boolean.'];
-  }
-  if (value.timeout !== undefined
-    && (typeof value.timeout !== "number"
-      || !Number.isFinite(value.timeout)
-      || value.timeout < 0)) {
-    return ['MCP server "timeout" must be a finite non-negative number.'];
-  }
-  if (value.requestIdFormat !== undefined
-    && value.requestIdFormat !== "string"
-    && value.requestIdFormat !== "number") {
-    return ['MCP server "requestIdFormat" must be "string" or "number".'];
-  }
-  if (value.auth !== undefined) {
-    if (!isRecord(value.auth)
-      || !hasOnlyFields(value.auth, MCP_AUTH_FIELDS)
-      || (value.auth.type !== "oauth" && value.auth.type !== "apikey")
-      || Object.entries(value.auth).some(([key, entry]) =>
-        key !== "type" && typeof entry !== "string")) {
-      return ["MCP server auth configuration is invalid."];
-    }
-  }
-  if (value.oauth !== undefined) {
-    if (!isRecord(value.oauth) || !hasOnlyFields(value.oauth, MCP_OAUTH_FIELDS)) {
-      return ["MCP server OAuth configuration is invalid."];
-    }
-    for (const [key, entry] of Object.entries(value.oauth)) {
-      if (key === "callbackPort") {
-        if (typeof entry !== "number" || !Number.isSafeInteger(entry) || entry < 1 || entry > 65_535) {
-          return ["MCP server OAuth callbackPort is invalid."];
-        }
-      } else if (typeof entry !== "string") {
-        return ["MCP server OAuth configuration is invalid."];
-      }
-    }
-  }
-  if (type === "stdio") {
-    if (typeof value.command !== "string" || value.command.length === 0) {
-      return ['MCP stdio "command" must be a non-empty string.'];
-    }
-    if (value.args !== undefined
-      && (!Array.isArray(value.args) || !value.args.every((entry) => typeof entry === "string"))) {
-      return ['MCP stdio "args" must be an array of strings.'];
-    }
-    if (value.env !== undefined && !isStringRecord(value.env)) {
-      return ['MCP stdio "env" must contain only string values.'];
-    }
-    if (value.envPolicy !== undefined && value.envPolicy !== "literal") {
-      return ['MCP stdio "envPolicy" must be "literal".'];
-    }
-    if (value.cwd !== undefined && (typeof value.cwd !== "string" || value.cwd.length === 0)) {
-      return ['MCP stdio "cwd" must be a non-empty string.'];
-    }
-  } else {
-    if (typeof value.url !== "string" || value.url.length === 0) {
-      return ['MCP remote "url" must be a non-empty string.'];
-    }
-    if (value.headers !== undefined && !isStringRecord(value.headers)) {
-      return ['MCP remote "headers" must contain only string values.'];
-    }
-    if (value.headerPolicy !== undefined && value.headerPolicy !== "origin-locked") {
-      return ['MCP remote "headerPolicy" must be "origin-locked".'];
-    }
-  }
-  return [];
-}
-
 export function normalizeMcpStdioCwd(
   config: MCPServerConfig,
   sourceRoot: string,
@@ -434,25 +309,13 @@ export function sanitizeMcpServerConfig(config: MCPServerConfig): McpServerConfi
   };
 }
 
-function validationErrors(name: string, value: unknown): string[] {
-  const nameError = validateServerName(name);
-  if (nameError) return [nameError];
-  const ownedErrors = ownedMcpValidationErrors(value);
-  if (ownedErrors.length > 0) return ownedErrors;
-  try {
-    return validateServerConfig(name, value as unknown as MCPServerConfig);
-  } catch {
-    return ["MCP server configuration is invalid."];
-  }
-}
-
 /** Revalidate one already-confined project row before loading a durable snapshot. */
 export function projectMcpValidationErrors(name: string, value: unknown): string[] {
-  return validationErrors(name, value);
+  return mcpServerValidationErrors(name, value);
 }
 
 function validateMutation(name: string, value: unknown): asserts value is MCPServerConfig {
-  const errors = validationErrors(name, value);
+  const errors = mcpServerValidationErrors(name, value);
   if (errors.length > 0) {
     throw new GhostError(
       "invalid_mcp_server",
@@ -520,7 +383,7 @@ function parseProjectMcpInputs(
         name,
         source: input.source,
         config,
-        errors: validationErrors(name, config),
+        errors: mcpServerValidationErrors(name, config),
       };
       configured.push(server);
       if (server.errors.length > 0) {
@@ -666,6 +529,36 @@ export class McpCatalog {
     return { servers, skipped };
   }
 
+  /**
+   * Move a row's literal secrets into the machine keyring, authorize the
+   * accounts they landed in, then write the reference-only row.
+   *
+   * `add` and `update` share this because they must not drift on its ordering:
+   * policy is widened only after a verified keyring write, and the secret
+   * context is closed on every path out.
+   */
+  private async writeMigratedServer(
+    mutation: "add" | "update",
+    ghostName: string,
+    absolutePath: string,
+    name: string,
+    config: unknown,
+  ): Promise<void> {
+    const home = this.registry.get(ghostName).dir;
+    const context = openGhostSecretContext({ home });
+    try {
+      const migrated = materializeMcpSecretReferences(name, config as MCPServerConfig, context);
+      authorizeGhostAccounts(home, context, migrated.addedAccounts);
+      try {
+        await this.writer[mutation](absolutePath, name, migrated.config);
+      } catch (error) {
+        translateWriterError(error, name);
+      }
+    } finally {
+      context.close();
+    }
+  }
+
   /** Add a new server to the visible ghost file. */
   async add(ghostName: string, name: string, config: unknown): Promise<McpCatalogSnapshot> {
     validateMutation(name, config);
@@ -675,11 +568,7 @@ export class McpCatalog {
         throw new GhostError("mcp_server_exists", `MCP server ${JSON.stringify(name)} already exists.`, 409);
       }
       const [canonical] = this.sources(ghostName);
-      try {
-        await this.writer.add(canonical.absolutePath, name, config);
-      } catch (error) {
-        translateWriterError(error, name);
-      }
+      await this.writeMigratedServer("add", ghostName, canonical.absolutePath, name, config);
       return this.list(ghostName);
     });
   }
@@ -693,11 +582,7 @@ export class McpCatalog {
       if (!server) {
         throw new GhostError("mcp_server_not_found", `No MCP server named ${JSON.stringify(name)}.`, 404);
       }
-      try {
-        await this.writer.update(server.source.absolutePath, name, config);
-      } catch (error) {
-        translateWriterError(error, name);
-      }
+      await this.writeMigratedServer("update", ghostName, server.source.absolutePath, name, config);
       return this.list(ghostName);
     });
   }
@@ -750,45 +635,52 @@ export class McpCatalog {
    */
   async test(ghostName: string, name: string): Promise<McpConnectionTest> {
     return this.withHomeLease(ghostName, async () => {
-      const server = (await this.effective(ghostName)).configured
-        .find((candidate) => candidate.name === name);
-      if (!server) {
-        throw new GhostError("mcp_server_not_found", `No MCP server named ${JSON.stringify(name)}.`, 404);
-      }
-      validateMutation(name, server.config);
       const home = this.registry.get(ghostName).dir;
-      const manager = new MCPManager(home, null, { redactErrors: true });
-      const source: SourceMeta = {
-        provider: "native",
-        providerName: "OMP",
-        path: server.source.absolutePath,
-        level: "user",
-      };
+      const context = openGhostSecretContext({ home });
       try {
-        const expanded = expandMcpServerConfig(server.config as MCPServerConfig);
-        const result = await manager.connectServers(
-          { [name]: normalizeMcpStdioCwd(expanded, home) },
-          { [name]: source },
-        );
-        const connected = result.connectedServers.includes(name)
-          || manager.getConnectionStatus(name) === "connected";
-        return {
-          name,
-          ok: connected,
-          status: connected ? "connected" : "failed",
-          toolCount: manager.getTools().filter((tool) => tool.mcpServerName === name).length,
-          message: connected ? "Connection succeeded." : "Connection failed; check the server configuration.",
+        const server = (await this.effective(ghostName)).configured
+          .find((candidate) => candidate.name === name);
+        if (!server) {
+          throw new GhostError("mcp_server_not_found", `No MCP server named ${JSON.stringify(name)}.`, 404);
+        }
+        validateMutation(name, server.config);
+        const manager = new MCPManager(home, null, { redactErrors: true });
+        const source: SourceMeta = {
+          provider: "native",
+          providerName: "OMP",
+          path: server.source.absolutePath,
+          level: "user",
         };
-      } catch {
-        return {
-          name,
-          ok: false,
-          status: "failed",
-          toolCount: 0,
-          message: "Connection failed; check the server configuration.",
-        };
+        try {
+          const resolved = resolveMcpServerSecrets(server.config as MCPServerConfig, context);
+          const expanded = expandMcpServerConfig(resolved);
+          const result = await manager.connectServers(
+            { [name]: normalizeMcpStdioCwd(expanded, home) },
+            { [name]: source },
+          );
+          const connected = result.connectedServers.includes(name)
+            || manager.getConnectionStatus(name) === "connected";
+          return {
+            name,
+            ok: connected,
+            status: connected ? "connected" : "failed",
+            toolCount: manager.getTools().filter((tool) => tool.mcpServerName === name).length,
+            message: connected ? "Connection succeeded." : "Connection failed; check the server configuration.",
+          };
+        } catch (error) {
+          if (error instanceof SecretServiceError) throw error;
+          return {
+            name,
+            ok: false,
+            status: "failed",
+            toolCount: 0,
+            message: "Connection failed; check the server configuration.",
+          };
+        } finally {
+          await manager.disconnectAll().catch(() => {});
+        }
       } finally {
-        await manager.disconnectAll().catch(() => {});
+        context.close();
       }
     });
   }

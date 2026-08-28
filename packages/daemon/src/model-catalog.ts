@@ -13,8 +13,8 @@
  * `getModels` for the full models.dev-backed catalogue and `getAvailable` for
  * models a credentialed provider can serve now. The daemon hardcodes no model
  * list, so registry updates appear without Ghost code changes. A
- * `GhostOmpRuntime` is scoped to the ghost's own `models.json` + `agent.db`, so
- * "usable" is per-ghost by construction. The
+ * `GhostOmpRuntime` is scoped to the ghost's own model/account policy plus the
+ * machine keyring, so "usable" is per-ghost by construction. The
  * single code-owned row, `claude-code/default`, is a runtime selector rather
  * than a model id: its usability is the external Claude Code plan-login
  * status, and selecting it bypasses OMP's model lookup.
@@ -324,7 +324,8 @@ function clampOffset(offset: number | undefined): number {
 /**
  * Reads a ghost's model catalogue and writes its chat-model selection. One
  * instance is shared by the daemon; every call builds a fresh per-ghost
- * runtime so it always reflects the ghost's current `models.json`/`agent.db`.
+ * runtime so it always reflects the ghost's current model/account policy and
+ * keyring metadata.
  */
 export class ModelCatalog {
   private readonly registry: GhostRegistry;
