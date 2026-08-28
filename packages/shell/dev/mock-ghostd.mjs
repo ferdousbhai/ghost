@@ -47,6 +47,9 @@ const SESSION_CWD = homedir();
 const DELTA_MS = flag("--slow") ? 30 : 12;
 const TOOL_STEPS = Math.max(1, Math.min(100, Number(opt("--tool-steps", "1")) || 1));
 const ASK_TIMEOUT_S = Math.max(0, Number(opt("--ask-timeout", "120")) || 0);
+const START_IN_PLAN_MODE = flag("--plan");
+const NO_JOBS = flag("--no-jobs");
+const MOCK_STARTED_AT = Date.now();
 const OWNS_GHOSTS_ROOT = !process.env.GHOSTS_ROOT;
 const GHOSTS_ROOT = process.env.GHOSTS_ROOT
   || mkdtempSync(join(tmpdir(), "ghost-shell-mock-"));
@@ -456,6 +459,7 @@ function seedMockDocuments() {
 function seedMockHome(name, includeLegacyDocs = false) {
   const dir = join(GHOSTS_ROOT, name);
   mkdirSync(join(dir, "memory"), { recursive: true });
+  mkdirSync(join(dir, "plans"), { recursive: true });
   writeFileSync(
     join(dir, "character.md"),
     `# ${name}\n\nI am ${name}, a quiet local ghost who answers directly.\n`,
@@ -482,6 +486,11 @@ function seedMockHome(name, includeLegacyDocs = false) {
   writeFileSync(
     join(dir, "memory", "current-project.md"),
     `${MOCK_MEMORY[1].content}\n`,
+    "utf8",
+  );
+  writeFileSync(
+    join(dir, "plans", "hud-work-strip.md"),
+    "# HUD work strip\n\nShow the conversation plan, todo phases, and background jobs above the queue.\n",
     "utf8",
   );
 }
@@ -739,6 +748,173 @@ const sessionSummary = (s) => ({
   pinned: s.pinned === true,
   unread: !s.readAt || s.updatedAt > s.readAt,
 });
+
+
+// Plan/todo and jobs are keyed by the full runtime-qualified conversation id,
+// just like their routes. Every conversation gets an independent fixture the
+// first time the HUD asks for it, including unpublished client-side drafts.
+const planStore = new Map();
+const jobStore = new Map();
+const workKey = (name, conversationId) => JSON.stringify([name, conversationId]);
+
+function dropWork(name, conversationId = null) {
+  for (const store of [planStore, jobStore]) {
+    for (const key of [...store.keys()]) {
+      const [storedName, storedConversation] = JSON.parse(key);
+      if (storedName === name && (conversationId === null || storedConversation === conversationId))
+        store.delete(key);
+    }
+  }
+}
+
+function moveWorkGhost(from, to) {
+  for (const store of [planStore, jobStore]) {
+    for (const [key, value] of [...store.entries()]) {
+      const [storedName, conversationId] = JSON.parse(key);
+      if (storedName !== from) continue;
+      store.delete(key);
+      if (store === planStore && value.plan) {
+        value.plan.path = join(GHOSTS_ROOT, to, "plans", basename(value.plan.path));
+      }
+      store.set(workKey(to, conversationId), value);
+    }
+  }
+}
+
+const MOCK_TODO = [
+  {
+    name: "Build",
+    tasks: [
+      { content: "Read the shell contract", status: "completed" },
+      { content: "Wire the daemon state", status: "completed" },
+      { content: "Build the HUD work strip", status: "in_progress" },
+    ],
+  },
+  {
+    name: "Verify",
+    tasks: [
+      { content: "Add focused QML coverage", status: "completed" },
+      { content: "Capture an isolated preview", status: "blocked", blocker: "Waiting for the nested compositor" },
+      { content: "Run shell checks", status: "pending" },
+      { content: "Review the final diff", status: "pending" },
+    ],
+  },
+];
+
+const MOCK_PLAN_CONTENT = [
+  "# HUD work strip",
+  "",
+  "Show the current conversation's plan, todo phases, and background jobs directly above the queue.",
+  "",
+  "1. Fetch plan and job state with the active conversation identity.",
+  "2. Keep the strip keyboard-accessible and quiet when empty.",
+  "3. Poll only while a visible HUD has a running job.",
+].join("\n");
+
+function planFor(name, conversationId) {
+  const key = workKey(name, conversationId);
+  if (!planStore.has(key)) {
+    planStore.set(key, {
+      planning: START_IN_PLAN_MODE,
+      plan: {
+        path: join(GHOSTS_ROOT, name, "plans", "hud-work-strip.md"),
+        title: "HUD work strip",
+        approvedAt: new Date(MOCK_STARTED_AT - 10 * 60_000).toISOString(),
+        content: MOCK_PLAN_CONTENT,
+      },
+      todo: structuredClone(MOCK_TODO),
+    });
+  }
+  return planStore.get(key);
+}
+
+function planSnapshot(name, conversationId) {
+  return structuredClone(planFor(name, conversationId));
+}
+
+function setPlanAction(name, conversationId, action) {
+  const current = planFor(name, conversationId);
+  const next = {
+    planning: action === "start",
+    plan: action === "clear" ? null : current.plan,
+    todo: current.todo,
+  };
+  planStore.set(workKey(name, conversationId), next);
+  return planSnapshot(name, conversationId);
+}
+
+function initialJobs() {
+  if (NO_JOBS) return [];
+  return [
+    {
+      id: "job-build",
+      label: "Build shell preview",
+      command: "pnpm --filter @ghost/shell build",
+      status: "running",
+      startedAt: new Date(MOCK_STARTED_AT).toISOString(),
+      durationMs: 0,
+      output: "Preparing the Quickshell preview…\nCompiling QML resources…",
+      outputTruncated: false,
+    },
+    {
+      id: "job-history",
+      label: "Long verification log",
+      command: "pnpm test -- --verbose",
+      status: "completed",
+      startedAt: new Date(MOCK_STARTED_AT - 48_000).toISOString(),
+      endedAt: new Date(MOCK_STARTED_AT - 3_000).toISOString(),
+      durationMs: 45_000,
+      exitCode: 0,
+      output: Array.from({ length: 400 }, (_, index) => `verification line ${index + 1}`).join("\n"),
+      outputTruncated: true,
+    },
+    {
+      id: "job-lint",
+      label: "Lint experimental theme",
+      command: "pnpm lint",
+      status: "failed",
+      startedAt: new Date(MOCK_STARTED_AT - 195_000).toISOString(),
+      endedAt: new Date(MOCK_STARTED_AT - 5_000).toISOString(),
+      durationMs: 190_000,
+      exitCode: 2,
+      output: "qmllint: experimental-theme.qml:42: Unknown property",
+      outputTruncated: false,
+    },
+  ];
+}
+
+function jobsFor(name, conversationId) {
+  const key = workKey(name, conversationId);
+  if (!jobStore.has(key)) jobStore.set(key, initialJobs());
+  const jobs = jobStore.get(key);
+  const running = jobs.find((job) => job.id === "job-build" && job.status === "running");
+  const elapsed = Date.now() - MOCK_STARTED_AT;
+  if (running && elapsed >= 20_000) {
+    running.status = "completed";
+    running.endedAt = new Date(MOCK_STARTED_AT + 20_000).toISOString();
+    running.durationMs = 20_000;
+    running.exitCode = 0;
+    running.output += "\nPreview build complete.";
+  } else if (running) {
+    running.durationMs = Math.max(0, elapsed);
+  }
+  return jobs;
+}
+
+function jobsSnapshot(name, conversationId) {
+  return { jobs: structuredClone(jobsFor(name, conversationId)) };
+}
+
+function cancelJob(name, conversationId, jobId) {
+  const job = jobsFor(name, conversationId).find((candidate) => candidate.id === jobId);
+  if (!job) return null;
+  if (job.status !== "running") return { outcome: "already_settled", job: structuredClone(job) };
+  const endedAt = Date.now();
+  job.status = "cancelled";
+  job.endedAt = new Date(endedAt).toISOString();
+  job.durationMs = Math.max(0, endedAt - Date.parse(job.startedAt));
+  return { outcome: "cancelled", job: structuredClone(job) };
+}
 
 
 const projectStore = new Map();
@@ -2181,6 +2357,7 @@ const mockServer = createServer(async (req, res) => {
     ghosts.splice(ghosts.indexOf(ghost), 1);
     sessionStore.delete(name);
     projectStore.delete(name);
+    dropWork(name);
     for (const receipt of abandonedProjectDrafts) {
       if (JSON.parse(receipt)[0] === name) abandonedProjectDrafts.delete(receipt);
     }
@@ -2232,6 +2409,7 @@ const mockServer = createServer(async (req, res) => {
     for (const preview of projectTrust.values()) {
       if (preview.name === name) preview.name = next;
     }
+    moveWorkGhost(name, next);
     if (OWNS_GHOSTS_ROOT) renameSync(ghost.dir, join(GHOSTS_ROOT, next));
     ghost.name = next;
     ghost.dir = join(GHOSTS_ROOT, next);
@@ -2459,6 +2637,58 @@ const mockServer = createServer(async (req, res) => {
       }));
     }
   }
+  if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "plan") {
+    const conversation = routeConversation(parts);
+    if (!conversation) return json(res, 400, {
+      error: { code: "invalid_conversation_id", message: "invalid conversation id" },
+    });
+    if (req.method === "GET") return json(res, 200, planSnapshot(name, conversation.id));
+    if (req.method !== "POST") return json(res, 405, {
+      error: { code: "method_not_allowed", message: `${req.method} is not allowed here.` },
+    });
+    if (answering.has(turnKey(name, conversation.conversationId))) {
+      return json(res, 409, {
+        error: { code: "session_busy", message: "Wait for this answer to finish." },
+      });
+    }
+    const body = await readBody(req).catch(() => null);
+    if (!body || !["start", "stop", "clear"].includes(body.action)) {
+      return json(res, 400, {
+        error: { code: "invalid_request", message: '"action" must be "start", "stop", or "clear".' },
+      });
+    }
+    const state = setPlanAction(name, conversation.id, body.action);
+    publishConversationUpdated(name, conversation.runtime, conversation.conversationId,
+      new Date().toISOString(), "plan");
+    return json(res, 200, state);
+  }
+  if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "todo"
+      && req.method === "GET") {
+    const conversation = routeConversation(parts);
+    if (!conversation) return json(res, 400, {
+      error: { code: "invalid_conversation_id", message: "invalid conversation id" },
+    });
+    return json(res, 200, { todo: planSnapshot(name, conversation.id).todo });
+  }
+  if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "jobs"
+      && req.method === "GET") {
+    const conversation = routeConversation(parts);
+    if (!conversation) return json(res, 400, {
+      error: { code: "invalid_conversation_id", message: "invalid conversation id" },
+    });
+    return json(res, 200, jobsSnapshot(name, conversation.id));
+  }
+  if (parts[3] === "sessions" && parts.length === 8 && parts[5] === "jobs"
+      && parts[7] === "cancel" && req.method === "POST") {
+    const conversation = routeConversation(parts);
+    if (!conversation) return json(res, 400, {
+      error: { code: "invalid_conversation_id", message: "invalid conversation id" },
+    });
+    const result = cancelJob(name, conversation.id, decodeURIComponent(parts[6]));
+    return result
+      ? json(res, 200, result)
+      : json(res, 404, { error: { code: "not_found", message: "No such background job." } });
+  }
   if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "live"
       && req.method === "GET") {
     const conversation = routeConversation(parts);
@@ -2572,6 +2802,7 @@ const mockServer = createServer(async (req, res) => {
     const deleted = ghostSessions(name).delete(conversation.id);
     if (deleted) {
       ghostProjects(name).delete(conversation.id);
+      dropWork(name, conversation.id);
       publishConversationUpdated(name, conversation.runtime, conversation.conversationId);
     }
     return deleted

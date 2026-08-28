@@ -19,7 +19,7 @@ qml/
   GhostBarSurface.qml  opt-in standalone layer strip carrying the widget
   TrayBridge.qml       system-tray (StatusNotifierItem) presence, via a helper
   tray/ghost-tray.py   the SNI + DBusMenu D-Bus object Quickshell cannot expose
-  components/          chat, ask, queue, tool-card, routing and orb UI
+  components/          chat, ask, work strip, queue, tool-card, routing and orb UI
   services/            Ghostd, Theme, Notifier (singletons)     → qs.services
 contrib/               keybinds, systemd unit, Omarchy bar integration
 dev/                   mock daemon, demo script, lint
@@ -94,6 +94,11 @@ never answered, timed out, or talked through instead, from the transcript's
 offers to answer it now on the branch the daemon kept. While a model
 is streaming, Enter steers the active run, Ctrl+Enter queues a follow-up, and
 Shift+Enter inserts a newline. The queued state is visible below the composer.
+
+The chat column also carries a conversation-scoped work strip above that queue:
+plan mode or the approved plan, read-only todo phases, and background jobs with
+cancellation and bounded output disclosure. It disappears when all three are
+empty and polls running jobs only while the HUD is visible.
 
 A project bound before the first owner turn is still an unpublished draft. The
 shell keeps that runtime-qualified identity selected while it asks ghostd to

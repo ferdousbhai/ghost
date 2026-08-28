@@ -1143,6 +1143,34 @@ Singleton {
     property string mcpNotice: ""
     property string mcpGhost: ""
 
+    // Plan mode, todo phases, and jobs are one conversation-scoped work view.
+    // The GETs stay separate so neither a slow plan-file read nor a large job
+    // output tail holds the other row back, while the stamps make both caches
+    // retire together when the selected conversation changes.
+    property bool workPlanning: false
+    property var workPlan: null
+    property var workTodo: []
+    property var workJobs: []
+    property bool workPlanLoaded: false
+    property bool workJobsLoaded: false
+    property bool workPlanLoading: false
+    property bool workJobsLoading: false
+    property bool workMutating: false
+    property string workPlanError: ""
+    property string workJobsError: ""
+    property string workMutationError: ""
+    property string workGhost: ""
+    property string workSessionId: ""
+    readonly property bool workLoading: root.workPlanLoading || root.workJobsLoading
+    readonly property string workError: root.workMutationError !== ""
+        ? root.workMutationError
+        : (root.workPlanError !== "" ? root.workPlanError : root.workJobsError)
+    readonly property bool workHasRunningJobs: root.workJobs.some(function (job) {
+        return job && job.status === "running";
+    })
+    readonly property bool workHasContent: root.workPlanning || root.workPlan !== null
+        || root.workTodo.length > 0 || root.workJobs.length > 0
+
     property var liveStatus: ({ phase: "idle" })
     property bool liveLoading: false
     property bool liveMutating: false
@@ -1314,6 +1342,11 @@ Singleton {
     property var commandsRequest: null
     property var mcpRequest: null
     property var mcpMutationRequest: null
+    property var workPlanRequest: null
+    property var workJobsRequest: null
+    property var workMutationRequest: null
+    /** Test seam; production constructs native QML XHRs. */
+    property var workRequestFactory: null
     property var liveRequest: null
     property var collabRequest: null
     property var greetingRequest: null
@@ -1458,6 +1491,7 @@ Singleton {
         root.retireRemoteRequests();
         root.retireHooksRequest();
         root.retireDocumentRequests();
+        root.clearWork();
         for (const request of [root.projectRequest, root.projectPreviewRequest,
                 root.projectMutationRequest]) {
             if (request && request.readyState !== 4) request.abort();
@@ -1469,6 +1503,8 @@ Singleton {
     onActiveGhostChanged: {
         root.modelGeneration += 1;
         root.modelRequest = null;
+        if (root.workGhost !== "" && root.workGhost !== root.activeGhost)
+            root.clearWork();
         // A rename moves loginGhost before activeGhost, preserving a live flow.
         // Any other selection change makes the old ghost's requests stale.
         if (root.loginGhost === "" || root.loginGhost !== root.activeGhost)
@@ -1476,6 +1512,10 @@ Singleton {
         if (root.projectGhost !== "" && root.projectGhost !== root.activeGhost)
             root.clearProject();
         root.connectConversationEvents(root.activeGhost);
+    }
+    onCurrentSessionIdChanged: {
+        if (root.workSessionId !== "" && root.workSessionId !== root.currentSessionId)
+            root.clearWork();
     }
 
 
@@ -1621,6 +1661,7 @@ Singleton {
         root.clearCommands();
         root.clearProject();
         root.clearMcp();
+        root.clearWork();
         root.clearConnect();
         root.refresh();
     }
@@ -1843,6 +1884,7 @@ Singleton {
         root.clearCommands();
         root.clearProject();
         root.clearMcp();
+        root.clearWork();
         root.clearConnect();
     }
 
@@ -1874,6 +1916,7 @@ Singleton {
         root.clearCommands();
         root.clearProject();
         root.clearMcp();
+        root.clearWork();
         root.clearConnect();
         root.fetchCurrentModel();
         root.fetchSessions(name);
@@ -1978,6 +2021,7 @@ Singleton {
         const target = root.ensureTurnState(ghost, id, state.conversationId, runtime);
         root.showTurnState(ghost, id);
         root.clearCommands();
+        root.clearWork();
         root.clearConnect();
         root.fetchProject(false, false);
         return target;
@@ -2613,6 +2657,287 @@ Singleton {
     }
 
 
+    function makeWorkRequest(): var {
+        return typeof root.workRequestFactory === "function"
+            ? root.workRequestFactory() : new XMLHttpRequest();
+    }
+
+    function workRoute(ghost: string, sessionId: string): string {
+        return "/api/ghosts/" + encodeURIComponent(ghost)
+            + "/sessions/" + encodeURIComponent(sessionId);
+    }
+
+    function workIdentityCurrent(ghost: string, sessionId: string): bool {
+        return ghost !== "" && sessionId !== ""
+            && ghost === root.activeGhost && sessionId === root.currentSessionId
+            && ghost === root.workGhost && sessionId === root.workSessionId;
+    }
+
+    /** Retire ownership before abort: the test XHR finishes abort synchronously. */
+    function clearWork(): void {
+        const planRequest = root.workPlanRequest;
+        const jobsRequest = root.workJobsRequest;
+        const mutationRequest = root.workMutationRequest;
+        root.workPlanRequest = null;
+        root.workJobsRequest = null;
+        root.workMutationRequest = null;
+        root.workPlanning = false;
+        root.workPlan = null;
+        root.workTodo = [];
+        root.workJobs = [];
+        root.workPlanLoaded = false;
+        root.workJobsLoaded = false;
+        root.workPlanLoading = false;
+        root.workJobsLoading = false;
+        root.workMutating = false;
+        root.workPlanError = "";
+        root.workJobsError = "";
+        root.workMutationError = "";
+        root.workGhost = "";
+        root.workSessionId = "";
+        for (const request of [planRequest, jobsRequest, mutationRequest]) {
+            if (request && request.readyState !== 4) request.abort();
+        }
+    }
+
+    function prepareWorkIdentity(ghost: string, sessionId: string): void {
+        if (root.workGhost !== ghost || root.workSessionId !== sessionId)
+            root.clearWork();
+        root.workGhost = ghost;
+        root.workSessionId = sessionId;
+    }
+
+    function validWorkTask(task: var): bool {
+        return !!task && typeof task === "object" && !Array.isArray(task)
+            && typeof task.content === "string"
+            && ["pending", "in_progress", "completed", "abandoned", "blocked"]
+                .indexOf(task.status) >= 0
+            && (task.blocker === undefined || typeof task.blocker === "string");
+    }
+
+    function validWorkTodo(todo: var): bool {
+        return Array.isArray(todo) && todo.every(function (phase) {
+            return !!phase && typeof phase === "object" && !Array.isArray(phase)
+                && typeof phase.name === "string" && Array.isArray(phase.tasks)
+                && phase.tasks.every(root.validWorkTask);
+        });
+    }
+
+    function validApprovedPlan(plan: var): bool {
+        return plan === null || (!!plan && typeof plan === "object"
+            && !Array.isArray(plan) && typeof plan.path === "string"
+            && typeof plan.title === "string" && typeof plan.approvedAt === "string"
+            && (plan.content === null || typeof plan.content === "string"));
+    }
+
+    function applyWorkPlan(body: var, ghost: string, sessionId: string): bool {
+        if (!body || typeof body !== "object" || Array.isArray(body)
+                || typeof body.planning !== "boolean"
+                || !root.validApprovedPlan(body.plan) || !root.validWorkTodo(body.todo))
+            return false;
+        root.workPlanning = body.planning;
+        root.workPlan = body.plan;
+        root.workTodo = body.todo;
+        root.workPlanLoaded = true;
+        root.workPlanError = "";
+        root.workGhost = ghost;
+        root.workSessionId = sessionId;
+        return true;
+    }
+
+    function validWorkJob(job: var): bool {
+        return !!job && typeof job === "object" && !Array.isArray(job)
+            && typeof job.id === "string" && job.id !== ""
+            && typeof job.label === "string" && typeof job.command === "string"
+            && ["running", "completed", "failed", "cancelled"].indexOf(job.status) >= 0
+            && typeof job.startedAt === "string"
+            && (job.endedAt === undefined || typeof job.endedAt === "string")
+            && typeof job.durationMs === "number" && Number.isFinite(job.durationMs)
+            && (job.exitCode === undefined || (typeof job.exitCode === "number"
+                && Number.isFinite(job.exitCode)))
+            && typeof job.output === "string" && typeof job.outputTruncated === "boolean";
+    }
+
+    function applyWorkJobs(body: var, ghost: string, sessionId: string): bool {
+        if (!body || typeof body !== "object" || Array.isArray(body)
+                || !Array.isArray(body.jobs) || !body.jobs.every(root.validWorkJob))
+            return false;
+        root.workJobs = body.jobs;
+        root.workJobsLoaded = true;
+        root.workJobsError = "";
+        root.workGhost = ghost;
+        root.workSessionId = sessionId;
+        return true;
+    }
+
+    function fetchWorkPlan(force: bool, ghost: string, sessionId: string): void {
+        root.prepareWorkIdentity(ghost, sessionId);
+        if (!force && (root.workPlanLoading || root.workPlanLoaded)) return;
+        const previous = root.workPlanRequest;
+        root.workPlanRequest = null;
+        if (previous && previous.readyState !== 4) previous.abort();
+        const xhr = root.makeWorkRequest();
+        root.workPlanRequest = xhr;
+        root.workPlanLoading = true;
+        root.workPlanError = "";
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || xhr !== root.workPlanRequest) return;
+            root.workPlanRequest = null;
+            root.workPlanLoading = false;
+            if (!root.workIdentityCurrent(ghost, sessionId)) return;
+            if (xhr.status === 200) {
+                try {
+                    if (!root.applyWorkPlan(JSON.parse(xhr.responseText), ghost, sessionId))
+                        throw new Error("invalid plan state");
+                    root.reachable = true;
+                } catch (error) {
+                    root.workPlanLoaded = false;
+                    root.workPlanning = false;
+                    root.workPlan = null;
+                    root.workTodo = [];
+                    root.workPlanError = "ghostd sent malformed plan state";
+                }
+            } else {
+                root.workPlanLoaded = false;
+                root.workPlanError = root.describeError(xhr, "GET plan");
+            }
+        };
+        root.dispatch(xhr, "GET", root.workRoute(ghost, sessionId) + "/plan", ({}), null,
+            function () { return xhr === root.workPlanRequest; });
+    }
+
+    function fetchWorkJobs(force: bool, ghost: string, sessionId: string): void {
+        root.prepareWorkIdentity(ghost, sessionId);
+        if (!force && (root.workJobsLoading || root.workJobsLoaded)) return;
+        const previous = root.workJobsRequest;
+        root.workJobsRequest = null;
+        if (previous && previous.readyState !== 4) previous.abort();
+        const xhr = root.makeWorkRequest();
+        root.workJobsRequest = xhr;
+        root.workJobsLoading = true;
+        root.workJobsError = "";
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || xhr !== root.workJobsRequest) return;
+            root.workJobsRequest = null;
+            root.workJobsLoading = false;
+            if (!root.workIdentityCurrent(ghost, sessionId)) return;
+            if (xhr.status === 200) {
+                try {
+                    if (!root.applyWorkJobs(JSON.parse(xhr.responseText), ghost, sessionId))
+                        throw new Error("invalid jobs state");
+                    root.reachable = true;
+                } catch (error) {
+                    root.workJobsLoaded = false;
+                    root.workJobs = [];
+                    root.workJobsError = "ghostd sent malformed background jobs";
+                }
+            } else {
+                root.workJobsLoaded = false;
+                root.workJobsError = root.describeError(xhr, "GET jobs");
+            }
+        };
+        root.dispatch(xhr, "GET", root.workRoute(ghost, sessionId) + "/jobs", ({}), null,
+            function () { return xhr === root.workJobsRequest; });
+    }
+
+    function fetchWork(force: bool): void {
+        const ghost = root.activeGhost;
+        if (ghost === "") {
+            root.clearWork();
+            return;
+        }
+        const sessionId = root.ensureSession(ghost);
+        root.prepareWorkIdentity(ghost, sessionId);
+        root.fetchWorkPlan(force, ghost, sessionId);
+        root.fetchWorkJobs(force, ghost, sessionId);
+    }
+
+    function workFailureMessage(xhr: var, fallback: string): string {
+        const detail = root.errorDetail(xhr);
+        return detail !== "" ? detail : root.describeError(xhr, fallback);
+    }
+
+    function planAction(action: string): void {
+        if (["start", "stop", "clear"].indexOf(action) < 0 || root.workMutating)
+            return;
+        const ghost = root.activeGhost;
+        if (ghost === "") return;
+        const sessionId = root.ensureSession(ghost);
+        root.prepareWorkIdentity(ghost, sessionId);
+        const previous = root.workPlanRequest;
+        root.workPlanRequest = null;
+        root.workPlanLoading = false;
+        if (previous && previous.readyState !== 4) previous.abort();
+        const xhr = root.makeWorkRequest();
+        root.workMutationRequest = xhr;
+        root.workMutating = true;
+        root.workMutationError = "";
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || xhr !== root.workMutationRequest) return;
+            root.workMutationRequest = null;
+            root.workMutating = false;
+            if (!root.workIdentityCurrent(ghost, sessionId)) return;
+            if (xhr.status === 200 || xhr.status === 201) {
+                try {
+                    if (!root.applyWorkPlan(JSON.parse(xhr.responseText), ghost, sessionId))
+                        throw new Error("invalid plan state");
+                    root.workMutationError = "";
+                    root.reachable = true;
+                } catch (error) {
+                    root.workMutationError = "ghostd sent malformed plan state";
+                }
+            } else {
+                root.workMutationError = root.workFailureMessage(xhr, "POST plan");
+            }
+        };
+        root.dispatch(xhr, "POST", root.workRoute(ghost, sessionId) + "/plan",
+            ({ "Content-Type": "application/json" }), JSON.stringify({ action: action }),
+            function () { return xhr === root.workMutationRequest; });
+    }
+
+    function cancelWorkJob(jobId: string): void {
+        if (jobId === "" || root.workMutating) return;
+        const ghost = root.activeGhost;
+        if (ghost === "") return;
+        const sessionId = root.ensureSession(ghost);
+        root.prepareWorkIdentity(ghost, sessionId);
+        const xhr = root.makeWorkRequest();
+        root.workMutationRequest = xhr;
+        root.workMutating = true;
+        root.workMutationError = "";
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || xhr !== root.workMutationRequest) return;
+            root.workMutationRequest = null;
+            root.workMutating = false;
+            if (!root.workIdentityCurrent(ghost, sessionId)) return;
+            if (xhr.status === 200) {
+                try {
+                    const body = JSON.parse(xhr.responseText);
+                    if (!body || ["cancelled", "already_settled"].indexOf(body.outcome) < 0
+                            || !root.validWorkJob(body.job) || body.job.id !== jobId)
+                        throw new Error("invalid cancel result");
+                    let found = false;
+                    root.workJobs = root.workJobs.map(function (job) {
+                        if (job.id !== jobId) return job;
+                        found = true;
+                        return body.job;
+                    });
+                    if (!found) root.workJobs = root.workJobs.concat([body.job]);
+                    root.workMutationError = "";
+                    root.reachable = true;
+                } catch (error) {
+                    root.workMutationError = "ghostd sent malformed job cancellation";
+                }
+            } else {
+                root.workMutationError = root.workFailureMessage(xhr, "POST cancel job");
+            }
+        };
+        root.dispatch(xhr, "POST", root.workRoute(ghost, sessionId) + "/jobs/"
+            + encodeURIComponent(jobId) + "/cancel", ({}), null,
+            function () { return xhr === root.workMutationRequest; });
+    }
+
+
     function clearConnect(): void {
         if (root.liveRequest && root.liveRequest.readyState !== 4)
             root.liveRequest.abort();
@@ -3065,6 +3390,7 @@ Singleton {
         root.showTurnState(ghost, id);
         root.clearCommands();
         root.clearProject();
+        root.clearWork();
         root.clearConnect();
         // A blank chat is back on screen, so it earns a fresh opening line.
         root.clearGreeting();
@@ -3128,6 +3454,7 @@ Singleton {
                         root.clearTurnProjection();
                         root.clearCommands();
                         root.clearProject();
+                        root.clearWork();
                         root.clearConnect();
                         root.clearGreeting();
                         root.fetchGreeting();
@@ -3265,6 +3592,7 @@ Singleton {
         root.currentSessionId = id;
         root.showTurnState(ghost, id);
         root.clearCommands();
+        root.clearWork();
         root.clearConnect();
         // A conversation with its own history needs no opening line; a greeting
         // would be answering a question nobody just asked.
