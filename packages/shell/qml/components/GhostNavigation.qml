@@ -56,6 +56,11 @@ FocusScope {
             id: "connect",
             label: "Remote",
             icon: "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"
+        },
+        {
+            id: "remote",
+            label: "Phone access",
+            icon: "M8 2h8a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zM10 5h4M11 18h2"
         }
     ]
     readonly property real destinationHeight: Math.max(34, Math.min(

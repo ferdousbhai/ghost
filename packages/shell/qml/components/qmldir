@@ -26,6 +26,7 @@ ModelSwitcher 1.0 ModelSwitcher.qml
 PencilGlyph 1.0 PencilGlyph.qml
 ProjectChip 1.0 ProjectChip.qml
 QueueLine 1.0 QueueLine.qml
+RemoteAccess 1.0 RemoteAccess.qml
 Roster 1.0 Roster.qml
 SpectralOrb 1.0 SpectralOrb.qml
 ToolCard 1.0 ToolCard.qml

@@ -134,7 +134,7 @@ FloatingWindow {
     minimumSize: Qt.size(568, 360)
 
     function showSection(section: string): void {
-        if (["chat", "docs", "memory", "commands", "hooks", "mcp", "connect", "character"]
+        if (["chat", "docs", "memory", "commands", "hooks", "mcp", "connect", "remote", "character"]
                 .indexOf(section) < 0)
             return;
         hud.loginOpen = false;
@@ -151,6 +151,8 @@ FloatingWindow {
             Ghostd.fetchMcp(false);
         } else if (section === "connect") {
             Ghostd.fetchConnect(false);
+        } else if (section === "remote") {
+            Ghostd.refreshRemote();
         } else if (section === "docs") {
             Ghostd.fetchDocuments("", "", false, false);
         } else if (section === "memory") {
@@ -1120,6 +1122,15 @@ FloatingWindow {
                     && !hud.loginOpen && !hud.switcherOpen
                 Layout.fillWidth: true
                 Layout.fillHeight: true
+            }
+
+            RemoteAccess {
+                id: remoteAccess
+                visible: hud.currentSection === "remote"
+                    && !hud.loginOpen && !hud.switcherOpen
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                onCloseRequested: hud.showSection("chat")
             }
 
             // Model switcher: swaps in over the transcript body.

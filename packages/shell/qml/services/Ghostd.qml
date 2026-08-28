@@ -62,6 +62,224 @@ Singleton {
         modal, and a rename is typed in the roster row itself. */
     property string ghostRenameError: ""
 
+    // Phone access is daemon-global rather than ghost- or conversation-scoped.
+    // Keep its owner/request state outside clearConnect(), which owns the
+    // selected conversation's live-voice and collaboration capabilities.
+
+    function emptyRemoteStatus(): var {
+        return {
+            enabled: false,
+            state: "off",
+            scheme: null,
+            hostname: null,
+            url: null,
+            tailscale: {
+                installed: false,
+                running: false,
+                loggedIn: false,
+                operator: false,
+                certs: false
+            },
+            guests: "none",
+            owner: null,
+            problem: null
+        };
+    }
+
+    function makeRemoteRequest(): var {
+        return typeof root.remoteRequestFactory === "function"
+            ? root.remoteRequestFactory() : new XMLHttpRequest();
+    }
+
+    function validRemoteStatus(body: var): bool {
+        if (!body || typeof body !== "object" || Array.isArray(body)
+                || typeof body.enabled !== "boolean"
+                || ["on", "off", "unavailable"].indexOf(body.state) < 0
+                || (body.scheme !== null && body.scheme !== "https" && body.scheme !== "http")
+                || (body.hostname !== null && typeof body.hostname !== "string")
+                || (body.url !== null && typeof body.url !== "string")
+                || (body.guests !== "read-only" && body.guests !== "none")
+                || (body.owner !== null && typeof body.owner !== "string")
+                || !body.tailscale || typeof body.tailscale !== "object"
+                || Array.isArray(body.tailscale)) return false;
+        for (const capability of ["installed", "running", "loggedIn", "operator", "certs"])
+            if (typeof body.tailscale[capability] !== "boolean") return false;
+        if (body.problem !== null) {
+            if (!body.problem || typeof body.problem !== "object"
+                    || typeof body.problem.code !== "string"
+                    || typeof body.problem.message !== "string"
+                    || (body.problem.action !== undefined
+                        && typeof body.problem.action !== "string")) return false;
+        }
+        return true;
+    }
+
+    function applyRemoteStatus(body: var): bool {
+        if (!root.validRemoteStatus(body)) return false;
+        root.remoteStatus = body;
+        root.remoteError = "";
+        if (body.enabled && body.state === "on" && typeof body.url === "string"
+                && body.url !== "") {
+            root.fetchRemoteQr();
+        } else {
+            root.clearRemoteQr();
+        }
+        return true;
+    }
+
+    function remoteUnsupported(): void {
+        root.clearRemoteQr();
+        root.remoteStatus = {
+            enabled: false,
+            state: "unavailable",
+            scheme: null,
+            hostname: null,
+            url: null,
+            tailscale: {
+                installed: false,
+                running: false,
+                loggedIn: false,
+                operator: false,
+                certs: false
+            },
+            guests: "none",
+            owner: null,
+            problem: {
+                code: "remote_unsupported",
+                message: "This daemon does not support remote access"
+            }
+        };
+        root.remoteError = "";
+    }
+
+    function clearRemoteQr(): void {
+        const request = root.remoteQrRequest;
+        root.remoteQrRequest = null;
+        root.remoteQrLoading = false;
+        root.remoteQrSource = "";
+        root.remoteQrUrl = "";
+        if (request && request.readyState !== 4) request.abort();
+    }
+
+    function retireRemoteRequests(): void {
+        const request = root.remoteRequest;
+        root.remoteRequest = null;
+        root.remoteLoading = false;
+        root.remoteMutating = false;
+        if (request && request.readyState !== 4) request.abort();
+        root.clearRemoteQr();
+    }
+
+    function clearRemote(): void {
+        root.retireRemoteRequests();
+        root.remoteStatus = root.emptyRemoteStatus();
+        root.remoteError = "";
+    }
+
+    function fetchRemoteQr(): void {
+        const status = root.remoteStatus;
+        if (!status || !status.enabled || status.state !== "on"
+                || typeof status.url !== "string" || status.url === "") {
+            root.clearRemoteQr();
+            return;
+        }
+        if (root.remoteQrSource !== "" && root.remoteQrUrl === status.url) return;
+        if (root.remoteQrRequest && root.remoteQrRequest.readyState !== 4) return;
+        const xhr = root.makeRemoteRequest();
+        const expectedUrl = status.url;
+        root.remoteQrRequest = xhr;
+        root.remoteQrLoading = true;
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || xhr !== root.remoteQrRequest) return;
+            root.remoteQrRequest = null;
+            root.remoteQrLoading = false;
+            if (root.remoteStatus.url !== expectedUrl || !root.remoteStatus.enabled
+                    || root.remoteStatus.state !== "on") return;
+            if (xhr.status === 200) {
+                const svg = String(xhr.responseText || "");
+                if (svg.indexOf("<svg") < 0) {
+                    root.remoteError = "ghostd sent malformed remote-access QR code";
+                    return;
+                }
+                root.remoteQrUrl = expectedUrl;
+                root.remoteQrSource = "data:image/svg+xml;charset=utf-8,"
+                    + encodeURIComponent(svg);
+            } else {
+                root.remoteError = root.describeError(xhr, "GET remote-access QR code");
+            }
+        };
+        root.dispatch(xhr, "GET", "/api/remote/qr.svg", ({}), null,
+            function () { return root.remoteQrRequest === xhr; });
+    }
+
+    function refreshRemote(): void {
+        if (root.remoteMutating) return;
+        if (root.remoteRequest && root.remoteRequest.readyState !== 4) return;
+        const xhr = root.makeRemoteRequest();
+        root.remoteRequest = xhr;
+        root.remoteLoading = true;
+        root.remoteError = "";
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || xhr !== root.remoteRequest) return;
+            root.remoteRequest = null;
+            root.remoteLoading = false;
+            if (xhr.status === 200) {
+                try {
+                    if (!root.applyRemoteStatus(JSON.parse(xhr.responseText)))
+                        throw new Error("invalid remote status");
+                    root.reachable = true;
+                } catch (error) {
+                    root.remoteError = "ghostd sent malformed remote-access status";
+                }
+            } else if (xhr.status === 409 && root.errorCode(xhr) === "not_supported") {
+                root.remoteUnsupported();
+            } else {
+                root.remoteError = root.describeError(xhr, "GET remote access");
+            }
+        };
+        root.dispatch(xhr, "GET", "/api/remote", ({}), null,
+            function () { return root.remoteRequest === xhr; });
+    }
+
+    function setRemoteEnabled(enabled: bool): void {
+        if (root.remoteMutating || typeof enabled !== "boolean") return;
+        const previous = root.remoteRequest;
+        root.remoteRequest = null;
+        if (previous && previous.readyState !== 4) previous.abort();
+        const xhr = root.makeRemoteRequest();
+        root.remoteRequest = xhr;
+        root.remoteLoading = false;
+        root.remoteMutating = true;
+        root.remoteError = "";
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || xhr !== root.remoteRequest) return;
+            root.remoteRequest = null;
+            root.remoteMutating = false;
+            if (xhr.status === 200) {
+                try {
+                    if (!root.applyRemoteStatus(JSON.parse(xhr.responseText)))
+                        throw new Error("invalid remote status");
+                    root.reachable = true;
+                    root.remoteSetFinished(enabled, true);
+                    Qt.callLater(function () { root.refreshRemote(); });
+                } catch (error) {
+                    root.remoteError = "ghostd sent malformed remote-access status";
+                    root.remoteSetFinished(enabled, false);
+                }
+            } else if (xhr.status === 409 && root.errorCode(xhr) === "not_supported") {
+                root.remoteUnsupported();
+                root.remoteSetFinished(enabled, false);
+            } else {
+                root.remoteError = root.describeError(xhr, "POST remote access");
+                root.remoteSetFinished(enabled, false);
+            }
+        };
+        root.dispatch(xhr, "POST", "/api/remote",
+            ({ "Content-Type": "application/json" }),
+            JSON.stringify({ enabled: enabled }),
+            function () { return root.remoteRequest === xhr; });
+    }
+
     // Daemon-global trusted configuration, projected as bounded display-only
     // metadata. It is deliberately independent of ghost, conversation,
     // project, and the owner-wide Documents cache.
@@ -918,6 +1136,16 @@ Singleton {
         the list's rows. */
     property string memoryRaw: ""
 
+    property var remoteStatus: root.emptyRemoteStatus()
+    property bool remoteLoading: false
+    property bool remoteMutating: false
+    property string remoteError: ""
+    /** Authenticated SVG responses become a data URL for QML's Image, whose
+        network loader cannot attach the bearer header itself. */
+    property string remoteQrSource: ""
+    property string remoteQrUrl: ""
+    property bool remoteQrLoading: false
+
     property var activeHooks: []
     property var hookEvents: []
     property int activeHookCount: 0
@@ -1065,6 +1293,7 @@ Singleton {
     signal hooksConnectionReset(int epoch)
     signal projectPreviewFinished(bool ok)
     signal projectMutationFinished(string action, bool ok)
+    signal remoteSetFinished(bool enabled, bool ok)
 
     property var providers: []
     property string loginId: ""
@@ -1133,6 +1362,10 @@ Singleton {
     property string eventsFrameBuffer: ""
     property var memoryRequest: null
     property var memoryMutationRequest: null
+    property var remoteRequest: null
+    property var remoteQrRequest: null
+    /** Test seam; production constructs native QML XHRs. */
+    property var remoteRequestFactory: null
     property var hooksRequest: null
     property var hooksRequestFactory: null
     property var hookConfigRequest: null
@@ -1296,6 +1529,7 @@ Singleton {
     function retireClientRequests(): void {
         root.cancelLogin();
         root.cancelAllTranscriptLoads();
+        root.retireRemoteRequests();
         root.retireHooksRequest();
         root.retireDocumentRequests();
         for (const request of [root.projectRequest, root.projectPreviewRequest,

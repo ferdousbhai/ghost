@@ -137,7 +137,7 @@ so a reload does not resurrect what streaming set aside.
 
 The restored 64px rail at the right edge is the successor to summon-ghost's
 final `AppSideNav` (`4852804cf4e09ca50c16e08e6106c06df82e2a94`): Chat,
-Docs, Memory, Agent definitions, Commands, MCP, Remote, and Character stay
+Docs, Memory, Agent definitions, Commands, MCP, Remote, Phone access, and Character stay
 reachable without covering the content. Docs preserves Ghost's visual language
 but uses an adaptive folder/list/detail hierarchy: wide windows show all three;
 narrow windows use a reversible stack.
@@ -210,6 +210,17 @@ writable access requires typing `WRITABLE` after a warning that its holder can
 steer the ghost and exercise local tools. A structured `not_supported` response
 renders as a neutral product-status explanation.
 
+Phone access is the machine-global sibling to that conversation-scoped Remote
+view. “Reach me from my phone” asks ghostd to enable or disable Tailscale Serve,
+then shows its private tailnet URL, a camera-sized QR code, the owner identity,
+and the read-only guest policy. Setup problems carry the daemon's exact message;
+when one has a one-time terminal command, the panel keeps it selectable and
+offers a keyboard-accessible copy action. The panel refreshes when opened and
+after a switch change, but does not poll in the background.
+For problem-state previews, pass
+`--remote-problem=tailscale_missing` (or another daemon problem code) to the
+mock, or set `GHOST_REMOTE_PROBLEM`.
+
 ## System tray
 
 The ghost also shows up as a system-tray icon — a StatusNotifierItem — for as
@@ -257,7 +268,7 @@ qs -c ghost ipc call ghost ask "<prompt>"     # reply arrives as a notification
 qs -c ghost ipc call ghost login              # open "Connect a model"
 qs -c ghost ipc call ghost loginTo <id> <oauth|api_key>   # and start one
 qs -c ghost ipc call ghost switcher           # open the model switcher
-qs -c ghost ipc call ghost section docs       # chat|docs|memory|agents|commands|mcp|connect|character
+qs -c ghost ipc call ghost section docs       # chat|docs|memory|agents|commands|mcp|connect|remote|character
 qs -c ghost ipc call ghost status             # JSON
 qs -c ghost ipc call ghost refresh            # re-read roster and theme
 ```

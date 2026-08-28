@@ -35,6 +35,8 @@ import {
 const argv = process.argv.slice(2);
 const flag = (name) => argv.includes(name);
 const opt = (name, fallback) => {
+  const inline = argv.find((argument) => argument.startsWith(`${name}=`));
+  if (inline) return inline.slice(name.length + 1);
   const i = argv.indexOf(name);
   return i >= 0 && argv[i + 1] ? argv[i + 1] : fallback;
 };
@@ -53,6 +55,76 @@ const DOCUMENTS_ROOT = process.env.GHOST_DOCUMENTS_ROOT
   || mkdtempSync(join(tmpdir(), "ghost-documents-mock-"));
 const TRASH_ROOT = join(process.env.XDG_DATA_HOME || join(homedir(), ".local", "share"), "Trash", "files");
 const DOCUMENT_INLINE_MAX_BYTES = 1_048_576;
+const REMOTE_HOSTNAME = "omarchy-thinkpad.tail58bdd3.ts.net";
+const REMOTE_PROBLEM = opt(
+  "--remote-problem",
+  process.env.GHOST_REMOTE_PROBLEM ?? process.env.REMOTE_PROBLEM ?? "",
+);
+
+const REMOTE_PROBLEMS = {
+  tailscale_missing: {
+    message: "Tailscale is not installed.",
+    action: "omarchy-install-service-tailscale",
+  },
+  tailscale_stopped: {
+    message: "Tailscale is installed but not running.",
+  },
+  not_logged_in: {
+    message: "This machine is not logged in to Tailscale.",
+    action: "tailscale up",
+  },
+  operator_required: {
+    message: "Ghost needs permission to manage Tailscale Serve.",
+    action: "sudo tailscale set --operator=$USER",
+  },
+  serve_failed: {
+    message: "tailscale serve failed: mock CLI error",
+  },
+  remote_unsupported: {
+    message: "This daemon does not support remote access",
+  },
+};
+
+if (REMOTE_PROBLEM !== "" && !Object.hasOwn(REMOTE_PROBLEMS, REMOTE_PROBLEM)) {
+  console.error(`unknown --remote-problem=${REMOTE_PROBLEM}; expected ${Object.keys(REMOTE_PROBLEMS).join(", ")}`);
+  process.exit(2);
+}
+
+let remoteEnabled = false;
+
+function remoteSnapshot() {
+  const missing = REMOTE_PROBLEM === "tailscale_missing";
+  const stopped = REMOTE_PROBLEM === "tailscale_stopped";
+  const loggedOut = REMOTE_PROBLEM === "not_logged_in";
+  const operatorRequired = REMOTE_PROBLEM === "operator_required";
+  const installed = !missing;
+  const running = installed && !stopped;
+  const loggedIn = running && !loggedOut;
+  const operator = loggedIn && !operatorRequired;
+  const certs = installed;
+  const problem = REMOTE_PROBLEM === "" ? null : {
+    code: REMOTE_PROBLEM,
+    ...REMOTE_PROBLEMS[REMOTE_PROBLEM],
+  };
+  const available = problem === null;
+  return {
+    enabled: remoteEnabled,
+    state: available ? (remoteEnabled ? "on" : "off") : "unavailable",
+    scheme: loggedIn ? "https" : null,
+    hostname: loggedIn ? REMOTE_HOSTNAME : null,
+    url: available && remoteEnabled ? `https://${REMOTE_HOSTNAME}` : null,
+    tailscale: { installed, running, loggedIn, operator, certs },
+    guests: "read-only",
+    owner: loggedIn ? "owner@example.com" : null,
+    problem,
+  };
+}
+
+const REMOTE_QR_SVG = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 29 29" shape-rendering="crispEdges">
+  <rect width="29" height="29" fill="white"/>
+  <path fill="black" d="M2 2h7v7H2zm2 2v3h3V4zm16-2h7v7h-7zm2 2v3h3V4zM2 20h7v7H2zm2 2v3h3v-3zm8-20h2v2h-2zm3 1h2v3h-2zm-4 4h3v2h-3zm5 3h3v3h-3zm-5 3h2v3h-2zm4 2h2v4h-2zm4-5h2v2h-2zm2 3h3v2h-3zm-7 8h3v3h-3zm5-3h2v2h-2zm3 3h3v2h-3zm-8 5h2v2h-2zm4-1h3v2h-3zm5 0h2v2h-2z"/>
+</svg>`;
 
 /** @type {{ name: string, dir: string, createdAt: string }[]} */
 const ghosts = ["casper", "moaning-myrtle"].map((name) => ({
@@ -938,6 +1010,15 @@ function hooksStatus() {
     .filter(({ count }) => count > 0);
   return { active: rows.length > 0, total: rows.length, events, hooks: rows, sessionStopContinuationCap: 10 };
 }
+
+const svg = (res, body) => {
+  res.writeHead(200, {
+    "content-type": "image/svg+xml",
+    "content-length": Buffer.byteLength(body),
+    "cache-control": "no-store",
+  });
+  res.end(body);
+};
 
 const readBody = (req) =>
   new Promise((resolve, reject) => {
@@ -1956,6 +2037,43 @@ const mockServer = createServer(async (req, res) => {
         error: { code: error.code || "internal_error", message: error.message || "document delete failed" },
       });
     }
+  }
+
+  if (parts.length === 2 && parts[0] === "api" && parts[1] === "remote") {
+    if (req.method === "GET") return json(res, 200, remoteSnapshot());
+    if (req.method !== "POST") return json(res, 405, {
+      error: { code: "method_not_allowed", message: `${req.method} is not allowed here.` },
+    });
+    if (REMOTE_PROBLEM === "remote_unsupported") {
+      return json(res, 409, {
+        error: {
+          code: "not_supported",
+          message: REMOTE_PROBLEMS.remote_unsupported.message,
+        },
+      });
+    }
+    const body = await readBody(req).catch(() => null);
+    if (typeof body?.enabled !== "boolean") {
+      return json(res, 400, {
+        error: { code: "invalid_request", message: '"enabled" must be a boolean' },
+      });
+    }
+    remoteEnabled = body.enabled;
+    return json(res, 200, remoteSnapshot());
+  }
+
+  if (parts.length === 3 && parts[0] === "api" && parts[1] === "remote"
+      && parts[2] === "qr.svg") {
+    if (req.method !== "GET") return json(res, 405, {
+      error: { code: "method_not_allowed", message: `${req.method} is not allowed here.` },
+    });
+    const status = remoteSnapshot();
+    if (!status.enabled || status.state !== "on" || !status.url) {
+      return json(res, 404, {
+        error: { code: "remote_off", message: "Remote access is off." },
+      });
+    }
+    return svg(res, REMOTE_QR_SVG);
   }
 
   if (parts[0] !== "api" || parts[1] !== "ghosts") return json(res, 404, { error: "not found" });
