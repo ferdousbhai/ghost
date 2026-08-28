@@ -12,7 +12,7 @@ extensions shell to this sidecar — the same shape as `TrayBridge.qml` →
 `ghost-tray.py`.
 
 Vision is NOT in the helper. Semantic (AT-SPI) access is preferred where it
-exists (GTK); OMP's native `inspect_image` — which resolves the `vision` role
+exists (GTK); Ghost's `inspect_image` — which resolves the `vision_model` role
 Ghost binds from `models.json` — is the universal fallback for
 canvas/Qt-without-a11y/web/games. The strongest path uses both: try semantic,
 fall back to a screenshot + vision.

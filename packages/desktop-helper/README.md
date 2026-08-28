@@ -19,11 +19,10 @@ by Fabio Pauli:
   0.56+ `hl.dsp.*` Lua grammar (see below).
 
 Vision is **not** here: semantic (AT-SPI) access is preferred where it exists.
-Under Claude Code, `ghost_screen` returns the image block and the model reads
-it directly; an image-inspection tool for pi sessions, resolving the
-`vision_model` the ghost binds in `models.json`, is a planned Ghost port
-(issue #3). The strongest path uses both — try semantic, fall back to a
-screenshot + vision.
+A chat model that accepts images reads `ghost_screen`'s image block directly;
+a blind one hands the saved frame to Ghost's `inspect_image`, which resolves
+the `vision_model` the ghost binds in `models.json`. The strongest path uses
+both — try semantic, fall back to a screenshot + vision.
 
 There is deliberately **no `exec` op**: this is desktop control only. The ghost
 already has the harness's native Bash.

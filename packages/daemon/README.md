@@ -213,9 +213,10 @@ isolated per-session boundary. A pi session has no `task` tool, so no
 bundled, project, ghost-file, or ambient subagent is invokable in phase 1.
 pi's native `bash`, `edit`, `find`, `grep`, `ls`, `read`, and `write` plus
 Ghost's own tools (registered directly as pi custom tools) remain available;
-Ghost's own `bash`/`jobs` (background jobs) and `web_search` join them; image
-inspection is a planned Ghost port (issue #3). There is no tool approval;
-`ask` is not an approval prompt.
+Ghost's own `bash`/`jobs` (background jobs), `web_search`, and
+`inspect_image` (the `vision_model` role describes an image a blind chat model
+cannot see) join them. There is no tool approval; `ask` is not an approval
+prompt.
 
 Claude Code sessions retain Claude's native subagents.
 

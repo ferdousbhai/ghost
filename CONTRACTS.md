@@ -354,10 +354,9 @@ pi's native tools in a Ghost session are `bash`, `edit`, `find`, `grep`, `ls`,
 tools named `mcp__<server>_<tool>` — are registered directly as pi custom
 tools and appear in `getActiveToolNames()`; there is no separate mount. There
 is no `task` tool; no bundled, custom, or ambient subagent can be spawned.
-Claude Code retains its own native subagent behavior. `inspect_image`/vision,
-live voice, the encrypted collaboration relay, and a Ghost-owned
-plan/goal/todo surface are planned Ghost ports (issue #3), not present in a pi
-session today. Ghost's `settings.yml`,
+Claude Code retains its own native subagent behavior. Live voice, the
+encrypted collaboration relay, and a Ghost-owned plan/goal/todo surface are
+planned Ghost ports (issue #3), not present in a pi session today. Ghost's `settings.yml`,
 `models.json`, and `mcp.json` are read from the ghost home, never the live cwd.
 pi's `DefaultResourceLoader` runs with `noExtensions`, `noSkills`,
 `noPromptTemplates`, `noThemes`, and `noContextFiles`; Ghost supplies every
@@ -433,6 +432,18 @@ discovery path.
 canonicalizes staged legacy `notes/`/`docs/` Markdown. It exposes no live
 legacy document list, read, find, write, or search API; live Documents are
 exclusively the machine-wide `MachineDocuments` boundary and daemon route.
+
+`inspect_image` is Ghost-owned (`packages/daemon/src/inspect-image.ts`) and
+exists for a chat model that cannot see images: it reads one
+png/jpg/gif/webp file (relative paths resolve against the conversation cwd),
+resizes it with pi's own image resizer, and asks the ghost's
+`roles.vision_model` (read from `models.json` at call time; the bound model
+must accept images) to describe it, with the optional `question`, returning
+the description through the shared untrusted-text result (fenced, injection-
+flagged). A blind chat model with no vision model bound is a tool error
+naming the role to bind. A chat model that accepts images is told to use
+pi's `read`, which attaches image files itself; `ghost_screen` already points
+a blind model at `inspect_image` for its saved frames.
 
 `web_search` is Ghost-owned (`packages/daemon/src/web-search.ts`): a provider
 chain read from `settings.yml`. The default order is Brave Search, Firecrawl's

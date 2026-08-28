@@ -146,6 +146,7 @@ import {
   jobSnapshot,
 } from "./jobs.js";
 import { piExtensionFromGhost, renderPersonaPrompt } from "./pi-extension-bridge.js";
+import { createInspectImageTool } from "./inspect-image.js";
 import { createWebSearchTool } from "./web-search.js";
 import { GhostMcpManager } from "./mcp-manager.js";
 import { validateServerName, type MCPServerConfig } from "./mcp-config.js";
@@ -2662,6 +2663,11 @@ export class SessionHost {
         createBashTool({ cwd: runtimeCwd, manager: jobs, autoBackgroundMs: this.autoBackgroundMs }) as ToolDefinition,
         createJobsTool(jobs) as ToolDefinition,
         createWebSearchTool({ settings, secrets: modelRuntime.secretResolver }) as ToolDefinition,
+        createInspectImageTool({
+          runtime: modelRuntime,
+          cwd: runtimeCwd,
+          visionModel: () => readGhostModels(paths.home)?.roles?.vision_model,
+        }) as ToolDefinition,
       ],
     });
     const { session, extensionsResult } = created;

@@ -69,4 +69,5 @@ export * from "./hyprland.js";
 export * from "./memory.js";
 export * from "./persona.js";
 export * from "./screen.js";
+export { untrustedTextResult } from "./shared.js";
 export * from "./shared.js";

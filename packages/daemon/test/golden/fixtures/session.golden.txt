@@ -123,7 +123,7 @@ ghost_desktop       registry=yes  wire=yes  invokable=yes
 ghost_memory_write  registry=yes  wire=yes  invokable=yes
 ghost_screen        registry=yes  wire=yes  invokable=yes
 grep                registry=yes  wire=yes  invokable=yes
-inspect_image       registry=no   wire=no   invokable=no
+inspect_image       registry=yes  wire=yes  invokable=yes
 ls                  registry=yes  wire=yes  invokable=yes
 read                registry=yes  wire=yes  invokable=yes
 task                registry=no   wire=no   invokable=no
