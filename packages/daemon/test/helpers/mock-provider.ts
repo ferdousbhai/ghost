@@ -81,6 +81,7 @@ export type MockStep = (
 ) & MockStepOptions;
 
 export interface CapturedRequest {
+  authorization: string | null;
   system: string;
   messages: unknown[];
   toolNames: string[];
@@ -145,6 +146,7 @@ export async function startMockProvider(
       };
       const system = body.messages?.find((message) => message.role === "system");
       requests.push({
+        authorization: request.headers.authorization ?? null,
         system: typeof system?.content === "string"
           ? system.content
           : JSON.stringify(system?.content ?? ""),

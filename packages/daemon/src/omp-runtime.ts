@@ -1,12 +1,4 @@
-import { randomUUID } from "node:crypto";
-import {
-  chmodSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  renameSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { AuthStorage } from "@oh-my-pi/pi-ai/auth-storage";
 import {
@@ -32,22 +24,19 @@ import {
   KeyringAuthCredentialStore,
   type GhostSecretContext,
 } from "./keyring-credential-store.js";
-import { readGhostModels, type GhostModelsFile } from "./models.js";
+import {
+  collectKeyringProviders,
+  mergeConfiguredAccounts,
+  providerAccountName,
+  syncModelsView,
+} from "./model-config-view.js";
+import { readGhostModels } from "./models.js";
 import {
   authorizeGhostAccounts,
   openGhostSecretContext,
 } from "./secret-migration.js";
-import {
-  isSecretReference,
-  parseSecretReference,
-  secretAccountName,
-  serviceForCredentialProvider,
-} from "./secret-reference.js";
-import { resolveProviderSecrets } from "./secret-resolution.js";
-import { SecretServiceError } from "./secret-service.js";
 
 const OMP_MODELS_VIEW = "models.omp.json";
-const KEYRING_PLACEHOLDER = "ghost-keyring-reference";
 const SUBSCRIPTION_PROVIDERS = new Set([
   "openai-codex",
   "openai-codex-device",
@@ -63,52 +52,6 @@ interface RuntimeInput {
   settings?: Settings;
 }
 
-function ompModelsDocument(value: unknown): { providers: Record<string, unknown> } {
-  const source = value && typeof value === "object" && !Array.isArray(value)
-    ? value as { providers?: unknown }
-    : {};
-  const providers: Record<string, unknown> = {};
-  if (source.providers && typeof source.providers === "object" && !Array.isArray(source.providers)) {
-    for (const [provider, raw] of Object.entries(source.providers)) {
-      if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
-      const { name: _ghostDisplayName, ...config } = raw as Record<string, unknown>;
-      if (typeof config.apiKey === "string" && isSecretReference(config.apiKey)) {
-        config.apiKey = KEYRING_PLACEHOLDER;
-      }
-      if (config.headers && typeof config.headers === "object" && !Array.isArray(config.headers)) {
-        config.headers = Object.fromEntries(Object.entries(config.headers).map(([name, header]) => [
-          name,
-          typeof header === "string" && isSecretReference(header) ? KEYRING_PLACEHOLDER : header,
-        ]));
-      }
-      if (
-        Array.isArray(config.models)
-        && config.models.length > 0
-        && config.apiKey === undefined
-        && config.auth === undefined
-      ) {
-        // Legacy Ghost treated an omitted key on custom endpoints as keyless.
-        config.auth = "none";
-      }
-      providers[provider] = config;
-    }
-  }
-  return { providers };
-}
-
-function syncOmpModelsView(input: unknown, agentDir: string): string {
-  const target = join(agentDir, OMP_MODELS_VIEW);
-  const rendered = `${JSON.stringify(ompModelsDocument(input), null, 2)}\n`;
-  if (existsSync(target) && readFileSync(target, "utf8") === rendered) return target;
-
-  const temporary = `${target}.${randomUUID()}.tmp`;
-  writeFileSync(temporary, rendered, { encoding: "utf8", mode: 0o600, flag: "wx" });
-  chmodSync(temporary, 0o600);
-  renameSync(temporary, target);
-  chmodSync(target, 0o600);
-  return target;
-}
-
 function providerName(id: string): string {
   return id
     .split(/[-_]/)
@@ -119,45 +62,6 @@ function providerName(id: string): string {
 
 function authStorageProvider(providerId: string): string {
   return getProviderDefinition(providerId)?.storeCredentialsAs ?? providerId;
-}
-
-function providerAccountName(providerId: string, account: string): string {
-  return secretAccountName({
-    service: serviceForCredentialProvider(authStorageProvider(providerId)),
-    account,
-  });
-}
-
-/**
- * Resolve each provider's keyring references into the live registry, and report
- * which of that provider's own accounts its configuration names.
- *
- * OMP's file loader only ever sees `KEYRING_PLACEHOLDER`; the values arrive
- * here, in memory, and never touch the projected view on disk.
- */
-function registerKeyringProviders(
-  registry: ModelRegistry,
-  models: GhostModelsFile,
-  resolver: GhostSecretContext,
-): ReadonlyMap<string, ReadonlySet<string>> {
-  const configAccounts = new Map<string, ReadonlySet<string>>();
-  for (const [provider, config] of Object.entries(models.providers)) {
-    const references = [config.apiKey, ...Object.values(config.headers ?? {})]
-      .filter((value): value is string => typeof value === "string" && isSecretReference(value))
-      .map(parseSecretReference);
-    if (references.length === 0) continue;
-    const service = serviceForCredentialProvider(authStorageProvider(provider));
-    const accounts = new Set(references
-      .filter((ref) => ref.service === service)
-      .map((ref) => ref.account));
-    if (accounts.size > 0) configAccounts.set(provider, accounts);
-    const resolved = resolveProviderSecrets(config, resolver);
-    registry.registerProvider(provider, {
-      ...(resolved.apiKey ? { apiKey: resolved.apiKey } : {}),
-      ...(resolved.headers ? { headers: resolved.headers } : {}),
-    }, "ghost-keyring");
-  }
-  return configAccounts;
 }
 
 export class GhostOmpRuntime implements LoginRuntime, ModelCatalogRuntime {
@@ -196,12 +100,18 @@ export class GhostOmpRuntime implements LoginRuntime, ModelCatalogRuntime {
       await authStorage.reload();
 
       const models = readGhostModels(home) ?? { providers: {} };
-      const ompModelsPath = syncOmpModelsView(models, agentDir);
+      const ompModelsPath = syncModelsView(models, agentDir, OMP_MODELS_VIEW, { legacyKeylessAuth: true });
       const modelRegistry = new ModelRegistry(authStorage, ompModelsPath, {
         ...(input.settings ? { settings: input.settings } : {}),
         cacheDbPath: join(agentDir, "models.db"),
       });
-      const providerConfigAccounts = registerKeyringProviders(modelRegistry, models, secretResolver);
+      const providerConfigAccounts = new Map<string, ReadonlySet<string>>();
+      for (const registration of collectKeyringProviders(models, secretResolver, authStorageProvider)) {
+        modelRegistry.registerProvider(registration.provider, registration.config, "ghost-keyring");
+        if (registration.accounts.size > 0) {
+          providerConfigAccounts.set(registration.provider, registration.accounts);
+        }
+      }
       await modelRegistry.hydrateCredentialScopedModelCaches();
       await modelRegistry.refresh(input.allowModelNetwork ? "online-if-uncached" : "offline");
       return new GhostOmpRuntime(
@@ -255,19 +165,10 @@ export class GhostOmpRuntime implements LoginRuntime, ModelCatalogRuntime {
   }
 
   getProviderAccounts(providerId: string) {
-    const storageProvider = authStorageProvider(providerId);
-    const rows = this.credentialStore.listProviderAccounts(storageProvider);
-    const configured = this.providerConfigAccounts.get(providerId) ?? new Set<string>();
-    const byAccount = new Map(rows.map((row) => [row.account, row]));
-    for (const account of configured) {
-      const row = byAccount.get(account);
-      byAccount.set(account, {
-        ...(row ?? { account }),
-        configured: true,
-        connectedVia: row?.connectedVia ?? "api_key",
-      });
-    }
-    return [...byAccount.values()];
+    return mergeConfiguredAccounts(
+      this.credentialStore.listProviderAccounts(authStorageProvider(providerId)),
+      this.providerConfigAccounts.get(providerId) ?? new Set(),
+    );
   }
 
   complete(
@@ -319,7 +220,7 @@ export class GhostOmpRuntime implements LoginRuntime, ModelCatalogRuntime {
     account = "personal",
   ): Promise<Credential> {
     const storageProvider = authStorageProvider(providerId);
-    const accountName = providerAccountName(providerId, account);
+    const accountName = providerAccountName(providerId, account, authStorageProvider);
     // Make the selected row visible to this short-lived login runtime before
     // AuthStorage rebuilds its snapshot. Durable policy is written only after
     // the flow succeeds, against the ghost's current (possibly renamed) home.
@@ -367,21 +268,17 @@ export class GhostOmpRuntime implements LoginRuntime, ModelCatalogRuntime {
   }
 
   authorizeAccount(providerId: string, account: string, home: string): void {
-    const accountName = providerAccountName(providerId, account);
+    const accountName = providerAccountName(providerId, account, authStorageProvider);
     authorizeGhostAccounts(home, this.secretResolver, [accountName]);
     this.credentialStore.allowAccounts([accountName]);
   }
 
   async logout(providerId: string, account: string): Promise<void> {
     const storageProvider = authStorageProvider(providerId);
-    const accountName = providerAccountName(providerId, account);
-    if (!this.secretResolver.allowedAccounts.has(accountName)) {
-      throw new SecretServiceError(
-        "secret_not_authorized",
-        `Ghost policy does not allow keyring account ${accountName}; logout was refused.`,
-        403,
-      );
-    }
+    this.secretResolver.assertAccountAuthorized(
+      providerAccountName(providerId, account, authStorageProvider),
+      "logout",
+    );
     this.credentialStore.setWriteAccount(storageProvider, account);
     try {
       await this.authStorage.remove(storageProvider);

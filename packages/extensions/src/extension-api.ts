@@ -107,11 +107,11 @@ export interface CollectedGhostExtension {
 }
 
 /**
- * Run factories against a recording API. Runtimes and tests use this to obtain
+ * Run a factory against a recording API. Runtimes and tests use this to obtain
  * the registered tools and hooks without a session.
  */
 export async function collectGhostExtension(
-  ...factories: readonly GhostExtensionFactory[]
+  factory: GhostExtensionFactory,
 ): Promise<CollectedGhostExtension> {
   const tools = new Map<string, AnyGhostToolDefinition>();
   const beforeAgentStart: GhostBeforeAgentStartHandler[] = [];
@@ -126,27 +126,6 @@ export async function collectGhostExtension(
       beforeAgentStart.push(handler);
     },
   };
-  for (const factory of factories) await factory(api);
+  await factory(api);
   return { tools, beforeAgentStart };
-}
-
-/**
- * Run the collected `before_agent_start` handlers in order, each seeing the
- * previous one's replacement. Returns the final sections, or the incoming ones
- * when no handler replaced them.
- */
-export async function runBeforeAgentStart(
-  handlers: readonly GhostBeforeAgentStartHandler[],
-  event: Omit<GhostBeforeAgentStartEvent, "type">,
-  ctx: GhostToolContext,
-): Promise<string[]> {
-  let systemPrompt = [...event.systemPrompt];
-  for (const handler of handlers) {
-    const result = await handler(
-      { type: "before_agent_start", prompt: event.prompt, systemPrompt },
-      ctx,
-    );
-    if (result?.systemPrompt !== undefined) systemPrompt = [...result.systemPrompt];
-  }
-  return systemPrompt;
 }

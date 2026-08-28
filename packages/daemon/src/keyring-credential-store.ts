@@ -52,6 +52,12 @@ export interface CredentialRow {
   active: number;
 }
 
+export interface ProviderAccountStatus {
+  account: string;
+  configured: boolean;
+  connectedVia?: "oauth" | "api_key";
+}
+
 interface CacheRow {
   value: string;
   expires_at_sec: number;
@@ -137,7 +143,7 @@ function renderEnvelope(envelope: SecretEnvelope): string {
   return rendered;
 }
 
-function credentialData(credential: AuthCredential): string {
+export function credentialData(credential: AuthCredential): string {
   if (credential.type === "api_key") {
     return JSON.stringify(credential.source === "login"
       ? { key: credential.key, source: "login" }
@@ -147,21 +153,7 @@ function credentialData(credential: AuthCredential): string {
   return JSON.stringify(data);
 }
 
-const API_KEY_CREDENTIAL_FIELDS = new Set(["type", "key", "source"]);
-const OAUTH_CREDENTIAL_FIELDS = new Set([
-  "type",
-  "refresh",
-  "access",
-  "expires",
-  "enterpriseUrl",
-  "projectId",
-  "email",
-  "accountId",
-  "apiEndpoint",
-  "orgId",
-  "orgName",
-  "authorizedAt",
-]);
+const API_KEY_CREDENTIAL_FIELDS = new Set(["type", "key", "source", "env"]);
 const OAUTH_STRING_FIELDS = [
   "enterpriseUrl",
   "projectId",
@@ -171,6 +163,11 @@ const OAUTH_STRING_FIELDS = [
   "orgId",
   "orgName",
 ] as const;
+
+function isStringRecord(value: unknown): value is Record<string, string> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value)
+    && Object.values(value as Record<string, unknown>).every((entry) => typeof entry === "string");
+}
 
 export function validateAuthCredential(value: unknown): AuthCredential {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -184,10 +181,14 @@ export function validateAuthCredential(value: unknown): AuthCredential {
     if (credential.source !== undefined && credential.source !== "login") {
       throw new SecretServiceError("keyring_unavailable", "A Ghost keyring API-key credential is malformed.");
     }
+    if (credential.env !== undefined && !isStringRecord(credential.env)) {
+      throw new SecretServiceError("keyring_unavailable", "A Ghost keyring API-key credential is malformed.");
+    }
     return credential as AuthCredential;
   }
+  // OAuth credentials carry provider-specific extras (account ids, endpoints);
+  // the known ones are type-checked and the rest are kept as opaque JSON.
   if (credential.type === "oauth"
-    && Object.keys(credential).every((key) => OAUTH_CREDENTIAL_FIELDS.has(key))
     && typeof credential.access === "string"
     && typeof credential.refresh === "string"
     && typeof credential.expires === "number"
@@ -659,6 +660,84 @@ export class GhostSecretContext {
     }
   }
 
+  /** Allowed accounts of one provider's service, in policy order. */
+  allowedProviderAccounts(provider: string): SecretAccountRef[] {
+    const service = serviceForCredentialProvider(provider);
+    return [...this.allowedAccounts]
+      .map(parseSecretAccountName)
+      .filter((ref) => ref.service === service);
+  }
+
+  /** Active credential rows whose account this context may see. */
+  allowedCredentialRows(provider?: string): CredentialRow[] {
+    return this.activeCredentialRows(provider)
+      .filter((row) => this.allowedAccounts.has(secretAccountName(row)));
+  }
+
+  credentialForRow(row: CredentialRow): AuthCredential {
+    const value = this.readField({ service: row.service, account: row.account, field: row.field });
+    if (value === undefined) {
+      throw new SecretServiceError(
+        "secret_reference_missing",
+        `Credential reference ${formatSecretReference(row, row.field)} is absent from Ghost's keyring. Log in again and retry.`,
+      );
+    }
+    const credential = validateAuthCredential(value);
+    if (credential.type !== row.credential_type) {
+      throw new SecretServiceError("keyring_unavailable", "Ghost keyring credential metadata does not match its secret.");
+    }
+    return credential;
+  }
+
+  listProviderAccounts(provider: string): ProviderAccountStatus[] {
+    const byAccount = new Map(this.allowedCredentialRows(provider).map((row) => [row.account, row]));
+    return this.allowedProviderAccounts(provider).map((ref) => {
+      const row = byAccount.get(ref.account);
+      return {
+        account: ref.account,
+        configured: Boolean(row),
+        ...(row ? { connectedVia: row.credential_type } : {}),
+      };
+    });
+  }
+
+  assertAccountAuthorized(accountName: string, action: string): void {
+    if (this.allowedAccounts.has(accountName)) return;
+    throw new SecretServiceError(
+      "secret_not_authorized",
+      `Ghost policy does not allow keyring account ${accountName}; ${action} was refused.`,
+      403,
+    );
+  }
+
+  tryAcquireRefreshLease(id: number, owner: string, expiresAtMs: number): boolean {
+    return this.metadata.transaction(() => {
+      const current = this.metadata.db.query(
+        "SELECT owner, expires_at_ms FROM ghost_refresh_leases WHERE credential_id = ?",
+      ).get(id) as { owner: string; expires_at_ms: number } | null;
+      if (current && current.expires_at_ms > Date.now() && current.owner !== owner) return false;
+      this.metadata.db.query(`
+        INSERT INTO ghost_refresh_leases(credential_id, owner, expires_at_ms) VALUES (?, ?, ?)
+        ON CONFLICT(credential_id) DO UPDATE SET owner = excluded.owner, expires_at_ms = excluded.expires_at_ms
+      `).run(id, owner, expiresAtMs);
+      this.metadata.bumpRevision();
+      return true;
+    });
+  }
+
+  refreshLeaseExpiresAt(id: number): number | undefined {
+    const row = this.metadata.db.query(
+      "SELECT expires_at_ms FROM ghost_refresh_leases WHERE credential_id = ?",
+    ).get(id) as { expires_at_ms: number } | null;
+    return row?.expires_at_ms;
+  }
+
+  releaseRefreshLease(id: number, owner: string): void {
+    this.metadata.db.query(
+      "DELETE FROM ghost_refresh_leases WHERE credential_id = ? AND owner = ?",
+    ).run(id, owner);
+  }
+
   activeCredentialRows(provider?: string): CredentialRow[] {
     if (provider === undefined) {
       return this.metadata.db.query(`
@@ -724,29 +803,12 @@ export class KeyringAuthCredentialStore implements AuthCredentialStore {
     this.context.allowAccounts(accounts);
   }
 
-  listProviderAccounts(provider: string): Array<{
-    account: string;
-    configured: boolean;
-    connectedVia?: "oauth" | "api_key";
-  }> {
-    const byAccount = new Map(this.context.activeCredentialRows(provider)
-      .filter((row) => this.context.allowedAccounts.has(secretAccountName(row)))
-      .map((row) => [row.account, row]));
-    return this.allowedProviderAccounts(provider).map((ref) => {
-      const row = byAccount.get(ref.account);
-      return {
-        account: ref.account,
-        configured: Boolean(row),
-        ...(row ? { connectedVia: row.credential_type } : {}),
-      };
-    });
+  listProviderAccounts(provider: string): ProviderAccountStatus[] {
+    return this.context.listProviderAccounts(provider);
   }
 
   private allowedProviderAccounts(provider: string): SecretAccountRef[] {
-    const service = serviceForCredentialProvider(provider);
-    return [...this.context.allowedAccounts]
-      .map(parseSecretAccountName)
-      .filter((ref) => ref.service === service);
+    return this.context.allowedProviderAccounts(provider);
   }
 
   private targetAccounts(provider: string, count: number): SecretAccountRef[] {
@@ -781,34 +843,13 @@ export class KeyringAuthCredentialStore implements AuthCredentialStore {
     ).get(id) as CredentialRow | null;
   }
 
-  private credentialForRow(row: CredentialRow): AuthCredential {
-    const value = this.context.readField({
-      service: row.service,
-      account: row.account,
-      field: row.field,
-    });
-    if (value === undefined) {
-      throw new SecretServiceError(
-        "secret_reference_missing",
-        `Credential reference ${formatSecretReference(row, row.field)} is absent from Ghost's keyring. Log in again and retry.`,
-      );
-    }
-    const credential = validateAuthCredential(value);
-    if (credential.type !== row.credential_type) {
-      throw new SecretServiceError("keyring_unavailable", "Ghost keyring credential metadata does not match its secret.");
-    }
-    return credential;
-  }
-
   listAuthCredentials(provider?: string): StoredAuthCredential[] {
-    return this.context.activeCredentialRows(provider)
-      .filter((row) => this.context.allowedAccounts.has(secretAccountName(row)))
-      .map((row) => ({
-        id: row.id,
-        provider: row.provider,
-        credential: this.credentialForRow(row),
-        disabledCause: null,
-      }));
+    return this.context.allowedCredentialRows(provider).map((row) => ({
+      id: row.id,
+      provider: row.provider,
+      credential: this.context.credentialForRow(row),
+      disabledCause: null,
+    }));
   }
 
   updateAuthCredential(id: number, credential: AuthCredential): void {
@@ -992,31 +1033,15 @@ export class KeyringAuthCredentialStore implements AuthCredentialStore {
   }
 
   tryAcquireCredentialRefreshLease(id: number, owner: string, expiresAtMs: number): boolean {
-    return this.context.metadata.transaction(() => {
-      const current = this.context.metadata.db.query(
-        "SELECT owner, expires_at_ms FROM ghost_refresh_leases WHERE credential_id = ?",
-      ).get(id) as { owner: string; expires_at_ms: number } | null;
-      if (current && current.expires_at_ms > Date.now() && current.owner !== owner) return false;
-      this.context.metadata.db.query(`
-        INSERT INTO ghost_refresh_leases(credential_id, owner, expires_at_ms) VALUES (?, ?, ?)
-        ON CONFLICT(credential_id) DO UPDATE SET owner = excluded.owner, expires_at_ms = excluded.expires_at_ms
-      `).run(id, owner, expiresAtMs);
-      this.context.metadata.bumpRevision();
-      return true;
-    });
+    return this.context.tryAcquireRefreshLease(id, owner, expiresAtMs);
   }
 
   getCredentialRefreshLeaseExpiresAt(id: number): number | undefined {
-    const row = this.context.metadata.db.query(
-      "SELECT expires_at_ms FROM ghost_refresh_leases WHERE credential_id = ?",
-    ).get(id) as { expires_at_ms: number } | null;
-    return row?.expires_at_ms;
+    return this.context.refreshLeaseExpiresAt(id);
   }
 
   releaseCredentialRefreshLease(id: number, owner: string): void {
-    this.context.metadata.db.query(
-      "DELETE FROM ghost_refresh_leases WHERE credential_id = ? AND owner = ?",
-    ).run(id, owner);
+    this.context.releaseRefreshLease(id, owner);
   }
 
   renewCredentialRefreshLease(id: number, owner: string, expiresAtMs: number): boolean {

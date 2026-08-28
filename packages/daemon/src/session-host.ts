@@ -14,6 +14,7 @@ import {
   createAgentSession,
 } from "@oh-my-pi/pi-coding-agent/sdk";
 import type { CreateAgentSessionOptions } from "@oh-my-pi/pi-coding-agent/sdk";
+import type { ExtensionFactory } from "@oh-my-pi/pi-coding-agent";
 import type {
   AgentSession,
   AgentSessionEvent,
@@ -86,6 +87,7 @@ import {
   type GhostHomeDigestReaders,
   type RelayTransport,
 } from "./extensions.js";
+import { adaptGhostExtensionForOmp } from "./omp-extension-bridge.js";
 import {
   FIRST_MEETING_SECTION,
   generateGreeting,
@@ -2584,9 +2586,12 @@ export class SessionHost {
       paths.home,
       ompToolCapabilities,
     );
-    extensions.factories.push((api) => {
-      api.on("session.compacting", () => ({ prompt: GHOST_COMPACTION_PROMPT }));
-    });
+    const extensionFactories: ExtensionFactory[] = [
+      adaptGhostExtensionForOmp(extensions.ghost),
+      (api) => {
+        api.on("session.compacting", () => ({ prompt: GHOST_COMPACTION_PROMPT }));
+      },
+    ];
 
     const {
       contextFiles,
@@ -2658,7 +2663,7 @@ export class SessionHost {
 
     const ask = new AskBroker(this.logger);
     const hookExtensions = await loadGhostHookExtensions(paths.home);
-    extensions.factories.push(...hookExtensions.factories);
+    extensionFactories.push(...hookExtensions.factories);
     for (const error of hookExtensions.errors) {
       this.logger.error("extension failed to load", {
         ghost: ghostName,
@@ -2672,7 +2677,7 @@ export class SessionHost {
         settings,
         authStorage: modelRuntime.authStorage,
         modelRegistry: modelRuntime.modelRegistry,
-        extensions: extensions.factories,
+        extensions: extensionFactories,
         // Executable discovery is empty. Trusted visible Ghost hooks were
         // already descriptor-pinned and imported as inline factories above;
         // project hooks/extensions and Ghost custom-code tools stay disabled.

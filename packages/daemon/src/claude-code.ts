@@ -58,7 +58,6 @@ import {
   openRegularFileNoFollow,
   type GhostToolCapabilities,
   type AnyGhostToolDefinition,
-  type GhostExtensionFactory,
   type GhostToolContext,
   type GhostToolResult,
 } from "@ghost/extensions";
@@ -959,24 +958,9 @@ async function buildPersona(
   });
 }
 
-async function captureToolDefinitions(
-  ghost: GhostExtensionFactory,
-): Promise<Map<string, AnyGhostToolDefinition>> {
-  // buildPersona adapts Ghost's only prompt hook outside the session runtime;
-  // this bridge needs the tools alone, so the hook is collected and ignored.
-  const collected = await collectGhostExtension(ghost);
-  return collected.tools;
-}
-
 function signalFromToolExtra(extra: unknown): AbortSignal | undefined {
   const signal = (extra as { signal?: unknown } | null)?.signal;
   return signal instanceof AbortSignal ? signal : undefined;
-}
-
-function toolContext(cwd: string): GhostToolContext {
-  // Claude Code has no pi Model instance. Keep that absence explicit so the
-  // bridge never invents model metadata just to advertise capabilities.
-  return { cwd, model: undefined };
 }
 
 function mcpContent(result: GhostToolResult<unknown>): Array<
@@ -1044,7 +1028,11 @@ export async function bridgeClaudeCodeTools(
   resolved: ReturnType<typeof resolveGhostExtensions>,
   homeDir: string,
 ): Promise<SdkMcpToolDefinition[]> {
-  const definitions = await captureToolDefinitions(resolved.ghost);
+  // buildPersona adapts Ghost's prompt hook outside the session runtime; this
+  // bridge needs the tools alone. Claude Code has no pi Model instance, so the
+  // tool context deliberately carries none.
+  const definitions = (await collectGhostExtension(resolved.ghost)).tools;
+  const context: GhostToolContext = { cwd: homeDir };
   return resolved.toolNames.map((name): SdkMcpToolDefinition => {
     const definition = definitions.get(name);
     if (!definition) {
@@ -1063,7 +1051,7 @@ export async function bridgeClaudeCodeTools(
             args as never,
             signalFromToolExtra(extra),
             undefined,
-            toolContext(homeDir),
+            context,
           );
           return { content: mcpContent(result) };
         } catch (cause) {

@@ -652,7 +652,6 @@ describe("Claude Code subscription runtime", () => {
         await screenExtension(api);
         await browserExtension(api);
       },
-      factories: [],
       toolNames: [GHOST_SCREEN, GHOST_BROWSER],
     }, paths.home);
     const call = async (name: string, args: Record<string, unknown>) => {

@@ -2,7 +2,7 @@ import { Type } from "typebox";
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { describe, expect, it } from "vitest";
 import type { GhostExtensionFactory } from "@ghost/extensions";
-import { adaptGhostExtensionForOmp, ghostToolContextFromOmp } from "../src/omp-extension-bridge.js";
+import { adaptGhostExtensionForOmp } from "../src/omp-extension-bridge.js";
 
 interface Registered {
   name: string;
@@ -80,19 +80,13 @@ describe("adaptGhostExtensionForOmp", () => {
     );
     expect(replaced).toEqual({ systemPrompt: ["ghost:/ghosts/test", "omp"] });
 
-    const silent = await adaptGhostExtensionForOmp((api) => {
-      api.on("before_agent_start", () => undefined);
-    });
     const quiet = fakeOmp();
-    await silent(quiet.api);
+    await adaptGhostExtensionForOmp((api) => {
+      api.on("before_agent_start", () => undefined);
+    })(quiet.api);
     expect(await quiet.handlers.get("before_agent_start")![0]!(
-      { type: "before_agent_start", prompt: "hi", systemPrompt: "one", systemPromptOptions: {} },
+      { type: "before_agent_start", prompt: "hi", systemPrompt: ["one"], systemPromptOptions: {} },
       ompContext,
     )).toBeUndefined();
-  });
-
-  it("projects only cwd and the model identity from an OMP context", () => {
-    expect(ghostToolContextFromOmp({ cwd: "/x", model: undefined } as ExtensionContext))
-      .toEqual({ cwd: "/x", model: undefined });
   });
 });

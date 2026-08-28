@@ -9,11 +9,14 @@ import type {
   ExtensionContext,
   ExtensionFactory,
 } from "@oh-my-pi/pi-coding-agent";
+// The `legacy-typebox` facade is deliberate: its `Type.Unsafe` validates a
+// raw JSON Schema document through OMP's authoritative validator and emits it
+// verbatim, where OMP's `fromJsonSchema` lowers keywords lossily.
 import { Type } from "@oh-my-pi/pi-coding-agent/extensibility/legacy-typebox";
 import type {
+  AnyGhostToolDefinition,
   GhostExtensionFactory,
   GhostToolContext,
-  GhostToolResult,
 } from "@ghost/extensions";
 
 export function ghostToolContextFromOmp(ctx: ExtensionContext): GhostToolContext {
@@ -32,40 +35,21 @@ export function adaptGhostExtensionForOmp(
   return (pi: ExtensionAPI) =>
     factory({
       registerTool(definition) {
+        const tool = definition as AnyGhostToolDefinition;
         pi.registerTool({
-          name: definition.name,
-          label: definition.label,
-          description: definition.description,
-          // Ghost schemas are plain JSON Schema documents; OMP validates those
-          // through its `Type.Unsafe` facade rather than its own builders.
-          parameters: Type.Unsafe<Record<string, unknown>>(
-            definition.parameters as Record<string, unknown>,
-          ),
+          name: tool.name,
+          label: tool.label,
+          description: tool.description,
+          parameters: Type.Unsafe<Record<string, unknown>>(tool.parameters as Record<string, unknown>),
           execute: (toolCallId, params, signal, onUpdate, ctx) =>
-            definition.execute(
-              toolCallId,
-              params as never,
-              signal,
-              onUpdate === undefined
-                ? undefined
-                : (partial: GhostToolResult<unknown>) => onUpdate(partial as never),
-              ghostToolContextFromOmp(ctx),
-            ) as Promise<never>,
+            tool.execute(toolCallId, params as never, signal, onUpdate, ghostToolContextFromOmp(ctx)),
         });
       },
       on(_event, handler) {
-        pi.on("before_agent_start", async (event, ctx) => {
-          const systemPrompt = Array.isArray(event.systemPrompt)
-            ? event.systemPrompt
-            : [event.systemPrompt];
-          const result = await handler(
-            { type: "before_agent_start", prompt: event.prompt, systemPrompt },
-            ghostToolContextFromOmp(ctx),
-          );
-          return result?.systemPrompt === undefined
-            ? undefined
-            : { systemPrompt: result.systemPrompt };
-        });
+        pi.on("before_agent_start", (event, ctx) => handler(
+          { type: "before_agent_start", prompt: event.prompt, systemPrompt: event.systemPrompt },
+          ghostToolContextFromOmp(ctx),
+        ));
       },
     });
 }

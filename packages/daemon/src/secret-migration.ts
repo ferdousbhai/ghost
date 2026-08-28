@@ -110,7 +110,7 @@ function privateJson(path: string): unknown {
   }
 }
 
-function atomicPrivateJson(path: string, value: unknown): void {
+export function atomicPrivateJson(path: string, value: unknown): void {
   const rendered = `${JSON.stringify(value, null, 2)}\n`;
   if (Buffer.byteLength(rendered, "utf8") > MAX_PRIVATE_FILE_BYTES) {
     throw new SecretServiceError("secret_migration_failed", `${path} would exceed 1 MiB after migration.`);
