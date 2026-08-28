@@ -78,3 +78,11 @@ cannot be ruled out.
 Secret Service keeps values off portable disk and encrypts them at rest. It is
 not a security boundary against another process already running as the same OS
 owner while the collection is unlocked.
+
+A login keyring with a blank password auto-unlocks on first access, so it can
+never be observed locked and Ghost's locked-keyring error will not occur on such
+a machine. That is the normal arrangement under display-manager autologin, where
+PAM has no password to unlock a keyring with; at-rest protection then comes from
+full-disk encryption alone. Fail-closed still holds where it matters — a
+passworded keyring that is locked, or an absent Secret Service, is an error,
+never a plaintext fallback.
