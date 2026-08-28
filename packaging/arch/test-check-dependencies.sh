@@ -30,6 +30,15 @@ require_srcinfo_entry() {
   fi
 }
 
+require_srcinfo_dependency() {
+  local package="$1"
+  local srcinfo="$2"
+  if ! grep -Eq $'^\tdepends = '"${package}([<>=]|\$)" "$srcinfo"; then
+    printf '%s does not declare depends = %s\n' "$srcinfo" "$package" >&2
+    exit 1
+  fi
+}
+
 command -v rg >/dev/null || {
   printf 'ripgrep is required by package checks but is not installed\n' >&2
   exit 1
@@ -58,6 +67,8 @@ cmp "$script_dir/.SRCINFO" "$work/ghost-ai-git.SRCINFO"
 require_srcinfo_entry checkdepends nodejs "$work/ghost-ai-git.SRCINFO"
 require_srcinfo_entry checkdepends python-yaml "$work/ghost-ai-git.SRCINFO"
 require_srcinfo_entry checkdepends ripgrep "$work/ghost-ai-git.SRCINFO"
+# The keyring store shells out to libsecret's secret-tool at runtime.
+require_srcinfo_dependency libsecret "$work/ghost-ai-git.SRCINFO"
 
 bash "$source_root/packaging/release/render-arch-package.sh" \
   "$work/ghost-ai" \
@@ -69,6 +80,7 @@ bash "$source_root/packaging/release/render-arch-package.sh" \
 require_srcinfo_entry checkdepends nodejs "$work/ghost-ai/.SRCINFO"
 require_srcinfo_entry checkdepends python-yaml "$work/ghost-ai/.SRCINFO"
 require_srcinfo_entry checkdepends ripgrep "$work/ghost-ai/.SRCINFO"
+require_srcinfo_dependency libsecret "$work/ghost-ai/.SRCINFO"
 
 ci_dependencies_file="$work/ci-dependencies"
 bash "$script_dir/ci-dependencies.sh" --names > "$ci_dependencies_file"

@@ -2,6 +2,7 @@
 set -euo pipefail
 
 root="${1:?usage: smoke.sh <package-root>}"
+script_dir="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 
 require_file() {
   local path="$root$1"
@@ -53,6 +54,10 @@ require_file /usr/share/ghost/chromium-extension/manifest.json
 require_file /usr/lib/systemd/user/ghostd.service
 require_file /usr/lib/systemd/user/ghost-shell.service
 require_file /usr/share/applications/ghost.desktop
+# Installed documentation links into docs/; those targets must ship with it.
+require_file /usr/share/doc/ghost/docs/keyring.md
+require_file /usr/share/doc/ghost/docs/hooks.md
+require_file /usr/share/doc/ghost/docs/claude-code-runtime.md
 require_executable /usr/bin/ghostd
 require_executable /usr/bin/ghost-desktop-helper
 require_executable /usr/bin/ghost-launch
@@ -84,6 +89,13 @@ for path in \
     exit 1
   fi
 done
+
+# Both recipes install the same checked-in launcher; a rewritten or generated
+# copy would silently change the daemon's startup contract.
+if ! cmp -s "$script_dir/ghostd" "$root/usr/bin/ghostd"; then
+  printf 'packaged /usr/bin/ghostd differs from packaging/arch/ghostd\n' >&2
+  exit 1
+fi
 
 if [[ "$(readlink "$root/etc/xdg/quickshell/ghost")" != "/usr/share/ghost/quickshell" ]]; then
   printf 'system Quickshell config link is missing or incorrect\n' >&2

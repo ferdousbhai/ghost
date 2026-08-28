@@ -13,6 +13,7 @@ depends=(
   'grim>=1.5'
   'hyprland>=0.56'
   'libnotify>=0.8'
+  'libsecret>=0.21'
   'python>=3.11'
   'python-dbus>=1.4'
   'python-gobject>=3.50'
@@ -32,6 +33,7 @@ checkdepends=(
 optdepends=(
   'chromium: dedicated Ghost browser and browser-relay smoke test'
   'claude-code: Claude Code plan runtime'
+  'gnome-keyring: Secret Service provider for provider and MCP credentials'
 )
 conflicts=('ghost-ai-git')
 options=('!debug' '!strip')

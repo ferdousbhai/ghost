@@ -13,6 +13,7 @@ depends=(
   'grim>=1.5'
   'hyprland>=0.56'
   'libnotify>=0.8'
+  'libsecret>=0.21'
   'python>=3.11'
   'python-dbus>=1.4'
   'python-gobject>=3.50'
@@ -37,6 +38,7 @@ checkdepends=(
 optdepends=(
   'chromium: dedicated Ghost browser and browser-relay smoke test'
   'claude-code: Claude Code plan runtime'
+  'gnome-keyring: Secret Service provider for provider and MCP credentials'
 )
 provides=('ghost-ai')
 conflicts=('ghost-ai')
@@ -196,9 +198,17 @@ package() {
   install -Dm644 packaging/arch/README.md "$pkgdir/usr/share/doc/ghost/ARCH.md"
   install -Dm644 README.md "$pkgdir/usr/share/doc/ghost/README.md"
   install -Dm644 CONTRACTS.md "$pkgdir/usr/share/doc/ghost/CONTRACTS.md"
+  # The installed README, CONTRACTS.md, and ARCH.md link into docs/. Ship those
+  # link targets so the relative references resolve inside the package.
+  for doc in claude-code-runtime.md hooks.md keyring.md; do
+    install -Dm644 "docs/$doc" "$pkgdir/usr/share/doc/ghost/docs/$doc"
+  done
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
   install -Dm644 THIRD_PARTY_NOTICES.md \
     "$pkgdir/usr/share/licenses/$pkgname/THIRD_PARTY_NOTICES.md"
+  # docs/claude-code-runtime.md links the notices next to the docs directory.
+  ln -s "/usr/share/licenses/$pkgname/THIRD_PARTY_NOTICES.md" \
+    "$pkgdir/usr/share/doc/ghost/THIRD_PARTY_NOTICES.md"
 
   # Package-manager stores and archive copies can retain a builder's numeric
   # owner. Normalize the complete payload under fakeroot and reject unsafe modes.
