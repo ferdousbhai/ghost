@@ -61,27 +61,31 @@ const REMOTE_PROBLEM = opt(
   process.env.GHOST_REMOTE_PROBLEM ?? process.env.REMOTE_PROBLEM ?? "",
 );
 
+// Each problem breaks the Tailscale capability ladder at one rung; the rungs
+// below it stay true.
+const REMOTE_LADDER = ["installed", "running", "loggedIn", "operator"];
 const REMOTE_PROBLEMS = {
   tailscale_missing: {
     message: "Tailscale is not installed.",
     action: "omarchy-install-service-tailscale",
+    breaks: "installed",
   },
   tailscale_stopped: {
     message: "Tailscale is installed but not running.",
+    breaks: "running",
   },
   not_logged_in: {
     message: "This machine is not logged in to Tailscale.",
     action: "tailscale up",
+    breaks: "loggedIn",
   },
   operator_required: {
     message: "Ghost needs permission to manage Tailscale Serve.",
     action: "sudo tailscale set --operator=$USER",
+    breaks: "operator",
   },
   serve_failed: {
     message: "tailscale serve failed: mock CLI error",
-  },
-  remote_unsupported: {
-    message: "This daemon does not support remote access",
   },
 };
 
@@ -93,19 +97,12 @@ if (REMOTE_PROBLEM !== "" && !Object.hasOwn(REMOTE_PROBLEMS, REMOTE_PROBLEM)) {
 let remoteEnabled = false;
 
 function remoteSnapshot() {
-  const missing = REMOTE_PROBLEM === "tailscale_missing";
-  const stopped = REMOTE_PROBLEM === "tailscale_stopped";
-  const loggedOut = REMOTE_PROBLEM === "not_logged_in";
-  const operatorRequired = REMOTE_PROBLEM === "operator_required";
-  const installed = !missing;
-  const running = installed && !stopped;
-  const loggedIn = running && !loggedOut;
-  const operator = loggedIn && !operatorRequired;
-  const certs = installed;
-  const problem = REMOTE_PROBLEM === "" ? null : {
-    code: REMOTE_PROBLEM,
-    ...REMOTE_PROBLEMS[REMOTE_PROBLEM],
-  };
+  const { breaks, ...problemFields } = REMOTE_PROBLEMS[REMOTE_PROBLEM] ?? {};
+  const cut = REMOTE_LADDER.indexOf(breaks ?? "");
+  const tailscale = Object.fromEntries(REMOTE_LADDER.map((rung, index) => [rung, cut < 0 || index < cut]));
+  tailscale.certs = tailscale.installed;
+  const { loggedIn } = tailscale;
+  const problem = REMOTE_PROBLEM === "" ? null : { code: REMOTE_PROBLEM, ...problemFields };
   const available = problem === null;
   return {
     enabled: remoteEnabled,
@@ -113,7 +110,7 @@ function remoteSnapshot() {
     scheme: loggedIn ? "https" : null,
     hostname: loggedIn ? REMOTE_HOSTNAME : null,
     url: available && remoteEnabled ? `https://${REMOTE_HOSTNAME}` : null,
-    tailscale: { installed, running, loggedIn, operator, certs },
+    tailscale,
     guests: "read-only",
     owner: loggedIn ? "owner@example.com" : null,
     problem,
@@ -2044,14 +2041,6 @@ const mockServer = createServer(async (req, res) => {
     if (req.method !== "POST") return json(res, 405, {
       error: { code: "method_not_allowed", message: `${req.method} is not allowed here.` },
     });
-    if (REMOTE_PROBLEM === "remote_unsupported") {
-      return json(res, 409, {
-        error: {
-          code: "not_supported",
-          message: REMOTE_PROBLEMS.remote_unsupported.message,
-        },
-      });
-    }
     const body = await readBody(req).catch(() => null);
     if (typeof body?.enabled !== "boolean") {
       return json(res, 400, {

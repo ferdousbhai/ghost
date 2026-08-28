@@ -151,8 +151,6 @@ FloatingWindow {
             Ghostd.fetchMcp(false);
         } else if (section === "connect") {
             Ghostd.fetchConnect(false);
-        } else if (section === "remote") {
-            Ghostd.refreshRemote();
         } else if (section === "docs") {
             Ghostd.fetchDocuments("", "", false, false);
         } else if (section === "memory") {

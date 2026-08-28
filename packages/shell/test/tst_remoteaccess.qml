@@ -154,8 +154,7 @@ TestCase {
                 "tailscale up"],
             ["operator_required", "Ghost needs permission to manage Tailscale Serve.",
                 "sudo tailscale set --operator=$USER"],
-            ["serve_failed", "tailscale serve failed: mock CLI error", ""],
-            ["remote_unsupported", "This daemon does not support remote access", ""]
+            ["serve_failed", "tailscale serve failed: mock CLI error", ""]
         ];
         const panel = createTemporaryObject(panelComponent, tc);
         verify(panel !== null);
@@ -178,20 +177,6 @@ TestCase {
             compare(actionBlock.visible, row[2] !== "", row[0]);
             compare(actionCommand.text, row[2], row[0]);
         }
-    }
-
-    function test_notSupportedPostBecomesProductStatus(): void {
-        const panel = createTemporaryObject(panelComponent, tc);
-        const remoteSwitch = findChild(panel, "remoteSwitch");
-        remoteSwitch.activate();
-        compare(requests.length, 2);
-        requests[1].complete(409, {
-            error: { code: "not_supported", message: "Old daemon" }
-        });
-        const statusText = findChild(panel, "remoteStatusText");
-        compare(statusText.text, "This daemon does not support remote access");
-        verify(!remoteSwitch.enabled);
-        compare(Ghostd.remoteError, "");
     }
 
     function test_navigationKeepsPhoneAccessBesideRemote(): void {
@@ -225,7 +210,7 @@ TestCase {
         compare(requests[1].body, '{"enabled":true}');
     }
 
-    function test_successfulPostAppliesThenRefreshes(): void {
+    function test_successfulPostAppliesItsStatus(): void {
         const panel = createTemporaryObject(panelComponent, tc);
         const remoteSwitch = findChild(panel, "remoteSwitch");
         remoteSwitch.activate();
@@ -235,11 +220,10 @@ TestCase {
             url: "https://omarchy-thinkpad.tail58bdd3.ts.net"
         }));
 
-        tryCompare(requests, "length", 4);
+        // The POST reply is the post-change status; only the QR code follows.
+        tryCompare(requests, "length", 3);
         compare(requests[2].method, "GET");
         verify(requests[2].url.endsWith("/api/remote/qr.svg"));
-        compare(requests[3].method, "GET");
-        verify(requests[3].url.endsWith("/api/remote"));
         verify(remoteSwitch.checked);
     }
 

@@ -12,15 +12,11 @@ Rectangle {
 
     readonly property var status: Ghostd.remoteStatus || ({})
     readonly property var problem: root.status.problem || null
-    readonly property bool remoteOn: root.status.enabled === true
-        && root.status.state === "on" && typeof root.status.url === "string"
-        && root.status.url !== ""
-    readonly property bool unsupported: root.problem !== null
-        && root.problem.code === "remote_unsupported"
+    readonly property bool remoteOn: Ghostd.remoteUrl !== ""
     readonly property string statusLine: root.problem !== null
         ? String(root.problem.message || "Remote access is unavailable")
         : (Ghostd.remoteError !== "" ? Ghostd.remoteError
-            : (root.remoteOn ? "On — " + root.status.url : "Off"))
+            : (root.remoteOn ? "On — " + Ghostd.remoteUrl : "Off"))
 
     signal closeRequested()
 
@@ -76,6 +72,55 @@ Rectangle {
                 root.copy(copyButton.value);
                 event.accepted = true;
             }
+        }
+    }
+
+    // A read-only value in a film box with a copy button at its right edge.
+    component CopyField: Rectangle {
+        id: copyField
+
+        required property string value
+        required property string label
+        property string textName: ""
+        property string copyName: ""
+
+        width: parent.width
+        height: Math.max(Theme.controlHeight, fieldText.implicitHeight + Theme.gap)
+        radius: Theme.radius
+        color: Theme.film(0.05)
+        border.width: 1
+        border.color: Theme.border
+
+        TextEdit {
+            id: fieldText
+            objectName: copyField.textName
+            anchors.left: parent.left
+            anchors.leftMargin: Theme.pad / 2
+            anchors.right: fieldCopy.left
+            anchors.rightMargin: Theme.gap / 2
+            anchors.verticalCenter: parent.verticalCenter
+            text: copyField.value
+            readOnly: true
+            selectByMouse: true
+            activeFocusOnTab: true
+            textFormat: TextEdit.PlainText
+            color: Theme.foregroundBright
+            selectionColor: Theme.selection
+            selectedTextColor: Theme.foregroundBright
+            font.family: Theme.fontFamilyMono
+            font.pixelSize: Theme.fontSizeSmall
+            wrapMode: TextEdit.WrapAnywhere
+            Accessible.name: copyField.label
+            Accessible.description: "Select or copy this"
+        }
+
+        ClipboardButton {
+            id: fieldCopy
+            objectName: copyField.copyName
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            value: copyField.value
+            accessibleName: "Copy " + copyField.label.toLowerCase()
         }
     }
 
@@ -190,7 +235,7 @@ Rectangle {
                                 text: root.statusLine
                                 textFormat: Text.PlainText
                                 color: root.problem !== null || Ghostd.remoteError !== ""
-                                    ? (root.unsupported ? Theme.foregroundDim : Theme.warn)
+                                    ? Theme.warn
                                     : (root.remoteOn ? Theme.ok : Theme.foregroundDim)
                                 font.family: Theme.fontFamily
                                 font.pixelSize: Theme.fontSizeSmall
@@ -219,7 +264,7 @@ Rectangle {
                             border.color: remoteSwitch.checked
                                 ? Theme.ghostAmberBright : Theme.borderStrong
                             activeFocusOnTab: true
-                            enabled: !Ghostd.remoteMutating && !root.unsupported
+                            enabled: !Ghostd.remoteMutating
                             opacity: enabled ? 1 : 0.55
 
                             Accessible.role: Accessible.CheckBox
@@ -292,47 +337,11 @@ Rectangle {
                             wrapMode: Text.WordWrap
                         }
 
-                        Rectangle {
-                            width: parent.width
-                            height: Math.max(Theme.controlHeight,
-                                remoteActionCommand.implicitHeight + Theme.gap)
-                            radius: Theme.radius
-                            color: Theme.film(0.05)
-                            border.width: 1
-                            border.color: Theme.border
-
-                            TextEdit {
-                                id: remoteActionCommand
-                                objectName: "remoteActionCommand"
-                                anchors.left: parent.left
-                                anchors.leftMargin: Theme.pad / 2
-                                anchors.right: actionCopy.left
-                                anchors.rightMargin: Theme.gap / 2
-                                anchors.verticalCenter: parent.verticalCenter
-                                text: root.problem && root.problem.action
-                                    ? String(root.problem.action) : ""
-                                readOnly: true
-                                selectByMouse: true
-                                activeFocusOnTab: true
-                                textFormat: TextEdit.PlainText
-                                color: Theme.foregroundBright
-                                selectionColor: Theme.selection
-                                selectedTextColor: Theme.foregroundBright
-                                font.family: Theme.fontFamilyMono
-                                font.pixelSize: Theme.fontSizeSmall
-                                wrapMode: TextEdit.WrapAnywhere
-                                Accessible.name: "Terminal command"
-                                Accessible.description: "Select or copy this command"
-                            }
-
-                            ClipboardButton {
-                                id: actionCopy
-                                objectName: "remoteActionCopy"
-                                anchors.right: parent.right
-                                anchors.verticalCenter: parent.verticalCenter
-                                value: remoteActionCommand.text
-                                accessibleName: "Copy terminal command"
-                            }
+                        CopyField {
+                            label: "Terminal command"
+                            value: root.problem && root.problem.action ? String(root.problem.action) : ""
+                            textName: "remoteActionCommand"
+                            copyName: "remoteActionCopy"
                         }
                     }
                 }
@@ -365,46 +374,11 @@ Rectangle {
                         font.weight: Font.DemiBold
                     }
 
-                    Rectangle {
-                        width: parent.width
-                        height: Math.max(Theme.controlHeight,
-                            remoteUrlText.implicitHeight + Theme.gap)
-                        radius: Theme.radius
-                        color: Theme.film(0.05)
-                        border.width: 1
-                        border.color: Theme.border
-
-                        TextEdit {
-                            id: remoteUrlText
-                            objectName: "remoteUrlText"
-                            anchors.left: parent.left
-                            anchors.leftMargin: Theme.pad / 2
-                            anchors.right: urlCopy.left
-                            anchors.rightMargin: Theme.gap / 2
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: root.remoteOn ? String(root.status.url) : ""
-                            readOnly: true
-                            selectByMouse: true
-                            activeFocusOnTab: true
-                            textFormat: TextEdit.PlainText
-                            color: Theme.foregroundBright
-                            selectionColor: Theme.selection
-                            selectedTextColor: Theme.foregroundBright
-                            font.family: Theme.fontFamilyMono
-                            font.pixelSize: Theme.fontSizeSmall
-                            wrapMode: TextEdit.WrapAnywhere
-                            Accessible.name: "Remote access URL"
-                            Accessible.description: "Select or copy this URL"
-                        }
-
-                        ClipboardButton {
-                            id: urlCopy
-                            objectName: "remoteUrlCopy"
-                            anchors.right: parent.right
-                            anchors.verticalCenter: parent.verticalCenter
-                            value: remoteUrlText.text
-                            accessibleName: "Copy remote access URL"
-                        }
+                    CopyField {
+                        label: "Remote access URL"
+                        value: Ghostd.remoteUrl
+                        textName: "remoteUrlText"
+                        copyName: "remoteUrlCopy"
                     }
 
                     Item {
@@ -417,7 +391,6 @@ Rectangle {
                             anchors.centerIn: parent
                             width: 220
                             height: 220
-                            visible: root.remoteOn
                             source: Ghostd.remoteQrSource
                             sourceSize.width: 220
                             sourceSize.height: 220
@@ -425,13 +398,12 @@ Rectangle {
                             asynchronous: true
                             cache: false
                             Accessible.role: Accessible.Graphic
-                            Accessible.name: "QR code for " + remoteUrlText.text
+                            Accessible.name: "QR code for " + Ghostd.remoteUrl
                         }
 
                         Text {
                             anchors.centerIn: parent
-                            visible: Ghostd.remoteQrLoading
-                                || (!Ghostd.remoteQrLoading && Ghostd.remoteQrSource === "")
+                            visible: Ghostd.remoteQrLoading || Ghostd.remoteQrSource === ""
                             text: Ghostd.remoteQrLoading ? "Loading QR code…" : "QR code unavailable"
                             textFormat: Text.PlainText
                             color: Theme.foregroundFaint
