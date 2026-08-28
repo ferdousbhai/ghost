@@ -24,6 +24,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "build:binary": "bash scripts/build-binary.sh",
     "typecheck": "tsc -p tsconfig.json",
     "test": "bun --bun ./node_modules/vitest/vitest.mjs run",
     "dev": "bun src/main.ts"

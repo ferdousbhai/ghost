@@ -8,8 +8,13 @@ in [`docs/claude-code-runtime.md`](../../docs/claude-code-runtime.md).
 
 ## Run it
 
-Ghost runs on Bun 1.3.14 or newer (`bun --bun`); a `bun build --compile`
-single-binary `ghostd` is a planned follow-up.
+Ghost runs on Bun 1.3.14 or newer (`bun --bun`). `pnpm --filter @ghost/daemon
+build:binary` compiles `ghostd` into one self-contained executable
+(`packages/daemon/dist/ghostd`, Bun runtime included, version embedded); it
+needs no `node_modules` at runtime. Playwright's optional BiDi/Electron
+modules and macOS `fsevents` are left external because Ghost drives Chromium
+over CDP and never loads them. Packaging still installs the source tree; the
+binary becomes the package artifact in a follow-up (issue #17).
 
 ```bash
 pnpm --filter @ghost/extensions build

@@ -276,6 +276,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
 }
 
 async function readVersion(): Promise<string> {
+  // A compiled binary carries its version; a source checkout reads package.json.
+  if (process.env.GHOSTD_VERSION) return process.env.GHOSTD_VERSION;
   const { readFile } = await import("node:fs/promises");
   const { fileURLToPath } = await import("node:url");
   const { dirname, join } = await import("node:path");
