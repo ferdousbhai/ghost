@@ -1,6 +1,6 @@
 /**
  * The one long-lived link to `ghost-desktop-helper`, the Python computer-use
- * sidecar (docs/DESKTOP_HELPER.md).
+ * sidecar (docs/desktop-helper.md).
  *
  * Both desktop tools — `ghost_desktop` (hyprland.ts) and `ghost_screen`
  * (screen.ts) — steer the same desktop, which is a single machine resource, so

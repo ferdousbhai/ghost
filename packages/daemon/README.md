@@ -203,7 +203,9 @@ Credentials are never inherited from the daemon environment: `env-scrub.ts`
 removes provider keys and routing variables before a session is created.
 Provider login writes Ghost's Linux Secret Service schema at machine scope.
 Portable config contains only service/account references; see
-[`docs/keyring.md`](../../docs/keyring.md). Legacy plaintext `.pi/auth.json`
+[`docs/keyring.md`](../../docs/keyring.md). Fetched page and on-screen
+text is fenced and screened; see
+[`docs/injection-defense.md`](../../docs/injection-defense.md). Legacy plaintext `.pi/auth.json`
 (and an older home's `agent.db` credential rows) are verified into Secret
 Service and then scrubbed.
 

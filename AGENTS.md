@@ -42,7 +42,7 @@ The common defect here is a change that works on the path you tested and is miss
 - **Surfaces.** Daemon API, HUD (QML), relay extension, desktop helper. A behavior reachable from one is usually reachable from another.
 - **Contracts.** Anything crossing a package boundary or the wire is in `CONTRACTS.md`. Change it first; the consumers follow in the same commit.
 - **Reverse states.** If you added a way in, add the way out and the way to see it. Pin needs unpin. A one-way door is a bug.
-- **Docs.** Protocol changes land in `docs/hooks.md`, `docs/claude-code-runtime.md`, or `docs/DESKTOP_HELPER.md`.
+- **Docs.** Protocol changes land in `docs/hooks.md`, `docs/claude-code-runtime.md`, or `docs/desktop-helper.md`.
 
 ## Code index
 
@@ -54,7 +54,7 @@ The common defect here is a change that works on the path you tested and is miss
 - `packages/shell/qml/` — Quickshell HUD and desktop UI
 - `packages/chromium-extension/extension/` — opt-in browser relay
 - `packages/desktop-helper/src/ghost_desktop_helper/` — Python computer-use sidecar
-- `docs/hooks.md`, `docs/claude-code-runtime.md`, and `docs/DESKTOP_HELPER.md` — runtime protocols
+- `docs/hooks.md`, `docs/claude-code-runtime.md`, and `docs/desktop-helper.md` — runtime protocols
 
 Comments describe how a thing is used and move with the code; they are for functions, not for every line of behavior.
 

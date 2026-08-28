@@ -293,3 +293,10 @@ daemon, pi, or a model — not a stand-in for something that does not exist. The
 client assumes the daemon owns conversation history, keyed by
 `options.sessionId`; set `GHOST_HUD_REPLAY=1` if a build turns out to be
 stateless per request.
+
+## If something is wrong
+
+The daemon logs to the journal (`journalctl --user -u ghostd -f`). For the shell,
+run it from a terminal and watch stderr; QML type errors and failed bindings
+print there. Reproduce against the mock with `dev/preview.sh` rather than
+debugging on the live desktop.
