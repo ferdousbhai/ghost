@@ -76,6 +76,7 @@ import {
   type GhostRegistry,
 } from "./ghosts.js";
 import { silentLogger, type Logger } from "./log.js";
+import { loadOptionalMachineSkills } from "./optional-skills.js";
 import {
   maintenanceStatePath,
   type ConversationMaintenance,
@@ -156,7 +157,6 @@ import {
   type PlanState,
   type TodoPhase,
 } from "./plan-mode.js";
-import { createWebSearchTool } from "./web-search.js";
 import { GhostMcpManager } from "./mcp-manager.js";
 import { validateServerName, type MCPServerConfig } from "./mcp-config.js";
 import { resolveChatModel } from "./model-routing.js";
@@ -2565,8 +2565,9 @@ export class SessionHost {
     mkdirSync(paths.sessionDir, { recursive: true });
 
     const settings = loadGhostSettings(paths.home);
-    const [sessionCharacter, ghostSnapshot] = await Promise.all([
+    const [sessionCharacter, optionalSkills, ghostSnapshot] = await Promise.all([
       openGhostHome(paths.home).readCharacter(),
+      loadOptionalMachineSkills(this.ownerHome),
       loadProjectDeclarativeSnapshot(paths.home, { level: "user" }),
     ]);
     const projectSnapshot = project.root && projectIdentity
@@ -2579,6 +2580,7 @@ export class SessionHost {
         })
       : null;
     const rootSnapshots = [
+      ...(optionalSkills ? [optionalSkills] : []),
       ghostSnapshot,
       ...(projectSnapshot ? [projectSnapshot] : []),
     ];
@@ -2756,7 +2758,6 @@ export class SessionHost {
         askTool as ToolDefinition,
         createBashTool({ cwd: runtimeCwd, manager: jobs, autoBackgroundMs: this.autoBackgroundMs }) as ToolDefinition,
         createJobsTool(jobs) as ToolDefinition,
-        createWebSearchTool({ settings, secrets: modelRuntime.secretResolver }) as ToolDefinition,
         createTodoTool(plan) as ToolDefinition,
         createProposePlanTool({
           book: plan,

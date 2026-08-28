@@ -142,8 +142,8 @@ export function renderPiDeclarativePrompt(
   if (skills.length > 0) {
     sections.push([
       "## Skills",
-      "When a skill matches, read `skill://<name>` before acting.",
-      ...skills.map((skill) => `- ${skill.name}: ${skill.description}`),
+      "When a skill matches, read its listed `SKILL.md` before acting.",
+      ...skills.map((skill) => `- ${skill.name}: ${skill.description} (${skill.filePath})`),
     ].join("\n"));
   }
 

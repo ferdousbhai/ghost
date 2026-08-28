@@ -1600,6 +1600,8 @@ describe("SessionHost.open", () => {
       "write",
     ]);
     expect(names).toEqual(expect.arrayContaining([...PI_NATIVE_TOOL_NAMES, "ask"]));
+    expect(names).not.toContain("web_search");
+    expect(names).not.toContain("web_fetch");
     expect(names).not.toContain("task");
     expect(handle.session.getToolDefinition("task")).toBeUndefined();
     for (const name of ["ghost_memory_write", "ghost_browser", "ghost_desktop"]) {
@@ -1941,6 +1943,39 @@ lines.on("line", (line) => {
     // An unbound owner-home cwd is operational only. It does not admit
     // ambient owner skills into this explicitly ghost-scoped snapshot.
     expect(handle.skills.map((skill) => skill.name)).toEqual(["inking"]);
+  });
+
+  it("admits only recommended optional machine skills", async () => {
+    await setup([{ kind: "text", text: "hello" }]);
+    const skills = join(temp!.ownerHome, ".agents", "skills");
+    mkdirSync(join(skills, "firecrawl"), { recursive: true });
+    mkdirSync(join(skills, "hey"), { recursive: true });
+    mkdirSync(join(skills, "ambient"), { recursive: true });
+    writeFileSync(
+      join(skills, "firecrawl", "SKILL.md"),
+      "---\nname: firecrawl\ndescription: Official Firecrawl CLI skill.\n---\n\nUse firecrawl.\n",
+      "utf8",
+    );
+    writeFileSync(
+      join(skills, "hey", "SKILL.md"),
+      "---\nname: hey\ndescription: Official HEY CLI skill.\n---\n\nUse hey.\n",
+      "utf8",
+    );
+    writeFileSync(
+      join(skills, "ambient", "SKILL.md"),
+      "---\nname: ambient\ndescription: Must stay invisible.\n---\n\nIgnore me.\n",
+      "utf8",
+    );
+
+    const handle = await host!.open("casper", "conv-firecrawl-skill");
+
+    expect(handle.skills.map((skill) => skill.name)).toEqual(["firecrawl", "hey"]);
+    expect(handle.session.systemPrompt).toContain("firecrawl: Official Firecrawl CLI skill.");
+    expect(handle.session.systemPrompt).toContain("hey: Official HEY CLI skill.");
+    expect(handle.session.systemPrompt).toContain(
+      join(skills, "firecrawl", "SKILL.md"),
+    );
+    expect(handle.session.systemPrompt).not.toContain("Must stay invisible");
   });
 
   it("keeps owner-home coding-agent instructions out of an unbound prompt", async () => {

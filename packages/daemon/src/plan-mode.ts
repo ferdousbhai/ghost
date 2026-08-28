@@ -322,7 +322,7 @@ export function isReadOnlyCommand(command: string): boolean {
   });
 }
 
-const ALWAYS_ALLOWED = new Set(["read", "grep", "find", "ls", "todo", "propose_plan", "jobs", "web_search", "inspect_image", ASK_TOOL_NAME, GHOST_SCREEN, GHOST_CHARACTER]);
+const ALWAYS_ALLOWED = new Set(["read", "grep", "find", "ls", "todo", "propose_plan", "jobs", "inspect_image", ASK_TOOL_NAME, GHOST_SCREEN, GHOST_CHARACTER]);
 
 /** Why a tool call is refused while planning, or null when it may run. */
 export function planModeRefusal(state: PlanState, plansDir: string, toolName: string, input: Record<string, unknown>): string | null {

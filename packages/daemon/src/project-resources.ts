@@ -100,8 +100,13 @@ const PROJECT_MCP_FILES = [
   { kind: "legacy", relativePath: ".omp/.mcp.json" },
 ] as const;
 
-function sourceFor(path: string, level: "user" | "project"): SourceMeta {
-  return { provider: "ghost-pinned", providerName: "Ghost", path, level };
+function sourceFor(path: string, level: "user" | "project" | "native"): SourceMeta {
+  return {
+    provider: level === "native" ? "ghost-recommended" : "ghost-pinned",
+    providerName: level === "native" ? "Ghost recommended" : "Ghost",
+    path,
+    level,
+  };
 }
 
 function checkBudget(budget: ScanBudget): boolean {
@@ -452,9 +457,11 @@ async function countDirectoryEntries(root: FileHandle, relativeDir: string, budg
 export async function loadProjectDeclarativeSnapshot(
   rootPath: string,
   options: {
-    level: "user" | "project";
+    level: "user" | "project" | "native";
     expectedIdentity?: ProjectFilesystemIdentity;
     includeContents?: boolean;
+    /** Read only these exact skill files and admit no other resource category. */
+    skillFiles?: readonly { name: string; relativePath: string }[];
     traceOpen?: (path: string) => void;
     /** Deterministic cooperative-clock seam used by boundary tests. */
     now?: () => number;
@@ -474,19 +481,20 @@ export async function loadProjectDeclarativeSnapshot(
   const root = await openPinnedRoot(rootPath, options.expectedIdentity, options.traceOpen);
   try {
     const projectLevel = options.level === "project";
-    const instructionFiles = projectLevel ? PROJECT_INSTRUCTION_FILES : GHOST_INSTRUCTION_FILES;
+    const skillsOnly = options.skillFiles !== undefined;
+    const instructionFiles = skillsOnly ? [] : projectLevel ? PROJECT_INSTRUCTION_FILES : GHOST_INSTRUCTION_FILES;
     const skillDirectories = projectLevel ? PROJECT_SKILL_DIRS : ["skills"];
-    const ruleDirectories = projectLevel ? PROJECT_RULE_DIRS : ["rules"];
-    const promptDirectories = projectLevel ? PROJECT_PROMPT_DIRS : ["prompts"];
-    const commandDirectories = projectLevel ? PROJECT_COMMAND_DIRS : ["commands"];
-    const agentDirectories = projectLevel ? PROJECT_AGENT_DIRS : ["agents"];
-    const executableDirectories = projectLevel ? PROJECT_EXECUTABLE_DIRS : [];
+    const ruleDirectories = skillsOnly ? [] : projectLevel ? PROJECT_RULE_DIRS : ["rules"];
+    const promptDirectories = skillsOnly ? [] : projectLevel ? PROJECT_PROMPT_DIRS : ["prompts"];
+    const commandDirectories = skillsOnly ? [] : projectLevel ? PROJECT_COMMAND_DIRS : ["commands"];
+    const agentDirectories = skillsOnly ? [] : projectLevel ? PROJECT_AGENT_DIRS : ["agents"];
+    const executableDirectories = skillsOnly ? [] : projectLevel ? PROJECT_EXECUTABLE_DIRS : [];
     // Fixed MCP files are the only bounded resources that can change runtime
     // connectivity. Admit or explicitly reject them before broad directory
     // walks can consume the shared entry, byte, or cooperative-time budget.
     const mcpInputs: EffectiveProjectMcpInput[] = [];
     const mcpWarningStart = budget.warnings.length;
-    if (projectLevel) {
+    if (projectLevel && !skillsOnly) {
       for (const descriptor of PROJECT_MCP_FILES) {
         const source: ProjectMcpConfigSource = {
           kind: descriptor.kind,
@@ -538,8 +546,22 @@ export async function loadProjectDeclarativeSnapshot(
       }
       return files;
     };
-    const skillFiles = (await scanDirectories(skillDirectories))
-      .filter((file) => basename(file.relativePath).toLowerCase() === "skill.md");
+    const skillFiles: MarkdownFile[] = [];
+    const expectedSkillNames = new Map<string, string>();
+    if (options.skillFiles) {
+      for (const expected of options.skillFiles) {
+        const file = await readRelativeFile(root, rootPath, expected.relativePath, budget);
+        if (file) {
+          skillFiles.push(file);
+          expectedSkillNames.set(file.absolutePath, expected.name);
+        }
+      }
+    } else {
+      skillFiles.push(
+        ...(await scanDirectories(skillDirectories))
+          .filter((file) => basename(file.relativePath).toLowerCase() === "skill.md"),
+      );
+    }
     const ruleFiles = await scanDirectories(ruleDirectories);
     const promptFiles = await scanDirectories(promptDirectories);
     const commandFiles = await scanDirectories(commandDirectories);
@@ -566,13 +588,18 @@ export async function loadProjectDeclarativeSnapshot(
         budget.warnings.push(`${file.relativePath} was ignored because its skill name or description is missing.`);
         continue;
       }
+      const expectedName = expectedSkillNames.get(file.absolutePath);
+      if (expectedName && name !== expectedName) {
+        budget.warnings.push(`${file.relativePath} was ignored because its skill name is not ${expectedName}.`);
+        continue;
+      }
       skillEntries.set(name, {
         name,
         description: detail,
         filePath: file.absolutePath,
         baseDir: join(file.absolutePath, ".."),
         containRoot: join(file.absolutePath, ".."),
-        source: `ghost-pinned:${options.level}`,
+        source: options.level === "native" ? "ghost-recommended:native" : `ghost-pinned:${options.level}`,
         snapshotContent: file.content,
         hide: frontmatter.hide === true || frontmatter.disableModelInvocation === true,
         _source: sourceFor(file.absolutePath, options.level),

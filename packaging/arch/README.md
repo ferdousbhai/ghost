@@ -16,6 +16,68 @@ makepkg -si
 systemctl --user enable --now ghostd.service ghost-shell.service
 ```
 
+## Optional CLI integrations
+
+Ghost packages none of these CLIs or skills. Install only the integrations you
+want as the desktop user; the upstream installer then owns its files and
+updates. The package's optional dependencies expose the system prerequisites.
+Install the shared npm prerequisite once if you did not select it with Ghost:
+
+```sh
+omarchy pkg add npm
+```
+
+[Firecrawl](https://github.com/firecrawl/cli) provides keyless web search and
+scraping plus its official skills:
+
+```sh
+npx -y firecrawl-cli@latest init --all --skip-auth
+```
+
+Replace `--skip-auth` with `--browser` to sign in during setup.
+
+[HEY](https://github.com/basecamp/hey-cli) is installed by current Omarchy
+through its mise wrapper. If `hey` is missing, run `omarchy update` to receive
+that migration. [Basecamp](https://github.com/basecamp/basecamp-cli) is in
+Omarchy's package repository. Both CLIs embed their own skills:
+
+```sh
+hey skill install
+hey auth login
+
+omarchy pkg add basecamp-cli
+basecamp skill install
+basecamp auth login
+```
+
+Obsidian 1.12.7 or newer includes its CLI. Enable **Settings → General →
+Command line interface** in Obsidian, then install the Obsidian CEO's
+[skill pack](https://github.com/kepano/obsidian-skills):
+
+```sh
+omarchy pkg add obsidian
+npx -y skills@latest add https://github.com/kepano/obsidian-skills \
+  --global --yes \
+  --skill json-canvas obsidian-bases obsidian-cli obsidian-markdown
+```
+
+Google publishes both the
+[Google Workspace CLI](https://github.com/googleworkspace/cli) and its skills:
+
+```sh
+npm install -g @googleworkspace/cli
+npx -y skills@latest add https://github.com/googleworkspace/cli \
+  --global --yes \
+  --skill gws-calendar gws-chat gws-docs gws-drive gws-forms gws-gmail \
+    gws-keep gws-meet gws-people gws-shared gws-sheets gws-slides gws-tasks \
+    gws-workflow
+gws auth setup
+```
+
+Open a new pi session after installing skills. Ghost admits only the exact
+recommended `~/.agents/skills/<name>/SKILL.md` entrypoints listed in
+`CONTRACTS.md`; it does not scan nested or other ambient skills.
+
 Before opening a session, install `libsecret` (for `secret-tool`) and run a
 user-session Secret Service provider such as `gnome-keyring`; its default
 collection must be available to `ghostd`. See
