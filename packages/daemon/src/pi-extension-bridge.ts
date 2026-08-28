@@ -33,7 +33,10 @@ export async function renderPersonaPrompt(
   return sections;
 }
 
-export function piExtensionFromGhost(extension: CollectedGhostExtension): ExtensionFactory {
+export function piExtensionFromGhost(
+  extension: CollectedGhostExtension,
+  options: { dynamicSections?: () => string[] } = {},
+): ExtensionFactory {
   return (pi: ExtensionAPI) => {
     for (const tool of extension.tools.values()) {
       pi.registerTool({
@@ -45,14 +48,14 @@ export function piExtensionFromGhost(extension: CollectedGhostExtension): Extens
           tool.execute(toolCallId, params as never, signal, onUpdate, ghostToolContextFromPi(ctx)),
       });
     }
-    if (extension.beforeAgentStart.length === 0) return;
+    if (extension.beforeAgentStart.length === 0 && !options.dynamicSections) return;
+    // Sections that change between turns (plan mode, the todo list) follow
+    // the persona's re-render, so one hook owns the whole prompt.
     pi.on("before_agent_start", async (event, ctx) => ({
-      systemPrompt: (await renderPersonaPrompt(
-        extension,
-        ghostToolContextFromPi(ctx),
-        event.prompt,
-        [event.systemPrompt],
-      )).join("\n\n"),
+      systemPrompt: [
+        ...(await renderPersonaPrompt(extension, ghostToolContextFromPi(ctx), event.prompt, [event.systemPrompt])),
+        ...(options.dynamicSections?.() ?? []),
+      ].join("\n\n"),
     }));
   };
 }

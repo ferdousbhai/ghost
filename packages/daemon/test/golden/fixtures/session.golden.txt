@@ -127,7 +127,7 @@ inspect_image       registry=yes  wire=yes  invokable=yes
 ls                  registry=yes  wire=yes  invokable=yes
 read                registry=yes  wire=yes  invokable=yes
 task                registry=no   wire=no   invokable=no
-todo                registry=no   wire=no   invokable=no
+todo                registry=yes  wire=yes  invokable=yes
 write               registry=yes  wire=yes  invokable=yes
 (tools outside this universe are not compared)
 

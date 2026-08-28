@@ -147,6 +147,15 @@ import {
 } from "./jobs.js";
 import { piExtensionFromGhost, renderPersonaPrompt } from "./pi-extension-bridge.js";
 import { createInspectImageTool } from "./inspect-image.js";
+import {
+  createPlanModeGuard,
+  createProposePlanTool,
+  createTodoTool,
+  PlanBook,
+  planSections,
+  type PlanState,
+  type TodoPhase,
+} from "./plan-mode.js";
 import { createWebSearchTool } from "./web-search.js";
 import { GhostMcpManager } from "./mcp-manager.js";
 import { validateServerName, type MCPServerConfig } from "./mcp-config.js";
@@ -681,6 +690,21 @@ export interface GhostSessionHandle {
   commands: readonly GhostFileCommand[];
 }
 
+export interface PlanStateView {
+  planning: boolean;
+  plan: (PlanState["plan"] & { content: string | null }) | null;
+  todo: TodoPhase[];
+}
+
+function planStateView(book: PlanBook): PlanStateView {
+  const state = book.getState();
+  return {
+    planning: state.planning,
+    plan: state.plan ? { ...state.plan, content: book.planContent() } : null,
+    todo: book.getTodo(),
+  };
+}
+
 export interface QueuedMessages {
   streaming: boolean;
   count: number;
@@ -741,6 +765,7 @@ interface HostedSession extends GhostSessionHandle {
   liveVoiceStart?: Promise<LiveVoiceStatus>;
   ask: AskBroker;
   jobs: GhostJobManager;
+  plan: PlanBook;
   /** Jobs that settled while an owner held the session without streaming. */
   pendingJobResults: GhostJob[];
   /**
@@ -1943,6 +1968,70 @@ export class SessionHost {
     }
   }
 
+  /** Plan mode, the approved plan (with its text), and the todo list of one conversation. */
+  async planState(
+    ghostName: string,
+    sessionId?: string | null,
+    runtime: ConversationRuntime = "pi",
+  ): Promise<PlanStateView> {
+    assertPiConversation(runtime, "Plan mode");
+    const book = await this.planBook(ghostName, sessionId, false);
+    return book ? planStateView(book) : { planning: false, plan: null, todo: [] };
+  }
+
+  /** `start` enters plan mode, `stop` leaves it (keeping an approved plan), `clear` also drops the plan. */
+  async setPlanMode(
+    ghostName: string,
+    sessionId: string | null | undefined,
+    action: "start" | "stop" | "clear",
+    runtime: ConversationRuntime = "pi",
+  ): Promise<PlanStateView> {
+    assertPiConversation(runtime, "Plan mode");
+    const book = (await this.planBook(ghostName, sessionId, true)) as PlanBook;
+    const current = book.getState();
+    book.setState({
+      planning: action === "start",
+      ...(action !== "clear" && current.plan ? { plan: current.plan } : {}),
+    });
+    await this.announceConversationUpdated(ghostName, "pi", requireRawConversationId(sessionId ?? DEFAULT_SESSION_KEY));
+    return planStateView(book);
+  }
+
+  /**
+   * The conversation's plan book: the open session's own, or one over the
+   * transcript file when the conversation is not open. Nothing opens a full
+   * session for it. Writing needs the session idle so the entry lands in
+   * order; a conversation without a transcript is created for a write and
+   * reported empty for a read.
+   */
+  private async planBook(ghostName: string, sessionId: string | null | undefined, write: boolean): Promise<PlanBook | null> {
+    const ghost = this.registry.get(ghostName);
+    const conversationId = requireRawConversationId(sessionId ?? DEFAULT_SESSION_KEY);
+    const key = this.keyOf(ghostName, conversationId);
+    const opening = this.opening.get(key);
+    if (opening) await opening.catch(() => {});
+    const hosted = this.sessions.get(key);
+    if (hosted) {
+      if (write && this.sessionOwned(hosted)) {
+        throw new GhostError("session_busy", "Wait for this conversation's turn to finish before changing plan mode.", 409);
+      }
+      return hosted.plan;
+    }
+    const paths = ghostPaths(ghost.dir);
+    const sessionFile = join(paths.sessionDir, sessionFileNameFor(conversationId));
+    if (!existsSync(sessionFile)) {
+      if (!write) return null;
+      mkdirSync(paths.sessionDir, { recursive: true });
+      writeFileSync(sessionFile, "", { flag: "wx", mode: 0o600 });
+    } else {
+      await requireSessionFileConversationId(sessionFile, conversationId);
+    }
+    const project = await this.projectState(ghostName, "pi", conversationId);
+    const manager = SessionManager.open(sessionFile, paths.sessionDir, project.cwd);
+    if (!existsSync(sessionFile) || manager.getEntries().length <= 1) bindConversationId(manager, conversationId);
+    return new PlanBook(manager);
+  }
+
   private assertPiRuntime(ghostName: string, feature: string): Ghost {
     const ghost = this.registry.get(ghostName);
     try {
@@ -2526,9 +2615,10 @@ export class SessionHost {
     const ghostExtension = await collectGhostExtension(extensions.ghost);
     const personaSections = await renderPersonaPrompt(ghostExtension, { cwd: runtimeCwd });
     const extensionFactories: ExtensionFactory[] = [
-      piExtensionFromGhost(ghostExtension),
+      piExtensionFromGhost(ghostExtension, { dynamicSections: () => planSections(planBookRef.book) }),
       ghostCompactionExtension,
     ];
+    const planBookRef: { book: PlanBook } = { book: undefined as unknown as PlanBook };
 
     const modelRuntime = await createGhostPiRuntime({
       authPath: ghostAuthPath(paths.agentDir),
@@ -2604,6 +2694,10 @@ export class SessionHost {
     }
     const liveMcp = mcp;
     extensionFactories.push(mcpToolsExtension(liveMcp));
+    const plansDir = join(paths.home, "plans", sessionFileNameFor(sessionKey).replace(/\.jsonl$/, ""));
+    const plan = new PlanBook(sessionManager);
+    planBookRef.book = plan;
+    extensionFactories.push(createPlanModeGuard(plan, plansDir));
     const chatRef = resolveChatModelRef(readGhostModels(paths.home));
     const chatModel = resolveChatModel(chatRef, modelRuntime.getAvailableSnapshot());
     if (chatRef && (chatModel?.provider !== chatRef.provider || chatModel.id !== chatRef.modelId)) {
@@ -2663,6 +2757,13 @@ export class SessionHost {
         createBashTool({ cwd: runtimeCwd, manager: jobs, autoBackgroundMs: this.autoBackgroundMs }) as ToolDefinition,
         createJobsTool(jobs) as ToolDefinition,
         createWebSearchTool({ settings, secrets: modelRuntime.secretResolver }) as ToolDefinition,
+        createTodoTool(plan) as ToolDefinition,
+        createProposePlanTool({
+          book: plan,
+          broker: ask,
+          plansDir,
+          timeoutMs: () => this.askTimeoutSeconds * 1000,
+        }) as ToolDefinition,
         createInspectImageTool({
           runtime: modelRuntime,
           cwd: runtimeCwd,
@@ -2714,6 +2815,7 @@ export class SessionHost {
       nextOwnerTurnId: persistedPiOwnerTurnCount(sessionManager.getBranch()),
       ask,
       jobs,
+      plan,
       pendingJobResults: [],
       settings,
       skills: effectiveDeclarative.skills,
@@ -4174,6 +4276,7 @@ export class SessionHost {
       const output = await executeGhostBuiltin(dispatch, {
         session: hosted.session,
         jobs: hosted.jobs,
+        plan: hosted.plan,
         cwd: hosted.session.sessionManager.getCwd(),
         projectRoot: hosted.project.root,
         ghostHome: hosted.ghost.dir,
@@ -6245,6 +6348,7 @@ export class SessionHost {
       // assistant call, then rebuild the model's context on that branch.
       const manager = hosted.session.sessionManager;
       manager.branch(reopen.assistantEntryId);
+      hosted.plan.reload();
       const previous = reopen.resultMessage;
       manager.appendMessage({
         ...previous,

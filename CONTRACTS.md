@@ -354,9 +354,9 @@ pi's native tools in a Ghost session are `bash`, `edit`, `find`, `grep`, `ls`,
 tools named `mcp__<server>_<tool>` — are registered directly as pi custom
 tools and appear in `getActiveToolNames()`; there is no separate mount. There
 is no `task` tool; no bundled, custom, or ambient subagent can be spawned.
-Claude Code retains its own native subagent behavior. Live voice, the
-encrypted collaboration relay, and a Ghost-owned plan/goal/todo surface are
-planned Ghost ports (issue #3), not present in a pi session today. Ghost's `settings.yml`,
+Claude Code retains its own native subagent behavior. Live voice (issue #44)
+and the encrypted collaboration relay (issue #45) are deferred; goals with
+budgets belong with always-on check-ins (issue #18). Ghost's `settings.yml`,
 `models.json`, and `mcp.json` are read from the ghost home, never the live cwd.
 pi's `DefaultResourceLoader` runs with `noExtensions`, `noSkills`,
 `noPromptTemplates`, `noThemes`, and `noContextFiles`; Ghost supplies every
@@ -433,6 +433,31 @@ canonicalizes staged legacy `notes/`/`docs/` Markdown. It exposes no live
 legacy document list, read, find, write, or search API; live Documents are
 exclusively the machine-wide `MachineDocuments` boundary and daemon route.
 
+Plan mode and the todo list are Ghost-owned (`packages/daemon/src/plan-mode.ts`)
+and conversation-scoped; both persist as custom transcript entries
+(`ghost-plan`, `ghost-todo`), so they follow branches and survive restarts.
+The `todo` tool keeps phases of tasks (`init`/`view`/`start`/`done`/`rm`/
+`drop`/`block`/`unblock`/`append`; exactly one task is in progress) and
+`/todo` prints them. Plan mode starts from the owner (`POST …/plan
+{action:"start"}`): every later turn's system prompt carries a plan-mode
+section, and a `tool_call` hook refuses mutations — `edit`/`write` outside
+the conversation's `plans/` folder, `bash` unless the command is read-only by
+a conservative allowlist (no redirection, `tee`, `xargs`, `sudo`; `git` only
+for its read subcommands), browser actions beyond open/read/find/screenshot/
+back/console/network/tabs/wait/scroll, desktop ops beyond see/state/layers/
+toplevels/ax_query/ax_roles/hit_test/capture/watch, MCP tools, and memory
+writes — with a reason the model sees. `propose_plan {title, content}` writes
+`<ghost-home>/plans/<conversation>/<slug>.md` and asks the owner through
+`ask` (Approve / Revise, the note or free text carried back to the model);
+approval persists `{planning:false, plan}` and every later turn's system
+prompt carries the plan's text as the current plan until the owner clears it
+(`POST …/plan {action:"clear"}`); `stop` leaves plan mode keeping the plan.
+`/plan` prints the state without a model. A session keeps this state in
+memory (`PlanBook`), written through to the transcript and re-read when the
+branch moves, so the per-turn section and the per-call guard never rescan the
+tree; the plan and todo routes read the open session's book or open the
+transcript file directly, never a full session.
+
 `inspect_image` is Ghost-owned (`packages/daemon/src/inspect-image.ts`) and
 exists for a chat model that cannot see images: it reads one
 png/jpg/gif/webp file (relative paths resolve against the conversation cwd),
@@ -486,15 +511,16 @@ reports (`was cancelled`); jobs cancelled by session teardown do not.
 Slash commands are a Ghost-owned catalog
 (`packages/daemon/src/slash-commands.ts`), session-scoped and built from the
 conversation's pinned declarative snapshot. It holds the headless builtins Ghost
-answers without a model — `/context`, `/tools`, `/dirs`, `/jobs`, and
-`/compact [instructions]` (`available`), plus the informational forms of
+answers without a model — `/context`, `/tools`, `/dirs`, `/jobs`, `/todo`,
+`/plan`, and `/compact [instructions]` (`available`), plus the informational
+forms of
 `/model`, `/session [info]`, and `/usage [show]` (`partial`) — the
 conversation's admitted Markdown commands and prompt templates, expanded into
 the user turn with pi's `$ARGUMENTS`/`$1`/`${@:2}` placeholders, and
 `/skill:<name> [args]` force-invocation. Every known command from another
-harness (`/todo`, `/browser`, `/computer`, `/memory`, `/mcp`, `/move`,
+harness (`/browser`, `/computer`, `/memory`, `/mcp`, `/move`,
 `/add-dir`, `/remove-dir`, `/pin`, `/rename`, `/share`, `/export`, `/dump`,
-`/stats`, and TUI-only ones such as `/plan`, `/help`, `/clear`, `/new`,
+`/stats`, and TUI-only ones such as `/help`, `/clear`, `/new`,
 `/resume`, `/exit`, `/quit`, `/settings`, `/theme`, `/keybindings`, `/login`,
 `/logout`) is `unsupported`: it is consumed before the prompt reaches pi's
 `AgentSession` and reported as `command_output` with `unsupported_command`. It
@@ -1281,6 +1307,16 @@ one must not be a leak of both.
   Claude Code returns `409 not_supported`, because opening an unrelated pi
   session just to discover commands would lie about the active runtime;
   non-GET methods return `405`.
+- `GET|POST /api/ghosts/:name/sessions/:id/plan` → `{ planning, plan, todo }`
+  — `plan` is `{ path, title, approvedAt, content }` (`content` null when the
+  file is gone) or null; `todo` is the phase list. GET never opens a session
+  and reports an unknown conversation as empty. POST takes
+  `{ action: "start"|"stop"|"clear" }` (anything else is `400
+  invalid_request`), appends the change to the transcript (creating one for a
+  new conversation), and answers the new state; an open session with a turn
+  running is `409 session_busy`.
+- `GET  /api/ghosts/:name/sessions/:id/todo` → `{ todo }` — the phase list
+  alone, same rules as GET plan.
 - `GET  /api/ghosts/:name/sessions/:id/jobs` → `{ jobs }` — the background
   jobs of that conversation as `{ id, label, command, status, startedAt,
   endedAt?, durationMs, exitCode?, output, outputTruncated }` rows, where

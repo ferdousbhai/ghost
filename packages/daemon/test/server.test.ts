@@ -2723,3 +2723,17 @@ describe("background job routes", () => {
     expect(wrongMethod.status).toBe(405);
   });
 });
+
+describe("plan mode routes", () => {
+  it("reads, starts, and rejects malformed plan-mode actions", async () => {
+    const base = await serve();
+    const route = `${base}/api/ghosts/casper/sessions/${piSegment("conv-plan")}/plan`;
+    expect(await (await fetch(route)).json()).toEqual({ planning: false, plan: null, todo: [] });
+    const started = await fetch(route, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "start" }) });
+    expect(started.status).toBe(200);
+    expect(await started.json()).toMatchObject({ planning: true });
+    const bad = await fetch(route, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "dance" }) });
+    expect(bad.status).toBe(400);
+    expect(await (await fetch(`${base}/api/ghosts/casper/sessions/${piSegment("conv-plan")}/todo`)).json()).toEqual({ todo: [] });
+  });
+});

@@ -544,11 +544,12 @@ describe("OMP slash commands", () => {
     // Ghost augments OMP's headless builder result with the unified registry so
     // an OMP user's familiar TUI-only commands remain discoverable but honest.
     expect(commands).toContainEqual(expect.objectContaining({
-      name: "plan",
+      name: "help",
       source: "builtin",
       availability: "unsupported",
       unavailableReason: expect.stringContaining("interactive terminal UI"),
     }));
+    expect(commands).toContainEqual(expect.objectContaining({ name: "plan", availability: "available" }));
   });
 
   it("reports that an active Claude Code runtime has no OMP command catalog", async () => {
@@ -579,7 +580,7 @@ describe("OMP slash commands", () => {
 
     for (const [sessionId, prompt, command] of [
       ["conv-memory", "/memory stats", "/memory"],
-      ["conv-plan", "/plan make a plan", "/plan"],
+      ["conv-help", "/help", "/help"],
       ["conv-delete", "/session delete", "/session"],
     ] as const) {
       const events = await run(sessionId, prompt);
@@ -7925,6 +7926,47 @@ describe("background jobs", () => {
 
     await host!.close("casper", "conv-cancel-jobs");
     expect(host!.listJobs("casper", "conv-cancel-jobs")).toEqual([]);
+  });
+});
+
+describe("plan mode", () => {
+  it("keeps the world read-only while planning, pins the approved plan, and lists the todo", async () => {
+    const { dir } = await setup([
+      { kind: "tool", name: "bash", args: { command: "touch plan-mode-must-not-run" } },
+      { kind: "tool", name: "propose_plan", args: { title: "Fix the leak", content: "# Plan\n1. patch\n2. test" } },
+      { kind: "text", text: "Plan approved, starting." },
+      { kind: "tool", name: "todo", args: { op: "init", items: ["patch", "test"] } },
+      { kind: "text", text: "Tracking it." },
+    ]);
+    await host!.setPlanMode("casper", "conv-plan", "start");
+    expect(await host!.planState("casper", "conv-plan")).toEqual({ planning: true, plan: null, todo: [] });
+
+    const events: PiMessagesEvent[] = [];
+    const turn = host!.runTurn("casper", { sessionId: "conv-plan", prompt: "Plan the fix.", emit: (event) => events.push(event) });
+    const pending = await waitFor(() => host!.pendingAsk("casper", "conv-plan"), 10_000);
+    expect(pending.questions[0]?.question).toContain("Fix the leak");
+    host!.answerAsk("casper", "conv-plan", pending.id, { kind: "submit", results: [{ id: "plan", selectedOptions: ["Approve"] }] });
+    await turn;
+
+    expect(existsSync(join(temp!.ownerHome, "plan-mode-must-not-run"))).toBe(false);
+    expect(events).toContainEqual(expect.objectContaining({ type: "tool_execution_end", toolName: "bash", isError: true, summary: expect.stringContaining("Plan mode") }));
+    expect(provider!.requests[0]?.system).toContain("# Plan mode");
+    const state = await host!.planState("casper", "conv-plan");
+    expect(state.planning).toBe(false);
+    expect(state.plan).toMatchObject({ title: "Fix the leak", content: "# Plan\n1. patch\n2. test\n", path: expect.stringContaining(join(dir, "plans")) });
+
+    const listed: PiMessagesEvent[] = [];
+    await host!.runTurn("casper", { sessionId: "conv-plan", prompt: "Start on it.", emit: (event) => listed.push(event) });
+    expect(provider!.requests.at(-1)?.system).toContain("# Current plan: Fix the leak");
+    expect(provider!.requests.at(-1)?.system).toContain("2. test");
+    expect((await host!.planState("casper", "conv-plan")).todo).toEqual([
+      { name: "Tasks", tasks: [{ content: "patch", status: "in_progress" }, { content: "test", status: "pending" }] },
+    ]);
+
+    const shown: PiMessagesEvent[] = [];
+    await host!.runTurn("casper", { sessionId: "conv-plan", prompt: "/todo", emit: (event) => shown.push(event) });
+    expect(shown).toContainEqual(expect.objectContaining({ type: "command_output", command: "/todo", output: "## Tasks\n[>] patch\n[ ] test" }));
+    expect(await host!.setPlanMode("casper", "conv-plan", "clear")).toMatchObject({ planning: false, plan: null });
   });
 });
 

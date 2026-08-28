@@ -8,6 +8,7 @@
  */
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import { formatJobList, type GhostJobManager } from "./jobs.js";
+import { formatTodo, type PlanBook } from "./plan-mode.js";
 
 export type GhostCommandAvailability = "available" | "partial" | "unsupported";
 
@@ -38,7 +39,8 @@ const BUILTINS: readonly BuiltinSpec[] = [
   { name: "tools", description: "List the tools active in this conversation", availability: "available" },
   { name: "dirs", description: "Show the directories this conversation works in", availability: "available" },
   { name: "jobs", description: "List this conversation's background jobs", availability: "available" },
-  { name: "todo", description: "Show the plan's to-do list", availability: "unsupported", reason: "Plan mode returns with Ghost's own plan and to-do surface." },
+  { name: "todo", description: "Show this conversation's todo list", availability: "available" },
+  { name: "plan", description: "Show plan mode and the approved plan", availability: "available" },
   { name: "compact", description: "Summarize older history to free context", availability: "available", hint: "[instructions]" },
   { name: "browser", description: "Browser mode", availability: "unsupported", reason: "Ghost's browser tools own this surface." },
   { name: "computer", description: "Computer use mode", availability: "unsupported", reason: "Ghost's desktop tools own this surface." },
@@ -57,7 +59,6 @@ const BUILTINS: readonly BuiltinSpec[] = [
   { name: "dump", description: "Dump the raw request", availability: "unsupported", reason: "A raw request sidecar would contain context and secrets, so it is not exposed here." },
   { name: "stats", description: "Open the stats dashboard", availability: "unsupported", reason: "Ghost does not manage a separate dashboard server." },
   ...[
-    ["plan", "Plan mode"],
     ["help", "Show command help"],
     ["clear", "Clear the terminal"],
     ["new", "Start a new session"],
@@ -168,6 +169,7 @@ export function classifyGhostBuiltin(text: string): GhostBuiltinDispatch {
 export interface GhostBuiltinContext {
   session: AgentSession;
   jobs: GhostJobManager;
+  plan: PlanBook;
   cwd: string;
   projectRoot: string | null;
   ghostHome: string;
@@ -207,6 +209,15 @@ export async function executeGhostBuiltin(
     }
     case "/tools":
       return session.getActiveToolNames().map((name) => `- ${name}`).join("\n") || "No tools are active.";
+    case "/todo":
+      return formatTodo(context.plan.getTodo());
+    case "/plan": {
+      const state = context.plan.getState();
+      if (state.planning) return "Plan mode is on: the conversation is read-only until a plan is approved.";
+      return state.plan
+        ? `Plan mode is off. Current plan: ${state.plan.title} (${state.plan.path}, approved ${state.plan.approvedAt}).`
+        : "Plan mode is off and no plan is pinned.";
+    }
     case "/jobs":
       return formatJobList(context.jobs.list());
     case "/dirs":

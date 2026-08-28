@@ -310,6 +310,10 @@ ad-hoc prompts:
 - Tool lifecycle events include start, update, completion, error, bounded
   result summaries, and model-fallback state so the shell can render durable
   activity cards rather than a transient name.
+- Plan mode (`POST …/sessions/:id/plan {action: start}`) makes the
+  conversation read-only until the model's `propose_plan` is approved through
+  `ask`; the approved plan is pinned into every later turn. The `todo` tool and
+  `/todo` keep a phased task list the shell can show (`GET …/sessions/:id/todo`).
 - `web_search` tries Brave Search, Firecrawl, then DuckDuckGo, skipping a
   provider without its key — so it works keyless out of the box. A
   `keyring:<service>/<account>` reference under `web.search.<provider>.apiKey`

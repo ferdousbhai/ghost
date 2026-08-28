@@ -10,7 +10,7 @@
  */
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type, type Static } from "typebox";
-import type { AskBroker, AskQuestion, AskResultItem } from "./ask-broker.js";
+import type { AskBroker, AskOpenOptions, AskQuestion, AskResultItem } from "./ask-broker.js";
 
 const RESERVED_OPTION_LABELS = new Set(["Other (type your own)", "Chat about this", "Next →"]);
 
@@ -130,6 +130,29 @@ export interface AskToolOptions {
    * per ask because plan mode may suspend it; 0 waits forever.
    */
   timeoutMs: () => number;
+}
+
+/**
+ * Ask the owner one question. Resolves with their answer, `undefined` when
+ * they chose to chat instead, and throws `AskCancelledError` on cancel or an
+ * unanswered single choice.
+ */
+export async function askOwner(
+  broker: AskBroker,
+  question: AskQuestion,
+  options: AskOpenOptions,
+): Promise<AskResultItem | undefined> {
+  const answer = await broker.open([question], options);
+  if (!answer) throw new AskCancelledError();
+  if (answer.kind === "chat") return undefined;
+  const result = answer.results[0];
+  const unanswered = result
+    && !result.timedOut
+    && !result.multi
+    && result.selectedOptions.length === 0
+    && result.customInput === undefined;
+  if (!result || unanswered) throw new AskCancelledError();
+  return result;
 }
 
 export function createAskTool(options: AskToolOptions): ToolDefinition<typeof askToolSchema, AskToolDetails> {

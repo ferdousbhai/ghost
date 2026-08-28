@@ -1832,6 +1832,35 @@ export function createDaemonServer(options: ServerOptions): Server {
             response,
           );
         }
+        if (segments.length === 6 && segments[3] === "sessions" && segments[5] === "plan") {
+          const conversation = decodeConversationIdentity(segments[4] ?? "");
+          if (method === "GET") {
+            jsonResponse(response, 200, await options.host.planState(ghostName, conversation.conversationId, conversation.runtime));
+            return;
+          }
+          if (method === "POST") {
+            const body = await readJsonBody(request, maxBodyBytes);
+            const action = (body as { action?: unknown }).action;
+            if (action !== "start" && action !== "stop" && action !== "clear") {
+              errorResponse(response, 400, "invalid_request", "action must be start, stop, or clear.");
+              return;
+            }
+            jsonResponse(response, 200, await options.host.setPlanMode(ghostName, conversation.conversationId, action, conversation.runtime));
+            return;
+          }
+          errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+          return;
+        }
+        if (segments.length === 6 && segments[3] === "sessions" && segments[5] === "todo") {
+          if (method !== "GET") {
+            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+            return;
+          }
+          const conversation = decodeConversationIdentity(segments[4] ?? "");
+          const state = await options.host.planState(ghostName, conversation.conversationId, conversation.runtime);
+          jsonResponse(response, 200, { todo: state.todo });
+          return;
+        }
         if (segments.length === 6 && segments[3] === "sessions" && segments[5] === "jobs") {
           if (method !== "GET") {
             errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
