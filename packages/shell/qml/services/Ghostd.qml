@@ -20,6 +20,7 @@ import QtQuick
 import "CommandTranscript.js" as CommandTranscript
 import "GhostRename.js" as GhostRename
 import "HookStatus.js" as HookStatus
+import "HookConfig.js" as HookConfig
 import "TurnBlocks.js" as TurnBlocks
 import "../components/DocumentModel.js" as DocumentModel
 import "../components/ProjectModel.js" as ProjectModel
@@ -84,10 +85,19 @@ Singleton {
         root.activeHooks = [];
         root.hookEvents = [];
         root.activeHookCount = 0;
-        root.hookContinuationCap = 2;
+        root.hookContinuationCap = 10;
         root.hooksLoaded = false;
         root.hooksStale = false;
         root.hooksError = "";
+        if (root.hookConfigRequest && root.hookConfigRequest.readyState !== 4)
+            root.hookConfigRequest.abort();
+        root.hookConfigRequest = null;
+        root.hookConfig = null;
+        root.hookConfigPath = "";
+        root.hookConfigAvailable = false;
+        root.hookConfigLoaded = false;
+        root.hookConfigLoading = false;
+        root.hookConfigError = "";
         root.hooksConnectionReset(root.hooksEpoch);
     }
 
@@ -143,6 +153,91 @@ Singleton {
         root.dispatch(xhr, "GET", "/api/hooks", ({}), null, function () {
             return epoch === root.hooksEpoch && root.hooksRequest === xhr;
         });
+    }
+
+    /** Read the owner's hooks.json through the daemon. A 404 means the daemon has no file to edit. */
+    function fetchHookConfig(force: bool): void {
+        if (!force && (root.hookConfigLoaded || root.hookConfigLoading)) return;
+        if (root.hookConfigRequest && root.hookConfigRequest.readyState !== 4) {
+            if (!force) return;
+            root.hookConfigRequest.abort();
+        }
+        const xhr = root.makeHooksRequest();
+        const epoch = root.hooksEpoch;
+        root.hookConfigRequest = xhr;
+        root.hookConfigLoading = true;
+        root.hookConfigError = "";
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || epoch !== root.hooksEpoch
+                    || xhr !== root.hookConfigRequest) return;
+            root.hookConfigRequest = null;
+            root.hookConfigLoading = false;
+            if (xhr.status === 200) {
+                const config = HookConfig.parseConfig(xhr.responseText);
+                if (config === null) {
+                    root.hookConfigError = "ghostd sent a malformed hook configuration";
+                    return;
+                }
+                root.hookConfigPath = config.path;
+                root.hookConfig = config.document;
+                root.hookConfigAvailable = true;
+                root.hookConfigLoaded = true;
+                root.reachable = true;
+            } else if (xhr.status === 404) {
+                root.hookConfig = null;
+                root.hookConfigPath = "";
+                root.hookConfigAvailable = false;
+                root.hookConfigLoaded = true;
+            } else if (xhr.status === 0) {
+                root.failHooksTransport(epoch);
+            } else {
+                root.hookConfigError = root.describeError(xhr, "GET hooks config");
+            }
+        };
+        root.dispatch(xhr, "GET", "/api/hooks/config", ({}), null, function () {
+            return epoch === root.hooksEpoch && root.hookConfigRequest === xhr;
+        });
+    }
+
+    /**
+     * Replace the owner's hooks.json whole. The daemon's loader is the only
+     * validator: a refused document comes back as its message and nothing
+     * changes; an admitted one is live at once, so the status is re-read.
+     */
+    function writeHookConfig(document: var): void {
+        if (root.hookConfigBusy || !root.hookConfigAvailable) return;
+        const xhr = root.makeHooksRequest();
+        const epoch = root.hooksEpoch;
+        root.hookConfigMutation = xhr;
+        root.hookConfigBusy = true;
+        root.hookConfigError = "";
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || xhr !== root.hookConfigMutation) return;
+            root.hookConfigMutation = null;
+            root.hookConfigBusy = false;
+            if (epoch !== root.hooksEpoch) return;
+            let ok = false;
+            if (xhr.status === 200) {
+                const config = HookConfig.parseConfig(xhr.responseText);
+                if (config === null) {
+                    root.hookConfigError = "ghostd sent a malformed hook configuration";
+                } else {
+                    root.hookConfigPath = config.path;
+                    root.hookConfig = config.document;
+                    ok = true;
+                }
+            } else if (xhr.status === 400) {
+                // The loader's message names the field; that is the whole story.
+                const detail = root.errorDetail(xhr);
+                root.hookConfigError = detail !== "" ? detail : root.describeError(xhr, "PUT hooks config");
+            } else {
+                root.hookConfigError = root.describeError(xhr, "PUT hooks config");
+            }
+            root.hookConfigWriteFinished(ok);
+            if (ok) root.fetchHooks(true);
+        };
+        root.dispatch(xhr, "PUT", "/api/hooks/config", ({ "Content-Type": "application/json" }),
+            JSON.stringify(document), function () { return xhr === root.hookConfigMutation; });
     }
 
 
@@ -834,13 +929,22 @@ Singleton {
     property var activeHooks: []
     property var hookEvents: []
     property int activeHookCount: 0
-    property int hookContinuationCap: 2
+    property int hookContinuationCap: 10
     property bool hooksLoading: false
     property bool hooksLoaded: false
     /** A failed refresh may retain the last exact successful projection. */
     property bool hooksStale: false
     property string hooksError: ""
     property int hooksEpoch: 0
+    /** The owner's hooks.json as the daemon admitted it; null until read. */
+    property var hookConfig: null
+    property string hookConfigPath: ""
+    /** False on a daemon built without a hooks file (the route is 404). */
+    property bool hookConfigAvailable: false
+    property bool hookConfigLoaded: false
+    property bool hookConfigLoading: false
+    property bool hookConfigBusy: false
+    property string hookConfigError: ""
 
     // Machine Documents are deliberately not keyed by the active ghost. Each
     // cache entry represents exactly one directory and one current-folder
@@ -962,6 +1066,7 @@ Singleton {
     signal liveActionFinished(string action, bool ok)
     signal collabActionFinished(string action, bool writable, bool ok)
     signal memoryWriteFinished(string path, bool ok)
+    signal hookConfigWriteFinished(bool ok)
     signal documentDirectoryChanged(string path, string query)
     signal documentDeleteFinished(string path, bool ok)
     signal documentsConnectionReset(int epoch)
@@ -1038,6 +1143,8 @@ Singleton {
     property var memoryMutationRequest: null
     property var hooksRequest: null
     property var hooksRequestFactory: null
+    property var hookConfigRequest: null
+    property var hookConfigMutation: null
     /** Test seams; production constructs native QML XHRs. */
     property var documentRequestFactory: null
     property var documentContentRequestFactory: null

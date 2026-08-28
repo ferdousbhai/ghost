@@ -24,6 +24,7 @@ Window {
     Component.onCompleted: {
         Ghostd.activeHooks = [{
             event: "conversation_idle",
+            source: "builtin",
             name: "![remote](" + root.fixtureUrl + "/markdown-name.png) "
                 + "<img src=\"file:///etc/passwd\">",
             description: "<img src=\"" + root.fixtureUrl + "/raw-description.png\"> "
