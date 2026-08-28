@@ -430,13 +430,12 @@ async function serveDaemon(
     claudeCode: { probe: claudeCodeProbe },
     ...(relay ? { relayTransport: relay } : {}),
   });
-  const memoryUpkeep = hooks.builtinSettings(MEMORY_UPKEEP_SETTINGS_KEY);
   const maintenance = new ConversationMaintenance({
     registry,
     homeOperations,
     hooks,
     logger,
-    ...(memoryUpkeep.idleSeconds === undefined ? {} : { idleSeconds: memoryUpkeep.idleSeconds }),
+    idleSeconds: hooks.builtinSettings(MEMORY_UPKEEP_SETTINGS_KEY).idleSeconds,
     withRuntime: (ghostName, use) => host.withMaintenanceRuntime(ghostName, use),
   });
   host.setConversationMaintenance(maintenance);

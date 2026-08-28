@@ -194,6 +194,12 @@ async function waitForAsk(base: string, sessionId: string): Promise<{
   throw new Error("timed out waiting for ask interaction");
 }
 
+/** A runner built without a hooks.json: nothing to read, nothing to replace. */
+const noHooksFile = {
+  config: () => undefined,
+  replaceConfig: async (): Promise<never> => { throw new Error("This hook runner has no configuration file."); },
+};
+
 describe("GET /api/ghosts", () => {
   it("lists ghosts with name, dir, and createdAt", async () => {
     const base = await serve();
@@ -261,7 +267,7 @@ describe("GET /api/hooks", () => {
       prompt: "secret",
       context: "secret",
     });
-    const base = await serve(undefined, { hooks: { status } });
+    const base = await serve(undefined, { hooks: { ...noHooksFile, status } });
 
     const response = await fetch(`${base}/api/hooks`);
     expect(response.status).toBe(200);
@@ -318,7 +324,7 @@ describe("GET /api/hooks", () => {
       hooks: [],
       sessionStopContinuationCap: GHOST_SESSION_STOP_CONTINUATION_CAP,
     }));
-    const base = await serve(undefined, { hooks: { status } });
+    const base = await serve(undefined, { hooks: { ...noHooksFile, status } });
     const response = await fetch(`${base}/api/hooks`, { method: "POST" });
     expect(response.status).toBe(405);
     expect(await response.json()).toEqual({
@@ -338,7 +344,7 @@ describe("/api/hooks/config", () => {
   });
 
   it("is absent when the runner has no configuration file", async () => {
-    const base = await serve(undefined, { hooks: { status: empty } });
+    const base = await serve(undefined, { hooks: { ...noHooksFile, status: empty } });
     const response = await fetch(`${base}/api/hooks/config`);
     expect(response.status).toBe(404);
   });

@@ -1,12 +1,13 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import { mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
-import { randomUUID } from "node:crypto";
 import type { Logger } from "./log.js";
 import { silentLogger } from "./log.js";
+import { writePrivateJsonAtomic } from "./private-file.js";
+import { serializeByKey } from "./promise-chain.js";
 
 export const GHOST_HOOK_HANDLER_TIMEOUT_MS = 30_000;
 export const GHOST_SESSION_STOP_CONTINUATION_CAP = 10;
@@ -204,16 +205,15 @@ interface RegisteredHook {
 const SETTINGS_KEY = /^[a-z][a-z0-9_]*$/u;
 
 /**
- * Admit the `builtin` section of a `hooks.json` document: per-key tuning for
- * hooks registered in code. The section is read at startup and applies at
- * the next start, because a built-in idle registration's identity includes
- * its interval and persisted retry state refers to that identity.
+ * The `builtin` section of a `hooks.json` document: per-key tuning for hooks
+ * registered in code. It is read at startup and applies at the next start,
+ * because a built-in idle registration's identity includes its interval and
+ * persisted retry state refers to that identity.
  */
-export function parseBuiltinHookSettings(
-  parsed: unknown,
+function parseBuiltinHookSettings(
+  parsed: Record<string, unknown>,
   path: string,
 ): Record<string, GhostBuiltinHookSettings> {
-  if (!isObject(parsed)) throw new Error(`${path} must contain a JSON object.`);
   const builtin = parsed.builtin;
   if (builtin === undefined) return {};
   if (!isObject(builtin)) throw new Error(`${path}: "builtin" must be an object.`);
@@ -228,7 +228,7 @@ export function parseBuiltinHookSettings(
     }
     settings[key] = raw.idleSeconds === undefined
       ? {}
-      : { idleSeconds: idleDelayMs(raw.idleSeconds, 0, `${path}: builtin.${key}.idleSeconds`) / 1_000 };
+      : { idleSeconds: idleSeconds(raw.idleSeconds, `${path}: builtin.${key}.idleSeconds`) };
   }
   return settings;
 }
@@ -279,12 +279,15 @@ function displayText(value: unknown, fallback: string, label: string, maximum: n
   return value.trim();
 }
 
-function idleDelayMs(value: unknown, fallbackMs: number, label: string): number {
-  if (value === undefined) return fallbackMs;
+function idleSeconds(value: unknown, label: string): number {
   if (!Number.isSafeInteger(value) || (value as number) < 1 || (value as number) > 86_400) {
     throw new Error(`${label} must be an integer in [1, 86400].`);
   }
-  return (value as number) * 1_000;
+  return value as number;
+}
+
+function idleDelayMs(value: unknown, fallbackMs: number, label: string): number {
+  return value === undefined ? fallbackMs : idleSeconds(value, label) * 1_000;
 }
 
 function explicitIdleRegistrationId(value: unknown, label: string): string | undefined {
@@ -327,12 +330,21 @@ function readCommandHooksDocument(path: string): Record<string, unknown> {
   return parsed;
 }
 
+export interface ParsedHooksDocument {
+  commands: CommandHook[];
+  builtin: Record<string, GhostBuiltinHookSettings>;
+}
+
 /**
  * Admit one `hooks.json` document. Every error names the offending field the
  * same way whether the document came from disk or from `PUT /api/hooks/config`.
  */
-export function parseCommandHooks(parsed: unknown, path: string): CommandHook[] {
+export function parseHooksDocument(parsed: unknown, path: string): ParsedHooksDocument {
   if (!isObject(parsed)) throw new Error(`${path} must contain a JSON object.`);
+  return { commands: parseCommandHooks(parsed, path), builtin: parseBuiltinHookSettings(parsed, path) };
+}
+
+function parseCommandHooks(parsed: Record<string, unknown>, path: string): CommandHook[] {
   const hooks = parsed.hooks;
   if (hooks === undefined) return [];
   if (!isObject(hooks)) throw new Error(`${path}: "hooks" must be an object.`);
@@ -639,7 +651,7 @@ export class GhostHookRunner {
   private readonly retiredIdleRegistrations = new Set<string>();
   private readonly builtin: Record<string, GhostBuiltinHookSettings>;
   private commandConfig?: GhostHookCommandConfig;
-  private configReplacement: Promise<unknown> = Promise.resolve();
+  private readonly configWrites = new Map<string, Promise<unknown>>();
 
   constructor(
     options: GhostHookRunnerOptions & {
@@ -663,15 +675,16 @@ export class GhostHookRunner {
     this.builtin = options.builtin ?? {};
     this.commandConfig = options.commandConfig;
     this.commandRunner = options.commandRunner ?? runCommandHook;
-    this.installCommands(options.commands ?? []);
+    const commands = options.commands ?? [];
+    this.assertIdleRegistrationsFree(commands);
+    this.installCommands(commands);
   }
 
   static fromConfig(path: string, options: GhostHookRunnerOptions = {}): GhostHookRunner {
     const document = readCommandHooksDocument(path);
     return new GhostHookRunner({
       ...options,
-      commands: parseCommandHooks(document, path),
-      builtin: parseBuiltinHookSettings(document, path),
+      ...parseHooksDocument(document, path),
       commandConfig: { path, document },
     });
   }
@@ -681,25 +694,32 @@ export class GhostHookRunner {
     return this.builtin[key] ?? {};
   }
 
-  private installCommands(commands: CommandHook[]): void {
-    const targets = new Map<string, IdleTarget>();
+  /** A command may not take an idle registration id another command or a built-in handler holds. */
+  private assertIdleRegistrationsFree(commands: CommandHook[]): void {
+    const seen = new Set<string>();
     for (const command of commands) {
-      if (!command.idleRegistration) continue;
-      const id = command.idleRegistration.id;
+      const id = command.idleRegistration?.id;
+      if (id === undefined) continue;
       const existing = this.idleTargets.get(id);
-      if (targets.has(id) || (existing !== undefined && "handler" in existing)) {
+      if (seen.has(id) || (existing !== undefined && "handler" in existing)) {
         throw new Error(`Duplicate conversation_idle registration ${JSON.stringify(id)}.`);
       }
-      targets.set(id, { registration: command.idleRegistration, command });
+      seen.add(id);
     }
+  }
+
+  /** Swap the live command hooks: every old idle registration retires, every new one arms. */
+  private installCommands(commands: CommandHook[]): void {
     for (const command of this.commands) {
       const id = command.idleRegistration?.id;
       if (id === undefined) continue;
       this.idleTargets.delete(id);
-      if (!targets.has(id)) this.retiredIdleRegistrations.add(id);
+      this.retiredIdleRegistrations.add(id);
     }
-    for (const [id, target] of targets) {
-      this.idleTargets.set(id, target);
+    for (const command of commands) {
+      if (!command.idleRegistration) continue;
+      const id = command.idleRegistration.id;
+      this.idleTargets.set(id, { registration: command.idleRegistration, command });
       this.retiredIdleRegistrations.delete(id);
     }
     this.commands = commands;
@@ -717,30 +737,22 @@ export class GhostHookRunner {
    * to the next boundary; a changed idle registration arms from the next owner
    * activity, and a deadline already armed against a retired one settles as a
    * no-op. Replacements are serialized so two writers cannot interleave the
-   * file and the live set.
+   * file and the live set; a clash with a built-in idle registration is
+   * refused before the file changes.
    */
   async replaceConfig(document: unknown): Promise<GhostHookCommandConfig> {
     const config = this.commandConfig;
     if (!config) throw new Error("This hook runner has no configuration file.");
-    const commands = parseCommandHooks(document, config.path);
-    parseBuiltinHookSettings(document, config.path);
+    const { commands } = parseHooksDocument(document, config.path);
+    this.assertIdleRegistrationsFree(commands);
     const admitted = document as Record<string, unknown>;
-    const run = this.configReplacement.then(async () => {
+    return serializeByKey(this.configWrites, config.path, async () => {
       await mkdir(dirname(config.path), { recursive: true });
-      const temporary = `${config.path}.${process.pid}.${randomUUID()}.tmp`;
-      try {
-        await writeFile(temporary, `${JSON.stringify(admitted, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
-        await rename(temporary, config.path);
-      } catch (error) {
-        await rm(temporary, { force: true }).catch(() => {});
-        throw error;
-      }
+      await writePrivateJsonAtomic(config.path, admitted);
       this.installCommands(commands);
       this.commandConfig = { path: config.path, document: admitted };
       return this.commandConfig;
     });
-    this.configReplacement = run.catch(() => {});
-    return run;
   }
 
   async register(factory: GhostHookFactory): Promise<void> {

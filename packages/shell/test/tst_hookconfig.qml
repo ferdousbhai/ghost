@@ -49,11 +49,11 @@ TestCase {
         ]);
         compare(cards[1].key, "config:session_stop:0:0");
         compare(cards[2].key, "config:session_stop:0:1");
-        compare(cards[1].command, "/bin/review");
+        compare(cards[1].fields.command, "/bin/review");
         compare(cards[1].fields.timeout, "5");
         compare(cards[2].fields.name, "");
         compare(cards[4].idleSeconds, 120);
-        compare(cards[0].command, "");
+        compare(cards[0].fields.command, "");
         compare(cards[0].groupIndex, -1);
     }
 

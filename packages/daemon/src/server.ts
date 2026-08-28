@@ -66,7 +66,7 @@ export interface ServerOptions {
    */
   catalog?: ModelCatalog;
   mcp?: McpCatalog;
-  hooks?: Pick<GhostHookRunner, "status"> & Partial<Pick<GhostHookRunner, "config" | "replaceConfig">>;
+  hooks?: Pick<GhostHookRunner, "status" | "config" | "replaceConfig">;
   logger?: Logger;
   maxBodyBytes?: number;
   includeThinking?: boolean;
@@ -357,9 +357,9 @@ export function createDaemonServer(options: ServerOptions): Server {
     request: IncomingMessage,
     response: ServerResponse,
   ): Promise<void> => {
-    const config = options.hooks?.config?.();
-    const replaceConfig = options.hooks?.replaceConfig;
-    if (!config || !replaceConfig) {
+    const hooks = options.hooks;
+    const config = hooks?.config();
+    if (!hooks || !config) {
       errorResponse(response, 404, "not_found", "Hook configuration is not available.");
       return;
     }
@@ -374,7 +374,7 @@ export function createDaemonServer(options: ServerOptions): Server {
     const document = await readJsonBody(request, maxBodyBytes);
     let replaced: GhostHookCommandConfig;
     try {
-      replaced = await replaceConfig.call(options.hooks, document);
+      replaced = await hooks.replaceConfig(document);
     } catch (error) {
       errorResponse(response, 400, "invalid_request", (error as Error).message);
       return;

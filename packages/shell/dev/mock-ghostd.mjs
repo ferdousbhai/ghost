@@ -888,8 +888,15 @@ function hooksDocumentProblem(document) {
       if (!group || !Array.isArray(group.hooks)) return `${path}: hooks.${event}[${g}].hooks must be an array.`;
       for (const [h, handler] of group.hooks.entries()) {
         const label = `hooks.${event}[${g}].hooks[${h}]`;
-        if (handler?.type !== "command" || typeof handler.command !== "string" || !handler.command.trim()) {
+        if (handler?.type !== "command" || typeof handler.command !== "string" || !handler.command.trim()
+            || handler.command.includes("\0")) {
           return `${path}: ${label} must be a command hook with a non-empty NUL-free command.`;
+        }
+        for (const [field, max] of [["name", 80], ["description", 240]]) {
+          const value = handler[field];
+          if (value !== undefined && (typeof value !== "string" || !value.trim() || value.trim().length > max)) {
+            return `${path}: ${label}.${field} must be a non-empty string of at most ${max} characters.`;
+          }
         }
         if (handler.timeout !== undefined && !(typeof handler.timeout === "number" && handler.timeout > 0 && handler.timeout <= 600)) {
           return `${path}: ${label}.timeout must be a number in (0, 600].`;

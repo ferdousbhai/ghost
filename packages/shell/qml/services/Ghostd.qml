@@ -79,6 +79,24 @@ Singleton {
         if (request && request.readyState !== 4) request.abort();
     }
 
+    function retireHookConfigRequest(): void {
+        const request = root.hookConfigRequest;
+        root.hookConfigRequest = null;
+        if (request && request.readyState !== 4) request.abort();
+    }
+
+    /** Take the daemon's `{ path, document }` as the current hooks.json; false when the body is not that. */
+    function adoptHookConfig(xhr: var): bool {
+        const config = HookConfig.parseConfig(xhr.responseText);
+        if (config === null) {
+            root.hookConfigError = "ghostd sent a malformed hook configuration";
+            return false;
+        }
+        root.hookConfigPath = config.path;
+        root.hookConfig = config.document;
+        return true;
+    }
+
     function beginHooksConnectionEpoch(): void {
         root.hooksEpoch += 1;
         root.retireHooksRequest();
@@ -89,14 +107,10 @@ Singleton {
         root.hooksLoaded = false;
         root.hooksStale = false;
         root.hooksError = "";
-        if (root.hookConfigRequest && root.hookConfigRequest.readyState !== 4)
-            root.hookConfigRequest.abort();
-        root.hookConfigRequest = null;
+        root.retireHookConfigRequest();
         root.hookConfig = null;
         root.hookConfigPath = "";
-        root.hookConfigAvailable = false;
         root.hookConfigLoaded = false;
-        root.hookConfigLoading = false;
         root.hookConfigError = "";
         root.hooksConnectionReset(root.hooksEpoch);
     }
@@ -158,35 +172,22 @@ Singleton {
     /** Read the owner's hooks.json through the daemon. A 404 means the daemon has no file to edit. */
     function fetchHookConfig(force: bool): void {
         if (!force && (root.hookConfigLoaded || root.hookConfigLoading)) return;
-        if (root.hookConfigRequest && root.hookConfigRequest.readyState !== 4) {
-            if (!force) return;
-            root.hookConfigRequest.abort();
-        }
+        root.retireHookConfigRequest();
         const xhr = root.makeHooksRequest();
         const epoch = root.hooksEpoch;
         root.hookConfigRequest = xhr;
-        root.hookConfigLoading = true;
         root.hookConfigError = "";
         xhr.onreadystatechange = function () {
             if (xhr.readyState !== 4 || epoch !== root.hooksEpoch
                     || xhr !== root.hookConfigRequest) return;
             root.hookConfigRequest = null;
-            root.hookConfigLoading = false;
             if (xhr.status === 200) {
-                const config = HookConfig.parseConfig(xhr.responseText);
-                if (config === null) {
-                    root.hookConfigError = "ghostd sent a malformed hook configuration";
-                    return;
-                }
-                root.hookConfigPath = config.path;
-                root.hookConfig = config.document;
-                root.hookConfigAvailable = true;
+                if (!root.adoptHookConfig(xhr)) return;
                 root.hookConfigLoaded = true;
                 root.reachable = true;
             } else if (xhr.status === 404) {
                 root.hookConfig = null;
                 root.hookConfigPath = "";
-                root.hookConfigAvailable = false;
                 root.hookConfigLoaded = true;
             } else if (xhr.status === 0) {
                 root.failHooksTransport(epoch);
@@ -209,23 +210,14 @@ Singleton {
         const xhr = root.makeHooksRequest();
         const epoch = root.hooksEpoch;
         root.hookConfigMutation = xhr;
-        root.hookConfigBusy = true;
         root.hookConfigError = "";
         xhr.onreadystatechange = function () {
             if (xhr.readyState !== 4 || xhr !== root.hookConfigMutation) return;
             root.hookConfigMutation = null;
-            root.hookConfigBusy = false;
             if (epoch !== root.hooksEpoch) return;
             let ok = false;
             if (xhr.status === 200) {
-                const config = HookConfig.parseConfig(xhr.responseText);
-                if (config === null) {
-                    root.hookConfigError = "ghostd sent a malformed hook configuration";
-                } else {
-                    root.hookConfigPath = config.path;
-                    root.hookConfig = config.document;
-                    ok = true;
-                }
+                ok = root.adoptHookConfig(xhr);
             } else if (xhr.status === 400) {
                 // The loader's message names the field; that is the whole story.
                 const detail = root.errorDetail(xhr);
@@ -940,10 +932,10 @@ Singleton {
     property var hookConfig: null
     property string hookConfigPath: ""
     /** False on a daemon built without a hooks file (the route is 404). */
-    property bool hookConfigAvailable: false
+    readonly property bool hookConfigAvailable: root.hookConfig !== null
     property bool hookConfigLoaded: false
-    property bool hookConfigLoading: false
-    property bool hookConfigBusy: false
+    readonly property bool hookConfigLoading: root.hookConfigRequest !== null
+    readonly property bool hookConfigBusy: root.hookConfigMutation !== null
     property string hookConfigError: ""
 
     // Machine Documents are deliberately not keyed by the active ghost. Each

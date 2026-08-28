@@ -31,7 +31,7 @@ Rectangle {
     readonly property bool editing: root.editingKey !== ""
     readonly property bool drafting: root.editingKey === HookConfig.DRAFT_KEY
     readonly property var cards: root.editing ? root.frozenCards : root.liveCards
-    readonly property var rows: root.drafting ? [root.draftCard()].concat(root.cards) : root.cards
+    readonly property var rows: root.drafting ? [HookConfig.draftCard()].concat(root.cards) : root.cards
     readonly property bool busy: Ghostd.hookConfigBusy
     readonly property bool editable: Ghostd.hookConfigLoaded && Ghostd.hookConfigAvailable
     readonly property string error: Ghostd.hookConfigError !== ""
@@ -47,40 +47,25 @@ Rectangle {
         Ghostd.fetchHookConfig(force);
     }
 
-    function draftCard(): var {
-        return {
-            key: HookConfig.DRAFT_KEY,
-            source: "config",
-            event: root.draftEvent,
-            name: "",
-            description: "",
-            idleSeconds: 0,
-            command: "",
-            settingsKey: "",
-            pendingIdleSeconds: 0,
-            fields: HookConfig.blankFields(),
-            groupIndex: -1,
-            handlerIndex: -1
-        };
-    }
-
     function canEdit(card: var): bool {
         return !!card && (card.source === "config" || card.settingsKey !== "");
     }
 
-    function beginEdit(card: var): void {
-        if (root.busy || root.editing || !root.editable || !root.canEdit(card)) return;
+    /** Open one card's form over a frozen list, starting from `fields` as typed. */
+    function open(key: string, event: string, fields: var): void {
+        if (root.busy || root.editing || !root.editable) return;
         root.frozenCards = root.liveCards;
-        root.fields = Object.assign(HookConfig.blankFields(), card.fields);
-        root.editingKey = card.key;
+        root.fields = Object.assign(HookConfig.blankFields(), fields);
+        root.draftEvent = event;
+        root.editingKey = key;
+    }
+
+    function beginEdit(card: var): void {
+        if (root.canEdit(card)) root.open(card.key, card.event, card.fields);
     }
 
     function beginDraft(): void {
-        if (root.busy || root.editing || !root.editable) return;
-        root.frozenCards = root.liveCards;
-        root.fields = HookConfig.blankFields();
-        root.draftEvent = "session_stop";
-        root.editingKey = HookConfig.DRAFT_KEY;
+        root.open(HookConfig.DRAFT_KEY, "session_stop", null);
     }
 
     function endEdit(): void {
@@ -140,69 +125,13 @@ Rectangle {
         function onHookConfigWriteFinished(ok: bool): void {
             const attempt = root.lastAttempt;
             root.lastAttempt = null;
-            if (ok || !attempt) return;
-            if (attempt.key === HookConfig.DRAFT_KEY) {
-                root.beginDraft();
-                root.draftEvent = attempt.event;
-            } else {
-                root.beginEdit(HookConfig.find(root.liveCards, attempt.key));
-            }
-            if (root.editing) root.fields = attempt.fields;
+            if (!ok && attempt) root.open(attempt.key, attempt.event, attempt.fields);
         }
     }
 
-    component PaneButton: Rectangle {
-        id: button
-        property string label
-        property bool danger: false
-        property bool primary: false
-        signal activated()
-
-        width: buttonLabel.implicitWidth + Theme.pad * 1.5
-        height: Theme.controlHeight
-        radius: Theme.radius
-        color: !button.enabled ? "transparent"
-            : button.primary ? (buttonArea.containsMouse ? Theme.amber(0.28) : Theme.amber(0.18))
-            : (buttonArea.containsMouse ? Theme.film(0.08) : Theme.film(0.04))
-        border.width: button.activeFocus ? 1 : 0
-        border.color: Theme.amber(0.55)
-        activeFocusOnTab: button.enabled
-
-        Accessible.role: Accessible.Button
-        Accessible.name: button.label
-
-        Text {
-            id: buttonLabel
-            anchors.centerIn: parent
-            text: button.label
-            textFormat: Text.PlainText
-            color: !button.enabled ? Theme.foregroundFaint
-                : button.danger ? Theme.danger
-                : button.primary ? Theme.ghostAmberBright : Theme.foreground
-            font.family: Theme.fontFamily
-            font.pixelSize: Theme.fontSizeSmall
-        }
-
-        MouseArea {
-            id: buttonArea
-            anchors.fill: parent
-            enabled: button.enabled
-            hoverEnabled: true
-            cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-            onClicked: button.activated()
-        }
-
-        Keys.onPressed: event => {
-            if (button.enabled && (event.key === Qt.Key_Return || event.key === Qt.Key_Enter
-                    || event.key === Qt.Key_Space)) {
-                button.activated();
-                event.accepted = true;
-            }
-        }
-    }
-
-    // One labelled field of the edit form. Plain TextInput rather than a
-    // Controls TextField, for the reason Composer.qml spells out.
+    // One labelled field of the edit form: an InlineRename in a bordered
+    // box. Enter alone does nothing here — a form with several fields saves
+    // on Ctrl+Enter, and Esc discards the whole edit.
     component Field: Column {
         id: field
         property string label
@@ -231,7 +160,7 @@ Rectangle {
             border.width: 1
             border.color: input.activeFocus ? Theme.amber(0.55) : Theme.border
 
-            TextInput {
+            InlineRename {
                 id: input
                 objectName: "hookField-" + field.name
                 anchors.left: parent.left
@@ -239,21 +168,13 @@ Rectangle {
                 anchors.right: parent.right
                 anchors.rightMargin: Theme.gap
                 anchors.verticalCenter: parent.verticalCenter
+                placeholder: field.placeholder
                 text: root.fields[field.name] || ""
-                color: Theme.foregroundBright
-                selectByMouse: true
-                selectionColor: Theme.selection
-                selectedTextColor: Theme.foregroundBright
                 font.family: field.mono ? Theme.fontFamilyMono : Theme.fontFamily
-                font.pixelSize: Theme.fontSize
-                clip: true
                 Accessible.name: field.label
 
-                onTextChanged: if (input.text !== (root.fields[field.name] || "")) root.setField(field.name, input.text)
-                Keys.onEscapePressed: event => {
-                    root.endEdit();
-                    event.accepted = true;
-                }
+                onEdited: value => { if (value !== (root.fields[field.name] || "")) root.setField(field.name, value); }
+                onCancelled: root.endEdit()
                 Keys.onPressed: event => {
                     if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
                             && (event.modifiers & Qt.ControlModifier)) {
@@ -262,16 +183,6 @@ Rectangle {
                     }
                 }
                 Component.onCompleted: if (field.takeFocus) input.forceActiveFocus()
-
-                Text {
-                    anchors.left: parent.left
-                    anchors.verticalCenter: parent.verticalCenter
-                    visible: input.text === ""
-                    text: field.placeholder
-                    textFormat: Text.PlainText
-                    color: Theme.foregroundFaint
-                    font: input.font
-                }
             }
         }
     }
@@ -331,20 +242,20 @@ Rectangle {
                 anchors.top: parent.top
                 spacing: Theme.gap
 
-                PaneButton {
+                ActionButton {
                     objectName: "hooksNewButton"
                     label: "+ New"
                     enabled: root.editable && !root.busy && !root.editing
                     Accessible.description: "Add a command hook to hooks.json"
-                    onActivated: root.beginDraft()
+                    onClicked: root.beginDraft()
                 }
 
-                PaneButton {
+                ActionButton {
                     objectName: "hooksRefreshButton"
                     label: Ghostd.hooksLoading ? "Refreshing" : "Refresh"
                     enabled: !Ghostd.hooksLoading && !root.editing
                     Accessible.description: "Reload hook status and configuration"
-                    onActivated: root.load(true)
+                    onClicked: root.load(true)
                 }
             }
         }
@@ -584,7 +495,7 @@ Rectangle {
                     objectName: "hookCommand"
                     width: parent.width
                     visible: hookCard.config
-                    text: hookCard.modelData.command
+                    text: hookCard.modelData.fields.command
                     textFormat: Text.PlainText
                     color: Theme.foreground
                     font.family: Theme.fontFamilyMono
@@ -633,7 +544,7 @@ Rectangle {
                         spacing: Theme.gap / 2
 
                         Repeater {
-                            model: ["before_prompt", "session_stop", "conversation_idle"]
+                            model: HookStatus.EVENT_ORDER
 
                             Rectangle {
                                 id: chip
@@ -730,18 +641,18 @@ Rectangle {
                     Row {
                         spacing: Theme.gap
 
-                        PaneButton {
+                        ActionButton {
                             objectName: "hookSaveButton"
                             label: "Save"
                             primary: true
                             enabled: !hookCard.config || root.fields.command.trim() !== ""
-                            onActivated: root.commitEdit()
+                            onClicked: root.commitEdit()
                         }
 
-                        PaneButton {
+                        ActionButton {
                             objectName: "hookCancelButton"
                             label: "Cancel"
-                            onActivated: root.endEdit()
+                            onClicked: root.endEdit()
                         }
 
                         Text {

@@ -1,5 +1,6 @@
 module qs.components
 
+ActionButton 1.0 ActionButton.qml
 ActivityLine 1.0 ActivityLine.qml
 AskDialog 1.0 AskDialog.qml
 Bubble 1.0 Bubble.qml

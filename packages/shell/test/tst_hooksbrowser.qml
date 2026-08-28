@@ -83,10 +83,7 @@ TestCase {
         Ghostd.hooksRequestFactory = function () { return tc.fakeRequest(); };
         Ghostd.hookConfig = null;
         Ghostd.hookConfigPath = "";
-        Ghostd.hookConfigAvailable = false;
         Ghostd.hookConfigLoaded = true;
-        Ghostd.hookConfigLoading = false;
-        Ghostd.hookConfigBusy = false;
         Ghostd.hookConfigError = "";
         Ghostd.activeHooks = [{
             event: "conversation_idle",
@@ -108,9 +105,7 @@ TestCase {
         Ghostd.retireHooksRequest();
         Ghostd.hooksRequestFactory = null;
         Ghostd.hookConfig = null;
-        Ghostd.hookConfigAvailable = false;
         Ghostd.hookConfigLoaded = false;
-        Ghostd.hookConfigBusy = false;
         Ghostd.hookConfigError = "";
         Ghostd.activeHooks = [];
         Ghostd.hookEvents = [];
@@ -153,7 +148,6 @@ TestCase {
         Ghostd.activeHookCount = 2;
         Ghostd.hookConfig = configDocument();
         Ghostd.hookConfigPath = "/owner/.config/ghost/hooks.json";
-        Ghostd.hookConfigAvailable = true;
         const browser = createTemporaryObject(browserComponent, tc);
         verify(browser !== null);
         tryVerify(function () { return findChild(browser, "hookCommand") !== null; });
@@ -252,7 +246,6 @@ TestCase {
         Ghostd.activeHookCount = 2;
         Ghostd.hookConfig = configDocument();
         Ghostd.hookConfigPath = "/owner/.config/ghost/hooks.json";
-        Ghostd.hookConfigAvailable = true;
         const browser = createTemporaryObject(browserComponent, tc);
         tryVerify(function () { return findChild(browser, "hookCommand") !== null; });
         const cards = hookCards(browser);

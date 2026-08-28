@@ -1,4 +1,5 @@
 .pragma library
+.import "HookStatus.js" as HookStatus
 
 // The owner's hooks.json as the Hooks pane edits it. The daemon's document is
 // `{ hooks: { <event>: [ { hooks: [ handler, ... ] }, ... ] } }`, where a
@@ -10,15 +11,22 @@
 // ghostd restarts. The daemon's loader is the only validator: a refused
 // document comes back as its message, never as a rule re-implemented here.
 
-const EVENT_ORDER = ["before_prompt", "session_stop", "conversation_idle"];
+const EVENT_ORDER = HookStatus.EVENT_ORDER;
 const DRAFT_KEY = "draft";
-
-function isObject(value) {
-    return value !== null && typeof value === "object" && !Array.isArray(value);
-}
+const isObject = HookStatus.isObject;
 
 function text(value) {
     return value === undefined || value === null ? "" : String(value);
+}
+
+function trimmed(fields, key) {
+    return text(fields[key]).trim();
+}
+
+/** A number if it parses, else as typed so the daemon's message names the field. */
+function numberOrText(value) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : value;
 }
 
 function clone(document) {
@@ -63,6 +71,28 @@ function blankFields() {
     return { command: "", name: "", description: "", timeout: "", idleSeconds: "" };
 }
 
+/** One pane row; `fields` is what its edit form starts from. */
+function card(overrides) {
+    return Object.assign({
+        key: "",
+        source: "config",
+        event: "",
+        name: "",
+        description: "",
+        idleSeconds: 0,
+        settingsKey: "",
+        pendingIdleSeconds: 0,
+        fields: blankFields(),
+        groupIndex: -1,
+        handlerIndex: -1
+    }, overrides);
+}
+
+/** The row a new command hook is drafted in; its event lives on the pane. */
+function draftCard() {
+    return card({ key: DRAFT_KEY });
+}
+
 /** The editable fields of one handler as typed text; absent fields are "". */
 function fieldsOf(handler) {
     const fields = blankFields();
@@ -100,7 +130,7 @@ function cards(statusHooks, document) {
             const fields = blankFields();
             fields.idleSeconds = text(tuning.idleSeconds);
             const configured = Number(fields.idleSeconds);
-            out.push({
+            out.push(card({
                 key: "builtin:" + event + ":" + b,
                 source: "builtin",
                 event,
@@ -112,11 +142,8 @@ function cards(statusHooks, document) {
                 // restart is what applies it.
                 pendingIdleSeconds: settingsKey !== "" && fields.idleSeconds !== ""
                     && configured !== (row.idleSeconds || 0) ? configured : 0,
-                command: "",
-                fields,
-                groupIndex: -1,
-                handlerIndex: -1
-            });
+                fields
+            }));
         }
         for (let i = 0; i < entries.length; i += 1) {
             const entry = entries[i];
@@ -124,21 +151,17 @@ function cards(statusHooks, document) {
             const status = aligned ? configRows[i] : null;
             const fields = fieldsOf(entry.handler);
             const idle = Number(fields.idleSeconds);
-            out.push({
+            out.push(card({
                 key: "config:" + event + ":" + entry.groupIndex + ":" + entry.handlerIndex,
-                source: "config",
                 event,
-                settingsKey: "",
-                pendingIdleSeconds: 0,
                 name: status ? status.name : (fields.name === "" ? "Command hook" : fields.name),
                 description: status ? status.description : fields.description,
                 idleSeconds: status ? status.idleSeconds || 0
                     : (Number.isSafeInteger(idle) && idle > 0 ? idle : 0),
-                command: fields.command,
                 fields,
                 groupIndex: entry.groupIndex,
                 handlerIndex: entry.handlerIndex
-            });
+            }));
         }
     }
     return out;
@@ -159,15 +182,14 @@ function builtinTuning(document, key) {
 function withBuiltinIdle(document, key, fields) {
     const next = clone(document);
     if (!isObject(next.builtin)) next.builtin = {};
-    const value = text(fields.idleSeconds).trim();
+    const value = trimmed(fields, "idleSeconds");
     if (value === "") {
         delete next.builtin[key];
         if (Object.keys(next.builtin).length === 0) delete next.builtin;
         return next;
     }
-    const number = Number(value);
     next.builtin[key] = Object.assign(isObject(next.builtin[key]) ? next.builtin[key] : {},
-        { idleSeconds: Number.isFinite(number) ? number : value });
+        { idleSeconds: numberOrText(value) });
     return next;
 }
 
@@ -178,9 +200,8 @@ function find(cardList, key) {
 
 /**
  * One handler from the fields as typed. An emptied optional field is dropped
- * so the daemon's default applies; a number that does not parse is sent as
- * typed so the daemon's message names the field. `idleSeconds` belongs only
- * to a conversation_idle hook.
+ * so the daemon's default applies. `idleSeconds` belongs only to a
+ * conversation_idle hook.
  */
 function handlerFrom(existing, event, fields) {
     const handler = isObject(existing) ? clone(existing) : {};
@@ -189,17 +210,12 @@ function handlerFrom(existing, event, fields) {
     const optional = ["name", "description", "timeout", "idleSeconds"];
     for (let i = 0; i < optional.length; i += 1) {
         const key = optional[i];
-        const value = text(fields[key]).trim();
+        const value = trimmed(fields, key);
         if (value === "" || (key === "idleSeconds" && event !== "conversation_idle")) {
             delete handler[key];
             continue;
         }
-        if (key === "timeout" || key === "idleSeconds") {
-            const number = Number(value);
-            handler[key] = Number.isFinite(number) ? number : value;
-        } else {
-            handler[key] = value;
-        }
+        handler[key] = key === "timeout" || key === "idleSeconds" ? numberOrText(value) : value;
     }
     return handler;
 }
