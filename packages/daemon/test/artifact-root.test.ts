@@ -10,9 +10,11 @@ import {
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { listOmpExtensionRoots } from "@oh-my-pi/pi-coding-agent/discovery/omp-extension-roots";
+import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   loadGhostHookExtensions,
+  scopeGhostSessionArtifactRediscovery,
   withGhostArtifactRoot,
 } from "../src/artifact-root.js";
 
@@ -39,6 +41,30 @@ describe("ghost artifact loading", () => {
 
     expect(roots).toEqual([{ path: dir, name: dir.split("/").at(-1), level: "user" }]);
     expect(existsSync(join(dir, ".omp"))).toBe(false);
+  });
+
+  it("keeps both rediscovery entry points inside the home after rebinding", async () => {
+    const dir = makeHome();
+    const observed: string[][] = [];
+    const observe = async (): Promise<void> => {
+      const roots = await listOmpExtensionRoots({
+        // The operational cwd of an unbound conversation, which native OMP
+        // discovery would otherwise treat as a package root.
+        cwd: homedir(),
+        home: homedir(),
+        repoRoot: null,
+      });
+      observed.push(roots.map((root) => root.path));
+    };
+    const session = { refreshSkills: observe, prompt: observe } as unknown as AgentSession;
+
+    scopeGhostSessionArtifactRediscovery(session, dir);
+    await session.refreshSkills();
+    await session.prompt("proof the sheet");
+
+    // #37: these two methods are the whole enforcement surface. Anything that
+    // silently drops one falls back to cwd discovery, so both are pinned here.
+    expect(observed).toEqual([[dir], [dir]]);
   });
 
   it("preloads only executable hook files from the home", async () => {
