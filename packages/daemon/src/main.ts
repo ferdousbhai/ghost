@@ -9,7 +9,12 @@ import { ClaudeCodeProbe } from "./claude-code.js";
 import { importCommand } from "./import-command.js";
 import { legacyDocumentsPlacementCommand } from "./legacy-documents-placement.js";
 import { loginCommand } from "./login-command.js";
-import { loadConfig, type DaemonConfig, type DaemonConfigOverrides } from "./config.js";
+import {
+  defaultConfigPath,
+  loadConfig,
+  type DaemonConfig,
+  type DaemonConfigOverrides,
+} from "./config.js";
 import { scrubProviderEnv } from "./env-scrub.js";
 import { DocumentsService } from "./documents.js";
 import { ConversationMaintenance, MEMORY_UPKEEP_SETTINGS_KEY } from "./conversation-maintenance.js";
@@ -25,6 +30,8 @@ import { McpCatalog } from "./mcp-catalog.js";
 import { ModelCatalog } from "./model-catalog.js";
 import { createRelayHub } from "./relay.js";
 import { relayTokenCommand } from "./relay-token.js";
+import { remoteCommand } from "./remote-command.js";
+import { RemoteServe } from "./remote-serve.js";
 import { startDaemonServer, type ListeningServer } from "./server.js";
 import { SessionHost } from "./session-host.js";
 
@@ -37,6 +44,7 @@ Usage:
   ghostd login [<ghost>] [--provider <id>] [--api-key] [options]
   ghostd relay-token [--rotate] [--quiet]
   ghostd api-token [--rotate] [--quiet]
+  ghostd remote [on|off|status]
   ghostd hook-smol-complete
 
 Subcommands:
@@ -55,6 +63,8 @@ Subcommands:
                            (minting one on first run). The shell reads the file
                            itself; this is for curl, scripts, and diagnosing a
                            401. --rotate mints a new one and invalidates the old.
+  remote                   Show or change the daemon's tailnet exposure through
+                           Tailscale Serve. Defaults to status.
   hook-smol-complete       Internal command-hook bridge. Reads ghost_home and
                            prompt as JSON on stdin and writes one smol-model
                            completion as JSON on stdout.
@@ -289,9 +299,11 @@ async function readVersion(): Promise<string> {
 
 export async function main(argv: string[] = process.argv.slice(2), runtime: MainRuntime = {}): Promise<number> {
   // Subcommands own their narrower persistence lifecycle. Token commands touch
-  // only XDG state; login and import take the home reservation themselves.
+  // only XDG state, remote touches config and Tailscale Serve, and login/import
+  // take the home reservation themselves.
   if (argv[0] === "relay-token") return relayTokenCommand(argv.slice(1));
   if (argv[0] === "api-token") return apiTokenCommand(argv.slice(1));
+  if (argv[0] === "remote") return remoteCommand(argv.slice(1));
   if (argv[0] === "login") return loginCommand(argv.slice(1));
   if (argv[0] === "import") return importCommand(argv.slice(1));
   if (argv[0] === "hook-smol-complete") return hookSmolCompleteCommand(argv.slice(1));
@@ -480,6 +492,7 @@ async function serveDaemon(
     onModelRoutingChanged: (name) => host.rebindModel(name),
   });
   const mcp = new McpCatalog({ registry, homeOperations });
+  const remoteServe = new RemoteServe(config.port, config.remote);
 
   let listening: ListeningServer;
   try {
@@ -497,6 +510,8 @@ async function serveDaemon(
       address: config.host,
       relay: relay ?? null,
       remote: new RemoteAccess(config.remote),
+      remoteServe,
+      configPath: config.configPath ?? defaultConfigPath(process.env, homedir()),
     });
   } catch (error) {
     logger.error("could not bind", {
@@ -505,6 +520,17 @@ async function serveDaemon(
       error: (error as Error).message,
     });
     return 1;
+  }
+
+  remoteServe.setPort(listening.port);
+  if (config.remote.enabled) {
+    try {
+      const status = await remoteServe.ensure(config.remote.enabled);
+      if (status.url && !status.problem) logger.info("remote access ready", { url: status.url });
+      else logger.warn("remote access is unavailable", { problem: status.problem });
+    } catch (error) {
+      logger.warn("could not configure remote access", { error: (error as Error).message });
+    }
   }
 
   logger.info("listening", {

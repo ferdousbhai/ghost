@@ -1,6 +1,6 @@
 /**
  * The page a phone or another laptop opens over the tailnet: one HTML file,
- * no framework, served by the daemon at `/` and `/remote`. It talks to the
+ * no framework, served by the daemon at `/`. It talks to the
  * same API the shell uses; `tailscale serve` supplies the caller's identity,
  * so the page carries no token. Guests see a read-only view; the owner can
  * type.
@@ -10,6 +10,8 @@ import { createHash } from "node:crypto";
 export const REMOTE_VIEWER_HTML = `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#111318">
+<link rel="manifest" href="/manifest.webmanifest">
 <title>ghost</title>
 <style>
   :root { color-scheme: light dark; font: 15px/1.45 system-ui, sans-serif; }
@@ -159,4 +161,13 @@ function inlineHash(tag: "script" | "style"): string {
 }
 
 /** Strict: only the page's own inline script and style, and only this origin's API. */
-export const REMOTE_VIEWER_CSP = `default-src 'none'; script-src ${inlineHash("script")}; style-src ${inlineHash("style")}; connect-src 'self'; form-action 'none'; base-uri 'none'`;
+export const REMOTE_VIEWER_CSP = `default-src 'none'; script-src ${inlineHash("script")}; style-src ${inlineHash("style")}; connect-src 'self'; manifest-src 'self'; form-action 'none'; base-uri 'none'`;
+
+export const REMOTE_MANIFEST = {
+  name: "Ghost",
+  short_name: "Ghost",
+  start_url: "/",
+  display: "standalone",
+  background_color: "#111318",
+  theme_color: "#111318",
+} as const;

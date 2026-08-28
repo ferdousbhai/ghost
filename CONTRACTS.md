@@ -717,10 +717,8 @@ Three checks, applied to every `/api` request before routing:
    without a preflight.
 
 **Tailnet identity** (`packages/daemon/src/tailscale-identity.ts`) is the one
-alternative to the bearer token. Omarchy ships Tailscale; the owner runs
-`tailscale serve --bg 7717` (needs `tailscale set --operator=$USER` once, which
-Omarchy's installer does) and Tailscale terminates TLS on the node's tailnet
-name, proxies to the loopback daemon, and stamps `Tailscale-User-Login`,
+alternative to the bearer token. Ghost owns a Tailscale Serve proxy to the
+loopback daemon, and Tailscale stamps `Tailscale-User-Login`,
 `Tailscale-User-Name`, and `Tailscale-User-Profile-Pic` on each request —
 stripping any such header a client sent itself. Ghost accepts that identity
 exactly as Tailscale documents it: only on a loopback connection (a local
@@ -738,10 +736,27 @@ from), else `403 forbidden_origin`, checked before any credential. `GET
 /api/remote/whoami` reports `{ login, role, name? }` for an identity caller
 and `{ login: null, role: "owner" }` for the token.
 
+**Remote access** is configured by `remote.enabled` (default `false`) and
+owned by `packages/daemon/src/remote-serve.ts`. `GET /api/remote` reports the
+Tailscale and Serve state; an owner-only `POST /api/remote { enabled }`
+changes it and durably updates the config file. `GET /api/remote/qr.svg`
+returns a no-store QR code for the active URL, while the unauthenticated
+`GET /manifest.webmanifest` makes the viewer installable. When the tailnet
+advertises certificate domains Ghost serves HTTPS on port 443; otherwise it
+serves HTTP on port 80. A configured exposure is idempotently re-applied after
+ghostd starts listening, including a change from HTTP to HTTPS when
+certificates become available. Status problems are `tailscale_missing`
+(`omarchy-install-service-tailscale`), `tailscale_stopped`, `not_logged_in`
+(`tailscale up`), `operator_required`
+(`sudo tailscale set --operator=$USER`), `serve_failed`, or
+`remote_unsupported`; codes without a parenthesized command have no automatic
+action to offer.
+
 The daemon serves a built-in viewer page at `GET /`
 (`packages/daemon/src/remote-viewer.ts`: one HTML file, no framework; its CSP
 allows only the page's own inline script and style by hash and `connect-src
-'self'`) that a phone or another laptop opens over the tailnet: ghost and
+'self'`, plus its own manifest) that a phone or another laptop opens over the
+tailnet: ghost and
 conversation pickers, the transcript, live refresh over `GET …/events`, and —
 for the owner only — a composer that posts to `…/messages` and renders the
 stream. It carries no token; the identity comes from `tailscale serve`, so on
@@ -1453,6 +1468,12 @@ one must not be a leak of both.
 - `GET  /api/remote/whoami` → `{ login, role, name? }` — the tailnet identity
   this request was admitted on, or `{ login: null, role: "owner" }` for a
   bearer-token caller. See "Tailnet identity" under Authentication.
+- `GET|POST /api/remote` → the exact remote exposure status, or owner-only
+  `{ enabled: boolean }` control persisted as `remote.enabled`.
+- `GET /api/remote/qr.svg` → a no-store `image/svg+xml` QR code for the active
+  remote URL; `404 not_found` while remote access is off.
+- `GET /manifest.webmanifest` → the unauthenticated, icon-free manifest for
+  installing the built-in viewer as a standalone app.
 - `GET|POST /api/ghosts/:name/sessions/:id/collab` owns one encrypted relay
   host through the `CollaborationManager` interface. GET returns
   `{ supported, active, readOnlyUrl?, writableUrl?, participants }` without

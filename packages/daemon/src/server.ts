@@ -1,11 +1,13 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
+import { homedir } from "node:os";
 import { isAbsolute } from "node:path";
 import { apiTokenMatches, readOrCreateApiToken } from "./api-token.js";
-import { REMOTE_VIEWER_CSP, REMOTE_VIEWER_HTML } from "./remote-viewer.js";
+import { assertLoopback, defaultConfigPath, writeConfigFile } from "./config.js";
+import { REMOTE_MANIFEST, REMOTE_VIEWER_CSP, REMOTE_VIEWER_HTML } from "./remote-viewer.js";
+import type { RemoteServe, RemoteStatus } from "./remote-serve.js";
 import type { RemoteAccess, TailscaleIdentity } from "./tailscale-identity.js";
 import type { AuthType, LoginManager } from "./auth.js";
-import { assertLoopback } from "./config.js";
 import {
   requireConversationIdentity,
   type ConversationIdentity,
@@ -91,6 +93,10 @@ export interface ServerOptions {
   apiToken?: string | null;
   /** Callers reaching the daemon through `tailscale serve`; omit to admit none. */
   remote?: RemoteAccess | null;
+  /** Owns the Tailscale Serve exposure and its QR code; null means unsupported. */
+  remoteServe?: RemoteServe | null;
+  /** Config file changed by `POST /api/remote`; defaults to the XDG path. */
+  configPath?: string;
 }
 
 export interface ListeningServer {
@@ -286,6 +292,29 @@ export function createDaemonServer(options: ServerOptions): Server {
     : options.relay;
   const apiToken = resolveApiToken(options.apiToken, logger);
   const remote = options.remote ?? null;
+  const remoteServe = options.remoteServe ?? null;
+  const configPath = options.configPath ?? defaultConfigPath(process.env, homedir());
+
+  const unsupportedRemoteStatus = (): RemoteStatus => ({
+    enabled: false,
+    state: "unavailable",
+    scheme: null,
+    hostname: null,
+    url: null,
+    tailscale: {
+      installed: false,
+      running: false,
+      loggedIn: false,
+      operator: false,
+      certs: false,
+    },
+    guests: "none",
+    owner: null,
+    problem: {
+      code: "remote_unsupported",
+      message: "Remote access is not supported by this daemon.",
+    },
+  });
 
   /**
    * The gate every `/api` request passes before it is routed: `null` when it
@@ -1766,6 +1795,20 @@ export function createDaemonServer(options: ServerOptions): Server {
           response.end(REMOTE_VIEWER_HTML);
           return;
         }
+        if (segments.length === 1 && segments[0] === "manifest.webmanifest") {
+          if (method !== "GET") {
+            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+            return;
+          }
+          const manifest = JSON.stringify(REMOTE_MANIFEST);
+          response.writeHead(200, {
+            "content-type": "application/manifest+json; charset=utf-8",
+            "content-length": Buffer.byteLength(manifest),
+            "cache-control": "no-store",
+          });
+          response.end(manifest);
+          return;
+        }
         if (segments[0] !== "api") {
           errorResponse(response, 404, "not_found", "Not found.");
           return;
@@ -1777,6 +1820,54 @@ export function createDaemonServer(options: ServerOptions): Server {
           }
           const identity = admission.identity;
           jsonResponse(response, 200, identity ? { login: identity.login, role: identity.role, ...(identity.name ? { name: identity.name } : {}) } : { login: null, role: "owner" });
+          return;
+        }
+        if (segments.length === 3 && segments[1] === "remote" && segments[2] === "qr.svg") {
+          if (method !== "GET") {
+            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+            return;
+          }
+          if (!remoteServe) {
+            errorResponse(response, 404, "not_found", "Remote access is off.");
+            return;
+          }
+          const status = await remoteServe.status();
+          if (!status.enabled || !status.url) {
+            errorResponse(response, 404, "not_found", "Remote access is off.");
+            return;
+          }
+          const svg = await remoteServe.qrSvg(status.url);
+          response.writeHead(200, {
+            "content-type": "image/svg+xml; charset=utf-8",
+            "content-length": Buffer.byteLength(svg),
+            "cache-control": "no-store",
+          });
+          response.end(svg);
+          return;
+        }
+        if (segments.length === 2 && segments[1] === "remote") {
+          if (method === "GET") {
+            jsonResponse(response, 200, remoteServe ? await remoteServe.status() : unsupportedRemoteStatus());
+            return;
+          }
+          if (method !== "POST") {
+            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+            return;
+          }
+          if (!remoteServe) {
+            errorResponse(response, 409, "not_supported", "Remote access is not supported by this daemon.");
+            return;
+          }
+          const body = await readJsonBody(request, maxBodyBytes);
+          if (body === null || typeof body !== "object" || Array.isArray(body)
+            || typeof (body as { enabled?: unknown }).enabled !== "boolean") {
+            errorResponse(response, 400, "invalid_request", '"enabled" must be a boolean.');
+            return;
+          }
+          const enabled = (body as { enabled: boolean }).enabled;
+          const status = enabled ? await remoteServe.enable() : await remoteServe.disable();
+          await writeConfigFile(configPath, { remote: { enabled } });
+          jsonResponse(response, 200, status);
           return;
         }
         if (segments[1] === "relay" && segments[2] === "status" && segments.length === 3) {

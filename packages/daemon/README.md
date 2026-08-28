@@ -333,28 +333,28 @@ ad-hoc prompts:
 
 ## Reach it from your phone (Tailscale)
 
-Omarchy ships Tailscale. Once (Omarchy's installer already does this):
+Omarchy ships Tailscale. On the machine running ghostd, turn on Ghost's
+tailnet viewer:
 
 ```sh
-sudo tailscale set --operator=$USER
+ghostd remote on
 ```
 
-Then, on the machine running ghostd:
+It prints the URL to open from any device on your tailnet. The built-in viewer
+shows your ghosts and conversations live and lets the owner type. The shell
+will offer the same switch. `ghostd remote status` shows the URL, owner, guest
+policy, and any action needed; `ghostd remote off` removes both of Ghost's
+managed Serve listeners.
 
-```sh
-tailscale serve --bg 7717
-```
-
-Open `https://<this-machine>.<tailnet>.ts.net/` from any device on your
-tailnet: the daemon's built-in viewer shows your ghosts and conversations
-live, and lets you type. Tailscale stamps your identity on each request; the
+Tailscale stamps your identity on each request; the
 login this node is signed in as owns the ghosts (set `remote.owner` in
 `~/.config/ghost/config.json` to change it), other tailnet members get a
-read-only view (`remote.guests: "none"` hides it from them). ghostd itself
-stays bound to loopback; `tailscale serve status` shows what is exposed and
-`tailscale serve --https=443 off` stops it. HTTPS needs certificates enabled
-for the tailnet (admin console → DNS → HTTPS Certificates); until then use
-`tailscale serve --bg --http=80 7717` and `http://<this-machine>/`.
+read-only view (`remote.guests: "none"` hides it from them), and ghostd itself
+stays bound to loopback. Ghost uses HTTPS when the tailnet has certificates
+enabled and otherwise uses HTTP on port 80. An `operator_required` problem
+line means to run `sudo tailscale set --operator=$USER` once (Omarchy's
+installer normally already has); `not_logged_in` offers `tailscale up`, and
+`tailscale_missing` offers `omarchy-install-service-tailscale`.
 
 ## HTTP API
 

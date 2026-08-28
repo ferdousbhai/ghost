@@ -1,7 +1,10 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { DocumentsService } from "../src/documents.js";
 import { HomeOperationCoordinator } from "../src/home-operations.js";
 import { startDaemonServer, type ListeningServer } from "../src/server.js";
+import { RemoteServe, type RemoteStatus } from "../src/remote-serve.js";
 import { SessionHost } from "../src/session-host.js";
 import { RemoteAccess, type RemoteAccessOptions } from "../src/tailscale-identity.js";
 import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
@@ -21,7 +24,10 @@ async function stop(): Promise<void> {
 }
 afterEach(stop);
 
-async function serve(remote: RemoteAccessOptions | null = {}): Promise<string> {
+async function serve(
+  remote: RemoteAccessOptions | null = {},
+  remoteServe: RemoteServe | null = null,
+): Promise<string> {
   temp = makeTempGhosts();
   temp.registry.ensureRoot();
   seedGhost(temp.root, { name: "casper" });
@@ -35,6 +41,8 @@ async function serve(remote: RemoteAccessOptions | null = {}): Promise<string> {
     port: 0,
     apiToken: TOKEN,
     remote: remote === null ? null : new RemoteAccess({ selfLogin: async () => "Owner@Example.com", ...remote }),
+    remoteServe,
+    configPath: join(temp.root, "config.json"),
   });
   return `http://127.0.0.1:${listening.port}`;
 }
@@ -44,6 +52,56 @@ const asTailnet = (login: string, extra: Record<string, string> = {}) => ({
   "tailscale-user-name": "Some One",
   ...extra,
 });
+
+function remoteStatus(enabled: boolean): RemoteStatus {
+  return {
+    enabled,
+    state: enabled ? "on" : "off",
+    scheme: enabled ? "https" : null,
+    hostname: "ghostbox.example.ts.net",
+    url: enabled ? "https://ghostbox.example.ts.net/" : null,
+    tailscale: {
+      installed: true,
+      running: true,
+      loggedIn: true,
+      operator: true,
+      certs: true,
+    },
+    guests: "read-only",
+    owner: "owner@example.com",
+    problem: null,
+  };
+}
+
+class FakeRemoteServe extends RemoteServe {
+  readonly mutations: boolean[] = [];
+  current: RemoteStatus;
+
+  constructor(enabled: boolean) {
+    super(7717, { run: async () => { throw new Error("fake runner should not be called"); } });
+    this.current = remoteStatus(enabled);
+  }
+
+  override async status(): Promise<RemoteStatus> {
+    return this.current;
+  }
+
+  override async enable(): Promise<RemoteStatus> {
+    this.mutations.push(true);
+    this.current = remoteStatus(true);
+    return this.current;
+  }
+
+  override async disable(): Promise<RemoteStatus> {
+    this.mutations.push(false);
+    this.current = remoteStatus(false);
+    return this.current;
+  }
+
+  override async qrSvg(url: string): Promise<string> {
+    return `<svg data-url="${url}"></svg>`;
+  }
+}
 
 describe("tailnet identity", () => {
   it("admits the owner fully and guests read-only", async () => {
@@ -96,5 +154,99 @@ describe("tailnet identity", () => {
     expect(await page.text()).toContain("/remote/whoami");
     expect((await fetch(`${base}/`, { method: "POST" })).status).toBe(405);
     expect((await fetch(`${base}/remote`)).status).toBe(404);
+  });
+
+  it("serves the web app manifest without authentication", async () => {
+    const base = await serve();
+    const response = await fetch(`${base}/manifest.webmanifest`);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("application/manifest+json");
+    expect(await response.json()).toEqual({
+      name: "Ghost",
+      short_name: "Ghost",
+      start_url: "/",
+      display: "standalone",
+      background_color: "#111318",
+      theme_color: "#111318",
+    });
+  });
+});
+
+describe("remote management", () => {
+  it("gets status and persists owner POST changes", async () => {
+    const fake = new FakeRemoteServe(false);
+    const base = await serve({}, fake);
+    const headers = { authorization: `Bearer ${TOKEN}` };
+
+    expect(await (await fetch(`${base}/api/remote`, { headers })).json())
+      .toEqual(remoteStatus(false));
+    const response = await fetch(`${base}/api/remote`, {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify({ enabled: true }),
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(remoteStatus(true));
+    expect(fake.mutations).toEqual([true]);
+    expect(JSON.parse(readFileSync(join(temp!.root, "config.json"), "utf8")))
+      .toEqual({ remote: { enabled: true } });
+  });
+
+  it("rejects malformed changes and guest writes", async () => {
+    const fake = new FakeRemoteServe(false);
+    const base = await serve({}, fake);
+    const invalid = await fetch(`${base}/api/remote`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+      body: JSON.stringify({ enabled: "yes" }),
+    });
+    expect(invalid.status).toBe(400);
+    expect(await invalid.json()).toMatchObject({ error: { code: "invalid_request" } });
+
+    const guest = await fetch(`${base}/api/remote`, {
+      method: "POST",
+      headers: { ...asTailnet("guest@example.com"), "content-type": "application/json" },
+      body: JSON.stringify({ enabled: true }),
+    });
+    expect(guest.status).toBe(403);
+    expect(await guest.json()).toMatchObject({ error: { code: "read_only" } });
+    expect(fake.mutations).toEqual([]);
+  });
+
+  it("serves a no-store QR only while remote access is on", async () => {
+    const fake = new FakeRemoteServe(true);
+    const base = await serve({}, fake);
+    const headers = { authorization: `Bearer ${TOKEN}` };
+    const qr = await fetch(`${base}/api/remote/qr.svg`, { headers });
+    expect(qr.status).toBe(200);
+    expect(qr.headers.get("content-type")).toContain("image/svg+xml");
+    expect(qr.headers.get("cache-control")).toBe("no-store");
+    expect(await qr.text()).toContain("https://ghostbox.example.ts.net/");
+
+    fake.current = remoteStatus(false);
+    const off = await fetch(`${base}/api/remote/qr.svg`, { headers });
+    expect(off.status).toBe(404);
+    expect(await off.json()).toMatchObject({ error: { code: "not_found" } });
+  });
+
+  it("returns the stable unsupported status and refuses POST without RemoteServe", async () => {
+    const base = await serve({}, null);
+    const headers = { authorization: `Bearer ${TOKEN}` };
+    const status = await fetch(`${base}/api/remote`, { headers });
+    expect(await status.json()).toMatchObject({
+      enabled: false,
+      state: "unavailable",
+      scheme: null,
+      hostname: null,
+      url: null,
+      problem: { code: "remote_unsupported" },
+    });
+    const post = await fetch(`${base}/api/remote`, {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify({ enabled: true }),
+    });
+    expect(post.status).toBe(409);
+    expect(await post.json()).toMatchObject({ error: { code: "not_supported" } });
   });
 });

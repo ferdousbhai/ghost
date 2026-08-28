@@ -36,9 +36,12 @@ export {
   DEFAULT_PORT,
   defaultConfigPath,
   loadConfig,
+  writeConfigFile,
   type DaemonConfig,
   type DaemonConfigFile,
   type DaemonConfigOverrides,
+  type RemoteConfig,
+  type RemoteConfigFile,
 } from "./config.js";
 export {
   CLAUDE_CODE_BINARY_ENV,
@@ -338,6 +341,14 @@ export {
   type ListeningServer,
   type ServerOptions,
 } from "./server.js";
+export {
+  RemoteServe,
+  type CommandResult as RemoteCommandResult,
+  type CommandRunner as RemoteCommandRunner,
+  type RemoteProblem,
+  type RemoteServeOptions,
+  type RemoteStatus,
+} from "./remote-serve.js";
 export {
   conversationIdFromSessionFile,
   DEFAULT_TRANSCRIPT_LIMIT,
