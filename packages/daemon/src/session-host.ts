@@ -132,6 +132,7 @@ import {
   type GhostModelRoleBinding,
 } from "./models.js";
 import {
+  asRuntimeSessionEvent,
   createPiMessagesAdapter,
   type PiMessagesEvent,
   zeroUsage,
@@ -4633,7 +4634,7 @@ export class SessionHost {
       deferAgentEnd: true,
     });
     const unsubscribe = hosted.session.subscribe((event: AgentSessionEvent) => {
-      adapter.handle(event);
+      adapter.handle(asRuntimeSessionEvent(event));
     });
 
     const onAbort = () => {
@@ -6207,7 +6208,7 @@ export class SessionHost {
     let committedActivity: MaintenanceOwnerActivity | null | undefined;
     let turnFailure: { error: unknown; aborted: boolean } | undefined;
     try {
-      unsubscribe = hosted.session.subscribe((event: AgentSessionEvent) => adapter.handle(event));
+      unsubscribe = hosted.session.subscribe((event: AgentSessionEvent) => adapter.handle(asRuntimeSessionEvent(event)));
       options.signal?.addEventListener("abort", onAbort, { once: true });
       const probe = await hosted.session.navigateTree(options.entryId, { allowAskReopen: true });
       if (!probe.reopenAsk) {
@@ -6223,7 +6224,7 @@ export class SessionHost {
         toolName: "ask",
         args: { questions: probe.reopenAsk.questions },
         intent: "Re-answer an earlier question",
-      } as AgentSessionEvent);
+      });
       this.recordToolCwd(hosted, syntheticId, hosted.session.sessionManager.getCwd());
 
       const toolSession: ToolSession = {
@@ -6259,7 +6260,7 @@ export class SessionHost {
         toolName: "ask",
         result,
         isError: result.isError === true,
-      } as AgentSessionEvent);
+      });
 
       const committed = await hosted.session.navigateTree(options.entryId, {
         allowAskReopen: true,
