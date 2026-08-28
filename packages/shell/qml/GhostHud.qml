@@ -134,7 +134,7 @@ FloatingWindow {
     minimumSize: Qt.size(568, 360)
 
     function showSection(section: string): void {
-        if (["chat", "docs", "memory", "agents", "commands", "hooks", "mcp", "connect", "character"]
+        if (["chat", "docs", "memory", "commands", "hooks", "mcp", "connect", "character"]
                 .indexOf(section) < 0)
             return;
         hud.loginOpen = false;
@@ -153,8 +153,8 @@ FloatingWindow {
             Ghostd.fetchConnect(false);
         } else if (section === "docs") {
             Ghostd.fetchDocuments("", "", false, false);
-        } else {
-            Ghostd.fetchContext(false);
+        } else if (section === "memory") {
+            Ghostd.fetchMemory(false);
         }
     }
 
@@ -1044,16 +1044,31 @@ FloatingWindow {
                 }
             }
 
-            // Memory, inactive agent definitions, and character replace chat rather than
-            // nesting its roster/conversation sidebar inside their own index.
-            ContextBrowser {
-                id: contextBrowser
-                visible: ["memory", "agents", "character"]
-                    .indexOf(hud.currentSection) >= 0
+            // Memory and character replace chat rather than nesting its
+            // roster/conversation sidebar inside their own surface.
+            MemoryList {
+                id: memoryList
+                visible: hud.currentSection === "memory"
                     && !hud.loginOpen && !hud.switcherOpen
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                section: hud.currentSection
+            }
+
+            // character.md is a real file, so it gets the real file editor.
+            // Instantiated only while shown: leaving flushes and returning
+            // re-reads, the same as the workbench.
+            Loader {
+                id: characterPane
+                readonly property string path: Workbench.absolute("character.md")
+                active: hud.currentSection === "character" && characterPane.path !== ""
+                visible: active && !hud.loginOpen && !hud.switcherOpen
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+
+                sourceComponent: FilePane {
+                    filePath: characterPane.path
+                    onClosed: hud.showSection("chat")
+                }
             }
 
             // Machine-shared Documents have their own lazy folder hierarchy;

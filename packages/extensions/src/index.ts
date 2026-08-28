@@ -31,6 +31,7 @@ export {
 export {
   assertWritableMemory,
   coerceMemorySlug,
+  compareMemoryNewestFirst,
   deriveMemoryIndex,
   MAX_MEMORY_FILE_BYTES,
   MAX_MEMORY_FILE_CONTENT_LENGTH,

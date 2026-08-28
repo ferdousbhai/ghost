@@ -8,11 +8,11 @@ import {
   requireConversationIdentity,
   type ConversationIdentity,
 } from "./conversation-identity.js";
-import { readGhostContext } from "./context-catalog.js";
 import {
-  trashGhostContextFile,
-  type TrashableContextSection,
-} from "./context-files.js";
+  listGhostMemory,
+  trashGhostMemoryFile,
+  writeGhostMemory,
+} from "./memory-files.js";
 import { DocumentsService } from "./documents.js";
 import type {
   McpCatalog,
@@ -414,16 +414,38 @@ export function createDaemonServer(options: ServerOptions): Server {
   };
 
   /**
-   * Everything the owner's right-hand context rail can browse. The catalog is
-   * rebuilt from the ghost home and the project snapshot on every request; no second
-   * index is stored beside the plain files.
+   * The owner's memory list: the plain files, read from disk on every request.
    */
-  const handleGhostContext = async (
+  const handleListMemory = async (
     ghostName: string,
     response: ServerResponse,
   ): Promise<void> => {
     const ghost = options.registry.get(ghostName);
-    jsonResponse(response, 200, await readGhostContext(ghost.dir));
+    jsonResponse(response, 200, await listGhostMemory(ghost.dir));
+  };
+
+  const handleWriteMemory = async (
+    ghostName: string,
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): Promise<void> => {
+    const body = await readJsonBody(request, maxBodyBytes);
+    if (body === null || typeof body !== "object" || Array.isArray(body)) {
+      errorResponse(response, 400, "invalid_request", "Request body must be a JSON object.");
+      return;
+    }
+    const { content, name } = body as { content?: unknown; name?: unknown };
+    if (typeof content !== "string") {
+      errorResponse(response, 400, "invalid_request", '"content" must be a string.');
+      return;
+    }
+    if (name !== undefined && typeof name !== "string") {
+      errorResponse(response, 400, "invalid_request", '"name" must be a string when present.');
+      return;
+    }
+    const ghost = options.registry.get(ghostName);
+    const written = await writeGhostMemory(ghost.dir, { content, name });
+    jsonResponse(response, 200, { ok: true, ...written });
   };
 
   const handleDocuments = async (
@@ -487,7 +509,7 @@ export function createDaemonServer(options: ServerOptions): Server {
     jsonResponse(response, 200, { ok: true, ...await documents.trash(path) });
   };
 
-  const handleTrashGhostContext = async (
+  const handleTrashMemory = async (
     ghostName: string,
     request: IncomingMessage,
     response: ServerResponse,
@@ -497,15 +519,7 @@ export function createDaemonServer(options: ServerOptions): Server {
       errorResponse(response, 400, "invalid_request", "Request body must be a JSON object.");
       return;
     }
-    const { section, path, confirm } = body as {
-      section?: unknown;
-      path?: unknown;
-      confirm?: unknown;
-    };
-    if (section !== "memory") {
-      errorResponse(response, 400, "invalid_request", '"section" must be "memory".');
-      return;
-    }
+    const { path, confirm } = body as { path?: unknown; confirm?: unknown };
     if (typeof path !== "string" || path === "") {
       errorResponse(response, 400, "invalid_request", '"path" must be a non-empty string.');
       return;
@@ -515,17 +529,12 @@ export function createDaemonServer(options: ServerOptions): Server {
         response,
         400,
         "confirmation_required",
-        '"confirm" must exactly repeat the context file path.',
+        '"confirm" must exactly repeat the memory file path.',
       );
       return;
     }
     const ghost = options.registry.get(ghostName);
-    const trashed = trashGhostContextFile(
-      ghost.dir,
-      section as TrashableContextSection,
-      path,
-    );
-    jsonResponse(response, 200, { ok: true, ...trashed });
+    jsonResponse(response, 200, { ok: true, ...trashGhostMemoryFile(ghost.dir, path) });
   };
 
   const handleGreeting = async (
@@ -1734,11 +1743,10 @@ export function createDaemonServer(options: ServerOptions): Server {
         if (segments.length === 3 && method === "DELETE") {
           return await handleDeleteGhost(ghostName, url, response);
         }
-        if (segments.length === 4 && segments[3] === "context") {
-          if (method === "GET") return await handleGhostContext(ghostName, response);
-          if (method === "DELETE") {
-            return await handleTrashGhostContext(ghostName, request, response);
-          }
+        if (segments.length === 4 && segments[3] === "memory") {
+          if (method === "GET") return await handleListMemory(ghostName, response);
+          if (method === "PUT") return await handleWriteMemory(ghostName, request, response);
+          if (method === "DELETE") return await handleTrashMemory(ghostName, request, response);
           errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
           return;
         }

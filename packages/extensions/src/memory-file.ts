@@ -120,16 +120,20 @@ export interface MemoryIndex {
   readonly total: number;
 }
 
+/** Newest first, slug as the deterministic tie-break: the order memory is shown in. */
+export function compareMemoryNewestFirst(left: MemoryFileMeta, right: MemoryFileMeta): number {
+  return right.updated.localeCompare(left.updated) || left.slug.localeCompare(right.slug);
+}
+
 /**
  * The per-session memory index: one file name per line in newest-first order,
- * with slug as the deterministic tie-break, cut off at the injection budget.
- * The slug alone says what a fact is about, so no preview of the content
- * rides along. Derived on every session start and never stored.
+ * cut off at the injection budget. The slug alone says what a fact is about,
+ * so no preview of the content rides along. Derived on every session start
+ * and never stored.
  */
 export function deriveMemoryIndex(files: readonly MemoryFileMeta[]): MemoryIndex {
   const sorted = [...files]
-    .sort((left, right) =>
-      right.updated.localeCompare(left.updated) || left.slug.localeCompare(right.slug))
+    .sort(compareMemoryNewestFirst)
     .map((file) => `- ${memoryFileName(file.slug)}`);
   const lines: string[] = [];
   let chars = 0;

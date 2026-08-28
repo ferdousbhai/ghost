@@ -813,54 +813,69 @@ describe("conversation project binding", () => {
   });
 });
 
-describe("GET /api/ghosts/:name/context", () => {
-  it("serves the derived context catalog and rejects other methods", async () => {
+describe("/api/ghosts/:name/memory", () => {
+  it("lists the plain memory files and rejects other methods", async () => {
     const base = await serve();
     const ghostDir = join(temp!.root, "casper");
-    mkdirSync(join(ghostDir, "docs", "guides"), { recursive: true });
-    mkdirSync(join(ghostDir, ".omp", "agents"), { recursive: true });
-    writeFileSync(join(ghostDir, ".omp", "config.yml"), "task:\n  disabledAgents: []\n", "utf8");
-    writeFileSync(
-      join(ghostDir, ".omp", "agents", "route-probe.md"),
-      "---\nname: route-probe\ndescription: HTTP route fixture\n---\nPrivate fixture prompt.\n",
-      "utf8",
-    );
-    writeFileSync(
-      join(ghostDir, "docs", "guides", "launch.md"),
-      "# Launch guide\n\nShip deliberately.\n\n#product #launch\n",
-      "utf8",
-    );
     writeFileSync(
       join(ghostDir, "memory", "preferred-tone.md"),
       "The owner prefers direct answers. Lead with the decision.\n",
       "utf8",
     );
 
-    const response = await fetch(`${base}/api/ghosts/casper/context`);
+    const response = await fetch(`${base}/api/ghosts/casper/memory`);
     expect(response.status).toBe(200);
     const body = await response.json() as {
-      character: { path: string };
-      memory: Array<{ path: string; description: string; content: string }>;
-      agents: Array<{ name: string; source: string }>;
+      memory: Array<{ path: string; slug: string; content: string; updated: string }>;
+      skipped: unknown[];
     };
-    expect(body.character.path).toBe("character.md");
-    expect(body).not.toHaveProperty("docs");
-    expect(body.memory).toContainEqual(expect.objectContaining({
+    expect(body.memory).toEqual([{
       path: "memory/preferred-tone.md",
-      description: "The owner prefers direct...",
+      slug: "preferred-tone",
       content: "The owner prefers direct answers. Lead with the decision.",
-    }));
-    expect(body.agents).toEqual([]);
+      updated: expect.any(String),
+    }]);
+    expect(body.skipped).toEqual([]);
 
-    expect((await fetch(`${base}/api/ghosts/casper/context`, {
+    expect((await fetch(`${base}/api/ghosts/casper/memory`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: "{}",
     })).status).toBe(405);
-    expect((await fetch(`${base}/api/ghosts/missing/context`)).status).toBe(404);
+    expect((await fetch(`${base}/api/ghosts/missing/memory`)).status).toBe(404);
   });
 
-  it("moves confirmed memory files to Trash and refuses ghost-local docs", async () => {
+  it("writes one fact through the validating writer", async () => {
+    const base = await serve();
+    const ghostDir = join(temp!.root, "casper");
+    const put = (body: unknown) => fetch(`${base}/api/ghosts/casper/memory`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    const created = await put({ content: "Prefers concise replies." });
+    expect(created.status).toBe(200);
+    expect(await created.json()).toEqual({
+      ok: true,
+      slug: "prefers-concise-replies",
+      path: "memory/prefers-concise-replies.md",
+      created: true,
+    });
+    expect(readFileSync(join(ghostDir, "memory", "prefers-concise-replies.md"), "utf8"))
+      .toBe("Prefers concise replies.\n");
+
+    const replaced = await put({ name: "prefers-concise-replies", content: "Prefers one item." });
+    expect((await replaced.json() as { created: boolean }).created).toBe(false);
+    expect(readFileSync(join(ghostDir, "memory", "prefers-concise-replies.md"), "utf8"))
+      .toBe("Prefers one item.\n");
+
+    expect((await put({ content: "   " })).status).toBe(400);
+    expect((await put({ content: 42 })).status).toBe(400);
+    expect((await put({ name: "Not A Slug", content: "x" })).status).toBe(400);
+  });
+
+  it("moves confirmed memory files to Trash and refuses everything else", async () => {
     const base = await serve();
     const ghostDir = join(temp!.root, "casper");
     const doc = join(ghostDir, "docs", "delete-me.md");
@@ -868,39 +883,28 @@ describe("GET /api/ghosts/:name/context", () => {
     mkdirSync(join(ghostDir, "docs"), { recursive: true });
     writeFileSync(doc, "doc\n", "utf8");
     writeFileSync(memory, "temporary memory\n", "utf8");
-    const remove = (body: unknown) => fetch(`${base}/api/ghosts/casper/context`, {
+    const remove = (body: unknown) => fetch(`${base}/api/ghosts/casper/memory`, {
       method: "DELETE",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     });
 
-    const unconfirmed = await remove({
-      section: "docs",
-      path: "docs/delete-me.md",
-      confirm: "docs/something-else.md",
-    });
-    expect(unconfirmed.status).toBe(400);
-    expect(existsSync(doc)).toBe(true);
+    expect((await remove({
+      path: "memory/delete-me-too.md",
+      confirm: "memory/something-else.md",
+    })).status).toBe(400);
+    expect(existsSync(memory)).toBe(true);
 
-    const docResponse = await remove({
-      section: "docs",
-      path: "docs/delete-me.md",
-      confirm: "docs/delete-me.md",
-    });
-    expect(docResponse.status).toBe(400);
+    expect((await remove({ path: "docs/delete-me.md", confirm: "docs/delete-me.md" })).status)
+      .toBe(400);
     expect(existsSync(doc)).toBe(true);
 
     expect((await remove({
-      section: "memory",
       path: "memory/delete-me-too.md",
       confirm: "memory/delete-me-too.md",
     })).status).toBe(200);
     expect(existsSync(memory)).toBe(false);
-    expect((await remove({
-      section: "character",
-      path: "character.md",
-      confirm: "character.md",
-    })).status).toBe(400);
+    expect((await remove({ path: "character.md", confirm: "character.md" })).status).toBe(400);
     expect(existsSync(join(ghostDir, "character.md"))).toBe(true);
   });
 });

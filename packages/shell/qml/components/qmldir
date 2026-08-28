@@ -8,7 +8,6 @@ Composer 1.0 Composer.qml
 CommandsBrowser 1.0 CommandsBrowser.qml
 ConnectBrowser 1.0 ConnectBrowser.qml
 ConfirmDialog 1.0 ConfirmDialog.qml
-ContextBrowser 1.0 ContextBrowser.qml
 Conversations 1.0 Conversations.qml
 DocumentsBrowser 1.0 DocumentsBrowser.qml
 DocumentView 1.0 DocumentView.qml
@@ -20,6 +19,7 @@ HooksBrowser 1.0 HooksBrowser.qml
 InlineRename 1.0 InlineRename.qml
 MarkdownEditor 1.0 MarkdownEditor.qml
 McpBrowser 1.0 McpBrowser.qml
+MemoryList 1.0 MemoryList.qml
 ModelLogin 1.0 ModelLogin.qml
 ModelSwitcher 1.0 ModelSwitcher.qml
 PencilGlyph 1.0 PencilGlyph.qml

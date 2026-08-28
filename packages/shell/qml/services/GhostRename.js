@@ -13,7 +13,7 @@ var ownerKeys = [
     "liveGhost",
     "collabGhost",
     "activeGhost",
-    "contextGhost"
+    "memoryGhost"
 ];
 
 function cloneMap(value) {

@@ -292,10 +292,14 @@ export {
   type TrashPathResult,
 } from "./trash.js";
 export {
-  trashGhostContextFile,
-  type TrashedContextFile,
-  type TrashableContextSection,
-} from "./context-files.js";
+  listGhostMemory,
+  trashGhostMemoryFile,
+  writeGhostMemory,
+  type GhostMemoryEntry,
+  type GhostMemoryListing,
+  type GhostMemorySkipped,
+  type TrashedMemoryFile,
+} from "./memory-files.js";
 export {
   LiveVoiceManager,
   type LiveTranscriptRow,

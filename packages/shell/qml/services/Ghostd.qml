@@ -816,17 +816,20 @@ Singleton {
         root.mutateProject("unbind", "PUT", "", body);
     }
 
-    // Plain files stay canonical. This is only the latest derived daemon
-    // snapshot used by the right-hand Memory/inactive-agent/Character surfaces.
-    property var contextCharacter: ({ path: "character.md", title: null })
-    property var contextMemory: []
-    property var contextAgents: []
-    property var contextSkipped: []
-    property bool contextLoading: false
-    property string contextError: ""
-    property string contextDeletingPath: ""
-    property string contextDeleteError: ""
-    property string contextGhost: ""
+    // Plain files stay canonical: memory/*.md is one fact per file, and this
+    // is only the latest listing of them read through the daemon.
+    property var memory: []
+    property var memorySkipped: []
+    property bool memoryLoading: false
+    property string memoryError: ""
+    /** The memory path a write or trash is in flight for; "" when idle. A
+        new fact has no path yet and is busy under "memory/". */
+    property string memoryBusyPath: ""
+    property string memoryActionError: ""
+    property string memoryGhost: ""
+    /** The last listing body verbatim: an unchanged directory must not rebuild
+        the list's rows. */
+    property string memoryRaw: ""
 
     property var activeHooks: []
     property var hookEvents: []
@@ -958,7 +961,7 @@ Singleton {
     signal mcpMutationFinished(string action, string server, bool ok)
     signal liveActionFinished(string action, bool ok)
     signal collabActionFinished(string action, bool writable, bool ok)
-    signal contextDeleteFinished(string section, string path, bool ok)
+    signal memoryWriteFinished(string path, bool ok)
     signal documentDirectoryChanged(string path, string query)
     signal documentDeleteFinished(string path, bool ok)
     signal documentsConnectionReset(int epoch)
@@ -1031,8 +1034,8 @@ Singleton {
     property string eventsGhost: ""
     property int eventsConsumed: 0
     property string eventsFrameBuffer: ""
-    property var contextRequest: null
-    property var contextDeleteRequest: null
+    property var memoryRequest: null
+    property var memoryMutationRequest: null
     property var hooksRequest: null
     property var hooksRequestFactory: null
     /** Test seams; production constructs native QML XHRs. */
@@ -1515,7 +1518,7 @@ Singleton {
             liveGhost: root.liveGhost,
             collabGhost: root.collabGhost,
             activeGhost: root.activeGhost,
-            contextGhost: root.contextGhost
+            memoryGhost: root.memoryGhost
         };
     }
 
@@ -1532,7 +1535,7 @@ Singleton {
         root.liveGhost = state.liveGhost;
         root.collabGhost = state.collabGhost;
         root.activeGhost = state.activeGhost;
-        root.contextGhost = state.contextGhost;
+        root.memoryGhost = state.memoryGhost;
     }
 
     function applyGhostRename(from: string, to: string): void {
@@ -1577,7 +1580,7 @@ Singleton {
         root.clearTurnProjection();
         root.clearModelState();
         root.clearGreeting();
-        root.clearContext();
+        root.clearMemory();
         root.clearCommands();
         root.clearProject();
         root.clearMcp();
@@ -1608,7 +1611,7 @@ Singleton {
         root.clearModelState();
         // The greeting is this ghost's own voice, so it never carries over.
         root.clearGreeting();
-        root.clearContext();
+        root.clearMemory();
         root.clearCommands();
         root.clearProject();
         root.clearMcp();
@@ -2036,107 +2039,116 @@ Singleton {
     }
 
 
-    function clearContext(): void {
-        if (root.contextRequest && root.contextRequest.readyState !== 4)
-            root.contextRequest.abort();
-        if (root.contextDeleteRequest && root.contextDeleteRequest.readyState !== 4)
-            root.contextDeleteRequest.abort();
-        root.contextRequest = null;
-        root.contextDeleteRequest = null;
-        root.contextCharacter = ({ path: "character.md", title: null });
-        root.contextMemory = [];
-        root.contextAgents = [];
-        root.contextSkipped = [];
-        root.contextLoading = false;
-        root.contextError = "";
-        root.contextDeletingPath = "";
-        root.contextDeleteError = "";
-        root.contextGhost = "";
+    function clearMemory(): void {
+        if (root.memoryRequest && root.memoryRequest.readyState !== 4)
+            root.memoryRequest.abort();
+        if (root.memoryMutationRequest && root.memoryMutationRequest.readyState !== 4)
+            root.memoryMutationRequest.abort();
+        root.memoryRequest = null;
+        root.memoryMutationRequest = null;
+        root.memory = [];
+        root.memorySkipped = [];
+        root.memoryLoading = false;
+        root.memoryError = "";
+        root.memoryBusyPath = "";
+        root.memoryActionError = "";
+        root.memoryGhost = "";
+        root.memoryRaw = "";
     }
 
     /**
-     * Rebuild the active ghost's context catalog. `force` bypasses the
-     * per-ghost cache for the visible refresh affordance after external edits.
+     * Re-read the active ghost's memory files. `force` bypasses the per-ghost
+     * cache; the memory list forces it whenever the directory changes on disk.
      */
-    function fetchContext(force: bool): void {
+    function fetchMemory(force: bool): void {
         const ghost = root.activeGhost;
         if (ghost === "") {
-            root.clearContext();
+            root.clearMemory();
             return;
         }
-        if (!force && root.contextGhost === ghost) return;
-        if (root.contextRequest && root.contextRequest.readyState !== 4) {
+        if (!force && root.memoryGhost === ghost) return;
+        if (root.memoryRequest && root.memoryRequest.readyState !== 4) {
             if (!force) return;
-            root.contextRequest.abort();
+            root.memoryRequest.abort();
         }
 
         const xhr = new XMLHttpRequest();
-        root.contextRequest = xhr;
-        root.contextLoading = true;
-        root.contextError = "";
+        root.memoryRequest = xhr;
+        root.memoryLoading = true;
+        root.memoryError = "";
         xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.contextRequest) return;
-            root.contextLoading = false;
+            if (xhr.readyState !== 4 || xhr !== root.memoryRequest) return;
+            root.memoryLoading = false;
             if (ghost !== root.activeGhost) return;
             if (xhr.status === 200) {
                 try {
-                    const body = JSON.parse(xhr.responseText);
-                    root.contextCharacter = body.character
-                        && typeof body.character === "object"
-                        ? body.character : ({ path: "character.md", title: null });
-                    root.contextMemory = Array.isArray(body.memory) ? body.memory : [];
-                    root.contextAgents = Array.isArray(body.agents) ? body.agents : [];
-                    root.contextSkipped = Array.isArray(body.skipped) ? body.skipped : [];
-                    root.contextGhost = ghost;
-                    root.contextError = "";
+                    if (root.memoryGhost !== ghost || xhr.responseText !== root.memoryRaw) {
+                        const body = JSON.parse(xhr.responseText);
+                        root.memory = Array.isArray(body.memory) ? body.memory : [];
+                        root.memorySkipped = Array.isArray(body.skipped) ? body.skipped : [];
+                        root.memoryRaw = xhr.responseText;
+                    }
+                    root.memoryGhost = ghost;
+                    root.memoryError = "";
                     root.reachable = true;
                 } catch (error) {
-                    root.contextError = "ghostd sent malformed context";
+                    root.memoryError = "ghostd sent a malformed memory list";
                 }
             } else {
-                root.contextError = root.describeError(xhr, "GET context");
+                root.memoryError = root.describeError(xhr, "GET memory");
             }
         };
         root.dispatch(xhr, "GET",
-            "/api/ghosts/" + encodeURIComponent(ghost) + "/context", ({}), null);
+            "/api/ghosts/" + encodeURIComponent(ghost) + "/memory", ({}), null);
     }
 
-    function deleteContextFile(section: string, path: string): void {
+    /**
+     * One mutation at a time, each followed by a re-read: the file on disk is
+     * the truth and the list never guesses what the daemon wrote.
+     */
+    function mutateMemory(method: string, busyPath: string, body: var,
+                          settle: var): void {
         const ghost = root.activeGhost;
-        if (ghost === "" || path === "" || root.contextDeletingPath !== "") return;
-        if (section !== "memory") return;
+        if (ghost === "" || root.memoryBusyPath !== "") return;
         const xhr = new XMLHttpRequest();
-        root.contextDeleteRequest = xhr;
-        root.contextDeletingPath = path;
-        root.contextDeleteError = "";
+        root.memoryMutationRequest = xhr;
+        root.memoryBusyPath = busyPath;
+        root.memoryActionError = "";
         xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.contextDeleteRequest) return;
-            root.contextDeletingPath = "";
+            if (xhr.readyState !== 4 || xhr !== root.memoryMutationRequest) return;
+            root.memoryBusyPath = "";
             if (ghost !== root.activeGhost) return;
+            let result = null;
             if (xhr.status === 200) {
                 try {
-                    const body = JSON.parse(xhr.responseText);
-                    if (!body || body.ok !== true || body.path !== path
-                            || typeof body.trash !== "string")
-                        throw new Error("invalid trash result");
-                    // The absolute trash destination is intentionally not
-                    // logged; the file manager owns restoration from here.
-                    root.contextDeleteError = "";
-                    root.contextDeleteFinished(section, path, true);
-                    root.fetchContext(true);
+                    result = JSON.parse(xhr.responseText);
+                    if (!result || result.ok !== true) throw new Error("not ok");
                 } catch (error) {
-                    root.contextDeleteError = "ghostd sent a malformed trash result";
-                    root.contextDeleteFinished(section, path, false);
+                    result = null;
+                    root.memoryActionError = "ghostd sent a malformed memory result";
                 }
             } else {
-                root.contextDeleteError = root.describeError(xhr, "DELETE context file");
-                root.contextDeleteFinished(section, path, false);
+                root.memoryActionError = root.describeError(xhr, method + " memory");
             }
+            if (settle) settle(result);
+            if (result !== null) root.fetchMemory(true);
         };
-        root.dispatch(xhr, "DELETE",
-            "/api/ghosts/" + encodeURIComponent(ghost) + "/context",
-            ({ "Content-Type": "application/json" }),
-            JSON.stringify({ section: section, path: path, confirm: path }));
+        root.dispatch(xhr, method,
+            "/api/ghosts/" + encodeURIComponent(ghost) + "/memory",
+            ({ "Content-Type": "application/json" }), JSON.stringify(body));
+    }
+
+    /** Create (empty `name`) or replace one memory file with `content`. */
+    function writeMemory(name: string, content: string): void {
+        const path = "memory/" + (name === "" ? "" : name + ".md");
+        root.mutateMemory("PUT", path, ({ name: name === "" ? undefined : name, content: content }),
+            function (result) { root.memoryWriteFinished(path, result !== null); });
+    }
+
+    /** Move one memory file to recoverable Trash. */
+    function deleteMemory(path: string): void {
+        if (path === "") return;
+        root.mutateMemory("DELETE", path, ({ path: path, confirm: path }), null);
     }
 
 

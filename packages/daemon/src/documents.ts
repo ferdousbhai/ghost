@@ -2,7 +2,6 @@ import { lstatSync } from "node:fs";
 import { join } from "node:path";
 import {
   descriptorPath,
-  isGhostError as isExtensionGhostError,
   type MachineDocuments,
   openMachineDocuments,
   withDescriptorLock,
@@ -10,25 +9,14 @@ import {
   type DocumentTextContent,
   type ListDocumentDirectoryOptions,
 } from "@ghost/extensions";
-import { GhostError } from "./ghosts.js";
+import { GhostError, translateExtensionError } from "./ghosts.js";
 import { trashPath, type TrashPathResult } from "./trash.js";
 
 export interface TrashedDocument extends TrashPathResult {
   readonly path: string;
 }
 
-function statusFor(code: string): number {
-  if (code === "not_found") return 404;
-  if (code === "document_too_large") return 413;
-  if (code === "cursor_stale" || code === "conflict") return 409;
-  return 400;
-}
-
 function translate(error: unknown): never {
-  if (isExtensionGhostError(error)) {
-    const code = error.code;
-    throw new GhostError(code, error.message, statusFor(code));
-  }
   if ((error as NodeJS.ErrnoException).code === "ENOENT") {
     throw new GhostError(
       "not_found",
@@ -36,7 +24,7 @@ function translate(error: unknown): never {
       404,
     );
   }
-  throw error;
+  return translateExtensionError(error);
 }
 
 export class DocumentsService {

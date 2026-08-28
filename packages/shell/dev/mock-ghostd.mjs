@@ -11,6 +11,7 @@ import {
   closeSync,
   constants,
   fstatSync,
+  existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -103,14 +104,12 @@ const MOCK_MEMORY = [
   {
     path: "memory/preferred-tone.md",
     slug: "preferred-tone",
-    description: "The owner prefers direct...",
     content: "The owner prefers direct, evidence-first answers. Use terse, concrete language. Lead with the decision and evidence.",
     updated: "2026-08-24",
   },
   {
     path: "memory/current-project.md",
     slug: "current-project",
-    description: "Ghost is the owner's local...",
     content: "Ghost is the owner's local sovereign assistant. Keep context in plain files and keep cloud credentials out of exports.",
     updated: "2026-08-25",
   },
@@ -325,20 +324,36 @@ function setGhostCollab(name, sessionId, state) {
 }
 
 const deletedContext = new Map();
+/** Per-ghost owner-written facts, layered over the seeded MOCK_MEMORY. */
+const writtenMemory = new Map();
 
 function contextDeletedFor(name) {
   if (!deletedContext.has(name)) deletedContext.set(name, new Set());
   return deletedContext.get(name);
 }
 
-function contextSnapshot(name) {
+function writtenMemoryFor(name) {
+  if (!writtenMemory.has(name)) writtenMemory.set(name, new Map());
+  return writtenMemory.get(name);
+}
+
+function memoryListing(name) {
   const deleted = contextDeletedFor(name);
+  const written = writtenMemoryFor(name);
+  const seeded = MOCK_MEMORY.filter((item) => !deleted.has(item.path) && !written.has(item.path));
   return {
-    character: { path: "character.md", title: name },
-    memory: MOCK_MEMORY.filter((item) => !deleted.has(item.path)),
-    agents: [],
+    memory: [...seeded, ...written.values()].sort((a, b) =>
+      b.updated.localeCompare(a.updated) || a.slug.localeCompare(b.slug)),
     skipped: [],
   };
+}
+
+// Mirrors memorySlugForText in @ghost/extensions (minus NFKD), which the
+// shell package cannot import.
+function memorySlug(text) {
+  const slug = text.toLowerCase().replace(/[^a-z0-9\s-]/gu, "").trim()
+    .split(/[\s-]+/u).filter(Boolean).slice(0, 6).join("-").slice(0, 64);
+  return slug || "memory";
 }
 
 function seedMockDocuments() {
@@ -1888,33 +1903,61 @@ const mockServer = createServer(async (req, res) => {
   }
 
 
-  if (parts.length === 4 && parts[3] === "context" && req.method === "GET") {
-    return json(res, 200, contextSnapshot(name));
+  if (parts.length === 4 && parts[3] === "memory" && req.method === "GET") {
+    return json(res, 200, memoryListing(name));
   }
-  if (parts.length === 4 && parts[3] === "context" && req.method === "DELETE") {
+  if (parts.length === 4 && parts[3] === "memory" && req.method === "PUT") {
     const body = await readBody(req).catch(() => ({}));
-    const section = body?.section;
+    const content = typeof body?.content === "string" ? body.content.trim() : "";
+    if (content === "") {
+      return json(res, 400, {
+        error: { message: "A memory must contain one concise fact.", code: "invalid_request" },
+      });
+    }
+    if (content.length > 2000) {
+      return json(res, 400, {
+        error: { message: "Memory files must be 2000 characters or fewer.", code: "invalid_request" },
+      });
+    }
+    const slug = typeof body?.name === "string" && body.name !== "" ? body.name : memorySlug(content);
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(slug)) {
+      return json(res, 400, {
+        error: { message: "Memory file names must be short kebab-case slugs.", code: "invalid_request" },
+      });
+    }
+    const path = `memory/${slug}.md`;
+    const existed = memoryListing(name).memory.some((item) => item.path === path);
+    contextDeletedFor(name).delete(path);
+    writtenMemoryFor(name).set(path, { path, slug, content, updated: new Date().toISOString() });
+    if (OWNS_GHOSTS_ROOT) {
+      mkdirSync(join(ghost.dir, "memory"), { recursive: true });
+      writeFileSync(join(ghost.dir, path), `${content}\n`, "utf8");
+    }
+    return json(res, 200, { ok: true, slug, path, created: !existed });
+  }
+  if (parts.length === 4 && parts[3] === "memory" && req.method === "DELETE") {
+    const body = await readBody(req).catch(() => ({}));
     const path = typeof body?.path === "string" ? body.path : "";
-    if (section !== "memory" || path === ""
-        || body?.confirm !== path) {
+    if (path === "" || body?.confirm !== path) {
       return json(res, 400, {
         error: {
-          message: "Context deletion requires an exact path confirmation",
+          message: "Memory deletion requires an exact path confirmation",
           code: "confirmation_required",
         },
       });
     }
-    if (!MOCK_MEMORY.some((item) => item.path === path) || contextDeletedFor(name).has(path)) {
+    if (!memoryListing(name).memory.some((item) => item.path === path)) {
       return json(res, 404, {
-        error: { message: "No such context file", code: "not_found" },
+        error: { message: "No such memory file", code: "not_found" },
       });
     }
     const trash = join(GHOSTS_ROOT, ".mock-trash", name, path.replace(/\//gu, "--"));
-    if (OWNS_GHOSTS_ROOT) {
+    if (OWNS_GHOSTS_ROOT && existsSync(join(ghost.dir, path))) {
       mkdirSync(join(GHOSTS_ROOT, ".mock-trash", name), { recursive: true });
       renameSync(join(ghost.dir, path), trash);
     }
     contextDeletedFor(name).add(path);
+    writtenMemoryFor(name).delete(path);
     return json(res, 200, { ok: true, path, trash });
   }
   // Banishing a ghost. The real daemon moves the home to the XDG trash so it is
@@ -1942,6 +1985,7 @@ const mockServer = createServer(async (req, res) => {
       if (preview.name === name) projectTrust.delete(token);
     }
     deletedContext.delete(name);
+    writtenMemory.delete(name);
     mcpStore.delete(name);
     liveStates.delete(name);
     collabStates.delete(name);
@@ -1969,7 +2013,7 @@ const mockServer = createServer(async (req, res) => {
         error: { message: `${name} is still answering — stop the turn first`, code: "ghost_busy" },
       });
     }
-    for (const store of [sessionStore, projectStore, deletedContext, mcpStore,
+    for (const store of [sessionStore, projectStore, deletedContext, writtenMemory, mcpStore,
         liveStates, collabStates, roles, routing]) {
       if (store.has(name)) {
         store.set(next, store.get(name));

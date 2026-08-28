@@ -82,8 +82,8 @@ and nothing else: the slug is what says what a fact is about, so the writer's
 instructions ask for a name that does. It orders files by modification time
 descending, then slug ascending, and admits only complete lines through its
 4,000-character budget, so the stalest facts fall out first. Index lines are
-fenced as untrusted data. The context API returns `updated` as the file's
-full ISO modification timestamp.
+fenced as untrusted data. The memory API returns `updated` as the file's full
+ISO modification timestamp.
 One file is at most 2,000 JavaScript UTF-16 code units of content and 6,001
 on-disk bytes, inclusive; the byte ceiling is the worst-case canonical UTF-8
 content plus the writer's final newline. Every list, direct read, and exact
@@ -108,7 +108,7 @@ descriptor lock used by writes. The first destination is `<slug>.md`; an
 existing destination makes the writer choose `<slug>-2.md`, then the next free
 numeric suffix, without replacing trash. The pre-rename delete intent records
 the exact source bytes and SHA-256 plus that collision-free relative trash
-name. This private lifecycle trash is distinct from the owner-facing context
+name. This private lifecycle trash is distinct from the owner-facing memory
 route's freedesktop Trash result.
 
 Canonical ghost-home Documents already keep their title in the leading `#`
@@ -799,27 +799,28 @@ one must not be a leak of both.
   rename. A Claude Code conversation keeps its resume sidecar, but that runtime
   stores the transcript itself under its own `~/.claude/projects/<cwd>` path,
   which does not move with the home.
-- `GET  /api/ghosts/:name/context` → `{ character, memory, agents,
-  skipped }` — the owner's browseable ghost context,
-  derived from disk for each request and never stored. `character` is
-  `{ path: "character.md", title }`, where `title` is derived from its leading
-  Markdown heading. `memory` contains
-  `{ path: "memory/<slug>.md", slug, description, content, updated }`, where
-  `description` is the derived 32-character index preview and `updated` is the
-  full ISO filesystem modification timestamp.
-  `agents` is an empty compatibility array: custom agent definitions may be
-  counted during a trusted-project preview, but are inactive and never ambiently
-  discovered. A pi session has no `task` tool, so agent definitions are not
-  runtime capabilities and do not appear here. `skipped` reports
-  malformed memory files as `{ section: "memory", path, reason }` without
-  hiding the valid siblings. The returned file paths are ghost-home-relative;
-  a client already gets that home's absolute `dir` from `GET /api/ghosts`.
-- `DELETE /api/ghosts/:name/context`
-  `{ section: "memory", path, confirm: path }` →
-  `{ ok: true, path, trash, kind }` — moves exactly one Markdown file under the
-  memory section to recoverable Trash. `confirm` must byte-match `path`; absolute
-  paths, traversal, non-Markdown paths, directories, `character.md`, and helper
-  definitions are refused. A symlink is moved as a symlink and never followed.
+- `GET  /api/ghosts/:name/memory` → `{ memory, skipped }` — the owner's
+  memory list, read from the plain files on each request and never stored.
+  `memory` holds `{ path: "memory/<slug>.md", slug, content, updated }` in the
+  index's order (newest first, slug as the tie-break), where `content` is the
+  whole file (the fact) and `updated` is the full ISO filesystem modification
+  timestamp. `skipped` reports malformed memory files
+  as `{ path, reason }` without hiding the valid siblings. Paths are
+  ghost-home-relative; a client already gets that home's absolute `dir` from
+  `GET /api/ghosts`. The shell shows this list as it is: one editable row per
+  fact, no derived title or preview, and it watches the directory instead of
+  offering a refresh.
+- `PUT  /api/ghosts/:name/memory` `{ content, name? }` →
+  `{ ok: true, slug, path, created }` — creates or replaces exactly one memory
+  file through the same validating, redacting, atomic `GhostHome` writer as
+  `ghost_memory_write`; an omitted `name` derives the slug from the fact. A
+  format rejection (empty, over the limit, bad slug) is a 400 with the writer's
+  own message.
+- `DELETE /api/ghosts/:name/memory` `{ path, confirm: path }` →
+  `{ ok: true, path, trash, kind }` — moves exactly one Markdown file under
+  `memory/` to recoverable Trash. `confirm` must byte-match `path`; absolute
+  paths, traversal, non-Markdown paths, directories, and anything outside
+  `memory/` are refused. A symlink is moved as a symlink and never followed.
   The ordinary destination is the freedesktop home Trash; cross-filesystem
   moves fall back to `<ghost>/.trash/`, still by rename rather than copy/unlink.
 - `GET  /api/ghosts/:name/mcp` → `{ servers, skipped }` — the effective
