@@ -395,7 +395,7 @@ export const FIRST_MEETING_SECTION = [
   "## First meeting",
   "",
   "Your character is unwritten. Help with the owner's request first. In quiet moments, learn "
-  + "about them one question at a time and let them shape your voice. Save durable facts as "
+  + "about them one question at a time and let them shape your voice. Save stable facts to "
   + "memory. When ready, show them a character draft; write it with `ghost_character` only "
   + "after approval. Drop the subject if they are uninterested.",
 ].join("\n");

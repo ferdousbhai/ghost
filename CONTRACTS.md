@@ -611,7 +611,7 @@ The ordinary maintenance model receives only a close-neutralized untrusted
 transcript fence and four memory-only tools: list metadata, read one memory,
 plain-text search, and one atomic write. It has no Documents, character,
 deletion, network/MCP, native filesystem, shell, or general session tool. One
-ordinary generation may publish at most one memory file. Durable facts must be
+ordinary generation may publish at most one memory file. Memories must be
 grounded in what the owner said or confirmed; assistant text alone may carry
 external or untrusted content and is not evidence worth memorizing.
 
@@ -1611,7 +1611,7 @@ are read as `smol_model` when the new key is absent; writers persist only
 While `character.md` is missing, blank, or byte-equal to the seed, sessions —
 pi and Claude Code runtimes alike — get a
 "first meeting" system-prompt section: help with the owner's request first,
-learn about them one question at a time during quiet moments, save durable facts
+learn about them one question at a time during quiet moments, save stable facts
 as memory, and eventually draft and write the character with the
 `ghost_character` tool (read/write `character.md`). The populated character
 file IS the completion latch — there is no separate onboarding state — and the
