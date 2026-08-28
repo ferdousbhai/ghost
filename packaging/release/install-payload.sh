@@ -75,9 +75,17 @@ install -Dm644 "$source_root/packaging/release/README.md" \
   "$pkgdir/usr/share/doc/ghost/RELEASE-SOURCE.md"
 install -Dm644 "$source_root/README.md" "$pkgdir/usr/share/doc/ghost/README.md"
 install -Dm644 "$source_root/CONTRACTS.md" "$pkgdir/usr/share/doc/ghost/CONTRACTS.md"
+# The installed README, CONTRACTS.md, and ARCH.md link into docs/. Ship those
+# link targets so the relative references resolve inside the package.
+for doc in claude-code-runtime.md hooks.md keyring.md; do
+  install -Dm644 "$source_root/docs/$doc" "$pkgdir/usr/share/doc/ghost/docs/$doc"
+done
 install -Dm644 "$source_root/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 install -Dm644 "$source_root/THIRD_PARTY_NOTICES.md" \
   "$pkgdir/usr/share/licenses/$pkgname/THIRD_PARTY_NOTICES.md"
+# docs/claude-code-runtime.md links the notices next to the docs directory.
+ln -s "/usr/share/licenses/$pkgname/THIRD_PARTY_NOTICES.md" \
+  "$pkgdir/usr/share/doc/ghost/THIRD_PARTY_NOTICES.md"
 
 chown -hR 0:0 "$pkgdir"
 find "$pkgdir" \( -type f -o -type d \) -exec chmod go-w {} +

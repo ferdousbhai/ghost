@@ -11,6 +11,12 @@ To relay the browser you already use, load this directory unpacked in Chromium:
 
   /usr/share/ghost/chromium-extension
 
+Provider and MCP credentials are read from the Secret Service, so a
+user-session provider such as gnome-keyring must be running and unlocked before
+your first session:
+
+  /usr/share/doc/ghost/docs/keyring.md
+
 Ghost homes, credentials, browser profiles, and daemon state live in your home
 directory. Pacman does not own or remove them.
 EOF

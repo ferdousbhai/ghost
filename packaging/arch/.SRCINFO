@@ -18,6 +18,7 @@ pkgbase = ghost-ai-git
 	depends = grim>=1.5
 	depends = hyprland>=0.56
 	depends = libnotify>=0.8
+	depends = libsecret>=0.21
 	depends = python>=3.11
 	depends = python-dbus>=1.4
 	depends = python-gobject>=3.50
@@ -29,6 +30,7 @@ pkgbase = ghost-ai-git
 	depends = ydotool>=1.0
 	optdepends = chromium: dedicated Ghost browser and browser-relay smoke test
 	optdepends = claude-code: Claude Code plan runtime
+	optdepends = gnome-keyring: Secret Service provider for provider and MCP credentials
 	provides = ghost-ai
 	conflicts = ghost-ai
 	options = !debug
