@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionFactory } from "@oh-my-pi/pi-coding-agent";
+import type { GhostExtensionAPI, GhostExtensionFactory } from "../extension-api.js";
 import { deriveDocumentsIndex } from "../catalog.js";
 import {
   DOCUMENT_INDEX_MAX_ENTRIES,
@@ -22,8 +22,8 @@ function resolveDocuments(options: PersonaExtensionOptions): MachineDocuments {
 
 export function createPersonaExtension(
   options: PersonaExtensionOptions = {},
-): ExtensionFactory {
-  return (pi: ExtensionAPI) => {
+): GhostExtensionFactory {
+  return (pi: GhostExtensionAPI) => {
     pi.on("before_agent_start", async (_event, ctx) => {
       const home = resolveHome(options, ctx);
       const [character, memory, documents] = await Promise.all([

@@ -636,22 +636,25 @@ describe("Claude Code subscription runtime", () => {
       }),
       dispose: async () => {},
     } as never;
+    const screenExtension = createScreenExtension({
+      home: paths.home,
+      helper,
+      capabilities: CLAUDE_CODE_TOOL_CAPABILITIES,
+    });
+    const browserExtension = createBrowserExtension({
+      home: paths.home,
+      backend: () => browser,
+      browser: { idleTimeoutMs: 0, resolver },
+      capabilities: CLAUDE_CODE_TOOL_CAPABILITIES,
+    });
     const tools = await bridgeClaudeCodeTools({
-      factories: [
-        createScreenExtension({
-          home: paths.home,
-          helper,
-          capabilities: CLAUDE_CODE_TOOL_CAPABILITIES,
-        }),
-        createBrowserExtension({
-          home: paths.home,
-          backend: () => browser,
-          browser: { idleTimeoutMs: 0, resolver },
-          capabilities: CLAUDE_CODE_TOOL_CAPABILITIES,
-        }),
-      ],
+      ghost: async (api) => {
+        await screenExtension(api);
+        await browserExtension(api);
+      },
+      factories: [],
       toolNames: [GHOST_SCREEN, GHOST_BROWSER],
-    }, paths.home, "Ghost bridge test");
+    }, paths.home);
     const call = async (name: string, args: Record<string, unknown>) => {
       const definition = tools.find((candidate) => candidate.name === name);
       if (!definition) throw new Error(`Missing bridged tool ${name}`);

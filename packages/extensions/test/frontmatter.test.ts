@@ -9,6 +9,14 @@ import {
 } from "../src/frontmatter.js";
 import { GhostError } from "../src/errors.js";
 
+import { parse as parseYaml } from "yaml";
+
+/** How pi reads frontmatter: the block between `---` fences, parsed as YAML. */
+function parseFrontmatter(text: string): { frontmatter: Record<string, unknown> } {
+  const match = /^---\n([\s\S]*?)\n---\n/.exec(text);
+  return { frontmatter: match ? (parseYaml(match[1]!) as Record<string, unknown>) : {} };
+}
+
 describe("yamlScalar", () => {
   it("leaves safe plain scalars unquoted", () => {
     expect(yamlScalar("Paper notes")).toBe("Paper notes");
@@ -109,11 +117,11 @@ describe("round trip", () => {
   });
 });
 
-describe("cross-check against pi's YAML frontmatter parser", () => {
+describe("cross-check against a real YAML parser", () => {
   // Our writer is hand-rolled, so the values it emits must still be valid YAML
-  // as pi (and any other reader of these files) understands it.
-  it("emits scalars pi reads back unchanged", async () => {
-    const { parseFrontmatter } = await import("@oh-my-pi/pi-utils/frontmatter");
+  // as pi (which parses frontmatter with the `yaml` package) and any other
+  // reader of these files understands it.
+  it("emits scalars a YAML reader gets back unchanged", async () => {
     const values = [
       "Paper notes",
       "Restoring the Vandercook 4: notes",
@@ -136,8 +144,7 @@ describe("cross-check against pi's YAML frontmatter parser", () => {
     }
   });
 
-  it("emits tag lists pi reads back unchanged", async () => {
-    const { parseFrontmatter } = await import("@oh-my-pi/pi-utils/frontmatter");
+  it("emits tag lists a YAML reader gets back unchanged", async () => {
     const tags = ["paper", "press work", "one, two", "3"];
     const text = renderDocument([`tags: ${yamlFlowList(tags)}`], "body");
     expect((parseFrontmatter(text).frontmatter as { tags: string[] }).tags).toEqual(tags);

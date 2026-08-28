@@ -1,8 +1,5 @@
-import type {
-  ExtensionAPI,
-  ExtensionFactory,
-} from "@oh-my-pi/pi-coding-agent";
-import { Type } from "@oh-my-pi/pi-coding-agent/extensibility/legacy-typebox";
+import { Type } from "typebox";
+import type { GhostExtensionAPI, GhostExtensionFactory } from "../extension-api.js";
 import { stringEnum } from "../tool-schema.js";
 import {
   GhostBrowserError,
@@ -103,14 +100,14 @@ function describeProjectionChanges(changes: ReadonlyArray<readonly [number, stri
 
 export function createBrowserExtension(
   options: BrowserExtensionOptions = {},
-): ExtensionFactory {
+): GhostExtensionFactory {
   const sessionFor = (ctx: CwdContext): GhostBrowserSession =>
     browserSessionFor(resolveHome(options, ctx).dir, {
       ...options.browser,
       ...(options.backend === undefined ? {} : { backend: options.backend }),
     });
 
-  return (pi: ExtensionAPI) => {
+  return (pi: GhostExtensionAPI) => {
     pi.registerTool({
       name: GHOST_BROWSER,
       label: "Browse the web",

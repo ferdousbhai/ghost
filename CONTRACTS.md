@@ -1662,9 +1662,13 @@ whole model before any non-local exposure.
 
 ## Package boundaries
 
-- `packages/extensions` — pure OMP extensions plus ghost-home and machine
-  Documents filesystem helpers. No HTTP, no daemon lifecycle. Exports the
-  extension factories and typed readers/writers.
+- `packages/extensions` — Ghost's built-in extensions plus ghost-home and
+  machine Documents filesystem helpers. No HTTP, no daemon lifecycle, and no
+  runtime package: extensions are written against the Ghost extension seam in
+  `extension-api.ts` (`registerTool` with TypeBox JSON Schema parameters, the
+  `before_agent_start` prompt hook, and a tool context of `cwd` plus an
+  optional model), and the daemon adapts that seam to each session runtime.
+  Exports the extension factories and typed readers/writers.
 - `packages/daemon` — per-ghost OMP `AgentSession` and Claude Code query
   lifecycles, env scrubbing, model/runtime selection, the HTTP API, systemd
   unit. Depends on `extensions`. Both installed user services declare

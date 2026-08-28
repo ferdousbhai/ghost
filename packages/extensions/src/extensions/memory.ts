@@ -1,5 +1,5 @@
-import type { ExtensionAPI, ExtensionFactory } from "@oh-my-pi/pi-coding-agent";
-import { Type } from "@oh-my-pi/pi-coding-agent/extensibility/legacy-typebox";
+import { Type } from "typebox";
+import type { GhostExtensionAPI, GhostExtensionFactory } from "../extension-api.js";
 import {
   resolveHome,
   textResult,
@@ -14,8 +14,8 @@ export type MemoryExtensionOptions = GhostExtensionOptions;
 
 export function createMemoryExtension(
   options: MemoryExtensionOptions = {},
-): ExtensionFactory {
-  return (pi: ExtensionAPI) => {
+): GhostExtensionFactory {
+  return (pi: GhostExtensionAPI) => {
     pi.registerTool({
       name: GHOST_MEMORY_WRITE,
       label: "Write memory",

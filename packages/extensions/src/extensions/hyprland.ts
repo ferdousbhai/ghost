@@ -1,8 +1,5 @@
-import type {
-  ExtensionAPI,
-  ExtensionFactory,
-} from "@oh-my-pi/pi-coding-agent";
-import { Type } from "@oh-my-pi/pi-coding-agent/extensibility/legacy-typebox";
+import { Type } from "typebox";
+import type { GhostExtensionAPI, GhostExtensionFactory } from "../extension-api.js";
 import { GhostError } from "../errors.js";
 import { stringEnum } from "../tool-schema.js";
 import {
@@ -555,11 +552,11 @@ export function desktopToolNames(): string[] {
 
 export function createHyprlandExtension(
   options: HyprlandExtensionOptions = {},
-): ExtensionFactory {
+): GhostExtensionFactory {
   const run = options.run ?? runCommand;
   const helper = options.helper ?? getSharedDesktopHelper();
 
-  return (pi: ExtensionAPI) => {
+  return (pi: GhostExtensionAPI) => {
     pi.registerTool({
       name: GHOST_DESKTOP,
       label: "Desktop",

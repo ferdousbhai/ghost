@@ -1,4 +1,5 @@
 import type { ExtensionFactory } from "@oh-my-pi/pi-coding-agent";
+import { adaptGhostExtensionForOmp } from "./omp-extension-bridge.js";
 import {
   closeAllBrowserSessions as closeAllExtensionBrowserSessions,
   createGhostExtension,
@@ -14,6 +15,7 @@ import {
   type CharacterFile,
   type DocumentDirectoryPage,
   type DocumentsIndex,
+  type GhostExtensionFactory,
   type GhostToolCapabilitiesSource,
   type GhostToolCapabilitiesResolver,
   type MemoryListing,
@@ -71,6 +73,9 @@ function selectBrowserBackend(
 }
 
 export interface ResolvedGhostExtensions {
+  /** Ghost's own extension, on the runtime-neutral seam. */
+  ghost: GhostExtensionFactory;
+  /** The same extension adapted for the OMP session, plus any OMP-native additions. */
   factories: ExtensionFactory[];
   toolNames: string[];
 }
@@ -99,8 +104,10 @@ export function resolveGhostExtensions(
     ...(options.extraSections === undefined ? {} : { extraSections: options.extraSections }),
     capabilities,
   };
+  const ghost = createGhostExtension(extensionOptions);
   return {
-    factories: [createGhostExtension(extensionOptions)],
+    ghost,
+    factories: [adaptGhostExtensionForOmp(ghost)],
     toolNames: ghostToolNames(),
   };
 }

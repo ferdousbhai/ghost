@@ -1,4 +1,4 @@
-import type { ExtensionFactory } from "@oh-my-pi/pi-coding-agent";
+import type { GhostExtensionFactory } from "../extension-api.js";
 import { browserToolNames, createBrowserExtension, type BrowserExtensionOptions } from "./browser.js";
 import {
   characterToolNames,
@@ -32,7 +32,7 @@ export function ghostToolNames(): string[] {
 
 export function createGhostExtension(
   options: GhostExtensionSetOptions = {},
-): ExtensionFactory {
+): GhostExtensionFactory {
   const persona = createPersonaExtension(options);
   const character = createCharacterExtension(options);
   const memory = createMemoryExtension(options);

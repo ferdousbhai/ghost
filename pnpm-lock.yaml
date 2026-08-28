@@ -71,6 +71,9 @@ importers:
       '@types/ws':
         specifier: ^8.5.13
         version: 8.18.1
+      typebox:
+        specifier: ^1.3.7
+        version: 1.3.16
       typescript:
         specifier: ^5.8.3
         version: 5.9.3
@@ -80,15 +83,6 @@ importers:
 
   packages/extensions:
     dependencies:
-      '@oh-my-pi/pi-ai':
-        specifier: 18.0.3
-        version: 18.0.3
-      '@oh-my-pi/pi-coding-agent':
-        specifier: 18.0.3
-        version: 18.0.3(patch_hash=2aac0f811d414dbdb6c48dd8a3576dbeba6ba55fdcb70a3e336b400a6fe9fbd7)
-      '@oh-my-pi/pi-utils':
-        specifier: 18.0.3
-        version: 18.0.3
       fflate:
         specifier: ^0.8.2
         version: 0.8.3
@@ -98,6 +92,9 @@ importers:
       tldts:
         specifier: ^7.4.11
         version: 7.4.11
+      typebox:
+        specifier: ^1.3.7
+        version: 1.3.16
     devDependencies:
       '@types/bun':
         specifier: ^1.3.14
@@ -111,6 +108,9 @@ importers:
       vitest:
         specifier: ^3.2.4
         version: 3.2.7(@types/node@22.20.1)(jiti@2.7.0)(lightningcss@1.32.0)(yaml@2.9.0)
+      yaml:
+        specifier: ^2.9.0
+        version: 2.9.0
 
   packages/shell: {}
 
@@ -1905,6 +1905,9 @@ packages:
   type-is@2.1.0:
     resolution: {integrity: sha512-faYHw0anBbc/kWF3zFTEnxSFOAGUX9GFbOBthvDdLsIlEoWOFOtS0zgCiQYwIskL9iGXZL3kAXD8OoZ4GmMATA==}
     engines: {node: '>= 18'}
+
+  typebox@1.3.16:
+    resolution: {integrity: sha512-Jac8dgnin+g2p1w1v9sk92Wvp49ZqsmSgNhrXDK+RqrovsjiORMZvYZ8t8id9b9XQp6LMfaAwnIRSHGsM+3FMw==}
 
   typed-query-selector@2.12.2:
     resolution: {integrity: sha512-EOPFbyIub4ngnEdqi2yOcNeDLaX/0jcE1JoAXQDDMIthap7FoN795lc/SHfIq2d416VufXpM8z/lD+WRm2gfOQ==}
@@ -3785,6 +3788,8 @@ snapshots:
       content-type: 2.1.0
       media-typer: 1.1.1
       mime-types: 3.0.2
+
+  typebox@1.3.16: {}
 
   typed-query-selector@2.12.2: {}
 

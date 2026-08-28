@@ -130,6 +130,8 @@ export {
   type GhostSystemPromptInput,
 } from "./prompt.js";
 
+export * from "./extension-api.js";
+export { stringEnum } from "./tool-schema.js";
 export * from "./untrusted.js";
 
 export * from "./extensions/index.js";
