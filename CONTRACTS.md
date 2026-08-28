@@ -77,12 +77,12 @@ reject a larger body, and a larger hand-edited file fails session construction
 rather than being truncated into the prompt.
 
 Memory files have no frontmatter and no required heading. Their complete
-Markdown content is the fact. The per-session index normalizes that content to
-one line and derives a word-aware preview of at most 32 characters, including
-`...`. It orders files by modification time descending, then slug ascending,
-and admits only complete lines through its 4,000-character budget, so the
-stalest facts fall out first. Index lines are fenced as untrusted data. The
-context API returns `updated` as the file's
+Markdown content is the fact. The per-session index is one file name per line
+and nothing else: the slug is what says what a fact is about, so the writer's
+instructions ask for a name that does. It orders files by modification time
+descending, then slug ascending, and admits only complete lines through its
+4,000-character budget, so the stalest facts fall out first. Index lines are
+fenced as untrusted data. The context API returns `updated` as the file's
 full ISO modification timestamp.
 One file is at most 2,000 JavaScript UTF-16 code units of content and 6,001
 on-disk bytes, inclusive; the byte ceiling is the worst-case canonical UTF-8

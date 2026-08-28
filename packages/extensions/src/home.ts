@@ -23,7 +23,6 @@ import {
   MAX_MEMORY_FILE_BYTES,
   MAX_MEMORY_FILES,
   memoryFileName,
-  memoryIndexPreview,
   memorySlugForText,
   parseMemoryFile,
   redactMemorySecrets,
@@ -808,7 +807,6 @@ export class GhostHome {
         const parsed = parseMemoryFile(source.text);
         files.push({
           slug: coerceMemorySlug(entry.name),
-          description: memoryIndexPreview(parsed.content),
           content: parsed.content,
           updated: source.modified.toISOString(),
         });
@@ -833,7 +831,6 @@ export class GhostHome {
     const parsed = parseMemoryFile(source.text);
     return {
       slug,
-      description: memoryIndexPreview(parsed.content),
       content: parsed.content,
       updated: source.modified.toISOString(),
     };

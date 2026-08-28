@@ -127,8 +127,7 @@ async function settle(maintenance: ConversationMaintenance, value = turn()): Pro
 describe("ConversationMaintenance", () => {
   it("detects index pressure before the hard memory-file threshold", () => {
     const files = Array.from({ length: 62 }, (_, position) => ({
-      slug: `pressure-${String(position).padStart(3, "0")}`,
-      description: "x".repeat(32),
+      slug: `pressure-${String(position).padStart(3, "0")}-${"x".repeat(33)}`,
       content: `Stable fact ${position}.`,
       updated: "2026-08-27T08:00:00.000Z",
     }));

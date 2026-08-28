@@ -33,8 +33,9 @@ function memorySection(input: GhostSystemPromptInput): string[] {
   }
   return [
     "## Memory",
-    `One-fact files under ${JSON.stringify(input.memoryRoot)}. The index is newest first with `
-      + "32-character previews. Read a file before relying on it; verify time-sensitive facts.",
+    `One-fact files under ${JSON.stringify(input.memoryRoot)}. The index lists file names, `
+      + "newest first; the name says what the fact is about. Read a file before relying on "
+      + "it; verify time-sensitive facts.",
     "",
     fenceUntrusted(lines.join("\n"), {
       source: "Memory index",

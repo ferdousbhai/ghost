@@ -211,7 +211,7 @@ describe("golden: greeting flow", () => {
     const reference: GreetingContextInput = {
       ghostName: "casper",
       character: "You are casper, a letterpress printer.",
-      memoryLines: ["- owner-prefers-short.md: The owner wants short answers"],
+      memoryLines: ["- owner-prefers-short.md"],
       documents: {
         root: "/home/owner/Documents",
         lines: ['- file: "press.md"'],

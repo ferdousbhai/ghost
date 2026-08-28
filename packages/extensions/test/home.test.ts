@@ -547,8 +547,7 @@ describe("memory", () => {
         })),
     );
     const file = await home.readMemory("hot-file");
-    expect(file.description).toMatch(/^write \d+$/);
-    expect(file.content).toBe(file.description);
+    expect(file.content).toMatch(/^write \d+$/);
     const { files } = await home.listMemory();
     expect(files.filter((entry) => entry.slug === "hot-file")).toHaveLength(1);
   });

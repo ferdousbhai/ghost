@@ -62,6 +62,6 @@ describe("memory extension", () => {
         })),
     );
     const file = await openGhostHome(fixture.dir).readMemory("hot-file");
-    expect(file.content).toBe(file.description);
+    expect(file.content).toMatch(/^write \d+$/);
   });
 });

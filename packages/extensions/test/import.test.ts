@@ -160,7 +160,7 @@ describe("importGhostArchive", () => {
 
     const memory = await home.listMemory();
     expect(deriveMemoryIndex(memory.files).lines)
-      .toEqual(["- working-habit.md: I work in the morning. The..."]);
+      .toEqual(["- working-habit.md"]);
 
     expect(await home.listConversations()).toEqual(["conv-1"]);
     expect(await home.readExportManifest())

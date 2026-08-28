@@ -14,13 +14,11 @@ describe("readGhostHomeDigest", () => {
           files: [
             {
               slug: "stale",
-              description: "STALE",
               content: "stale",
               updated: "2026-08-26T08:00:00.000Z",
             },
             {
               slug: "fresh",
-              description: "FRESH",
               content: "fresh",
               updated: "2026-08-27T08:00:00.000Z",
             },
@@ -42,8 +40,8 @@ describe("readGhostHomeDigest", () => {
       },
     });
     expect(digest.memoryLines).toEqual([
-      "- fresh.md: FRESH",
-      "- stale.md: STALE",
+      "- fresh.md",
+      "- stale.md",
     ]);
   });
 
@@ -103,7 +101,6 @@ describe("readGhostHomeDigest", () => {
             : Promise.resolve({
               files: [{
                 slug: "remembered",
-                description: "MEMORY_OK",
                 content: "remember this",
                 updated: "2026-08-27",
               }],
@@ -137,7 +134,7 @@ describe("readGhostHomeDigest", () => {
         "character" in testCase.failed ? null : "CHARACTER_OK",
       );
       expect(digest.memoryLines).toEqual(
-        "memory" in testCase.failed ? [] : ["- remembered.md: MEMORY_OK"],
+        "memory" in testCase.failed ? [] : ["- remembered.md"],
       );
       expect(digest.documents).toMatchObject(
         "documents" in testCase.failed

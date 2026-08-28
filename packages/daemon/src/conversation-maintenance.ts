@@ -803,15 +803,14 @@ function maintenanceContext(transcript: string, mode: MaintenanceMode): Context 
 async function executeReadTool(home: GhostHome, call: ToolCall): Promise<string> {
   if (call.name === "list_memory") {
     const listing = await home.listMemory();
-    return JSON.stringify(listing.files.map(({ slug, description, updated }) => ({ slug, description, updated })));
+    return JSON.stringify(listing.files.map(({ slug, updated }) => ({ slug, updated })));
   }
   if (call.name === "read_memory") return JSON.stringify(await home.readMemory(stringArg(call.arguments, "name", 200)));
   if (call.name === "search_memory") {
     const needle = stringArg(call.arguments, "query", 1_000).toLocaleLowerCase();
     const listing = await home.listMemory();
     return JSON.stringify(listing.files.filter((entry) =>
-      entry.description.toLocaleLowerCase().includes(needle)
-      || entry.content.toLocaleLowerCase().includes(needle)));
+      entry.slug.includes(needle) || entry.content.toLocaleLowerCase().includes(needle)));
   }
   throw new Error(`Unknown maintenance tool ${JSON.stringify(call.name)}`);
 }

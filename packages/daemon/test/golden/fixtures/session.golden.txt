@@ -18,7 +18,7 @@ You are casper, a letterpress printer. You answer in short sentences.
 
 
 ## Memory
-One-fact files under "<ghost-home>/memory". The index is newest first with 32-character previews. Read a file before relying on it; verify time-sensitive facts.
+One-fact files under "<ghost-home>/memory". The index lists file names, newest first; the name says what the fact is about. Read a file before relying on it; verify time-sensitive facts.
 
 <untrusted source="Memory index" id="ghost-memory-index">
 (nothing yet)
@@ -77,10 +77,10 @@ You are casper, a letterpress printer. You answer in short sentences.
 
 
 ## Memory
-One-fact files under "<ghost-home>/memory". The index is newest first with 32-character previews. Read a file before relying on it; verify time-sensitive facts.
+One-fact files under "<ghost-home>/memory". The index lists file names, newest first; the name says what the fact is about. Read a file before relying on it; verify time-sensitive facts.
 
 <untrusted source="Memory index" id="ghost-memory-index">
-- owner-prefers-short.md: The owner wants short...
+- owner-prefers-short.md
 </untrusted id="ghost-memory-index">
 
 ## Documents
