@@ -4,7 +4,6 @@ import type {
   NetworkEntry,
 } from "./browser-backend.js";
 
-/** Hard output budgets for data a page can control. */
 export const MAX_BROWSER_OBSERVATION_BYTES = 64 * 1024;
 export const MAX_BROWSER_OBSERVATION_ITEMS = 50;
 export const MAX_BROWSER_OBSERVATION_STRING_BYTES = 2 * 1024;
@@ -15,21 +14,17 @@ export interface BoundedJavascriptResult extends BackendJavascriptResult {
   readonly shortened: number;
   readonly replaced: number;
   readonly truncated: boolean;
-  /** UTF-8 bytes in the serialized projected value. */
   readonly bytes: number;
 }
 
 export interface BoundedEntryResult<T> {
   readonly entries: readonly T[];
   readonly total: number;
-  /** Entries not returned because they were invalid or beyond a budget. */
   readonly omitted: number;
-  /** Fields removed by projection, including invalid optional fields. */
   readonly fieldsOmitted: number;
   readonly fieldsShortened: number;
   readonly fieldsReplaced: number;
   readonly truncated: boolean;
-  /** UTF-8 bytes in the serialized projected entries. */
   readonly bytes: number;
 }
 
@@ -51,7 +46,6 @@ function utf8Bytes(value: string): number {
   return Buffer.byteLength(value, "utf8");
 }
 
-/** Truncate without first allocating a Buffer for the whole hostile string. */
 export function boundBrowserObservationString(
   value: unknown,
   maxBytes = MAX_BROWSER_OBSERVATION_STRING_BYTES,

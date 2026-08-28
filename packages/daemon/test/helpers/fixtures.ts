@@ -11,13 +11,10 @@ import type { PiMessagesEvent } from "../../src/pi-messages.js";
 
 export interface TempGhosts {
   root: string;
-  /** The `XDG_DATA_HOME` this fixture points the process at. */
   xdgDataHome: string;
   /** The freedesktop home trash under it — where a deleted ghost lands. */
   trashDir: string;
-  /** Disposable owner-wide Documents root for any session the fixture opens. */
   documentsDir: string;
-  /** Disposable OS owner home for cwd/project trust tests. */
   ownerHome: string;
   registry: GhostRegistry;
   cleanup(): void;
@@ -70,7 +67,6 @@ export interface SeedGhostOptions {
   character?: string;
   docs?: Record<string, string>;
   memory?: Record<string, string>;
-  /** Wire the ghost to a mock provider. */
   provider?: { baseUrl: string; modelId: string; providerId?: string };
 }
 

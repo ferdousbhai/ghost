@@ -49,7 +49,6 @@ afterEach(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()));
 });
 
-/** A fake extension: connects, says hello, and answers requests from a script. */
 async function connectExtension(options: {
   token?: string;
   origin?: string | null;
@@ -153,7 +152,6 @@ function waitFor(predicate: () => boolean, timeoutMs = 2_000): Promise<void> {
   });
 }
 
-// -------------------------------------------------------------------- pairing
 
 describe("pairing", () => {
   it("accepts the extension and reports who connected", async () => {
@@ -221,7 +219,6 @@ describe("pairing", () => {
   });
 });
 
-// ------------------------------------------------------------------- requests
 
 describe("requests", () => {
   it("correlates replies with their requests, even out of order", async () => {
@@ -399,7 +396,6 @@ describe("requests", () => {
   }, 10_000);
 });
 
-// ------------------------------------------------------------------- shutdown
 
 describe("shutdown", () => {
   it("hangs up on the browser and refuses new upgrades", async () => {
@@ -414,7 +410,6 @@ describe("shutdown", () => {
   });
 });
 
-// --------------------------------------------------------------------- switch
 
 describe("the relay can be turned off entirely", () => {
   it.each(["0", "off", "false", "NO"])("GHOSTD_RELAY=%s builds no hub", (value) => {

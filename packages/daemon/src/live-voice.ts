@@ -66,7 +66,6 @@ function assistantText(message: AssistantMessage): string {
     .trim();
 }
 
-/** Conversation-scoped lifecycle for OMP's realtime microphone controller. */
 export class LiveVoiceManager {
   private readonly records = new Map<string, LiveVoiceRecord>();
   private readonly createController: LiveControllerFactory;
@@ -81,7 +80,6 @@ export class LiveVoiceManager {
     return cloneStatus(this.records.get(sessionKey)?.status ?? emptyStatus());
   }
 
-  /** Notify the session owner when an active controller terminates on its own. */
   setOnInactive(listener: ((sessionKey: string) => void | Promise<void>) | undefined): void {
     this.onInactive = listener;
   }

@@ -128,7 +128,6 @@ function authStorageProvider(providerId: string): string {
   return getProviderDefinition(providerId)?.storeCredentialsAs ?? providerId;
 }
 
-/** The machine account one provider's credential lives at, as policy names it. */
 function providerAccountName(providerId: string, account: string): string {
   return secretAccountName({
     service: serviceForCredentialProvider(authStorageProvider(providerId)),
@@ -168,7 +167,6 @@ function registerKeyringProviders(
   return configAccounts;
 }
 
-/** A small old-shape facade so Ghost's stable HTTP/CLI contracts need not leak OMP internals. */
 export class GhostOmpRuntime implements LoginRuntime, ModelCatalogRuntime {
   readonly modelRegistry: ModelRegistry;
   readonly authStorage: AuthStorage;

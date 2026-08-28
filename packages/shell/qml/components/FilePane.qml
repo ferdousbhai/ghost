@@ -34,10 +34,8 @@ import "Merge.js" as Merge
 Item {
     id: root
 
-    /** Absolute path of the open file. Never "" while the pane is visible. */
     required property string filePath
 
-    /** The user closed the pane. Any unsaved text has been flushed first. */
     signal closed()
 
     readonly property string fileName: Highlighter.baseName(root.filePath)
@@ -52,9 +50,7 @@ Item {
     property string diskText: ""
     /** Set while a write is in flight, so a failure can put the dot back. */
     property string preWriteDisk: ""
-    /** Disk content we refused to adopt; non-empty means an open conflict. */
     property string conflictText: ""
-    /** One quiet line under the header. Empty when there is nothing to say. */
     property string notice: ""
 
     readonly property bool dirty: root.markdown && editor.dirty
@@ -62,7 +58,6 @@ Item {
     implicitWidth: 480
     implicitHeight: 320
 
-    // ---- File policy ------------------------------------------------------
 
     function absorb(incoming: string): void {
         if (incoming === root.diskText) return;
@@ -180,7 +175,6 @@ Item {
         onTriggered: root.save()
     }
 
-    // ---- Header -----------------------------------------------------------
 
     Rectangle {
         id: header
@@ -329,7 +323,6 @@ Item {
         }
     }
 
-    // ---- Notice -----------------------------------------------------------
 
     Item {
         id: noticeLine
@@ -390,7 +383,6 @@ Item {
         }
     }
 
-    // ---- Body -------------------------------------------------------------
     //
     // All three bodies exist for the pane's lifetime and one is shown. A
     // Loader would hand back an untyped item, and the header and the save

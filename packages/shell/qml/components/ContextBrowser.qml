@@ -12,7 +12,6 @@ import "ContextDelete.js" as ContextDelete
 Rectangle {
     id: root
 
-    /** One of memory, agents, or character. */
     required property string section
 
     property string selectedMemorySlug: ""
@@ -264,7 +263,6 @@ Rectangle {
         }
     }
 
-    // ---- Header -----------------------------------------------------------
 
     Rectangle {
         id: header
@@ -407,7 +405,6 @@ Rectangle {
         anchors.bottom: parent.bottom
         clip: true
 
-        // ---- Left index --------------------------------------------------
 
         Rectangle {
             id: indexPane
@@ -676,7 +673,6 @@ Rectangle {
             }
         }
 
-        // ---- Detail ------------------------------------------------------
 
         Item {
             id: detailPane

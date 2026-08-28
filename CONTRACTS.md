@@ -641,7 +641,7 @@ one must not be a leak of both.
   `total > 0`, and `total` equals both event counts and row count. The body
   never exposes commands, source paths, arguments, prompts, injected context,
   errors, receipts, or scheduler state. `sessionStopContinuationCap` is the
-  exact value `2`, the consecutive hidden-continuation cap.
+  exact value `10`, the consecutive hidden-continuation cap.
 - `GET  /api/ghosts` → `[{ name, dir, createdAt }]`
 - `POST /api/ghosts` `{ name }` → creates `~/ghosts/<name>/` with a seeded
   `character.md`

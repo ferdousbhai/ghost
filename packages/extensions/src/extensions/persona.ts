@@ -17,11 +17,8 @@ import { buildGhostSystemPrompt } from "../prompt.js";
 import { resolveHome, type GhostExtensionOptions } from "./shared.js";
 
 export interface PersonaExtensionOptions extends GhostExtensionOptions {
-  /** Overrides the directory name as the ghost's name. */
   readonly ghostName?: string;
-  /** Shared machine Documents store. Defaults to the XDG Documents directory. */
   readonly documents?: MachineDocuments | string;
-  /** Extra sections appended after the derived ones. */
   readonly extraSections?: readonly string[];
 }
 
@@ -59,5 +56,4 @@ export function createPersonaExtension(
   };
 }
 
-/** Persona over the session's own ghost home. */
 export default createPersonaExtension();

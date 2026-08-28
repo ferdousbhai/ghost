@@ -66,7 +66,6 @@ export const MOCK_PROJECT_WARNING_TEXT = Object.freeze({
   truncated: "This preview is truncated; only the displayed counts were admitted.",
 });
 
-/** A fresh complete resource-count row, with MCP names deduplicated like ghostd. */
 export function mockProjectResources() {
   const mcpNames = new Set(MOCK_PROJECT_SOURCES.mcpFiles.flatMap((source) => source.names));
   return {
@@ -82,7 +81,6 @@ export function mockProjectResources() {
   };
 }
 
-/** Preserve the live preview's warning order and string-only wire shape. */
 export function mockProjectWarnings(resources, options = {}) {
   const scanWarnings = Array.isArray(options.scanWarnings)
     ? options.scanWarnings.filter((warning) => typeof warning === "string") : [];

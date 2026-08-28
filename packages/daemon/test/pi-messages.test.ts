@@ -10,7 +10,6 @@ import {
 } from "../src/pi-messages.js";
 import { parseSseStream } from "./helpers/fixtures.js";
 
-/** Minimal assistant message stand-ins; only the fields the adapter reads. */
 function assistantMessage(fields: Record<string, unknown> = {}): never {
   return {
     role: "assistant",
@@ -62,7 +61,6 @@ function collect(): { events: PiMessagesEvent[]; emit: (e: PiMessagesEvent) => v
   return { events, emit: (event) => events.push(event) };
 }
 
-/** One provider step that streams text. */
 function textStep(text: string, stepIndex = 0): AgentSessionEvent[] {
   const partial = { content: [] as Array<{ type: string; text?: string }> };
   partial.content[stepIndex] = { type: "text", text };
@@ -97,7 +95,6 @@ function textStep(text: string, stepIndex = 0): AgentSessionEvent[] {
   ] as unknown as AgentSessionEvent[];
 }
 
-/** One provider step that streams a tool call. */
 function toolStep(id: string, name: string, args: string): AgentSessionEvent[] {
   const partial = {
     content: [{ type: "toolCall", id, name, arguments: JSON.parse(args) }],

@@ -25,16 +25,12 @@ import "EditorPolicy.js" as Editor
 Singleton {
     id: root
 
-    /** Absolute path of the open file. "" means the workbench is closed. */
     property string filePath: ""
 
-    /** Basename of `filePath`, for titles and click affordances. */
     readonly property string fileName: root.baseName(root.filePath)
 
-    /** "markdown", "code", or "" when no pane here can render the file. */
     readonly property string kind: root.kindOf(root.filePath)
 
-    /** The active ghost's home directory, or "" while it is unknown. */
     readonly property string home: {
         const ghost = Ghostd.activeGhost;
         if (ghost === "") return "";
@@ -68,18 +64,15 @@ Singleton {
         root.filePath = root.absolute(path);
     }
 
-    /** Close the workbench; the chat takes the whole width back. */
     function close(): void {
         root.filePath = "";
     }
 
-    /** True when `path` resolves to something a pane can actually render. */
     function canOpen(path: string): bool {
         const resolved = root.absolute(path);
         return resolved !== "" && root.kindOf(resolved) !== "";
     }
 
-    /** True when `path` is renderable after resolving it against `base`. */
     function canOpenFrom(path: string, base: string): bool {
         const resolved = root.absoluteFrom(path, base);
         return resolved !== "" && root.kindOf(resolved) !== "";
@@ -127,14 +120,12 @@ Singleton {
         return segments.length === 0 ? "" : "/" + segments.join("/");
     }
 
-    /** The last path segment of `path`, or "" when there is none. */
     function baseName(path: string): string {
         const value = String(path || "");
         const cut = value.lastIndexOf("/");
         return cut < 0 ? value : value.slice(cut + 1);
     }
 
-    /** Which pane renders `path`: "markdown", "code", or "". */
     function kindOf(path: string): string {
         const name = root.baseName(path);
         const dot = name.lastIndexOf(".");
@@ -144,7 +135,6 @@ Singleton {
         return root.codeExtensions.indexOf(ext) >= 0 ? "code" : "";
     }
 
-    // ---- Open in an editor -------------------------------------------------
     //
     // Three constraints, all measured against Quickshell 0.3.0 rather than
     // assumed, because every one of them is silent when you get it wrong:
@@ -161,7 +151,6 @@ Singleton {
     //     loaded/loadFailed signals are the answer, and with `blockLoading` they
     //     fire inside the `text()` call rather than an event loop later.
 
-    /** Whether the last `read()` found a readable file. */
     property bool readOk: false
 
     /** How the PATH answered, once: -1 unknown, 0 no, 1 yes. A machine does
@@ -182,13 +171,11 @@ Singleton {
         return probe.text();
     }
 
-    /** True when `path` is a readable regular file. Directories are false. */
     function exists(path: string): bool {
         root.read(path);
         return root.readOk;
     }
 
-    /** The project directory `path` belongs to. See EditorPolicy.js. */
     function projectRoot(path: string): string {
         const file = root.absolute(path);
         if (file === "") return "";

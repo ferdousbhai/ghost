@@ -42,7 +42,6 @@ function commandFailure(command: string, stderr: string): SecretServiceError {
   );
 }
 
-/** The exact attributes of one Ghost-owned item; never a search pattern. */
 function itemAttributes(ref: SecretAccountRef): string[] {
   return ["xdg:schema", GHOST_SECRET_SCHEMA, "service", ref.service, "account", ref.account];
 }
@@ -81,7 +80,6 @@ export class SecretToolServiceClient implements SecretServiceClient {
     }
   }
 
-  /** Revalidate the caller's names and refuse before touching a locked service. */
   private target(input: SecretAccountRef): SecretAccountRef {
     const ref = parseSecretAccountName(secretAccountName(input));
     this.assertAvailable();
@@ -176,7 +174,6 @@ export function createSecretServiceClient(): SecretServiceClient {
   return defaultClientFactory();
 }
 
-/** Install a process-local fake. Production code has no environment fallback. */
 export function setSecretServiceClientFactoryForTests(factory: SecretServiceClientFactory): void {
   if (!process.env.GHOST_TEST_XDG_STATE_HOME) {
     throw new Error("The Secret Service test factory is available only under the daemon test harness.");

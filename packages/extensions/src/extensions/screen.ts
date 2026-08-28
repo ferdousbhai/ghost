@@ -80,12 +80,10 @@ export {
 
 export const GHOST_SCREEN = "ghost_screen";
 
-/** The mime type the sidecar always returns. */
 export const CAPTURE_MIME_TYPE = "image/png";
 
 type ElementOf<T> = T extends readonly (infer E)[] ? E : never;
 
-/** OMP's `ImageContent`: base64 `data` plus a `mimeType`. */
 export type GhostImageContent = Extract<
   ElementOf<AgentToolResult<unknown>["content"]>,
   { type: "image" }
@@ -105,13 +103,9 @@ export const MAX_CAPTURE_BYTES = MAX_SCREENSHOT_BYTES;
  * context or the disk. Zero new dependency — it just loops the capture op.
  */
 export const DEFAULT_WATCH_FRAMES = 4;
-/** Never sample more frames than this in one watch, whatever the model asks. */
 export const MAX_WATCH_FRAMES = 8;
-/** Default gap between frames. */
 export const DEFAULT_WATCH_INTERVAL_MS = 500;
-/** Longest gap between frames a watch will honour. */
 export const MAX_WATCH_INTERVAL_MS = 5_000;
-/** Whole-watch wall-clock budget; sampling stops once it is spent. */
 export const MAX_WATCH_RUN_MS = 30_000;
 
 export const SCREEN_MODES = ["capture", "watch"] as const;
@@ -148,10 +142,8 @@ function clampInt(value: number | undefined, fallback: number, min: number, max:
   return Math.max(min, Math.min(Math.floor(value), max));
 }
 
-/** The region syntax the model writes: `X,Y WxH`. */
 const REGION_PATTERN = /^(-?\d{1,6}),(-?\d{1,6}) (\d{1,6})x(\d{1,6})$/;
 
-/** A monitor name, as `hyprctl monitors` reports it. */
 const OUTPUT_PATTERN = /^[A-Za-z0-9._:-]{1,64}$/;
 
 export type ScreenTarget = "screen" | "window" | "region";
@@ -159,13 +151,10 @@ export type ScreenTarget = "screen" | "window" | "region";
 export const SCREEN_TARGETS = ["screen", "window", "region"] as const;
 
 export interface ScreenExtensionOptions extends GhostExtensionOptions {
-  /** Test seam: the sidecar link. Defaults to the shared per-daemon helper. */
   readonly helper?: DesktopHelper;
-  /** How many captures to keep. Defaults to 20. */
   readonly retention?: number;
 }
 
-/** A filename that sorts chronologically and names the ghost that took it. */
 export function screenshotFileName(ghostName: string, now: Date = new Date()): string {
   return ghostScreenshotName(ghostName, "screen", now);
 }
@@ -182,7 +171,6 @@ export async function pruneScreenshots(
   return pruneScreenshotDirectoryPath(dir, retention, ghostScreenshotMatcher(ghostName, "screen"));
 }
 
-/** Parse the `X,Y WxH` region the model writes into the sidecar's rect. */
 export function parseRegion(region: string): {
   x: number;
   y: number;
@@ -207,7 +195,6 @@ export function parseRegion(region: string): {
 }
 
 export interface HelperCapture {
-  /** Absolute path of the saved PNG. */
   readonly path: string;
   readonly bytes: number;
   readonly image: GhostImageContent;
@@ -382,13 +369,11 @@ export function screenToolNames(): string[] {
   return [GHOST_SCREEN];
 }
 
-/** A short, model-facing description of what the capture disturbed. */
 function captureNote(meta: HelperCaptureResult): string {
   const note = honestyNote(meta);
   return note || "Background-safe.";
 }
 
-/** What the capture was aimed at, in the words the model used to ask for it. */
 function targetLabel(params: {
   target?: ScreenTarget | undefined;
   window?: string | undefined;
@@ -469,7 +454,6 @@ function aggregateWatchHonesty(captures: HelperCapture[]): {
   };
 }
 
-/** A short, model-facing summary of a watch's frames and honesty. */
 function watchNote(captures: HelperCapture[]): string {
   const honesty = aggregateWatchHonesty(captures);
   const parts: string[] = [

@@ -46,7 +46,6 @@ afterEach(async () => {
   temp = null;
 });
 
-/** The complete character body that must lead the system prompt. */
 const CHARACTER = `# casper
 
 You are casper, a letterpress printer. You answer in short sentences.

@@ -81,20 +81,16 @@ import { descriptorPath } from "../linux-fs.js";
 export const BROWSER_PROFILE_DIRNAME = ".browser-profile";
 
 export interface PlaywrightBackendOptions {
-  /** Headed by default; the owner can watch the ghost browse. */
   readonly headless?: boolean;
   /** Skip detection and use this Chrome/Chromium binary. */
   readonly executablePath?: string;
-  /** Launch timeout. Per-action timeouts arrive with each call. */
   readonly launchTimeoutMs?: number;
 }
 
 const DEFAULT_LAUNCH_TIMEOUT_MS = 30_000;
 
-/** How many console / network entries the rings keep before dropping the oldest. */
 const RING_LIMIT = 200;
 
-/** Names to look for on `PATH`, best first. */
 const LINUX_BINARY_NAMES = [
   "chromium",
   "chromium-browser",
@@ -104,7 +100,6 @@ const LINUX_BINARY_NAMES = [
   "ungoogled-chromium",
 ];
 
-/** Absolute paths worth trying when `PATH` comes up empty. */
 const EXTRA_CANDIDATES = [
   "/usr/bin/chromium",
   "/usr/bin/chromium-browser",
@@ -225,7 +220,6 @@ async function directoryEntries(directory: FileHandle, state: { entries: number 
   return entries;
 }
 
-/** Clear a directory without ever resolving a child through a mutable parent path. */
 async function clearPinnedDirectory(
   directory: FileHandle,
   state: { entries: number },
@@ -328,7 +322,6 @@ async function removePersistedServiceWorkers(
   }
 }
 
-/** A headed browser needs a display; without one, fall back to headless. */
 function hasDisplay(env: NodeJS.ProcessEnv = process.env): boolean {
   return Boolean(env["WAYLAND_DISPLAY"] || env["DISPLAY"]);
 }
@@ -344,11 +337,9 @@ export class PlaywrightBrowserBackend implements GhostBrowserBackend {
   #headless: boolean;
   #refs = new Set<string>();
 
-  /** Console and network rings, drained by `readConsole`/`readNetwork`. */
   #console: ConsoleEntry[] = [];
   #network: NetworkEntry[] = [];
   #observed = new WeakSet<Page>();
-  /** Stable ids for tabs, since Playwright pages have none of their own. */
   #pageIds = new WeakMap<Page, string>();
   #nextPageId = 1;
   /** Network-policy failures are sticky until a deliberate new navigation. */
@@ -410,9 +401,7 @@ export class PlaywrightBrowserBackend implements GhostBrowserBackend {
     return { applied: !this.running };
   }
 
-  // ------------------------------------------------------------------ lifecycle
 
-  /** Launch on first use, and only once even under parallel tool calls. */
   async #contextOrLaunch(): Promise<BrowserContext> {
     if (this.#closing) await this.#closing;
     if (this.#context) return this.#context;
@@ -550,7 +539,6 @@ export class PlaywrightBrowserBackend implements GhostBrowserBackend {
     return context;
   }
 
-  /** Attach console / network listeners once per page; feeds the rings. */
   #observe(page: Page): void {
     if (this.#observed.has(page)) return;
     this.#observed.add(page);
@@ -700,7 +688,6 @@ export class PlaywrightBrowserBackend implements GhostBrowserBackend {
     return closing;
   }
 
-  // -------------------------------------------------------------------- helpers
 
   async #contextWithin(options: BackendActionOptions, action: string): Promise<BrowserContext> {
     try {
@@ -732,7 +719,6 @@ export class PlaywrightBrowserBackend implements GhostBrowserBackend {
     return withTimeout(context.newPage(), options.timeoutMs, action, options.signal);
   }
 
-  /** The current page, refusing to launch just to report there is nothing on it. */
   async #openPage(options: BackendActionOptions, action: string): Promise<Page> {
     if (!this.#context) {
       throw new GhostBrowserError("no_page", "The browser is not open yet.");
@@ -815,7 +801,6 @@ export class PlaywrightBrowserBackend implements GhostBrowserBackend {
     rethrowBackendError(error, action, timeoutMs);
   }
 
-  // -------------------------------------------------------------------- actions
 
   async open(url: string, options: BackendActionOptions): Promise<PageSummary> {
     const page = await this.#page(options, `opening ${url}`);

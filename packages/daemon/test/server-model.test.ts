@@ -46,7 +46,6 @@ interface ServeOptions {
   claudePlan?: boolean;
 }
 
-/** Boot a server whose catalogue is the given fake runtime. Returns the base URL. */
 async function serve(options: ServeOptions = {}): Promise<string> {
   temp = makeTempGhosts();
   temp.registry.ensureRoot();

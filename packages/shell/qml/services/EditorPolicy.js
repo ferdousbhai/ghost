@@ -14,7 +14,6 @@
 // filesystem primitive can answer, and the `.git` walk below is written around
 // the limit rather than pretending otherwise.
 
-/** Omarchy's own editor launcher; it reads the same default file we do. */
 var LAUNCHER = "omarchy-launch-editor";
 
 /**
@@ -30,7 +29,6 @@ var GUI_EDITORS = {
     "sublime_text": "pair"
 };
 
-/** Directory containing `path`: "/" for a top-level entry, "" for a bare name. */
 function parentOf(path) {
     var value = String(path || "");
     var cut = value.lastIndexOf("/");
@@ -38,7 +36,6 @@ function parentOf(path) {
     return cut === 0 ? "/" : value.slice(0, cut);
 }
 
-/** True when `path` is `dir` or lives inside it. Both must be absolute. */
 function isUnder(path, dir) {
     if (typeof path !== "string" || typeof dir !== "string") return false;
     if (path === "" || dir === "") return false;
@@ -98,7 +95,6 @@ function editorSetting(defaultsText) {
     return token === "" ? "nvim" : token;
 }
 
-/** argv for a folder-aware GUI editor, or [] when `setting` names none. */
 function guiArgv(setting, root, filePath) {
     var name = String(setting || "");
     var cut = name.lastIndexOf("/");
@@ -133,7 +129,6 @@ function launchPlan(defaultsText, hasLauncher, hasCode, root, filePath) {
     return { command: [], workingDirectory: "" };
 }
 
-/** Whether `name` is an executable-looking entry in `pathEnv`. */
 function onPath(pathEnv, name, exists) {
     var entries = String(pathEnv || "").split(":");
     for (var index = 0; index < entries.length; index += 1) {

@@ -16,9 +16,7 @@ export const MAX_MEMORY_FILE_CONTENT_LENGTH = 2_000;
 export const MAX_MEMORY_FILE_BYTES = MAX_MEMORY_FILE_CONTENT_LENGTH * 3 + 1;
 export const MAX_MEMORY_FILE_SLUG_LENGTH = 64;
 export const MAX_MEMORY_FILES = 500;
-/** Maximum length of one derived index preview, including an ellipsis. */
 export const MEMORY_INDEX_PREVIEW_CHARS = 32;
-/** Injection budget for the per-session memory index, in characters. */
 export const MEMORY_INDEX_BUDGET_CHARS = 4_000;
 export const REDACTED_MEMORY_SECRET = "[REDACTED_SECRET]";
 
@@ -30,13 +28,10 @@ export interface ParsedMemoryFile {
 
 export interface MemoryFileMeta {
   readonly slug: string;
-  /** A preview derived from the memory content, never stored separately. */
   readonly description: string;
-  /** Filesystem modification time as an ISO timestamp. */
   readonly updated: string;
 }
 
-/** Validate `<slug>.md` and return the slug. */
 export function parseMemoryFileName(name: string): string {
   if (!name.endsWith(".md")) {
     throw new MemoryFileFormatError("Memory files must use the .md extension.");
@@ -54,7 +49,6 @@ export function memoryFileName(slug: string): string {
   return `${slug}.md`;
 }
 
-/** Accept either `preferred-tone` or `preferred-tone.md`; return the slug. */
 export function coerceMemorySlug(name: string): string {
   return parseMemoryFileName(name.endsWith(".md") ? name : memoryFileName(name.trim()));
 }
@@ -63,7 +57,6 @@ export function normalizeMemoryText(value: string): string {
   return value.replace(/\s+/g, " ").trim();
 }
 
-/** Remove common credential forms before memory content reaches validation or disk. */
 export function redactMemorySecrets(value: string): string {
   return value
     .replace(
@@ -103,7 +96,6 @@ export function memorySlugForText(text: string): string {
   return slug || "memory";
 }
 
-/** The compact index text derived from a memory's normalized content. */
 export function memoryIndexPreview(content: string): string {
   const normalized = normalizeMemoryText(content);
   if (normalized.length <= MEMORY_INDEX_PREVIEW_CHARS) return normalized;
@@ -118,7 +110,6 @@ export function memoryIndexPreview(content: string): string {
   return `${prefix.trimEnd().replace(/[.,;:!?]+$/u, "")}...`;
 }
 
-/** Validate a memory file the model is about to write, before it hits disk. */
 export function assertWritableMemory(content: string): void {
   const normalized = content.trim();
   if (normalized.length === 0) {
@@ -146,13 +137,9 @@ export function parseMemoryFile(markdown: string): ParsedMemoryFile {
 }
 
 export interface MemoryIndex {
-  /** Budgeted index lines, newest first. */
   readonly lines: readonly string[];
-  /** Characters the included lines occupy (one newline each). */
   readonly chars: number;
-  /** Files omitted because the index budget was exhausted. */
   readonly omitted: number;
-  /** Files considered, before the budget cut. */
   readonly total: number;
 }
 

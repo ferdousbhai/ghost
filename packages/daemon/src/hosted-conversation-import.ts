@@ -82,17 +82,12 @@ export interface HostedConversationImportFailure {
 }
 
 export interface HostedConversationImportResult {
-  /** Hosted JSON fixtures found. */
   found: number;
-  /** New native OMP sessions published. */
   imported: number;
-  /** Native targets that already existed and were deliberately left alone. */
   existing: number;
-  /** Fixtures that could not be projected; each source file remains untouched. */
   failures: HostedConversationImportFailure[];
 }
 
-/** Verify one retained/moved hosted fixture still names this conversation. */
 export async function hostedConversationSourceMatches(
   path: string,
   conversationId: string,

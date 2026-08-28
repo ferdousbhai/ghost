@@ -23,18 +23,15 @@ export interface Harness {
   readonly tools: Map<string, AnyTool>;
   readonly handlers: Map<string, AnyHandler[]>;
   toolNames(): string[];
-  /** Execute a registered tool the way the runtime would. */
   call(
     name: string,
     params?: Record<string, unknown>,
     signal?: AbortSignal,
   ): Promise<AgentToolResult<any>>;
-  /** Fire `tool_call`, returning the first blocking result, as pi does. */
   toolCall(
     toolName: string,
     input?: Record<string, unknown>,
   ): Promise<ToolCallEventResult | undefined>;
-  /** Fire `before_agent_start` and return the assembled system prompt. */
   beforeAgentStart(incomingSystemPrompt?: string): Promise<string | undefined>;
 }
 
@@ -116,7 +113,6 @@ export async function loadExtension(
   };
 }
 
-/** The text a tool returned, joined. */
 export function resultText(result: AgentToolResult<any>): string {
   return result.content
     .filter((part): part is { type: "text"; text: string } => part.type === "text")

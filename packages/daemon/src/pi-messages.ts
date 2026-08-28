@@ -32,12 +32,10 @@ import {
 export type PiMessagesEvent =
   | { type: "start" }
   | {
-      /** Owner-authored input dequeued into this still-running turn. */
       type: "owner_message";
       text: string;
     }
   | {
-      /** Standalone slash-command output; it is not an assistant/model block. */
       type: "command_output";
       command: string;
       output: string;
@@ -62,7 +60,6 @@ export type PiMessagesEvent =
       id: string;
       toolName: string;
       arguments: unknown;
-      /** Absolute working directory captured when this exact call began. */
       cwd: string;
       intent?: string;
     }
@@ -87,7 +84,6 @@ export type PiMessagesEvent =
       role: string;
     }
   | {
-      /** OMP tree navigation committed a new active branch mid-stream. */
       type: "branch_changed";
       transcript: TranscriptWireView;
     }
@@ -111,7 +107,6 @@ export type PiMessagesEvent =
       responseId?: string;
     };
 
-/** Kept structural here to avoid coupling the wire codec back to SessionHost. */
 export interface TranscriptWireView {
   id: string;
   title: string | null;
@@ -120,7 +115,6 @@ export interface TranscriptWireView {
   truncated: boolean;
 }
 
-/** SSE framing, byte-identical to the hosted relay's. */
 export function encodeSseEvent(event: unknown): string {
   return `data: ${JSON.stringify(event)}\n\n`;
 }
@@ -166,17 +160,10 @@ export function copyUsage(usage: Usage): Usage {
   return { ...usage, cost: { ...usage.cost } };
 }
 
-// ---------------------------------------------------------------------------
-// Request
-// ---------------------------------------------------------------------------
 
-/** The parsed, trusted subset of a pi-messages request. */
 export interface PiMessagesRequest {
-  /** Client-requested model id. Advisory: the ghost's own config wins. */
   model: string | null;
-  /** `options.sessionId` — the conversation id. */
   sessionId: string | null;
-  /** The newest user message, flattened to text. */
   prompt: string;
 }
 
@@ -189,7 +176,6 @@ export class PiMessagesRequestError extends Error {
   }
 }
 
-/** Flatten pi content parts (or a bare string) to text. */
 export function textFromParts(parts: unknown): string {
   if (typeof parts === "string") return parts;
   if (!Array.isArray(parts)) return "";
@@ -260,9 +246,6 @@ export function parsePiMessagesRequest(body: unknown): PiMessagesRequest {
   };
 }
 
-// ---------------------------------------------------------------------------
-// AgentSessionEvent → PiMessagesEvent
-// ---------------------------------------------------------------------------
 
 export interface PiMessagesAdapterOptions {
   /**
@@ -276,22 +259,15 @@ export interface PiMessagesAdapterOptions {
    * prompt skips one; later dequeued steering/follow-ups still cross the wire.
    */
   skipOwnerMessages?: number;
-  /** Let the harness hold `done` across hidden session-stop continuations. */
   deferAgentEnd?: boolean;
-  /** Session cwd snapshot captured independently for every tool start. */
   getCwd?: () => string;
 }
 
 export interface PiMessagesAdapter {
-  /** Feed one pi `AgentSessionEvent`. Safe to call after termination. */
   handle(event: AgentSessionEvent): void;
-  /** Emit the single terminal `done`. No-op once terminal. */
   finishDone(reason?: "stop" | "length" | "toolUse"): void;
-  /** Emit the single terminal `error`. No-op once terminal. */
   finishError(error: unknown, aborted?: boolean): void;
-  /** True once a terminal event has been emitted. */
   isTerminal(): boolean;
-  /** Aggregate usage across every provider step of the turn. */
   totalUsage(): Usage;
 }
 
@@ -303,7 +279,6 @@ type AssistantContentBlock =
 
 const TOOL_SUMMARY_LIMIT = 240;
 
-/** Small human-facing excerpt only; tool results can contain files/images/DOM. */
 function toolResultSummary(result: unknown): string | undefined {
   let text: string | undefined;
   if (typeof result === "string") text = result;
@@ -348,7 +323,6 @@ export function createPiMessagesAdapter(
   let started = false;
   let terminal = false;
   let nextWireIndex = 0;
-  /** Per-step map: the step's own contentIndex → this turn's wire index. */
   let wireIndexByStepIndex = new Map<number, number>();
   let lastStopReason: string | undefined;
   let lastErrorMessage: string | undefined;

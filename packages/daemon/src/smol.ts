@@ -34,18 +34,12 @@ import type { Api, AssistantMessage, Model } from "@oh-my-pi/pi-ai";
 import type { GhostModelRoleBinding } from "./models.js";
 import type { GhostOmpRuntime } from "./omp-runtime.js";
 
-/** The role name in `<home>/models.json`. Mirrors `GhostModelRole`. */
 export const SMOL_MODEL_ROLE = "smol_model";
 
-// ---------------------------------------------------------------------------
-// Resolution
-// ---------------------------------------------------------------------------
 
-/** OMP model fields the smol resolver ranks. */
 export type SmolModel = Pick<Model<Api>, "provider" | "id">
   & Partial<Pick<Model<Api>, "name" | "cost">>;
 
-/** A candidate model plus the one fact ranking needs beyond cost. */
 export interface SmolCandidate {
   readonly model: SmolModel;
   /**
@@ -61,17 +55,13 @@ export interface SmolCandidate {
  * so the rules can be tested against a fixture with no OMP runtime at all.
  */
 export interface SmolModelCatalog {
-  /** Every model the ghost can use right now (its provider is credentialed). */
   usable(): readonly SmolCandidate[];
-  /** One model by ref (whether or not credentialed), or undefined. */
   find(provider: string, modelId: string): SmolCandidate | undefined;
-  /** Whether the ghost has a working credential for a candidate's provider. */
   hasCredentials(candidate: SmolCandidate): boolean;
 }
 
 export interface ResolvedSmolModel {
   readonly model: SmolModel;
-  /** `role` when `roles.smol_model` named it, `cheapest` when ranked. */
   readonly via: "role" | "cheapest";
 }
 
@@ -90,7 +80,6 @@ export class SmolModelUnavailableError extends Error {
   }
 }
 
-/** `provider/id`, the label every smol error and log line names a model by. */
 export function smolModelLabel(model: SmolModel): string {
   return `${model.provider}/${model.id}`;
 }
@@ -176,9 +165,6 @@ export function resolveSmolModel(
   return { model: cheapest.model, via: "cheapest" };
 }
 
-// ---------------------------------------------------------------------------
-// Runtime adapter
-// ---------------------------------------------------------------------------
 
 /**
  * The slice of `GhostOmpRuntime` this module drives. A test passes a fake.
@@ -196,7 +182,6 @@ export type SmolRuntime = Pick<
   | "complete"
 >;
 
-/** Whether a provider's credential is a zero-marginal-cost subscription. */
 function isSubscriptionProvider(runtime: SmolRuntime, provider: string): boolean {
   return runtime.isUsingSubscription(provider) || runtime.isUsingOAuth(provider);
 }

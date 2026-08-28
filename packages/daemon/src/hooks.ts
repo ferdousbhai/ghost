@@ -7,7 +7,7 @@ import type { Logger } from "./log.js";
 import { silentLogger } from "./log.js";
 
 export const GHOST_HOOK_HANDLER_TIMEOUT_MS = 30_000;
-export const GHOST_SESSION_STOP_CONTINUATION_CAP = 2;
+export const GHOST_SESSION_STOP_CONTINUATION_CAP = 10;
 export const GHOST_CONVERSATION_IDLE_DELAY_MS = 60_000;
 const MAX_HOOK_OUTPUT_BYTES = 1024 * 1024;
 
@@ -25,7 +25,6 @@ interface GhostHookEventBase {
   session_file?: string;
   signal: AbortSignal;
   ghost_name: string;
-  /** Absolute ghost-home storage root; deliberately distinct from cwd. */
   ghost_home: string;
   cwd: string;
   runtime: "omp" | "claude-code";
@@ -51,6 +50,12 @@ export interface GhostSessionStopEvent extends GhostHookEventBase {
   turn_id: number;
   last_assistant_message?: unknown;
   stop_hook_active: boolean;
+  /**
+   * The runtime's native transcript when one exists on disk: the Pi session file
+   * for OMP conversations, the Claude Code SDK session file for Claude Code
+   * conversations. `messages` still carries only the current pass.
+   */
+  transcript_path?: string;
 }
 
 export interface GhostConversationIdleEvent extends GhostHookEventBase {
@@ -130,7 +135,6 @@ export interface GhostHookRegistrationOptions {
   description?: string;
   idleSeconds?: number;
   timeoutSeconds?: number;
-  /** Stable across restarts; conversation_idle only. */
   registrationId?: string;
 }
 
@@ -661,13 +665,11 @@ export class GhostHookRunner {
     return this.handlers[event].length > 0 || this.commands.some((hook) => hook.eventName === event);
   }
 
-  /** Exact distinct idle deadlines currently admitted by handlers and commands. */
   conversationIdleDelaysMs(): readonly number[] {
     return [...new Set(this.conversationIdleRegistrations().map(({ idleMs }) => idleMs))]
       .sort((left, right) => left - right);
   }
 
-  /** Stable semantic identities for restart-safe idle delivery. */
   conversationIdleRegistrations(): readonly GhostConversationIdleRegistration[] {
     return [
       ...this.handlers.conversation_idle
@@ -847,7 +849,6 @@ export class GhostHookRunner {
     }
   }
 
-  /** Dispatch exactly one in-process idle registration, independent of delay peers. */
   async emitConversationIdleRegistration(
     event: GhostConversationIdleEvent,
     registration: GhostConversationIdleRegistration,

@@ -21,7 +21,6 @@ export const MAX_PRIVATE_FILE_BYTES = 1_048_576;
 
 export type PrivateReadRefusal = "open" | "unsafe" | "too_large" | "changed" | "encoding";
 
-/** Why one confined read was refused. `cause` carries the `open` errno error. */
 export class PrivateReadError extends Error {
   readonly refusal: PrivateReadRefusal;
 

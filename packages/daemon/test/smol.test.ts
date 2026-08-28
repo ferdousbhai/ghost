@@ -22,7 +22,6 @@ interface FakeModel extends SmolModel {
   credentialed?: boolean;
 }
 
-/** Build a catalog directly (no runtime) for the pure resolver tests. */
 function catalogOf(models: FakeModel[]): SmolModelCatalog {
   const toCandidate = (model: FakeModel) => ({
     model: { provider: model.provider, id: model.id, name: model.name, cost: model.cost },

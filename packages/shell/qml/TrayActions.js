@@ -1,6 +1,5 @@
 .pragma library
 
-/** Route one validated helper intent through the shell's existing owners. */
 function dispatch(message, ghostd, hud, quit) {
     if (!message || typeof message.action !== "string") return false;
     switch (message.action) {

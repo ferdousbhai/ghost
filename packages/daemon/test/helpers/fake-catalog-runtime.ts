@@ -14,15 +14,11 @@ export interface FakeCatalogModel extends CatalogModel {
 }
 
 export interface FakeCatalogOptions {
-  /** The full catalogue: every model OMP would report from getModels(). */
   models: FakeCatalogModel[];
-  /** Providers with a working credential; their models are "available". */
   credentialed?: string[];
-  /** Credentialed providers signed in via OAuth (vs an api key). */
   oauth?: string[];
 }
 
-/** Materialize a complete OMP model while keeping catalogue fixtures concise. */
 export function fakeOmpModel(model: FakeCatalogModel): Model<Api> {
   return {
     id: model.id,
@@ -66,7 +62,6 @@ export function makeFakeCatalogRuntime(options: FakeCatalogOptions): ModelCatalo
   };
 }
 
-/** A small, realistic catalogue: two providers, one credentialed. */
 export function sampleCatalog(): FakeCatalogModel[] {
   return [
     {

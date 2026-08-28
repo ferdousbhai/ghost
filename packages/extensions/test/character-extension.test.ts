@@ -10,7 +10,6 @@ import { openGhostHome } from "../src/home.js";
 import { createGhostFixture, type GhostFixture } from "./support/fixture.js";
 import { loadExtension, resultText } from "./support/harness.js";
 
-/** The file the daemon seeds a freshly summoned ghost with. */
 const SEEDED_CHARACTER = `# casper
 
 You are casper.

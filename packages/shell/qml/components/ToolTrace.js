@@ -166,7 +166,6 @@ function askAutoAnswer(activity) {
     return askAutoAnswerFromQuestions(askQuestions(activity));
 }
 
-/** Everything a card needs from an ask, derived in one pass over its options. */
 function askPresentation(activity, completed) {
     const questions = askQuestions(activity);
     const settlement = askSettlement(activity);
@@ -252,7 +251,6 @@ function fileBase(activity) {
     }
 }
 
-/** Absolute session cwd captured by the daemon when this tool began. */
 function fileCwd(activity) {
     activity = fields(activity);
     return typeof activity.cwd === "string" ? activity.cwd.trim() : "";
@@ -450,7 +448,6 @@ function hasDiagnostics(activity, preparedInput) {
         || Boolean(activity.intent && activity.summary);
 }
 
-/** One delegate-facing view, so bindings do not re-normalise the same call. */
 function view(activity, completed, failed, expanded) {
     activity = fields(activity);
     const ask = askPresentation(activity, completed);

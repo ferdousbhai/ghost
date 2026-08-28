@@ -25,7 +25,6 @@ TestCase {
         return out.join("");
     }
 
-    // ---- Disjoint edits ---------------------------------------------------
 
     function test_disjointRegionsBothApply(): void {
         const mine = "ALPHA\nbravo\ncharlie\ndelta\necho\n";
@@ -50,7 +49,6 @@ TestCase {
         compare(merged.text, "charlie\ndelta\nECHO\n");
     }
 
-    // ---- One side idle ----------------------------------------------------
 
     function test_unchangedSideReturnsTheOtherVerbatim_data() {
         return [
@@ -71,7 +69,6 @@ TestCase {
         compare(merged.text, data.want);
     }
 
-    // ---- Agreement --------------------------------------------------------
 
     function test_identicalEditsCollapse(): void {
         // The same rewrite of line three on both sides, plus an edit only mine
@@ -99,7 +96,6 @@ TestCase {
         compare(merged.text, same);
     }
 
-    // ---- Conflict ---------------------------------------------------------
 
     function test_sameLineDivergentEditsConflict(): void {
         const mine = "alpha\nbravo\nmine\ndelta\necho\n";
@@ -140,7 +136,6 @@ TestCase {
         verify(!Merge.merge(tc.base, mine, wider).ok);
     }
 
-    // ---- Boundaries -------------------------------------------------------
 
     function test_insertionBesideARewrittenLineMerges(): void {
         // An insertion *before* a line the other side rewrote is not a
@@ -159,7 +154,6 @@ TestCase {
         verify(!merged.ok);
     }
 
-    // ---- Newlines ---------------------------------------------------------
 
     function test_missingTrailingNewlineSurvives(): void {
         // A file with no final newline: theirs appends to the last line's own
@@ -188,7 +182,6 @@ TestCase {
         compare(merged.text, "A\n\n\nb\n");
     }
 
-    // ---- Empty inputs -----------------------------------------------------
 
     function test_emptyBase_data() {
         return [
@@ -214,7 +207,6 @@ TestCase {
         compare(merged.text, "y\n");
     }
 
-    // ---- Size ceilings ----------------------------------------------------
 
     function test_hugeFileFallsBackToTheConflictPrompt(): void {
         const base = tc.lines(20001, "line");
@@ -244,7 +236,6 @@ TestCase {
             base.replace("line 10\n", "MINE\n").replace("line 4000\n", "THEIRS\n"));
     }
 
-    // ---- The no-loss property ---------------------------------------------
 
     function test_cleanMergeInventsAndLosesNothing(): void {
         const base = tc.lines(12, "base");

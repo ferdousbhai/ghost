@@ -12,7 +12,6 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 
 interface MockStepOptions {
-  /** Hold this request after capture, so tests can exercise overlapping work. */
   gate?: Promise<void>;
   /**
    * An observable gate: tests can await the exact provider boundary before
@@ -24,13 +23,9 @@ interface MockStepOptions {
 }
 
 export interface MockProviderBarrier {
-  /** Number of provider requests currently known to have reached this gate. */
   readonly arrivals: number;
-  /** Resolve once at least `count` requests have reached the gate. */
   waitForArrivals(count?: number): Promise<void>;
-  /** Release every current and future request at this gate. Idempotent. */
   release(): void;
-  /** Provider-side half of the barrier. Tests normally use the other methods. */
   hold(): Promise<void>;
 }
 
@@ -89,7 +84,6 @@ export interface CapturedRequest {
   system: string;
   messages: unknown[];
   toolNames: string[];
-  /** The model id the agent asked to run on (OpenAI `model` field). */
   model: string;
 }
 
@@ -110,13 +104,10 @@ export interface MockProviderOptions {
    */
   script: MockStep[];
   modelId?: string;
-  /** Milliseconds between streamed chunks. Keep tiny; tests are serial. */
   chunkDelayMs?: number;
-  /** Consume the script per request, including side requests such as compaction. */
   sequential?: boolean;
 }
 
-/** Where in the script this conversation is: one step per assistant turn. */
 function stepIndexFor(messages: Array<{ role?: string }>): number {
   return messages.filter((message) => message.role === "assistant").length;
 }

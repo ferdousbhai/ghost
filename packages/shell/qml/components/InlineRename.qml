@@ -22,18 +22,14 @@ import qs.services
 TextInput {
     id: field
 
-    /** Shown while empty, for a row that has never had a name of its own. */
     required property string placeholder
 
-    /** Keep the caret's text; the list decides what to do with it. */
     signal committed()
-    /** Throw the edit away. */
     signal cancelled()
     signal edited(string value)
     signal focusGained()
     signal focusLost()
 
-    /** Take the keyboard, seeded with `draft` and selected whole. */
     function begin(draft: string): void {
         field.text = draft;
         field.forceActiveFocus();

@@ -22,7 +22,6 @@ export type DocumentEntryKind = "directory" | "file";
 
 export interface DocumentDirectoryEntry {
   readonly name: string;
-  /** Path relative to the machine's Documents root. */
   readonly path: string;
   readonly kind: DocumentEntryKind;
   readonly size?: number;
@@ -36,14 +35,10 @@ export interface SkippedDocumentEntry {
 }
 
 export interface DocumentDirectoryPage {
-  /** Absolute, canonical local Documents root. */
   readonly root: string;
-  /** Normalized Documents-relative directory; empty means the root. */
   readonly path: string;
-  /** Normalized current-directory name query. */
   readonly query: string;
   readonly entries: readonly DocumentDirectoryEntry[];
-  /** Counts cover the filtered direct children before pagination, never descendants. */
   readonly total: number;
   readonly fileCount: number;
   readonly directoryCount: number;
@@ -53,11 +48,8 @@ export interface DocumentDirectoryPage {
 }
 
 export interface DocumentTextContent {
-  /** Absolute, canonical local Documents root. */
   readonly root: string;
-  /** Normalized Documents-relative regular-file path. */
   readonly path: string;
-  /** Exact byte length of `content` under strict UTF-8 decoding. */
   readonly size: number;
   readonly modifiedAt: string;
   readonly content: string;
@@ -119,7 +111,6 @@ function invalidPath(path: string, message: string): GhostError {
   return new GhostError("invalid_path", `${message}: ${JSON.stringify(path)}.`, { path });
 }
 
-/** Normalize a directory below Documents. Empty names the root. */
 export function normalizeDocumentsDirectoryPath(input: string): string {
   if (input.includes("\0") || input.includes("\\") || input.startsWith("/")) {
     throw invalidPath(input, "Documents paths must be confined relative paths");
@@ -132,7 +123,6 @@ export function normalizeDocumentsDirectoryPath(input: string): string {
   return segments.join("/");
 }
 
-/** Normalize one file path below Documents. */
 export function normalizeDocumentsFilePath(input: string): string {
   const normalized = normalizeDocumentsDirectoryPath(input);
   if (normalized === "") throw invalidPath(input, "A Documents file path is required");
@@ -344,7 +334,6 @@ export class MachineDocuments {
     };
   }
 
-  /** Open a pinned parent directory for a file mutation. */
   async openFileParent(path: string): Promise<{
     root: string;
     relativePath: string;

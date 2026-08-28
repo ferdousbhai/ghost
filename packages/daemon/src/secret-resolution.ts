@@ -1,4 +1,3 @@
-/** In-memory expansion of portable keyring references at connection time. */
 import type { MCPServerConfig } from "@oh-my-pi/pi-coding-agent/mcp/types";
 import type { GhostProviderConfig } from "./models.js";
 import { visitMcpSecretFields, visitProviderSecretFields } from "./secret-migration.js";
@@ -14,7 +13,6 @@ function resolveValue(value: string, resolver: SecretResolver): string {
   return value.startsWith(SECRET_REFERENCE_PREFIX) ? resolver.resolve(value) : value;
 }
 
-/** Restore exactly the fields migration is allowed to have replaced. */
 export function resolveProviderSecrets(
   config: GhostProviderConfig,
   resolver: SecretResolver,
@@ -24,7 +22,6 @@ export function resolveProviderSecrets(
   return resolved;
 }
 
-/** Restore exactly the fields migration is allowed to have replaced. */
 export function resolveMcpServerSecrets(
   input: MCPServerConfig,
   resolver: SecretResolver,

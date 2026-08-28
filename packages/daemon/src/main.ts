@@ -94,7 +94,6 @@ export interface ParsedArgs {
 }
 
 export interface MainRuntime {
-  /** Test observer called after the root reservation and before home access. */
   afterHomeReservationAcquired?: () => Promise<void>;
 }
 
@@ -106,13 +105,11 @@ export interface StagedShutdownOptions {
   stopAdmission(): void;
   /** Synchronously signal cancellation to active work. */
   abortActive(): void;
-  /** Full orderly teardown, which may contain third-party code. */
   graceful(): Promise<void>;
   /** Best-effort terminal close after the grace deadline. */
   force(): void;
   graceMs?: number;
   forceMs?: number;
-  /** Deterministic deadline seam for tests. */
   wait?: (delayMs: number) => Promise<void>;
 }
 
@@ -123,7 +120,6 @@ function shutdownWait(delayMs: number): Promise<void> {
   });
 }
 
-/** Complete signal handling in bounded time even when a dependency never settles. */
 export async function runStagedShutdown(options: StagedShutdownOptions): Promise<"graceful" | "forced"> {
   const wait = options.wait ?? shutdownWait;
   options.stopAdmission();
@@ -157,7 +153,6 @@ export interface ShutdownSignalOptions {
   timing?: Pick<StagedShutdownOptions, "graceMs" | "forceMs" | "wait">;
 }
 
-/** Keep both signal handlers live until teardown settles; a repeat forces immediately. */
 export async function waitForShutdownSignal(options: ShutdownSignalOptions): Promise<void> {
   const signalProcess = process as unknown as {
     listeners(event: "SIGINT" | "SIGTERM"): Array<(...args: unknown[]) => void>;

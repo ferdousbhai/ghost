@@ -18,7 +18,6 @@ import { addUsage, copyUsage, zeroUsage, type PiMessagesEvent } from "./pi-messa
 
 export interface ClaudePiMessagesAdapter {
   handle(message: SDKMessage): void;
-  /** Add a hidden continuation pass's usage without terminating the stream. */
   recordUsage(result: SDKResultMessage): void;
   finishError(error: unknown, aborted?: boolean): void;
   isTerminal(): boolean;

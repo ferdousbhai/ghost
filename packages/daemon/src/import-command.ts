@@ -175,9 +175,7 @@ function closeServer(server: Server): Promise<void> {
  * stopped; an overwrite additionally probes the legacy daemon listener.
  */
 export interface ImportCommandRuntime {
-  /** Test observer called only after both overwrite reservations are held. */
   afterOverwriteReservationAcquired?: () => Promise<void>;
-  /** Test observer called after archive publication while reservations remain held. */
   afterArchivePublished?: () => Promise<void>;
   /** Test observer called after the legacy listener closes but before the home unlocks. */
   afterLegacyPortReservationReleased?: () => Promise<void>;

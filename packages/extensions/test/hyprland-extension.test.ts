@@ -75,7 +75,6 @@ const MONITORS = [
 
 const ACTIVE = CLIENTS[1];
 
-/** The default sidecar answers for the read/act ops the tests exercise. */
 function desktopHandler(op: string): unknown {
   switch (op) {
     case "state":

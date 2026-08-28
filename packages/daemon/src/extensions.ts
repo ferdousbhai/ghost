@@ -50,11 +50,8 @@ export async function ensureGhostHomeLayout(homeDir: string): Promise<void> {
   await openGhostHome(homeDir).ensure();
 }
 
-/** How the daemon asks for a session's extension set. */
 export interface GhostExtensionOptions {
-  /** Overrides the ghost home directory name as the ghost's name. */
   ghostName?: string;
-  /** Shared machine Documents store, injected once by the daemon. */
   documents?: MachineDocuments | string;
   /**
    * Which browser `ghost_browser` drives. `"relay"` (with a `relayTransport`
@@ -88,13 +85,10 @@ function selectBrowserBackend(
 }
 
 export interface ResolvedGhostExtensions {
-  /** Inline factories passed to OMP's native extension loader. */
   factories: ExtensionFactory[];
-  /** Ghost-specific tools added to OMP's native tool set. */
   toolNames: string[];
 }
 
-/** Preserve OMP's existing per-call model capability behavior exactly. */
 export const ompToolCapabilities: GhostToolCapabilitiesResolver = (context) => ({
   vision: context.model?.input?.includes("image") ?? false,
 });
@@ -136,7 +130,6 @@ export function resolveGhostExtensions(
  * Derived, never stored, exactly as it is in a session.
  */
 export interface GhostHomeDigest {
-  /** The character body, or null when there is no character file. */
   character: string | null;
   memoryLines: readonly string[];
   documents: DocumentsIndex;
@@ -153,7 +146,6 @@ export interface GhostHomeDigestReaders {
 
 export interface GhostHomeDigestReadOptions {
   readonly readers?: GhostHomeDigestReaders;
-  /** Categorical only: the rejected error and its paths never cross this seam. */
   readonly onUnavailable?: (input: GhostHomeDigestInput) => void;
 }
 

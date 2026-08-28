@@ -11,13 +11,10 @@ export type FrontmatterValue = string | number | boolean | string[];
 export type FrontmatterRecord = Record<string, FrontmatterValue>;
 
 const FENCE = "---";
-/** Reserved on Windows even with an extension; `-file` keeps them openable. */
 const RESERVED_FILENAMES = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
 const PLAIN_YAML_SCALAR = /^[A-Za-z0-9][A-Za-z0-9 _./-]*$/;
-/** Plain scalars YAML would read back as something other than a string. */
 const AMBIGUOUS_YAML_SCALAR = /^(y|n|yes|no|true|false|on|off|null|nan|-?\d+(\.\d+)?)$/i;
 
-/** Quote unless the value survives a YAML round trip as a plain scalar. */
 export function yamlScalar(value: string): string {
   if (
     value.length > 0
@@ -41,7 +38,6 @@ export function yamlFlowList(values: readonly string[]): string {
   return `[${values.map(yamlScalar).join(", ")}]`;
 }
 
-/** One filesystem-safe path segment. Never empty, never `.`/`..`/hidden. */
 export function sanitizePathSegment(segment: string): string {
   let printable = "";
   for (const character of segment) {
@@ -60,9 +56,7 @@ export function sanitizePathSegment(segment: string): string {
 }
 
 export interface SplitDocument {
-  /** Frontmatter lines, fences excluded, `\r` stripped. */
   readonly lines: readonly string[];
-  /** Everything after the closing fence and its single separator newline, verbatim. */
   readonly body: string;
   readonly hadFrontmatter: boolean;
 }
@@ -104,7 +98,6 @@ export function splitFrontmatter(text: string): SplitDocument {
   throw new GhostError("invalid_format", "Unterminated frontmatter: no closing --- line.");
 }
 
-/** `---\n<lines>\n---\n\n<body>` — the export's exact layout, body untouched. */
 export function renderDocument(lines: readonly string[], body: string): string {
   return `${FENCE}\n${lines.join("\n")}\n${FENCE}\n\n${body}`;
 }
@@ -133,7 +126,6 @@ function unquote(value: string): string {
   return value;
 }
 
-/** Split a flow-list body on commas that are not inside quotes. */
 function splitFlowItems(inner: string): string[] {
   const items: string[] = [];
   let current = "";

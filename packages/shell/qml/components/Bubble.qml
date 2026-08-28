@@ -32,10 +32,8 @@ Item {
     required property string failure
     required property bool busy
     required property string sourceEntryId
-    /** Position in the transcript model; gates entrances to freshly arrived rows. */
     required property int rowIndex
 
-    /** The edit action was clicked. The HUD decides what it costs. */
     signal branchRequested(string entryId)
 
     readonly property bool mine: root.speaker === "user"

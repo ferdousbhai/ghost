@@ -22,6 +22,7 @@ import {
   readOrCreateApiToken,
   rotateApiToken,
 } from "../src/api-token.js";
+import { GHOST_SESSION_STOP_CONTINUATION_CAP } from "../src/hooks.js";
 import { startDaemonServer, type ListeningServer } from "../src/server.js";
 import { SessionHost } from "../src/session-host.js";
 import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
@@ -43,7 +44,6 @@ afterEach(async () => {
   temp = null;
 });
 
-/** A server whose only interesting property is the token it expects. */
 async function serve(apiToken: string | null = TOKEN): Promise<string> {
   temp = makeTempGhosts();
   temp.registry.ensureRoot();
@@ -103,7 +103,7 @@ describe("the bearer token", () => {
       total: 0,
       events: [],
       hooks: [],
-      sessionStopContinuationCap: 2,
+      sessionStopContinuationCap: GHOST_SESSION_STOP_CONTINUATION_CAP,
     });
   });
 
@@ -257,7 +257,6 @@ describe("the two deliberate exemptions", () => {
   });
 });
 
-// ------------------------------------------------------------ the token store
 
 describe("the API token store", () => {
   let dir: string;

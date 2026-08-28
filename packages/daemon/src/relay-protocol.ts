@@ -47,7 +47,6 @@ export function isRelayOp(value: unknown): value is RelayOp {
   return typeof value === "string" && OP_SET.has(value);
 }
 
-// -------------------------------------------------------------------- frames
 
 export interface RelayHelloFrame {
   readonly t: "hello";
@@ -80,7 +79,6 @@ export interface RelayEventFrame {
   readonly data?: Record<string, unknown>;
 }
 
-/** Everything the extension may send. */
 export type RelayClientFrame =
   | RelayHelloFrame
   | RelayResponseOk
@@ -101,7 +99,6 @@ export interface RelayRequestFrame {
   readonly timeoutMs: number;
 }
 
-/** Everything the daemon may send. */
 export type RelayServerFrame = RelayWelcomeFrame | RelayRequestFrame;
 
 export type ParsedClientFrame =
@@ -203,12 +200,10 @@ export function encodeServerFrame(frame: RelayServerFrame): string {
   return JSON.stringify(frame);
 }
 
-// ------------------------------------------------------------- upgrade check
 
 export interface RelayUpgradeRequest {
   readonly url: string | undefined;
   readonly headers: IncomingHttpHeaders;
-  /** `socket.remoteAddress`. */
   readonly remoteAddress: string | undefined;
 }
 

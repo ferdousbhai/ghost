@@ -26,17 +26,13 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
 
-/** 32 bytes, hex. Long enough that guessing is not a strategy. */
 const TOKEN_BYTES = 32;
 const TOKEN_CREATE_ATTEMPTS = 8;
 export const TOKEN_PATTERN = /^[0-9a-f]{64}$/;
 
 export interface TokenStoreOptions {
-  /** Injected for tests. Defaults to `process.env`. */
   env?: NodeJS.ProcessEnv;
-  /** Injected for tests. Defaults to `os.homedir()`. */
   home?: string;
-  /** Skip the XDG dance entirely and use this file. */
   path?: string;
 }
 
@@ -46,28 +42,19 @@ export interface TokenCommandOptions extends TokenStoreOptions {
 }
 
 export interface TokenStoreSpec {
-  /** File name under `$XDG_STATE_HOME/ghost/`. */
   filename: string;
-  /** Environment variable that overrides the whole path. */
   envVar: string;
-  /** The `ghostd` subcommand that prints it, used in messages too. */
   command: string;
   /** One line saying what the secret is for, printed above the storage note. */
   purpose: string;
 }
 
 export interface TokenStore {
-  /** File name under `$XDG_STATE_HOME/ghost/`. */
   readonly filename: string;
-  /** Where the token lives, without creating anything. */
   defaultPath(env?: NodeJS.ProcessEnv, home?: string): string;
-  /** The token, minting one on first call. */
   readOrCreate(options?: TokenStoreOptions): { token: string; path: string; created: boolean };
-  /** The stored token, or undefined when there is no token file. */
   read(options?: TokenStoreOptions): string | undefined;
-  /** Mint a fresh token, invalidating whatever the old one had paired. */
   rotate(options?: TokenStoreOptions): { token: string; path: string };
-  /** `ghostd <command> [--rotate] [--quiet]`. Returns a process exit code. */
   command(argv?: readonly string[], options?: TokenCommandOptions): number;
 }
 

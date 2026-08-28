@@ -1,4 +1,3 @@
-/** Bounded reads for daemon-owned recovery and conversation control files. */
 import { randomUUID } from "node:crypto";
 import { lstat, open, rename, unlink } from "node:fs/promises";
 import type { BigIntStats } from "node:fs";

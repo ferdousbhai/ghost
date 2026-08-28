@@ -279,7 +279,6 @@ Rectangle {
         }
     }
 
-    // ---- Header -----------------------------------------------------------
 
     Rectangle {
         id: header
@@ -367,7 +366,6 @@ Rectangle {
         anchors.bottom: parent.bottom
         clip: true
 
-        // ---- Folder tree --------------------------------------------------
 
         Rectangle {
             id: folderPane
@@ -538,7 +536,6 @@ Rectangle {
             }
         }
 
-        // ---- Direct-file list --------------------------------------------
 
         Rectangle {
             id: listPane
@@ -1053,7 +1050,6 @@ Rectangle {
             }
         }
 
-        // ---- File detail --------------------------------------------------
 
         Item {
             id: detailPane

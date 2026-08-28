@@ -37,21 +37,15 @@ Singleton {
     readonly property string stateDir: (Quickshell.env("XDG_STATE_HOME") || (Quickshell.env("HOME") + "/.local/state"))
         + "/omarchy/current"
 
-    /** Raw key → value from colors.toml. Empty when Omarchy is not installed. */
     property var colors: ({})
-    /** Raw "section.key" → value from shell.toml. */
     property var shell: ({})
-    /** Theme name, e.g. "tokyo-night". Empty when unknown. */
     property string themeName: ""
-    /** True when we are painting on top of an Omarchy theme rather than the fallback. */
     readonly property bool themed: Object.keys(root.colors).length > 0
-    /** Explicit accessibility escape hatch for every decorative loop. */
     readonly property bool reducedMotion: {
         const value = String(Quickshell.env("GHOST_REDUCE_MOTION") || "").toLowerCase();
         return value === "1" || value === "true" || value === "yes";
     }
 
-    // ---- Fallback palette -------------------------------------------------
     // Tokyo Night, Omarchy's default theme. Chosen so a non-Omarchy machine
     // gets a coherent dark surface rather than Qt's default battleship grey.
     readonly property var fallback: ({
@@ -77,7 +71,6 @@ Singleton {
         return (value !== undefined && value !== "") ? value : root.fallback[key];
     }
 
-    // ---- Semantic roles ---------------------------------------------------
     readonly property bool light: root.pick("mode") === "light"
 
     // The summon-ghost canvas: a cool near-black (hue ~260) so the warm amber
@@ -112,13 +105,11 @@ Singleton {
         return luma > 0.58 ? "#111111" : "#ffffff";
     }
 
-    /** Bar geometry, from the theme's [bar] section when present. */
     readonly property int barSize: Number(root.shell["bar.size-horizontal"]) || 26
     readonly property color barBackground: root.shell["bar.background"] || root.background
     readonly property color barForeground: root.shell["bar.text"] || root.foreground
     readonly property color barActive: root.shell["bar.active"] || root.accent
 
-    // ---- Ghost brand ------------------------------------------------------
     // The summon-ghost identity, ported from the Cloudflare app: warm amber
     // for the ghost's presence, actions, and ownership; cold spectral
     // blue-white for machine thinking (the orb, ambient fog). Fixed brand
@@ -130,24 +121,19 @@ Singleton {
     readonly property color ghostRose: "#fb7185"
     readonly property color spectral: "#c8dcff"
 
-    /** Translucent ink film over the canvas — the old app's white/N% surfaces. */
     function film(alpha: real): color {
         return root.light ? Qt.rgba(0, 0, 0, alpha * 0.8) : Qt.rgba(1, 1, 1, alpha);
     }
-    /** Ghost amber at low alpha, for tinted fills, borders, and glows. */
     function amber(alpha: real): color {
         return Qt.rgba(0.984, 0.749, 0.141, alpha);
     }
-    /** Ember orange at low alpha; the middle of the brand gradient. */
     function ember(alpha: real): color {
         return Qt.rgba(0.976, 0.451, 0.086, alpha);
     }
-    /** Rose at low alpha; the cool end of the brand gradient. */
     function rose(alpha: real): color {
         return Qt.rgba(0.984, 0.443, 0.522, alpha);
     }
 
-    // ---- Code editor chrome ----------------------------------------------
     // Deliberately dark in *both* Omarchy modes. A code view is editor chrome,
     // not a reading surface: VS Code, Xcode and Zed all keep a dark editor in a
     // light shell because a syntax palette tuned for contrast on dark ink turns
@@ -173,7 +159,6 @@ Singleton {
     readonly property string synKeyword: "#9d8cf5"
     readonly property string synFunction: "#d9c98a"
 
-    // ---- Fixed design tokens ---------------------------------------------
     // Not themed by Omarchy; kept here so every surface agrees on an 8px
     // rhythm and a readable native type scale.
     readonly property int radius: 8
@@ -193,7 +178,6 @@ Singleton {
     /** Proportional line height for reading copy; chrome labels stay at 1.0. */
     readonly property real lineHeight: 1.35
 
-    // ---- TOML ------------------------------------------------------------
     // A deliberately small parser. Omarchy's theme files are generated from
     // templates and only ever contain `key = "value"`, `key = number`,
     // `key = true`, `# comment` and `[section]`. Anything fancier (arrays,

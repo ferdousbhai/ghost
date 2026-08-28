@@ -2,7 +2,6 @@
 # ghost-tray — the ghost shell's StatusNotifierItem (system-tray) bridge.
 #
 # WHY THIS EXISTS AS A SEPARATE PROCESS
-# -------------------------------------
 # Quickshell 0.3.0 can *consume* a StatusNotifierItem (Quickshell.Services.
 # SystemTray) and *consume* a DBusMenu, but it exposes no primitive for
 # *producing* either — there is no generic D-Bus object/adaptor or bus-name
@@ -14,7 +13,6 @@
 # Quickshell QML, so the shell spawns this tiny helper and drives it.
 #
 # HOW IT TALKS TO THE SHELL (no second connection to ghostd)
-# ----------------------------------------------------------
 # All ghost state already lives in the shell's one Ghostd singleton. Rather
 # than open a second client here, the shell PUSHES state down our stdin as one
 # JSON object per line, and we PUSH user intents (left-click, menu choices)
@@ -157,7 +155,6 @@ class Menu(dbus.service.Object):
         self._active = ""
         self.rebuild([], "", [])
 
-    # ---- layout construction ----
     def rebuild(self, ghosts, active, sessions):
         self._ghosts = ghosts
         self._active = active
@@ -212,7 +209,6 @@ class Menu(dbus.service.Object):
             signature="ia{sv}av", variant_level=1)
         return node
 
-    # ---- interface: com.canonical.dbusmenu ----
     @dbus.service.method(MENU_IFACE, in_signature="iias", out_signature="u(ia{sv}av)")
     def GetLayout(self, parentId, recursionDepth, propertyNames):
         names = list(propertyNames)
@@ -271,7 +267,6 @@ class Menu(dbus.service.Object):
     def AboutToShowGroup(self, ids):
         return dbus.Array([], signature="i"), dbus.Array([], signature="i")
 
-    # ---- interface: properties ----
     @dbus.service.method(PROPS_IFACE, in_signature="ss", out_signature="v")
     def Get(self, iface, prop):
         return self.GetAll(iface).get(prop, dbus.String(""))
@@ -314,7 +309,6 @@ class StatusNotifierItem(dbus.service.Object):
         self._tooltip = description or ""
         self.NewToolTip()
 
-    # ---- interface: properties ----
     @dbus.service.method(PROPS_IFACE, in_signature="ss", out_signature="v")
     def Get(self, iface, prop):
         return self.GetAll(iface).get(prop, dbus.String(""))
@@ -348,7 +342,6 @@ class StatusNotifierItem(dbus.service.Object):
     def Set(self, iface, prop, value):
         pass
 
-    # ---- interface: org.kde.StatusNotifierItem ----
     @dbus.service.method(SNI_IFACE, in_signature="ii", out_signature="")
     def Activate(self, x, y):
         self._on_action(("toggle", None))

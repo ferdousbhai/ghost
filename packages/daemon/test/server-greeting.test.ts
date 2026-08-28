@@ -33,9 +33,7 @@ afterEach(async () => {
 });
 
 interface ServeOptions {
-  /** Replace the model call. Omitted, the real generator runs (and finds nothing). */
   generate?: GreetingGenerator;
-  /** Seed a written character.md ghost. Off, the ghost is created from the seed. */
   written?: boolean;
   greeting?: Omit<GreetingConfig, "generate">;
   logger?: Logger;

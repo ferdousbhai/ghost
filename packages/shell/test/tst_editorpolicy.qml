@@ -14,7 +14,6 @@ TestCase {
     id: tc
     name: "EditorPolicy"
 
-    /** An `exists` probe over a fixed list of readable regular files. */
     function probe(files) {
         return function (path) { return files.indexOf(path) >= 0; };
     }

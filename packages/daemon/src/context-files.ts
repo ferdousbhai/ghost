@@ -10,7 +10,6 @@ import {
 export type TrashableContextSection = "memory";
 
 export interface TrashedContextFile extends TrashPathResult {
-  /** Ghost-home-relative path that was moved. */
   path: string;
 }
 
@@ -48,7 +47,6 @@ function validateContextPath(
   return target;
 }
 
-/** Move one memory Markdown file out of a ghost home recoverably. */
 export function trashGhostContextFile(
   ghostDir: string,
   section: TrashableContextSection,

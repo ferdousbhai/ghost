@@ -32,7 +32,6 @@ export interface ConversationPins {
   pinned: string[];
 }
 
-/** The pin file inside one ghost's `sessions/` directory. */
 export function pinsPath(sessionDir: string): string {
   return join(sessionDir, PINS_FILENAME);
 }

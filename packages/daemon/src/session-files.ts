@@ -22,7 +22,6 @@ function conversationIdFitsFileName(conversationId: string): boolean {
     && /^[A-Za-z0-9._-]+$/u.test(conversationId);
 }
 
-/** Map a client conversation id onto its collision-safe transcript filename. */
 export function sessionFileNameFor(conversationId: string): string {
   requireRawConversationId(conversationId);
   if (conversationIdFitsFileName(conversationId)) return `${conversationId}.jsonl`;
@@ -32,7 +31,6 @@ export function sessionFileNameFor(conversationId: string): string {
   return `${HASHED_SESSION_PREFIX}${digest}.jsonl`;
 }
 
-/** Collision-safe Claude v3 metadata sidecar for one exact raw conversation id. */
 export function claudeSessionMetadataPath(
   sessionDir: string,
   conversationId: string,
@@ -42,7 +40,6 @@ export function claudeSessionMetadataPath(
   return join(sessionDir, `${CLAUDE_SESSION_PREFIX}${digest}${CLAUDE_SESSION_SUFFIX}`);
 }
 
-/** Persist an exact raw id when the safe transcript name cannot carry it. */
 export function bindConversationId(
   manager: SessionManager,
   conversationId: string,
@@ -86,7 +83,6 @@ function conversationIdFromCustomEntry(entry: unknown): string | null {
   return null;
 }
 
-/** Recover the exact raw conversation id represented by a native transcript. */
 export async function conversationIdFromSessionFile(
   sessionFile: string,
 ): Promise<string | null> {

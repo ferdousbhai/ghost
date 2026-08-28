@@ -46,7 +46,6 @@ export interface LegacyDocumentsPlacementResult {
 export interface LegacyDocumentsPlacementOptions {
   readonly sourceRoot: string;
   readonly documentsRoot: string;
-  /** Defaults to true. Mutation requires an explicit false. */
   readonly dryRun?: boolean;
   /** Deterministic race/failure seam used only by automated tests. */
   readonly probe?: (
@@ -783,7 +782,6 @@ Defaults to a read-only dry run. --apply copies regular files without overwrite
 and leaves every legacy source in place.
 `;
 
-/** CLI wrapper; dry-run is intentionally the default and only --apply mutates. */
 export async function legacyDocumentsPlacementCommand(
   argv: readonly string[],
   io: PlacementCommandIO = { stdout: process.stdout, stderr: process.stderr },

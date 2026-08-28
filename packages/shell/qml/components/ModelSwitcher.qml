@@ -23,12 +23,9 @@ import "ModelRouting.js" as Routing
 Rectangle {
     id: root
 
-    /** Return to the transcript. */
     signal closeRequested()
-    /** Open the provider login (ModelLogin), keeping the switcher as the origin. */
     signal connectProviderRequested()
 
-    /** Advanced OMP role/fallback overview, separate from the one-click chat picker. */
     property bool routingView: false
     property string routeRole: ""
     property string routeLabel: ""
@@ -36,7 +33,6 @@ Rectangle {
     readonly property bool pickingRoute: routeRole !== ""
     readonly property var routingRows: Routing.rows(Ghostd.modelRouting)
 
-    /** A catalog choice that cannot become effective until its provider login finishes. */
     property var pendingModel: null
     readonly property bool hasPendingModel: pendingModel !== null
     readonly property string pendingModelName: {
@@ -44,7 +40,6 @@ Rectangle {
         return root.pendingModel.name || root.pendingModel.id;
     }
 
-    /** True once the user has typed a search: show catalog instead of available. */
     readonly property bool searching: searchField.text.trim() !== ""
 
     // Available models, flattened into provider-header + model rows for a single
@@ -67,7 +62,6 @@ Rectangle {
     radius: Theme.radius
     color: Theme.background
 
-    /** Open the panel: fresh current model + available list; clear any old search. */
     function open(): void {
         searchField.text = "";
         root.routingView = false;
@@ -99,7 +93,6 @@ Rectangle {
         };
     }
 
-    /** Drop client intent and refresh the effective daemon-reported selection. */
     function clearPendingModel(): void {
         root.pendingModel = null;
         Ghostd.fetchCurrentModel();
@@ -117,7 +110,6 @@ Rectangle {
         }
     }
 
-    /** (Re)run the catalog search from the box, debounced. */
     function runSearch(): void {
         Ghostd.fetchCatalog(searchField.text.trim(), 0);
     }
@@ -135,7 +127,6 @@ Rectangle {
         anchors.margins: Theme.pad
         spacing: Theme.gap
 
-        // ---- Header -------------------------------------------------------
         RowLayout {
             Layout.fillWidth: true
             spacing: Theme.gap
@@ -204,7 +195,6 @@ Rectangle {
             }
         }
 
-        // ---- Search box ---------------------------------------------------
         Rectangle {
             visible: !root.routingView
             Layout.fillWidth: true
@@ -329,7 +319,6 @@ Rectangle {
             }
         }
 
-        // ---- OMP role + fallback routing ---------------------------------
         Flickable {
             visible: root.routingView
             Layout.fillWidth: true
@@ -578,7 +567,6 @@ Rectangle {
             }
         }
 
-        // ---- Available list (default view) --------------------------------
         Flickable {
             visible: !root.routingView && !root.searching
             Layout.fillWidth: true
@@ -746,7 +734,6 @@ Rectangle {
             }
         }
 
-        // ---- Catalog list (while searching) -------------------------------
         Flickable {
             visible: !root.routingView && root.searching
             Layout.fillWidth: true

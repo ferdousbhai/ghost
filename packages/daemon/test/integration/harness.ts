@@ -44,11 +44,8 @@ export interface JsonResponse<T = unknown> {
 }
 
 export interface SseWireFrame {
-  /** One normalized frame, excluding its terminating blank line. */
   raw: string;
-  /** The first data line, matching the pinned pi-messages parser. */
   data?: string;
-  /** Parsed pi-messages payload when `data` is JSON rather than `[DONE]`. */
   event?: PiMessagesEvent;
 }
 
@@ -78,7 +75,6 @@ export function within<T>(
   });
 }
 
-/** A streaming response parsed incrementally from an actual loopback socket. */
 export class RealSseClient {
   readonly frames: SseWireFrame[] = [];
   readonly status: number;
@@ -170,7 +166,6 @@ export class RealSseClient {
     ).then((frame) => frame.event as PiMessagesEvent);
   }
 
-  /** Destroy the client side of the socket without waiting for the turn. */
   disconnect(): void {
     if (this.completed || this.disconnected) return;
     this.disconnected = true;
@@ -262,7 +257,6 @@ function restoreEnvironment(snapshot: NodeJS.ProcessEnv): void {
   }
 }
 
-/** Boot a production SessionHost and daemon server in a disposable universe. */
 export async function startRealDaemonHarness(
   options: RealDaemonHarnessOptions,
 ): Promise<RealDaemonHarness> {

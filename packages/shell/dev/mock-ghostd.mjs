@@ -108,7 +108,6 @@ const HOST = "127.0.0.1";
 const SESSION_CWD = homedir();
 const DELTA_MS = flag("--slow") ? 30 : 12;
 const TOOL_STEPS = Math.max(1, Math.min(100, Number(opt("--tool-steps", "1")) || 1));
-/** The contract's `askTimeoutSeconds` default; 0 means no deadline is armed. */
 const ASK_TIMEOUT_S = Math.max(0, Number(opt("--ask-timeout", "120")) || 0);
 const OWNS_GHOSTS_ROOT = !process.env.GHOSTS_ROOT;
 const GHOSTS_ROOT = process.env.GHOSTS_ROOT
@@ -163,7 +162,6 @@ function publishConversationUpdated(name, runtime, conversationId,
   }
 }
 
-// ---- Browsable ghost context ----------------------------------------------
 // Metadata stays in memory. The default root gets matching temporary files so
 // FilePane exercises real atomic reads/writes without touching ~/ghosts.
 const MOCK_MEMORY = [
@@ -352,7 +350,6 @@ function validMcpConfig(config) {
   return false;
 }
 
-// ---- Connect fixtures ----------------------------------------------------
 const liveStates = new Map();
 const collabStates = new Map();
 let collabSeq = 0;
@@ -482,7 +479,6 @@ if (OWNS_DOCUMENTS_ROOT) {
   process.once("exit", () => rmSync(DOCUMENTS_ROOT, { recursive: true, force: true }));
 }
 
-// ---- Conversation store ----------------------------------------------------
 // The daemon persists a ghost's conversations (pi sessions); the mock keeps
 // them in memory. Each ghost is seeded with a titled thread and an untitled one
 // (title === null exercises the HUD's fallback). A turn appends to its session
@@ -725,7 +721,6 @@ const sessionSummary = (s) => ({
   unread: !s.readAt || s.updatedAt > s.readAt,
 });
 
-// ---- Explicit conversation projects --------------------------------------
 
 const projectStore = new Map();
 const projectTrust = new Map();
@@ -849,7 +844,6 @@ function recordTurn(name, sessionId, prompt, assistantText, ownerMessages = []) 
     runtime === "claude-code" ? "project" : undefined);
 }
 
-// ---- Greetings -------------------------------------------------------------
 // The empty-chat opening line. Both branches of the contract are demoable:
 // `casper` answers as a ghost that already knows the owner, `moaning-myrtle`
 // answers `onboarding: true` (it has no character.md yet and says so), and any
@@ -897,20 +891,16 @@ const readBody = (req) =>
     req.on("error", reject);
   });
 
-// ---- Pending asks ----------------------------------------------------------
 // OMP's ask tool pauses the turn while the SSE stream stays open, so the mock
 // pauses the same way: the turn script awaits a promise and the HTTP routes
 // settle it. One ask per conversation, which is all OMP allows.
 
-/** "<ghost> <conversation>" → the ask a paused turn is waiting on. */
 const pendingAsks = new Map();
 const askKey = (name, sessionId) => JSON.stringify([name, sessionId]);
 let askSeq = 0;
 
-/** Yielded by a script where a real turn blocks inside the ask tool. */
 const ASK_WAIT = Symbol("ask-wait");
 
-/** What the clock submits on expiry: the recommended option, or nothing. */
 function timedOutResults(questions) {
   return questions.map((question) => {
     const options = question.options ?? [];
@@ -955,7 +945,6 @@ function openAsk(name, sessionId, questions) {
   return promise;
 }
 
-/** How the question closed, for the tool card's summary line. */
 function askSummary(answer) {
   if (answer.kind === "chat") return "Moved to chat";
   if (answer.kind !== "submit") return "Dismissed without an answer";
@@ -964,14 +953,12 @@ function askSummary(answer) {
   return answer.timedOut ? `Timed out — answered with ${picked}` : `Answered with ${picked}`;
 }
 
-/** The persisted `ghostAsk.settled` a live answer becomes on a re-answer. */
 const settledFrom = (answer) => {
   if (answer.kind === "chat") return "chat";
   if (answer.kind !== "submit") return "cancelled";
   return answer.timedOut ? "timedOut" : "submitted";
 };
 
-/** The question a scripted turn stops on. */
 const LIVE_QUESTION = {
   id: "q-live",
   header: "Before I write anything",
@@ -1127,9 +1114,7 @@ function* script(name, prompt, sessionId) {
   }
 }
 
-/** Conversation keys with a turn in flight; the real daemon's busy gate is per conversation. */
 const answering = new Set();
-/** Active turn queues, keyed exactly like the daemon's session routes. */
 const activeTurns = new Map();
 const turnKey = (name, sessionId) => JSON.stringify([name, sessionId]);
 const ghostIsAnswering = (name) => [...answering].some((key) => {
@@ -1140,7 +1125,6 @@ const ghostIsAnswering = (name) => [...answering].some((key) => {
   }
 });
 
-/** Open an SSE response, and free a paused turn if the client walks away. */
 function openStream(req, res, name, sessionId) {
   res.writeHead(200, {
     "content-type": "text/event-stream; charset=utf-8",
@@ -1226,7 +1210,6 @@ async function streamTurn(req, res, name, body) {
   }
 }
 
-/** Where the message carrying an ask sits, or -1 once a branch discarded it. */
 const askCallIndex = (session, call) =>
   session.messages.findIndex((m) => Array.isArray(m.content) && m.content.includes(call));
 
@@ -1292,7 +1275,6 @@ async function streamReanswer(req, res, name, sessionId, session, entryId, recor
   res.end();
 }
 
-/** Pull the last user message's text out of a pi-messages `context`. */
 function extractPrompt(body) {
   const messages = body?.context?.messages;
   const last = Array.isArray(messages) ? messages.at(-1) : undefined;
@@ -1303,7 +1285,6 @@ function extractPrompt(body) {
   return "(no prompt)";
 }
 
-// ---- Scripted login flows --------------------------------------------------
 
 const PROVIDERS = [
   { id: "openai-codex", name: "OpenAI Codex", subscription: true, authTypes: ["oauth"] },
@@ -1317,7 +1298,6 @@ const PROVIDERS = [
   },
 ];
 
-/** loginId → mutable login session. */
 const logins = new Map();
 
 function startLogin(providerId, authType) {
@@ -1385,7 +1365,6 @@ function finishLogin(session) {
   delete view.prompt;
 }
 
-// ---- Scripted model catalogue ----------------------------------------------
 // A small stand-in for pi's ~1,270-model registry: enough providers and rows
 // to exercise available-vs-catalog, the vision badge, search, and paging.
 
@@ -1424,9 +1403,7 @@ const CATALOG = [
 // Which providers this mock pretends to be credentialed for. `anthropic` starts
 // connected so the available list is non-empty; the rest route through login.
 const credentialed = new Set(["anthropic"]);
-/** ghost name → { provider, id } explicit chat-model role. */
 const roles = new Map();
-/** ghost name → { [ghostRole]: { primary, fallbacks } }. */
 const routing = new Map();
 const ROUTE_ROLES = [
   ["chat_model", "default", "Chat"],
@@ -1541,7 +1518,6 @@ function routeState(name) {
   };
 }
 
-// ---- Shared Documents -----------------------------------------------------
 
 const DOCUMENT_DIRECTORY_FLAGS = constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW;
 const DOCUMENT_FILE_FLAGS = constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW;
@@ -2547,7 +2523,6 @@ const mockServer = createServer(async (req, res) => {
       : json(res, 400, { error: { message: "no user message with that entryId", code: "invalid_branch" } });
   }
 
-  // ---- The ask a paused turn is waiting on ---------------------------------
   if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "ask" && req.method === "GET") {
     const conversation = routeConversation(parts);
     if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
@@ -2606,7 +2581,6 @@ const mockServer = createServer(async (req, res) => {
     return streamReanswer(req, res, name, conversation.conversationId, s, entryId, record);
   }
 
-  // ---- Model indicator + switcher ------------------------------------------
   if (parts[3] === "model" && parts.length === 4 && req.method === "GET") {
     return json(res, 200, resolveCurrent(name));
   }
@@ -2679,7 +2653,6 @@ const mockServer = createServer(async (req, res) => {
     return json(res, 200, routeState(name));
   }
 
-  // ---- Login endpoints -----------------------------------------------------
   if (parts[3] === "providers" && req.method === "GET") {
     return json(res, 200, { providers: PROVIDERS });
   }

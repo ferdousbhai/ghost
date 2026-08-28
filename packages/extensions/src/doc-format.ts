@@ -15,16 +15,13 @@ const H1_LINE = /^# (.*\S.*)$/;
 
 export interface ParsedDoc {
   readonly title: string;
-  /** Tag slugs without the leading `#`; the reserved `archived` tag is omitted. */
   readonly tags: readonly string[];
   readonly archived: boolean;
 }
 
 export interface DocRenderInput {
   readonly title: string;
-  /** Markdown below the title, excluding a trailing tag line. */
   readonly content?: string;
-  /** Lowercase tag slugs without `#`, excluding the reserved `archived` status. */
   readonly tags?: readonly string[];
   readonly archived?: boolean;
 }
@@ -43,7 +40,6 @@ function legacyTagSlugs(line: string): string[] | null {
     : null;
 }
 
-/** Parse only canonical ghost-home/v2 Markdown. */
 export function parseDoc(text: string): ParsedDoc {
   const lines = linesOf(text);
   const first = lines[0] ?? "";
@@ -94,7 +90,6 @@ function assertTag(tag: string): void {
   }
 }
 
-/** Render canonical v2 Markdown for migration and newly-derived documents. */
 export function renderDoc(input: DocRenderInput): string {
   const title = assertTitle(input.title);
   const tags: string[] = [];

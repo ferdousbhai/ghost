@@ -39,7 +39,6 @@ function translate(error: unknown): never {
   throw error;
 }
 
-/** Machine-level Documents reads and recoverable mutations. */
 export class DocumentsService {
   readonly store: MachineDocuments;
 

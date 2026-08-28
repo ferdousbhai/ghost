@@ -27,7 +27,6 @@ afterEach(() => {
   for (const path of roots.splice(0)) rmSync(path, { recursive: true, force: true });
 });
 
-/** Machine metadata defaults beside the home; tests that share one pass it. */
 function openContext(
   home: string,
   client: MemorySecretServiceClient,
@@ -36,7 +35,6 @@ function openContext(
   return openGhostSecretContext({ home, client, metadataPath });
 }
 
-/** A machine home holding one plaintext provider key. */
 function literalHome(machine: string, name: string, apiKey: string): string {
   const home = join(machine, name);
   mkdirSync(home);

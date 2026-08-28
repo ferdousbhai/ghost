@@ -28,13 +28,11 @@ Item {
     property int phraseIndex: 0
     property int ellipsisStep: 0
     readonly property var phrases: root.phrasesFor(root.heldKey)
-    /** The ghost said what it is doing; nothing invented can beat that. */
     readonly property string narration: Ghostd.statusText
     readonly property string phrase: root.narration !== "" ? root.narration
         : (root.phrases && root.phrases.length > 0
             ? root.phrases[root.phraseIndex % root.phrases.length] : "")
 
-    /** Take up the current state and say something new about it. */
     function adopt(fresh: bool): void {
         root.heldKey = root.stateKey;
         root.phraseIndex = root.randomPhrase(fresh ? -1 : root.phraseIndex);

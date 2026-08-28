@@ -74,12 +74,10 @@ export function isSecretReference(value: unknown): boolean {
   }
 }
 
-/** Throw unless `field` can be written as a reference into `ref`. */
 export function assertSecretReference(ref: SecretAccountRef, field: string): void {
   formatSecretReference(ref, field);
 }
 
-/** Keep ordinary provider ids readable and confine opaque MCP credential ids. */
 export function serviceForCredentialProvider(provider: string): string {
   if (COMPONENT_PATTERN.test(provider)) return provider;
   const slug = provider.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 72)

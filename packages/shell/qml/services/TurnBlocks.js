@@ -90,7 +90,6 @@ function split(blocks, toolIndices, streaming) {
     };
 }
 
-/** A stored message's content as an ordered part list, however it is shaped. */
 function partsOf(message) {
     if (Array.isArray(message.content)) return message.content;
     if (typeof message.content === "string" && message.content !== "")
@@ -165,7 +164,6 @@ function rows(messages) {
     return out;
 }
 
-/** The same split over a stored message's ordered content parts. */
 function fromParts(parts) {
     var blocks = {};
     var toolIndices = [];

@@ -1,4 +1,3 @@
-/** Unread transitions and the passive conversation invalidation stream. */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
 import { claudeSessionMetadataPath } from "../src/claude-code.js";

@@ -123,7 +123,6 @@ export interface LoginRuntime {
   }>;
   logout?(providerId: string, account: string): Promise<void>;
   authorizeAccount?(providerId: string, account: string, home: string): void;
-  /** Release OMP's open keyring/model-catalog handles once the flow settles. */
   close?(): void;
 }
 
@@ -137,12 +136,10 @@ export type LoginStatus =
   | "succeeded"
   | "failed";
 
-/** A prompt to render. Never carries the value the user will enter. */
 export interface LoginPromptView {
   kind: "text" | "secret" | "manual_code" | "select";
   message: string;
   placeholder?: string;
-  /** True when the answer is sensitive (api key / pasted code): mask the field. */
   secret: boolean;
   options?: { id: string; label: string; description?: string }[];
 }
@@ -154,7 +151,6 @@ export interface LoginView {
   account: string;
   authType: AuthType;
   status: LoginStatus;
-  /** A progress/info line, when the flow last reported one. */
   message?: string;
   authUrl?: string;
   authInstructions?: string;
@@ -162,26 +158,18 @@ export interface LoginView {
   verificationUrl?: string;
   deviceExpiresInSeconds?: number;
   prompt?: LoginPromptView;
-  /** Set on success when a chat model was bound because none was configured. */
   modelBound?: { provider: string; modelId: string };
   error?: string;
 }
 
-/** One provider a ghost can log into, derived from OMP's registry. */
 export interface ProviderInfo {
   id: string;
   name: string;
-  /** Whether this provider's OAuth is backed by a subscription (ChatGPT, Claude Pro). */
   subscription: boolean;
-  /** The auth types offered, in the order oauth-then-key. */
   authTypes: AuthType[];
-  /** OAuth selector label ("Sign in with OpenRouter"), when the provider sets one. */
   loginLabel?: string;
-  /** Whether the ghost already has a working credential for this provider. */
   configured: boolean;
-  /** Billing caveat safe to show in provider pickers. */
   billingNote?: string;
-  /** How it is configured, when it is. */
   connectedVia?: AuthType;
   accounts: Array<{ account: string; configured: boolean; connectedVia?: AuthType }>;
 }
@@ -195,7 +183,6 @@ interface PendingPrompt {
 
 interface LoginSession {
   ghostName: string;
-  /** Stable across the same-filesystem directory rename that changes a ghost's name. */
   ghostHome: GhostHomeIdentity;
   view: LoginView;
   controller: AbortController;
@@ -203,7 +190,6 @@ interface LoginSession {
   runtimeClosed: boolean;
   pending: PendingPrompt | null;
   settledAt: number | null;
-  /** TTL timer for an unfinished login; retention timer once settled. */
   timer: ReturnType<typeof setTimeout> | null;
 }
 
@@ -241,15 +227,10 @@ function startingLogin(ghostName: string, ghostHome: GhostHomeIdentity): Startin
 export interface LoginManagerOptions {
   registry: GhostRegistry;
   logger?: Logger;
-  /** Sets OMP's offline posture on the runtime it builds. See config.offline. */
   offline?: boolean;
-  /** Abandon an unfinished login after this long. Default 5 min. */
   loginTtlMs?: number;
-  /** Keep a settled login readable this long before dropping it. Default 60s. */
   retainSettledMs?: number;
-  /** Test seam: build the per-ghost runtime a login drives. */
   createRuntime?: (input: { authPath: string; modelsPath: string; offline: boolean }) => Promise<LoginRuntime>;
-  /** Awaited after credentials/model binding, before success becomes observable. */
   onLoginSucceeded?: (ghostName: string, signal: AbortSignal) => Promise<void>;
   now?: () => number;
 }
@@ -357,7 +338,6 @@ async function discoverAvailableModels(
   });
 }
 
-/** Reject an account label the machine keyring could never name. */
 function assertAccountName(providerId: string, account: string): void {
   try {
     parseSecretAccountName(`${serviceForCredentialProvider(providerId)}/${account}`);
@@ -380,9 +360,7 @@ export class LoginManager {
   private readonly onLoginSucceeded: NonNullable<LoginManagerOptions["onLoginSucceeded"]>;
   private readonly now: () => number;
   private readonly sessions = new Map<string, LoginSession>();
-  /** Runtime construction has started, but no pollable login session exists yet. */
   private readonly starting = new Set<StartingLogin>();
-  /** Whole-home moves admitted by the server but not yet completed or cancelled. */
   private readonly moving = new Set<GhostHomeIdentity>();
   private disposed = false;
 
@@ -406,7 +384,6 @@ export class LoginManager {
     });
   }
 
-  /** The providers this ghost can log into, derived from OMP's registry. */
   async listProviders(ghostName: string): Promise<ProviderInfo[]> {
     const ghost = this.registry.get(ghostName);
     const runtime = await this.buildRuntime(ghost.dir);
@@ -417,7 +394,6 @@ export class LoginManager {
     }
   }
 
-  /** Remove one machine service/account item; ghost policy files stay untouched. */
   async logout(ghostName: string, providerId: string, account: string): Promise<void> {
     const ghost = this.registry.get(ghostName);
     const runtime = await this.buildRuntime(ghost.dir);
@@ -584,13 +560,11 @@ export class LoginManager {
     }
   }
 
-  /** The current step to show, or a structured 404 for an unknown login. */
   view(ghostName: string, loginId: string): LoginView {
     const session = this.sessionForGhost(ghostName, loginId);
     return this.publicView(session);
   }
 
-  /** Satisfy an awaiting prompt with a pasted code, api key, or selected id. */
   submitInput(ghostName: string, loginId: string, value: string): LoginView {
     const session = this.sessionForGhost(ghostName, loginId);
     if (session.view.status === "succeeded" || session.view.status === "failed") {
@@ -610,7 +584,6 @@ export class LoginManager {
     return this.publicView(session);
   }
 
-  // ---- Interaction bridge ------------------------------------------------
 
   private onNotify(session: LoginSession, event: AuthEvent): void {
     if (this.isSettled(session)) return;
@@ -813,7 +786,6 @@ export class LoginManager {
     if (bound && this.isActive(session)) session.view.modelBound = bound;
   }
 
-  // ---- Lifecycle ---------------------------------------------------------
 
   private isActive(session: LoginSession): boolean {
     return this.sessions.get(session.view.loginId) === session
@@ -870,7 +842,6 @@ export class LoginManager {
     });
   }
 
-  /** Drop settled sessions past their retention window. Cheap; called on start. */
   private sweep(): void {
     const cutoff = this.now() - this.retainSettledMs;
     for (const [loginId, session] of this.sessions) {
@@ -881,12 +852,10 @@ export class LoginManager {
     }
   }
 
-  /** How many logins are currently tracked. Diagnostics/tests. */
   get size(): number {
     return this.sessions.size;
   }
 
-  /** How many whole-home moves are currently gated. Diagnostics/tests. */
   get moveReservationCount(): number {
     return this.moving.size;
   }

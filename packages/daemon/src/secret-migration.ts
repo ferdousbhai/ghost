@@ -48,7 +48,6 @@ import {
 import { SecretServiceError, type SecretServiceClient } from "./secret-service.js";
 
 const MCP_FILENAME = "mcp.json";
-/** A credential-shaped name: an argument flag, or a URL query key. */
 const SENSITIVE_NAME = /(?:^|[-_])(api[-_]?key|auth|bearer|credential|password|secret|token)(?:$|[-_])/i;
 const SENSITIVE_ARGUMENT_VALUE = /(?:authorization\s*:|bearer\s+|api[-_ ]?key\s*[:=])/i;
 
@@ -382,7 +381,6 @@ export function visitMcpSecretFields(
   }
 }
 
-/** Convert one MCP server config before it is allowed onto portable disk. */
 export function materializeMcpSecretReferences(
   serverName: string,
   input: MCPServerConfig,
@@ -571,7 +569,6 @@ export function openGhostSecretContext(options: GhostSecretMigrationOptions): Gh
   }
 }
 
-/** Add policy after an already-verified interactive write. */
 export function authorizeGhostAccounts(home: string, context: GhostSecretContext, accounts: readonly string[]): void {
   if (accounts.length === 0) return;
   addGhostAccounts(home, accounts);

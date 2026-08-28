@@ -16,7 +16,6 @@ function target(section, row) {
     return { section: section, path: path, title: title };
 }
 
-/** Value to select after `deletedPath`, preferring the following row. */
 function nextValue(rows, deletedPath, selectionKey) {
     const list = Array.isArray(rows) ? rows : [];
     const survivors = list.filter(function (row) {

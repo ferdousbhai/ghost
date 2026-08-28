@@ -50,9 +50,6 @@ import {
   type SmolRuntime,
 } from "./smol.js";
 
-// ---------------------------------------------------------------------------
-// Budgets and caps
-// ---------------------------------------------------------------------------
 
 /**
  * Injection budgets for the greeting prompt, in characters. Tighter than the
@@ -63,10 +60,8 @@ export const GREETING_MEMORY_BUDGET_CHARS = 1_200;
 export const GREETING_DOCS_BUDGET_CHARS = 1_200;
 export const GREETING_CHARACTER_BUDGET_CHARS = 2_000;
 
-/** Hard cap on a greeting, applied after cleaning. Over it, the result is rejected. */
 export const MAX_GREETING_CHARS = 300;
 
-/** More enders than this means the model wrote prose, not a greeting. */
 export const MAX_GREETING_SENTENCE_ENDERS = 4;
 
 /**
@@ -86,34 +81,21 @@ export const GREETING_LEAK_MARKERS: readonly string[] = [
   "as an ai",
 ];
 
-/** How long one greeting completion may take before it is abandoned. */
 export const GREETING_TIMEOUT_MS = 6_000;
 
-/** How long a generated greeting stays fresh. */
 export const GREETING_CACHE_TTL_MS = 10 * 60_000;
 
-// ---------------------------------------------------------------------------
-// The prompt
-// ---------------------------------------------------------------------------
 
-/** Everything the greeting prompt is assembled from. Derived per request. */
 export interface GreetingContextInput {
   readonly ghostName: string;
-  /** The character.md body, or null when there is none worth speaking from. */
   readonly character: string | null;
-  /** `deriveMemoryIndex(...).lines` for this ghost. */
   readonly memoryLines: readonly string[];
-  /** The derived index for the owner-wide Documents root. */
   readonly documents: DocumentsIndex;
-  /** Weekday, date, time, timezone — in the daemon's local zone. */
   readonly localTime: string;
-  /** Whole days since the ghost's most recent conversation, or null for none. */
   readonly daysSinceLastConversation: number | null;
-  /** True when character.md is still the seed: this ghost has never been met. */
   readonly onboarding: boolean;
 }
 
-/** A contiguous prefix of `lines` that fits the budget, mirroring deriveMemoryIndex. */
 function budgetedLines(
   lines: readonly string[],
   budgetChars: number,
@@ -185,7 +167,6 @@ function greetingInstructions(input: GreetingContextInput): string[] {
   ];
 }
 
-/** The deterministic, close-neutralizing fence around the untrusted half of the prompt. */
 const GREETING_DATA_NONCE = "ghost-greeting-context";
 const GREETING_DATA_SOURCE = "greeting ghost context";
 export const GREETING_DATA_OPEN =
@@ -228,7 +209,6 @@ function greetingData(input: GreetingContextInput): string[] {
   return lines;
 }
 
-/** The single user-message context one greeting completion runs on. */
 export function buildGreetingContext(input: GreetingContextInput): Context {
   const data = fenceUntrusted(greetingData(input).join("\n"), {
     source: GREETING_DATA_SOURCE,
@@ -264,7 +244,6 @@ export function localTimeString(now: Date = new Date()): string {
   return timeZone ? `${formatted} (${timeZone})` : formatted;
 }
 
-/** Whole days between an ISO timestamp and now, or null when it will not parse. */
 export function wholeDaysSince(
   isoTimestamp: string,
   now: number = Date.now(),
@@ -274,9 +253,6 @@ export function wholeDaysSince(
   return Math.max(0, Math.floor((now - then) / 86_400_000));
 }
 
-// ---------------------------------------------------------------------------
-// Cleaning
-// ---------------------------------------------------------------------------
 
 const OPENING_QUOTES = new Set(["\"", "'", "“", "‘", "`"]);
 const CLOSING_QUOTES = new Set(["\"", "'", "”", "’", "`"]);
@@ -316,18 +292,12 @@ export function cleanGreeting(raw: string): string | null {
   return text;
 }
 
-// ---------------------------------------------------------------------------
-// Generation
-// ---------------------------------------------------------------------------
 
 export interface GenerateGreetingInput {
   readonly runtime: SmolRuntime;
   readonly context: GreetingContextInput;
-  /** `roles.smol_model`, when the owner bound one. */
   readonly ref?: GhostModelRoleBinding | null;
-  /** Defaults to `GREETING_TIMEOUT_MS`. */
   readonly timeoutMs?: number;
-  /** Caller cancellation, combined with the timeout. */
   readonly signal?: AbortSignal;
 }
 
@@ -359,15 +329,9 @@ export async function generateGreeting(
   }
 }
 
-// ---------------------------------------------------------------------------
-// Caching
-// ---------------------------------------------------------------------------
 
-/** The body of `POST /api/ghosts/:name/greeting`. */
 export interface GreetingResult {
-  /** The greeting, or null when none could be generated. Never an error. */
   readonly greeting: string | null;
-  /** True when this ghost's character.md is still the seed. */
   readonly onboarding: boolean;
 }
 
@@ -378,9 +342,7 @@ interface GreetingCacheEntry {
 }
 
 export interface GreetingCacheOptions {
-  /** Defaults to `GREETING_CACHE_TTL_MS`. */
   readonly ttlMs?: number;
-  /** Test seam for the clock. */
   readonly now?: () => number;
 }
 
@@ -447,7 +409,6 @@ export class GreetingCache {
     return promise;
   }
 
-  /** Drop one ghost's entry, or every entry. */
   clear(key?: string): void {
     if (key === undefined) {
       this.entries.clear();
@@ -459,9 +420,6 @@ export class GreetingCache {
   }
 }
 
-// ---------------------------------------------------------------------------
-// First meeting
-// ---------------------------------------------------------------------------
 
 /**
  * The system-prompt section a freshly summoned ghost's conversations

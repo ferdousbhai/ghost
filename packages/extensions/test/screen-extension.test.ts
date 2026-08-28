@@ -47,7 +47,6 @@ const VISION_CHAT = fixtureModel({
   costInput: 5,
 });
 
-/** A sidecar that answers state + capture; capture honesty is configurable. */
 function captureHelper(capture: Record<string, unknown> = {}): FakeHelper {
   return fakeHelper({
     handle: (op) => {

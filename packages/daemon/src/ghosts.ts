@@ -27,14 +27,12 @@ import { trashPath } from "./trash.js";
 
 export { homeTrashDir } from "./trash.js";
 
-/** One discovered ghost, as served by `GET /api/ghosts`. */
 export interface Ghost {
   name: string;
   dir: string;
   createdAt: string;
 }
 
-/** Directory names the daemon owns inside a ghost home. */
 export const GHOST_SESSIONS_DIRNAME = "sessions";
 export const GHOST_AGENT_DIRNAME = ".pi";
 export const GHOST_CHARACTER_FILENAME = "character.md";
@@ -117,7 +115,6 @@ function createdAtOf(dir: string): string {
   return new Date(birth).toISOString();
 }
 
-/** Absolute paths the daemon derives from a ghost home. */
 export function ghostPaths(dir: string): {
   home: string;
   agentDir: string;
@@ -253,7 +250,6 @@ export class GhostRegistry {
     this.root = resolve(root);
   }
 
-  /** Create the ghosts root if it does not exist yet. Idempotent. */
   ensureRoot(): void {
     mkdirSync(this.root, { recursive: true });
   }
@@ -283,7 +279,6 @@ export class GhostRegistry {
     return ghosts.sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  /** One ghost by name, or null when it does not exist. */
   find(name: string): Ghost | null {
     if (!isValidGhostName(name)) return null;
     const dir = join(this.root, name);
@@ -291,7 +286,6 @@ export class GhostRegistry {
     return { name, dir, createdAt: createdAtOf(dir) };
   }
 
-  /** One ghost by name, or a structured 404. */
   get(name: string): Ghost {
     assertValidGhostName(name);
     const ghost = this.find(name);

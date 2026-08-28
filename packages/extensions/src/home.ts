@@ -70,14 +70,12 @@ export const MEMORY_DIRNAME = "memory";
 export const MEMORY_TRASH_DIRNAME = ".trash";
 export const CONVERSATIONS_DIRNAME = "conversations";
 export const CHARACTER_FILENAME = "character.md";
-/** A character is injected into every model turn, so it has a hard context budget. */
 export const MAX_CHARACTER_BODY_LENGTH = 20_000;
 export const EXPORT_MANIFEST_FILENAME = "export-manifest.json";
 
 const MEMORY_INTENT_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
 export interface SkippedFile {
-  /** Path relative to the ghost home. */
   readonly path: string;
   readonly reason: string;
 }
@@ -88,14 +86,12 @@ export interface MemoryListing {
 }
 
 export interface MemoryWriteInput {
-  /** `preferred-tone` or `preferred-tone.md`. Derived from the content when omitted. */
   readonly name?: string;
   readonly content: string;
 }
 
 export interface MemoryWriteResult {
   readonly slug: string;
-  /** Path relative to the ghost home, e.g. `memory/preferred-tone.md`. */
   readonly path: string;
   readonly created: boolean;
 }
@@ -103,7 +99,6 @@ export interface MemoryWriteResult {
 export interface MemoryWriteIntent {
   readonly id: string;
   readonly path: `memory/${string}.md`;
-  /** Exact prior admitted UTF-8 Markdown, or null when this creates the file. */
   readonly before: string | null;
   /** Exact serialized Markdown that will be atomically published. */
   readonly after: string;
@@ -122,19 +117,15 @@ export interface MemoryWriteWithReceiptResult {
 
 export interface MemoryDeleteResult {
   readonly slug: string;
-  /** Former path relative to the ghost home. */
   readonly path: `memory/${string}.md`;
-  /** Recoverable destination relative to the ghost home. */
   readonly trash: `.trash/${string}.md`;
 }
 
 export interface MemoryDeleteIntent {
   readonly id: string;
   readonly path: `memory/${string}.md`;
-  /** Exact admitted UTF-8 Markdown present before the move. */
   readonly before: string;
   readonly beforeSha256: string;
-  /** Collision-free recoverable destination relative to the ghost home. */
   readonly trash: `.trash/${string}.md`;
 }
 
@@ -191,7 +182,6 @@ function parseMemoryTrashFileName(name: string): string {
   return slug;
 }
 
-/** Trash names are `<slug>.md`, then `<slug>-2.md` and upward. */
 function validMemoryTrashSlug(slug: string, trashSlug: string): boolean {
   if (trashSlug === slug) return true;
   if (!trashSlug.startsWith(`${slug}-`)) return false;
@@ -233,7 +223,6 @@ async function collisionFreeMemoryTrashName(
   );
 }
 
-/** Serialize mutations to the same file while allowing unrelated files to proceed. */
 const fileMutationQueues = new Map<string, Promise<unknown>>();
 
 async function withFileMutationQueue<T>(path: string, mutate: () => Promise<T>): Promise<T> {
@@ -261,7 +250,6 @@ function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** Reject anything that would leave the ghost home, however it was spelled. */
 function resolveWithin(base: string, relativePath: string, label: string): string {
   const full = resolve(base, relativePath);
   if (full !== base && !full.startsWith(base + sep)) {
@@ -644,9 +632,7 @@ async function migrateExportManifest(
 }
 
 export class GhostHome {
-  /** Absolute path to the ghost home directory. */
   readonly dir: string;
-  /** Directory name — the ghost's name. */
   readonly name: string;
   readonly #memoryReadProbe?: GhostHomeOptions["memoryReadProbe"];
 
@@ -676,7 +662,6 @@ export class GhostHome {
     return join(this.dir, CONVERSATIONS_DIRNAME);
   }
 
-  /** A path relative to the ghost home, for messages and results. */
   relative(absolutePath: string): string {
     return absolutePath.startsWith(this.dir + sep)
       ? absolutePath.slice(this.dir.length + 1).split(sep).join("/")
@@ -687,7 +672,6 @@ export class GhostHome {
     return exists(this.dir);
   }
 
-  /** Create the directory skeleton. Safe to call repeatedly. */
   async ensure(): Promise<void> {
     await withFileMutationQueue(this.dir, async () => {
       await mkdir(this.dir, { recursive: true });
@@ -758,9 +742,7 @@ export class GhostHome {
     });
   }
 
-  // ---------------------------------------------------------------- character
 
-  /** The leading Markdown heading is display metadata derived from the persona. */
   private characterTitle(body: string): string | undefined {
     const firstContentLine = body
       .split("\n")
@@ -804,7 +786,6 @@ export class GhostHome {
     });
   }
 
-  // ------------------------------------------------------------------- memory
 
   async listMemory(): Promise<MemoryListing> {
     const dir = this.memoryDir;
@@ -1051,7 +1032,6 @@ export class GhostHome {
     });
   }
 
-  /** Move one admitted memory into this ghost's recoverable trash. */
   async deleteMemory(name: string): Promise<MemoryDeleteResult> {
     return (await this.deleteMemoryWithReceipt(name, async () => {})).deleted;
   }
@@ -1121,7 +1101,6 @@ export class GhostHome {
     });
   }
 
-  /** Exact trashed bytes for delete receipt/recovery classification. */
   async readTrashedMemorySource(trashPath: string): Promise<string> {
     const prefix = `${MEMORY_TRASH_DIRNAME}/`;
     if (!trashPath.startsWith(prefix)) {
@@ -1158,14 +1137,11 @@ export class GhostHome {
     }
   }
 
-  /** Validate a delete intent without moving anything during recovery. */
   validateMemoryDeleteIntent(intent: MemoryDeleteIntent): void {
     assertValidMemoryDeleteIntent(intent);
   }
 
-  // ------------------------------------------------------- conversations/meta
 
-  /** Imported transcript file names, without the `.json`. */
   async listConversations(): Promise<string[]> {
     if (!(await exists(this.conversationsDir))) return [];
     const directory = await openConfinedDirectory(this.dir, this.conversationsDir, {
@@ -1200,7 +1176,6 @@ export class GhostHome {
     }
   }
 
-  /** The v2 `export-manifest.json` of the archive this home was imported from. */
   async readExportManifest(): Promise<Record<string, unknown> | null> {
     const fullPath = join(this.dir, EXPORT_MANIFEST_FILENAME);
     const text = await readConfinedText(this.dir, fullPath, "Manifest path");

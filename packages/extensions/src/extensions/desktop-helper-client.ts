@@ -33,11 +33,7 @@ import { delimiter, join, sep } from "node:path";
 import { GhostError, type GhostErrorCode } from "../errors.js";
 import { MAX_SCREENSHOT_BYTES } from "./screenshot-retention.js";
 
-// ---------------------------------------------------------------------------
-// Protocol shapes (docs/DESKTOP_HELPER.md; packages/desktop-helper)
-// ---------------------------------------------------------------------------
 
-/** A tool the sidecar probed for at startup. */
 export interface BackendTool {
   readonly available?: boolean;
   readonly path?: string | null;
@@ -45,7 +41,6 @@ export interface BackendTool {
   readonly [key: string]: unknown;
 }
 
-/** `hello.available-backends`: which capabilities this machine actually has. */
 export interface AvailableBackends {
   readonly hyprctl?: BackendTool;
   readonly grim?: BackendTool & { foreign_toplevel?: boolean; notes?: string[] };
@@ -61,7 +56,6 @@ export interface AvailableBackends {
   readonly [key: string]: unknown;
 }
 
-/** The sidecar's `hello` handshake, its one honest capability report. */
 export interface HelloPayload {
   readonly type?: "hello";
   readonly helper?: string;
@@ -88,7 +82,6 @@ export interface HonestyMetadata {
   readonly [key: string]: unknown;
 }
 
-/** `capture` result: base64 PNG plus the ladder rung and its honesty. */
 export interface HelperCaptureResult extends HonestyMetadata {
   readonly png_base64: string;
   readonly width: number;
@@ -120,7 +113,6 @@ export interface AxElement {
   readonly [key: string]: unknown;
 }
 
-/** `ax_query` result: matching elements, each with a `ref`, plus tree warnings. */
 export interface AxQueryResult {
   readonly app?: string;
   readonly pid?: number;
@@ -141,9 +133,6 @@ export interface AxHitTestResult {
   readonly element: AxElement;
 }
 
-// ---------------------------------------------------------------------------
-// Error mapping
-// ---------------------------------------------------------------------------
 
 /** The sidecar's own error vocabulary (protocol.py `_ERROR_CODES`). */
 export type SidecarErrorCode =
@@ -187,7 +176,6 @@ interface SidecarError {
   readonly details?: Record<string, unknown>;
 }
 
-/** Turn a sidecar `{code, message, details}` into a `GhostError`. */
 export function ghostErrorFromSidecar(error: SidecarError, op: string): GhostError {
   const sidecarCode = error.code ?? "internal";
   const ghostCode = SIDECAR_ERROR_TO_GHOST[sidecarCode] ?? "invalid_format";
@@ -202,16 +190,11 @@ export function ghostErrorFromSidecar(error: SidecarError, op: string): GhostErr
   });
 }
 
-// ---------------------------------------------------------------------------
-// Capability predicates (for tools that degrade before a round trip)
-// ---------------------------------------------------------------------------
 
-/** True when the sidecar reported a usable AT-SPI accessibility bus. */
 export function atspiAvailable(hello: HelloPayload): boolean {
   return hello["available-backends"]?.atspi?.available === true;
 }
 
-/** Why AT-SPI is unavailable, with remediation, or null when it is available. */
 export function atspiUnavailableReason(hello: HelloPayload): string | null {
   const atspi = hello["available-backends"]?.atspi;
   if (atspi?.available === true) return null;
@@ -221,12 +204,10 @@ export function atspiUnavailableReason(hello: HelloPayload): string | null {
     || "the accessibility bus is not available";
 }
 
-/** True when ydotool (the only injected-pointer/evdev backend) is usable. */
 export function ydotoolUsable(hello: HelloPayload): boolean {
   return hello["available-backends"]?.ydotool?.usable === true;
 }
 
-/** Why ydotool is not usable, or null when it is. */
 export function ydotoolUnusableReason(hello: HelloPayload): string | null {
   const ydotool = hello["available-backends"]?.ydotool;
   if (ydotool?.usable === true) return null;
@@ -235,40 +216,28 @@ export function ydotoolUnusableReason(hello: HelloPayload): string | null {
     || (ydotool?.available ? "the ydotool daemon socket is not ready" : "ydotool is not installed");
 }
 
-// ---------------------------------------------------------------------------
 // The client interface (what the tools depend on; the real client and the
 // test fakes both implement it)
-// ---------------------------------------------------------------------------
 
 export interface RequestOptions {
   readonly signal?: AbortSignal | undefined;
-  /** Override the per-request timeout. */
   readonly timeoutMs?: number;
 }
 
 export interface DesktopHelper {
-  /** Start if needed and return the (cached) hello handshake. */
   hello(): Promise<HelloPayload>;
-  /** Convenience: the backend map from the hello handshake. */
   capabilities(): Promise<AvailableBackends>;
-  /** Send one op, resolve its result or throw a mapped `GhostError`. */
   request<T = unknown>(
     op: string,
     args?: Record<string, unknown>,
     options?: RequestOptions,
   ): Promise<T>;
-  /** Stop the process and reject anything in flight. */
   dispose(): Promise<void>;
 }
 
-// ---------------------------------------------------------------------------
-// Command resolution
-// ---------------------------------------------------------------------------
 
-/** The environment variable a deployment can point at an explicit helper binary. */
 export const HELPER_COMMAND_ENV = "GHOST_DESKTOP_HELPER";
 
-/** The executable name a normal install puts on PATH. */
 export const HELPER_BINARY = "ghost-desktop-helper";
 
 export interface ResolvedHelperCommand {
@@ -327,11 +296,7 @@ export function resolveHelperCommand(
   );
 }
 
-// ---------------------------------------------------------------------------
-// The process seam (real spawn, or a fake for tests)
-// ---------------------------------------------------------------------------
 
-/** The minimal child-process surface the client drives. `node:child_process` fits. */
 export interface HelperProcess {
   readonly stdin: NodeJS.EventEmitter & {
     write(chunk: string): boolean;
@@ -346,25 +311,17 @@ export interface HelperProcess {
   on(event: "error", listener: (error: Error) => void): unknown;
 }
 
-/** How the client launches the sidecar. Injectable so tests never spawn Python. */
 export type HelperSpawner = () => HelperProcess;
 
 export interface DesktopHelperClientOptions {
-  /** Test seam: launch the process. Defaults to spawning the resolved command. */
   readonly spawn?: HelperSpawner;
-  /** Environment for command resolution and the child. Defaults to `process.env`. */
   readonly env?: NodeJS.ProcessEnv;
-  /** Explicit helper command, overriding PATH resolution. */
   readonly command?: string;
-  /** How long to wait for the `hello` line before giving up. Defaults to 20s. */
   readonly startTimeoutMs?: number;
-  /** Default per-request timeout. Defaults to 30s. */
   readonly requestTimeoutMs?: number;
-  /** Reap the process after this long with no requests. Defaults to 5min. 0 disables. */
   readonly idleTimeoutMs?: number;
   /** Grace after SIGTERM before escalating to SIGKILL. Defaults to 1s. */
   readonly stopTimeoutMs?: number;
-  /** Sink for the sidecar's stderr log lines. */
   readonly onLog?: (line: string) => void;
 }
 
@@ -372,7 +329,6 @@ export const DEFAULT_START_TIMEOUT_MS = 20_000;
 export const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 export const DEFAULT_IDLE_TIMEOUT_MS = 5 * 60_000;
 export const DEFAULT_STOP_TIMEOUT_MS = 1_000;
-/** One 8 MiB capture after base64 expansion, plus bounded JSON metadata. */
 export const MAX_HELPER_LINE_BYTES = Math.ceil(MAX_SCREENSHOT_BYTES / 3) * 4
   + 256 * 1024;
 
@@ -722,7 +678,6 @@ export class DesktopHelperClient implements DesktopHelper {
     }
   }
 
-  /** Drop the process handle, then conclusively reap it before allowing a respawn. */
   private teardown(error?: GhostError, alreadyExited = false): Promise<void> {
     this.clearStartTimer();
     this.clearIdleTimer();
@@ -811,9 +766,6 @@ function abortError(op: string): GhostError {
   );
 }
 
-// ---------------------------------------------------------------------------
-// The shared per-daemon instance
-// ---------------------------------------------------------------------------
 
 let shared: DesktopHelperClient | null = null;
 
@@ -829,7 +781,6 @@ export function getSharedDesktopHelper(
   return shared;
 }
 
-/** Tear down and forget the shared instance. For tests and daemon shutdown. */
 export async function resetSharedDesktopHelper(): Promise<void> {
   if (shared) {
     await shared.dispose();

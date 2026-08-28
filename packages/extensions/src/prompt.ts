@@ -17,7 +17,6 @@ export interface GhostSystemPromptInput {
   readonly memoryRoot: string;
   readonly memory: MemoryIndex;
   readonly docs: DocumentsIndex;
-  /** Sections appended after the derived ones, e.g. daemon-supplied context. */
   readonly extraSections?: readonly string[];
 }
 

@@ -10,7 +10,6 @@ import qs.services
 Item {
     id: root
 
-    /** Emitted after a ghost is picked, so the HUD can return focus to the composer. */
     signal picked()
 
     /** The × was clicked: the HUD raises the modal, which asks for the name
@@ -24,12 +23,9 @@ Item {
 
     property bool naming: false
 
-    // ---- Renaming a ghost -------------------------------------------------
     // Held on the list, not the row: the roster is replaced wholesale on every
     // refresh, which rebuilds every delegate underneath a half-typed name.
-    /** The ghost being renamed in place, under its current name, or "". */
     property string editingName: ""
-    /** The name as it stands in the field. */
     property string editDraft: ""
     /** The field currently up, or null. A reference rather than a flag:
         a rebuilt row can take the keyboard before the row it replaced
@@ -379,7 +375,6 @@ Item {
             wrapMode: Text.Wrap
         }
 
-        // ---- Naming a new ghost -------------------------------------------
         // Exists only while the header's + is armed; the roster carries no
         // standing summon row.
 

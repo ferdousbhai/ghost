@@ -10,12 +10,9 @@ import qs.services
 FocusScope {
     id: root
 
-    /** The route currently shown by the host. */
     property string currentSection: "chat"
-    /** Redacted daemon-global handler count shown on the Hooks destination. */
     property int activeHookCount: 0
 
-    /** A destination was chosen by pointer or keyboard. */
     signal selected(string section)
 
     readonly property var destinations: [

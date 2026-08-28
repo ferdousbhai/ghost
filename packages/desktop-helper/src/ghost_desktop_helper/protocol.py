@@ -153,14 +153,12 @@ class Server:
         self._desktop: GhostDesktop | None = None
         self._desktop_error: str | None = None
 
-    # --- desktop lifecycle ----------------------------------------------
 
     def _get_desktop(self) -> GhostDesktop:
         if self._desktop is None:
             self._desktop = self._desktop_factory()
         return self._desktop
 
-    # --- handshake -------------------------------------------------------
 
     def hello(self) -> dict[str, Any]:
         """Report version, Hyprland version, dispatch grammar, and backends.
@@ -194,7 +192,6 @@ class Server:
             payload["available-backends"] = {"error": str(exc)}
         return payload
 
-    # --- dispatch --------------------------------------------------------
 
     def handle(self, request: dict[str, Any]) -> dict[str, Any]:
         request_id = request.get("id")
@@ -242,7 +239,6 @@ class Server:
             "error": {"code": code, "message": message, "details": details or {}},
         }
 
-    # --- io --------------------------------------------------------------
 
     def _emit(self, obj: dict[str, Any]) -> None:
         self._stdout.write(json.dumps(obj, default=str) + "\n")

@@ -52,7 +52,6 @@ const SEED_KNOWLEDGE_MARKERS = [
   "Your docs and memory files are yours.",
 ] as const;
 
-/** True when the body still looks like the file a new ghost was seeded with. */
 export function isSeededCharacterBody(body: string): boolean {
   return body.includes(SEED_VOICE_MARKER)
     && SEED_KNOWLEDGE_MARKERS.some((marker) => body.includes(marker));

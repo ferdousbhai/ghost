@@ -53,7 +53,6 @@ afterEach(async () => {
   temp = null;
 });
 
-/** The pinned clock. See the header: the only value this fixture injects. */
 const LOCAL_TIME = "Sunday, 15 February 2026 at 19:40 (Europe/Berlin)";
 
 const CHARACTER = `# casper
@@ -91,9 +90,7 @@ type ScriptedReply =
 
 interface ScriptedSmol {
   runtime: SmolRuntime;
-  /** Every prompt the smol model was actually asked, in order. */
   prompts: string[];
-  /** Every model ref it was asked on, in order. */
   models: string[];
 }
 
@@ -142,13 +139,10 @@ function pinnedGenerator(smol: ScriptedSmol): GreetingGenerator {
 }
 
 interface Case {
-  /** Section label in the fixture. */
   readonly label: string;
   readonly reply: ScriptedReply;
-  /** False seeds an un-met ghost straight out of `GhostRegistry.create`. */
   readonly written: boolean;
   readonly credentialed?: boolean;
-  /** Post twice, to record that the cache answers the second call. */
   readonly postTwice?: boolean;
 }
 

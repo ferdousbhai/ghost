@@ -1,4 +1,3 @@
-/** Load only the owner-visible settings file for one Ghost. */
 import { existsSync } from "node:fs";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { SettingPath } from "@oh-my-pi/pi-coding-agent/config/settings-schema";

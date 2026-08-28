@@ -1,4 +1,3 @@
-/** Ghost's small policy projection onto OMP's native compaction settings. */
 
 /**
  * The summary instructions handed to OMP's compaction. Modeled on Anthropic's
@@ -19,23 +18,18 @@ Cover, under clear headings:
 4. Open threads and next steps — what is unfinished, what was promised, and what should happen next.
 5. Key facts and references — specific names, paths, identifiers, values, and other concrete details referenced in the conversation that a continuation would need.`;
 
-/** Fraction of the context window to trigger at when not overridden. */
 export const DEFAULT_THRESHOLD_FRACTION = 0.8;
 
-/** Tunable compaction policy (see config.ts / DaemonConfig). */
 export interface CompactionConfig {
-  /** Master switch projected onto OMP's native auto-compaction. */
   enabled: boolean;
   /**
    * Absolute token threshold. OMP gives this precedence over the percentage,
    * matching Ghost's existing owner-facing configuration.
    */
   thresholdTokens?: number;
-  /** Fraction of the active model's context window. Defaults to 0.8. */
   thresholdFraction?: number;
 }
 
-/** Default policy: OMP-native async compaction at 80% of the active window. */
 export const DEFAULT_COMPACTION_CONFIG: CompactionConfig = { enabled: true };
 
 export interface NativeCompactionSettings {

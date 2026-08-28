@@ -58,7 +58,6 @@ function turn(position = 1): SettledMaintenanceTurn {
   };
 }
 
-/** Enough valid memories to put this home under consolidation pressure. */
 function seedPressureMemories(prefix: string): void {
   for (let position = 0; position < MEMORY_CONSOLIDATION_FILE_THRESHOLD; position += 1) {
     writeFileSync(

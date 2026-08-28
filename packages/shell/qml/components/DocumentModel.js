@@ -20,7 +20,6 @@ function text(value) {
     return value === undefined || value === null ? "" : String(value);
 }
 
-/** Plain dictionaries must not inherit constructor/toString/__proto__ keys. */
 function emptyMap() {
     return Object.create(null);
 }
@@ -70,7 +69,6 @@ function isCanonicalPath(value) {
     });
 }
 
-/** Invalid input never aliases another Documents path (especially the root). */
 function normalizePath(value) {
     return isCanonicalPath(value) ? value : "";
 }
@@ -154,7 +152,6 @@ function validAbsolutePath(value) {
     });
 }
 
-/** Strict UTF-8 byte length, or -1 for an unpaired UTF-16 surrogate. */
 function utf8ByteLength(value) {
     if (typeof value !== "string") return -1;
     let bytes = 0;
@@ -205,7 +202,6 @@ function uniquePaths(entries) {
     return true;
 }
 
-/** Maximum regular-file size the shell may read into an inline pane. */
 function inlineFileMaxBytes() {
     return INLINE_FILE_MAX_BYTES;
 }

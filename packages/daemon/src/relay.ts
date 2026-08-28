@@ -50,12 +50,9 @@ import {
 import { defaultRelayTokenPath, readOrCreateRelayToken } from "./relay-token.js";
 
 export const RELAY_PING_INTERVAL_MS = 20_000;
-/** How long past the caller's own deadline the hub waits before giving up. */
 export const RELAY_TIMEOUT_GRACE_MS = 2_000;
 export const RELAY_CLOSE_GOING_AWAY = 1001;
-/** Close code for "you were replaced or the daemon is shutting down". */
 export const RELAY_CLOSE_SHUTDOWN = 4000;
-/** An 8 MiB PNG after base64 expansion, plus bounded JSON/page metadata. */
 export const MAX_RELAY_MESSAGE_BYTES = Math.ceil(MAX_CAPTURE_BYTES / 3) * 4
   + 256 * 1024;
 
@@ -66,28 +63,20 @@ function rawDataBytes(data: RawData): number {
 }
 
 export interface RelayHubOptions {
-  /** The expected pairing token. Defaults to the XDG state file, minted if absent. */
   token?: string;
   logger?: Logger;
   pingIntervalMs?: number;
-  /** Where the extension should dial, for `GET /api/relay/status`. Filled in later. */
   publicUrl?: string;
 }
 
 export interface RelayStatus {
-  /** Whether an extension is connected right now. */
   connected: boolean;
-  /** What it said it was, from the `hello` frame. */
   peer: string | null;
-  /** When it connected, ISO-8601. */
   since: string | null;
   protocol: number;
   path: string;
-  /** The `ws://` URL to paste into the extension, once the port is known. */
   url: string | null;
-  /** Requests in flight. */
   pending: number;
-  /** Never the token itself — where it lives, so the CLI hint is actionable. */
   tokenPath: string | null;
 }
 
@@ -122,7 +111,6 @@ function asFailure(value: string): BrowserFailure {
 export class RelayHub implements RelayTransport {
   readonly tokenPath: string | null;
 
-  /** Set when a token was supplied; otherwise the file is read on first upgrade. */
   #token: string | undefined;
   readonly #logger: Logger;
   readonly #pingIntervalMs: number;
@@ -152,7 +140,6 @@ export class RelayHub implements RelayTransport {
     this.#wss = new WebSocketServer({ noServer: true, maxPayload: MAX_RELAY_MESSAGE_BYTES });
   }
 
-  // ---------------------------------------------------------------- transport
 
   get connected(): boolean {
     return this.#socket !== undefined && this.#socket.readyState === 1 /* OPEN */;
@@ -230,9 +217,7 @@ export class RelayHub implements RelayTransport {
     });
   }
 
-  // ------------------------------------------------------------------- status
 
-  /** Tell the hub the bound port, so the status route can print a dialable URL. */
   setPublicUrl(url: string): void {
     this.#publicUrl = url;
   }
@@ -250,7 +235,6 @@ export class RelayHub implements RelayTransport {
     };
   }
 
-  // ---------------------------------------------------------------- lifecycle
 
   /**
    * Handle an HTTP upgrade. Wired to the server's `upgrade` event; refusals are
@@ -471,7 +455,6 @@ export class RelayHub implements RelayTransport {
   }
 }
 
-/** Answer a refused upgrade with a real HTTP status the popup can display. */
 function refuse(socket: Duplex, status: number, reason: string): void {
   const text = `${reason}\n`;
   const statusText = {

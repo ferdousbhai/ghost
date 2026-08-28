@@ -70,7 +70,6 @@ import {
   SECRET_REFERENCE_PREFIX,
 } from "./secret-reference.js";
 
-/** One model entry, a subset of OMP's models-file model. */
 export interface GhostModelDefinition {
   id: string;
   name?: string;
@@ -84,7 +83,6 @@ export interface GhostModelDefinition {
   [key: string]: unknown;
 }
 
-/** One provider entry, a subset of OMP's models-file provider. */
 export interface GhostProviderConfig {
   name?: string;
   baseUrl?: string;
@@ -191,12 +189,9 @@ const LEGACY_SMOL_MODEL_ROLE = "title_model";
 
 export interface GhostModelsFile {
   providers: Record<string, GhostProviderConfig>;
-  /** Machine-keyring accounts this ghost is allowed to resolve. */
   accounts?: string[];
   roles?: Partial<Record<GhostModelRole, GhostModelRoleBinding>>;
-  /** Ordered retry choices, projected to OMP's `retry.fallbackChains`. */
   fallbacks?: Partial<Record<GhostModelRole, GhostModelRoleBinding[]>>;
-  /** Preserve OMP/provider additions this version of Ghost does not interpret. */
   [key: string]: unknown;
 }
 
@@ -205,7 +200,6 @@ export interface GhostOmpModelRouting {
   fallbackChains: Record<string, string[]>;
 }
 
-/** OMP's unambiguous provider-qualified selector. */
 export function ghostModelSelector(binding: GhostModelRoleBinding): string {
   return `${binding.provider}/${binding.modelId}`;
 }
@@ -473,7 +467,6 @@ function migrateLegacySmolRole<T>(
   return migrated;
 }
 
-/** Re-throw a name parser's own message against the file that carried the name. */
 function assertParses(path: string, value: string, parse: (input: string) => unknown): void {
   try {
     parse(value);
@@ -482,13 +475,11 @@ function assertParses(path: string, value: string, parse: (input: string) => unk
   }
 }
 
-/** A configured value is either a literal or a well-formed keyring reference. */
 function assertSecretValue(path: string, value: string): void {
   if (!value.startsWith(SECRET_REFERENCE_PREFIX)) return;
   assertParses(path, value, parseSecretReference);
 }
 
-/** The machine accounts this ghost may resolve, each named once and parseable. */
 function assertAccountPolicy(path: string, accounts: unknown): void {
   if (accounts === undefined) return;
   if (!Array.isArray(accounts) || !accounts.every((entry) => typeof entry === "string")) {
@@ -502,7 +493,6 @@ function assertAccountPolicy(path: string, accounts: unknown): void {
   }
 }
 
-/** Provider entries carry only strings, and only well-formed references. */
 function assertProviderShape(path: string, providers: Record<string, unknown>): void {
   for (const [provider, value] of Object.entries(providers)) {
     if (value === null || typeof value !== "object" || Array.isArray(value)) {
@@ -526,7 +516,6 @@ function assertProviderShape(path: string, providers: Record<string, unknown>): 
   }
 }
 
-/** Read `<home>/models.json`, or null when absent. Throws on malformed. */
 export function readGhostModels(configDir: string): GhostModelsFile | null {
   const path = ghostModelsPath(configDir);
   let text: string;
@@ -580,7 +569,6 @@ export function readGhostModels(configDir: string): GhostModelsFile | null {
   };
 }
 
-/** Add allowed machine accounts without replacing another models.json mutation. */
 export function addGhostAccounts(configDir: string, additions: readonly string[]): GhostModelsFile {
   for (const account of additions) parseSecretAccountName(account);
   mkdirSync(configDir, { recursive: true });
@@ -659,7 +647,6 @@ export function setChatModelRole(
   });
 }
 
-/** Set any Ghost model role while preserving providers, other roles, and chains. */
 export function setGhostModelRole(
   configDir: string,
   role: GhostModelRole,
@@ -676,7 +663,6 @@ export function setGhostModelRole(
   });
 }
 
-/** Clear one explicit primary while preserving its retry chain and every sibling role. */
 export function clearGhostModelRole(
   configDir: string,
   role: GhostModelRole,
@@ -693,7 +679,6 @@ export function clearGhostModelRole(
   });
 }
 
-/** Append one retry choice unless the same provider/model is already present. */
 export function appendGhostModelFallback(
   configDir: string,
   role: GhostModelRole,
@@ -736,7 +721,6 @@ export function replaceGhostModelFallbacks(
   });
 }
 
-/** Clear a role's retry chain without disturbing its primary binding. */
 export function clearGhostModelFallbacks(
   configDir: string,
   role: GhostModelRole,
@@ -784,9 +768,6 @@ export function setChatModelRoleIfUnset(
   });
 }
 
-// ---------------------------------------------------------------------------
-// Presets
-// ---------------------------------------------------------------------------
 
 /**
  * OpenRouter's free roster rotates; this is a **changeable default**, not a
@@ -804,11 +785,8 @@ export const OPENROUTER_PROVIDER_ID = "openrouter";
 export const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 
 export interface OpenRouterPresetOptions {
-  /** Device-local OpenRouter key. Omit when signing in via OAuth instead. */
   apiKey?: string;
-  /** Model id to bind to the chat role. Defaults to the free model above. */
   modelId?: string;
-  /** Display name for the model in OMP's picker. */
   modelName?: string;
   contextWindow?: number;
   maxTokens?: number;
@@ -850,12 +828,10 @@ export function openRouterPreset(
 }
 
 export interface OpenAiCompatiblePresetOptions {
-  /** Provider id, also the key in `providers`. */
   providerId: string;
   baseUrl: string;
   modelId: string;
   name?: string;
-  /** OMP stream API. Defaults to `openai-completions`; `pi-messages` works too. */
   api?: string;
   apiKey?: string;
   headers?: Record<string, string>;

@@ -91,7 +91,6 @@ export const RELAY_SUBPROTOCOL = "ghost-relay.v1";
 /** Prefix for the pairing token when it rides in `Sec-WebSocket-Protocol`. */
 export const RELAY_TOKEN_SUBPROTOCOL_PREFIX = "ghost-token.";
 
-/** The daemon path the extension dials. */
 export const RELAY_PATH = "/relay";
 
 /**
@@ -177,23 +176,19 @@ export const RELAY_DISCONNECTED_MESSAGE =
   + "driven. Ask them to open Chromium with the Ghost relay extension installed "
   + "and paired (the extension's popup shows the connection status).";
 
-// ---------------------------------------------------------------- reply parsing
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** A wire string, or the fallback when the field is missing or the wrong type. */
 function readString(value: unknown, fallback: string): string {
   return typeof value === "string" ? value : fallback;
 }
 
-/** A non-empty wire string, or undefined — the shape optional fields want. */
 function readNonEmpty(value: unknown): string | undefined {
   return typeof value === "string" && value !== "" ? value : undefined;
 }
 
-/** A wire number, or undefined. */
 function readNumber(value: unknown): number | undefined {
   return typeof value === "number" ? value : undefined;
 }
@@ -294,16 +289,13 @@ function readTabInfos(value: unknown): readonly BackendTabInfo[] {
   });
 }
 
-// ------------------------------------------------------------------ the backend
 
 export interface RelayBackendOptions {
-  /** The daemon's socket, adapted. */
   readonly transport: RelayTransport;
 }
 
 export class RelayBrowserBackend implements GhostBrowserBackend {
   readonly name = "relay";
-  /** A relay drives a window the owner can see. There is nothing to hide. */
   readonly headless = false;
 
   readonly #transport: RelayTransport;
@@ -333,7 +325,6 @@ export class RelayBrowserBackend implements GhostBrowserBackend {
     return { applied: false };
   }
 
-  // -------------------------------------------------------------------- plumbing
 
   async #call(
     op: RelayOp,
@@ -367,7 +358,6 @@ export class RelayBrowserBackend implements GhostBrowserBackend {
     return reply.result;
   }
 
-  // --------------------------------------------------------------------- actions
 
   async current(options: BackendActionOptions = { timeoutMs: 5_000 }): Promise<PageSummary | undefined> {
     // Cheap and non-committal when no tab has ever been opened: do not start or

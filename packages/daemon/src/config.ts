@@ -13,13 +13,9 @@ import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { DEFAULT_COMPACTION_CONFIG, type CompactionConfig } from "./compaction.js";
 
-/** Resolved, absolute daemon configuration. */
 export interface DaemonConfig {
-  /** TCP port for the local HTTP API. 0 = ephemeral (tests). */
   port: number;
-  /** Loopback address to bind. Never widened beyond loopback (see assertLoopback). */
   host: string;
-  /** Absolute path to the directory holding one sub-directory per ghost. */
   ghostsRoot: string;
   /**
    * Forbid every network call pi makes on its own behalf (update checks,
@@ -62,13 +58,10 @@ export interface DaemonConfig {
    * settings and still beneath plan mode.
    */
   askTimeoutSeconds: number;
-  /** Where the config was read from, or null when defaults/env only. */
   configPath: string | null;
-  /** Trusted user-level command-hook configuration beside config.json. */
   hooksPath: string;
 }
 
-/** The subset a user may write into config.json. */
 export interface DaemonConfigFile {
   port?: number;
   host?: string;
@@ -83,7 +76,6 @@ export interface DaemonConfigFile {
   askTimeoutSeconds?: number;
 }
 
-/** Explicit overrides from CLI flags — highest precedence. */
 export interface DaemonConfigOverrides {
   port?: number;
   host?: string;
@@ -92,11 +84,8 @@ export interface DaemonConfigOverrides {
   browserMode?: "relay" | "profile";
   compaction?: CompactionConfig;
   askTimeoutSeconds?: number;
-  /** Config file path; defaults to <XDG_CONFIG_HOME>/ghost/config.json. */
   configPath?: string;
-  /** Injected for tests. Defaults to process.env. */
   env?: NodeJS.ProcessEnv;
-  /** Injected for tests. Defaults to os.homedir(). */
   home?: string;
 }
 
@@ -111,7 +100,6 @@ export const DEFAULT_ASK_TIMEOUT_SECONDS = 120;
 export const DEFAULT_HOST = "127.0.0.1";
 export const DEFAULT_GHOSTS_DIRNAME = "ghosts";
 
-/** Loopback-only, per CONTRACTS.md. v1 has no auth, so exposure is the risk. */
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "localhost"]);
 
 export function assertLoopback(host: string): void {
@@ -253,7 +241,6 @@ function parseFraction(raw: string, source: string): number {
   return value;
 }
 
-/** Expand a leading `~` so config.json can say `~/ghosts`. */
 function expandHome(path: string, home: string): string {
   if (path === "~") return home;
   if (path.startsWith("~/")) return join(home, path.slice(2));

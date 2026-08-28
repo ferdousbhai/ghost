@@ -27,7 +27,6 @@ export interface FakeProvider {
   usingOAuth?: boolean;
 }
 
-/** A realistic-enough registry: two subscription OAuth providers, one keyed. */
 export const DEFAULT_FAKE_PROVIDERS: FakeProvider[] = [
   { id: "openai-codex", name: "OpenAI Codex", oauth: { isSubscription: true } },
   { id: "anthropic", name: "Anthropic", oauth: { isSubscription: true }, apiKeyLogin: true },
@@ -44,7 +43,6 @@ export const DEFAULT_FAKE_PROVIDERS: FakeProvider[] = [
 export interface FakeRuntimeOptions {
   login: LoginImpl;
   providers?: FakeProvider[];
-  /** Models each provider reports available; drives default-model binding. */
   models?: Record<string, string[]>;
 }
 

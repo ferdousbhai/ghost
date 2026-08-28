@@ -409,7 +409,6 @@ export class GhostSecretContext {
     return value;
   }
 
-  /** Reuse an exact Ghost-known account, or allocate the next local label. */
   selectLiteralAccount(
     service: string,
     fields: Readonly<Record<string, string>>,
@@ -660,7 +659,6 @@ export class GhostSecretContext {
     }
   }
 
-  /** Active rows, oldest first. Each caller applies its own account policy. */
   activeCredentialRows(provider?: string): CredentialRow[] {
     if (provider === undefined) {
       return this.metadata.db.query(`

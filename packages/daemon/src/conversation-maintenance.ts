@@ -81,14 +81,12 @@ export type MaintenanceSourceIdentity =
 
 export interface MaintenanceOwnerActivity {
   source: MaintenanceSourceIdentity;
-  /** Actual operational cwd after a no-model owner action. */
   cwd: string;
 }
 
 export interface SettledMaintenanceTurn {
   source: MaintenanceSourceIdentity;
   sourceRevision: MaintenanceSourceRevision;
-  /** Actual operational cwd after the settled turn; never the storage root by implication. */
   cwd: string;
   ownerPrompt: string;
   assistantText: string;
@@ -143,9 +141,7 @@ type MemoryMutationReceipt = MemoryWriteReceipt | MemoryDeleteReceipt;
 
 type DeleteSide = "unreadable" | "absent" | "exact" | "different";
 
-/** What recovery observed on both sides of one journaled delete. */
 interface DeleteClassification {
-  /** Only an absent source plus the exact journaled trashed bytes. */
   completed: boolean;
   sourceState: string;
   trashState: string;
@@ -154,7 +150,6 @@ interface DeleteClassification {
 interface ActiveRun {
   id: string;
   throughSequence: number;
-  /** Missing in original v1 sidecars and therefore interpreted as `normal`. */
   mode?: MaintenanceMode;
   receipts: MemoryMutationReceipt[];
 }
@@ -192,14 +187,12 @@ export interface ConversationMaintenanceStateV1 {
   activeMutation: MemoryMutationIntent | null;
 }
 
-/** Everything one maintenance generation may touch, and nothing else. */
 export interface MaintenanceUpdateInput {
   home: GhostHome;
   transcript: string;
   signal: AbortSignal;
   mode: MaintenanceMode;
   writeMemory(input: { name?: string; content: string }): Promise<MemoryWriteReceipt>;
-  /** Rejects outside consolidation. */
   deleteMemory(name: string): Promise<MemoryDeleteReceipt>;
 }
 
@@ -210,7 +203,6 @@ export interface ConversationMaintenanceOptions {
   withRuntime: MaintenanceWithRuntime;
   logger?: Logger;
   idleSeconds?: number;
-  /** Test seam; production resolves smol_model and runs the restricted loop. */
   update?: (input: MaintenanceUpdateInput) => Promise<void>;
   now?: () => Date;
   schedule?: (run: () => void, milliseconds: number) => NodeJS.Timeout;
@@ -669,7 +661,6 @@ function ambiguousDeleteNotice(
   };
 }
 
-/** Classify one side of a journaled delete against its exact recorded bytes. */
 function deleteSide(bytes: string | null | undefined, intent: MemoryDeleteIntent): DeleteSide {
   if (bytes === undefined) return "unreadable";
   if (bytes === null) return "absent";
@@ -685,7 +676,6 @@ function noticeBacklogFull(): GhostError {
   );
 }
 
-/** Retire the turns a finished run covered; its notice is already queued. */
 function settleThrough(state: ConversationMaintenanceStateV1, throughSequence: number): void {
   state.retainedThroughSequence = Math.max(state.retainedThroughSequence, throughSequence);
   state.pendingTurns = state.pendingTurns.filter((turn) => turn.sequence > throughSequence);
@@ -920,7 +910,6 @@ export class ConversationMaintenance {
     return maintenanceStatePath(ghostPaths(ghost.dir).sessionDir, identity.runtime, identity.conversationId);
   }
 
-  /** Serialize every read-modify-write of one control file in this process. */
   private async withStateQueue<T>(path: string, operation: () => Promise<T>): Promise<T> {
     const previous = this.stateQueues.get(path) ?? Promise.resolve();
     const current = previous.catch(() => undefined).then(operation);
@@ -1530,7 +1519,6 @@ export class ConversationMaintenance {
     };
   }
 
-  /** Rekey drained state after the registry's whole-home rename, before release. */
   async completeGhostRename(previous: string, next: string): Promise<void> {
     if ((this.ghostReservations.get(previous) ?? 0) < 1) {
       throw new GhostError("ghost_busy", "Ghost maintenance did not reserve this rename.", 409);
@@ -1572,7 +1560,6 @@ export class ConversationMaintenance {
     }
   }
 
-  /** Drop drained in-memory state after the registry has moved the home to Trash. */
   completeGhostDelete(ghostName: string): void {
     if ((this.ghostReservations.get(ghostName) ?? 0) < 1) {
       throw new GhostError("ghost_busy", "Ghost maintenance did not reserve this deletion.", 409);

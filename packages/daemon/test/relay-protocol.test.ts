@@ -53,7 +53,6 @@ function upgrade(overrides: {
   );
 }
 
-// -------------------------------------------------------------------- framing
 
 describe("client frames", () => {
   it("accepts a hello and keeps the peer's self-description bounded", () => {
@@ -139,7 +138,6 @@ describe("client frames", () => {
   });
 });
 
-// ------------------------------------------------------------- upgrade check
 
 describe("who may open a relay socket", () => {
   it("lets the extension in and negotiates the subprotocol", () => {
@@ -220,7 +218,6 @@ describe("constant-time token comparison", () => {
   });
 });
 
-// ---------------------------------------------------------------- token store
 
 describe("the token store", () => {
   let dir: string;

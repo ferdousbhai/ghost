@@ -28,18 +28,12 @@ export const TITLE_PROMPT =
   "Write a 3-6 word title for a conversation that starts with this message. "
   + "Title only, no quotes.";
 
-/** Longest first-message slice fed to the title model. */
 export const MAX_TITLE_PROMPT_INPUT = 2_000;
 
-/** Hard caps on a generated title, applied after cleaning. */
 export const MAX_TITLE_WORDS = 10;
 export const MAX_TITLE_CHARS = 80;
 
-// ---------------------------------------------------------------------------
-// Generation
-// ---------------------------------------------------------------------------
 
-/** The single-message context for a title completion. */
 export function buildTitleContext(firstPrompt: string): Context {
   const message = firstPrompt.slice(0, MAX_TITLE_PROMPT_INPUT);
   return {

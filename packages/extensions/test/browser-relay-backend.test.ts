@@ -41,14 +41,11 @@ interface Sent {
 
 const PUBLIC_RESOLVER = async () => [{ address: "93.184.216.34", family: 4 }];
 
-/** A transport that answers from a script and records what it was asked. */
 class ScriptedTransport implements RelayTransport {
   connected = true;
   peer: string | undefined = "Chromium/141 via ghost-relay/0.0.1";
   readonly sent: Sent[] = [];
-  /** Per-op reply. A function gets the args, so a test can branch on them. */
   replies = new Map<RelayOp, RelayReply | ((args: Record<string, unknown>) => RelayReply)>();
-  /** Ops that should look like the extension vanished mid-request. */
   dropOn = new Set<RelayOp>();
   barriers = new Map<RelayOp, Promise<void>>();
 
@@ -114,7 +111,6 @@ async function expectGhostError(work: Promise<unknown>): Promise<GhostError> {
   throw new Error("expected a GhostError");
 }
 
-// ------------------------------------------------------------------- protocol
 
 describe("the protocol constants are a contract", () => {
   it("names exactly the verbs the seam has, plus current and status", () => {
@@ -157,7 +153,6 @@ describe("the protocol constants are a contract", () => {
   });
 });
 
-// -------------------------------------------------------------------- actions
 
 describe("driving the relay", () => {
   it("reports nothing running until a page is open", async () => {
@@ -296,7 +291,6 @@ describe("driving the relay", () => {
   });
 });
 
-// ---------------------------------------------------------- tier-1 relay ops
 
 describe("the Tier-1 relay ops translate the seam to the wire", () => {
   it("forwards, mirroring back", async () => {
@@ -423,7 +417,6 @@ describe("the relaxed one-tab invariant, on the relay backend", () => {
   });
 });
 
-// ------------------------------------------------------------------ screenshots
 
 describe("screenshots", () => {
   let dir: string;
@@ -473,7 +466,6 @@ describe("screenshots", () => {
   });
 });
 
-// ---------------------------------------------------------------- the sad paths
 
 describe("when the relay is not there", () => {
   it("says what to do about it, without going to the wire", async () => {
@@ -564,7 +556,6 @@ describe("when the relay is not there", () => {
   });
 });
 
-// ------------------------------------------------------- policy above the seam
 
 describe("the session layer's policy applies to the relay too", () => {
   let dir: string;

@@ -98,21 +98,15 @@ const DEFAULT_BROWSER_BACKEND = playwrightBackend();
 export const DEFAULT_ACTING_BUDGET = 12;
 
 export interface BrowserSessionOptions {
-  /** The ghost home. Screenshots and any per-ghost backend state live under it. */
   readonly homeDir: string;
   /** Which browser to drive. Defaults to a dedicated Playwright Chromium profile. */
   readonly backend?: BrowserBackendFactory;
-  /** Close the browser after this long with no action. Zero disables it. */
   readonly idleTimeoutMs?: number;
   readonly actionTimeoutMs?: number;
-  /** Creator-owned opt-in for loopback/private-network browsing. */
   readonly allowLocal?: boolean;
-  /** DNS verification timeout and injectable resolver (tests use no network). */
   readonly dnsTimeoutMs?: number;
   readonly resolver?: BrowserDnsResolver;
-  /** Shared DNS/idle timer seam for deterministic tests. */
   readonly clock?: BrowserPolicyClock;
-  /** Bound explicit, idle, and process-wide shutdown. */
   readonly closeTimeoutMs?: number;
   /**
    * Consequential actions allowed per owner-directed `open()`. See
@@ -135,9 +129,7 @@ export interface BrowserOperationOptions {
 }
 
 export interface SessionReadResult extends PageSummary {
-  /** Truncated to the requested budget. */
   readonly text: string;
-  /** Length before truncation, so the model knows what it is missing. */
   readonly totalLength: number;
 }
 
@@ -260,14 +252,10 @@ export class GhostBrowserSession {
   #queuedActions = 0;
   #activeAbort: AbortController | undefined;
   #idleTimer: ReturnType<typeof setTimeout> | undefined;
-  /** Refs minted by the most recent `find`, and the page they were minted on. */
   #refs = new Map<string, PageElementMatch>();
   #refPageUrl: string | undefined;
-  /** The URL the owner's most recent `open()` landed on — the trusted origin. */
   #originUrl: string | undefined;
-  /** Navigations the page itself drove since that open (link-follows / redirects). */
   #originHops = 0;
-  /** Consequential actions left before the next `open()` re-anchors the origin. */
   #actingRemaining: number;
 
   readonly #idleTimeoutMs: number;
@@ -313,7 +301,6 @@ export class GhostBrowserSession {
     return this.backend.setHeadless(headless);
   }
 
-  /** The refs the most recent `find` minted, for tests and result rendering. */
   get refs(): ReadonlyMap<string, PageElementMatch> {
     return this.#refs;
   }
@@ -322,24 +309,19 @@ export class GhostBrowserSession {
     return this.#refPageUrl;
   }
 
-  /** The trusted origin (last `open()`), for tests and result rendering. */
   get originUrl(): string | undefined {
     return this.#originUrl;
   }
 
-  /** Navigations the page drove since the last `open()`. */
   get originHops(): number {
     return this.#originHops;
   }
 
-  /** Consequential actions left before the next `open()` re-anchors the origin. */
   get actingRemaining(): number {
     return this.#actingRemaining;
   }
 
-  // -------------------------------------------------------------------- helpers
 
-  /** Serialize every action; see the file header. */
   #serial<T>(work: () => Promise<T>): Promise<T> {
     this.#queuedActions += 1;
     this.#clearIdleTimer();
@@ -381,7 +363,6 @@ export class GhostBrowserSession {
     this.#idleTimer = undefined;
   }
 
-  /** Restart the idle countdown. A ghost that stopped browsing stops paying for it. */
   #touchIdleTimer(): void {
     this.#clearIdleTimer();
     if (this.#queuedActions > 0 || !this.backend.running || this.#idleTimeoutMs <= 0) return;
@@ -499,7 +480,6 @@ export class GhostBrowserSession {
     if (this.#actingBudget > 0) this.#actingRemaining -= 1;
   }
 
-  /** Nothing but `open` and `close` may act on a browser with no page loaded. */
   async #requirePage(
     options: { timeoutMs?: number; signal?: AbortSignal } = {},
   ): Promise<PageSummary> {
@@ -512,7 +492,6 @@ export class GhostBrowserSession {
     );
   }
 
-  // -------------------------------------------------------------------- actions
 
   open(url: string, options: BrowserOperationOptions = {}) {
     return this.#serial(() => this.#openImpl(url, options));
@@ -1100,7 +1079,6 @@ export class GhostBrowserSession {
     return { steps: results, stopped: false };
   }
 
-  /** Dispatch one batch step to a non-serialized impl. Returns a short summary. */
   async #runStep(step: BatchStep, options: BrowserOperationOptions): Promise<string> {
     const t = options;
     switch (step.action) {
@@ -1206,7 +1184,6 @@ export class GhostBrowserSession {
     }
   }
 
-  /** Close the browser after every admitted action, with one bounded queue slot. */
   close(options: BrowserOperationOptions = {}): Promise<boolean> {
     // Wake a cooperative backend so the terminal close can take its queue slot.
     // The close itself remains serialized and therefore never races an action.
@@ -1244,7 +1221,6 @@ export class GhostBrowserSession {
   }
 }
 
-// ------------------------------------------------------------------- registry
 
 interface EffectiveSessionOptions {
   readonly backend: BrowserBackendFactory;
@@ -1329,7 +1305,6 @@ function sessionOptionSummary(options: EffectiveSessionOptions): Record<string, 
   };
 }
 
-/** Where a ghost's screenshots go. */
 export function screenshotDirFor(_homeDir: string): string {
   return resolveScreenshotDirectory();
 }
@@ -1389,7 +1364,6 @@ export function browserSessionFor(
   return session;
 }
 
-/** Close every browser this process opened. The daemon calls this on shutdown. */
 export async function closeAllBrowserSessions(): Promise<void> {
   if (closingAll) return closingAll;
   const open = [...sessions.entries()];

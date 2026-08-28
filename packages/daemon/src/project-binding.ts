@@ -200,7 +200,6 @@ function completeResources(value: Partial<ProjectResourceSummary> | null | undef
   };
 }
 
-/** A bounded, content-free preview. Symbolic links are never followed by the scan. */
 export async function summarizeProject(
   root: string,
   expectedIdentity?: ProjectFilesystemIdentity,
@@ -567,7 +566,6 @@ export class ProjectBindingStore {
     return [...this.previews.values()].some((preview) => preview.key === key);
   }
 
-  /** Revoke every outstanding receipt for one conversation incarnation. */
   revoke(scope: string, runtime: ConversationRuntime, conversationId: string): void {
     const key = this.key(scope, runtime, conversationId);
     this.incarnations.set(key, (this.incarnations.get(key) ?? 0) + 1);
@@ -901,7 +899,6 @@ export class ProjectBindingStore {
     }
   }
 
-  /** Publish runtime health without pretending the owner's binding generation changed. */
   async updateRuntimeStatus(
     sessionDir: string,
     runtime: ConversationRuntime,
@@ -998,7 +995,6 @@ export class ProjectBindingStore {
     }
   }
 
-  /** Persist a successful `!cd` without changing the active resource snapshot. */
   async resolveOperationalCwd(current: ProjectBindingState, cwd: string): Promise<string> {
     if (!isAbsolute(cwd)) {
       throw new GhostError("invalid_project_path", "A working directory must be absolute.", 400);

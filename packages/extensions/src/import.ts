@@ -69,7 +69,6 @@ export interface GhostArchiveManifest {
 }
 
 export interface ImportGhostArchiveOptions {
-  /** Override the ghost home directory name. Defaults to the archive's ghost name. */
   readonly name?: string;
   /**
    * Cleanly replace an existing ghost home. Off by default. The daemon must
@@ -85,9 +84,7 @@ export interface ImportGhostArchiveResult {
   readonly dir: string;
   readonly manifest: GhostArchiveManifest;
   readonly filesWritten: number;
-  /** Archive entries deliberately not written (zip noise, directory entries). */
   readonly ignored: readonly string[];
-  /** Recoverable previous home retained under `<ghostsRoot>/.trash/`. */
   readonly replaced?: string;
 }
 
@@ -129,7 +126,6 @@ export type ImportFaultPoint =
 
 let importFaultInjector: ((point: ImportFaultPoint) => void | Promise<void>) | null = null;
 
-/** Private test seam; not re-exported from the package entry point. */
 export function setImportFaultInjectorForTest(
   injector: ((point: ImportFaultPoint) => void | Promise<void>) | null,
 ): void {
@@ -250,7 +246,6 @@ async function readExactly(
   return bytes;
 }
 
-/** Check central-directory sizes and paths without allocating entry contents. */
 async function preflightZip(source: FileHandle, compressedSize: number): Promise<void> {
   if (compressedSize < ZIP_EOCD_MIN_BYTES) {
     throw new GhostError("invalid_format", "Not a readable zip archive: missing directory.");

@@ -18,13 +18,11 @@ export interface GhostExtensionOptions {
    * Omitted, each call resolves the home from the session's own `cwd`.
    */
   readonly home?: GhostHome | string;
-  /** Runtime capabilities supplied by the harness, resolved for each tool call. */
   readonly capabilities?: GhostToolCapabilitiesSource;
 }
 
 export type CwdContext = Pick<ExtensionContext, "cwd">;
 
-/** Harness capabilities Ghost tools consume without depending on a provider model shape. */
 export interface GhostToolCapabilities {
   readonly vision: boolean;
 }
@@ -81,7 +79,6 @@ export interface InjectionFlagDetails {
   readonly injectionReasons?: string[];
 }
 
-/** Fence an untrusted text payload and annotate, but never block, a detection. */
 export async function untrustedTextResult<TDetails extends object>(
   text: string,
   details: TDetails,
@@ -103,16 +100,10 @@ export async function untrustedTextResult<TDetails extends object>(
   return textResult(protectedText, protectedDetails);
 }
 
-// ---------------------------------------------------------------------------
-// Bounded output
-// ---------------------------------------------------------------------------
 
 export interface BudgetedText {
-  /** The text, truncated to the budget. */
   readonly text: string;
-  /** True when the original was longer than the budget. */
   readonly truncated: boolean;
-  /** The length before truncation, so the model knows what it is missing. */
   readonly totalLength: number;
 }
 
@@ -127,15 +118,11 @@ export function budgeted(text: string, maxChars: number): BudgetedText {
   return { text: text.slice(0, maxChars), truncated: true, totalLength };
 }
 
-/** The `(showing the first N of M characters)` footer, or null when whole. */
 export function budgetFooter(result: BudgetedText): string | null {
   if (!result.truncated) return null;
   return `(showing the first ${result.text.length} of ${result.totalLength} characters)`;
 }
 
-// ---------------------------------------------------------------------------
-// Running local programs
-// ---------------------------------------------------------------------------
 
 /**
  * The desktop extensions (screen, hyprland) reach the machine by running small
@@ -151,26 +138,20 @@ export interface CommandResult {
 
 export interface RunCommandOptions {
   readonly signal?: AbortSignal;
-  /** Kill the child after this long. Defaults to 10s. */
   readonly timeoutMs?: number;
-  /** Cap on captured stdout+stderr. Defaults to 8 MiB. */
   readonly maxBuffer?: number;
-  /** Extra environment for the child. The parent env is inherited. */
   readonly env?: NodeJS.ProcessEnv;
 }
 
-/** Run a program. Injectable so tests never touch the real desktop. */
 export type CommandRunner = (
   command: string,
   args: readonly string[],
   options?: RunCommandOptions,
 ) => Promise<CommandResult>;
 
-/** A program exited non-zero, timed out, or is not installed. */
 export class CommandError extends Error {
   readonly command: string;
   readonly args: readonly string[];
-  /** `ENOENT` when the program is not installed. */
   readonly errno: string | undefined;
   readonly exitCode: number | undefined;
   readonly stderr: string;

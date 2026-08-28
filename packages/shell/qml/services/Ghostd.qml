@@ -34,7 +34,6 @@ import "../components/ProjectModel.js" as ProjectModel
 Singleton {
     id: root
 
-    // ---- Connection -------------------------------------------------------
     readonly property string host: Quickshell.env("GHOSTD_HOST") || "127.0.0.1"
     readonly property string port: String(Quickshell.env("GHOSTD_PORT") || "7717")
     // IPv6 literals need brackets in a URL authority; ghostd binds loopback only.
@@ -42,7 +41,6 @@ Singleton {
         + (root.host.indexOf(":") >= 0 ? "[" + root.host + "]" : root.host)
         + ":" + root.port
 
-    // ---- Auth -------------------------------------------------------------
     // Same resolution the daemon does (packages/daemon/src/api-token.ts): an
     // explicit override, else $XDG_STATE_HOME/ghost/api-token, else the XDG
     // default. A relative XDG_STATE_HOME is not a state home, so it is ignored.
@@ -54,29 +52,22 @@ Singleton {
             : (Quickshell.env("HOME") || "") + "/.local/state";
         return base + "/ghost/api-token";
     }
-    /** The bearer token, "" until the file has been read (or if it cannot be). */
     property string apiToken: ""
 
-    /** [{ name, dir, createdAt }], newest listing from GET /api/ghosts. */
     property var ghosts: []
-    /** Name of the ghost the HUD is talking to. Empty until the first listing. */
     property string activeGhost: ""
     /** False once any request fails; the HUD shows a reconnect hint. */
     property bool reachable: false
     /** Human-readable last failure, or "". */
     property string lastError: ""
-    /** Ghost currently being deleted, or "" when idle. */
     property string deletingGhost: ""
-    /** Ghost whose rename is in flight, under its OLD name, or "" when idle. */
     property string renamingGhost: ""
-    /** Why the last ghost deletion was refused, or "". Presentable as-is. */
     property string ghostDeleteError: ""
     /** Why the last ghost rename was refused, or "". Presentable as-is. Kept
         apart from `ghostDeleteError`: that one renders inside the banish
         modal, and a rename is typed in the roster row itself. */
     property string ghostRenameError: ""
 
-    // ---- Lifecycle-hook catalog ------------------------------------------
     // Daemon-global trusted configuration, projected as bounded display-only
     // metadata. It is deliberately independent of ghost, conversation,
     // project, and the owner-wide Documents cache.
@@ -161,7 +152,6 @@ Singleton {
         });
     }
 
-    // ---- Shared Documents ------------------------------------------------
 
     function documentSnapshot(path: string, query: string): var {
         return DocumentModel.snapshot(root.documentDirectories, path, query);
@@ -415,7 +405,6 @@ Singleton {
             });
     }
 
-    /** Move one shared regular file to system Trash after exact confirmation. */
     function deleteDocument(path: string): void {
         if (!DocumentModel.isCanonicalPath(path)) return;
         const normalized = DocumentModel.normalizePath(path);
@@ -465,7 +454,6 @@ Singleton {
             });
     }
 
-    // ---- Conversation project binding ------------------------------------
 
     function makeProjectRequest(kind: string): var {
         let factory = null;
@@ -636,7 +624,6 @@ Singleton {
         root.projectMutating = false;
     }
 
-    /** Retire every request and every field owned by the previous conversation. */
     function clearProject(): void {
         root.retireProjectRequests();
         root.projectState = ProjectModel.empty();
@@ -658,7 +645,6 @@ Singleton {
         return true;
     }
 
-    /** Read the active conversation's explicit binding. `ensure` mints a blank id on click. */
     function fetchProject(force: bool, ensure: bool): void {
         const ghost = root.activeGhost;
         if (ghost === "") {
@@ -711,7 +697,6 @@ Singleton {
             function () { return xhr === root.projectRequest; });
     }
 
-    /** Resolve and summarize a typed directory without trusting or loading it. */
     function previewProject(path: string): void {
         const candidate = path.trim();
         const ghost = root.activeGhost;
@@ -838,7 +823,6 @@ Singleton {
         root.mutateProject("unbind", "PUT", "", body);
     }
 
-    // ---- Browsable ghost context -----------------------------------------
     // Plain files stay canonical. This is only the latest derived daemon
     // snapshot used by the right-hand Memory/inactive-agent/Character surfaces.
     property var contextCharacter: ({ path: "character.md", title: null })
@@ -849,10 +833,8 @@ Singleton {
     property string contextError: ""
     property string contextDeletingPath: ""
     property string contextDeleteError: ""
-    /** The ghost the current snapshot belongs to; "" means none is cached. */
     property string contextGhost: ""
 
-    // ---- Lifecycle-hook catalog ------------------------------------------
     property var activeHooks: []
     property var hookEvents: []
     property int activeHookCount: 0
@@ -864,14 +846,12 @@ Singleton {
     property string hooksError: ""
     property int hooksEpoch: 0
 
-    // ---- Shared Documents -------------------------------------------------
     // Machine Documents are deliberately not keyed by the active ghost. Each
     // cache entry represents exactly one directory and one current-folder
     // query; deeper folders arrive only when the owner opens them.
     property string documentsRoot: ""
     property var documentDirectories: DocumentModel.emptyMap()
     property var documentRequests: DocumentModel.emptyMap()
-    /** Changes whenever an established daemon connection is lost. */
     property int documentsEpoch: 0
     property bool establishedConnection: false
     property string documentContentPath: ""
@@ -884,7 +864,6 @@ Singleton {
     property string documentDeletingPath: ""
     property string documentDeleteError: ""
 
-    // ---- Conversation project binding ------------------------------------
     // Project discovery is explicit and conversation-scoped. The ghost home
     // remains the persona/memory/session store; this state changes only what
     // the active runtime discovers from an owner-trusted working tree.
@@ -898,7 +877,6 @@ Singleton {
     property string projectGhost: ""
     property string projectSessionId: ""
 
-    // ---- OMP commands -----------------------------------------------------
     // Effective commands are conversation-scoped: an extension can register
     // them while a session is built, so a ghost-level cache would quietly show
     // the wrong palette after switching conversations.
@@ -908,7 +886,6 @@ Singleton {
     property string commandsGhost: ""
     property string commandsSessionId: ""
 
-    // ---- Ghost MCP -------------------------------------------------------
     // Only the active ghost's visible `<ghost-home>/mcp.json` is represented
     // here. Explicitly bound external-project MCP remains session-owned. GET
     // is sanitized; secret-bearing values are write-only through mutations.
@@ -920,7 +897,6 @@ Singleton {
     property string mcpNotice: ""
     property string mcpGhost: ""
 
-    // ---- Connect: live voice, collaboration -------------------------------
     property var liveStatus: ({ phase: "idle" })
     property bool liveLoading: false
     property bool liveMutating: false
@@ -936,51 +912,36 @@ Singleton {
     property string collabGhost: ""
     property string collabSessionId: ""
 
-    // ---- Conversations ----------------------------------------------------
     // A ghost owns many conversations (pi sessions). The daemon persists them;
     // the HUD lists them per ghost, resumes one by loading its transcript, and
     // starts a fresh one on demand. This fixes #26 — a restart no longer loses
     // history, because a conversation lives in the daemon keyed by session id.
-    /** Session listing: [{ id, runtime, conversationId, title, … }]. `id` is the action key. */
     property var sessions: []
-    /** Runtime-qualified id of the active conversation. */
     property string currentSessionId: ""
     /** Non-empty when a sessions/transcript fetch failed. */
     property string sessionsError: ""
-    /** Conversation currently being deleted, or "" when idle. */
     property string deletingSessionId: ""
     /** Why the last branch refused, or "". Kept apart from `sessionsError`:
         that one renders in the conversation list, and a branch is asked for
         from a message, half a window away from it. */
     property string branchError: ""
-    /** Whether the owner can currently see the HUD. */
     property bool hudVisible: false
 
-    // ---- Greeting ---------------------------------------------------------
     // The ghost's opening line for an empty chat. Pure upside: the HUD paints
     // its own static invitation the instant the card appears and only swaps to
     // this if and when it arrives, so a slow, absent, or failed greeting costs
     // the owner nothing. Every failure path therefore leaves it "".
-    /** The daemon's opening line for the active ghost, or "". */
     property string greeting: ""
-    /** True when that greeting is the "we have not met yet" onboarding one. */
     property bool greetingOnboarding: false
-    /** The ghost the current greeting was fetched for; the once-per-ghost latch. */
     property string greetingGhost: ""
 
-    // ---- Turn state -------------------------------------------------------
-    /** ListModel of { role, text, tools, toolActivity, error, pending }. */
     property alias transcript: transcriptModel
-    /** Presentation-only builtin output, keyed by ghost and conversation. */
     property var commandExchanges: ({})
-    /** Number of rows restored from storage, excluding command presentation. */
     property int hydratedRowCount: 0
     property string commandTurnKey: ""
     property int commandTurnIndex: -1
     property int commandTurnAnchor: 0
-    /** True from `start` until `done`/`error`. */
     property bool streaming: false
-    /** Compact activity line: "thinking", "read_memory", "" when idle. */
     property string activity: ""
     /**
      * The ghost's own words for what it is doing right now, or "" when it is
@@ -989,11 +950,9 @@ Singleton {
      * as it is true, and nowhere afterwards. See TurnBlocks.js for the split.
      */
     property string statusText: ""
-    /** OMP's currently-blocking ask interaction, or null. */
     property var pendingAsk: null
     property bool askSubmitting: false
     property string askError: ""
-    /** OMP's user-visible pending queues. Enter steers; Ctrl+Enter follows up. */
     property var steeringQueue: []
     property var followUpQueue: []
     property bool queueSubmitting: false
@@ -1014,14 +973,9 @@ Singleton {
     signal projectPreviewFinished(bool ok)
     signal projectMutationFinished(string action, bool ok)
 
-    // ---- Model login ------------------------------------------------------
-    /** [{ id, name, subscription, authTypes, loginLabel, billingNote, configured, connectedVia }]. */
     property var providers: []
-    /** The active login's id, or "" when none is running. */
     property string loginId: ""
-    /** The current login view from GET .../login/:id — the step to render. */
     property var loginState: ({})
-    /** Which ghost the running login belongs to (a login is per ghost). */
     property string loginGhost: ""
     /** The daemon route that currently owns loginId. During an optimistic ghost
         rename this remains the old name until the rename XHR succeeds. */
@@ -1031,51 +985,34 @@ Singleton {
     /** Non-empty while a login request is in flight or has failed to reach ghostd. */
     property string loginError: ""
 
-    // ---- Model selection --------------------------------------------------
-    /** The resolved current model: { provider, id, name?, contextWindow?, hasVision } | null. */
     property var currentModel: null
-    /** How currentModel was chosen: "role" (explicit pick), "default" (fallback), "none". */
     property string modelSource: "none"
-    /** scope=available rows the ghost can use now: [{ provider, id, name?, …, current }]. */
     property var availableModels: []
-    /** Full available-model count behind the page held in availableModels. */
     property int availableModelTotal: 0
-    /** scope=catalog rows for the last search: same shape plus `usable`. */
     property var catalogModels: []
-    /** Full filtered count behind the current catalog page (may exceed catalogModels.length). */
     property int catalogTotal: 0
-    /** The query and page offset the catalog list currently reflects. */
     property string catalogQuery: ""
     property int catalogOffset: 0
     readonly property int catalogLimit: 50
-    /** True while a catalog search is in flight; drives the switcher's "searching…" line. */
     property bool catalogLoading: false
     /** Non-empty when a model fetch or switch failed. */
     property string modelError: ""
-    /** Non-fatal setup instruction returned by a successful model switch. */
     property string modelWarning: ""
-    /** [{ role, ompRole, label, primary, effective, source, fallbacks }] from OMP routing. */
     property var modelRouting: []
     property bool modelRoutingLoading: false
 
-    /** PUT /model wrote a role whose provider is not credentialed — prompt a login. */
     signal modelSwitchNeedsLogin(string provider)
-    /** PUT /model completed with a usable selection — return the HUD to chat. */
     signal modelSwitchCompleted(string provider, string id)
-    /** One advanced role/fallback mutation completed — return to the route overview. */
     signal modelRouteCompleted(string role, string target)
 
-    // ---- Internals --------------------------------------------------------
     // The XHR must be held by a property. A request whose only reference is the
     // closure it installed on itself is eligible for collection mid-flight.
     property var request: null
     property var listRequest: null
     property var deleteGhostRequest: null
     property var renameGhostRequest: null
-    /** Test seam; production always constructs the native rename XHR. */
     property var renameGhostRequestFactory: null
     property var renameGhostSnapshot: null
-    /** Semantic project state held across an optimistic active-ghost rename. */
     property var renameGhostProjectSnapshot: null
     property var renameSessionRequest: null
     /** Login requests have distinct owners so a poll cannot evict an input or
@@ -1084,24 +1021,19 @@ Singleton {
     property var loginStartRequest: null
     property var loginPollRequest: null
     property var loginInputRequest: null
-    /** Invalidates callbacks from a closed, switched, or superseded flow. */
     property int loginGeneration: 0
     /** Test seam; production always constructs the native QML XHR. */
     property var loginRequestFactory: null
-    /** Test seam for a changed token between a request and its first 401. */
     property var tokenReloadOverride: null
     readonly property bool loginPolling: loginPoll.running
     property var modelRequest: null
-    /** Invalidates current-model GETs started before a ghost/model transition. */
     property int modelGeneration: 0
     property var availRequest: null
-    /** Test seam; production constructs the native available-model XHR. */
     property var availableModelsRequestFactory: null
     property var catalogRequest: null
     property var setModelRequest: null
     property var modelRoutingRequest: null
     property var sessionsRequest: null
-    /** Long-lived passive invalidation stream for the active ghost. */
     property var eventsRequest: null
     property string eventsGhost: ""
     property int eventsConsumed: 0
@@ -1109,7 +1041,6 @@ Singleton {
     property var contextRequest: null
     property var contextDeleteRequest: null
     property var hooksRequest: null
-    /** Test seam; production always constructs a native status XHR. */
     property var hooksRequestFactory: null
     /** Test seams; production constructs native QML XHRs. */
     property var documentRequestFactory: null
@@ -1125,7 +1056,6 @@ Singleton {
     property var projectPreviewRequest: null
     property var projectMutationRequest: null
     property var projectAbandonRequest: null
-    /** Owner navigation staged until a pre-turn binding is durably removed. */
     property var pendingProjectReplacement: null
     property var commandsRequest: null
     property var mcpRequest: null
@@ -1134,13 +1064,10 @@ Singleton {
     property var collabRequest: null
     property var greetingRequest: null
     property var transcriptRequest: null
-    /** Test seam; production constructs each native transcript-page XHR. */
     property var transcriptRequestFactory: null
-    /** Keep transcript restoration finite if a peer reports an absurd total. */
     readonly property int transcriptPageLimit: 1000
     readonly property int transcriptMaxPages: 10
     property var deleteSessionRequest: null
-    /** Test seam; production constructs the native session-deletion XHR. */
     property var deleteSessionRequestFactory: null
     property var pinSessionRequest: null
     property var readSessionRequests: ({})
@@ -1149,13 +1076,10 @@ Singleton {
     property var queueRequest: null
     property var queueStatusRequest: null
     property var branchRequest: null
-    /** Test seam; production constructs the native branch XHR. */
     property var branchRequestFactory: null
 
     property var sessionIds: ({})     // ghost name -> runtime-qualified active id
-    /** Full live/presentation state keyed by JSON.stringify([ghost, sessionId]). */
     property var turnStates: ({})
-    /** Keys whose HTTP turn is still open; replacing this array wakes bindings. */
     property var liveConversationKeys: []
     readonly property bool anyStreaming: root.liveConversationKeys.length > 0
     property var blocks: ({})         // contentIndex -> { kind, text }
@@ -1165,7 +1089,6 @@ Singleton {
     property int assistantRow: -1
     property int consumed: 0
     property string frameBuffer: ""
-    /** True when blocks/tool labels changed since the last 50ms render pass. */
     property bool presentationDirty: false
 
     ListModel { id: transcriptModel }
@@ -1300,9 +1223,7 @@ Singleton {
         root.connectConversationEvents(root.activeGhost);
     }
 
-    // ---- Authenticated requests -------------------------------------------
 
-    /** The token, reading the file on first use. "" when there is none yet. */
     function token(): string {
         if (root.apiToken === "") {
             const text = apiTokenFile.text();
@@ -1311,7 +1232,6 @@ Singleton {
         return root.apiToken;
     }
 
-    /** Re-read the token file. Returns the token, which may be unchanged. */
     function reloadToken(): string {
         if (root.tokenReloadOverride) {
             const overridden = root.tokenReloadOverride();
@@ -1369,7 +1289,6 @@ Singleton {
         else xhr.send(body);
     }
 
-    // ---- Ghost roster -----------------------------------------------------
 
     function refresh(): void {
         root.fetchHooks(false);
@@ -1623,7 +1542,6 @@ Singleton {
         root.contextGhost = state.contextGhost;
     }
 
-    /** Move everything the shell keys by a ghost's name onto the new one. */
     function applyGhostRename(from: string, to: string): void {
         root.installGhostRenameState(GhostRename.move(root.ghostRenameState(), from, to));
         root.moveTurnStates(from, to);
@@ -2107,7 +2025,6 @@ Singleton {
         }
     }
 
-    /** Drop model data that belongs to the previously selected ghost. */
     function clearModelState(): void {
         root.currentModel = null;
         root.modelSource = "none";
@@ -2118,18 +2035,14 @@ Singleton {
         root.modelWarning = "";
     }
 
-    // ---- Greeting ---------------------------------------------------------
 
-    /** Forget the current greeting so the next fetch asks for a fresh one. */
     function clearGreeting(): void {
         root.greeting = "";
         root.greetingOnboarding = false;
         root.greetingGhost = "";
     }
 
-    // ---- Browsable context -----------------------------------------------
 
-    /** Drop a snapshot that belongs to a ghost the owner has left. */
     function clearContext(): void {
         if (root.contextRequest && root.contextRequest.readyState !== 4)
             root.contextRequest.abort();
@@ -2195,7 +2108,6 @@ Singleton {
             "/api/ghosts/" + encodeURIComponent(ghost) + "/context", ({}), null);
     }
 
-    /** Move one memory file to system Trash after the UI confirms it. */
     function deleteContextFile(section: string, path: string): void {
         const ghost = root.activeGhost;
         if (ghost === "" || path === "" || root.contextDeletingPath !== "") return;
@@ -2234,9 +2146,7 @@ Singleton {
             JSON.stringify({ section: section, path: path, confirm: path }));
     }
 
-    // ---- OMP command catalog ---------------------------------------------
 
-    /** Forget a catalog whose ghost or conversation is no longer active. */
     function clearCommands(): void {
         if (root.commandsRequest && root.commandsRequest.readyState !== 4)
             root.commandsRequest.abort();
@@ -2302,7 +2212,6 @@ Singleton {
             + "/sessions/" + encodeURIComponent(sessionId) + "/commands", ({}), null);
     }
 
-    // ---- Ghost MCP management -------------------------------------------
 
     function clearMcp(): void {
         if (root.mcpRequest && root.mcpRequest.readyState !== 4)
@@ -2320,7 +2229,6 @@ Singleton {
         root.mcpGhost = "";
     }
 
-    /** Apply the sanitized catalog shape shared by reads and mutations. */
     function applyMcpSnapshot(body: var, ghost: string): bool {
         if (!body || !Array.isArray(body.servers) || !Array.isArray(body.skipped))
             return false;
@@ -2440,7 +2348,6 @@ Singleton {
             "delete", name);
     }
 
-    // ---- Connect: live voice, collaboration -------------------------------
 
     function clearConnect(): void {
         if (root.liveRequest && root.liveRequest.readyState !== 4)
@@ -2720,9 +2627,7 @@ Singleton {
             ({ "Content-Type": "application/json" }), JSON.stringify({}));
     }
 
-    // ---- Conversations ----------------------------------------------------
 
-    /** Keep one authenticated SSE invalidation stream attached to the active ghost. */
     function connectConversationEvents(ghost: string): void {
         const previous = root.eventsRequest;
         if (previous && previous.readyState !== 4) {
@@ -2824,7 +2729,6 @@ Singleton {
         });
     }
 
-    /** GET the active ghost's conversation listing. Newest-updated first. */
     function fetchSessions(ghost: string): void {
         const g = ghost || root.activeGhost;
         if (g === "") {
@@ -2904,7 +2808,6 @@ Singleton {
         root.fetchProject(false, false);
     }
 
-    /** Keep a lazily-created live conversation navigable until ghostd lists it. */
     function ensureOptimisticSessionRow(ghost: string, id: string): void {
         const state = root.turnStates[root.conversationKey(ghost, id)];
         if (state) state.published = true;
@@ -2928,7 +2831,6 @@ Singleton {
         }]));
     }
 
-    /** Move one stored conversation's Ghost-owned artifacts to Trash. */
     function deleteConversation(id: string): void {
         const ghost = root.activeGhost;
         if (ghost === "" || id === "" || root.deletingSessionId !== "") return;
@@ -3063,7 +2965,6 @@ Singleton {
             JSON.stringify({ title: next }));
     }
 
-    /** Swap one row's title. A fresh row object, or nothing re-reads it. */
     function applySessionTitle(id: string, title: var): void {
         root.sessions = root.sessions.map(function (session) {
             return session && session.id === id
@@ -3072,7 +2973,6 @@ Singleton {
         });
     }
 
-    /** The listing order GET sessions returns, applied to a local edit. */
     function orderSessions(list: var): var {
         return list.slice().sort(function (a, b) {
             const pinnedA = a.pinned === true ? 1 : 0;
@@ -3136,7 +3036,6 @@ Singleton {
         root.loadConversationTranscript(state, true);
     }
 
-    /** Persist that the owner opened a stored conversation. */
     function markConversationRead(ghost: string, id: string): void {
         if (ghost === "" || id === "") return;
         const local = ghost === root.activeGhost ? root.sessions.find(function (session) {
@@ -3174,7 +3073,6 @@ Singleton {
         root.markConversationRead(root.activeGhost, root.currentSessionId);
     }
 
-    /** Refresh the persisted entry ids a live turn could not know yet. */
     function refreshCurrentTranscript(): void {
         const state = root.activeTurnState(false);
         if (!state || state.streaming) return;
@@ -3394,7 +3292,6 @@ Singleton {
         return Array.isArray(root.commandExchanges[key]) ? root.commandExchanges[key] : [];
     }
 
-    /** Keep every command_output frame in the current presentation exchange. */
     function receiveCommandOutput(event: var): void {
         const state = root.activeTurnState(false);
         if (!state) return;
@@ -3443,7 +3340,6 @@ Singleton {
             || part.status === "failed" ? "failed" : "complete";
     }
 
-    /** Recover tool cards from an assistant message on transcript load. */
     function messageTools(message: var): var {
         if (!Array.isArray(message.content)) return [];
         return message.content
@@ -3551,7 +3447,6 @@ Singleton {
             JSON.stringify({ action: "fork", entryId: entryId }));
     }
 
-    /** Run modern OMP's two-phase Ask tree re-answer as a streamed continuation. */
     function reanswerHistoricalAsk(entryId: string): void {
         const ghost = root.activeGhost;
         const sessionId = root.currentSessionId;
@@ -3573,7 +3468,6 @@ Singleton {
             JSON.stringify({ entryId: entryId }));
     }
 
-    // ---- A turn -----------------------------------------------------------
 
     function send(text: string): void {
         const prompt = text.trim();
@@ -3665,7 +3559,6 @@ Singleton {
         if (xhr && xhr.readyState !== 4) xhr.abort();
     }
 
-    /** Shared initialization for ordinary turns and streamed ask re-answers. */
     function beginTurn(): void {
         const ghost = root.activeGhost;
         if (ghost === "") return;
@@ -3689,7 +3582,6 @@ Singleton {
         root.projectTurnFields(state);
     }
 
-    /** Fields scoped to the assistant segment between two owner messages. */
     function resetAssistantSegment(): void {
         const state = root.activeTurnState(true);
         if (state) root.resetAssistantSegmentFor(state);
@@ -3704,7 +3596,6 @@ Singleton {
         root.projectTurnFields(state);
     }
 
-    /** The dialog and submission state belonging to one OMP ask interaction. */
     function resetAskState(): void {
         const state = root.activeTurnState(true);
         if (state) root.resetAskStateFor(state);
@@ -3717,7 +3608,6 @@ Singleton {
         root.projectTurnFields(state);
     }
 
-    /** The interaction fields every terminal/cancel path must clear together. */
     function resetInteractionState(): void {
         const state = root.activeTurnState(true);
         if (state) root.resetInteractionStateFor(state);
@@ -3774,7 +3664,6 @@ Singleton {
         root.projectTurnFields(state);
     }
 
-    /** A half-open SSE response missed three daemon keepalives. */
     function expireStream(): void {
         const state = root.compatibilityTurnState();
         if (!state) return;
@@ -3846,7 +3735,6 @@ Singleton {
         return root.sessionIds[ghost];
     }
 
-    // ---- SSE --------------------------------------------------------------
 
     /**
      * Feed a raw chunk of the response body. Chunk boundaries are network
@@ -4084,7 +3972,6 @@ Singleton {
         root.syncToolActivityFor(state);
     }
 
-    /** Push buffered block text into the model. Cheap when nothing changed. */
     function flush(force: bool, segmentClosed: bool): void {
         const state = root.activeTurnState(false);
         if (!state) return;
@@ -4165,7 +4052,6 @@ Singleton {
             root.markConversationRead(state.ghost, state.sessionId);
     }
 
-    /** Move a dequeued steer/follow-up from QueueLine into transcript order. */
     function receiveOwnerMessage(text: string): void {
         const state = root.activeTurnState(false);
         if (!state) return;
@@ -4230,9 +4116,7 @@ Singleton {
         root.projectTurnFields(state);
     }
 
-    // ---- OMP ask ---------------------------------------------------------
 
-    /** Fetch the ask payload surfaced by the live conversation, if ready. */
     function fetchPendingAsk(): void {
         const state = root.activeTurnState(false);
         if (state) root.fetchPendingAskFor(state);
@@ -4263,7 +4147,6 @@ Singleton {
             + "/sessions/" + encodeURIComponent(state.sessionId) + "/ask", ({}), null);
     }
 
-    /** Submit an OMP ask result. `answer` is { kind, results? }. */
     function answerAsk(answer: var): void {
         const state = root.activeTurnState(false);
         if (!state) return;
@@ -4309,7 +4192,6 @@ Singleton {
         root.answerAsk({ kind: "cancel" });
     }
 
-    // ---- OMP steering + follow-up queues --------------------------------
 
     function applyQueue(body: var): void {
         const state = root.activeTurnState(false);
@@ -4388,7 +4270,6 @@ Singleton {
             JSON.stringify({ mode: mode, text: prompt }));
     }
 
-    // ---- Model login ------------------------------------------------------
 
     function newLoginRequest(): var {
         return root.loginRequestFactory ? root.loginRequestFactory() : new XMLHttpRequest();
@@ -4458,7 +4339,6 @@ Singleton {
         return true;
     }
 
-    /** GET the providers this ghost can log into. Call when the panel opens. */
     function fetchProviders(): void {
         const ghost = root.activeGhost;
         if (ghost === "") return;
@@ -4514,7 +4394,6 @@ Singleton {
         return true;
     }
 
-    /** Begin a login for the active ghost. authType is "oauth" or "api_key". */
     function startLogin(providerId: string, authType: string): void {
         const ghost = root.activeGhost;
         if (ghost === "") return;
@@ -4567,7 +4446,6 @@ Singleton {
         return true;
     }
 
-    /** Poll the running login's current step. */
     function pollLogin(): void {
         if (root.loginId === "" || root.loginRouteGhost === ""
                 || root.loginRoutePaused) return;
@@ -4616,7 +4494,6 @@ Singleton {
         return true;
     }
 
-    /** Satisfy an awaiting prompt with a pasted code, API key, or selected id. */
     function submitLoginInput(value: string): bool {
         if (root.loginId === "" || root.loginRouteGhost === ""
                 || root.loginRoutePaused) return false;
@@ -4643,7 +4520,6 @@ Singleton {
         return true;
     }
 
-    /** Open the current auth URL in the owner's browser. */
     function openLoginUrl(url: string): void {
         if (!ExternalLinks.openLoginUrl(url)) root.loginError = "ghostd sent an unsafe login URL";
     }
@@ -4667,7 +4543,6 @@ Singleton {
         root.abortLoginRequest(input);
     }
 
-    /** A refused rename leaves the old daemon route authoritative. */
     function resumeLoginRoute(routeGhost: string): void {
         if (root.loginRouteGhost !== routeGhost) return;
         root.loginRoutePaused = false;
@@ -4692,7 +4567,6 @@ Singleton {
         if (root.loginId !== "" && !root.isLoginTerminal()) loginPoll.start();
     }
 
-    /** Cancel every client-side part of the current flow. */
     function cancelLogin(): void {
         loginPoll.stop();
         root.loginGeneration += 1;
@@ -4705,12 +4579,10 @@ Singleton {
         root.loginError = "";
     }
 
-    /** Clear login state and stop polling. Leaves the provider list intact. */
     function resetLogin(): void {
         root.cancelLogin();
     }
 
-    // ---- Model selection --------------------------------------------------
 
     function applyCurrentModelResponse(xhr: var, ghost: string, generation: int): bool {
         if (xhr.readyState !== 4 || xhr !== root.modelRequest
@@ -4744,7 +4616,6 @@ Singleton {
         return true;
     }
 
-    /** GET the ghost's current model. Cheap; called on refresh, ghost switch, panel open. */
     function fetchCurrentModel(): void {
         const ghost = root.activeGhost;
         if (ghost === "") return;
@@ -4758,7 +4629,6 @@ Singleton {
             "/api/ghosts/" + encodeURIComponent(ghost) + "/model", ({}), null);
     }
 
-    /** GET the models this ghost can use right now (credentialed providers only). */
     function fetchAvailableModels(): void {
         const ghost = root.activeGhost;
         if (ghost === "") return;
@@ -4879,7 +4749,6 @@ Singleton {
         root.modelRouting = Array.isArray(body.roles) ? body.roles : [];
     }
 
-    /** Fetch Ghost roles plus the OMP role/fallback projection. */
     function fetchModelRouting(): void {
         const ghost = root.activeGhost;
         if (ghost === "") return;
@@ -4904,7 +4773,6 @@ Singleton {
             + "/model-routing", ({}), null);
     }
 
-    /** Assign a primary model or append an ordered OMP retry fallback. */
     function setModelRoute(role: string, target: string, provider: string, id: string): void {
         const ghost = root.activeGhost;
         if (ghost === "" || role === "" || provider === "" || id === "") return;
@@ -4937,7 +4805,6 @@ Singleton {
         root.replaceModelFallbacks(role, []);
     }
 
-    /** Remove an explicit primary so OMP's automatic role resolution is visible again. */
     function clearModelPrimary(role: string): void {
         const ghost = root.activeGhost;
         if (ghost === "" || role === "") return;
@@ -5007,7 +4874,6 @@ Singleton {
             }));
     }
 
-    // ---- Errors -----------------------------------------------------------
 
     /** The daemon's own presentable message for a failure, or "". */
     function errorDetail(xhr: var): string {
@@ -5022,7 +4888,6 @@ Singleton {
         }
     }
 
-    /** Machine-readable daemon error code, when the response carries one. */
     function errorCode(xhr: var): string {
         try {
             const body = JSON.parse(xhr.responseText);

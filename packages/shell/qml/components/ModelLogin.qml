@@ -36,14 +36,12 @@ Rectangle {
     radius: Theme.radius
     color: Theme.background
 
-    /** Open the panel for the active ghost: fresh provider list, no stale login. */
     function open(): void {
         codeField.text = "";
         Ghostd.resetLogin();
         Ghostd.fetchProviders();
     }
 
-    /** Retire client requests before the parent changes panels. */
     function close(): void {
         codeField.text = "";
         Ghostd.cancelLogin();
@@ -76,7 +74,6 @@ Rectangle {
         anchors.margins: Theme.pad
         spacing: Theme.gap
 
-        // ---- Header -------------------------------------------------------
         RowLayout {
             Layout.fillWidth: true
             spacing: Theme.gap
@@ -111,7 +108,6 @@ Rectangle {
             }
         }
 
-        // ---- Provider picker ----------------------------------------------
         Flickable {
             visible: root.picking
             Layout.fillWidth: true
@@ -243,7 +239,6 @@ Rectangle {
             }
         }
 
-        // ---- Active login -------------------------------------------------
         Flickable {
             visible: !root.picking
             Layout.fillWidth: true

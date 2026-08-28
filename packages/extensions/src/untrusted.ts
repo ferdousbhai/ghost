@@ -143,7 +143,6 @@ function matchesAny(content: string, patterns: readonly RegExp[]): boolean {
   return patterns.some((pattern) => pattern.test(content));
 }
 
-/** Deterministic, no-I/O detector for clear prompt-injection indicators. */
 export class HeuristicInjectionDetector implements InjectionDetector {
   detect(content: string, _ctx?: { source?: string }): InjectionDetection {
     const reasons: string[] = [];
@@ -270,7 +269,6 @@ function isInjectionClassifierLabel(label: string): boolean {
   ) || /^label[_ -]?1$/.test(normalized);
 }
 
-/** Options are primarily exposed so tests and embedders can supply an environment. */
 export interface ClassifierInjectionDetectorOptions {
   readonly env?: NodeJS.ProcessEnv;
 }
@@ -325,7 +323,6 @@ export class ClassifierInjectionDetector implements InjectionDetector {
   }
 }
 
-/** Combine independent detector signals without weighting either detector. */
 export function combineInjectionDetections(
   first: InjectionDetection,
   second: InjectionDetection,
@@ -372,7 +369,6 @@ export class CompositeInjectionDetector implements InjectionDetector {
 
 const defaultHeuristicInjectionDetector = new HeuristicInjectionDetector();
 
-/** Heuristic-only by default; opt-in classifier signals are additive. */
 export const defaultInjectionDetector: InjectionDetector =
   configuredModel(process.env) === undefined
     ? defaultHeuristicInjectionDetector
@@ -381,7 +377,6 @@ export const defaultInjectionDetector: InjectionDetector =
       new ClassifierInjectionDetector(),
     );
 
-/** Detect prompt injection with the default detector. */
 export function detectInjection(
   content: string,
   ctx?: { source?: string },

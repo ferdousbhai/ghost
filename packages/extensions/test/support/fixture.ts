@@ -58,9 +58,7 @@ Superseded. Kept for the record.
 };
 
 export interface GhostFixture {
-  /** The ghosts root; ghost homes are directories inside it. */
   readonly root: string;
-  /** The ghost home directory itself. */
   readonly dir: string;
   cleanup(): Promise<void>;
 }
@@ -76,7 +74,6 @@ export async function writeFileTree(
   }
 }
 
-/** A temp ghosts root containing one populated ghost home named `casper`. */
 export async function createGhostFixture(
   name = "casper",
   files: Record<string, string> = FILES,
@@ -92,7 +89,6 @@ export async function createGhostFixture(
   };
 }
 
-/** An empty temp directory, for import targets and fresh homes. */
 export async function createTempDir(): Promise<{ dir: string; cleanup(): Promise<void> }> {
   const dir = await mkdtemp(join(tmpdir(), "ghost-tmp-"));
   return { dir, cleanup: () => rm(dir, { recursive: true, force: true }) };

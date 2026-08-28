@@ -16,10 +16,8 @@ import "NotificationText.js" as NotificationText
 Singleton {
     id: root
 
-    /** Set false to silence notifications entirely. */
     property bool enabled: true
 
-    /** How much of the reply to put in the notification body. */
     readonly property int excerptLength: 180
 
     function excerpt(text: string): string {

@@ -15,7 +15,7 @@
  */
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { constants as fsConstants } from "node:fs";
+import { constants as fsConstants, existsSync, readdirSync } from "node:fs";
 import {
   access,
   lstat,
@@ -124,7 +124,6 @@ const execFileAsync = promisify(execFile);
 
 export interface ClaudeCodeAuthStatus {
   loggedIn: boolean;
-  /** Claude Code's authentication source; `claude.ai` is the plan-backed path. */
   authMethod?: string;
   apiProvider?: string;
   subscriptionType?: string;
@@ -138,11 +137,8 @@ export interface ClaudeSessionMetadata {
   created: string;
   modified: string;
   messageCount: number;
-  /** Owner-initiated turns, independent of Claude's internal sampling/tool turns. */
   ownerTurnCount: number;
-  /** Version 2 pins the actual runtime cwd; version 1 resumes at ghost home. */
   cwd?: string;
-  /** Version 3's exact bounded project inputs, reused without filesystem reads. */
   projectSnapshot?: ClaudePersistedProjectSnapshot;
 }
 
@@ -168,7 +164,6 @@ export interface ClaudeProjectSnapshot {
   root: string | null;
   cwd: string;
   identity?: ProjectFilesystemIdentity;
-  /** Exact validated project inputs captured before the caller publishes SSE. */
   admittedSnapshot?: ClaudePersistedProjectSnapshot;
   reportStatus?: (input: {
     status: "ready" | "degraded";
@@ -190,36 +185,24 @@ export interface ClaudeCodeProbeResult {
 }
 
 export interface ClaudeCodeProbeOptions {
-  /** Installed Claude Code path/name. Defaults to GHOST_CLAUDE_BINARY or `claude`. */
   binaryPath?: string;
-  /** Short cache lifetime for one executable/auth snapshot. */
   ttlMs?: number;
-  /** Deterministic cache clock seam. */
   now?: () => number;
-  /** Test seam for executable discovery. */
   resolveExecutable?: (binaryPath: string) => Promise<string>;
-  /** Test seam for the external `claude auth status` process. */
   readAuthStatus?: (binaryPath: string) => Promise<ClaudeCodeAuthStatus>;
 }
 
 export interface ClaudeCodeRuntimeOptions {
-  /** OS account home. New unbound Claude conversations start here. */
   ownerHome?: string;
   logger?: Logger;
   extensionOptions?: GhostExtensionOptions;
   browserMode?: "relay" | "profile";
   relayTransport?: RelayTransport;
-  /** Installed Claude Code path/name. Defaults to GHOST_CLAUDE_BINARY or `claude`. */
   binaryPath?: string;
-  /** Test seam; production always uses the official Agent SDK query(). */
   createQuery?: ClaudeCodeQueryFactory;
-  /** Test seam for the external `claude auth status` preflight. */
   readAuthStatus?: (binaryPath: string) => Promise<ClaudeCodeAuthStatus>;
-  /** Test seam for installed-executable discovery. */
   resolveExecutable?: (binaryPath: string) => Promise<string>;
-  /** Shared catalogue/turn probe. Production wires one daemon-wide instance. */
   probe?: ClaudeCodeProbe;
-  /** Ghost-owned lifecycle hooks shared with the pi harness. */
   hooks?: GhostHookRunner;
 }
 
@@ -351,7 +334,6 @@ function authStatusFromJson(raw: string): ClaudeCodeAuthStatus {
   };
 }
 
-/** Token-free external-auth check; no SDK query and no model request. */
 export async function readClaudeCodeAuthStatus(
   binaryPath: string,
 ): Promise<ClaudeCodeAuthStatus> {
@@ -440,7 +422,6 @@ export class ClaudeCodeProbe {
     return isClaudePlanAuth((await this.read()).authStatus);
   }
 
-  /** Drop both the settled snapshot and ownership of any older in-flight probe. */
   invalidate(): void {
     this.generation += 1;
     this.cached = undefined;
@@ -474,6 +455,30 @@ export function claudeSessionMetadataPath(
   conversationId: string,
 ): string {
   return nativeClaudeSessionMetadataPath(sessionDir, conversationId);
+}
+
+/**
+ * The Claude Code SDK's own session transcript for a resume id, when it exists.
+ * The SDK persists under `$CLAUDE_CONFIG_DIR/projects/<encoded cwd>/<id>.jsonl`;
+ * the directory name encoding is the SDK's, so the file is located by id.
+ */
+export function claudeSdkTranscriptPath(
+  sessionId: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string | undefined {
+  if (!/^[A-Za-z0-9-]{1,128}$/u.test(sessionId)) return undefined;
+  const projects = join(env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude"), "projects");
+  let directories: string[];
+  try {
+    directories = readdirSync(projects);
+  } catch {
+    return undefined;
+  }
+  for (const directory of directories) {
+    const candidate = join(projects, directory, `${sessionId}.jsonl`);
+    if (existsSync(candidate)) return candidate;
+  }
+  return undefined;
 }
 
 function isBoundedScalarString(value: string, maximum: number): boolean {
@@ -558,7 +563,6 @@ function validClaudeMcpToolPolicy(value: unknown): boolean {
     && CLAUDE_MCP_PERMISSION_POLICIES.has(policy.permission_policy);
 }
 
-/** Validate exactly the serializable stdio/http/sse SDK MCP union persisted by Ghost. */
 function validPersistedClaudeMcpConfig(value: unknown): value is ClaudeMcpServerConfig {
   const config = objectRecord(value);
   if (!config || containsEnvironmentExpansion(config)) return false;
@@ -1174,7 +1178,6 @@ async function buildMcpTools(
   return { tools, names: resolved.toolNames };
 }
 
-/** Adapt Ghost's OMP-neutral extension tools to in-process Claude SDK MCP tools. */
 export async function bridgeClaudeCodeTools(
   resolved: ReturnType<typeof resolveGhostExtensions>,
   homeDir: string,
@@ -1539,7 +1542,6 @@ function runQueryEffect(input: {
   }));
 }
 
-/** The ghost half of a `JSON.stringify([ghostName, conversationId])` key. */
 function runtimeKeyGhost(key: string): string {
   return (JSON.parse(key) as [string, string])[0];
 }
@@ -1636,7 +1638,6 @@ export class ClaudeCodeRuntime {
     };
   }
 
-  /** True while ANY conversation of this ghost is mid-turn. */
   isGhostBusy(ghostName: string): boolean {
     for (const key of this.busy) {
       if (runtimeKeyGhost(key) === ghostName) return true;
@@ -1972,7 +1973,13 @@ export class ClaudeCodeRuntime {
           role: "assistant",
           content: resultText ? [{ type: "text", text: resultText }] : [],
         };
-        const hookResult = completed.subtype === "success" && this.hooks.hasHandlers("session_stop")
+        const emitsSessionStop = completed.subtype === "success"
+          && this.hooks.hasHandlers("session_stop");
+        // Only worth locating when a handler will actually read it.
+        const sdkTranscript = emitsSessionStop
+          ? claudeSdkTranscriptPath(completed.session_id)
+          : undefined;
+        const hookResult = emitsSessionStop
           ? await this.hooks.emitSessionStop({
             type: "session_stop",
             messages: [lastAssistant],
@@ -1980,6 +1987,7 @@ export class ClaudeCodeRuntime {
             last_assistant_message: lastAssistant,
             session_id: completed.session_id,
             session_file: claudeSessionMetadataPath(paths.sessionDir, conversationId),
+            ...(sdkTranscript ? { transcript_path: sdkTranscript } : {}),
             stop_hook_active: stopHookActive,
             owner_prompt: options.prompt,
             signal: options.signal ?? new AbortController().signal,
@@ -2078,7 +2086,6 @@ export class ClaudeCodeRuntime {
     return result.sort((a, b) => b.modified.localeCompare(a.modified));
   }
 
-  /** Close every live query of one ghost, across its conversations. */
   async closeGhost(ghostName: string): Promise<void> {
     for (const key of [...this.active.keys()]) {
       const [keyGhost, conversationId] = JSON.parse(key) as [string, string];
@@ -2100,7 +2107,6 @@ export class ClaudeCodeRuntime {
     }
   }
 
-  /** Delete one persisted resume sidecar. Returns false when none exists. */
   async deleteSession(ghost: Ghost, conversationId: string): Promise<boolean> {
     if (this.isBusy(ghost.name, conversationId)) {
       throw new GhostError(

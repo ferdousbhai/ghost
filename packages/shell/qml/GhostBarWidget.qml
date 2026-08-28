@@ -14,7 +14,6 @@ import qs.components
 Item {
     id: root
 
-    /** Colors are overridable so a host bar can impose its own palette. */
     property color foregroundColor: Theme.barForeground
     property color activeColor: Theme.barActive
     property color idleColor: Theme.foregroundDim

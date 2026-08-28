@@ -294,7 +294,6 @@ class GhostDesktop:
         self._ax_epoch: int = 0
         self._ax_window: dict[str, Any] | None = None
 
-    # --- target resolution (ported from omaharness.desktop) --------------
 
     def _match_windows(self, query: str | int | None) -> list[dict[str, Any]]:
         clients = self.hyprctl.clients()
@@ -375,7 +374,6 @@ class GhostDesktop:
             self.hyprctl, self.ydotool, operation=operation, runner=self._runner
         )
 
-    # --- AT-SPI plumbing -------------------------------------------------
 
     def _ax_backend(self) -> atspi_module.AtspiBackend:
         if self._atspi is None:
@@ -462,7 +460,6 @@ class GhostDesktop:
                 reason="out_of_range",
             ) from exc
 
-    # --- server-side clamps for model-supplied walk knobs ----------------
 
     @staticmethod
     def _clamp_nodes(value: Any) -> int:
@@ -491,7 +488,6 @@ class GhostDesktop:
         limit = int(limit)
         return _MAX_LIMIT_CAP if limit <= 0 else min(limit, _MAX_LIMIT_CAP)
 
-    # --- ops: windows / desktop state ------------------------------------
 
     def see(self, name: str | None = None) -> dict[str, Any]:
         """Windows matching a name (or all), best candidate first."""
@@ -566,7 +562,6 @@ class GhostDesktop:
         ]
         return report
 
-    # --- ops: accessibility ----------------------------------------------
 
     def ax_query(
         self,
@@ -757,7 +752,6 @@ class GhostDesktop:
             "element": {**node, "ref": self._mint_ref(epoch, node["element_index"])},
         }
 
-    # --- ops: input ------------------------------------------------------
 
     def key(
         self,
@@ -1165,7 +1159,6 @@ class GhostDesktop:
             target=window["address"],
         )
 
-    # --- ops: capture ----------------------------------------------------
 
     def capture(
         self,
@@ -1334,7 +1327,6 @@ class GhostDesktop:
             },
         }
 
-    # --- ops: compositor control -----------------------------------------
 
     def focus(
         self, *, address: str | None = None, name: str | int | None = None
@@ -1372,7 +1364,6 @@ class GhostDesktop:
             grammar=self.hyprctl.encoder.generation,
         )
 
-    # --- warnings --------------------------------------------------------
 
     @staticmethod
     def _tree_warnings(

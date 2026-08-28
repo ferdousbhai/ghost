@@ -40,14 +40,12 @@ function hasSafeWebForm(value, scheme) {
     return authority !== "" && !/(?:@|%40)/i.test(authority);
 }
 
-/** Model-authored Markdown may open only web pages and email drafts. */
 function isModelUrl(value) {
     var scheme = schemeOf(value);
     if (scheme === "http" || scheme === "https") return hasSafeWebForm(value, scheme);
     return scheme === "mailto" && value.length > "mailto:".length;
 }
 
-/** Daemon-issued OAuth/device links are web URLs, never arbitrary handlers. */
 function isLoginUrl(value) {
     var scheme = schemeOf(value);
     return (scheme === "http" || scheme === "https") && hasSafeWebForm(value, scheme);

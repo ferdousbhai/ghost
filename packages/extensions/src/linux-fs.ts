@@ -73,7 +73,6 @@ export async function openDirectoryNoFollow(
   }
 }
 
-/** Open a regular file without following links or blocking on special files. */
 export async function openRegularFileNoFollow(
   path: string,
   label: string,

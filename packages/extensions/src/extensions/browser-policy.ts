@@ -21,14 +21,11 @@
 import { lookup } from "node:dns/promises";
 import { getDomain } from "tldts";
 
-/** The only schemes a navigation may use. */
 const ALLOWED_PROTOCOLS = new Set(["http:", "https:"]);
 
-/** The one non-http URL worth allowing: an empty page to start from. */
 export const BLANK_URL = "about:blank";
 
 export interface UrlPolicyOptions {
-  /** Permit loopback, private, and link-local destinations. Off by default. */
   readonly allowLocal?: boolean;
 }
 
@@ -41,7 +38,6 @@ export interface BrowserDnsResolverOptions {
   readonly signal?: AbortSignal;
 }
 
-/** Injectable so unit tests never consult the network. */
 export type BrowserDnsResolver = (
   hostname: string,
   options?: BrowserDnsResolverOptions,
@@ -81,7 +77,6 @@ export type UrlPolicyResult =
   | { readonly ok: true; readonly url: string }
   | { readonly ok: false; readonly rejection: UrlPolicyRejection };
 
-/** Host suffixes that always mean "something on this machine or LAN". */
 const LOCAL_SUFFIXES = [".localhost", ".local", ".internal", ".home.arpa"];
 
 function parseIpv4(host: string): number[] | null {
@@ -242,7 +237,6 @@ function isPublicIpv6(host: string): boolean {
   return (h0 & 0xe000) === 0x2000;
 }
 
-/** True only for an IP address suitable as a public Internet peer. */
 export function isPublicInternetAddress(address: string): boolean {
   const unbracketed = address.startsWith("[") && address.endsWith("]")
     ? address.slice(1, -1)
@@ -252,7 +246,6 @@ export function isPublicInternetAddress(address: string): boolean {
   return false;
 }
 
-/** True when this hostname names the owner's machine or private network. */
 export function isLocalHostname(hostname: string): boolean {
   // A trailing dot is a fully-qualified spelling of the same name: `localhost.`
   // resolves exactly where `localhost` does, so strip one before classifying or
@@ -415,9 +408,6 @@ export async function checkNetworkUrl(
   return checked;
 }
 
-// ---------------------------------------------------------------------------
-// Consequential-action provenance guardrail
-// ---------------------------------------------------------------------------
 
 /**
  * The prompt-injection boundary, in one place.
@@ -476,7 +466,6 @@ export const ACTING_ACTIONS = new Set([
   "javascript",
 ]);
 
-/** True for the sharp edge — the operations the provenance gate governs. */
 export function isActingAction(action: string): boolean {
   return ACTING_ACTIONS.has(action);
 }
@@ -492,7 +481,6 @@ export function registrableDomain(hostname: string): string {
   return getDomain(host, { allowPrivateDomains: true, validateHostname: true }) ?? host;
 }
 
-/** The registrable domain named by a URL, or undefined if it does not parse. */
 function domainOf(rawUrl: string): string | undefined {
   try {
     return registrableDomain(new URL(rawUrl).hostname);

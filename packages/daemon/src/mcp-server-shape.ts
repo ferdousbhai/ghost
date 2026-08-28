@@ -149,7 +149,6 @@ function ownedMcpValidationErrors(value: unknown): string[] {
   return [];
 }
 
-/** Ghost's own shape rules, then OMP's, for one named server row. */
 export function mcpServerValidationErrors(name: string, value: unknown): string[] {
   const nameError = validateServerName(name);
   if (nameError) return [nameError];

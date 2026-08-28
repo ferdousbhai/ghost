@@ -58,7 +58,6 @@ function splitLines(source) {
     return out;
 }
 
-// ---- Diff -------------------------------------------------------------------
 
 /**
  * Matched line pairs [aIndex, bIndex] in increasing order — a longest common
@@ -142,7 +141,6 @@ function changeHunks(a, b) {
     return hunks;
 }
 
-// ---- Merge ------------------------------------------------------------------
 
 function isInsertion(hunk) {
     return hunk.aStart === hunk.aEnd;

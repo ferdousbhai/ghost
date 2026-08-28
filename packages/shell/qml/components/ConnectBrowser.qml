@@ -230,7 +230,6 @@ Rectangle {
             width: pageScroll.width - Theme.pad * 2
             spacing: Theme.sectionGap
 
-            // ---- Live voice ---------------------------------------------
             Rectangle {
                 width: parent.width
                 height: liveContent.implicitHeight + Theme.pad * 2
@@ -381,7 +380,6 @@ Rectangle {
                 }
             }
 
-            // ---- Collaboration relay ------------------------------------
             Rectangle {
                 width: parent.width
                 height: collabContent.implicitHeight + Theme.pad * 2

@@ -128,9 +128,7 @@ class FakePage {
   pageText = "";
   javascriptResult: unknown = "js-result";
   evaluateBarrier: Promise<void> | undefined;
-  /** Selectors that should behave as if nothing matched. */
   missingSelectors = new Set<string>();
-  /** Clicking these navigates, the way a link does. */
   navigateOnClick = new Map<string, string>();
   screenshots: Array<{ type?: string; timeout?: number; fullPage?: boolean }> = [];
   screenshotContents = Buffer.from("not really a png", "utf8");
@@ -415,7 +413,6 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
 
 let fixture: GhostFixture;
 let picturesRoot: { dir: string; cleanup(): Promise<void> };
-/** Where captures land: the desktop's screenshot directory, not the ghost home. */
 let shots: string;
 let context: FakeContext;
 
@@ -462,7 +459,6 @@ afterEach(async () => {
   await fixture.cleanup();
 });
 
-// ------------------------------------------------------------------- registration
 
 describe("registration", () => {
   it("registers exactly one tool", async () => {
@@ -486,7 +482,6 @@ describe("registration", () => {
   });
 });
 
-// -------------------------------------------------------------------- launching
 
 describe("launching", () => {
   it("launches lazily, once, into the ghost's own profile", async () => {
@@ -732,7 +727,6 @@ describe("launching", () => {
   });
 });
 
-// ----------------------------------------------------------------- url policy
 
 describe("url policy through the tool", () => {
   it("refuses a file URL without ever starting a browser", async () => {
@@ -822,7 +816,6 @@ describe("url policy through the tool", () => {
   });
 });
 
-// -------------------------------------------------------------------- reading
 
 describe("read", () => {
   it("refuses before anything is open", async () => {
@@ -871,7 +864,6 @@ describe("read", () => {
   });
 });
 
-// ----------------------------------------------------------------------- find
 
 const SIGN_IN: PageElementMatch = {
   ref: "e1",
@@ -1049,7 +1041,6 @@ describe("find and refs", () => {
   });
 });
 
-// --------------------------------------------------------------- click and type
 
 describe("click and type", () => {
   it("accepts a raw selector too", async () => {
@@ -1113,7 +1104,6 @@ describe("click and type", () => {
   });
 });
 
-// ------------------------------------------------- prompt-injection guardrail
 
 const CONFIRM_BUTTON: PageElementMatch = {
   ref: "e1",
@@ -1124,7 +1114,6 @@ const CONFIRM_BUTTON: PageElementMatch = {
   disabled: false,
 };
 
-/** Open the origin, then follow a link the page offers to `destination`. */
 async function hopVia(destination: string): Promise<Harness> {
   const harness = await openWithMatches([SIGN_IN]);
   context.page.navigateOnClick.set(`[${REF_ATTRIBUTE}="e1"]`, destination);
@@ -1241,7 +1230,6 @@ describe("prompt-injection guardrail", () => {
   });
 });
 
-// ------------------------------------------------------- screenshot, back, close
 
 describe("screenshot, back, close", () => {
   it("writes the screenshot where the desktop saves screenshots", async () => {
@@ -1369,7 +1357,6 @@ describe("screenshot, back, close", () => {
   });
 });
 
-// ---------------------------------------------------- tier-1 capability actions
 
 describe("navigation, input, and scripting actions (Playwright backend)", () => {
   it("goes forward, the mirror of back", async () => {
@@ -1763,7 +1750,6 @@ describe("screenshot returns a real image to a vision model", () => {
   });
 });
 
-// -------------------------------------------------------------------- timeouts
 
 describe("timeouts", () => {
   it("observes late work failures when cancellation was already signalled", async () => {
@@ -1875,7 +1861,6 @@ describe("finding a browser to launch", () => {
   });
 });
 
-// -------------------------------------------------------------- backend seam
 
 /**
  * A backend that is not Playwright at all. The relay into the owner's real
@@ -2193,7 +2178,6 @@ describe("the backend is a choice, and policy sits above it", () => {
   });
 });
 
-// ------------------------------------------------------------ session registry
 
 describe("the process-wide browser session registry", () => {
   it("reuses a session for omitted and explicitly-defaulted options", () => {

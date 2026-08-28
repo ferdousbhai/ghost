@@ -48,7 +48,6 @@ ShellRoot {
         }
     }
 
-    // ---- IPC ------------------------------------------------------------
     // `qs -c ghost ipc call ghost toggle`
     //
     // IpcHandler reflects over *typed* members only — an untyped function is
@@ -75,36 +74,30 @@ ShellRoot {
             hud.close();
         }
 
-        /** Summon the HUD already pointed at a particular ghost. */
         function summon(name: string): void {
             if (name !== "") Ghostd.selectGhost(name);
             hud.open();
         }
 
-        /** Send a prompt without opening the HUD; the reply arrives as a notification. */
         function ask(prompt: string): void {
             Ghostd.send(prompt);
         }
 
-        /** Open the HUD on the "Connect a model" panel for the active ghost. */
         function login(): void {
             hud.open();
             hud.openLogin();
         }
 
-        /** Open the HUD on the model switcher for the active ghost. */
         function switcher(): void {
             hud.open();
             hud.openSwitcher();
         }
 
-        /** Open one destination from the permanent right-hand navigation. */
         function section(name: string): void {
             hud.open();
             hud.showSection(name);
         }
 
-        /** Open the panel and begin a specific login straight away. */
         function loginTo(provider: string, authType: string): void {
             hud.open();
             hud.openLogin();
@@ -129,7 +122,6 @@ ShellRoot {
         }
     }
 
-    // ---- Notifications ----------------------------------------------------
     // Only when the HUD is shut. If the user is looking at the stream, a
     // toast saying what they just watched arrive is noise.
     Connections {

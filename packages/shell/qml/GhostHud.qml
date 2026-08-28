@@ -40,13 +40,9 @@ FloatingWindow {
 
     /** Driven by IPC; see the IpcHandler in shell.qml. Bound to `visible`. */
     property bool shown: false
-    /** The whole left sidebar (ghost roster + conversations). Toggled with Ctrl+B. */
     property bool sidebarOpen: true
-    /** The "Connect a model" panel replaces the transcript body when open. */
     property bool loginOpen: false
-    /** The model switcher replaces the transcript body when open. */
     property bool switcherOpen: false
-    /** True when login was reached from the switcher, so closing returns there. */
     property bool loginFromSwitcher: false
 
     // Leaving login abandons any client-only model intent and restores the
@@ -58,27 +54,21 @@ FloatingWindow {
             if (modelSwitcher.hasPendingModel) modelSwitcher.clearPendingModel();
         }
     }
-    /** Global destination selected by the restored right-hand navigation. */
     property string currentSection: "chat"
     readonly property int navigationWidth: 64
 
-    // ---- Pending confirmation ----------------------------------------------
     // Deleting a conversation is asked in a modal over the whole window rather
     // than in the row itself: the row is 16px of a scrolling sidebar, and a
     // question that erases a transcript deserves the middle of the screen. The
     // id lives here, not in Conversations, because the dialog outlives the
     // delegate that raised it (a refresh rebuilds every row).
-    /** The conversation awaiting a confirmed delete, or "". */
     property string pendingDeleteSessionId: ""
-    /** Its title, held for the dialog's wording after the row is gone. */
     property string pendingDeleteTitle: ""
-    /** The ghost awaiting a confirmed banish, or "". */
     property string pendingDeleteGhost: ""
     /** The message a branch would fork from, held while the composer's own
         draft is being asked about, or "". */
     property string pendingBranchEntryId: ""
 
-    /** Drop the pending delete and hand the keyboard back to the composer. */
     function dismissDelete(): void {
         hud.pendingDeleteSessionId = "";
         hud.pendingDeleteTitle = "";
@@ -114,27 +104,19 @@ FloatingWindow {
         composer.take();
     }
 
-    // ---- Workbench geometry ------------------------------------------------
     // The file pane sits beside the chat when both columns can still be read,
     // and takes the chat's place when they cannot. The test is on the width
     // actually left for the two of them, not on the window: an open sidebar
     // costs a fixed 244px that a raw window-width threshold would ignore.
-    /** The fixed sidebar column. */
     readonly property int sidebarWidth: 220
-    /** The narrowest chat that still reads as a conversation. */
     readonly property int chatMinimumWidth: 380
-    /** The narrowest file pane worth splitting the window for. */
     readonly property int paneMinimumWidth: 320
-    /** Width left for chat + file pane once padding, navigation, and sidebar are taken. */
     readonly property int bodyWidth: hud.width - Theme.pad * 2
         - hud.navigationWidth - Theme.sectionGap
         - (hud.sidebarOpen ? hud.sidebarWidth + Theme.sectionGap : 0)
-    /** A file is open in the workbench. */
     readonly property bool workbenchOpen: Workbench.filePath !== ""
-    /** …and there is room for it beside the chat rather than over it. */
     readonly property bool workbenchSplit: hud.workbenchOpen
         && hud.bodyWidth >= hud.chatMinimumWidth + hud.paneMinimumWidth + Theme.sectionGap
-    /** The pane's share while split: the larger half, never at the chat's cost. */
     readonly property int workbenchWidth: {
         const region = hud.bodyWidth - Theme.sectionGap;
         return Math.max(hud.paneMinimumWidth,
@@ -151,7 +133,6 @@ FloatingWindow {
     implicitHeight: 620
     minimumSize: Qt.size(568, 360)
 
-    /** Move between the ghost's chat, context, and capability surfaces. */
     function showSection(section: string): void {
         if (["chat", "docs", "memory", "agents", "commands", "hooks", "mcp", "connect", "character"]
                 .indexOf(section) < 0)
@@ -209,7 +190,6 @@ FloatingWindow {
         modelLogin.open();
     }
 
-    /** Open the model switcher over the transcript. */
     function openSwitcher(): void {
         projectChip.hide();
         hud.currentSection = "chat";
@@ -218,7 +198,6 @@ FloatingWindow {
         modelSwitcher.open();
     }
 
-    /** Reach the provider login from the switcher; closing it returns to the switcher. */
     function openLoginFromSwitcher(): void {
         projectChip.hide();
         hud.currentSection = "chat";
@@ -228,7 +207,6 @@ FloatingWindow {
         modelLogin.open();
     }
 
-    /** Authenticate a model already selected in the switcher; completion returns to chat. */
     function openLoginForSelectedModel(): void {
         projectChip.hide();
         hud.currentSection = "chat";
@@ -251,7 +229,6 @@ FloatingWindow {
             hud.close();
     }
 
-    /** True when our toplevel (app-id "ghost") is Hyprland's focused window. */
     function focused(): bool {
         const top = Hyprland.activeToplevel;
         return !!(top && top.lastIpcObject && top.lastIpcObject["class"] === "ghost");
@@ -333,7 +310,6 @@ FloatingWindow {
             }
         }
 
-        // ---- Ambient fog ----------------------------------------------
         // The old app's AmbientBackground: two cold blobs breathing far under
         // the reading surface. `z: -1` puts them over the card's own fill but
         // beneath every layout child, and `enabled: false` keeps the whole
@@ -393,7 +369,6 @@ FloatingWindow {
             anchors.rightMargin: Theme.pad + hud.navigationWidth + Theme.sectionGap
             spacing: Theme.gap
 
-            // ---- Header ---------------------------------------------------
             Item {
                 Layout.fillWidth: true
                 implicitHeight: 32
@@ -549,7 +524,6 @@ FloatingWindow {
                 }
             }
 
-            // ---- Body -----------------------------------------------------
             RowLayout {
                 visible: hud.currentSection === "chat"
                     && !hud.loginOpen && !hud.switcherOpen
@@ -736,7 +710,6 @@ FloatingWindow {
                         onCountChanged: if (pinned) positionViewAtEnd()
                         onContentHeightChanged: if (pinned) positionViewAtEnd()
 
-                        // ---- Empty transcript: the welcome hero -----------
                         // A declared child of a ListView lands in the scrolling
                         // contentItem, whose height is 0 while the list is
                         // empty — so centre against the *view* explicitly
@@ -786,7 +759,6 @@ FloatingWindow {
                             Item {
                                 id: plinth
 
-                                /** Idle float. Kept off `y` so the Column keeps owning layout. */
                                 property real bob: 0
 
                                 anchors.horizontalCenter: parent.horizontalCenter
@@ -908,7 +880,6 @@ FloatingWindow {
                                 Text {
                                     id: invitation
 
-                                    /** What the card should be saying. */
                                     readonly property string line: Ghostd.greeting !== ""
                                         ? Ghostd.greeting : "What's on your mind?"
 
@@ -1176,7 +1147,6 @@ FloatingWindow {
             onSelected: section => hud.showSection(section)
         }
 
-        // ---- Destructive confirmation ------------------------------------
         // Sits over the whole card, above the layout, so the scrim dims the
         // sidebar and transcript alike.
         ConfirmDialog {

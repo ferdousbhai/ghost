@@ -30,6 +30,7 @@ import {
   type ListeningServer,
   type ServerOptions,
 } from "../src/server.js";
+import { GHOST_SESSION_STOP_CONTINUATION_CAP } from "../src/hooks.js";
 import { SessionHost, sessionFileNameFor } from "../src/session-host.js";
 import { toolCwdsPath } from "../src/tool-cwds.js";
 import { makeTempGhosts, parseSseStream, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
@@ -98,7 +99,6 @@ async function serve(
   return `http://127.0.0.1:${listening.port}`;
 }
 
-/** POST a pi-messages turn and read the whole SSE body. */
 async function postTurn(
   base: string,
   body: unknown,
@@ -216,7 +216,7 @@ describe("GET /api/hooks", () => {
       total: 0,
       events: [],
       hooks: [],
-      sessionStopContinuationCap: 2,
+      sessionStopContinuationCap: GHOST_SESSION_STOP_CONTINUATION_CAP,
     });
   });
 
@@ -239,7 +239,7 @@ describe("GET /api/hooks", () => {
           idleSeconds: 60,
         },
       ],
-      sessionStopContinuationCap: 2,
+      sessionStopContinuationCap: GHOST_SESSION_STOP_CONTINUATION_CAP,
     };
     const status = vi.fn(() => projection);
     Object.assign(projection as unknown as Record<string, unknown>, {
@@ -282,7 +282,7 @@ describe("GET /api/hooks", () => {
           idleSeconds: 60,
         },
       ],
-      sessionStopContinuationCap: 2,
+      sessionStopContinuationCap: GHOST_SESSION_STOP_CONTINUATION_CAP,
     });
     expect(status).toHaveBeenCalledTimes(1);
 
@@ -312,7 +312,7 @@ describe("GET /api/hooks", () => {
       total: 0,
       events: [],
       hooks: [],
-      sessionStopContinuationCap: 2,
+      sessionStopContinuationCap: GHOST_SESSION_STOP_CONTINUATION_CAP,
     }));
     const base = await serve(undefined, { hooks: { status } });
     const response = await fetch(`${base}/api/hooks`, { method: "POST" });

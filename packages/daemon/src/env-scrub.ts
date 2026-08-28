@@ -30,7 +30,6 @@
  * credential variables added by a future OMP release.
  */
 
-/** Exact variable names, grouped by why they are dangerous. */
 export const PROVIDER_CREDENTIAL_ENV_VARS: readonly string[] = [
   // Direct provider credentials read by pi-ai or the Claude Code HTTP agent.
   "AI_GATEWAY_API_KEY",
@@ -189,16 +188,13 @@ export const PROVIDER_CREDENTIAL_ENV_PATTERNS: readonly RegExp[] = [
  * and that guarantee does not depend on being offline.
  */
 export const PI_OFFLINE_ENV_VAR = "PI_OFFLINE";
-/** Ghost's smol lane owns session titles, so OMP must not generate a duplicate. */
 export const PI_NO_TITLE_ENV_VAR = "PI_NO_TITLE";
 
 export interface ScrubOptions {
-  /** Set `PI_OFFLINE`; when false, an inherited `PI_OFFLINE` is cleared. */
   offline?: boolean;
 }
 
 export interface ScrubResult {
-  /** Names (never values) of the variables removed. Safe to log. */
   removed: string[];
 }
 
@@ -234,7 +230,6 @@ export function scrubProviderEnv(
   return { removed: removed.sort() };
 }
 
-/** Names still present that the scrub would remove. Empty once scrubbed. */
 export function findProviderCredentialEnv(
   env: NodeJS.ProcessEnv = process.env,
 ): string[] {

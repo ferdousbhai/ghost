@@ -18,7 +18,6 @@ import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
 const pad2 = (value: number) => String(value).padStart(2, "0");
 
-/** `20260824-153000` — local time, sortable, and safe in a file name. */
 function trashStamp(now: Date): string {
   return `${now.getFullYear()}${pad2(now.getMonth() + 1)}${pad2(now.getDate())}`
     + `-${pad2(now.getHours())}${pad2(now.getMinutes())}${pad2(now.getSeconds())}`;
@@ -45,9 +44,7 @@ function deletionDate(now: Date): string {
 
 export interface TrashPathOptions {
   now?: Date;
-  /** Same-filesystem recovery directory used only when the home trash is EXDEV. */
   fallbackRoot?: string;
-  /** Test seams for XDG trash resolution. */
   env?: NodeJS.ProcessEnv;
   home?: string;
   /** Original lexical location for `.trashinfo` when `inputPath` is descriptor-relative. */
@@ -55,7 +52,6 @@ export interface TrashPathOptions {
 }
 
 export interface TrashPathResult {
-  /** Absolute destination of the moved path. */
   trash: string;
   /** Whether the path landed in the freedesktop trash or the EXDEV fallback. */
   kind: "freedesktop" | "fallback";

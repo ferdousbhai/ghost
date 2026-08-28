@@ -20,7 +20,6 @@ export interface ConversationReadState {
   reads: ConversationReads;
 }
 
-/** The read-state file inside one ghost's `sessions/` directory. */
 export function readsPath(sessionDir: string): string {
   return join(sessionDir, READS_FILENAME);
 }

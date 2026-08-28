@@ -50,9 +50,7 @@ export interface ProjectDeclarativeSnapshot {
   rules: Rule[];
   promptTemplates: PromptTemplate[];
   slashCommands: FileSlashCommand[];
-  /** Exact project MCP rows parsed and validated from this same confined scan. */
   mcp: EffectiveProjectMcpRead;
-  /** MCP-specific subset of warnings, retained separately for runtime health. */
   mcpWarnings: string[];
   resources: ProjectResourceSummary;
   warnings: string[];
@@ -234,7 +232,6 @@ async function openPinnedRootDescriptor(
   }
 }
 
-/** Canonicalize one absolute directory without following any path component. */
 export async function pinnedProjectIdentity(
   path: string,
 ): Promise<{ root: string; dev: string; ino: string }> {

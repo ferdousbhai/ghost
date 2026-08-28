@@ -17,7 +17,6 @@ function joinedOutput(before, after) {
     return /\n$/u.test(left) || /^\n/u.test(right) ? left + right : left + "\n" + right;
 }
 
-/** Add one command_output event to the exchange currently being streamed. */
 function append(current, event, prompt, anchor) {
     const previous = current || ({});
     return {

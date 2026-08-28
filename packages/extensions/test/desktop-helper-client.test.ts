@@ -32,7 +32,6 @@ const HELLO: HelloPayload = {
   },
 };
 
-/** Let the client's `await start()` chain flush so its write lands on stdin. */
 const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
 
 function makeStream(): EventEmitter & { setEncoding(encoding: string): unknown } {
@@ -81,7 +80,6 @@ class FakeProcess extends EventEmitter {
     this.stdout.emit("data", `${JSON.stringify(object)}\n`);
   }
 
-  /** The id of the nth request written to stdin. */
   requestId(index = 0): number {
     return (JSON.parse(this.writes[index] ?? "{}") as { id: number }).id;
   }

@@ -11,7 +11,6 @@ TestCase {
         return { kind: "text", text: value };
     }
 
-    // ---- Settled turns ----------------------------------------------------
 
     function test_preambleBeforeToolCallLeavesTheReply(): void {
         const blocks = {
@@ -60,7 +59,6 @@ TestCase {
         compare(turn.status, "");
     }
 
-    // ---- Live turns -------------------------------------------------------
 
     function test_liveTrailingPreambleWaitsBesideTheOrb(): void {
         // The tool call has not arrived yet. Holding the block back is what
@@ -102,7 +100,6 @@ TestCase {
         compare(turn.status, "");
     }
 
-    // ---- Restored transcripts ---------------------------------------------
 
     function test_storedPartsSplitTheSameWay(): void {
         const parts = [
@@ -119,7 +116,6 @@ TestCase {
         compare(TurnBlocks.fromParts(parts), "when is the launch?");
     }
 
-    // ---- Regrouping a restored conversation -------------------------------
 
     function test_unansweredAskSurvivesWithNoTextBesideIt(): void {
         // The shape that broke a real conversation: the app closed on an open

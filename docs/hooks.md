@@ -158,6 +158,7 @@ contains the same message directly:
   },
   "session_id": "...",
   "session_file": "...",
+  "transcript_path": "...",
   "stop_hook_active": false,
   "ghost_name": "casper",
   "ghost_home": "/home/me/ghosts/casper",
@@ -171,6 +172,11 @@ contains the same message directly:
 `runtime` is `omp` or `claude-code`. Both runtimes expose only the current
 assistant pass in `messages`; conversation history remains owned by the runtime.
 `owner_prompt` is required and immutable across hidden continuation passes.
+`transcript_path`, when present, is the runtime's native transcript on disk — the
+Pi session file for OMP conversations, the Claude Code SDK session file for Claude
+Code conversations — so a hook can review the whole owner turn, not just the
+current pass. It is omitted when no transcript exists yet, and is untrusted
+content exactly like `messages`.
 
 Exit 0 with no output or `{}` accepts the pass. Either response below requests a
 hidden continuation:
@@ -189,7 +195,8 @@ and timeouts are logged and fail open, matching OMP's `session_stop` policy.
 Handlers are cancelled when the client aborts the turn.
 
 Ghost sets `stop_hook_active: true` on continuation passes and permits at most
-two consecutive hidden continuations. Hook authors should normally stop after
+ten consecutive hidden continuations per owner turn
+(`GHOST_SESSION_STOP_CONTINUATION_CAP`). Hook authors should normally stop after
 one revision. A continuation reason is in model context; an informational
 notification alone is not.
 

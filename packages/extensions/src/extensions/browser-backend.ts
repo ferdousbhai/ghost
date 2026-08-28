@@ -27,26 +27,20 @@ import { GhostError } from "../errors.js";
  * `details.failure` rather than widening that union for one extension.
  */
 export type BrowserFailure =
-  /** No browser to drive: nothing installed, or the relay is not connected. */
   | "browser_unavailable"
-  /** The URL policy refused the destination. */
   | "blocked_url"
   /** The navigation itself failed. */
   | "navigation_failed"
   | "timeout"
-  /** Nothing is loaded to act on. */
   | "no_page"
-  /** A ref that no `find` minted, or one the page has since invalidated. */
   | "unknown_ref"
   | "element_not_found"
-  /** The action's own parameters do not make sense. */
   | "invalid_input"
   /**
    * A consequential action (click/type) was aimed at a page off the
    * owner-opened origin's registrable domain — the prompt-injection guardrail.
    */
   | "blocked_action"
-  /** The per-open budget of consequential actions is spent. */
   | "action_budget";
 
 const FAILURE_CODES = {
@@ -76,20 +70,17 @@ export class GhostBrowserError extends GhostError {
   }
 }
 
-// ------------------------------------------------------------------ result shapes
 
 export interface PageSummary {
   readonly url: string;
   readonly title: string;
 }
 
-/** Untruncated. The session layer owns the budget, so both backends agree on it. */
 export interface BackendReadResult extends PageSummary {
   readonly text: string;
 }
 
 export interface PageElementMatch {
-  /** `e1`, `e2`, … — minted by the backend, tracked by the session layer. */
   readonly ref: string;
   readonly tag: string;
   readonly role?: string;
@@ -101,7 +92,6 @@ export interface PageElementMatch {
   readonly disabled: boolean;
 }
 
-/** What to act on: a ref the backend minted, or a raw CSS selector. */
 export interface BackendTarget {
   readonly ref?: string;
   readonly selector?: string;
@@ -121,19 +111,15 @@ export interface BackendScreenshotOptions extends BackendActionOptions {
   readonly fullPage: boolean;
 }
 
-/** The session validates and publishes these bytes into its confined directory. */
 export interface BackendScreenshotResult extends PageSummary {
   readonly bytes: Uint8Array;
 }
 
 export interface BackendBackResult extends PageSummary {
-  /** False when there was no history to go back to. */
   readonly moved: boolean;
 }
 
-// --------------------------------------------------- Tier-1 capability shapes
 
-/** A wheel scroll, in CSS pixels. `x`/`y` anchor the wheel; default is centre. */
 export interface BackendScrollInput {
   readonly deltaX: number;
   readonly deltaY: number;
@@ -141,53 +127,41 @@ export interface BackendScrollInput {
   readonly y?: number;
 }
 
-/** A press-move-release drag between two viewport points. */
 export interface BackendDragInput {
   readonly fromX: number;
   readonly fromY: number;
   readonly toX: number;
   readonly toY: number;
-  /** Intermediate move events; more is smoother. Defaults to a small number. */
   readonly steps?: number;
 }
 
-/** A single key or chord. `modifiers` are names: Control, Alt, Shift, Meta. */
 export interface BackendKeyInput {
   readonly key: string;
   readonly code?: string;
   readonly modifiers?: readonly string[];
-  /** For a printable key, the character to insert. */
   readonly text?: string;
 }
 
-/** The result of running page JavaScript. `value` is JSON-serializable. */
 export interface BackendJavascriptResult {
   readonly value: unknown;
-  /** `typeof value`, before JSON round-tripping flattened it. */
   readonly type: string;
 }
 
-/** One buffered console message, drained from the ring. */
 export interface ConsoleEntry {
-  /** `log`, `warn`, `error`, `info`, `debug`, `exception`, … */
   readonly level: string;
   readonly text: string;
   readonly url?: string;
   readonly line?: number;
 }
 
-/** One buffered network exchange, drained from the ring. */
 export interface NetworkEntry {
   readonly method: string;
   readonly url: string;
   readonly status?: number;
-  /** The resource type the browser assigned: document, script, xhr, … */
   readonly type?: string;
-  /** Encoded body size in bytes, when the browser reported it. */
   readonly bodyBytes?: number;
 }
 
-/** Set files on a file input the owner's browser reads from disk itself. */
 export interface BackendUploadInput extends BackendTarget {
   readonly paths: readonly string[];
 }
@@ -197,12 +171,10 @@ export interface BackendResizeInput {
   readonly height: number;
 }
 
-/** Whether the resize took effect (a relay resizes a real window; some backends can't). */
 export interface BackendResizeResult extends PageSummary {
   readonly applied: boolean;
 }
 
-/** What the ghost knows about one of its tabs. */
 export interface BackendTabInfo {
   readonly id: string;
   readonly url: string;
@@ -214,30 +186,21 @@ export type BackendTabsOp = "list" | "create" | "close" | "switch";
 
 export interface BackendTabsInput {
   readonly op: BackendTabsOp;
-  /** For close/switch: which tab. For create: ignored. */
   readonly id?: string;
-  /** For create: the (already URL-policy-checked) URL to open, or blank. */
   readonly url?: string;
 }
 
 export interface BackendTabsResult {
   readonly tabs: readonly BackendTabInfo[];
-  /** The active tab id, or null when none is owned. */
   readonly active: string | null;
-  /** For create/switch/close: where the active tab is now. */
   readonly page?: PageSummary;
-  /** For create: the new tab's id. */
   readonly id?: string;
 }
 
-// ------------------------------------------------------------------- the backend
 
 export interface GhostBrowserBackend {
-  /** For messages and details payloads: `playwright`, `relay`, … */
   readonly name: string;
-  /** Whether a browser is live right now. Drives lazy launch and idle shutdown. */
   readonly running: boolean;
-  /** Whether the browser is currently windowless. Relay backends are never headless. */
   readonly headless: boolean;
 
   /**
@@ -254,10 +217,8 @@ export interface GhostBrowserBackend {
    */
   current(options?: BackendActionOptions): Promise<PageSummary | undefined>;
 
-  /** Navigate. The URL has passed session policy; capable backends recheck at request time. */
   open(url: string, options: BackendActionOptions): Promise<PageSummary>;
 
-  /** The page's readable text, untruncated. */
   read(options: BackendActionOptions): Promise<BackendReadResult>;
 
   /**
@@ -278,16 +239,12 @@ export interface GhostBrowserBackend {
 
   back(options: BackendActionOptions): Promise<BackendBackResult>;
 
-  /** Forward navigation — the mirror of `back`. */
   forward(options: BackendActionOptions): Promise<BackendBackResult>;
 
-  /** Wheel-scroll the page. Observing; never gated. */
   scroll(input: BackendScrollInput, options: BackendActionOptions): Promise<PageSummary>;
 
-  /** A trusted press-move-release drag. Consequential. */
   drag(input: BackendDragInput, options: BackendActionOptions): Promise<PageSummary>;
 
-  /** A trusted key or chord. Consequential. */
   key(input: BackendKeyInput, options: BackendActionOptions): Promise<PageSummary>;
 
   /**
@@ -297,13 +254,10 @@ export interface GhostBrowserBackend {
    */
   javascript(code: string, options: BackendActionOptions): Promise<BackendJavascriptResult>;
 
-  /** Drain the buffered console messages. Observing. */
   readConsole(options: BackendActionOptions): Promise<readonly ConsoleEntry[]>;
 
-  /** Drain the buffered network exchanges. Observing. */
   readNetwork(options: BackendActionOptions): Promise<readonly NetworkEntry[]>;
 
-  /** Set files on a file input. Consequential. */
   upload(input: BackendUploadInput, options: BackendActionOptions): Promise<PageSummary>;
 
   /**
@@ -312,15 +266,12 @@ export interface GhostBrowserBackend {
    */
   resize(input: BackendResizeInput, options: BackendActionOptions): Promise<BackendResizeResult>;
 
-  /** List / create / close / switch the ghost's tabs. */
   tabs(input: BackendTabsInput, options: BackendActionOptions): Promise<BackendTabsResult>;
 
-  /** Shut down. Returns false when there was nothing running. */
   close(options?: BackendActionOptions): Promise<boolean>;
 }
 
 export interface BrowserBackendContext {
-  /** The ghost home. A backend that needs per-ghost state puts it under here. */
   readonly homeDir: string;
   /**
    * Session-owned network policy. Playwright uses this on every request; other
@@ -328,7 +279,6 @@ export interface BrowserBackendContext {
    * session layer.
    */
   readonly checkUrl: (url: string, options?: BackendActionOptions) => Promise<string>;
-  /** Verify an actual connected peer when a backend can observe it. */
   readonly checkAddress: (address: string, url: string) => void;
 }
 
@@ -359,7 +309,6 @@ export function identifiedBrowserBackendFactory(
   });
 }
 
-// --------------------------------------------------------------- shared helpers
 
 export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -381,7 +330,6 @@ export function browserAbortError(action: string): GhostError {
   );
 }
 
-/** Reject promptly when an operation is cancelled, even across an injected seam. */
 export async function withAbort<T>(
   work: Promise<T>,
   action: string,
@@ -411,7 +359,6 @@ export async function withAbort<T>(
   }
 }
 
-/** A wall-clock cap for work whose own timeout we do not control. */
 export async function withTimeout<T>(
   work: Promise<T>,
   timeoutMs: number,
@@ -435,7 +382,6 @@ export async function withTimeout<T>(
   }
 }
 
-/** Normalize a backend's own error into ours, keeping timeouts recognizable. */
 export function rethrowBackendError(
   error: unknown,
   action: string,

@@ -54,14 +54,12 @@ export type McpConfigSource = "canonical" | "legacy";
 export type McpTransport = "stdio" | "http" | "sse";
 
 export interface McpConfiguredKeysView {
-  /** Names are useful for diagnostics; values are intentionally never returned. */
   keys: string[];
   configured: true;
 }
 
 export interface McpAuthView {
   type: MCPAuthConfig["type"];
-  /** A stored credential reference exists. The reference itself is not returned. */
   configured: boolean;
 }
 
@@ -84,7 +82,6 @@ export interface McpStdioServerConfigView extends McpServerConfigViewBase {
   command: string;
   cwd?: string;
   envPolicy?: "literal";
-  /** Arguments can contain bearer tokens and are therefore summarized. */
   argumentCount: number;
   environment?: McpConfiguredKeysView;
 }
@@ -103,7 +100,6 @@ export interface McpServerView {
   name: string;
   enabled: boolean;
   source: McpConfigSource;
-  /** Ghost-home-relative, never an ambient or absolute path. */
   path: "mcp.json" | ".omp/mcp.json" | ".omp/.mcp.json";
   config: McpServerConfigView;
 }
@@ -118,7 +114,6 @@ export interface McpCatalogSnapshot {
   skipped: McpCatalogSkipped[];
 }
 
-/** Sanitized result of an isolated connection probe. */
 export interface McpConnectionTest {
   name: string;
   ok: boolean;
@@ -130,7 +125,6 @@ export interface McpConnectionTest {
 
 export interface McpCatalogOptions {
   registry: GhostRegistry;
-  /** Shared gate for path-bound mutations and whole-home moves. */
   homeOperations?: HomeOperationCoordinator;
   /** Test seam around OMP's locked atomic project-config writer. */
   writer?: Partial<McpCatalogWriter>;
@@ -162,9 +156,7 @@ export interface EffectiveProjectMcpServer {
 }
 
 export interface EffectiveProjectMcpRead {
-  /** Names claimed by source precedence, including disabled or invalid rows. */
   claimedNames: string[];
-  /** Only valid, enabled rows admitted to a runtime snapshot. */
   servers: EffectiveProjectMcpServer[];
   skipped: McpCatalogSkipped[];
 }
@@ -177,7 +169,6 @@ export interface EffectiveProjectMcpInput {
 
 interface ParsedProjectMcpInputs {
   effective: EffectiveProjectMcpRead;
-  /** Management-only rows; never persisted in a declarative snapshot. */
   configured: EffectiveProjectMcpServer[];
 }
 
@@ -270,7 +261,6 @@ function sanitizeOAuth(oauth: MCPServerConfig["oauth"]): McpOAuthView | undefine
   };
 }
 
-/** Redact every field that can reasonably carry a credential before HTTP sees it. */
 export function sanitizeMcpServerConfig(config: MCPServerConfig): McpServerConfigView {
   const type = config.type ?? "stdio";
   const auth = sanitizeAuth(config.auth);
@@ -559,7 +549,6 @@ export class McpCatalog {
     }
   }
 
-  /** Add a new server to the visible ghost file. */
   async add(ghostName: string, name: string, config: unknown): Promise<McpCatalogSnapshot> {
     validateMutation(name, config);
     return this.withHomeLease(ghostName, async () => {
@@ -573,7 +562,6 @@ export class McpCatalog {
     });
   }
 
-  /** Replace an effective server in the native file that currently owns it. */
   async update(ghostName: string, name: string, config: unknown): Promise<McpCatalogSnapshot> {
     validateMutation(name, config);
     return this.withHomeLease(ghostName, async () => {
@@ -587,7 +575,6 @@ export class McpCatalog {
     });
   }
 
-  /** Toggle an effective, valid server without moving it between native files. */
   async setEnabled(ghostName: string, name: string, enabled: boolean): Promise<McpCatalogSnapshot> {
     if (typeof enabled !== "boolean") {
       throw new GhostError("invalid_request", '"enabled" must be a boolean.', 400);
@@ -612,7 +599,6 @@ export class McpCatalog {
     });
   }
 
-  /** Remove only the JSON member; OMP deliberately leaves the config file. */
   async remove(ghostName: string, name: string): Promise<McpCatalogSnapshot> {
     return this.withHomeLease(ghostName, async () => {
       const server = (await this.effective(ghostName)).configured

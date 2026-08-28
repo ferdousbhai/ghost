@@ -108,50 +108,35 @@ export type NotifyUrgency = "low" | "normal" | "critical";
 
 export const NOTIFY_URGENCIES = ["low", "normal", "critical"] as const;
 
-/** The pointer buttons `click` and `drag` accept (ydotool `_BUTTONS`). */
 export const MOUSE_BUTTONS = ["left", "right", "middle"] as const;
 
 export type MouseButton = (typeof MOUSE_BUTTONS)[number];
 
-/** The AT-SPI attributes `ax_set` can write (bridge.py `ax_set`). */
 export const AX_SET_ATTRIBUTES = ["text", "value", "focused"] as const;
 
-/** AT-SPI actions are application-defined; bound the dynamic name without narrowing it. */
 export const MAX_AX_ACTION_LENGTH = 80;
 
-/** Pointer click repetition is bounded at the extension and helper boundaries. */
 export const MAX_CLICKS = 3;
 
-/** `ghost-desktop-helper` clamps an accessibility query to this ceiling. */
 export const MAX_AX_QUERY_LIMIT = 200;
 
-/** Default used by the sidecar when the caller does not select a query limit. */
 export const DEFAULT_AX_QUERY_LIMIT = 20;
 
-/** Maximum records included in one model-facing desktop observation. */
 export const MAX_DESKTOP_OBSERVATION_ITEMS = 40;
 
-/** Maximum length of one untrusted string in a desktop observation. */
 export const MAX_DESKTOP_OBSERVATION_TEXT = 200;
 
-/** Maximum state/action/warning strings included in one observation field. */
 export const MAX_DESKTOP_OBSERVATION_LIST_ITEMS = 12;
 
-/** Windows listed by `state`. Beyond this the model is paying for noise. */
 export const MAX_LISTED_WINDOWS = 40;
 
-/** Window and workspace titles are truncated to this in `state`. */
 export const MAX_TITLE_LENGTH = 80;
 
-/** A Hyprland window address, as `hyprctl -j clients` reports it. */
 const ADDRESS_PATTERN = /^0x[0-9a-fA-F]{1,16}$/;
 
 export interface HyprlandExtensionOptions extends GhostExtensionOptions {
-  /** Test seam: how `notify-send` is run. */
   readonly run?: CommandRunner;
-  /** Test seam: the sidecar link. Defaults to the shared per-daemon helper. */
   readonly helper?: DesktopHelper;
-  /** Test seam / override for the `notify` environment. Defaults to `process.env`. */
   readonly env?: NodeJS.ProcessEnv;
 }
 
@@ -246,7 +231,6 @@ function condensedWindow(value: unknown): Record<string, unknown> | null {
   };
 }
 
-/** Project a raw `see` response onto bounded, actionable window fields. */
 export function condenseDesktopWindows(value: unknown): Record<string, unknown> {
   const result = asRecord(value) ?? {};
   const observed = Array.isArray(result["windows"]) ? result["windows"] : [];
@@ -258,7 +242,6 @@ export function condenseDesktopWindows(value: unknown): Record<string, unknown> 
   return { windows, count, omitted: Math.max(count - windows.length, 0) };
 }
 
-/** Project raw layer surfaces without returning arbitrary helper fields. */
 export function condenseDesktopLayers(value: unknown): Record<string, unknown> {
   const result = asRecord(value) ?? {};
   const observed = Array.isArray(result["layers"]) ? result["layers"] : [];
@@ -313,7 +296,6 @@ function condensedAxElement(value: unknown): Record<string, unknown> | null {
   };
 }
 
-/** Project `ax_query` onto fields the next semantic action can use. */
 export function condenseAxQuery(value: unknown): Record<string, unknown> {
   const result = asRecord(value) ?? {};
   const observed = Array.isArray(result["elements"]) ? result["elements"] : [];
@@ -335,7 +317,6 @@ export function condenseAxQuery(value: unknown): Record<string, unknown> {
   };
 }
 
-/** Bound the single accessibility element returned by `hit_test`. */
 export function condenseAxHitTest(value: unknown): Record<string, unknown> {
   const result = asRecord(value) ?? {};
   return {
@@ -344,7 +325,6 @@ export function condenseAxHitTest(value: unknown): Record<string, unknown> {
   };
 }
 
-/** Project role counts without returning an unbounded arbitrary-key object. */
 export function condenseAxRoles(value: unknown): Record<string, unknown> {
   const result = asRecord(value) ?? {};
   const roles = asRecord(result["roles"]) ?? {};
@@ -412,7 +392,6 @@ export interface DesktopState {
     focused: boolean;
     resolution?: string;
   }>;
-  /** Windows beyond `MAX_LISTED_WINDOWS` that were not listed. */
   readonly omitted: number;
   readonly workspacesOmitted: number;
   readonly monitorsOmitted: number;
@@ -501,7 +480,6 @@ export function condenseDesktopState(
   };
 }
 
-/** A one-line, model-facing summary of a result's honesty metadata. */
 export function honestyNote(meta: HonestyMetadata): string {
   const condensed = condenseHonestyMetadata(meta);
   const parts: string[] = [];
@@ -547,12 +525,10 @@ export function condenseHonestyMetadata(meta: HonestyMetadata): CondensedHonesty
   };
 }
 
-/** Details common to every honesty-bearing result. */
 function honestyDetails(meta: HonestyMetadata): Record<string, unknown> {
   return { ...condenseHonestyMetadata(meta) };
 }
 
-/** A capture/input/perform result, with honesty and a message. */
 function honestyResult(
   message: string,
   meta: HonestyMetadata,
@@ -598,7 +574,6 @@ function requireYdotool(hello: HelloPayload): void {
   );
 }
 
-/** Split a comma/space separated states filter into a clean list. */
 function splitStates(value: string | undefined): string[] {
   if (!value) return [];
   return value

@@ -3,9 +3,7 @@ import { GhostError } from "./ghosts.js";
 export type ConversationRuntime = "pi" | "claude-code";
 
 export interface ConversationIdentity {
-  /** Opaque, runtime-qualified id used by listing rows, events, and action routes. */
   id: string;
-  /** Runtime-owned resume id. Passed unchanged as pi-messages `options.sessionId`. */
   conversationId: string;
   runtime: ConversationRuntime;
 }
@@ -15,7 +13,6 @@ const RUNTIME_PREFIXES: Readonly<Record<ConversationRuntime, string>> = {
   "claude-code": "claude-code:",
 };
 
-/** Public/runtime resume ids are bounded in Unicode scalar values, not UTF-16 code units. */
 export const MAX_CONVERSATION_ID_SCALARS = 200;
 
 /**
@@ -40,7 +37,6 @@ export function isValidConversationId(conversationId: string): boolean {
   return scalars > 0;
 }
 
-/** Reject malformed/unbounded raw ids at every non-wire entry point. */
 export function requireRawConversationId(conversationId: string): string {
   if (isValidConversationId(conversationId)) return conversationId;
   throw new GhostError(
@@ -63,7 +59,6 @@ export function conversationIdentity<Runtime extends ConversationRuntime>(
   };
 }
 
-/** Parse a public action id without consulting storage. */
 export function parseConversationIdentity(id: string): ConversationIdentity | null {
   for (const runtime of ["pi", "claude-code"] as const) {
     const prefix = RUNTIME_PREFIXES[runtime];
@@ -74,7 +69,6 @@ export function parseConversationIdentity(id: string): ConversationIdentity | nu
   return null;
 }
 
-/** Action routes never guess a runtime from an unqualified raw resume id. */
 export function requireConversationIdentity(id: string): ConversationIdentity {
   const parsed = parseConversationIdentity(id);
   if (parsed) return parsed;

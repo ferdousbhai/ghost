@@ -9,25 +9,15 @@
  */
 
 export type GhostErrorCode =
-  /** The named doc, memory file, or ghost home does not exist. */
   | "not_found"
-  /** A path escaped the ghost home, or a name is not a legal file name. */
   | "invalid_path"
-  /** The bytes are not in the ghost-home/v1 shape (frontmatter, manifest, …). */
   | "invalid_format"
-  /** A safety policy refuses the requested operation. */
   | "forbidden"
-  /** A documented size or count limit was exceeded. */
   | "limit_exceeded"
-  /** A Documents file exceeded the shell's bounded inline-content limit. */
   | "document_too_large"
-  /** A bounded Documents file is not strict UTF-8 text. */
   | "invalid_document_content"
-  /** A paginated listing cursor is malformed or bound to another request. */
   | "invalid_cursor"
-  /** The paged directory changed after the cursor was issued. */
   | "cursor_stale"
-  /** The target already exists and the operation refused to clobber it. */
   | "conflict";
 
 export class GhostError extends Error {

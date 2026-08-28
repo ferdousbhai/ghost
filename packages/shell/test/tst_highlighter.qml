@@ -34,7 +34,6 @@ TestCase {
         return html.indexOf("<font color=\"" + colour + "\">" + word + "</font>") >= 0;
     }
 
-    // ---- Escaping ---------------------------------------------------------
 
     function test_escapesEntities(): void {
         compare(Highlighter.escapeHtml("a < b && c > d"), "a &lt; b &amp;&amp; c &gt; d");
@@ -52,7 +51,6 @@ TestCase {
         compare(tc.plainOf(html), "// hi\n");
     }
 
-    // ---- Round trip -------------------------------------------------------
 
     readonly property string jsSample:
         "// count things <fast>\n"
@@ -118,7 +116,6 @@ TestCase {
         compare(html, "a &lt; b\n");
     }
 
-    // ---- Tokenising -------------------------------------------------------
 
     function test_jsTokens(): void {
         const html = Highlighter.highlight(tc.jsSample, "a.js", tc.palette);
@@ -185,7 +182,6 @@ TestCase {
         verify(tc.coloured(sql, tc.palette.keyword, "From"));
     }
 
-    // ---- Path classification ----------------------------------------------
 
     function test_paths_data() {
         return [

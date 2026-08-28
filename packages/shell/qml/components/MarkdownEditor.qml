@@ -48,14 +48,11 @@ Item {
         sense that matters: the preview never writes back. */
     property bool reading: false
 
-    /** The live buffer, and whether it has run ahead of the file. */
     readonly property alias buffer: field.text
     readonly property bool dirty: field.text !== root.source
 
-    /** A keystroke landed. Fires only for real edits, not for adopt(). */
     signal edited()
 
-    /** Take on-disk text without counting as an edit. */
     property bool adopting: false
     function adopt(text: string): void {
         root.adopting = true;

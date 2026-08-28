@@ -32,9 +32,7 @@ import "Highlighter.js" as Highlighter
 Item {
     id: root
 
-    /** File text as read from disk. */
     required property string source
-    /** Absolute path; only its extension is used, to pick the language. */
     required property string filePath
 
     // CRLF would otherwise show up as a stray glyph per line, and a single

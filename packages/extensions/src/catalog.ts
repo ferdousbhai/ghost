@@ -13,7 +13,6 @@ import {
 } from "./documents.js";
 import type { DocumentsIndex } from "./types.js";
 
-/** Injection budget for the per-turn Documents index, in characters. */
 export const DOC_CATALOG_BUDGET_CHARS = DOCUMENT_INDEX_BUDGET_CHARS;
 
 function catalogLine(entry: DocumentDirectoryEntry): string {

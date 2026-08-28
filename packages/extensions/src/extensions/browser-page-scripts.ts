@@ -14,7 +14,6 @@
  * result interfaces below.
  */
 
-/** The attribute `find` stamps onto matched elements to mint a stable ref. */
 export const REF_ATTRIBUTE = "data-ghost-ref";
 
 /**

@@ -71,11 +71,7 @@ function updating(): boolean {
   return process.env.UPDATE_GOLDEN === "1" || process.env.UPDATE_GOLDEN === "true";
 }
 
-// ---------------------------------------------------------------------------
-// Normalisation
-// ---------------------------------------------------------------------------
 
-/** Object keys whose values are wall-clock and can never be stable. */
 const CLOCK_KEYS = new Set([
   "timestamp",
   "timestamps",
@@ -87,10 +83,8 @@ const CLOCK_KEYS = new Set([
   "expiresAt",
 ]);
 
-/** Object keys holding an elapsed measurement. */
 const DURATION_KEYS = new Set(["durationMs", "elapsedMs", "tookMs", "latencyMs"]);
 
-/** Object keys holding an OMP transcript entry id. */
 const ENTRY_ID_KEYS = new Set(["entryId", "parentId", "resultEntryId", "previousTargetId", "nextTargetId"]);
 
 const ISO_TIMESTAMP = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})/g;
@@ -117,14 +111,12 @@ export class Normalizer {
   private readonly paths: Array<[string, string]> = [];
   private readonly entryIds = new Map<string, string>();
 
-  /** Register an absolute path to collapse, longest first so nesting works. */
   path(absolute: string, placeholder: string): this {
     this.paths.push([absolute, placeholder]);
     this.paths.sort((a, b) => b[0].length - a[0].length);
     return this;
   }
 
-  /** Map a raw entry id onto a stable first-seen ordinal. */
   entryId(raw: string | null): string {
     if (raw === null) return "<none>";
     const existing = this.entryIds.get(raw);
@@ -134,7 +126,6 @@ export class Normalizer {
     return label;
   }
 
-  /** Collapse registered absolute paths and ISO timestamps inside free text. */
   text(value: string): string {
     let out = value;
     for (const [absolute, placeholder] of this.paths) {
@@ -170,12 +161,10 @@ export class Normalizer {
     return out;
   }
 
-  /** One canonical JSON line. */
   line(input: unknown): string {
     return JSON.stringify(this.value(input));
   }
 
-  /** Canonical pretty JSON, for structures worth reading vertically. */
   json(input: unknown): string {
     return JSON.stringify(this.value(input), null, 2);
   }
@@ -258,7 +247,6 @@ export function toolSurfaceTable(
   universe: readonly string[],
   registry: readonly string[],
   wire: readonly string[],
-  /** `session.getToolByName` — resolves xd://-mounted capabilities too. */
   resolvable?: (name: string) => boolean,
 ): string {
   const inRegistry = new Set(registry);
@@ -274,9 +262,6 @@ export function toolSurfaceTable(
   return rows.join("\n");
 }
 
-// ---------------------------------------------------------------------------
-// Fixture documents
-// ---------------------------------------------------------------------------
 
 export interface GoldenSection {
   readonly title: string;

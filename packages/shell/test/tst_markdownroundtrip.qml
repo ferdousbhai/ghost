@@ -48,7 +48,6 @@ TestCase {
         return ed.text;
     }
 
-    // ---- What survives ----------------------------------------------------
 
     function test_inlineAndBlockStructureSurvive(): void {
         compare(tc.roundTrip("# Heading\n"), "# Heading\n\n");
@@ -61,7 +60,6 @@ TestCase {
         compare(tc.roundTrip("Ünïcödé — “curly” 日本語\n"), "Ünïcödé — “curly” 日本語\n\n");
     }
 
-    // ---- What does not ----------------------------------------------------
 
     function test_rawHtmlBlockIsEaten(): void {
         // The <div> and the blank line before it are gone, and the text is
@@ -122,7 +120,6 @@ TestCase {
         compare(fresh.text, "---\ntitle: A\n---\nplain C\n\n");
     }
 
-    // ---- The direction we do use ------------------------------------------
 
     function test_renderingIsSafe(): void {
         // A read-only Text never serialises, so the reading view can show

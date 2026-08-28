@@ -61,7 +61,6 @@ Rectangle {
     }
 
     property int cursor: 0
-    /** Which field wants the caret next; the delegates watch it and answer. */
     property var focusTarget: ({ question: -1, field: "" })
 
     // A question that outgrows the window scrolls; one that fits does not.
@@ -181,7 +180,6 @@ Rectangle {
         });
     }
 
-    // ---- Keyboard ---------------------------------------------------------
 
     /** `rows` opens with question 0's options in order, so the recommended
         option's index is already the row index — nothing to search for. */
@@ -219,7 +217,6 @@ Rectangle {
         root.toggle(question, option.label);
     }
 
-    /** 1–9 answer the question the cursor is in, not the first one on screen. */
     function pickNumber(number: int): bool {
         const question = root.cursorQuestion();
         for (let i = 0; i < root.rows.length; i++) {
@@ -236,7 +233,6 @@ Rectangle {
         root.focusTarget = ({ question: root.cursorQuestion(), field: field });
     }
 
-    /** Keep the keyboard cursor inside the scrolled window it moved out of. */
     function revealRow(top: real, rowHeight: real): void {
         if (askScroll.contentHeight <= askScroll.height) return;
         let target = askScroll.contentY;
@@ -347,7 +343,6 @@ Rectangle {
         onTriggered: root.clock = Date.now()
     }
 
-    // ---- Parts ------------------------------------------------------------
     // An inline component sees nothing of the file around it, so each of these
     // takes what it needs as properties and reports back as signals.
 
@@ -360,7 +355,6 @@ Rectangle {
 
         required property string placeholder
         property string value: ""
-        /** The note is the quieter of the two: smaller type, no fill. */
         property bool quiet: false
 
         signal edited(string text)

@@ -72,7 +72,6 @@ function isAbsolute(path) {
         && path.indexOf("\0") < 0;
 }
 
-/** Strict UTF-8 byte length, or -1 for an unpaired UTF-16 surrogate. */
 function utf8ByteLength(value) {
     if (typeof value !== "string") return -1;
     let bytes = 0;

@@ -309,7 +309,6 @@ describe("OMP model routing projection", () => {
 });
 
 describe("the legacy title_model role", () => {
-  /** Write a raw models.json, bypassing the writer, as an older Ghost left it. */
   function writeRaw(agentDir: string, file: unknown): void {
     writeFileSync(ghostModelsPath(agentDir), `${JSON.stringify(file, null, 2)}\n`, "utf8");
   }

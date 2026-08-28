@@ -30,23 +30,18 @@ Item {
         the keyboard just has nowhere to be. */
     signal refocused()
 
-    // ---- Renaming a conversation ------------------------------------------
     // Both of these live on the list rather than on the row, and have to: the
     // listing is replaced wholesale on every re-list (a finished turn does one),
     // which rebuilds every delegate underneath a half-typed name.
-    /** The conversation being renamed in place, or "". */
     property string editingId: ""
-    /** The name as it stands in the field. */
     property string editDraft: ""
     /** The field currently up, or null. A reference rather than a flag:
         a rebuilt row can take the keyboard before the row it replaced
         reports losing it, and only the object itself knows the truth. */
     property var editor: null
 
-    /** The live filter. Empty shows every conversation in both groups. */
     readonly property string query: searchInput.text.trim()
 
-    /** Filtered daemon order: pinned first, then newest inside each group. */
     readonly property var pinnedSessions: root.group(true)
     readonly property var filteredSessions: Ghostd.sessions.filter(root.matches)
 
@@ -415,7 +410,6 @@ Item {
             font.letterSpacing: 1
         }
 
-        // ---- Search ------------------------------------------------------
         // Only shown once there is something to search — an empty ghost gets
         // its empty state, not a dead field.
         Rectangle {
@@ -503,7 +497,6 @@ Item {
             }
         }
 
-        // ---- Pinned ------------------------------------------------------
         // Header and rows vanish together when nothing pinned survives the
         // filter; Notes never shows an empty group.
         Text {

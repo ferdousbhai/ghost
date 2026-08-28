@@ -83,14 +83,12 @@ export interface BrowserExtensionOptions extends GhostExtensionOptions {
    * signed-in Chromium slots in here, with no change to the tool.
    */
   readonly backend?: BrowserBackendFactory;
-  /** Idle shutdown and per-action timeouts. */
   readonly browser?: Omit<BrowserSessionOptions, "homeDir" | "backend">;
 }
 
 const MIN_TIMEOUT_MS = 1_000;
 const MAX_TIMEOUT_MS = 120_000;
 
-/** `" — Title"` when the page has a title, else `""`. */
 function titleSuffix(title: string): string {
   return title ? ` — ${title}` : "";
 }
@@ -820,5 +818,4 @@ export type {
   PageElementMatch,
 } from "./browser-backend.js";
 
-/** Browser extension over the session's own ghost home. */
 export default createBrowserExtension();

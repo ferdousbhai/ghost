@@ -96,7 +96,6 @@ function availabilityFor(command: InternalAvailableSlashCommand): Pick<
   };
 }
 
-/** Build the session-specific command palette with OMP's own discovery rules. */
 export async function buildGhostAvailableSlashCommands(
   session: AgentSession,
 ): Promise<GhostAvailableSlashCommand[]> {
@@ -149,7 +148,6 @@ export type GhostBuiltinDispatch =
   | { kind: "execute"; command: string }
   | { kind: "unsupported"; command: string; reason: string };
 
-/** Classify before `AgentSession.prompt()` so known builtins never reach the model. */
 export function classifyGhostBuiltin(text: string): GhostBuiltinDispatch {
   const parsed = parseSlashCommand(text);
   if (!parsed) return { kind: "not_builtin" };
@@ -170,7 +168,6 @@ export function classifyGhostBuiltin(text: string): GhostBuiltinDispatch {
   return { kind: "unsupported", command, reason: unsupportedReason(builtin.name, true) };
 }
 
-/** Execute a command already admitted by `classifyGhostBuiltin`. */
 export async function executeGhostBuiltin(
   text: string,
   runtime: SlashCommandRuntime,

@@ -41,7 +41,6 @@ const store = createTokenStore({
     + " debugging and scripts.",
 });
 
-/** Where the API token lives, without creating it. */
 export function defaultApiTokenPath(
   env: NodeJS.ProcessEnv = process.env,
   home?: string,
@@ -61,19 +60,16 @@ export function readOrCreateApiToken(
   return store.readOrCreate(options);
 }
 
-/** The stored token, or undefined when there is none (or it is unreadable). */
 export function readApiToken(options: ApiTokenStoreOptions = {}): string | undefined {
   return store.read(options);
 }
 
-/** Mint a fresh token, invalidating whatever any running client holds. */
 export function rotateApiToken(
   options: ApiTokenStoreOptions = {},
 ): { token: string; path: string } {
   return store.rotate(options);
 }
 
-/** Constant-time comparison; see token-store.ts for why it has to be. */
 export function apiTokenMatches(expected: string, presented: string): boolean {
   return tokenMatches(expected, presented);
 }

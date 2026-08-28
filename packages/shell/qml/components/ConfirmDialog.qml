@@ -21,18 +21,15 @@ Item {
     property string body: ""
     property string confirmText: "Delete"
     property string cancelText: "Cancel"
-    /** The confirmed action is in flight: buttons lock, the label says so. */
     property bool busy: false
     /** The failure to show in place of nothing happening, or "". */
     property string error: ""
-    /** Paint the confirm button as destructive (rose) rather than neutral. */
     property bool destructive: true
     /** When set, the confirm stays locked until this exact string is typed
         back — the gate an erased home directory earns over a stray Return. */
     property string challenge: ""
     property string challengePlaceholder: ""
 
-    /** True when the answer, if one was demanded, has been given. */
     readonly property bool answered: root.challenge === ""
         || challengeField.text === root.challenge
 

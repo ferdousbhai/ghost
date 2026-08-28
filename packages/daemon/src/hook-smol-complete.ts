@@ -51,7 +51,6 @@ function hookContext(prompt: string): Context {
   };
 }
 
-/** Resolve `roles.smol_model` (or Ghost's normal smol fallback) and complete once. */
 export async function completeHookSmol(
   input: HookSmolInput,
   options: HookSmolOptions = {},
@@ -138,7 +137,6 @@ function parseInput(raw: string): HookSmolInput {
   return { ghost_home: input.ghost_home, prompt: input.prompt };
 }
 
-/** Internal `ghostd hook-smol-complete` subcommand. */
 export async function hookSmolCompleteCommand(argv: string[]): Promise<number> {
   if (argv.length > 0) {
     process.stderr.write("hook-smol-complete accepts JSON on stdin and no arguments.\n");

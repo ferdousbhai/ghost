@@ -20,7 +20,6 @@ export interface CollaborationStatus {
 export interface StartCollaborationInput {
   sessionKey: string;
   session: AgentSession;
-  /** SessionHost's admission wrapper for writable guest prompts. */
   promptCustomMessage?: AgentSession["promptCustomMessage"];
   relayUrl: string;
   writable: boolean;
@@ -125,10 +124,8 @@ function contextFor(
   return adapter as unknown as InteractiveModeContext;
 }
 
-/** Conversation-scoped owner of OMP's encrypted collaboration host. */
 export class CollaborationManager {
   private readonly active = new Map<string, ActiveCollaboration>();
-  /** Per-conversation lifecycle tail; includes hosts still awaiting start(). */
   private readonly operations = new Map<string, Promise<void>>();
   private readonly createHost: CollaborationHostFactory;
   private disposed = false;

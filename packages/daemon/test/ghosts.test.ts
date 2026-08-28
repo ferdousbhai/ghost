@@ -190,7 +190,6 @@ describe("GhostRegistry.rename", () => {
   });
 });
 
-/** `/dev/shm` is a tmpfs of its own, so a rename from `/tmp` into it is EXDEV. */
 const SHM = "/dev/shm";
 const shmIsAnotherFilesystem = (() => {
   try {
@@ -200,7 +199,6 @@ const shmIsAnotherFilesystem = (() => {
   }
 })();
 
-/** The `Path=` and `DeletionDate=` of a `.trashinfo`, as written. */
 function readTrashInfo(path: string): { path: string; deletionDate: string } {
   const text = readFileSync(path, "utf8");
   expect(text.startsWith("[Trash Info]\n")).toBe(true);

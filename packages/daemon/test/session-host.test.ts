@@ -5411,8 +5411,10 @@ describe("SessionHost.runTurn", () => {
     const hookOwners: string[] = [];
     const hookHomes: string[] = [];
     const hookIdentities: string[] = [];
+    const hookTranscripts: Array<string | undefined> = [];
     await hooks.register((api) => {
       api.on("session_stop", (event) => {
+        hookTranscripts.push(event.transcript_path);
         hookCwds.push(event.cwd);
         hookOwners.push(event.owner_prompt);
         hookHomes.push(event.ghost_home);
@@ -5424,13 +5426,21 @@ describe("SessionHost.runTurn", () => {
         }
       });
     });
-    await setup([
-      // Avoid OMP's own canned-phrasing retry: this test owns the retry via
-      // Ghost's session_stop hook and must observe both passes itself.
-      { kind: "text", text: "The first answer circles around the point." },
-      { kind: "text", text: "Here is the direct answer." },
-      { kind: "text", text: "Here is the final direct answer." },
-    ], { hooks });
+    // The hook blocks every pass, so the cap ends the turn: one initial pass
+    // plus GHOST_SESSION_STOP_CONTINUATION_CAP continuations. Avoid OMP's own
+    // canned-phrasing retry: this test owns the retry via Ghost's session_stop
+    // hook and must observe every pass itself.
+    const passCount = GHOST_SESSION_STOP_CONTINUATION_CAP + 1;
+    const passTexts = [
+      "The first answer circles around the point.",
+      "Here is the direct answer.",
+      ...Array.from(
+        { length: passCount - 3 },
+        (_, index) => `Here is direct answer ${index + 3}.`,
+      ),
+      "Here is the final direct answer.",
+    ];
+    await setup(passTexts.map((text) => ({ kind: "text" as const, text })), { hooks });
 
     const events: PiMessagesEvent[] = [];
     await host!.runTurn("casper", {
@@ -5439,26 +5449,19 @@ describe("SessionHost.runTurn", () => {
       emit: (event) => events.push(event),
     });
 
-    expect(active).toEqual([false, true, true]);
-    expect(hookCwds).toEqual(Array(3).fill(temp!.ownerHome));
-    expect(hookOwners).toEqual(Array(3).fill("Answer me."));
-    expect(hookHomes).toEqual([
-      join(temp!.root, "casper"),
-      join(temp!.root, "casper"),
-      join(temp!.root, "casper"),
-    ]);
-    expect(hookIdentities).toEqual([
-      "omp:pi:conv-hooks",
-      "omp:pi:conv-hooks",
-      "omp:pi:conv-hooks",
-    ]);
-    expect(passes).toHaveLength(3);
+    expect(active).toEqual([false, ...Array(passCount - 1).fill(true)]);
+    expect(hookCwds).toEqual(Array(passCount).fill(temp!.ownerHome));
+    expect(hookOwners).toEqual(Array(passCount).fill("Answer me."));
+    expect(hookHomes).toEqual(Array(passCount).fill(join(temp!.root, "casper")));
+    expect(hookIdentities).toEqual(Array(passCount).fill("omp:pi:conv-hooks"));
+    expect(hookTranscripts).toEqual(
+      Array(passCount).fill(join(temp!.root, "casper", "sessions", sessionFileNameFor("conv-hooks"))),
+    );
+    expect(passes).toHaveLength(passCount);
     expect(passes.every((messages) => messages.length === 1)).toBe(true);
-    expect(passes.map((messages) => JSON.stringify(messages))).toEqual([
-      expect.stringContaining("The first answer circles around the point."),
-      expect.stringContaining("Here is the direct answer."),
-      expect.stringContaining("Here is the final direct answer."),
-    ]);
+    expect(passes.map((messages) => JSON.stringify(messages))).toEqual(
+      passTexts.map((text) => expect.stringContaining(text)),
+    );
     expect(JSON.stringify(passes)).not.toContain("Answer me.");
     expect(events.filter((event) => event.type === "start")).toHaveLength(1);
     expect(events.filter((event) => event.type === "done")).toHaveLength(1);
@@ -6327,7 +6330,6 @@ describe("forkConversationTitle", () => {
 });
 
 describe("conversation branching", () => {
-  /** Two turns in one conversation, with a title, ready to branch off. */
   async function seedBranchable(
     title: string | null = "Weekend trip",
     projectBindingsFactory?: (fixture: TempGhosts) => ProjectBindingStore,
@@ -8289,7 +8291,6 @@ describe("SessionHost.renameGhost", () => {
 });
 
 describe("pinned conversations", () => {
-  /** Two conversations, `older` first, so ordering is unambiguous. */
   async function twoConversations() {
     const fixture = await setup([{ kind: "text", text: "hello" }]);
     await host!.runTurn("casper", { sessionId: "older", prompt: "one", emit: () => {} });

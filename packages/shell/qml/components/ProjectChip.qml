@@ -341,7 +341,6 @@ FocusScope {
                     wrapMode: Text.WordWrap
                 }
 
-                // ---- Current state --------------------------------------
                 ColumnLayout {
                     visible: root.mode === "overview" && root.binding.id !== ""
                     Layout.fillWidth: true
@@ -466,7 +465,6 @@ FocusScope {
                     }
                 }
 
-                // ---- Typed path ----------------------------------------
                 ColumnLayout {
                     visible: root.mode === "choose"
                     Layout.fillWidth: true
@@ -587,7 +585,6 @@ FocusScope {
                     }
                 }
 
-                // ---- Trust preview ------------------------------------
                 ColumnLayout {
                     visible: root.mode === "preview" && root.preview !== null
                     Layout.fillWidth: true
@@ -743,7 +740,6 @@ FocusScope {
                     }
                 }
 
-                // ---- Unbind confirmation -------------------------------
                 ColumnLayout {
                     visible: root.mode === "unbind"
                     Layout.fillWidth: true

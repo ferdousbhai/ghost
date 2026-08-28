@@ -139,7 +139,6 @@ TestCase {
         compare(ToolTrace.text(activity, false, false, false), "Reading its own character");
     }
 
-    // ---- ask ------------------------------------------------------------
     // One settled ask, reused: the question the user closed the app on rather
     // than answering.
     function askActivity(settled: string): var {
@@ -350,7 +349,6 @@ TestCase {
         );
     }
 
-    // ---- The model boundaries a card is rendered through -------------------
     // Nothing above proves anything about the real thing on its own: an
     // activity reaches a ToolCard across a ListModel role AND a Repeater's
     // `modelData`, and each of those hands a JS array back as a variant list —
@@ -360,7 +358,6 @@ TestCase {
 
     ListModel { id: restoredTranscript }
 
-    /** The activity list after both crossings, as a ToolCard receives it. */
     property var throughTheModels: null
     property var crossed: []
 

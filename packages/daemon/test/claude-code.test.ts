@@ -4,13 +4,16 @@ import {
   existsSync,
   linkSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   readdirSync,
   renameSync,
+  rmSync,
   statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type {
   Options as ClaudeQueryOptions,
@@ -27,6 +30,7 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   bridgeClaudeCodeTools,
+  claudeSdkTranscriptPath,
   claudeSessionMetadataPath,
   CLAUDE_SESSION_METADATA_MAX_BYTES,
   CLAUDE_CODE_TOOL_CAPABILITIES,
@@ -2335,40 +2339,46 @@ describe("Claude Code subscription runtime", () => {
       emit: (event) => events.push(event),
     });
 
-    expect(lifecycle.queries).toBe(3);
-    expect(active).toEqual([false, true, true]);
+    // The hook always continues, so the cap ends each owner turn: one initial
+    // query plus GHOST_SESSION_STOP_CONTINUATION_CAP continuations.
+    const passCount = GHOST_SESSION_STOP_CONTINUATION_CAP + 1;
+    const activePerTurn = [false, ...Array(passCount - 1).fill(true)];
+    expect(lifecycle.queries).toBe(passCount);
+    expect(active).toEqual(activePerTurn);
     expect(seenOptions[1]?.resume).toBe(seenOptions[0]?.sessionId);
     expect(events.filter((event) => event.type === "start")).toHaveLength(1);
     expect(events.filter((event) => event.type === "done")).toHaveLength(1);
-    expect(events.at(-1)).toMatchObject({ type: "done", usage: { totalTokens: 6 } });
+    // The fake query reports two tokens per query.
+    expect(events.at(-1)).toMatchObject({ type: "done", usage: { totalTokens: passCount * 2 } });
 
     await host!.runTurn("casper", {
       sessionId: "conversation-hooks",
       prompt: "one more owner turn",
       emit: () => {},
     });
-    expect(lifecycle.queries).toBe(6);
-    expect(active).toEqual([false, true, true, false, true, true]);
+    expect(lifecycle.queries).toBe(passCount * 2);
+    expect(active).toEqual([...activePerTurn, ...activePerTurn]);
     expect(beforeTurnIds).toEqual([1, 2]);
-    expect(turnIds).toEqual([1, 1, 1, 2, 2, 2]);
+    expect(turnIds).toEqual([...Array(passCount).fill(1), ...Array(passCount).fill(2)]);
     expect(ownerPrompts).toEqual([
-      "hello",
-      "hello",
-      "hello",
-      "one more owner turn",
-      "one more owner turn",
-      "one more owner turn",
+      ...Array(passCount).fill("hello"),
+      ...Array(passCount).fill("one more owner turn"),
     ]);
-    expect(hookHomes).toEqual(Array(6).fill(paths.home));
-    expect(hookCwds).toEqual(Array(6).fill(temp!.ownerHome));
-    expect(hookIdentities).toEqual(Array(6).fill(
+    expect(hookHomes).toEqual(Array(passCount * 2).fill(paths.home));
+    expect(hookCwds).toEqual(Array(passCount * 2).fill(temp!.ownerHome));
+    expect(hookIdentities).toEqual(Array(passCount * 2).fill(
       "claude-code:claude-code:conversation-hooks",
     ));
+    // Each query runs `providerTurns[query] ?? 1` provider turns, two messages each.
+    const totalProviderTurns = Array.from(
+      { length: passCount * 2 },
+      (_, query) => providerTurns[query] ?? 1,
+    ).reduce((sum, turns) => sum + turns, 0);
     expect(JSON.parse(readFileSync(
       claudeSessionMetadataPath(paths.sessionDir, "conversation-hooks"),
       "utf8",
     ))).toMatchObject({
-      messageCount: 24,
+      messageCount: totalProviderTurns * 2,
       ownerTurnCount: 2,
     });
   });
@@ -2915,5 +2925,26 @@ describe("Claude Code subscription runtime", () => {
     expect(seenOptions[0]?.abortController?.signal.aborted).toBe(true);
     expect(lifecycle.interrupted).toBe(1);
     expect(lifecycle.closed).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe("claudeSdkTranscriptPath", () => {
+  it("locates the SDK session transcript by id under the config projects tree", () => {
+    const root = mkdtempSync(join(tmpdir(), "ghost-claude-config-"));
+    try {
+      const projectDir = join(root, "projects", "-home-me-project");
+      mkdirSync(projectDir, { recursive: true });
+      const transcript = join(projectDir, "0123abcd-session.jsonl");
+      writeFileSync(transcript, "");
+      const env = { CLAUDE_CONFIG_DIR: root };
+      expect(claudeSdkTranscriptPath("0123abcd-session", env)).toBe(transcript);
+      expect(claudeSdkTranscriptPath("missing-session", env)).toBeUndefined();
+      expect(claudeSdkTranscriptPath("../escape", env)).toBeUndefined();
+      expect(claudeSdkTranscriptPath("0123abcd-session", {
+        CLAUDE_CONFIG_DIR: join(root, "nope"),
+      })).toBeUndefined();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

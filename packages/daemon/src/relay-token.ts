@@ -58,12 +58,10 @@ export function readOrCreateRelayToken(
   return store.readOrCreate(options);
 }
 
-/** The stored token, or undefined when there is none (or it is unreadable). */
 export function readRelayToken(options: RelayTokenStoreOptions = {}): string | undefined {
   return store.read(options);
 }
 
-/** Mint a fresh token, invalidating whatever the extension had stored. */
 export function rotateRelayToken(
   options: RelayTokenStoreOptions = {},
 ): { token: string; path: string } {

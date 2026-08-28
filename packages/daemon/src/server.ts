@@ -120,9 +120,7 @@ import type { SessionHost } from "./session-host.js";
 export interface ServerOptions {
   registry: GhostRegistry;
   host: SessionHost;
-  /** Machine-wide Documents listing and recoverable file deletion. */
   documents?: DocumentsService;
-  /** Shared gate for path-bound catalog writes and whole-home moves. */
   homeOperations?: HomeOperationCoordinator;
   /**
    * Provider login orchestration. Omit to leave the `/providers` and `/login`
@@ -136,14 +134,10 @@ export interface ServerOptions {
    * needs no switcher surface.
    */
   catalog?: ModelCatalog;
-  /** Ghost-owned MCP management. Omit to leave the MCP routes out. */
   mcp?: McpCatalog;
-  /** Loaded hooks. Only their bounded redacted status projection crosses HTTP. */
   hooks?: Pick<GhostHookRunner, "status">;
   logger?: Logger;
-  /** Max request body. A turn is a few KB; this is a sanity bound. */
   maxBodyBytes?: number;
-  /** Forward `thinking_*` blocks on the wire. Off by default. */
   includeThinking?: boolean;
   /**
    * The browser relay. Omitted, one is built from the XDG token file unless
@@ -170,9 +164,7 @@ export interface ListeningServer {
   server: Server;
   port: number;
   address: string;
-  /** The browser relay, when this server has one. */
   relay: RelayHub | undefined;
-  /** Stop accepting, end live streams, and resolve once closed. */
   close(): Promise<void>;
 }
 
@@ -184,9 +176,7 @@ const DEFAULT_MAX_BODY_BYTES = 1_048_576;
  */
 const MAX_CONVERSATION_TITLE_LENGTH = 120;
 const TURN_ID_PATTERN = /^[A-Za-z0-9_.:-]{1,64}$/;
-/** Live SSE responses, stashed on the server so close() can end them. */
 const LIVE_STREAMS = Symbol.for("ghostd.liveStreams");
-/** The relay hub, stashed on the server so close() can hang up on the browser. */
 const RELAY_HUB = Symbol.for("ghostd.relayHub");
 
 /**
@@ -212,7 +202,6 @@ function jsonResponse(
   response.end(text);
 }
 
-/** Copy the bounded public projection instead of serializing runner objects. */
 function publicHookStatus(status: GhostHookStatus): GhostHookStatus {
   return {
     active: status.active,
@@ -247,7 +236,6 @@ class InvalidPathEncodingError extends Error {
   }
 }
 
-/** Decode one dynamic route segment without letting `URIError` escape as a 500. */
 function decodePathSegment(segment: string): string {
   try {
     return decodeURIComponent(segment);
@@ -261,7 +249,6 @@ function decodeConversationIdentity(segment: string): ConversationIdentity {
   return requireConversationIdentity(decodePathSegment(segment));
 }
 
-/** The token out of `Authorization: Bearer <token>`, or "" when there is none. */
 function bearerToken(header: string | string[] | undefined): string {
   if (typeof header !== "string") return "";
   const match = /^ *bearer +(\S+) *$/i.exec(header);
@@ -775,7 +762,6 @@ export function createDaemonServer(options: ServerOptions): Server {
     jsonResponse(response, 200, { ok: true, pinned });
   };
 
-  /** Mark one conversation opened using the daemon's clock. */
   const handleMarkSessionRead = async (
     ghostName: string,
     conversation: ConversationIdentity,
@@ -796,7 +782,6 @@ export function createDaemonServer(options: ServerOptions): Server {
     jsonResponse(response, 200, { ok: true, readAt });
   };
 
-  /** Rename one conversation. A conversation name cannot be unset. */
   const handleRenameSession = async (
     ghostName: string,
     conversation: ConversationIdentity,
@@ -875,7 +860,6 @@ export function createDaemonServer(options: ServerOptions): Server {
     return decorateMcpSnapshot(ghostName, await options.mcp.list(ghostName), extra);
   };
 
-  /** Keep a project-config write and every live-session reload under one lease. */
   const mutateMcp = async (
     ghostName: string,
     mutation: () => Promise<McpCatalogSnapshot>,
@@ -2165,12 +2149,10 @@ export function createDaemonServer(options: ServerOptions): Server {
   return server;
 }
 
-/** The relay hub a `createDaemonServer` built for itself, if it built one. */
 export function relayHubOf(server: Server): RelayHub | undefined {
   return (server as unknown as Record<symbol, RelayHub | null | undefined>)[RELAY_HUB] ?? undefined;
 }
 
-/** Start the API on a loopback address. `port: 0` picks an ephemeral port. */
 export async function startDaemonServer(
   options: ServerOptions & { port: number; address?: string },
 ): Promise<ListeningServer> {

@@ -1,4 +1,3 @@
-/** Cross-process exclusion between daemon home access and destructive imports. */
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { mkdir, open, realpath, type FileHandle } from "node:fs/promises";
@@ -49,7 +48,6 @@ interface CanonicalRoot {
   lockParent: string;
 }
 
-/** Resolve the root's existing components while allowing a new root basename. */
 async function canonicalRoot(path: string): Promise<CanonicalRoot> {
   const absolute = resolve(path);
   const parent = dirname(absolute);

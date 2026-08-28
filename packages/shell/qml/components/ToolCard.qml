@@ -210,7 +210,6 @@ Rectangle {
         Rectangle {
             id: fileChip
 
-            /** This card's file is the one already showing in the workbench. */
             readonly property bool current: Workbench.filePath === root.workbenchPath
 
             visible: root.openable

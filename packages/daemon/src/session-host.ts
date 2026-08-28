@@ -272,7 +272,6 @@ export const OMP_NATIVE_TOOL_NAMES: readonly string[] = [
   "write",
 ];
 
-/** The only OMP-specific instruction retained in a Pi conversation. */
 export const PI_RUNTIME_SYSTEM_SECTION = [
   "## Tools",
   "`xd://` mounts additional tools: read `xd://` to list them, read `xd://<name>` for "
@@ -292,11 +291,9 @@ export function phase1PiSubagentSessionOptions(): Pick<
 
 export interface UserBashCommand {
   command: string;
-  /** `!!command` runs locally but excludes its result from model context. */
   excludeFromContext: boolean;
 }
 
-/** Parse OMP's direct local-command sigils without intercepting ordinary text. */
 export function parseUserBashCommand(text: string): UserBashCommand | null {
   const trimmed = text.trimStart();
   if (!trimmed.startsWith("!")) return null;
@@ -467,19 +464,14 @@ export interface TitleTimeoutTimer {
 }
 
 export interface TitleConfig {
-  /** Master switch. Defaults to enabled. */
   enabled?: boolean;
-  /** Provider deadline. Defaults to 15 seconds. */
   timeoutMs?: number;
-  /** Test seam: replace the default title generator. */
   generate?: TitleGenerator;
-  /** Deterministic test seam for the provider deadline. */
   scheduleTimeout?: (callback: () => void, timeoutMs: number) => TitleTimeoutTimer;
 }
 
 export const DEFAULT_TITLE_TIMEOUT_MS = 15_000;
 
-/** The default: resolve smol_model against the session's own runtime, complete once. */
 const defaultTitleGenerator: TitleGenerator = async ({ runtime, configDir, firstPrompt, signal }) => {
   let ref = null;
   try {
@@ -513,15 +505,10 @@ export type GreetingGenerator = (input: {
 }) => Promise<string | null>;
 
 export interface GreetingConfig {
-  /** Master switch. Defaults to enabled; off answers `greeting: null`. */
   enabled?: boolean;
-  /** Cache lifetime. Defaults to `GREETING_CACHE_TTL_MS`. */
   ttlMs?: number;
-  /** Test seam: replace the default generator. */
   generate?: GreetingGenerator;
-  /** Test seam for the exact raw character bytes used by the onboarding latch. */
   readRawCharacter?: typeof readCharacterFile;
-  /** Test seams for independently faulting derived greeting inputs. */
   inputReaders?: GhostHomeDigestReaders;
 }
 
@@ -531,15 +518,10 @@ export interface SessionRetentionTimer {
 }
 
 export interface SessionRetentionConfig {
-  /** Dispose an otherwise-idle cached session after this long. `0` disables TTL expiry. */
   idleTtlMs?: number;
-  /** Soft maximum: protected sessions may exceed it until they become idle. */
   maxSessions?: number;
-  /** How often protected sessions are reconsidered after becoming idle. */
   sweepIntervalMs?: number;
-  /** Monotonic test seam. Production uses `Date.now`. */
   now?: () => number;
-  /** Timer test seam. The returned timer is always unref'd. */
   schedule?: (callback: () => void, intervalMs: number) => SessionRetentionTimer;
 }
 
@@ -575,11 +557,8 @@ export type SessionTransactionProbeStage =
 
 export interface SessionHostOptions {
   registry: GhostRegistry;
-  /** OS account home used as the operational cwd for every new unbound session. */
   ownerHome?: string;
-  /** Injectable conversation binding/trust store. */
   projectBindings?: ProjectBindingStore;
-  /** Test seam for fault-injecting the startup ownership scope. */
   sessionStartupProbe?: (
     stage: "model-runtime" | "mcp" | "session-manager" | "agent-session",
     runtime: GhostOmpRuntime,
@@ -594,7 +573,6 @@ export interface SessionHostOptions {
   /** Test seam for marker lstat failures; production always uses fs.lstat. */
   transactionMarkerLstat?: (path: string) => Promise<unknown>;
   logger?: Logger;
-  /** Sets `PI_OFFLINE` and forbids catalog refresh. See config.offline. */
   offline?: boolean;
   /**
    * Background conversation-title generation. Enabled by default; a title is
@@ -614,7 +592,6 @@ export interface SessionHostOptions {
    * Chromium; `"profile"` (or no transport) uses the per-ghost profile.
    */
   browserMode?: "relay" | "profile";
-  /** The daemon's relay hub as a transport, for the relay browser backend. */
   relayTransport?: RelayTransport;
   /**
    * Seconds a question waits before it settles itself. Daemon-wide; see
@@ -637,27 +614,19 @@ export interface SessionHostOptions {
     ClaudeCodeRuntimeOptions,
     "logger" | "extensionOptions" | "browserMode" | "relayTransport" | "hooks"
   >;
-  /** Injectable owner for OMP's conversation-scoped realtime voice surface. */
   liveVoice?: LiveVoiceManager;
-  /** Injectable owner for OMP's encrypted collaboration relay hosts. */
   collaboration?: CollaborationManager;
-  /** Awaited Ghost-owned lifecycle hooks, shared by every model harness. */
   hooks?: GhostHookRunner;
-  /** Optional conversation-idle maintenance owner; production attaches it at boot. */
   maintenance?: SessionConversationMaintenance;
-  /** Shared whole-home gate; production uses the same instance as the server and maintenance. */
   homeOperations?: HomeOperationCoordinator;
-  /** Internal daemon cache bounds and deterministic lifecycle test seams. */
   retention?: SessionRetentionConfig;
 }
 
 export interface RunTurnOptions {
-  /** Conversation id (pi-messages `options.sessionId`). */
   sessionId?: string | null;
   prompt: string;
   emit: (event: PiMessagesEvent) => void;
   signal?: AbortSignal;
-  /** Forward `thinking_*` blocks. Off by default; reasoning is private. */
   includeThinking?: boolean;
 }
 
@@ -667,7 +636,6 @@ export interface AdmittedTurnOptions {
   includeThinking?: boolean;
 }
 
-/** One runtime-resolved, project-checked admission. `release` is idempotent. */
 export interface TurnAdmission {
   run(options: AdmittedTurnOptions): Promise<void>;
   release(): void;
@@ -687,9 +655,7 @@ type SelectedTurnRuntime =
 
 export interface RunAskReanswerOptions {
   sessionId?: string | null;
-  /** Runtime qualified by the public action id. Re-answer is Pi-only. */
   runtime?: ConversationRuntime;
-  /** Persisted `ask` toolResult entry selected from the branch tree. */
   entryId: string;
   emit: (event: PiMessagesEvent) => void;
   signal?: AbortSignal;
@@ -701,7 +667,6 @@ export interface GhostSessionHandle {
   sessionKey: string;
   session: AgentSession;
   sessionFile: string | undefined;
-  /** Which model the session resolved to, for diagnostics. */
   model: { provider: string; id: string } | null;
 }
 
@@ -726,18 +691,13 @@ export type QueueMode = "steer" | "followUp";
 
 interface HostedMCP {
   manager: MCPManager;
-  /** Serialized dynamic MCP tool refreshes; never rejects. */
   refresh?: Promise<void>;
-  /** Serialized config reconnects, so concurrent mutations never interleave. */
   reload?: Promise<void>;
 }
 
 interface HostedSession extends GhostSessionHandle {
-  /** Exact persisted project/cwd snapshot this session was opened with. */
   project: ProjectBindingState;
-  /** Exact confined declarative/MCP scan this session was opened with. */
   projectSnapshot: ProjectDeclarativeSnapshot | null;
-  /** Tool-call id to its start cwd; persisted beside the OMP transcript. */
   toolCwds: Map<string, string>;
   toolCwdWrite?: Promise<void>;
   /** Monotonic in-memory revision, retained across failed publications. */
@@ -745,23 +705,15 @@ interface HostedSession extends GhostSessionHandle {
   /** Last revision known to be file-and-directory durable. */
   toolCwdPersistedVersion: number;
   busy: boolean;
-  /** Last owner-visible use, for TTL and LRU retention. */
   lastUsedAt: number;
-  /** Persistent owner listener for turns started outside SessionHost (collab). */
   unsubscribeOwnership?: () => void;
-  /** Owner actions admitted before their native persisted Pi pass settles. */
   pendingOwnerPasses: PendingPiOwnerPass[];
-  /** Serial durability/hook drain shared by HTTP, queue, collaboration, and voice. */
   ownerPassSettlement?: Promise<void>;
   /** Reconstructed from the persisted branch and reserved synchronously per owner action. */
   nextOwnerTurnId: number;
-  /** Coalesces terminal-event and live-voice deferred-update drains. */
   settlingDeferred?: Promise<void>;
-  /** Nested reservations while live voice is starting or stopping. */
   liveVoiceTransitions?: number;
-  /** Lets stop wait for an admitted startup before stopping its controller. */
   liveVoiceStart?: Promise<LiveVoiceStatus>;
-  /** HTTP-backed implementation of OMP's built-in `ask` UI contract. */
   ask: AskBroker;
   /**
    * The runtime this session's model was bound from, kept so a later model
@@ -774,11 +726,8 @@ interface HostedSession extends GhostSessionHandle {
    * rebound after that exclusive owner releases the AgentSession.
    */
   pendingRebind?: boolean;
-  /** Keyring credentials changed; reload the borrowed OMP runtime once idle. */
   pendingAuthRefresh?: boolean;
-  /** Config changed during a turn or live voice; reconnect once idle. */
   pendingMcpReload?: boolean;
-  /** Project MCP reconnect/tool refresh work currently touching this session. */
   mcpTransitions?: number;
   /**
    * The in-flight background title generation, if any. `listSessions` awaits it
@@ -786,11 +735,8 @@ interface HostedSession extends GhostSessionHandle {
    * Resolves (never rejects) when title generation settles.
    */
   title?: Promise<void>;
-  /** Cancels the provider call and bounded wrapper on timeout or shutdown. */
   titleAbort?: AbortController;
-  /** Nested reservations while collaboration starts or stops. */
   collaborationTransitions?: number;
-  /** Writable CollabHost prompts admitted outside the HTTP turn path. */
   rawCollaborationPrompts?: number;
   rawCollaborationIdle?: Promise<void>;
   releaseRawCollaborationIdle?: () => void;
@@ -816,7 +762,6 @@ interface HostedSession extends GhostSessionHandle {
   mcpSingletonCleared?: boolean;
   sessionDisposed?: boolean;
   forceDisposeStarted?: boolean;
-  /** MCP lifecycle populated strictly from this ghost home's `.omp/`. */
   mcp?: HostedMCP;
 }
 
@@ -841,12 +786,10 @@ export function sessionKeyOf(
   ]);
 }
 
-/** The (ghost, conversation) halves back out of a `sessionKeyOf` key. */
 function sessionKeyParts(key: string): [string, string] {
   return JSON.parse(key) as [string, string];
 }
 
-/** Destructive reservations include runtime: equal raw ids remain independent. */
 function deletionKeyOf(
   ghostName: string,
   runtime: ConversationRuntime,
@@ -1102,7 +1045,6 @@ function exactDeleteStaticSource(
   }
 }
 
-/** Resolve the deliberately small persistent-cd grammar OMP admits. */
 function persistentCdTarget(command: string, cwd: string, ownerHome: string): string | null {
   if (!isPersistentShellCdCommand(command)) return null;
   let rest = command.trim().slice(2).trim();
@@ -1119,7 +1061,6 @@ function persistentCdTarget(command: string, cwd: string, ownerHome: string): st
 
 const LEGACY_PI_SESSION_PREFIX_MAX_BYTES = 64 * 1024;
 
-/** Header cwd from a released Pi transcript, without opening a second writer. */
 async function legacyPiSessionCwd(path: string): Promise<string | undefined> {
   try {
     const prefix = await readDaemonControlPrefix(path, LEGACY_PI_SESSION_PREFIX_MAX_BYTES);
@@ -1181,11 +1122,9 @@ function assertPiConversation(runtime: ConversationRuntime, feature: string): vo
   }
 }
 
-/** One row in the conversation listing. Titles are null until generated. */
 export interface SessionSummary {
   /** Runtime-qualified public row/action identity. */
   id: string;
-  /** Raw runtime resume id; pi-messages keeps sending this as `options.sessionId`. */
   conversationId: string;
   runtime: ConversationRuntime;
   title: string | null;
@@ -1207,7 +1146,6 @@ export interface ConversationUpdatedEvent {
 
 export type ConversationEventListener = (event: ConversationUpdatedEvent) => void;
 
-/** A renderable transcript message: OMP's message shape, reasoning removed. */
 export interface TranscriptMessage {
   role: "user" | "assistant";
   content: unknown;
@@ -1224,7 +1162,6 @@ export type AskSettlement = "submitted" | "cancelled" | "timedOut" | "chat";
  * left to describe is the ask's own: re-answering commits a new one here.
  */
 export interface AskBranchNavigation {
-  /** The active ask toolResult entry; selecting re-answer creates its sibling. */
   resultEntryId: string;
   settled: AskSettlement;
 }
@@ -1249,20 +1186,16 @@ function askSettlement(details: AskToolDetails | null | undefined): AskSettlemen
   return "cancelled";
 }
 
-/** A conversation's history for rehydration in the shell. */
 export interface Transcript {
   id: string;
   conversationId: string;
   runtime: "pi";
   title: string | null;
   messages: TranscriptMessage[];
-  /** Total renderable messages before the page cap. */
   total: number;
-  /** True when this page omits messages (paged, or over the cap). */
   truncated: boolean;
 }
 
-/** Default and hard cap on messages returned from one transcript read. */
 export const DEFAULT_TRANSCRIPT_LIMIT = 1_000;
 export const MAX_TRANSCRIPT_LIMIT = 2_000;
 
@@ -1387,7 +1320,6 @@ async function readLegacySessionTitle(sessionFile: string): Promise<string | nul
   return legacySessionTitle(entries);
 }
 
-/** A title already ending in a copy counter, as `<base> (<n>)`. */
 const COPY_COUNTER_TITLE = /^(.*\S)\s+\((\d+)\)$/;
 
 /**
@@ -1476,7 +1408,6 @@ function projectMcpRuntimeStatus(result: ProjectMcpConnectionResult): {
   };
 }
 
-/** Connect only native MCP files under the ghost and explicitly bound project. */
 async function connectGhostProjectMCP(
   manager: MCPManager,
   input: {
@@ -1601,7 +1532,6 @@ export class SessionHost {
   private readonly titleEnabled: boolean;
   private readonly titleTimeoutMs: number;
   private readonly titleTimeoutScheduler: NonNullable<TitleConfig["scheduleTimeout"]>;
-  /** Seconds an unanswered ask waits; 0 waits forever. Projected onto `ask.timeout`. */
   private readonly askTimeoutSeconds: number;
   private readonly generateTitle: TitleGenerator;
   private readonly greetingEnabled: boolean;
@@ -1615,32 +1545,23 @@ export class SessionHost {
   private readonly liveVoice: LiveVoiceManager;
   private readonly collaboration: CollaborationManager;
   private readonly sessions = new Map<string, HostedSession>();
-  /** Passive listing invalidation listeners; they never own or open a session. */
   private readonly conversationListeners = new Map<string, Set<ConversationEventListener>>();
-  /** In-flight opens, so two concurrent turns never build two sessions. */
   private readonly opening = new Map<string, Promise<HostedSession>>();
   /** In-flight closes, so a reopen cannot race a still-disposing session. */
   private readonly closing = new Map<
     string,
     { hosted: HostedSession; promise: Promise<void> }
   >();
-  /** Removed from admission, but still requiring an idempotent cleanup retry. */
   private readonly cleanupRetries = new Map<string, HostedSession>();
-  /** Runtime-qualified conversation identities reserved by destructive delete. */
   private readonly deleting = new Set<string>();
-  /** Turn calls reserve their raw conversation before their first async open. */
   private readonly turnAdmissions = new Set<string>();
-  /** External open/close calls reserve a raw conversation across every await. */
   private readonly lifecycleAdmissions = new Map<string, number>();
   /** Fork markers owned by this process are not crash-recovered mid-publication. */
   private readonly activeForks = new Set<string>();
   private readonly forkRecoveries = new Map<string, Promise<void>>();
-  /** CAS project writes reserve one runtime-qualified conversation end to end. */
   private readonly projectTransitions = new Set<string>();
   private readonly mcpReloadGhosts = new Set<string>();
-  /** Ghost names reserved by an in-flight whole-ghost move: a delete or a rename. */
   private readonly reservedGhosts = new Set<string>();
-  /** Route-level move claims held between HomeOperation preclaim and host mutation admission. */
   private readonly homeMoveClaims = new Set<string>();
   private readonly unregisterHomeMoveParticipant: (() => void) | undefined;
   /** Read-through cache for legacy titles that have not had a writable open yet. */
@@ -1776,7 +1697,6 @@ export class SessionHost {
     }
   }
 
-  /** Attach the daemon-wide maintenance owner after constructing the host/runtime cycle. */
   setConversationMaintenance(maintenance: SessionConversationMaintenance): void {
     if (this.maintenance && this.maintenance !== maintenance) {
       throw new Error("Conversation maintenance is already attached.");
@@ -1784,7 +1704,6 @@ export class SessionHost {
     this.maintenance = maintenance;
   }
 
-  /** Borrow this ghost's OMP catalogue/auth runtime for one maintenance completion. */
   async withMaintenanceRuntime<T>(
     ghostName: string,
     use: (runtime: GhostOmpRuntime) => Promise<T>,
@@ -1816,7 +1735,6 @@ export class SessionHost {
     return this.reservedGhosts.has(ghostName) || this.homeMoveClaims.has(ghostName);
   }
 
-  /** Test/diagnostic projection of the bounded in-memory Pi session cache. */
   get cachedSessionCount(): number {
     return this.sessions.size;
   }
@@ -1884,7 +1802,6 @@ export class SessionHost {
     });
   }
 
-  /** Subscribe to small conversation-list invalidations for one ghost. */
   subscribeConversationEvents(
     ghostName: string,
     listener: ConversationEventListener,
@@ -1899,7 +1816,6 @@ export class SessionHost {
     };
   }
 
-  /** Publish after storage settles; a deletion uses its mutation time. */
   private async announceConversationUpdated(
     ghostName: string,
     runtime: ConversationRuntime,
@@ -1936,7 +1852,6 @@ export class SessionHost {
     }
   }
 
-  /** Open (or reuse) the pi session for one ghost + conversation. */
   async open(
     ghostName: string,
     sessionId?: string | null,
@@ -2041,7 +1956,6 @@ export class SessionHost {
     }
   }
 
-  /** OMP's live, session-scoped slash-command catalog, annotated by Ghost's policy. */
   async availableCommands(
     ghostName: string,
     sessionId?: string | null,
@@ -2062,7 +1976,6 @@ export class SessionHost {
     }
   }
 
-  /** Reject OMP-only surfaces without constructing a shadow pi session. */
   private assertOmpRuntime(ghostName: string, feature: string): Ghost {
     const ghost = this.registry.get(ghostName);
     try {
@@ -2081,7 +1994,6 @@ export class SessionHost {
     return ghost;
   }
 
-  /** Current realtime voice state; this read never opens a conversation. */
   liveVoiceStatus(
     ghostName: string,
     sessionId?: string | null,
@@ -2158,7 +2070,6 @@ export class SessionHost {
     }
   }
 
-  /** Current encrypted collaboration state; this read never opens a conversation. */
   collaborationStatus(
     ghostName: string,
     sessionId?: string | null,
@@ -2278,7 +2189,6 @@ export class SessionHost {
     });
   }
 
-  /** Read project/cwd state without creating a runtime session or sidecar. */
   async getProject(
     ghostName: string,
     conversationId: string,
@@ -2287,7 +2197,6 @@ export class SessionHost {
     return this.projectState(ghostName, runtime, requireRawConversationId(conversationId));
   }
 
-  /** Inspect one candidate and mint a short-lived, conversation-bound trust receipt. */
   async previewProject(
     ghostName: string,
     conversationId: string,
@@ -2944,7 +2853,6 @@ export class SessionHost {
     }
   }
 
-  /** Promote a pi 0.84 display name into OMP 18's native title slot on resume. */
   private async promoteLegacySessionTitle(
     manager: SessionManager,
     ghostName: string,
@@ -2970,7 +2878,6 @@ export class SessionHost {
     }
   }
 
-  /** The currently blocked OMP `ask`, if this live conversation has one. */
   pendingAsk(
     ghostName: string,
     sessionId?: string | null,
@@ -2981,7 +2888,6 @@ export class SessionHost {
     return this.sessions.get(this.keyOf(ghostName, sessionId))?.ask.pending ?? null;
   }
 
-  /** Resolve the current ask. AskBroker validates ids/options and is first-response-wins. */
   answerAsk(
     ghostName: string,
     sessionId: string | null | undefined,
@@ -3027,7 +2933,6 @@ export class SessionHost {
     };
   }
 
-  /** Queue text using OMP's native steering/follow-up semantics. */
   async queueMessage(
     ghostName: string,
     sessionId: string | null | undefined,
@@ -3161,7 +3066,6 @@ export class SessionHost {
     });
   }
 
-  /** Aggregate one configured server's state without opening a conversation. */
   mcpConnectionStatus(
     ghostName: string,
     serverName: string,
@@ -3186,7 +3090,6 @@ export class SessionHost {
     await this.withMcpReload(ghostName, async () => {});
   }
 
-  /** Reserve MCP config mutation and live-session publication as one transition. */
   async withMcpReload<T>(ghostName: string, mutation: () => Promise<T>): Promise<T> {
     this.registry.get(ghostName);
     if (this.ghostMoveReserved(ghostName)
@@ -3224,7 +3127,6 @@ export class SessionHost {
     }
   }
 
-  /** Manual retry for already-loaded managers; never opens a session. */
   async reconnectMcp(
     ghostName: string,
     serverName: string,
@@ -3258,7 +3160,6 @@ export class SessionHost {
     }
   }
 
-  /** Reconnect one hosted manager from disk and replace its mounted tool set. */
   private reloadHostedMcp(hosted: HostedSession): Promise<void> {
     const mcp = hosted.mcp;
     if (!mcp) return Promise.resolve();
@@ -3315,7 +3216,6 @@ export class SessionHost {
       || this.liveVoice.status(hosted.sessionKey).active;
   }
 
-  /** Every way OMP can have an exclusive owner, including raw CollabHost turns. */
   private sessionOwned(hosted: HostedSession): boolean {
     return hosted.busy
       || (hosted.rawCollaborationPrompts ?? 0) > 0
@@ -3491,13 +3391,15 @@ export class SessionHost {
     while (!pass.signal.aborted) {
       const assistant = latestAssistantEntry.message;
       if (assistant.role !== "assistant") return latestAssistantEntry;
+      // Pi's own session file is the OMP runtime's native transcript.
+      const sessionFile = hosted.session.sessionFile;
       const result = await this.hooks.emitSessionStop({
         type: "session_stop",
         messages: [assistant],
         turn_id: pass.turnId,
         last_assistant_message: assistant,
         session_id: hosted.session.sessionId,
-        ...(hosted.session.sessionFile ? { session_file: hosted.session.sessionFile } : {}),
+        ...(sessionFile ? { session_file: sessionFile, transcript_path: sessionFile } : {}),
         stop_hook_active: stopHookActive,
         owner_prompt: pass.ownerPrompt,
         signal: pass.signal,
@@ -4067,7 +3969,6 @@ export class SessionHost {
     }
   }
 
-  /** Apply deferred owner changes after voice releases its AgentSession. */
   private async settleLiveVoiceSession(key: string): Promise<void> {
     if (this.disposed) return;
     const hosted = this.sessions.get(key);
@@ -4160,7 +4061,6 @@ export class SessionHost {
     return current ? { provider: current.provider, id: current.id } : null;
   }
 
-  /** Run OMP's direct `!`/`!!` command surface without asking a model. */
   private async runUserBash(
     ghostName: string,
     command: UserBashCommand,
@@ -4333,7 +4233,6 @@ export class SessionHost {
     }
   }
 
-  /** Consume one known OMP builtin without creating a model message or turn. */
   private async runBuiltinCommand(
     hosted: HostedSession,
     dispatch: Exclude<ReturnType<typeof classifyGhostBuiltin>, { kind: "not_builtin" }>,
@@ -4437,7 +4336,6 @@ export class SessionHost {
     );
   }
 
-  /** Capture one Claude project's exact first-turn inputs before SSE publication. */
   private async admitClaudeProject(
     ghostName: string,
     conversationId: string,
@@ -4990,7 +4888,6 @@ export class SessionHost {
     };
   }
 
-  /** The default generator: `roles.smol_model`, one completion, clean or null. */
   private async defaultGreeting(input: {
     ghost: Ghost;
     context: GreetingContextInput;
@@ -5637,7 +5534,6 @@ export class SessionHost {
     await this.finishForkArtifactState(sessionDir, marker, record, artifacts, []);
   }
 
-  /** Every stored conversation for one ghost, before pin state is applied. */
   private recoverForkTransactions(sessionDir: string): Promise<void> {
     const existing = this.forkRecoveries.get(sessionDir);
     if (existing) return existing;
@@ -6223,7 +6119,6 @@ export class SessionHost {
     }
   }
 
-  /** Undo a fork that never reached the user without creating a Trash entry. */
   private async discardFork(ghostName: string, forkId: string): Promise<void> {
     try {
       const ghost = this.registry.get(ghostName);
@@ -6511,7 +6406,6 @@ export class SessionHost {
     }
   }
 
-  /** Move every Ghost-owned artifact for one idle conversation to recoverable trash. */
   async deleteSession(
     ghostName: string,
     sessionId?: string | null,
@@ -6866,7 +6760,6 @@ export class SessionHost {
     }
   }
 
-  /** True while any conversation of this ghost is busy, opening, closing, or mid-delete. */
   private ghostBusy(ghostName: string): boolean {
     for (const key of this.turnAdmissions) {
       if (sessionKeyParts(key)[0] === ghostName) return true;
@@ -6897,7 +6790,6 @@ export class SessionHost {
     return this.claudeCode.isGhostBusy(ghostName);
   }
 
-  /** MCP is ghost-wide, so even a pre-stream turn admission owns this lease. */
   private ghostHasTurnAdmission(ghostName: string): boolean {
     for (const key of this.turnAdmissions) {
       if (sessionKeyParts(key)[0] === ghostName) return true;
@@ -6931,7 +6823,6 @@ export class SessionHost {
     await this.closeHostedSession(key, "conversation closed");
   }
 
-  /** The sole path that removes and disposes a cached Pi session. */
   private closeHostedSession(
     key: string,
     reason: string,
@@ -7133,7 +7024,6 @@ export class SessionHost {
     }
   }
 
-  /** Dispose one OMP session and the project-only MCP manager Ghost injected. */
   private async disposePiSession(hosted: HostedSession): Promise<void> {
     const failures: unknown[] = [];
     await this.collectCleanupFailure(failures, () => this.beginHostedDispose(hosted));
@@ -7181,7 +7071,6 @@ export class SessionHost {
     }
   }
 
-  /** Tear down every hosted session. Idempotent; bounded by main's shutdown stage. */
   disposeAll(): Promise<void> {
     if (this.disposePromise) return this.disposePromise;
     this.beginShutdown();

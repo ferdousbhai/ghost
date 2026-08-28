@@ -66,7 +66,6 @@ export function ghostScreenshotName(
 
 export type ScreenshotProducer = "screen" | "browser";
 
-/** Matches exactly what `ghostScreenshotName` writes for one ghost and producer. */
 export function ghostScreenshotMatcher(
   ghostName: string,
   producer: ScreenshotProducer,
@@ -81,10 +80,8 @@ function escapeForPattern(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/** Each screenshot producer keeps this many of its own captures. */
 export const DEFAULT_SCREENSHOT_RETENTION = 20;
 
-/** Hard ceiling for a screenshot on transport, disk, and provider output. */
 export const MAX_SCREENSHOT_BYTES = 8 * 1024 * 1024;
 
 const MAX_SCREENSHOT_COLLISIONS = 10_000;
@@ -102,7 +99,6 @@ function screenshotLimitError(label: string, bytes: number): GhostError {
   );
 }
 
-/** Refuse an encoded screenshot before allocating its decoded byte buffer. */
 export function assertScreenshotBase64WithinLimit(data: string, label: string): void {
   const padding = data.endsWith("==") ? 2 : data.endsWith("=") ? 1 : 0;
   const decodedBytes = Math.max(Math.floor(data.length * 3 / 4) - padding, 0);
@@ -201,7 +197,6 @@ export async function writeScreenshotFile<T>(
   return result;
 }
 
-/** Keep the newest matching regular files. Other screenshot producers are untouched. */
 export async function pruneScreenshotFiles(
   directory: FileHandle,
   retention: number,
@@ -243,7 +238,6 @@ export async function pruneScreenshotFiles(
   return doomed.map((entry) => entry.name);
 }
 
-/** Pin and exclusively lock the screenshot directory for one mutation. */
 export async function withScreenshotDirectory<T>(
   screenshotDir: string,
   action: (directory: FileHandle, logicalDir: string) => Promise<T>,
@@ -277,7 +271,6 @@ export async function pruneScreenshotDirectoryPath(
   }
 }
 
-/** Read a confined screenshot without allocating more than the screenshot cap. */
 export async function readScreenshotFile(
   screenshotDir: string,
   path: string,

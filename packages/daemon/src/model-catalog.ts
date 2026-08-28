@@ -75,23 +75,16 @@ import { createGhostOmpRuntime, type GhostOmpRuntime } from "./omp-runtime.js";
 export interface ModelCatalogRuntime {
   /** The full catalogue, synchronous. Optionally scoped to one provider. */
   getModels(providerId?: string): readonly Model<Api>[];
-  /** One model, or undefined when the pair is not in the catalogue. */
   getModel(providerId: string, modelId: string): Model<Api> | undefined;
-  /** Models a credentialed provider can serve now. Optionally scoped. */
   getAvailable(providerId?: string): Promise<readonly Model<Api>[]>;
-  /** Whether the ghost has a working credential for this provider. */
   getProviderAuthStatus(providerId: string): { configured: boolean };
-  /** Whether a configured provider is backed by OAuth (vs an api key). */
   isUsingOAuth(providerId: string): boolean;
-  /** Release the per-operation credential and catalogue handles. */
   close(): void;
 }
 
-/** OMP model fields exposed through Ghost's catalogue views. */
 export type CatalogModel = Pick<Model<Api>, "provider" | "id">
   & Partial<Pick<Model<Api>, "name" | "priority" | "input" | "contextWindow" | "cost">>;
 
-/** How a model is shown as the current selection: no cost, no credential. */
 export interface ModelView {
   provider: string;
   id: string;
@@ -103,7 +96,6 @@ export interface ModelView {
 export type CurrentModelSource = "role" | "default" | "none";
 
 export interface CurrentModel {
-  /** The resolved chat model, or null when nothing usable resolves. */
   current: ModelView | null;
   /**
    * How it was chosen. `role` — `roles.chat_model` is set and resolves.
@@ -113,7 +105,6 @@ export interface CurrentModel {
   source: CurrentModelSource;
 }
 
-/** One row in a `available`/`catalog` listing. */
 export interface ModelListItem {
   provider: string;
   id: string;
@@ -121,11 +112,8 @@ export interface ModelListItem {
   contextWindow?: number;
   cost?: { input: number; output: number; cacheRead: number; cacheWrite: number };
   hasVision: boolean;
-  /** How the provider is signed in, when it is. Absent for an uncredentialed one. */
   connectedVia?: "oauth" | "api_key" | "claude_plan";
-  /** `catalog` scope only: whether the provider is credentialed. */
   usable?: boolean;
-  /** True for the ghost's current chat-model selection. */
   current: boolean;
 }
 
@@ -133,20 +121,15 @@ export type ModelScope = "available" | "catalog";
 
 export interface ListModelsQuery {
   scope?: ModelScope;
-  /** Restrict to one provider id. */
   provider?: string;
-  /** Case-insensitive substring match on model id and name. */
   q?: string;
-  /** Page size. Clamped to [1, MAX_MODELS_LIMIT]; defaults to DEFAULT_MODELS_LIMIT. */
   limit?: number;
-  /** Page offset into the filtered list. Clamped to >= 0. */
   offset?: number;
 }
 
 export interface ListModelsResult {
   scope: ModelScope;
   models: ModelListItem[];
-  /** How many models matched the filters, before the page cap. */
   total: number;
   limit: number;
   offset: number;
@@ -156,19 +139,15 @@ export interface ListModelsResult {
 
 export interface SetModelResult {
   ok: true;
-  /** Whether the chosen model's provider is signed in and can answer now. */
   usable: boolean;
-  /** Present when `usable` is false: a message the shell can turn into a login prompt. */
   warning?: string;
   current: ModelView;
-  /** Always `role`: the write set `roles.chat_model`. */
   source: "role";
 }
 
 export type ModelRouteTarget = "primary" | "fallback";
 
 export interface ModelRouteModel extends ModelView {
-  /** False means the binding remains configured but is absent from the current catalogue. */
   resolved: boolean;
   usable: boolean;
 }
@@ -181,7 +160,6 @@ export interface ModelRouteView {
   label: string;
   /** Configured primary. Chat keeps its legacy implicit-provider primary here. */
   primary: ModelRouteModel | null;
-  /** The model the role currently resolves to, including OMP automatic roles. */
   effective: ModelRouteModel | null;
   source: ModelRouteSource;
   fallbacks: ModelRouteModel[];
@@ -226,20 +204,15 @@ export const MAX_MODELS_LIMIT = 500;
 
 export interface ModelCatalogOptions {
   registry: GhostRegistry;
-  /** Shared gate for path-bound mutations and whole-home moves. */
   homeOperations?: HomeOperationCoordinator;
   logger?: Logger;
-  /** OMP's offline posture; forbids catalogue network refresh when true. */
   offline?: boolean;
-  /** Test seam: build the per-ghost runtime the catalogue reads. */
   createRuntime?: (input: {
     authPath: string;
     modelsPath: string;
     allowModelNetwork: boolean;
   }) => Promise<ModelCatalogRuntime>;
-  /** Test seam for the external, credential-free Claude Code status probe. */
   claudeCodePlanStatus?: () => Promise<boolean>;
-  /** Shared executable/auth probe used by both catalogue reads and turns. */
   claudeCodeProbe?: ClaudeCodeProbe;
   /**
    * Notified after `roles.chat_model` is written, with the ghost name, so a
@@ -403,7 +376,6 @@ export class ModelCatalog {
     };
   }
 
-  /** The effective chat/default selection without treating it as explicit. */
   private automaticDefaultView(
     file: GhostModelsFile | null,
     available: readonly Model<Api>[],
@@ -539,7 +511,6 @@ export class ModelCatalog {
     return model;
   }
 
-  /** Set a role primary or append an ordered retry fallback. */
   async setModelRoute(
     ghostName: string,
     role: GhostModelRole,
@@ -568,7 +539,6 @@ export class ModelCatalog {
     });
   }
 
-  /** Remove every retry fallback for one role. */
   async clearModelFallbacks(
     ghostName: string,
     role: GhostModelRole,
@@ -580,7 +550,6 @@ export class ModelCatalog {
     });
   }
 
-  /** Clear one explicit role primary; automatic OMP resolution becomes visible immediately. */
   async clearModelPrimary(
     ghostName: string,
     role: GhostModelRole,
@@ -688,7 +657,6 @@ export class ModelCatalog {
     }
   }
 
-  /** Which model answers this ghost's turns, and why. Mirrors session-host. */
   async getCurrent(ghostName: string): Promise<CurrentModel> {
     return this.withRuntime(ghostName, ({ runtime, configDir }) =>
       this.resolveCurrent(runtime, this.readModelsFile(configDir, ghostName)));
@@ -921,6 +889,5 @@ export class ModelCatalog {
   }
 }
 
-/** Compile-time proof that the OMP 18 facade satisfies Ghost's stable catalogue seam. */
 const _runtimeShapeCheck: (r: GhostOmpRuntime) => ModelCatalogRuntime = (r) => r;
 void _runtimeShapeCheck;

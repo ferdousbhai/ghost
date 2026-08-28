@@ -41,7 +41,6 @@ function words(list) {
     return set;
 }
 
-// ---- Keyword sets -----------------------------------------------------------
 
 const JS_WORDS =
     "as async await break case catch class const constructor continue debugger "
@@ -110,7 +109,6 @@ const SQL_WORDS =
     + "end asc desc count sum avg min max cast coalesce default constraint unique "
     + "check begin commit rollback transaction with returning";
 
-// ---- String forms -----------------------------------------------------------
 
 const DQ = { open: "\"", close: "\"", escape: true, multiline: false };
 const SQ = { open: "'", close: "'", escape: true, multiline: false };
@@ -118,7 +116,6 @@ const BACKTICK = { open: "`", close: "`", escape: true, multiline: true };
 const PY_TRIPLE_D = { open: "\"\"\"", close: "\"\"\"", escape: true, multiline: true };
 const PY_TRIPLE_S = { open: "'''", close: "'''", escape: true, multiline: true };
 
-// ---- Languages --------------------------------------------------------------
 //
 // line       line-comment openers
 // block      [opener, closer] pairs
@@ -239,7 +236,6 @@ const FILENAMES = {
 
 const MARKDOWN = { md: true, markdown: true, mdown: true, mkd: true };
 
-// ---- Path helpers -----------------------------------------------------------
 
 function baseName(path) {
     const clean = String(path || "").replace(/[\\/]+$/u, "");
@@ -254,7 +250,6 @@ function parentPath(path) {
     return cut === 0 ? "/" : clean.slice(0, cut);
 }
 
-/** Lower-cased extension without the dot, or "" when there is none. */
 function extensionOf(path) {
     const name = baseName(path);
     const dot = name.lastIndexOf(".");
@@ -266,7 +261,6 @@ function isMarkdown(path) {
     return MARKDOWN[extensionOf(path)] === true;
 }
 
-/** A key into LANGUAGES, or "" when we have no table for this file. */
 function languageOf(path) {
     const ext = extensionOf(path);
     if (EXTENSIONS[ext]) return EXTENSIONS[ext];
@@ -274,13 +268,11 @@ function languageOf(path) {
     return FILENAMES[name] || "";
 }
 
-/** The word the pane header shows for a language, e.g. "python". */
 function languageLabel(path) {
     const ext = extensionOf(path);
     return ext === "" ? "text" : ext;
 }
 
-// ---- Escaping ---------------------------------------------------------------
 
 // Ampersands first: escaping < or > before & would double-escape the entities
 // we just introduced.
@@ -291,7 +283,6 @@ function escapeHtml(text) {
         .replace(/>/gu, "&gt;");
 }
 
-// ---- Scanner ----------------------------------------------------------------
 
 const IDENT_START = /[A-Za-z_$]/u;
 const IDENT_BODY = /[A-Za-z0-9_$]/u;
@@ -478,7 +469,6 @@ function tokenize(src, spec) {
     return out;
 }
 
-// ---- Rendering --------------------------------------------------------------
 
 /**
  * Rich-text markup for `source`, coloured for the language of `path`.
@@ -511,7 +501,6 @@ function hexColour(value) {
     return /^#[0-9a-fA-F]{3,8}$/u.test(text) ? text : "";
 }
 
-/** A font family safe to drop into a <pre style="font-family:'…'"> rule. */
 function safeFontFamily(value, fallback) {
     const text = String(value === undefined || value === null ? "" : value).trim();
     return /^[A-Za-z0-9 _.-]{1,64}$/u.test(text) ? text : fallback;

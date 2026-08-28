@@ -1,4 +1,3 @@
-/** Explicit loading for the visible Ghost-owned OMP artifact directories. */
 import type { Dirent } from "node:fs";
 import { readdir, type FileHandle } from "node:fs/promises";
 import { join } from "node:path";
@@ -22,7 +21,6 @@ export interface GhostHookExtensionLoad {
 }
 
 export interface GhostHookExtensionLoadOptions {
-  /** Test/diagnostic seam after the final entry is pinned, before evaluation. */
   afterOpen?: (path: string) => void | Promise<void>;
 }
 
@@ -128,7 +126,6 @@ export async function loadGhostHookExtensions(
   }
 }
 
-/** Keep OMP's public rediscovery entry points pinned to one Ghost root. */
 export function scopeGhostSessionArtifactRediscovery(
   session: AgentSession,
   homeDir: string,

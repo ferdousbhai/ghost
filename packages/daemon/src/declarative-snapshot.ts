@@ -1,4 +1,3 @@
-/** Shared accepted-resource merge semantics for the Pi and Claude runtimes. */
 import type { PromptTemplate } from "@oh-my-pi/pi-coding-agent/config/prompt-templates";
 import type { Rule } from "@oh-my-pi/pi-coding-agent/capability/rule";
 import type { Skill } from "@oh-my-pi/pi-coding-agent/extensibility/skills";
@@ -38,7 +37,6 @@ function requiredContent(value: string | undefined, category: string): string {
   return value;
 }
 
-/** Project resources shadow same-named Ghost resources exactly as Pi has always done. */
 export function mergeProjectDeclarativeSnapshots(
   snapshots: readonly ProjectDeclarativeSnapshot[],
 ): EffectiveDeclarativeSnapshot {
@@ -51,7 +49,6 @@ export function mergeProjectDeclarativeSnapshots(
   };
 }
 
-/** Freeze accepted declarative bytes for a non-OMP runtime and its resume sidecar. */
 export function declarativePromptSnapshot(
   snapshot: EffectiveDeclarativeSnapshot,
 ): DeclarativePromptSnapshot {
@@ -91,7 +88,6 @@ export function mergeDeclarativePromptSnapshots(
   };
 }
 
-/** Always-active declarative text for Claude's native system-prompt preset. */
 export function renderClaudeDeclarativePrompt(snapshot: DeclarativePromptSnapshot): string {
   const sections = [
     ...snapshot.instructions.map((item) => ({
@@ -117,7 +113,6 @@ export interface PiDeclarativePromptOptions {
   readonly disabledRules?: readonly string[];
 }
 
-/** Only declarative material the Pi model can act on before an explicit invocation. */
 export function renderPiDeclarativePrompt(
   snapshot: EffectiveDeclarativeSnapshot,
   options: PiDeclarativePromptOptions = {},

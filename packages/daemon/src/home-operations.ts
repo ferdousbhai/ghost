@@ -13,7 +13,6 @@ export interface HomeMoveParticipantReservation {
 }
 
 export interface HomeMoveParticipant {
-  /** Reject an active owner before any participant is cancelled or reserved. */
   preclaim?(ghostName: string): void;
   /** Reserve idle work synchronously, then expose its actual drain. */
   reserve(ghostName: string): HomeMoveParticipantReservation;
@@ -38,7 +37,6 @@ export class HomeOperationCoordinator {
     this.registry = registry;
   }
 
-  /** Admit one operation before it resolves or captures a path inside the home. */
   acquire(ghostName: string): () => void {
     const identity = homeIdentity(this.registry.get(ghostName).dir);
     const state = this.states.get(identity) ?? { active: 0, moving: false, drained: null };
@@ -74,7 +72,6 @@ export class HomeOperationCoordinator {
     }
   }
 
-  /** Register work which must be cancelled and drained before a whole-home move. */
   registerMoveParticipant(participant: HomeMoveParticipant): () => void {
     this.moveParticipants.add(participant);
     let registered = true;
@@ -85,7 +82,6 @@ export class HomeOperationCoordinator {
     };
   }
 
-  /** Block new leases, then wait for every operation admitted before the block. */
   async reserveMove(ghostName: string): Promise<() => void> {
     const identity = homeIdentity(this.registry.get(ghostName).dir);
     // A move never cancels or waits for active owner/model work. Run every
@@ -151,7 +147,6 @@ export class HomeOperationCoordinator {
 
 const sharedCoordinators = new WeakMap<GhostRegistry, HomeOperationCoordinator>();
 
-/** One coordinator per in-process registry unless an embedder supplies its own. */
 export function homeOperationsFor(registry: GhostRegistry): HomeOperationCoordinator {
   const existing = sharedCoordinators.get(registry);
   if (existing) return existing;

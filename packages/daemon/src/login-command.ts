@@ -244,7 +244,6 @@ function terminalInteraction(rl: Interface): AuthInteraction {
 }
 
 export interface LoginCommandRuntime {
-  /** Test observer called after reservation and before any ghost-home access. */
   afterHomeReservationAcquired?: () => Promise<void>;
 }
 
