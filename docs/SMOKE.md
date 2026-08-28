@@ -56,12 +56,18 @@ qs -p ~/.config/quickshell/ghost/shell.qml kill   # then start it again as usual
 
 ## Ghosts, models, asks
 
-- [ ] **Rename a ghost.** Its conversations, pins, memory and docs come with it;
-      every conversation still opens. A login started before the rename still
+- [ ] **Rename a ghost.** Its conversations, pins and memory come with it;
+      shared Documents remain unchanged and available. Legacy docs inside an
+      imported ghost home stay import-only and move with that home. Every
+      conversation still opens. A login started before the rename still
       completes afterwards.
 - [ ] **Branch a message.** It creates a copy named `<title> (2)`, rewound to
       before that message, with its text in the composer. The original is
       untouched, and both threads appear in the sidebar.
+- [ ] **Message actions stay out of the way.** The edit pencil is absent until
+      hovering a user message, then appears with clear space after and aligned
+      to the final text line. The copy icon on ghost replies keeps the same gap,
+      including when either action wraps below the text.
 - [ ] **Pick a model for a provider you have not logged into.** The switcher
       shows it dimmed as "waiting for login" rather than showing nothing, and
       clears once the login finishes or the panel closes.

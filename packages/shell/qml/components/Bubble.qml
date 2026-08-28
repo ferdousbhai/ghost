@@ -132,7 +132,7 @@ Item {
             ? Math.min(parent.width * 0.82,
                 Math.max(bodyText.implicitWidth
                     + (messageActions.visible
-                        ? messageActions.implicitWidth + Theme.gap / 2 : 0)
+                        ? messageActions.implicitWidth + Theme.gap : 0)
                     + root.contentInset * 2, 72))
             : parent.width
         implicitWidth: Math.max(content.implicitWidth, 1) + root.contentInset * 2
@@ -179,6 +179,11 @@ Item {
                     bodyText.visible ? bodyText.implicitHeight : 0,
                     messageActions.visible
                         ? messageActions.y + messageActions.height : 0)
+
+                HoverHandler {
+                    id: messageHover
+                    acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                }
 
                 Text {
                     id: bodyText
@@ -247,7 +252,7 @@ Item {
                     readonly property real finalLineHeight:
                         bodyMeasure.endRect.height * bodyText.lineHeight
                     readonly property real inlineX: bodyMeasure.endRect.x
-                        + Theme.gap / 2
+                        + Theme.gap
                     readonly property bool fitsInline: root.body !== ""
                         && messageActions.inlineX + messageActions.implicitWidth
                             <= message.width
@@ -296,18 +301,20 @@ Item {
                         id: editAction
 
                         visible: root.mine && root.sourceEntryId !== ""
-                        // A running turn owns the conversation. Dimmed rather
-                        // than hidden: the click still answers, in the line
-                        // above the composer, instead of vanishing under the
-                        // pointer.
-                        opacity: Ghostd.streaming ? 0.4 : 1
+                        // A running turn owns the conversation. On hover it
+                        // stays dimmed, so the click can answer above the
+                        // composer instead of vanishing under the pointer.
+                        opacity: messageHover.hovered
+                            ? (Ghostd.streaming ? 0.4 : 1) : 0
                         width: 16
                         height: 16
                         Accessible.role: Accessible.Button
                         Accessible.name: "Edit message"
 
                         PencilGlyph {
-                            anchors.fill: parent
+                            width: parent.width
+                            height: parent.height
+                            y: -1
                             size: editAction.width
                             tint: editArea.containsMouse
                                 ? Theme.ghostAmberBright : Theme.foregroundFaint
