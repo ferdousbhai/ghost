@@ -65,37 +65,6 @@ _install_tree() {
   done < <(find "$source_dir" -type f -print0)
 }
 
-_unlink_references_to() {
-  local tree="$1"
-  local target="$2"
-  local link resolved
-
-  while IFS= read -r -d '' link; do
-    resolved="$(realpath -m "$link")"
-    case "$resolved" in
-      "$target"|"$target"/*) unlink "$link" ;;
-    esac
-  done < <(find "$tree" -type l -print0)
-}
-
-_remove_tree() {
-  local target="$1"
-  [[ -e "$target" ]] || return 0
-  find "$target" -depth -delete
-}
-
-_prune_optional_package() {
-  local daemon_dir="$1"
-  local pattern="$2"
-  local package_dir
-
-  while IFS= read -r -d '' package_dir; do
-    _unlink_references_to "$daemon_dir" "$package_dir"
-    _remove_tree "$package_dir"
-  done < <(find "$daemon_dir/node_modules/.pnpm" -mindepth 1 -maxdepth 1 \
-    -type d -name "$pattern" -print0)
-}
-
 pkgver() {
   cd -- "$srcdir/ghost"
 
@@ -110,8 +79,9 @@ build() {
   cd -- "$srcdir/ghost"
 
   bash packaging/release/prepare-pnpm-engine.sh .
-  ONNXRUNTIME_NODE_INSTALL=skip pnpm install --frozen-lockfile
+  pnpm install --frozen-lockfile
   pnpm build
+  pnpm --filter @ghost/daemon build:binary
 }
 
 check() {
@@ -120,8 +90,6 @@ check() {
   bash packaging/arch/test-check-dependencies.sh
   GHOST_ARCH_CHECK_RUNTIME_TEST_ROOT="$srcdir" \
     bash packaging/arch/test-check-runtime.sh packaging/arch/PKGBUILD
-  GHOST_OFFLINE_DEPLOY_TEST_ROOT="$srcdir" \
-    bash packaging/release/test-offline-deploy.sh "$srcdir/ghost"
   pnpm test
   pnpm typecheck
   pnpm lint
@@ -138,33 +106,7 @@ package() {
   local appdir="$pkgdir/usr/lib/ghost"
   local sharedir="$pkgdir/usr/share/ghost"
 
-  # Assemble from the frozen shared lock without registry metadata. The helper
-  # gives pnpm a fresh cache/home and dead network, then makes the injected
-  # workspace payload self-contained and checkout-path independent.
-  bash packaging/release/deploy-runtime.sh . "$appdir/daemon"
-
-  # Arch is x86_64 glibc. Remove optional musl payloads and non-Linux ONNX
-  # libraries, first unlinking only references into the exact discarded tree.
-  _prune_optional_package "$appdir/daemon" '@anthropic-ai+claude-agent-sdk-linux-x64-musl@*'
-  _prune_optional_package "$appdir/daemon" '@img+sharp-libvips-linuxmusl-x64@*'
-  _prune_optional_package "$appdir/daemon" '@img+sharp-linuxmusl-x64@*'
-  _prune_optional_package "$appdir/daemon" 'lightningcss-linux-x64-musl@*'
-  for foreign_dir in \
-    "$appdir/daemon/node_modules/.pnpm/onnxruntime-node@"*/node_modules/onnxruntime-node/bin/napi-v6/linux/arm64 \
-    "$appdir/daemon/node_modules/.pnpm/onnxruntime-node@"*/node_modules/onnxruntime-node/bin/napi-v6/darwin \
-    "$appdir/daemon/node_modules/.pnpm/onnxruntime-node@"*/node_modules/onnxruntime-node/bin/napi-v6/win32; do
-    [[ -e "$foreign_dir" ]] || continue
-    _unlink_references_to "$appdir/daemon" "$foreign_dir"
-    _remove_tree "$foreign_dir"
-  done
-  if find "$appdir/daemon/node_modules/.pnpm" -path \
-    '*/onnxruntime-node/bin/napi-v6/linux/x64/libonnxruntime_providers_*.so' \
-    -print -quit | grep -q .; then
-    printf 'runtime contains non-frozen optional ONNX CUDA provider libraries\n' >&2
-    exit 1
-  fi
-
-  install -Dm755 packaging/arch/ghostd "$pkgdir/usr/bin/ghostd"
+  install -Dm755 packages/daemon/dist/ghostd "$pkgdir/usr/bin/ghostd"
   install -Dm755 packaging/arch/ghost-desktop-helper \
     "$pkgdir/usr/bin/ghost-desktop-helper"
   install -Dm755 packages/shell/contrib/bin/ghost-launch \
@@ -191,8 +133,6 @@ package() {
     "$pkgdir/usr/share/applications/ghost.desktop"
   install -Dm755 packaging/arch/service-browser-smoke.sh \
     "$pkgdir/usr/lib/ghost/package-smoke/service-browser-smoke.sh"
-  install -Dm755 packaging/release/smoke-native-runtime.sh \
-    "$pkgdir/usr/lib/ghost/package-smoke/native-runtime-smoke.sh"
 
   _install_tree packages/shell/contrib "$pkgdir/usr/share/doc/ghost/shell-contrib"
   install -Dm644 packaging/arch/README.md "$pkgdir/usr/share/doc/ghost/ARCH.md"

@@ -2,11 +2,12 @@
 
 `PKGBUILD` builds `ghost-ai-git`, the development package for the first
 owner-local beta. The `ghost-git` AUR name already belongs to an unrelated
-screenshot utility, hence the collision-free package name. JavaScript runtime
-dependencies come from the repository's frozen `pnpm-lock.yaml`; minimum system
-runtime versions are declared in the package metadata. The stable `ghost-ai`
-template and release-source machinery live under `packaging/release/` and are
-installed for reference as `RELEASE-SOURCE.md`.
+screenshot utility, hence the collision-free package name. The daemon is one
+self-contained x86_64 executable at `/usr/bin/ghostd`, with Bun embedded and no
+installed source or JavaScript dependency tree. Bun remains a package runtime
+dependency only because the installed service-context Chromium smoke test uses
+it. The stable `ghost-ai` template and release-source machinery live under
+`packaging/release/` and are installed for reference as `RELEASE-SOURCE.md`.
 
 Build and install from this directory:
 
@@ -29,6 +30,9 @@ renders a fixed-checksum stable `ghost-ai` PKGBUILD whose package phases are
 fully offline. Nothing is published automatically. Issue #17 still requires an
 actual version tag and GitHub release, inspection of those attached artifacts,
 and a human upload of the rendered bundle to the `ghost-ai` AUR package.
+
+TODO (#17): the stable release recipe still deploys the daemon source tree and
+must make the same switch to the compiled executable.
 
 The shell is installed at `/usr/share/ghost/quickshell` and exposed as the
 system Quickshell config `ghost`, so the existing `qs -c ghost` integration and
@@ -89,9 +93,9 @@ For a real service-context Chromium check on a graphical Arch login, run:
 /usr/lib/ghost/package-smoke/service-browser-smoke.sh
 ```
 
-It launches Playwright's persistent Chromium in a transient user unit with the
-daemon's hardening properties and `chromiumSandbox: true`; a passing command
-therefore proves the unit does not force `--no-sandbox`. CI containers do not
-run a graphical user manager, so this probe is intentionally a release-machine
-check. Ghost's Playwright backend opts into the same sandbox setting, so the
+It launches Chromium with a CDP endpoint in a transient user unit with the
+daemon's hardening properties and without `--no-sandbox`; a passing command
+therefore proves the unit permits Chromium's sandbox. CI containers do not run
+a graphical user manager, so this probe is intentionally a release-machine
+check. Ghost's Playwright backend opts into `chromiumSandbox: true`, so the
 probe covers the production launch policy rather than a weaker test-only mode.

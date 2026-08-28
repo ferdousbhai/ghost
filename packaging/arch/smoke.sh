@@ -2,7 +2,6 @@
 set -euo pipefail
 
 root="${1:?usage: smoke.sh <package-root>}"
-script_dir="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 
 require_file() {
   local path="$root$1"
@@ -44,8 +43,6 @@ require_unit_directive() {
   fi
 }
 
-require_file /usr/lib/ghost/daemon/dist/main.js
-require_file /usr/lib/ghost/daemon/package.json
 require_file /usr/lib/ghost/desktop-helper/ghost_desktop_helper/__main__.py
 require_file /usr/lib/ghost/desktop-helper/ghost_desktop_helper/_vendor/omaharness/LICENSE
 require_file /usr/share/ghost/quickshell/shell.qml
@@ -62,7 +59,6 @@ require_executable /usr/bin/ghostd
 require_executable /usr/bin/ghost-desktop-helper
 require_executable /usr/bin/ghost-launch
 require_executable /usr/lib/ghost/package-smoke/service-browser-smoke.sh
-require_executable /usr/lib/ghost/package-smoke/native-runtime-smoke.sh
 
 # Numeric ownership is checked on the package archive itself. An unprivileged
 # extraction deliberately owns its materialized tree and cannot preserve root.
@@ -90,19 +86,6 @@ for path in \
   fi
 done
 
-# Both recipes install the same checked-in launcher; a rewritten or generated
-# copy would silently change the daemon's startup contract. Callers that run a
-# copy of this script outside the checkout must place the launcher beside it.
-reference_ghostd="$script_dir/ghostd"
-if [[ ! -f "$reference_ghostd" ]]; then
-  printf 'missing reference launcher beside smoke.sh: %s\n' "$reference_ghostd" >&2
-  exit 1
-fi
-if ! cmp -s "$reference_ghostd" "$root/usr/bin/ghostd"; then
-  printf 'packaged /usr/bin/ghostd differs from the checked-in launcher\n' >&2
-  exit 1
-fi
-
 if [[ "$(readlink "$root/etc/xdg/quickshell/ghost")" != "/usr/share/ghost/quickshell" ]]; then
   printf 'system Quickshell config link is missing or incorrect\n' >&2
   exit 1
@@ -123,7 +106,7 @@ if find "$root/usr/lib/ghost/desktop-helper" \
   printf 'package payload contains generated Python bytecode\n' >&2
   exit 1
 fi
-bun "$root/usr/lib/ghost/daemon/dist/main.js" --version | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'
+"$root/usr/bin/ghostd" --version | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'
 
 require_unit_directive /usr/lib/systemd/user/ghostd.service Unit PartOf \
   graphical-session.target
@@ -145,8 +128,6 @@ require_unit_directive /usr/lib/systemd/user/ghost-shell.service Service ExecRel
   '/usr/bin/qs -c ghost ipc call ghost refresh'
 
 # Every symlink in the installed payload must resolve inside that payload.
-# This catches pnpm workspace links back into the build checkout even while the
-# checkout still exists, and rejects broken links after target-specific pruning.
 while IFS= read -r -d '' link; do
   target="$(readlink "$link")"
   if [[ "$target" == /* ]]; then
@@ -166,18 +147,6 @@ while IFS= read -r -d '' link; do
     exit 1
   fi
 done < <(find "$root" -type l -print0)
-
-smoke_parent="${GHOST_PACKAGE_SMOKE_WORK_ROOT:-${TMPDIR:-/tmp}}"
-mkdir -p "$smoke_parent"
-native_scratch="$(mktemp -d "$smoke_parent/ghost-native-smoke.XXXXXX")"
-cleanup() {
-  find "$native_scratch" -depth -delete
-}
-trap cleanup EXIT
-bash "$root/usr/lib/ghost/package-smoke/native-runtime-smoke.sh" \
-  "$root/usr/lib/ghost/daemon" "$native_scratch"
-cleanup
-trap - EXIT
 
 if find "$root" -path '*/ghosts/*' -print -quit | grep -q .; then
   printf 'package payload must not own a user ghosts directory\n' >&2

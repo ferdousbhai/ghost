@@ -299,11 +299,9 @@ fi
 [[ ! -e "$nested_destination" && ! -L "$nested_destination" ]]
 [[ "$(< "$outside_sentinel")" == outside ]]
 
-# The development package invokes this exact deploy helper. The stable package
-# consumes the runtime archive produced through runtime-tree -> deploy helper;
-# render it once here to keep that call chain and artifact source explicit.
-grep -Fq 'bash packaging/release/deploy-runtime.sh . "$appdir/daemon"' \
-  "$source_root/packaging/arch/PKGBUILD"
+# The stable package consumes the runtime archive produced through
+# runtime-tree -> deploy helper; render it once here to keep that call chain and
+# artifact source explicit.
 grep -Fq 'bash packaging/release/deploy-runtime.sh "$source_root" "$destination"' \
   "$source_root/packaging/release/runtime-tree.sh"
 rendered="$work/rendered-stable"

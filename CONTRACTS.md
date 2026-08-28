@@ -1846,7 +1846,10 @@ whole model before any non-local exposure.
   unit. Depends on `extensions`. Both installed user services declare
   `WorkingDirectory=%h`; that sets process cwd only, while Ghost storage keeps
   its explicit roots. Daemon CLI operands still resolve relative to the caller's
-  cwd when the CLI is launched directly.
+  cwd when the CLI is launched directly. The Arch development package installs
+  the daemon as the single self-contained `/usr/bin/ghostd` executable, with
+  its Bun runtime and version embedded and no daemon source or `node_modules`
+  tree.
 - `packages/shell` — the Omarchy/Quickshell HUD, model routing, ask/queue and
   branching UI, live tool cards, and summoning indicator.
 - `packages/chromium-extension` — the "my browser" relay, driving one tab of the
