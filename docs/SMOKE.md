@@ -71,6 +71,15 @@ qs -p ~/.config/quickshell/ghost/shell.qml kill   # then start it again as usual
 - [ ] **Pick a model for a provider you have not logged into.** The switcher
       shows it dimmed as "waiting for login" rather than showing nothing, and
       clears once the login finishes or the panel closes.
+- [ ] **Migrate an old credential home.** On first session open, `.pi/agent.db`
+      is scrubbed and vacuumed, `models.json` contains `keyring:` references,
+      and the next turn still works. Lock a passworded keyring and try again:
+      session open must report a keyring error, with no plaintext fallback.
+- [ ] **Let idle memory maintenance run.** Give the ghost one durable fact,
+      finish the turn, and leave it idle; the memory write appears after the
+      60-second deadline. Ordinary upkeep stays single-write below pressure;
+      consolidation runs only at a 3,200-character index, an omitted entry, or
+      100 valid files, and its deletions remain recoverable.
 - [ ] **Let an ask time out.** Until 30s remain there is a static line saying it
       answers itself; then a seconds countdown, amber for the last 10. If the
       question carried a recommendation it is taken and the card offers to

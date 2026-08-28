@@ -15,6 +15,12 @@ makepkg -si
 systemctl --user enable --now ghostd.service ghost-shell.service
 ```
 
+Before opening a session, install `libsecret` (for `secret-tool`) and run a
+user-session Secret Service provider such as `gnome-keyring`; its default
+collection must be available to `ghostd`. See
+[keyring credentials](../../docs/keyring.md) for failure behavior and the
+blank-password/autologin caveat.
+
 This remains the rolling development package: `pnpm install` may populate its
 store during `build()`, so it is not the AUR release recipe. Release CI now
 constructs a deterministic, architecture-specific runtime source from the
