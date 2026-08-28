@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { DEFAULT_COMPACTION_CONFIG, type CompactionConfig } from "./compaction.js";
+import type { RemoteAccessOptions } from "./tailscale-identity.js";
 
 export interface DaemonConfig {
   port: number;
@@ -27,6 +28,12 @@ export interface DaemonConfig {
   browserMode: "relay" | "profile";
   compaction: CompactionConfig;
   askTimeoutSeconds: number;
+  /**
+   * Who may reach the daemon through `tailscale serve`: `owner` is the login
+   * that owns every ghost (default: the login this node belongs to), `guests`
+   * says what other tailnet members may do (default read-only).
+   */
+  remote: Pick<RemoteAccessOptions, "owner" | "guests">;
   configPath: string | null;
   hooksPath: string;
 }
@@ -43,6 +50,7 @@ export interface DaemonConfigFile {
     thresholdFraction?: number;
   };
   askTimeoutSeconds?: number;
+  remote?: Pick<RemoteAccessOptions, "owner" | "guests">;
 }
 
 export interface DaemonConfigOverrides {
@@ -138,6 +146,24 @@ function readConfigFile(path: string): DaemonConfigFile | null {
       throw new Error(`${path}: "browserMode" must be "relay" or "profile".`);
     }
     config.browserMode = file.browserMode;
+  }
+  if (file.remote !== undefined) {
+    if (file.remote === null || typeof file.remote !== "object" || Array.isArray(file.remote)) {
+      throw new Error(`${path}: "remote" must be a JSON object.`);
+    }
+    const raw = file.remote as Record<string, unknown>;
+    const remote: Pick<RemoteAccessOptions, "owner" | "guests"> = {};
+    if (raw.owner !== undefined) {
+      if (typeof raw.owner !== "string" || !raw.owner.trim()) throw new Error(`${path}: "remote.owner" must be a login.`);
+      remote.owner = raw.owner;
+    }
+    if (raw.guests !== undefined) {
+      if (raw.guests !== "read-only" && raw.guests !== "none") {
+        throw new Error(`${path}: "remote.guests" must be "read-only" or "none".`);
+      }
+      remote.guests = raw.guests;
+    }
+    config.remote = remote;
   }
   if (file.compaction !== undefined) {
     if (file.compaction === null || typeof file.compaction !== "object" || Array.isArray(file.compaction)) {
@@ -287,6 +313,7 @@ export function loadConfig(overrides: DaemonConfigOverrides = {}): DaemonConfig 
     browserMode,
     compaction,
     askTimeoutSeconds,
+    remote: file?.remote ?? {},
     configPath: file ? configPath : null,
     hooksPath,
   };

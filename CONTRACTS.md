@@ -716,6 +716,38 @@ Three checks, applied to every `/api` request before routing:
    That excludes exactly the three types a cross-site form post can produce
    without a preflight.
 
+**Tailnet identity** (`packages/daemon/src/tailscale-identity.ts`) is the one
+alternative to the bearer token. Omarchy ships Tailscale; the owner runs
+`tailscale serve --bg 7717` (needs `tailscale set --operator=$USER` once, which
+Omarchy's installer does) and Tailscale terminates TLS on the node's tailnet
+name, proxies to the loopback daemon, and stamps `Tailscale-User-Login`,
+`Tailscale-User-Name`, and `Tailscale-User-Profile-Pic` on each request —
+stripping any such header a client sent itself. Ghost accepts that identity
+exactly as Tailscale documents it: only on a loopback connection (a local
+process that could forge the header could already read the token file — the
+same trust domain), and only through the `RemoteAccess` the daemon is started
+with (`main.ts` builds it from the `remote` config; a server without one
+admits no identity). The login equal to `remote.owner` (default: the login
+this node is signed in as, from `tailscale status`, asked again until it
+answers) is the **owner** and may do everything the token may; any other
+member is a **guest**: `GET` only, else `403 read_only`, and nothing at all
+when `remote.guests` is `"none"` (`"read-only"` by default). One origin rule
+covers both callers: an `Origin`, when present, must be loopback or name the
+host the request was addressed to (the tailnet name the viewer was served
+from), else `403 forbidden_origin`, checked before any credential. `GET
+/api/remote/whoami` reports `{ login, role, name? }` for an identity caller
+and `{ login: null, role: "owner" }` for the token.
+
+The daemon serves a built-in viewer page at `GET /`
+(`packages/daemon/src/remote-viewer.ts`: one HTML file, no framework; its CSP
+allows only the page's own inline script and style by hash and `connect-src
+'self'`) that a phone or another laptop opens over the tailnet: ghost and
+conversation pickers, the transcript, live refresh over `GET …/events`, and —
+for the owner only — a composer that posts to `…/messages` and renders the
+stream. It carries no token; the identity comes from `tailscale serve`, so on
+plain loopback the page reports unauthorized. Off the tailnet it needs Funnel
+plus the bearer token and is not the intended path.
+
 Two deliberate exemptions, which must not be widened:
 
 - `OPTIONS` answers `204` unauthenticated. A preflight cannot carry
@@ -1395,6 +1427,9 @@ one must not be a leak of both.
   model rebinds and MCP reloads/reconnects defer across that same boundary and
   apply after voice releases the session. Claude Code returns
   `409 not_supported`.
+- `GET  /api/remote/whoami` → `{ login, role, name? }` — the tailnet identity
+  this request was admitted on, or `{ login: null, role: "owner" }` for a
+  bearer-token caller. See "Tailnet identity" under Authentication.
 - `GET|POST /api/ghosts/:name/sessions/:id/collab` owns one encrypted relay
   host through the `CollaborationManager` interface. GET returns
   `{ supported, active, readOnlyUrl?, writableUrl?, participants }` without

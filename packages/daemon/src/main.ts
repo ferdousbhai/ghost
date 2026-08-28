@@ -3,6 +3,7 @@ import { pathToFileURL } from "node:url";
 import { homedir } from "node:os";
 import { openMachineDocuments } from "@ghost/extensions";
 import { apiTokenCommand } from "./api-token.js";
+import { RemoteAccess } from "./tailscale-identity.js";
 import { LoginManager } from "./auth.js";
 import { ClaudeCodeProbe } from "./claude-code.js";
 import { importCommand } from "./import-command.js";
@@ -494,6 +495,7 @@ async function serveDaemon(
       port: config.port,
       address: config.host,
       relay: relay ?? null,
+      remote: new RemoteAccess(config.remote),
     });
   } catch (error) {
     logger.error("could not bind", {

@@ -2632,7 +2632,7 @@ describe("routing and transport", () => {
 
   it("404s anything outside the contract and 405s the wrong method", async () => {
     const base = await serve();
-    expect((await fetch(`${base}/`)).status).toBe(404);
+    expect((await fetch(`${base}/nothing`)).status).toBe(404);
     expect((await fetch(`${base}/api/other`)).status).toBe(404);
     expect((await fetch(`${base}/api/ghosts/casper`)).status).toBe(404);
     expect((await fetch(`${base}/api/ghosts/casper/sessions`, { method: "POST" })).status)

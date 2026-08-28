@@ -188,7 +188,7 @@ export type RelayUpgradeDecision =
   | { readonly ok: true; readonly subprotocol: string }
   | { readonly ok: false; readonly status: number; readonly reason: string };
 
-const LOOPBACK_ADDRESSES = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
+export const LOOPBACK_ADDRESSES: ReadonlySet<string> = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
 
 /**
  * Whether the origin may open a relay socket at all.

@@ -330,6 +330,31 @@ ad-hoc prompts:
   `ask` still commits the revised result as a sibling in place and resumes
   generation there.
 
+## Reach it from your phone (Tailscale)
+
+Omarchy ships Tailscale. Once (Omarchy's installer already does this):
+
+```sh
+sudo tailscale set --operator=$USER
+```
+
+Then, on the machine running ghostd:
+
+```sh
+tailscale serve --bg 7717
+```
+
+Open `https://<this-machine>.<tailnet>.ts.net/` from any device on your
+tailnet: the daemon's built-in viewer shows your ghosts and conversations
+live, and lets you type. Tailscale stamps your identity on each request; the
+login this node is signed in as owns the ghosts (set `remote.owner` in
+`~/.config/ghost/config.json` to change it), other tailnet members get a
+read-only view (`remote.guests: "none"` hides it from them). ghostd itself
+stays bound to loopback; `tailscale serve status` shows what is exposed and
+`tailscale serve --https=443 off` stops it. HTTPS needs certificates enabled
+for the tailnet (admin console → DNS → HTTPS Certificates); until then use
+`tailscale serve --bg --http=80 7717` and `http://<this-machine>/`.
+
 ## HTTP API
 
 The authoritative route and payload contract is

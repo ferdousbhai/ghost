@@ -2,6 +2,8 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from "node:net";
 import { isAbsolute } from "node:path";
 import { apiTokenMatches, readOrCreateApiToken } from "./api-token.js";
+import { REMOTE_VIEWER_CSP, REMOTE_VIEWER_HTML } from "./remote-viewer.js";
+import type { RemoteAccess, TailscaleIdentity } from "./tailscale-identity.js";
 import type { AuthType, LoginManager } from "./auth.js";
 import { assertLoopback } from "./config.js";
 import {
@@ -86,6 +88,8 @@ export interface ServerOptions {
    * `apiToken: null` is exactly the CSRF hole issue #485 closed.
    */
   apiToken?: string | null;
+  /** Callers reaching the daemon through `tailscale serve`; omit to admit none. */
+  remote?: RemoteAccess | null;
 }
 
 export interface ListeningServer {
@@ -114,6 +118,16 @@ const RELAY_HUB = Symbol.for("ghostd.relayHub");
  * ghost's memory through the user's own browser.
  */
 const LOOPBACK_ORIGIN = /^http:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?$/;
+
+/** Whether a browser origin names the host this request was addressed to. */
+function sameHostOrigin(origin: string, host: string | undefined): boolean {
+  if (!host) return false;
+  try {
+    return new URL(origin).host.toLowerCase() === host.toLowerCase();
+  } catch {
+    return false;
+  }
+}
 
 function jsonResponse(
   response: ServerResponse,
@@ -268,30 +282,37 @@ export function createDaemonServer(options: ServerOptions): Server {
     ? createRelayHub({ ...(options.logger ? { logger: options.logger } : {}) })
     : options.relay;
   const apiToken = resolveApiToken(options.apiToken, logger);
+  const remote = options.remote ?? null;
 
   /**
-   * The gate every `/api` request passes before it is routed. Returns true when
-   * it has already answered, in which case the caller must stop.
+   * The gate every `/api` request passes before it is routed: `null` when it
+   * has already answered, otherwise who was admitted (a tailnet identity, or
+   * `undefined` for the bearer token and the open routes).
    */
-  const refuseUnauthenticated = (
+  const authenticate = async (
     request: IncomingMessage,
     response: ServerResponse,
     method: string,
     segments: readonly string[],
-  ): boolean => {
-    if (apiToken === null) return false;
-    if (segments[0] !== "api") return false;
+  ): Promise<{ identity: TailscaleIdentity | undefined } | null> => {
+    const admitted = { identity: undefined };
+    if (apiToken === null) return admitted;
+    if (segments[0] !== "api") return admitted;
     // Deliberately open: it carries no secret, and a client with no token yet
     // may still need to ask whether the relay is up.
-    if (segments[1] === "relay" && segments[2] === "status" && segments.length === 3) return false;
+    if (segments[1] === "relay" && segments[2] === "status" && segments.length === 3) return admitted;
 
+    // A page served by this daemon is loopback, or same-host through
+    // `tailscale serve`; anything else is a cross-site page.
     const origin = request.headers.origin;
-    if (typeof origin === "string" && !LOOPBACK_ORIGIN.test(origin)) {
+    if (typeof origin === "string" && !LOOPBACK_ORIGIN.test(origin) && !sameHostOrigin(origin, request.headers.host)) {
       errorResponse(response, 403, "forbidden_origin", "That origin may not call this daemon.");
-      return true;
+      return null;
     }
     const presented = bearerToken(request.headers.authorization);
-    if (presented === "" || !apiTokenMatches(apiToken, presented)) {
+    const tokenOk = presented !== "" && apiTokenMatches(apiToken, presented);
+    const identity = tokenOk ? undefined : (await remote?.identify(request)) ?? undefined;
+    if (!tokenOk && !identity) {
       response.setHeader("www-authenticate", "Bearer");
       errorResponse(
         response,
@@ -299,7 +320,11 @@ export function createDaemonServer(options: ServerOptions): Server {
         "unauthorized",
         "This API needs the machine-local bearer token. Run `ghostd api-token`.",
       );
-      return true;
+      return null;
+    }
+    if (identity?.role === "guest" && method !== "GET") {
+      errorResponse(response, 403, "read_only", "Tailnet guests can watch this ghost but not act for it.");
+      return null;
     }
     if ((method === "POST" || method === "PUT") && !isJsonContentType(request.headers["content-type"])) {
       errorResponse(
@@ -308,9 +333,9 @@ export function createDaemonServer(options: ServerOptions): Server {
         "unsupported_media_type",
         "Mutating requests must be application/json.",
       );
-      return true;
+      return null;
     }
-    return false;
+    return { identity };
   };
 
   const handleListGhosts = (response: ServerResponse): void => {
@@ -1684,11 +1709,34 @@ export function createDaemonServer(options: ServerOptions): Server {
       }
       const url = new URL(request.url ?? "/", "http://127.0.0.1");
       const segments = url.pathname.split("/").filter(Boolean);
-      if (refuseUnauthenticated(request, response, method, segments)) return;
+      const admission = await authenticate(request, response, method, segments);
+      if (!admission) return;
 
       try {
+        if (segments.length === 0) {
+          if (method !== "GET") {
+            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+            return;
+          }
+          response.writeHead(200, {
+            "content-type": "text/html; charset=utf-8",
+            "content-security-policy": REMOTE_VIEWER_CSP,
+            "cache-control": "no-store",
+          });
+          response.end(REMOTE_VIEWER_HTML);
+          return;
+        }
         if (segments[0] !== "api") {
           errorResponse(response, 404, "not_found", "Not found.");
+          return;
+        }
+        if (segments.length === 3 && segments[1] === "remote" && segments[2] === "whoami") {
+          if (method !== "GET") {
+            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+            return;
+          }
+          const identity = admission.identity;
+          jsonResponse(response, 200, identity ? { login: identity.login, role: identity.role, ...(identity.name ? { name: identity.name } : {}) } : { login: null, role: "owner" });
           return;
         }
         if (segments[1] === "relay" && segments[2] === "status" && segments.length === 3) {
