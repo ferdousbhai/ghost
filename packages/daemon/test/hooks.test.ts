@@ -79,6 +79,28 @@ function idleEvent(overrides: Partial<GhostConversationIdleEvent> = {}): GhostCo
   };
 }
 
+// A killed descendant is reparented to init, and only init can reap it. Under a
+// non-reaping PID 1 -- the CI container's `tail -f /dev/null` entrypoint -- it stays
+// an unreaped zombie forever, and `process.kill(pid, 0)` reports a zombie as alive.
+// A zombie has already exited and dropped its inherited stdout/stderr pipes, so it is
+// not a survivor; only a process that can still run and hold those pipes is.
+function isAlive(pid: number): boolean {
+  try {
+    // "<pid> (<comm>) <state> ...", and comm can hold spaces and parens, so end it at the last ")".
+    const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+    const state = stat.slice(stat.lastIndexOf(")") + 2).split(" ")[0];
+    return state !== "Z";
+  } catch {
+    // No procfs (non-Linux), or the entry vanished; fall back to signal probing.
+  }
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
 describe("GhostHookRunner", () => {
   it("runs in-process handlers sequentially and returns the first continuation", async () => {
     const runner = new GhostHookRunner();
@@ -353,19 +375,11 @@ describe("GhostHookRunner", () => {
       const runner = GhostHookRunner.fromConfig(config);
       const controller = new AbortController();
       const running = runner.emitSessionStop(event({ signal: controller.signal }));
-      await vi.waitFor(() => expect(existsSync(pidsPath)).toBe(true));
+      await vi.waitFor(() => expect(existsSync(pidsPath)).toBe(true), { timeout: 5_000 });
       const pids = JSON.parse(readFileSync(pidsPath, "utf8")) as number[];
       if (mode === "abort") controller.abort(new Error("owner moved on"));
       await running;
-      const alive = (pid: number): boolean => {
-        try {
-          process.kill(pid, 0);
-          return true;
-        } catch (error) {
-          return (error as NodeJS.ErrnoException).code === "EPERM";
-        }
-      };
-      await vi.waitFor(() => expect(pids.filter(alive)).toEqual([]), { timeout: 5_000 });
+      await vi.waitFor(() => expect(pids.filter(isAlive)).toEqual([]), { timeout: 5_000 });
     }
   }, 15_000);
 
