@@ -46,6 +46,51 @@ function literalHome(machine: string, name: string, apiKey: string): string {
   return home;
 }
 
+/**
+ * A legacy OMP `agent.db`: the credential tables named beside the identity,
+ * usage, and cache tables the scrub has to reach too. Table names are OMP's,
+ * because those are what the scrub's keep-list decides on; columns are only the
+ * ones a test reads back, because the scrub itself is column-blind.
+ * `AUTOINCREMENT` earns its place — it makes SQLite create `sqlite_sequence`,
+ * so the enumeration meets a table the keep-list skips by prefix.
+ */
+function legacyAgentDb(agentDir: string): void {
+  const db = new Database(join(agentDir, "agent.db"));
+  db.exec(`
+    CREATE TABLE auth_schema_version (id INTEGER PRIMARY KEY, version INTEGER NOT NULL);
+    CREATE TABLE auth_change_revision (id INTEGER PRIMARY KEY, revision INTEGER NOT NULL);
+    CREATE TABLE auth_credentials (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      provider TEXT,
+      credential_type TEXT,
+      data TEXT,
+      disabled_cause TEXT
+    );
+    CREATE TABLE auth_credential_blocks (credential_id INTEGER, provider_key TEXT);
+    CREATE TABLE auth_credential_refresh_leases (credential_id INTEGER PRIMARY KEY, owner TEXT);
+    CREATE TABLE auth_credential_block_mirror_guard (credential_id INTEGER PRIMARY KEY) WITHOUT ROWID;
+    CREATE TABLE cache (key TEXT PRIMARY KEY, value TEXT);
+    CREATE TABLE usage_history (provider TEXT, account_key TEXT, email TEXT, account_id TEXT);
+    CREATE TABLE clients (install_id TEXT PRIMARY KEY, hostname TEXT);
+    CREATE TABLE client_usage (install_id TEXT, model TEXT, cost_usd REAL);
+    INSERT INTO auth_schema_version VALUES (1, 3);
+    INSERT INTO auth_change_revision VALUES (1, 17);
+    INSERT INTO auth_credential_blocks VALUES (1, 'openai:oauth');
+    INSERT INTO auth_credential_refresh_leases VALUES (1, 'owner-a');
+    INSERT INTO auth_credential_block_mirror_guard VALUES (1);
+    INSERT INTO cache VALUES ('usage_cache:openai:acct-identity', 'cached-usage-payload');
+    INSERT INTO usage_history VALUES ('openai', 'acct-identity', 'someone@example.test', 'acct-identity');
+    INSERT INTO clients VALUES ('install-identity', 'workstation-identity');
+    INSERT INTO client_usage VALUES ('install-identity', 'gpt-identity', 6.0);
+  `);
+  const credential = db.query(`
+    INSERT INTO auth_credentials(provider, credential_type, data, disabled_cause) VALUES (?, 'api_key', ?, ?)
+  `);
+  credential.run("openai", JSON.stringify({ key: "live-secret" }), null);
+  credential.run("anthropic", JSON.stringify({ key: "disabled-secret" }), "revoked by provider");
+  db.close();
+}
+
 describe("keyring references", () => {
   it("round-trips service/account with an optional field", () => {
     expect(parseSecretReference("keyring:openrouter/personal")).toEqual({
@@ -291,21 +336,7 @@ describe("plaintext migration", () => {
         expires: 2_000_000_000_000,
       },
     }));
-    const db = new Database(join(agentDir, "agent.db"));
-    db.exec(`
-      CREATE TABLE auth_credentials (
-        id INTEGER PRIMARY KEY,
-        provider TEXT,
-        credential_type TEXT,
-        data TEXT,
-        disabled_cause TEXT
-      );
-    `);
-    db.query(`
-      INSERT INTO auth_credentials(provider, credential_type, data, disabled_cause)
-      VALUES (?, 'api_key', ?, NULL)
-    `).run("openai", JSON.stringify({ key: "database-secret" }));
-    db.close();
+    legacyAgentDb(agentDir);
 
     const client = new MemorySecretServiceClient();
     const context = openContext(home, client);
@@ -330,10 +361,69 @@ describe("plaintext migration", () => {
     expect((scrubbedDb.query("SELECT COUNT(*) AS count FROM auth_credentials").get() as { count: number }).count)
       .toBe(0);
     scrubbedDb.close();
-    expect(readFileSync(join(agentDir, "agent.db")).includes(Buffer.from("database-secret"))).toBe(false);
+    expect(readFileSync(join(agentDir, "agent.db")).includes(Buffer.from("live-secret"))).toBe(false);
 
     const store = new KeyringAuthCredentialStore(context);
     expect(store.listAuthCredentials().map((row) => row.provider).sort()).toEqual(["anthropic", "openai"]);
+    store.close();
+  });
+
+  it("empties every legacy identity, usage, and cache table down to schema rows", () => {
+    const home = root();
+    const agentDir = join(home, ".pi");
+    mkdirSync(agentDir, { recursive: true });
+    legacyAgentDb(agentDir);
+
+    openContext(home, new MemorySecretServiceClient()).close();
+
+    const scrubbed = new Database(join(agentDir, "agent.db"), { readonly: true });
+    const count = (table: string): number =>
+      (scrubbed.query(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number }).count;
+    for (const table of [
+      "auth_credentials",
+      "auth_credential_blocks",
+      "auth_credential_refresh_leases",
+      "auth_credential_block_mirror_guard",
+      "cache",
+      "usage_history",
+      "clients",
+      "client_usage",
+    ]) {
+      expect(count(table), table).toBe(0);
+    }
+    expect(scrubbed.query("SELECT version FROM auth_schema_version WHERE id = 1").get())
+      .toEqual({ version: 3 });
+    expect(scrubbed.query("SELECT revision FROM auth_change_revision WHERE id = 1").get())
+      .toEqual({ revision: 17 });
+    scrubbed.close();
+
+    const bytes = readFileSync(join(agentDir, "agent.db"));
+    for (const residue of [
+      "live-secret",
+      "disabled-secret",
+      "someone@example.test",
+      "acct-identity",
+      "workstation-identity",
+      "cached-usage-payload",
+      "gpt-identity",
+    ]) {
+      expect(bytes.includes(Buffer.from(residue)), residue).toBe(false);
+    }
+  });
+
+  it("deletes a credential OMP had disabled instead of migrating it", () => {
+    const home = root();
+    const agentDir = join(home, ".pi");
+    mkdirSync(agentDir, { recursive: true });
+    legacyAgentDb(agentDir);
+
+    const client = new MemorySecretServiceClient();
+    const context = openContext(home, client);
+    const store = new KeyringAuthCredentialStore(context);
+    expect(store.listAuthCredentials()).toMatchObject([
+      { provider: "openai", credential: { key: "live-secret" }, disabledCause: null },
+    ]);
+    expect([...client.items.values()].join("\n")).not.toContain("disabled-secret");
     store.close();
   });
 
