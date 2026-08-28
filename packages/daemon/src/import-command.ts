@@ -249,7 +249,7 @@ export async function importCommand(
       + `${conversations.failures.length > 0
         ? `, ${conversations.failures.length} could not be activated`
         : ""}.\n`
-      + `\nStart the daemon (ghostd) and summon it with Super+G.\n`,
+      + `\nStart the daemon (ghostd) and summon it with Super+Ctrl+G.\n`,
     );
     for (const failure of conversations.failures) {
       fail(`import: kept ${failure.source} unchanged: ${failure.error}\n`);

@@ -155,7 +155,7 @@ maintenance may write one owner-grounded fact. Only index pressure switches
 that delivery to consolidation: at least 3,200 of 4,000 index characters, any
 omitted memory, or 100 valid files. Consolidation is limited to four writes and
 four recoverable `.trash/` deletions and has a six-hour claimed cooldown.
-Foreground turns cannot delete memory. Every write path redacts common secret
+Foreground turns get no deletion tool. Every write path redacts common secret
 forms before validation, slug derivation, or disk.
 
 ### Ghost and conversation-project MCP
