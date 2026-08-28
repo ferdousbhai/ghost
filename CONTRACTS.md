@@ -271,20 +271,26 @@ Migration is idempotent and serialized per home. It imports active
 header literals plus sensitive MCP environment/header/client-secret/URL and
 recognized credential-argument values with references, read-verifies every
 Secret Service write, atomically and durably replaces portable config, then
-removes `auth.json` and deletes and vacuums every `auth_credentials` row. No
-source is removed or replaced before its keyring writes verify; plaintext
-sources remain for retry. A conflicting literal never overwrites a Ghost-known
-schema item, even if secret-free metadata was lost: migration allocates
-`account-2`, `account-3`, and so on. An `mcp.json` row the MCP catalogue itself
-rejects is not a migration failure: migration skips it untouched, the catalogue
-keeps reporting it as `invalid_mcp_server`/skipped, and any secret it holds
-stays plaintext in that visibly invalid row until the owner corrects it, after
-which the next open migrates it. Fail-closed is about the keyring, not about a
-neighbouring row's shape. `.pi/agent.db` is read and scrubbed where an older
-home has one; no session, login, or model listing creates one, so a home
-migrated or created after this point holds only derived non-credential state
-there. Credentials already copied into backup, sync, or Trash history remain
-exposed there and may need provider-side rotation.
+removes `auth.json` and empties and vacuums `agent.db` down to its schema and
+change-counter rows. Every other table goes, not only the credential ones:
+`usage_history` carries a provider email and account id per sample, `clients` a
+hostname, `client_usage` per-model spend, and `cache` usage payloads keyed by
+account, and none of it is read again. A credential OMP had disabled is not
+migrated and is deleted with the rest — Ghost's keyring store has no disabled
+state to carry it into — so log in again to replace it. No source is removed or
+replaced before its keyring writes verify; plaintext sources remain for retry. A
+conflicting literal never overwrites a Ghost-known schema item, even if
+secret-free metadata was lost: migration allocates `account-2`, `account-3`, and
+so on. An `mcp.json` row the MCP catalogue itself rejects is not a migration
+failure: migration skips it untouched, the catalogue keeps reporting it as
+`invalid_mcp_server`/skipped, and any secret it holds stays plaintext in that
+visibly invalid row until the owner corrects it, after which the next open
+migrates it. Fail-closed is about the keyring, not about a neighbouring row's
+shape. `.pi/agent.db` is read and scrubbed where an older home has one; no
+session, login, or model listing creates one, so a home migrated or created
+after this point carries no credential, identity, or usage residue there.
+Credentials already copied into backup, sync, or Trash history remain exposed
+there and may need provider-side rotation.
 
 One naming convention makes the boundary readable rather than remembered. A
 plain-named entry in a ghost home is part of that ghost's identity and travels

@@ -51,14 +51,20 @@ logged-out machine account fails closed until that account signs in again.
 On the first open after upgrade, Ghost imports active `.pi/agent.db` rows and
 legacy `.pi/auth.json`, and replaces provider and MCP literals. Each keyring
 write is read back before portable config changes or plaintext removal. Config
-replacements are atomic and durable; the SQLite credential table is deleted and
-vacuumed, and `auth.json` is removed. Matching literals reuse an existing Ghost
-schema item; a conflicting value receives `account-2`, `account-3`, and so on
-rather than overwriting another login, even if the secret-free metadata database
-was lost. An interrupted run resumes from the source that remains. A locked or
-missing service, absent item, disallowed account, malformed item, or failed
-verification is reported as a keyring error and leaves plaintext migration
-sources available for retry.
+replacements are atomic and durable; `agent.db` is emptied down to its schema
+and change-counter rows and vacuumed, and `auth.json` is removed. The scrub
+takes every other table, not just the credential ones: the usage, client, and
+cache rows there name the account and the machine too, in a file that gets
+backed up and copied like any other. A credential OMP had disabled is not
+migrated and is deleted with the rest — the keyring store has no disabled state
+to carry it into, and a dead secret there would claim the account name a working
+login wants — so log in again to replace it. Matching literals reuse an existing
+Ghost schema item; a conflicting value receives `account-2`, `account-3`, and so
+on rather than overwriting another login, even if the secret-free metadata
+database was lost. An interrupted run resumes from the source that remains. A
+locked or missing service, absent item, disallowed account, malformed item, or
+failed verification is reported as a keyring error and leaves plaintext
+migration sources available for retry.
 
 Nothing recreates `.pi/agent.db` afterwards, so a home created after the move
 never has one. An `mcp.json` server that Ghost's MCP schema rejects is a

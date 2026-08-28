@@ -158,8 +158,13 @@ function parseStoredCredential(type: unknown, data: unknown): AuthCredential {
   }
 }
 
-function readAgentDb(path: string): { credentials: PlainCredentialRow[]; hasCredentialTable: boolean } {
-  if (!existsSync(path)) return { credentials: [], hasCredentialTable: false };
+/**
+ * A row OMP disabled is skipped rather than migrated: the keyring store has no
+ * disabled state to carry it into, and the scrub below deletes it with the rest
+ * of the file. CONTRACTS.md states that outcome and the answer to it.
+ */
+function readAgentDb(path: string): PlainCredentialRow[] {
+  if (!existsSync(path)) return [];
   const stats = lstatSync(path);
   if (!stats.isFile() || stats.isSymbolicLink() || stats.nlink !== 1) {
     throw new SecretServiceError("secret_migration_failed", `Ghost refused to migrate unsafe ${path}.`);
@@ -167,22 +172,19 @@ function readAgentDb(path: string): { credentials: PlainCredentialRow[]; hasCred
   const db = new Database(path, { readonly: true, strict: true });
   try {
     const table = db.query(
-      "SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'auth_credentials'",
-    ).get() as { present: number } | null;
-    if (!table) return { credentials: [], hasCredentialTable: false };
+      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'auth_credentials'",
+    ).get();
+    if (!table) return [];
     const rows = db.query(`
       SELECT provider, credential_type, data
       FROM auth_credentials WHERE disabled_cause IS NULL ORDER BY id
     `).all() as Array<{ provider: unknown; credential_type: unknown; data: unknown }>;
-    return {
-      credentials: rows.map((row) => {
-        if (typeof row.provider !== "string" || row.provider.length === 0) {
-          throw new SecretServiceError("secret_migration_failed", "agent.db contains an invalid provider id.");
-        }
-        return { provider: row.provider, credential: parseStoredCredential(row.credential_type, row.data) };
-      }),
-      hasCredentialTable: true,
-    };
+    return rows.map((row) => {
+      if (typeof row.provider !== "string" || row.provider.length === 0) {
+        throw new SecretServiceError("secret_migration_failed", "agent.db contains an invalid provider id.");
+      }
+      return { provider: row.provider, credential: parseStoredCredential(row.credential_type, row.data) };
+    });
   } finally {
     db.close();
   }
@@ -475,24 +477,31 @@ function importCredentials(
   }
 }
 
+/** What the file is, rather than whose it was: schema number and change counter. */
+const AGENT_DB_SCHEMA_TABLES = new Set(["auth_schema_version", "auth_change_revision"]);
+
+/**
+ * Empty the legacy database down to those two rows.
+ *
+ * The keep-list is a list of what stays, not of what goes, on purpose: naming
+ * the credential tables left the identity sitting beside them, and nothing
+ * creates or reads `agent.db` after migration — the injected credential store
+ * bypasses it entirely — so deleting every table not named here covers whatever
+ * OMP adds later by default. CONTRACTS.md lists what the narrow scrub left.
+ */
 function scrubAgentDb(path: string): void {
   if (!existsSync(path)) return;
   const db = new Database(path, { create: false, strict: true });
   try {
-    const table = db.query(
-      "SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'auth_credentials'",
-    ).get();
-    if (!table) return;
+    const rows = db.query("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
+      .all() as Array<{ name: string }>;
+    const tables = rows
+      .map((row) => row.name)
+      .filter((name) => !name.startsWith("sqlite_") && !AGENT_DB_SCHEMA_TABLES.has(name));
+    if (tables.length === 0) return;
     db.exec("PRAGMA journal_mode = DELETE");
     db.transaction(() => {
-      db.query("DELETE FROM auth_credentials").run();
-      const tables = db.query("SELECT name FROM sqlite_master WHERE type = 'table'")
-        .all() as Array<{ name: string }>;
-      const names = new Set(tables.map((row) => row.name));
-      if (names.has("auth_credential_refresh_leases")) {
-        db.query("DELETE FROM auth_credential_refresh_leases").run();
-      }
-      if (names.has("auth_credential_blocks")) db.query("DELETE FROM auth_credential_blocks").run();
+      for (const name of tables) db.exec(`DELETE FROM "${name.replaceAll('"', '""')}"`);
     }).exclusive();
     db.exec("VACUUM");
   } finally {
@@ -522,7 +531,7 @@ function migrateWithContext(
 
   const database = readAgentDb(agentDb);
   const legacy = legacyCredentials(authPath);
-  importCredentials([...database.credentials, ...legacy], context, addedAccounts);
+  importCredentials([...database, ...legacy], context, addedAccounts);
 
   const previousAccounts = models.accounts ?? [];
   const mergedAccounts = [...new Set([...previousAccounts, ...addedAccounts])];
@@ -537,7 +546,7 @@ function migrateWithContext(
   // Plaintext is removed only after every keyring write was read back and both
   // portable config replacements are durable. Every preceding step is
   // idempotent, so a crash is resumed from the surviving source.
-  if (database.hasCredentialTable) scrubAgentDb(agentDb);
+  scrubAgentDb(agentDb);
   removePlainFile(authPath);
 }
 
