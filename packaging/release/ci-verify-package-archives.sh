@@ -43,6 +43,9 @@ trap 'exit 143' TERM
 
 smoke_copy="$isolation_parent/smoke.sh"
 cp -- "$workspace/packaging/arch/smoke.sh" "$smoke_copy"
+# The smoke test byte-compares the packaged launcher against the checked-in one,
+# so the reference must travel with the script past ghost_ci_hide_checkout.
+cp -- "$workspace/packaging/arch/ghostd" "$isolation_parent/ghostd"
 mapfile -t archives < <(
   find "$release_out" -maxdepth 1 -type f \
     -name '*.pkg.tar.zst' -print | LC_ALL=C sort

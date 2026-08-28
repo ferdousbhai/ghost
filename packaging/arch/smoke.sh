@@ -91,9 +91,15 @@ for path in \
 done
 
 # Both recipes install the same checked-in launcher; a rewritten or generated
-# copy would silently change the daemon's startup contract.
-if ! cmp -s "$script_dir/ghostd" "$root/usr/bin/ghostd"; then
-  printf 'packaged /usr/bin/ghostd differs from packaging/arch/ghostd\n' >&2
+# copy would silently change the daemon's startup contract. Callers that run a
+# copy of this script outside the checkout must place the launcher beside it.
+reference_ghostd="$script_dir/ghostd"
+if [[ ! -f "$reference_ghostd" ]]; then
+  printf 'missing reference launcher beside smoke.sh: %s\n' "$reference_ghostd" >&2
+  exit 1
+fi
+if ! cmp -s "$reference_ghostd" "$root/usr/bin/ghostd"; then
+  printf 'packaged /usr/bin/ghostd differs from the checked-in launcher\n' >&2
   exit 1
 fi
 
