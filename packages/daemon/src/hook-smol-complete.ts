@@ -1,4 +1,4 @@
-import type { Context, Model } from "@oh-my-pi/pi-ai";
+import type { Context, Model } from "@earendil-works/pi-ai";
 import { isAbsolute, resolve } from "node:path";
 import { realpath } from "node:fs/promises";
 import { scrubProviderEnv } from "./env-scrub.js";
@@ -9,7 +9,7 @@ import {
   readGhostModels,
   resolveSmolModelRef,
 } from "./models.js";
-import { createGhostOmpRuntime } from "./omp-runtime.js";
+import { createGhostPiRuntime } from "./pi-runtime.js";
 import {
   assistantText,
   resolveSmolModel,
@@ -56,7 +56,7 @@ export async function completeHookSmol(
   const home = await realpath(resolve(input.ghost_home));
   if (!isGhostHome(home)) throw new Error(`${home} is not a Ghost home.`);
   const paths = ghostPaths(home);
-  const runtimeFactory = options.runtimeFactory ?? createGhostOmpRuntime;
+  const runtimeFactory = options.runtimeFactory ?? createGhostPiRuntime;
   const runtime = await runtimeFactory({
     authPath: ghostAuthPath(paths.agentDir),
     modelsPath: ghostModelsPath(paths.home),
@@ -139,7 +139,7 @@ export async function hookSmolCompleteCommand(argv: string[]): Promise<number> {
   }
   try {
     // This subcommand bypasses daemon boot, so it owns the same credential
-    // isolation before constructing an OMP runtime.
+    // isolation before constructing a pi runtime.
     scrubProviderEnv(process.env, { offline: false });
     const input = parseInput(await readStdin());
     const signal = AbortSignal.timeout(HOOK_SMOL_TIMEOUT_MS);

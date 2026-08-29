@@ -70,9 +70,10 @@ describe("persona extension", () => {
     const prompt = (await harness.beforeAgentStart()) ?? "";
     expect(prompt).toContain("the ghost of a working typographer");
     expect(prompt).toContain("## Memory");
-    expect(prompt).toContain("- apprentice-question.md: I explained how to start");
-    expect(prompt.indexOf("- working-habit.md:")).toBeLessThan(
-      prompt.indexOf("- apprentice-question.md:"),
+    expect(prompt).toContain("- apprentice-question.md");
+    expect(prompt).not.toContain("I explained how to start");
+    expect(prompt.indexOf("- working-habit.md")).toBeLessThan(
+      prompt.indexOf("- apprentice-question.md"),
     );
     expect(prompt).toContain("## Documents");
     expect(prompt).toContain('directory: "craft"');
@@ -157,7 +158,7 @@ describe("persona extension", () => {
     await openGhostHome(fixture.dir).writeMemory({
       content: "freshly-written memory between turns",
     });
-    expect(await harness.beforeAgentStart()).toContain("freshly-written memory");
+    expect(await harness.beforeAgentStart()).toContain("- freshly-written-memory-between-turns.md");
   });
 
   it("says so plainly when there is no character file", async () => {

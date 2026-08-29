@@ -11,6 +11,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, join, resolve } from "node:path";
+import { isGhostError as isExtensionGhostError } from "@ghost/extensions";
 import { trashPath } from "./trash.js";
 
 export { homeTrashDir } from "./trash.js";
@@ -50,6 +51,24 @@ export class GhostError extends Error {
     this.code = code;
     this.status = status;
   }
+}
+
+const EXTENSION_ERROR_STATUS: Record<string, number> = {
+  not_found: 404,
+  document_too_large: 413,
+  cursor_stale: 409,
+  conflict: 409,
+};
+
+/**
+ * Re-throw a `@ghost/extensions` error as the daemon's, keeping its code and
+ * message so a client sees what the home writer actually refused.
+ */
+export function translateExtensionError(error: unknown): never {
+  if (isExtensionGhostError(error)) {
+    throw new GhostError(error.code, error.message, EXTENSION_ERROR_STATUS[error.code] ?? 400);
+  }
+  throw error;
 }
 
 export function isValidGhostName(name: string): boolean {

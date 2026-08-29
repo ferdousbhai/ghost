@@ -15,10 +15,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   builtinProviderPreset,
   appendGhostModelFallback,
-  clearGhostModelRole,
   clearGhostModelFallbacks,
   ghostAuthPath,
-  ghostOmpModelRouting,
   ghostModelsLockPath,
   ghostModelsPath,
   GhostModelsWriteConflictError,
@@ -27,14 +25,13 @@ import {
   OPENROUTER_BASE_URL,
   OPENROUTER_DEFAULT_FREE_MODEL,
   readGhostModels,
-  replaceGhostModelFallbacks,
   resolveChatModelRef,
   resolveSmolModelRef,
   setChatModelRole,
   setGhostModelRole,
   writeGhostModels,
 } from "../src/models.js";
-import { createGhostOmpRuntime } from "../src/omp-runtime.js";
+import { createGhostPiRuntime } from "../src/pi-runtime.js";
 
 let dir: string | null = null;
 
@@ -223,91 +220,6 @@ describe("resolveChatModelRef", () => {
   });
 });
 
-describe("OMP model routing projection", () => {
-  it("maps Ghost roles and ordered fallbacks onto OMP role settings", () => {
-    expect(ghostOmpModelRouting({
-      providers: {},
-      roles: {
-        chat_model: { provider: "openai-codex", modelId: "gpt-5.6-sol" },
-        smol_model: { provider: "anthropic", modelId: "claude-haiku-4-5" },
-        slow_model: { provider: "anthropic", modelId: "claude-opus-4-6" },
-        vision_model: { provider: "openai-codex", modelId: "gpt-5.6" },
-        plan_model: { provider: "openai-codex", modelId: "gpt-5.6-sol" },
-        designer_model: { provider: "google-gemini-cli", modelId: "gemini-3.1-pro" },
-        commit_model: { provider: "anthropic", modelId: "claude-haiku-4-5" },
-        tiny_model: { provider: "anthropic", modelId: "claude-haiku-4-5" },
-        task_model: { provider: "openai-codex", modelId: "gpt-5.6-sol" },
-        advisor_model: { provider: "anthropic", modelId: "claude-opus-4-6" },
-        general_purpose_model: { provider: "openai-codex", modelId: "gpt-5.6-sol" },
-        research_model: { provider: "anthropic", modelId: "claude-opus-4-6" },
-      },
-      fallbacks: {
-        chat_model: [
-          { provider: "anthropic", modelId: "claude-sonnet-4-6" },
-          { provider: "xai", modelId: "grok-code-fast-1" },
-        ],
-      },
-    })).toEqual({
-      modelRoles: {
-        default: "openai-codex/gpt-5.6-sol",
-        smol: "anthropic/claude-haiku-4-5",
-        slow: "anthropic/claude-opus-4-6",
-        vision: "openai-codex/gpt-5.6",
-        plan: "openai-codex/gpt-5.6-sol",
-        designer: "google-gemini-cli/gemini-3.1-pro",
-        commit: "anthropic/claude-haiku-4-5",
-        tiny: "anthropic/claude-haiku-4-5",
-        task: "openai-codex/gpt-5.6-sol",
-        advisor: "anthropic/claude-opus-4-6",
-        general: "openai-codex/gpt-5.6-sol",
-        research: "anthropic/claude-opus-4-6",
-      },
-      fallbackChains: {
-        default: ["anthropic/claude-sonnet-4-6", "xai/grok-code-fast-1"],
-      },
-    });
-  });
-
-  it("clears primaries and replaces complete fallback chains atomically", () => {
-    const agentDir = makeAgentDir();
-    writeGhostModels(agentDir, {
-      providers: {},
-      roles: {
-        slow_model: { provider: "anthropic", modelId: "strong" },
-        research_model: { provider: "legacy", modelId: "research" },
-      },
-      fallbacks: {
-        slow_model: [{ provider: "old", modelId: "one" }],
-        research_model: [{ provider: "legacy", modelId: "fallback" }],
-      },
-      futureSetting: { preserved: true },
-    });
-
-    replaceGhostModelFallbacks(agentDir, "slow_model", [
-      { provider: "new", modelId: "second" },
-      { provider: "new", modelId: "first" },
-    ]);
-    clearGhostModelRole(agentDir, "slow_model");
-
-    expect(readGhostModels(agentDir)).toMatchObject({
-      roles: {
-        research_model: { provider: "legacy", modelId: "research" },
-      },
-      fallbacks: {
-        slow_model: [
-          { provider: "new", modelId: "second" },
-          { provider: "new", modelId: "first" },
-        ],
-        research_model: [{ provider: "legacy", modelId: "fallback" }],
-      },
-      futureSetting: { preserved: true },
-    });
-
-    replaceGhostModelFallbacks(agentDir, "slow_model", []);
-    expect(readGhostModels(agentDir)?.fallbacks?.slow_model).toBeUndefined();
-  });
-});
-
 describe("the legacy title_model role", () => {
   function writeRaw(agentDir: string, file: unknown): void {
     writeFileSync(ghostModelsPath(agentDir), `${JSON.stringify(file, null, 2)}\n`, "utf8");
@@ -337,10 +249,6 @@ describe("the legacy title_model role", () => {
     expect(resolveSmolModelRef(file)).toEqual({
       provider: "anthropic",
       modelId: "claude-haiku-4-5",
-    });
-    expect(ghostOmpModelRouting(file)).toEqual({
-      modelRoles: { smol: "anthropic/claude-haiku-4-5" },
-      fallbackChains: { smol: ["xai/grok-4-fast"] },
     });
   });
 
@@ -411,13 +319,13 @@ describe("OMP compatibility", () => {
         apiKey: "not-needed",
       }),
     );
-    const runtime = await createGhostOmpRuntime({
+    const runtime = await createGhostPiRuntime({
       authPath: ghostAuthPath(agentDir),
       modelsPath: ghostModelsPath(agentDir),
       allowModelNetwork: false,
     });
     // A schema rejection would surface here rather than as a missing model.
-    expect(runtime.modelRegistry.getError()).toBeUndefined();
+    expect(runtime.runtime.getError()).toBeUndefined();
     const model = runtime.getModel("ghost-local", "mock-ghost-1");
     expect(model?.baseUrl).toBe("http://127.0.0.1:1/v1");
     runtime.close();
@@ -430,14 +338,13 @@ describe("OMP compatibility", () => {
       openrouter: { type: "api_key", key: "legacy-secret" },
     }), { encoding: "utf8", mode: 0o600 });
 
-    const runtime = await createGhostOmpRuntime({
+    const runtime = await createGhostPiRuntime({
       authPath,
       modelsPath: ghostModelsPath(agentDir),
       allowModelNetwork: false,
     });
-    expect(runtime.authStorage.get("openrouter")).toMatchObject({
-      type: "api_key",
-      key: "legacy-secret",
+    await expect(runtime.runtime.getAuth("openrouter")).resolves.toMatchObject({
+      auth: { apiKey: "legacy-secret" },
     });
     // The keyring is the only credential store now. The verified import
     // removes its plaintext source, and Ghost injects its own
@@ -450,14 +357,13 @@ describe("OMP compatibility", () => {
 
     // Idempotent: reopening with the source already gone resolves the same
     // machine account rather than importing a second copy of it.
-    const reopened = await createGhostOmpRuntime({
+    const reopened = await createGhostPiRuntime({
       authPath,
       modelsPath: ghostModelsPath(agentDir),
       allowModelNetwork: false,
     });
-    expect(reopened.authStorage.get("openrouter")).toMatchObject({
-      type: "api_key",
-      key: "legacy-secret",
+    await expect(reopened.runtime.getAuth("openrouter")).resolves.toMatchObject({
+      auth: { apiKey: "legacy-secret" },
     });
     expect(readGhostModels(agentDir)?.accounts).toEqual(["openrouter/personal"]);
     expect(existsSync(join(agentDir, "agent.db"))).toBe(false);

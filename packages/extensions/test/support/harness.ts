@@ -1,5 +1,5 @@
 /**
- * A scripted stand-in for OMP's extension runtime.
+ * A scripted stand-in for the daemon's extension runtime.
  *
  * The tests drive tool calls and lifecycle events directly against the
  * registered handlers. No model is contacted and no session is created: the
@@ -7,17 +7,19 @@
  * testing here is our logic, deterministically.
  */
 import type {
-  AgentToolResult,
-  ExtensionAPI,
-  ExtensionContext,
-  ExtensionFactory,
-  ToolCallEvent,
-  ToolCallEventResult,
-  ToolDefinition,
-} from "@oh-my-pi/pi-coding-agent";
+  AnyGhostToolDefinition,
+  GhostExtensionAPI,
+  GhostExtensionFactory,
+  GhostToolContext,
+  GhostToolResult,
+} from "../../src/extension-api.js";
 
-type AnyTool = ToolDefinition<any, any>;
-type AnyHandler = (event: any, ctx: ExtensionContext) => unknown;
+type AnyTool = AnyGhostToolDefinition;
+type AnyHandler = (event: any, ctx: GhostToolContext) => unknown;
+export interface ToolCallEventResult {
+  block?: boolean;
+  reason?: string;
+}
 
 export interface Harness {
   readonly tools: Map<string, AnyTool>;
@@ -27,7 +29,7 @@ export interface Harness {
     name: string,
     params?: Record<string, unknown>,
     signal?: AbortSignal,
-  ): Promise<AgentToolResult<any>>;
+  ): Promise<GhostToolResult<any>>;
   toolCall(
     toolName: string,
     input?: Record<string, unknown>,
@@ -35,14 +37,13 @@ export interface Harness {
   beforeAgentStart(incomingSystemPrompt?: string): Promise<string | undefined>;
 }
 
-function fakeContext(cwd: string): ExtensionContext {
-  // Only `cwd` is read by these extensions; the rest of the surface is TUI and
-  // session plumbing the tests deliberately do not exercise.
-  return { cwd, mode: "print", hasUI: false } as unknown as ExtensionContext;
+function fakeContext(cwd: string): GhostToolContext {
+  // Only `cwd` is read by these extensions.
+  return { cwd };
 }
 
 export async function loadExtension(
-  factory: ExtensionFactory,
+  factory: GhostExtensionFactory,
   cwd: string,
 ): Promise<Harness> {
   const tools = new Map<string, AnyTool>();
@@ -51,25 +52,14 @@ export async function loadExtension(
 
   const api = {
     registerTool(tool: AnyTool) {
-      const parameters = tool.parameters as unknown as {
-        toJsonSchema?: () => unknown;
-      };
-      // OMP 18's TypeBox compatibility facade returns callable omptype schemas.
-      // The real harness serializes those before handing them to a provider;
-      // expose that same wire shape to these schema assertions.
-      tools.set(tool.name, {
-        ...tool,
-        parameters: typeof parameters.toJsonSchema === "function"
-          ? parameters.toJsonSchema()
-          : tool.parameters,
-      } as AnyTool);
+      tools.set(tool.name, tool);
     },
     on(event: string, handler: AnyHandler) {
       const existing = handlers.get(event) ?? [];
       existing.push(handler);
       handlers.set(event, existing);
     },
-  } as unknown as ExtensionAPI;
+  } as unknown as GhostExtensionAPI;
 
   await factory(api);
 
@@ -83,7 +73,7 @@ export async function loadExtension(
       return tool.execute(`call-${name}`, params, signal, undefined, ctx);
     },
     async toolCall(toolName, input = {}) {
-      const event = { type: "tool_call", toolCallId: "call-1", toolName, input } as ToolCallEvent;
+      const event = { type: "tool_call", toolCallId: "call-1", toolName, input };
       for (const handler of handlers.get("tool_call") ?? []) {
         const result = (await handler(event, ctx)) as ToolCallEventResult | undefined;
         if (result?.block) return result;
@@ -113,7 +103,7 @@ export async function loadExtension(
   };
 }
 
-export function resultText(result: AgentToolResult<any>): string {
+export function resultText(result: GhostToolResult<any>): string {
   return result.content
     .filter((part): part is { type: "text"; text: string } => part.type === "text")
     .map((part) => part.text)

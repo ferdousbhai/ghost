@@ -120,7 +120,7 @@ export async function readDaemonControlLine(
 
 /**
  * Return only complete newline-terminated records from one bounded prefix.
- * This supports OMP's optional title slot followed by its session header while
+ * This supports an OMP-era title slot followed by the session header while
  * never allocating the append-only transcript remainder.
  */
 export async function readDaemonControlPrefix(

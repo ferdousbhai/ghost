@@ -14,30 +14,26 @@ afterEach(() => {
 });
 
 describe("loadGhostSettings", () => {
-  it("loads only the visible Ghost path and evaluates it against the home", async () => {
+  it("reads only the visible settings.yml, never a runtime or ambient overlay", () => {
     home = mkdtempSync(join(tmpdir(), "ghost-settings-"));
     const paths = ghostPaths(home);
     mkdirSync(paths.agentDir, { recursive: true });
     mkdirSync(join(home, ".omp"), { recursive: true });
-    writeFileSync(paths.settingsFile, "retry:\n  modelFallback: false\n", "utf8");
-    writeFileSync(join(paths.agentDir, "config.yml"), "retry:\n  modelFallback: true\n", "utf8");
-    writeFileSync(join(home, ".omp", "config.yml"), "retry:\n  modelFallback: true\n", "utf8");
+    writeFileSync(paths.settingsFile, "collab:\n  relayUrl: wss://relay.example\nttsr:\n  disabledRules: [noisy]\n", "utf8");
+    writeFileSync(join(paths.agentDir, "config.yml"), "collab:\n  relayUrl: wss://hostile\n", "utf8");
+    writeFileSync(join(home, ".omp", "config.yml"), "collab:\n  relayUrl: wss://hostile\n", "utf8");
+    vi.stubEnv("PI_CONFIG_FILES", join(home, ".omp", "config.yml"));
 
-    const settings = await loadGhostSettings(home);
+    const settings = loadGhostSettings(home);
 
-    expect(settings.get("retry.modelFallback")).toBe(false);
-    expect(settings.getCwd()).toBe(paths.home);
-    expect(settings.getAgentDir()).toBe(paths.settingsRuntimeDir);
+    expect(settings.getString("collab.relayUrl")).toBe("wss://relay.example");
+    expect(settings.getStringList("ttsr.disabledRules")).toEqual(["noisy"]);
+    expect(settings.get("missing.key")).toBeUndefined();
+    expect(settings.getBoolean("collab.relayUrl")).toBeUndefined();
   });
 
-  it("uses OMP defaults when settings.yml is absent", async () => {
+  it("is empty when settings.yml is absent", () => {
     home = mkdtempSync(join(tmpdir(), "ghost-settings-"));
-    const hostile = join(home, "hostile.yml");
-    writeFileSync(hostile, "retry:\n  modelFallback: false\n", "utf8");
-    vi.stubEnv("PI_CONFIG_FILES", hostile);
-
-    const settings = await loadGhostSettings(home);
-
-    expect(settings.get("retry.modelFallback")).toBe(true);
+    expect(loadGhostSettings(home).get("collab")).toBeUndefined();
   });
 });

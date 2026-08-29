@@ -1,5 +1,5 @@
-import type { ExtensionAPI, ExtensionFactory } from "@oh-my-pi/pi-coding-agent";
-import { Type } from "@oh-my-pi/pi-coding-agent/extensibility/legacy-typebox";
+import { Type } from "typebox";
+import type { GhostExtensionAPI, GhostExtensionFactory } from "../extension-api.js";
 import {
   resolveHome,
   textResult,
@@ -14,8 +14,8 @@ export type MemoryExtensionOptions = GhostExtensionOptions;
 
 export function createMemoryExtension(
   options: MemoryExtensionOptions = {},
-): ExtensionFactory {
-  return (pi: ExtensionAPI) => {
+): GhostExtensionFactory {
+  return (pi: GhostExtensionAPI) => {
     pi.registerTool({
       name: GHOST_MEMORY_WRITE,
       label: "Write memory",
@@ -28,13 +28,13 @@ export function createMemoryExtension(
       parameters: Type.Object({
         content: Type.String({
           description:
-            "One concise fact, in your own words. This is the entire Markdown file "
-            + "and is shortened automatically for the memory index.",
+            "One concise fact, in your own words. This is the entire Markdown file.",
         }),
         name: Type.Optional(Type.String({
           description:
             "File name, lowercase words joined by dashes, such as preferred-tone.md. "
-            + "Omit it and a name is derived from the fact. Reuse an existing "
+            + "The memory index shows only names, so make it say what the fact is "
+            + "about. Omit it and a name is derived from the fact. Reuse an existing "
             + "name to replace that memory.",
         })),
       }),

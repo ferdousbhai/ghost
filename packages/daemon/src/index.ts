@@ -36,9 +36,12 @@ export {
   DEFAULT_PORT,
   defaultConfigPath,
   loadConfig,
+  writeConfigFile,
   type DaemonConfig,
   type DaemonConfigFile,
   type DaemonConfigOverrides,
+  type RemoteConfig,
+  type RemoteConfigFile,
 } from "./config.js";
 export {
   CLAUDE_CODE_BINARY_ENV,
@@ -84,10 +87,6 @@ export {
   type GhostHomeDigestReadOptions,
   type ResolvedGhostExtensions,
 } from "./extensions.js";
-export {
-  DocumentsService,
-  type TrashedDocument,
-} from "./documents.js";
 export {
   assertValidGhostName,
   GHOST_AGENT_DIRNAME,
@@ -292,10 +291,14 @@ export {
   type TrashPathResult,
 } from "./trash.js";
 export {
-  trashGhostContextFile,
-  type TrashedContextFile,
-  type TrashableContextSection,
-} from "./context-files.js";
+  listGhostMemory,
+  trashGhostMemoryFile,
+  writeGhostMemory,
+  type GhostMemoryEntry,
+  type GhostMemoryListing,
+  type GhostMemorySkipped,
+  type TrashedMemoryFile,
+} from "./memory-files.js";
 export {
   LiveVoiceManager,
   type LiveTranscriptRow,
@@ -334,11 +337,12 @@ export {
   type ListeningServer,
   type ServerOptions,
 } from "./server.js";
+export { RemoteServe, type RemoteProblem, type RemoteServeOptions, type RemoteStatus } from "./remote-serve.js";
 export {
   conversationIdFromSessionFile,
   DEFAULT_TRANSCRIPT_LIMIT,
   MAX_TRANSCRIPT_LIMIT,
-  OMP_NATIVE_TOOL_NAMES,
+  PI_NATIVE_TOOL_NAMES,
   SessionHost,
   sessionFileNameFor,
   type AdmittedTurnOptions,

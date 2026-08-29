@@ -13,8 +13,7 @@ import type {
   SDKMessage,
   SDKResultMessage,
 } from "@anthropic-ai/claude-agent-sdk";
-import type { Usage } from "@oh-my-pi/pi-ai";
-import { addUsage, copyUsage, zeroUsage, type PiMessagesEvent } from "./pi-messages.js";
+import { addUsage, copyUsage, zeroUsage, type PiMessagesEvent, type Usage } from "./pi-messages.js";
 
 export interface ClaudePiMessagesAdapter {
   handle(message: SDKMessage): void;

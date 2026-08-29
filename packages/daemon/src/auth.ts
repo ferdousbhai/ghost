@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { statSync } from "node:fs";
-import type { Api, Model } from "@oh-my-pi/pi-ai";
+import type { Api, Credential, Model } from "@earendil-works/pi-ai";
 import { GhostError, ghostPaths, type Ghost, type GhostRegistry } from "./ghosts.js";
 import { silentLogger, type Logger } from "./log.js";
 import {
@@ -8,22 +8,14 @@ import {
   ghostModelsPath,
   readGhostModels,
   resolveChatModelRef,
-  resolveOmpChatModel,
   setChatModelRoleIfUnset,
 } from "./models.js";
-import { createGhostOmpRuntime } from "./omp-runtime.js";
+import { resolveChatModel } from "./model-routing.js";
+import { createGhostPiRuntime } from "./pi-runtime.js";
 import { parseSecretAccountName, serviceForCredentialProvider } from "./secret-reference.js";
 
 export type AuthType = "oauth" | "api_key";
-export type Credential =
-  | { type: "api_key"; key: string; source?: "login" }
-  | {
-      type: "oauth";
-      refresh: string;
-      access: string;
-      expires: number;
-      [key: string]: unknown;
-    };
+export type { Credential } from "@earendil-works/pi-ai";
 export type AuthEvent =
   | { type: "auth_url"; url: string; instructions?: string }
   | {
@@ -54,7 +46,7 @@ export interface AuthInteraction {
 }
 
 /**
- * The minimum of `GhostOmpRuntime` this module drives; tests pass a fake with
+ * The minimum of `GhostPiRuntime` this module drives; tests pass a fake with
  * a scripted `login()`.
  */
 export interface LoginRuntime {
@@ -205,7 +197,7 @@ async function defaultCreateRuntime(input: {
   // the provider's own OAuth HTTP, so a login works offline. create() still
   // builds the local credential snapshot, which `configured`/`connectedVia`
   // read.
-  return createGhostOmpRuntime({
+  return createGhostPiRuntime({
     authPath: input.authPath,
     modelsPath: input.modelsPath,
     allowModelNetwork: false,
@@ -213,7 +205,7 @@ async function defaultCreateRuntime(input: {
 }
 
 /**
- * Bind `roles.chat_model` if the ghost has none, using OMP's provider-default
+ * Bind `roles.chat_model` if the ghost has none, using the catalogue-default
  * rule over the provider's available (then known) models. Provider-agnostic;
  * returns null and writes nothing when a model is already bound or none can be
  * resolved (offline, empty catalog). Shared by the HTTP login and the `ghostd
@@ -249,7 +241,7 @@ export async function bindDefaultChatModelIfUnset(
   if (candidatesOrAborted === null || !commitAllowed()) return null;
   let candidates = candidatesOrAborted;
   if (candidates.length === 0) candidates = runtime.getModels(providerId);
-  const model = resolveOmpChatModel(null, candidates);
+  const model = resolveChatModel(null, candidates);
   if (!model || !commitAllowed()) return null;
 
   return setChatModelRoleIfUnset(configDir, model.provider, model.id, commitAllowed);
@@ -406,7 +398,7 @@ export class LoginManager {
   }
 
   /**
-   * Begin a login. Validates the provider/authType against OMP's registry,
+   * Begin a login. Validates the provider/authType against pi's registry,
    * then drives `runtime.login()` in the background. Returns the initial view.
    */
   async start(

@@ -1,8 +1,5 @@
-import type {
-  ExtensionAPI,
-  ExtensionFactory,
-} from "@oh-my-pi/pi-coding-agent";
-import { Type } from "@oh-my-pi/pi-coding-agent/extensibility/legacy-typebox";
+import { Type } from "typebox";
+import type { GhostExtensionAPI, GhostExtensionFactory } from "../extension-api.js";
 import { GhostError } from "../errors.js";
 import {
   CHARACTER_FILENAME,
@@ -69,8 +66,8 @@ const DESCRIPTION =
  */
 export function createCharacterExtension(
   options: CharacterExtensionOptions = {},
-): ExtensionFactory {
-  return (pi: ExtensionAPI) => {
+): GhostExtensionFactory {
+  return (pi: GhostExtensionAPI) => {
     pi.registerTool({
       name: GHOST_CHARACTER,
       label: "Character",

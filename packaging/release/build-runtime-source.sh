@@ -59,6 +59,9 @@ epoch="${SOURCE_DATE_EPOCH:-$(git -C "$source_root" show -s --format=%ct "$commi
   exit 1
 }
 
+bun_version="$(bun --version)"
+compile_target=bun-linux-x64
+
 work_parent="${GHOST_RELEASE_WORK_ROOT:-$output_dir/work}"
 mkdir -p "$work_parent"
 work="$(mktemp -d "$work_parent/runtime.XXXXXX")"
@@ -69,64 +72,41 @@ trap cleanup EXIT
 
 name="ghost-runtime-${version}-linux-${arch}"
 runtime_root="$work/$name"
-daemon="$runtime_root/daemon"
-mkdir -p "$runtime_root"
+daemon_binary="$runtime_root/bin/ghostd"
+client_binary="$runtime_root/bin/ghost"
+mkdir -p "$runtime_root/bin"
 
-bash "$source_root/packaging/release/runtime-tree.sh" "$source_root" "$daemon"
-
-if find "$daemon" ! \( -type f -o -type d -o -type l \) \
-  -print -quit | grep -q .; then
-  printf 'runtime payload contains a special filesystem entry\n' >&2
-  exit 1
-fi
-
-# Bind the runtime to every frozen dependency input, including the in-tree
-# catalog override and every dependency patch. The tagged source rechecks these
-# before packaging.
-bash "$source_root/packaging/release/frozen-inputs.sh" "$source_root" \
-  > "$runtime_root/FROZEN-INPUTS.SHA256"
+(
+  cd "$source_root"
+  # Populate dependencies only from the pre-seeded store and frozen lockfile.
+  # Lifecycle scripts stay disabled; in particular, onnxruntime-node must not
+  # download optional CUDA provider libraries while assembling a release.
+  export ONNXRUNTIME_NODE_INSTALL=skip
+  pnpm install --ignore-scripts --offline --frozen-lockfile
+  pnpm build
+  GHOSTD_COMPILE_TARGET="$compile_target" \
+    pnpm --filter @ghost/daemon build:binary
+)
+install -m755 "$source_root/packages/daemon/dist/ghostd" "$daemon_binary"
+install -m755 "$source_root/packages/daemon/dist/ghost" "$client_binary"
 
 (
   cd "$runtime_root"
-  find daemon -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum
-) > "$runtime_root/PAYLOAD.SHA256"
-
-(
-  cd "$runtime_root"
-  while IFS= read -r -d '' link; do
-    target="$(readlink "$link")"
-    hash="$(printf '%s' "$target" | sha256sum | cut -d' ' -f1)"
-    printf '%s  %s\n' "$hash" "$link"
-  done < <(find daemon -type l -print0 | LC_ALL=C sort -z)
-) > "$runtime_root/SYMLINKS.SHA256"
-
-find "$runtime_root" -type d -exec chmod 755 {} +
-find "$runtime_root" -type f -perm /111 -exec chmod 755 {} +
-find "$runtime_root" -type f ! -perm /111 -exec chmod 644 {} +
-
-(
-  cd "$runtime_root"
-  while IFS= read -r -d '' path; do
-    kind=f
-    [[ -d "$path" ]] && kind=d
-    [[ -L "$path" ]] && kind=l
-    printf '%s\t%s\t%s\n' "$(stat -c '%a' "$path")" "$kind" "$path"
-  done < <(find daemon -print0 | LC_ALL=C sort -z)
-) > "$runtime_root/PAYLOAD.MODES"
+  sha256sum bin/ghost bin/ghostd > PAYLOAD.SHA256
+)
 
 cat > "$runtime_root/MANIFEST" <<EOF
-format=ghost-runtime-source/v1
+format=ghost-runtime-source/v2
 version=$version
 os=linux
 arch=$arch
 source_commit=$commit
 source_date_epoch=$epoch
-frozen_inputs_sha256=$(sha256sum "$runtime_root/FROZEN-INPUTS.SHA256" | cut -d' ' -f1)
+bun_version=$bun_version
+compile_target=$compile_target
 payload_manifest_sha256=$(sha256sum "$runtime_root/PAYLOAD.SHA256" | cut -d' ' -f1)
-symlink_manifest_sha256=$(sha256sum "$runtime_root/SYMLINKS.SHA256" | cut -d' ' -f1)
-modes_manifest_sha256=$(sha256sum "$runtime_root/PAYLOAD.MODES" | cut -d' ' -f1)
 EOF
-chmod 644 "$runtime_root"/{MANIFEST,FROZEN-INPUTS.SHA256,PAYLOAD.SHA256,SYMLINKS.SHA256,PAYLOAD.MODES}
+chmod 644 "$runtime_root"/{MANIFEST,PAYLOAD.SHA256}
 find "$runtime_root" -exec touch -h -d "@$epoch" {} +
 
 archive="$output_dir/$name.tar.zst"

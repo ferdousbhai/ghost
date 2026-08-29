@@ -62,6 +62,7 @@ import {
 import { SessionHost, type SessionHostOptions } from "../src/session-host.js";
 import { makeFakeCatalogRuntime } from "./helpers/fake-catalog-runtime.js";
 import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
+import { recordingLogger } from "./helpers/recording-logger.js";
 
 let temp: TempGhosts | null = null;
 let host: SessionHost | null = null;
@@ -636,22 +637,24 @@ describe("Claude Code subscription runtime", () => {
       }),
       dispose: async () => {},
     } as never;
+    const screenExtension = createScreenExtension({
+      home: paths.home,
+      helper,
+      capabilities: CLAUDE_CODE_TOOL_CAPABILITIES,
+    });
+    const browserExtension = createBrowserExtension({
+      home: paths.home,
+      backend: () => browser,
+      browser: { idleTimeoutMs: 0, resolver },
+      capabilities: CLAUDE_CODE_TOOL_CAPABILITIES,
+    });
     const tools = await bridgeClaudeCodeTools({
-      factories: [
-        createScreenExtension({
-          home: paths.home,
-          helper,
-          capabilities: CLAUDE_CODE_TOOL_CAPABILITIES,
-        }),
-        createBrowserExtension({
-          home: paths.home,
-          backend: () => browser,
-          browser: { idleTimeoutMs: 0, resolver },
-          capabilities: CLAUDE_CODE_TOOL_CAPABILITIES,
-        }),
-      ],
+      ghost: async (api) => {
+        await screenExtension(api);
+        await browserExtension(api);
+      },
       toolNames: [GHOST_SCREEN, GHOST_BROWSER],
-    }, paths.home, "Ghost bridge test");
+    }, paths.home);
     const call = async (name: string, args: Record<string, unknown>) => {
       const definition = tools.find((candidate) => candidate.name === name);
       if (!definition) throw new Error(`Missing bridged tool ${name}`);
@@ -1585,13 +1588,7 @@ describe("Claude Code subscription runtime", () => {
   });
 
   it("rejects malformed or secret-bearing stored MCP rows before SDK launch or logging", async () => {
-    const logs: string[] = [];
-    const logger: Logger = {
-      debug: (message, fields) => logs.push(JSON.stringify({ message, fields })),
-      info: (message, fields) => logs.push(JSON.stringify({ message, fields })),
-      warn: (message, fields) => logs.push(JSON.stringify({ message, fields })),
-      error: (message, fields) => logs.push(JSON.stringify({ message, fields })),
-    };
+    const logger = recordingLogger();
     const { paths, lifecycle } = setupClaudeHost({ logger });
     const project = join(temp!.root, "claude-malformed-stored-mcp");
     mkdirSync(project);
@@ -1623,7 +1620,7 @@ describe("Claude Code subscription runtime", () => {
 
     expect(lifecycle.queries).toBe(0);
     expect(await host!.listSessions("casper")).toEqual([]);
-    expect(logs.join("\n")).not.toContain(sentinel);
+    expect(JSON.stringify(logger.records)).not.toContain(sentinel);
   });
 
   it("keeps non-MCP project scan warnings out of Claude MCP health", async () => {
@@ -2129,13 +2126,7 @@ describe("Claude Code subscription runtime", () => {
   });
 
   it("skips and logs malformed Claude Code sidecars without hiding valid sessions", async () => {
-    const warnings: Array<{ message: string; fields?: Record<string, unknown> }> = [];
-    const logger: Logger = {
-      debug: () => {},
-      info: () => {},
-      warn: (message, fields) => warnings.push({ message, fields }),
-      error: () => {},
-    };
+    const logger = recordingLogger("warn");
     const { paths } = setupClaudeHost({ logger });
     await host!.runTurn("casper", {
       sessionId: "conversation-valid",
@@ -2152,23 +2143,17 @@ describe("Claude Code subscription runtime", () => {
         runtime: "claude-code",
       }),
     ]);
-    expect(warnings).toContainEqual({
+    expect(logger.records).toContainEqual(expect.objectContaining({
       message: "skipping invalid Claude Code session metadata",
       fields: expect.objectContaining({
         path: malformedPath,
         error: expect.stringContaining("not valid Claude session metadata"),
       }),
-    });
+    }));
   });
 
   it("listSessions skips insecure sidecar entries without hiding a valid sibling", async () => {
-    const warnings: Array<{ message: string; fields?: Record<string, unknown> }> = [];
-    const logger: Logger = {
-      debug: () => {},
-      info: () => {},
-      warn: (message, fields) => warnings.push({ message, fields }),
-      error: () => {},
-    };
+    const logger = recordingLogger("warn");
     const { paths } = setupClaudeHost({ logger });
     await host!.runTurn("casper", {
       sessionId: "secure-listing",
@@ -2195,7 +2180,7 @@ describe("Claude Code subscription runtime", () => {
     expect(await host!.listSessions("casper")).toEqual([
       expect.objectContaining({ conversationId: "secure-listing", runtime: "claude-code" }),
     ]);
-    expect(warnings.map((entry) => entry.fields?.path)).toEqual(expect.arrayContaining([
+    expect(logger.records.map((entry) => entry.fields?.path)).toEqual(expect.arrayContaining([
       wrongMode,
       symlink,
       oversized,
@@ -2204,13 +2189,7 @@ describe("Claude Code subscription runtime", () => {
   });
 
   it("never lists or resumes a Claude sidecar transplanted onto another id's hash", async () => {
-    const warnings: Array<{ message: string; fields?: Record<string, unknown> }> = [];
-    const logger: Logger = {
-      debug: () => {},
-      info: () => {},
-      warn: (message, fields) => warnings.push({ message, fields }),
-      error: () => {},
-    };
+    const logger = recordingLogger("warn");
     const { paths, lifecycle } = setupClaudeHost({ logger });
     await host!.runTurn("casper", {
       sessionId: "conversation-a",
@@ -2227,13 +2206,13 @@ describe("Claude Code subscription runtime", () => {
         conversationId: "conversation-a",
       }),
     ]);
-    expect(warnings).toContainEqual({
+    expect(logger.records).toContainEqual(expect.objectContaining({
       message: "skipping invalid Claude Code session metadata",
       fields: expect.objectContaining({
         path: transplanted,
         error: expect.stringContaining("sidecar filename"),
       }),
-    });
+    }));
 
     const events: PiMessagesEvent[] = [];
     await expect(host!.runTurn("casper", {
@@ -2460,7 +2439,7 @@ describe("Claude Code subscription runtime", () => {
 
   it("emits one generic error when a durable Claude maintenance record rejects", async () => {
     const finished: Array<SettledMaintenanceTurn | undefined> = [];
-    const warnings: Array<{ message: string; fields?: Record<string, unknown> }> = [];
+    const logger = recordingLogger("warn");
     let releases = 0;
     let rejectNext = true;
     const reservation = () => ({ drained: Promise.resolve(), release: () => {} });
@@ -2487,15 +2466,7 @@ describe("Claude Code subscription runtime", () => {
       beginShutdown: async () => {},
       disposeAll: async () => {},
     };
-    const { paths } = setupClaudeHost({
-      maintenance,
-      logger: {
-        debug: () => {},
-        info: () => {},
-        warn: (message, fields) => warnings.push({ message, fields }),
-        error: () => {},
-      },
-    });
+    const { paths } = setupClaudeHost({ maintenance, logger });
     const failedEvents: PiMessagesEvent[] = [];
 
     await host!.runTurn("casper", {
@@ -2520,11 +2491,16 @@ describe("Claude Code subscription runtime", () => {
       assistantText: "Hello from the plan.",
     })]);
     expect(releases).toBe(1);
-    expect(warnings).toContainEqual({
+    expect(logger.records).toContainEqual({
+      level: "warn",
       message: "conversation maintenance turn record failed",
-      fields: { ghost: "casper", runtime: "claude-code" },
+      fields: {
+        ghost: "casper",
+        conversation: "strict-claude-maintenance",
+        runtime: "claude-code",
+      },
     });
-    expect(JSON.stringify(warnings)).not.toContain("sensitive Claude sidecar failure");
+    expect(JSON.stringify(logger.records)).not.toContain("sensitive Claude sidecar failure");
     expect(JSON.parse(readFileSync(
       claudeSessionMetadataPath(paths.sessionDir, "strict-claude-maintenance"),
       "utf8",
@@ -2580,13 +2556,7 @@ describe("Claude Code subscription runtime", () => {
 
   it("fails open when a persisted Claude notice acknowledgement fails", async () => {
     const hooks = new GhostHookRunner();
-    const warnings: Array<{ message: string; fields?: Record<string, unknown> }> = [];
-    const logger: Logger = {
-      debug: () => {},
-      info: () => {},
-      warn: (message, fields) => warnings.push({ message, fields }),
-      error: () => {},
-    };
+    const logger = recordingLogger("warn");
     await hooks.register((api) => {
       api.on("before_prompt", () => ({
         additionalContext: "A durable maintenance notice.",
@@ -2609,11 +2579,16 @@ describe("Claude Code subscription runtime", () => {
       paths.sessionDir,
       "conversation-ack-failure",
     ))).toBe(true);
-    expect(warnings).toContainEqual({
+    expect(logger.records).toContainEqual({
+      level: "warn",
       message: "before_prompt hook acknowledgement failed",
-      fields: { ghost: "casper", runtime: "claude-code" },
+      fields: {
+        ghost: "casper",
+        conversation: "conversation-ack-failure",
+        runtime: "claude-code",
+      },
     });
-    expect(JSON.stringify(warnings)).not.toContain("sensitive notice id");
+    expect(JSON.stringify(logger.records)).not.toContain("sensitive notice id");
   });
 
   it("fails closed without Claude.ai plan auth and never starts a query", async () => {

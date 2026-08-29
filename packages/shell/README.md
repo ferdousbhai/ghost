@@ -19,7 +19,7 @@ qml/
   GhostBarSurface.qml  opt-in standalone layer strip carrying the widget
   TrayBridge.qml       system-tray (StatusNotifierItem) presence, via a helper
   tray/ghost-tray.py   the SNI + DBusMenu D-Bus object Quickshell cannot expose
-  components/          chat, ask, queue, tool-card, routing and orb UI
+  components/          chat, ask, work strip, queue, tool-card, routing and orb UI
   services/            Ghostd, Theme, Notifier (singletons)     → qs.services
 contrib/               keybinds, systemd unit, Omarchy bar integration
 dev/                   mock daemon, demo script, lint
@@ -58,9 +58,9 @@ because a layer surface is invisible to the WM's own window binds.
 
 ## Harness interaction
 
-The HUD follows modern OMP's interaction model. A model selection closes the
+The HUD follows the daemon's interaction model. A model selection closes the
 switcher immediately and returns focus to chat. The advanced routing view binds
-all of OMP's built-in roles, shows whether each primary is explicit or which
+all of Ghost's model roles, shows whether each primary is explicit or which
 effective model Auto resolves, and edits the complete ordered retry chain.
 General and Research remain available only for older homes that configured
 them. Within each provider, current model families sort ahead of older versions.
@@ -72,7 +72,7 @@ provider choice; API-key login accepts the pasted key. Completion returns to
 chat, while login opened from the switcher returns there. The switcher itself
 closes on a model selection and restores chat focus.
 
-OMP's built-in `ask` appears as a structured in-chat form, taking the composer's
+Ghost's `ask` tool appears as a structured in-chat form, taking the composer's
 place while a question stands. It supports offered options, custom input, notes,
 multiple selection, chat-about-this, and dismissal; it is separate from tool
 approval, which Ghost does not expose. Because it replaces the composer, it also
@@ -83,7 +83,7 @@ would submit if the ask timed out. Answering or dismissing hands focus back.
 When the HUD is shut, a completed turn keeps the active ghost's name and an
 excerpt of its answer. If a turn pauses instead, Ghost raises the actual
 question under that same identity; clicking either Omarchy notification opens
-the HUD. OMP's hard-coded "Oh My Pi / Waiting for input" toast stays disabled.
+the HUD. No harness-owned toast is shown.
 
 Dismissal is not a nicety. Until it existed, a question the user did not want to
 answer had no exit but closing the app, which left the conversation holding a
@@ -94,6 +94,18 @@ never answered, timed out, or talked through instead, from the transcript's
 offers to answer it now on the branch the daemon kept. While a model
 is streaming, Enter steers the active run, Ctrl+Enter queues a follow-up, and
 Shift+Enter inserts a newline. The queued state is visible below the composer.
+
+After a successful Pi turn, four minutes with an empty composer arms a
+transient completion over the conversation's current context. Its one-line
+`※ recap:` status restores the goal, current task, and one next action without
+adding a message to history. Typing, starting another turn, or changing
+ghost/conversation clears it and aborts any request still running; recap
+failures stay silent because the transcript is already the durable fallback.
+
+The chat column also carries a conversation-scoped work strip above that queue:
+plan mode or the approved plan, read-only todo phases, and background jobs with
+cancellation and bounded output disclosure. It disappears when all three are
+empty and polls running jobs only while the HUD is visible.
 
 A project bound before the first owner turn is still an unpublished draft. The
 shell keeps that runtime-qualified identity selected while it asks ghostd to
@@ -137,40 +149,8 @@ so a reload does not resurrect what streaming set aside.
 
 The restored 64px rail at the right edge is the successor to summon-ghost's
 final `AppSideNav` (`4852804cf4e09ca50c16e08e6106c06df82e2a94`): Chat,
-Docs, Memory, Agent definitions, Commands, MCP, Remote, and Character stay
-reachable without covering the content. Docs preserves Ghost's visual language
-but uses an adaptive folder/list/detail hierarchy: wide windows show all three;
-narrow windows use a reversible stack.
-
-Documents is the one owner's machine-wide XDG Documents tree, not ghost-home
-state. The daemon returns metadata for one direct directory page at a time,
-folders first; expanding a folder is what loads its children, and neither the
-model nor the UI imposes a folder depth limit. Folder selection, search, scroll,
-and loaded pages survive ghost switches because renaming or deleting a ghost
-does not move, copy, or reset Documents.
-
-Regular files of any type appear in the list. The shell instantiates its inline
-viewer only for a supported text, code, or Markdown file with a validated size
-of at most 1 MiB (1,048,576 bytes). Content comes from ghostd's authenticated,
-descriptor-confined endpoint; the Documents surface never constructs a QML
-`FileView` or `FilePane` for the path. All admitted content, including Markdown
-and code, is shown as literal plain text: image syntax, raw HTML, links, data
-URLs, and local/network resource references are never resolved or fetched. A
-larger file, one without trustworthy size metadata, or content that is not
-strict UTF-8 text is not read inline; the detail pane says why and offers Open
-externally. Inline content is read-only and reloads explicitly. Opening
-externally deliberately hands the current absolute path to the owner's desktop
-outside the confined viewer boundary. Document deletion requires explicit
-confirmation and moves only a regular file to system Trash.
-
-Hosted imports may leave legacy `notes/` or `docs/` Markdown inside an imported
-ghost home. Those files are import-only: the Documents API, session context,
-and the Docs rail ignore them. Ghost performs no automatic migration and new
-ghost homes do not create `docs/`. Retaining one in live Documents is an
-explicit owner operation: choose a destination, refuse an existing-name
-collision rather than overwrite it, copy the selected source, verify the
-result, and only then decide separately whether to retain the legacy source.
-There is no generic multi-ghost migration path.
+Character, Memory, Commands, Hooks, MCP, Remote, and Phone access stay reachable
+without covering the content.
 
 The ghost-scoped context response remains derived rather than persisted. It
 contains character and read-only atomic memory; phase one exposes no runnable
@@ -178,13 +158,13 @@ agent definitions because isolated task/subagent execution is disabled. Memory
 deletion is confirmed and recoverable. Character and agent-definition deletion
 are not offered.
 
-Commands is the effective, conversation-scoped OMP slash-command catalog:
-built-ins, extension/plugin commands, project commands, and explicit
-`/skill:<name>` entries use the same discovery and precedence as the harness.
+Commands is the effective, conversation-scoped Ghost slash-command catalog:
+headless builtins, admitted Markdown commands and prompt templates, and
+explicit `/skill:<name>` entries, exactly as the daemon reports them.
 It is searchable by name, alias, description, input, and source. Choosing a row
 returns to chat with `/name ` staged in the composer; it never runs on selection.
 Typing `/` in the composer opens the same catalog as a compact autocomplete.
-Commands that OMP exposes but Ghost supports only partially (or not at all)
+Commands known from other harnesses that Ghost supports only partially (or not at all)
 remain discoverable with an availability badge and reason; selecting one still
 only stages text, so the palette never suggests that staging proved support.
 
@@ -209,6 +189,17 @@ visibly distinct read-only and writable URLs. Read-only can start directly;
 writable access requires typing `WRITABLE` after a warning that its holder can
 steer the ghost and exercise local tools. A structured `not_supported` response
 renders as a neutral product-status explanation.
+
+Phone access is the machine-global sibling to that conversation-scoped Remote
+view. “Reach me from my phone” asks ghostd to enable or disable Tailscale Serve,
+then shows its private tailnet URL, a camera-sized QR code, the owner identity,
+and the read-only guest policy. Setup problems carry the daemon's exact message;
+when one has a one-time terminal command, the panel keeps it selectable and
+offers a keyboard-accessible copy action. The panel refreshes when opened and
+after a switch change, but does not poll in the background.
+For problem-state previews, pass
+`--remote-problem=tailscale_missing` (or another daemon problem code) to the
+mock, or set `GHOST_REMOTE_PROBLEM`.
 
 ## System tray
 
@@ -257,7 +248,7 @@ qs -c ghost ipc call ghost ask "<prompt>"     # reply arrives as a notification
 qs -c ghost ipc call ghost login              # open "Connect a model"
 qs -c ghost ipc call ghost loginTo <id> <oauth|api_key>   # and start one
 qs -c ghost ipc call ghost switcher           # open the model switcher
-qs -c ghost ipc call ghost section docs       # chat|docs|memory|agents|commands|mcp|connect|character
+qs -c ghost ipc call ghost section memory     # chat|character|memory|commands|hooks|mcp|connect|remote
 qs -c ghost ipc call ghost status             # JSON
 qs -c ghost ipc call ghost refresh            # re-read roster and theme
 ```
@@ -282,3 +273,10 @@ daemon, pi, or a model — not a stand-in for something that does not exist. The
 client assumes the daemon owns conversation history, keyed by
 `options.sessionId`; set `GHOST_HUD_REPLAY=1` if a build turns out to be
 stateless per request.
+
+## If something is wrong
+
+The daemon logs to the journal (`journalctl --user -u ghostd -f`). For the shell,
+run it from a terminal and watch stderr; QML type errors and failed bindings
+print there. Reproduce against the mock with `dev/preview.sh` rather than
+debugging on the live desktop.

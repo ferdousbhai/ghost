@@ -8,7 +8,6 @@ export interface CharacterFile {
 
 export interface MemoryRecord {
   readonly slug: string;
-  readonly description: string;
   readonly content: string;
   readonly updated: string;
 }

@@ -1,5 +1,6 @@
-import { CATALOG_PROVIDERS } from "@oh-my-pi/pi-catalog/provider-models";
-import type { ProviderCatalogEntry } from "@oh-my-pi/pi-catalog/provider-models";
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   findProviderCredentialEnv,
@@ -15,12 +16,16 @@ import {
 // than weakening the coverage assertion.
 const INTENTIONALLY_NON_CREDENTIAL_CATALOG_ENV_VARS: readonly string[] = [];
 
+/**
+ * Every credential variable pi's provider registry reads. pi keeps the table
+ * private, so it is pinned by scanning its compiled module for variable names.
+ */
 function pinnedCatalogEnvVars(): string[] {
-  const providers: readonly ProviderCatalogEntry[] = CATALOG_PROVIDERS;
-  return [...new Set(providers.flatMap((provider) => [
-    ...(provider.envVars ?? []),
-    ...(provider.catalogDiscovery?.envVars ?? []),
-  ]))].sort();
+  const piAiPackage = createRequire(import.meta.url).resolve("@earendil-works/pi-ai/package.json");
+  const source = readFileSync(join(dirname(piAiPackage), "dist", "env-api-keys.js"), "utf8");
+  return [...new Set(
+    [...source.matchAll(/"([A-Z][A-Z0-9_]*(?:_API_KEY|_TOKEN|_KEY|_CREDENTIALS))"/g)].map((match) => match[1]!),
+  )].sort();
 }
 
 describe("scrubProviderEnv", () => {

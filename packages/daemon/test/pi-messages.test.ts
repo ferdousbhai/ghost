@@ -1,4 +1,3 @@
-import type { AgentSessionEvent } from "@oh-my-pi/pi-coding-agent";
 import { describe, expect, it } from "vitest";
 import {
   createPiMessagesAdapter,
@@ -7,6 +6,7 @@ import {
   PiMessagesRequestError,
   textFromParts,
   type PiMessagesEvent,
+  type RuntimeSessionEvent as AgentSessionEvent,
 } from "../src/pi-messages.js";
 import { parseSseStream } from "./helpers/fixtures.js";
 

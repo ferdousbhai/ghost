@@ -1,4 +1,3 @@
-import type { ExtensionFactory } from "@oh-my-pi/pi-coding-agent";
 import {
   closeAllBrowserSessions as closeAllExtensionBrowserSessions,
   createGhostExtension,
@@ -14,6 +13,7 @@ import {
   type CharacterFile,
   type DocumentDirectoryPage,
   type DocumentsIndex,
+  type GhostExtensionFactory,
   type GhostToolCapabilitiesSource,
   type GhostToolCapabilitiesResolver,
   type MemoryListing,
@@ -71,17 +71,18 @@ function selectBrowserBackend(
 }
 
 export interface ResolvedGhostExtensions {
-  factories: ExtensionFactory[];
+  /** Ghost's own extension, on the runtime-neutral seam; each runtime adapts it. */
+  ghost: GhostExtensionFactory;
   toolNames: string[];
 }
 
-export const ompToolCapabilities: GhostToolCapabilitiesResolver = (context) => ({
+export const piToolCapabilities: GhostToolCapabilitiesResolver = (context) => ({
   vision: context.model?.input?.includes("image") ?? false,
 });
 
 /**
  * Build the extension set for one session. `homeDir` pins Ghost-owned files to
- * the ghost home even when OMP's native `!cd` changes the conversation cwd.
+ * the ghost home even when a direct `!cd` changes the conversation cwd.
  * It is still per-session data, never a process-global value, so concurrent
  * ghosts cannot race or share a home.
  */
@@ -100,7 +101,7 @@ export function resolveGhostExtensions(
     capabilities,
   };
   return {
-    factories: [createGhostExtension(extensionOptions)],
+    ghost: createGhostExtension(extensionOptions),
     toolNames: ghostToolNames(),
   };
 }

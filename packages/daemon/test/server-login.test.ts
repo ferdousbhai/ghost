@@ -9,12 +9,11 @@
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { AuthStorage } from "@oh-my-pi/pi-ai/auth-storage";
 import { afterEach, describe, expect, it } from "vitest";
 import type { AuthInteraction, LoginManagerOptions } from "../src/auth.js";
 import { LoginManager } from "../src/auth.js";
 import { ghostPaths } from "../src/ghosts.js";
-import { KeyringAuthCredentialStore } from "../src/keyring-credential-store.js";
+import { GhostPiCredentialStore } from "../src/pi-credential-store.js";
 import { readGhostModels } from "../src/models.js";
 import { authorizeGhostAccounts, openGhostSecretContext } from "../src/secret-migration.js";
 import { startDaemonServer, type ListeningServer } from "../src/server.js";
@@ -292,9 +291,7 @@ describe("the full url + paste state machine", () => {
         authPath,
         client: testSecretService,
       });
-      const credentialStore = new KeyringAuthCredentialStore(context);
-      const authStorage = new AuthStorage(credentialStore);
-      await authStorage.reload();
+      const credentialStore = new GhostPiCredentialStore(context);
       return {
         ...makeFakeRuntime({
           models: { openrouter: ["m-1"] },
@@ -303,7 +300,7 @@ describe("the full url + paste state machine", () => {
             const credential = { type: "api_key" as const, key };
             credentialStore.allowAccounts([`${providerId}/personal`]);
             credentialStore.setWriteAccount(providerId, "personal");
-            await authStorage.set(providerId, credential);
+            await credentialStore.modify(providerId, async () => credential);
             credentialStore.clearWriteAccount();
             return credential;
           },
@@ -313,7 +310,7 @@ describe("the full url + paste state machine", () => {
           authorizeGhostAccounts(home, context, [`${providerId}/${account}`]);
           credentialStore.allowAccounts([`${providerId}/${account}`]);
         },
-        close: () => authStorage.close(),
+        close: () => context.close(),
       };
     });
 
@@ -349,12 +346,12 @@ describe("the full url + paste state machine", () => {
       authPath: join(bob.agentDir, "auth.json"),
       client: testSecretService,
     });
-    const stored = new AuthStorage(new KeyringAuthCredentialStore(context));
     try {
-      await stored.reload();
-      expect(stored.get("openrouter")).toEqual({ type: "api_key", key: "sk-after-rename" });
+      context.allowAccounts(["openrouter/personal"]);
+      await expect(new GhostPiCredentialStore(context).read("openrouter"))
+        .resolves.toEqual({ type: "api_key", key: "sk-after-rename" });
     } finally {
-      stored.close();
+      context.close();
     }
     const models = readFileSync(join(bob.home, "models.json"), "utf8");
     expect(models).not.toContain("sk-after-rename");

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import {
   lstat,
   open as openFile,
@@ -9,50 +9,22 @@ import {
 import { createHash, randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { openGhostHome } from "@ghost/extensions";
+import { collectGhostExtension, openGhostHome } from "@ghost/extensions";
 import {
+  convertToLlm,
   createAgentSession,
-} from "@oh-my-pi/pi-coding-agent/sdk";
-import type { CreateAgentSessionOptions } from "@oh-my-pi/pi-coding-agent/sdk";
-import type {
-  AgentSession,
-  AgentSessionEvent,
-} from "@oh-my-pi/pi-coding-agent/session/agent-session";
-import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
-import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import type { SessionEntry } from "@oh-my-pi/pi-coding-agent/session/session-entries";
-import {
-  visitEntriesFromFile,
-  visitEntriesFromFileStream,
-} from "@oh-my-pi/pi-coding-agent/session/session-loader";
-import type { SettingPath } from "@oh-my-pi/pi-coding-agent/config/settings";
-import type { SourceMeta } from "@oh-my-pi/pi-coding-agent/capability/types";
-import { MCPManager } from "@oh-my-pi/pi-coding-agent/mcp/manager";
-import { validateServerName } from "@oh-my-pi/pi-coding-agent/mcp/config-writer";
-import type { MCPServerConfig } from "@oh-my-pi/pi-coding-agent/mcp/types";
-import {
-  buildSkillPromptMessage,
-  parseSkillInvocation,
-} from "@oh-my-pi/pi-coding-agent/extensibility/skills";
-import {
-  LIVE_DELEGATION_MESSAGE_TYPE,
-  SKILL_PROMPT_MESSAGE_TYPE,
-} from "@oh-my-pi/pi-coding-agent/session/messages";
-import {
-  bashExecutionToText,
-  type BashExecutionMessage,
-} from "@oh-my-pi/pi-coding-agent/session/messages";
-import {
-  isPersistentShellCdCommand,
-  type BashResult,
-} from "@oh-my-pi/pi-coding-agent/exec/bash-executor";
-import {
-  AskTool,
-  type AskToolDetails,
-  type QuestionResult,
-} from "@oh-my-pi/pi-coding-agent/tools/ask";
-import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
-import { ToolAbortError } from "@oh-my-pi/pi-coding-agent/tools/tool-errors";
+  createLocalBashOperations,
+  createSyntheticSourceInfo,
+  DefaultResourceLoader,
+  SessionManager,
+  SettingsManager,
+  type AgentSession,
+  type AgentSessionEvent,
+  type ExtensionFactory,
+  type SessionEntry,
+  type ToolDefinition,
+} from "@earendil-works/pi-coding-agent";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import {
   CLAUDE_CODE_PROVIDER_ID,
   ClaudeCodeRuntime,
@@ -77,7 +49,7 @@ import {
   ghostSessionStopContinuation,
 } from "./hooks.js";
 import {
-  ompToolCapabilities,
+  piToolCapabilities,
   readGhostHomeDigest,
   resolveGhostExtensions,
   type GhostExtensionOptions,
@@ -105,6 +77,7 @@ import {
   type GhostRegistry,
 } from "./ghosts.js";
 import { silentLogger, type Logger } from "./log.js";
+import { loadOptionalMachineSkills } from "./optional-skills.js";
 import {
   maintenanceStatePath,
   type ConversationMaintenance,
@@ -120,16 +93,15 @@ import type {
   HomeOperationCoordinator,
 } from "./home-operations.js";
 import {
-  ghostOmpModelRouting,
   ghostAuthPath,
   ghostModelsPath,
   readGhostModels,
   resolveChatModelRef,
-  resolveOmpChatModel,
   resolveSmolModelRef,
   type GhostModelRoleBinding,
 } from "./models.js";
 import {
+  asRuntimeSessionEvent,
   createPiMessagesAdapter,
   type PiMessagesEvent,
   zeroUsage,
@@ -158,18 +130,52 @@ export {
   conversationIdFromSessionFile,
   sessionFileNameFor,
 };
-import { createGhostOmpRuntime, type GhostOmpRuntime } from "./omp-runtime.js";
-import { loadGhostSettings } from "./ghost-settings.js";
-import {
-  loadGhostHookExtensions,
-  scopeGhostSessionArtifactRediscovery,
-} from "./artifact-root.js";
+import { createGhostPiRuntime, type GhostPiRuntime } from "./pi-runtime.js";
+import { loadGhostSettings, type GhostSettings } from "./ghost-settings.js";
+import { loadGhostHookExtensions } from "./artifact-root.js";
 import { AskBroker, AskBrokerError, type PendingAsk } from "./ask-broker.js";
+import { AskCancelledError, createAskTool, type AskToolDetails } from "./ask-tool.js";
+import type { AskResultItem } from "./ask-broker.js";
+import {
+  type CancelJobOutcome,
+  createBashTool,
+  createJobsTool,
+  formatJobResult,
+  type GhostJob,
+  GhostJobManager,
+  type GhostJobSnapshot,
+  JOB_RESULT_MESSAGE_TYPE,
+  jobSnapshot,
+} from "./jobs.js";
+import { piExtensionFromGhost, renderPersonaPrompt } from "./pi-extension-bridge.js";
+import { createInspectImageTool } from "./inspect-image.js";
+import {
+  createPlanModeGuard,
+  createProposePlanTool,
+  createTodoTool,
+  PlanBook,
+  planSections,
+  type PlanState,
+  type TodoPhase,
+} from "./plan-mode.js";
+import { GhostMcpManager } from "./mcp-manager.js";
+import { validateServerName, type MCPServerConfig } from "./mcp-config.js";
+import { resolveChatModel } from "./model-routing.js";
+import { buildRecapPrompt, normalizeRecap } from "./recap.js";
+import { assistantText } from "./smol.js";
+import {
+  convertOmpTranscript,
+  hasOmpTitleSlot,
+  readSessionEntries,
+  sessionTitle,
+} from "./session-transcript.js";
+import type { Rule, Skill } from "./declarative-types.js";
 import {
   buildGhostAvailableSlashCommands,
   classifyGhostBuiltin,
   executeGhostBuiltin,
   type GhostAvailableSlashCommand,
+  type GhostFileCommand,
 } from "./slash-commands.js";
 import {
   LiveVoiceManager,
@@ -219,38 +225,46 @@ type SessionConversationMaintenance = Pick<ConversationMaintenance,
   | "disposeAll"
 >;
 
-/**
- * The core OMP capabilities Ghost deliberately exposes in the phase-1 Pi
- * runtime. OMP may add or gate other tools by configuration and model
- * capability, so this is an audited minimum rather than an exhaustive
- * registry.
- */
-export const OMP_NATIVE_TOOL_NAMES: readonly string[] = [
+/** pi's built-in coding tools a ghost session starts with. */
+export const PI_NATIVE_TOOL_NAMES: readonly string[] = [
   "bash",
   "edit",
-  "glob",
+  "find",
   "grep",
-  "hub",
+  "ls",
   "read",
-  "web_search",
   "write",
 ];
 
-export const PI_RUNTIME_SYSTEM_SECTION = [
-  "## Tools",
-  "`xd://` mounts additional tools: read `xd://` to list them, read `xd://<name>` for "
-    + "instructions, and write JSON there to call one.",
-].join("\n");
+const SKILL_PROMPT_MESSAGE_TYPE = "skill-prompt";
+const LIVE_DELEGATION_MESSAGE_TYPE = "live-delegation";
 
-export function phase1PiSubagentSessionOptions(): Pick<
-  CreateAgentSessionOptions,
-  "disabledToolNames" | "spawns" | "taskAgents"
-> {
-  return {
-    disabledToolNames: ["task"],
-    spawns: "",
-    taskAgents: [],
-  };
+/** `cd ...` typed at the `!` prompt moves the conversation's working directory. */
+function isPersistentShellCdCommand(command: string): boolean {
+  return /^cd(?:\s|$)/.test(command.trim());
+}
+
+type BashResult = Awaited<ReturnType<AgentSession["executeBash"]>>;
+
+interface BashExecutionMessage {
+  role: "bashExecution";
+  command: string;
+  output: string;
+  exitCode: number | undefined;
+  cancelled: boolean;
+  truncated: boolean;
+  timestamp: number;
+  excludeFromContext?: boolean;
+}
+
+function bashExecutionToText(message: BashExecutionMessage): string {
+  const status = message.cancelled
+    ? "[cancelled]"
+    : message.exitCode === undefined || message.exitCode === 0
+      ? ""
+      : `[exit ${message.exitCode}]`;
+  const output = message.truncated ? `${message.output}\n[output truncated]` : message.output;
+  return [`$ ${message.command}`, output.trimEnd(), status].filter(Boolean).join("\n");
 }
 
 export interface UserBashCommand {
@@ -289,32 +303,57 @@ function tailSummary(text: string, maxLength = 800): string | undefined {
   return clean.length <= maxLength ? clean : `…${clean.slice(-maxLength)}`;
 }
 
+function parseSkillInvocation(prompt: string): { name: string; args: string } | null {
+  const match = /^\/skill:([A-Za-z0-9_.-]+)(?:\s+([\s\S]*))?$/.exec(prompt.trim());
+  return match ? { name: match[1] ?? "", args: (match[2] ?? "").trim() } : null;
+}
+
 /**
- * Preserve OMP's explicit `/skill:name args` command surface. Native `read`
- * lets the model discover skills; this path is the user's force-invocation.
+ * Preserve the explicit `/skill:name args` command surface. The prompt lets
+ * the model discover skills; this path is the owner's force-invocation, which
+ * sends the admitted skill bytes as an owner-attributed message.
  */
-async function promptOmpSession(session: AgentSession, prompt: string): Promise<void> {
-  if (session.skillsSettings?.enableSkillCommands) {
-    const invocation = parseSkillInvocation(prompt);
-    const skill = invocation
-      ? session.skills.find((candidate) => candidate.name === invocation.name)
-      : undefined;
-    if (invocation && skill) {
-      const built = await buildSkillPromptMessage(skill, invocation.args, "user");
-      await session.promptCustomMessage({
-        customType: SKILL_PROMPT_MESSAGE_TYPE,
-        content: built.message,
-        display: true,
-        details: built.details,
-        attribution: "user",
-      }, {
-        streamingBehavior: "steer",
-        queueChipText: prompt,
-      });
-      return;
-    }
+async function promptPiSession(
+  session: AgentSession,
+  prompt: string,
+  skills: readonly Skill[],
+): Promise<void> {
+  const invocation = parseSkillInvocation(prompt);
+  const skill = invocation ? skills.find((candidate) => candidate.name === invocation.name) : undefined;
+  if (invocation && skill && skill.snapshotContent !== undefined) {
+    const content = [
+      `<skill name=${JSON.stringify(skill.name)} path=${JSON.stringify(skill.filePath)}>`,
+      skill.snapshotContent,
+      "</skill>",
+      ...(invocation.args ? [`Arguments: ${invocation.args}`] : []),
+    ].join("\n");
+    await session.sendCustomMessage({
+      customType: SKILL_PROMPT_MESSAGE_TYPE,
+      content,
+      display: true,
+      details: { attribution: "user", skill: skill.name },
+    }, { triggerTurn: true, deliverAs: "steer" });
+    return;
   }
+  // pi expands `/name args` against the admitted Markdown commands the loader
+  // was given (`promptsOverride`); everything else is the owner's message.
   await session.prompt(prompt);
+}
+
+/** Ghost's summary briefing replaces pi's default compaction instructions. */
+const ghostCompactionExtension: ExtensionFactory = (api) => {
+  api.on("session_before_compact", (event) => {
+    if (event.customInstructions !== undefined) return undefined;
+    (event as { customInstructions?: string }).customInstructions = GHOST_COMPACTION_PROMPT;
+    return undefined;
+  });
+};
+
+/** Registers whichever manager the hosted MCP slot holds when pi (re)loads. */
+function mcpToolsExtension(mcp: HostedMCP): ExtensionFactory {
+  return (api) => {
+    for (const tool of mcp.manager.getTools()) api.registerTool(tool);
+  };
 }
 
 function persistedPiOwnerTurnCount(entries: readonly SessionEntry[]): number {
@@ -323,7 +362,7 @@ function persistedPiOwnerTurnCount(entries: readonly SessionEntry[]): number {
     if (entry.type === "message" && entry.message.role === "user") {
       const attribution = (entry.message as { attribution?: string }).attribution;
       if (attribution !== "agent") count += 1;
-    } else if (entry.type === "custom_message" && entry.attribution === "user") {
+    } else if (entry.type === "custom_message" && customMessageAttribution(entry) === "user") {
       count += 1;
     }
     if (!Number.isSafeInteger(count)) {
@@ -336,6 +375,7 @@ function persistedPiOwnerTurnCount(entries: readonly SessionEntry[]): number {
 type PiOwnerPassKind = "direct" | "steer" | "followUp" | "collaboration" | "voice" | "reanswer";
 
 const ASK_REANSWER_OWNER_MESSAGE_TYPE = "ghost-ask-reanswer-owner";
+const DEFAULT_AUTO_BACKGROUND_MS = 60_000;
 const MODEL_TURN_PERSISTENCE_ERROR = "Could not durably settle this owner turn.";
 
 interface PendingPiOwnerPass {
@@ -377,11 +417,16 @@ function entryText(content: unknown): string {
   }).join("");
 }
 
+function customMessageAttribution(entry: Extract<SessionEntry, { type: "custom_message" }>): string | undefined {
+  const details = entry.details as { attribution?: unknown } | undefined;
+  return typeof details?.attribution === "string" ? details.attribution : undefined;
+}
+
 function piOwnerEntry(entry: SessionEntry): { kind: PiOwnerPassKind; prompt: string } | null {
   if (entry.type === "message" && entry.message.role === "user") {
     if ((entry.message as { attribution?: string }).attribution === "agent") return null;
     return {
-      kind: (entry.message as { steering?: boolean }).steering === true ? "steer" : "direct",
+      kind: "direct",
       prompt: entryText(entry.message.content),
     };
   }
@@ -392,7 +437,7 @@ function piOwnerEntry(entry: SessionEntry): { kind: PiOwnerPassKind; prompt: str
   if (entry.customType === LIVE_DELEGATION_MESSAGE_TYPE) {
     return { kind: "voice", prompt: entryText(entry.content) };
   }
-  if (entry.attribution === "user") {
+  if (customMessageAttribution(entry) === "user") {
     return { kind: "collaboration", prompt: entryText(entry.content) };
   }
   return null;
@@ -403,7 +448,10 @@ function passEntryMatches(
   owner: { kind: PiOwnerPassKind; prompt: string },
 ): boolean {
   if (pass.kind === "direct") return owner.kind === "direct" || owner.kind === "collaboration";
-  if (pass.kind === "followUp") return owner.kind === "direct" && owner.prompt === pass.ownerPrompt;
+  // pi queues steer and follow-up text as ordinary user messages.
+  if (pass.kind === "steer" || pass.kind === "followUp") {
+    return owner.kind === "direct" && owner.prompt === pass.ownerPrompt;
+  }
   return owner.kind === pass.kind && owner.prompt === pass.ownerPrompt;
 }
 
@@ -415,7 +463,7 @@ function passEntryMatches(
  */
 export type TitleGenerator = (input: {
   session: AgentSession;
-  runtime: GhostOmpRuntime;
+  runtime: GhostPiRuntime;
   ghostName: string;
   configDir: string;
   firstPrompt: string;
@@ -525,7 +573,7 @@ export interface SessionHostOptions {
   projectBindings?: ProjectBindingStore;
   sessionStartupProbe?: (
     stage: "model-runtime" | "mcp" | "session-manager" | "agent-session",
-    runtime: GhostOmpRuntime,
+    runtime: GhostPiRuntime,
   ) => void | Promise<void>;
   /** Test seam for fault-injecting durable per-tool cwd publication. */
   toolCwdWriter?: typeof writeToolCwds;
@@ -560,15 +608,19 @@ export interface SessionHostOptions {
   /**
    * Seconds a question waits before it settles itself. Daemon-wide; see
    * DaemonConfig.askTimeoutSeconds for why it is not a property of the ghost.
-   * `0` (the default here) waits forever. Sessions carry it as OMP's own
-   * `ask.timeout`, so OMP resolves plan mode and an explicit disable with it.
+   * `0` (the default here) waits forever; Ghost's `ask` tool reads it per call.
    */
   askTimeoutSeconds?: number;
   /**
-   * OMP-native compaction policy. Defaults to enabled at 80% of the active
-   * model's context window, with asynchronous speculation enabled.
+   * pi's native compaction, thresholded by Ghost. Defaults to enabled at 80%
+   * of the active model's context window.
    */
   compaction?: CompactionConfig;
+  /**
+   * Background jobs: a foreground `bash` call that runs longer than
+   * `autoBackgroundMs` continues as a job (default 60s; 0 disables).
+   */
+  jobs?: { autoBackgroundMs?: number };
   /**
    * Owner-local Claude Code harness. It is dormant unless
    * `roles.chat_model.provider` is `claude-code`; options are chiefly the
@@ -633,6 +685,27 @@ export interface GhostSessionHandle {
   session: AgentSession;
   sessionFile: string | undefined;
   model: { provider: string; id: string } | null;
+  /** The admitted skills, for `/skill:` force-invocation. */
+  skills: readonly Skill[];
+  /** The admitted rules, rendered into the persona prompt. */
+  rules: readonly Rule[];
+  /** The admitted Markdown commands and prompt templates, for `/` discovery. */
+  commands: readonly GhostFileCommand[];
+}
+
+export interface PlanStateView {
+  planning: boolean;
+  plan: (PlanState["plan"] & { content: string | null }) | null;
+  todo: TodoPhase[];
+}
+
+function planStateView(book: PlanBook): PlanStateView {
+  const state = book.getState();
+  return {
+    planning: state.planning,
+    plan: state.plan ? { ...state.plan, content: book.planContent() } : null,
+    todo: book.getTodo(),
+  };
 }
 
 export interface QueuedMessages {
@@ -654,15 +727,29 @@ export interface TrashedConversation {
 
 export type QueueMode = "steer" | "followUp";
 
+interface McpSource {
+  path: string;
+  level: "user" | "project";
+}
+
 interface HostedMCP {
-  manager: MCPManager;
+  manager: GhostMcpManager;
+  /** The rows the manager was built from, kept for reconnects. */
+  configs: Map<string, MCPServerConfig>;
+  sources: Map<string, McpSource>;
   /** Serialized dynamic tool refreshes; never rejects. */
   refresh?: Promise<void>;
   /** Serialized config reconnects; concurrent mutations must not interleave. */
   reload?: Promise<void>;
 }
 
+interface HostedRecap {
+  controller: AbortController;
+  task: Promise<string | null>;
+}
+
 interface HostedSession extends GhostSessionHandle {
+  logger: Logger;
   project: ProjectBindingState;
   projectSnapshot: ProjectDeclarativeSnapshot | null;
   toolCwds: Map<string, string>;
@@ -674,6 +761,8 @@ interface HostedSession extends GhostSessionHandle {
   busy: boolean;
   lastUsedAt: number;
   unsubscribeOwnership?: () => void;
+  /** The abort signal of the most recent agent run, captured at `agent_start`. */
+  runSignal?: AbortSignal;
   pendingOwnerPasses: PendingPiOwnerPass[];
   /** Serial durability and hook drain shared by every owner-action path. */
   ownerPassSettlement?: Promise<void>;
@@ -684,12 +773,19 @@ interface HostedSession extends GhostSessionHandle {
   /** Lets a concurrent stop wait for an admitted startup. */
   liveVoiceStart?: Promise<LiveVoiceStatus>;
   ask: AskBroker;
+  jobs: GhostJobManager;
+  plan: PlanBook;
+  /** Jobs that settled while an owner held the session without streaming. */
+  pendingJobResults: GhostJob[];
   /**
    * The runtime this session's model was bound from, kept so a later model
    * switch can re-resolve against the same catalogue the session was built
    * with (see `rebindModel`).
    */
-  modelRuntime: GhostOmpRuntime;
+  modelRuntime: GhostPiRuntime;
+  /** The ghost's own settings.yml, read when the session opened. */
+  settings: GhostSettings;
+  /** A `!cd` moved the working directory; the session reopens on release. */
   /**
    * Set when a model switch arrived during a turn or live voice. The model is
    * rebound after that exclusive owner releases the AgentSession.
@@ -705,6 +801,8 @@ interface HostedSession extends GhostSessionHandle {
    */
   title?: Promise<void>;
   titleAbort?: AbortController;
+  /** One abortable, non-persisted completion over the current Pi context. */
+  recap?: HostedRecap;
   collaborationTransitions?: number;
   rawCollaborationPrompts?: number;
   rawCollaborationIdle?: Promise<void>;
@@ -715,7 +813,6 @@ interface HostedSession extends GhostSessionHandle {
   /** Close the borrowed runtime exactly once across graceful/forced teardown. */
   modelRuntimeClosed?: boolean;
   /** Successful cleanup stages shared by graceful, retried, and forced paths. */
-  disposeBegun?: boolean;
   bashAbortStarted?: boolean;
   abortTask?: Promise<void>;
   abortCompleted?: boolean;
@@ -728,7 +825,6 @@ interface HostedSession extends GhostSessionHandle {
   mcpReloadSettled?: boolean;
   mcpDisconnected?: boolean;
   mcpRefreshSettled?: boolean;
-  mcpSingletonCleared?: boolean;
   sessionDisposed?: boolean;
   forceDisposeStarted?: boolean;
   mcp?: HostedMCP;
@@ -1136,7 +1232,7 @@ export interface AskBranchNavigation {
 }
 
 /**
- * How an ask closed survives only in the tool result OMP wrote. A cancel or an
+ * How an ask closed survives only in the tool result pi wrote. A cancel or an
  * abort throws out of the tool, leaving an error entry with empty details; an
  * answer carries the selections, either as `results` for a multi-question ask
  * or flattened onto details for a single one. Without reading that back, a
@@ -1145,7 +1241,7 @@ export interface AskBranchNavigation {
 function askSettlement(details: AskToolDetails | null | undefined): AskSettlement {
   if (!details) return "cancelled";
   if (details.chatRedirect === true) return "chat";
-  const timedOut = (result: QuestionResult) => result.timedOut === true;
+  const timedOut = (result: AskResultItem) => result.timedOut === true;
   if (details.results && details.results.length > 0) {
     return details.results.some(timedOut) ? "timedOut" : "submitted";
   }
@@ -1248,47 +1344,6 @@ function editableUserText(content: unknown): string {
     .join("");
 }
 
-/**
- * pi 0.84 stored a display name as an append-only `session_info` entry. OMP 18
- * replaced that record with a fixed title slot, but does not migrate the old
- * entry itself. Keep this reader until every pre-OMP transcript has had a
- * writable open and can be promoted through `SessionManager.setSessionName`.
- */
-function legacySessionTitle(entries: readonly unknown[]): string | null {
-  let title: string | null = null;
-  for (const entry of entries) {
-    const record = entry as { type?: unknown; name?: unknown } | null;
-    if (record?.type !== "session_info") continue;
-    if (typeof record.name !== "string") {
-      title = null;
-      continue;
-    }
-    const normalized = Array.from(record.name, (character) => {
-      const codePoint = character.codePointAt(0) ?? 0;
-      return codePoint <= 0x1f || (codePoint >= 0x7f && codePoint <= 0x9f)
-        ? " "
-        : character;
-    }).join("").replace(/ +/g, " ").trim();
-    title = normalized || null;
-  }
-  return title;
-}
-
-async function readLegacySessionTitle(sessionFile: string): Promise<string | null> {
-  // OMP 18 reserves a physical title slot before the first session entry. Its
-  // presence proves this cannot contain Ghost's older `session_info` title,
-  // so stop after the first logical entry instead of scanning a growing chat
-  // every time an untitled conversation changes.
-  const nativeTitleSlot = await visitEntriesFromFileStream(sessionFile, () => false);
-  if (nativeTitleSlot) return null;
-
-  const entries: unknown[] = [];
-  await visitEntriesFromFile(sessionFile, (entry) => {
-    if ((entry as { type?: unknown }).type === "session_info") entries.push(entry);
-  });
-  return legacySessionTitle(entries);
-}
-
 const COPY_COUNTER_TITLE = /^(.*\S)\s+\((\d+)\)$/;
 
 /**
@@ -1318,19 +1373,13 @@ export function forkConversationTitle(
   return `${base} (${counter})`;
 }
 
-/** Upgrade one loaded pi 0.84 title to OMP 18's durable native title slot. */
-export async function migrateLegacySessionTitle(
-  manager: SessionManager,
-): Promise<string | null> {
+/** Carry an OMP-era title (header or `title_change`) into pi's `session_info`. */
+export function migrateLegacySessionTitle(manager: SessionManager): string | null {
   if (manager.getSessionName()) return null;
-  const title = legacySessionTitle(manager.getEntries());
+  const title = sessionTitle(manager.getEntries());
   if (!title) return null;
-  const changed = await manager.setSessionName(
-    title,
-    "auto",
-    "ghost-legacy-session-info",
-  );
-  return changed ? title : null;
+  manager.appendSessionInfo(title);
+  return title;
 }
 
 interface ProjectMcpConnectionResult {
@@ -1344,7 +1393,7 @@ function rejectedProjectMcpCount(effective: EffectiveProjectMcpRead): number {
 }
 
 function summarizeProjectMcpConnection(
-  sources: ReadonlyMap<string, SourceMeta>,
+  sources: ReadonlyMap<string, McpSource>,
   errors: ReadonlyMap<string, unknown>,
   rejected = 0,
 ): ProjectMcpConnectionResult {
@@ -1378,16 +1427,16 @@ function projectMcpRuntimeStatus(result: ProjectMcpConnectionResult): {
 }
 
 async function connectGhostProjectMCP(
-  manager: MCPManager,
+  manager: GhostMcpManager,
   input: {
     ghostRoot: string;
     secretResolver: SecretResolver;
     project?: { root: string; mcp: EffectiveProjectMcpRead };
   },
   logger: Logger,
-): Promise<ProjectMcpConnectionResult> {
+): Promise<{ result: ProjectMcpConnectionResult; configs: Map<string, MCPServerConfig>; sources: Map<string, McpSource> }> {
   const configs = new Map<string, MCPServerConfig>();
-  const sources = new Map<string, SourceMeta>();
+  const sources = new Map<string, McpSource>();
   let projectRejected = 0;
   const roots = [
     {
@@ -1430,8 +1479,6 @@ async function connectGhostProjectMCP(
       const resolved = resolveMcpServerSecrets(config, input.secretResolver);
       configs.set(server.name, normalizeMcpStdioCwd(expandMcpServerConfig(resolved), root));
       sources.set(server.name, {
-        provider: "native",
-        providerName: "OMP",
         path: server.source.absolutePath,
         level: isActiveProject ? "project" : "user",
       });
@@ -1439,23 +1486,18 @@ async function connectGhostProjectMCP(
   }
 
   if (configs.size === 0) {
-    return summarizeProjectMcpConnection(sources, new Map(), projectRejected);
+    return { result: summarizeProjectMcpConnection(sources, new Map(), projectRejected), configs, sources };
   }
   try {
-    const result = await manager.connectServers(
-      Object.fromEntries(configs),
-      Object.fromEntries(sources),
-    );
-    for (const [name, error] of result.errors) {
+    const connected = await manager.connectServers(Object.fromEntries(configs));
+    for (const [name, error] of connected.errors) {
       logger.error("ghost project MCP server failed to load", {
         path: sources.get(name)?.path ?? `mcp:${name}`,
         server: name,
-        code: error === "mcp_tool_load_failed"
-          ? "mcp_tool_load_failed"
-          : "mcp_connection_failed",
+        code: error,
       });
     }
-    return summarizeProjectMcpConnection(sources, result.errors, projectRejected);
+    return { result: summarizeProjectMcpConnection(sources, connected.errors, projectRejected), configs, sources };
   } catch {
     logger.error("project MCP failed to load", {
       path: input.project ? join(input.project.root, ".omp") : input.ghostRoot,
@@ -1463,25 +1505,14 @@ async function connectGhostProjectMCP(
     });
     const configured = summarizeProjectMcpConnection(sources, new Map(), projectRejected);
     return {
-      projectConfigured: configured.projectConfigured,
-      projectFailed: configured.projectFailed + configured.projectConfigured,
+      result: {
+        projectConfigured: configured.projectConfigured,
+        projectFailed: configured.projectFailed + configured.projectConfigured,
+      },
+      configs,
+      sources,
     };
   }
-}
-
-/**
- * Hide the two CustomTool fields that OMP 18.0.3's reflective adapter proxies
- * before assigning its own readonly copies under Bun. Ordinary property reads
- * still see the original values, so `strict: false`, load-mode selection,
- * rendering, execution, and MCP provenance are preserved. Remove this bridge
- * when the upstream RegisteredToolAdapter/CustomToolAdapter Bun bug is fixed.
- */
-function mcpToolsForBunAdapter(manager: MCPManager): ReturnType<MCPManager["getTools"]> {
-  return manager.getTools().map((tool) => new Proxy(tool, {
-    ownKeys(target) {
-      return Reflect.ownKeys(target).filter((key) => key !== "strict" && key !== "loadMode");
-    },
-  }));
 }
 
 export class SessionHost {
@@ -1498,6 +1529,7 @@ export class SessionHost {
   private readonly browserMode: "relay" | "profile";
   private readonly relayTransport: RelayTransport | undefined;
   private readonly compactionConfig: CompactionConfig;
+  private readonly autoBackgroundMs: number;
   private readonly titleEnabled: boolean;
   private readonly titleTimeoutMs: number;
   private readonly titleTimeoutScheduler: NonNullable<TitleConfig["scheduleTimeout"]>;
@@ -1539,10 +1571,7 @@ export class SessionHost {
   private readonly homeMoveClaims = new Set<string>();
   private readonly unregisterHomeMoveParticipant: (() => void) | undefined;
   /** Read-through cache for legacy titles that have not had a writable open yet. */
-  private readonly legacyTitles = new Map<
-    string,
-    { modifiedMs: number; size: number; title: string | null }
-  >();
+  private readonly legacyTitles = new Map<string, { modifiedMs: number; title: string | null }>();
   private readonly retentionIdleTtlMs: number;
   private readonly retentionMaxSessions: number;
   private readonly retentionNow: () => number;
@@ -1568,6 +1597,7 @@ export class SessionHost {
     this.browserMode = options.browserMode ?? "relay";
     this.relayTransport = options.relayTransport;
     this.compactionConfig = options.compaction ?? DEFAULT_COMPACTION_CONFIG;
+    this.autoBackgroundMs = options.jobs?.autoBackgroundMs ?? DEFAULT_AUTO_BACKGROUND_MS;
     this.titleEnabled = options.title?.enabled ?? true;
     this.titleTimeoutMs = options.title?.timeoutMs ?? DEFAULT_TITLE_TIMEOUT_MS;
     if (!Number.isFinite(this.titleTimeoutMs) || this.titleTimeoutMs <= 0) {
@@ -1626,7 +1656,8 @@ export class SessionHost {
       try {
         await this.settleLiveVoiceSession(key);
       } catch (error) {
-        this.logger.warn("deferred session update after live voice failed", {
+        const [ghost, conversation] = sessionKeyParts(key);
+        this.logger.child({ ghost, conversation }).warn("deferred session update after live voice failed", {
           session: key,
           error: error instanceof Error ? error.message : String(error),
         });
@@ -1680,7 +1711,7 @@ export class SessionHost {
 
   async withMaintenanceRuntime<T>(
     ghostName: string,
-    use: (runtime: GhostOmpRuntime) => Promise<T>,
+    use: (runtime: GhostPiRuntime) => Promise<T>,
   ): Promise<T> {
     if (this.disposed) {
       throw new GhostError("shutting_down", "The daemon is shutting down.", 503);
@@ -1689,7 +1720,7 @@ export class SessionHost {
     // Maintenance owns a short-lived runtime. Borrowing one from the Pi cache
     // would let an unrelated eviction or project/runtime switch close it while
     // the idle generation is still using the model catalogue.
-    const runtime = await createGhostOmpRuntime({
+    const runtime = await createGhostPiRuntime({
       authPath: ghostAuthPath(paths.agentDir),
       modelsPath: ghostModelsPath(paths.home),
       allowModelNetwork: !this.offline,
@@ -1720,9 +1751,8 @@ export class SessionHost {
   private sessionProtectedFromRetention(hosted: HostedSession): boolean {
     const [, conversationId] = sessionKeyParts(hosted.sessionKey);
     return this.sessionOwned(hosted)
+      || hosted.jobs.hasRunning()
       || hosted.session.isCompacting
-      || hosted.session.compactionSpeculation === "running"
-      || hosted.session.isEvalRunning
       || hosted.title !== undefined
       || hosted.settlingDeferred !== undefined
       || (hosted.collaborationTransitions ?? 0) > 0
@@ -1769,7 +1799,8 @@ export class SessionHost {
   /** Remove cache admission synchronously; a failed teardown gates replacement opens. */
   private retireHostedSession(key: string, reason: string): void {
     void this.closeHostedSession(key, reason).catch((error) => {
-      this.logger.warn("retained session disposal failed", {
+      const [ghost, conversation] = sessionKeyParts(key);
+      this.logger.child({ ghost, conversation }).warn("retained session disposal failed", {
         session: key,
         error: error instanceof Error ? error.message : String(error),
       });
@@ -1817,9 +1848,7 @@ export class SessionHost {
       try {
         listener(event);
       } catch (error) {
-        this.logger.warn("conversation event listener failed", {
-          ghost: ghostName,
-          conversation: identity.id,
+        this.logger.child({ ghost: ghostName, conversation: identity.conversationId }).warn("conversation event listener failed", {
           error: error instanceof Error ? error.message : String(error),
         });
       }
@@ -1879,7 +1908,7 @@ export class SessionHost {
     }
     const ghost = this.registry.get(ghostName);
     const paths = ghostPaths(ghost.dir);
-    await this.recoverForkTransactions(paths.sessionDir);
+    await this.recoverForkTransactions(paths.sessionDir, ghostName);
     if (await transactionMarkerEntryExists(
       forkTransactionPath(paths.sessionDir, conversationId),
     )) {
@@ -1935,8 +1964,8 @@ export class SessionHost {
     sessionId?: string | null,
     runtime: ConversationRuntime = "pi",
   ): Promise<GhostAvailableSlashCommand[]> {
-    assertPiConversation(runtime, "OMP slash commands");
-    this.assertOmpRuntime(ghostName, "OMP slash commands");
+    assertPiConversation(runtime, "Slash commands");
+    this.assertPiRuntime(ghostName, "Slash commands");
     const hosted = await this.idleHostedSession(
       ghostName,
       sessionId,
@@ -1944,13 +1973,77 @@ export class SessionHost {
       true,
     );
     try {
-      return buildGhostAvailableSlashCommands(hosted.session);
+      return buildGhostAvailableSlashCommands(hosted.commands);
     } finally {
       await this.releaseSessionClaim(hosted, ghostName);
     }
   }
 
-  private assertOmpRuntime(ghostName: string, feature: string): Ghost {
+  /** Plan mode, the approved plan (with its text), and the todo list of one conversation. */
+  async planState(
+    ghostName: string,
+    sessionId?: string | null,
+    runtime: ConversationRuntime = "pi",
+  ): Promise<PlanStateView> {
+    assertPiConversation(runtime, "Plan mode");
+    const book = await this.planBook(ghostName, sessionId, false);
+    return book ? planStateView(book) : { planning: false, plan: null, todo: [] };
+  }
+
+  /** `start` enters plan mode, `stop` leaves it (keeping an approved plan), `clear` also drops the plan. */
+  async setPlanMode(
+    ghostName: string,
+    sessionId: string | null | undefined,
+    action: "start" | "stop" | "clear",
+    runtime: ConversationRuntime = "pi",
+  ): Promise<PlanStateView> {
+    assertPiConversation(runtime, "Plan mode");
+    const book = (await this.planBook(ghostName, sessionId, true)) as PlanBook;
+    const current = book.getState();
+    book.setState({
+      planning: action === "start",
+      ...(action !== "clear" && current.plan ? { plan: current.plan } : {}),
+    });
+    await this.announceConversationUpdated(ghostName, "pi", requireRawConversationId(sessionId ?? DEFAULT_SESSION_KEY));
+    return planStateView(book);
+  }
+
+  /**
+   * The conversation's plan book: the open session's own, or one over the
+   * transcript file when the conversation is not open. Nothing opens a full
+   * session for it. Writing needs the session idle so the entry lands in
+   * order; a conversation without a transcript is created for a write and
+   * reported empty for a read.
+   */
+  private async planBook(ghostName: string, sessionId: string | null | undefined, write: boolean): Promise<PlanBook | null> {
+    const ghost = this.registry.get(ghostName);
+    const conversationId = requireRawConversationId(sessionId ?? DEFAULT_SESSION_KEY);
+    const key = this.keyOf(ghostName, conversationId);
+    const opening = this.opening.get(key);
+    if (opening) await opening.catch(() => {});
+    const hosted = this.sessions.get(key);
+    if (hosted) {
+      if (write && this.sessionOwned(hosted)) {
+        throw new GhostError("session_busy", "Wait for this conversation's turn to finish before changing plan mode.", 409);
+      }
+      return hosted.plan;
+    }
+    const paths = ghostPaths(ghost.dir);
+    const sessionFile = join(paths.sessionDir, sessionFileNameFor(conversationId));
+    if (!existsSync(sessionFile)) {
+      if (!write) return null;
+      mkdirSync(paths.sessionDir, { recursive: true });
+      writeFileSync(sessionFile, "", { flag: "wx", mode: 0o600 });
+    } else {
+      await requireSessionFileConversationId(sessionFile, conversationId);
+    }
+    const project = await this.projectState(ghostName, "pi", conversationId);
+    const manager = SessionManager.open(sessionFile, paths.sessionDir, project.cwd);
+    if (!existsSync(sessionFile) || manager.getEntries().length <= 1) bindConversationId(manager, conversationId);
+    return new PlanBook(manager);
+  }
+
+  private assertPiRuntime(ghostName: string, feature: string): Ghost {
     const ghost = this.registry.get(ghostName);
     try {
       const configured = resolveChatModelRef(readGhostModels(ghostPaths(ghost.dir).home));
@@ -1963,7 +2056,7 @@ export class SessionHost {
       }
     } catch (error) {
       if (error instanceof GhostError) throw error;
-      // Match runTurn: malformed routing falls through to OMP's own selection.
+      // Match runTurn: malformed routing falls through to the catalogue default.
     }
     return ghost;
   }
@@ -1974,7 +2067,7 @@ export class SessionHost {
     runtime: ConversationRuntime = "pi",
   ): LiveVoiceStatus {
     assertPiConversation(runtime, "Live voice");
-    this.assertOmpRuntime(ghostName, "Live voice");
+    this.assertPiRuntime(ghostName, "Live voice");
     return this.liveVoice.status(this.keyOf(ghostName, sessionId));
   }
 
@@ -1985,7 +2078,7 @@ export class SessionHost {
     runtime: ConversationRuntime = "pi",
   ): Promise<LiveVoiceStatus> {
     assertPiConversation(runtime, "Live voice");
-    this.assertOmpRuntime(ghostName, "Live voice");
+    this.assertPiRuntime(ghostName, "Live voice");
     const key = this.keyOf(ghostName, sessionId);
     if (action === "stop") {
       const hosted = this.sessions.get(key);
@@ -2006,6 +2099,7 @@ export class SessionHost {
       return this.liveVoice.setMuted(key, action === "mute");
     }
 
+    await this.cancelRecap(key);
     const current = this.liveVoice.status(key);
     const currentHosted = this.sessions.get(key);
     if (current.active && (currentHosted?.liveVoiceTransitions ?? 0) === 0) return current;
@@ -2050,7 +2144,7 @@ export class SessionHost {
     runtime: ConversationRuntime = "pi",
   ): CollaborationStatus {
     assertPiConversation(runtime, "Live collaboration");
-    this.assertOmpRuntime(ghostName, "Live collaboration");
+    this.assertPiRuntime(ghostName, "Live collaboration");
     return this.collaboration.status(this.keyOf(ghostName, sessionId));
   }
 
@@ -2066,7 +2160,7 @@ export class SessionHost {
     runtime: ConversationRuntime = "pi",
   ): Promise<CollaborationStatus> {
     assertPiConversation(runtime, "Live collaboration");
-    this.assertOmpRuntime(ghostName, "Live collaboration");
+    this.assertPiRuntime(ghostName, "Live collaboration");
     const key = this.keyOf(ghostName, sessionId);
     if (input.action === "stop") {
       const hosted = this.sessions.get(key);
@@ -2092,17 +2186,13 @@ export class SessionHost {
     );
     hosted.collaborationTransitions = (hosted.collaborationTransitions ?? 0) + 1;
     try {
-      const configuredRelay = hosted.session.settings.get("collab.relayUrl");
-      const relayUrl = input.relayUrl
-        ?? (typeof configuredRelay === "string" ? configuredRelay : "");
+      const relayUrl = input.relayUrl ?? hosted.settings.getString("collab.relayUrl") ?? "";
+      const webUrl = hosted.settings.getString("collab.webUrl");
       return await this.collaboration.start({
         sessionKey: key,
         session: hosted.session,
-        promptCustomMessage: (message, options) => this.runCollaborationPrompt(
-          hosted,
-          message,
-          options,
-        ),
+        promptGuest: (text) => this.runCollaborationPrompt(hosted, text),
+        ...(webUrl ? { webUrl } : {}),
         relayUrl,
         writable: input.writable === true,
         confirmed: input.confirmed === true,
@@ -2123,7 +2213,7 @@ export class SessionHost {
   ): Promise<ProjectBindingState> {
     const ghost = this.registry.get(ghostName);
     const paths = ghostPaths(ghost.dir);
-    await this.recoverForkTransactions(paths.sessionDir);
+    await this.recoverForkTransactions(paths.sessionDir, ghostName);
     if (runtime === "pi" && await transactionMarkerEntryExists(
       forkTransactionPath(paths.sessionDir, conversationId),
     )) {
@@ -2392,7 +2482,7 @@ export class SessionHost {
       const ghost = this.registry.get(ghostName);
       const sessionDir = ghostPaths(ghost.dir).sessionDir;
       mkdirSync(sessionDir, { recursive: true });
-      await this.recoverForkTransactions(sessionDir);
+      await this.recoverForkTransactions(sessionDir, ghostName);
       const key = this.keyOf(ghostName, conversationId);
       const transcript = join(sessionDir, sessionFileNameFor(conversationId));
       const claudeSidecar = claudeSessionMetadataPath(sessionDir, conversationId);
@@ -2477,6 +2567,7 @@ export class SessionHost {
     key: string,
   ): Promise<HostedSession> {
     const ghost = this.registry.get(ghostName);
+    const logger = this.logger.child({ ghost: ghostName, conversation: sessionKey });
     const paths = ghostPaths(ghost.dir);
     let project = await this.projectState(ghostName, "pi", sessionKey);
     const projectIdentity = project.root
@@ -2486,65 +2577,10 @@ export class SessionHost {
     mkdirSync(paths.agentDir, { recursive: true });
     mkdirSync(paths.sessionDir, { recursive: true });
 
-    const settingsOverrides: Partial<Record<SettingPath, unknown>> = {
-      ...nativeCompactionSettings(this.compactionConfig),
-      // `ghost_browser`, `ghost_desktop`, and `ghost_screen` own those surfaces,
-      // so OMP's overlapping browser/computer built-ins stay off. Image
-      // inspection is the opposite call: it is OMP-native now — `inspect_image`
-      // runs in its default `auto` mode, registering only when the active chat
-      // model cannot see, and resolving the `vision` role Ghost projects from
-      // `models.json`'s `vision_model`. OMP's `images.describeForTextModels`
-      // attachment fallback is deliberately left at its default (on) for the
-      // same reason. Everything else remains governed by the user's native OMP
-      // setup.
-      "browser.enabled": false,
-      "computer.enabled": false,
-      // Ghost memory is plain files in the ghost home. OMP's memory lanes
-      // (retain/recall/reflect on the mnemopi/hindsight backends, autolearn's
-      // managed skills) would grow a second store outside it, and settings
-      // load read-only from the ghost home, so one stray key there would
-      // mount them silently. Force the whole system off. `memories.enabled`
-      // is the legacy flag OMP migrates into `memory.backend`; pin it too.
-      "memory.backend": "off",
-      "memories.enabled": false,
-      "autolearn.enabled": false,
-      // OMP's developer grievance collector is unrelated to a ghost and must
-      // never add a prompt instruction, local database, or network route.
-      "dev.autoqa": false,
-      // OMP's declarative loaders know about user-level providers even when
-      // called for one explicit root. Disable the highest-priority ambient
-      // identity source before loading; the immutable snapshot below then
-      // filters every returned file to the ghost or trusted project root.
-      // Root-local CLAUDE.md remains eligible.
-      "disabledExtensions": ["context-file:user:CLAUDE.md"],
-      // Ghost has no approval surface. Sessions are explicitly local and unrestricted.
-      "tools.approvalMode": "yolo",
-      // How long an unanswered question waits is the owner's setting, and it
-      // belongs here rather than in the broker: OMP's ask tool resolves the
-      // deadline once, subtracting plan mode and an explicit `0`, and hands the
-      // broker the answer. Setting it as an override also puts the daemon-wide
-      // value above a ghost home's own settings, which is the direction
-      // it was always meant to run — the person at the keyboard decides how
-      // long a dialog waits, not the persona asking.
-      "ask.timeout": this.askTimeoutSeconds,
-      // OMP's toast is branded "Oh My Pi" and targets an OMP terminal window.
-      // Ghost's shell owns this surface: it names the ghost, includes the
-      // actual question, and opens the HUD when clicked.
-      "ask.notify": "off",
-    };
-    const settings = await loadGhostSettings(paths.home, settingsOverrides);
-    try {
-      const routing = ghostOmpModelRouting(readGhostModels(paths.home));
-      settings.override("modelRoles", routing.modelRoles);
-      settings.override("retry.fallbackChains", routing.fallbackChains);
-    } catch (error) {
-      this.logger.error("models.json routing is unusable", {
-        ghost: ghostName,
-        error: (error as Error).message,
-      });
-    }
-    const [sessionCharacter, ghostSnapshot] = await Promise.all([
+    const settings = loadGhostSettings(paths.home);
+    const [sessionCharacter, optionalSkills, ghostSnapshot] = await Promise.all([
       openGhostHome(paths.home).readCharacter(),
+      loadOptionalMachineSkills(this.ownerHome),
       loadProjectDeclarativeSnapshot(paths.home, { level: "user" }),
     ]);
     const projectSnapshot = project.root && projectIdentity
@@ -2557,17 +2593,21 @@ export class SessionHost {
         })
       : null;
     const rootSnapshots = [
+      ...(optionalSkills ? [optionalSkills] : []),
       ghostSnapshot,
       ...(projectSnapshot ? [projectSnapshot] : []),
     ];
     const effectiveDeclarative = mergeProjectDeclarativeSnapshots(rootSnapshots);
+    const fileCommands: GhostFileCommand[] = [
+      ...effectiveDeclarative.slashCommands,
+      ...effectiveDeclarative.promptTemplates,
+    ];
     const declarativeSection = renderPiDeclarativePrompt(effectiveDeclarative, {
-      disabledRules: settings.get("ttsr.disabledRules"),
+      disabledRules: settings.getStringList("ttsr.disabledRules"),
     });
     // A seeded character marks a first meeting until the ghost writes its own.
     const extraSections = [
       ...(this.extensionOptions.extraSections ?? []),
-      PI_RUNTIME_SYSTEM_SECTION,
       ...(declarativeSection ? [declarativeSection] : []),
       ...(isSeededCharacter(ghostName, sessionCharacter?.body ?? null)
         ? [FIRST_MEETING_SECTION]
@@ -2582,26 +2622,24 @@ export class SessionHost {
         extraSections,
       },
       paths.home,
-      ompToolCapabilities,
+      piToolCapabilities,
     );
-    extensions.factories.push((api) => {
-      api.on("session.compacting", () => ({ prompt: GHOST_COMPACTION_PROMPT }));
-    });
+    // The persona's own prompt is also the session's base prompt, so the
+    // transcript, compaction, and any reader between turns see the ghost
+    // rather than pi's default; the hook re-renders it before every turn.
+    const ghostExtension = await collectGhostExtension(extensions.ghost);
+    const personaSections = await renderPersonaPrompt(ghostExtension, { cwd: runtimeCwd });
+    const extensionFactories: ExtensionFactory[] = [
+      piExtensionFromGhost(ghostExtension, { dynamicSections: () => planSections(planBookRef.book) }),
+      ghostCompactionExtension,
+    ];
+    const planBookRef: { book: PlanBook } = { book: undefined as unknown as PlanBook };
 
-    const {
-      contextFiles,
-      skills,
-      promptTemplates,
-      slashCommands,
-      rules,
-    } = effectiveDeclarative;
-
-    const modelRuntime = await createGhostOmpRuntime({
+    const modelRuntime = await createGhostPiRuntime({
       authPath: ghostAuthPath(paths.agentDir),
       modelsPath: ghostModelsPath(paths.home),
       // Provider catalogs are fetched only when the daemon is not offline.
       allowModelNetwork: !this.offline,
-      settings,
     });
 
     let mcp: HostedMCP | undefined;
@@ -2609,13 +2647,9 @@ export class SessionHost {
     let createdSession: AgentSession | undefined;
     try {
     await this.sessionStartupProbe("model-runtime", modelRuntime);
-    // Supplying an MCPManager is OMP's SDK lever for skipping its ambient MCP
-    // discovery. Populate it ourselves from the ghost home only.
-    mcp = { manager: new MCPManager(runtimeCwd, null, { redactErrors: true }) };
-    mcp.manager.setAuthStorage(modelRuntime.authStorage);
-    if (settings.get("mcp.notifications")) mcp.manager.setNotificationsEnabled(true);
+    const manager = new GhostMcpManager({ cwd: runtimeCwd, logger });
     const mcpResult = await connectGhostProjectMCP(
-      mcp.manager,
+      manager,
       {
         ghostRoot: paths.home,
         secretResolver: modelRuntime.secretResolver,
@@ -2623,8 +2657,9 @@ export class SessionHost {
           ? { project: { root: project.root, mcp: projectSnapshot.mcp } }
           : {}),
       },
-      this.logger,
+      logger,
     );
+    mcp = { manager, configs: mcpResult.configs, sources: mcpResult.sources };
     await this.sessionStartupProbe("mcp", modelRuntime);
     if (project.root) {
       await this.projectBindings.updateRuntimeStatus(
@@ -2632,117 +2667,128 @@ export class SessionHost {
         "pi",
         sessionKey,
         project,
-        projectMcpRuntimeStatus(mcpResult),
+        projectMcpRuntimeStatus(mcpResult.result),
       );
       project = await this.projectState(ghostName, "pi", sessionKey);
     }
 
     const sessionFile = join(paths.sessionDir, sessionFileNameFor(sessionKey));
     const sessionFileExists = existsSync(sessionFile);
-    if (sessionFileExists) await requireSessionFileConversationId(sessionFile, sessionKey);
-    sessionManager = await SessionManager.open(
-      sessionFile,
-      paths.sessionDir,
-      undefined,
-      { initialCwd: runtimeCwd },
-    );
-    await this.sessionStartupProbe("session-manager", modelRuntime);
-    // The binding sidecar is the crash-safe authority for future resumes. A
-    // prior transcript header may carry the old cwd if the daemon stopped
-    // between publishing a binding and OMP's next header update.
-    if (resolve(sessionManager.getCwd()) !== resolve(runtimeCwd)) {
-      await sessionManager.moveTo(runtimeCwd, paths.sessionDir);
+    if (sessionFileExists) {
+      await requireSessionFileConversationId(sessionFile, sessionKey);
+      // A transcript the Oh My Pi runtime wrote is converted once, in place.
+      if (await hasOmpTitleSlot(sessionFile)) await convertOmpTranscript(sessionFile);
     }
+    // pi defers a new transcript until its first assistant message; Ghost
+    // persists direct bash turns and hook context before any model pass, so
+    // it hands pi an empty file, which pi initializes and appends to from then on.
+    if (!sessionFileExists) {
+      mkdirSync(paths.sessionDir, { recursive: true });
+      writeFileSync(sessionFile, "", { flag: "wx", mode: 0o600 });
+    }
+    // The binding sidecar is the crash-safe authority for the cwd; the header
+    // may carry an older one from before a rebind.
+    sessionManager = SessionManager.open(sessionFile, paths.sessionDir, runtimeCwd);
+    await this.sessionStartupProbe("session-manager", modelRuntime);
     if (!sessionFileExists) bindConversationId(sessionManager, sessionKey);
-    await this.promoteLegacySessionTitle(sessionManager, ghostName, sessionKey);
+    this.promoteLegacySessionTitle(sessionManager, ghostName, sessionKey, logger);
 
-    const ask = new AskBroker(this.logger);
+    const ask = new AskBroker();
+    const jobs = new GhostJobManager({
+      operations: createLocalBashOperations(),
+      onSettled: (job) => this.deliverJobResult(key, job),
+    });
     const hookExtensions = await loadGhostHookExtensions(paths.home);
-    extensions.factories.push(...hookExtensions.factories);
+    extensionFactories.push(...hookExtensions.factories);
     for (const error of hookExtensions.errors) {
-      this.logger.error("extension failed to load", {
-        ghost: ghostName,
+      logger.error("extension failed to load", {
         path: error.path,
         error: error.error,
       });
     }
-    const created = await createAgentSession({
-        cwd: runtimeCwd,
-        agentDir: paths.agentDir,
-        settings,
-        authStorage: modelRuntime.authStorage,
-        modelRegistry: modelRuntime.modelRegistry,
-        extensions: extensions.factories,
-        // Executable discovery is empty. Trusted visible Ghost hooks were
-        // already descriptor-pinned and imported as inline factories above;
-        // project hooks/extensions and Ghost custom-code tools stay disabled.
-        disableExtensionDiscovery: true,
-        additionalExtensionPaths: [],
-        preloadedExtensionPaths: [],
-        contextFiles,
-        skills,
-        rules,
-        promptTemplates,
-        slashCommands,
-        workspaceTree: {
-          rootPath: project.root ?? runtimeCwd,
-          rendered: "",
-          truncated: false,
-          totalLines: 0,
-          agentsMdFiles: [],
-        },
-        activeRepoContextProvider: async () => null,
-        watchdogFiles: [],
-        advisorConfigs: { advisors: [], sharedInstructions: undefined },
-        enableLsp: false,
-        hasUI: false,
-        // `ask` is a human-input bridge, not a tool-approval surface. OMP keeps
-        // those concerns separate: interactivePrompts exposes AskTool while the
-        // yolo approval mode above still auto-accepts the explicit capability set.
-        interactivePrompts: true,
-        autoApprove: true,
-        agentRegistry: new AgentRegistry(),
-        ...phase1PiSubagentSessionOptions(),
-        // See decision 1: sessions live under the ghost home. `open` on a path
-        // that does not exist yet creates it; the bound raw id keeps that
-        // transcript stable across daemon restarts.
-        sessionManager,
-        mcpManager: mcp.manager,
-        // The persona extension supplies the complete provider-facing prompt
-        // before every turn. No OMP prose crosses this boundary.
-        systemPrompt: [],
-      });
-    const { session, extensionsResult, setToolUIContext } = created;
-    createdSession = session;
-    scopeGhostSessionArtifactRediscovery(session, paths.home);
-    await this.sessionStartupProbe("agent-session", modelRuntime);
     const liveMcp = mcp;
-    setToolUIContext(ask.uiContext, true);
-
-    // Injected managers are borrowed in OMP's ownership model, so Ghost must
-    // bridge initial and notification-driven tool catalogs into this session.
-    // Install this even when no server exists yet: adding the first server to
-    // a live conversation must mount its tools without reopening the session.
-    const refreshMCPTools = (): Promise<void> => {
-      const run = (liveMcp.refresh ?? Promise.resolve()).then(async () => {
-        if (!session.isDisposed) {
-          await session.refreshMCPTools(mcpToolsForBunAdapter(liveMcp.manager));
-        }
+    extensionFactories.push(mcpToolsExtension(liveMcp));
+    const plansDir = join(paths.home, "plans", sessionFileNameFor(sessionKey).replace(/\.jsonl$/, ""));
+    const plan = new PlanBook(sessionManager);
+    planBookRef.book = plan;
+    extensionFactories.push(createPlanModeGuard(plan, plansDir));
+    const chatRef = resolveChatModelRef(readGhostModels(paths.home));
+    const chatModel = resolveChatModel(chatRef, modelRuntime.getAvailableSnapshot());
+    if (chatRef && (chatModel?.provider !== chatRef.provider || chatModel.id !== chatRef.modelId)) {
+      logger.warn("configured chat model is not available", {
+        provider: chatRef.provider,
+        modelId: chatRef.modelId,
       });
-      liveMcp.refresh = run.catch(() => {
-        this.logger.warn("ghost project MCP tool refresh failed", {
-          ghost: ghostName,
-          code: "mcp_tool_load_failed",
-        });
-      });
-      return run;
-    };
-    mcp.manager.setOnToolsChanged(() => refreshMCPTools());
-    await refreshMCPTools().catch(() => {});
+    }
+    const settingsManager = SettingsManager.inMemory({
+      compaction: nativeCompactionSettings(this.compactionConfig, chatModel?.contextWindow),
+      defaultTools: [...PI_NATIVE_TOOL_NAMES],
+      enableSkillCommands: false,
+    });
+    const resourceLoader = new DefaultResourceLoader({
+      cwd: runtimeCwd,
+      agentDir: paths.agentDir,
+      settingsManager,
+      extensionFactories,
+      // Executable discovery is empty. Trusted visible Ghost hooks were
+      // already descriptor-pinned and imported as inline factories above;
+      // project hooks/extensions and Ghost custom-code tools stay disabled.
+      noExtensions: true,
+      noSkills: true,
+      noPromptTemplates: true,
+      promptsOverride: () => ({
+        prompts: fileCommands.map((command) => ({
+          name: command.name,
+          description: command.description,
+          content: command.content,
+          filePath: command.source,
+          sourceInfo: createSyntheticSourceInfo(command.source, { source: "ghost" }),
+        })),
+        diagnostics: [],
+      }),
+      noThemes: true,
+      noContextFiles: true,
+      // The persona extension supplies the complete provider-facing prompt
+      // before every turn; pi's own prose never crosses this boundary.
+      systemPrompt: personaSections.join("\n\n"),
+    });
+    await resourceLoader.reload();
+    const askTool = createAskTool({
+      broker: ask,
+      timeoutMs: () => this.askTimeoutSeconds * 1000,
+    });
+    const created = await createAgentSession({
+      cwd: runtimeCwd,
+      agentDir: paths.agentDir,
+      modelRuntime: modelRuntime.runtime,
+      ...(chatModel ? { model: chatModel } : {}),
+      sessionManager,
+      settingsManager,
+      resourceLoader,
+      customTools: [
+        askTool as ToolDefinition,
+        createBashTool({ cwd: runtimeCwd, manager: jobs, autoBackgroundMs: this.autoBackgroundMs }) as ToolDefinition,
+        createJobsTool(jobs) as ToolDefinition,
+        createTodoTool(plan) as ToolDefinition,
+        createProposePlanTool({
+          book: plan,
+          broker: ask,
+          plansDir,
+          timeoutMs: () => this.askTimeoutSeconds * 1000,
+        }) as ToolDefinition,
+        createInspectImageTool({
+          runtime: modelRuntime,
+          cwd: runtimeCwd,
+          visionModel: () => readGhostModels(paths.home)?.roles?.vision_model,
+        }) as ToolDefinition,
+      ],
+    });
+    const { session, extensionsResult } = created;
+    createdSession = session;
+    await this.sessionStartupProbe("agent-session", modelRuntime);
 
     for (const error of extensionsResult.errors ?? []) {
-      this.logger.error("extension failed to load", {
-        ghost: ghostName,
+      logger.error("extension failed to load", {
         path: error.path,
         error: String(error.error),
       });
@@ -2755,14 +2801,14 @@ export class SessionHost {
       ? { provider: initialModel.provider, id: initialModel.id }
       : null;
 
-    this.logger.info("ghost session opened", {
-      ghost: ghostName,
+    logger.info("ghost session opened", {
       session: sessionKey,
       tools: toolNames.length,
       model: model ? `${model.provider}/${model.id}` : null,
     });
 
     const hosted: HostedSession = {
+      logger,
       ghost,
       sessionKey: key,
       session,
@@ -2779,45 +2825,29 @@ export class SessionHost {
       pendingOwnerPasses: [],
       nextOwnerTurnId: persistedPiOwnerTurnCount(sessionManager.getBranch()),
       ask,
+      jobs,
+      plan,
+      pendingJobResults: [],
+      settings,
+      skills: effectiveDeclarative.skills,
+      rules: effectiveDeclarative.rules,
+      commands: fileCommands,
       ...(mcp ? { mcp } : {}),
     };
+    // A tool catalog change on a live server re-registers the MCP extension.
+    liveMcp.manager.setOnToolsChanged(() => this.refreshHostedMcpTools(hosted));
     // CollabHost receives the raw AgentSession, so a writable guest can start
     // a turn without passing through runTurn() and setting hosted.busy. The
     // terminal public agent_end is emitted only after prompt bookkeeping has
     // unwound; that is the safe boundary for deferred model/MCP ownership.
-    hosted.unsubscribeOwnership = session.subscribe((event) => {
-      this.touchSession(hosted);
-      if (event.type === "tool_execution_start") {
-        this.recordToolCwd(hosted, event.toolCallId, session.sessionManager.getCwd());
-      }
-      if (event.type !== "agent_end" || event.isTerminal === false) return;
-      // HTTP/ask owners publish their terminal frame only after the same
-      // durability barrier below. This subscription owns raw collaboration or
-      // voice turns only; racing both paths would create independent retry
-      // loops and could publish a terminal frame against the wrong attempt.
-      if (hosted.busy) return;
-      void (async () => {
-        await this.flushToolCwds(hosted);
-        await this.settlePiOwnerPasses(hosted);
-        const [, conversationId] = sessionKeyParts(key);
-        await this.announceConversationUpdated(ghostName, "pi", conversationId);
-        await this.settleDeferredSession(hosted);
-      })().catch((error) => {
-        this.logger.warn("deferred session update after external turn failed", {
-          session: key,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      });
-    });
+    hosted.unsubscribeOwnership = this.watchExternalTurns(hosted);
     return hosted;
     } catch (error) {
       const cleanup = await Promise.allSettled([
         async () => createdSession?.dispose(),
-        async () => sessionManager?.close(),
         async () => mcp?.manager.disconnectAll(),
         async () => modelRuntime.close(),
       ].map(async (action) => action()));
-      if (mcp && MCPManager.instance() === mcp.manager) MCPManager.setInstance(undefined);
       const failures = cleanup.flatMap((result) =>
         result.status === "rejected" ? [result.reason] : []);
       if (failures.length > 0) {
@@ -2827,16 +2857,101 @@ export class SessionHost {
     }
   }
 
-  private async promoteLegacySessionTitle(
+  /**
+   * A settled job reports back into its conversation as an agent-attributed
+   * follow-up. pi queues it behind a live turn and otherwise starts a turn of
+   * its own, which `watchExternalTurns` settles; only a session an owner holds
+   * without streaming waits, until `releaseSessionClaim` calls back here.
+   */
+  private deliverJobResult(key: string, job: GhostJob): void {
+    const hosted = this.sessions.get(key);
+    if (!hosted || hosted.sessionDisposed) return;
+    if (hosted.busy && !hosted.session.isStreaming) {
+      hosted.pendingJobResults.push(job);
+      return;
+    }
+    hosted.session.sendCustomMessage({
+      customType: JOB_RESULT_MESSAGE_TYPE,
+      content: formatJobResult(job),
+      display: true,
+      details: { attribution: "agent", jobId: job.id, status: job.status, exitCode: job.exitCode ?? null },
+    }, { triggerTurn: true, deliverAs: "followUp" }).catch((error) => {
+      hosted.logger.warn("background job result could not be delivered", {
+        session: key,
+        job: job.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+  }
+
+  /** The background jobs of one open conversation; a closed one has none. */
+  listJobs(ghostName: string, sessionId?: string | null, runtime: ConversationRuntime = "pi"): GhostJobSnapshot[] {
+    assertPiConversation(runtime, "Background jobs");
+    this.registry.get(ghostName);
+    const hosted = this.sessions.get(this.keyOf(ghostName, sessionId));
+    const now = Date.now();
+    return hosted ? hosted.jobs.list().map((job) => jobSnapshot(job, now)) : [];
+  }
+
+  cancelJob(
+    ghostName: string,
+    sessionId: string | null | undefined,
+    jobId: string,
+    runtime: ConversationRuntime = "pi",
+  ): { outcome: CancelJobOutcome; job: GhostJobSnapshot | null } {
+    assertPiConversation(runtime, "Background jobs");
+    this.registry.get(ghostName);
+    const hosted = this.sessions.get(this.keyOf(ghostName, sessionId));
+    if (!hosted) return { outcome: "not_found", job: null };
+    const outcome = hosted.jobs.cancel(jobId);
+    const job = hosted.jobs.get(jobId);
+    return { outcome, job: job ? jobSnapshot(job) : null };
+  }
+
+  /**
+   * Settle turns that bypass `runTurn` (a writable collaboration guest or live
+   * voice drive the raw AgentSession). HTTP/ask owners publish their terminal
+   * frame after the same durability barrier; while one owns the session this
+   * watcher stays out so two settlement loops never race one attempt.
+   */
+  private watchExternalTurns(hosted: HostedSession): () => void {
+    const [ghostName, conversationId] = sessionKeyParts(hosted.sessionKey);
+    return hosted.session.subscribe((event) => {
+      this.touchSession(hosted);
+      if (event.type === "agent_start") {
+        hosted.runSignal = hosted.session.agent.signal;
+        // Raw collaboration, voice, and job turns bypass HTTP admission; they
+        // still win over a presentation-only recap.
+        hosted.recap?.controller.abort();
+      }
+      if (event.type === "tool_execution_start") {
+        this.recordToolCwd(hosted, event.toolCallId, hosted.session.sessionManager.getCwd());
+      }
+      if (event.type !== "agent_settled" || hosted.busy) return;
+      void (async () => {
+        await this.flushToolCwds(hosted);
+        await this.settlePiOwnerPasses(hosted);
+        await this.announceConversationUpdated(ghostName, "pi", conversationId);
+        await this.settleDeferredSession(hosted);
+      })().catch((error) => {
+        hosted.logger.warn("deferred session update after external turn failed", {
+          session: hosted.sessionKey,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+    });
+  }
+
+  private promoteLegacySessionTitle(
     manager: SessionManager,
     ghostName: string,
     conversationId: string,
-  ): Promise<void> {
+    logger = this.logger.child({ ghost: ghostName, conversation: conversationId }),
+  ): void {
     try {
-      const title = await migrateLegacySessionTitle(manager);
+      const title = migrateLegacySessionTitle(manager);
       if (title) {
-        this.logger.info("migrated legacy conversation title", {
-          ghost: ghostName,
+        logger.info("migrated legacy conversation title", {
           session: conversationId,
           title,
         });
@@ -2844,8 +2959,7 @@ export class SessionHost {
     } catch (error) {
       // Title recovery must never make an otherwise healthy conversation
       // impossible to resume. Listing still has the read-only fallback below.
-      this.logger.warn("legacy conversation title migration failed", {
-        ghost: ghostName,
+      logger.warn("legacy conversation title migration failed", {
         session: conversationId,
         error: error instanceof Error ? error.message : String(error),
       });
@@ -2898,12 +3012,11 @@ export class SessionHost {
     this.registry.get(ghostName);
     const hosted = this.sessions.get(this.keyOf(ghostName, sessionId));
     if (!hosted) return { streaming: false, count: 0, steering: [], followUp: [] };
-    const queued = hosted.session.getQueuedMessages();
     return {
       streaming: hosted.session.isStreaming,
-      count: hosted.session.queuedMessageCount,
-      steering: [...queued.steering],
-      followUp: [...queued.followUp],
+      count: hosted.session.pendingMessageCount,
+      steering: [...hosted.session.getSteeringMessages()],
+      followUp: [...hosted.session.getFollowUpMessages()],
     };
   }
 
@@ -2951,7 +3064,7 @@ export class SessionHost {
    * turn kept answering on the old one (there is no idle eviction).
    * `ModelCatalog.setChatModel` calls this right after the write.
    *
-   * A busy session is not yanked mid-turn or mid-voice — OMP's active owner
+   * A busy session is not yanked mid-turn or mid-voice — the active owner
    * keeps the model it started on. It is flagged instead and rebound once that
    * owner releases the AgentSession.
    *
@@ -3018,12 +3131,10 @@ export class SessionHost {
     ghostName: string,
     signal?: AbortSignal,
   ): Promise<void> {
-    await this.awaitUnlessAborted(hosted.modelRuntime.authStorage.reload(), signal);
     await this.awaitUnlessAborted(
-      hosted.modelRuntime.modelRegistry.hydrateCredentialScopedModelCaches(),
+      hosted.modelRuntime.runtime.refresh({ allowNetwork: false, ...(signal ? { signal } : {}) }),
       signal,
     );
-    await this.awaitUnlessAborted(hosted.modelRuntime.modelRegistry.refresh("offline"), signal);
     signal?.throwIfAborted();
     await this.rebindSessionModel(hosted, ghostName);
   }
@@ -3056,7 +3167,7 @@ export class SessionHost {
   }
 
   /**
-   * Re-read the ghost and bound-project MCP files for every open OMP conversation.
+   * Re-read the ghost and bound-project MCP files for every open pi conversation.
    * Turns and live voice coalesce changes into one deferred reload at their
    * settle boundary; idle sessions reconnect immediately.
    */
@@ -3142,11 +3253,7 @@ export class SessionHost {
       // Connect a complete candidate before replacing the live manager. A
       // malformed or unavailable new server therefore cannot create a window
       // where the old catalog has already been torn down.
-      const candidate = new MCPManager(hosted.session.sessionManager.getCwd(), null, { redactErrors: true });
-      candidate.setAuthStorage(hosted.modelRuntime.authStorage);
-      if (hosted.session.settings.get("mcp.notifications")) {
-        candidate.setNotificationsEnabled(true);
-      }
+      const candidate = this.createHostedMcpCandidate(hosted);
       if (hosted.project.root) {
         await this.projectBindings.assertTrusted(hosted.project.root);
         if (!hosted.projectSnapshot) {
@@ -3157,7 +3264,7 @@ export class SessionHost {
           );
         }
       }
-      const result = await connectGhostProjectMCP(
+      const connected = await connectGhostProjectMCP(
         candidate,
         {
           ghostRoot: hosted.ghost.dir,
@@ -3171,10 +3278,10 @@ export class SessionHost {
               }
             : {}),
         },
-        this.logger,
+        hosted.logger,
       );
-      await this.replaceHostedMcpManager(hosted, candidate);
-      await this.updateHostedProjectMcpStatus(hosted, result);
+      await this.replaceHostedMcpManager(hosted, candidate, connected.configs, connected.sources);
+      await this.updateHostedProjectMcpStatus(hosted, connected.result);
     });
     const tracked = reload.finally(() => {
       if (mcp.reload === tracked) mcp.reload = undefined;
@@ -3190,8 +3297,9 @@ export class SessionHost {
       || this.liveVoice.status(hosted.sessionKey).active;
   }
 
-  private sessionOwned(hosted: HostedSession): boolean {
+  private sessionOwned(hosted: HostedSession, includeRecap = true): boolean {
     return hosted.busy
+      || (includeRecap && hosted.recap !== undefined)
       || (hosted.rawCollaborationPrompts ?? 0) > 0
       || hosted.pendingOwnerPasses.length > 0
       || hosted.ownerPassSettlement !== undefined
@@ -3219,10 +3327,11 @@ export class SessionHost {
             500,
           );
         }
-        this.logger.warn("conversation maintenance cleanup was not recorded", {
-          ghost: identity.ghostName,
-          runtime: identity.runtime,
-        });
+        this.logger
+          .child({ ghost: identity.ghostName, conversation: identity.conversationId })
+          .warn("conversation maintenance cleanup was not recorded", {
+            runtime: identity.runtime,
+          });
       } finally {
         release();
       }
@@ -3281,7 +3390,7 @@ export class SessionHost {
           ghost_name: ghostName,
           ghost_home: ghost.dir,
           cwd: hosted.session.sessionManager.getCwd(),
-          runtime: "omp",
+          runtime: "pi",
           conversation_runtime: "pi",
           conversation_id: conversationId,
         });
@@ -3294,19 +3403,9 @@ export class SessionHost {
             triggerTurn: false,
             ...(input.delivery ? { deliverAs: input.delivery } : {}),
           });
-          if (result.acknowledge) {
-            if (input.delivery) pass.acknowledge = result.acknowledge;
-            else {
-              try {
-                await result.acknowledge();
-              } catch {
-                this.logger.warn("before_prompt hook acknowledgement failed", {
-                  ghost: ghostName,
-                  runtime: "pi",
-                });
-              }
-            }
-          }
+          // pi writes nothing to disk before the first assistant message, so
+          // the hook is acknowledged once the pass has settled durably.
+          if (result.acknowledge) pass.acknowledge = result.acknowledge;
         }
       }
       hosted.pendingOwnerPasses.push(pass);
@@ -3379,15 +3478,14 @@ export class SessionHost {
         ghost_name: ghostName,
         ghost_home: ghost.dir,
         cwd: hosted.session.sessionManager.getCwd(),
-        runtime: "omp",
+        runtime: "pi",
         conversation_runtime: "pi",
         conversation_id: conversationId,
       });
       const additionalContext = ghostSessionStopContinuation(result);
       if (!additionalContext) return latestAssistantEntry;
       if (continuationCount >= GHOST_SESSION_STOP_CONTINUATION_CAP) {
-        this.logger.warn("session_stop continuation cap reached", {
-          ghost: ghostName,
+        hosted.logger.warn("session_stop continuation cap reached", {
           session: hosted.session.sessionId,
           cap: GHOST_SESSION_STOP_CONTINUATION_CAP,
         });
@@ -3449,8 +3547,7 @@ export class SessionHost {
             try {
               await pass.acknowledge();
             } catch {
-              this.logger.warn("before_prompt hook acknowledgement failed", {
-                ghost: hosted.ghost.name,
+              hosted.logger.warn("before_prompt hook acknowledgement failed", {
                 runtime: "pi",
               });
             }
@@ -3461,7 +3558,12 @@ export class SessionHost {
           }
           let assistantEntry = boundary.assistantEntry;
           const assistant = assistantEntry.message;
-          if (assistant.role !== "assistant" || assistant.stopReason === "aborted" || pass.signal.aborted) {
+          // An abort that lands while a tool runs surfaces on the follow-up
+          // model call as a provider error; the run's own signal is the fact.
+          const aborted = assistant.role === "assistant"
+            && (assistant.stopReason === "aborted"
+              || (assistant.stopReason === "error" && hosted.runSignal?.aborted === true));
+          if (assistant.role !== "assistant" || aborted || pass.signal.aborted) {
             await pass.finish();
             continue;
           }
@@ -3482,7 +3584,7 @@ export class SessionHost {
           (pass) => !completed.has(pass),
         );
       }
-      if (!hosted.session.isStreaming && hosted.session.queuedMessageCount === 0) {
+      if (!hosted.session.isStreaming && hosted.session.pendingMessageCount === 0) {
         const abandoned = hosted.pendingOwnerPasses.splice(0);
         for (const pass of abandoned) await pass.finish();
       }
@@ -3504,20 +3606,29 @@ export class SessionHost {
     finish?: (turn?: SettledMaintenanceTurn) => Promise<void>,
   ): PiSettlementBarrier {
     const completed = Promise.withResolvers<PiSettlementResult>();
-    const unregister = hosted.session.deferInFlightSettlement(async () => {
-      let result: PiSettlementResult;
-      try {
-        result = await this.settlePiNow(hosted, finish);
-      } catch (error) {
-        result = { settlementError: error };
-      }
-      completed.resolve(result);
-      const failure = result.toolCwdError ?? result.settlementError;
-      if (failure !== undefined) throw failure;
+    let armed = true;
+    const unsubscribe = hosted.session.subscribe((event) => {
+      if (!armed || event.type !== "agent_settled") return;
+      armed = false;
+      unsubscribe();
+      void (async () => {
+        let result: PiSettlementResult;
+        try {
+          result = await this.settlePiNow(hosted, finish);
+        } catch (error) {
+          result = { settlementError: error };
+        }
+        completed.resolve(result);
+      })();
     });
     return {
       settled: completed.promise,
-      cancel: unregister,
+      cancel: () => {
+        if (!armed) return false;
+        armed = false;
+        unsubscribe();
+        return true;
+      },
     };
   }
 
@@ -3536,8 +3647,7 @@ export class SessionHost {
       await this.settlePiOwnerPasses(hosted);
     } catch (error) {
       settlementError = error;
-      this.logger.warn("Pi owner pass settlement failed", {
-        ghost: hosted.ghost.name,
+      hosted.logger.warn("Pi owner pass settlement failed", {
         error: error instanceof Error ? error.message : String(error),
       });
       await this.abandonPiOwnerPasses(hosted);
@@ -3554,7 +3664,7 @@ export class SessionHost {
     if (!createdAt) return null;
     return {
       source: { runtime: "pi", createdAt },
-      cwd: hosted.session.sessionManager.getCwd(),
+      cwd: hosted.project.cwd,
     };
   }
 
@@ -3566,8 +3676,7 @@ export class SessionHost {
   ): Promise<void> {
     if (!this.maintenance) return;
     if (!activity) {
-      this.logger.warn("conversation maintenance owner activity was not recorded", {
-        ghost: ghostName,
+      hosted.logger.warn("conversation maintenance owner activity was not recorded", {
         runtime: "pi",
       });
       return;
@@ -3578,20 +3687,15 @@ export class SessionHost {
         activity,
       );
     } catch {
-      this.logger.warn("conversation maintenance owner activity was not recorded", {
-        ghost: ghostName,
+      hosted.logger.warn("conversation maintenance owner activity was not recorded", {
         runtime: "pi",
       });
     }
   }
 
-  private async runCollaborationPrompt(
-    hosted: HostedSession,
-    message: Parameters<AgentSession["promptCustomMessage"]>[0],
-    options?: Parameters<AgentSession["promptCustomMessage"]>[1],
-  ): Promise<void> {
+  private async runCollaborationPrompt(hosted: HostedSession, text: string): Promise<void> {
     while (hosted.mcpPublication) await hosted.mcpPublication;
-    const ownerPrompt = options?.queueChipText?.trim() || entryText(message.content).trim();
+    const ownerPrompt = text.trim();
     if (!ownerPrompt) {
       throw new GhostError("invalid_prompt", "A writable collaboration prompt cannot be empty.", 400);
     }
@@ -3608,10 +3712,12 @@ export class SessionHost {
       hosted.releaseRawCollaborationIdle = idle.resolve;
     }
     try {
-      await hosted.session.promptCustomMessage({
-        ...message,
-        attribution: "user",
-      }, options);
+      await hosted.session.sendCustomMessage({
+        customType: "collaboration-prompt",
+        content: ownerPrompt,
+        display: true,
+        details: { attribution: "user" },
+      }, { triggerTurn: true, ...(hosted.session.isStreaming ? { deliverAs: "steer" as const } : {}) });
       const settlement = await settlementBarrier.settled;
       if (settlement.toolCwdError !== undefined || settlement.settlementError !== undefined) {
         throw new GhostError(
@@ -3647,11 +3753,11 @@ export class SessionHost {
 
   private async runLiveVoicePrompt(
     hosted: HostedSession,
-    message: Parameters<AgentSession["sendCustomMessage"]>[0],
+    message: Parameters<AgentSession["sendCustomMessage"]>[0] | string,
     options?: Parameters<AgentSession["sendCustomMessage"]>[1],
-  ): Promise<boolean> {
+  ): Promise<void> {
     const ownerPrompt = (typeof message === "string" ? message : entryText(message.content)).trim();
-    if (!ownerPrompt) return false;
+    if (!ownerPrompt) return;
     const pass = await this.preparePiOwnerPass(hosted, {
       kind: "voice",
       ownerPrompt,
@@ -3659,34 +3765,25 @@ export class SessionHost {
     });
     const settlementBarrier = this.deferPiSettlement(hosted);
     try {
-      const delivered = await hosted.session.sendCustomMessage(
+      await hosted.session.sendCustomMessage(
         typeof message === "string"
           ? {
               customType: LIVE_DELEGATION_MESSAGE_TYPE,
               content: message,
               display: true,
-              attribution: "user",
+              details: { attribution: "user" },
             }
-          : { ...message, attribution: "user" },
-        options,
+          : { ...message, details: { ...(message.details as object ?? {}), attribution: "user" } },
+        { triggerTurn: true, ...options },
       );
-      if (!delivered && !hosted.session.isStreaming && hosted.session.queuedMessageCount === 0
-        && settlementBarrier.cancel()) {
-        hosted.pendingOwnerPasses = hosted.pendingOwnerPasses.filter(
-          (candidate) => candidate !== pass,
+      const settlement = await settlementBarrier.settled;
+      if (settlement.toolCwdError !== undefined || settlement.settlementError !== undefined) {
+        throw new GhostError(
+          "session_settlement_failed",
+          "The live voice turn could not be durably settled.",
+          500,
         );
-        await pass.finish();
-      } else {
-        const settlement = await settlementBarrier.settled;
-        if (settlement.toolCwdError !== undefined || settlement.settlementError !== undefined) {
-          throw new GhostError(
-            "session_settlement_failed",
-            "The live voice turn could not be durably settled.",
-            500,
-          );
-        }
       }
-      return delivered;
     } catch (error) {
       if (settlementBarrier.cancel()) {
         hosted.pendingOwnerPasses = hosted.pendingOwnerPasses.filter(
@@ -3730,17 +3827,30 @@ export class SessionHost {
     }
   }
 
-  private createHostedMcpCandidate(hosted: HostedSession): MCPManager {
-    const candidate = new MCPManager(
-      hosted.session.sessionManager.getCwd(),
-      null,
-      { redactErrors: true },
-    );
-    candidate.setAuthStorage(hosted.modelRuntime.authStorage);
-    if (hosted.session.settings.get("mcp.notifications")) {
-      candidate.setNotificationsEnabled(true);
-    }
-    return candidate;
+  private createHostedMcpCandidate(hosted: HostedSession): GhostMcpManager {
+    return new GhostMcpManager({
+      cwd: hosted.session.sessionManager.getCwd(),
+      logger: hosted.logger,
+    });
+  }
+
+  /**
+   * Re-register the MCP tool extension on the live session so pi's tool
+   * registry follows the manager's current catalog. Serialized; never rejects.
+   */
+  private refreshHostedMcpTools(hosted: HostedSession): Promise<void> {
+    const mcp = hosted.mcp;
+    if (!mcp) return Promise.resolve();
+    const run = (mcp.refresh ?? Promise.resolve()).then(async () => {
+      if (hosted.sessionDisposed) return;
+      await hosted.session.reload();
+    });
+    mcp.refresh = run.catch(() => {
+      hosted.logger.warn("ghost project MCP tool refresh failed", {
+        code: "mcp_tool_load_failed",
+      });
+    });
+    return run;
   }
 
   private async updateHostedProjectMcpStatus(
@@ -3768,7 +3878,9 @@ export class SessionHost {
 
   private async replaceHostedMcpManager(
     hosted: HostedSession,
-    candidate: MCPManager,
+    candidate: GhostMcpManager,
+    configs: Map<string, MCPServerConfig>,
+    sources: Map<string, McpSource>,
   ): Promise<void> {
     const mcp = hosted.mcp;
     if (!mcp) {
@@ -3776,43 +3888,23 @@ export class SessionHost {
       return;
     }
     await this.publishMcpCandidate(hosted, async () => {
-      candidate.setOnToolsChanged(() => {
-        const refresh = (mcp.refresh ?? Promise.resolve()).then(async () => {
-          if (!hosted.session.isDisposed && mcp.manager === candidate) {
-            await hosted.session.refreshMCPTools(
-              mcpToolsForBunAdapter(candidate),
-              candidate,
-            );
-          }
-        });
-        mcp.refresh = refresh.catch(() => {
-          this.logger.warn("ghost project MCP tool refresh failed", {
-            ghost: hosted.ghost.name,
-            code: "mcp_tool_load_failed",
-          });
-        });
-        return mcp.refresh;
-      });
       const previous = mcp.manager;
+      previous.setOnToolsChanged(undefined);
+      candidate.setOnToolsChanged(() => this.refreshHostedMcpTools(hosted));
       mcp.manager = candidate;
+      mcp.configs = configs;
+      mcp.sources = sources;
       try {
-        if (!hosted.session.isDisposed) {
-          await hosted.session.refreshMCPTools(mcpToolsForBunAdapter(candidate), candidate);
-        }
+        await this.refreshHostedMcpTools(hosted);
       } catch (error) {
         mcp.manager = previous;
-        if (!hosted.session.isDisposed) {
-          await hosted.session.refreshMCPTools(
-            mcpToolsForBunAdapter(previous),
-            previous,
-          ).catch(() => {});
-        }
+        previous.setOnToolsChanged(() => this.refreshHostedMcpTools(hosted));
+        await this.refreshHostedMcpTools(hosted).catch(() => {});
         await candidate.disconnectAll().catch(() => {});
         throw error;
       }
       await previous.disconnectAll().catch(() => {
-        this.logger.warn("previous project MCP manager did not close cleanly", {
-          ghost: hosted.ghost.name,
+        hosted.logger.warn("previous project MCP manager did not close cleanly", {
           code: "mcp_connection_failed",
         });
       });
@@ -3821,25 +3913,16 @@ export class SessionHost {
 
   private reconnectHostedMcp(hosted: HostedSession, serverName: string): Promise<void> {
     const mcp = hosted.mcp;
-    if (!mcp?.manager.getServerConfig(serverName)) return Promise.resolve();
-    const reconnectsProject = mcp.manager.getSource(serverName)?.level === "project";
+    if (!mcp?.configs.has(serverName)) return Promise.resolve();
+    const reconnectsProject = mcp.sources.get(serverName)?.level === "project";
     hosted.mcpTransitions = (hosted.mcpTransitions ?? 0) + 1;
     const reconnect = (mcp.reload ?? Promise.resolve()).then(async () => {
       const candidate = this.createHostedMcpCandidate(hosted);
-      const configs = new Map<string, MCPServerConfig>();
-      const sources = new Map<string, SourceMeta>();
-      for (const name of mcp.manager.getAllServerNames()) {
-        const config = mcp.manager.getServerConfig(name);
-        const source = mcp.manager.getSource(name);
-        if (config) configs.set(name, config);
-        if (source) sources.set(name, source);
-      }
+      const configs = new Map(mcp.configs);
+      const sources = new Map(mcp.sources);
       let published = false;
       try {
-        const result = await candidate.connectServers(
-          Object.fromEntries(configs),
-          Object.fromEntries(sources),
-        );
+        const result = await candidate.connectServers(Object.fromEntries(configs));
         const summary = summarizeProjectMcpConnection(
           sources,
           result.errors,
@@ -3847,7 +3930,7 @@ export class SessionHost {
             ? rejectedProjectMcpCount(hosted.projectSnapshot.mcp)
             : 0,
         );
-        await this.replaceHostedMcpManager(hosted, candidate);
+        await this.replaceHostedMcpManager(hosted, candidate, configs, sources);
         published = true;
         if (reconnectsProject) await this.updateHostedProjectMcpStatus(hosted, summary);
       } catch (error) {
@@ -3897,8 +3980,7 @@ export class SessionHost {
     })();
     hosted.toolCwdWrite = write;
     void write.catch((error) => {
-      this.logger.warn("could not persist a tool working directory", {
-        ghost: hosted.ghost.name,
+      hosted.logger.warn("could not persist a tool working directory", {
         toolCallId,
         error: error instanceof Error ? error.message : String(error),
       });
@@ -3939,7 +4021,18 @@ export class SessionHost {
     } finally {
       hosted.busy = false;
       this.touchSession(hosted);
+      for (const job of hosted.pendingJobResults.splice(0)) this.deliverJobResult(hosted.sessionKey, job);
     }
+  }
+
+  /** Cancel presentation-only recap work and drain deferred session changes. */
+  private async cancelRecap(key: string): Promise<void> {
+    const hosted = this.sessions.get(key);
+    const recap = hosted?.recap;
+    if (!hosted || !recap) return;
+    recap.controller.abort();
+    await recap.task.catch(() => {});
+    await this.settleDeferredSession(hosted);
   }
 
   private async settleLiveVoiceSession(key: string): Promise<void> {
@@ -3981,8 +4074,7 @@ export class SessionHost {
         ghostName,
       );
     } catch (error) {
-      this.logger.warn("model rebind failed", {
-        ghost: ghostName,
+      hosted.logger.warn("model rebind failed", {
         error: (error as Error).message,
       });
     }
@@ -3993,22 +4085,18 @@ export class SessionHost {
    *
    * Provider-agnostic by construction: the (provider, modelId) pair comes
    * from the ghost's own `models.json`, and an unresolvable pair is a warning
-   * rather than a hard failure — OMP's own default selection still applies,
+   * rather than a hard failure — the catalogue default still applies,
    * and the turn will report a clean error if there is nothing to run on.
    */
   private async selectModel(
     session: AgentSession,
-    modelRuntime: GhostOmpRuntime,
+    modelRuntime: GhostPiRuntime,
     configDir: string,
     ghostName: string,
   ): Promise<{ provider: string; id: string } | null> {
     let ref: ReturnType<typeof resolveChatModelRef> = null;
     try {
-      const file = readGhostModels(configDir);
-      const routing = ghostOmpModelRouting(file);
-      session.settings.override("modelRoles", routing.modelRoles);
-      session.settings.override("retry.fallbackChains", routing.fallbackChains);
-      ref = resolveChatModelRef(file);
+      ref = resolveChatModelRef(readGhostModels(configDir));
     } catch (error) {
       this.logger.error("models.json is unusable", {
         ghost: ghostName,
@@ -4017,7 +4105,7 @@ export class SessionHost {
       const current = session.model;
       return current ? { provider: current.provider, id: current.id } : null;
     }
-    const model = resolveOmpChatModel(ref, modelRuntime.modelRegistry.getAvailable());
+    const model = resolveChatModel(ref, modelRuntime.getAvailableSnapshot());
     if (ref && (model?.provider !== ref.provider || model.id !== ref.modelId)) {
       this.logger.warn("configured chat model is not available", {
         ghost: ghostName,
@@ -4027,7 +4115,7 @@ export class SessionHost {
     }
     if (model) {
       // Await the live rebind so the next prompt cannot race onto the prior model.
-      await session.setModel(model, "default");
+      await session.setModel(model);
       return { provider: model.provider, id: model.id };
     }
     const current = session.model;
@@ -4102,54 +4190,32 @@ export class SessionHost {
             summary: tailSummary(streamedTail),
           });
         },
-        {
-          excludeFromContext: command.excludeFromContext,
-          useUserShell: true,
-        },
+        { excludeFromContext: command.excludeFromContext },
       );
 
       if (
         isPersistentShellCdCommand(command.command)
         && !result.cancelled
         && result.exitCode === 0
-        && result.workingDir
-        && isAbsolute(result.workingDir)
       ) {
-        const nextCwd = resolve(result.workingDir);
-        if (prevalidatedCd && nextCwd !== prevalidatedCd) {
-          throw new GhostError(
-            "cwd_outside_project",
-            "The shell resolved cd to a different directory than the trusted preflight.",
-            409,
-          );
-        }
-        if (nextCwd !== resolve(hosted.session.sessionManager.getCwd())) {
+        const target = prevalidatedCd
+          ?? persistentCdTarget(command.command, executionCwd, this.ownerHome);
+        const nextCwd = target ? resolve(target) : null;
+        if (nextCwd && nextCwd !== resolve(hosted.session.sessionManager.getCwd())) {
           const sessionDir = ghostPaths(hosted.ghost.dir).sessionDir;
-          const previousCwd = resolve(hosted.session.sessionManager.getCwd());
-          await hosted.session.sessionManager.moveTo(nextCwd, sessionDir);
-          try {
-            await this.projectBindings.writeOperationalCwd(
-              sessionDir,
-              "pi",
-              conversationId,
-              hosted.project,
-              nextCwd,
-            );
-          } catch (error) {
-            await hosted.session.sessionManager.moveTo(previousCwd, sessionDir).catch((rollbackError) => {
-              this.logger.error("could not roll back a failed cwd persistence", {
-                ghost: ghostName,
-                error: rollbackError instanceof Error ? rollbackError.message : String(rollbackError),
-              });
-            });
-            throw error;
-          }
+          await this.projectBindings.writeOperationalCwd(
+            sessionDir,
+            "pi",
+            conversationId,
+            hosted.project,
+            nextCwd,
+          );
           hosted.project = await this.projectState(ghostName, "pi", conversationId);
           await this.announceConversationUpdated(ghostName, "pi", conversationId, "project");
         }
       }
 
-      const isError = result.cancelled || result.timedOut === true
+      const isError = result.cancelled
         || (result.exitCode !== undefined && result.exitCode !== 0);
       options.emit({
         type: "tool_execution_end",
@@ -4176,8 +4242,7 @@ export class SessionHost {
         pendingTerminal = { type: "done", reason: "stop", usage: zeroUsage() };
       }
     } catch (error) {
-      this.logger.error("direct bash command failed", {
-        ghost: ghostName,
+      hosted.logger.error("direct bash command failed", {
         error: error instanceof Error ? error.message : String(error),
       });
       if (!toolFinished) {
@@ -4225,19 +4290,15 @@ export class SessionHost {
     }
 
     try {
-      await executeGhostBuiltin(options.prompt, {
+      const output = await executeGhostBuiltin(dispatch, {
         session: hosted.session,
-        sessionManager: hosted.session.sessionManager,
-        settings: hosted.session.settings,
+        jobs: hosted.jobs,
+        plan: hosted.plan,
         cwd: hosted.session.sessionManager.getCwd(),
-        output: (output) => {
-          options.emit({ type: "command_output", command: dispatch.command, output });
-        },
-        refreshCommands: () => {},
-        reloadPlugins: async () => {
-          throw new Error("Plugin reload is outside Ghost's read-only builtin command set.");
-        },
+        projectRoot: hosted.project.root,
+        ghostHome: hosted.ghost.dir,
       });
+      options.emit({ type: "command_output", command: dispatch.command, output });
       options.emit({ type: "done", reason: "stop", usage: zeroUsage() });
     } catch (error) {
       options.emit({
@@ -4253,7 +4314,7 @@ export class SessionHost {
 
   /**
    * Resolve the selected chat runtime once, before any command dispatch or
-   * runtime state is opened. Malformed routing retains OMP's fallback behavior.
+   * runtime state is opened. Malformed routing retains the default fallback.
    */
   private selectedTurnRuntime(ghostName: string): ConfiguredTurnRuntime {
     const ghost = this.registry.get(ghostName);
@@ -4406,6 +4467,9 @@ export class SessionHost {
       this.turnAdmissions.delete(admissionKey);
     };
     try {
+      // Reserve first so another owner cannot slip in while recap cancellation
+      // drains; owner work then wins this presentation-only boundary.
+      await this.cancelRecap(admissionKey);
       const configured = this.selectedTurnRuntime(ghostName);
       await this.assertProjectRuntimeMatches(ghostName, conversationId, configured.runtime);
       const bashCommand = parseUserBashCommand(options.prompt);
@@ -4509,6 +4573,12 @@ export class SessionHost {
         await this.recordPiOwnerActivity(ghostName, conversationId, hosted);
         await finishMaintenance();
       });
+      // pi binds a session's cwd when it opens; a `!cd` takes effect by
+      // reopening the conversation at its new operational cwd.
+      const moved = this.sessions.get(key);
+      if (moved && resolve(moved.project.cwd) !== resolve(moved.session.sessionManager.getCwd())) {
+        await this.closePi(ghostName, conversationId);
+      }
       await this.announceConversationUpdated(
         ghostName,
         "pi",
@@ -4576,7 +4646,7 @@ export class SessionHost {
       true,
     );
 
-    // Known OMP builtins are commands even when Ghost cannot safely run them.
+    // Known builtins are commands even when Ghost cannot safely run them.
     // Consume them before hooks, title generation, and especially
     // before AgentSession.prompt(), where unknown slash text becomes a model
     // message.
@@ -4619,7 +4689,7 @@ export class SessionHost {
     const adapter = createPiMessagesAdapter(emitAfterToolCwdDurability, {
       includeThinking: options.includeThinking,
       getCwd: () => hosted.session.sessionManager.getCwd(),
-      // The shell rendered the POST's prompt before opening the stream. OMP
+      // The shell rendered the POST's prompt before opening the stream. pi
       // emits it again as the run's first user message; only later dequeued
       // steering/follow-ups belong on the live wire.
       skipOwnerMessages: 1,
@@ -4628,7 +4698,7 @@ export class SessionHost {
       deferAgentEnd: true,
     });
     const unsubscribe = hosted.session.subscribe((event: AgentSessionEvent) => {
-      adapter.handle(event);
+      adapter.handle(asRuntimeSessionEvent(event));
     });
 
     const onAbort = () => {
@@ -4646,10 +4716,9 @@ export class SessionHost {
         finish: finishMaintenance,
       });
       settlementBarrier = this.deferPiSettlement(hosted, finishMaintenance);
-      await promptOmpSession(hosted.session, options.prompt);
+      await promptPiSession(hosted.session, options.prompt, hosted.skills);
     } catch (error) {
-      this.logger.error("turn failed", {
-        ghost: ghostName,
+      hosted.logger.error("turn failed", {
         error: (error as Error).message,
       });
       turnFailure = { error, aborted: options.signal?.aborted === true };
@@ -4699,13 +4768,108 @@ export class SessionHost {
     }
   }
 
+  /** Generate one transient recap without adding either message to the transcript. */
+  async recap(
+    ghostName: string,
+    conversationId: string | null | undefined,
+    runtime: ConversationRuntime = "pi",
+    signal?: AbortSignal,
+  ): Promise<string | null> {
+    assertPiConversation(runtime, "Conversation recap");
+    const ghost = this.assertPiRuntime(ghostName, "Conversation recap");
+    const id = requireRawConversationId(conversationId ?? DEFAULT_SESSION_KEY);
+    const key = this.keyOf(ghostName, id);
+    const paths = ghostPaths(ghost.dir);
+    const sessionFile = join(paths.sessionDir, sessionFileNameFor(id));
+
+    // `open` creates a transcript. A recap is only a view over existing
+    // history, so an unknown id stays unknown instead of creating an empty row.
+    if (!existsSync(sessionFile) && !this.sessions.has(key) && !this.opening.has(key)) {
+      throw new GhostError(
+        "not_found",
+        `This ghost has no conversation ${JSON.stringify(id)}.`,
+        404,
+      );
+    }
+    if (this.turnAdmissions.has(key)) {
+      throw new GhostError(
+        "session_busy",
+        "Wait for this conversation to finish before generating a recap.",
+        409,
+      );
+    }
+    if (signal?.aborted) return null;
+
+    const hosted = await this.idleHostedSession(
+      ghostName,
+      id,
+      "Wait for this conversation to finish before generating a recap.",
+    );
+    this.assertPiRuntime(ghostName, "Conversation recap");
+    if (this.turnAdmissions.has(key)) {
+      throw new GhostError(
+        "session_busy",
+        "Wait for this conversation to finish before generating a recap.",
+        409,
+      );
+    }
+
+    const branchMessages = hosted.session.sessionManager.buildSessionContext().messages;
+    if (branchMessages.length === 0 || signal?.aborted) return null;
+
+    const controller = new AbortController();
+    const onAbort = () => controller.abort(signal?.reason);
+    signal?.addEventListener("abort", onAbort, { once: true });
+    if (signal?.aborted) controller.abort(signal.reason);
+
+    let tracked!: Promise<string | null>;
+    const generation = Promise.resolve().then(async () => {
+      const model = hosted.session.model;
+      if (!model) throw new Error("This conversation has no chat model bound for a recap.");
+      const response = await hosted.modelRuntime.complete(model, {
+        systemPrompt: hosted.session.systemPrompt,
+        messages: [
+          ...convertToLlm(branchMessages),
+          {
+            role: "user",
+            content: buildRecapPrompt(hosted.session.sessionName),
+            timestamp: Date.now(),
+          },
+        ],
+      }, { signal: controller.signal });
+      if (response.stopReason === "error" || response.stopReason === "aborted") {
+        throw new Error(response.errorMessage || `Recap generation ${response.stopReason}.`);
+      }
+      const recap = normalizeRecap(assistantText(response));
+      if (!recap) throw new Error("The chat model returned no usable recap text.");
+      return recap;
+    });
+    tracked = generation.catch((error: unknown) => {
+      if (!controller.signal.aborted) {
+        hosted.logger.warn("conversation recap generation failed", {
+          session: id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      return null;
+    }).finally(() => {
+      signal?.removeEventListener("abort", onAbort);
+      if (hosted.recap?.task === tracked) hosted.recap = undefined;
+      this.touchSession(hosted);
+    });
+    hosted.recap = { controller, task: tracked };
+    const recap = await tracked;
+    await this.settleDeferredSession(hosted);
+    return recap;
+  }
+
   /**
    * Fire-and-forget conversation titling. Non-blocking by construction: the
    * promise is stored on the session so `listSessions` can await it before
    * reading titles, but this method never awaits and never throws — a failure
    * is logged and the conversation simply stays untitled. Generation is a
    * single completion on the smol_model (see title.ts); the result is stored
-   * through OMP's native title slot, which never enters the model's context.
+   * as pi's `session_info` name, which never enters the model's context.
    */
   private startBackgroundTitle(
     hosted: HostedSession,
@@ -4744,9 +4908,8 @@ export class SessionHost {
         const title = raw.trim();
         // A concurrent turn may have titled it first; do not overwrite.
         if (!title || hosted.session.sessionName) return;
-        await hosted.session.sessionManager.setSessionName(title, "auto", "ghost-title");
-        this.logger.info("named ghost conversation", {
-          ghost: ghostName,
+        hosted.session.setSessionName(title);
+        hosted.logger.info("named ghost conversation", {
           session: hosted.session.sessionId,
           title,
         });
@@ -4755,8 +4918,7 @@ export class SessionHost {
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted && !timedOut) return;
-        this.logger.warn("conversation title generation failed", {
-          ghost: ghostName,
+        hosted.logger.warn("conversation title generation failed", {
           error: error instanceof Error ? error.message : String(error),
         });
       });
@@ -4772,11 +4934,12 @@ export class SessionHost {
 
   async greeting(ghostName: string): Promise<GreetingResult> {
     const ghost = this.registry.get(ghostName);
+    const logger = this.logger.child({ ghost: ghost.name });
     const unavailable = new Set<GhostHomeDigestInput>();
     const reportUnavailable = (input: GhostHomeDigestInput) => {
       if (unavailable.has(input)) return;
       unavailable.add(input);
-      this.logger.warn("greeting input unavailable", { ghost: ghost.name, input });
+      logger.warn("greeting input unavailable", { input });
     };
     let character: string | null = null;
     let characterAvailable = true;
@@ -4802,7 +4965,7 @@ export class SessionHost {
         const context = await this.greetingContext(ghost, onboarding, reportUnavailable);
         return { greeting: await this.generateGreetingFor({ ghost, context }), onboarding };
       } catch {
-        this.logger.warn("greeting generation failed", { ghost: ghost.name });
+        logger.warn("greeting generation failed");
         return { greeting: null, onboarding };
       }
     });
@@ -4817,6 +4980,7 @@ export class SessionHost {
     onboarding: boolean,
     onUnavailable: (input: GhostHomeDigestInput) => void,
   ): Promise<GreetingContextInput> {
+    const logger = this.logger.child({ ghost: ghost.name });
     const paths = ghostPaths(ghost.dir);
     const digest: GhostHomeDigest = await readGhostHomeDigest(
       paths.home,
@@ -4836,7 +5000,7 @@ export class SessionHost {
         );
       if (newest) daysSinceLastConversation = wholeDaysSince(newest);
     } catch {
-      this.logger.warn("greeting conversation recency unavailable", { ghost: ghost.name });
+      logger.warn("greeting conversation recency unavailable");
     }
 
     return {
@@ -4878,13 +5042,13 @@ export class SessionHost {
    */
   private async withGreetingRuntime<T>(
     ghost: Ghost,
-    use: (runtime: GhostOmpRuntime) => Promise<T>,
+    use: (runtime: GhostPiRuntime) => Promise<T>,
   ): Promise<T> {
     for (const hosted of this.sessions.values()) {
       if (hosted.ghost.name === ghost.name) return use(hosted.modelRuntime);
     }
     const paths = ghostPaths(ghost.dir);
-    const runtime = await createGhostOmpRuntime({
+    const runtime = await createGhostPiRuntime({
       authPath: ghostAuthPath(paths.agentDir),
       modelsPath: ghostModelsPath(paths.home),
       allowModelNetwork: !this.offline,
@@ -5013,9 +5177,8 @@ export class SessionHost {
   }
 
   /**
-   * Name one conversation through OMP's native title slot with source
-   * `"user"`. OMP refuses an automatic title over a name a person chose, so
-   * the background titler cannot undo the rename.
+   * Name one conversation through pi's `session_info`. The background titler
+   * only names a conversation that has no name yet, so it cannot undo a rename.
    *
    * Naming is allowed mid-turn. The title slot is not part of the conversation
    * tree — writing it appends one audit entry and rewrites 256 fixed bytes —
@@ -5028,6 +5191,13 @@ export class SessionHost {
     runtime: ConversationRuntime = "pi",
   ): Promise<string> {
     assertPiConversation(runtime, "Conversation renaming");
+    if (!/\P{C}/u.test(title)) {
+      throw new GhostError(
+        "invalid_request",
+        "A conversation title needs at least one printable character.",
+        400,
+      );
+    }
     const ghost = this.registry.get(ghostName);
     const paths = ghostPaths(ghost.dir);
     const id = conversationId ?? DEFAULT_SESSION_KEY;
@@ -5064,42 +5234,40 @@ export class SessionHost {
 
     const hosted = this.sessions.get(key);
     const project = hosted?.project ?? await this.projectState(ghostName, "pi", id);
-    const manager = hosted?.session.sessionManager ?? await SessionManager.open(
+    const manager = hosted?.session.sessionManager ?? SessionManager.open(
       sessionFile,
       paths.sessionDir,
-      undefined,
-      { initialCwd: project.cwd },
+      project.cwd,
     );
     try {
-      const stored = await this.applySessionName(manager, title);
+      const stored = this.applySessionName(hosted?.session, manager, title);
       this.legacyTitles.delete(sessionFile);
-      this.logger.info("renamed ghost conversation", {
-        ghost: ghostName,
+      (hosted?.logger ?? this.logger.child({ ghost: ghostName, conversation: id })).info("renamed ghost conversation", {
         session: id,
         title: stored,
       });
       await this.announceConversationUpdated(ghostName, "pi", id);
       return stored;
     } finally {
-      // Release a manager opened for this write alone; the live session keeps
-      // its own, and the next turn re-opens an idle conversation for itself.
-      if (!hosted) await manager.close();
+      // A manager opened for this write alone is dropped here; the live
+      // session keeps its own, and the next turn re-opens an idle conversation.
     }
   }
 
   /**
-   * Write one name through OMP and answer with what it kept — OMP collapses
-   * control characters and runs of spaces, so the stored name is the honest
-   * one to hand back. A name with nothing printable in it stores as nothing,
-   * which is a bad request rather than a silent no-op.
+   * Write one name through pi and answer with what it kept — pi trims the
+   * name, so the stored name is the honest one to hand back. A name with
+   * nothing printable in it is a bad request rather than a silent no-op.
    */
-  private async applySessionName(
+  private applySessionName(
+    session: AgentSession | undefined,
     manager: SessionManager,
     title: string,
-  ): Promise<string> {
-    const applied = await manager.setSessionName(title, "user", "ghost-rename");
+  ): string {
+    if (session) session.setSessionName(title);
+    else manager.appendSessionInfo(title);
     const stored = manager.getSessionName();
-    if (!applied || !stored) {
+    if (!stored) {
       throw new GhostError(
         "invalid_request",
         "A conversation title needs at least one printable character.",
@@ -5496,10 +5664,10 @@ export class SessionHost {
     await this.finishForkArtifactState(sessionDir, marker, record, artifacts, []);
   }
 
-  private recoverForkTransactions(sessionDir: string): Promise<void> {
+  private recoverForkTransactions(sessionDir: string, ghostName: string): Promise<void> {
     const existing = this.forkRecoveries.get(sessionDir);
     if (existing) return existing;
-    const recovery = this.recoverForkTransactionsOnce(sessionDir).finally(() => {
+    const recovery = this.recoverForkTransactionsOnce(sessionDir, ghostName).finally(() => {
       if (this.forkRecoveries.get(sessionDir) === recovery) {
         this.forkRecoveries.delete(sessionDir);
       }
@@ -5508,7 +5676,7 @@ export class SessionHost {
     return recovery;
   }
 
-  private async recoverForkTransactionsOnce(sessionDir: string): Promise<void> {
+  private async recoverForkTransactionsOnce(sessionDir: string, ghostName: string): Promise<void> {
     let names: string[];
     try {
       names = await readdir(sessionDir);
@@ -5520,6 +5688,7 @@ export class SessionHost {
       const marker = join(sessionDir, name);
       if (this.activeForks.has(marker)) continue;
       let markerValidated = false;
+      let conversationId: string | undefined;
       try {
         const value = JSON.parse(await readDaemonControlFile(
           marker,
@@ -5608,6 +5777,7 @@ export class SessionHost {
           throw new Error("invalid fork transaction artifact paths");
         }
         markerValidated = true;
+        conversationId = record.conversationId;
         let recoverable = true;
         for (const [temporary, final] of pairs) {
           if (!(await this.transactionEntryExists(temporary))
@@ -5641,7 +5811,11 @@ export class SessionHost {
           toolCwds,
         ]);
       } catch {
-        this.logger.error(markerValidated ? "fork recovery is still pending" : "fork recovery marker is invalid", {
+        const logger = this.logger.child({
+          ghost: ghostName,
+          ...(conversationId ? { conversation: conversationId } : {}),
+        });
+        logger.error(markerValidated ? "fork recovery is still pending" : "fork recovery marker is invalid", {
           path: marker,
           code: markerValidated ? "fork_recovery_pending" : "fork_marker_invalid",
         });
@@ -5654,28 +5828,31 @@ export class SessionHost {
   ): Promise<StoredSessionRow[]> {
     const paths = ghostPaths(ghost.dir);
     mkdirSync(paths.sessionDir, { recursive: true });
-    await this.recoverForkTransactions(paths.sessionDir);
+    await this.recoverForkTransactions(paths.sessionDir, ghost.name);
     const [sessions, claudeSessions] = await Promise.all([
-      SessionManager.list(paths.home, paths.sessionDir),
+      SessionManager.listAll(paths.sessionDir),
       this.claudeCode.listSessions(ghost),
     ]);
     const scannedOmpSessions = await Promise.all(sessions.map(async (info) => {
-      const nativeTitle = info.title?.trim() ? info.title : null;
-      let title = nativeTitle;
+      let title = info.name?.trim() ? info.name : null;
       if (!title) {
         const modifiedMs = info.modified.getTime();
         const cached = this.legacyTitles.get(info.path);
-        if (cached?.modifiedMs === modifiedMs && cached.size === info.size) {
+        if (cached?.modifiedMs === modifiedMs) {
           title = cached.title;
         } else {
           try {
-            title = await readLegacySessionTitle(info.path);
+            // pi already reported the `session_info` title; only an unconverted
+            // OMP transcript still keeps its title somewhere pi does not read.
+            title = (await hasOmpTitleSlot(info.path))
+              ? sessionTitle(await readSessionEntries(info.path))
+              : null;
           } catch {
             // A concurrent delete or malformed transcript should not make the
             // entire conversation list fail.
             title = null;
           }
-          this.legacyTitles.set(info.path, { modifiedMs, size: info.size, title });
+          this.legacyTitles.set(info.path, { modifiedMs, title });
         }
       }
       let conversationId: string | null;
@@ -5723,7 +5900,7 @@ export class SessionHost {
   /**
    * Read one conversation's messages so the shell can rehydrate it (issue #26).
    *
-   * Reuses OMP's own session read: the transcript file is opened read-only and
+   * Reuses pi's own session read: the transcript file is opened read-only and
    * its message entries are projected to the same `{ role, content }` shape a
    * pi-messages client renders. Private reasoning (`thinking` blocks) and
    * internal `toolResult` messages are dropped — exactly what the live wire
@@ -5755,12 +5932,7 @@ export class SessionHost {
     if (hosted?.title) await hosted.title.catch(() => {});
     const project = hosted?.project ?? await this.projectState(ghostName, "pi", id);
 
-    const manager = await SessionManager.open(
-      path,
-      paths.sessionDir,
-      undefined,
-      { initialCwd: project.cwd },
-    );
+    const manager = SessionManager.open(path, paths.sessionDir, project.cwd);
     const toolCwds = await readToolCwds(paths.sessionDir, id);
     return this.transcriptFromManager(id, manager, options, toolCwds);
   }
@@ -5800,7 +5972,7 @@ export class SessionHost {
     const messages = all.slice(offset, offset + limit);
     return {
       ...conversationIdentity("pi", id),
-      title: manager.getSessionName() ?? legacySessionTitle(manager.getEntries()),
+      title: manager.getSessionName() ?? sessionTitle(manager.getEntries()),
       messages,
       total,
       truncated: offset > 0 || offset + messages.length < total,
@@ -5936,52 +6108,54 @@ export class SessionHost {
       // A title generated by the turn that just finished may still be in
       // flight; the copy is named after it.
       if (source.title) await source.title.catch(() => {});
-      // Session persistence is lazy and buffered, so the file being copied has
-      // to be complete on disk first.
-      await sourceManager.ensureOnDisk();
-      await sourceManager.flush();
-      const sourceFile = sourceManager.getSessionFile();
-      if (!sourceFile) {
+      const sourceHeader = sourceManager.getHeader();
+      if (!sourceHeader) {
         throw new GhostError("invalid_branch", "This conversation has no transcript to branch from.", 400);
       }
-      // Names to avoid colliding with, straight from OMP's own listing. The
+      // Names to avoid colliding with, straight from the session listing. The
       // full `listSessions` would also read every Claude Code sidecar and the
       // pins, and wait on unrelated titles, for one `(n)`.
       const title = forkConversationTitle(
         sourceManager.getSessionName() ?? null,
-        (await SessionManager.list(paths.home, paths.sessionDir)).map((info) => info.title ?? null),
+        (await SessionManager.listAll(paths.sessionDir)).map((info) => info.name ?? null),
       );
-      const forked = await SessionManager.forkFrom(
-        sourceFile,
-        sourceManager.getCwd(),
-        paths.sessionDir,
-        undefined,
-        // Pin the copy's path to the same bounded mapping every other
-        // conversation uses, so `open` and `listSessions` find it unaided.
-        { sessionFile: temporaryForkFile },
-      );
-      try {
-        // forkFrom inherits the source's title *and* its provenance, and OMP
-        // refuses an "auto" write over a name the user chose. The copy name is
-        // derived from that name, so it inherits its standing with it.
-        if (title) await forked.setSessionName(title, forked.titleSource ?? "auto", "ghost-fork");
-        const draft = editableUserText(entry.message.content);
-        // This is the durable, SessionManager-level equivalent of navigating
-        // onto a user message: discard that editable turn from the active
-        // branch while preserving its abandoned subtree off-branch. It appends
-        // the branch marker and rewrites the hidden journal before publication.
-        await forked.discardEntryDurably(entryId);
-        await forked.ensureOnDisk();
-        await forked.flush();
-        stagedFork = {
-          title: forked.getSessionName() ?? null,
-          draft,
-          transcript: this.transcriptFromManager(forkId, forked, {}, source.toolCwds),
-        };
-      } finally {
-        // Release the copy's writer before the host opens it as a session.
-        await forked.close();
+      // A branch is a copy rewound to just before the chosen message: the
+      // source's entries up to that message's parent, under a new header, and
+      // the copy's own title. Entry ids are kept so the caller's id resolves.
+      const kept: SessionEntry[] = entry.parentId ? sourceManager.getBranch(entry.parentId) : [];
+      const lastId = kept.at(-1)?.id ?? null;
+      const forkHeader = {
+        type: "session" as const,
+        version: sourceHeader.version,
+        id: forkId,
+        timestamp: new Date().toISOString(),
+        cwd: sourceManager.getCwd(),
+        parentSession: sourceHeader.id,
+      };
+      const forkEntries: unknown[] = [forkHeader, ...kept];
+      if (title) {
+        forkEntries.push({
+          type: "session_info",
+          id: `ghost-fork-title-${randomUUID().slice(0, 8)}`,
+          parentId: lastId,
+          timestamp: forkHeader.timestamp,
+          name: title,
+        });
       }
+      const staged = await openFile(temporaryForkFile, "wx", 0o600);
+      try {
+        await staged.writeFile(`${forkEntries.map((item) => JSON.stringify(item)).join("\n")}\n`, "utf8");
+        await staged.sync();
+      } finally {
+        await staged.close();
+      }
+      const forked = SessionManager.open(temporaryForkFile, paths.sessionDir, sourceManager.getCwd());
+      const draft = editableUserText(entry.message.content);
+      stagedFork = {
+        title: forked.getSessionName() ?? null,
+        draft,
+        transcript: this.transcriptFromManager(forkId, forked, {}, source.toolCwds),
+      };
       const sidecars = await Promise.allSettled([
         this.projectBindings.clone(
           paths.sessionDir,
@@ -6122,16 +6296,53 @@ export class SessionHost {
         Object.entries(reads).filter(([id]) => remainingIds.has(id)),
       ));
     } catch (error) {
-      this.logger.warn("could not discard an abandoned branch copy", {
-        ghost: ghostName,
-        conversation: forkId,
+      this.logger.child({ ghost: ghostName, conversation: forkId }).warn("could not discard an abandoned branch copy", {
         error: error instanceof Error ? error.message : String(error),
       });
     }
   }
 
   /**
-   * Re-open a historical OMP `ask`, commit the new answer as a sibling
+   * The persisted ask a re-answer would revise: the `ask` tool result at
+   * `entryId`, the assistant call it answered, and that call's questions.
+   */
+  private reopenableAsk(
+    hosted: HostedSession,
+    entryId: string,
+  ): {
+    questions: Parameters<ReturnType<typeof createAskTool>["execute"]>[1]["questions"];
+    assistantEntryId: string;
+    resultMessage: Extract<AgentMessage, { role: "toolResult" }>;
+  } | null {
+    const manager = hosted.session.sessionManager;
+    const entry = manager.getEntry(entryId);
+    if (entry?.type !== "message" || entry.message.role !== "toolResult" || entry.message.toolName !== "ask") {
+      return null;
+    }
+    const resultMessage = entry.message;
+    let assistantId = entry.parentId;
+    while (assistantId) {
+      const candidate = manager.getEntry(assistantId);
+      if (!candidate) return null;
+      if (candidate.type === "message" && candidate.message.role === "assistant") {
+        const call = candidate.message.content.find((part) =>
+          part.type === "toolCall" && part.id === resultMessage.toolCallId);
+        if (call?.type !== "toolCall") return null;
+        const questions = (call.arguments as { questions?: unknown } | undefined)?.questions;
+        if (!Array.isArray(questions) || questions.length === 0) return null;
+        return {
+          questions: questions as Parameters<ReturnType<typeof createAskTool>["execute"]>[1]["questions"],
+          assistantEntryId: candidate.id,
+          resultMessage,
+        };
+      }
+      assistantId = candidate.parentId;
+    }
+    return null;
+  }
+
+  /**
+   * Re-open a historical `ask`, commit the new answer as a sibling
    * toolResult, rebuild the active branch, then resume the model on that branch.
    */
   async runAskReanswer(
@@ -6139,7 +6350,7 @@ export class SessionHost {
     options: RunAskReanswerOptions,
   ): Promise<void> {
     assertPiConversation(options.runtime ?? "pi", "Ask re-answering");
-    this.assertOmpRuntime(ghostName, "Ask re-answering");
+    this.assertPiRuntime(ghostName, "Ask re-answering");
     const conversationId = requireRawConversationId(options.sessionId ?? DEFAULT_SESSION_KEY);
     const admissionKey = this.keyOf(ghostName, conversationId);
     if (this.ghostMoveReserved(ghostName)) {
@@ -6202,13 +6413,13 @@ export class SessionHost {
     let committedActivity: MaintenanceOwnerActivity | null | undefined;
     let turnFailure: { error: unknown; aborted: boolean } | undefined;
     try {
-      unsubscribe = hosted.session.subscribe((event: AgentSessionEvent) => adapter.handle(event));
+      unsubscribe = hosted.session.subscribe((event: AgentSessionEvent) => adapter.handle(asRuntimeSessionEvent(event)));
       options.signal?.addEventListener("abort", onAbort, { once: true });
-      const probe = await hosted.session.navigateTree(options.entryId, { allowAskReopen: true });
-      if (!probe.reopenAsk) {
+      const reopen = this.reopenableAsk(hosted, options.entryId);
+      if (!reopen) {
         throw new GhostError(
           "ask_not_reanswerable",
-          "That branch point is not a recoverable OMP ask result.",
+          "That branch point is not a recoverable ask result.",
           400,
         );
       }
@@ -6216,32 +6427,26 @@ export class SessionHost {
         type: "tool_execution_start",
         toolCallId: syntheticId,
         toolName: "ask",
-        args: { questions: probe.reopenAsk.questions },
+        args: { questions: reopen.questions },
         intent: "Re-answer an earlier question",
-      } as AgentSessionEvent);
+      });
       this.recordToolCwd(hosted, syntheticId, hosted.session.sessionManager.getCwd());
 
-      const toolSession: ToolSession = {
-        cwd: hosted.session.sessionManager.getCwd(),
-        // The HTTP broker can reach the owner, but this daemon is not an OMP
-        // terminal UI. Keeping those concepts separate also keeps OMP from
-        // advertising itself as the desktop application for this interaction.
-        hasUI: false,
-        canPromptUser: true,
-        settings: hosted.session.settings,
-        getSessionFile: () => hosted.session.sessionFile ?? null,
-        getSessionSpawns: () => null,
-        getPlanModeState: () => hosted.session.getPlanModeState(),
-      };
-      const askTool = new AskTool(toolSession);
-      const result = await askTool.execute(
-        syntheticId,
-        { questions: probe.reopenAsk.questions },
-        options.signal,
-        undefined,
-        hosted.session.buildAskReanswerContext(hosted.ask.uiContext),
-      );
-      if (result.details?.chatRedirect) {
+      const askTool = createAskTool({ broker: hosted.ask, timeoutMs: () => this.askTimeoutSeconds * 1000 });
+      let result: Awaited<ReturnType<typeof askTool.execute>>;
+      try {
+        result = await askTool.execute(
+          syntheticId,
+          { questions: reopen.questions },
+          options.signal,
+          undefined,
+          {} as never,
+        );
+      } catch (error) {
+        adapter.handle({ type: "tool_execution_end", toolCallId: syntheticId, toolName: "ask", result: undefined, isError: true });
+        throw error;
+      }
+      if (result.details.chatRedirect) {
         throw new GhostError(
           "ask_chat_unavailable",
           "Chat about this is not available while re-answering a branch; submit an answer instead.",
@@ -6253,16 +6458,23 @@ export class SessionHost {
         toolCallId: syntheticId,
         toolName: "ask",
         result,
-        isError: result.isError === true,
-      } as AgentSessionEvent);
-
-      const committed = await hosted.session.navigateTree(options.entryId, {
-        allowAskReopen: true,
-        reanswerAskResult: result,
+        isError: false,
       });
-      if (!committed.askReanswerCommitted) {
-        throw new GhostError("ask_reanswer_failed", "OMP did not commit the revised answer.", 409);
-      }
+
+      // Commit the revised answer as a sibling tool result under the same
+      // assistant call, then rebuild the model's context on that branch.
+      const manager = hosted.session.sessionManager;
+      manager.branch(reopen.assistantEntryId);
+      hosted.plan.reload();
+      const previous = reopen.resultMessage;
+      manager.appendMessage({
+        ...previous,
+        content: result.content,
+        details: result.details,
+        isError: false,
+        timestamp: Date.now(),
+      });
+      hosted.session.agent.state.messages = manager.buildSessionContext().messages;
       committedActivity = this.piOwnerActivity(hosted);
       options.emit({
         type: "branch_changed",
@@ -6276,7 +6488,7 @@ export class SessionHost {
 
       const ownerPrompt = entryText(result.content).trim();
       if (!ownerPrompt) {
-        throw new GhostError("ask_reanswer_failed", "OMP produced an empty revised answer.", 409);
+        throw new GhostError("ask_reanswer_failed", "The revised answer was empty.", 409);
       }
       reanswerPass = await this.preparePiOwnerPass(hosted, {
         kind: "reanswer",
@@ -6285,19 +6497,18 @@ export class SessionHost {
         finish: finishMaintenance,
         callerOwnsFinishOnFailure: true,
       });
-      await hosted.session.sendCustomMessage({
-        customType: ASK_REANSWER_OWNER_MESSAGE_TYPE,
-        content: ownerPrompt,
-        display: false,
-        attribution: "user",
-        details: { askResultEntryId: options.entryId },
-      }, { triggerTurn: false });
+      manager.appendCustomMessageEntry(
+        ASK_REANSWER_OWNER_MESSAGE_TYPE,
+        ownerPrompt,
+        false,
+        { attribution: "user", askResultEntryId: options.entryId },
+      );
       settlementBarrier = this.deferPiSettlement(hosted, finishMaintenance);
-      hosted.session.resumeAfterAskReanswer();
+      await hosted.session.agent.continue();
       await hosted.session.waitForIdle();
     } catch (error) {
       turnFailure = {
-        error: error instanceof ToolAbortError ? new Error("Ask re-answer cancelled.") : error,
+        error: error instanceof AskCancelledError ? new Error("Ask re-answer cancelled.") : error,
         aborted: options.signal?.aborted === true,
       };
     } finally {
@@ -6387,7 +6598,7 @@ export class SessionHost {
     const runtimeBusy = runtime === "pi"
       ? this.opening.has(piKey)
         || (hosted
-          ? this.sessionOwned(hosted) || (hosted.mcpTransitions ?? 0) > 0
+          ? this.sessionOwned(hosted, false) || (hosted.mcpTransitions ?? 0) > 0
           : this.liveVoice.status(piKey).active)
       : this.claudeCode.isBusy(ghostName, id);
     const busy = this.mcpReloadGhosts.has(ghostName)
@@ -6420,6 +6631,7 @@ export class SessionHost {
     let maintenanceDeleteOutcome: MaintenanceConversationDeleteOutcome = "rolled-back";
     this.deleting.add(deleteKey);
     try {
+      if (runtime === "pi") await this.cancelRecap(piKey);
       await maintenanceReservation?.drained;
       const draftMarker = draftAbandonTransactionPath(paths.sessionDir, runtime, id);
       const draftState = await transactionMarkerState(
@@ -6582,8 +6794,7 @@ export class SessionHost {
         conversationId: id,
       });
       maintenanceDeleteOutcome = "completed";
-      this.logger.info("trashed ghost conversation", {
-        ghost: ghostName,
+      this.logger.child({ ghost: ghostName, conversation: id }).info("trashed ghost conversation", {
         session: identity.id,
         artifacts: artifacts.map((entry) => entry.artifact),
       });
@@ -6699,9 +6910,10 @@ export class SessionHost {
     const hosted = [...this.sessions].filter(([key]) => sessionKeyParts(key)[0] === ghostName);
     // Title generation can still append to an otherwise-idle transcript. Let
     // it settle before the home moves out from under it.
-    const background = hosted
-      .flatMap(([, entry]) => [entry.title])
-      .filter((task): task is Promise<void> => task !== undefined);
+    for (const [, entry] of hosted) entry.recap?.controller.abort();
+    const background: Promise<unknown>[] = hosted
+      .flatMap(([, entry]) => [entry.title, entry.recap?.task])
+      .filter((task) => task !== undefined);
     if (background.length > 0) await Promise.allSettled(background);
 
     for (const [key] of hosted) await this.closePi(ghostName, sessionKeyParts(key)[1]);
@@ -6769,9 +6981,7 @@ export class SessionHost {
       await this.closeHostedSession(key, "project binding changed");
     } catch {
       try {
-        this.logger.warn("committed project session cleanup is pending retry", {
-          ghost: ghostName,
-          conversation: sessionId,
+        this.logger.child({ ghost: ghostName, conversation: sessionId }).warn("committed project session cleanup is pending retry", {
           code: "project_cleanup_pending",
         });
       } catch {
@@ -6846,11 +7056,6 @@ export class SessionHost {
     hosted.modelRuntimeClosed = true;
   }
 
-  private beginHostedDispose(hosted: HostedSession): void {
-    if (hosted.disposeBegun) return;
-    hosted.session.beginDispose();
-    hosted.disposeBegun = true;
-  }
 
   private abortHostedBash(hosted: HostedSession): void {
     if (hosted.bashAbortStarted) return;
@@ -6936,11 +7141,6 @@ export class SessionHost {
     hosted.mcpRefreshSettled = true;
   }
 
-  private clearHostedMcpSingleton(hosted: HostedSession): void {
-    if (hosted.mcpSingletonCleared) return;
-    if (MCPManager.instance() === hosted.mcp?.manager) MCPManager.setInstance(undefined);
-    hosted.mcpSingletonCleared = true;
-  }
 
   private async disposeHostedAgentSession(hosted: HostedSession): Promise<void> {
     if (hosted.sessionDisposed) return;
@@ -6961,7 +7161,7 @@ export class SessionHost {
 
   private reportCleanupFailure(hosted: HostedSession | undefined, stage: string, error: unknown): void {
     try {
-      this.logger.warn("session cleanup failed", {
+      (hosted?.logger ?? this.logger).warn("session cleanup failed", {
         ...(hosted ? { session: hosted.sessionKey } : {}),
         stage,
         error: error instanceof Error ? error.message : String(error),
@@ -6988,8 +7188,9 @@ export class SessionHost {
 
   private async disposePiSession(hosted: HostedSession): Promise<void> {
     const failures: unknown[] = [];
-    await this.collectCleanupFailure(failures, () => this.beginHostedDispose(hosted));
     await this.collectCleanupFailure(failures, () => this.detachHostedOwnership(hosted));
+    await this.collectCleanupFailure(failures, () => hosted.recap?.controller.abort());
+    await this.collectCleanupFailure(failures, () => hosted.recap?.task);
     await this.collectCleanupFailure(failures, () => this.flushHostedToolCwds(hosted));
     await this.collectCleanupFailure(failures, () => this.abortHostedBash(hosted));
     await this.collectCleanupFailure(failures, () => this.abortHostedSession(hosted));
@@ -7000,9 +7201,9 @@ export class SessionHost {
       await this.collectCleanupFailure(failures, () => this.settleHostedMcpReload(hosted));
       await this.collectCleanupFailure(failures, () => this.disconnectHostedMcp(hosted));
       await this.collectCleanupFailure(failures, () => this.settleHostedMcpRefresh(hosted));
-      await this.collectCleanupFailure(failures, () => this.clearHostedMcpSingleton(hosted));
     }
     await this.collectCleanupFailure(failures, () => this.disposeHostedAgentSession(hosted));
+    await this.collectCleanupFailure(failures, () => hosted.jobs.dispose());
     await this.collectCleanupFailure(failures, () => this.closeModelRuntime(hosted));
     if (failures.length > 0) {
       throw new AggregateError(failures, `Failed to fully dispose session ${hosted.sessionKey}.`);
@@ -7025,10 +7226,10 @@ export class SessionHost {
       Promise.resolve().then(() => this.claudeCode.disposeAll()),
     ];
     for (const hosted of this.sessions.values()) {
-      this.launchCleanupStep(hosted, "begin dispose", () => this.beginHostedDispose(hosted));
       this.launchCleanupStep(hosted, "abort bash", () => this.abortHostedBash(hosted));
       this.launchCleanupStep(hosted, "close ask", () => this.closeHostedAsk(hosted));
       this.launchCleanupStep(hosted, "abort title", () => this.abortHostedTitle(hosted));
+      this.launchCleanupStep(hosted, "abort recap", () => hosted.recap?.controller.abort());
       this.launchCleanupStep(hosted, "abort session", () => this.abortHostedSession(hosted));
     }
   }
@@ -7091,10 +7292,10 @@ export class SessionHost {
     for (const entry of hosted) {
       this.sessions.delete(entry.sessionKey);
       this.cleanupRetries.set(entry.sessionKey, entry);
-      this.launchCleanupStep(entry, "force begin dispose", () => this.beginHostedDispose(entry));
       this.launchCleanupStep(entry, "force abort bash", () => this.abortHostedBash(entry));
       this.launchCleanupStep(entry, "force close ask", () => this.closeHostedAsk(entry));
       this.launchCleanupStep(entry, "force abort title", () => this.abortHostedTitle(entry));
+      this.launchCleanupStep(entry, "force abort recap", () => entry.recap?.controller.abort());
       this.launchCleanupStep(entry, "force detach ownership", () => this.detachHostedOwnership(entry));
       this.launchCleanupStep(entry, "force abort session", () => this.abortHostedSession(entry));
       if (entry.mcp) {
@@ -7103,21 +7304,14 @@ export class SessionHost {
           "force disconnect MCP",
           () => this.disconnectHostedMcp(entry),
         );
-        this.launchCleanupStep(
-          entry,
-          "force clear MCP singleton",
-          () => this.clearHostedMcpSingleton(entry),
-        );
       }
+      this.launchCleanupStep(entry, "force cancel jobs", () => entry.jobs.dispose());
       this.launchCleanupStep(entry, "force close model runtime", () => this.closeModelRuntime(entry));
       if (!entry.sessionDisposed && !entry.forceDisposeStarted) {
         entry.forceDisposeStarted = true;
         this.launchCleanupStep(entry, "force dispose session", async () => {
           try {
-            await entry.session.dispose({
-              drainTimeoutMs: 0,
-              mnemopiConsolidateTimeoutMs: 0,
-            });
+            await entry.session.dispose();
             entry.sessionDisposed = true;
           } finally {
             entry.forceDisposeStarted = false;

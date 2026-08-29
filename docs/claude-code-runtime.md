@@ -11,11 +11,11 @@ never receives or stores the Claude credential.
 
 Anthropic currently says Claude Agent SDK usage can draw from a user's Claude
 plan limits. That external plan-authenticated runtime remains distinct from an
-Anthropic provider configured through OMP. The boundary is explicit:
+Anthropic provider configured through pi. The boundary is explicit:
 
 | selection | harness | authentication | accounting path |
 |---|---|---|---|
-| `anthropic/<model>` | OMP | Ghost Secret Service item selected by the ghost's account policy | the provider account's current API/OAuth terms |
+| `anthropic/<model>` | pi | Ghost Secret Service item selected by the ghost's account policy | the provider account's current API/OAuth terms |
 | `claude-code/default` | official Claude Agent SDK + installed `claude` | owner's external Claude Code login | owner's Claude plan limits, subject to Anthropic's current policy and any enabled overage |
 
 Policy and product behavior can change. Before making a pricing promise, check
@@ -77,7 +77,7 @@ For each turn Ghost:
    unbound, or the trusted project cwd plus its approved declarative snapshot;
 5. captures the Ghost-specific `@ghost/extensions` tool definitions and
    exposes them as one in-process SDK MCP server;
-6. starts an Effect-scoped Agent SDK query and maps the SDK's async message
+6. starts one scoped Agent SDK query and maps the SDK's async message
    stream onto Ghost's existing pi-messages SSE protocol;
 7. persists the opaque Claude session id, listing metadata, and actual cwd
    before it emits the terminal `done`, then closes the query process.
@@ -118,13 +118,13 @@ The query is deliberately unrestricted for its local owner:
   environment, including Anthropic API and OAuth token variables.
 
 The ghost tool set contains no vision tool at all. `ghost_screen` returns the
-actual image block and Claude consumes it directly. No OMP `ModelRegistry` is
+actual image block and Claude consumes it directly. No pi model runtime is
 fabricated as a fallback.
 
 The backend is owner-local by construction and uses the owner's external
 Claude Code authentication.
 
-## Why one Effect scope per turn
+## Why one scoped query per turn
 
 T3 Code keeps a long-lived query fed by an Effect queue. That is correct for a
 coding session whose system instructions are stable. A Ghost system prompt is
@@ -132,8 +132,9 @@ not stable: memory files and the shallow owner Documents index are derived
 again before every turn. Keeping one query alive would freeze those indexes.
 
 Ghost therefore retains T3's important lifecycle—typed startup/stream
-failures, `Stream.fromAsyncIterable`, interruption through the SDK query, and
-scoped finalization—but closes after one turn. The next turn resumes with the
+failures, async-iterable streaming, interruption through the SDK query, and
+scoped finalization—without the `effect` dependency, and closes after one
+turn. The next turn resumes with the
 opaque Claude session id and a freshly derived system prompt. A failed or
 malformed resume metadata file is an explicit error; Ghost does not silently
 start a replacement conversation.
@@ -189,7 +190,7 @@ in [`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md). The adapted sources
 are:
 
 - [`ClaudeAdapter.ts`](https://github.com/pingdotgg/t3code/blob/2c4158f87a1b6a586d0aa5e0338f122cb7887c4f/apps/server/src/provider/Layers/ClaudeAdapter.ts):
-  injected `query()` seam, SDK option construction, Effect-scoped
+  injected `query()` seam, SDK option construction, scoped
   AsyncIterable streaming, interrupt/close lifecycle, resume id handling, and
   partial-event normalization;
 - [`ClaudeExecutable.ts`](https://github.com/pingdotgg/t3code/blob/2c4158f87a1b6a586d0aa5e0338f122cb7887c4f/apps/server/src/provider/Drivers/ClaudeExecutable.ts):
@@ -209,8 +210,8 @@ Symbolic links, hidden ghost providers, and ambient cwd resources never enter
 that snapshot, and executable settings remain disabled.
 The dependency versions match the reviewed T3 implementation:
 `@anthropic-ai/claude-agent-sdk@0.3.170`,
-`@anthropic-ai/sdk@0.93.0`, `@modelcontextprotocol/sdk@1.29.0`,
-`effect@4.0.0-beta.103`, and `zod@4.4.3`.
+`@anthropic-ai/sdk@0.93.0`, `@modelcontextprotocol/sdk@1.29.0`, and
+`zod@4.4.3`; Ghost does not take T3's `effect` dependency.
 
 ## Legal boundary
 

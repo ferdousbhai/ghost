@@ -1,9 +1,55 @@
-import type { Usage } from "@oh-my-pi/pi-ai";
-import type { AgentSessionEvent } from "@oh-my-pi/pi-coding-agent";
 import {
   isValidConversationId,
   MAX_CONVERSATION_ID_SCALARS,
 } from "./conversation-identity.js";
+
+/** Token and cost accounting for one provider step, as pi reports it. */
+export interface Usage {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  totalTokens: number;
+  cost: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+    total: number;
+  };
+}
+
+/** The message fields the wire projection reads, whichever runtime produced them. */
+export interface RuntimeMessage {
+  role: string;
+  content?: unknown;
+  attribution?: string;
+  display?: boolean;
+  usage?: Usage;
+  stopReason?: string;
+  errorMessage?: string;
+}
+
+/**
+ * The session events the wire projection understands. Both agent runtimes
+ * emit this structural shape; everything else they emit is ignored.
+ */
+export type RuntimeSessionEvent =
+  | { type: "agent_start" }
+  | { type: "agent_end"; willRetry?: boolean }
+  | { type: "message_start"; message: RuntimeMessage }
+  | { type: "message_update"; message: RuntimeMessage; assistantMessageEvent: unknown }
+  | { type: "message_end"; message: RuntimeMessage }
+  | { type: "tool_execution_start"; toolCallId: string; toolName: string; args: unknown; intent?: string }
+  | { type: "tool_execution_update"; toolCallId: string; toolName: string; partialResult: unknown }
+  | { type: "tool_execution_end"; toolCallId: string; toolName: string; result: unknown; isError: boolean }
+  | { type: "retry_fallback_applied"; from: string; to: string; role: string }
+  | { type: "retry_fallback_succeeded"; model: string; role: string };
+
+/** Narrow a runtime's own event union at the subscription seam. */
+export function asRuntimeSessionEvent(event: { type: string }): RuntimeSessionEvent {
+  return event as RuntimeSessionEvent;
+}
 
 export type PiMessagesEvent =
   | { type: "start" }
@@ -240,7 +286,7 @@ export interface PiMessagesAdapterOptions {
 }
 
 export interface PiMessagesAdapter {
-  handle(event: AgentSessionEvent): void;
+  handle(event: RuntimeSessionEvent): void;
   finishDone(reason?: "stop" | "length" | "toolUse"): void;
   finishError(error: unknown, aborted?: boolean): void;
   isTerminal(): boolean;
@@ -281,7 +327,7 @@ function toolResultSummary(result: unknown): string | undefined {
 /**
  * Translate one agent run into the flattened pi-messages event sequence.
  *
- * The seam is `message_update.assistantMessageEvent`: OMP's agent loop
+ * The seam is `message_update.assistantMessageEvent`: pi's agent loop
  * forwards the provider's `AssistantMessageEvent` stream there verbatim,
  * which is the same event type the hosted runtime tapped. Step boundaries
  * (`message_start` / `message_end`) are invisible on the wire, but each step
@@ -362,7 +408,7 @@ export function createPiMessagesAdapter(
         return;
       case "toolcall_start": {
         if (stepIndex === undefined) return;
-        // OMP's toolcall_start carries no id/name of its own; they are already
+        // pi's toolcall_start carries no id/name of its own; they are already
         // set on the partial message's content block.
         const block = event.partial?.content?.[stepIndex];
         if (block?.type !== "toolCall") return;
@@ -406,10 +452,7 @@ export function createPiMessagesAdapter(
           ensureStarted();
           return;
         case "message_start": {
-          const message = event.message as typeof event.message & {
-            attribution?: string;
-            display?: boolean;
-          };
+          const message = event.message;
           // Forced /skill prompts are persisted as displayable custom messages
           // attributed to the owner. Count that as the POST's already-rendered
           // input too, or the first later steer would consume the skip instead.
@@ -437,25 +480,18 @@ export function createPiMessagesAdapter(
         case "message_update": {
           if (event.message.role !== "assistant") return;
           handleAssistantMessageEvent(
-            event.assistantMessageEvent as unknown as Parameters<
-              typeof handleAssistantMessageEvent
-            >[0],
+            event.assistantMessageEvent as Parameters<typeof handleAssistantMessageEvent>[0],
           );
           return;
         }
         case "message_end": {
-          const message = event.message as {
-            role: string;
-            usage?: Usage;
-            stopReason?: string;
-            errorMessage?: string;
-          };
+          const message = event.message;
           if (message.role !== "assistant") return;
           addUsage(usage, message.usage);
           lastStopReason = message.stopReason;
           if (message.stopReason === "error" || message.stopReason === "aborted") {
             ensureStarted();
-            // OMP owns retry/fallback recovery after a failed provider step.
+            // The runtime owns retry/fallback recovery after a failed provider step.
             // Do not terminate the Ghost stream here: a later model may still
             // answer this same turn. `finishDone` turns the *last* failed step
             // into an error only after AgentSession.prompt() has settled.
@@ -519,9 +555,9 @@ export function createPiMessagesAdapter(
           });
           return;
         case "agent_end":
-          // Legacy pi emitted this hint; tolerate it on replayed/test events
-          // even though OMP 18 now owns retrying inside the settled run.
-          if ((event as typeof event & { willRetry?: boolean }).willRetry || deferAgentEnd) return;
+          // A retrying run ends its failed attempt with `willRetry`; the turn
+          // is not over until an attempt ends without it.
+          if (event.willRetry || deferAgentEnd) return;
           this.finishDone();
           return;
         default:

@@ -20,8 +20,8 @@ import QtQuick
 import "CommandTranscript.js" as CommandTranscript
 import "GhostRename.js" as GhostRename
 import "HookStatus.js" as HookStatus
+import "HookConfig.js" as HookConfig
 import "TurnBlocks.js" as TurnBlocks
-import "../components/DocumentModel.js" as DocumentModel
 import "../components/ProjectModel.js" as ProjectModel
 
 Singleton {
@@ -61,9 +61,150 @@ Singleton {
         modal, and a rename is typed in the roster row itself. */
     property string ghostRenameError: ""
 
-    // Daemon-global trusted configuration, projected as bounded display-only
-    // metadata. It is deliberately independent of ghost, conversation,
-    // project, and the owner-wide Documents cache.
+    // Phone access is daemon-global rather than ghost- or conversation-scoped.
+    // Keep its owner/request state outside clearConnect(), which owns the
+    // selected conversation's live-voice and collaboration capabilities.
+
+    function makeRemoteRequest(): var {
+        return typeof root.remoteRequestFactory === "function"
+            ? root.remoteRequestFactory() : new XMLHttpRequest();
+    }
+
+    /** The daemon's RemoteStatus; the panel reads the rest defensively. */
+    function validRemoteStatus(body: var): bool {
+        return !!body && typeof body === "object" && !Array.isArray(body)
+            && typeof body.enabled === "boolean"
+            && (body.problem === null
+                || (!!body.problem && typeof body.problem === "object"
+                    && typeof body.problem.message === "string"));
+    }
+
+    /** Adopt a status; the QR code is fetched once per URL. */
+    function applyRemoteStatus(body: var): bool {
+        if (!root.validRemoteStatus(body)) return false;
+        const urlBefore = root.remoteUrl;
+        root.remoteStatus = body;
+        root.remoteError = "";
+        if (root.remoteUrl !== urlBefore) root.clearRemoteQr();
+        if (root.remoteUrl !== "" && root.remoteQrSource === "") root.fetchRemoteQr();
+        return true;
+    }
+
+    function clearRemoteQr(): void {
+        const request = root.remoteQrRequest;
+        root.remoteQrRequest = null;
+        root.remoteQrSource = "";
+        if (request && request.readyState !== 4) request.abort();
+    }
+
+    function retireRemoteRequests(): void {
+        const request = root.remoteRequest;
+        root.remoteRequest = null;
+        root.remoteLoading = false;
+        root.remoteMutating = false;
+        if (request && request.readyState !== 4) request.abort();
+        root.clearRemoteQr();
+    }
+
+    function clearRemote(): void {
+        root.retireRemoteRequests();
+        root.remoteStatus = ({});
+        root.remoteError = "";
+    }
+
+    function fetchRemoteQr(): void {
+        const expectedUrl = root.remoteUrl;
+        if (expectedUrl === "") {
+            root.clearRemoteQr();
+            return;
+        }
+        if (root.remoteQrRequest && root.remoteQrRequest.readyState !== 4) return;
+        const xhr = root.makeRemoteRequest();
+        root.remoteQrRequest = xhr;
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || xhr !== root.remoteQrRequest) return;
+            root.remoteQrRequest = null;
+            if (root.remoteUrl !== expectedUrl) return;
+            if (xhr.status === 200) {
+                const svg = String(xhr.responseText || "");
+                if (svg.indexOf("<svg") < 0) {
+                    root.remoteError = "ghostd sent malformed remote-access QR code";
+                    return;
+                }
+                root.remoteQrSource = "data:image/svg+xml;charset=utf-8,"
+                    + encodeURIComponent(svg);
+            } else {
+                root.remoteError = root.describeError(xhr, "GET remote-access QR code");
+            }
+        };
+        root.dispatch(xhr, "GET", "/api/remote/qr.svg", ({}), null,
+            function () { return root.remoteQrRequest === xhr; });
+    }
+
+    function refreshRemote(): void {
+        if (root.remoteMutating) return;
+        if (root.remoteRequest && root.remoteRequest.readyState !== 4) return;
+        const xhr = root.makeRemoteRequest();
+        root.remoteRequest = xhr;
+        root.remoteLoading = true;
+        root.remoteError = "";
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || xhr !== root.remoteRequest) return;
+            root.remoteRequest = null;
+            root.remoteLoading = false;
+            if (xhr.status === 200) {
+                try {
+                    if (!root.applyRemoteStatus(JSON.parse(xhr.responseText)))
+                        throw new Error("invalid remote status");
+                    root.reachable = true;
+                } catch (error) {
+                    root.remoteError = "ghostd sent malformed remote-access status";
+                }
+            } else {
+                root.remoteError = root.describeError(xhr, "GET remote access");
+            }
+        };
+        root.dispatch(xhr, "GET", "/api/remote", ({}), null,
+            function () { return root.remoteRequest === xhr; });
+    }
+
+    function setRemoteEnabled(enabled: bool): void {
+        if (root.remoteMutating || typeof enabled !== "boolean") return;
+        const previous = root.remoteRequest;
+        root.remoteRequest = null;
+        if (previous && previous.readyState !== 4) previous.abort();
+        const xhr = root.makeRemoteRequest();
+        root.remoteRequest = xhr;
+        root.remoteLoading = false;
+        root.remoteMutating = true;
+        root.remoteError = "";
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || xhr !== root.remoteRequest) return;
+            root.remoteRequest = null;
+            root.remoteMutating = false;
+            if (xhr.status === 200) {
+                try {
+                    if (!root.applyRemoteStatus(JSON.parse(xhr.responseText)))
+                        throw new Error("invalid remote status");
+                    root.reachable = true;
+                    root.remoteSetFinished(enabled, true);
+                } catch (error) {
+                    root.remoteError = "ghostd sent malformed remote-access status";
+                    root.remoteSetFinished(enabled, false);
+                }
+            } else {
+                root.remoteError = root.describeError(xhr, "POST remote access");
+                root.remoteSetFinished(enabled, false);
+            }
+        };
+        root.dispatch(xhr, "POST", "/api/remote",
+            ({ "Content-Type": "application/json" }),
+            JSON.stringify({ enabled: enabled }),
+            function () { return root.remoteRequest === xhr; });
+    }
+
+    // Hook status and configuration are daemon-global, independent of any
+    // ghost, conversation, or project.
 
     function makeHooksRequest(): var {
         return typeof root.hooksRequestFactory === "function"
@@ -78,16 +219,39 @@ Singleton {
         if (request && request.readyState !== 4) request.abort();
     }
 
+    function retireHookConfigRequest(): void {
+        const request = root.hookConfigRequest;
+        root.hookConfigRequest = null;
+        if (request && request.readyState !== 4) request.abort();
+    }
+
+    /** Take the daemon's `{ path, document }` as the current hooks.json; false when the body is not that. */
+    function adoptHookConfig(xhr: var): bool {
+        const config = HookConfig.parseConfig(xhr.responseText);
+        if (config === null) {
+            root.hookConfigError = "ghostd sent a malformed hook configuration";
+            return false;
+        }
+        root.hookConfigPath = config.path;
+        root.hookConfig = config.document;
+        return true;
+    }
+
     function beginHooksConnectionEpoch(): void {
         root.hooksEpoch += 1;
         root.retireHooksRequest();
         root.activeHooks = [];
         root.hookEvents = [];
         root.activeHookCount = 0;
-        root.hookContinuationCap = 2;
+        root.hookContinuationCap = 10;
         root.hooksLoaded = false;
         root.hooksStale = false;
         root.hooksError = "";
+        root.retireHookConfigRequest();
+        root.hookConfig = null;
+        root.hookConfigPath = "";
+        root.hookConfigLoaded = false;
+        root.hookConfigError = "";
         root.hooksConnectionReset(root.hooksEpoch);
     }
 
@@ -145,308 +309,68 @@ Singleton {
         });
     }
 
-
-    function documentSnapshot(path: string, query: string): var {
-        return DocumentModel.snapshot(root.documentDirectories, path, query);
-    }
-
-    function makeDocumentRequest(): var {
-        return typeof root.documentRequestFactory === "function"
-            ? root.documentRequestFactory() : new XMLHttpRequest();
-    }
-
-    function makeDocumentDeleteRequest(): var {
-        return typeof root.documentDeleteRequestFactory === "function"
-            ? root.documentDeleteRequestFactory() : new XMLHttpRequest();
-    }
-
-    function makeDocumentContentRequest(): var {
-        return typeof root.documentContentRequestFactory === "function"
-            ? root.documentContentRequestFactory() : new XMLHttpRequest();
-    }
-
-    function installDocumentRequest(key: string, xhr: var): void {
-        const next = DocumentModel.copyMap(root.documentRequests);
-        const previous = DocumentModel.mapValue(next, key, null);
-        delete next[key];
-        root.documentRequests = next;
-        if (previous && previous.readyState !== 4) previous.abort();
-        const installed = DocumentModel.copyMap(root.documentRequests);
-        installed[key] = xhr;
-        root.documentRequests = installed;
-    }
-
-    function retireDocumentRequest(key: string, xhr: var): void {
-        if (DocumentModel.mapValue(root.documentRequests, key, null) !== xhr) return;
-        const next = DocumentModel.copyMap(root.documentRequests);
-        delete next[key];
-        root.documentRequests = next;
-    }
-
-    /** Retire ownership before abort: fake/native XHR may finish synchronously. */
-    function retireDocumentRequests(): void {
-        const requests = root.documentRequests;
-        const content = root.documentContentRequest;
-        const deletion = root.documentDeleteRequest;
-        root.documentRequests = DocumentModel.emptyMap();
-        root.documentContentRequest = null;
-        root.documentDeleteRequest = null;
-        for (const key of Object.keys(requests || {})) {
-            if (requests[key] && requests[key].readyState !== 4) requests[key].abort();
-        }
-        if (content && content.readyState !== 4) content.abort();
-        if (deletion && deletion.readyState !== 4) deletion.abort();
-    }
-
-    function beginDocumentsConnectionEpoch(): void {
-        root.documentsEpoch += 1;
-        root.retireDocumentRequests();
-        root.documentsRoot = "";
-        root.documentDirectories = DocumentModel.emptyMap();
-        root.documentContentPath = "";
-        root.documentContent = "";
-        root.documentContentModifiedAt = "";
-        root.documentContentSize = -1;
-        root.documentContentLoading = false;
-        root.documentContentReady = false;
-        root.documentContentError = "";
-        root.documentDeletingPath = "";
-        root.documentDeleteError = "";
-        root.documentsConnectionReset(root.documentsEpoch);
+    /** Read the owner's hooks.json through the daemon. A 404 means the daemon has no file to edit. */
+    function fetchHookConfig(force: bool): void {
+        if (!force && (root.hookConfigLoaded || root.hookConfigLoading)) return;
+        root.retireHookConfigRequest();
+        const xhr = root.makeHooksRequest();
+        const epoch = root.hooksEpoch;
+        root.hookConfigRequest = xhr;
+        root.hookConfigError = "";
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || epoch !== root.hooksEpoch
+                    || xhr !== root.hookConfigRequest) return;
+            root.hookConfigRequest = null;
+            if (xhr.status === 200) {
+                if (!root.adoptHookConfig(xhr)) return;
+                root.hookConfigLoaded = true;
+                root.reachable = true;
+            } else if (xhr.status === 404) {
+                root.hookConfig = null;
+                root.hookConfigPath = "";
+                root.hookConfigLoaded = true;
+            } else if (xhr.status === 0) {
+                root.failHooksTransport(epoch);
+            } else {
+                root.hookConfigError = root.describeError(xhr, "GET hooks config");
+            }
+        };
+        root.dispatch(xhr, "GET", "/api/hooks/config", ({}), null, function () {
+            return epoch === root.hooksEpoch && root.hookConfigRequest === xhr;
+        });
     }
 
     /**
-     * A status-0 Documents result owns the whole Documents connection epoch,
-     * even during startup when the general daemon reachability latch is
-     * already false. Retiring the epoch clears every loading owner and makes a
-     * later healthy daemon establish its root from a fresh first page.
+     * Replace the owner's hooks.json whole. The daemon's loader is the only
+     * validator: a refused document comes back as its message and nothing
+     * changes; an admitted one is live at once, so the status is re-read.
      */
-    function failDocumentsTransport(epoch: int): void {
-        if (epoch !== root.documentsEpoch) return;
-        root.reachable = false;
-        // A true -> false transition already retired the epoch through
-        // onReachableChanged. When reachable was false already, do it here.
-        if (epoch === root.documentsEpoch) root.beginDocumentsConnectionEpoch();
-    }
-
-    /**
-     * Read one direct directory page. `append` consumes the cursor held by the
-     * cached first page; `force` starts that path/query over without dropping
-     * the prior rows while the replacement is in flight.
-     */
-    function fetchDocuments(path: string, query: string, append: bool, force: bool): void {
-        if (!DocumentModel.isCanonicalPath(path)) return;
-        const normalizedPath = DocumentModel.normalizePath(path);
-        const normalizedQuery = DocumentModel.normalizedQuery(query);
-        const firstRootPage = normalizedPath === "" && normalizedQuery === "" && !append;
-        // A daemon restart may legitimately resolve a different XDG Documents
-        // root. Only a new root page establishes that authority for this epoch.
-        if (root.documentsRoot === "" && !firstRootPage) {
-            root.fetchDocuments("", "", false, false);
-            return;
-        }
-        const cacheKey = DocumentModel.key(normalizedPath, normalizedQuery);
-        const current = root.documentSnapshot(normalizedPath, normalizedQuery);
-        if (append && (!current.loaded || current.nextCursor === "")) return;
-        if (!append && !force && (current.loaded || current.loading)) return;
-
-        const xhr = root.makeDocumentRequest();
-        const epoch = root.documentsEpoch;
-        root.installDocumentRequest(cacheKey, xhr);
-        root.documentDirectories = DocumentModel.begin(root.documentDirectories,
-            normalizedPath, normalizedQuery, append);
-        const cursor = append ? current.nextCursor : "";
-        const params = [
-            "path=" + encodeURIComponent(normalizedPath),
-            "q=" + encodeURIComponent(normalizedQuery),
-            "limit=100"
-        ];
-        if (cursor !== "") params.push("cursor=" + encodeURIComponent(cursor));
+    function writeHookConfig(document: var): void {
+        if (root.hookConfigBusy || !root.hookConfigAvailable) return;
+        const xhr = root.makeHooksRequest();
+        const epoch = root.hooksEpoch;
+        root.hookConfigMutation = xhr;
+        root.hookConfigError = "";
         xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || epoch !== root.documentsEpoch
-                    || DocumentModel.mapValue(root.documentRequests, cacheKey, null) !== xhr) return;
-            root.retireDocumentRequest(cacheKey, xhr);
+            if (xhr.readyState !== 4 || xhr !== root.hookConfigMutation) return;
+            root.hookConfigMutation = null;
+            if (epoch !== root.hooksEpoch) return;
+            let ok = false;
             if (xhr.status === 200) {
-                try {
-                    const body = JSON.parse(xhr.responseText);
-                    if (root.documentsRoot === "" && !firstRootPage) {
-                        throw new Error("Documents root was not established by a fresh first page");
-                    }
-                    if (root.documentsRoot !== "" && body.root !== root.documentsRoot) {
-                        root.documentDirectories = DocumentModel.fail(root.documentDirectories,
-                            normalizedPath, normalizedQuery,
-                            "ghostd changed the Documents root during a listing", false);
-                        root.documentDirectoryChanged(normalizedPath, normalizedQuery);
-                        return;
-                    }
-                    const applied = DocumentModel.applyPage(root.documentDirectories,
-                        normalizedPath, normalizedQuery, body, append);
-                    root.documentDirectories = applied.cache;
-                    if (applied.ok) {
-                        root.documentsRoot = body.root;
-                        root.reachable = true;
-                    }
-                } catch (error) {
-                    root.documentDirectories = DocumentModel.fail(root.documentDirectories,
-                        normalizedPath, normalizedQuery,
-                        "ghostd sent a malformed Documents page", false);
-                }
-            } else if (xhr.status === 0) {
-                root.failDocumentsTransport(epoch);
-                return;
+                ok = root.adoptHookConfig(xhr);
+            } else if (xhr.status === 400) {
+                // The loader's message names the field; that is the whole story.
+                const detail = root.errorDetail(xhr);
+                root.hookConfigError = detail !== "" ? detail : root.describeError(xhr, "PUT hooks config");
             } else {
-                const stale = xhr.status === 409 && root.errorCode(xhr) === "cursor_stale";
-                const detail = stale
-                    ? "This folder changed while more items were loading. Refresh it to continue."
-                    : root.describeError(xhr, "GET Documents");
-                root.documentDirectories = DocumentModel.fail(root.documentDirectories,
-                    normalizedPath, normalizedQuery, detail, stale);
+                root.hookConfigError = root.describeError(xhr, "PUT hooks config");
             }
-            root.documentDirectoryChanged(normalizedPath, normalizedQuery);
+            root.hookConfigWriteFinished(ok);
+            if (ok) root.fetchHooks(true);
         };
-        root.dispatch(xhr, "GET", "/api/documents?" + params.join("&"), ({}), null,
-            function () {
-                return epoch === root.documentsEpoch
-                    && DocumentModel.mapValue(root.documentRequests, cacheKey, null) === xhr;
-            });
+        root.dispatch(xhr, "PUT", "/api/hooks/config", ({ "Content-Type": "application/json" }),
+            JSON.stringify(document), function () { return xhr === root.hookConfigMutation; });
     }
-
-    function refreshDocuments(path: string, query: string): void {
-        root.fetchDocuments(path, query, false, true);
-    }
-
-    function loadMoreDocuments(path: string, query: string): void {
-        root.fetchDocuments(path, query, true, false);
-    }
-
-    function clearDocumentContent(): void {
-        const request = root.documentContentRequest;
-        root.documentContentRequest = null;
-        if (request && request.readyState !== 4) request.abort();
-        root.documentContentPath = "";
-        root.documentContent = "";
-        root.documentContentModifiedAt = "";
-        root.documentContentSize = -1;
-        root.documentContentLoading = false;
-        root.documentContentReady = false;
-        root.documentContentError = "";
-    }
-
-    /** Read one inline-safe file through ghostd; QML never opens its pathname. */
-    function fetchDocumentContent(path: string, force: bool): void {
-        if (!DocumentModel.isCanonicalPath(path) || path === "" || root.documentsRoot === "") {
-            root.clearDocumentContent();
-            return;
-        }
-        const normalized = DocumentModel.normalizePath(path);
-        if (!force && root.documentContentPath === normalized
-                && (root.documentContentReady || root.documentContentLoading)) return;
-        const previous = root.documentContentRequest;
-        root.documentContentRequest = null;
-        if (previous && previous.readyState !== 4) previous.abort();
-        const xhr = root.makeDocumentContentRequest();
-        const epoch = root.documentsEpoch;
-        root.documentContentRequest = xhr;
-        if (root.documentContentPath !== normalized) {
-            root.documentContent = "";
-            root.documentContentModifiedAt = "";
-            root.documentContentSize = -1;
-            root.documentContentReady = false;
-        }
-        root.documentContentPath = normalized;
-        root.documentContentLoading = true;
-        root.documentContentError = "";
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || epoch !== root.documentsEpoch
-                    || xhr !== root.documentContentRequest) return;
-            root.documentContentRequest = null;
-            root.documentContentLoading = false;
-            if (xhr.status === 200) {
-                try {
-                    const body = JSON.parse(xhr.responseText);
-                    if (!DocumentModel.exactKeys(body,
-                            ["root", "path", "size", "modifiedAt", "content"])
-                            || body.root !== root.documentsRoot || body.path !== normalized
-                            || !Number.isSafeInteger(body.size) || body.size < 0
-                            || body.size > DocumentModel.inlineFileMaxBytes()
-                            || !DocumentModel.validTimestamp(body.modifiedAt)
-                            || typeof body.content !== "string"
-                            || body.content.indexOf("\0") >= 0
-                            || DocumentModel.utf8ByteLength(body.content) !== body.size)
-                        throw new Error("invalid content result");
-                    root.documentContent = body.content;
-                    root.documentContentModifiedAt = body.modifiedAt;
-                    root.documentContentSize = body.size;
-                    root.documentContentReady = true;
-                    root.documentContentError = "";
-                    root.reachable = true;
-                } catch (error) {
-                    root.documentContentReady = false;
-                    root.documentContentError = "ghostd sent malformed Documents content";
-                }
-            } else if (xhr.status === 0) {
-                root.failDocumentsTransport(epoch);
-                return;
-            } else {
-                root.documentContentReady = false;
-                root.documentContentError = root.describeError(xhr, "GET Documents content");
-            }
-        };
-        root.dispatch(xhr, "GET", "/api/documents/content?path="
-            + encodeURIComponent(normalized), ({}), null, function () {
-                return epoch === root.documentsEpoch && root.documentContentRequest === xhr;
-            });
-    }
-
-    function deleteDocument(path: string): void {
-        if (!DocumentModel.isCanonicalPath(path)) return;
-        const normalized = DocumentModel.normalizePath(path);
-        if (normalized === "" || root.documentDeletingPath !== "") return;
-        if (root.documentDeleteRequest && root.documentDeleteRequest.readyState !== 4)
-            root.documentDeleteRequest.abort();
-        const xhr = root.makeDocumentDeleteRequest();
-        const epoch = root.documentsEpoch;
-        root.documentDeleteRequest = xhr;
-        root.documentDeletingPath = normalized;
-        root.documentDeleteError = "";
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || epoch !== root.documentsEpoch
-                    || xhr !== root.documentDeleteRequest) return;
-            root.documentDeleteRequest = null;
-            root.documentDeletingPath = "";
-            if (xhr.status === 200) {
-                try {
-                    const body = JSON.parse(xhr.responseText);
-                    if (!DocumentModel.exactKeys(body, ["ok", "path", "trash", "kind"])
-                            || body.ok !== true || body.path !== normalized
-                            || (body.kind !== "freedesktop" && body.kind !== "fallback")
-                            || !DocumentModel.validAbsolutePath(body.trash))
-                        throw new Error("invalid trash result");
-                    root.documentDirectories = DocumentModel.removePath(
-                        root.documentDirectories, normalized);
-                    root.documentDeleteError = "";
-                    root.documentDeleteFinished(normalized, true);
-                    root.refreshDocuments(DocumentModel.parent(normalized), "");
-                } catch (error) {
-                    root.documentDeleteError = "ghostd sent a malformed document trash result";
-                    root.documentDeleteFinished(normalized, false);
-                }
-            } else if (xhr.status === 0) {
-                root.failDocumentsTransport(epoch);
-                return;
-            } else {
-                root.documentDeleteError = root.describeError(xhr, "DELETE document");
-                root.documentDeleteFinished(normalized, false);
-            }
-        };
-        root.dispatch(xhr, "DELETE", "/api/documents",
-            ({ "Content-Type": "application/json" }),
-            JSON.stringify({ path: normalized, confirm: normalized }),
-            function () {
-                return epoch === root.documentsEpoch && root.documentDeleteRequest === xhr;
-            });
-    }
-
 
     function makeProjectRequest(kind: string): var {
         let factory = null;
@@ -816,46 +740,54 @@ Singleton {
         root.mutateProject("unbind", "PUT", "", body);
     }
 
-    // Plain files stay canonical. This is only the latest derived daemon
-    // snapshot used by the right-hand Memory/inactive-agent/Character surfaces.
-    property var contextCharacter: ({ path: "character.md", title: null })
-    property var contextMemory: []
-    property var contextAgents: []
-    property var contextSkipped: []
-    property bool contextLoading: false
-    property string contextError: ""
-    property string contextDeletingPath: ""
-    property string contextDeleteError: ""
-    property string contextGhost: ""
+    // Plain files stay canonical: memory/*.md is one fact per file, and this
+    // is only the latest listing of them read through the daemon.
+    property var memory: []
+    property var memorySkipped: []
+    property bool memoryLoading: false
+    property string memoryError: ""
+    /** The memory path a write or trash is in flight for; "" when idle. A
+        new fact has no path yet and is busy under "memory/". */
+    property string memoryBusyPath: ""
+    property string memoryActionError: ""
+    property string memoryGhost: ""
+    /** The last listing body verbatim: an unchanged directory must not rebuild
+        the list's rows. */
+    property string memoryRaw: ""
+
+    /** The daemon's RemoteStatus, `{}` until read. */
+    property var remoteStatus: ({})
+    /** The tailnet URL while remote access is on, else "". */
+    readonly property string remoteUrl: typeof root.remoteStatus.url === "string" ? root.remoteStatus.url : ""
+    property bool remoteLoading: false
+    property bool remoteMutating: false
+    property string remoteError: ""
+    /** Authenticated SVG responses become a data URL for QML's Image, whose
+        network loader cannot attach the bearer header itself. */
+    property string remoteQrSource: ""
+    readonly property bool remoteQrLoading: root.remoteQrRequest !== null
 
     property var activeHooks: []
     property var hookEvents: []
     property int activeHookCount: 0
-    property int hookContinuationCap: 2
+    property int hookContinuationCap: 10
     property bool hooksLoading: false
     property bool hooksLoaded: false
     /** A failed refresh may retain the last exact successful projection. */
     property bool hooksStale: false
     property string hooksError: ""
     property int hooksEpoch: 0
+    /** The owner's hooks.json as the daemon admitted it; null until read. */
+    property var hookConfig: null
+    property string hookConfigPath: ""
+    /** False on a daemon built without a hooks file (the route is 404). */
+    readonly property bool hookConfigAvailable: root.hookConfig !== null
+    property bool hookConfigLoaded: false
+    readonly property bool hookConfigLoading: root.hookConfigRequest !== null
+    readonly property bool hookConfigBusy: root.hookConfigMutation !== null
+    property string hookConfigError: ""
 
-    // Machine Documents are deliberately not keyed by the active ghost. Each
-    // cache entry represents exactly one directory and one current-folder
-    // query; deeper folders arrive only when the owner opens them.
-    property string documentsRoot: ""
-    property var documentDirectories: DocumentModel.emptyMap()
-    property var documentRequests: DocumentModel.emptyMap()
-    property int documentsEpoch: 0
     property bool establishedConnection: false
-    property string documentContentPath: ""
-    property string documentContent: ""
-    property string documentContentModifiedAt: ""
-    property int documentContentSize: -1
-    property bool documentContentLoading: false
-    property bool documentContentReady: false
-    property string documentContentError: ""
-    property string documentDeletingPath: ""
-    property string documentDeleteError: ""
 
     // Project discovery is explicit and conversation-scoped. The ghost home
     // remains the persona/memory/session store; this state changes only what
@@ -889,6 +821,34 @@ Singleton {
     property string mcpError: ""
     property string mcpNotice: ""
     property string mcpGhost: ""
+
+    // Plan mode, todo phases, and jobs are one conversation-scoped work view.
+    // The GETs stay separate so neither a slow plan-file read nor a large job
+    // output tail holds the other row back, while the stamps make both caches
+    // retire together when the selected conversation changes.
+    property bool workPlanning: false
+    property var workPlan: null
+    property var workTodo: []
+    property var workJobs: []
+    property bool workPlanLoaded: false
+    property bool workJobsLoaded: false
+    readonly property bool workPlanLoading: root.workPlanRequest !== null
+    readonly property bool workJobsLoading: root.workJobsRequest !== null
+    readonly property bool workMutating: root.workMutationRequest !== null
+    property string workPlanError: ""
+    property string workJobsError: ""
+    property string workMutationError: ""
+    property string workGhost: ""
+    property string workSessionId: ""
+    readonly property string workError: root.workMutationError !== ""
+        ? root.workMutationError
+        : (root.workPlanError !== "" ? root.workPlanError : root.workJobsError)
+    readonly property int workRunningJobCount: root.workJobs.filter(function (job) {
+        return job && job.status === "running";
+    }).length
+    readonly property bool workHasRunningJobs: root.workRunningJobCount > 0
+    readonly property bool workHasContent: root.workPlanning || root.workPlan !== null
+        || root.workTodo.length > 0 || root.workJobs.length > 0
 
     property var liveStatus: ({ phase: "idle" })
     property bool liveLoading: false
@@ -928,6 +888,14 @@ Singleton {
     property bool greetingOnboarding: false
     property string greetingGhost: ""
 
+    // A recap is presentation-only: one completed Pi turn and an empty
+    // composer arm four idle minutes. Owner activity retires every stale part.
+    property string recapText: ""
+    property var recapTarget: null
+    property bool composerHasDraft: false
+    /** Mutable for deterministic QML tests; production keeps four minutes. */
+    property int recapIdleMs: 240000
+
     property alias transcript: transcriptModel
     property var commandExchanges: ({})
     property int hydratedRowCount: 0
@@ -958,13 +926,12 @@ Singleton {
     signal mcpMutationFinished(string action, string server, bool ok)
     signal liveActionFinished(string action, bool ok)
     signal collabActionFinished(string action, bool writable, bool ok)
-    signal contextDeleteFinished(string section, string path, bool ok)
-    signal documentDirectoryChanged(string path, string query)
-    signal documentDeleteFinished(string path, bool ok)
-    signal documentsConnectionReset(int epoch)
+    signal memoryWriteFinished(string path, bool ok)
+    signal hookConfigWriteFinished(bool ok)
     signal hooksConnectionReset(int epoch)
     signal projectPreviewFinished(bool ok)
     signal projectMutationFinished(string action, bool ok)
+    signal remoteSetFinished(bool enabled, bool ok)
 
     property var providers: []
     property string loginId: ""
@@ -1031,16 +998,16 @@ Singleton {
     property string eventsGhost: ""
     property int eventsConsumed: 0
     property string eventsFrameBuffer: ""
-    property var contextRequest: null
-    property var contextDeleteRequest: null
+    property var memoryRequest: null
+    property var memoryMutationRequest: null
+    property var remoteRequest: null
+    property var remoteQrRequest: null
+    /** Test seam; production constructs native QML XHRs. */
+    property var remoteRequestFactory: null
     property var hooksRequest: null
     property var hooksRequestFactory: null
-    /** Test seams; production constructs native QML XHRs. */
-    property var documentRequestFactory: null
-    property var documentContentRequestFactory: null
-    property var documentDeleteRequestFactory: null
-    property var documentContentRequest: null
-    property var documentDeleteRequest: null
+    property var hookConfigRequest: null
+    property var hookConfigMutation: null
     property var projectRequestFactory: null
     property var projectPreviewRequestFactory: null
     property var projectMutationRequestFactory: null
@@ -1053,9 +1020,17 @@ Singleton {
     property var commandsRequest: null
     property var mcpRequest: null
     property var mcpMutationRequest: null
+    property var workPlanRequest: null
+    property var workJobsRequest: null
+    property var workMutationRequest: null
+    /** Test seam; production constructs native QML XHRs. */
+    property var workRequestFactory: null
     property var liveRequest: null
     property var collabRequest: null
     property var greetingRequest: null
+    property var recapRequest: null
+    /** Test seam; production constructs the native recap XHR. */
+    property var recapRequestFactory: null
     property var transcriptRequest: null
     property var transcriptRequestFactory: null
     readonly property int transcriptPageLimit: 1000
@@ -1167,6 +1142,13 @@ Singleton {
         onTriggered: root.pollQueues()
     }
 
+    Timer {
+        id: recapIdleTimer
+        interval: Math.max(1, root.recapIdleMs)
+        repeat: false
+        onTriggered: root.requestRecap()
+    }
+
     Component.onCompleted: root.refresh()
     Component.onDestruction: root.retireClientRequests()
 
@@ -1179,23 +1161,18 @@ Singleton {
                         root.fetchHooks(false);
                 });
             }
-            if (root.documentsRoot === "") {
-                Qt.callLater(function () {
-                    if (root.reachable && root.documentsRoot === "")
-                        root.fetchDocuments("", "", false, true);
-                });
-            }
         } else if (root.establishedConnection) {
             root.beginHooksConnectionEpoch();
-            root.beginDocumentsConnectionEpoch();
         }
     }
 
     function retireClientRequests(): void {
         root.cancelLogin();
         root.cancelAllTranscriptLoads();
+        root.clearRecap();
+        root.retireRemoteRequests();
         root.retireHooksRequest();
-        root.retireDocumentRequests();
+        root.clearWork();
         for (const request of [root.projectRequest, root.projectPreviewRequest,
                 root.projectMutationRequest]) {
             if (request && request.readyState !== 4) request.abort();
@@ -1205,8 +1182,11 @@ Singleton {
         root.projectMutationRequest = null;
     }
     onActiveGhostChanged: {
+        root.clearRecap();
         root.modelGeneration += 1;
         root.modelRequest = null;
+        if (root.workGhost !== "" && root.workGhost !== root.activeGhost)
+            root.clearWork();
         // A rename moves loginGhost before activeGhost, preserving a live flow.
         // Any other selection change makes the old ghost's requests stale.
         if (root.loginGhost === "" || root.loginGhost !== root.activeGhost)
@@ -1214,6 +1194,14 @@ Singleton {
         if (root.projectGhost !== "" && root.projectGhost !== root.activeGhost)
             root.clearProject();
         root.connectConversationEvents(root.activeGhost);
+    }
+    onCurrentSessionIdChanged: {
+        root.clearRecap();
+        if (root.workSessionId !== "" && root.workSessionId !== root.currentSessionId)
+            root.clearWork();
+    }
+    onComposerHasDraftChanged: {
+        if (root.composerHasDraft) root.clearRecap();
     }
 
 
@@ -1515,7 +1503,7 @@ Singleton {
             liveGhost: root.liveGhost,
             collabGhost: root.collabGhost,
             activeGhost: root.activeGhost,
-            contextGhost: root.contextGhost
+            memoryGhost: root.memoryGhost
         };
     }
 
@@ -1532,7 +1520,7 @@ Singleton {
         root.liveGhost = state.liveGhost;
         root.collabGhost = state.collabGhost;
         root.activeGhost = state.activeGhost;
-        root.contextGhost = state.contextGhost;
+        root.memoryGhost = state.memoryGhost;
     }
 
     function applyGhostRename(from: string, to: string): void {
@@ -1577,7 +1565,7 @@ Singleton {
         root.clearTurnProjection();
         root.clearModelState();
         root.clearGreeting();
-        root.clearContext();
+        root.clearMemory();
         root.clearCommands();
         root.clearProject();
         root.clearMcp();
@@ -1608,7 +1596,7 @@ Singleton {
         root.clearModelState();
         // The greeting is this ghost's own voice, so it never carries over.
         root.clearGreeting();
-        root.clearContext();
+        root.clearMemory();
         root.clearCommands();
         root.clearProject();
         root.clearMcp();
@@ -2035,108 +2023,172 @@ Singleton {
         root.greetingGhost = "";
     }
 
+    function clearRecap(): void {
+        recapIdleTimer.stop();
+        const xhr = root.recapRequest;
+        root.recapRequest = null;
+        root.recapText = "";
+        root.recapTarget = null;
+        if (xhr && xhr.readyState !== 4) xhr.abort();
+    }
 
-    function clearContext(): void {
-        if (root.contextRequest && root.contextRequest.readyState !== 4)
-            root.contextRequest.abort();
-        if (root.contextDeleteRequest && root.contextDeleteRequest.readyState !== 4)
-            root.contextDeleteRequest.abort();
-        root.contextRequest = null;
-        root.contextDeleteRequest = null;
-        root.contextCharacter = ({ path: "character.md", title: null });
-        root.contextMemory = [];
-        root.contextAgents = [];
-        root.contextSkipped = [];
-        root.contextLoading = false;
-        root.contextError = "";
-        root.contextDeletingPath = "";
-        root.contextDeleteError = "";
-        root.contextGhost = "";
+    function scheduleRecapFor(state: var): void {
+        root.clearRecap();
+        if (!root.isActiveTurn(state) || state.streaming || state.runtime !== "pi"
+                || root.composerHasDraft) return;
+        root.recapTarget = { ghost: state.ghost, sessionId: state.sessionId };
+        recapIdleTimer.restart();
+    }
+
+    function requestRecap(): void {
+        recapIdleTimer.stop();
+        const target = root.recapTarget;
+        const ghost = target ? target.ghost : "";
+        const sessionId = target ? target.sessionId : "";
+        const state = root.turnStates[root.conversationKey(ghost, sessionId)];
+        if (ghost === "" || sessionId === "" || root.composerHasDraft
+                || !root.isActiveTurn(state) || state.streaming || state.runtime !== "pi") {
+            root.clearRecap();
+            return;
+        }
+
+        const xhr = root.recapRequestFactory
+            ? root.recapRequestFactory() : new XMLHttpRequest();
+        root.recapRequest = xhr;
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || xhr !== root.recapRequest) return;
+            root.recapRequest = null;
+            const current = root.turnStates[root.conversationKey(ghost, sessionId)];
+            if (root.composerHasDraft || !root.isActiveTurn(current) || current.streaming) {
+                root.clearRecap();
+                return;
+            }
+            if (xhr.status !== 200) return;
+            try {
+                const body = JSON.parse(xhr.responseText);
+                root.recapText = typeof body.recap === "string" ? body.recap.trim() : "";
+            } catch (error) {
+                root.recapText = "";
+            }
+        };
+        root.dispatch(xhr, "POST", "/api/ghosts/" + encodeURIComponent(ghost)
+            + "/sessions/" + encodeURIComponent(sessionId) + "/recap",
+            ({ "Content-Type": "application/json" }), JSON.stringify({}), function () {
+                return xhr === root.recapRequest;
+            });
+    }
+
+
+    function clearMemory(): void {
+        if (root.memoryRequest && root.memoryRequest.readyState !== 4)
+            root.memoryRequest.abort();
+        if (root.memoryMutationRequest && root.memoryMutationRequest.readyState !== 4)
+            root.memoryMutationRequest.abort();
+        root.memoryRequest = null;
+        root.memoryMutationRequest = null;
+        root.memory = [];
+        root.memorySkipped = [];
+        root.memoryLoading = false;
+        root.memoryError = "";
+        root.memoryBusyPath = "";
+        root.memoryActionError = "";
+        root.memoryGhost = "";
+        root.memoryRaw = "";
     }
 
     /**
-     * Rebuild the active ghost's context catalog. `force` bypasses the
-     * per-ghost cache for the visible refresh affordance after external edits.
+     * Re-read the active ghost's memory files. `force` bypasses the per-ghost
+     * cache; the memory list forces it whenever the directory changes on disk.
      */
-    function fetchContext(force: bool): void {
+    function fetchMemory(force: bool): void {
         const ghost = root.activeGhost;
         if (ghost === "") {
-            root.clearContext();
+            root.clearMemory();
             return;
         }
-        if (!force && root.contextGhost === ghost) return;
-        if (root.contextRequest && root.contextRequest.readyState !== 4) {
+        if (!force && root.memoryGhost === ghost) return;
+        if (root.memoryRequest && root.memoryRequest.readyState !== 4) {
             if (!force) return;
-            root.contextRequest.abort();
+            root.memoryRequest.abort();
         }
 
         const xhr = new XMLHttpRequest();
-        root.contextRequest = xhr;
-        root.contextLoading = true;
-        root.contextError = "";
+        root.memoryRequest = xhr;
+        root.memoryLoading = true;
+        root.memoryError = "";
         xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.contextRequest) return;
-            root.contextLoading = false;
+            if (xhr.readyState !== 4 || xhr !== root.memoryRequest) return;
+            root.memoryLoading = false;
             if (ghost !== root.activeGhost) return;
             if (xhr.status === 200) {
                 try {
-                    const body = JSON.parse(xhr.responseText);
-                    root.contextCharacter = body.character
-                        && typeof body.character === "object"
-                        ? body.character : ({ path: "character.md", title: null });
-                    root.contextMemory = Array.isArray(body.memory) ? body.memory : [];
-                    root.contextAgents = Array.isArray(body.agents) ? body.agents : [];
-                    root.contextSkipped = Array.isArray(body.skipped) ? body.skipped : [];
-                    root.contextGhost = ghost;
-                    root.contextError = "";
+                    if (root.memoryGhost !== ghost || xhr.responseText !== root.memoryRaw) {
+                        const body = JSON.parse(xhr.responseText);
+                        root.memory = Array.isArray(body.memory) ? body.memory : [];
+                        root.memorySkipped = Array.isArray(body.skipped) ? body.skipped : [];
+                        root.memoryRaw = xhr.responseText;
+                    }
+                    root.memoryGhost = ghost;
+                    root.memoryError = "";
                     root.reachable = true;
                 } catch (error) {
-                    root.contextError = "ghostd sent malformed context";
+                    root.memoryError = "ghostd sent a malformed memory list";
                 }
             } else {
-                root.contextError = root.describeError(xhr, "GET context");
+                root.memoryError = root.describeError(xhr, "GET memory");
             }
         };
         root.dispatch(xhr, "GET",
-            "/api/ghosts/" + encodeURIComponent(ghost) + "/context", ({}), null);
+            "/api/ghosts/" + encodeURIComponent(ghost) + "/memory", ({}), null);
     }
 
-    function deleteContextFile(section: string, path: string): void {
+    /**
+     * One mutation at a time, each followed by a re-read: the file on disk is
+     * the truth and the list never guesses what the daemon wrote.
+     */
+    function mutateMemory(method: string, busyPath: string, body: var,
+                          settle: var): void {
         const ghost = root.activeGhost;
-        if (ghost === "" || path === "" || root.contextDeletingPath !== "") return;
-        if (section !== "memory") return;
+        if (ghost === "" || root.memoryBusyPath !== "") return;
         const xhr = new XMLHttpRequest();
-        root.contextDeleteRequest = xhr;
-        root.contextDeletingPath = path;
-        root.contextDeleteError = "";
+        root.memoryMutationRequest = xhr;
+        root.memoryBusyPath = busyPath;
+        root.memoryActionError = "";
         xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.contextDeleteRequest) return;
-            root.contextDeletingPath = "";
+            if (xhr.readyState !== 4 || xhr !== root.memoryMutationRequest) return;
+            root.memoryBusyPath = "";
             if (ghost !== root.activeGhost) return;
+            let result = null;
             if (xhr.status === 200) {
                 try {
-                    const body = JSON.parse(xhr.responseText);
-                    if (!body || body.ok !== true || body.path !== path
-                            || typeof body.trash !== "string")
-                        throw new Error("invalid trash result");
-                    // The absolute trash destination is intentionally not
-                    // logged; the file manager owns restoration from here.
-                    root.contextDeleteError = "";
-                    root.contextDeleteFinished(section, path, true);
-                    root.fetchContext(true);
+                    result = JSON.parse(xhr.responseText);
+                    if (!result || result.ok !== true) throw new Error("not ok");
                 } catch (error) {
-                    root.contextDeleteError = "ghostd sent a malformed trash result";
-                    root.contextDeleteFinished(section, path, false);
+                    result = null;
+                    root.memoryActionError = "ghostd sent a malformed memory result";
                 }
             } else {
-                root.contextDeleteError = root.describeError(xhr, "DELETE context file");
-                root.contextDeleteFinished(section, path, false);
+                root.memoryActionError = root.describeError(xhr, method + " memory");
             }
+            if (settle) settle(result);
+            if (result !== null) root.fetchMemory(true);
         };
-        root.dispatch(xhr, "DELETE",
-            "/api/ghosts/" + encodeURIComponent(ghost) + "/context",
-            ({ "Content-Type": "application/json" }),
-            JSON.stringify({ section: section, path: path, confirm: path }));
+        root.dispatch(xhr, method,
+            "/api/ghosts/" + encodeURIComponent(ghost) + "/memory",
+            ({ "Content-Type": "application/json" }), JSON.stringify(body));
+    }
+
+    /** Create (empty `name`) or replace one memory file with `content`. */
+    function writeMemory(name: string, content: string): void {
+        const path = "memory/" + (name === "" ? "" : name + ".md");
+        root.mutateMemory("PUT", path, ({ name: name === "" ? undefined : name, content: content }),
+            function (result) { root.memoryWriteFinished(path, result !== null); });
+    }
+
+    /** Move one memory file to recoverable Trash. */
+    function deleteMemory(path: string): void {
+        if (path === "") return;
+        root.mutateMemory("DELETE", path, ({ path: path, confirm: path }), null);
     }
 
 
@@ -2339,6 +2391,266 @@ Singleton {
         if (name === "") return;
         root.mutateMcp("DELETE", "/" + encodeURIComponent(name), null,
             "delete", name);
+    }
+
+
+    function makeWorkRequest(): var {
+        return typeof root.workRequestFactory === "function"
+            ? root.workRequestFactory() : new XMLHttpRequest();
+    }
+
+    function workRoute(ghost: string, sessionId: string): string {
+        return "/api/ghosts/" + encodeURIComponent(ghost)
+            + "/sessions/" + encodeURIComponent(sessionId);
+    }
+
+    function workIdentityCurrent(ghost: string, sessionId: string): bool {
+        return ghost !== "" && sessionId !== ""
+            && ghost === root.activeGhost && sessionId === root.currentSessionId
+            && ghost === root.workGhost && sessionId === root.workSessionId;
+    }
+
+    /** Retire ownership before abort: the test XHR finishes abort synchronously. */
+    function retireWorkRequest(kind: string): void {
+        let request = null;
+        if (kind === "plan") {
+            request = root.workPlanRequest;
+            root.workPlanRequest = null;
+        } else if (kind === "jobs") {
+            request = root.workJobsRequest;
+            root.workJobsRequest = null;
+        } else {
+            return;
+        }
+        if (request && request.readyState !== 4) request.abort();
+    }
+
+    /** Retire ownership before abort: the test XHR finishes abort synchronously. */
+    function clearWork(): void {
+        const mutationRequest = root.workMutationRequest;
+        root.retireWorkRequest("plan");
+        root.retireWorkRequest("jobs");
+        root.workMutationRequest = null;
+        root.workPlanning = false;
+        root.workPlan = null;
+        root.workTodo = [];
+        root.workJobs = [];
+        root.workPlanLoaded = false;
+        root.workJobsLoaded = false;
+        root.workPlanError = "";
+        root.workJobsError = "";
+        root.workMutationError = "";
+        root.workGhost = "";
+        root.workSessionId = "";
+        if (mutationRequest && mutationRequest.readyState !== 4) mutationRequest.abort();
+    }
+
+    function prepareWorkIdentity(ghost: string, sessionId: string): void {
+        if (root.workGhost !== ghost || root.workSessionId !== sessionId)
+            root.clearWork();
+        root.workGhost = ghost;
+        root.workSessionId = sessionId;
+    }
+
+    function validWorkTask(task: var): bool {
+        return !!task && typeof task === "object" && !Array.isArray(task)
+            && ["pending", "in_progress", "completed", "abandoned", "blocked"]
+                .indexOf(task.status) >= 0;
+    }
+
+    function validWorkTodo(todo: var): bool {
+        return Array.isArray(todo) && todo.every(function (phase) {
+            return !!phase && typeof phase === "object" && !Array.isArray(phase)
+                && typeof phase.name === "string" && Array.isArray(phase.tasks)
+                && phase.tasks.every(root.validWorkTask);
+        });
+    }
+
+    function validApprovedPlan(plan: var): bool {
+        return plan === null || (!!plan && typeof plan === "object"
+            && !Array.isArray(plan) && typeof plan.path === "string"
+            && typeof plan.title === "string");
+    }
+
+    function applyWorkPlan(body: var): bool {
+        if (!body || typeof body !== "object" || Array.isArray(body)
+                || typeof body.planning !== "boolean"
+                || !root.validApprovedPlan(body.plan) || !root.validWorkTodo(body.todo))
+            return false;
+        root.workPlanning = body.planning;
+        root.workPlan = body.plan;
+        root.workTodo = body.todo;
+        root.workPlanLoaded = true;
+        root.workPlanError = "";
+        return true;
+    }
+
+    function validWorkJob(job: var): bool {
+        return !!job && typeof job === "object" && !Array.isArray(job)
+            && typeof job.id === "string" && job.id !== ""
+            && typeof job.label === "string" && typeof job.command === "string"
+            && ["running", "completed", "failed", "cancelled"].indexOf(job.status) >= 0
+            && typeof job.durationMs === "number" && Number.isFinite(job.durationMs)
+            && (job.exitCode === undefined || (typeof job.exitCode === "number"
+                && Number.isFinite(job.exitCode)))
+            && typeof job.output === "string" && typeof job.outputTruncated === "boolean";
+    }
+
+    function applyWorkJobs(body: var): bool {
+        if (!body || typeof body !== "object" || Array.isArray(body)
+                || !Array.isArray(body.jobs) || !body.jobs.every(root.validWorkJob))
+            return false;
+        root.workJobs = body.jobs;
+        root.workJobsLoaded = true;
+        root.workJobsError = "";
+        return true;
+    }
+
+    function fetchWorkResource(kind: string, force: bool,
+            ghost: string, sessionId: string): void {
+        if (kind !== "plan" && kind !== "jobs") return;
+        const isPlan = kind === "plan";
+        const loading = isPlan ? root.workPlanLoading : root.workJobsLoading;
+        const loaded = isPlan ? root.workPlanLoaded : root.workJobsLoaded;
+        if (!force && (loading || loaded)) return;
+        root.retireWorkRequest(kind);
+        const xhr = root.makeWorkRequest();
+        if (isPlan) {
+            root.workPlanRequest = xhr;
+            root.workPlanError = "";
+        } else {
+            root.workJobsRequest = xhr;
+            root.workJobsError = "";
+        }
+        xhr.onreadystatechange = function () {
+            const current = isPlan ? root.workPlanRequest : root.workJobsRequest;
+            if (xhr.readyState !== 4 || xhr !== current) return;
+            if (isPlan) root.workPlanRequest = null;
+            else root.workJobsRequest = null;
+            if (!root.workIdentityCurrent(ghost, sessionId)) return;
+            if (xhr.status === 200) {
+                try {
+                    const body = JSON.parse(xhr.responseText);
+                    const applied = isPlan
+                        ? root.applyWorkPlan(body) : root.applyWorkJobs(body);
+                    if (!applied) throw new Error("invalid work state");
+                    root.reachable = true;
+                } catch (error) {
+                    if (isPlan) {
+                        root.workPlanLoaded = false;
+                        root.workPlanning = false;
+                        root.workPlan = null;
+                        root.workTodo = [];
+                        root.workPlanError = "ghostd sent malformed plan state";
+                    } else {
+                        root.workJobsLoaded = false;
+                        root.workJobs = [];
+                        root.workJobsError = "ghostd sent malformed background jobs";
+                    }
+                }
+            } else {
+                if (isPlan) {
+                    root.workPlanLoaded = false;
+                    root.workPlanError = root.describeError(xhr, "GET plan");
+                } else {
+                    root.workJobsLoaded = false;
+                    root.workJobsError = root.describeError(xhr, "GET jobs");
+                }
+            }
+        };
+        root.dispatch(xhr, "GET", root.workRoute(ghost, sessionId) + "/" + kind, ({}), null,
+            function () {
+                return xhr === (isPlan ? root.workPlanRequest : root.workJobsRequest);
+            });
+    }
+
+    function fetchWorkJobs(force: bool, ghost: string, sessionId: string): void {
+        root.fetchWorkResource("jobs", force, ghost, sessionId);
+    }
+
+    function fetchWork(force: bool): void {
+        const ghost = root.activeGhost;
+        if (ghost === "") {
+            root.clearWork();
+            return;
+        }
+        const sessionId = root.ensureSession(ghost);
+        root.prepareWorkIdentity(ghost, sessionId);
+        root.fetchWorkResource("plan", force, ghost, sessionId);
+        root.fetchWorkResource("jobs", force, ghost, sessionId);
+    }
+
+    function planAction(action: string): void {
+        if (["start", "stop", "clear"].indexOf(action) < 0 || root.workMutating)
+            return;
+        const ghost = root.activeGhost;
+        if (ghost === "") return;
+        const sessionId = root.ensureSession(ghost);
+        root.prepareWorkIdentity(ghost, sessionId);
+        root.retireWorkRequest("plan");
+        const xhr = root.makeWorkRequest();
+        root.workMutationRequest = xhr;
+        root.workMutationError = "";
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || xhr !== root.workMutationRequest) return;
+            root.workMutationRequest = null;
+            if (!root.workIdentityCurrent(ghost, sessionId)) return;
+            if (xhr.status === 200 || xhr.status === 201) {
+                try {
+                    if (!root.applyWorkPlan(JSON.parse(xhr.responseText)))
+                        throw new Error("invalid plan state");
+                    root.workMutationError = "";
+                    root.reachable = true;
+                } catch (error) {
+                    root.workMutationError = "ghostd sent malformed plan state";
+                }
+            } else {
+                root.workMutationError = root.describeError(xhr, "POST plan");
+            }
+        };
+        root.dispatch(xhr, "POST", root.workRoute(ghost, sessionId) + "/plan",
+            ({ "Content-Type": "application/json" }), JSON.stringify({ action: action }),
+            function () { return xhr === root.workMutationRequest; });
+    }
+
+    function cancelWorkJob(jobId: string): void {
+        if (jobId === "" || root.workMutating) return;
+        const ghost = root.activeGhost;
+        if (ghost === "") return;
+        const sessionId = root.ensureSession(ghost);
+        root.prepareWorkIdentity(ghost, sessionId);
+        const xhr = root.makeWorkRequest();
+        root.workMutationRequest = xhr;
+        root.workMutationError = "";
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || xhr !== root.workMutationRequest) return;
+            root.workMutationRequest = null;
+            if (!root.workIdentityCurrent(ghost, sessionId)) return;
+            if (xhr.status === 200) {
+                try {
+                    const body = JSON.parse(xhr.responseText);
+                    if (!body || ["cancelled", "already_settled"].indexOf(body.outcome) < 0
+                            || !root.validWorkJob(body.job) || body.job.id !== jobId)
+                        throw new Error("invalid cancel result");
+                    let found = false;
+                    root.workJobs = root.workJobs.map(function (job) {
+                        if (job.id !== jobId) return job;
+                        found = true;
+                        return body.job;
+                    });
+                    if (!found) root.workJobs = root.workJobs.concat([body.job]);
+                    root.workMutationError = "";
+                    root.reachable = true;
+                } catch (error) {
+                    root.workMutationError = "ghostd sent malformed job cancellation";
+                }
+            } else {
+                root.workMutationError = root.describeError(xhr, "POST cancel job");
+            }
+        };
+        root.dispatch(xhr, "POST", root.workRoute(ghost, sessionId) + "/jobs/"
+            + encodeURIComponent(jobId) + "/cancel", ({}), null,
+            function () { return xhr === root.workMutationRequest; });
     }
 
 
@@ -2994,6 +3306,8 @@ Singleton {
         root.currentSessionId = id;
         root.showTurnState(ghost, id);
         root.clearCommands();
+        // Opening the selected title reaches here without changing its identity.
+        root.clearWork();
         root.clearConnect();
         // A conversation with its own history needs no opening line; a greeting
         // would be answering a question nobody just asked.
@@ -3561,6 +3875,7 @@ Singleton {
     }
 
     function beginTurnFor(state: var): void {
+        root.clearRecap();
         root.cancelTranscriptLoad(state);
         root.resetAssistantSegmentFor(state);
         state.assistantRow = -1;
@@ -4010,7 +4325,9 @@ Singleton {
         root.flushTurn(state, true, false);
         root.resetInteractionStateFor(state);
         let text = "";
+        let recapEligible = false;
         if (state.assistantRow >= 0 && state.assistantRow < state.rows.length) {
+            recapEligible = state.rows[state.assistantRow].role === "assistant";
             root.setTurnRow(state, state.assistantRow, "pending", false);
             if (errorMessage !== "")
                 root.setTurnRow(state, state.assistantRow, "error", errorMessage);
@@ -4029,6 +4346,7 @@ Singleton {
             // error banner so it does not linger under a good reply.
             state.lastError = "";
             root.turnFinished(state.ghost, text);
+            if (recapEligible && root.isActiveTurn(state)) root.scheduleRecapFor(state);
         }
         root.projectTurnFields(state);
         Qt.callLater(function () {

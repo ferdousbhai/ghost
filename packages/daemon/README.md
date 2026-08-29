@@ -1,21 +1,29 @@
 # `@ghost/daemon` — `ghostd`
 
 The local process that hosts Ghost personas behind one authenticated loopback
-API. Provider-agnostic conversations run on modern Oh My Pi 18.0.3; selecting
+API. Provider-agnostic conversations run on pi (`@earendil-works/pi-coding-agent`,
+`pi-agent-core`, and `pi-ai` 0.84.3); selecting
 `claude-code/default` uses the owner-local Claude Agent SDK boundary documented
 in [`docs/claude-code-runtime.md`](../../docs/claude-code-runtime.md).
 
 ## Run it
 
-Ghost's OMP packages require Bun 1.3.14 or newer.
+Ghost runs on Bun 1.3.14 or newer (`bun --bun`). `pnpm --filter @ghost/daemon
+build:binary` compiles `ghostd` and its `ghost` terminal client into
+self-contained executables (`packages/daemon/dist/ghostd` and `dist/ghost`, Bun
+runtime included, version embedded); they need no `node_modules` at runtime.
+Playwright's optional BiDi/Electron
+modules and macOS `fsevents` are left external because Ghost drives Chromium
+over CDP and never loads them. The Arch development package installs this
+artifact directly as `/usr/bin/ghostd`; it does not install the daemon source
+tree or JavaScript dependencies.
 
 ```bash
-pnpm --filter @ghost/extensions build
-pnpm --filter @ghost/daemon build
-bun packages/daemon/dist/main.js
-
 # development
 bun packages/daemon/src/main.ts --port 7788
+
+# built binary
+packages/daemon/dist/ghostd --port 7788
 ```
 
 ```text
@@ -24,48 +32,68 @@ ghostd [options]
   -p, --port <port>        port on 127.0.0.1 (default 7717)
       --ghosts-root <dir>  directory containing ghosts
       --config <file>      default ~/.config/ghost/config.json
-      --offline            disable OMP catalogue network refresh
+      --offline            disable pi catalogue network refresh
       --log-level <level>  debug | info | warn | error
 ```
 
+## Terminal client
+
+The implementation in `src/cli/` follows the authoritative
+[`ghost` CLI contract](../../CONTRACTS.md#ghost-cli).
+
+```sh
+ghost say "Summarize what we were doing"
+ghost sessions
+ghost show -s cli-abc
+ghost ask -s cli-abc
+ghost watch
+ghost smoke --no-turn
+```
+
+`ghost smoke` starts a scratch daemon and a scratch ghost. A real turn needs a
+provider signed in inside that scratch home, so CI uses `--no-turn`.
+
 `config.json` carries the same settings plus `browserMode`, `compaction`, and
-`askTimeoutSeconds`. Compaction is OMP-native and asynchronously speculative:
-`enabled` defaults to true, `thresholdFraction` defaults to `0.8` and maps to
-OMP's percentage threshold, and `thresholdTokens` selects a fixed native
-threshold and takes precedence when both are present. The last setting is how
+`askTimeoutSeconds`. Compaction is pi's native compaction: `enabled` defaults
+to true, `thresholdFraction` defaults to `0.8`, and `thresholdTokens` selects a
+fixed threshold and takes precedence when both are present; Ghost projects the
+threshold onto pi's `reserveTokens` for the bound model's context window and
+supplies its own summary instructions. The last setting is how
 long a question waits before it settles
 itself — with the option its asker marked recommended, or with no selection
 when it marked none — so that a turn nobody is watching resumes instead of
 stalling; `0` waits forever. It is daemon-wide rather than per-ghost because how
 long a dialog sits is a property of the person at the keyboard, not of the
-persona asking, and each session carries it as OMP's own `ask.timeout` so plan
+persona asking, and Ghost's own `ask` tool hands it to each question so plan
 mode and a per-question deadline still win. Every setting also has an
 environment override (`GHOSTD_ASK_TIMEOUT` here); see `loadConfig` for the
 compaction overrides as well.
 
 The systemd user unit is in `contrib/ghostd.service`. `SIGINT` and `SIGTERM`
 stop new requests, end live streams, dispose hosted sessions, and exit cleanly.
+Filter one ghost's journal records with
+`journalctl --user -u ghostd GHOST=<name>`; see the
+[daemon harness invariants](../../CONTRACTS.md#daemon-harness-invariants) for
+the structured field contract.
 
 ## Storage and isolation
 
-Everything Ghost owns for an OMP conversation stays inside the ghost home:
+Everything Ghost owns for a pi conversation stays inside the ghost home:
 
 ```text
 ~/ghosts/<name>/
   character.md             persona
-  memory/*.md              one durable fact per plain Markdown file
-  settings.yml             per-ghost OMP settings
+  memory/*.md              one stable fact per plain Markdown file
+  settings.yml             the ghost's own plain YAML settings
   models.json              providers, keyring policy, roles, and fallbacks;
                            secret references only
   mcp.json                 ghost-owned MCP servers; secret references only
-  .pi/                     derived OMP machine runtime; never credentials
-    models.omp.json        generated secret-free provider projection
-    models.db              derived OMP catalogue cache
-    agent.db               legacy OMP database shell; only in a home that
-                           predates the keyring, with its credential table
-                           emptied and vacuumed. Nothing creates one any more.
+  .pi/                     derived pi machine runtime; never credentials
+    models.pi.json         secret-free provider/models view synced from
+                           models.json
+    models-store.json      pi's catalogue cache
   sessions/
-    <conversation>.jsonl   OMP session tree
+    <conversation>.jsonl   pi session file
     claude-<sha256>.json   Claude resume metadata, when selected
     <stem>.<runtime>.project.json
                            conversation project root, cwd, and snapshot status
@@ -89,14 +117,8 @@ non-hidden regular files and directories, with no content reads or descent,
 capped at 100 entries and 4,000 characters. Explicit native filesystem tools
 can traverse further when the task calls for it.
 
-The HTTP API browses one directory at a time with opaque pagination and current-
-directory name filtering. It never follows symbolic links. Its inline content
-route opens a regular file below pinned directory descriptors, reads at most
-1 MiB of strict UTF-8 text, and rejects NUL, replacement, and special-file
-swaps; the shell does not read Documents pathnames itself. File deletion is
-descriptor-confined, serialized through the shared filesystem lock, and moves
-one exactly confirmed regular file to recoverable Trash. Ghost rename, delete,
-and future home export never move or copy the owner-wide Documents tree.
+Ghost rename, delete, and future home export never move or copy the owner-wide
+Documents tree.
 
 The hosted importer retains its bounded archive safety and may leave legacy
 `notes/`/`docs/` Markdown under the imported ghost home for explicit manual
@@ -104,14 +126,15 @@ placement. That compatibility tree is not indexed or exposed as live Documents;
 there is no automatic startup/import migration into the owner's XDG directory.
 
 To retain those files, stop Ghost and choose one legacy home. The source is
-normally `<ghost-home>/docs` after hosted import compatibility has run; use the
-exact `root` reported by `GET /api/documents`. The operator command defaults to
-a read-only dry run:
+normally `<ghost-home>/docs` after hosted import compatibility has run. Pass the
+absolute owner-wide Documents root (`XDG_DOCUMENTS_DIR`, the configured XDG
+user directory, or `~/Documents`). The operator command defaults to a read-only
+dry run:
 
 ```bash
 ghostd place-legacy-documents \
   --source /absolute/path/to/ghost-home/docs \
-  --documents-root /absolute/path/from-api
+  --documents-root /absolute/path/to/Documents
 ```
 
 It refuses relative paths, symbolic links in either root or any traversed
@@ -125,7 +148,7 @@ source file is modified or removed:
 ```bash
 ghostd place-legacy-documents \
   --source /absolute/path/to/ghost-home/docs \
-  --documents-root /absolute/path/from-api \
+  --documents-root /absolute/path/to/Documents \
   --apply
 ```
 
@@ -146,8 +169,8 @@ The import's `--host` and `--port` options retain a listener check for older
 daemon versions that do not take the root reservation; they must match that
 older daemon's effective loopback listener.
 
-Ghost-home context listings are derived from disk for each request and never
-persist a catalog. Documents use their separate machine-level route.
+Ghost-home context listings and the owner-wide Documents index are derived from
+disk and never persist a catalog.
 
 The memory index is likewise derived, newest modification first, before each
 model turn. After a settled turn has been idle for 60 seconds, ordinary
@@ -160,14 +183,14 @@ forms before validation, slug derivation, or disk.
 
 ### Ghost and conversation-project MCP
 
-Ghost deliberately narrows OMP's MCP discovery to the ghost home's visible
+Ghost's own `GhostMcpManager` connects only the ghost home's visible
 `mcp.json`, plus `.omp/mcp.json` and legacy `.omp/.mcp.json` under one
 explicitly trusted conversation project. The ghost MCP management API reads and
 writes only the visible ghost-owned file. Its list response redacts every credential-
 bearing value and does not open a conversation merely to report connection
 status.
 
-Ghost MCP mutations are live: every idle OMP conversation reconnects from the
+Ghost MCP mutations are live: every idle pi conversation reconnects from the
 visible ghost file while reusing the exact project MCP rows admitted with that
 conversation's immutable declarative snapshot. It connects a candidate manager
 before replacing the mounted MCP tools; a busy conversation defers one
@@ -179,26 +202,28 @@ targets managers that are already loaded.
 ### Connect and recoverable deletion
 
 The session-scoped live-voice and collaboration routes deliberately cross the
-owner-local boundary. Live voice uses the local microphone and OpenAI Codex
-Realtime with the ghost's Codex OAuth. Collaboration exposes distinct encrypted
-read-only and confirmed writable relay links; the latter can drive the host
-session and its local tools. Links are never logged.
+owner-local boundary. Their daemon API and interfaces (`LiveVoiceManager`,
+`CollaborationManager`) are in place, but the default implementations answer
+`501 not_supported` until the Ghost-owned ports land (issue #3).
 
-Whole ghosts, documents, and memory files move to freedesktop Trash, with a
+Whole ghosts and memory files move to freedesktop Trash, with a
 same-filesystem fallback when needed. Conversation deletion pre-journals every
 owned transcript/sidecar destination inside a private same-filesystem fallback
 Trash root so a crash after rename can recover the complete receipt. Only
 rollback of a fork or project draft that was never shown to the owner remains a
 permanent unlink.
 
-`SessionManager.open` receives the explicit per-ghost session directory;
-`createAgentSession({ agentDir })` alone does not redirect transcripts.
+`SessionManager.open` receives the explicit transcript file, per-ghost session
+directory, and cwd, so nothing lands in `~/.pi`.
 Credentials are never inherited from the daemon environment: `env-scrub.ts`
-removes provider keys and routing variables before OMP is loaded. Provider
-login writes Ghost's Linux Secret Service schema at machine scope. Portable
-config contains only service/account references; see
-[`docs/keyring.md`](../../docs/keyring.md). Existing `agent.db` credentials and
-`.pi/auth.json` are verified into Secret Service and then scrubbed.
+removes provider keys and routing variables before a session is created.
+Provider login writes Ghost's Linux Secret Service schema at machine scope.
+Portable config contains only service/account references; see
+[`docs/keyring.md`](../../docs/keyring.md). Fetched page and on-screen
+text is fenced and screened; see
+[`docs/injection-defense.md`](../../docs/injection-defense.md). Legacy plaintext `.pi/auth.json`
+(and an older home's `agent.db` credential rows) are verified into Secret
+Service and then scrubbed.
 
 New sessions start with the owner's home as their operational cwd, while
 transcripts, persona, memory, browser state, configuration, and keyring policy
@@ -208,20 +233,23 @@ conversation may explicitly trust and bind one project, after which Ghost pins
 its data-only instructions, skills, rules, Markdown commands/prompts, and scoped
 MCP configuration. Project executable extensions, hooks, custom code tools,
 LSP, and custom agent definitions stay disabled until they can run through an
-isolated per-session boundary. Pi explicitly disables OMP's `task` tool, so no
+isolated per-session boundary. A pi session has no `task` tool, so no
 bundled, project, ghost-file, or ambient subagent is invokable in phase 1.
-Native filesystem/Bash, hub, web search, background jobs, and Ghost's explicit
-extensions remain available. Tool
-approval UI is disabled (`approvalMode: yolo`, `autoApprove: true`); `ask` is
-not an approval prompt.
+pi's native `bash`, `edit`, `find`, `grep`, `ls`, `read`, and `write` plus
+Ghost's own tools (registered directly as pi custom tools) remain available;
+Ghost's own `bash`/`jobs` (background jobs) and `inspect_image` (the
+`vision_model` role describes an image a blind chat model cannot see) join
+them. There is no tool approval; `ask` is not an approval prompt.
 
 Claude Code sessions retain Claude's native subagents.
 
 
 ## Models and routing
 
-The catalogue and provider authentication come from OMP's `ModelRegistry` and
-`AuthStorage`. `models.json` remains Ghost's durable, inspectable policy file:
+The catalogue comes from pi (`@earendil-works/pi-ai`, cached in
+`.pi/models-store.json`) and provider authentication from pi's `ModelRuntime`
+over Ghost's `GhostPiCredentialStore`. `models.json` remains Ghost's durable,
+inspectable policy file:
 
 ```jsonc
 {
@@ -238,9 +266,10 @@ The catalogue and provider authentication come from OMP's `ModelRegistry` and
 }
 ```
 
-Ghost maps its roles to OMP as follows:
+Model roles are Ghost-owned. Each role's short name (the `ompRole` field of
+the routing API) is:
 
-| Ghost | OMP |
+| Ghost | short name |
 |---|---|
 | `chat_model` | `default` |
 | `smol_model` | `smol` |
@@ -255,19 +284,23 @@ Ghost maps its roles to OMP as follows:
 | `general_purpose_model` | `general` |
 | `research_model` | `research` |
 
-`task_model` and `advisor_model` remain OMP routing-policy roles. They do not
-make either kind of subagent available while Pi spawning is disabled in phase 1.
+`chat_model` is explicit or the catalogue default (the first catalogue
+provider's best-ranked model). `task_model`, `smol_model`, `slow_model`, and
+`designer_model` inherit the chat default when unbound; `tiny_model` and
+`advisor_model` follow Ghost's preference lists; `vision_model`, `plan_model`,
+and `commit_model` stay unset until bound. `task_model` and `advisor_model` do
+not make any subagent available while spawning is disabled in phase 1.
 
-Fallback arrays are ordered and projected to `retry.fallbackChains`; OMP owns
-retry classification, cooldowns, and fallback execution. The switcher orders a
-provider's models using OMP's priority and then descending semantic
-version/date, so the newest family appears first. `claude-code/default` can be
-the primary chat runtime but cannot be an OMP fallback or a non-chat role.
-General and Research are compatibility-only rows and appear only when an older
-home has configured them.
+Fallback arrays are ordered Ghost policy stored in `models.json`. The switcher
+orders a provider's models using provider priority and then descending
+semantic version/date, so the newest family appears first.
+`claude-code/default` can be the primary chat runtime but cannot be a fallback
+or a non-chat role. General and Research are compatibility-only rows and appear
+only when an older home has configured them.
 
-Interactive provider login is a pollable wrapper around OMP's registry login.
-The same flow is available in the shell and in a TTY:
+Interactive provider login is a pollable wrapper around pi's
+`ModelRuntime.login`/`logout`. The same flow is available in the shell and in a
+TTY:
 
 ```bash
 ghostd login <ghost> --provider openai-codex
@@ -281,12 +314,12 @@ the complete login. The shell's login flow already runs inside the serving daemo
 A pasted code or key is resolved directly into the pending login interaction;
 it is not logged or returned from a GET response.
 
-## OMP interaction features
+## Interaction features
 
-The daemon exposes OMP's interaction primitives without translating them into
+The daemon exposes these interaction primitives without translating them into
 ad-hoc prompts:
 
-- `ask` pauses the harness on structured questions. The HTTP bridge supports
+- Ghost's own `ask` tool pauses the harness on structured questions. The HTTP bridge supports
   submit, chat-about-this, and cancel outcomes; validates all option ids; is
   first-response-wins; and remains pollable across a shell reconnect.
 - `steer` injects text into the active generation. `followUp` queues a new turn
@@ -295,11 +328,56 @@ ad-hoc prompts:
 - Tool lifecycle events include start, update, completion, error, bounded
   result summaries, and model-fallback state so the shell can render durable
   activity cards rather than a transient name.
+- Recap runs one non-persisted completion over an existing Pi conversation's
+  effective system prompt and current branch. It uses the current chat model
+  but never appends its prompt or reply to the transcript. The request is
+  abortable and presentation-only; Claude Code has no equivalent non-mutating
+  conversation context.
+- Plan mode (`POST …/sessions/:id/plan {action: start}`) makes the
+  conversation read-only until the model's `propose_plan` is approved through
+  `ask`; the approved plan is pinned into every later turn. The `todo` tool and
+  `/todo` keep a phased task list the shell can show (`GET …/sessions/:id/todo`).
+- Pi can use recommended Firecrawl, HEY, Basecamp, Obsidian, and Google
+  Workspace CLI skills through `bash` when the owner installs them from their
+  upstream sources. Ghost admits only the exact allowlisted
+  `~/.agents/skills/<name>/SKILL.md` entrypoints with matching names, not nested
+  or other ambient skills.
+- Background jobs: `bash` with `background: true` starts a command as a job of
+  the conversation, and a foreground command that runs longer than the
+  auto-background budget (60 s by default) continues as one. The model's `jobs`
+  tool and `/jobs` list, wait for, and cancel them; a settled job reports back
+  into the conversation as a follow-up turn. `GET …/sessions/:id/jobs` and
+  `POST …/sessions/:id/jobs/:jobId/cancel` expose them to the shell.
 - Branching off a message forks the conversation: the transcript is copied to a
   new conversation, rewound to just before that message, and its text handed
   back as a draft, leaving the original untouched. Re-answering a historical
   `ask` still commits the revised result as a sibling in place and resumes
   generation there.
+
+## Reach it from your phone (Tailscale)
+
+Omarchy ships Tailscale. On the machine running ghostd, turn on Ghost's
+tailnet viewer:
+
+```sh
+ghostd remote on
+```
+
+It prints the URL to open from any device on your tailnet. The built-in viewer
+shows your ghosts and conversations live and lets the owner type. The shell
+will offer the same switch. `ghostd remote status` shows the URL, owner, guest
+policy, and any action needed; `ghostd remote off` removes Ghost's Serve
+listener.
+
+Tailscale stamps your identity on each request; the
+login this node is signed in as owns the ghosts (set `remote.owner` in
+`~/.config/ghost/config.json` to change it), other tailnet members get a
+read-only view (`remote.guests: "none"` hides it from them), and ghostd itself
+stays bound to loopback. Ghost uses HTTPS when the tailnet has certificates
+enabled and otherwise uses HTTP on port 80. An `operator_required` problem
+line means to run `sudo tailscale set --operator=$USER` once (Omarchy's
+installer normally already has); `not_logged_in` offers `tailscale up`, and
+`tailscale_missing` offers `omarchy-install-service-tailscale`.
 
 ## HTTP API
 
@@ -308,11 +386,9 @@ The authoritative route and payload contract is
 
 | method | path | purpose |
 |---|---|---|
-| GET | `/api/documents` | lazily list one shared Documents directory |
-| DELETE | `/api/documents` | move one confirmed regular Documents file to Trash |
 | PUT | `/api/ghosts/:name/name` | rename the ghost, moving its whole home |
-| GET | `/api/ghosts/:name/context` | derive browsable character and memory; `agents` is an empty compatibility array while Pi subagents remain disabled |
-| DELETE | `/api/ghosts/:name/context` | move one confirmed memory file to Trash |
+| GET/PUT | `/api/ghosts/:name/memory` | list or write the ghost's plain memory files |
+| DELETE | `/api/ghosts/:name/memory` | move one confirmed memory file to Trash |
 | GET/PUT | `/api/ghosts/:name/sessions/:id/project` | inspect, bind, or unbind one conversation project |
 | POST | `/api/ghosts/:name/sessions/:id/project/preview` | inspect a project and mint a short-lived trust receipt |
 | POST | `/api/ghosts/:name/sessions/:id/project/reload` | refresh an idle conversation's trusted snapshot |
@@ -323,6 +399,7 @@ The authoritative route and payload contract is
 | POST | `/api/ghosts/:name/mcp/:server/test` | isolated sanitized connection probe |
 | POST | `/api/ghosts/:name/mcp/:server/reconnect` | retry already-loaded live managers |
 | PUT | `/api/ghosts/:name/sessions/:id/title` | rename one conversation |
+| POST | `/api/ghosts/:name/sessions/:id/recap` | generate a transient Pi recap |
 | DELETE | `/api/ghosts/:name/sessions/:id` | move every owned conversation artifact to Trash |
 | GET/POST | `/api/ghosts/:name/sessions/:id/live` | inspect or control realtime voice |
 | GET/POST | `/api/ghosts/:name/sessions/:id/collab` | inspect or control encrypted relay collaboration |
@@ -335,7 +412,7 @@ The authoritative route and payload contract is
 Every `/api` route except the deliberately public relay status requires the
 machine-local bearer token, rejects non-loopback browser origins, and requires
 JSON for POST/PUT. The pi-messages SSE response remains the client wire format;
-OMP is the harness behind it.
+pi is the harness behind it.
 
 ## Validate
 

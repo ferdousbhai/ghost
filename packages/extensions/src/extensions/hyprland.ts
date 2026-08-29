@@ -1,8 +1,5 @@
-import type {
-  ExtensionAPI,
-  ExtensionFactory,
-} from "@oh-my-pi/pi-coding-agent";
-import { Type } from "@oh-my-pi/pi-coding-agent/extensibility/legacy-typebox";
+import { Type } from "typebox";
+import type { GhostExtensionAPI, GhostExtensionFactory } from "../extension-api.js";
 import { GhostError } from "../errors.js";
 import { stringEnum } from "../tool-schema.js";
 import {
@@ -29,6 +26,10 @@ import {
 export const GHOST_DESKTOP = "ghost_desktop";
 
 export const GHOST_DESKTOP_TOOL_NAMES = [GHOST_DESKTOP] as const;
+/** Actions that only look: what a read-only conversation (plan mode) may still run. */
+export const READ_ONLY_DESKTOP_ACTIONS: ReadonlySet<string> = new Set([
+  "state", "see", "layers", "ax_query", "ax_roles", "hit_test",
+]);
 
 export const NOTIFY_SEND_BINARY = "notify-send";
 
@@ -555,11 +556,11 @@ export function desktopToolNames(): string[] {
 
 export function createHyprlandExtension(
   options: HyprlandExtensionOptions = {},
-): ExtensionFactory {
+): GhostExtensionFactory {
   const run = options.run ?? runCommand;
   const helper = options.helper ?? getSharedDesktopHelper();
 
-  return (pi: ExtensionAPI) => {
+  return (pi: GhostExtensionAPI) => {
     pi.registerTool({
       name: GHOST_DESKTOP,
       label: "Desktop",

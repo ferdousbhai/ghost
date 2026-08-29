@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -9,6 +9,7 @@ import {
   DEFAULT_PORT,
   defaultConfigPath,
   loadConfig,
+  writeConfigFile,
 } from "../src/config.js";
 
 let home: string | null = null;
@@ -41,8 +42,45 @@ describe("loadConfig", () => {
       ghostsRoot: join(root, "ghosts"),
       offline: false,
       browserMode: "relay",
-      configPath: null,
+      remote: { enabled: false },
+      configPath: join(root, ".config", "ghost", "config.json"),
     });
+  });
+
+  it("reads remote.enabled and rejects a non-boolean value", () => {
+    const root = makeHome();
+    writeConfig(root, { remote: { enabled: true, guests: "none" } });
+    expect(loadConfig({ env: {}, home: root }).remote).toEqual({
+      enabled: true,
+      guests: "none",
+    });
+    writeConfig(root, { remote: { enabled: "yes" } });
+    expect(() => loadConfig({ env: {}, home: root }))
+      .toThrowError(/"remote.enabled" must be a boolean/);
+  });
+
+  it("atomically creates and merges a private config while preserving unknown keys", async () => {
+    const root = makeHome();
+    const path = join(root, "new", "ghost", "config.json");
+    await writeConfigFile(path, {
+      remote: { enabled: true, owner: "owner@example.com" },
+    });
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+    writeFileSync(path, JSON.stringify({
+      future: { keep: true },
+      remote: { enabled: true, owner: "owner@example.com", futurePolicy: "keep" },
+    }), { mode: 0o600 });
+
+    await writeConfigFile(path, { remote: { enabled: false } });
+    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({
+      future: { keep: true },
+      remote: {
+        enabled: false,
+        owner: "owner@example.com",
+        futurePolicy: "keep",
+      },
+    });
+    expect(statSync(path).mode & 0o777).toBe(0o600);
   });
 
   it("takes browserMode from env, then file, defaulting to relay", () => {

@@ -2,18 +2,20 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from "node:net";
 import { isAbsolute } from "node:path";
 import { apiTokenMatches, readOrCreateApiToken } from "./api-token.js";
-import type { AuthType, LoginManager } from "./auth.js";
 import { assertLoopback } from "./config.js";
+import { REMOTE_MANIFEST, REMOTE_VIEWER_CSP, REMOTE_VIEWER_HTML } from "./remote-viewer.js";
+import type { RemoteServe } from "./remote-serve.js";
+import type { RemoteAccess, TailscaleIdentity } from "./tailscale-identity.js";
+import type { AuthType, LoginManager } from "./auth.js";
 import {
   requireConversationIdentity,
   type ConversationIdentity,
 } from "./conversation-identity.js";
-import { readGhostContext } from "./context-catalog.js";
 import {
-  trashGhostContextFile,
-  type TrashableContextSection,
-} from "./context-files.js";
-import { DocumentsService } from "./documents.js";
+  listGhostMemory,
+  trashGhostMemoryFile,
+  writeGhostMemory,
+} from "./memory-files.js";
 import type {
   McpCatalog,
   McpCatalogSnapshot,
@@ -27,6 +29,7 @@ import {
 import { assertValidGhostName, GhostError, type GhostRegistry } from "./ghosts.js";
 import {
   GHOST_SESSION_STOP_CONTINUATION_CAP,
+  type GhostHookCommandConfig,
   type GhostHookStatus,
   type GhostHookRunner,
 } from "./hooks.js";
@@ -48,7 +51,6 @@ import type { SessionHost } from "./session-host.js";
 export interface ServerOptions {
   registry: GhostRegistry;
   host: SessionHost;
-  documents?: DocumentsService;
   homeOperations?: HomeOperationCoordinator;
   /**
    * Provider login orchestration. Omit to leave the `/providers` and `/login`
@@ -63,7 +65,7 @@ export interface ServerOptions {
    */
   catalog?: ModelCatalog;
   mcp?: McpCatalog;
-  hooks?: Pick<GhostHookRunner, "status">;
+  hooks?: Pick<GhostHookRunner, "status" | "config" | "replaceConfig">;
   logger?: Logger;
   maxBodyBytes?: number;
   includeThinking?: boolean;
@@ -86,6 +88,10 @@ export interface ServerOptions {
    * `apiToken: null` is exactly the CSRF hole issue #485 closed.
    */
   apiToken?: string | null;
+  /** Callers reaching the daemon through `tailscale serve`; omit to admit none. */
+  remote?: RemoteAccess | null;
+  /** Owns the Tailscale Serve exposure and its QR code; omitted, the `/api/remote` routes 404. */
+  remoteServe?: RemoteServe;
 }
 
 export interface ListeningServer {
@@ -99,8 +105,7 @@ export interface ListeningServer {
 const DEFAULT_MAX_BODY_BYTES = 1_048_576;
 /**
  * A conversation name is a label in a sidebar, not a description. The cap is
- * generous for a sentence and short enough that OMP's fixed-width title slot
- * still holds it.
+ * generous for a sentence and short enough to stay a label.
  */
 const MAX_CONVERSATION_TITLE_LENGTH = 120;
 const TURN_ID_PATTERN = /^[A-Za-z0-9_.:-]{1,64}$/;
@@ -115,6 +120,16 @@ const RELAY_HUB = Symbol.for("ghostd.relayHub");
  * ghost's memory through the user's own browser.
  */
 const LOOPBACK_ORIGIN = /^http:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?$/;
+
+/** Whether a browser origin names the host this request was addressed to. */
+function sameHostOrigin(origin: string, host: string | undefined): boolean {
+  if (!host) return false;
+  try {
+    return new URL(origin).host.toLowerCase() === host.toLowerCase();
+  } catch {
+    return false;
+  }
+}
 
 function jsonResponse(
   response: ServerResponse,
@@ -135,11 +150,13 @@ function publicHookStatus(status: GhostHookStatus): GhostHookStatus {
     active: status.active,
     total: status.total,
     events: status.events.map(({ event, count }) => ({ event, count })),
-    hooks: status.hooks.map(({ event, name, description, idleSeconds }) => ({
+    hooks: status.hooks.map(({ event, source, name, description, idleSeconds, settingsKey }) => ({
       event,
+      source,
       name,
       description,
       ...(event === "conversation_idle" && idleSeconds !== undefined ? { idleSeconds } : {}),
+      ...(source === "builtin" && settingsKey !== undefined ? { settingsKey } : {}),
     })),
     sessionStopContinuationCap: status.sessionStopContinuationCap,
   };
@@ -159,6 +176,23 @@ function errorResponse(
   message: string,
 ): void {
   jsonResponse(response, status, { error: { message, code } });
+}
+
+function abortOnClose(
+  request: IncomingMessage,
+  response: ServerResponse,
+): { signal: AbortSignal; release: () => void } {
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  request.on("aborted", abort);
+  response.on("close", abort);
+  return {
+    signal: controller.signal,
+    release: () => {
+      request.off("aborted", abort);
+      response.off("close", abort);
+    },
+  };
 }
 
 class InvalidPathEncodingError extends Error {
@@ -262,37 +296,44 @@ export function createDaemonServer(options: ServerOptions): Server {
   const logger = options.logger ?? silentLogger;
   const maxBodyBytes = options.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
   const homeOperations = options.homeOperations ?? homeOperationsFor(options.registry);
-  const documents = options.documents ?? new DocumentsService();
   const liveStreams = new Set<ServerResponse>();
   // `undefined` means "decide for me"; `null` means "no relay on this server".
   const relay = options.relay === undefined
     ? createRelayHub({ ...(options.logger ? { logger: options.logger } : {}) })
     : options.relay;
   const apiToken = resolveApiToken(options.apiToken, logger);
+  const remote = options.remote ?? null;
+  const remoteServe = options.remoteServe;
 
   /**
-   * The gate every `/api` request passes before it is routed. Returns true when
-   * it has already answered, in which case the caller must stop.
+   * The gate every `/api` request passes before it is routed: `null` when it
+   * has already answered, otherwise who was admitted (a tailnet identity, or
+   * `undefined` for the bearer token and the open routes).
    */
-  const refuseUnauthenticated = (
+  const authenticate = async (
     request: IncomingMessage,
     response: ServerResponse,
     method: string,
     segments: readonly string[],
-  ): boolean => {
-    if (apiToken === null) return false;
-    if (segments[0] !== "api") return false;
+  ): Promise<{ identity: TailscaleIdentity | undefined } | null> => {
+    const admitted = { identity: undefined };
+    if (apiToken === null) return admitted;
+    if (segments[0] !== "api") return admitted;
     // Deliberately open: it carries no secret, and a client with no token yet
     // may still need to ask whether the relay is up.
-    if (segments[1] === "relay" && segments[2] === "status" && segments.length === 3) return false;
+    if (segments[1] === "relay" && segments[2] === "status" && segments.length === 3) return admitted;
 
+    // A page served by this daemon is loopback, or same-host through
+    // `tailscale serve`; anything else is a cross-site page.
     const origin = request.headers.origin;
-    if (typeof origin === "string" && !LOOPBACK_ORIGIN.test(origin)) {
+    if (typeof origin === "string" && !LOOPBACK_ORIGIN.test(origin) && !sameHostOrigin(origin, request.headers.host)) {
       errorResponse(response, 403, "forbidden_origin", "That origin may not call this daemon.");
-      return true;
+      return null;
     }
     const presented = bearerToken(request.headers.authorization);
-    if (presented === "" || !apiTokenMatches(apiToken, presented)) {
+    const tokenOk = presented !== "" && apiTokenMatches(apiToken, presented);
+    const identity = tokenOk ? undefined : (await remote?.identify(request)) ?? undefined;
+    if (!tokenOk && !identity) {
       response.setHeader("www-authenticate", "Bearer");
       errorResponse(
         response,
@@ -300,7 +341,11 @@ export function createDaemonServer(options: ServerOptions): Server {
         "unauthorized",
         "This API needs the machine-local bearer token. Run `ghostd api-token`.",
       );
-      return true;
+      return null;
+    }
+    if (identity?.role === "guest" && method !== "GET") {
+      errorResponse(response, 403, "read_only", "Tailnet guests can watch this ghost but not act for it.");
+      return null;
     }
     if ((method === "POST" || method === "PUT") && !isJsonContentType(request.headers["content-type"])) {
       errorResponse(
@@ -309,13 +354,50 @@ export function createDaemonServer(options: ServerOptions): Server {
         "unsupported_media_type",
         "Mutating requests must be application/json.",
       );
-      return true;
+      return null;
     }
-    return false;
+    return { identity };
   };
 
   const handleListGhosts = (response: ServerResponse): void => {
     jsonResponse(response, 200, options.registry.list());
+  };
+
+  /**
+   * The owner's `hooks.json`, read and replaced whole. Whole-document
+   * replacement keeps "groups run in file order" honest: there are no per-hook
+   * ids to invent for a file that has none. The daemon's loader is the only
+   * validator; a client shows its message rather than re-implementing the
+   * schema.
+   */
+  const handleHookConfig = async (
+    method: string,
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): Promise<void> => {
+    const hooks = options.hooks;
+    const config = hooks?.config();
+    if (!hooks || !config) {
+      errorResponse(response, 404, "not_found", "Hook configuration is not available.");
+      return;
+    }
+    if (method === "GET") {
+      jsonResponse(response, 200, { path: config.path, document: config.document });
+      return;
+    }
+    if (method !== "PUT") {
+      errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+      return;
+    }
+    const document = await readJsonBody(request, maxBodyBytes);
+    let replaced: GhostHookCommandConfig;
+    try {
+      replaced = await hooks.replaceConfig(document);
+    } catch (error) {
+      errorResponse(response, 400, "invalid_request", (error as Error).message);
+      return;
+    }
+    jsonResponse(response, 200, { path: replaced.path, document: replaced.document });
   };
 
   const handleCreateGhost = async (
@@ -401,68 +483,55 @@ export function createDaemonServer(options: ServerOptions): Server {
     const keepalive = setInterval(() => {
       if (!closed && !response.writableEnded) response.write(SSE_KEEPALIVE_COMMENT);
     }, SSE_KEEPALIVE_INTERVAL_MS);
+    const connection = abortOnClose(request, response);
     const cleanup = () => {
       if (closed) return;
       closed = true;
       clearInterval(keepalive);
       unsubscribe();
       liveStreams.delete(response);
-      request.off("aborted", cleanup);
-      response.off("close", cleanup);
+      connection.release();
     };
-    request.on("aborted", cleanup);
-    response.on("close", cleanup);
+    connection.signal.addEventListener("abort", cleanup, { once: true });
   };
 
   /**
-   * Everything the owner's right-hand context rail can browse. The catalog is
-   * rebuilt from the ghost home and OMP discovery on every request; no second
-   * index is stored beside the plain files.
+   * The owner's memory list: the plain files, read from disk on every request.
    */
-  const handleGhostContext = async (
+  const handleListMemory = async (
     ghostName: string,
     response: ServerResponse,
   ): Promise<void> => {
     const ghost = options.registry.get(ghostName);
-    jsonResponse(response, 200, await readGhostContext(ghost.dir));
+    jsonResponse(response, 200, await listGhostMemory(ghost.dir));
   };
 
-  const handleDocuments = async (
-    url: URL,
+  const handleWriteMemory = async (
+    ghostName: string,
+    request: IncomingMessage,
     response: ServerResponse,
   ): Promise<void> => {
-    const rawLimit = url.searchParams.get("limit");
-    let limit: number | undefined;
-    if (rawLimit !== null) {
-      if (!/^\d+$/.test(rawLimit)) {
-        errorResponse(response, 400, "invalid_request", '"limit" must be an integer.');
-        return;
-      }
-      limit = Number(rawLimit);
-    }
-    const page = await documents.list(url.searchParams.get("path") ?? "", {
-      query: url.searchParams.get("q") ?? "",
-      ...(limit === undefined ? {} : { limit }),
-      ...(url.searchParams.has("cursor")
-        ? { cursor: url.searchParams.get("cursor") ?? "" }
-        : {}),
-    });
-    jsonResponse(response, 200, page);
-  };
-
-  const handleDocumentContent = async (
-    url: URL,
-    response: ServerResponse,
-  ): Promise<void> => {
-    const path = url.searchParams.get("path");
-    if (path === null || path === "") {
-      errorResponse(response, 400, "invalid_request", '"path" must be a non-empty string.');
+    const body = await readJsonBody(request, maxBodyBytes);
+    if (body === null || typeof body !== "object" || Array.isArray(body)) {
+      errorResponse(response, 400, "invalid_request", "Request body must be a JSON object.");
       return;
     }
-    jsonResponse(response, 200, await documents.content(path));
+    const { content, name } = body as { content?: unknown; name?: unknown };
+    if (typeof content !== "string") {
+      errorResponse(response, 400, "invalid_request", '"content" must be a string.');
+      return;
+    }
+    if (name !== undefined && typeof name !== "string") {
+      errorResponse(response, 400, "invalid_request", '"name" must be a string when present.');
+      return;
+    }
+    const ghost = options.registry.get(ghostName);
+    const written = await writeGhostMemory(ghost.dir, { content, name });
+    jsonResponse(response, 200, { ok: true, ...written });
   };
 
-  const handleTrashDocument = async (
+  const handleTrashMemory = async (
+    ghostName: string,
     request: IncomingMessage,
     response: ServerResponse,
   ): Promise<void> => {
@@ -481,52 +550,12 @@ export function createDaemonServer(options: ServerOptions): Server {
         response,
         400,
         "confirmation_required",
-        '"confirm" must exactly repeat the Documents file path.',
-      );
-      return;
-    }
-    jsonResponse(response, 200, { ok: true, ...await documents.trash(path) });
-  };
-
-  const handleTrashGhostContext = async (
-    ghostName: string,
-    request: IncomingMessage,
-    response: ServerResponse,
-  ): Promise<void> => {
-    const body = await readJsonBody(request, maxBodyBytes);
-    if (body === null || typeof body !== "object" || Array.isArray(body)) {
-      errorResponse(response, 400, "invalid_request", "Request body must be a JSON object.");
-      return;
-    }
-    const { section, path, confirm } = body as {
-      section?: unknown;
-      path?: unknown;
-      confirm?: unknown;
-    };
-    if (section !== "memory") {
-      errorResponse(response, 400, "invalid_request", '"section" must be "memory".');
-      return;
-    }
-    if (typeof path !== "string" || path === "") {
-      errorResponse(response, 400, "invalid_request", '"path" must be a non-empty string.');
-      return;
-    }
-    if (confirm !== path) {
-      errorResponse(
-        response,
-        400,
-        "confirmation_required",
-        '"confirm" must exactly repeat the context file path.',
+        '"confirm" must exactly repeat the memory file path.',
       );
       return;
     }
     const ghost = options.registry.get(ghostName);
-    const trashed = trashGhostContextFile(
-      ghost.dir,
-      section as TrashableContextSection,
-      path,
-    );
-    jsonResponse(response, 200, { ok: true, ...trashed });
+    jsonResponse(response, 200, { ok: true, ...trashGhostMemoryFile(ghost.dir, path) });
   };
 
   const handleGreeting = async (
@@ -761,6 +790,34 @@ export function createDaemonServer(options: ServerOptions): Server {
         conversation.runtime,
       ),
     });
+  };
+
+  const handleRecap = async (
+    ghostName: string,
+    conversation: ConversationIdentity,
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): Promise<void> => {
+    const body = await readJsonBody(request, maxBodyBytes);
+    if (body === null || typeof body !== "object" || Array.isArray(body)) {
+      errorResponse(response, 400, "invalid_request", "Request body must be a JSON object.");
+      return;
+    }
+
+    const connection = abortOnClose(request, response);
+    try {
+      const recap = await options.host.recap(
+        ghostName,
+        conversation.conversationId,
+        conversation.runtime,
+        connection.signal,
+      );
+      if (!response.writableEnded && !connection.signal.aborted) {
+        jsonResponse(response, 200, { recap });
+      }
+    } finally {
+      connection.release();
+    }
   };
 
   const decorateMcpSnapshot = (
@@ -1312,7 +1369,7 @@ export function createDaemonServer(options: ServerOptions): Server {
       ? requestedTurnId
       : crypto.randomUUID();
 
-    const controller = new AbortController();
+    const connection = abortOnClose(request, response);
     response.writeHead(200, { ...SSE_HEADERS, "x-ghost-turn-id": turnId });
     // A turn can idle behind a slow model; keep the connection warm. The
     // pinned client skips frames without a `data:` line, so a comment costs
@@ -1322,12 +1379,6 @@ export function createDaemonServer(options: ServerOptions): Server {
     }, SSE_KEEPALIVE_INTERVAL_MS);
     liveStreams.add(response);
 
-    const onClose = () => {
-      // The client navigated away or the socket dropped: stop generating.
-      if (!controller.signal.aborted) controller.abort();
-    };
-    response.on("close", onClose);
-
     let terminal = false;
     const emit = (event: PiMessagesEvent): void => {
       if (response.writableEnded || terminal) return;
@@ -1336,11 +1387,11 @@ export function createDaemonServer(options: ServerOptions): Server {
     };
 
     try {
-      await run(emit, controller.signal);
+      await run(emit, connection.signal);
       // Keep the HTTP seam honest even if a runtime regresses. The shell also
       // treats EOF without a terminal frame as failure, but emitting the error
       // here preserves one protocol invariant for every client and runtime.
-      if (!terminal && !controller.signal.aborted) {
+      if (!terminal && !connection.signal.aborted) {
         emit({
           type: "error",
           reason: "error",
@@ -1362,7 +1413,7 @@ export function createDaemonServer(options: ServerOptions): Server {
     } finally {
       clearInterval(keepalive);
       liveStreams.delete(response);
-      response.off("close", onClose);
+      connection.release();
       if (!response.writableEnded) response.end();
     }
   };
@@ -1676,11 +1727,89 @@ export function createDaemonServer(options: ServerOptions): Server {
       }
       const url = new URL(request.url ?? "/", "http://127.0.0.1");
       const segments = url.pathname.split("/").filter(Boolean);
-      if (refuseUnauthenticated(request, response, method, segments)) return;
+      const admission = await authenticate(request, response, method, segments);
+      if (!admission) return;
 
       try {
+        if (segments.length === 0) {
+          if (method !== "GET") {
+            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+            return;
+          }
+          response.writeHead(200, {
+            "content-type": "text/html; charset=utf-8",
+            "content-security-policy": REMOTE_VIEWER_CSP,
+            "cache-control": "no-store",
+          });
+          response.end(REMOTE_VIEWER_HTML);
+          return;
+        }
+        if (segments.length === 1 && segments[0] === "manifest.webmanifest") {
+          if (method !== "GET") {
+            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+            return;
+          }
+          const manifest = JSON.stringify(REMOTE_MANIFEST);
+          response.writeHead(200, {
+            "content-type": "application/manifest+json; charset=utf-8",
+            "content-length": Buffer.byteLength(manifest),
+            "cache-control": "no-store",
+          });
+          response.end(manifest);
+          return;
+        }
         if (segments[0] !== "api") {
           errorResponse(response, 404, "not_found", "Not found.");
+          return;
+        }
+        if (segments.length === 3 && segments[1] === "remote" && segments[2] === "whoami") {
+          if (method !== "GET") {
+            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+            return;
+          }
+          const identity = admission.identity;
+          jsonResponse(response, 200, identity ? { login: identity.login, role: identity.role, ...(identity.name ? { name: identity.name } : {}) } : { login: null, role: "owner" });
+          return;
+        }
+        if (segments.length === 3 && segments[1] === "remote" && segments[2] === "qr.svg") {
+          if (method !== "GET") {
+            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+            return;
+          }
+          const url = remoteServe ? (await remoteServe.status()).url : null;
+          if (!remoteServe || !url) {
+            errorResponse(response, 404, "not_found", "Remote access is off.");
+            return;
+          }
+          const svg = await remoteServe.qrSvg(url);
+          response.writeHead(200, {
+            "content-type": "image/svg+xml; charset=utf-8",
+            "content-length": Buffer.byteLength(svg),
+            "cache-control": "no-store",
+          });
+          response.end(svg);
+          return;
+        }
+        if (segments.length === 2 && segments[1] === "remote") {
+          if (!remoteServe) {
+            errorResponse(response, 404, "not_found", "Remote access is not available.");
+            return;
+          }
+          if (method === "GET") {
+            jsonResponse(response, 200, await remoteServe.status());
+            return;
+          }
+          if (method !== "POST") {
+            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+            return;
+          }
+          const body = await readJsonBody(request, maxBodyBytes);
+          if (body === null || typeof body !== "object" || Array.isArray(body)
+            || typeof (body as { enabled?: unknown }).enabled !== "boolean") {
+            errorResponse(response, 400, "invalid_request", '"enabled" must be a boolean.');
+            return;
+          }
+          jsonResponse(response, 200, await remoteServe.setEnabled((body as { enabled: boolean }).enabled));
           return;
         }
         if (segments[1] === "relay" && segments[2] === "status" && segments.length === 3) {
@@ -1696,6 +1825,9 @@ export function createDaemonServer(options: ServerOptions): Server {
             : { enabled: false, connected: false, reason: "The relay is off (GHOSTD_RELAY)." });
           return;
         }
+        if (segments.length === 3 && segments[1] === "hooks" && segments[2] === "config") {
+          return await handleHookConfig(method, request, response);
+        }
         if (segments.length === 2 && segments[1] === "hooks") {
           if (method !== "GET") {
             errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
@@ -1708,17 +1840,6 @@ export function createDaemonServer(options: ServerOptions): Server {
             hooks: [],
             sessionStopContinuationCap: GHOST_SESSION_STOP_CONTINUATION_CAP,
           }));
-          return;
-        }
-        if (segments.length === 3 && segments[1] === "documents" && segments[2] === "content") {
-          if (method === "GET") return await handleDocumentContent(url, response);
-          errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-          return;
-        }
-        if (segments.length === 2 && segments[1] === "documents") {
-          if (method === "GET") return await handleDocuments(url, response);
-          if (method === "DELETE") return await handleTrashDocument(request, response);
-          errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
           return;
         }
         if (segments[1] !== "ghosts") {
@@ -1735,11 +1856,10 @@ export function createDaemonServer(options: ServerOptions): Server {
         if (segments.length === 3 && method === "DELETE") {
           return await handleDeleteGhost(ghostName, url, response);
         }
-        if (segments.length === 4 && segments[3] === "context") {
-          if (method === "GET") return await handleGhostContext(ghostName, response);
-          if (method === "DELETE") {
-            return await handleTrashGhostContext(ghostName, request, response);
-          }
+        if (segments.length === 4 && segments[3] === "memory") {
+          if (method === "GET") return await handleListMemory(ghostName, response);
+          if (method === "PUT") return await handleWriteMemory(ghostName, request, response);
+          if (method === "DELETE") return await handleTrashMemory(ghostName, request, response);
           errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
           return;
         }
@@ -1825,6 +1945,65 @@ export function createDaemonServer(options: ServerOptions): Server {
             response,
           );
         }
+        if (segments.length === 6 && segments[3] === "sessions" && segments[5] === "plan") {
+          const conversation = decodeConversationIdentity(segments[4] ?? "");
+          if (method === "GET") {
+            jsonResponse(response, 200, await options.host.planState(ghostName, conversation.conversationId, conversation.runtime));
+            return;
+          }
+          if (method === "POST") {
+            const body = await readJsonBody(request, maxBodyBytes);
+            const action = (body as { action?: unknown }).action;
+            if (action !== "start" && action !== "stop" && action !== "clear") {
+              errorResponse(response, 400, "invalid_request", "action must be start, stop, or clear.");
+              return;
+            }
+            jsonResponse(response, 200, await options.host.setPlanMode(ghostName, conversation.conversationId, action, conversation.runtime));
+            return;
+          }
+          errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+          return;
+        }
+        if (segments.length === 6 && segments[3] === "sessions" && segments[5] === "todo") {
+          if (method !== "GET") {
+            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+            return;
+          }
+          const conversation = decodeConversationIdentity(segments[4] ?? "");
+          const state = await options.host.planState(ghostName, conversation.conversationId, conversation.runtime);
+          jsonResponse(response, 200, { todo: state.todo });
+          return;
+        }
+        if (segments.length === 6 && segments[3] === "sessions" && segments[5] === "jobs") {
+          if (method !== "GET") {
+            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+            return;
+          }
+          const conversation = decodeConversationIdentity(segments[4] ?? "");
+          jsonResponse(response, 200, {
+            jobs: options.host.listJobs(ghostName, conversation.conversationId, conversation.runtime),
+          });
+          return;
+        }
+        if (segments.length === 8 && segments[3] === "sessions" && segments[5] === "jobs" && segments[7] === "cancel") {
+          if (method !== "POST") {
+            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+            return;
+          }
+          const conversation = decodeConversationIdentity(segments[4] ?? "");
+          const result = options.host.cancelJob(
+            ghostName,
+            conversation.conversationId,
+            decodePathSegment(segments[6] ?? ""),
+            conversation.runtime,
+          );
+          if (result.outcome === "not_found") {
+            errorResponse(response, 404, "not_found", "This conversation has no such background job.");
+            return;
+          }
+          jsonResponse(response, 200, result);
+          return;
+        }
         if (segments.length === 6 && segments[3] === "sessions" && segments[5] === "commands") {
           if (method !== "GET") {
             errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
@@ -1833,6 +2012,18 @@ export function createDaemonServer(options: ServerOptions): Server {
           return await handleSessionCommands(
             ghostName,
             decodeConversationIdentity(segments[4] ?? ""),
+            response,
+          );
+        }
+        if (segments.length === 6 && segments[3] === "sessions" && segments[5] === "recap") {
+          if (method !== "POST") {
+            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+            return;
+          }
+          return await handleRecap(
+            ghostName,
+            decodeConversationIdentity(segments[4] ?? ""),
+            request,
             response,
           );
         }

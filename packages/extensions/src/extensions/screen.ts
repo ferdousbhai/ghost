@@ -1,11 +1,11 @@
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { Type } from "typebox";
 import type {
-  AgentToolResult,
-  ExtensionAPI,
-  ExtensionFactory,
-} from "@oh-my-pi/pi-coding-agent";
-import { Type } from "@oh-my-pi/pi-coding-agent/extensibility/legacy-typebox";
+  GhostExtensionAPI,
+  GhostExtensionFactory,
+  GhostToolResult,
+} from "../extension-api.js";
 import { GhostError } from "../errors.js";
 import type { GhostHome } from "../home.js";
 import { stringEnum } from "../tool-schema.js";
@@ -52,7 +52,7 @@ export const CAPTURE_MIME_TYPE = "image/png";
 type ElementOf<T> = T extends readonly (infer E)[] ? E : never;
 
 export type GhostImageContent = Extract<
-  ElementOf<AgentToolResult<unknown>["content"]>,
+  ElementOf<GhostToolResult<unknown>["content"]>,
   { type: "image" }
 >;
 
@@ -473,7 +473,7 @@ export async function buildWatchResult(
   params: { prompt: string; target?: ScreenTarget | undefined; window?: string | undefined; region?: string | undefined; output?: string | undefined },
   captures: HelperCapture[],
   vision: boolean,
-): Promise<AgentToolResult<Record<string, unknown>>> {
+): Promise<GhostToolResult<Record<string, unknown>>> {
   if (captures.length === 0) {
     throw new GhostError(
       "not_found",
@@ -517,10 +517,10 @@ export async function buildWatchResult(
 
 export function createScreenExtension(
   options: ScreenExtensionOptions = {},
-): ExtensionFactory {
+): GhostExtensionFactory {
   const helper = options.helper ?? getSharedDesktopHelper();
 
-  return (pi: ExtensionAPI) => {
+  return (pi: GhostExtensionAPI) => {
     pi.registerTool({
       name: GHOST_SCREEN,
       label: "Look at the screen",

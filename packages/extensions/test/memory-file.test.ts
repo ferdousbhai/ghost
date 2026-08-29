@@ -7,8 +7,6 @@ import {
   MAX_MEMORY_FILE_BYTES,
   MAX_MEMORY_FILE_CONTENT_LENGTH,
   MEMORY_INDEX_BUDGET_CHARS,
-  MEMORY_INDEX_PREVIEW_CHARS,
-  memoryIndexPreview,
   memorySlugForText,
   parseMemoryFile,
   parseMemoryFileName,
@@ -90,37 +88,17 @@ describe("redactMemorySecrets", () => {
   });
 });
 
-describe("memoryIndexPreview", () => {
-  it("keeps a concise fact whole", () => {
-    expect(memoryIndexPreview("Owner likes tea.")).toBe("Owner likes tea.");
-  });
-
-  it("matches the word-aware truncation contract", () => {
-    expect(memoryIndexPreview("Owner prefers concise answers and wants the decision first."))
-      .toBe("Owner prefers concise answers...");
-    expect(memoryIndexPreview("Owner prefers concise answers...")).toHaveLength(
-      MEMORY_INDEX_PREVIEW_CHARS,
-    );
-  });
-
-  it("normalizes whitespace and hard-cuts a long first word", () => {
-    expect(memoryIndexPreview("Owner\nlikes   jasmine tea.")).toBe("Owner likes jasmine tea.");
-    expect(memoryIndexPreview("x".repeat(100)))
-      .toBe(`${"x".repeat(MEMORY_INDEX_PREVIEW_CHARS - 3)}...`);
-  });
-});
-
 describe("deriveMemoryIndex", () => {
   it("sorts newest first with slug as the deterministic tie-break", () => {
     const index = deriveMemoryIndex([
-      { slug: "working-habit", description: "second", updated: "2026-08-26" },
-      { slug: "zebra", description: "new tie", updated: "2026-08-27" },
-      { slug: "apprentice-question", description: "first", updated: "2026-08-27" },
+      { slug: "working-habit", updated: "2026-08-26" },
+      { slug: "zebra", updated: "2026-08-27" },
+      { slug: "apprentice-question", updated: "2026-08-27" },
     ]);
     expect(index.lines).toEqual([
-      "- apprentice-question.md: first",
-      "- zebra.md: new tie",
-      "- working-habit.md: second",
+      "- apprentice-question.md",
+      "- zebra.md",
+      "- working-habit.md",
     ]);
     expect(index.omitted).toBe(0);
     expect(index.total).toBe(3);
@@ -128,15 +106,14 @@ describe("deriveMemoryIndex", () => {
 
   it("cuts off at the injection budget and omits the stalest remainder", () => {
     const files = Array.from({ length: 400 }, (_, position) => ({
-      slug: `memory-${String(position).padStart(4, "0")}`,
-      description: "x".repeat(32),
+      slug: `memory-${String(position).padStart(4, "0")}-${"x".repeat(40)}`,
       updated: position === 0 ? "2020-01-01" : "2026-08-27",
     }));
     const index = deriveMemoryIndex(files);
     expect(index.chars).toBeLessThanOrEqual(MEMORY_INDEX_BUDGET_CHARS);
     expect(index.omitted).toBeGreaterThan(0);
     expect(index.lines.length + index.omitted).toBe(400);
-    expect(index.lines.some((line) => line.startsWith("- memory-0000.md:"))).toBe(false);
-    expect(index.lines[0]).toBe(`- memory-0001.md: ${"x".repeat(32)}`);
+    expect(index.lines.some((line) => line.startsWith("- memory-0000-"))).toBe(false);
+    expect(index.lines[0]).toBe(`- memory-0001-${"x".repeat(40)}.md`);
   });
 });

@@ -994,7 +994,6 @@ describe("ghost_desktop registration", () => {
   it("publishes bounded limit and accessibility-action schemas", async () => {
     const { extension } = await harness();
     const parameters = extension.tools.get(GHOST_DESKTOP)?.parameters as unknown as {
-      toJsonSchema(): {
         properties: Record<string, {
           enum?: string[];
           minLength?: number;
@@ -1004,8 +1003,7 @@ describe("ghost_desktop registration", () => {
           default?: number;
         }>;
       };
-    };
-    const schema = parameters.toJsonSchema();
+    const schema = parameters;
     expect(schema.properties["limit"]).toMatchObject({
       minimum: 1,
       maximum: MAX_AX_QUERY_LIMIT,

@@ -124,7 +124,6 @@ describe("the bearer token", () => {
       "/api/ghosts/casper/providers",
       "/api/ghosts/casper/sessions/pi%3Adraft/project/draft",
       "/api/hooks",
-      "/api/documents/content?path=secret.txt",
       "/api/nonsense",
     ]) {
       expect((await fetch(`${base}${path}`)).status, path).toBe(401);

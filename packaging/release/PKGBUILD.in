@@ -18,6 +18,7 @@ depends=(
   'python-dbus>=1.4'
   'python-gobject>=3.50'
   'python-pillow>=10'
+  'qrencode'
   'qt6-5compat>=6.8'
   'quickshell>=0.3'
   'wtype>=0.4'
@@ -31,9 +32,12 @@ checkdepends=(
   'ripgrep'
 )
 optdepends=(
+  'basecamp-cli: Basecamp CLI and embedded pi skill'
   'chromium: dedicated Ghost browser and browser-relay smoke test'
   'claude-code: Claude Code plan runtime'
   'gnome-keyring: Secret Service provider for provider and MCP credentials'
+  'npm: Firecrawl, Google Workspace, and Agent Skills installers for optional pi integrations'
+  'obsidian>=1.12.7: Obsidian CLI access for pi'
 )
 conflicts=('ghost-ai-git')
 options=('!debug' '!strip')
@@ -89,7 +93,8 @@ check() {
 
 package() {
   local source_root="$srcdir/ghost-${pkgver}"
-  local runtime_daemon="$srcdir/runtime/ghost-runtime-${pkgver}-linux-${CARCH}/daemon"
+  local runtime_root="$srcdir/runtime/ghost-runtime-${pkgver}-linux-${CARCH}"
   bash "$source_root/packaging/release/install-payload.sh" \
-    "$source_root" "$runtime_daemon" "$pkgdir" "$pkgname"
+    "$source_root" "$runtime_root/bin/ghostd" "$runtime_root/bin/ghost" \
+      "$pkgdir" "$pkgname"
 }

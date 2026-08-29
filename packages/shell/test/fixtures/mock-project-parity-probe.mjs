@@ -8,7 +8,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import {
@@ -160,10 +160,10 @@ try {
     { event: "conversation_idle", count: 1 },
   ]);
   assert.equal(hooks.hooks.length, hooks.total);
-  assert.equal(hooks.sessionStopContinuationCap, 2);
-  assert.deepEqual(Object.keys(hooks.hooks[0]), ["event", "name", "description"]);
+  assert.equal(hooks.sessionStopContinuationCap, 10);
+  assert.deepEqual(Object.keys(hooks.hooks[0]), ["event", "source", "name", "description"]);
   assert.deepEqual(Object.keys(hooks.hooks[2]), [
-    "event", "name", "description", "idleSeconds",
+    "event", "source", "name", "description", "idleSeconds", "settingsKey",
   ]);
   assert.equal(hooks.hooks[2].idleSeconds, 60);
   const serializedHooks = JSON.stringify(hooks);
@@ -229,11 +229,32 @@ try {
   assert.equal(rejected.status, 400);
   assert.equal((await rejected.json()).error.code, "invalid_project_path");
 
-  const contextResponse = await fetch(`http://127.0.0.1:${port}/api/ghosts/casper/context`);
-  assert.equal(contextResponse.status, 200);
-  const context = await contextResponse.json();
-  assert.deepEqual(context.agents, []);
-  assert.ok(!("docs" in context));
+  const memoryResponse = await fetch(`http://127.0.0.1:${port}/api/ghosts/casper/memory`);
+  assert.equal(memoryResponse.status, 200);
+  const memory = await memoryResponse.json();
+  assert.ok(Array.isArray(memory.memory) && memory.memory.length > 0);
+  assert.deepEqual(Object.keys(memory.memory[0]).sort(), ["content", "path", "slug", "updated"]);
+  assert.deepEqual(memory.skipped, []);
+  const writtenResponse = await fetch(`http://127.0.0.1:${port}/api/ghosts/casper/memory`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ content: "Probe fact worth keeping." }),
+  });
+  assert.equal(writtenResponse.status, 200);
+  const written = await writtenResponse.json();
+  assert.equal(written.slug, "probe-fact-worth-keeping");
+  assert.equal(written.created, true);
+  const trashedResponse = await fetch(`http://127.0.0.1:${port}/api/ghosts/casper/memory`, {
+    method: "DELETE",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ path: written.path, confirm: written.path }),
+  });
+  assert.equal(trashedResponse.status, 200);
+  assert.equal((await fetch(`http://127.0.0.1:${port}/api/ghosts/casper/memory`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ content: "   " }),
+  })).status, 400);
 
   const mcpResponse = await fetch(`http://127.0.0.1:${port}/api/ghosts/casper/mcp`);
   assert.equal(mcpResponse.status, 200);
@@ -248,76 +269,12 @@ try {
   const casper = roster.find((ghost) => ghost.name === "casper");
   assert.ok(casper);
 
-  const documentsResponse = await fetch(`http://127.0.0.1:${port}/api/documents`);
-  assert.equal(documentsResponse.status, 200);
-  const documents = await documentsResponse.json();
-  assert.ok(isAbsolute(documents.root));
-  assert.notEqual(documents.root, casper.dir);
-  assert.ok(documents.entries.some((entry) => entry.name === "Launch notes.md"));
-  assert.deepEqual(documents.entries.map((entry) => entry.name), [
-    "Empty folder", "Projects", "Reference", "A Oversized draft.md",
-    "Alpha.md", "alpha.md", "household-budget.csv", "Launch notes.md",
-    "note 10.md", "note 2.md", "reading-list.pdf", "Welcome.md",
-  ]);
-  assert.ok(documents.entries.find((entry) => entry.name === "A Oversized draft.md").size
-    > 1048576);
-
-  let pageUrl = `http://127.0.0.1:${port}/api/documents?limit=5`;
-  let pageNumber = 0;
-  let lastPage = null;
-  do {
-    const pageResponse = await fetch(pageUrl);
-    assert.equal(pageResponse.status, 200);
-    lastPage = await pageResponse.json();
-    pageNumber += 1;
-    pageUrl = lastPage.nextCursor === null ? null
-      : `http://127.0.0.1:${port}/api/documents?limit=5&cursor=${encodeURIComponent(lastPage.nextCursor)}`;
-  } while (pageUrl !== null);
-  assert.ok(pageNumber > 1);
-  assert.equal(lastPage.nextCursor, null);
-  assert.equal(lastPage.truncated, true);
-  assert.ok(lastPage.entries.length < lastPage.total);
-
-  const contentResponse = await fetch(
-    `http://127.0.0.1:${port}/api/documents/content?path=${encodeURIComponent("Launch notes.md")}`,
-  );
-  assert.equal(contentResponse.status, 200);
-  const content = await contentResponse.json();
-  assert.equal(content.root, documents.root);
-  assert.equal(content.path, "Launch notes.md");
-  assert.equal(Buffer.byteLength(content.content, "utf8"), content.size);
-  assert.match(content.content, /^# Launch notes/mu);
-  const oversizedResponse = await fetch(
-    `http://127.0.0.1:${port}/api/documents/content?path=${encodeURIComponent("A Oversized draft.md")}`,
-  );
-  assert.equal(oversizedResponse.status, 413);
-  assert.equal((await oversizedResponse.json()).error.code, "document_too_large");
-
-  const deletedDocumentResponse = await fetch(
-    `http://127.0.0.1:${port}/api/documents`,
-    {
-      method: "DELETE",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ path: "household-budget.csv", confirm: "household-budget.csv" }),
-    },
-  );
-  assert.equal(deletedDocumentResponse.status, 200);
-  const deletedDocument = await deletedDocumentResponse.json();
-  assert.deepEqual(
-    { ok: deletedDocument.ok, path: deletedDocument.path, kind: deletedDocument.kind },
-    { ok: true, path: "household-budget.csv", kind: "fallback" },
-  );
-  assert.deepEqual(Object.keys(deletedDocument).sort(), ["kind", "ok", "path", "trash"]);
-  assert.ok(isAbsolute(deletedDocument.trash));
-  assert.ok(existsSync(join(casper.dir, "docs", "launch-notes.md")));
-
   const transcriptResponse = await fetch(
     `http://127.0.0.1:${port}/api/ghosts/casper/sessions/pi%3Asess-casper-1/transcript`,
   );
   assert.equal(transcriptResponse.status, 200);
   const transcript = JSON.stringify(await transcriptResponse.json());
-  assert.ok(transcript.includes(join(documents.root, "Launch notes.md")));
-  assert.ok(!transcript.includes("https://example.com/launch-notes"));
+  assert.ok(transcript.includes(join(casper.dir, "plans", "hud-work-strip.md")));
 
   const createdResponse = await fetch(`http://127.0.0.1:${port}/api/ghosts`, {
     method: "POST",
@@ -326,21 +283,20 @@ try {
   });
   assert.equal(createdResponse.status, 201);
   const created = await createdResponse.json();
-  assert.ok(!existsSync(join(created.dir, "docs")));
+  assert.ok(existsSync(created.dir));
 
   const turnResponse = await fetch(`http://127.0.0.1:${port}/api/ghosts/casper/messages`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
-      context: { messages: [{ role: "user", content: "probe shared Documents" }] },
-      options: { sessionId: "mock-doc-trace-probe" },
+      context: { messages: [{ role: "user", content: "probe project tool trace" }] },
+      options: { sessionId: "mock-project-trace-probe" },
     }),
   });
   assert.equal(turnResponse.status, 200);
   const turnEvents = await turnResponse.text();
-  const absoluteTracePath = join(documents.root, "Projects", "Ghost", "step-2.md");
-  assert.ok(turnEvents.includes(absoluteTracePath));
-  assert.ok(!turnEvents.includes('"path":"docs/'));
+  assert.ok(turnEvents.includes(join(casper.dir, "plans", "step-2.md")));
+
 } finally {
   if (child.exitCode === null) child.kill("SIGTERM");
   await new Promise((resolveExit) => {

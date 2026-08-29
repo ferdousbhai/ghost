@@ -1,7 +1,4 @@
-import type { PromptTemplate } from "@oh-my-pi/pi-coding-agent/config/prompt-templates";
-import type { Rule } from "@oh-my-pi/pi-coding-agent/capability/rule";
-import type { Skill } from "@oh-my-pi/pi-coding-agent/extensibility/skills";
-import type { FileSlashCommand } from "@oh-my-pi/pi-coding-agent/extensibility/slash-commands";
+import type { FileSlashCommand, PromptTemplate, Rule, Skill } from "./declarative-types.js";
 import type { ProjectDeclarativeSnapshot } from "./project-resources.js";
 
 export interface EffectiveDeclarativeSnapshot {
@@ -145,8 +142,8 @@ export function renderPiDeclarativePrompt(
   if (skills.length > 0) {
     sections.push([
       "## Skills",
-      "When a skill matches, read `skill://<name>` before acting.",
-      ...skills.map((skill) => `- ${skill.name}: ${skill.description}`),
+      "When a skill matches, read its listed `SKILL.md` before acting.",
+      ...skills.map((skill) => `- ${skill.name}: ${skill.description} (${skill.filePath})`),
     ].join("\n"));
   }
 

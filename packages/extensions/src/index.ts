@@ -31,15 +31,14 @@ export {
 export {
   assertWritableMemory,
   coerceMemorySlug,
+  compareMemoryNewestFirst,
   deriveMemoryIndex,
   MAX_MEMORY_FILE_BYTES,
   MAX_MEMORY_FILE_CONTENT_LENGTH,
   MAX_MEMORY_FILE_SLUG_LENGTH,
   MAX_MEMORY_FILES,
   MEMORY_INDEX_BUDGET_CHARS,
-  MEMORY_INDEX_PREVIEW_CHARS,
   memoryFileName,
-  memoryIndexPreview,
   memorySlugForText,
   normalizeMemoryText,
   parseMemoryFile,
@@ -60,19 +59,13 @@ export {
 export {
   DOCUMENT_INDEX_BUDGET_CHARS,
   DOCUMENT_INDEX_MAX_ENTRIES,
-  DOCUMENT_INLINE_MAX_BYTES,
-  DOCUMENT_LIST_DEFAULT_LIMIT,
-  DOCUMENT_LIST_MAX_LIMIT,
-  DOCUMENT_QUERY_MAX_CHARS,
   MachineDocuments,
   normalizeDocumentsDirectoryPath,
-  normalizeDocumentsFilePath,
   openMachineDocuments,
   resolveDocumentsDirectory,
   type DocumentDirectoryEntry,
   type DocumentDirectoryPage,
   type DocumentEntryKind,
-  type DocumentTextContent,
   type ListDocumentDirectoryOptions,
   type ResolveDocumentsDirectoryOptions,
   type SkippedDocumentEntry,
@@ -130,6 +123,8 @@ export {
   type GhostSystemPromptInput,
 } from "./prompt.js";
 
+export * from "./extension-api.js";
+export { stringEnum } from "./tool-schema.js";
 export * from "./untrusted.js";
 
 export * from "./extensions/index.js";

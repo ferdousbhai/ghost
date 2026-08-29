@@ -27,7 +27,8 @@ import {
   oauthCredential,
   type LoginImpl,
 } from "./helpers/fake-login-runtime.js";
-import { fakeOmpModel } from "./helpers/fake-catalog-runtime.js";
+import { fakePiModel } from "./helpers/fake-catalog-runtime.js";
+import { recordingLogger } from "./helpers/recording-logger.js";
 
 let temp: TempGhosts | null = null;
 const managers: LoginManager[] = [];
@@ -275,7 +276,7 @@ describe("successful login refresh", () => {
   });
 
   it("does not enter the refresh hook when the TTL expires during default binding", async () => {
-    const finishDiscovery = deferred<readonly ReturnType<typeof fakeOmpModel>[]>();
+    const finishDiscovery = deferred<readonly ReturnType<typeof fakePiModel>[]>();
     const refreshed: string[] = [];
     const { manager, root } = setup(async () => oauthCredential(), {
       loginTtlMs: 30,
@@ -299,7 +300,7 @@ describe("successful login refresh", () => {
       (view) => view.status === "failed",
     );
     finishDiscovery.resolve([
-      fakeOmpModel({ provider: "openai-codex", id: "default-after-timeout" }),
+      fakePiModel({ provider: "openai-codex", id: "default-after-timeout" }),
     ]);
     await new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -313,7 +314,7 @@ describe("successful login refresh", () => {
   });
 
   it("cannot bind or publish a model after disposal during default discovery", async () => {
-    const finishDiscovery = deferred<readonly ReturnType<typeof fakeOmpModel>[]>();
+    const finishDiscovery = deferred<readonly ReturnType<typeof fakePiModel>[]>();
     const { manager, root } = setup(async () => oauthCredential(), {
       createRuntime: async () => {
         const runtime = makeFakeRuntime({
@@ -332,7 +333,7 @@ describe("successful login refresh", () => {
     );
     manager.dispose();
     finishDiscovery.resolve([
-      fakeOmpModel({ provider: "openai-codex", id: "default-after-dispose" }),
+      fakePiModel({ provider: "openai-codex", id: "default-after-dispose" }),
     ]);
     await new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -349,7 +350,7 @@ describe("default model binding", () => {
     const dir = seedGhost(temp.root, { name: "casper" });
     const agentDir = ghostPaths(dir).home;
     const discoveryStarted = deferred();
-    const finishDiscovery = deferred<readonly ReturnType<typeof fakeOmpModel>[]>();
+    const finishDiscovery = deferred<readonly ReturnType<typeof fakePiModel>[]>();
     const binding = bindDefaultChatModelIfUnset(
       agentDir,
       {
@@ -366,7 +367,7 @@ describe("default model binding", () => {
     await discoveryStarted.promise;
 
     setChatModelRole(agentDir, "openai-codex", "gpt-5-codex");
-    finishDiscovery.resolve([fakeOmpModel({ provider: "openrouter", id: "login-default" })]);
+    finishDiscovery.resolve([fakePiModel({ provider: "openrouter", id: "login-default" })]);
 
     await expect(binding).resolves.toBeNull();
     expect(readGhostModels(agentDir)?.roles?.chat_model).toEqual({
@@ -489,10 +490,7 @@ describe("per-ghost isolation", () => {
 
 describe("logging never carries secrets", () => {
   it("keeps a pasted key out of every log line", async () => {
-    const lines: string[] = [];
-    const record = (message: string, fields?: Record<string, unknown>) =>
-      lines.push(`${message} ${JSON.stringify(fields ?? {})}`);
-    const logger = { debug: record, info: record, warn: record, error: record };
+    const logger = recordingLogger();
     const login: LoginImpl = async (_id, _type, interaction) => {
       await interaction.prompt({ type: "secret", message: "key" });
       return apiKeyCredential();
@@ -502,9 +500,9 @@ describe("logging never carries secrets", () => {
     await waitFor(() => manager.view("casper", started.loginId), (v) => v.status === "awaiting_input");
     manager.submitInput("casper", started.loginId, "sk-TOP-SECRET");
     await waitFor(() => manager.view("casper", started.loginId), (v) => v.status === "succeeded");
-    expect(lines.join("\n")).not.toContain("sk-TOP-SECRET");
+    expect(JSON.stringify(logger.records)).not.toContain("sk-TOP-SECRET");
     // But something WAS logged (start + success), proving the assertion is live.
-    expect(lines.some((l) => l.includes("login succeeded"))).toBe(true);
+    expect(logger.records.some(({ message }) => message.includes("login succeeded"))).toBe(true);
   });
 });
 

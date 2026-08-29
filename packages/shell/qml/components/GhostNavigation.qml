@@ -1,7 +1,7 @@
 pragma ComponentBehavior: Bound
 
 // The fixed context rail: one quiet, full-height edge shared by chat, the
-// ghost's home, and OMP capabilities. The host owns routing; this component
+// ghost's home, and runtime capabilities. The host owns routing; this component
 // owns only selection, keyboard traversal, and the active/hover treatment.
 import QtQuick
 import QtQuick.Shapes
@@ -27,19 +27,9 @@ FocusScope {
             icon: "M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zM16 9h3M16 13h3M10 12a2 2 0 1 0 0-4 2 2 0 0 0 0 4M6 17a4 4 0 0 1 8 0"
         },
         {
-            id: "docs",
-            label: "Documents",
-            icon: "M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2zM14 2v6h6M8 13h8M8 17h8M8 9h2"
-        },
-        {
             id: "memory",
             label: "Memory",
             icon: "M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"
-        },
-        {
-            id: "agents",
-            label: "Agent definitions (inactive)",
-            icon: "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"
         },
         {
             id: "commands",
@@ -61,6 +51,11 @@ FocusScope {
             id: "connect",
             label: "Remote",
             icon: "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"
+        },
+        {
+            id: "remote",
+            label: "Phone access",
+            icon: "M8 2h8a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zM10 5h4M11 18h2"
         }
     ]
     readonly property real destinationHeight: Math.max(34, Math.min(

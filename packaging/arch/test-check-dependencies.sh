@@ -81,6 +81,14 @@ require_srcinfo_entry checkdepends nodejs "$work/ghost-ai/.SRCINFO"
 require_srcinfo_entry checkdepends python-yaml "$work/ghost-ai/.SRCINFO"
 require_srcinfo_entry checkdepends ripgrep "$work/ghost-ai/.SRCINFO"
 require_srcinfo_dependency libsecret "$work/ghost-ai/.SRCINFO"
+sed -n 's/^	depends = //p' "$work/ghost-ai-git.SRCINFO" \
+  | LC_ALL=C sort > "$work/development-depends"
+sed -n 's/^	depends = //p' "$work/ghost-ai/.SRCINFO" \
+  | LC_ALL=C sort > "$work/stable-depends"
+if ! cmp "$work/development-depends" "$work/stable-depends"; then
+  printf 'stable and development runtime dependencies differ\n' >&2
+  exit 1
+fi
 
 ci_dependencies_file="$work/ci-dependencies"
 bash "$script_dir/ci-dependencies.sh" --names > "$ci_dependencies_file"

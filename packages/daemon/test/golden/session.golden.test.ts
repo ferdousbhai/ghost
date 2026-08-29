@@ -19,7 +19,7 @@ import { MachineDocuments } from "@ghost/extensions";
 import { afterEach, describe, expect, it } from "vitest";
 import { resolveGhostExtensions } from "../../src/extensions.js";
 import {
-  OMP_NATIVE_TOOL_NAMES,
+  PI_NATIVE_TOOL_NAMES,
   SessionHost,
 } from "../../src/session-host.js";
 import type { PiMessagesEvent } from "../../src/pi-messages.js";
@@ -163,7 +163,7 @@ describe("golden: session", () => {
     // presentation without hiding a missing native or Ghost-owned capability.
     const handle = await host.open("casper", "conv-golden");
     const universe = [
-      ...OMP_NATIVE_TOOL_NAMES,
+      ...PI_NATIVE_TOOL_NAMES,
       ...OTHER_AUDITED_OMP_TOOLS,
       ...resolveGhostExtensions({ documents }, dir, { vision: false }).toolNames,
     ];
@@ -176,7 +176,7 @@ describe("golden: session", () => {
         // `invokable` is the column that matters for Ghost's own capabilities:
         // OMP mounts them under xd:// so they are absent from both other
         // columns while remaining callable — which the events above prove.
-        (name) => handle.session.getToolByName(name) !== undefined,
+        (name) => handle.session.getToolDefinition(name) !== undefined,
       ),
     });
 

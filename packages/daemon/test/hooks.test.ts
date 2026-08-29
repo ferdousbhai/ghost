@@ -11,6 +11,7 @@ import {
   type GhostConversationIdleRegistration,
   type GhostSessionStopEvent,
 } from "../src/hooks.js";
+import { recordingLogger } from "./helpers/recording-logger.js";
 
 const directories: string[] = [];
 afterEach(() => {
@@ -33,7 +34,7 @@ function beforePromptEvent(overrides: Partial<GhostBeforePromptEvent> = {}): Gho
     ghost_name: "casper",
     ghost_home: process.cwd(),
     cwd: process.cwd(),
-    runtime: "omp",
+    runtime: "pi",
     conversation_id: "session-1",
     conversation_runtime: "pi",
     ...overrides,
@@ -52,7 +53,7 @@ function event(overrides: Partial<GhostSessionStopEvent> = {}): GhostSessionStop
     ghost_name: "casper",
     ghost_home: process.cwd(),
     cwd: process.cwd(),
-    runtime: "omp",
+    runtime: "pi",
     conversation_id: "session-1",
     conversation_runtime: "pi",
     ...overrides,
@@ -67,7 +68,7 @@ function idleEvent(overrides: Partial<GhostConversationIdleEvent> = {}): GhostCo
     ghost_name: "casper",
     ghost_home: process.cwd(),
     cwd: process.cwd(),
-    runtime: "omp",
+    runtime: "pi",
     conversation_id: "session-1",
     conversation_runtime: "pi",
     conversation_incarnation: "68c7477b-c759-4a4e-a747-c908159080c2",
@@ -183,6 +184,7 @@ describe("GhostHookRunner", () => {
       events: [{ event: "conversation_idle", count: 1 }],
       hooks: [{
         event: "conversation_idle",
+        source: "builtin",
         name: "Memory upkeep",
         description: "One memory write after idle.",
         idleSeconds: 60,
@@ -259,6 +261,116 @@ describe("GhostHookRunner", () => {
     }));
     expect(GhostHookRunner.fromConfig(config).conversationIdleRegistrations())
       .toEqual(GhostHookRunner.fromConfig(config).conversationIdleRegistrations());
+  });
+
+  it("replaces the command configuration live and retires its old idle registrations", async () => {
+    const directory = temporaryDirectory();
+    const config = join(directory, "nested", "hooks.json");
+    const runner = GhostHookRunner.fromConfig(config);
+    expect(runner.config()).toEqual({ path: config, document: {} });
+    expect(runner.hasHandlers("session_stop")).toBe(false);
+
+    const observed: string[] = [];
+    await runner.register((api) => {
+      api.on("conversation_idle", () => { observed.push("builtin"); }, {
+        name: "Builtin upkeep",
+        idleSeconds: 60,
+        registrationId: "ghost.test.builtin",
+      });
+    });
+
+    const first = {
+      hooks: {
+        session_stop: [{ hooks: [{
+          type: "command",
+          command: "echo '{\"decision\":\"block\",\"reason\":\"Revise.\"}'",
+          name: "Reviewer",
+        }] }],
+        conversation_idle: [{ hooks: [{ type: "command", command: "/bin/true", idleSeconds: 30, name: "Idle command" }] }],
+      },
+    };
+    await expect(runner.replaceConfig(first)).resolves.toEqual({ path: config, document: first });
+    expect(JSON.parse(readFileSync(config, "utf8"))).toEqual(first);
+    expect(runner.hasHandlers("session_stop")).toBe(true);
+    expect(ghostSessionStopContinuation(await runner.emitSessionStop(event()))).toBe("Revise.");
+    const retired = runner.conversationIdleRegistrations().find(({ idleMs }) => idleMs === 30_000);
+    expect(retired).toBeDefined();
+    expect(runner.status().hooks.map(({ source, name }) => `${source}:${name}`))
+      .toEqual(["config:Reviewer", "builtin:Builtin upkeep", "config:Idle command"]);
+
+    const invalid = { hooks: { session_stop: [{ hooks: [{ type: "command", command: "" }] }] } };
+    await expect(runner.replaceConfig(invalid)).rejects.toThrow(/non-empty NUL-free command/u);
+    expect(JSON.parse(readFileSync(config, "utf8"))).toEqual(first);
+    expect(runner.hasHandlers("session_stop")).toBe(true);
+
+    const second = { hooks: {} };
+    await runner.replaceConfig(second);
+    expect(JSON.parse(readFileSync(config, "utf8"))).toEqual(second);
+    expect(runner.hasHandlers("session_stop")).toBe(false);
+    expect(runner.conversationIdleRegistrations().map(({ id }) => id)).toEqual(["ghost.test.builtin"]);
+    // A deadline armed against the retired registration settles as a no-op.
+    await expect(runner.emitConversationIdleRegistration(idleEvent(), retired as NonNullable<typeof retired>))
+      .resolves.toBeUndefined();
+    await expect(runner.emitConversationIdleRegistration(idleEvent(), { id: "never", idleMs: 1_000 }))
+      .rejects.toThrow(/Unknown conversation_idle registration/u);
+    expect(observed).toEqual([]);
+  });
+
+  it("reads builtin tuning at startup, names it on status, and rejects bad tuning", async () => {
+    const directory = temporaryDirectory();
+    const config = join(directory, "hooks.json");
+    writeFileSync(config, JSON.stringify({
+      hooks: {},
+      builtin: { memory_upkeep: { idleSeconds: 900 }, other: {} },
+    }));
+    const runner = GhostHookRunner.fromConfig(config);
+    expect(runner.builtinSettings("memory_upkeep")).toEqual({ idleSeconds: 900 });
+    expect(runner.builtinSettings("other")).toEqual({});
+    expect(runner.builtinSettings("absent")).toEqual({});
+    expect(new GhostHookRunner().builtinSettings("memory_upkeep")).toEqual({});
+
+    await runner.register((api) => {
+      api.on("conversation_idle", () => {}, {
+        name: "Memory upkeep",
+        idleSeconds: runner.builtinSettings("memory_upkeep").idleSeconds,
+        settingsKey: "memory_upkeep",
+      });
+    });
+    expect(runner.status().hooks).toEqual([{
+      event: "conversation_idle",
+      source: "builtin",
+      name: "Memory upkeep",
+      description: "Runs in the background after the configured idle interval.",
+      idleSeconds: 900,
+      settingsKey: "memory_upkeep",
+    }]);
+
+    // A replaced document is admitted with its builtin section, but the
+    // startup tuning stands until the next start.
+    await runner.replaceConfig({ hooks: {}, builtin: { memory_upkeep: { idleSeconds: 30 } } });
+    expect(runner.builtinSettings("memory_upkeep")).toEqual({ idleSeconds: 900 });
+    for (const [document, message] of [
+      [{ hooks: {}, builtin: [] }, /"builtin" must be an object/u],
+      [{ hooks: {}, builtin: { "Bad-Key": {} } }, /must match \[a-z\]/u],
+      [{ hooks: {}, builtin: { memory_upkeep: 5 } }, /builtin\.memory_upkeep must be an object/u],
+      [{ hooks: {}, builtin: { memory_upkeep: { timeout: 5 } } }, /builtin\.memory_upkeep\.timeout is not a setting/u],
+      [{ hooks: {}, builtin: { memory_upkeep: { idleSeconds: 0 } } }, /idleSeconds must be an integer in \[1, 86400\]/u],
+    ] as const) {
+      await expect(runner.replaceConfig(document)).rejects.toThrow(message);
+    }
+    expect(JSON.parse(readFileSync(config, "utf8"))).toEqual({
+      hooks: {},
+      builtin: { memory_upkeep: { idleSeconds: 30 } },
+    });
+    await expect(new GhostHookRunner().register((api) => {
+      api.on("before_prompt", () => {}, { settingsKey: "Nope" });
+    })).rejects.toThrow(/settingsKey must match/u);
+  });
+
+  it("has no configuration to replace when built without a file", async () => {
+    const runner = new GhostHookRunner();
+    expect(runner.config()).toBeUndefined();
+    await expect(runner.replaceConfig({ hooks: {} })).rejects.toThrow(/no configuration file/u);
   });
 
   it("rejects fractional, zero, and out-of-range conversation idle delays", async () => {
@@ -400,25 +512,20 @@ describe("GhostHookRunner", () => {
         [{ hooks: [{ type: "command", command: "/bin/true", idleSeconds: 60 }] }],
       ])),
     }));
-    const warnings: Array<{ message: string; fields?: Record<string, unknown> }> = [];
+    const logger = recordingLogger("warn");
     const runner = GhostHookRunner.fromConfig(config, {
       commandRunner: async () => { throw new Error("must-not-leak execution sentinel"); },
-      logger: {
-        debug: () => {},
-        info: () => {},
-        warn: (message, fields) => { warnings.push({ message, fields }); },
-        error: () => {},
-      },
+      logger,
     });
     await expect(runner.emitBeforePrompt(beforePromptEvent())).resolves.toBeUndefined();
     await expect(runner.emitSessionStop(event())).resolves.toBeUndefined();
     await expect(runner.emitConversationIdle(idleEvent())).resolves.toBeUndefined();
-    expect(warnings.map(({ message }) => message)).toEqual([
+    expect(logger.records.map(({ message }) => message)).toEqual([
       "before_prompt hook failed open",
       "session_stop hook failed open",
       "conversation_idle hook failed open",
     ]);
-    expect(JSON.stringify(warnings)).not.toContain("must-not-leak");
+    expect(JSON.stringify(logger.records)).not.toContain("must-not-leak");
   });
 
   it("logs categorical command failures without stdout or stderr detail", async () => {
@@ -465,6 +572,7 @@ describe("GhostHookRunner", () => {
     const runner = GhostHookRunner.fromConfig(config, {
       commandRunner,
       logger: {
+        child() { return this; },
         debug: record("debug"),
         info: record("info"),
         warn: record("warn"),

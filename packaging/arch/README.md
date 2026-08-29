@@ -2,11 +2,13 @@
 
 `PKGBUILD` builds `ghost-ai-git`, the development package for the first
 owner-local beta. The `ghost-git` AUR name already belongs to an unrelated
-screenshot utility, hence the collision-free package name. JavaScript runtime
-dependencies come from the repository's frozen `pnpm-lock.yaml`; minimum system
-runtime versions are declared in the package metadata. The stable `ghost-ai`
-template and release-source machinery live under `packaging/release/` and are
-installed for reference as `RELEASE-SOURCE.md`.
+screenshot utility, hence the collision-free package name. The daemon and
+terminal client are self-contained x86_64 executables at `/usr/bin/ghostd` and
+`/usr/bin/ghost`, with Bun embedded and no installed source or JavaScript
+dependency tree. Bun remains a package runtime dependency only because the
+installed service-context Chromium smoke test uses it. The stable `ghost-ai`
+template and release-source machinery live under `packaging/release/`; its
+runtime source carries the same compiled executables.
 
 Build and install from this directory:
 
@@ -15,6 +17,68 @@ makepkg -si
 systemctl --user enable --now ghostd.service ghost-shell.service
 ```
 
+## Optional CLI integrations
+
+Ghost packages none of these CLIs or skills. Install only the integrations you
+want as the desktop user; the upstream installer then owns its files and
+updates. The package's optional dependencies expose the system prerequisites.
+Install the shared npm prerequisite once if you did not select it with Ghost:
+
+```sh
+omarchy pkg add npm
+```
+
+[Firecrawl](https://github.com/firecrawl/cli) provides keyless web search and
+scraping plus its official skills:
+
+```sh
+npx -y firecrawl-cli@latest init --all --skip-auth
+```
+
+Replace `--skip-auth` with `--browser` to sign in during setup.
+
+[HEY](https://github.com/basecamp/hey-cli) is installed by current Omarchy
+through its mise wrapper. If `hey` is missing, run `omarchy update` to receive
+that migration. [Basecamp](https://github.com/basecamp/basecamp-cli) is in
+Omarchy's package repository. Both CLIs embed their own skills:
+
+```sh
+hey skill install
+hey auth login
+
+omarchy pkg add basecamp-cli
+basecamp skill install
+basecamp auth login
+```
+
+Obsidian 1.12.7 or newer includes its CLI. Enable **Settings → General →
+Command line interface** in Obsidian, then install the Obsidian CEO's
+[skill pack](https://github.com/kepano/obsidian-skills):
+
+```sh
+omarchy pkg add obsidian
+npx -y skills@latest add https://github.com/kepano/obsidian-skills \
+  --global --yes \
+  --skill json-canvas obsidian-bases obsidian-cli obsidian-markdown
+```
+
+Google publishes both the
+[Google Workspace CLI](https://github.com/googleworkspace/cli) and its skills:
+
+```sh
+npm install -g @googleworkspace/cli
+npx -y skills@latest add https://github.com/googleworkspace/cli \
+  --global --yes \
+  --skill gws-calendar gws-chat gws-docs gws-drive gws-forms gws-gmail \
+    gws-keep gws-meet gws-people gws-shared gws-sheets gws-slides gws-tasks \
+    gws-workflow
+gws auth setup
+```
+
+Open a new pi session after installing skills. Ghost admits only the exact
+recommended `~/.agents/skills/<name>/SKILL.md` entrypoints listed in
+`CONTRACTS.md`; it does not scan nested or other ambient skills.
+
 Before opening a session, install `libsecret` (for `secret-tool`) and run a
 user-session Secret Service provider such as `gnome-keyring`; its default
 collection must be available to `ghostd`. See
@@ -22,13 +86,11 @@ collection must be available to `ghostd`. See
 blank-password/autologin caveat.
 
 This remains the rolling development package: `pnpm install` may populate its
-store during `build()`, so it is not the AUR release recipe. Release CI now
-constructs a deterministic, architecture-specific runtime source from the
-frozen lock/vendor inputs, pairs it with the exact tagged source archive, and
-renders a fixed-checksum stable `ghost-ai` PKGBUILD whose package phases are
-fully offline. Nothing is published automatically. Issue #17 still requires an
-actual version tag and GitHub release, inspection of those attached artifacts,
-and a human upload of the rendered bundle to the `ghost-ai` AUR package.
+store during `build()`, so it is not the AUR release recipe. The stable package
+uses the [v2 runtime-source mechanism](../release/README.md#reproducibility-boundary)
+and also installs `/usr/bin/ghostd` and `/usr/bin/ghost`; publishing still
+requires a version tag, artifact inspection, and a human upload to the
+`ghost-ai` AUR package.
 
 The shell is installed at `/usr/share/ghost/quickshell` and exposed as the
 system Quickshell config `ghost`, so the existing `qs -c ghost` integration and
@@ -89,9 +151,10 @@ For a real service-context Chromium check on a graphical Arch login, run:
 /usr/lib/ghost/package-smoke/service-browser-smoke.sh
 ```
 
-It launches Playwright's persistent Chromium in a transient user unit with the
-daemon's hardening properties and `chromiumSandbox: true`; a passing command
-therefore proves the unit does not force `--no-sandbox`. CI containers do not
-run a graphical user manager, so this probe is intentionally a release-machine
-check. Ghost's Playwright backend opts into the same sandbox setting, so the
-probe covers the production launch policy rather than a weaker test-only mode.
+It first uses `/usr/bin/ghost status --json` to verify that the terminal client
+can authenticate to the active packaged daemon, then launches Chromium with a
+CDP endpoint in a transient user unit with the daemon's hardening properties
+and without `--no-sandbox`. CI containers do not run a graphical user manager,
+so this probe is intentionally a release-machine check. Ghost's Playwright
+backend opts into `chromiumSandbox: true`, so the probe covers the production
+launch policy rather than a weaker test-only mode.

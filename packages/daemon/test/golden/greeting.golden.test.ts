@@ -27,7 +27,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { MachineDocuments } from "@ghost/extensions";
 import { afterEach, describe, expect, it } from "vitest";
-import type { AssistantMessage, Context } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, Context } from "@earendil-works/pi-ai";
 import {
   buildGreetingContext,
   generateGreeting,
@@ -211,7 +211,7 @@ describe("golden: greeting flow", () => {
     const reference: GreetingContextInput = {
       ghostName: "casper",
       character: "You are casper, a letterpress printer.",
-      memoryLines: ["- owner-prefers-short.md: The owner wants short answers"],
+      memoryLines: ["- owner-prefers-short.md"],
       documents: {
         root: "/home/owner/Documents",
         lines: ['- file: "press.md"'],

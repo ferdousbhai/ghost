@@ -1,4 +1,4 @@
-import type { ExtensionFactory } from "@oh-my-pi/pi-coding-agent";
+import type { GhostExtensionFactory } from "../extension-api.js";
 import { browserToolNames, createBrowserExtension, type BrowserExtensionOptions } from "./browser.js";
 import {
   characterToolNames,
@@ -32,7 +32,7 @@ export function ghostToolNames(): string[] {
 
 export function createGhostExtension(
   options: GhostExtensionSetOptions = {},
-): ExtensionFactory {
+): GhostExtensionFactory {
   const persona = createPersonaExtension(options);
   const character = createCharacterExtension(options);
   const memory = createMemoryExtension(options);
@@ -69,4 +69,5 @@ export * from "./hyprland.js";
 export * from "./memory.js";
 export * from "./persona.js";
 export * from "./screen.js";
+export { untrustedTextResult } from "./shared.js";
 export * from "./shared.js";

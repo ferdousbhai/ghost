@@ -2,19 +2,21 @@
 
 Your ghost, on your machine. An AI persona with memory, docs, and tools —
 running locally as an [Omarchy](https://omarchy.org)-native desktop app,
-built on the modern [Oh My Pi](https://github.com/can1357/oh-my-pi)
-agent harness.
+built on the [pi](https://github.com/earendil-works/pi) coding agent
+(`@earendil-works/pi-coding-agent`, `pi-agent-core`, `pi-ai`).
 
-Ghost pins OMP 18.0.3. Pi sessions keep its native filesystem, Bash, web search,
-hub coordination, background jobs, steering/follow-ups, fallback routing, and
-branchable conversations. Ghost adds bounded declarative skills, rules,
+Ghost pins pi 0.84.3. pi sessions keep its native filesystem tools and Bash,
+steering/follow-ups, and branchable conversations; Ghost adds its own `ask`
+tool, model roles and fallback chains, bounded declarative skills, rules,
 Markdown commands/prompts, and MCP from the visible ghost home plus one
-explicitly trusted project. Pi's `task` tool and every subagent definition are
-disabled in phase 1; project plugins, hooks, custom code tools, and LSP are also
-disabled pending a per-session isolation boundary. Trusted visible
-`hooks/pre` and `hooks/post` files in the ghost home remain the explicit
-in-process extension surface. The optional Claude Code runtime retains Claude's
-native subagents. Ghost replaces Pi's coding-oriented system prompt with its
+explicitly trusted project. Live voice and the collaboration relay are planned
+Ghost ports (issue #3). There is
+no `task` tool and every subagent definition is disabled in phase 1; project
+plugins, hooks, custom code tools, and LSP are also disabled pending a
+per-session isolation boundary. Trusted visible `hooks/pre` and `hooks/post`
+files in the ghost home remain the explicit in-process extension surface. The
+optional Claude Code runtime retains Claude's native subagents. Ghost replaces
+pi's coding-oriented system prompt with its
 character, bounded memory and shallow owner Documents indexes, and minimal
 runtime guidance; Claude keeps its native preset and receives the same
 Ghost-owned context as an append. Browser and desktop capabilities remain
@@ -26,6 +28,16 @@ Idle maintenance may write owner-grounded memory and consolidates it only under
 index pressure; every memory write redacts common credential forms before disk.
 Provider and MCP secrets live in Linux Secret Service, while portable config
 holds only keyring references; see [docs/keyring.md](docs/keyring.md).
+
+The `ghost` terminal client talks only to ghostd's authenticated HTTP API. Use
+it for a quick terminal conversation or to inspect the same sessions the HUD
+shows.
+
+```sh
+ghost say "What should I focus on today?"
+ghost sessions
+ghost show -s cli-abc
+```
 
 Status: beta release candidate. See CONTRACTS.md for the data and API
 contracts, and [docs/hooks.md](docs/hooks.md) for awaited model-harness hooks.

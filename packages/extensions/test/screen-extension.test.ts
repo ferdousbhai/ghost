@@ -326,10 +326,8 @@ describe("ghost_screen tool", () => {
 
   it("publishes the same watch bounds that runtime enforces", async () => {
     const { harness } = await harnessFor(TEXT_ONLY);
-    const parameters = harness.tools.get(GHOST_SCREEN)?.parameters as unknown as {
-      toJsonSchema(): { properties: Record<string, Record<string, unknown>> };
-    };
-    const schema = parameters.toJsonSchema();
+    const parameters = harness.tools.get(GHOST_SCREEN)?.parameters as unknown as { properties: Record<string, Record<string, unknown>> };
+    const schema = parameters;
     expect(schema.properties["frames"]).toMatchObject({
       minimum: 1,
       maximum: MAX_WATCH_FRAMES,

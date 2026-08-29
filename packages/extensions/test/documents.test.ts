@@ -12,7 +12,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import { deriveDocumentsIndex } from "../src/catalog.js";
 import {
   DOCUMENT_INDEX_MAX_ENTRIES,
-  DOCUMENT_INLINE_MAX_BYTES,
   MachineDocuments,
   resolveDocumentsDirectory,
 } from "../src/documents.js";
@@ -89,30 +88,21 @@ describe("MachineDocuments", () => {
     expect(JSON.stringify(page)).not.toContain("secret.txt");
   });
 
-  it("paginates a wide directory without imposing a sibling count cap", async () => {
+  it("limits returned entries without imposing a sibling count cap", async () => {
     const { root, documents } = await fixture();
     await Promise.all(Array.from({ length: 601 }, (_, index) =>
       mkdir(join(root, `folder-${String(index).padStart(3, "0")}`))
     ));
 
-    const names: string[] = [];
-    let cursor: string | undefined;
-    do {
-      const page = await documents.listDirectory("", {
-        limit: 250,
-        ...(cursor === undefined ? {} : { cursor }),
-      });
-      expect(page.total).toBe(601);
-      expect(page.directoryCount).toBe(601);
-      names.push(...page.entries.map((entry) => entry.name));
-      cursor = page.nextCursor ?? undefined;
-    } while (cursor);
+    const page = await documents.listDirectory("", { limit: 250 });
 
-    expect(names).toHaveLength(601);
-    expect(new Set(names).size).toBe(601);
+    expect(page.total).toBe(601);
+    expect(page.directoryCount).toBe(601);
+    expect(page.entries).toHaveLength(250);
+    expect(page.truncated).toBe(true);
   });
 
-  it("uses exact lexical paging order without numeric collation", async () => {
+  it("uses exact lexical order without numeric collation", async () => {
     const { root, documents } = await fixture();
     for (const name of ["file-2", "file-10", "file-1", "Alpha", "alpha"]) {
       await writeFile(join(root, name), name);
@@ -120,16 +110,8 @@ describe("MachineDocuments", () => {
     await mkdir(join(root, "file-20"));
     await mkdir(join(root, "file-3"));
 
-    const names: string[] = [];
-    let cursor: string | undefined;
-    do {
-      const page = await documents.listDirectory("", {
-        limit: 2,
-        ...(cursor ? { cursor } : {}),
-      });
-      names.push(...page.entries.map((entry) => entry.name));
-      cursor = page.nextCursor ?? undefined;
-    } while (cursor);
+    const page = await documents.listDirectory("", { limit: 7 });
+    const names = page.entries.map((entry) => entry.name);
 
     expect(names).toEqual([
       "file-20",
@@ -160,33 +142,6 @@ describe("MachineDocuments", () => {
     }
     expect((await documents.listDirectory(path)).entries.map((entry) => entry.name))
       .toEqual(["leaf.txt"]);
-  });
-
-  it("filters files and directories by current-directory name and binds cursors", async () => {
-    const { root, documents } = await fixture();
-    await mkdir(join(root, "Alpha Folder"));
-    await mkdir(join(root, "Other"));
-    await writeFile(join(root, "alpha.txt"), "a");
-    await writeFile(join(root, "beta.txt"), "b");
-
-    const first = await documents.listDirectory("", { query: " ALPHA ", limit: 1 });
-    expect(first).toMatchObject({ query: "ALPHA", total: 2, fileCount: 1, directoryCount: 1 });
-    expect(first.entries[0]?.kind).toBe("directory");
-    await expect(documents.listDirectory("", {
-      query: "other",
-      cursor: first.nextCursor as string,
-    })).rejects.toMatchObject({ code: "invalid_cursor" });
-  });
-
-  it("rejects a cursor when the visible directory set changes", async () => {
-    const { root, documents } = await fixture();
-    await writeFile(join(root, "a.txt"), "a");
-    await writeFile(join(root, "b.txt"), "b");
-    const first = await documents.listDirectory("", { limit: 1 });
-    await writeFile(join(root, "c.txt"), "c");
-
-    await expect(documents.listDirectory("", { cursor: first.nextCursor as string }))
-      .rejects.toMatchObject({ code: "cursor_stale" });
   });
 
   it("refuses traversal and does not traverse a directory symlink", async () => {
@@ -231,54 +186,6 @@ describe("MachineDocuments", () => {
     await symlink(outside, inside);
 
     await expect(documents.listDirectory("inside"))
-      .rejects.toMatchObject({ code: "invalid_path" });
-  });
-
-  it("reads strict UTF-8 text through the exact inclusive inline boundary", async () => {
-    const { root, documents } = await fixture();
-    const atLimit = "x".repeat(DOCUMENT_INLINE_MAX_BYTES);
-    await writeFile(join(root, "at-limit.txt"), atLimit);
-    await writeFile(join(root, "too-large.txt"), `${atLimit}x`);
-    await writeFile(join(root, "invalid.txt"), new Uint8Array([0xc3, 0x28]));
-    await writeFile(join(root, "nul.txt"), new Uint8Array([0x61, 0, 0x62]));
-
-    await expect(documents.readTextContent("at-limit.txt")).resolves.toMatchObject({
-      root,
-      path: "at-limit.txt",
-      size: DOCUMENT_INLINE_MAX_BYTES,
-      content: atLimit,
-    });
-    await expect(documents.readTextContent("too-large.txt"))
-      .rejects.toMatchObject({ code: "document_too_large" });
-    await expect(documents.readTextContent("invalid.txt"))
-      .rejects.toMatchObject({ code: "invalid_document_content" });
-    await expect(documents.readTextContent("nul.txt"))
-      .rejects.toMatchObject({ code: "invalid_document_content" });
-  });
-
-  it("fails closed when a listed regular file is replaced by a large file, FIFO, or symlink", async () => {
-    const { root, documents } = await fixture();
-    const target = join(root, "changing.txt");
-    const outside = join(root, "..", "outside-secret.txt");
-    await writeFile(target, "small");
-    expect((await documents.listDirectory()).entries[0]?.kind).toBe("file");
-
-    await unlink(target);
-    await writeFile(target, "x".repeat(DOCUMENT_INLINE_MAX_BYTES + 1));
-    await expect(documents.readTextContent("changing.txt"))
-      .rejects.toMatchObject({ code: "document_too_large" });
-
-    await unlink(target);
-    await execFileAsync("mkfifo", [target]);
-    const started = Date.now();
-    await expect(documents.readTextContent("changing.txt"))
-      .rejects.toMatchObject({ code: "invalid_path" });
-    expect(Date.now() - started).toBeLessThan(1_000);
-
-    await unlink(target);
-    await writeFile(outside, "must not cross the content boundary");
-    await symlink(outside, target);
-    await expect(documents.readTextContent("changing.txt"))
       .rejects.toMatchObject({ code: "invalid_path" });
   });
 

@@ -15,17 +15,18 @@ TestCase {
                 { event: "conversation_idle", count: 1 }
             ],
             hooks: [
-                { event: "before_prompt", name: "Prompt policy", description: "Adds policy." },
-                { event: "session_stop", name: "Continuity", description: "Checks completion." },
-                { event: "session_stop", name: "Style", description: "Checks prose." },
+                { event: "before_prompt", source: "config", name: "Prompt policy", description: "Adds policy." },
+                { event: "session_stop", source: "builtin", name: "Continuity", description: "Checks completion." },
+                { event: "session_stop", source: "config", name: "Style", description: "Checks prose." },
                 {
                     event: "conversation_idle",
+                    source: "builtin",
                     name: "Memory upkeep",
                     description: "Updates durable context.",
                     idleSeconds: 600
                 }
             ],
-            sessionStopContinuationCap: 2
+            sessionStopContinuationCap: 10
         };
     }
 
@@ -36,10 +37,10 @@ TestCase {
         compare(status.events.length, 3);
         compare(status.hooks[1].name, "Continuity");
         compare(status.hooks[3].idleSeconds, 600);
-        compare(status.sessionStopContinuationCap, 2);
+        compare(status.sessionStopContinuationCap, 10);
         compare(HookStatus.label("session_stop"), "Session stop");
-        compare(HookStatus.trigger("session_stop", 2, 0),
-            "After each assistant pass · up to 2 continuations");
+        compare(HookStatus.trigger("session_stop", 10, 0),
+            "After each assistant pass · up to 10 continuations");
         compare(HookStatus.trigger("conversation_idle", 2, 600),
             "After 10 minutes of conversation inactivity");
     }
@@ -50,7 +51,7 @@ TestCase {
             total: 0,
             events: [],
             hooks: [],
-            sessionStopContinuationCap: 2
+            sessionStopContinuationCap: 10
         });
         verify(status !== null);
         compare(status.total, 0);
@@ -115,9 +116,38 @@ TestCase {
         cap.sessionStopContinuationCap = 2.5;
         compare(HookStatus.normalize(cap), null);
 
-        const wrongCap = validStatus();
-        wrongCap.sessionStopContinuationCap = 6;
-        compare(HookStatus.normalize(wrongCap), null);
+        const zeroCap = validStatus();
+        zeroCap.sessionStopContinuationCap = 0;
+        compare(HookStatus.normalize(zeroCap), null);
+
+        const tunedConfig = validStatus();
+        tunedConfig.hooks[0].settingsKey = "prompt";
+        compare(HookStatus.normalize(tunedConfig), null);
+
+        const badKey = validStatus();
+        badKey.hooks[3].settingsKey = "Memory-Upkeep";
+        compare(HookStatus.normalize(badKey), null);
+
+        const tuned = validStatus();
+        tuned.hooks[3].settingsKey = "memory_upkeep";
+        compare(HookStatus.normalize(tuned).hooks[3].settingsKey, "memory_upkeep");
+        compare(HookStatus.normalize(tuned).hooks[1].settingsKey, undefined);
+
+        const badSource = validStatus();
+        badSource.hooks[0].source = "extension";
+        compare(HookStatus.normalize(badSource), null);
+
+        const noSource = validStatus();
+        delete noSource.hooks[0].source;
+        compare(HookStatus.normalize(noSource), null);
+
+        const hugeCap = validStatus();
+        hugeCap.sessionStopContinuationCap = 101;
+        compare(HookStatus.normalize(hugeCap), null);
+
+        const otherCap = validStatus();
+        otherCap.sessionStopContinuationCap = 6;
+        compare(HookStatus.normalize(otherCap).sessionStopContinuationCap, 6);
 
         const extraRoot = validStatus();
         extraRoot.command = "/bin/private";

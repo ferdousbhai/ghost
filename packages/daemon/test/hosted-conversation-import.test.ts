@@ -8,8 +8,8 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CURRENT_SESSION_VERSION } from "@oh-my-pi/pi-coding-agent/session/session-entries";
-import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import { CURRENT_SESSION_VERSION } from "@earendil-works/pi-coding-agent";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   hostedConversationSourcePaths,
@@ -121,12 +121,11 @@ describe("migrateHostedConversations", () => {
       .map((line) => JSON.parse(line))
       .find((entry) => entry.type === "session");
     expect(header?.version).toBe(CURRENT_SESSION_VERSION);
-    const manager = await SessionManager.open(target, sessionDir, undefined, { initialCwd: ownerHome });
+    const manager = SessionManager.open(target, sessionDir, ownerHome);
     expect(manager.getCwd()).toBe(ownerHome);
     try {
       expect(manager.getSessionId()).toBe("hosted-one");
       expect(manager.getSessionName()).toBe("A hosted conversation");
-      expect(manager.titleSource).toBe("auto");
 
       const entries = manager.getEntries();
       const messages = entries.filter((entry) => entry.type === "message");
@@ -171,20 +170,17 @@ describe("migrateHostedConversations", () => {
         }),
       }));
       expect(entries.at(-1)).toMatchObject({
-        type: "title_change",
-        title: "A hosted conversation",
-        source: "auto",
-        trigger: "ghost-hosted-import",
+        type: "session_info",
+        name: "A hosted conversation",
         timestamp: UPDATED,
       });
     } finally {
-      await manager.close();
+      // Nothing to release: pi's session manager holds no descriptor.
     }
 
-    const [listed] = await SessionManager.list(home, sessionDir);
-    expect(listed?.title).toBe("A hosted conversation");
+    const [listed] = await SessionManager.listAll(sessionDir);
+    expect(listed?.name).toBe("A hosted conversation");
     expect(listed?.created.toISOString()).toBe(CREATED);
-    expect(listed?.modified.toISOString()).toBe(UPDATED);
   });
 
   it("is idempotent and never overwrites an existing native target", async () => {

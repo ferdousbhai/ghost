@@ -1,141 +1,133 @@
 /**
- * OMP slash-command discovery plus Ghost's headless execution boundary.
- *
- * Catalog composition stays upstream-owned, but file commands come from the
- * conversation's pinned snapshot rather than being rediscovered from live cwd.
- * Execution is deliberately narrower: a builtin must be explicitly admitted
- * here before its OMP text handler runs. A known command that is not admitted
- * is still consumed, so it can never be mistaken for an ordinary model prompt.
+ * Slash commands as Ghost understands them. The catalog is Ghost's own: a
+ * small set of headless builtins it can answer without a model, the
+ * conversation's pinned Markdown commands and prompt templates, and the
+ * builtins other harnesses taught people that Ghost deliberately does not
+ * run. A known command that is not admitted is still consumed, so it can never
+ * be mistaken for an ordinary model prompt.
  */
-import {
-  buildAvailableSlashCommands,
-  type InternalAvailableSlashCommand,
-} from "@oh-my-pi/pi-coding-agent/slash-commands/available-commands";
-import { executeAcpBuiltinSlashCommand } from "@oh-my-pi/pi-coding-agent/slash-commands/acp-builtins";
-import {
-  BUILTIN_SLASH_COMMANDS_INTERNAL,
-  lookupBuiltinSlashCommand,
-} from "@oh-my-pi/pi-coding-agent/slash-commands/builtin-registry";
-import { parseSlashCommand } from "@oh-my-pi/pi-coding-agent/slash-commands/helpers/parse";
-import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
-import type { SlashCommandRuntime } from "@oh-my-pi/pi-coding-agent/slash-commands/types";
+import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import { formatJobList, type GhostJobManager } from "./jobs.js";
+import { formatTodo, type PlanBook } from "./plan-mode.js";
 
 export type GhostCommandAvailability = "available" | "partial" | "unsupported";
 
-export interface GhostAvailableSlashCommand extends InternalAvailableSlashCommand {
+export interface GhostAvailableSlashCommand {
+  name: string;
+  aliases?: string[];
+  description: string;
+  input?: { hint: string };
+  subcommands?: string[];
+  source: "builtin" | "file" | "extension";
   availability: GhostCommandAvailability;
   unavailableReason?: string;
 }
 
-const FULLY_AVAILABLE_BUILTINS = new Set(["jobs", "tools", "context", "dirs"]);
+interface BuiltinSpec {
+  name: string;
+  description: string;
+  availability: GhostCommandAvailability;
+  hint?: string;
+  reason?: string;
+}
 
-const PARTIALLY_AVAILABLE_BUILTINS = new Set([
-  "advisor",
-  "changelog",
-  "extended-context",
-  "fast",
-  "model",
-  "session",
-  "todo",
-  "usage",
-  "vision",
-]);
+const BUILTINS: readonly BuiltinSpec[] = [
+  { name: "model", description: "Show the model this conversation answers on", availability: "partial", hint: "[provider/model]" },
+  { name: "session", description: "Show this conversation's transcript path and id", availability: "partial", hint: "[info]" },
+  { name: "usage", description: "Show token usage and cost for this conversation", availability: "partial", hint: "[show]" },
+  { name: "context", description: "Show how much of the model's context window is used", availability: "available" },
+  { name: "tools", description: "List the tools active in this conversation", availability: "available" },
+  { name: "dirs", description: "Show the directories this conversation works in", availability: "available" },
+  { name: "jobs", description: "List this conversation's background jobs", availability: "available" },
+  { name: "todo", description: "Show this conversation's todo list", availability: "available" },
+  { name: "plan", description: "Show plan mode and the approved plan", availability: "available" },
+  { name: "compact", description: "Summarize older history to free context", availability: "available", hint: "[instructions]" },
+  { name: "browser", description: "Browser mode", availability: "unsupported", reason: "Ghost's browser tools own this surface." },
+  { name: "computer", description: "Computer use mode", availability: "unsupported", reason: "Ghost's desktop tools own this surface." },
+  { name: "memory", description: "Memory backends", availability: "unsupported", reason: "Ghost memory is plain files in this ghost home." },
+  { name: "mcp", description: "MCP servers", availability: "unsupported", reason: "Use Ghost MCP management." },
+  { name: "move", description: "Move the conversation to another project", availability: "unsupported", reason: "A Ghost conversation stays rooted in its ghost home." },
+  { name: "add-dir", description: "Add a directory to the conversation", availability: "unsupported", reason: "Ghost does not extend a conversation outside its fixed ghost-home scope." },
+  { name: "remove-dir", description: "Remove a directory from the conversation", availability: "unsupported", reason: "Ghost does not change a conversation's fixed ghost-home scope." },
+  { name: "pin", description: "Pin the conversation", availability: "unsupported", reason: "Use Ghost's conversation pin API or UI." },
+  { name: "rename", description: "Rename the conversation", availability: "unsupported", reason: "Use Ghost's conversation rename API or UI so its title contract is preserved." },
+  { name: "name", description: "Name the session", availability: "unsupported", reason: "Use Ghost's conversation rename API or UI so its title contract is preserved." },
+  { name: "fork", description: "Fork the session", availability: "unsupported", reason: "Use Ghost's conversation fork API or UI." },
+  { name: "clone", description: "Clone the session", availability: "unsupported", reason: "Use Ghost's conversation fork API or UI." },
+  { name: "share", description: "Share a snapshot", availability: "unsupported", reason: "Ghost does not publish conversation snapshots; use Remote collaboration for deliberate live access." },
+  { name: "export", description: "Export the conversation", availability: "unsupported", reason: "Filesystem export is not enabled through the Ghost daemon." },
+  { name: "dump", description: "Dump the raw request", availability: "unsupported", reason: "A raw request sidecar would contain context and secrets, so it is not exposed here." },
+  { name: "stats", description: "Open the stats dashboard", availability: "unsupported", reason: "Ghost does not manage a separate dashboard server." },
+  ...[
+    ["help", "Show command help"],
+    ["clear", "Clear the terminal"],
+    ["new", "Start a new session"],
+    ["resume", "Resume a session"],
+    ["exit", "Exit"],
+    ["quit", "Quit"],
+    ["settings", "Open settings"],
+    ["theme", "Choose a theme"],
+    ["keybindings", "Edit keybindings"],
+    ["login", "Sign in to a provider"],
+    ["logout", "Sign out of a provider"],
+    ["tree", "Browse the session tree"],
+    ["thinking", "Choose a thinking level"],
+    ["scoped-models", "Scope models"],
+    ["import", "Import a session"],
+    ["copy", "Copy the last response"],
+    ["changelog", "Show the changelog"],
+    ["hotkeys", "Show hotkeys"],
+    ["trust", "Trust a project"],
+    ["reload", "Reload the session"],
+  ].map(([name = "", description = ""]): BuiltinSpec => ({
+    name,
+    description,
+    availability: "unsupported",
+    reason: "This command drives an interactive terminal UI; Ghost runs headless.",
+  })),
+];
+
+const BUILTIN_BY_NAME = new Map(BUILTINS.map((spec) => [spec.name, spec]));
 
 const PARTIAL_INVOCATIONS: Readonly<Record<string, ReadonlySet<string>>> = {
-  advisor: new Set(["status", "dump", "dump raw"]),
-  changelog: new Set(["", "full"]),
-  "extended-context": new Set(["status"]),
-  fast: new Set(["status"]),
   model: new Set([""]),
   session: new Set(["", "info"]),
-  todo: new Set(["", "copy", "help", "?"]),
   usage: new Set(["", "show"]),
-  vision: new Set(["status"]),
 };
 
-const COMMAND_REASONS: Readonly<Record<string, string>> = {
-  browser: "Ghost's browser tools own this surface; OMP browser mode is disabled.",
-  computer: "Ghost's desktop tools own this surface; OMP computer use is disabled.",
-  memory: "Ghost memory is plain files in this ghost home; OMP memory backends are disabled.",
-  mcp: "Use Ghost MCP management; OMP's ambient user/global MCP manager is not mounted.",
-  move: "A Ghost conversation stays rooted in its ghost home and cannot be moved to another project.",
-  "add-dir": "Ghost does not extend a conversation outside its fixed ghost-home scope.",
-  "remove-dir": "Ghost does not change a conversation's fixed ghost-home scope.",
-  pin: "Use Ghost's conversation pin API or UI; OMP's global session pins are not used.",
-  rename: "Use Ghost's conversation rename API or UI so its title contract is preserved.",
-  share: "Ghost does not publish conversation snapshots; use Remote collaboration for deliberate live access.",
-  export: "OMP's filesystem export command is not enabled through the Ghost daemon.",
-  dump: "OMP dump writes a raw request sidecar containing context and secrets, so it is not exposed here.",
-  stats: "OMP's command launches a separate dashboard server, which the Ghost daemon does not manage.",
-};
+const PARTIAL_REASON = "Only the informational forms of this command are available in Ghost.";
 
-function unsupportedReason(name: string, hasHeadlessHandler: boolean): string {
-  const specific = COMMAND_REASONS[name];
-  if (specific) return specific;
-  if (!hasHeadlessHandler) {
-    return `/${name} requires OMP's interactive terminal UI and is not available in Ghost yet.`;
-  }
-  return `/${name} is not enabled in Ghost's safe headless command set yet.`;
+/** A Markdown command or prompt template admitted for this conversation. */
+export interface GhostFileCommand {
+  name: string;
+  description: string;
+  content: string;
+  source: string;
 }
 
-function availabilityFor(command: InternalAvailableSlashCommand): Pick<
-  GhostAvailableSlashCommand,
-  "availability" | "unavailableReason"
-> {
-  if (command.source !== "builtin") return { availability: "available" };
-  if (FULLY_AVAILABLE_BUILTINS.has(command.name)) return { availability: "available" };
-  if (PARTIALLY_AVAILABLE_BUILTINS.has(command.name)) {
-    return {
-      availability: "partial",
-      unavailableReason: "Only the informational forms of this command are available in Ghost.",
-    };
-  }
-  return {
-    availability: "unsupported",
-    unavailableReason: unsupportedReason(command.name, true),
-  };
-}
-
-export async function buildGhostAvailableSlashCommands(
-  session: AgentSession,
-): Promise<GhostAvailableSlashCommand[]> {
-  const pinnedFileCommands = [...session.slashCommands];
-  const discovered = await buildAvailableSlashCommands(
-    session,
-    async () => pinnedFileCommands,
-  );
-  const discoveredBuiltins = new Map(
-    discovered
-      .filter((command) => command.source === "builtin")
-      .map((command) => [command.name, command] as const),
-  );
-  const builtins = BUILTIN_SLASH_COMMANDS_INTERNAL.map((spec): GhostAvailableSlashCommand => {
-    const discoveredCommand = discoveredBuiltins.get(spec.name);
-    if (discoveredCommand) {
-      return { ...discoveredCommand, ...availabilityFor(discoveredCommand) };
-    }
-    const hint = spec.acpInputHint ?? spec.inlineHint;
-    return {
-      name: spec.name,
-      ...(spec.aliases ? { aliases: [...spec.aliases] } : {}),
-      description: spec.description,
-      ...(hint ? { input: { hint } } : {}),
-      ...(spec.subcommands ? { subcommands: [...spec.subcommands] } : {}),
-      source: "builtin",
-      availability: "unsupported",
-      unavailableReason: unsupportedReason(spec.name, false),
-    };
-  });
-  const dynamic = discovered
-    .filter((command) => command.source !== "builtin")
-    .map((command) => ({ ...command, ...availabilityFor(command) }));
-  const seen = new Set([...builtins, ...dynamic].map((command) => command.name));
-  for (const template of session.promptTemplates) {
-    if (seen.has(template.name)) continue;
-    seen.add(template.name);
+export function buildGhostAvailableSlashCommands(
+  commands: readonly GhostFileCommand[],
+): GhostAvailableSlashCommand[] {
+  const builtins = BUILTINS.map((spec): GhostAvailableSlashCommand => ({
+    name: spec.name,
+    description: spec.description,
+    ...(spec.hint ? { input: { hint: spec.hint } } : {}),
+    source: "builtin",
+    availability: spec.availability,
+    ...(spec.availability === "partial"
+      ? { unavailableReason: PARTIAL_REASON }
+      : spec.reason
+        ? { unavailableReason: spec.reason }
+        : {}),
+  }));
+  const seen = new Set(builtins.map((command) => command.name));
+  const dynamic: GhostAvailableSlashCommand[] = [];
+  for (const command of commands) {
+    if (seen.has(command.name)) continue;
+    seen.add(command.name);
     dynamic.push({
-      name: template.name,
-      description: template.description,
+      name: command.name,
+      description: command.description,
       source: "file",
       availability: "available",
     });
@@ -143,38 +135,102 @@ export async function buildGhostAvailableSlashCommands(
   return [...builtins, ...dynamic];
 }
 
+export interface ParsedSlashCommand {
+  name: string;
+  args: string;
+}
+
+export function parseSlashCommand(text: string): ParsedSlashCommand | null {
+  const match = /^\/([A-Za-z][\w:-]*)(?:\s+([\s\S]*))?$/.exec(text.trim());
+  if (!match) return null;
+  return { name: match[1] ?? "", args: (match[2] ?? "").trim() };
+}
+
 export type GhostBuiltinDispatch =
   | { kind: "not_builtin" }
-  | { kind: "execute"; command: string }
+  | { kind: "execute"; command: string; args: string }
   | { kind: "unsupported"; command: string; reason: string };
 
 export function classifyGhostBuiltin(text: string): GhostBuiltinDispatch {
   const parsed = parseSlashCommand(text);
   if (!parsed) return { kind: "not_builtin" };
-  const builtin = lookupBuiltinSlashCommand(parsed.name);
-  if (!builtin) return { kind: "not_builtin" };
-
-  const command = `/${builtin.name}`;
-  if (!builtin.handle) {
-    return { kind: "unsupported", command, reason: unsupportedReason(builtin.name, false) };
+  const spec = BUILTIN_BY_NAME.get(parsed.name);
+  if (!spec) return { kind: "not_builtin" };
+  const command = `/${spec.name}`;
+  if (spec.availability === "unsupported") {
+    return { kind: "unsupported", command, reason: spec.reason ?? `${command} is not available in Ghost.` };
   }
-  const args = parsed.args.trim().toLowerCase().replace(/\s+/g, " ");
-  if (FULLY_AVAILABLE_BUILTINS.has(builtin.name) && !args) {
-    return { kind: "execute", command };
-  }
-  if (PARTIAL_INVOCATIONS[builtin.name]?.has(args)) {
-    return { kind: "execute", command };
-  }
-  return { kind: "unsupported", command, reason: unsupportedReason(builtin.name, true) };
+  const args = parsed.args.toLowerCase().replace(/\s+/g, " ");
+  if (spec.availability === "available") return { kind: "execute", command, args: parsed.args };
+  if (PARTIAL_INVOCATIONS[spec.name]?.has(args)) return { kind: "execute", command, args: parsed.args };
+  return { kind: "unsupported", command, reason: PARTIAL_REASON };
 }
 
+export interface GhostBuiltinContext {
+  session: AgentSession;
+  jobs: GhostJobManager;
+  plan: PlanBook;
+  cwd: string;
+  projectRoot: string | null;
+  ghostHome: string;
+}
+
+function formatTokens(value: number): string {
+  return value >= 1000 ? `${(value / 1000).toFixed(1)}k` : String(value);
+}
+
+/** Answer an admitted builtin without a model; returns the text to show. */
 export async function executeGhostBuiltin(
-  text: string,
-  runtime: SlashCommandRuntime,
-): Promise<void> {
-  const result = await executeAcpBuiltinSlashCommand(text, runtime);
-  if (result === false) throw new Error("The admitted OMP builtin no longer has a headless handler.");
-  if ("prompt" in result) {
-    throw new Error("A read-only Ghost builtin unexpectedly requested a model turn.");
+  dispatch: Extract<GhostBuiltinDispatch, { kind: "execute" }>,
+  context: GhostBuiltinContext,
+): Promise<string> {
+  const { session } = context;
+  switch (dispatch.command) {
+    case "/model": {
+      const model = session.model;
+      return model ? `${model.provider}/${model.id} (thinking: ${session.thinkingLevel})` : "No model is bound.";
+    }
+    case "/session":
+      return [`id: ${session.sessionId}`, `file: ${session.sessionFile ?? "(not persisted)"}`].join("\n");
+    case "/usage": {
+      const stats = session.getSessionStats();
+      return [
+        `messages: ${stats.userMessages} user, ${stats.assistantMessages} assistant, ${stats.toolCalls} tool calls`,
+        `tokens: ${formatTokens(stats.tokens.input)} in, ${formatTokens(stats.tokens.output)} out, ${formatTokens(stats.tokens.cacheRead)} cache read`,
+        `cost: $${stats.cost.toFixed(4)}`,
+      ].join("\n");
+    }
+    case "/context": {
+      const usage = session.getContextUsage();
+      if (!usage) return "Context usage is unknown until the first turn.";
+      const window = usage.contextWindow ?? 0;
+      const percent = window > 0 ? Math.round(((usage.tokens ?? 0) / window) * 100) : 0;
+      return `${formatTokens(usage.tokens ?? 0)} of ${formatTokens(window)} tokens (${percent}%)`;
+    }
+    case "/tools":
+      return session.getActiveToolNames().map((name) => `- ${name}`).join("\n") || "No tools are active.";
+    case "/todo":
+      return formatTodo(context.plan.getTodo());
+    case "/plan": {
+      const state = context.plan.getState();
+      if (state.planning) return "Plan mode is on: the conversation is read-only until a plan is approved.";
+      return state.plan
+        ? `Plan mode is off. Current plan: ${state.plan.title} (${state.plan.path}, approved ${state.plan.approvedAt}).`
+        : "Plan mode is off and no plan is pinned.";
+    }
+    case "/jobs":
+      return formatJobList(context.jobs.list());
+    case "/dirs":
+      return [
+        `cwd: ${context.cwd}`,
+        `ghost home: ${context.ghostHome}`,
+        ...(context.projectRoot ? [`project: ${context.projectRoot}`] : []),
+      ].join("\n");
+    case "/compact": {
+      const result = await session.compact(dispatch.args || undefined);
+      return `Compacted ${formatTokens(result.tokensBefore)} tokens of history into a summary.`;
+    }
+    default:
+      throw new Error(`Unknown admitted builtin ${dispatch.command}.`);
   }
 }

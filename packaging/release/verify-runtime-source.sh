@@ -11,54 +11,8 @@ epoch="${6:?usage: verify-runtime-source.sh <runtime-root> <source-root> <versio
 runtime_root="$(realpath "$runtime_root")"
 source_root="$(realpath "$source_root")"
 manifest="$runtime_root/MANIFEST"
-
-if find "$runtime_root" ! \( -type f -o -type d -o -type l \) \
-  -print -quit | grep -q .; then
-  printf 'runtime source contains a special filesystem entry\n' >&2
-  exit 1
-fi
-
-manifest_value() {
-  local key="$1"
-  sed -n "s/^${key}=//p" "$manifest"
-}
-
-expect_manifest() {
-  local key="$1"
-  local expected="$2"
-  local actual
-  actual="$(manifest_value "$key")"
-  if [[ "$actual" != "$expected" ]]; then
-    printf 'runtime manifest %s mismatch: expected %s, got %s\n' \
-      "$key" "$expected" "$actual" >&2
-    exit 1
-  fi
-}
-
-[[ -f "$manifest" && -d "$runtime_root/daemon" ]]
-expect_manifest format ghost-runtime-source/v1
-expect_manifest version "$version"
-expect_manifest os linux
-expect_manifest arch "$arch"
-expect_manifest source_commit "$commit"
-expect_manifest source_date_epoch "$epoch"
-expect_manifest frozen_inputs_sha256 \
-  "$(sha256sum "$runtime_root/FROZEN-INPUTS.SHA256" | cut -d' ' -f1)"
-expect_manifest payload_manifest_sha256 \
-  "$(sha256sum "$runtime_root/PAYLOAD.SHA256" | cut -d' ' -f1)"
-expect_manifest symlink_manifest_sha256 \
-  "$(sha256sum "$runtime_root/SYMLINKS.SHA256" | cut -d' ' -f1)"
-expect_manifest modes_manifest_sha256 \
-  "$(sha256sum "$runtime_root/PAYLOAD.MODES" | cut -d' ' -f1)"
-
-(
-  cd "$source_root"
-  sha256sum --quiet -c "$runtime_root/FROZEN-INPUTS.SHA256"
-)
-(
-  cd "$runtime_root"
-  sha256sum --quiet -c PAYLOAD.SHA256
-)
+daemon_binary="$runtime_root/bin/ghostd"
+client_binary="$runtime_root/bin/ghost"
 
 work_parent="${GHOST_RELEASE_WORK_ROOT:-$(dirname "$runtime_root")}"
 mkdir -p "$work_parent"
@@ -68,57 +22,100 @@ cleanup() {
 }
 trap cleanup EXIT
 
-(
-  cd "$runtime_root"
-  find daemon -type f -print | LC_ALL=C sort
-) > "$temporary/expected-files"
-sed -E 's/^[0-9a-f]{64}  //' "$runtime_root/PAYLOAD.SHA256" \
-  | LC_ALL=C sort > "$temporary/listed-files"
-cmp "$temporary/expected-files" "$temporary/listed-files"
+require_identical() {
+  local expected="$1"
+  local actual="$2"
+  local mismatch="$3"
 
-(
-  cd "$runtime_root"
-  while IFS= read -r -d '' link; do
-    target="$(readlink "$link")"
-    hash="$(printf '%s' "$target" | sha256sum | cut -d' ' -f1)"
-    printf '%s  %s\n' "$hash" "$link"
-  done < <(find daemon -type l -print0 | LC_ALL=C sort -z)
-) > "$temporary/symlinks"
-cmp "$runtime_root/SYMLINKS.SHA256" "$temporary/symlinks"
-
-(
-  cd "$runtime_root"
-  while IFS= read -r -d '' path; do
-    kind=f
-    [[ -d "$path" ]] && kind=d
-    [[ -L "$path" ]] && kind=l
-    printf '%s\t%s\t%s\n' "$(stat -c '%a' "$path")" "$kind" "$path"
-  done < <(find daemon -print0 | LC_ALL=C sort -z)
-) > "$temporary/modes"
-cmp "$runtime_root/PAYLOAD.MODES" "$temporary/modes"
-
-while IFS= read -r -d '' link; do
-  target="$(readlink "$link")"
-  if [[ "$target" == /* ]]; then
-    resolved="$(realpath -m "$target")"
-  else
-    resolved="$(realpath -m "$(dirname "$link")/$target")"
-  fi
-  case "$resolved" in
-    "$runtime_root/daemon"/*) ;;
-    *)
-      printf 'runtime symlink escapes payload: %s -> %s\n' \
-        "${link#"$runtime_root/"}" "$resolved" >&2
-      exit 1
-      ;;
-  esac
-  [[ -e "$resolved" ]] || {
-    printf 'runtime symlink is broken: %s\n' "${link#"$runtime_root/"}" >&2
+  if ! cmp "$expected" "$actual"; then
+    printf '%s\n' "$mismatch" >&2
     exit 1
-  }
-done < <(find "$runtime_root/daemon" -type l -print0)
+  fi
+}
 
-bash "$source_root/packaging/release/smoke-native-runtime.sh" \
-  "$runtime_root/daemon" "$temporary/native"
-bun "$runtime_root/daemon/dist/main.js" --version | grep -Fxq "$version"
+if find "$runtime_root" ! \( -type f -o -type d \) \
+  -print -quit | grep -q .; then
+  printf 'runtime source contains a special filesystem entry\n' >&2
+  exit 1
+fi
+
+(
+  cd "$runtime_root"
+  find . -mindepth 1 -printf '%y\t%P\n' | LC_ALL=C sort
+) > "$temporary/layout.actual"
+printf '%s\n' \
+  $'d\tbin' \
+  $'f\tMANIFEST' \
+  $'f\tPAYLOAD.SHA256' \
+  $'f\tbin/ghost' \
+  $'f\tbin/ghostd' \
+  | LC_ALL=C sort > "$temporary/layout.expected"
+require_identical "$temporary/layout.expected" "$temporary/layout.actual" \
+  'runtime source does not have the v2 two-binary layout'
+
+bun_version="$(sed -n 's/^bun_version=//p' "$manifest")"
+[[ "$bun_version" =~ ^[^[:space:]=]+$ ]] || {
+  printf 'runtime manifest has an invalid bun_version\n' >&2
+  exit 1
+}
+compile_target="$(sed -n 's/^compile_target=//p' "$manifest")"
+[[ "$compile_target" == bun-linux-x64 ]] || {
+  printf 'runtime manifest has an unsupported compile_target: %s\n' \
+    "$compile_target" >&2
+  exit 1
+}
+
+cat > "$temporary/MANIFEST.expected" <<EOF
+format=ghost-runtime-source/v2
+version=$version
+os=linux
+arch=$arch
+source_commit=$commit
+source_date_epoch=$epoch
+bun_version=$bun_version
+compile_target=$compile_target
+payload_manifest_sha256=$(sha256sum "$runtime_root/PAYLOAD.SHA256" | cut -d' ' -f1)
+EOF
+require_identical "$temporary/MANIFEST.expected" "$manifest" \
+  'runtime manifest does not match the expected v2 identity'
+printf 'Runtime compiler: bun_version=%s compile_target=%s\n' \
+  "$bun_version" "$compile_target"
+
+[[ "$(wc -l < "$runtime_root/PAYLOAD.SHA256")" -eq 2 ]] \
+  && sed -n '1p' "$runtime_root/PAYLOAD.SHA256" \
+    | grep -Eq '^[0-9a-f]{64}  bin/ghost$' \
+  && sed -n '2p' "$runtime_root/PAYLOAD.SHA256" \
+    | grep -Eq '^[0-9a-f]{64}  bin/ghostd$' || {
+  printf 'runtime payload checksum manifest is invalid\n' >&2
+  exit 1
+}
+if ! (cd "$runtime_root" && sha256sum -c PAYLOAD.SHA256); then
+  printf 'runtime payload hashes do not match the staged binary\n' >&2
+  exit 1
+fi
+
+verify_binary() {
+  local binary="$1"
+  local label="$2"
+  local elf_header="$temporary/$label.elf-header"
+
+  [[ -x "$binary" ]] || {
+    printf 'runtime binary is not executable: %s\n' "$binary" >&2
+    return 1
+  }
+  LC_ALL=C readelf -h "$binary" > "$elf_header"
+  grep -Eq '^[[:space:]]*Class:[[:space:]]+ELF64$' "$elf_header"
+  grep -Eq '^[[:space:]]*Data:[[:space:]]+2.s complement, little endian$' \
+    "$elf_header"
+  grep -Eq '^[[:space:]]*Type:[[:space:]]+(EXEC|DYN)[[:space:]]' \
+    "$elf_header"
+  grep -Eq '^[[:space:]]*Machine:[[:space:]]+Advanced Micro Devices X86-64$' \
+    "$elf_header"
+}
+
+verify_binary "$daemon_binary" ghostd
+verify_binary "$client_binary" ghost
+
+bash "$source_root/packaging/release/smoke-binary-runtime.sh" \
+  "$daemon_binary" "$client_binary" "$version" "$temporary/smoke"
 printf 'Verified runtime source: %s\n' "$runtime_root"

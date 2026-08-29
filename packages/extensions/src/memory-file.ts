@@ -9,7 +9,6 @@ export const MAX_MEMORY_FILE_CONTENT_LENGTH = 2_000;
 export const MAX_MEMORY_FILE_BYTES = MAX_MEMORY_FILE_CONTENT_LENGTH * 3 + 1;
 export const MAX_MEMORY_FILE_SLUG_LENGTH = 64;
 export const MAX_MEMORY_FILES = 500;
-export const MEMORY_INDEX_PREVIEW_CHARS = 32;
 export const MEMORY_INDEX_BUDGET_CHARS = 4_000;
 export const REDACTED_MEMORY_SECRET = "[REDACTED_SECRET]";
 
@@ -21,7 +20,6 @@ export interface ParsedMemoryFile {
 
 export interface MemoryFileMeta {
   readonly slug: string;
-  readonly description: string;
   readonly updated: string;
 }
 
@@ -89,20 +87,6 @@ export function memorySlugForText(text: string): string {
   return slug || "memory";
 }
 
-export function memoryIndexPreview(content: string): string {
-  const normalized = normalizeMemoryText(content);
-  if (normalized.length <= MEMORY_INDEX_PREVIEW_CHARS) return normalized;
-
-  const available = MEMORY_INDEX_PREVIEW_CHARS - "...".length;
-  let prefix = normalized.slice(0, available);
-  const next = normalized[available];
-  if (next !== undefined && !/\s/u.test(next)) {
-    const lastSpace = prefix.lastIndexOf(" ");
-    if (lastSpace > 0) prefix = prefix.slice(0, lastSpace);
-  }
-  return `${prefix.trimEnd().replace(/[.,;:!?]+$/u, "")}...`;
-}
-
 export function assertWritableMemory(content: string): void {
   const normalized = content.trim();
   if (normalized.length === 0) {
@@ -136,16 +120,21 @@ export interface MemoryIndex {
   readonly total: number;
 }
 
+/** Newest first, slug as the deterministic tie-break: the order memory is shown in. */
+export function compareMemoryNewestFirst(left: MemoryFileMeta, right: MemoryFileMeta): number {
+  return right.updated.localeCompare(left.updated) || left.slug.localeCompare(right.slug);
+}
+
 /**
- * The per-session memory index: one line per file in newest-first order, with
- * slug as the deterministic tie-break, cut off at the injection budget.
- * Derived on every session start and never stored.
+ * The per-session memory index: one file name per line in newest-first order,
+ * cut off at the injection budget. The slug alone says what a fact is about,
+ * so no preview of the content rides along. Derived on every session start
+ * and never stored.
  */
 export function deriveMemoryIndex(files: readonly MemoryFileMeta[]): MemoryIndex {
   const sorted = [...files]
-    .sort((left, right) =>
-      right.updated.localeCompare(left.updated) || left.slug.localeCompare(right.slug))
-    .map((file) => `- ${memoryFileName(file.slug)}: ${file.description}`);
+    .sort(compareMemoryNewestFirst)
+    .map((file) => `- ${memoryFileName(file.slug)}`);
   const lines: string[] = [];
   let chars = 0;
   for (const line of sorted) {

@@ -23,14 +23,18 @@ pkgbase = ghost-ai-git
 	depends = python-dbus>=1.4
 	depends = python-gobject>=3.50
 	depends = python-pillow>=10
+	depends = qrencode
 	depends = qt6-5compat>=6.8
 	depends = quickshell>=0.3
 	depends = wtype>=0.4
 	depends = xdg-utils>=1.2
 	depends = ydotool>=1.0
+	optdepends = basecamp-cli: Basecamp CLI and embedded pi skill
 	optdepends = chromium: dedicated Ghost browser and browser-relay smoke test
 	optdepends = claude-code: Claude Code plan runtime
 	optdepends = gnome-keyring: Secret Service provider for provider and MCP credentials
+	optdepends = npm: Firecrawl, Google Workspace, and Agent Skills installers for optional pi integrations
+	optdepends = obsidian>=1.12.7: Obsidian CLI access for pi
 	provides = ghost-ai
 	conflicts = ghost-ai
 	options = !debug

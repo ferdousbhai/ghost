@@ -1,6 +1,6 @@
-import type { Api, AssistantMessage, Model } from "@oh-my-pi/pi-ai";
+import type { Api, AssistantMessage, Model } from "@earendil-works/pi-ai";
 import type { GhostModelRoleBinding } from "./models.js";
-import type { GhostOmpRuntime } from "./omp-runtime.js";
+import type { GhostPiRuntime } from "./pi-runtime.js";
 
 export const SMOL_MODEL_ROLE = "smol_model";
 
@@ -20,7 +20,7 @@ export interface SmolCandidate {
 
 /**
  * The slice of a model catalogue the resolver reads. Narrowed to an interface
- * so the rules can be tested against a fixture with no OMP runtime at all.
+ * so the rules can be tested against a fixture with no pi runtime at all.
  */
 export interface SmolModelCatalog {
   usable(): readonly SmolCandidate[];
@@ -135,13 +135,13 @@ export function resolveSmolModel(
 
 
 /**
- * The slice of `GhostOmpRuntime` this module drives. A test passes a fake.
+ * The slice of `GhostPiRuntime` this module drives. A test passes a fake.
  * `getModels`/`getModel` read
  * the static catalogue synchronously (no availability network call), and the
  * subscription/OAuth/credential predicates are the ones `ModelCatalog` reads.
  */
 export type SmolRuntime = Pick<
-  GhostOmpRuntime,
+  GhostPiRuntime,
   | "getModels"
   | "getModel"
   | "hasConfiguredAuth"
@@ -159,7 +159,7 @@ function toCandidate(runtime: SmolRuntime, model: SmolModel): SmolCandidate {
 }
 
 /**
- * Build a `SmolModelCatalog` over a Ghost OMP runtime. "Usable" is a model whose
+ * Build a `SmolModelCatalog` over a `GhostPiRuntime`. "Usable" is a model whose
  * provider has a configured credential — the same credential-based notion of
  * usability the model switcher reports, computed synchronously so a background
  * title or greeting never blocks on an availability probe.

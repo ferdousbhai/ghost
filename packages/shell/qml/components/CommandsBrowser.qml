@@ -1,6 +1,6 @@
 pragma ComponentBehavior: Bound
 
-// OMP's effective slash-command catalog for the active conversation. Discovery
+// The effective slash-command catalog for the active conversation. Discovery
 // stays daemon-side because extensions, plugins, skills, and project commands
 // all participate in precedence there. Choosing one only stages it in chat;
 // Enter remains the explicit act that runs it.
@@ -97,7 +97,7 @@ Rectangle {
 
                 Text {
                     width: parent.width
-                    text: "OMP commands available in this conversation. Choose one to stage it in chat."
+                    text: "Commands available in this conversation. Choose one to stage it in chat."
                     color: Theme.foregroundDim
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.fontSizeSmall
@@ -257,7 +257,7 @@ Rectangle {
 
                 Text {
                     width: parent.width
-                    text: "Reading this conversation's OMP extensions, plugins, skills, and project commands."
+                    text: "Reading this conversation's commands, prompts, skills, and project commands."
                     color: Theme.foregroundDim
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.fontSizeSmall
@@ -285,7 +285,7 @@ Rectangle {
                 Text {
                     width: parent.width
                     text: root.searchText.trim() === ""
-                        ? "Add OMP commands, plugins, or skills to this ghost and refresh."
+                        ? "Add commands, prompts, or skills to this ghost and refresh."
                         : "Try a command name, alias, description, or source."
                     color: Theme.foregroundDim
                     font.family: Theme.fontFamily

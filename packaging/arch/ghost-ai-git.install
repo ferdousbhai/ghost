@@ -11,6 +11,29 @@ To relay the browser you already use, load this directory unpacked in Chromium:
 
   /usr/share/ghost/chromium-extension
 
+Optional pi integrations are installed from upstream as this desktop user;
+Ghost packages none of their CLIs or skills:
+
+  omarchy pkg add npm
+  npx -y firecrawl-cli@latest init --all --skip-auth
+  hey skill install
+  omarchy pkg add basecamp-cli
+  basecamp skill install
+  omarchy pkg add obsidian
+  npx -y skills@latest add https://github.com/kepano/obsidian-skills \
+    --global --yes --skill json-canvas obsidian-bases obsidian-cli obsidian-markdown
+  npm install -g @googleworkspace/cli
+  npx -y skills@latest add https://github.com/googleworkspace/cli \
+    --global --yes --skill gws-calendar gws-chat gws-docs gws-drive gws-forms \
+    gws-gmail gws-keep gws-meet gws-people gws-shared gws-sheets gws-slides \
+    gws-tasks gws-workflow
+
+Exact skill selections, authentication commands, and upstream sources:
+
+  /usr/share/doc/ghost/ARCH.md
+
+Current Omarchy supplies hey through mise; run omarchy update if hey is missing.
+
 Provider and MCP credentials are read from the Secret Service, so a
 user-session provider such as gnome-keyring must be running and unlocked before
 your first session:

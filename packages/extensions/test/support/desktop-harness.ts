@@ -16,14 +16,14 @@
  * No model is contacted and no desktop is touched.
  */
 import type {
-  AgentToolResult,
-  ExtensionAPI,
-  ExtensionContext,
-  ExtensionFactory,
-  ToolCallEvent,
-  ToolCallEventResult,
-  ToolDefinition,
-} from "@oh-my-pi/pi-coding-agent";
+  AnyGhostToolDefinition,
+  GhostExtensionAPI,
+  GhostExtensionFactory,
+  GhostToolContext,
+  GhostToolModel,
+  GhostToolResult,
+} from "../../src/extension-api.js";
+import type { ToolCallEventResult } from "./harness.js";
 import type { CommandResult, CommandRunner, RunCommandOptions } from "../../src/extensions/shared.js";
 import { CommandError } from "../../src/extensions/shared.js";
 import type {
@@ -33,7 +33,7 @@ import type {
   RequestOptions,
 } from "../../src/extensions/desktop-helper-client.js";
 
-type AnyTool = ToolDefinition<any, any>;
+type AnyTool = AnyGhostToolDefinition;
 type AnyHandler = (event: any, ctx: any) => unknown;
 
 export const TINY_PNG_BASE64 =
@@ -47,27 +47,14 @@ export interface FixtureModelInput {
   costOutput?: number;
 }
 
-export type FixtureModel = NonNullable<ExtensionContext["model"]>;
+export type FixtureModel = GhostToolModel;
 
 export function fixtureModel(input: FixtureModelInput): FixtureModel {
-  const model: Record<string, unknown> = {
-    id: input.id,
-    name: input.id,
-    api: "openai-completions",
+  return {
     provider: input.provider,
-    baseUrl: "https://example.invalid/v1",
-    reasoning: false,
-    cost: {
-      input: input.costInput ?? 1,
-      output: input.costOutput ?? 1,
-      cacheRead: 0,
-      cacheWrite: 0,
-    },
-    contextWindow: 128_000,
-    maxTokens: 8_192,
+    id: input.id,
+    ...(input.input === undefined ? {} : { input: input.input }),
   };
-  if (input.input !== undefined) model["input"] = input.input;
-  return model as unknown as FixtureModel;
 }
 
 
@@ -174,13 +161,8 @@ export interface ContextOptions {
   readonly model?: FixtureModel | undefined;
 }
 
-export function makeContext(options: ContextOptions): ExtensionContext {
-  return {
-    cwd: options.cwd,
-    mode: "print",
-    hasUI: false,
-    model: options.model,
-  } as unknown as ExtensionContext;
+export function makeContext(options: ContextOptions): GhostToolContext {
+  return { cwd: options.cwd, model: options.model };
 }
 
 export interface DesktopHarness {
@@ -188,7 +170,7 @@ export interface DesktopHarness {
   readonly handlers: Map<string, AnyHandler[]>;
   activeTools: string[];
   toolNames(): string[];
-  call(name: string, params?: Record<string, unknown>): Promise<AgentToolResult<any>>;
+  call(name: string, params?: Record<string, unknown>): Promise<GhostToolResult<any>>;
   toolCall(
     toolName: string,
     input?: Record<string, unknown>,
@@ -199,8 +181,8 @@ export interface DesktopHarness {
 }
 
 export async function loadExtensionWith(
-  factory: ExtensionFactory,
-  ctx: ExtensionContext,
+  factory: GhostExtensionFactory,
+  ctx: GhostToolContext,
 ): Promise<DesktopHarness> {
   const tools = new Map<string, AnyTool>();
   const handlers = new Map<string, AnyHandler[]>();
@@ -216,7 +198,7 @@ export async function loadExtensionWith(
       return tool.execute(`call-${name}`, params, undefined, undefined, ctx);
     },
     async toolCall(toolName, input = {}) {
-      const event = { type: "tool_call", toolCallId: "call-1", toolName, input } as ToolCallEvent;
+      const event = { type: "tool_call", toolCallId: "call-1", toolName, input };
       for (const handler of handlers.get("tool_call") ?? []) {
         const result = (await handler(event, ctx)) as ToolCallEventResult | undefined;
         if (result?.block) return result;
@@ -262,13 +244,13 @@ export async function loadExtensionWith(
     setActiveTools: (names: string[]) => {
       harness.activeTools = [...names];
     },
-  } as unknown as ExtensionAPI;
+  } as unknown as GhostExtensionAPI;
 
   await factory(api);
   return harness;
 }
 
-export function resultText(result: AgentToolResult<any>): string {
+export function resultText(result: GhostToolResult<any>): string {
   return result.content
     .filter((part): part is { type: "text"; text: string } => part.type === "text")
     .map((part) => part.text)
@@ -276,7 +258,7 @@ export function resultText(result: AgentToolResult<any>): string {
 }
 
 export function resultImages(
-  result: AgentToolResult<any>,
+  result: GhostToolResult<any>,
 ): Array<{ type: "image"; data: string; mimeType: string }> {
   return result.content.filter(
     (part): part is { type: "image"; data: string; mimeType: string } => part.type === "image",

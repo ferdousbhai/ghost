@@ -3,7 +3,7 @@
  *
  * Both the visible MCP catalogue and the keyring migration have to agree on
  * this, and for opposite reasons: the catalogue rejects an invalid row so a
- * malformed value never reaches OMP or an HTTP sanitizer, while migration must
+ * malformed value never reaches the MCP manager or an HTTP sanitizer, while migration must
  * recognise exactly the same rows in order to leave everything else untouched.
  * Two independent copies of the rule would eventually disagree, and the
  * disagreement would show up as migration refusing a server the catalogue is
@@ -11,9 +11,7 @@
  *
  * Messages name fields but never interpolate their values.
  */
-import { validateServerConfig } from "@oh-my-pi/pi-coding-agent/mcp/config";
-import { validateServerName } from "@oh-my-pi/pi-coding-agent/mcp/config-writer";
-import type { MCPServerConfig } from "@oh-my-pi/pi-coding-agent/mcp/types";
+import { validateServerConfig, validateServerName, type MCPServerConfig } from "./mcp-config.js";
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -68,7 +66,7 @@ function isStringRecord(value: unknown): value is Record<string, string> {
 }
 
 /**
- * Validate Ghost's owned MCP boundary before OMP or an HTTP sanitizer sees a
+ * Validate Ghost's owned MCP boundary before the MCP manager or an HTTP sanitizer sees a
  * value.
  */
 function ownedMcpValidationErrors(value: unknown): string[] {
@@ -154,9 +152,5 @@ export function mcpServerValidationErrors(name: string, value: unknown): string[
   if (nameError) return [nameError];
   const ownedErrors = ownedMcpValidationErrors(value);
   if (ownedErrors.length > 0) return ownedErrors;
-  try {
-    return validateServerConfig(name, value as unknown as MCPServerConfig);
-  } catch {
-    return ["MCP server configuration is invalid."];
-  }
+  return validateServerConfig(name, value as unknown as MCPServerConfig);
 }

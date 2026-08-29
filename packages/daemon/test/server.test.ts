@@ -9,16 +9,12 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
-  symlinkSync,
-  unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { execFileSync } from "node:child_process";
-import { DOCUMENT_INLINE_MAX_BYTES, MachineDocuments } from "@ghost/extensions";
+import { MachineDocuments } from "@ghost/extensions";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { claudeSessionMetadataPath } from "../src/claude-code.js";
-import { DocumentsService } from "../src/documents.js";
 import { ghostPaths } from "../src/ghosts.js";
 import { HomeOperationCoordinator } from "../src/home-operations.js";
 import { McpCatalog } from "../src/mcp-catalog.js";
@@ -71,7 +67,6 @@ async function serve(
     provider: { baseUrl: provider.url, modelId: provider.modelId },
   });
   const machineDocuments = new MachineDocuments(join(temp.root, ".documents"));
-  const documents = new DocumentsService(machineDocuments);
   const homeOperations = new HomeOperationCoordinator(temp.registry);
   host = new SessionHost({
     registry: temp.registry,
@@ -84,7 +79,6 @@ async function serve(
   listening = await startDaemonServer({
     registry: temp.registry,
     host,
-    documents,
     mcp,
     homeOperations,
     port: 0,
@@ -194,6 +188,12 @@ async function waitForAsk(base: string, sessionId: string): Promise<{
   throw new Error("timed out waiting for ask interaction");
 }
 
+/** A runner built without a hooks.json: nothing to read, nothing to replace. */
+const noHooksFile = {
+  config: () => undefined,
+  replaceConfig: async (): Promise<never> => { throw new Error("This hook runner has no configuration file."); },
+};
+
 describe("GET /api/ghosts", () => {
   it("lists ghosts with name, dir, and createdAt", async () => {
     const base = await serve();
@@ -230,13 +230,15 @@ describe("GET /api/hooks", () => {
         { event: "conversation_idle", count: 1 },
       ],
       hooks: [
-        { event: "before_prompt", name: "Prompt policy", description: "Adds policy." },
-        { event: "session_stop", name: "Completion", description: "Checks completion." },
+        { event: "before_prompt", source: "builtin", name: "Prompt policy", description: "Adds policy." },
+        { event: "session_stop", source: "config", name: "Completion", description: "Checks completion." },
         {
           event: "conversation_idle",
+          source: "builtin",
           name: "Idle upkeep",
           description: "Runs after inactivity.",
           idleSeconds: 60,
+          settingsKey: "memory_upkeep",
         },
       ],
       sessionStopContinuationCap: GHOST_SESSION_STOP_CONTINUATION_CAP,
@@ -259,7 +261,7 @@ describe("GET /api/hooks", () => {
       prompt: "secret",
       context: "secret",
     });
-    const base = await serve(undefined, { hooks: { status } });
+    const base = await serve(undefined, { hooks: { ...noHooksFile, status } });
 
     const response = await fetch(`${base}/api/hooks`);
     expect(response.status).toBe(200);
@@ -273,13 +275,15 @@ describe("GET /api/hooks", () => {
         { event: "conversation_idle", count: 1 },
       ],
       hooks: [
-        { event: "before_prompt", name: "Prompt policy", description: "Adds policy." },
-        { event: "session_stop", name: "Completion", description: "Checks completion." },
+        { event: "before_prompt", source: "builtin", name: "Prompt policy", description: "Adds policy." },
+        { event: "session_stop", source: "config", name: "Completion", description: "Checks completion." },
         {
           event: "conversation_idle",
+          source: "builtin",
           name: "Idle upkeep",
           description: "Runs after inactivity.",
           idleSeconds: 60,
+          settingsKey: "memory_upkeep",
         },
       ],
       sessionStopContinuationCap: GHOST_SESSION_STOP_CONTINUATION_CAP,
@@ -314,7 +318,7 @@ describe("GET /api/hooks", () => {
       hooks: [],
       sessionStopContinuationCap: GHOST_SESSION_STOP_CONTINUATION_CAP,
     }));
-    const base = await serve(undefined, { hooks: { status } });
+    const base = await serve(undefined, { hooks: { ...noHooksFile, status } });
     const response = await fetch(`${base}/api/hooks`, { method: "POST" });
     expect(response.status).toBe(405);
     expect(await response.json()).toEqual({
@@ -324,254 +328,60 @@ describe("GET /api/hooks", () => {
   });
 });
 
-describe("/api/documents", () => {
-  it("lists and filters one shared directory with direct-child counts", async () => {
-    const base = await serve();
-    const root = join(temp!.root, ".documents");
-    mkdirSync(join(root, "Projects", "deep"), { recursive: true });
-    writeFileSync(join(root, "Projects", "deep", "hidden-from-root.txt"), "deep");
-    writeFileSync(join(root, "project brief.txt"), "arbitrary bytes");
-    writeFileSync(join(root, "other.pdf"), "pdf bytes");
-    writeFileSync(join(root, ".hidden"), "hidden");
+describe("/api/hooks/config", () => {
+  const empty = () => ({
+    active: false,
+    total: 0,
+    events: [],
+    hooks: [],
+    sessionStopContinuationCap: GHOST_SESSION_STOP_CONTINUATION_CAP,
+  });
 
-    const response = await fetch(`${base}/api/documents?q=PROJECT&limit=1`);
-    expect(response.status).toBe(200);
-    const body = await response.json() as {
-      root: string;
-      path: string;
-      query: string;
-      entries: Array<{ name: string; path: string; kind: string }>;
-      total: number;
-      fileCount: number;
-      directoryCount: number;
-      nextCursor: string | null;
-    };
-    expect(body).toMatchObject({
-      root,
-      path: "",
-      query: "PROJECT",
-      total: 2,
-      fileCount: 1,
-      directoryCount: 1,
+  it("is absent when the runner has no configuration file", async () => {
+    const base = await serve(undefined, { hooks: { ...noHooksFile, status: empty } });
+    const response = await fetch(`${base}/api/hooks/config`);
+    expect(response.status).toBe(404);
+  });
+
+  it("reads and replaces the whole document through the runner", async () => {
+    const path = join(temp?.root ?? "", "hooks.json");
+    let document: Record<string, unknown> = { hooks: {} };
+    const replaceConfig = vi.fn(async (next: unknown) => {
+      if (typeof next !== "object" || next === null || Array.isArray(next)) {
+        throw new Error(`${path} must contain a JSON object.`);
+      }
+      document = next as Record<string, unknown>;
+      return { path, document };
     });
-    expect(body.entries).toEqual([
-      { name: "Projects", path: "Projects", kind: "directory", modifiedAt: expect.any(String) },
-    ]);
-    expect(JSON.stringify(body)).not.toContain("hidden-from-root");
-
-    const next = await fetch(
-      `${base}/api/documents?q=PROJECT&limit=1&cursor=${encodeURIComponent(body.nextCursor ?? "")}`,
-    );
-    expect(next.status).toBe(200);
-    expect((await next.json() as { entries: Array<{ name: string }> }).entries)
-      .toEqual([expect.objectContaining({ name: "project brief.txt" })]);
-  });
-
-  it("keeps exact non-numeric ordering stable across API pages", async () => {
-    const base = await serve();
-    const root = join(temp!.root, ".documents");
-    mkdirSync(root, { recursive: true });
-    for (const name of ["file-2", "file-10", "file-1", "Alpha", "alpha"]) {
-      writeFileSync(join(root, name), name);
-    }
-    mkdirSync(join(root, "file-20"));
-    mkdirSync(join(root, "file-3"));
-
-    const names: string[] = [];
-    let cursor: string | null = null;
-    do {
-      const query = new URLSearchParams({ limit: "2" });
-      if (cursor) query.set("cursor", cursor);
-      const response = await fetch(`${base}/api/documents?${query}`);
-      expect(response.status).toBe(200);
-      const page = await response.json() as {
-        entries: Array<{ name: string }>;
-        nextCursor: string | null;
-      };
-      names.push(...page.entries.map((entry) => entry.name));
-      cursor = page.nextCursor;
-    } while (cursor);
-
-    expect(names).toEqual([
-      "file-20",
-      "file-3",
-      "Alpha",
-      "alpha",
-      "file-1",
-      "file-10",
-      "file-2",
-    ]);
-  });
-
-  it("returns cursor_stale after the direct entry set changes", async () => {
-    const base = await serve();
-    const root = join(temp!.root, ".documents");
-    mkdirSync(root, { recursive: true });
-    writeFileSync(join(root, "a.txt"), "a");
-    writeFileSync(join(root, "b.txt"), "b");
-    const first = await fetch(`${base}/api/documents?limit=1`);
-    const cursor = (await first.json() as { nextCursor: string }).nextCursor;
-    writeFileSync(join(root, "c.txt"), "c");
-
-    const stale = await fetch(
-      `${base}/api/documents?limit=1&cursor=${encodeURIComponent(cursor)}`,
-    );
-    expect(stale.status).toBe(409);
-    expect(await stale.json()).toMatchObject({ error: { code: "cursor_stale" } });
-  });
-
-  it("returns not_found for a missing direct or nested directory", async () => {
-    const base = await serve();
-    for (const path of ["missing", "missing/deep"]) {
-      const response = await fetch(
-        `${base}/api/documents?path=${encodeURIComponent(path)}`,
-      );
-      expect(response.status).toBe(404);
-      expect(await response.json()).toMatchObject({ error: { code: "not_found" } });
-    }
-  });
-
-  it("serves only bounded strict UTF-8 content through the confined content route", async () => {
-    const base = await serve();
-    const root = join(temp!.root, ".documents");
-    mkdirSync(root, { recursive: true });
-    const atLimit = "x".repeat(DOCUMENT_INLINE_MAX_BYTES);
-    writeFileSync(join(root, "at limit.md"), atLimit);
-    writeFileSync(join(root, "too-large.md"), `${atLimit}x`);
-    writeFileSync(join(root, "invalid.txt"), new Uint8Array([0xc3, 0x28]));
-    writeFileSync(join(root, "nul.txt"), new Uint8Array([0x61, 0, 0x62]));
-
-    const content = await fetch(
-      `${base}/api/documents/content?path=${encodeURIComponent("at limit.md")}`,
-    );
-    expect(content.status).toBe(200);
-    expect(await content.json()).toMatchObject({
-      root,
-      path: "at limit.md",
-      size: DOCUMENT_INLINE_MAX_BYTES,
-      content: atLimit,
-      modifiedAt: expect.any(String),
+    const base = await serve(undefined, {
+      hooks: { status: empty, config: () => ({ path, document }), replaceConfig },
     });
-    for (const [path, status, code] of [
-      ["too-large.md", 413, "document_too_large"],
-      ["invalid.txt", 400, "invalid_document_content"],
-      ["nul.txt", 400, "invalid_document_content"],
-    ] as const) {
-      const response = await fetch(
-        `${base}/api/documents/content?path=${encodeURIComponent(path)}`,
-      );
-      expect(response.status).toBe(status);
-      expect(await response.json()).toMatchObject({ error: { code } });
-    }
-  });
 
-  it("fails closed when listed content is replaced by a large file, FIFO, or symlink", async () => {
-    const base = await serve();
-    const root = join(temp!.root, ".documents");
-    mkdirSync(root, { recursive: true });
-    const changing = join(root, "changing.txt");
-    const outside = join(temp!.root, "outside-content.txt");
-    writeFileSync(changing, "small");
-    const listed = await fetch(`${base}/api/documents`);
-    expect((await listed.json() as { entries: Array<{ name: string }> }).entries)
-      .toContainEqual(expect.objectContaining({ name: "changing.txt" }));
+    const read = await fetch(`${base}/api/hooks/config`);
+    expect(await read.json()).toEqual({ path, document: { hooks: {} } });
 
-    unlinkSync(changing);
-    writeFileSync(changing, "x".repeat(DOCUMENT_INLINE_MAX_BYTES + 1));
-    let response = await fetch(`${base}/api/documents/content?path=changing.txt`);
-    expect(response.status).toBe(413);
-    expect(await response.json()).toMatchObject({ error: { code: "document_too_large" } });
-
-    unlinkSync(changing);
-    execFileSync("mkfifo", [changing]);
-    const started = Date.now();
-    response = await fetch(`${base}/api/documents/content?path=changing.txt`);
-    expect(Date.now() - started).toBeLessThan(1_000);
-    expect(response.status).toBe(400);
-    expect(await response.json()).toMatchObject({ error: { code: "invalid_path" } });
-
-    unlinkSync(changing);
-    writeFileSync(outside, "outside secret");
-    symlinkSync(outside, changing);
-    response = await fetch(`${base}/api/documents/content?path=changing.txt`);
-    expect(response.status).toBe(400);
-    const raw = await response.text();
-    expect(raw).not.toContain("outside secret");
-    expect(JSON.parse(raw)).toMatchObject({ error: { code: "invalid_path" } });
-  });
-
-  it("moves one exactly confirmed regular file to recoverable Trash", async () => {
-    const base = await serve();
-    const root = join(temp!.root, ".documents");
-    mkdirSync(join(root, "folder"), { recursive: true });
-    const file = join(root, "folder", "keep name.bin");
-    writeFileSync(file, "kept bytes");
-    const remove = (confirm: string) => fetch(`${base}/api/documents`, {
-      method: "DELETE",
+    const next = { hooks: { session_stop: [{ hooks: [{ type: "command", command: "/bin/true" }] }] } };
+    const written = await fetch(`${base}/api/hooks/config`, {
+      method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ path: "folder/keep name.bin", confirm }),
+      body: JSON.stringify(next),
     });
+    expect(written.status).toBe(200);
+    expect(await written.json()).toEqual({ path, document: next });
+    expect(replaceConfig).toHaveBeenCalledWith(next);
 
-    expect((await remove("wrong")).status).toBe(400);
-    expect(existsSync(file)).toBe(true);
-    const response = await remove("folder/keep name.bin");
-    expect(response.status).toBe(200);
-    const body = await response.json() as {
-      ok: boolean;
-      path: string;
-      trash: string;
-      kind: "freedesktop" | "fallback";
-    };
-    expect(body).toMatchObject({
-      ok: true,
-      path: "folder/keep name.bin",
-      kind: "freedesktop",
-    });
-    expect(readFileSync(body.trash, "utf8")).toBe("kept bytes");
-    expect(existsSync(file)).toBe(false);
-  });
-
-  it("serializes concurrent deletion of the same file", async () => {
-    const base = await serve();
-    const root = join(temp!.root, ".documents");
-    mkdirSync(root, { recursive: true });
-    writeFileSync(join(root, "one.txt"), "one");
-    const remove = () => fetch(`${base}/api/documents`, {
-      method: "DELETE",
+    const rejected = await fetch(`${base}/api/hooks/config`, {
+      method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ path: "one.txt", confirm: "one.txt" }),
+      body: "[]",
+    });
+    expect(rejected.status).toBe(400);
+    expect(await rejected.json()).toEqual({
+      error: { code: "invalid_request", message: `${path} must contain a JSON object.` },
     });
 
-    const responses = await Promise.all([remove(), remove()]);
-    expect(responses.map((response) => response.status).sort()).toEqual([200, 404]);
-    const bodies = await Promise.all(responses.map((response) => response.json()));
-    expect(bodies).toEqual(expect.arrayContaining([
-      expect.objectContaining({ ok: true, path: "one.txt" }),
-      expect.objectContaining({ error: expect.objectContaining({ code: "not_found" }) }),
-    ]));
-  });
-
-  it("refuses a symbolic-link document without touching its target", async () => {
-    const base = await serve();
-    const root = join(temp!.root, ".documents");
-    mkdirSync(root, { recursive: true });
-    const outside = join(temp!.root, "outside.txt");
-    const link = join(root, "outside-link.txt");
-    writeFileSync(outside, "outside bytes");
-    symlinkSync(outside, link);
-
-    const response = await fetch(`${base}/api/documents`, {
-      method: "DELETE",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ path: "outside-link.txt", confirm: "outside-link.txt" }),
-    });
-
-    expect(response.status).toBe(400);
-    expect(await response.json()).toMatchObject({
-      error: { code: "invalid_documents_path" },
-    });
-    expect(readFileSync(outside, "utf8")).toBe("outside bytes");
-    expect(existsSync(link)).toBe(true);
+    const posted = await fetch(`${base}/api/hooks/config`, { method: "POST" });
+    expect(posted.status).toBe(405);
   });
 });
 
@@ -813,54 +623,69 @@ describe("conversation project binding", () => {
   });
 });
 
-describe("GET /api/ghosts/:name/context", () => {
-  it("serves the derived context catalog and rejects other methods", async () => {
+describe("/api/ghosts/:name/memory", () => {
+  it("lists the plain memory files and rejects other methods", async () => {
     const base = await serve();
     const ghostDir = join(temp!.root, "casper");
-    mkdirSync(join(ghostDir, "docs", "guides"), { recursive: true });
-    mkdirSync(join(ghostDir, ".omp", "agents"), { recursive: true });
-    writeFileSync(join(ghostDir, ".omp", "config.yml"), "task:\n  disabledAgents: []\n", "utf8");
-    writeFileSync(
-      join(ghostDir, ".omp", "agents", "route-probe.md"),
-      "---\nname: route-probe\ndescription: HTTP route fixture\n---\nPrivate fixture prompt.\n",
-      "utf8",
-    );
-    writeFileSync(
-      join(ghostDir, "docs", "guides", "launch.md"),
-      "# Launch guide\n\nShip deliberately.\n\n#product #launch\n",
-      "utf8",
-    );
     writeFileSync(
       join(ghostDir, "memory", "preferred-tone.md"),
       "The owner prefers direct answers. Lead with the decision.\n",
       "utf8",
     );
 
-    const response = await fetch(`${base}/api/ghosts/casper/context`);
+    const response = await fetch(`${base}/api/ghosts/casper/memory`);
     expect(response.status).toBe(200);
     const body = await response.json() as {
-      character: { path: string };
-      memory: Array<{ path: string; description: string; content: string }>;
-      agents: Array<{ name: string; source: string }>;
+      memory: Array<{ path: string; slug: string; content: string; updated: string }>;
+      skipped: unknown[];
     };
-    expect(body.character.path).toBe("character.md");
-    expect(body).not.toHaveProperty("docs");
-    expect(body.memory).toContainEqual(expect.objectContaining({
+    expect(body.memory).toEqual([{
       path: "memory/preferred-tone.md",
-      description: "The owner prefers direct...",
+      slug: "preferred-tone",
       content: "The owner prefers direct answers. Lead with the decision.",
-    }));
-    expect(body.agents).toEqual([]);
+      updated: expect.any(String),
+    }]);
+    expect(body.skipped).toEqual([]);
 
-    expect((await fetch(`${base}/api/ghosts/casper/context`, {
+    expect((await fetch(`${base}/api/ghosts/casper/memory`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: "{}",
     })).status).toBe(405);
-    expect((await fetch(`${base}/api/ghosts/missing/context`)).status).toBe(404);
+    expect((await fetch(`${base}/api/ghosts/missing/memory`)).status).toBe(404);
   });
 
-  it("moves confirmed memory files to Trash and refuses ghost-local docs", async () => {
+  it("writes one fact through the validating writer", async () => {
+    const base = await serve();
+    const ghostDir = join(temp!.root, "casper");
+    const put = (body: unknown) => fetch(`${base}/api/ghosts/casper/memory`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    const created = await put({ content: "Prefers concise replies." });
+    expect(created.status).toBe(200);
+    expect(await created.json()).toEqual({
+      ok: true,
+      slug: "prefers-concise-replies",
+      path: "memory/prefers-concise-replies.md",
+      created: true,
+    });
+    expect(readFileSync(join(ghostDir, "memory", "prefers-concise-replies.md"), "utf8"))
+      .toBe("Prefers concise replies.\n");
+
+    const replaced = await put({ name: "prefers-concise-replies", content: "Prefers one item." });
+    expect((await replaced.json() as { created: boolean }).created).toBe(false);
+    expect(readFileSync(join(ghostDir, "memory", "prefers-concise-replies.md"), "utf8"))
+      .toBe("Prefers one item.\n");
+
+    expect((await put({ content: "   " })).status).toBe(400);
+    expect((await put({ content: 42 })).status).toBe(400);
+    expect((await put({ name: "Not A Slug", content: "x" })).status).toBe(400);
+  });
+
+  it("moves confirmed memory files to Trash and refuses everything else", async () => {
     const base = await serve();
     const ghostDir = join(temp!.root, "casper");
     const doc = join(ghostDir, "docs", "delete-me.md");
@@ -868,39 +693,28 @@ describe("GET /api/ghosts/:name/context", () => {
     mkdirSync(join(ghostDir, "docs"), { recursive: true });
     writeFileSync(doc, "doc\n", "utf8");
     writeFileSync(memory, "temporary memory\n", "utf8");
-    const remove = (body: unknown) => fetch(`${base}/api/ghosts/casper/context`, {
+    const remove = (body: unknown) => fetch(`${base}/api/ghosts/casper/memory`, {
       method: "DELETE",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     });
 
-    const unconfirmed = await remove({
-      section: "docs",
-      path: "docs/delete-me.md",
-      confirm: "docs/something-else.md",
-    });
-    expect(unconfirmed.status).toBe(400);
-    expect(existsSync(doc)).toBe(true);
+    expect((await remove({
+      path: "memory/delete-me-too.md",
+      confirm: "memory/something-else.md",
+    })).status).toBe(400);
+    expect(existsSync(memory)).toBe(true);
 
-    const docResponse = await remove({
-      section: "docs",
-      path: "docs/delete-me.md",
-      confirm: "docs/delete-me.md",
-    });
-    expect(docResponse.status).toBe(400);
+    expect((await remove({ path: "docs/delete-me.md", confirm: "docs/delete-me.md" })).status)
+      .toBe(400);
     expect(existsSync(doc)).toBe(true);
 
     expect((await remove({
-      section: "memory",
       path: "memory/delete-me-too.md",
       confirm: "memory/delete-me-too.md",
     })).status).toBe(200);
     expect(existsSync(memory)).toBe(false);
-    expect((await remove({
-      section: "character",
-      path: "character.md",
-      confirm: "character.md",
-    })).status).toBe(400);
+    expect((await remove({ path: "character.md", confirm: "character.md" })).status).toBe(400);
     expect(existsSync(join(ghostDir, "character.md"))).toBe(true);
   });
 });
@@ -1171,6 +985,41 @@ describe("GET /api/ghosts/:name/sessions/:id/commands", () => {
   });
 });
 
+describe("POST /api/ghosts/:name/sessions/:id/recap", () => {
+  it("returns a non-persisted Pi recap and enforces the route boundary", async () => {
+    const base = await serve([
+      { kind: "text", text: "We are shaping the launch notes." },
+      { kind: "text", text: "You are shaping the launch notes. Next: finish the opening section." },
+    ]);
+    await postTurn(base, { ...TURN_BODY, options: { sessionId: "conv-recap" } });
+    const transcriptUrl = `${base}/api/ghosts/casper/sessions/${piSegment("conv-recap")}/transcript`;
+    const before = await (await fetch(transcriptUrl)).json() as { total: number };
+    const recapUrl = `${base}/api/ghosts/casper/sessions/${piSegment("conv-recap")}/recap`;
+
+    const response = await fetch(recapUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      recap: "You are shaping the launch notes. Next: finish the opening section.",
+    });
+    const after = await (await fetch(transcriptUrl)).json() as { total: number };
+    expect(after.total).toBe(before.total);
+
+    expect((await fetch(recapUrl)).status).toBe(405);
+    expect((await fetch(
+      `${base}/api/ghosts/casper/sessions/${piSegment("missing")}/recap`,
+      { method: "POST", headers: { "content-type": "application/json" }, body: "{}" },
+    )).status).toBe(404);
+    expect((await fetch(
+      `${base}/api/ghosts/casper/sessions/${claudeSegment("conv-recap")}/recap`,
+      { method: "POST", headers: { "content-type": "application/json" }, body: "{}" },
+    )).status).toBe(409);
+  });
+});
+
 describe("session Connect routes", () => {
   it("does not expose encrypted snapshot sharing", async () => {
     const base = await serve();
@@ -1415,7 +1264,7 @@ describe("ghost MCP routes", () => {
       })],
     });
     expect(host!.mcpConnectionStatus("casper", "route_fixture")).toBe("connected");
-    expect(opened.session.getToolByName(firstTool)).toBeDefined();
+    expect(opened.session.getToolDefinition(firstTool)).toBeDefined();
 
     const disabled = await jsonRequest(`${collection}/route_fixture/enabled`, "PUT", {
       enabled: false,
@@ -1427,7 +1276,7 @@ describe("ghost MCP routes", () => {
         connectionStatus: "disabled",
       })],
     });
-    expect(opened.session.getToolByName(firstTool)).toBeUndefined();
+    expect(opened.session.getToolDefinition(firstTool)).toBeUndefined();
 
     const enabled = await jsonRequest(`${collection}/route_fixture/enabled`, "PUT", {
       enabled: true,
@@ -1440,7 +1289,7 @@ describe("ghost MCP routes", () => {
       })],
     });
     expect(host!.mcpConnectionStatus("casper", "route_fixture")).toBe("connected");
-    expect(opened.session.getToolByName(firstTool)).toBeDefined();
+    expect(opened.session.getToolDefinition(firstTool)).toBeDefined();
 
     const replaced = await jsonRequest(`${collection}/route_fixture`, "PUT", {
       config: { type: "stdio", command: process.execPath, args: [secondServer] },
@@ -1453,13 +1302,13 @@ describe("ghost MCP routes", () => {
       })],
     });
     expect(host!.mcpConnectionStatus("casper", "route_fixture")).toBe("connected");
-    expect(opened.session.getToolByName(firstTool)).toBeUndefined();
-    expect(opened.session.getToolByName(secondTool)).toBeDefined();
+    expect(opened.session.getToolDefinition(firstTool)).toBeUndefined();
+    expect(opened.session.getToolDefinition(secondTool)).toBeDefined();
 
     const removed = await jsonRequest(`${collection}/route_fixture`, "DELETE");
     expect(removed.status).toBe(200);
     expect(await removed.json()).toMatchObject({ servers: [] });
-    expect(opened.session.getToolByName(secondTool)).toBeUndefined();
+    expect(opened.session.getToolDefinition(secondTool)).toBeUndefined();
     expect(host!.mcpConnectionStatus("casper", "route_fixture")).toBe("disconnected");
   });
 
@@ -1478,9 +1327,9 @@ describe("ghost MCP routes", () => {
       config: { type: "stdio", command: process.execPath, args: [firstServer] },
     });
     expect(added.status).toBe(201);
-    expect(opened.session.getToolByName(stableTool)).toBeDefined();
+    expect(opened.session.getToolDefinition(stableTool)).toBeDefined();
 
-    vi.spyOn(opened.session, "refreshMCPTools")
+    vi.spyOn(opened.session, "reload")
       .mockRejectedValueOnce(new Error("injected live MCP publication failure"));
     const failed = await jsonRequest(`${collection}/route_fixture`, "PUT", {
       config: {
@@ -1492,8 +1341,8 @@ describe("ghost MCP routes", () => {
     });
     expect(failed.status).toBe(500);
     expect(await failed.json()).toMatchObject({ error: { code: "internal_error" } });
-    expect(opened.session.getToolByName(stableTool)).toBeDefined();
-    expect(opened.session.getToolByName(nextTool)).toBeUndefined();
+    expect(opened.session.getToolDefinition(stableTool)).toBeDefined();
+    expect(opened.session.getToolDefinition(nextTool)).toBeUndefined();
     expect(host!.mcpConnectionStatus("casper", "route_fixture")).toBe("connected");
 
     const durable = await fetch(collection);
@@ -1518,8 +1367,8 @@ describe("ghost MCP routes", () => {
     expect(await retried.json()).toMatchObject({
       servers: [expect.objectContaining({ connectionStatus: "connected" })],
     });
-    expect(opened.session.getToolByName(stableTool)).toBeUndefined();
-    expect(opened.session.getToolByName(nextTool)).toBeDefined();
+    expect(opened.session.getToolDefinition(stableTool)).toBeUndefined();
+    expect(opened.session.getToolDefinition(nextTool)).toBeDefined();
   });
 });
 
@@ -2628,7 +2477,7 @@ describe("routing and transport", () => {
 
   it("404s anything outside the contract and 405s the wrong method", async () => {
     const base = await serve();
-    expect((await fetch(`${base}/`)).status).toBe(404);
+    expect((await fetch(`${base}/nothing`)).status).toBe(404);
     expect((await fetch(`${base}/api/other`)).status).toBe(404);
     expect((await fetch(`${base}/api/ghosts/casper`)).status).toBe(404);
     expect((await fetch(`${base}/api/ghosts/casper/sessions`, { method: "POST" })).status)
@@ -2701,5 +2550,35 @@ describe("routing and transport", () => {
     });
     expect(response.status).toBe(413);
     expect(await response.json()).toMatchObject({ error: { code: "payload_too_large" } });
+  });
+});
+
+describe("background job routes", () => {
+  it("lists an unopened conversation's jobs as empty and 404s an unknown cancel", async () => {
+    const base = await serve();
+    const listed = await fetch(`${base}/api/ghosts/casper/sessions/${piSegment("conv-jobs")}/jobs`);
+    expect(listed.status).toBe(200);
+    expect(await listed.json()).toEqual({ jobs: [] });
+
+    const cancelled = await fetch(`${base}/api/ghosts/casper/sessions/${piSegment("conv-jobs")}/jobs/job-1/cancel`, { method: "POST" });
+    expect(cancelled.status).toBe(404);
+    expect(await cancelled.json()).toMatchObject({ error: { code: "not_found" } });
+
+    const wrongMethod = await fetch(`${base}/api/ghosts/casper/sessions/${piSegment("conv-jobs")}/jobs`, { method: "DELETE" });
+    expect(wrongMethod.status).toBe(405);
+  });
+});
+
+describe("plan mode routes", () => {
+  it("reads, starts, and rejects malformed plan-mode actions", async () => {
+    const base = await serve();
+    const route = `${base}/api/ghosts/casper/sessions/${piSegment("conv-plan")}/plan`;
+    expect(await (await fetch(route)).json()).toEqual({ planning: false, plan: null, todo: [] });
+    const started = await fetch(route, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "start" }) });
+    expect(started.status).toBe(200);
+    expect(await started.json()).toMatchObject({ planning: true });
+    const bad = await fetch(route, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "dance" }) });
+    expect(bad.status).toBe(400);
+    expect(await (await fetch(`${base}/api/ghosts/casper/sessions/${piSegment("conv-plan")}/todo`)).json()).toEqual({ todo: [] });
   });
 });

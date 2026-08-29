@@ -17,7 +17,7 @@ import {
   type HomeReservation,
 } from "./home-reservation.js";
 import { ghostAuthPath, ghostModelsPath } from "./models.js";
-import { createGhostOmpRuntime } from "./omp-runtime.js";
+import { createGhostPiRuntime } from "./pi-runtime.js";
 
 const USAGE = `ghostd login — sign a ghost into a model provider
 
@@ -32,7 +32,7 @@ Options:
       --oauth          Force the OAuth flow (the default when both are offered).
       --ghosts-root <dir>  Directory holding one sub-directory per ghost.
       --config <file>  Config file (default ~/.config/ghost/config.json).
-      --offline        Forbid OMP's catalogue network calls.
+      --offline        Forbid pi's catalogue network calls.
   -h, --help           Show this message.
 `;
 
@@ -271,7 +271,7 @@ export async function loginCommand(
     const registry = new GhostRegistry(homeReservation.ghostsRoot);
     const ghost = await resolveGhost(rl, registry, args.ghost);
     const paths = ghostPaths(ghost.dir);
-    const runtime = await createGhostOmpRuntime({
+    const runtime = await createGhostPiRuntime({
       authPath: ghostAuthPath(paths.agentDir),
       modelsPath: ghostModelsPath(paths.home),
       allowModelNetwork: !config.offline,

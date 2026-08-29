@@ -3,9 +3,19 @@
  * defaults would silently move the owner's ghosts instead of telling them.
  */
 import { readFileSync } from "node:fs";
+import { mkdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { DEFAULT_COMPACTION_CONFIG, type CompactionConfig } from "./compaction.js";
+import { writePrivateJsonAtomic } from "./private-file.js";
+import { serializeByKey } from "./promise-chain.js";
+import type { RemoteAccessOptions } from "./tailscale-identity.js";
+
+export type RemoteConfig = Pick<RemoteAccessOptions, "owner" | "guests"> & {
+  enabled: boolean;
+};
+
+export type RemoteConfigFile = Partial<RemoteConfig>;
 
 export interface DaemonConfig {
   port: number;
@@ -27,7 +37,14 @@ export interface DaemonConfig {
   browserMode: "relay" | "profile";
   compaction: CompactionConfig;
   askTimeoutSeconds: number;
-  configPath: string | null;
+  /**
+   * Who may reach the daemon through `tailscale serve`: `owner` is the login
+   * that owns every ghost (default: the login this node belongs to), `guests`
+   * says what other tailnet members may do (default read-only).
+   */
+  remote: RemoteConfig;
+  /** The config file read, or the one that would be written; it need not exist. */
+  configPath: string;
   hooksPath: string;
 }
 
@@ -43,6 +60,7 @@ export interface DaemonConfigFile {
     thresholdFraction?: number;
   };
   askTimeoutSeconds?: number;
+  remote?: RemoteConfigFile;
 }
 
 export interface DaemonConfigOverrides {
@@ -138,6 +156,30 @@ function readConfigFile(path: string): DaemonConfigFile | null {
       throw new Error(`${path}: "browserMode" must be "relay" or "profile".`);
     }
     config.browserMode = file.browserMode;
+  }
+  if (file.remote !== undefined) {
+    if (file.remote === null || typeof file.remote !== "object" || Array.isArray(file.remote)) {
+      throw new Error(`${path}: "remote" must be a JSON object.`);
+    }
+    const raw = file.remote as Record<string, unknown>;
+    const remote: RemoteConfigFile = {};
+    if (raw.enabled !== undefined) {
+      if (typeof raw.enabled !== "boolean") {
+        throw new Error(`${path}: "remote.enabled" must be a boolean.`);
+      }
+      remote.enabled = raw.enabled;
+    }
+    if (raw.owner !== undefined) {
+      if (typeof raw.owner !== "string" || !raw.owner.trim()) throw new Error(`${path}: "remote.owner" must be a login.`);
+      remote.owner = raw.owner;
+    }
+    if (raw.guests !== undefined) {
+      if (raw.guests !== "read-only" && raw.guests !== "none") {
+        throw new Error(`${path}: "remote.guests" must be "read-only" or "none".`);
+      }
+      remote.guests = raw.guests;
+    }
+    config.remote = remote;
   }
   if (file.compaction !== undefined) {
     if (file.compaction === null || typeof file.compaction !== "object" || Array.isArray(file.compaction)) {
@@ -287,7 +329,35 @@ export function loadConfig(overrides: DaemonConfigOverrides = {}): DaemonConfig 
     browserMode,
     compaction,
     askTimeoutSeconds,
-    configPath: file ? configPath : null,
+    remote: { ...file?.remote, enabled: file?.remote?.enabled ?? false },
+    configPath,
     hooksPath,
   };
+}
+
+function plainObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+const configWrites = new Map<string, Promise<unknown>>();
+
+/** Merge a config patch, one section deep, without discarding fields this daemon version does not understand. */
+export function writeConfigFile(path: string, patch: Partial<DaemonConfigFile>): Promise<void> {
+  return serializeByKey(configWrites, path, async () => {
+    let existing: Record<string, unknown> = {};
+    try {
+      const parsed = JSON.parse(await readFile(path, "utf8")) as unknown;
+      if (!plainObject(parsed)) throw new Error(`${path} must contain a JSON object.`);
+      existing = parsed;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    const merged: Record<string, unknown> = { ...existing };
+    for (const [key, value] of Object.entries(patch)) {
+      if (value === undefined) continue;
+      merged[key] = plainObject(value) && plainObject(existing[key]) ? { ...existing[key], ...value } : value;
+    }
+    await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+    await writePrivateJsonAtomic(path, merged);
+  });
 }

@@ -5,21 +5,17 @@ import {
 } from "../src/compaction.js";
 
 describe("nativeCompactionSettings", () => {
-  it("enables OMP asynchronous compaction at 80% by default", () => {
-    expect(nativeCompactionSettings({ enabled: true })).toEqual({
-      "compaction.enabled": true,
-      "compaction.asyncEnabled": true,
-      "compaction.thresholdTokens": -1,
-      "compaction.thresholdPercent": 80,
+  it("reserves the last 20% of the model's window by default", () => {
+    expect(nativeCompactionSettings({ enabled: true }, 100_000)).toEqual({
+      enabled: true,
+      reserveTokens: 20_000,
     });
   });
 
-  it("projects the owner-facing fraction onto OMP's percentage", () => {
-    expect(nativeCompactionSettings({ enabled: true, thresholdFraction: 0.625 })).toEqual({
-      "compaction.enabled": true,
-      "compaction.asyncEnabled": true,
-      "compaction.thresholdTokens": -1,
-      "compaction.thresholdPercent": 62.5,
+  it("projects the owner-facing fraction onto pi's reserve", () => {
+    expect(nativeCompactionSettings({ enabled: true, thresholdFraction: 0.625 }, 80_000)).toEqual({
+      enabled: true,
+      reserveTokens: 30_000,
     });
   });
 
@@ -28,21 +24,12 @@ describe("nativeCompactionSettings", () => {
       enabled: true,
       thresholdTokens: 50_000,
       thresholdFraction: 0.5,
-    })).toEqual({
-      "compaction.enabled": true,
-      "compaction.asyncEnabled": true,
-      "compaction.thresholdTokens": 50_000,
-      "compaction.thresholdPercent": 50,
-    });
+    }, 200_000)).toEqual({ enabled: true, reserveTokens: 150_000 });
   });
 
-  it("projects the master switch without dropping the native threshold policy", () => {
-    expect(nativeCompactionSettings({ enabled: false })).toEqual({
-      "compaction.enabled": false,
-      "compaction.asyncEnabled": true,
-      "compaction.thresholdTokens": -1,
-      "compaction.thresholdPercent": 80,
-    });
+  it("keeps only the master switch when the window is unknown or compaction is off", () => {
+    expect(nativeCompactionSettings({ enabled: true }, undefined)).toEqual({ enabled: true });
+    expect(nativeCompactionSettings({ enabled: false }, 100_000)).toEqual({ enabled: false });
   });
 });
 

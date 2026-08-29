@@ -1,7 +1,7 @@
 # Ghost hooks
 
 Ghost owns an awaited lifecycle boundary above its model harnesses. A hook has
-the same behavior whether a conversation uses OMP or the owner-local Claude Code
+the same behavior whether a conversation uses pi or the owner-local Claude Code
 runtime.
 
 Ghost supports three events. `before_prompt` runs after the user submits a prompt
@@ -9,7 +9,7 @@ but before the model request. It can add advisory context to that request withou
 blocking or creating another model turn. `session_stop` runs after an assistant
 pass and before Ghost emits the turn's terminal `done` frame. It can accept the
 pass or return model-visible context for a hidden continuation. The stop boundary
-follows OMP's contract rather than inferring completion from notification-only
+is awaited by Ghost rather than inferred from notification-only
 `agent_end` events. `conversation_idle` runs in the background after a configured
 whole-second interval without owner activity. It cannot block or continue a turn.
 
@@ -59,7 +59,10 @@ User hooks live in `$XDG_CONFIG_HOME/ghost/hooks.json` (normally
 }
 ```
 
-Restart `ghostd` after changing the file. Groups and handlers run in file order.
+Ghost reads the file at startup and again whenever `PUT /api/hooks/config`
+replaces it; the shell's Hooks pane edits it through that route, and no
+restart is needed for those edits. An edit made to the file by hand still
+needs a restart. Groups and handlers run in file order.
 Configured command strings must be non-empty and contain no NUL byte.
 All non-empty `before_prompt` contexts are combined. The first `session_stop`
 handler that requests a continuation wins. `idleSeconds` is a safe integer from
@@ -72,16 +75,30 @@ conversation's durable last-activity time. An optional `registrationId` on a
 stable when its delivery identity must survive configuration reordering;
 otherwise Ghost derives a stable identity from the admitted command fields.
 
+An optional top-level `builtin` object tunes hooks that Ghost registers in
+code. Each key names one built-in hook — the `settingsKey` on its status row
+— and holds `{ "idleSeconds": <integer 1..86400> }`. Today the one key is
+`memory_upkeep`, the idle interval before memory maintenance runs (default
+60). The section is validated with the rest of the file and applies at the
+next daemon start, not live: a built-in idle registration's identity includes
+its interval and persisted retry state refers to that identity.
+
+```json
+{ "hooks": {}, "builtin": { "memory_upkeep": { "idleSeconds": 900 } } }
+```
+
 This file configures Ghost's machine-level awaited command hooks. They run for
-both OMP and Claude Code conversations, above either model harness, and commands
+both pi and Claude Code conversations, above either model harness, and commands
 run with the daemon user's permissions. It is therefore a trusted machine
 configuration surface, not portable ghost data.
 
-Ghost-owned OMP hook extensions are a separate, Pi-only mechanism. Direct,
+Ghost-owned hook extensions are a separate, pi-only mechanism. Direct,
 non-hidden `.js`/`.ts` regular files in a trusted ghost home's visible
-`hooks/pre/` and `hooks/post/` directories are OMP extension factories; they run
-in-process with the daemon user's permissions and may register OMP handlers or
-tools. Ghost opens the home and each parent directory without following links,
+`hooks/pre/` and `hooks/post/` directories are Ghost extension factories
+written against `packages/extensions/src/extension-api.ts` (`registerTool`,
+`before_agent_start`); they run in-process with the daemon user's permissions
+and are adapted to pi by the daemon. Ghost opens the home and each parent
+directory without following links,
 opens the entry itself with `O_NOFOLLOW`, verifies that it is a regular file,
 and imports that pinned descriptor before binding the factory to the session.
 All dot-prefixed entries are ignored before extension or file-type checks, so
@@ -92,7 +109,7 @@ compatibility directories never contribute executable hooks.
 Treat a ghost home containing those visible hook files as executable code. Do
 not place an unreviewed archive or somebody else's hook extension there; remove
 the hook files before opening a session if the home is not trusted. The
-machine-level `hooks.json` commands and ghost-owned OMP extensions do not share
+machine-level `hooks.json` commands and ghost-owned extensions do not share
 configuration, ordering, or cross-runtime semantics.
 
 Each machine command runs in an owned process group. Abort, timeout, or the
@@ -119,7 +136,7 @@ explicit ghost-home storage root, and operational working directory:
   "ghost_name": "casper",
   "ghost_home": "/home/me/ghosts/casper",
   "cwd": "/home/me/project",
-  "runtime": "omp",
+  "runtime": "pi",
   "conversation_id": "conversation-a",
   "conversation_runtime": "pi"
 }
@@ -134,7 +151,7 @@ same user-initiated model request, return:
 
 `before_prompt` cannot block and does not accept continuation decisions. Errors,
 timeouts, and malformed output fail open. Context is hidden from the chat UI. In
-the OMP runtime it is a non-displayed custom context message; in the Claude Code
+the pi runtime it is a non-displayed custom context message; in the Claude Code
 runtime it is a synthetic, non-querying message paired with the real user prompt.
 
 ## `session_stop` protocol
@@ -163,17 +180,17 @@ contains the same message directly:
   "ghost_name": "casper",
   "ghost_home": "/home/me/ghosts/casper",
   "cwd": "/home/me/project",
-  "runtime": "omp",
+  "runtime": "pi",
   "conversation_id": "conversation-a",
   "conversation_runtime": "pi"
 }
 ```
 
-`runtime` is `omp` or `claude-code`. Both runtimes expose only the current
+`runtime` is `pi` or `claude-code`. Both runtimes expose only the current
 assistant pass in `messages`; conversation history remains owned by the runtime.
 `owner_prompt` is required and immutable across hidden continuation passes.
 `transcript_path`, when present, is the runtime's native transcript on disk — the
-Pi session file for OMP conversations, the Claude Code SDK session file for Claude
+pi session file for pi conversations, the Claude Code SDK session file for Claude
 Code conversations — so a hook can review the whole owner turn, not just the
 current pass. It is omitted when no transcript exists yet, and is untrusted
 content exactly like `messages`.
@@ -191,7 +208,7 @@ hidden continuation:
 
 `continue`/`decision` without non-empty context is ignored. Exit 2 also blocks,
 using stderr as the reason. Other exit codes, malformed output, thrown handlers,
-and timeouts are logged and fail open, matching OMP's `session_stop` policy.
+and timeouts are logged and fail open.
 Handlers are cancelled when the client aborts the turn.
 
 Ghost sets `stop_hook_active: true` on continuation passes and permits at most
@@ -221,7 +238,7 @@ conversation-maintenance identity:
   "ghost_name": "casper",
   "ghost_home": "/home/me/ghosts/casper",
   "cwd": "/home/me/project",
-  "runtime": "omp",
+  "runtime": "pi",
   "conversation_id": "conversation-a",
   "conversation_runtime": "pi",
   "conversation_incarnation": "68c7477b-c759-4a4e-a747-c908159080c2",
@@ -233,7 +250,7 @@ conversation-maintenance identity:
 ```
 
 `conversation_runtime` is the durable runtime (`pi` or `claude-code`), while
-`runtime` names the awaited-hook harness (`omp` or `claude-code`). The `cwd` is
+`runtime` names the awaited-hook harness (`pi` or `claude-code`). The `cwd` is
 the actual operational directory after the settled turn; `ghost_home` remains
 the separate storage root. `last_turn_outcome` is `completed` or `failed`.
 For Pi, `session_id` is the raw Ghost conversation id and `session_file` is its
@@ -282,9 +299,24 @@ durable cwd change.
 
 Authenticated `GET /api/hooks` returns only `{ active, total, events, hooks,
 sessionStopContinuationCap }`. Event rows contain `{ event, count }`; hook rows
-contain `{ event, name, description }` plus `idleSeconds` only for an idle hook.
-The continuation cap is exactly 2. Commands, source paths, arguments, prompts,
-injected context, errors, receipts, and scheduler state never cross that route.
+contain `{ event, source, name, description }` plus `idleSeconds` only for an
+idle hook, where `source` is `builtin` for an in-process registration and
+`config` for a `hooks.json` command. The continuation cap is an integer in
+`1..100` (default 10). Commands, source paths, arguments, prompts, injected
+context, errors, receipts, and scheduler state never cross that route.
+
+## Editing
+
+Authenticated `GET /api/hooks/config` returns `{ path, document }`: the
+admitted `hooks.json` as one object and its absolute path. `PUT
+/api/hooks/config` with a whole document validates it with the same loader,
+writes it atomically, and swaps the live command hooks. A rejected document
+is a 400 naming the offending field and changes nothing. `before_prompt` and
+`session_stop` changes apply at the next boundary. A changed idle registration
+arms from the next owner activity; a deadline already armed against a retired
+registration settles as a no-op rather than an error. Built-in hooks such as
+memory upkeep are registered in code; the document's `builtin` section tunes
+them and applies at the next start.
 
 ## In-process API
 

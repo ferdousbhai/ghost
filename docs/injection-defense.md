@@ -24,9 +24,7 @@ GHOST_INJECTION_MODEL=protectai/deberta-v3-base-prompt-injection-v2 ghost
 
 `GHOST_INJECTION_THRESHOLD` optionally sets the classifier flag threshold from 0 to 1; it defaults to `0.5`. If no model is configured, the classifier remains disabled and does not download a model.
 
-### Measured classifier results (2026-08-24)
-
-`protectai/deberta-v3-base-prompt-injection-v2` loaded and ran through `@huggingface/transformers`. On the 34-injection/28-benign corpus at the default `0.5` threshold, `ClassifierInjectionDetector` achieved **32/34 = 0.941 recall** and **8/28 = 0.286 FPR**; the additive `CompositeInjectionDetector` achieved **34/34 = 1.000 recall** and **8/28 = 0.286 FPR**. The model-backed test used Vitest's `--testTimeout=60000` CLI option because the default five-second timeout expired during inference. The heuristic already caught every injection in this corpus, so the classifier added no catches here and instead added eight false positives.
+On the evaluation corpus the heuristic alone catches every injection, so the classifier adds false positives rather than catches; treat it as a second opinion, not a default. Current numbers come from `injection-eval` below.
 
 ## Detection evaluation
 

@@ -84,7 +84,7 @@ FloatingWindow {
      */
     function requestBranch(entryId: string): void {
         if (entryId === "") return;
-        if (composer.text.trim() === "") {
+        if (!composer.hasDraft) {
             Ghostd.branchFrom(entryId);
             return;
         }
@@ -134,7 +134,7 @@ FloatingWindow {
     minimumSize: Qt.size(568, 360)
 
     function showSection(section: string): void {
-        if (["chat", "docs", "memory", "agents", "commands", "hooks", "mcp", "connect", "character"]
+        if (["chat", "memory", "commands", "hooks", "mcp", "connect", "remote", "character"]
                 .indexOf(section) < 0)
             return;
         hud.loginOpen = false;
@@ -151,10 +151,8 @@ FloatingWindow {
             Ghostd.fetchMcp(false);
         } else if (section === "connect") {
             Ghostd.fetchConnect(false);
-        } else if (section === "docs") {
-            Ghostd.fetchDocuments("", "", false, false);
-        } else {
-            Ghostd.fetchContext(false);
+        } else if (section === "memory") {
+            Ghostd.fetchMemory(false);
         }
     }
 
@@ -961,6 +959,10 @@ FloatingWindow {
                         Layout.fillWidth: true
                     }
 
+                    WorkStrip {
+                        Layout.fillWidth: true
+                    }
+
                     QueueLine {
                         Layout.fillWidth: true
                         steering: Ghostd.steeringQueue
@@ -998,10 +1000,29 @@ FloatingWindow {
                         onDismissed: Ghostd.dismissAsk()
                     }
 
+                    Text {
+                        visible: Ghostd.recapText !== ""
+                        Layout.fillWidth: true
+                        text: "※ recap: " + Ghostd.recapText
+                        textFormat: Text.PlainText
+                        color: Theme.foregroundDim
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSizeSmall
+                        font.italic: true
+                        wrapMode: Text.Wrap
+                    }
+
                     Composer {
                         id: composer
                         visible: Ghostd.pendingAsk === null
                         Layout.fillWidth: true
+
+                        Binding {
+                            target: Ghostd
+                            property: "composerHasDraft"
+                            value: composer.hasDraft
+                        }
+
                         onSubmitted: (prompt, mode) => {
                             if (mode === "prompt") Ghostd.send(prompt);
                             else Ghostd.queueMessage(prompt, mode);
@@ -1044,29 +1065,34 @@ FloatingWindow {
                 }
             }
 
-            // Memory, inactive agent definitions, and character replace chat rather than
-            // nesting its roster/conversation sidebar inside their own index.
-            ContextBrowser {
-                id: contextBrowser
-                visible: ["memory", "agents", "character"]
-                    .indexOf(hud.currentSection) >= 0
-                    && !hud.loginOpen && !hud.switcherOpen
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                section: hud.currentSection
-            }
-
-            // Machine-shared Documents have their own lazy folder hierarchy;
-            // unlike ghost context, it survives ghost selection and rename.
-            DocumentsBrowser {
-                id: documentsBrowser
-                visible: hud.currentSection === "docs"
+            // Memory and character replace chat rather than nesting its
+            // roster/conversation sidebar inside their own surface.
+            MemoryList {
+                id: memoryList
+                visible: hud.currentSection === "memory"
                     && !hud.loginOpen && !hud.switcherOpen
                 Layout.fillWidth: true
                 Layout.fillHeight: true
             }
 
-            // The effective OMP command palette is conversation-scoped. A pick
+            // character.md is a real file, so it gets the real file editor.
+            // Instantiated only while shown: leaving flushes and returning
+            // re-reads, the same as the workbench.
+            Loader {
+                id: characterPane
+                readonly property string path: Workbench.absolute("character.md")
+                active: hud.currentSection === "character" && characterPane.path !== ""
+                visible: active && !hud.loginOpen && !hud.switcherOpen
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+
+                sourceComponent: FilePane {
+                    filePath: characterPane.path
+                    onClosed: hud.showSection("chat")
+                }
+            }
+
+            // The effective command palette is conversation-scoped. A pick
             // returns to chat with the command staged, never already running.
             CommandsBrowser {
                 id: commandsBrowser
@@ -1080,8 +1106,9 @@ FloatingWindow {
                 }
             }
 
-            // Machine-level hook configuration is global and display-only. It
-            // never creates or selects a conversation merely to show status.
+            // Machine-level hook configuration is global: built-in hooks are
+            // shown, the owner's command hooks are edited in place. It never
+            // creates or selects a conversation merely to show status.
             HooksBrowser {
                 id: hooksBrowser
                 visible: hud.currentSection === "hooks"
@@ -1104,6 +1131,15 @@ FloatingWindow {
                     && !hud.loginOpen && !hud.switcherOpen
                 Layout.fillWidth: true
                 Layout.fillHeight: true
+            }
+
+            RemoteAccess {
+                id: remoteAccess
+                visible: hud.currentSection === "remote"
+                    && !hud.loginOpen && !hud.switcherOpen
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                onCloseRequested: hud.showSection("chat")
             }
 
             // Model switcher: swaps in over the transcript body.

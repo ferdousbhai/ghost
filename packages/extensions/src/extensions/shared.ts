@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import type { AgentToolResult, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
+import type { GhostToolContext, GhostToolResult } from "../extension-api.js";
 import { GhostError } from "../errors.js";
 import { GhostHome, openGhostHome } from "../home.js";
 import { detectInjection, fenceUntrusted } from "../untrusted.js";
@@ -15,14 +15,14 @@ export interface GhostExtensionOptions {
   readonly capabilities?: GhostToolCapabilitiesSource;
 }
 
-export type CwdContext = Pick<ExtensionContext, "cwd">;
+export type CwdContext = Pick<GhostToolContext, "cwd">;
 
 export interface GhostToolCapabilities {
   readonly vision: boolean;
 }
 
 export type GhostToolCapabilitiesResolver = (
-  context: Pick<ExtensionContext, "cwd" | "model">,
+  context: GhostToolContext,
 ) => GhostToolCapabilities;
 
 export type GhostToolCapabilitiesSource =
@@ -33,7 +33,7 @@ const NO_TOOL_CAPABILITIES: GhostToolCapabilities = { vision: false };
 
 export function resolveToolCapabilities(
   options: GhostExtensionOptions,
-  context: Pick<ExtensionContext, "cwd" | "model">,
+  context: GhostToolContext,
 ): GhostToolCapabilities {
   const source = options.capabilities;
   if (typeof source === "function") return source(context);
@@ -60,7 +60,7 @@ export function resolveHome(
 export function textResult<TDetails>(
   text: string,
   details: TDetails,
-): AgentToolResult<TDetails> {
+): GhostToolResult<TDetails> {
   return { content: [{ type: "text", text }], details };
 }
 
@@ -77,7 +77,7 @@ export async function untrustedTextResult<TDetails extends object>(
   text: string,
   details: TDetails,
   source: string,
-): Promise<AgentToolResult<TDetails & InjectionFlagDetails>> {
+): Promise<GhostToolResult<TDetails & InjectionFlagDetails>> {
   const detection = await detectInjection(text, { source });
   const fenced = fenceUntrusted(text, { source });
   const protectedText = detection.flagged

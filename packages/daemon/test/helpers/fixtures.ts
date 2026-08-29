@@ -2,12 +2,19 @@
  * Temp-directory fixtures: a ghosts root, a ghost home, and the SSE reader
  * the pinned pi-messages client uses.
  */
+import { afterEach } from "vitest";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { MachineDocuments } from "@ghost/extensions";
 import { GhostRegistry, ghostPaths } from "../../src/ghosts.js";
+import { HomeOperationCoordinator } from "../../src/home-operations.js";
+import { McpCatalog } from "../../src/mcp-catalog.js";
 import { openAiCompatiblePreset, writeGhostModels } from "../../src/models.js";
 import type { PiMessagesEvent } from "../../src/pi-messages.js";
+import { startDaemonServer, type ListeningServer } from "../../src/server.js";
+import { SessionHost } from "../../src/session-host.js";
+import { startMockProvider, type MockProvider, type MockStep } from "./mock-provider.js";
 
 export interface TempGhosts {
   root: string;
@@ -108,6 +115,66 @@ export function seedGhost(root: string, options: SeedGhostOptions = {}): string 
   return dir;
 }
 
+export interface TestDaemon {
+  apiToken: string;
+  env: NodeJS.ProcessEnv;
+  host: SessionHost;
+  listening: ListeningServer;
+  provider: MockProvider;
+  temp: TempGhosts;
+  tokenFile: string;
+}
+
+export interface StartTestDaemonOptions {
+  ghost?: string;
+  memory?: Record<string, string>;
+  openSession?: string;
+  providerScript?: MockStep[];
+}
+
+/** A real authenticated daemon bound only to disposable test-owned state. */
+export async function startTestDaemon(options: StartTestDaemonOptions = {}): Promise<TestDaemon> {
+  const apiToken = "a".repeat(64);
+  const ghost = options.ghost ?? "casper";
+  const temp = makeTempGhosts();
+  temp.registry.ensureRoot();
+  const provider = await startMockProvider({
+    script: options.providerScript ?? [{ kind: "text", text: "hello" }],
+  });
+  seedGhost(temp.root, {
+    name: ghost,
+    memory: options.memory,
+    provider: { baseUrl: provider.url, modelId: provider.modelId },
+  });
+  const homeOperations = new HomeOperationCoordinator(temp.registry);
+  const host = new SessionHost({
+    registry: temp.registry,
+    homeOperations,
+    ownerHome: temp.ownerHome,
+    offline: true,
+    extensionOptions: { documents: new MachineDocuments(temp.documentsDir) },
+  });
+  const listening = await startDaemonServer({
+    registry: temp.registry,
+    host,
+    homeOperations,
+    mcp: new McpCatalog({ registry: temp.registry }),
+    apiToken,
+    relay: null,
+    port: 0,
+  });
+  const tokenFile = join(temp.root, ".state", "api-token");
+  mkdirSync(dirname(tokenFile), { recursive: true });
+  writeFileSync(tokenFile, `${apiToken}\n`, { mode: 0o600 });
+  const env = {
+    GHOSTD_PORT: String(listening.port),
+    GHOSTD_API_TOKEN_FILE: tokenFile,
+    XDG_CONFIG_HOME: join(temp.root, ".config"),
+  };
+  if (options.openSession) await host.open(ghost, options.openSession);
+  return { apiToken, env, host, listening, provider, temp, tokenFile };
+}
+
 /**
  * Parse an SSE body according to Ghost's pi-messages contract: split on a
  * blank line, take the first `data:` line of each
@@ -126,4 +193,19 @@ export function parseSseStream(body: string): PiMessagesEvent[] {
     events.push(JSON.parse(data) as PiMessagesEvent);
   }
   return events;
+}
+
+/** A LIFO cleanup stack drained after each test in the calling file. */
+export function useCleanups(): { push(cleanup: () => void | Promise<void>): void } {
+  const cleanups: Array<() => void | Promise<void>> = [];
+  afterEach(async () => {
+    for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
+  });
+  return { push: (cleanup) => cleanups.push(cleanup) };
+}
+
+/** A private temporary directory, removed by `cleanup`. */
+export function tempDir(prefix = "ghostd-test-"): { path: string; cleanup(): void } {
+  const path = mkdtempSync(join(tmpdir(), prefix));
+  return { path, cleanup: () => rmSync(path, { recursive: true, force: true }) };
 }

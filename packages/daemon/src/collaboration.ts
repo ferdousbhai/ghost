@@ -1,6 +1,4 @@
-import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
-import { CollabHost } from "@oh-my-pi/pi-coding-agent/collab/host";
-import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
+import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import { GhostError } from "./ghosts.js";
 
 export interface CollaborationParticipant {
@@ -20,13 +18,16 @@ export interface CollaborationStatus {
 export interface StartCollaborationInput {
   sessionKey: string;
   session: AgentSession;
-  promptCustomMessage?: AgentSession["promptCustomMessage"];
+  /** Routes a guest's prompt through the host's owner-pass bookkeeping. */
+  promptGuest?: (text: string) => Promise<void>;
   relayUrl: string;
   writable: boolean;
   confirmed: boolean;
+  /** The web UI base for share links, from the ghost's settings. */
+  webUrl?: string;
 }
 
-interface CollaborationHost {
+export interface CollaborationHost {
   readonly link: string;
   readonly webLink: string;
   readonly viewLink: string;
@@ -36,7 +37,14 @@ interface CollaborationHost {
   stop(reason: string): Promise<void>;
 }
 
-type CollaborationHostFactory = (context: InteractiveModeContext) => CollaborationHost;
+/** What a relay host is built from: the session it mirrors and how guests prompt it. */
+export interface CollaborationHostContext {
+  session: AgentSession;
+  promptGuest: (text: string) => Promise<void>;
+  contextUsage(): { usedTokens: number; contextWindow: number };
+}
+
+export type CollaborationHostFactory = (context: CollaborationHostContext) => CollaborationHost;
 
 interface ActiveCollaboration {
   host: CollaborationHost;
@@ -78,51 +86,17 @@ function normalizedRelayUrl(value: string): string {
   return parsed.toString();
 }
 
-function collaborationSession(
-  session: AgentSession,
-  promptCustomMessage?: AgentSession["promptCustomMessage"],
-): AgentSession {
-  if (!promptCustomMessage) return session;
-  return new Proxy(session, {
-    get(target, property) {
-      if (property === "promptCustomMessage") return promptCustomMessage;
-      const value = Reflect.get(target, property, target);
-      return typeof value === "function" ? value.bind(target) : value;
-    },
-    set(target, property, value) {
-      return Reflect.set(target, property, value, target);
-    },
-  });
-}
-
-function contextFor(
-  session: AgentSession,
-  promptCustomMessage?: AgentSession["promptCustomMessage"],
-): InteractiveModeContext {
-  const contextUsage = (): { usedTokens: number; contextWindow: number } => {
-    const usage = session.getContextUsage();
-    return {
-      usedTokens: usage?.tokens ?? 0,
-      contextWindow: usage?.contextWindow ?? session.model?.contextWindow ?? 0,
-    };
-  };
-  const adapter = {
-    session: collaborationSession(session, promptCustomMessage),
-    sessionManager: session.sessionManager,
-    settings: session.settings,
-    eventBus: undefined,
-    collabHost: undefined,
-    showStatus: () => {},
-    updatePendingMessagesDisplay: () => {},
-    statusLine: {
-      getCachedContextBreakdown: contextUsage,
-      setCollabStatus: () => {},
-      invalidate: () => {},
-    },
-    ui: { requestRender: () => {} },
-  };
-  return adapter as unknown as InteractiveModeContext;
-}
+/**
+ * The encrypted relay host is being ported from Oh My Pi to Ghost; until it
+ * lands, starting a collaboration reports that honestly.
+ */
+const unavailableHost: CollaborationHostFactory = () => {
+  throw new GhostError(
+    "not_supported",
+    "Remote collaboration is not available in this build of Ghost yet.",
+    501,
+  );
+};
 
 export class CollaborationManager {
   private readonly active = new Map<string, ActiveCollaboration>();
@@ -132,7 +106,7 @@ export class CollaborationManager {
   private disposePromise: Promise<void> | undefined;
 
   constructor(options: CollaborationManagerOptions = {}) {
-    this.createHost = options.createHost ?? ((context) => new CollabHost(context));
+    this.createHost = options.createHost ?? unavailableHost;
   }
 
   status(sessionKey: string): CollaborationStatus {
@@ -183,14 +157,19 @@ export class CollaborationManager {
 
     return this.serialize(input.sessionKey, async () => {
       if (this.active.has(input.sessionKey)) return this.status(input.sessionKey);
-
-      const context = contextFor(input.session, input.promptCustomMessage);
-      const host = this.createHost(context);
-      context.collabHost = host as CollabHost;
-      const configuredWebUrl = input.session.settings.get("collab.webUrl");
-      const webUrl = typeof configuredWebUrl === "string" && configuredWebUrl.trim()
-        ? configuredWebUrl.trim()
-        : undefined;
+      const session = input.session;
+      const host = this.createHost({
+        session,
+        promptGuest: input.promptGuest ?? ((text) => session.prompt(text)),
+        contextUsage: () => {
+          const usage = session.getContextUsage();
+          return {
+            usedTokens: usage?.tokens ?? 0,
+            contextWindow: usage?.contextWindow ?? session.model?.contextWindow ?? 0,
+          };
+        },
+      });
+      const webUrl = input.webUrl?.trim() || undefined;
       try {
         await host.start(relayUrl, webUrl);
       } catch (error) {

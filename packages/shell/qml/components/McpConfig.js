@@ -57,8 +57,8 @@ function replacementConfig(server, requestedType) {
     if (typeof source.timeout === "number") config.timeout = source.timeout;
     if (source.requestIdFormat === "string" || source.requestIdFormat === "number")
         config.requestIdFormat = source.requestIdFormat;
-    // These fields are policy/placement metadata, not configured values. OMP
-    // exposes them verbatim in the daemon's sanitized view, so replacement
+    // These fields are policy/placement metadata, not configured values. The daemon
+    // exposes them verbatim in its sanitized view, so replacement
     // editing must carry them forward instead of quietly changing semantics.
     if (type === "stdio") {
         if (typeof source.cwd === "string") config.cwd = source.cwd;

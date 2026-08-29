@@ -1,8 +1,5 @@
-import type {
-  ExtensionAPI,
-  ExtensionFactory,
-} from "@oh-my-pi/pi-coding-agent";
-import { Type } from "@oh-my-pi/pi-coding-agent/extensibility/legacy-typebox";
+import { Type } from "typebox";
+import type { GhostExtensionAPI, GhostExtensionFactory } from "../extension-api.js";
 import { stringEnum } from "../tool-schema.js";
 import {
   GhostBrowserError,
@@ -31,6 +28,10 @@ import {
 export const GHOST_BROWSER = "ghost_browser";
 
 export const GHOST_BROWSER_TOOL_NAMES = [GHOST_BROWSER] as const;
+/** Actions that only look: what a read-only conversation (plan mode) may still run. */
+export const READ_ONLY_BROWSER_ACTIONS: ReadonlySet<string> = new Set([
+  "open", "read", "find", "screenshot", "back", "forward", "scroll", "console", "network",
+]);
 
 export function browserToolNames(): string[] {
   return [GHOST_BROWSER];
@@ -103,14 +104,14 @@ function describeProjectionChanges(changes: ReadonlyArray<readonly [number, stri
 
 export function createBrowserExtension(
   options: BrowserExtensionOptions = {},
-): ExtensionFactory {
+): GhostExtensionFactory {
   const sessionFor = (ctx: CwdContext): GhostBrowserSession =>
     browserSessionFor(resolveHome(options, ctx).dir, {
       ...options.browser,
       ...(options.backend === undefined ? {} : { backend: options.backend }),
     });
 
-  return (pi: ExtensionAPI) => {
+  return (pi: GhostExtensionAPI) => {
     pi.registerTool({
       name: GHOST_BROWSER,
       label: "Browse the web",

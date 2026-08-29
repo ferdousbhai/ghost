@@ -8,20 +8,13 @@
  * model is present to decide when to ask.
  */
 import {
-  closeSync,
-  constants,
-  fstatSync,
-  lstatSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
-  openSync,
-  readSync,
-  readdirSync,
   renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { homedir, tmpdir } from "node:os";
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -34,6 +27,8 @@ import {
 const argv = process.argv.slice(2);
 const flag = (name) => argv.includes(name);
 const opt = (name, fallback) => {
+  const inline = argv.find((argument) => argument.startsWith(`${name}=`));
+  if (inline) return inline.slice(name.length + 1);
   const i = argv.indexOf(name);
   return i >= 0 && argv[i + 1] ? argv[i + 1] : fallback;
 };
@@ -44,14 +39,80 @@ const SESSION_CWD = homedir();
 const DELTA_MS = flag("--slow") ? 30 : 12;
 const TOOL_STEPS = Math.max(1, Math.min(100, Number(opt("--tool-steps", "1")) || 1));
 const ASK_TIMEOUT_S = Math.max(0, Number(opt("--ask-timeout", "120")) || 0);
+const START_IN_PLAN_MODE = flag("--plan");
+const NO_JOBS = flag("--no-jobs");
+const MOCK_STARTED_AT = Date.now();
 const OWNS_GHOSTS_ROOT = !process.env.GHOSTS_ROOT;
 const GHOSTS_ROOT = process.env.GHOSTS_ROOT
   || mkdtempSync(join(tmpdir(), "ghost-shell-mock-"));
-const OWNS_DOCUMENTS_ROOT = !process.env.GHOST_DOCUMENTS_ROOT;
-const DOCUMENTS_ROOT = process.env.GHOST_DOCUMENTS_ROOT
-  || mkdtempSync(join(tmpdir(), "ghost-documents-mock-"));
 const TRASH_ROOT = join(process.env.XDG_DATA_HOME || join(homedir(), ".local", "share"), "Trash", "files");
-const DOCUMENT_INLINE_MAX_BYTES = 1_048_576;
+const REMOTE_HOSTNAME = "omarchy-thinkpad.tail58bdd3.ts.net";
+const REMOTE_PROBLEM = opt(
+  "--remote-problem",
+  process.env.GHOST_REMOTE_PROBLEM ?? process.env.REMOTE_PROBLEM ?? "",
+);
+
+// Each problem breaks the Tailscale capability ladder at one rung; the rungs
+// below it stay true.
+const REMOTE_LADDER = ["installed", "running", "loggedIn", "operator"];
+const REMOTE_PROBLEMS = {
+  tailscale_missing: {
+    message: "Tailscale is not installed.",
+    action: "omarchy-install-service-tailscale",
+    breaks: "installed",
+  },
+  tailscale_stopped: {
+    message: "Tailscale is installed but not running.",
+    breaks: "running",
+  },
+  not_logged_in: {
+    message: "This machine is not logged in to Tailscale.",
+    action: "tailscale up",
+    breaks: "loggedIn",
+  },
+  operator_required: {
+    message: "Ghost needs permission to manage Tailscale Serve.",
+    action: "sudo tailscale set --operator=$USER",
+    breaks: "operator",
+  },
+  serve_failed: {
+    message: "tailscale serve failed: mock CLI error",
+  },
+};
+
+if (REMOTE_PROBLEM !== "" && !Object.hasOwn(REMOTE_PROBLEMS, REMOTE_PROBLEM)) {
+  console.error(`unknown --remote-problem=${REMOTE_PROBLEM}; expected ${Object.keys(REMOTE_PROBLEMS).join(", ")}`);
+  process.exit(2);
+}
+
+let remoteEnabled = false;
+
+function remoteSnapshot() {
+  const { breaks, ...problemFields } = REMOTE_PROBLEMS[REMOTE_PROBLEM] ?? {};
+  const cut = REMOTE_LADDER.indexOf(breaks ?? "");
+  const tailscale = Object.fromEntries(REMOTE_LADDER.map((rung, index) => [rung, cut < 0 || index < cut]));
+  tailscale.certs = tailscale.installed;
+  const { loggedIn } = tailscale;
+  const problem = REMOTE_PROBLEM === "" ? null : { code: REMOTE_PROBLEM, ...problemFields };
+  const available = problem === null;
+  return {
+    enabled: remoteEnabled,
+    state: available ? (remoteEnabled ? "on" : "off") : "unavailable",
+    scheme: loggedIn ? "https" : null,
+    hostname: loggedIn ? REMOTE_HOSTNAME : null,
+    url: available && remoteEnabled ? `https://${REMOTE_HOSTNAME}` : null,
+    tailscale,
+    guests: "read-only",
+    owner: loggedIn ? "owner@example.com" : null,
+    problem,
+  };
+}
+
+const REMOTE_QR_SVG = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 29 29" shape-rendering="crispEdges">
+  <rect width="29" height="29" fill="white"/>
+  <path fill="black" d="M2 2h7v7H2zm2 2v3h3V4zm16-2h7v7h-7zm2 2v3h3V4zM2 20h7v7H2zm2 2v3h3v-3zm8-20h2v2h-2zm3 1h2v3h-2zm-4 4h3v2h-3zm5 3h3v3h-3zm-5 3h2v3h-2zm4 2h2v4h-2zm4-5h2v2h-2zm2 3h3v2h-3zm-7 8h3v3h-3zm5-3h2v2h-2zm3 3h3v2h-3zm-8 5h2v2h-2zm4-1h3v2h-3zm5 0h2v2h-2z"/>
+</svg>`;
 
 /** @type {{ name: string, dir: string, createdAt: string }[]} */
 const ghosts = ["casper", "moaning-myrtle"].map((name) => ({
@@ -103,14 +164,12 @@ const MOCK_MEMORY = [
   {
     path: "memory/preferred-tone.md",
     slug: "preferred-tone",
-    description: "The owner prefers direct...",
     content: "The owner prefers direct, evidence-first answers. Use terse, concrete language. Lead with the decision and evidence.",
     updated: "2026-08-24",
   },
   {
     path: "memory/current-project.md",
     slug: "current-project",
-    description: "Ghost is the owner's local...",
     content: "Ghost is the owner's local sovereign assistant. Keep context in plain files and keep cloud credentials out of exports.",
     updated: "2026-08-25",
   },
@@ -325,71 +384,47 @@ function setGhostCollab(name, sessionId, state) {
 }
 
 const deletedContext = new Map();
+/** Per-ghost owner-written facts, layered over the seeded MOCK_MEMORY. */
+const writtenMemory = new Map();
 
 function contextDeletedFor(name) {
   if (!deletedContext.has(name)) deletedContext.set(name, new Set());
   return deletedContext.get(name);
 }
 
-function contextSnapshot(name) {
+function writtenMemoryFor(name) {
+  if (!writtenMemory.has(name)) writtenMemory.set(name, new Map());
+  return writtenMemory.get(name);
+}
+
+function memoryListing(name) {
   const deleted = contextDeletedFor(name);
+  const written = writtenMemoryFor(name);
+  const seeded = MOCK_MEMORY.filter((item) => !deleted.has(item.path) && !written.has(item.path));
   return {
-    character: { path: "character.md", title: name },
-    memory: MOCK_MEMORY.filter((item) => !deleted.has(item.path)),
-    agents: [],
+    memory: [...seeded, ...written.values()].sort((a, b) =>
+      b.updated.localeCompare(a.updated) || a.slug.localeCompare(b.slug)),
     skipped: [],
   };
 }
 
-function seedMockDocuments() {
-  mkdirSync(join(DOCUMENTS_ROOT, "Projects", "Ghost", "Research"), { recursive: true });
-  mkdirSync(join(DOCUMENTS_ROOT, "Reference"), { recursive: true });
-  mkdirSync(join(DOCUMENTS_ROOT, "Empty folder"), { recursive: true });
-  writeFileSync(join(DOCUMENTS_ROOT, "Welcome.md"),
-    "# Welcome to Documents\n\nThis file belongs to the machine, not to one ghost.\n", "utf8");
-  writeFileSync(join(DOCUMENTS_ROOT, "Launch notes.md"),
-    "# Launch notes\n\nFinish the shared Documents browser and verify its narrow layout.\n", "utf8");
-  writeFileSync(join(DOCUMENTS_ROOT, "Alpha.md"), "# Uppercase tie\n", "utf8");
-  writeFileSync(join(DOCUMENTS_ROOT, "alpha.md"), "# Lowercase tie\n", "utf8");
-  writeFileSync(join(DOCUMENTS_ROOT, "household-budget.csv"),
-    "month,amount\nAugust,420\n", "utf8");
-  writeFileSync(join(DOCUMENTS_ROOT, "note 10.md"), "# Lexical ten\n", "utf8");
-  writeFileSync(join(DOCUMENTS_ROOT, "note 2.md"), "# Lexical two\n", "utf8");
-  writeFileSync(join(DOCUMENTS_ROOT, "A Oversized draft.md"),
-    `# Oversized draft\n\n${"x".repeat(1048577)}`, "utf8");
-  writeFileSync(join(DOCUMENTS_ROOT, "reading-list.pdf"),
-    "%PDF-1.4 mock preview fixture\n", "utf8");
-  writeFileSync(join(DOCUMENTS_ROOT, "Projects", "roadmap.md"),
-    "# Project roadmap\n\nFolders load one level at a time.\n", "utf8");
-  writeFileSync(join(DOCUMENTS_ROOT, "Projects", "Ghost", "decisions.md"),
-    "# Decisions\n\nShared Documents stay independent from ghost selection.\n", "utf8");
-  writeFileSync(join(DOCUMENTS_ROOT, "Projects", "Ghost", "Research", "notes.txt"),
-    "No folder depth is a product limit.\n", "utf8");
-  writeFileSync(join(DOCUMENTS_ROOT, "Reference", "settings.json"),
-    "{\n  \"shared\": true\n}\n", "utf8");
+// Mirrors memorySlugForText in @ghost/extensions (minus NFKD), which the
+// shell package cannot import.
+function memorySlug(text) {
+  const slug = text.toLowerCase().replace(/[^a-z0-9\s-]/gu, "").trim()
+    .split(/[\s-]+/u).filter(Boolean).slice(0, 6).join("-").slice(0, 64);
+  return slug || "memory";
 }
 
-function seedMockHome(name, includeLegacyDocs = false) {
+function seedMockHome(name) {
   const dir = join(GHOSTS_ROOT, name);
   mkdirSync(join(dir, "memory"), { recursive: true });
+  mkdirSync(join(dir, "plans"), { recursive: true });
   writeFileSync(
     join(dir, "character.md"),
     `# ${name}\n\nI am ${name}, a quiet local ghost who answers directly.\n`,
     "utf8",
   );
-  if (includeLegacyDocs) {
-    mkdirSync(join(dir, "docs", "reference"), { recursive: true });
-    writeFileSync(
-      join(dir, "docs", "launch-notes.md"),
-      "# Legacy launch notes\n\nThis hosted-import fixture remains inside the ghost home.\n",
-      "utf8",
-    );
-    writeFileSync(
-      join(dir, "docs", "reference", "working-agreement.md"),
-      "# Legacy working agreement\n\nImport-only; never exposed as shared Documents.\n",
-      "utf8",
-    );
-  }
   writeFileSync(
     join(dir, "memory", "preferred-tone.md"),
     `${MOCK_MEMORY[0].content}\n`,
@@ -400,18 +435,19 @@ function seedMockHome(name, includeLegacyDocs = false) {
     `${MOCK_MEMORY[1].content}\n`,
     "utf8",
   );
+  writeFileSync(
+    join(dir, "plans", "hud-work-strip.md"),
+    "# HUD work strip\n\nShow the conversation plan, todo phases, and background jobs above the queue.\n",
+    "utf8",
+  );
 }
 
 if (OWNS_GHOSTS_ROOT) {
-  for (const ghost of ghosts) seedMockHome(ghost.name, true);
+  for (const ghost of ghosts) seedMockHome(ghost.name);
   process.once("exit", () => rmSync(GHOSTS_ROOT, { recursive: true, force: true }));
   const stop = () => process.exit(0);
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);
-}
-if (OWNS_DOCUMENTS_ROOT) {
-  seedMockDocuments();
-  process.once("exit", () => rmSync(DOCUMENTS_ROOT, { recursive: true, force: true }));
 }
 
 // The daemon persists a ghost's conversations (pi sessions); the mock keeps
@@ -499,19 +535,19 @@ function ghostSessions(name) {
         entry({ role: "assistant", content: `I'm **${name}**. This thread was seeded by the mock so resume has history to show.`, timestamp: now - 7_195_000 }),
         entry({ role: "user", content: "and what do you remember about me?", timestamp: now - 3_610_000 }),
         entry({ role: "assistant", content: "Nothing yet — but branch that question and you get a second thread to ask it differently.", timestamp: now - 3_609_000 }),
-        entry({ role: "user", content: "open Launch notes.md in shared Documents and tell me what's left", timestamp: now - 3_608_000 }),
+        entry({ role: "user", content: "open the current HUD plan and tell me what's left", timestamp: now - 3_608_000 }),
         entry({
           role: "assistant",
           timestamp: now - 3_607_000,
           content: [
-            { type: "text", text: "Opening the shared Documents launch notes" },
+            { type: "text", text: "Opening the current HUD plan" },
             // A restored call has no live intent and no summary, so the card
             // falls back to the arguments: they have to say what it was for.
             {
               type: "toolCall",
               id: "call-seed-browser",
               name: "read",
-              arguments: { path: join(DOCUMENTS_ROOT, "Launch notes.md") },
+              arguments: { path: join(GHOSTS_ROOT, name, "plans", "hud-work-strip.md") },
               cwd: SESSION_CWD,
               failed: true,
             },
@@ -655,6 +691,173 @@ const sessionSummary = (s) => ({
   pinned: s.pinned === true,
   unread: !s.readAt || s.updatedAt > s.readAt,
 });
+
+
+// Plan/todo and jobs are keyed by the full runtime-qualified conversation id,
+// just like their routes. Every conversation gets an independent fixture the
+// first time the HUD asks for it, including unpublished client-side drafts.
+const planStore = new Map();
+const jobStore = new Map();
+const workKey = (name, conversationId) => JSON.stringify([name, conversationId]);
+
+function dropWork(name, conversationId = null) {
+  for (const store of [planStore, jobStore]) {
+    for (const key of [...store.keys()]) {
+      const [storedName, storedConversation] = JSON.parse(key);
+      if (storedName === name && (conversationId === null || storedConversation === conversationId))
+        store.delete(key);
+    }
+  }
+}
+
+function moveWorkGhost(from, to) {
+  for (const store of [planStore, jobStore]) {
+    for (const [key, value] of [...store.entries()]) {
+      const [storedName, conversationId] = JSON.parse(key);
+      if (storedName !== from) continue;
+      store.delete(key);
+      if (store === planStore && value.plan) {
+        value.plan.path = join(GHOSTS_ROOT, to, "plans", basename(value.plan.path));
+      }
+      store.set(workKey(to, conversationId), value);
+    }
+  }
+}
+
+const MOCK_TODO = [
+  {
+    name: "Build",
+    tasks: [
+      { content: "Read the shell contract", status: "completed" },
+      { content: "Wire the daemon state", status: "completed" },
+      { content: "Build the HUD work strip", status: "in_progress" },
+    ],
+  },
+  {
+    name: "Verify",
+    tasks: [
+      { content: "Add focused QML coverage", status: "completed" },
+      { content: "Capture an isolated preview", status: "blocked", blocker: "Waiting for the nested compositor" },
+      { content: "Run shell checks", status: "pending" },
+      { content: "Review the final diff", status: "pending" },
+    ],
+  },
+];
+
+const MOCK_PLAN_CONTENT = [
+  "# HUD work strip",
+  "",
+  "Show the current conversation's plan, todo phases, and background jobs directly above the queue.",
+  "",
+  "1. Fetch plan and job state with the active conversation identity.",
+  "2. Keep the strip keyboard-accessible and quiet when empty.",
+  "3. Poll only while a visible HUD has a running job.",
+].join("\n");
+
+function planFor(name, conversationId) {
+  const key = workKey(name, conversationId);
+  if (!planStore.has(key)) {
+    planStore.set(key, {
+      planning: START_IN_PLAN_MODE,
+      plan: {
+        path: join(GHOSTS_ROOT, name, "plans", "hud-work-strip.md"),
+        title: "HUD work strip",
+        approvedAt: new Date(MOCK_STARTED_AT - 10 * 60_000).toISOString(),
+        content: MOCK_PLAN_CONTENT,
+      },
+      todo: structuredClone(MOCK_TODO),
+    });
+  }
+  return planStore.get(key);
+}
+
+function planSnapshot(name, conversationId) {
+  return structuredClone(planFor(name, conversationId));
+}
+
+function setPlanAction(name, conversationId, action) {
+  const current = planFor(name, conversationId);
+  const next = {
+    planning: action === "start",
+    plan: action === "clear" ? null : current.plan,
+    todo: current.todo,
+  };
+  planStore.set(workKey(name, conversationId), next);
+  return planSnapshot(name, conversationId);
+}
+
+function initialJobs() {
+  if (NO_JOBS) return [];
+  return [
+    {
+      id: "job-build",
+      label: "Build shell preview",
+      command: "pnpm --filter @ghost/shell build",
+      status: "running",
+      startedAt: new Date(MOCK_STARTED_AT).toISOString(),
+      durationMs: 0,
+      output: "Preparing the Quickshell preview…\nCompiling QML resources…",
+      outputTruncated: false,
+    },
+    {
+      id: "job-history",
+      label: "Long verification log",
+      command: "pnpm test -- --verbose",
+      status: "completed",
+      startedAt: new Date(MOCK_STARTED_AT - 48_000).toISOString(),
+      endedAt: new Date(MOCK_STARTED_AT - 3_000).toISOString(),
+      durationMs: 45_000,
+      exitCode: 0,
+      output: Array.from({ length: 400 }, (_, index) => `verification line ${index + 1}`).join("\n"),
+      outputTruncated: true,
+    },
+    {
+      id: "job-lint",
+      label: "Lint experimental theme",
+      command: "pnpm lint",
+      status: "failed",
+      startedAt: new Date(MOCK_STARTED_AT - 195_000).toISOString(),
+      endedAt: new Date(MOCK_STARTED_AT - 5_000).toISOString(),
+      durationMs: 190_000,
+      exitCode: 2,
+      output: "qmllint: experimental-theme.qml:42: Unknown property",
+      outputTruncated: false,
+    },
+  ];
+}
+
+function jobsFor(name, conversationId) {
+  const key = workKey(name, conversationId);
+  if (!jobStore.has(key)) jobStore.set(key, initialJobs());
+  const jobs = jobStore.get(key);
+  const running = jobs.find((job) => job.id === "job-build" && job.status === "running");
+  const elapsed = Date.now() - MOCK_STARTED_AT;
+  if (running && elapsed >= 20_000) {
+    running.status = "completed";
+    running.endedAt = new Date(MOCK_STARTED_AT + 20_000).toISOString();
+    running.durationMs = 20_000;
+    running.exitCode = 0;
+    running.output += "\nPreview build complete.";
+  } else if (running) {
+    running.durationMs = Math.max(0, elapsed);
+  }
+  return jobs;
+}
+
+function jobsSnapshot(name, conversationId) {
+  return { jobs: structuredClone(jobsFor(name, conversationId)) };
+}
+
+function cancelJob(name, conversationId, jobId) {
+  const job = jobsFor(name, conversationId).find((candidate) => candidate.id === jobId);
+  if (!job) return null;
+  if (job.status !== "running") return { outcome: "already_settled", job: structuredClone(job) };
+  const endedAt = Date.now();
+  job.status = "cancelled";
+  job.endedAt = new Date(endedAt).toISOString();
+  job.durationMs = Math.max(0, endedAt - Date.parse(job.startedAt));
+  return { outcome: "cancelled", job: structuredClone(job) };
+}
 
 
 const projectStore = new Map();
@@ -812,6 +1015,127 @@ const json = (res, status, body) => {
   res.end(payload);
 };
 
+// The daemon's hooks.json, kept as one document the way ghostd does, with
+// its status projection derived from it. The loader's shape check is the
+// small subset a pane edit can plausibly trip, worded the way ghostd words it.
+const HOOKS_CONFIG_PATH = "/home/owner/.config/ghost/hooks.json";
+const HOOK_EVENTS = ["before_prompt", "session_stop", "conversation_idle"];
+let hooksDocument = {
+  hooks: {
+    before_prompt: [{ hooks: [{
+      type: "command",
+      command: "/home/owner/.local/bin/prompt-context",
+      name: "Prompt context",
+      description: "Adds bounded guidance before an owner prompt.",
+      timeout: 10,
+    }] }],
+    session_stop: [{ hooks: [{
+      type: "command",
+      command: "/home/owner/.local/bin/completion-check",
+      name: "Completion check",
+      description: "Reviews the current assistant pass before it settles.",
+    }] }],
+  },
+};
+const BUILTIN_HOOKS = [{
+  event: "conversation_idle",
+  source: "builtin",
+  name: "Idle upkeep",
+  description: "Runs after the current conversation remains inactive.",
+  idleSeconds: 60,
+  settingsKey: "memory_upkeep",
+}];
+
+function hooksDocumentProblem(document) {
+  const path = HOOKS_CONFIG_PATH;
+  if (document === null || typeof document !== "object" || Array.isArray(document)) {
+    return `${path} must contain a JSON object.`;
+  }
+  const builtin = document.builtin;
+  if (builtin !== undefined) {
+    if (builtin === null || typeof builtin !== "object" || Array.isArray(builtin)) return `${path}: "builtin" must be an object.`;
+    for (const [key, raw] of Object.entries(builtin)) {
+      if (!/^[a-z][a-z0-9_]*$/u.test(key)) return `${path}: builtin key ${JSON.stringify(key)} must match [a-z][a-z0-9_]*.`;
+      if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return `${path}: builtin.${key} must be an object.`;
+      for (const field of Object.keys(raw)) {
+        if (field !== "idleSeconds") return `${path}: builtin.${key}.${field} is not a setting.`;
+      }
+      if (raw.idleSeconds !== undefined
+          && !(Number.isSafeInteger(raw.idleSeconds) && raw.idleSeconds >= 1 && raw.idleSeconds <= 86_400)) {
+        return `${path}: builtin.${key}.idleSeconds must be an integer in [1, 86400].`;
+      }
+    }
+  }
+  const hooks = document.hooks;
+  if (hooks === undefined) return null;
+  if (hooks === null || typeof hooks !== "object" || Array.isArray(hooks)) return `${path}: "hooks" must be an object.`;
+  for (const event of Object.keys(hooks)) {
+    if (!HOOK_EVENTS.includes(event)) return `${path}: unsupported hook event ${JSON.stringify(event)}.`;
+    if (!Array.isArray(hooks[event])) return `${path}: "hooks.${event}" must be an array.`;
+    for (const [g, group] of hooks[event].entries()) {
+      if (!group || !Array.isArray(group.hooks)) return `${path}: hooks.${event}[${g}].hooks must be an array.`;
+      for (const [h, handler] of group.hooks.entries()) {
+        const label = `hooks.${event}[${g}].hooks[${h}]`;
+        if (handler?.type !== "command" || typeof handler.command !== "string" || !handler.command.trim()
+            || handler.command.includes("\0")) {
+          return `${path}: ${label} must be a command hook with a non-empty NUL-free command.`;
+        }
+        for (const [field, max] of [["name", 80], ["description", 240]]) {
+          const value = handler[field];
+          if (value !== undefined && (typeof value !== "string" || !value.trim() || value.trim().length > max)) {
+            return `${path}: ${label}.${field} must be a non-empty string of at most ${max} characters.`;
+          }
+        }
+        if (handler.timeout !== undefined && !(typeof handler.timeout === "number" && handler.timeout > 0 && handler.timeout <= 600)) {
+          return `${path}: ${label}.timeout must be a number in (0, 600].`;
+        }
+        if (event === "conversation_idle" && handler.idleSeconds !== undefined
+            && !(Number.isSafeInteger(handler.idleSeconds) && handler.idleSeconds >= 1 && handler.idleSeconds <= 86_400)) {
+          return `${path}: ${label}.idleSeconds must be an integer in [1, 86400].`;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+function hooksStatus() {
+  const rows = [];
+  for (const event of HOOK_EVENTS) {
+    rows.push(...BUILTIN_HOOKS.filter((row) => row.event === event));
+    for (const group of hooksDocument.hooks?.[event] ?? []) {
+      for (const handler of group.hooks) {
+        const trigger = event === "before_prompt" ? "Before-prompt"
+          : event === "session_stop" ? "Session-stop" : "Conversation-idle";
+        rows.push({
+          event,
+          source: "config",
+          name: handler.name ?? `${trigger} command hook`,
+          description: handler.description ?? (event === "before_prompt"
+            ? "Adds context before the owner prompt is sent."
+            : event === "session_stop"
+              ? "Reviews the current assistant pass and may continue it."
+              : "Runs in the background after the configured idle interval."),
+          ...(event === "conversation_idle" ? { idleSeconds: handler.idleSeconds ?? 60 } : {}),
+        });
+      }
+    }
+  }
+  const events = HOOK_EVENTS
+    .map((event) => ({ event, count: rows.filter((row) => row.event === event).length }))
+    .filter(({ count }) => count > 0);
+  return { active: rows.length > 0, total: rows.length, events, hooks: rows, sessionStopContinuationCap: 10 };
+}
+
+const svg = (res, body) => {
+  res.writeHead(200, {
+    "content-type": "image/svg+xml",
+    "content-length": Buffer.byteLength(body),
+    "cache-control": "no-store",
+  });
+  res.end(body);
+};
+
 const readBody = (req) =>
   new Promise((resolve, reject) => {
     let raw = "";
@@ -959,7 +1283,7 @@ function* script(name, prompt, sessionId) {
     const toolName = step % 3 === 0 ? "grep" : (step % 3 === 1 ? "read" : "glob");
     const args = {
       step: step + 1,
-      path: join(DOCUMENTS_ROOT, "Projects", "Ghost", `step-${step + 1}.md`),
+      path: join(GHOSTS_ROOT, name, "plans", `step-${step + 1}.md`),
     };
     yield { type: "toolcall_start", contentIndex: index, id, toolName };
     yield { type: "toolcall_delta", contentIndex: index, delta: JSON.stringify(args) };
@@ -1453,398 +1777,56 @@ function routeState(name) {
   };
 }
 
-
-const DOCUMENT_DIRECTORY_FLAGS = constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW;
-const DOCUMENT_FILE_FLAGS = constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW;
-
-function mockDocumentError(status, code, message) {
-  return Object.assign(new Error(message), { status, code });
-}
-
-function documentSegments(relativePath, allowRoot = true) {
-  if (typeof relativePath !== "string" || relativePath.startsWith("/")) return null;
-  if (relativePath === "") return allowRoot ? [] : null;
-  const segments = relativePath.split("/");
-  return segments.some((segment) => segment === "" || segment === "." || segment === "..")
-    ? null : segments;
-}
-
-function documentDescriptorPath(directoryFd, name = "") {
-  const directory = `/proc/self/fd/${directoryFd}`;
-  return name === "" ? directory : `${directory}/${name}`;
-}
-
-function openMockDocumentDirectory(relativePath = "") {
-  const segments = documentSegments(relativePath);
-  if (!segments) throw mockDocumentError(400, "invalid_path", "invalid Documents path");
-  let directoryFd;
-  try {
-    directoryFd = openSync(DOCUMENTS_ROOT, DOCUMENT_DIRECTORY_FLAGS);
-    for (const segment of segments) {
-      const next = openSync(documentDescriptorPath(directoryFd, segment), DOCUMENT_DIRECTORY_FLAGS);
-      closeSync(directoryFd);
-      directoryFd = next;
-    }
-    return directoryFd;
-  } catch (error) {
-    if (directoryFd !== undefined) closeSync(directoryFd);
-    throw error;
-  }
-}
-
-function openMockDocumentParent(relativePath) {
-  const segments = documentSegments(relativePath, false);
-  if (!segments) throw mockDocumentError(400, "invalid_path", "invalid Documents path");
-  const name = segments.pop();
-  return {
-    directoryFd: openMockDocumentDirectory(segments.join("/")),
-    name,
-  };
-}
-
-function compareDocumentEntries(left, right) {
-  if (left.kind !== right.kind) return left.kind === "directory" ? -1 : 1;
-  const foldedLeft = left.name.toLocaleLowerCase("en-US");
-  const foldedRight = right.name.toLocaleLowerCase("en-US");
-  if (foldedLeft < foldedRight) return -1;
-  if (foldedLeft > foldedRight) return 1;
-  return left.name < right.name ? -1 : left.name > right.name ? 1 : 0;
-}
-
-function documentDigest(entries) {
-  return createHash("sha256")
-    .update(entries.map((entry) => `${entry.kind}\0${entry.name}`).join("\0"))
-    .digest("base64url");
-}
-
-function encodeDocumentCursor(payload) {
-  return Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
-}
-
-function decodeDocumentCursor(raw) {
-  try {
-    const parsed = JSON.parse(Buffer.from(raw, "base64url").toString("utf8"));
-    if (!parsed || !Number.isInteger(parsed.offset) || parsed.offset < 0
-        || typeof parsed.digest !== "string" || typeof parsed.path !== "string"
-        || typeof parsed.query !== "string") return null;
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
-function listMockDocuments(url) {
-  const path = url.searchParams.get("path") || "";
-  const query = (url.searchParams.get("q") || "").trim().toLowerCase();
-  const limitRaw = Number(url.searchParams.get("limit") || 100);
-  if (!Number.isInteger(limitRaw) || limitRaw < 1 || limitRaw > 250) {
-    return { status: 400, body: { error: { code: "invalid_request", message: "limit must be 1..250" } } };
-  }
-  if (!documentSegments(path)) {
-    return { status: 400, body: { error: { code: "invalid_path", message: "invalid Documents path" } } };
-  }
-  let directoryFd;
-  let dirents;
-  try {
-    directoryFd = openMockDocumentDirectory(path);
-    dirents = readdirSync(documentDescriptorPath(directoryFd), { withFileTypes: true });
-  } catch (error) {
-    if (directoryFd !== undefined) closeSync(directoryFd);
-    if (typeof error?.status === "number") {
-      return { status: error.status, body: { error: { code: error.code, message: error.message } } };
-    }
-    if (["ELOOP", "ENOTDIR"].includes(error?.code)) {
-      return { status: 400, body: { error: { code: "invalid_path", message: "folder is not a confined directory" } } };
-    }
-    return { status: 404, body: { error: { code: "not_found", message: "folder is unavailable" } } };
-  }
-  const entries = [];
-  const skipped = [];
-  try {
-    for (const dirent of dirents) {
-      if (dirent.name.startsWith(".")) continue;
-      const relative = path === "" ? dirent.name : `${path}/${dirent.name}`;
-      try {
-        const stats = lstatSync(documentDescriptorPath(directoryFd, dirent.name));
-        if (stats.isSymbolicLink() || (!stats.isDirectory() && !stats.isFile())) {
-          skipped.push({ name: dirent.name, path: relative, reason: "Not a regular file or directory" });
-          continue;
-        }
-        entries.push({
-          name: dirent.name,
-          path: relative,
-          kind: stats.isDirectory() ? "directory" : "file",
-          ...(stats.isFile() ? { size: stats.size } : {}),
-          modifiedAt: stats.mtime.toISOString(),
-        });
-      } catch (error) {
-        skipped.push({ name: dirent.name, path: relative, reason: String(error.message || error) });
-      }
-    }
-  } finally {
-    closeSync(directoryFd);
-  }
-  const filtered = entries
-    .filter((entry) => query === "" || entry.name.toLowerCase().includes(query))
-    .sort(compareDocumentEntries);
-  const digest = documentDigest(filtered);
-  const rawCursor = url.searchParams.get("cursor");
-  let offset = 0;
-  if (rawCursor) {
-    const cursor = decodeDocumentCursor(rawCursor);
-    if (!cursor || cursor.path !== path || cursor.query !== query) {
-      return { status: 400, body: { error: { code: "invalid_cursor", message: "cursor does not belong to this listing" } } };
-    }
-    if (cursor.digest !== digest) {
-      return { status: 409, body: { error: { code: "cursor_stale", message: "folder changed during pagination" } } };
-    }
-    offset = cursor.offset;
-  }
-  if (offset > filtered.length) {
-    return { status: 409, body: { error: { code: "cursor_stale", message: "folder changed during pagination" } } };
-  }
-  const page = filtered.slice(offset, offset + limitRaw);
-  const nextOffset = offset + page.length;
-  const hasNextPage = nextOffset < filtered.length;
-  return {
-    status: 200,
-    body: {
-      root: DOCUMENTS_ROOT,
-      path,
-      query,
-      entries: page,
-      total: filtered.length,
-      fileCount: filtered.filter((entry) => entry.kind === "file").length,
-      directoryCount: filtered.filter((entry) => entry.kind === "directory").length,
-      nextCursor: hasNextPage
-        ? encodeDocumentCursor({ offset: nextOffset, digest, path, query }) : null,
-      // Production's flag describes this response, not whether another page
-      // follows it. A final non-first page is still only part of the result.
-      truncated: page.length < filtered.length,
-      skipped,
-    },
-  };
-}
-
-function readMockDocumentContent(relativePath) {
-  if (!documentSegments(relativePath, false)) {
-    throw mockDocumentError(400, "invalid_path", "invalid Documents path");
-  }
-  let directoryFd;
-  let fileFd;
-  try {
-    const opened = openMockDocumentParent(relativePath);
-    directoryFd = opened.directoryFd;
-    const { name } = opened;
-    try {
-      fileFd = openSync(documentDescriptorPath(directoryFd, name), DOCUMENT_FILE_FLAGS);
-    } catch (error) {
-      if (error?.code === "ENOENT") {
-        throw mockDocumentError(404, "not_found", "No such Documents file");
-      }
-      throw error;
-    }
-    const before = fstatSync(fileFd, { bigint: true });
-    if (!before.isFile()) {
-      throw mockDocumentError(400, "invalid_path", "Documents content must be a regular file");
-    }
-    if (before.size > BigInt(DOCUMENT_INLINE_MAX_BYTES)) {
-      throw mockDocumentError(413, "document_too_large", "Documents inline content is limited to 1 MiB");
-    }
-    const bytes = Buffer.allocUnsafe(DOCUMENT_INLINE_MAX_BYTES + 1);
-    let length = 0;
-    while (length < bytes.length) {
-      const count = readSync(fileFd, bytes, length, bytes.length - length, null);
-      if (count === 0) break;
-      length += count;
-    }
-    const after = fstatSync(fileFd, { bigint: true });
-    if (length > DOCUMENT_INLINE_MAX_BYTES
-        || after.size > BigInt(DOCUMENT_INLINE_MAX_BYTES)) {
-      throw mockDocumentError(413, "document_too_large", "Documents inline content is limited to 1 MiB");
-    }
-    const live = lstatSync(documentDescriptorPath(directoryFd, name), { bigint: true });
-    if (!after.isFile() || !live.isFile() || before.dev !== after.dev
-        || before.ino !== after.ino || before.size !== after.size
-        || before.mtimeNs !== after.mtimeNs || before.ctimeNs !== after.ctimeNs
-        || after.size !== BigInt(length) || live.dev !== after.dev || live.ino !== after.ino
-        || live.size !== after.size || live.mtimeNs !== after.mtimeNs
-        || live.ctimeNs !== after.ctimeNs) {
-      throw mockDocumentError(409, "conflict", "The Documents file changed while it was being read");
-    }
-    let content;
-    try {
-      content = new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(0, length));
-    } catch {
-      throw mockDocumentError(400, "invalid_document_content", "This Documents file is not valid UTF-8 text");
-    }
-    if (content.includes("\0")) {
-      throw mockDocumentError(400, "invalid_document_content", "This Documents file contains NUL bytes");
-    }
-    return {
-      root: DOCUMENTS_ROOT,
-      path: relativePath,
-      size: length,
-      modifiedAt: new Date(Number(after.mtimeMs)).toISOString(),
-      content,
-    };
-  } catch (error) {
-    if (typeof error?.status === "number") throw error;
-    if (error?.code === "ENOENT") {
-      throw mockDocumentError(404, "not_found", "No such Documents file");
-    }
-    if (["ELOOP", "ENOTDIR", "ENXIO"].includes(error?.code)) {
-      throw mockDocumentError(400, "invalid_path", "Documents path is not a regular confined file");
-    }
-    throw error;
-  } finally {
-    if (fileFd !== undefined) closeSync(fileFd);
-    if (directoryFd !== undefined) closeSync(directoryFd);
-  }
-}
-
-function deleteMockDocument(relativePath) {
-  if (!documentSegments(relativePath, false)) {
-    throw mockDocumentError(400, "invalid_path", "invalid Documents path");
-  }
-  let directoryFd;
-  let sourceFd;
-  let rootFd;
-  let trashFd;
-  let bucketFd;
-  try {
-    const opened = openMockDocumentParent(relativePath);
-    directoryFd = opened.directoryFd;
-    const { name } = opened;
-    const sourcePath = documentDescriptorPath(directoryFd, name);
-    try {
-      sourceFd = openSync(sourcePath, DOCUMENT_FILE_FLAGS);
-    } catch (error) {
-      if (error?.code === "ENOENT") {
-        throw mockDocumentError(404, "not_found", "No such regular document");
-      }
-      throw error;
-    }
-    const openedStats = fstatSync(sourceFd, { bigint: true });
-    const liveStats = lstatSync(sourcePath, { bigint: true });
-    if (!openedStats.isFile() || !liveStats.isFile() || openedStats.dev !== liveStats.dev
-        || openedStats.ino !== liveStats.ino) {
-      throw mockDocumentError(404, "not_found", "No such regular document");
-    }
-
-    rootFd = openMockDocumentDirectory();
-    const trashRootPath = documentDescriptorPath(rootFd, ".mock-trash");
-    try {
-      mkdirSync(trashRootPath, { mode: 0o700 });
-    } catch (error) {
-      if (error?.code !== "EEXIST") throw error;
-    }
-    trashFd = openSync(trashRootPath, DOCUMENT_DIRECTORY_FLAGS);
-    const bucketPath = mkdtempSync(`${documentDescriptorPath(trashFd)}/delete-`);
-    bucketFd = openSync(bucketPath, DOCUMENT_DIRECTORY_FLAGS);
-    const destinationPath = documentDescriptorPath(bucketFd, name);
-
-    renameSync(sourcePath, destinationPath);
-    const trashedStats = lstatSync(destinationPath, { bigint: true });
-    if (!trashedStats.isFile() || trashedStats.dev !== openedStats.dev
-        || trashedStats.ino !== openedStats.ino) {
-      throw mockDocumentError(409, "conflict", "Document changed while it was moved to mock Trash");
-    }
-    return {
-      path: relativePath,
-      trash: join(DOCUMENTS_ROOT, ".mock-trash", basename(bucketPath), name),
-      kind: "fallback",
-    };
-  } catch (error) {
-    if (typeof error?.status === "number") throw error;
-    if (error?.code === "ENOENT") {
-      throw mockDocumentError(404, "not_found", "No such regular document");
-    }
-    if (["ELOOP", "ENOTDIR", "ENXIO"].includes(error?.code)) {
-      throw mockDocumentError(400, "invalid_path", "Document path is not a confined regular file");
-    }
-    throw error;
-  } finally {
-    if (bucketFd !== undefined) closeSync(bucketFd);
-    if (trashFd !== undefined) closeSync(trashFd);
-    if (rootFd !== undefined) closeSync(rootFd);
-    if (sourceFd !== undefined) closeSync(sourceFd);
-    if (directoryFd !== undefined) closeSync(directoryFd);
-  }
-}
-
 const mockServer = createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", `http://${HOST}:${PORT}`);
   const parts = url.pathname.split("/").filter(Boolean); // ["api","ghosts",...]
   console.error(`${req.method} ${url.pathname}`);
 
+  if (parts.length === 3 && parts[0] === "api" && parts[1] === "hooks" && parts[2] === "config") {
+    if (req.method === "GET") return json(res, 200, { path: HOOKS_CONFIG_PATH, document: hooksDocument });
+    if (req.method !== "PUT") return json(res, 405, {
+      error: { code: "method_not_allowed", message: `${req.method} is not allowed here.` },
+    });
+    const body = await readBody(req).catch(() => null);
+    const problem = hooksDocumentProblem(body);
+    if (problem) return json(res, 400, { error: { code: "invalid_request", message: problem } });
+    hooksDocument = body;
+    return json(res, 200, { path: HOOKS_CONFIG_PATH, document: hooksDocument });
+  }
   if (parts.length === 2 && parts[0] === "api" && parts[1] === "hooks") {
     if (req.method !== "GET") return json(res, 405, {
       error: { code: "method_not_allowed", message: `${req.method} is not allowed here.` },
     });
-    return json(res, 200, {
-      active: true,
-      total: 3,
-      events: [
-        { event: "before_prompt", count: 1 },
-        { event: "session_stop", count: 1 },
-        { event: "conversation_idle", count: 1 },
-      ],
-      hooks: [
-        {
-          event: "before_prompt",
-          name: "Prompt context",
-          description: "Adds bounded guidance before an owner prompt.",
-        },
-        {
-          event: "session_stop",
-          name: "Completion check",
-          description: "Reviews the current assistant pass before it settles.",
-        },
-        {
-          event: "conversation_idle",
-          name: "Idle upkeep",
-          description: "Runs after the current conversation remains inactive.",
-          idleSeconds: 60,
-        },
-      ],
-      sessionStopContinuationCap: 2,
-    });
+    return json(res, 200, hooksStatus());
   }
 
-  if (parts.length === 2 && parts[0] === "api" && parts[1] === "documents"
-      && req.method === "GET") {
-    const result = listMockDocuments(url);
-    return json(res, result.status, result.body);
-  }
-  if (parts.length === 3 && parts[0] === "api" && parts[1] === "documents"
-      && parts[2] === "content" && req.method === "GET") {
-    const path = url.searchParams.get("path") || "";
-    try {
-      return json(res, 200, readMockDocumentContent(path));
-    } catch (error) {
-      return json(res, error.status || 500, {
-        error: { code: error.code || "internal_error", message: error.message || "content read failed" },
-      });
-    }
-  }
-  if (parts.length === 2 && parts[0] === "api" && parts[1] === "documents"
-      && req.method === "DELETE") {
-    const body = await readBody(req).catch(() => ({}));
-    const path = typeof body?.path === "string" ? body.path : "";
-    if (!documentSegments(path, false) || body?.confirm !== path) {
+  if (parts.length === 2 && parts[0] === "api" && parts[1] === "remote") {
+    if (req.method === "GET") return json(res, 200, remoteSnapshot());
+    if (req.method !== "POST") return json(res, 405, {
+      error: { code: "method_not_allowed", message: `${req.method} is not allowed here.` },
+    });
+    const body = await readBody(req).catch(() => null);
+    if (typeof body?.enabled !== "boolean") {
       return json(res, 400, {
-        error: { code: "confirmation_required", message: "document deletion requires its exact path" },
+        error: { code: "invalid_request", message: '"enabled" must be a boolean' },
       });
     }
-    try {
-      const deleted = deleteMockDocument(path);
-      return json(res, 200, { ok: true, ...deleted });
-    } catch (error) {
-      return json(res, error.status || 500, {
-        error: { code: error.code || "internal_error", message: error.message || "document delete failed" },
+    remoteEnabled = body.enabled;
+    return json(res, 200, remoteSnapshot());
+  }
+
+  if (parts.length === 3 && parts[0] === "api" && parts[1] === "remote"
+      && parts[2] === "qr.svg") {
+    if (req.method !== "GET") return json(res, 405, {
+      error: { code: "method_not_allowed", message: `${req.method} is not allowed here.` },
+    });
+    const status = remoteSnapshot();
+    if (!status.enabled || status.state !== "on" || !status.url) {
+      return json(res, 404, {
+        error: { code: "remote_off", message: "Remote access is off." },
       });
     }
+    return svg(res, REMOTE_QR_SVG);
   }
 
   if (parts[0] !== "api" || parts[1] !== "ghosts") return json(res, 404, { error: "not found" });
@@ -1888,33 +1870,61 @@ const mockServer = createServer(async (req, res) => {
   }
 
 
-  if (parts.length === 4 && parts[3] === "context" && req.method === "GET") {
-    return json(res, 200, contextSnapshot(name));
+  if (parts.length === 4 && parts[3] === "memory" && req.method === "GET") {
+    return json(res, 200, memoryListing(name));
   }
-  if (parts.length === 4 && parts[3] === "context" && req.method === "DELETE") {
+  if (parts.length === 4 && parts[3] === "memory" && req.method === "PUT") {
     const body = await readBody(req).catch(() => ({}));
-    const section = body?.section;
+    const content = typeof body?.content === "string" ? body.content.trim() : "";
+    if (content === "") {
+      return json(res, 400, {
+        error: { message: "A memory must contain one concise fact.", code: "invalid_request" },
+      });
+    }
+    if (content.length > 2000) {
+      return json(res, 400, {
+        error: { message: "Memory files must be 2000 characters or fewer.", code: "invalid_request" },
+      });
+    }
+    const slug = typeof body?.name === "string" && body.name !== "" ? body.name : memorySlug(content);
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(slug)) {
+      return json(res, 400, {
+        error: { message: "Memory file names must be short kebab-case slugs.", code: "invalid_request" },
+      });
+    }
+    const path = `memory/${slug}.md`;
+    const existed = memoryListing(name).memory.some((item) => item.path === path);
+    contextDeletedFor(name).delete(path);
+    writtenMemoryFor(name).set(path, { path, slug, content, updated: new Date().toISOString() });
+    if (OWNS_GHOSTS_ROOT) {
+      mkdirSync(join(ghost.dir, "memory"), { recursive: true });
+      writeFileSync(join(ghost.dir, path), `${content}\n`, "utf8");
+    }
+    return json(res, 200, { ok: true, slug, path, created: !existed });
+  }
+  if (parts.length === 4 && parts[3] === "memory" && req.method === "DELETE") {
+    const body = await readBody(req).catch(() => ({}));
     const path = typeof body?.path === "string" ? body.path : "";
-    if (section !== "memory" || path === ""
-        || body?.confirm !== path) {
+    if (path === "" || body?.confirm !== path) {
       return json(res, 400, {
         error: {
-          message: "Context deletion requires an exact path confirmation",
+          message: "Memory deletion requires an exact path confirmation",
           code: "confirmation_required",
         },
       });
     }
-    if (!MOCK_MEMORY.some((item) => item.path === path) || contextDeletedFor(name).has(path)) {
+    if (!memoryListing(name).memory.some((item) => item.path === path)) {
       return json(res, 404, {
-        error: { message: "No such context file", code: "not_found" },
+        error: { message: "No such memory file", code: "not_found" },
       });
     }
     const trash = join(GHOSTS_ROOT, ".mock-trash", name, path.replace(/\//gu, "--"));
-    if (OWNS_GHOSTS_ROOT) {
+    if (OWNS_GHOSTS_ROOT && existsSync(join(ghost.dir, path))) {
       mkdirSync(join(GHOSTS_ROOT, ".mock-trash", name), { recursive: true });
       renameSync(join(ghost.dir, path), trash);
     }
     contextDeletedFor(name).add(path);
+    writtenMemoryFor(name).delete(path);
     return json(res, 200, { ok: true, path, trash });
   }
   // Banishing a ghost. The real daemon moves the home to the XDG trash so it is
@@ -1935,6 +1945,7 @@ const mockServer = createServer(async (req, res) => {
     ghosts.splice(ghosts.indexOf(ghost), 1);
     sessionStore.delete(name);
     projectStore.delete(name);
+    dropWork(name);
     for (const receipt of abandonedProjectDrafts) {
       if (JSON.parse(receipt)[0] === name) abandonedProjectDrafts.delete(receipt);
     }
@@ -1942,6 +1953,7 @@ const mockServer = createServer(async (req, res) => {
       if (preview.name === name) projectTrust.delete(token);
     }
     deletedContext.delete(name);
+    writtenMemory.delete(name);
     mcpStore.delete(name);
     liveStates.delete(name);
     collabStates.delete(name);
@@ -1969,7 +1981,7 @@ const mockServer = createServer(async (req, res) => {
         error: { message: `${name} is still answering — stop the turn first`, code: "ghost_busy" },
       });
     }
-    for (const store of [sessionStore, projectStore, deletedContext, mcpStore,
+    for (const store of [sessionStore, projectStore, deletedContext, writtenMemory, mcpStore,
         liveStates, collabStates, roles, routing]) {
       if (store.has(name)) {
         store.set(next, store.get(name));
@@ -1985,6 +1997,7 @@ const mockServer = createServer(async (req, res) => {
     for (const preview of projectTrust.values()) {
       if (preview.name === name) preview.name = next;
     }
+    moveWorkGhost(name, next);
     if (OWNS_GHOSTS_ROOT) renameSync(ghost.dir, join(GHOSTS_ROOT, next));
     ghost.name = next;
     ghost.dir = join(GHOSTS_ROOT, next);
@@ -2212,6 +2225,58 @@ const mockServer = createServer(async (req, res) => {
       }));
     }
   }
+  if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "plan") {
+    const conversation = routeConversation(parts);
+    if (!conversation) return json(res, 400, {
+      error: { code: "invalid_conversation_id", message: "invalid conversation id" },
+    });
+    if (req.method === "GET") return json(res, 200, planSnapshot(name, conversation.id));
+    if (req.method !== "POST") return json(res, 405, {
+      error: { code: "method_not_allowed", message: `${req.method} is not allowed here.` },
+    });
+    if (answering.has(turnKey(name, conversation.conversationId))) {
+      return json(res, 409, {
+        error: { code: "session_busy", message: "Wait for this answer to finish." },
+      });
+    }
+    const body = await readBody(req).catch(() => null);
+    if (!body || !["start", "stop", "clear"].includes(body.action)) {
+      return json(res, 400, {
+        error: { code: "invalid_request", message: '"action" must be "start", "stop", or "clear".' },
+      });
+    }
+    const state = setPlanAction(name, conversation.id, body.action);
+    publishConversationUpdated(name, conversation.runtime, conversation.conversationId,
+      new Date().toISOString(), "plan");
+    return json(res, 200, state);
+  }
+  if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "todo"
+      && req.method === "GET") {
+    const conversation = routeConversation(parts);
+    if (!conversation) return json(res, 400, {
+      error: { code: "invalid_conversation_id", message: "invalid conversation id" },
+    });
+    return json(res, 200, { todo: planSnapshot(name, conversation.id).todo });
+  }
+  if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "jobs"
+      && req.method === "GET") {
+    const conversation = routeConversation(parts);
+    if (!conversation) return json(res, 400, {
+      error: { code: "invalid_conversation_id", message: "invalid conversation id" },
+    });
+    return json(res, 200, jobsSnapshot(name, conversation.id));
+  }
+  if (parts[3] === "sessions" && parts.length === 8 && parts[5] === "jobs"
+      && parts[7] === "cancel" && req.method === "POST") {
+    const conversation = routeConversation(parts);
+    if (!conversation) return json(res, 400, {
+      error: { code: "invalid_conversation_id", message: "invalid conversation id" },
+    });
+    const result = cancelJob(name, conversation.id, decodeURIComponent(parts[6]));
+    return result
+      ? json(res, 200, result)
+      : json(res, 404, { error: { code: "not_found", message: "No such background job." } });
+  }
   if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "live"
       && req.method === "GET") {
     const conversation = routeConversation(parts);
@@ -2325,6 +2390,7 @@ const mockServer = createServer(async (req, res) => {
     const deleted = ghostSessions(name).delete(conversation.id);
     if (deleted) {
       ghostProjects(name).delete(conversation.id);
+      dropWork(name, conversation.id);
       publishConversationUpdated(name, conversation.runtime, conversation.conversationId);
     }
     return deleted
@@ -2348,6 +2414,21 @@ const mockServer = createServer(async (req, res) => {
       return json(res, 409, { error: { code: "not_supported", message: "Claude Code has no OMP commands" } });
     }
     return json(res, 200, { commands: MOCK_COMMANDS });
+  }
+  if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "recap" && req.method === "POST") {
+    await readBody(req).catch(() => ({}));
+    const conversation = routeConversation(parts);
+    if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
+    if (conversation.runtime !== "pi") {
+      return json(res, 409, {
+        error: { code: "not_supported", message: "Claude Code has no transient recap completion" },
+      });
+    }
+    const s = ghostSessions(name).get(conversation.id);
+    if (!s) return json(res, 404, { error: { code: "not_found", message: "no such session" } });
+    return json(res, 200, {
+      recap: "You were shaping the launch notes into a clear plan. Next: choose the first section to finish.",
+    });
   }
   if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "transcript" && req.method === "GET") {
     for (const field of ["limit", "offset"]) {

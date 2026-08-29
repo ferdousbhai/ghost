@@ -3,6 +3,7 @@ import { pathToFileURL } from "node:url";
 import { homedir } from "node:os";
 import { openMachineDocuments } from "@ghost/extensions";
 import { apiTokenCommand } from "./api-token.js";
+import { RemoteAccess } from "./tailscale-identity.js";
 import { LoginManager } from "./auth.js";
 import { ClaudeCodeProbe } from "./claude-code.js";
 import { importCommand } from "./import-command.js";
@@ -10,8 +11,7 @@ import { legacyDocumentsPlacementCommand } from "./legacy-documents-placement.js
 import { loginCommand } from "./login-command.js";
 import { loadConfig, type DaemonConfig, type DaemonConfigOverrides } from "./config.js";
 import { scrubProviderEnv } from "./env-scrub.js";
-import { DocumentsService } from "./documents.js";
-import { ConversationMaintenance } from "./conversation-maintenance.js";
+import { ConversationMaintenance, MEMORY_UPKEEP_SETTINGS_KEY } from "./conversation-maintenance.js";
 import { closeAllBrowserSessions, ensureGhostHomeLayout } from "./extensions.js";
 import { GhostRegistry } from "./ghosts.js";
 import { GhostHookRunner } from "./hooks.js";
@@ -19,11 +19,14 @@ import { acquireHomeReservation, HomeReservationBusyError, type HomeReservation 
 import { HomeOperationCoordinator } from "./home-operations.js";
 import { hookSmolCompleteCommand } from "./hook-smol-complete.js";
 import { migrateHostedConversations } from "./hosted-conversation-import.js";
-import { createLogger, type Logger, type LogLevel } from "./log.js";
+import { createJournalSink } from "./journal.js";
+import { createLogger, stderrSink, type Logger, type LogLevel } from "./log.js";
 import { McpCatalog } from "./mcp-catalog.js";
 import { ModelCatalog } from "./model-catalog.js";
 import { createRelayHub } from "./relay.js";
 import { relayTokenCommand } from "./relay-token.js";
+import { remoteCommand } from "./remote-command.js";
+import { RemoteServe } from "./remote-serve.js";
 import { startDaemonServer, type ListeningServer } from "./server.js";
 import { SessionHost } from "./session-host.js";
 
@@ -36,6 +39,7 @@ Usage:
   ghostd login [<ghost>] [--provider <id>] [--api-key] [options]
   ghostd relay-token [--rotate] [--quiet]
   ghostd api-token [--rotate] [--quiet]
+  ghostd remote [on|off|status]
   ghostd hook-smol-complete
 
 Subcommands:
@@ -54,6 +58,8 @@ Subcommands:
                            (minting one on first run). The shell reads the file
                            itself; this is for curl, scripts, and diagnosing a
                            401. --rotate mints a new one and invalidates the old.
+  remote                   Show or change the daemon's tailnet exposure through
+                           Tailscale Serve. Defaults to status.
   hook-smol-complete       Internal command-hook bridge. Reads ghost_home and
                            prompt as JSON on stdin and writes one smol-model
                            completion as JSON on stdout.
@@ -62,7 +68,7 @@ Options:
   -p, --port <port>        TCP port to bind on 127.0.0.1 (default 7717)
       --ghosts-root <dir>  Directory holding one sub-directory per ghost
       --config <file>      Config file (default ~/.config/ghost/config.json)
-      --offline            Forbid OMP's catalogue network calls (refresh off)
+      --offline            Forbid pi's catalogue network calls (refresh off)
       --log-level <level>  debug | info | warn | error (default info)
   -h, --help               Show this message
   -v, --version            Show the version
@@ -146,8 +152,8 @@ export async function waitForShutdownSignal(options: ShutdownSignalOptions): Pro
     on(event: "SIGINT" | "SIGTERM", listener: (...args: unknown[]) => void): void;
     off(event: "SIGINT" | "SIGTERM", listener: (...args: unknown[]) => void): void;
   };
-  // OMP's CLI-oriented postmortem module installs eager signal handlers that
-  // hard-exit after its own cleanup. ghostd owns process teardown instead: its
+  // A CLI-oriented dependency may install eager signal handlers that hard-exit
+  // after its own cleanup. ghostd owns process teardown instead: its
   // sessions/providers are drained below, under shorter bounded deadlines.
   const inherited = {
     SIGINT: signalProcess.listeners("SIGINT"),
@@ -276,6 +282,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
 }
 
 async function readVersion(): Promise<string> {
+  // A compiled binary carries its version; a source checkout reads package.json.
+  if (process.env.GHOSTD_VERSION) return process.env.GHOSTD_VERSION;
   const { readFile } = await import("node:fs/promises");
   const { fileURLToPath } = await import("node:url");
   const { dirname, join } = await import("node:path");
@@ -286,9 +294,11 @@ async function readVersion(): Promise<string> {
 
 export async function main(argv: string[] = process.argv.slice(2), runtime: MainRuntime = {}): Promise<number> {
   // Subcommands own their narrower persistence lifecycle. Token commands touch
-  // only XDG state; login and import take the home reservation themselves.
+  // only XDG state, remote touches config and Tailscale Serve, and login/import
+  // take the home reservation themselves.
   if (argv[0] === "relay-token") return relayTokenCommand(argv.slice(1));
   if (argv[0] === "api-token") return apiTokenCommand(argv.slice(1));
+  if (argv[0] === "remote") return remoteCommand(argv.slice(1));
   if (argv[0] === "login") return loginCommand(argv.slice(1));
   if (argv[0] === "import") return importCommand(argv.slice(1));
   if (argv[0] === "hook-smol-complete") return hookSmolCompleteCommand(argv.slice(1));
@@ -312,7 +322,8 @@ export async function main(argv: string[] = process.argv.slice(2), runtime: Main
     return 0;
   }
 
-  const logger = createLogger(parsed.logLevel);
+  const journalSink = createJournalSink();
+  const logger = createLogger(parsed.logLevel, journalSink ?? stderrSink);
   let config: DaemonConfig;
   try {
     config = loadConfig(parsed.overrides);
@@ -321,7 +332,7 @@ export async function main(argv: string[] = process.argv.slice(2), runtime: Main
     return 1;
   }
 
-  // Before OMP, before any session. Idempotent, but this is the call that
+  // Before pi, before any session. Idempotent, but this is the call that
   // matters: everything downstream inherits this environment.
   const { removed } = scrubProviderEnv(process.env, { offline: config.offline });
   if (removed.length > 0) {
@@ -410,7 +421,6 @@ async function serveDaemon(
   // the per-ghost profile).
   const relay = createRelayHub({ logger });
   const machineDocuments = openMachineDocuments();
-  const documents = new DocumentsService(machineDocuments);
   const homeOperations = new HomeOperationCoordinator(registry);
   const claudeCodeProbe = new ClaudeCodeProbe();
   const host = new SessionHost({
@@ -432,6 +442,7 @@ async function serveDaemon(
     homeOperations,
     hooks,
     logger,
+    idleSeconds: hooks.builtinSettings(MEMORY_UPKEEP_SETTINGS_KEY).idleSeconds,
     withRuntime: (ghostName, use) => host.withMaintenanceRuntime(ghostName, use),
   });
   host.setConversationMaintenance(maintenance);
@@ -475,14 +486,14 @@ async function serveDaemon(
     // the next freshly built session: rebind the live cached sessions.
     onModelRoutingChanged: (name) => host.rebindModel(name),
   });
-  const mcp = new McpCatalog({ registry, homeOperations });
+  const mcp = new McpCatalog({ registry, homeOperations, logger });
+  const remoteServe = new RemoteServe(config.port, { ...config.remote, configPath: config.configPath });
 
   let listening: ListeningServer;
   try {
     listening = await startDaemonServer({
       registry,
       host,
-      documents,
       homeOperations,
       login,
       catalog,
@@ -492,6 +503,8 @@ async function serveDaemon(
       port: config.port,
       address: config.host,
       relay: relay ?? null,
+      remote: new RemoteAccess(config.remote),
+      remoteServe,
     });
   } catch (error) {
     logger.error("could not bind", {
@@ -500,6 +513,12 @@ async function serveDaemon(
       error: (error as Error).message,
     });
     return 1;
+  }
+
+  if (config.remote.enabled) {
+    const status = await remoteServe.ensure();
+    if (status.url && !status.problem) logger.info("remote access ready", { url: status.url });
+    else logger.warn("remote access is unavailable", { problem: status.problem });
   }
 
   logger.info("listening", {

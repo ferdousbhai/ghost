@@ -14,9 +14,8 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { Database } from "bun:sqlite";
-import type { AuthCredential } from "@oh-my-pi/pi-ai/auth-storage";
-import { getProviderDefinition } from "@oh-my-pi/pi-ai/registry";
-import type { MCPServerConfig } from "@oh-my-pi/pi-coding-agent/mcp/types";
+import type { Credential as AuthCredential } from "@earendil-works/pi-ai";
+import type { MCPServerConfig } from "./mcp-config.js";
 import {
   addGhostAccounts,
   readGhostModels,
@@ -110,7 +109,7 @@ function privateJson(path: string): unknown {
   }
 }
 
-function atomicPrivateJson(path: string, value: unknown): void {
+export function atomicPrivateJson(path: string, value: unknown): void {
   const rendered = `${JSON.stringify(value, null, 2)}\n`;
   if (Buffer.byteLength(rendered, "utf8") > MAX_PRIVATE_FILE_BYTES) {
     throw new SecretServiceError("secret_migration_failed", `${path} would exceed 1 MiB after migration.`);
@@ -305,8 +304,7 @@ function migrateModels(
   let changed = false;
   const allowed = new Set(models.accounts ?? []);
   for (const [provider, config] of Object.entries(models.providers)) {
-    const storageProvider = getProviderDefinition(provider)?.storeCredentialsAs ?? provider;
-    const service = serviceForCredentialProvider(storageProvider);
+    const service = serviceForCredentialProvider(provider);
     const planned: Record<string, string> = {};
     visitProviderSecretFields(config, (value, field) => {
       if (!isSecretReference(value)) planned[field] = value;
