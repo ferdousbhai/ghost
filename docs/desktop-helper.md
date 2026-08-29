@@ -11,7 +11,7 @@ MIT-licensed, in
 [omarchy-quattro-harness](https://github.com/fabiopauli/omarchy-quattro-harness)
 by Fabio Pauli. We **vendor its desktop modules** (attributed in
 THIRD_PARTY_NOTICES) behind our own thin JSON bridge, and drop its browser
-(we have our own relay + Playwright). Our TS `ghost_desktop`/`ghost_screen`
+(we have our own browser relay). Our TS `ghost_desktop`/`ghost_screen`
 extensions shell to this sidecar — the same shape as `TrayBridge.qml` →
 `ghost-tray.py`.
 

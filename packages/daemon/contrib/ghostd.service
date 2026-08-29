@@ -1,9 +1,10 @@
 [Unit]
 Description=Ghost daemon (ghostd)
 Documentation=https://github.com/ferdousbhai/ghost
-# The desktop helper and headed browser inherit the compositor environment from
-# the user manager. Keep the daemon in the graphical session so it cannot start
-# early with a permanently incomplete WAYLAND_DISPLAY/Hyprland environment.
+# The desktop helper inherits the compositor environment from the user manager,
+# and the browser relay dials in from the owner's own Chromium session. Keep the
+# daemon in the graphical session so it cannot start early with a permanently
+# incomplete WAYLAND_DISPLAY/Hyprland environment.
 PartOf=graphical-session.target
 After=graphical-session.target network.target
 
@@ -38,9 +39,14 @@ ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectControlGroups=yes
 RestrictSUIDSGID=yes
-# Chromium's sandbox needs to create user, PID, network, IPC, and mount
-# namespaces. Denying namespace creation makes the dedicated browser abort;
-# NoNewPrivileges remains compatible with Chromium's user-namespace sandbox.
+# Ghost launches no browser of its own: the relay drives the Chromium the owner
+# already started. A ghost may still run `chromium` from its shell when none is
+# open — and that child would land in this unit's cgroup, where KillMode=mixed
+# and SendSIGKILL would take the owner's browser down with `systemctl --user
+# restart ghostd`. The browser tool therefore tells the ghost to start it
+# detached (`systemd-run --user --scope`). These properties stay because a
+# Chromium that does end up here must still be able to build its sandbox
+# namespaces; NoNewPrivileges remains compatible with them.
 LockPersonality=yes
 MemoryDenyWriteExecute=no
 # PrivateTmp only isolates /tmp and /var/tmp. The user runtime directory stays

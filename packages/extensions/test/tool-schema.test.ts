@@ -10,6 +10,7 @@ import {
   NOTIFY_URGENCIES,
 } from "../src/extensions/hyprland.js";
 import { createGhostExtension } from "../src/extensions/index.js";
+import { relayBackend } from "../src/extensions/browser-relay-backend.js";
 import {
   GHOST_SCREEN,
   SCREEN_TARGETS,
@@ -35,7 +36,7 @@ describe("stringEnum", () => {
 
   it("keeps every registered string enum strict-provider compatible", async () => {
     const harness = await loadExtension(
-      createGhostExtension(),
+      createGhostExtension({ backend: relayBackend({}) }),
       "/tmp/ghost-tool-schema-test",
     );
     const expected = [

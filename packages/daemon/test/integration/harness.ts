@@ -305,7 +305,6 @@ export async function startRealDaemonHarness(
     host = new SessionHost({
       registry,
       offline: true,
-      browserMode: "profile",
       title: { enabled: false },
       greeting: { enabled: false },
     });

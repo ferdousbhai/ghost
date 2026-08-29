@@ -64,9 +64,11 @@ ambient credential discovery, and no cloud custody.
   live owner-wide files, while skills are bounded declarative instructions from
   a ghost or trusted project. pi supports explicit `/skill:<name>` invocation
   without treating Documents as a package root.
-- **Two browser modes** — "My browser" (relay into the owner's real signed-in
-  Chromium via MV3 extension + chrome.debugger) and "Ghost's browser" (per-ghost
-  Playwright profile, isolated/autonomous), one backend-agnostic tool surface.
+- **One browser** — the owner's real signed-in Chromium, reached by an MV3
+  extension over `chrome.debugger`, behind a backend-agnostic tool surface. A
+  second, ghost-owned profile was tried and removed: it doubled the code for a
+  browser the owner never sees, and the tab is a better isolation unit than a
+  profile. Prefer a CLI over a web UI wherever one exists.
 - **Quickshell shell surfaces, not a webapp window** — Omarchy's own shell is
   Quickshell; an xdg-toplevel HUD plus a layer-shell bar widget stays native to
   the desktop. A chromium "deep workspace" view must earn its way in.

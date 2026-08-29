@@ -4,7 +4,7 @@
  * Same shape as the `RecordingBackend` tests in `browser-extension.test.ts`, and
  * for the same reason: what wants pinning down is that the policy above the seam
  * (URL vetting, ref bookkeeping, the read budget, screenshot naming) applies to a
- * backend that is *not* Playwright, and that this particular backend translates a
+ * backend seam, and that this backend translates a
  * socket into that seam faithfully — including when the socket is not there.
  *
  * No WebSocket, no browser, no daemon: the transport is three members and a
@@ -19,6 +19,7 @@ import type { BrowserFailure } from "../src/extensions/browser-backend.js";
 import {
   RelayBrowserBackend,
   relayBackend,
+  RELAY_OFF_MESSAGE,
   RELAY_OPS,
   RELAY_PROTOCOL_VERSION,
   RELAY_SUBPROTOCOL,
@@ -152,7 +153,13 @@ describe("the protocol constants are a contract", () => {
     const { loadExtension } = await import("./support/harness.js");
     const { mkdtemp } = await import("node:fs/promises");
     const home = await mkdtemp(join(tmpdir(), "ghost-relay-desc-"));
-    const harness = await loadExtension(createBrowserExtension({ browser: { idleTimeoutMs: 0 } }), home);
+    const harness = await loadExtension(
+      createBrowserExtension({
+        backend: relayBackend({ transport: new ScriptedTransport() }),
+        browser: { idleTimeoutMs: 0 },
+      }),
+      home,
+    );
     const description = harness.tools.get(GHOST_BROWSER)?.description ?? "";
     expect(description).toMatch(/javascript/i);
     expect(description).toMatch(/returns .* untrusted|untrusted DATA/i);
@@ -253,7 +260,7 @@ describe("driving the relay", () => {
     await backend.click({ selector: "button.primary" }, { timeoutMs: 5_000 });
     expect(sentArgs(transport, "click")).toEqual({ tab: "t1", selector: "button.primary" });
 
-    // A ref wins when both arrive, matching the Playwright backend.
+    // A ref wins when both arrive: it is the more specific of the two.
     await backend.click({ ref: "e1", selector: "a" }, { timeoutMs: 5_000 });
     expect(sentArgs(transport, "click")).toEqual({ tab: "t1", ref: "e1" });
   });
@@ -283,13 +290,6 @@ describe("driving the relay", () => {
     transport.answer("back", { page: PAGE, moved: false });
     const backend = await opened(transport);
     expect(await backend.back({ timeoutMs: 5_000 })).toMatchObject({ moved: false });
-  });
-
-  it("is never headless and says so rather than pretending the flag landed", async () => {
-    const backend = new RelayBrowserBackend({ transport: transportWithPage() });
-    expect(backend.headless).toBe(false);
-    expect(backend.setHeadless(true)).toEqual({ applied: false });
-    expect(backend.headless).toBe(false);
   });
 
   it("closes the ghost's tab without closing the browser", async () => {
@@ -508,6 +508,21 @@ describe("when the relay is not there", () => {
     expect(error.details["failure"]).toBe("browser_unavailable");
     expect(error.message).toMatch(/extension.*paired|popup/i);
     expect(transport.sent).toHaveLength(0);
+  });
+
+  it("names the real remedy when the daemon has no relay hub at all", async () => {
+    // `GHOSTD_RELAY=off`: there is no second browser to fall back to, so the
+    // tool stays registered rather than vanishing from under a conversation that
+    // was using it — but telling the model to pair an extension would be a dead
+    // end, because there is no endpoint to pair against.
+    const backend = new RelayBrowserBackend({});
+    expect(backend.running).toBe(false);
+    expect(await backend.current()).toBeUndefined();
+
+    const error = await expectGhostError(backend.open(PAGE.url, { timeoutMs: 5_000 }));
+    expect(error.details["failure"]).toBe("browser_unavailable");
+    expect(error.message).toBe(RELAY_OFF_MESSAGE);
+    expect(error.message).toMatch(/restart ghostd/i);
   });
 
   it("forgets its tab when the extension disappears mid-request", async () => {

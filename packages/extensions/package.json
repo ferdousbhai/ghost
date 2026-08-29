@@ -22,12 +22,10 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "bun --bun ./node_modules/vitest/vitest.mjs run",
-    "test:browser-integration": "GHOST_BROWSER_INTEGRATION=1 bun --bun ./node_modules/vitest/vitest.mjs run test/browser-playwright-integration.test.ts"
+    "test": "bun --bun ./node_modules/vitest/vitest.mjs run"
   },
   "dependencies": {
     "fflate": "^0.8.2",
-    "playwright-core": "^1.62.1",
     "tldts": "^7.4.11",
     "typebox": "^1.3.7"
   },

@@ -417,8 +417,8 @@ async function serveDaemon(
   // One relay hub, shared: the server exposes /relay over it and the session
   // host uses it as the browser backend's transport, so a ghost drives the
   // very browser the extension is connected to. `undefined` when GHOSTD_RELAY
-  // is off, which also disables the relay browser mode (sessions fall back to
-  // the per-ghost profile).
+  // is off — there is no second browser to fall back to, so `ghost_browser`
+  // then reports that none is reachable.
   const relay = createRelayHub({ logger });
   const machineDocuments = openMachineDocuments();
   const homeOperations = new HomeOperationCoordinator(registry);
@@ -429,7 +429,6 @@ async function serveDaemon(
     ownerHome,
     logger,
     offline: config.offline,
-    browserMode: config.browserMode,
     compaction: config.compaction,
     askTimeoutSeconds: config.askTimeoutSeconds,
     hooks,

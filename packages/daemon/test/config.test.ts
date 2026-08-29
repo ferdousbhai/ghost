@@ -41,7 +41,6 @@ describe("loadConfig", () => {
       host: DEFAULT_HOST,
       ghostsRoot: join(root, "ghosts"),
       offline: false,
-      browserMode: "relay",
       remote: { enabled: false },
       configPath: join(root, ".config", "ghost", "config.json"),
     });
@@ -81,22 +80,6 @@ describe("loadConfig", () => {
       },
     });
     expect(statSync(path).mode & 0o777).toBe(0o600);
-  });
-
-  it("takes browserMode from env, then file, defaulting to relay", () => {
-    const root = makeHome();
-    expect(loadConfig({ env: { GHOST_BROWSER_MODE: "profile" }, home: root }).browserMode)
-      .toBe("profile");
-    writeConfig(root, { browserMode: "profile" });
-    expect(loadConfig({ env: {}, home: root }).browserMode).toBe("profile");
-    // env wins over file
-    expect(loadConfig({ env: { GHOST_BROWSER_MODE: "relay" }, home: root }).browserMode)
-      .toBe("relay");
-  });
-
-  it("rejects an invalid browserMode", () => {
-    const root = makeHome();
-    expect(() => loadConfig({ env: { GHOST_BROWSER_MODE: "chrome" }, home: root })).toThrow();
   });
 
   it("reads the XDG config file", () => {

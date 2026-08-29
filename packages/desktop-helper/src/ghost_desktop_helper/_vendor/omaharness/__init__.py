@@ -6,7 +6,7 @@
 # This is a MINIMAL, DESKTOP-ONLY vendor of the harness for the Ghost project's
 # ghost-desktop-helper. The upstream package's __init__ re-exports the browser,
 # desktop-orchestrator, and knowledge surfaces; none of those are vendored here
-# (Ghost has its own relay + Playwright, and its own thin JSON bridge), so this
+# (Ghost has its own browser relay, and its own thin JSON bridge), so this
 # __init__ deliberately imports nothing but the shared error types. Every
 # vendored leaf module (dispatch, hypr, session, transaction, capture, headless,
 # toplevels, keys, inputs, atspi, process, errors) is imported directly by the

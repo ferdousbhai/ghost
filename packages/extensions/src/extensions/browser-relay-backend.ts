@@ -1,7 +1,7 @@
 /**
  * The relay backend: the ghost drives the owner's **real, signed-in Chromium**.
  *
- * The Playwright backend owns a browser. This one owns nothing. An MV3 extension
+ * This backend owns nothing. An MV3 extension
  * living in the owner's Chromium dials *out* to ghostd over a localhost
  * WebSocket, and every verb in `GhostBrowserBackend` becomes one request frame on
  * that socket. There is no profile to lock, no process to launch, and — the point
@@ -23,7 +23,7 @@
  *
  * **The transport does not throw for browser failures.** A page that would not
  * load is not an exception in the transport, it is a `{ ok: false, failure }`
- * reply — the same `BrowserFailure` vocabulary the Playwright backend raises. That
+ * reply — the `BrowserFailure` vocabulary the seam is written in. That
  * keeps error translation in one place (here) instead of smeared across a socket,
  * and it means "the extension disconnected mid-request" is expressible in the same
  * channel as "that element is gone".
@@ -32,11 +32,10 @@
  * obvious choice and the wrong one: it is scoped to a live `DOM.enable` session,
  * it is invalidated by any navigation, and it obliges the extension to hold a
  * debugger attachment open between tool calls just to keep `e3` meaningful. The
- * extension instead stamps `data-ghost-ref="e3"` exactly as the Playwright backend
- * does, so a ref *is* a selector, survives as long as the node does, and needs no
- * attachment at all until the moment something is clicked. Both backends therefore
- * mint refs with the same meaning, which is what lets `browser-session.ts` do the
- * bookkeeping for both.
+ * extension instead stamps `data-ghost-ref="e3"` on each match, so a ref *is* a
+ * selector: it survives as long as the node does and needs no attachment at all
+ * until the moment something is clicked. Minting refs is the backend's business,
+ * which is what lets `browser-session.ts` own the bookkeeping above it.
  *
  * Provenance: the relay shape (extension dials out over WebSocket, semantic verbs
  * rather than a remote `eval`, CDP only for input) is ported from the MIT-licensed
@@ -148,9 +147,9 @@ export type RelayReply =
 export interface RelayRequestOptions {
   readonly timeoutMs: number;
   /**
-   * The transport should cancel its pending request when it can. Relay protocol
-   * The protocol has no cancel frame, so an already-delivered browser operation may still
-   * finish remotely after the caller has stopped waiting.
+   * The transport should cancel its pending request when it can. The protocol has
+   * no cancel frame, so an already-delivered browser operation may still finish
+   * remotely after the caller has stopped waiting.
    */
   readonly signal?: AbortSignal;
 }
@@ -172,11 +171,19 @@ export interface RelayTransport {
   ): Promise<RelayReply>;
 }
 
+export const RELAY_OFF_MESSAGE =
+  "This daemon is running with its browser relay switched off (GHOSTD_RELAY), "
+  + "so there is no browser to drive and no endpoint an extension could pair "
+  + "with. Installing the extension will not help: the owner has to restart "
+  + "ghostd without GHOSTD_RELAY=off.";
+
 export const RELAY_DISCONNECTED_MESSAGE =
   "The browser relay is not connected, so the owner's Chromium cannot be "
   + "driven. Ask them to open Chromium with the Ghost relay extension installed "
-  + "and paired (the extension's popup shows the connection status).";
-
+  + "and paired (the extension's popup shows the connection status). If no "
+  + "Chromium is running you may start one yourself, but detach it from the "
+  + "daemon's service unit or restarting ghostd will kill it and every tab in "
+  + "it: `systemd-run --user --scope -- chromium`.";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -290,16 +297,20 @@ function readTabInfos(value: unknown): readonly BackendTabInfo[] {
   });
 }
 
-
 export interface RelayBackendOptions {
-  readonly transport: RelayTransport;
+  /**
+   * Absent when the daemon has no relay hub (`GHOSTD_RELAY=off`). There is one
+   * browser and it is reached through the extension, so "no relay" is "no
+   * browser": the tool still exists and every call says why, rather than
+   * disappearing from under a conversation that was using it.
+   */
+  readonly transport?: RelayTransport;
 }
 
 export class RelayBrowserBackend implements GhostBrowserBackend {
   readonly name = "relay";
-  readonly headless = false;
 
-  readonly #transport: RelayTransport;
+  readonly #transport: RelayTransport | undefined;
   /**
    * Who this backend is, for the extension. One extension serves every ghost and
    * conversation over a single socket, so the session id is what makes a tab
@@ -321,30 +332,25 @@ export class RelayBrowserBackend implements GhostBrowserBackend {
   }
 
   get running(): boolean {
-    return this.#transport.connected && this.#tabId !== undefined;
+    return this.#transport?.connected === true && this.#tabId !== undefined;
   }
-
-  /**
-   * Headless is meaningless here: the browser is the owner's, already on their
-   * desktop. Reporting `applied: false` is what makes the tool say so out loud
-   * rather than pretending the flag landed.
-   */
-  setHeadless(_headless: boolean): { applied: boolean } {
-    return { applied: false };
-  }
-
 
   async #call(
     op: RelayOp,
     args: Readonly<Record<string, unknown>>,
     options: BackendActionOptions,
   ): Promise<Record<string, unknown>> {
-    if (!this.#transport.connected) {
+    const transport = this.#transport;
+    if (!transport?.connected) {
       this.#tabId = undefined;
-      throw new GhostBrowserError("browser_unavailable", RELAY_DISCONNECTED_MESSAGE, { op });
+      throw new GhostBrowserError(
+        "browser_unavailable",
+        transport === undefined ? RELAY_OFF_MESSAGE : RELAY_DISCONNECTED_MESSAGE,
+        { op },
+      );
     }
     const reply = await withAbort(
-      this.#transport.request(op, {
+      transport.request(op, {
         ...args,
         session: this.#session,
         ...(this.#tabId === undefined ? {} : { tab: this.#tabId }),
@@ -369,7 +375,6 @@ export class RelayBrowserBackend implements GhostBrowserBackend {
     if (!isRecord(reply.result)) malformed(op, "the result is not an object");
     return reply.result;
   }
-
 
   async current(options: BackendActionOptions = { timeoutMs: 5_000 }): Promise<PageSummary | undefined> {
     // Cheap and non-committal when no tab has ever been opened: do not start or
@@ -584,10 +589,7 @@ function targetArgs(target: BackendTarget): Record<string, unknown> {
   throw new GhostBrowserError("invalid_input", "No ref or selector was given.");
 }
 
-/**
- * The relay backend factory, for `createBrowserExtension({ backend })`.
- *
- */
+/** The relay backend factory, for `createBrowserExtension({ backend })`. */
 export function relayBackend(options: RelayBackendOptions): BrowserBackendFactory {
   return identifiedBrowserBackendFactory(
     (_ctx: BrowserBackendContext) => new RelayBrowserBackend(options),

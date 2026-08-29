@@ -66,11 +66,11 @@ export type BrowserAction = (typeof BROWSER_ACTIONS)[number];
 
 export interface BrowserExtensionOptions extends GhostExtensionOptions {
   /**
-   * Which browser to drive. Defaults to `playwrightBackend()` — a dedicated
-   * Chromium profile under the ghost home. The relay into the owner's real
-   * signed-in Chromium slots in here, with no change to the tool.
+   * Which browser to drive: the relay into the owner's real signed-in Chromium.
+   * It stays behind the `GhostBrowserBackend` seam so the tool above it is
+   * written against verbs rather than against one browser.
    */
-  readonly backend?: BrowserBackendFactory;
+  readonly backend: BrowserBackendFactory;
   readonly browser?: Omit<BrowserSessionOptions, "homeDir" | "backend">;
 }
 
@@ -103,12 +103,12 @@ function describeProjectionChanges(changes: ReadonlyArray<readonly [number, stri
 }
 
 export function createBrowserExtension(
-  options: BrowserExtensionOptions = {},
+  options: BrowserExtensionOptions,
 ): GhostExtensionFactory {
   const sessionFor = (ctx: CwdContext): GhostBrowserSession =>
     browserSessionFor(resolveHome(options, ctx).dir, {
       ...options.browser,
-      ...(options.backend === undefined ? {} : { backend: options.backend }),
+      backend: options.backend,
     });
 
   return (pi: GhostExtensionAPI) => {
@@ -116,11 +116,16 @@ export function createBrowserExtension(
       name: GHOST_BROWSER,
       label: "Browse the web",
       description:
-        "Browse the web in a real browser on the owner's desktop. Depending "
-        + "on setup this is either the owner's signed-in browser (you act "
-        + "as them, using sessions they are already logged into) or a browser "
-        + "profile of your own; a dedicated browser may be visible or headless "
-        + "according to the host configuration.\n"
+        "Prefer a CLI when the job has one: agents drive command-line tools far "
+        + "better than web UIs, so reach for bash first and use this when there "
+        + "is no CLI for what the owner asked.\n"
+        + "This drives the owner's own signed-in Chromium, on their desktop, in "
+        + "front of them. You act as them, in the sessions they are already "
+        + "logged into, and they can watch and take over at any point. If no "
+        + "browser is reachable, they need to start Chromium with the Ghost relay "
+        + "extension paired. You may start one yourself, but detach it from the "
+        + "daemon's unit — `systemd-run --user --scope -- chromium` — or a ghostd "
+        + "restart takes the owner's browser down with it.\n"
         + "Work in steps: open a page, read it, find the element you want, then "
         + "click or type. Refs like e1 come from find and stay valid until the "
         + "page changes. Only http and https pages are reachable; local files and "
@@ -157,7 +162,7 @@ export function createBrowserExtension(
             + "elements by text or CSS selector and get refs for them. click: "
             + "click a ref or selector. type: put text into a field. screenshot: "
             + "save a PNG of the page and get its path. back: go back one page. "
-            + "close: shut the browser down.",
+            + "close: let go of the tabs you opened. The owner's browser stays open.",
         }),
         url: Type.Optional(Type.String({
           description: "For open. A full https URL, or a bare domain.",
@@ -324,7 +329,6 @@ export function createBrowserExtension(
               {
                 action: "open",
                 ...page,
-                headless: session.headless,
                 backend: session.backend.name,
               },
             );
@@ -792,18 +796,9 @@ export {
   closeAllBrowserSessions,
   screenshotDirFor,
 } from "./browser-session.js";
-export {
-  BROWSER_PROFILE_DIRNAME,
-  findChromiumExecutable,
-  NO_BROWSER_MESSAGE,
-  playwrightBackend,
-  PlaywrightBrowserBackend,
-} from "./browser-playwright.js";
 export type {
   BackendScreenshotResult,
   BrowserBackendFactory,
   GhostBrowserBackend,
   PageElementMatch,
 } from "./browser-backend.js";
-
-export default createBrowserExtension();

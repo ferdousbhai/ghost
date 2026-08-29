@@ -175,14 +175,6 @@ export interface BackendTabsResult {
 export interface GhostBrowserBackend {
   readonly name: string;
   readonly running: boolean;
-  readonly headless: boolean;
-
-  /**
-   * Ask for headed or headless. Returns whether it took effect now — for a
-   * launched browser it only applies at the next start, and for a relay it never
-   * applies at all, which the tool reports rather than silently swallowing.
-   */
-  setHeadless(headless: boolean): { applied: boolean };
 
   /**
    * Where the browser is right now, or undefined when nothing is loaded — which
@@ -235,8 +227,8 @@ export interface GhostBrowserBackend {
   upload(input: BackendUploadInput, options: BackendActionOptions): Promise<PageSummary>;
 
   /**
-   * Resize the browser window. Returns whether it took effect — a launched
-   * profile can honour it; some backends cannot, mirroring `setHeadless`.
+   * Resize the browser window. Returns whether it took effect — the owner's
+   * window manager may refuse, which the tool reports rather than swallowing.
    */
   resize(input: BackendResizeInput, options: BackendActionOptions): Promise<BackendResizeResult>;
 
@@ -247,13 +239,6 @@ export interface GhostBrowserBackend {
 
 export interface BrowserBackendContext {
   readonly homeDir: string;
-  /**
-   * Session-owned network policy. Playwright uses this on every request; other
-   * backends still have their requested and returned URLs checked by the
-   * session layer.
-   */
-  readonly checkUrl: (url: string, options?: BackendActionOptions) => Promise<string>;
-  readonly checkAddress: (address: string, url: string) => void;
 }
 
 /**

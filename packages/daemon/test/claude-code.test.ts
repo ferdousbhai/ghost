@@ -621,7 +621,6 @@ describe("Claude Code subscription runtime", () => {
     });
     const browser = {
       name: "claude-bridge-test",
-      setHeadless: () => ({ applied: true }),
       current: async () => browserPage,
       open: async (url: string) => {
         browserPage = { url, title: "Bridge fixture" };

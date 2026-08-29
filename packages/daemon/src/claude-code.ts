@@ -199,7 +199,6 @@ export interface ClaudeCodeRuntimeOptions {
   machineSkillPaths?: readonly string[];
   logger?: Logger;
   extensionOptions?: GhostExtensionOptions;
-  browserMode?: "relay" | "profile";
   relayTransport?: RelayTransport;
   binaryPath?: string;
   createQuery?: ClaudeCodeQueryFactory;
@@ -1014,14 +1013,12 @@ async function buildMcpTools(
   homeDir: string,
   ghostName: string,
   extensionOptions: GhostExtensionOptions,
-  browserMode: "relay" | "profile",
   relayTransport: RelayTransport | undefined,
 ): Promise<{ tools: SdkMcpToolDefinition[]; names: string[] }> {
   const resolved = resolveGhostExtensions(
     {
       ...extensionOptions,
       ghostName,
-      browserMode,
       ...(relayTransport ? { relayTransport } : {}),
     },
     homeDir,
@@ -1418,7 +1415,6 @@ function linkedTurnSignal(
 export class ClaudeCodeRuntime {
   private readonly logger: Logger;
   private readonly extensionOptions: GhostExtensionOptions;
-  private readonly browserMode: "relay" | "profile";
   private readonly relayTransport: RelayTransport | undefined;
   private readonly createQuery: ClaudeCodeQueryFactory;
   private readonly probe: ClaudeCodeProbe;
@@ -1444,7 +1440,6 @@ export class ClaudeCodeRuntime {
       : machineSkillPaths(this.ownerHome);
     this.logger = options.logger ?? silentLogger;
     this.extensionOptions = options.extensionOptions ?? {};
-    this.browserMode = options.browserMode ?? "relay";
     this.relayTransport = options.relayTransport;
     this.createQuery = options.createQuery
       ?? ((input) => query({ prompt: input.prompt, options: input.options }));
@@ -1696,7 +1691,6 @@ export class ClaudeCodeRuntime {
         paths.home,
         ghost.name,
         this.extensionOptions,
-        this.browserMode,
         this.relayTransport,
       );
       this.assertTurnAdmitted();

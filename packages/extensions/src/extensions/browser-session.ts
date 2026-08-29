@@ -1,7 +1,8 @@
 /**
  * Browser actions are serialized because parallel tool calls cannot safely
- * navigate and act on the same page. Sessions are keyed by ghost home because
- * Chromium exclusively locks each persistent profile directory.
+ * navigate and act on the same page. Sessions are keyed by ghost home because a
+ * ghost has one browser, not one per conversation; the tab, not the session, is
+ * what keeps two conversations out of each other's way.
  */
 import { writeFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
@@ -27,13 +28,11 @@ import {
   projectJavascriptResult,
   projectNetworkEntries,
 } from "./browser-observation.js";
-import { playwrightBackend } from "./browser-playwright.js";
 import {
   checkActingScope,
   checkNetworkUrl,
   DEFAULT_DNS_TIMEOUT_MS,
   defaultBrowserDnsResolver,
-  isPublicInternetAddress,
   type BrowserDnsResolver,
   type BrowserPolicyClock,
   systemBrowserPolicyClock,
@@ -66,8 +65,6 @@ export const MAX_BROWSER_REF_CHARS = 128;
 
 const BROWSER_REF_PATTERN = /^[A-Za-z0-9._:-]+$/;
 
-const DEFAULT_BROWSER_BACKEND = playwrightBackend();
-
 /**
  * How many consequential actions (click/type) may fire between two explicit
  * `open()`s. An injected page that hijacks the ghost cannot issue an `open()` on
@@ -79,8 +76,8 @@ export const DEFAULT_ACTING_BUDGET = 12;
 
 export interface BrowserSessionOptions {
   readonly homeDir: string;
-  /** Which browser to drive. Defaults to a dedicated Playwright Chromium profile. */
-  readonly backend?: BrowserBackendFactory;
+  /** Which browser to drive. There is one, so the caller names it. */
+  readonly backend: BrowserBackendFactory;
   readonly idleTimeoutMs?: number;
   readonly actionTimeoutMs?: number;
   readonly allowLocal?: boolean;
@@ -184,26 +181,26 @@ function boundedMatchString(value: unknown, maxChars: number): string {
 function projectBrowserMatch(value: unknown): PageElementMatch | null {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
   const match = value as Record<string, unknown>;
-  const ref = typeof match["ref"] === "string" ? match["ref"].trim() : "";
+  const ref = typeof match.ref === "string" ? match.ref.trim() : "";
   if (
     ref.length === 0
     || ref.length > MAX_BROWSER_REF_CHARS
     || !BROWSER_REF_PATTERN.test(ref)
   ) return null;
-  const role = boundedMatchString(match["role"], 80);
-  const name = boundedMatchString(match["name"], MAX_BROWSER_MATCH_TEXT_CHARS);
-  const href = boundedMatchString(match["href"], MAX_BROWSER_MATCH_HREF_CHARS);
-  const valueText = boundedMatchString(match["value"], MAX_BROWSER_MATCH_TEXT_CHARS);
+  const role = boundedMatchString(match.role, 80);
+  const name = boundedMatchString(match.name, MAX_BROWSER_MATCH_TEXT_CHARS);
+  const href = boundedMatchString(match.href, MAX_BROWSER_MATCH_HREF_CHARS);
+  const valueText = boundedMatchString(match.value, MAX_BROWSER_MATCH_TEXT_CHARS);
   return {
     ref,
-    tag: boundedMatchString(match["tag"], 80),
+    tag: boundedMatchString(match.tag, 80),
     ...(role ? { role } : {}),
     ...(name ? { name } : {}),
     ...(href ? { href } : {}),
     ...(valueText ? { value: valueText } : {}),
-    text: boundedMatchString(match["text"], MAX_BROWSER_MATCH_TEXT_CHARS),
-    visible: match["visible"] === true,
-    disabled: match["disabled"] === true,
+    text: boundedMatchString(match.text, MAX_BROWSER_MATCH_TEXT_CHARS),
+    visible: match.visible === true,
+    disabled: match.disabled === true,
   };
 }
 
@@ -261,24 +258,11 @@ export class GhostBrowserSession {
     this.#actingBudget = options.actingBudget ?? DEFAULT_ACTING_BUDGET;
     this.#allowActionsOffOrigin = options.allowActionsOffOrigin ?? false;
     this.#actingRemaining = this.#actingBudget;
-    this.backend = (options.backend ?? DEFAULT_BROWSER_BACKEND)({
-      homeDir: this.homeDir,
-      checkUrl: (url, operation = { timeoutMs: this.#actionTimeoutMs }) =>
-        this.#requireAllowedUrl(url, operation),
-      checkAddress: (address, url) => this.#requirePublicAddress(address, url),
-    });
+    this.backend = options.backend({ homeDir: this.homeDir });
   }
 
   get running(): boolean {
     return this.backend.running;
-  }
-
-  get headless(): boolean {
-    return this.backend.headless;
-  }
-
-  setHeadless(headless: boolean): { applied: boolean } {
-    return this.backend.setHeadless(headless);
   }
 
   get refs(): ReadonlyMap<string, PageElementMatch> {
@@ -375,15 +359,6 @@ export class GhostBrowserSession {
       });
     }
     return checked.url;
-  }
-
-  #requirePublicAddress(address: string, url: string): void {
-    if (this.#allowLocal || isPublicInternetAddress(address)) return;
-    throw new GhostBrowserError(
-      "blocked_url",
-      `${url} connected to a private or non-public network address, so the page was closed.`,
-      { url },
-    );
   }
 
   async #validatePage<T extends PageSummary>(
@@ -1228,7 +1203,7 @@ let closingAll: Promise<void> | undefined;
 function effectiveSessionOptions(
   options: Omit<BrowserSessionOptions, "homeDir">,
 ): EffectiveSessionOptions {
-  const backend = options.backend ?? DEFAULT_BROWSER_BACKEND;
+  const backend = options.backend;
   return {
     backend,
     backendIdentity: Object.freeze([...(backend.sessionIdentity ?? [backend])]),
@@ -1290,15 +1265,14 @@ export function screenshotDirFor(_homeDir: string): string {
 }
 
 /**
- * The one session for this ghost home, created on first ask. Keyed on the home
- * because that is what a launched Chromium locks, and because a ghost should
- * have one browser, not one per conversation. Later requests must describe the
- * same effective configuration; immutable changes are a typed conflict instead
- * of being silently discarded.
+ * The one session for this ghost home, created on first ask, because a ghost
+ * should have one browser rather than one per conversation. Later requests must
+ * describe the same effective configuration; immutable changes are a typed
+ * conflict instead of being silently discarded.
  */
 export function browserSessionFor(
   homeDir: string,
-  options: Omit<BrowserSessionOptions, "homeDir"> = {},
+  options: Omit<BrowserSessionOptions, "homeDir">,
 ): GhostBrowserSession {
   const key = resolve(homeDir);
   if (closingAll) {

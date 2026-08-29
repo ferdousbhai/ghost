@@ -4,7 +4,7 @@
  * These are strings, not functions, on purpose. This package compiles with
  * `lib: ["ES2023"]` and `types: ["node"]` — there is no DOM in scope, and adding
  * it would put `document`, `fetch`, and friends into every module in the package
- * just so three snippets can typecheck. Playwright's `evaluate()` accepts a
+ * just so three snippets can typecheck. A CDP `Runtime.evaluate` takes a
  * string expression that evaluates to a function, so the snippets stay here,
  * quarantined and named, instead of being smeared through the session module.
  *
@@ -19,7 +19,7 @@ export const REF_ATTRIBUTE = "data-ghost-ref";
 /**
  * Wrap a snippet into an expression that actually *runs*.
  *
- * Playwright's string form of `evaluate()` evaluates an expression; it does not
+ * `Runtime.evaluate` evaluates an expression; it does not
  * call it. Hand it `(arg) => {...}` and the page dutifully creates a function,
  * fails to serialize it, and returns `undefined` — which looks exactly like a
  * page that had nothing to say. The `arg` parameter is inlined as a JSON literal

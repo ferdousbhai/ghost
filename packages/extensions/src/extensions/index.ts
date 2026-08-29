@@ -31,7 +31,7 @@ export function ghostToolNames(): string[] {
 }
 
 export function createGhostExtension(
-  options: GhostExtensionSetOptions = {},
+  options: GhostExtensionSetOptions,
 ): GhostExtensionFactory {
   const persona = createPersonaExtension(options);
   const character = createCharacterExtension(options);

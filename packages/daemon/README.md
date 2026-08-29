@@ -12,9 +12,7 @@ Ghost runs on Bun 1.3.14 or newer (`bun --bun`). `pnpm --filter @ghost/daemon
 build:binary` compiles `ghostd` and its `ghost` terminal client into
 self-contained executables (`packages/daemon/dist/ghostd` and `dist/ghost`, Bun
 runtime included, version embedded); they need no `node_modules` at runtime.
-Playwright's optional BiDi/Electron
-modules and macOS `fsevents` are left external because Ghost drives Chromium
-over CDP and never loads them. The Arch development package installs this
+macOS `fsevents` is left external because Ghost never loads it. The Arch development package installs this
 artifact directly as `/usr/bin/ghostd`; it does not install the daemon source
 tree or JavaScript dependencies.
 
@@ -53,7 +51,7 @@ ghost smoke --no-turn
 `ghost smoke` starts a scratch daemon and a scratch ghost. A real turn needs a
 provider signed in inside that scratch home, so CI uses `--no-turn`.
 
-`config.json` carries the same settings plus `browserMode`, `compaction`, and
+`config.json` carries the same settings plus `compaction` and
 `askTimeoutSeconds`. Compaction is pi's native compaction: `enabled` defaults
 to true, `thresholdFraction` defaults to `0.8`, and `thresholdTokens` selects a
 fixed threshold and takes precedence when both are present; Ghost projects the
@@ -226,8 +224,8 @@ text is fenced and screened; see
 Service and then scrubbed.
 
 New sessions start with the owner's home as their operational cwd, while
-transcripts, persona, memory, browser state, configuration, and keyring policy
-remain under the ghost home. Credentials are machine-wide service/account
+transcripts, persona, memory, configuration, and keyring policy remain under the
+ghost home; browser state is the owner's, in their own Chromium profile. Credentials are machine-wide service/account
 items. The cwd alone grants no discovery authority. A
 conversation may explicitly trust and bind one project, after which Ghost pins
 its data-only instructions, skills, rules, Markdown commands/prompts, and scoped

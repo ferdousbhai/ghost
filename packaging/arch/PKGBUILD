@@ -38,7 +38,7 @@ checkdepends=(
 )
 optdepends=(
   'basecamp-cli: Basecamp CLI and embedded pi skill'
-  'chromium: dedicated Ghost browser and browser-relay smoke test'
+  'chromium: the browser the relay drives, and the browser-relay smoke test'
   'claude-code: Claude Code plan runtime'
   'gnome-keyring: Secret Service provider for provider and MCP credentials'
   'npm: Firecrawl, Google Workspace, and Agent Skills installers for optional pi integrations'

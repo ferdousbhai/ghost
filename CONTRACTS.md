@@ -318,10 +318,9 @@ One naming convention makes the boundary readable rather than remembered. A
 plain-named entry in a ghost home is part of that ghost's identity and travels
 with it, including `settings.yml`, `models.json`, and `mcp.json`. A dot-prefixed
 entry is bound to this machine and never leaves it: `.pi/` (derived pi
-runtime), `.browser-profile/` (cookies and logins), `.trash/` (recoverable
-per-home deletion state), and `.memory-maintenance.json` (the consolidation
-cooldown). Export needs no credential exception: portable files contain
-references rather than values.
+runtime), `.trash/` (recoverable per-home deletion state), and
+`.memory-maintenance.json` (the consolidation cooldown). Export needs no
+credential exception: portable files contain references rather than values.
 
 ### Session capabilities
 
@@ -336,8 +335,8 @@ A pi session uses pi's runtime (`@earendil-works/pi-coding-agent`,
 `pi-agent-core`, `pi-ai`) and native tools, but Ghost owns its roots and
 provider-facing system prompt. A new conversation's operational cwd is the OS
 account home (`os.homedir()`), while `agentDir`, `sessionDir`, character,
-memory, persona, keyring policy, browser profile, and MCP/config sources remain
-explicit paths under the ghost home. Cwd is not storage and is not authority to
+memory, persona, keyring policy, and MCP/config sources remain explicit paths
+under the ghost home. Cwd is not storage and is not authority to
 discover a project. Ghost renders the persona/system prompt itself and passes
 it as the loader's `systemPrompt`; its persona extension then replaces that
 prompt before every model turn (`before_agent_start`). No pi coding-agent
@@ -1907,7 +1906,7 @@ whole model before any non-local exposure.
   tree.
 - `packages/shell` — the Omarchy/Quickshell HUD, model routing, ask/queue and
   branching UI, live tool cards, and summoning indicator.
-- `packages/chromium-extension` — the "my browser" relay, driving tabs of the
+- `packages/chromium-extension` — the browser relay, driving tabs of the
   browser the user is already signed into. One extension serves every ghost and
   conversation over one socket, so the tab is the unit of isolation: relay
   protocol 2 requires every operation to carry its `session` id and every page
@@ -1916,11 +1915,19 @@ whole model before any non-local exposure.
   every other tab's, and each session's tabs separate from every other session's:
   `open` answers with the tab id, the `tabs` op lists and switches within the
   asking session's own tabs and answers `active` for it alone, and session
-  `close` sweeps every tab that session opened rather than only its current one. `browserMode` defaults to `"relay"`, which is
-  selected whenever the daemon has a relay hub: browser calls then fail with the
-  disconnected message until an extension pairs, rather than falling back.
-  `"profile"` selects "Ghost's browser", a dedicated Playwright Chromium profile
-  under the ghost home, which remains the right choice for anything autonomous.
+  `close` sweeps every tab that session opened rather than only its current one.
+  The relay is the only browser: there is no second backend and no browser mode
+  to choose. Browser calls fail with the disconnected message until an extension
+  pairs. A ghost that needs Chromium running may start it from its shell, but
+  must detach it from `ghostd.service` (`systemd-run --user --scope`): a child of
+  that unit is killed with it, so `systemctl --user restart ghostd` would
+  otherwise close the owner's browser and every tab in it. Cancelling a turn
+  frees the caller, not the browser — the relay has no cancel frame, so an
+  operation already handed to the extension runs to completion there. The
+  session layer owns the URL policy, ref bookkeeping, read budget, and idle timer
+  above the backend seam; per-request address pinning is gone with the backend
+  that could intercept every request, so a name is resolved and checked before a
+  navigation and every returned page URL is rechecked.
 - `packages/desktop-helper` — Python, not pnpm. The fallback PyGObject sidecar
   for Hyprland/Wayland computer-use when Omarchy CLI cannot perform an action,
   driven by the `ghost_desktop` and `ghost_screen` extensions over line-oriented

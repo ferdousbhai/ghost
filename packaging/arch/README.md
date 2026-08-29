@@ -115,9 +115,9 @@ edits `~/.config/hypr` or `~/.config/omarchy`.
 
 The package owns only files under `/usr`, plus the system Quickshell symlink at
 `/etc/xdg/quickshell/ghost`. It does not create or own `~/ghosts`,
-`~/.config/ghost`, `~/.local/state/ghost`, or a browser profile. Upgrading or
-removing it therefore leaves personas, docs, memory, sessions, provider
-credentials, API tokens, and browser state untouched.
+`~/.config/ghost`, or `~/.local/state/ghost`. Upgrading or removing it therefore
+leaves personas, docs, memory, sessions, provider credentials, and API tokens
+untouched.
 
 An upgrade requires `systemctl --user reenable --now ghostd.service
 ghost-shell.service`; re-enabling also moves an installation made with the old
@@ -138,23 +138,22 @@ sudo pacman -Rns ghost-ai-git
 For the stable package, the final command is `sudo pacman -Rns ghost-ai`.
 
 That removes package-owned files only. It deliberately leaves `~/ghosts`,
-provider credentials, API/relay tokens, and browser profiles untouched.
+provider credentials, and API/relay tokens untouched.
 
 `smoke.sh` validates a staged package tree, including daemon startup metadata,
 the private helper imports, desktop entry, Chromium manifest, Quickshell assets,
 and graphical-session service binding. `package()` runs it before producing the
 archive, and the Arch workflow builds the package in a clean container.
 
-For a real service-context Chromium check on a graphical Arch login, run:
+For a real service-context check on a graphical Arch login, run:
 
 ```sh
 /usr/lib/ghost/package-smoke/service-browser-smoke.sh
 ```
 
-It first uses `/usr/bin/ghost status --json` to verify that the terminal client
-can authenticate to the active packaged daemon, then launches Chromium with a
-CDP endpoint in a transient user unit with the daemon's hardening properties
-and without `--no-sandbox`. CI containers do not run a graphical user manager,
-so this probe is intentionally a release-machine check. Ghost's Playwright
-backend opts into `chromiumSandbox: true`, so the probe covers the production
-launch policy rather than a weaker test-only mode.
+It uses `/usr/bin/ghost status --json` to verify that the terminal client can
+authenticate to the active packaged daemon, then reads `/api/relay/status` to
+verify the browser relay endpoint is serving from it. Ghost launches no browser
+of its own — the relay dials out of a Chromium the owner started — so there is
+no launch policy to probe. CI containers do not run a graphical user manager, so
+this stays a release-machine check.

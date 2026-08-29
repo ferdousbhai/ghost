@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 # Compile ghostd and ghost into self-contained executables (Bun runtime included).
 #
-# Playwright's optional BiDi and Electron requires, and the macOS-only
-# fsevents watcher, stay external: Ghost drives Chromium over CDP and never
-# loads them, and Bun cannot embed modules it cannot resolve.
+# The macOS-only fsevents watcher stays external: Ghost never loads it, and Bun
+# cannot embed a module it cannot resolve.
 set -euo pipefail
 cd -- "$(dirname "${BASH_SOURCE[0]}")/.."
 version="$(bun -e 'process.stdout.write((await Bun.file("package.json").json()).version)')"
@@ -15,7 +14,7 @@ build_binary() {
   mkdir -p "$(dirname "$outfile")"
   bun build --compile --target="$target" \
     --define "process.env.GHOSTD_VERSION=\"$version\"" \
-    --external 'chromium-bidi/*' --external electron --external fsevents \
+    --external fsevents \
     "$entry" --outfile "$outfile"
 }
 

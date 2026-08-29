@@ -9,7 +9,6 @@ import {
   openMachineDocuments,
   openGhostHome,
   relayBackend,
-  type BrowserBackendFactory,
   type CharacterFile,
   type DocumentDirectoryPage,
   type DocumentsIndex,
@@ -40,14 +39,9 @@ export interface GhostExtensionOptions {
   ghostName?: string;
   documents?: MachineDocuments | string;
   /**
-   * Which browser `ghost_browser` drives. `"relay"` (with a `relayTransport`
-   * present) points the tool at the owner's real Chromium; `"profile"` (or
-   * no transport) leaves the extension's default per-ghost Playwright profile.
-   */
-  browserMode?: "relay" | "profile";
-  /**
-   * The daemon's relay hub, adapted as a transport. Present only when the
-   * relay is enabled; the relay backend is built from it per session.
+   * The daemon's relay hub, adapted as a transport; the browser backend is built
+   * from it per session. Absent only when `GHOSTD_RELAY` is off, which leaves the
+   * tool reporting that no browser is reachable.
    */
   relayTransport?: RelayTransport;
   /**
@@ -56,18 +50,6 @@ export interface GhostExtensionOptions {
    * prompt every turn, but from the sections it was constructed with.
    */
   extraSections?: readonly string[];
-}
-
-/**
- * Choose the browser backend for a session. Relay when asked for and available
- * otherwise `undefined` so the extension keeps its Playwright default.
- */
-function selectBrowserBackend(
-  options: GhostExtensionOptions,
-): BrowserBackendFactory | undefined {
-  if (options.browserMode === "profile") return undefined;
-  if (!options.relayTransport) return undefined;
-  return relayBackend({ transport: options.relayTransport });
 }
 
 export interface ResolvedGhostExtensions {
@@ -91,12 +73,15 @@ export function resolveGhostExtensions(
   homeDir: string | undefined,
   capabilities: GhostToolCapabilitiesSource,
 ): ResolvedGhostExtensions {
-  const backend = selectBrowserBackend(options);
   const extensionOptions = {
     ...(homeDir === undefined ? {} : { home: homeDir }),
     ...(options.ghostName === undefined ? {} : { ghostName: options.ghostName }),
     ...(options.documents === undefined ? {} : { documents: options.documents }),
-    ...(backend === undefined ? {} : { backend }),
+    // No transport means the daemon has no relay hub at all; the backend says so
+    // on every call rather than the tool disappearing from the conversation.
+    backend: options.relayTransport
+      ? relayBackend({ transport: options.relayTransport })
+      : relayBackend({}),
     ...(options.extraSections === undefined ? {} : { extraSections: options.extraSections }),
     capabilities,
   };

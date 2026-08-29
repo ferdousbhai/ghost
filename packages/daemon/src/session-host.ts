@@ -605,11 +605,10 @@ export interface SessionHostOptions {
   /** Passed to the `@ghost/extensions` factories. */
   extensionOptions?: GhostExtensionOptions;
   /**
-   * Which browser `ghost_browser` drives. Default `"relay"`. With a
-   * `relayTransport` present, relay sessions point at the owner's real
-   * Chromium; `"profile"` (or no transport) uses the per-ghost profile.
+   * The hub `ghost_browser` drives the owner's real Chromium through. Absent
+   * only when `GHOSTD_RELAY` is off, which leaves the tool reporting that no
+   * browser is reachable.
    */
-  browserMode?: "relay" | "profile";
   relayTransport?: RelayTransport;
   /**
    * Seconds a question waits before it settles itself. Daemon-wide; see
@@ -634,7 +633,7 @@ export interface SessionHostOptions {
    */
   claudeCode?: Omit<
     ClaudeCodeRuntimeOptions,
-    "logger" | "extensionOptions" | "browserMode" | "relayTransport" | "hooks" | "machineSkillPaths"
+    "logger" | "extensionOptions" | "relayTransport" | "hooks" | "machineSkillPaths"
   >;
   liveVoice?: LiveVoiceManager;
   collaboration?: CollaborationManager;
@@ -1533,7 +1532,6 @@ export class SessionHost {
   private readonly logger: Logger;
   private readonly offline: boolean;
   private readonly extensionOptions: GhostExtensionOptions;
-  private readonly browserMode: "relay" | "profile";
   private readonly relayTransport: RelayTransport | undefined;
   private readonly compactionConfig: CompactionConfig;
   private readonly autoBackgroundMs: number;
@@ -1604,7 +1602,6 @@ export class SessionHost {
     this.logger = options.logger ?? silentLogger;
     this.offline = options.offline ?? false;
     this.extensionOptions = options.extensionOptions ?? {};
-    this.browserMode = options.browserMode ?? "relay";
     this.relayTransport = options.relayTransport;
     this.compactionConfig = options.compaction ?? DEFAULT_COMPACTION_CONFIG;
     this.autoBackgroundMs = options.jobs?.autoBackgroundMs ?? DEFAULT_AUTO_BACKGROUND_MS;
@@ -1657,7 +1654,6 @@ export class SessionHost {
       machineSkillPaths: this.machineSkills,
       logger: this.logger,
       extensionOptions: this.extensionOptions,
-      browserMode: this.browserMode,
       ...(this.relayTransport ? { relayTransport: this.relayTransport } : {}),
       hooks: this.hooks,
       ...(options.claudeCode ?? {}),
@@ -2628,8 +2624,7 @@ export class SessionHost {
     const extensions = resolveGhostExtensions(
       {
         ghostName,
-        browserMode: this.browserMode,
-        ...(this.relayTransport ? { relayTransport: this.relayTransport } : {}),
+          ...(this.relayTransport ? { relayTransport: this.relayTransport } : {}),
         ...this.extensionOptions,
         extraSections,
       },

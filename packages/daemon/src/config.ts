@@ -34,7 +34,6 @@ export interface DaemonConfig {
    * env-scrub.ts, which is unconditional.
    */
   offline: boolean;
-  browserMode: "relay" | "profile";
   compaction: CompactionConfig;
   askTimeoutSeconds: number;
   /**
@@ -53,7 +52,6 @@ export interface DaemonConfigFile {
   host?: string;
   ghostsRoot?: string;
   offline?: boolean;
-  browserMode?: "relay" | "profile";
   compaction?: {
     enabled?: boolean;
     thresholdTokens?: number;
@@ -68,7 +66,6 @@ export interface DaemonConfigOverrides {
   host?: string;
   ghostsRoot?: string;
   offline?: boolean;
-  browserMode?: "relay" | "profile";
   compaction?: CompactionConfig;
   askTimeoutSeconds?: number;
   configPath?: string;
@@ -151,12 +148,6 @@ function readConfigFile(path: string): DaemonConfigFile | null {
     }
     config.offline = file.offline;
   }
-  if (file.browserMode !== undefined) {
-    if (file.browserMode !== "relay" && file.browserMode !== "profile") {
-      throw new Error(`${path}: "browserMode" must be "relay" or "profile".`);
-    }
-    config.browserMode = file.browserMode;
-  }
   if (file.remote !== undefined) {
     if (file.remote === null || typeof file.remote !== "object" || Array.isArray(file.remote)) {
       throw new Error(`${path}: "remote" must be a JSON object.`);
@@ -217,11 +208,6 @@ function readConfigFile(path: string): DaemonConfigFile | null {
   return config;
 }
 
-function parseBrowserMode(raw: string, source: string): "relay" | "profile" {
-  if (raw === "relay" || raw === "profile") return raw;
-  throw new Error(`Invalid browserMode from ${source}: ${JSON.stringify(raw)} (want "relay" or "profile")`);
-}
-
 function parseBoolean(raw: string, source: string): boolean {
   if (["1", "true", "yes", "on"].includes(raw.toLowerCase())) return true;
   if (["0", "false", "no", "off"].includes(raw.toLowerCase())) return false;
@@ -270,7 +256,6 @@ export function loadConfig(overrides: DaemonConfigOverrides = {}): DaemonConfig 
   const envHost = env.GHOSTD_HOST?.trim();
   const envRoot = env.GHOSTS_ROOT?.trim();
   const envOffline = env.GHOSTD_OFFLINE?.trim();
-  const envBrowserMode = env.GHOST_BROWSER_MODE?.trim();
   const envCompaction = env.GHOSTD_COMPACTION?.trim();
   const envCompactionTokens = env.GHOSTD_COMPACTION_THRESHOLD_TOKENS?.trim();
   const envCompactionFraction = env.GHOSTD_COMPACTION_THRESHOLD_FRACTION?.trim();
@@ -291,11 +276,6 @@ export function loadConfig(overrides: DaemonConfigOverrides = {}): DaemonConfig 
     ?? (envOffline ? parseBoolean(envOffline, "GHOSTD_OFFLINE") : undefined)
     ?? file?.offline
     ?? false;
-
-  const browserMode = overrides.browserMode
-    ?? (envBrowserMode ? parseBrowserMode(envBrowserMode, "GHOST_BROWSER_MODE") : undefined)
-    ?? file?.browserMode
-    ?? "relay";
 
   const enabled = overrides.compaction?.enabled
     ?? (envCompaction ? parseBoolean(envCompaction, "GHOSTD_COMPACTION") : undefined)
@@ -326,7 +306,6 @@ export function loadConfig(overrides: DaemonConfigOverrides = {}): DaemonConfig 
     host,
     ghostsRoot: resolve(expandHome(rawRoot, home)),
     offline,
-    browserMode,
     compaction,
     askTimeoutSeconds,
     remote: { ...file?.remote, enabled: file?.remote?.enabled ?? false },
