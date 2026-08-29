@@ -85,5 +85,6 @@ check() {
 
 package() {
   cd -- "$srcdir/ghost"
-  bash packaging/release/install-payload.sh . packages/daemon/dist/ghostd "$pkgdir" "$pkgname"
+  bash packaging/release/install-payload.sh \
+    . packages/daemon/dist/ghostd packages/daemon/dist/ghost "$pkgdir" "$pkgname"
 }

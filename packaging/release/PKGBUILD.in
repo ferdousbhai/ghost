@@ -90,7 +90,8 @@ check() {
 
 package() {
   local source_root="$srcdir/ghost-${pkgver}"
-  local runtime_binary="$srcdir/runtime/ghost-runtime-${pkgver}-linux-${CARCH}/bin/ghostd"
+  local runtime_root="$srcdir/runtime/ghost-runtime-${pkgver}-linux-${CARCH}"
   bash "$source_root/packaging/release/install-payload.sh" \
-    "$source_root" "$runtime_binary" "$pkgdir" "$pkgname"
+    "$source_root" "$runtime_root/bin/ghostd" "$runtime_root/bin/ghost" \
+      "$pkgdir" "$pkgname"
 }

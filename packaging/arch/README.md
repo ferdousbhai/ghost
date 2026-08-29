@@ -2,12 +2,13 @@
 
 `PKGBUILD` builds `ghost-ai-git`, the development package for the first
 owner-local beta. The `ghost-git` AUR name already belongs to an unrelated
-screenshot utility, hence the collision-free package name. The daemon is one
-self-contained x86_64 executable at `/usr/bin/ghostd`, with Bun embedded and no
-installed source or JavaScript dependency tree. Bun remains a package runtime
-dependency only because the installed service-context Chromium smoke test uses
-it. The stable `ghost-ai` template and release-source machinery live under
-`packaging/release/`; its runtime source carries the same compiled daemon.
+screenshot utility, hence the collision-free package name. The daemon and
+terminal client are self-contained x86_64 executables at `/usr/bin/ghostd` and
+`/usr/bin/ghost`, with Bun embedded and no installed source or JavaScript
+dependency tree. Bun remains a package runtime dependency only because the
+installed service-context Chromium smoke test uses it. The stable `ghost-ai`
+template and release-source machinery live under `packaging/release/`; its
+runtime source carries the same compiled executables.
 
 Build and install from this directory:
 
@@ -25,8 +26,9 @@ blank-password/autologin caveat.
 This remains the rolling development package: `pnpm install` may populate its
 store during `build()`, so it is not the AUR release recipe. The stable package
 uses the [v2 runtime-source mechanism](../release/README.md#reproducibility-boundary)
-and also installs only `/usr/bin/ghostd`; publishing still requires a version
-tag, artifact inspection, and a human upload to the `ghost-ai` AUR package.
+and also installs `/usr/bin/ghostd` and `/usr/bin/ghost`; publishing still
+requires a version tag, artifact inspection, and a human upload to the
+`ghost-ai` AUR package.
 
 The shell is installed at `/usr/share/ghost/quickshell` and exposed as the
 system Quickshell config `ghost`, so the existing `qs -c ghost` integration and
@@ -87,9 +89,10 @@ For a real service-context Chromium check on a graphical Arch login, run:
 /usr/lib/ghost/package-smoke/service-browser-smoke.sh
 ```
 
-It launches Chromium with a CDP endpoint in a transient user unit with the
-daemon's hardening properties and without `--no-sandbox`; a passing command
-therefore proves the unit permits Chromium's sandbox. CI containers do not run
-a graphical user manager, so this probe is intentionally a release-machine
-check. Ghost's Playwright backend opts into `chromiumSandbox: true`, so the
-probe covers the production launch policy rather than a weaker test-only mode.
+It first uses `/usr/bin/ghost status --json` to verify that the terminal client
+can authenticate to the active packaged daemon, then launches Chromium with a
+CDP endpoint in a transient user unit with the daemon's hardening properties
+and without `--no-sandbox`. CI containers do not run a graphical user manager,
+so this probe is intentionally a release-machine check. Ghost's Playwright
+backend opts into `chromiumSandbox: true`, so the probe covers the production
+launch policy rather than a weaker test-only mode.

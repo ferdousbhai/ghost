@@ -72,7 +72,8 @@ trap cleanup EXIT
 
 name="ghost-runtime-${version}-linux-${arch}"
 runtime_root="$work/$name"
-binary="$runtime_root/bin/ghostd"
+daemon_binary="$runtime_root/bin/ghostd"
+client_binary="$runtime_root/bin/ghost"
 mkdir -p "$runtime_root/bin"
 
 (
@@ -86,11 +87,12 @@ mkdir -p "$runtime_root/bin"
   GHOSTD_COMPILE_TARGET="$compile_target" \
     pnpm --filter @ghost/daemon build:binary
 )
-install -m755 "$source_root/packages/daemon/dist/ghostd" "$binary"
+install -m755 "$source_root/packages/daemon/dist/ghostd" "$daemon_binary"
+install -m755 "$source_root/packages/daemon/dist/ghost" "$client_binary"
 
 (
   cd "$runtime_root"
-  sha256sum bin/ghostd > PAYLOAD.SHA256
+  sha256sum bin/ghost bin/ghostd > PAYLOAD.SHA256
 )
 
 cat > "$runtime_root/MANIFEST" <<EOF

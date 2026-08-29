@@ -6,23 +6,25 @@ the stable `ghost-ai` package:
 1. `ghost-<version>.tar.gz`, deterministically generated from
    `v<version>`.
 2. `ghost-runtime-<version>-linux-x86_64.tar.zst`, containing the compiled
-   `ghostd` executable built from the frozen pnpm workspace.
+   `ghostd` daemon and `ghost` terminal client built from the frozen pnpm
+   workspace.
 
 The v2 runtime archive is a package *source*, not an installed pacman package.
-Its payload is exactly `bin/ghostd`; Bun and the daemon's JavaScript
-dependencies are compiled into that x86-64 executable. QML, the desktop helper,
-browser extension, services, launchers, licenses, and docs still come from the
-same tagged source archive, so a stable package never mixes an old UI with a
-new daemon.
+Its payload is exactly `bin/ghostd` and `bin/ghost`; Bun and the JavaScript
+dependencies are compiled into those x86-64 executables. QML, the desktop
+helper, browser extension, services, launchers, licenses, and docs still come
+from the same tagged source archive, so a stable package never mixes an old UI
+with a new daemon or client.
 
 ## Reproducibility boundary
 
-The v2 runtime archive is `bin/ghostd` compiled by `bun build --compile` at the
-`bun_version` recorded in `MANIFEST`, with `compile_target=bun-linux-x64` and
-the payload checksum bound to the exact `source_commit`. Release CI builds it
-from a frozen offline pnpm install behind dead proxies; the stable package then
-verifies the archive's fixed checksum, manifest, single-binary layout,
-executable x86-64 ELF, and `--help`/`--version` behavior before installation.
+The v2 runtime archive contains `bin/ghostd` and `bin/ghost`, compiled by
+`bun build --compile` at the `bun_version` recorded in `MANIFEST`, with
+`compile_target=bun-linux-x64` and both payload checksums bound to the exact
+`source_commit`. Release CI builds it from a frozen offline pnpm install behind
+dead proxies; the stable package then verifies the archive's fixed checksum,
+manifest, two-binary layout, executable x86-64 ELF files, and each binary's
+`--help`/`--version` behavior before installation.
 
 ## Release procedure
 
@@ -52,12 +54,12 @@ packaging/release/render-arch-package.sh \
 
 The rendered directory contains the AUR-ready `PKGBUILD`, `.SRCINFO`, and
 `ghost-ai.install`. Its `build()` is deliberately a no-op: the downloaded
-runtime source already contains the compiled daemon. CI builds that package
-against local copies of the exact sources with dead network proxies, extracts
-the pacman archive away from the checkout, and applies the same
-closure/owner/mode/runtime smoke used by the development package. Both package
-recipes disable makepkg stripping of the compiled executable. The rendered AUR
-bundle is also reproduced under umasks 022 and 077 and must remain
+runtime source already contains the compiled daemon and terminal client. CI
+builds that package against local copies of the exact sources with dead network
+proxies, extracts the pacman archive away from the checkout, and applies the
+same closure/owner/mode/runtime smoke used by the development package. Both
+package recipes disable makepkg stripping of the compiled executables. The
+rendered AUR bundle is also reproduced under umasks 022 and 077 and must remain
 byte-identical with normalized safe modes.
 
 Publishing remains a deliberate human release action: create the version tag

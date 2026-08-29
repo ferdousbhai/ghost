@@ -11,7 +11,8 @@ epoch="${6:?usage: verify-runtime-source.sh <runtime-root> <source-root> <versio
 runtime_root="$(realpath "$runtime_root")"
 source_root="$(realpath "$source_root")"
 manifest="$runtime_root/MANIFEST"
-binary="$runtime_root/bin/ghostd"
+daemon_binary="$runtime_root/bin/ghostd"
+client_binary="$runtime_root/bin/ghost"
 
 work_parent="${GHOST_RELEASE_WORK_ROOT:-$(dirname "$runtime_root")}"
 mkdir -p "$work_parent"
@@ -46,10 +47,11 @@ printf '%s\n' \
   $'d\tbin' \
   $'f\tMANIFEST' \
   $'f\tPAYLOAD.SHA256' \
+  $'f\tbin/ghost' \
   $'f\tbin/ghostd' \
   | LC_ALL=C sort > "$temporary/layout.expected"
 require_identical "$temporary/layout.expected" "$temporary/layout.actual" \
-  'runtime source does not have the v2 single-binary layout'
+  'runtime source does not have the v2 two-binary layout'
 
 bun_version="$(sed -n 's/^bun_version=//p' "$manifest")"
 [[ "$bun_version" =~ ^[^[:space:]=]+$ ]] || {
@@ -79,8 +81,11 @@ require_identical "$temporary/MANIFEST.expected" "$manifest" \
 printf 'Runtime compiler: bun_version=%s compile_target=%s\n' \
   "$bun_version" "$compile_target"
 
-[[ "$(wc -l < "$runtime_root/PAYLOAD.SHA256")" -eq 1 ]] \
-  && grep -Eq '^[0-9a-f]{64}  bin/ghostd$' "$runtime_root/PAYLOAD.SHA256" || {
+[[ "$(wc -l < "$runtime_root/PAYLOAD.SHA256")" -eq 2 ]] \
+  && sed -n '1p' "$runtime_root/PAYLOAD.SHA256" \
+    | grep -Eq '^[0-9a-f]{64}  bin/ghost$' \
+  && sed -n '2p' "$runtime_root/PAYLOAD.SHA256" \
+    | grep -Eq '^[0-9a-f]{64}  bin/ghostd$' || {
   printf 'runtime payload checksum manifest is invalid\n' >&2
   exit 1
 }
@@ -89,19 +94,28 @@ if ! (cd "$runtime_root" && sha256sum -c PAYLOAD.SHA256); then
   exit 1
 fi
 
-[[ -x "$binary" ]] || {
-  printf 'runtime binary is not executable: %s\n' "$binary" >&2
-  exit 1
+verify_binary() {
+  local binary="$1"
+  local label="$2"
+  local elf_header="$temporary/$label.elf-header"
+
+  [[ -x "$binary" ]] || {
+    printf 'runtime binary is not executable: %s\n' "$binary" >&2
+    return 1
+  }
+  LC_ALL=C readelf -h "$binary" > "$elf_header"
+  grep -Eq '^[[:space:]]*Class:[[:space:]]+ELF64$' "$elf_header"
+  grep -Eq '^[[:space:]]*Data:[[:space:]]+2.s complement, little endian$' \
+    "$elf_header"
+  grep -Eq '^[[:space:]]*Type:[[:space:]]+(EXEC|DYN)[[:space:]]' \
+    "$elf_header"
+  grep -Eq '^[[:space:]]*Machine:[[:space:]]+Advanced Micro Devices X86-64$' \
+    "$elf_header"
 }
-LC_ALL=C readelf -h "$binary" > "$temporary/elf-header"
-grep -Eq '^[[:space:]]*Class:[[:space:]]+ELF64$' "$temporary/elf-header"
-grep -Eq '^[[:space:]]*Data:[[:space:]]+2.s complement, little endian$' \
-  "$temporary/elf-header"
-grep -Eq '^[[:space:]]*Type:[[:space:]]+(EXEC|DYN)[[:space:]]' \
-  "$temporary/elf-header"
-grep -Eq '^[[:space:]]*Machine:[[:space:]]+Advanced Micro Devices X86-64$' \
-  "$temporary/elf-header"
+
+verify_binary "$daemon_binary" ghostd
+verify_binary "$client_binary" ghost
 
 bash "$source_root/packaging/release/smoke-binary-runtime.sh" \
-  "$binary" "$version" "$temporary/smoke"
+  "$daemon_binary" "$client_binary" "$version" "$temporary/smoke"
 printf 'Verified runtime source: %s\n' "$runtime_root"

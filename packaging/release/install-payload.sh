@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-source_root="${1:?usage: install-payload.sh <source-root> <runtime-binary> <pkgdir> <pkgname>}"
-runtime_binary="${2:?usage: install-payload.sh <source-root> <runtime-binary> <pkgdir> <pkgname>}"
-pkgdir="${3:?usage: install-payload.sh <source-root> <runtime-binary> <pkgdir> <pkgname>}"
-pkgname="${4:?usage: install-payload.sh <source-root> <runtime-binary> <pkgdir> <pkgname>}"
+usage='install-payload.sh <source-root> <ghostd-binary> <ghost-binary> <pkgdir> <pkgname>'
+source_root="${1:?usage: $usage}"
+daemon_binary="${2:?usage: $usage}"
+client_binary="${3:?usage: $usage}"
+pkgdir="${4:?usage: $usage}"
+pkgname="${5:?usage: $usage}"
 
 source_root="$(realpath "$source_root")"
-runtime_binary="$(realpath "$runtime_binary")"
+daemon_binary="$(realpath "$daemon_binary")"
+client_binary="$(realpath "$client_binary")"
 
 install_tree() {
   local source_dir="$1"
@@ -30,7 +33,8 @@ install_tree() {
 appdir="$pkgdir/usr/lib/ghost"
 sharedir="$pkgdir/usr/share/ghost"
 
-install -Dm755 "$runtime_binary" "$pkgdir/usr/bin/ghostd"
+install -Dm755 "$daemon_binary" "$pkgdir/usr/bin/ghostd"
+install -Dm755 "$client_binary" "$pkgdir/usr/bin/ghost"
 install -Dm755 "$source_root/packaging/arch/ghost-desktop-helper" \
   "$pkgdir/usr/bin/ghost-desktop-helper"
 install -Dm755 "$source_root/packages/shell/contrib/bin/ghost-launch" \

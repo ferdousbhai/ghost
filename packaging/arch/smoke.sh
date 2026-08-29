@@ -56,6 +56,7 @@ require_file /usr/share/doc/ghost/docs/keyring.md
 require_file /usr/share/doc/ghost/docs/hooks.md
 require_file /usr/share/doc/ghost/docs/claude-code-runtime.md
 require_executable /usr/bin/ghostd
+require_executable /usr/bin/ghost
 require_executable /usr/bin/ghost-desktop-helper
 require_executable /usr/bin/ghost-launch
 require_executable /usr/lib/ghost/package-smoke/service-browser-smoke.sh
@@ -77,6 +78,7 @@ for path in \
 done
 for path in \
   /usr/bin/ghostd \
+  /usr/bin/ghost \
   /usr/bin/ghost-desktop-helper \
   /usr/bin/ghost-launch \
   /usr/lib/ghost/package-smoke/service-browser-smoke.sh; do

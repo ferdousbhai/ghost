@@ -4,6 +4,17 @@ set -euo pipefail
 chromium_path="$(command -v chromium)"
 bun_path="$(command -v bun)"
 systemctl --user is-active --quiet graphical-session.target
+systemctl --user is-active --quiet ghostd.service
+
+/usr/bin/ghost status --json | python -c '
+import json
+import sys
+
+status = json.load(sys.stdin)
+if status.get("reachable") is not True:
+    raise SystemExit("ghost status did not report a reachable daemon")
+'
+printf 'Ghost terminal client reached the packaged daemon.\n'
 
 runtime_dir="${XDG_RUNTIME_DIR:?XDG_RUNTIME_DIR is required}"
 profile="$(mktemp -d -p "$runtime_dir" ghost-chromium-smoke.XXXXXX)"

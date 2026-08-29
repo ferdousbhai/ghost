@@ -26,13 +26,24 @@ if (process.argv.includes("--help")) {
   process.exitCode = 2;
 }
 EOF
+cat > "$work/ghost.ts" <<EOF
+if (process.argv.includes("--help")) {
+  console.log("Usage:\\n  ghost <verb> [args]");
+} else if (process.argv.includes("--version")) {
+  console.log("$version");
+} else {
+  process.exitCode = 2;
+}
+EOF
 bun build --compile --target=bun-linux-x64 "$work/ghostd.ts" \
   --outfile "$runtime_root/bin/ghostd"
-chmod 755 "$runtime_root/bin/ghostd"
+bun build --compile --target=bun-linux-x64 "$work/ghost.ts" \
+  --outfile "$runtime_root/bin/ghost"
+chmod 755 "$runtime_root/bin/ghostd" "$runtime_root/bin/ghost"
 
 (
   cd "$runtime_root"
-  sha256sum bin/ghostd > PAYLOAD.SHA256
+  sha256sum bin/ghost bin/ghostd > PAYLOAD.SHA256
 )
 cat > "$runtime_root/MANIFEST" <<EOF
 format=ghost-runtime-source/v2
@@ -78,7 +89,7 @@ assert_rejected "$wrong_target" 'unsupported compile_target'
 
 non_executable="$work/non-executable"
 cp -a "$runtime_root" "$non_executable"
-chmod 644 "$non_executable/bin/ghostd"
+chmod 644 "$non_executable/bin/ghost"
 assert_rejected "$non_executable" 'runtime binary is not executable'
 
 linked="$work/linked"
