@@ -20,13 +20,7 @@ The user stepped away and is returning. Recap the conversation in fewer than 40 
 
 /** Collapse provider formatting and keep the presentation-only result bounded. */
 export function normalizeRecap(text: string): string | null {
-  const withoutControls = [...text].map((character) => {
-    const scalar = character.codePointAt(0) ?? 0;
-    return scalar <= 0x1f || scalar === 0x7f ? " " : character;
-  }).join("");
-  const normalized = withoutControls
-    .replace(/\s+/gu, " ")
-    .trim();
+  const normalized = text.replace(/[\s -]+/gu, " ").trim();
   if (!normalized) return null;
 
   const characters = [...normalized];

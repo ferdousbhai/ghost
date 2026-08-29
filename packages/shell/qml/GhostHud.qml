@@ -84,7 +84,7 @@ FloatingWindow {
      */
     function requestBranch(entryId: string): void {
         if (entryId === "") return;
-        if (composer.text.trim() === "") {
+        if (!composer.hasDraft) {
             Ghostd.branchFrom(entryId);
             return;
         }
@@ -1018,6 +1018,13 @@ FloatingWindow {
                         id: composer
                         visible: Ghostd.pendingAsk === null
                         Layout.fillWidth: true
+
+                        Binding {
+                            target: Ghostd
+                            property: "composerHasDraft"
+                            value: composer.hasDraft
+                        }
+
                         onSubmitted: (prompt, mode) => {
                             if (mode === "prompt") Ghostd.send(prompt);
                             else Ghostd.queueMessage(prompt, mode);

@@ -1428,18 +1428,15 @@ shape and streams emit one complete event object per line.
   `{ recap: string | null }` — one non-persisted completion over the
   conversation's current effective system prompt and compaction-aware branch,
   followed by a recap request, using the conversation's current chat model.
-  The shell arms it after four minutes of inactivity following a successful Pi
-  turn, only while the composer is empty. The request asks for fewer than 40
-  words in one or two plain sentences; Ghost collapses the result to one line
-  and bounds it at 280 Unicode scalar values. The prompt and reply are never
-  appended to the transcript or stored anywhere. Typing, navigation, a new
-  owner turn, client disconnect, conversation teardown, or daemon shutdown
-  aborts it; a new owner turn waits for that cancellation and then wins session
-  admission. A generation, provider, or output failure is logged at warning
-  level and returns `200 { recap: null }`. An unknown conversation is `404`; a
-  running turn or second in-flight recap is `409 session_busy`; Claude Code is
-  `409 not_supported` because that runtime exposes no equivalent non-mutating
-  conversation context.
+  Ghost collapses the result to one line and bounds it at 280 Unicode scalar
+  values. The prompt and reply are never appended to the transcript or stored
+  anywhere. Typing, navigation, a new owner turn, client disconnect,
+  conversation teardown, or daemon shutdown aborts it; a new owner turn waits
+  for that cancellation and then wins session admission. A generation,
+  provider, or output failure is logged at warning level and returns
+  `200 { recap: null }`. An unknown conversation is `404`; a running turn or
+  second in-flight recap is `409 session_busy`; Claude Code is `409 not_supported`
+  because that runtime exposes no equivalent non-mutating conversation context.
 - `GET|POST /api/ghosts/:name/sessions/:id/plan` → `{ planning, plan, todo }`
   — `plan` is `{ path, title, approvedAt, content }` (`content` null when the
   file is gone) or null; `todo` is the phase list. GET never opens a session

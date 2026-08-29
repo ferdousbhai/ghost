@@ -2098,8 +2098,7 @@ export class SessionHost {
       return this.liveVoice.setMuted(key, action === "mute");
     }
 
-    const recapCancellation = this.cancelRecap(key);
-    if (recapCancellation) await recapCancellation;
+    await this.cancelRecap(key);
     const current = this.liveVoice.status(key);
     const currentHosted = this.sessions.get(key);
     if (current.active && (currentHosted?.liveVoiceTransitions ?? 0) === 0) return current;
@@ -3300,9 +3299,9 @@ export class SessionHost {
       || this.liveVoice.status(hosted.sessionKey).active;
   }
 
-  private sessionOwned(hosted: HostedSession): boolean {
+  private sessionOwned(hosted: HostedSession, includeRecap = true): boolean {
     return hosted.busy
-      || hosted.recap !== undefined
+      || (includeRecap && hosted.recap !== undefined)
       || (hosted.rawCollaborationPrompts ?? 0) > 0
       || hosted.pendingOwnerPasses.length > 0
       || hosted.ownerPassSettlement !== undefined
@@ -4035,15 +4034,14 @@ export class SessionHost {
     }
   }
 
-  /** Cancel presentation-only recap work before admitting owner activity. */
-  private cancelRecap(key: string): Promise<void> | undefined {
+  /** Cancel presentation-only recap work and drain deferred session changes. */
+  private async cancelRecap(key: string): Promise<void> {
     const hosted = this.sessions.get(key);
     const recap = hosted?.recap;
-    if (!recap) return undefined;
+    if (!hosted || !recap) return;
     recap.controller.abort();
-    return recap.task.catch(() => {}).then(async () => {
-      if (hosted) await this.settleDeferredSession(hosted);
-    });
+    await recap.task.catch(() => {});
+    await this.settleDeferredSession(hosted);
   }
 
   private async settleLiveVoiceSession(key: string): Promise<void> {
@@ -4482,8 +4480,7 @@ export class SessionHost {
     try {
       // Reserve first so another owner cannot slip in while recap cancellation
       // drains; owner work then wins this presentation-only boundary.
-      const recapCancellation = this.cancelRecap(admissionKey);
-      if (recapCancellation) await recapCancellation;
+      await this.cancelRecap(admissionKey);
       const configured = this.selectedTurnRuntime(ghostName);
       await this.assertProjectRuntimeMatches(ghostName, conversationId, configured.runtime);
       const bashCommand = parseUserBashCommand(options.prompt);
@@ -4815,17 +4812,13 @@ export class SessionHost {
     }
     if (signal?.aborted) return null;
 
-    const hosted = (await this.open(ghostName, id)) as HostedSession;
+    const hosted = await this.idleHostedSession(
+      ghostName,
+      id,
+      "Wait for this conversation to finish before generating a recap.",
+    );
     this.assertPiRuntime(ghostName, "Conversation recap");
-    if (this.turnAdmissions.has(key) || this.sessionOwned(hosted)) {
-      throw new GhostError(
-        "session_busy",
-        "Wait for this conversation to finish before generating a recap.",
-        409,
-      );
-    }
-    await hosted.mcp?.reload;
-    if (this.turnAdmissions.has(key) || this.sessionOwned(hosted)) {
+    if (this.turnAdmissions.has(key)) {
       throw new GhostError(
         "session_busy",
         "Wait for this conversation to finish before generating a recap.",
@@ -4843,9 +4836,8 @@ export class SessionHost {
 
     let tracked!: Promise<string | null>;
     const generation = Promise.resolve().then(async () => {
-      const chatRef = resolveChatModelRef(readGhostModels(paths.home));
-      const model = resolveChatModel(chatRef, hosted.modelRuntime.getAvailableSnapshot());
-      if (!model) throw new Error("This ghost has no available chat model for a recap.");
+      const model = hosted.session.model;
+      if (!model) throw new Error("This conversation has no chat model bound for a recap.");
       const response = await hosted.modelRuntime.complete(model, {
         systemPrompt: hosted.session.systemPrompt,
         messages: [
@@ -6612,15 +6604,11 @@ export class SessionHost {
     if (this.ghostMoveReserved(ghostName)) {
       throw new GhostError("ghost_busy", "Wait for this ghost's filesystem move to finish.", 409);
     }
-    if (runtime === "pi") {
-      const recapCancellation = this.cancelRecap(piKey);
-      if (recapCancellation) await recapCancellation;
-    }
     const hosted = runtime === "pi" ? this.sessions.get(piKey) : undefined;
     const runtimeBusy = runtime === "pi"
       ? this.opening.has(piKey)
         || (hosted
-          ? this.sessionOwned(hosted) || (hosted.mcpTransitions ?? 0) > 0
+          ? this.sessionOwned(hosted, false) || (hosted.mcpTransitions ?? 0) > 0
           : this.liveVoice.status(piKey).active)
       : this.claudeCode.isBusy(ghostName, id);
     const busy = this.mcpReloadGhosts.has(ghostName)
@@ -6653,6 +6641,7 @@ export class SessionHost {
     let maintenanceDeleteOutcome: MaintenanceConversationDeleteOutcome = "rolled-back";
     this.deleting.add(deleteKey);
     try {
+      if (runtime === "pi") await this.cancelRecap(piKey);
       await maintenanceReservation?.drained;
       const draftMarker = draftAbandonTransactionPath(paths.sessionDir, runtime, id);
       const draftState = await transactionMarkerState(

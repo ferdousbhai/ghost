@@ -19,8 +19,7 @@ Item {
     property bool slashDismissed: false
     property int slashIndex: 0
 
-    onTextChanged: Ghostd.composerHasDraft = root.text.trim() !== ""
-
+    readonly property bool hasDraft: field.text.trim() !== ""
     readonly property bool slashIntent: field.text.startsWith("/")
         && !/\s/u.test(field.text)
     readonly property var slashMatches: root.slashIntent

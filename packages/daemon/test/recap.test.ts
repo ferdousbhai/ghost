@@ -15,8 +15,8 @@ describe("recap prompt and presentation", () => {
     expect(prompt).toContain("ghost-recap-title");
   });
 
-  it("collapses whitespace, removes controls, and truncates by Unicode scalar", () => {
-    expect(normalizeRecap("  First\n\tpart.\u0000  Next part.  "))
+  it("collapses whitespace and hyphens, then truncates by Unicode scalar", () => {
+    expect(normalizeRecap("  First\n\tpart. -- Next part.  "))
       .toBe("First part. Next part.");
     expect(normalizeRecap(" \n\t ")).toBeNull();
 

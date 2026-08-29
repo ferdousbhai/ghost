@@ -1212,8 +1212,7 @@ Singleton {
     // A recap is presentation-only: one completed Pi turn and an empty
     // composer arm four idle minutes. Owner activity retires every stale part.
     property string recapText: ""
-    property string recapGhost: ""
-    property string recapSessionId: ""
+    property var recapTarget: null
     property bool composerHasDraft: false
     /** Mutable for deterministic QML tests; production keeps four minutes. */
     property int recapIdleMs: 240000
@@ -1362,7 +1361,6 @@ Singleton {
     property var recapRequest: null
     /** Test seam; production constructs the native recap XHR. */
     property var recapRequestFactory: null
-    property int recapGeneration: 0
     property var transcriptRequest: null
     property var transcriptRequestFactory: null
     readonly property int transcriptPageLimit: 1000
@@ -2364,13 +2362,11 @@ Singleton {
     }
 
     function clearRecap(): void {
-        root.recapGeneration += 1;
         recapIdleTimer.stop();
         const xhr = root.recapRequest;
         root.recapRequest = null;
         root.recapText = "";
-        root.recapGhost = "";
-        root.recapSessionId = "";
+        root.recapTarget = null;
         if (xhr && xhr.readyState !== 4) xhr.abort();
     }
 
@@ -2378,15 +2374,15 @@ Singleton {
         root.clearRecap();
         if (!root.isActiveTurn(state) || state.streaming || state.runtime !== "pi"
                 || root.composerHasDraft) return;
-        root.recapGhost = state.ghost;
-        root.recapSessionId = state.sessionId;
+        root.recapTarget = { ghost: state.ghost, sessionId: state.sessionId };
         recapIdleTimer.restart();
     }
 
     function requestRecap(): void {
         recapIdleTimer.stop();
-        const ghost = root.recapGhost;
-        const sessionId = root.recapSessionId;
+        const target = root.recapTarget;
+        const ghost = target ? target.ghost : "";
+        const sessionId = target ? target.sessionId : "";
         const state = root.turnStates[root.conversationKey(ghost, sessionId)];
         if (ghost === "" || sessionId === "" || root.composerHasDraft
                 || !root.isActiveTurn(state) || state.streaming || state.runtime !== "pi") {
@@ -2394,13 +2390,11 @@ Singleton {
             return;
         }
 
-        const generation = root.recapGeneration;
         const xhr = root.recapRequestFactory
             ? root.recapRequestFactory() : new XMLHttpRequest();
         root.recapRequest = xhr;
         xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.recapRequest
-                    || generation !== root.recapGeneration) return;
+            if (xhr.readyState !== 4 || xhr !== root.recapRequest) return;
             root.recapRequest = null;
             const current = root.turnStates[root.conversationKey(ghost, sessionId)];
             if (root.composerHasDraft || !root.isActiveTurn(current) || current.streaming) {
@@ -2418,7 +2412,7 @@ Singleton {
         root.dispatch(xhr, "POST", "/api/ghosts/" + encodeURIComponent(ghost)
             + "/sessions/" + encodeURIComponent(sessionId) + "/recap",
             ({ "Content-Type": "application/json" }), JSON.stringify({}), function () {
-                return xhr === root.recapRequest && generation === root.recapGeneration;
+                return xhr === root.recapRequest;
             });
     }
 

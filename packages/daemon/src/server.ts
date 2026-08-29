@@ -180,6 +180,23 @@ function errorResponse(
   jsonResponse(response, status, { error: { message, code } });
 }
 
+function abortOnClose(
+  request: IncomingMessage,
+  response: ServerResponse,
+): { signal: AbortSignal; release: () => void } {
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  request.on("aborted", abort);
+  response.on("close", abort);
+  return {
+    signal: controller.signal,
+    release: () => {
+      request.off("aborted", abort);
+      response.off("close", abort);
+    },
+  };
+}
+
 class InvalidPathEncodingError extends Error {
   readonly code = "invalid_request";
   readonly status = 400;
@@ -469,17 +486,16 @@ export function createDaemonServer(options: ServerOptions): Server {
     const keepalive = setInterval(() => {
       if (!closed && !response.writableEnded) response.write(SSE_KEEPALIVE_COMMENT);
     }, SSE_KEEPALIVE_INTERVAL_MS);
+    const connection = abortOnClose(request, response);
     const cleanup = () => {
       if (closed) return;
       closed = true;
       clearInterval(keepalive);
       unsubscribe();
       liveStreams.delete(response);
-      request.off("aborted", cleanup);
-      response.off("close", cleanup);
+      connection.release();
     };
-    request.on("aborted", cleanup);
-    response.on("close", cleanup);
+    connection.signal.addEventListener("abort", cleanup, { once: true });
   };
 
   /**
@@ -852,23 +868,19 @@ export function createDaemonServer(options: ServerOptions): Server {
       return;
     }
 
-    const controller = new AbortController();
-    const onClose = () => controller.abort();
-    request.on("aborted", onClose);
-    response.on("close", onClose);
+    const connection = abortOnClose(request, response);
     try {
       const recap = await options.host.recap(
         ghostName,
         conversation.conversationId,
         conversation.runtime,
-        controller.signal,
+        connection.signal,
       );
-      if (!response.writableEnded && !controller.signal.aborted) {
+      if (!response.writableEnded && !connection.signal.aborted) {
         jsonResponse(response, 200, { recap });
       }
     } finally {
-      request.off("aborted", onClose);
-      response.off("close", onClose);
+      connection.release();
     }
   };
 
@@ -1421,7 +1433,7 @@ export function createDaemonServer(options: ServerOptions): Server {
       ? requestedTurnId
       : crypto.randomUUID();
 
-    const controller = new AbortController();
+    const connection = abortOnClose(request, response);
     response.writeHead(200, { ...SSE_HEADERS, "x-ghost-turn-id": turnId });
     // A turn can idle behind a slow model; keep the connection warm. The
     // pinned client skips frames without a `data:` line, so a comment costs
@@ -1431,12 +1443,6 @@ export function createDaemonServer(options: ServerOptions): Server {
     }, SSE_KEEPALIVE_INTERVAL_MS);
     liveStreams.add(response);
 
-    const onClose = () => {
-      // The client navigated away or the socket dropped: stop generating.
-      if (!controller.signal.aborted) controller.abort();
-    };
-    response.on("close", onClose);
-
     let terminal = false;
     const emit = (event: PiMessagesEvent): void => {
       if (response.writableEnded || terminal) return;
@@ -1445,11 +1451,11 @@ export function createDaemonServer(options: ServerOptions): Server {
     };
 
     try {
-      await run(emit, controller.signal);
+      await run(emit, connection.signal);
       // Keep the HTTP seam honest even if a runtime regresses. The shell also
       // treats EOF without a terminal frame as failure, but emitting the error
       // here preserves one protocol invariant for every client and runtime.
-      if (!terminal && !controller.signal.aborted) {
+      if (!terminal && !connection.signal.aborted) {
         emit({
           type: "error",
           reason: "error",
@@ -1471,7 +1477,7 @@ export function createDaemonServer(options: ServerOptions): Server {
     } finally {
       clearInterval(keepalive);
       liveStreams.delete(response);
-      response.off("close", onClose);
+      connection.release();
       if (!response.writableEnded) response.end();
     }
   };

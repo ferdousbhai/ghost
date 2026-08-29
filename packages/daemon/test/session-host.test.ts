@@ -622,7 +622,7 @@ describe("SessionHost recap", () => {
         recapContext = context;
         return {
           role: "assistant",
-          content: [{ type: "text", text: "  Return to the launch plan.\n\tNext: finish the opening.\u0000  " }],
+          content: [{ type: "text", text: "  Return to the launch plan. -- Next: finish the opening.  " }],
           stopReason: "stop",
         } as never;
       });
