@@ -71,9 +71,10 @@ compaction overrides as well.
 
 The systemd user unit is in `contrib/ghostd.service`. `SIGINT` and `SIGTERM`
 stop new requests, end live streams, dispose hosted sessions, and exit cleanly.
-Under systemd, structured journal fields include the ghost and conversation
-when known; for example, `journalctl --user -u ghostd GHOST=dous`. Outside
-systemd, logs retain their stderr line format.
+Filter one ghost's journal records with
+`journalctl --user -u ghostd GHOST=<name>`; see the
+[daemon harness invariants](../../CONTRACTS.md#daemon-harness-invariants) for
+the structured field contract.
 
 ## Storage and isolation
 

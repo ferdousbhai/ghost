@@ -212,6 +212,7 @@ export interface ConversationMaintenanceOptions {
 
 interface Slot {
   identity: MaintenanceIdentity;
+  logger: Logger;
   generation: number;
   owners: number;
   reservations: number;
@@ -894,6 +895,10 @@ export class ConversationMaintenance {
     if (existing) return existing;
     const created: Slot = {
       identity: { ...identity },
+      logger: this.logger.child({
+        ghost: identity.ghostName,
+        conversation: identity.conversationId,
+      }),
       generation: 0,
       owners: 0,
       reservations: 0,
@@ -1240,11 +1245,7 @@ export class ConversationMaintenance {
       };
       const running = this.dispatchIdle(slot, generation, pending, event, due, retryDue, wokeAt)
         .catch((error) => {
-          if (!controller.signal.aborted) this.logger.child({
-            ghost: slot.identity.ghostName,
-            conversation: slot.identity.conversationId,
-          }).warn("conversation maintenance failed", {
-            ghost: slot.identity.ghostName,
+          if (!controller.signal.aborted) slot.logger.warn("conversation maintenance failed", {
             runtime: slot.identity.runtime,
             error: error instanceof Error ? error.message : String(error),
           });
@@ -1492,11 +1493,7 @@ export class ConversationMaintenance {
       });
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
-      this.logger.child({
-        ghost: slot.identity.ghostName,
-        conversation: slot.identity.conversationId,
-      }).warn("conversation maintenance was not re-armed after a released reservation", {
-        ghost: slot.identity.ghostName,
+      slot.logger.warn("conversation maintenance was not re-armed after a released reservation", {
         runtime: slot.identity.runtime,
         error: error instanceof Error ? error.name : "unknown",
       });
@@ -1535,6 +1532,10 @@ export class ConversationMaintenance {
     for (const [oldKey] of moved) this.slots.delete(oldKey);
     for (const [, slot] of moved) {
       slot.identity = { ...slot.identity, ghostName: next };
+      slot.logger = this.logger.child({
+        ghost: next,
+        conversation: slot.identity.conversationId,
+      });
       this.slots.set(this.key(slot.identity), slot);
     }
     const count = this.ghostReservations.get(previous) ?? 0;
@@ -1555,11 +1556,7 @@ export class ConversationMaintenance {
           last?.outcome ?? "completed",
         );
       } catch (error) {
-        this.logger.child({
-          ghost: next,
-          conversation: slot.identity.conversationId,
-        }).warn("renamed conversation maintenance state was not armed", {
-          ghost: next,
+        slot.logger.warn("renamed conversation maintenance state was not armed", {
           runtime: slot.identity.runtime,
           error: error instanceof Error ? error.name : "unknown",
         });
@@ -1650,7 +1647,7 @@ export class ConversationMaintenance {
           restored += 1;
         } catch (error) {
           invalid += 1;
-          this.logger.child({ ghost: ghostName }).warn("conversation maintenance state was not restored", {
+          this.logger.warn("conversation maintenance state was not restored", {
             ghost: ghostName,
             file: name,
             error: error instanceof Error ? error.message : String(error),

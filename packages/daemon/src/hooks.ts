@@ -922,7 +922,6 @@ export class GhostHookRunner {
       .then((result) => ({ kind: "result" as const, result: result ?? undefined }))
       .catch((error) => {
         logger.warn(`${event.type} hook failed open`, {
-          ghost: event.ghost_name,
           error: error instanceof Error ? error.message : String(error),
         });
         return { kind: "result" as const, result: undefined };
@@ -934,7 +933,6 @@ export class GhostHookRunner {
     if (settled.kind === "timeout") {
       controller.abort(new Error(`${event.type} hook timed out`));
       logger.warn(`${event.type} hook timed out`, {
-        ghost: event.ghost_name,
         timeoutMs: handlerTimeout,
       });
       // Cancellation is a lifecycle boundary, not detach. A hook which owns a

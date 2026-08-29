@@ -1776,7 +1776,6 @@ export class ClaudeCodeRuntime {
             await acknowledge();
           } catch {
             logger.warn("before_prompt hook acknowledgement failed", {
-              ghost: ghost.name,
               runtime: "claude-code",
             });
           }
@@ -1839,7 +1838,6 @@ export class ClaudeCodeRuntime {
         }
         if (continuationCount >= GHOST_SESSION_STOP_CONTINUATION_CAP) {
           logger.warn("session_stop continuation cap reached", {
-            ghost: ghost.name,
             session: completed.session_id,
             cap: GHOST_SESSION_STOP_CONTINUATION_CAP,
           });
@@ -1858,7 +1856,6 @@ export class ClaudeCodeRuntime {
       if (options.signal?.aborted) settledTurn = undefined;
       else if (settledTurn) settledTurn = { ...settledTurn, outcome: "failed" };
       logger.error("Claude Code turn failed", {
-        ghost: ghost.name,
         error: cause instanceof Error ? cause.message : String(cause),
       });
       if (!adapter.isTerminal()) pendingFailure = {
@@ -1870,7 +1867,6 @@ export class ClaudeCodeRuntime {
         await finishMaintenance?.(settledTurn);
       } catch {
         logger.warn("conversation maintenance turn record failed", {
-          ghost: ghost.name,
           runtime: "claude-code",
         });
         pendingTerminalResult = undefined;

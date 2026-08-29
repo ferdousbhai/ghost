@@ -1,5 +1,6 @@
+import { fstatSync } from "node:fs";
 import { dlopen, FFIType, ptr } from "bun:ffi";
-import { formatLogMessage, stderrSink, type LogLevel, type LogRecord, type LogSink } from "./log.js";
+import { createLogger, formatLogMessage, stderrSink, type LogLevel, type LogSink } from "./log.js";
 
 const JOURNAL_PRIORITY: Record<LogLevel, number> = {
   debug: 7,
@@ -18,6 +19,11 @@ export interface JournalSender {
   send(fields: readonly string[]): number;
 }
 
+export interface JournalSinkOptions {
+  /** Test seam for the stderr `dev:ino` value. */
+  stream?: string;
+}
+
 /** Encode one daemon record as the exact fields handed to sd_journal_sendv. */
 export function encodeJournalRecord(
   level: LogLevel,
@@ -29,9 +35,9 @@ export function encodeJournalRecord(
     `PRIORITY=${JOURNAL_PRIORITY[level]}`,
     "SYSLOG_IDENTIFIER=ghostd",
   ];
-  if (fields?.ghost !== undefined) encoded.push(`GHOST=${String(fields.ghost)}`);
+  if (typeof fields?.ghost === "string") encoded.push(`GHOST=${fields.ghost}`);
   const conversation = fields?.conversation ?? fields?.conversationId;
-  if (conversation !== undefined) encoded.push(`CONVERSATION=${String(conversation)}`);
+  if (typeof conversation === "string") encoded.push(`CONVERSATION=${conversation}`);
   return encoded;
 }
 
@@ -48,22 +54,15 @@ export function buildJournalIovec(fields: readonly string[]): JournalIovec {
 }
 
 function fallbackWarning(fallback: LogSink): void {
-  const record: LogRecord = {
-    level: "warn",
-    message: "systemd journal emission failed; falling back to stderr",
-  };
-  fallback(
-    `${new Date().toISOString()} warn  ${formatLogMessage(record.message)}`,
-    record,
-  );
+  createLogger("warn", fallback).warn("systemd journal unavailable; logging to stderr");
 }
 
 /** Wrap a sender so its first failure permanently and visibly selects stderr. */
 export function journalLogSink(sender: JournalSender, fallback: LogSink = stderrSink): LogSink {
   let enabled = true;
-  return (line, record) => {
+  return (record) => {
     if (!enabled) {
-      fallback(line, record);
+      fallback(record);
       return;
     }
     try {
@@ -72,21 +71,40 @@ export function journalLogSink(sender: JournalSender, fallback: LogSink = stderr
     } catch {
       enabled = false;
       fallbackWarning(fallback);
-      fallback(line, record);
+      fallback(record);
     }
   };
 }
 
-function underSystemd(env: NodeJS.ProcessEnv): boolean {
-  return env.JOURNAL_STREAM !== undefined || env.INVOCATION_ID !== undefined;
+function parseJournalStream(value: string | undefined): { dev: bigint; ino: bigint } | null {
+  const match = /^(\d+):(\d+)$/u.exec(value ?? "");
+  const dev = match?.[1];
+  const ino = match?.[2];
+  return dev !== undefined && ino !== undefined
+    ? { dev: BigInt(dev), ino: BigInt(ino) }
+    : null;
+}
+
+function underSystemd(env: NodeJS.ProcessEnv, options: JournalSinkOptions): boolean {
+  const inherited = parseJournalStream(env.JOURNAL_STREAM);
+  if (!inherited) return false;
+  try {
+    const stderr = options.stream === undefined
+      ? fstatSync(2, { bigint: true })
+      : parseJournalStream(options.stream);
+    return stderr !== null && inherited.dev === stderr.dev && inherited.ino === stderr.ino;
+  } catch {
+    return false;
+  }
 }
 
 /** Load libsystemd only for a systemd-owned daemon; null selects stderr. */
 export function createJournalSink(
   env: NodeJS.ProcessEnv = process.env,
   fallback: LogSink = stderrSink,
+  options: JournalSinkOptions = {},
 ): LogSink | null {
-  if (!underSystemd(env)) return null;
+  if (!underSystemd(env, options)) return null;
   try {
     const library = dlopen("libsystemd.so.0", {
       sd_journal_sendv: {
@@ -98,7 +116,8 @@ export function createJournalSink(
       send(fields) {
         const iovec = buildJournalIovec(fields);
         const result = library.symbols.sd_journal_sendv(ptr(iovec.buffer), fields.length);
-        void iovec.values;
+        // Reading the retained array here keeps every value buffer alive until sendv returns.
+        if (iovec.values.length !== fields.length) throw new Error("journal iovec field mismatch");
         return result;
       },
     }, fallback);

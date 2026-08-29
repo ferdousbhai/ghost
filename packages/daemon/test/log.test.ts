@@ -1,22 +1,25 @@
 import { describe, expect, it } from "vitest";
-import { createLogger, silentLogger } from "../src/log.js";
+import { silentLogger } from "../src/log.js";
+import { recordingLogger } from "./helpers/recording-logger.js";
 
 describe("logger children", () => {
   it("merges bound fields below call-site fields", () => {
-    const lines: string[] = [];
-    const logger = createLogger("debug", (line) => lines.push(line))
+    const root = recordingLogger();
+    const logger = root
       .child({ ghost: "casper", conversation: "first", inherited: true });
 
     logger.info("opened", { conversation: "second", local: true });
 
-    expect(lines).toHaveLength(1);
-    expect(lines[0]).toMatch(/ info {2}ghostd: opened /);
-    expect(JSON.parse(lines[0]!.slice(lines[0]!.indexOf("{")))).toEqual({
-      ghost: "casper",
-      conversation: "second",
-      inherited: true,
-      local: true,
-    });
+    expect(root.records).toEqual([{
+      level: "info",
+      message: "opened",
+      fields: {
+        ghost: "casper",
+        conversation: "second",
+        inherited: true,
+        local: true,
+      },
+    }]);
   });
 
   it("keeps silent children silent and returns the singleton", () => {

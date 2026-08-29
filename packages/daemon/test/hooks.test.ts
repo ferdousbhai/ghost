@@ -11,6 +11,7 @@ import {
   type GhostConversationIdleRegistration,
   type GhostSessionStopEvent,
 } from "../src/hooks.js";
+import { recordingLogger } from "./helpers/recording-logger.js";
 
 const directories: string[] = [];
 afterEach(() => {
@@ -511,26 +512,20 @@ describe("GhostHookRunner", () => {
         [{ hooks: [{ type: "command", command: "/bin/true", idleSeconds: 60 }] }],
       ])),
     }));
-    const warnings: Array<{ message: string; fields?: Record<string, unknown> }> = [];
+    const logger = recordingLogger("warn");
     const runner = GhostHookRunner.fromConfig(config, {
       commandRunner: async () => { throw new Error("must-not-leak execution sentinel"); },
-      logger: {
-        child() { return this; },
-        debug: () => {},
-        info: () => {},
-        warn: (message, fields) => { warnings.push({ message, fields }); },
-        error: () => {},
-      },
+      logger,
     });
     await expect(runner.emitBeforePrompt(beforePromptEvent())).resolves.toBeUndefined();
     await expect(runner.emitSessionStop(event())).resolves.toBeUndefined();
     await expect(runner.emitConversationIdle(idleEvent())).resolves.toBeUndefined();
-    expect(warnings.map(({ message }) => message)).toEqual([
+    expect(logger.records.map(({ message }) => message)).toEqual([
       "before_prompt hook failed open",
       "session_stop hook failed open",
       "conversation_idle hook failed open",
     ]);
-    expect(JSON.stringify(warnings)).not.toContain("must-not-leak");
+    expect(JSON.stringify(logger.records)).not.toContain("must-not-leak");
   });
 
   it("logs categorical command failures without stdout or stderr detail", async () => {

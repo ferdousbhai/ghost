@@ -93,6 +93,7 @@ import {
   startMockProvider,
   type MockProvider,
 } from "./helpers/mock-provider.js";
+import { recordingLogger } from "./helpers/recording-logger.js";
 
 let temp: TempGhosts | null = null;
 let provider: MockProvider | null = null;
@@ -407,16 +408,13 @@ function captureHostedMcpLogs(): {
   logger: SessionHostOptions["logger"];
   dispose(): void;
 } {
-  const daemon: unknown[] = [];
+  const logger = recordingLogger();
   const omp: unknown[] = [];
-  const record = (message: string, fields?: Record<string, unknown>) => {
-    daemon.push({ message, fields });
-  };
   const dispose = () => {};
   return {
-    daemon,
+    daemon: logger.records,
     omp,
-    logger: { child() { return this; }, debug: record, info: record, warn: record, error: record },
+    logger,
     dispose,
   };
 }
@@ -641,16 +639,10 @@ describe("SessionHost recap", () => {
   });
 
   it("logs generation failure as pure upside and refuses unknown or Claude conversations", async () => {
-    const warnings: Array<{ message: string; fields?: Record<string, unknown> }> = [];
+    const logger = recordingLogger("warn");
     await setup([{ kind: "text", text: "Conversation established." }], {
       title: { enabled: false },
-      logger: {
-        child() { return this; },
-        debug: () => {},
-        info: () => {},
-        warn: (message, fields) => warnings.push({ message, fields }),
-        error: () => {},
-      },
+      logger,
     });
     await host!.runTurn("casper", {
       sessionId: "conv-recap-failure",
@@ -662,7 +654,7 @@ describe("SessionHost recap", () => {
       .mockRejectedValueOnce(new Error("provider unavailable"));
 
     await expect(host!.recap("casper", "conv-recap-failure")).resolves.toBeNull();
-    expect(warnings).toContainEqual(expect.objectContaining({
+    expect(logger.records).toContainEqual(expect.objectContaining({
       message: "conversation recap generation failed",
       fields: expect.objectContaining({ session: "conv-recap-failure" }),
     }));
@@ -1188,13 +1180,10 @@ describe("SessionHost.open", () => {
       }
     }
     const collaboration = new FailingOnceCollaborationManager();
-    const cleanupLogs: Array<{ message: string; fields?: Record<string, unknown> }> = [];
-    const record = (message: string, fields?: Record<string, unknown>) => {
-      cleanupLogs.push({ message, fields });
-    };
+    const logger = recordingLogger();
     const { dir } = await setup([{ kind: "text", text: "unused" }], {
       collaboration,
-      logger: { child() { return this; }, debug: record, info: record, warn: record, error: record },
+      logger,
     });
     writeMcpFixture(dir);
     const firstProject = join(temp!.root, "cleanup-first-project");
@@ -1315,7 +1304,7 @@ describe("SessionHost.open", () => {
     );
     expect(await modelSystemPrompt("post-commit-cleanup"))
       .toContain("RELOADED-PROJECT-SNAPSHOT");
-    expect(cleanupLogs.filter((entry) =>
+    expect(logger.records.filter((entry) =>
       entry.message === "committed project session cleanup is pending retry"
       && entry.fields?.code === "project_cleanup_pending")).toHaveLength(2);
   });
@@ -1813,12 +1802,9 @@ describe("SessionHost.open", () => {
   });
 
   it("loads only visible ghost MCP while unbound, never ambient coding-agent MCP", async () => {
-    const logged: unknown[] = [];
-    const record = (message: string, fields?: Record<string, unknown>) => {
-      logged.push({ message, fields });
-    };
+    const logger = recordingLogger();
     const { dir } = await setup([{ kind: "text", text: "hello" }], {
-      logger: { child() { return this; }, debug: record, info: record, warn: record, error: record },
+      logger,
     });
     const serverPath = join(dir, "ghost-mcp.mjs");
     writeFileSync(
@@ -1875,7 +1861,7 @@ lines.on("line", (line) => {
     const toolNames = handle.session.getAllTools().map((tool) => tool.name);
     expect(toolNames).toContain("mcp__ghost_visible_ghost_echo");
     expect(toolNames.some((name) => name.includes("malformed"))).toBe(false);
-    expect(JSON.stringify(logged)).not.toContain("MCP_LOG_AND_LAUNCH_SENTINEL");
+    expect(JSON.stringify(logger.records)).not.toContain("MCP_LOG_AND_LAUNCH_SENTINEL");
     // This machine deliberately has `node_repl` in ~/.codex/config.toml. Its
     // absence here is the live sovereignty regression, not a mocked condition.
     expect(toolNames.some((name) => name.startsWith("mcp__node_repl_"))).toBe(false);
@@ -2504,12 +2490,9 @@ describe("SessionHost shutdown", () => {
   });
 
   it("reports and retries incomplete per-session shutdown cleanup", async () => {
-    const logs: Array<{ message: string; fields?: Record<string, unknown> }> = [];
-    const record = (message: string, fields?: Record<string, unknown>) => {
-      logs.push({ message, fields });
-    };
+    const logger = recordingLogger();
     await setup([{ kind: "text", text: "unused" }], {
-      logger: { child() { return this; }, debug: record, info: record, warn: record, error: record },
+      logger,
     });
     const conversationId = "conv-shutdown-cleanup-retry";
     const key = sessionKeyOf("casper", conversationId);
@@ -2526,7 +2509,7 @@ describe("SessionHost shutdown", () => {
 
     await host!.disposeAll();
     expect(internals.cleanupRetries.get(key)?.session).toBe(opened.session);
-    expect(logs).toContainEqual(expect.objectContaining({
+    expect(logger.records).toContainEqual(expect.objectContaining({
       message: "session cleanup failed",
       fields: expect.objectContaining({
         session: key,
@@ -4235,7 +4218,7 @@ describe("SessionHost.runTurn", () => {
     "records committed re-answer activity when %s fails before an assistant result",
     async (stage) => {
       const hooks = new ReanswerPreparationHooks();
-      const warnings: Array<{ message: string; fields?: Record<string, unknown> }> = [];
+      const logger = recordingLogger("warn");
       const activityReleaseCounts: number[] = [];
       let recorded!: ReturnType<typeof recordMaintenanceTurns>;
       recorded = recordMaintenanceTurns(
@@ -4266,13 +4249,7 @@ describe("SessionHost.runTurn", () => {
         hooks,
         maintenance: recorded.maintenance,
         title: { enabled: false },
-        logger: {
-          child() { return this; },
-          debug: () => {},
-          info: () => {},
-          warn: (message, fields) => warnings.push({ message, fields }),
-          error: () => {},
-        },
+        logger,
       }, { sequential: true });
       const sessionId = `reanswer-${stage}-failure`;
       const resultEntryId = await establishHistoricalAsk(sessionId);
@@ -4341,11 +4318,12 @@ describe("SessionHost.runTurn", () => {
           type: "error",
           errorMessage: "injected re-answer resume failure",
         });
-        expect(warnings).toContainEqual({
+        expect(logger.records).toContainEqual({
+          level: "warn",
           message: "conversation maintenance owner activity was not recorded",
-          fields: { ghost: "casper", runtime: "pi" },
+          fields: { ghost: "casper", conversation: sessionId, runtime: "pi" },
         });
-        expect(JSON.stringify(warnings)).not.toContain("sensitive owner activity write failure");
+        expect(JSON.stringify(logger.records)).not.toContain("sensitive owner activity write failure");
       }
     },
   );
@@ -5066,18 +5044,12 @@ describe("SessionHost.runTurn", () => {
         },
       }));
     });
-    const warnings: Array<{ message: string; fields?: Record<string, unknown> }> = [];
+    const logger = recordingLogger("warn");
     const recorded = recordMaintenanceTurns();
     await setup([{ kind: "text", text: "Initial durable answer." }], {
       hooks,
       maintenance: recorded.maintenance,
-      logger: {
-        child() { return this; },
-        debug: () => {},
-        info: () => {},
-        warn: (message, fields) => warnings.push({ message, fields }),
-        error: () => {},
-      },
+      logger,
     });
     const opened = await host!.open("casper", "continuation-start-failure");
     const sendCustomMessage = opened.session.sendCustomMessage.bind(opened.session);
@@ -5108,11 +5080,12 @@ describe("SessionHost.runTurn", () => {
     expect(recorded.released.count).toBe(1);
     expect(events.filter((event) => event.type === "done" || event.type === "error"))
       .toEqual([expect.objectContaining({ type: "error" })]);
-    expect(warnings).toContainEqual({
+    expect(logger.records).toContainEqual({
+      level: "warn",
       message: "before_prompt hook acknowledgement failed",
-      fields: { ghost: "casper", runtime: "pi" },
+      fields: { ghost: "casper", conversation: "continuation-start-failure", runtime: "pi" },
     });
-    expect(JSON.stringify(warnings)).not.toContain("sensitive acknowledgement failure");
+    expect(JSON.stringify(logger.records)).not.toContain("sensitive acknowledgement failure");
   });
 
   it("records the latest replacement leaf as failed when later stop settlement fails", async () => {
@@ -5205,7 +5178,7 @@ describe("SessionHost.runTurn", () => {
 
   it("fails open without logging notice details when Pi acknowledgement fails", async () => {
     const hooks = new GhostHookRunner();
-    const warnings: Array<{ message: string; fields?: Record<string, unknown> }> = [];
+    const logger = recordingLogger("warn");
     await hooks.register((api) => {
       api.on("before_prompt", () => ({
         additionalContext: "A retained private maintenance notice.",
@@ -5216,13 +5189,7 @@ describe("SessionHost.runTurn", () => {
     });
     await setup([{ kind: "text", text: "Direct answer." }], {
       hooks,
-      logger: {
-        child() { return this; },
-        debug: () => {},
-        info: () => {},
-        warn: (message, fields) => warnings.push({ message, fields }),
-        error: () => {},
-      },
+      logger,
     });
     const events: PiMessagesEvent[] = [];
 
@@ -5233,11 +5200,12 @@ describe("SessionHost.runTurn", () => {
     });
 
     expect(events.at(-1)?.type).toBe("done");
-    expect(warnings).toContainEqual({
+    expect(logger.records).toContainEqual({
+      level: "warn",
       message: "before_prompt hook acknowledgement failed",
-      fields: { ghost: "casper", runtime: "pi" },
+      fields: { ghost: "casper", conversation: "conv-ack-failure", runtime: "pi" },
     });
-    expect(JSON.stringify(warnings)).not.toContain("sensitive notice id");
+    expect(JSON.stringify(logger.records)).not.toContain("sensitive notice id");
   });
 
   it("drains maintenance before an owner turn and records a durable Pi revision before done", async () => {
@@ -5654,7 +5622,7 @@ describe("SessionHost.runTurn", () => {
   });
 
   it("fails open after no-model activity bookkeeping errors without inventing a turn", async () => {
-    const warnings: Array<{ message: string; fields?: Record<string, unknown> }> = [];
+    const logger = recordingLogger("warn");
     const finished: Array<SettledMaintenanceTurn | undefined> = [];
     const recordedCwds: string[] = [];
     const reservation = () => ({ drained: Promise.resolve(), release: () => {} });
@@ -5681,13 +5649,7 @@ describe("SessionHost.runTurn", () => {
     };
     await setup([{ kind: "text", text: "the model must not run" }], {
       maintenance,
-      logger: {
-        child() { return this; },
-        debug: () => {},
-        info: () => {},
-        warn: (message, fields) => warnings.push({ message, fields }),
-        error: () => {},
-      },
+      logger,
     });
     const ownerDocs = join(temp!.ownerHome, "failed-activity-docs");
     mkdirSync(ownerDocs);
@@ -5709,26 +5671,30 @@ describe("SessionHost.runTurn", () => {
     expect((await host!.open("casper", "failed-activity-cd")).session.sessionManager.getCwd())
       .toBe(ownerDocs);
     expect(finished).toEqual([undefined, undefined]);
-    expect(warnings).toEqual([
+    expect(logger.records).toEqual([
       {
+        level: "warn",
         message: "conversation maintenance owner activity was not recorded",
-        fields: { ghost: "casper", runtime: "pi" },
+        fields: { ghost: "casper", conversation: "failed-activity-cd", runtime: "pi" },
       },
       {
+        level: "warn",
         message: "conversation maintenance cleanup was not recorded",
-        fields: { ghost: "casper", runtime: "pi" },
+        fields: { ghost: "casper", conversation: "failed-activity-cd", runtime: "pi" },
       },
       {
+        level: "warn",
         message: "conversation maintenance owner activity was not recorded",
-        fields: { ghost: "casper", runtime: "pi" },
+        fields: { ghost: "casper", conversation: "failed-activity-builtin", runtime: "pi" },
       },
       {
+        level: "warn",
         message: "conversation maintenance cleanup was not recorded",
-        fields: { ghost: "casper", runtime: "pi" },
+        fields: { ghost: "casper", conversation: "failed-activity-builtin", runtime: "pi" },
       },
     ]);
-    expect(JSON.stringify(warnings)).not.toContain("sensitive maintenance bytes");
-    expect(JSON.stringify(warnings)).not.toContain("sensitive cleanup persistence bytes");
+    expect(JSON.stringify(logger.records)).not.toContain("sensitive maintenance bytes");
+    expect(JSON.stringify(logger.records)).not.toContain("sensitive cleanup persistence bytes");
     expect(provider!.requests).toHaveLength(0);
   });
 
@@ -6421,12 +6387,9 @@ describe("conversation branching", () => {
   );
 
   it("fails closed on malformed, unreadable, and dangling exact fork markers without leaking bytes", async () => {
-    const logs: unknown[] = [];
-    const record = (message: string, fields?: Record<string, unknown>) => {
-      logs.push({ message, fields });
-    };
+    const logger = recordingLogger();
     await setup([{ kind: "text", text: "hello" }], {
-      logger: { child() { return this; }, debug: record, info: record, warn: record, error: record },
+      logger,
     });
     await host!.runTurn("casper", {
       sessionId: "fork-marker-target",
@@ -6448,11 +6411,12 @@ describe("conversation branching", () => {
     }), { mode: 0o600 });
     expect((await host!.listSessions("casper")).map((row) => row.id))
       .toContain("pi:fork-marker-target");
-    expect(logs).toContainEqual({
+    expect(logger.records).toContainEqual({
+      level: "error",
       message: "fork recovery marker is invalid",
-      fields: { path: unrelated, code: "fork_marker_invalid" },
+      fields: { ghost: "casper", path: unrelated, code: "fork_marker_invalid" },
     });
-    expect(JSON.stringify(logs)).not.toContain(sentinel);
+    expect(JSON.stringify(logger.records)).not.toContain(sentinel);
     rmSync(unrelated);
 
     writeFileSync(marker, `{ malformed ${sentinel}\n`, { mode: 0o600 });
@@ -6463,7 +6427,7 @@ describe("conversation branching", () => {
       .rejects.toMatchObject({ code: "session_busy", status: 409 });
     await expect(host!.getProject("casper", "fork-marker-target", "pi"))
       .rejects.toMatchObject({ code: "session_busy", status: 409 });
-    expect(JSON.stringify(logs)).not.toContain(sentinel);
+    expect(JSON.stringify(logger.records)).not.toContain(sentinel);
 
     chmodSync(marker, 0o000);
     try {
@@ -6483,7 +6447,7 @@ describe("conversation branching", () => {
         .not.toContain("pi:fork-marker-target");
       await expect(host!.getProject("casper", "fork-marker-target", "pi"))
         .rejects.toMatchObject({ code: "session_busy", status: 409 });
-      expect(JSON.stringify(logs)).not.toContain(sentinel);
+      expect(JSON.stringify(logger.records)).not.toContain(sentinel);
     } finally {
       rmSync(marker);
     }
@@ -7422,12 +7386,9 @@ describe("session listing", () => {
   });
 
   it("filters exact malformed delete markers for both runtimes without trusting marker bytes", async () => {
-    const logs: unknown[] = [];
-    const record = (message: string, fields?: Record<string, unknown>) => {
-      logs.push({ message, fields });
-    };
+    const logger = recordingLogger();
     const { dir } = await setup([{ kind: "text", text: "hello" }], {
-      logger: { child() { return this; }, debug: record, info: record, warn: record, error: record },
+      logger,
     });
     const piId = "pi-delete-marker-target";
     const claudeId = "claude-delete-marker-target";
@@ -7474,7 +7435,7 @@ describe("session listing", () => {
       .rejects.toMatchObject({ code: "session_deleting", status: 409 });
     await expect(host!.getProject("casper", piId, "pi"))
       .rejects.toMatchObject({ code: "session_deleting", status: 409 });
-    expect(JSON.stringify({ piHidden, logs })).not.toContain(sentinel);
+    expect(JSON.stringify({ piHidden, logs: logger.records })).not.toContain(sentinel);
     await expect(host!.deleteSession("casper", piId, "pi"))
       .rejects.toMatchObject({ code: "delete_recovery_pending", status: 500 });
     expect(existsSync(piMarker)).toBe(true);
@@ -7496,7 +7457,7 @@ describe("session listing", () => {
     expect(await host!.listSessions("casper")).toEqual([]);
     await expect(host!.getProject("casper", claudeId, "claude-code"))
       .rejects.toMatchObject({ code: "session_deleting", status: 409 });
-    expect(JSON.stringify(logs)).not.toContain(sentinel);
+    expect(JSON.stringify(logger.records)).not.toContain(sentinel);
     await expect(host!.deleteSession("casper", claudeId, "claude-code"))
       .rejects.toMatchObject({ code: "delete_recovery_pending", status: 500 });
     expect(existsSync(claudeMarker)).toBe(true);

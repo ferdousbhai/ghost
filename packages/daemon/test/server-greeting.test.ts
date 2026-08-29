@@ -18,6 +18,7 @@ import {
 } from "../src/session-host.js";
 import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
 import { fetchNoReuse as fetch } from "./helpers/http-fetch.js";
+import { recordingLogger } from "./helpers/recording-logger.js";
 
 let temp: TempGhosts | null = null;
 let host: SessionHost | null = null;
@@ -195,14 +196,7 @@ describe("POST /api/ghosts/:name/greeting", () => {
 
   for (const code of ["EACCES", "EIO"] as const) {
     it(`keeps the route at 200 and preserves memory/Documents when character reads fail with ${code}`, async () => {
-      const logLines: string[] = [];
-      const logger: Logger = {
-        child() { return this; },
-        debug: () => {},
-        info: () => {},
-        warn: (message, fields) => logLines.push(JSON.stringify({ message, fields })),
-        error: (message, fields) => logLines.push(JSON.stringify({ message, fields })),
-      };
+      const logger = recordingLogger("warn");
       const failure = () => {
         throw Object.assign(new Error("SENSITIVE-/owner/ghosts/casper/character.md"), { code });
       };
@@ -240,9 +234,9 @@ describe("POST /api/ghosts/:name/greeting", () => {
       expect(seen?.character).toBeNull();
       expect(seen?.memoryLines).toEqual(["- survives.md"]);
       expect(seen?.documents.lines).toEqual(['- file: "DOCUMENT_SURVIVES"']);
-      expect(logLines.join("\n")).toContain('"input":"character"');
-      expect(logLines.join("\n")).not.toContain("SENSITIVE-");
-      expect(logLines.join("\n")).not.toContain("character.md");
+      expect(JSON.stringify(logger.records)).toContain('"input":"character"');
+      expect(JSON.stringify(logger.records)).not.toContain("SENSITIVE-");
+      expect(JSON.stringify(logger.records)).not.toContain("character.md");
     });
   }
 
@@ -262,14 +256,7 @@ describe("POST /api/ghosts/:name/greeting", () => {
     },
   ]) {
     it(`preserves every successful greeting input when ${testCase.label} is unavailable`, async () => {
-      const logLines: string[] = [];
-      const logger: Logger = {
-        child() { return this; },
-        debug: () => {},
-        info: () => {},
-        warn: (message, fields) => logLines.push(JSON.stringify({ message, fields })),
-        error: (message, fields) => logLines.push(JSON.stringify({ message, fields })),
-      };
+      const logger = recordingLogger("warn");
       const failed = async (): Promise<never> => {
         throw Object.assign(new Error("SENSITIVE-INPUT-PATH"), { code: testCase.code });
       };
@@ -310,11 +297,13 @@ describe("POST /api/ghosts/:name/greeting", () => {
       expect(seen?.documents.lines).toEqual(
         testCase.documentsFail ? [] : ['- file: "DOCUMENT_SURVIVES"'],
       );
-      if (testCase.memoryFails) expect(logLines.join("\n")).toContain('"input":"memory"');
-      if (testCase.documentsFail) {
-        expect(logLines.join("\n")).toContain('"input":"documents"');
+      if (testCase.memoryFails) {
+        expect(JSON.stringify(logger.records)).toContain('"input":"memory"');
       }
-      expect(logLines.join("\n")).not.toContain("SENSITIVE-");
+      if (testCase.documentsFail) {
+        expect(JSON.stringify(logger.records)).toContain('"input":"documents"');
+      }
+      expect(JSON.stringify(logger.records)).not.toContain("SENSITIVE-");
     });
   }
 

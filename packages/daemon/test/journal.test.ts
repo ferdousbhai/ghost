@@ -1,7 +1,25 @@
+import { spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { ptr, read } from "bun:ffi";
 import { describe, expect, it, vi } from "vitest";
-import { buildJournalIovec, encodeJournalRecord, journalLogSink } from "../src/journal.js";
-import { createLogger } from "../src/log.js";
+import {
+  buildJournalIovec,
+  createJournalSink,
+  encodeJournalRecord,
+  journalLogSink,
+} from "../src/journal.js";
+import { createLogger, type LogRecord } from "../src/log.js";
+
+function userJournalAvailable(): boolean {
+  if (!existsSync("/run/systemd/journal/socket")) return false;
+  const result = spawnSync("journalctl", ["--user", "--no-pager", "-n", "0"], {
+    encoding: "utf8",
+  });
+  return result.status === 0;
+}
+
+const hasUserJournal = userJournalAvailable();
 
 describe("journal records", () => {
   it.each([
@@ -39,6 +57,16 @@ describe("journal records", () => {
     })).toContain("CONVERSATION=canonical");
   });
 
+  it("does not promote non-string identity fields", () => {
+    const encoded = encodeJournalRecord("info", "opened", {
+      ghost: null,
+      conversation: { id: "object" },
+      conversationId: "shadowed-alias",
+    });
+
+    expect(encoded).not.toContain(expect.stringMatching(/^(?:GHOST|CONVERSATION)=/u));
+  });
+
   it("lays out one pointer and byte length per encoded field", () => {
     const fields = ["MESSAGE=ghostd: ready", "PRIORITY=6", "GHOST=døus"];
     const iovec = buildJournalIovec(fields);
@@ -54,16 +82,67 @@ describe("journal records", () => {
     const send = vi.fn(() => {
       throw new Error("unavailable");
     });
-    const lines: string[] = [];
-    const logger = createLogger("info", journalLogSink({ send }, (line) => lines.push(line)));
+    const records: LogRecord[] = [];
+    const logger = createLogger("info", journalLogSink({ send }, (record) => records.push(record)));
 
     logger.info("first", { ghost: "dous" });
     logger.info("second", { ghost: "dous" });
 
     expect(send).toHaveBeenCalledTimes(1);
-    expect(lines).toHaveLength(3);
-    expect(lines[0]).toContain("systemd journal emission failed; falling back to stderr");
-    expect(lines[1]).toContain('ghostd: first {"ghost":"dous"}');
-    expect(lines[2]).toContain('ghostd: second {"ghost":"dous"}');
+    expect(records).toEqual([
+      { level: "warn", message: "systemd journal unavailable; logging to stderr" },
+      { level: "info", message: "first", fields: { ghost: "dous" } },
+      { level: "info", message: "second", fields: { ghost: "dous" } },
+    ]);
   });
+
+  it("ignores inherited systemd identity that does not describe stderr", () => {
+    const fallback = vi.fn();
+
+    expect(createJournalSink(
+      { JOURNAL_STREAM: "1:2", INVOCATION_ID: "inherited" },
+      fallback,
+      { stream: "1:3" },
+    )).toBeNull();
+    expect(createJournalSink(
+      { INVOCATION_ID: "inherited" },
+      fallback,
+      { stream: "1:2" },
+    )).toBeNull();
+    expect(fallback).not.toHaveBeenCalled();
+  });
+
+  it.skipIf(!hasUserJournal)("round-trips identity through the user journal", async () => {
+    const stream = "1:2";
+    const fallback = vi.fn();
+    const sink = createJournalSink(
+      { ...process.env, JOURNAL_STREAM: stream },
+      fallback,
+      { stream },
+    );
+    expect(sink).not.toBeNull();
+
+    const ghost = randomUUID();
+    createLogger("info", sink!).info("journal integration probe", { ghost });
+
+    let record: Record<string, unknown> | undefined;
+    for (let attempt = 0; attempt < 20 && !record; attempt += 1) {
+      const result = spawnSync(
+        "journalctl",
+        ["--user", "--no-pager", "-o", "json", "-n", "1", `GHOST=${ghost}`],
+        { encoding: "utf8" },
+      );
+      expect(result.status).toBe(0);
+      const line = result.stdout.trim().split("\n").find(Boolean);
+      if (line) record = JSON.parse(line) as Record<string, unknown>;
+      if (!record) await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+
+    expect(fallback).not.toHaveBeenCalled();
+    expect(record).toMatchObject({
+      GHOST: ghost,
+      SYSLOG_IDENTIFIER: "ghostd",
+      MESSAGE: expect.stringContaining("journal integration probe"),
+    });
+  }, 5_000);
 });

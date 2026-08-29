@@ -3330,9 +3330,8 @@ export class SessionHost {
         this.logger
           .child({ ghost: identity.ghostName, conversation: identity.conversationId })
           .warn("conversation maintenance cleanup was not recorded", {
-            ghost: identity.ghostName,
             runtime: identity.runtime,
-        });
+          });
       } finally {
         release();
       }
@@ -3487,7 +3486,6 @@ export class SessionHost {
       if (!additionalContext) return latestAssistantEntry;
       if (continuationCount >= GHOST_SESSION_STOP_CONTINUATION_CAP) {
         hosted.logger.warn("session_stop continuation cap reached", {
-          ghost: ghostName,
           session: hosted.session.sessionId,
           cap: GHOST_SESSION_STOP_CONTINUATION_CAP,
         });
@@ -3550,7 +3548,6 @@ export class SessionHost {
               await pass.acknowledge();
             } catch {
               hosted.logger.warn("before_prompt hook acknowledgement failed", {
-                ghost: hosted.ghost.name,
                 runtime: "pi",
               });
             }
@@ -3651,7 +3648,6 @@ export class SessionHost {
     } catch (error) {
       settlementError = error;
       hosted.logger.warn("Pi owner pass settlement failed", {
-        ghost: hosted.ghost.name,
         error: error instanceof Error ? error.message : String(error),
       });
       await this.abandonPiOwnerPasses(hosted);
@@ -3681,7 +3677,6 @@ export class SessionHost {
     if (!this.maintenance) return;
     if (!activity) {
       hosted.logger.warn("conversation maintenance owner activity was not recorded", {
-        ghost: ghostName,
         runtime: "pi",
       });
       return;
@@ -3693,7 +3688,6 @@ export class SessionHost {
       );
     } catch {
       hosted.logger.warn("conversation maintenance owner activity was not recorded", {
-        ghost: ghostName,
         runtime: "pi",
       });
     }
@@ -4104,7 +4098,8 @@ export class SessionHost {
     try {
       ref = resolveChatModelRef(readGhostModels(configDir));
     } catch (error) {
-      this.logger.child({ ghost: ghostName }).error("models.json is unusable", {
+      this.logger.error("models.json is unusable", {
+        ghost: ghostName,
         error: (error as Error).message,
       });
       const current = session.model;
@@ -4112,7 +4107,8 @@ export class SessionHost {
     }
     const model = resolveChatModel(ref, modelRuntime.getAvailableSnapshot());
     if (ref && (model?.provider !== ref.provider || model.id !== ref.modelId)) {
-      this.logger.child({ ghost: ghostName }).warn("configured chat model is not available", {
+      this.logger.warn("configured chat model is not available", {
+        ghost: ghostName,
         provider: ref.provider,
         modelId: ref.modelId,
       });
@@ -4247,7 +4243,6 @@ export class SessionHost {
       }
     } catch (error) {
       hosted.logger.error("direct bash command failed", {
-        ghost: ghostName,
         error: error instanceof Error ? error.message : String(error),
       });
       if (!toolFinished) {
@@ -4329,7 +4324,8 @@ export class SessionHost {
         return { runtime: "claude-code", modelId: configured.modelId };
       }
     } catch (error) {
-      this.logger.child({ ghost: ghostName }).error("models.json is unusable", {
+      this.logger.error("models.json is unusable", {
+        ghost: ghostName,
         error: error instanceof Error ? error.message : String(error),
       });
     }
@@ -4723,7 +4719,6 @@ export class SessionHost {
       await promptPiSession(hosted.session, options.prompt, hosted.skills);
     } catch (error) {
       hosted.logger.error("turn failed", {
-        ghost: ghostName,
         error: (error as Error).message,
       });
       turnFailure = { error, aborted: options.signal?.aborted === true };
@@ -4852,7 +4847,6 @@ export class SessionHost {
     tracked = generation.catch((error: unknown) => {
       if (!controller.signal.aborted) {
         hosted.logger.warn("conversation recap generation failed", {
-          ghost: ghostName,
           session: id,
           error: error instanceof Error ? error.message : String(error),
         });
@@ -4916,7 +4910,6 @@ export class SessionHost {
         if (!title || hosted.session.sessionName) return;
         hosted.session.setSessionName(title);
         hosted.logger.info("named ghost conversation", {
-          ghost: ghostName,
           session: hosted.session.sessionId,
           title,
         });
@@ -4926,7 +4919,6 @@ export class SessionHost {
       .catch((error: unknown) => {
         if (controller.signal.aborted && !timedOut) return;
         hosted.logger.warn("conversation title generation failed", {
-          ghost: ghostName,
           error: error instanceof Error ? error.message : String(error),
         });
       });
@@ -6838,7 +6830,7 @@ export class SessionHost {
       const trashed = this.registry.trash(ghost.name);
       this.maintenance?.completeGhostDelete(ghost.name);
       this.forgetGhost(ghost.name, ghost.dir);
-      this.logger.child({ ghost: ghost.name }).info("trashed ghost", { trash: trashed.trash });
+      this.logger.info("trashed ghost", { ghost: ghost.name, trash: trashed.trash });
       return trashed;
     } finally {
       this.reservedGhosts.delete(ghost.name);
@@ -6882,7 +6874,7 @@ export class SessionHost {
       const renamed = this.registry.rename(ghost.name, nextName);
       await this.maintenance?.completeGhostRename(ghost.name, nextName);
       this.forgetGhost(ghost.name, ghost.dir);
-      this.logger.child({ ghost: ghost.name }).info("renamed ghost", { name: renamed.name });
+      this.logger.info("renamed ghost", { ghost: ghost.name, name: renamed.name });
       return renamed;
     } finally {
       this.reservedGhosts.delete(ghost.name);

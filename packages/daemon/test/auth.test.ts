@@ -28,6 +28,7 @@ import {
   type LoginImpl,
 } from "./helpers/fake-login-runtime.js";
 import { fakePiModel } from "./helpers/fake-catalog-runtime.js";
+import { recordingLogger } from "./helpers/recording-logger.js";
 
 let temp: TempGhosts | null = null;
 const managers: LoginManager[] = [];
@@ -489,10 +490,7 @@ describe("per-ghost isolation", () => {
 
 describe("logging never carries secrets", () => {
   it("keeps a pasted key out of every log line", async () => {
-    const lines: string[] = [];
-    const record = (message: string, fields?: Record<string, unknown>) =>
-      lines.push(`${message} ${JSON.stringify(fields ?? {})}`);
-    const logger = { child() { return this; }, debug: record, info: record, warn: record, error: record };
+    const logger = recordingLogger();
     const login: LoginImpl = async (_id, _type, interaction) => {
       await interaction.prompt({ type: "secret", message: "key" });
       return apiKeyCredential();
@@ -502,9 +500,9 @@ describe("logging never carries secrets", () => {
     await waitFor(() => manager.view("casper", started.loginId), (v) => v.status === "awaiting_input");
     manager.submitInput("casper", started.loginId, "sk-TOP-SECRET");
     await waitFor(() => manager.view("casper", started.loginId), (v) => v.status === "succeeded");
-    expect(lines.join("\n")).not.toContain("sk-TOP-SECRET");
+    expect(JSON.stringify(logger.records)).not.toContain("sk-TOP-SECRET");
     // But something WAS logged (start + success), proving the assertion is live.
-    expect(lines.some((l) => l.includes("login succeeded"))).toBe(true);
+    expect(logger.records.some(({ message }) => message.includes("login succeeded"))).toBe(true);
   });
 });
 

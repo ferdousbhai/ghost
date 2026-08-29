@@ -19,9 +19,15 @@ export interface LogRecord {
   fields?: Record<string, unknown>;
 }
 
-export type LogSink = (line: string, record: LogRecord) => void;
+export type LogSink = (record: LogRecord) => void;
 
-export const stderrSink: LogSink = (line) => process.stderr.write(`${line}\n`);
+export const stderrSink: LogSink = (record) => {
+  const line = `${new Date().toISOString()} ${record.level.padEnd(5)} ${formatLogMessage(
+    record.message,
+    record.fields,
+  )}`;
+  process.stderr.write(`${line}\n`);
+};
 
 export function formatLogMessage(
   message: string,
@@ -53,10 +59,7 @@ export function createLogger(
     const recordFields = mergedFields && Object.keys(mergedFields).length > 0
       ? mergedFields
       : undefined;
-    sink(
-      `${new Date().toISOString()} ${level.padEnd(5)} ${formatLogMessage(message, recordFields)}`,
-      { level, message, ...(recordFields ? { fields: recordFields } : {}) },
-    );
+    sink({ level, message, ...(recordFields ? { fields: recordFields } : {}) });
   };
   return {
     debug: (message, fields) => emit("debug", message, fields),
