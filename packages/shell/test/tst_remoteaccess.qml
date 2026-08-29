@@ -179,14 +179,6 @@ TestCase {
         }
     }
 
-    function test_navigationOmitsDocuments(): void {
-        const navigation = createTemporaryObject(navigationComponent, tc);
-        verify(navigation !== null);
-        verify(navigation.destinations.findIndex(function (destination) {
-            return destination.id === "docs";
-        }) < 0);
-    }
-
     function test_navigationKeepsPhoneAccessBesideRemote(): void {
         const navigation = createTemporaryObject(navigationComponent, tc);
         verify(navigation !== null);

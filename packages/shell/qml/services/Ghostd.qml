@@ -203,9 +203,8 @@ Singleton {
             function () { return root.remoteRequest === xhr; });
     }
 
-    // Daemon-global trusted configuration, projected as bounded display-only
-    // metadata. It is deliberately independent of ghost, conversation,
-    // project.
+    // Hook status and configuration are daemon-global, independent of any
+    // ghost, conversation, or project.
 
     function makeHooksRequest(): var {
         return typeof root.hooksRequestFactory === "function"

@@ -28,12 +28,10 @@ describe("readGhostHomeDigest", () => {
         documents: async () => ({
           root: "/not-read/Documents",
           path: "",
-          query: "",
           entries: [],
           total: 0,
           fileCount: 0,
           directoryCount: 0,
-          nextCursor: null,
           truncated: false,
           skipped: [],
         }),
@@ -111,7 +109,6 @@ describe("readGhostHomeDigest", () => {
             : Promise.resolve({
               root: "/owner/Documents",
               path: "",
-              query: "",
               entries: [{
                 name: "DOCUMENT_OK",
                 path: "DOCUMENT_OK",
@@ -122,7 +119,6 @@ describe("readGhostHomeDigest", () => {
               total: 1,
               fileCount: 1,
               directoryCount: 0,
-              nextCursor: null,
               truncated: false,
               skipped: [],
             }),

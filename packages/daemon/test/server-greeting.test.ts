@@ -342,7 +342,6 @@ function documentPage(name: string) {
   return {
     root: "/owner/Documents",
     path: "",
-    query: "",
     entries: [{
       name,
       path: name,
@@ -353,7 +352,6 @@ function documentPage(name: string) {
     total: 1,
     fileCount: 1,
     directoryCount: 0,
-    nextCursor: null,
     truncated: false,
     skipped: [],
   };

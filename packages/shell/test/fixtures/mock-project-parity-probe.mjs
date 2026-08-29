@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   rmSync,
@@ -261,6 +262,40 @@ try {
   assert.ok(mcp.servers.length > 0);
   assert.ok(mcp.servers.every((server) => server.source === "canonical"));
   assert.ok(mcp.servers.every((server) => server.path === "mcp.json"));
+
+  const rosterResponse = await fetch(`http://127.0.0.1:${port}/api/ghosts`);
+  assert.equal(rosterResponse.status, 200);
+  const roster = await rosterResponse.json();
+  const casper = roster.find((ghost) => ghost.name === "casper");
+  assert.ok(casper);
+
+  const transcriptResponse = await fetch(
+    `http://127.0.0.1:${port}/api/ghosts/casper/sessions/pi%3Asess-casper-1/transcript`,
+  );
+  assert.equal(transcriptResponse.status, 200);
+  const transcript = JSON.stringify(await transcriptResponse.json());
+  assert.ok(transcript.includes(join(casper.dir, "plans", "hud-work-strip.md")));
+
+  const createdResponse = await fetch(`http://127.0.0.1:${port}/api/ghosts`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name: "fresh-mock-ghost" }),
+  });
+  assert.equal(createdResponse.status, 201);
+  const created = await createdResponse.json();
+  assert.ok(existsSync(created.dir));
+
+  const turnResponse = await fetch(`http://127.0.0.1:${port}/api/ghosts/casper/messages`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      context: { messages: [{ role: "user", content: "probe project tool trace" }] },
+      options: { sessionId: "mock-project-trace-probe" },
+    }),
+  });
+  assert.equal(turnResponse.status, 200);
+  const turnEvents = await turnResponse.text();
+  assert.ok(turnEvents.includes(join(casper.dir, "plans", "step-2.md")));
 
 } finally {
   if (child.exitCode === null) child.kill("SIGTERM");
