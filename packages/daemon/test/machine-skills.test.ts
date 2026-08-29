@@ -33,12 +33,18 @@ describe("machine skills", () => {
     const piSkills = join(ownerHome, ".pi", "agent", "skills");
     writeSkill(join(agentsSkills, "ambient"), "ambient", "An owner-installed ambient skill.");
     writeSkill(join(managed, "omarchy"), "omarchy", "The managed Omarchy CLI skill.");
+    writeSkill(join(managed, "diagnose-crash"), "diagnose-crash", "Diagnose a system crash.");
     mkdirSync(piSkills, { recursive: true });
     symlinkSync(join(managed, "omarchy"), join(piSkills, "omarchy"));
+    symlinkSync(join(managed, "diagnose-crash"), join(piSkills, "diagnose-crash"));
 
-    const snapshot = await loadMachineSkills(ownerHome, { omarchySkillPath: join(ownerHome, "missing.md") });
+    const snapshot = await loadMachineSkills(ownerHome);
 
-    expect(snapshot?.skills.map((skill) => skill.name)).toEqual(["ambient", "omarchy"]);
+    expect(snapshot?.skills.map((skill) => skill.name).sort()).toEqual([
+      "ambient",
+      "diagnose-crash",
+      "omarchy",
+    ]);
     expect(snapshot?.skills.find((skill) => skill.name === "omarchy")?.filePath)
       .toBe(join(piSkills, "omarchy", "SKILL.md"));
     expect(snapshot?.skills.find((skill) => skill.name === "omarchy")?.snapshotContent)
@@ -47,31 +53,31 @@ describe("machine skills", () => {
     expect(snapshot?.rules).toEqual([]);
   });
 
-  it("deduplicates a packaged skill and its user symlink by real path", async () => {
+  it("deduplicates one managed skill linked into both standard roots", async () => {
     const ownerHome = mkdtempSync(join(tmpdir(), "ghost-machine-dedupe-"));
     const packaged = mkdtempSync(join(tmpdir(), "ghost-packaged-skills-"));
     roots.push(ownerHome, packaged);
     const skillDir = join(packaged, "omarchy");
     writeSkill(skillDir, "omarchy", "The packaged Omarchy CLI skill.");
     const agentsSkills = join(ownerHome, ".agents", "skills");
+    const piSkills = join(ownerHome, ".pi", "agent", "skills");
     mkdirSync(agentsSkills, { recursive: true });
+    mkdirSync(piSkills, { recursive: true });
     symlinkSync(skillDir, join(agentsSkills, "omarchy"));
+    symlinkSync(skillDir, join(piSkills, "omarchy"));
 
-    const skillFile = join(skillDir, "SKILL.md");
-    const snapshot = await loadMachineSkills(ownerHome, { omarchySkillPath: skillFile });
+    const snapshot = await loadMachineSkills(ownerHome);
 
     expect(snapshot?.skills.map((skill) => skill.name)).toEqual(["omarchy"]);
-    expect(machineSkillPaths(ownerHome, { omarchySkillPath: skillFile })).toEqual([
+    expect(machineSkillPaths(ownerHome)).toEqual([
       agentsSkills,
-      join(ownerHome, ".pi", "agent", "skills"),
-      skillFile,
+      piSkills,
     ]);
   });
 
   it("does nothing when no machine skill path exists", async () => {
     const ownerHome = mkdtempSync(join(tmpdir(), "ghost-no-machine-skills-"));
     roots.push(ownerHome);
-    await expect(loadMachineSkills(ownerHome, { omarchySkillPath: join(ownerHome, "missing.md") }))
-      .resolves.toBeNull();
+    await expect(loadMachineSkills(ownerHome)).resolves.toBeNull();
   });
 });

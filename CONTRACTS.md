@@ -26,14 +26,14 @@ instructions, skills, rules, Markdown prompts/commands, and MCP join the
 snapshot. Machine skills are the one ambient declarative exception: Ghost uses
 pi's native skill parser to snapshot every valid skill visible under the owner's
 `~/.agents/skills/` and `~/.pi/agent/skills/`, following the symlinks those
-standard machine roots commonly contain. It also names Omarchy's packaged
-`/usr/share/omarchy/default/agents/skills/omarchy/SKILL.md` explicitly, so the
-stock skill remains available before an installer creates a user-level link.
-Native realpath deduplication and name validation apply. Machine skills enter at
-session construction with lowest name precedence, before ghost-home and then
-project resources; no hardcoded skill-name allowlist exists. This owner-trusted
-machine discovery is deliberately outside the descriptor-confined project
-scanner. A pi session has no `task` tool, and every custom or
+standard machine roots commonly contain. Omarchy owns its package paths and
+maintains links for every shipped skill in those standard roots; Ghost carries
+no Omarchy-specific file or directory path. Native realpath deduplication and
+name validation apply. Machine skills enter at session construction with lowest
+name precedence, before ghost-home and then project resources; no hardcoded
+skill-name allowlist exists. This owner-trusted machine discovery is deliberately
+outside the descriptor-confined project scanner. A pi session has no `task`
+tool, and every custom or
 ambient subagent definition stays disabled until #31 supplies an isolated
 per-session agent boundary. Ghost and project `agents/*.md` definitions remain
 previewed but inert. Claude Code retains its own native subagents.
@@ -487,10 +487,10 @@ pi's `read`, which attaches image files itself; `ghost_screen` already points
 a blind model at `inspect_image` for its saved frames.
 
 Ghost registers neither `web_search` nor `web_fetch` for pi and packages no
-third-party CLI or skill. Omarchy itself owns the canonical packaged skill and
-CLI command catalog; Ghost merely admits that installed file as described
-above. The owner installs and updates other optional integrations from their
-upstream source as the desktop user:
+third-party CLI or skill. Omarchy itself owns its packaged skills, standard-root
+links, and CLI command catalog; Ghost admits those links like every other
+machine skill. The owner installs and updates other optional integrations from
+their upstream source as the desktop user:
 
 - Firecrawl: `npx -y firecrawl-cli@latest init --all --skip-auth` (replace
   `--skip-auth` with `--browser` for its authenticated flow).

@@ -97,10 +97,11 @@ The query is deliberately unrestricted for its local owner:
   project-over-ghost shadowing. Skill, conditional-rule, prompt, and
   Markdown-command bodies do not become always-active instructions. Malformed
   project resources cannot shadow accepted ghost siblings. Valid skills from
-  the owner-trusted `~/.agents/skills/`, `~/.pi/agent/skills/`, and Omarchy's
-  packaged skill entrypoint are indexed by name, description, and path, but
-  their bodies remain on-demand. Native SDK skill discovery stays empty, and
-  neither cwd nor hidden ghost providers add resources;
+  the owner-trusted `~/.agents/skills/` and `~/.pi/agent/skills/` are indexed by
+  name, description, and path, but their bodies remain on-demand. Omarchy
+  exposes its packaged skills through links in those standard roots. Native SDK
+  skill discovery stays empty, and neither cwd nor hidden ghost providers add
+  resources;
 - because the first-turn MCP translation is persisted for resume, phase 1
   rejects any project MCP row containing environment expansion, stdio env,
   headers, auth/OAuth, or URL userinfo/query before starting Claude. It never

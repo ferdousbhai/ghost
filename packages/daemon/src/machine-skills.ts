@@ -3,8 +3,6 @@ import { join } from "node:path";
 import { loadSkills } from "@earendil-works/pi-coding-agent";
 import type { ProjectDeclarativeSnapshot } from "./project-resources.js";
 
-export const OMARCHY_SKILL_PATH = "/usr/share/omarchy/default/agents/skills/omarchy/SKILL.md";
-
 export const OMARCHY_COMPUTER_USE_POLICY = [
   "## Computer use",
   "For laptop, shell, and Omarchy-system actions, first inspect `omarchy commands --json` or the relevant `omarchy <group> --help`, then use the stable `omarchy <group> <action>` route through Bash.",
@@ -12,13 +10,11 @@ export const OMARCHY_COMPUTER_USE_POLICY = [
 ].join("\n");
 
 export interface MachineSkillOptions {
-  /** Exact path override for deterministic tests. */
-  omarchySkillPath?: string;
   /** Complete path override shared with pi's native resource loader. */
   paths?: readonly string[];
 }
 
-/** The owner-trusted machine roots pi scans, plus Omarchy's packaged entrypoint. */
+/** The standard owner-trusted machine roots shared by agent skill installers. */
 export function machineSkillPaths(
   ownerHome: string,
   options: MachineSkillOptions = {},
@@ -27,7 +23,6 @@ export function machineSkillPaths(
   return [
     join(ownerHome, ".agents", "skills"),
     join(ownerHome, ".pi", "agent", "skills"),
-    options.omarchySkillPath ?? OMARCHY_SKILL_PATH,
   ];
 }
 
