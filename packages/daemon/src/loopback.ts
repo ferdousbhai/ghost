@@ -1,19 +1,39 @@
-import { createServer } from "node:net";
+import { createServer, type Server } from "node:net";
 
-export async function freePort(): Promise<number> {
+/**
+ * Ports handed out to a process that binds them later. Drawn at random from
+ * below the ephemeral range (Linux: 32768+), so a port-0 listener elsewhere
+ * cannot be given the same number between our probe and their bind.
+ */
+const PORT_FLOOR = 20_000;
+const PORT_CEILING = 29_999;
+
+function listenOnce(host: string, port: number): Promise<Server> {
   const server = createServer();
-  await new Promise<void>((resolve, reject) => {
+  return new Promise((resolve, reject) => {
     server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolve);
+    server.listen({ host, port, exclusive: true }, () => resolve(server));
   });
-  const address = server.address();
-  if (address === null || typeof address === "string") {
-    throw new Error("loopback listener has no TCP port");
-  }
-  await new Promise<void>((resolve, reject) => {
+}
+
+function closeServer(server: Server): Promise<void> {
+  return new Promise((resolve, reject) => {
     server.close((error) => error ? reject(error) : resolve());
   });
-  return address.port;
+}
+
+/** A loopback port on `host` that was bindable a moment ago. */
+export async function freePort(host = "127.0.0.1"): Promise<number> {
+  for (let attempt = 0; attempt < 32; attempt += 1) {
+    const port = PORT_FLOOR + Math.floor(Math.random() * (PORT_CEILING - PORT_FLOOR + 1));
+    try {
+      await closeServer(await listenOnce(host, port));
+      return port;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EADDRINUSE") throw error;
+    }
+  }
+  throw new Error(`no free loopback port found in ${PORT_FLOOR}-${PORT_CEILING}`);
 }
 
 export async function waitUntilServing(

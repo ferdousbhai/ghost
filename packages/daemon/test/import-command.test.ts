@@ -37,7 +37,9 @@ function makeArchiveDir(parent: string, ghostname: string): string {
   return dir;
 }
 
-async function listen(host: string, port = 0): Promise<Server> {
+/** A listener on a port outside the ephemeral range, so another worker's port-0 bind cannot take it once closed. */
+async function listen(host: string, port?: number): Promise<Server> {
+  port ??= await freePort(host);
   const server = createServer();
   await new Promise<void>((resolveListen, reject) => {
     server.once("error", reject);
