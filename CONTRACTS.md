@@ -1896,10 +1896,20 @@ whole model before any non-local exposure.
   tree.
 - `packages/shell` — the Omarchy/Quickshell HUD, model routing, ask/queue and
   branching UI, live tool cards, and summoning indicator.
-- `packages/chromium-extension` — the "my browser" relay, driving one tab of the
-  browser the user is already signed into. The default mode stays "Ghost's
-  browser", a dedicated Playwright Chromium profile under the ghost home, and
-  remains the right choice for anything autonomous.
+- `packages/chromium-extension` — the "my browser" relay, driving tabs of the
+  browser the user is already signed into. One extension serves every ghost and
+  conversation over one socket, so the tab is the unit of isolation: relay
+  protocol 2 requires every operation to carry its `session` id and every page
+  operation the `tab` id that session opened. The extension keeps each tab's
+  debugger attachment, isolated world, and console/network buffers separate from
+  every other tab's, and each session's tabs separate from every other session's:
+  `open` answers with the tab id, the `tabs` op lists and switches within the
+  asking session's own tabs and answers `active` for it alone, and session
+  `close` sweeps every tab that session opened rather than only its current one. `browserMode` defaults to `"relay"`, which is
+  selected whenever the daemon has a relay hub: browser calls then fail with the
+  disconnected message until an extension pairs, rather than falling back.
+  `"profile"` selects "Ghost's browser", a dedicated Playwright Chromium profile
+  under the ghost home, which remains the right choice for anything autonomous.
 - `packages/desktop-helper` — Python, not pnpm. A long-lived PyGObject sidecar
   for Hyprland/Wayland computer-use, driven by the `ghost_desktop` and
   `ghost_screen` extensions over line-oriented JSON on stdin/stdout. Managed with

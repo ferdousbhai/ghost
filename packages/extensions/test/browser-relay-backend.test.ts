@@ -87,9 +87,20 @@ class ScriptedTransport implements RelayTransport {
 
 const PAGE = { url: "https://example.com/", title: "Example Domain" };
 
+/**
+ * What one op put on the wire, minus the session id every op carries — that is
+ * asserted once, on its own, rather than repeated in thirteen expectations.
+ */
+function sentArgs(transport: ScriptedTransport, op: string): Record<string, unknown> | undefined {
+  const args = transport.lastFor(op as never)?.args;
+  if (args === undefined) return undefined;
+  const { session: _session, ...rest } = args as Record<string, unknown>;
+  return rest;
+}
+
 function transportWithPage(): ScriptedTransport {
   const transport = new ScriptedTransport();
-  transport.answer("open", { page: PAGE });
+  transport.answer("open", { page: PAGE, id: "t1" });
   transport.answer("current", { page: PAGE });
   transport.answer("close", { closed: true });
   return transport;
@@ -148,7 +159,7 @@ describe("the protocol constants are a contract", () => {
   });
 
   it("pins the version and subprotocol the extension has to agree with", () => {
-    expect(RELAY_PROTOCOL_VERSION).toBe(1);
+    expect(RELAY_PROTOCOL_VERSION).toBe(2);
     expect(RELAY_SUBPROTOCOL).toBe("ghost-relay.v1");
   });
 });
@@ -220,7 +231,7 @@ describe("driving the relay", () => {
     const backend = await opened(transport);
     const matches = await backend.find("Sign in", { timeoutMs: 5_000, limit: 2 });
 
-    expect(transport.lastFor("find")?.args).toEqual({ query: "Sign in", limit: 2 });
+    expect(sentArgs(transport, "find")).toEqual({ tab: "t1", query: "Sign in", limit: 2 });
     expect(matches).toHaveLength(2);
     expect(matches[0]).toEqual({
       ref: "e1", tag: "A", name: "Sign in", href: "/login", text: "Sign in",
@@ -237,14 +248,14 @@ describe("driving the relay", () => {
     const backend = await opened(transport);
 
     await backend.click({ ref: " e3 " }, { timeoutMs: 5_000 });
-    expect(transport.lastFor("click")?.args).toEqual({ ref: "e3" });
+    expect(sentArgs(transport, "click")).toEqual({ tab: "t1", ref: "e3" });
 
     await backend.click({ selector: "button.primary" }, { timeoutMs: 5_000 });
-    expect(transport.lastFor("click")?.args).toEqual({ selector: "button.primary" });
+    expect(sentArgs(transport, "click")).toEqual({ tab: "t1", selector: "button.primary" });
 
     // A ref wins when both arrive, matching the Playwright backend.
     await backend.click({ ref: "e1", selector: "a" }, { timeoutMs: 5_000 });
-    expect(transport.lastFor("click")?.args).toEqual({ ref: "e1" });
+    expect(sentArgs(transport, "click")).toEqual({ tab: "t1", ref: "e1" });
   });
 
   it("refuses to act with neither a ref nor a selector", async () => {
@@ -260,11 +271,11 @@ describe("driving the relay", () => {
     const backend = await opened(transport);
 
     await backend.type({ ref: "e2", text: "letterpress", submit: false }, { timeoutMs: 5_000 });
-    expect(transport.lastFor("type")?.args)
-      .toEqual({ ref: "e2", text: "letterpress", submit: false });
+    expect(sentArgs(transport, "type"))
+      .toEqual({ tab: "t1", ref: "e2", text: "letterpress", submit: false });
 
     await backend.type({ ref: "e2", text: "x", submit: true }, { timeoutMs: 5_000 });
-    expect(transport.lastFor("type")?.args).toMatchObject({ submit: true });
+    expect(sentArgs(transport, "type")).toMatchObject({ submit: true });
   });
 
   it("reports honestly when there was nowhere to go back to", async () => {
@@ -305,7 +316,7 @@ describe("the Tier-1 relay ops translate the seam to the wire", () => {
     transport.answer("scroll", { page: PAGE });
     const backend = await opened(transport);
     await backend.scroll({ deltaX: 0, deltaY: 300, x: 10, y: 20 }, { timeoutMs: 5_000 });
-    expect(transport.lastFor("scroll")?.args).toEqual({ deltaX: 0, deltaY: 300, x: 10, y: 20 });
+    expect(sentArgs(transport, "scroll")).toEqual({ tab: "t1", deltaX: 0, deltaY: 300, x: 10, y: 20 });
   });
 
   it("drags from one point to another", async () => {
@@ -313,7 +324,7 @@ describe("the Tier-1 relay ops translate the seam to the wire", () => {
     transport.answer("drag", { page: PAGE });
     const backend = await opened(transport);
     await backend.drag({ fromX: 1, fromY: 2, toX: 3, toY: 4, steps: 5 }, { timeoutMs: 5_000 });
-    expect(transport.lastFor("drag")?.args).toEqual({ fromX: 1, fromY: 2, toX: 3, toY: 4, steps: 5 });
+    expect(sentArgs(transport, "drag")).toEqual({ tab: "t1", fromX: 1, fromY: 2, toX: 3, toY: 4, steps: 5 });
   });
 
   it("sends a key with its modifiers", async () => {
@@ -321,7 +332,7 @@ describe("the Tier-1 relay ops translate the seam to the wire", () => {
     transport.answer("key", { page: PAGE });
     const backend = await opened(transport);
     await backend.key({ key: "a", modifiers: ["Control"] }, { timeoutMs: 5_000 });
-    expect(transport.lastFor("key")?.args).toMatchObject({ key: "a", modifiers: ["Control"] });
+    expect(sentArgs(transport, "key")).toMatchObject({ key: "a", modifiers: ["Control"] });
   });
 
   it("runs javascript and returns the value and its type", async () => {
@@ -329,7 +340,7 @@ describe("the Tier-1 relay ops translate the seam to the wire", () => {
     transport.answer("javascript", { value: 42, type: "number" });
     const backend = await opened(transport);
     const result = await backend.javascript("40+2", { timeoutMs: 5_000 });
-    expect(transport.lastFor("javascript")?.args).toEqual({ code: "40+2" });
+    expect(sentArgs(transport, "javascript")).toEqual({ tab: "t1", code: "40+2" });
     expect(result).toEqual({ value: 42, type: "number" });
   });
 
@@ -355,7 +366,7 @@ describe("the Tier-1 relay ops translate the seam to the wire", () => {
     transport.answer("upload", { page: PAGE });
     const backend = await opened(transport);
     await backend.upload({ ref: "e1", paths: ["/tmp/a"] }, { timeoutMs: 5_000 });
-    expect(transport.lastFor("upload")?.args).toEqual({ ref: "e1", paths: ["/tmp/a"] });
+    expect(sentArgs(transport, "upload")).toEqual({ tab: "t1", ref: "e1", paths: ["/tmp/a"] });
   });
 
   it("resizes and reports whether it applied", async () => {
@@ -364,7 +375,7 @@ describe("the Tier-1 relay ops translate the seam to the wire", () => {
     const backend = await opened(transport);
     expect(await backend.resize({ width: 800, height: 600 }, { timeoutMs: 5_000 }))
       .toMatchObject({ applied: true });
-    expect(transport.lastFor("resize")?.args).toEqual({ width: 800, height: 600 });
+    expect(sentArgs(transport, "resize")).toEqual({ tab: "t1", width: 800, height: 600 });
   });
 });
 
@@ -408,6 +419,25 @@ describe("the relaxed one-tab invariant, on the relay backend", () => {
     expect(backend.running).toBe(true);
   });
 
+  it("names one stable session on every op, and a different one per backend", async () => {
+    const transport = transportWithPage();
+    transport.answer("read", { page: PAGE, text: "hi" });
+    const backend = await opened(transport);
+    await backend.read({ timeoutMs: 5_000 });
+
+    const sessionOf = (op: string): unknown =>
+      (transport.lastFor(op as never)?.args as Record<string, unknown> | undefined)?.["session"];
+    const session = sessionOf("open");
+    expect(typeof session).toBe("string");
+    expect(sessionOf("read")).toBe(session);
+
+    // A second conversation is a second owner, or the extension could not tell
+    // whose tab is whose over the one socket they share.
+    const other = new RelayBrowserBackend({ transport: transportWithPage() });
+    await other.open(PAGE.url, { timeoutMs: 5_000 });
+    expect(new RelayBrowserBackend({ transport }).running).toBe(false);
+  });
+
   it("records the tab id the extension names on open", async () => {
     const transport = transportWithPage();
     transport.answer("open", { page: PAGE, id: "t9" });
@@ -439,7 +469,7 @@ describe("screenshots", () => {
 
     expect(page).toEqual({ ...PAGE, bytes: png });
     // fullPage is the backend's to forward, not to decide.
-    expect(transport.lastFor("screenshot")?.args).toEqual({ fullPage: true });
+    expect(sentArgs(transport, "screenshot")).toEqual({ tab: "t1", fullPage: true });
   });
 
   it("complains rather than writing an empty file when no image came back", async () => {

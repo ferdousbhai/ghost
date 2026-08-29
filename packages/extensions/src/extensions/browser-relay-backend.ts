@@ -8,7 +8,7 @@
  * of the whole exercise — the pages the ghost sees are the pages the owner is
  * already logged into.
  *
- * Relay protocol v1 reports page URLs but neither the connected peer address
+ * The relay protocol reports page URLs but neither the connected peer address
  * nor a cancel operation. The session therefore validates DNS before a request
  * and validates every returned page URL, while prompt cancellation stops local
  * waiting. It cannot peer-pin Chromium's already-delivered request or undo an
@@ -43,6 +43,7 @@
  * `browser-relay` package in https://github.com/can1357/oh-my-pi. No code is
  * vendored; that server half is Bun-only and its tool layer is a different seam.
  */
+import { randomUUID } from "node:crypto";
 import {
   assertScreenshotBase64WithinLimit,
   assertScreenshotBytesWithinLimit,
@@ -83,7 +84,7 @@ import {
  * in `hello`; a daemon that does not recognize it refuses the connection rather
  * than guessing, because a half-understood relay drives someone's real browser.
  */
-export const RELAY_PROTOCOL_VERSION = 1;
+export const RELAY_PROTOCOL_VERSION = 2;
 
 /** The negotiated WebSocket subprotocol. */
 export const RELAY_SUBPROTOCOL = "ghost-relay.v1";
@@ -148,7 +149,7 @@ export interface RelayRequestOptions {
   readonly timeoutMs: number;
   /**
    * The transport should cancel its pending request when it can. Relay protocol
-   * v1 has no cancel frame, so an already-delivered browser operation may still
+   * The protocol has no cancel frame, so an already-delivered browser operation may still
    * finish remotely after the caller has stopped waiting.
    */
   readonly signal?: AbortSignal;
@@ -300,20 +301,27 @@ export class RelayBrowserBackend implements GhostBrowserBackend {
 
   readonly #transport: RelayTransport;
   /**
-   * The ids of the tabs the extension is holding for this ghost. A set, not a
-   * boolean: the one-tab invariant is relaxed, so the ghost may own several. It
-   * stays a cheap local mirror — enough to answer `current`/`running` without a
-   * round-trip when nothing was ever opened — and the extension remains the
-   * authority, correcting it on every reply.
+   * Who this backend is, for the extension. One extension serves every ghost and
+   * conversation over a single socket, so the session id is what makes a tab
+   * *belong* to someone: the extension answers `tabs` with this session's tabs
+   * alone, refuses a switch or close aimed at another's, and on `close` sweeps
+   * every tab this session opened rather than only the one it last drove.
    */
-  #tabs = new Set<string>();
+  readonly #session = randomUUID();
+  /**
+   * The tab this session is driving now. `#call` puts it on every op so the
+   * extension can keep that tab's attach state and isolated world apart from
+   * every other session's. Undefined until the first `open`; the extension
+   * remains the authority and corrects it on every reply.
+   */
+  #tabId: string | undefined;
 
   constructor(options: RelayBackendOptions) {
     this.#transport = options.transport;
   }
 
   get running(): boolean {
-    return this.#transport.connected && this.#tabs.size > 0;
+    return this.#transport.connected && this.#tabId !== undefined;
   }
 
   /**
@@ -332,11 +340,15 @@ export class RelayBrowserBackend implements GhostBrowserBackend {
     options: BackendActionOptions,
   ): Promise<Record<string, unknown>> {
     if (!this.#transport.connected) {
-      this.#tabs.clear();
+      this.#tabId = undefined;
       throw new GhostBrowserError("browser_unavailable", RELAY_DISCONNECTED_MESSAGE, { op });
     }
     const reply = await withAbort(
-      this.#transport.request(op, args, {
+      this.#transport.request(op, {
+        ...args,
+        session: this.#session,
+        ...(this.#tabId === undefined ? {} : { tab: this.#tabId }),
+      }, {
         timeoutMs: options.timeoutMs,
         ...(options.signal === undefined ? {} : { signal: options.signal }),
       }),
@@ -347,7 +359,7 @@ export class RelayBrowserBackend implements GhostBrowserBackend {
       // The extension telling us the tab is gone is the one failure that also
       // changes our own state: there is nothing to act on until the next `open`.
       if (reply.failure === "no_page" || reply.failure === "browser_unavailable") {
-        this.#tabs.clear();
+        this.#tabId = undefined;
       }
       throw new GhostBrowserError(reply.failure, reply.message, {
         op,
@@ -363,11 +375,11 @@ export class RelayBrowserBackend implements GhostBrowserBackend {
     // Cheap and non-committal when no tab has ever been opened: do not start or
     // contact anything merely to confirm absence. Once a tab is believed to
     // exist, however, a disconnected relay is a real failure and #call reports it.
-    if (this.#tabs.size === 0) return undefined;
+    if (this.#tabId === undefined) return undefined;
     const result = await this.#call("current", {}, options);
     const page = result["page"];
     if (page === null || page === undefined) {
-      this.#tabs.clear();
+      this.#tabId = undefined;
       return undefined;
     }
     return readPage("current", page);
@@ -375,11 +387,11 @@ export class RelayBrowserBackend implements GhostBrowserBackend {
 
   async open(url: string, options: BackendActionOptions): Promise<PageSummary> {
     const result = await this.#call("open", { url }, options);
-    // The extension names the tab it opened; remember it so `running`/`current`
-    // can answer without a round-trip. A missing id (older extension) still means
-    // there is a tab, so fall back to a sentinel rather than reporting none.
+    // The extension names the tab it opened. Every later op rides on that id, so
+    // a reply without one is malformed rather than something to paper over.
     const id = result["id"];
-    this.#tabs.add(typeof id === "string" && id !== "" ? id : "active");
+    if (typeof id !== "string" || id === "") malformed("open", "no tab id");
+    this.#tabId = id;
     return readPage("open", result["page"]);
   }
 
@@ -531,11 +543,14 @@ export class RelayBrowserBackend implements GhostBrowserBackend {
       options,
     );
     const tabs = readTabInfos(result["tabs"]);
-    // The extension is authoritative on which tabs exist: rebuild the local mirror
-    // from its answer so `running` and `current` stay honest across create/close.
-    this.#tabs = new Set(tabs.map((tab) => tab.id));
-    const active = typeof result["active"] === "string" ? (result["active"] as string) : null;
-    const id = typeof result["id"] === "string" ? (result["id"] as string) : undefined;
+    // The extension is authoritative on which tab this session now drives:
+    // `active` is answered for this caller alone, so follow it across
+    // create/switch/close rather than trusting the local value.
+    // `readNonEmpty`, not a bare string check: an empty `active` would otherwise
+    // become this session's tab id and ride on every later call.
+    const active = readNonEmpty(result["active"]) ?? null;
+    this.#tabId = active ?? undefined;
+    const id = readNonEmpty(result["id"]);
     const page = result["page"];
     return {
       tabs,
@@ -546,23 +561,17 @@ export class RelayBrowserBackend implements GhostBrowserBackend {
   }
 
   /**
-   * Close the ghost's tab and let the extension drop its debugger attachment. The
-   * *browser* is emphatically not closed — it is the owner's, with the rest of
-   * their day open in it.
+   * Close this session's tab and let the extension drop its debugger attachment.
+   * Other conversations keep their own tabs, and the *browser* is emphatically
+   * not closed — it is the owner's, with the rest of their day open in it.
    */
   async close(options: BackendActionOptions = { timeoutMs: 10_000 }): Promise<boolean> {
-    if (this.#tabs.size === 0) return false;
+    if (this.#tabId === undefined) return false;
     const result = await this.#call("close", {}, options);
+    // The extension closed every tab this session opened, not just #tabId.
     const closed = result["closed"];
     if (typeof closed !== "boolean") malformed("close", "closed is not a boolean");
-    // The `close` op shuts the *active* tab; the extension reports the tabs that
-    // remain so the mirror stays truthful when several were open. An older
-    // extension that returns no such list leaves the ghost with one tab, so
-    // clearing is the safe default there.
-    const tabs = result["tabs"];
-    this.#tabs = Array.isArray(tabs)
-      ? new Set(readTabInfos(tabs).map((tab) => tab.id))
-      : new Set();
+    this.#tabId = undefined;
     return closed;
   }
 }

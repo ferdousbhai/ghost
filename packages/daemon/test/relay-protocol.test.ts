@@ -64,7 +64,7 @@ describe("client frames", () => {
     }));
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
-    expect(parsed.frame).toMatchObject({ t: "hello", protocol: 1, browser: "Chromium/141" });
+    expect(parsed.frame).toMatchObject({ t: "hello", protocol: 2, browser: "Chromium/141" });
     // A peer that sends a megabyte of "agent" must not get a megabyte into a log.
     expect((parsed.frame as { agent: string }).agent).toHaveLength(200);
   });

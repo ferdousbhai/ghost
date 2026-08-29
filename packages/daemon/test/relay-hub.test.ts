@@ -201,7 +201,7 @@ describe("pairing", () => {
 
     const result = await closed;
     expect(result.code).toBe(4000);
-    expect(result.reason).toMatch(/relay protocol 1/);
+    expect(result.reason).toMatch(/relay protocol 2/);
     await waitFor(() => !hub.connected);
   });
 
