@@ -15,6 +15,7 @@ import {
   type BrowserSessionOptions,
   type GhostBrowserSession,
 } from "./browser-session.js";
+import { RELAY_RECOVERY_HINT } from "./browser-relay-backend.js";
 import { readScreenshotFile, resolveScreenshotDirectory } from "./screenshot-retention.js";
 import {
   resolveHome,
@@ -122,10 +123,7 @@ export function createBrowserExtension(
         + "This drives the owner's own signed-in Chromium, on their desktop, in "
         + "front of them. You act as them, in the sessions they are already "
         + "logged into, and they can watch and take over at any point. If no "
-        + "browser is reachable, they need to start Chromium with the Ghost relay "
-        + "extension paired. You may start one yourself, but detach it from the "
-        + "daemon's unit — `systemd-run --user --scope -- chromium` — or a ghostd "
-        + "restart takes the owner's browser down with it.\n"
+        + `browser is reachable: ${RELAY_RECOVERY_HINT}\n`
         + "Work in steps: open a page, read it, find the element you want, then "
         + "click or type. Refs like e1 come from find and stay valid until the "
         + "page changes. Only http and https pages are reachable; local files and "

@@ -2624,7 +2624,7 @@ export class SessionHost {
     const extensions = resolveGhostExtensions(
       {
         ghostName,
-          ...(this.relayTransport ? { relayTransport: this.relayTransport } : {}),
+        ...(this.relayTransport ? { relayTransport: this.relayTransport } : {}),
         ...this.extensionOptions,
         extraSections,
       },

@@ -177,13 +177,20 @@ export const RELAY_OFF_MESSAGE =
   + "with. Installing the extension will not help: the owner has to restart "
   + "ghostd without GHOSTD_RELAY=off.";
 
+/**
+ * How a browser is got back. Said once, because the tool description and the
+ * failure a call throws are both read by the model and must not drift.
+ */
+export const RELAY_RECOVERY_HINT =
+  "Chromium has to be running with the Ghost relay extension installed and "
+  + "paired (the extension's popup shows the connection status). If none is "
+  + "running you may start one yourself, but detach it from the daemon's service "
+  + "unit or restarting ghostd kills it and every tab in it: "
+  + "`systemd-run --user --scope -- chromium`.";
+
 export const RELAY_DISCONNECTED_MESSAGE =
   "The browser relay is not connected, so the owner's Chromium cannot be "
-  + "driven. Ask them to open Chromium with the Ghost relay extension installed "
-  + "and paired (the extension's popup shows the connection status). If no "
-  + "Chromium is running you may start one yourself, but detach it from the "
-  + "daemon's service unit or restarting ghostd will kill it and every tab in "
-  + "it: `systemd-run --user --scope -- chromium`.";
+  + `driven. ${RELAY_RECOVERY_HINT}`;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

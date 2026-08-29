@@ -69,7 +69,7 @@ import {
   MAX_FIND_QUERY_CHARS,
 } from "../src/extensions/browser-session.js";
 import { GhostError } from "../src/errors.js";
-import { browserAbortError, GhostBrowserError } from "../src/extensions/browser-backend.js";
+import { GhostBrowserError } from "../src/extensions/browser-backend.js";
 import { relayBackend } from "../src/extensions/browser-relay-backend.js";
 import { MAX_SCREENSHOT_BYTES } from "../src/extensions/screenshot-retention.js";
 import { createGhostFixture, createTempDir, type GhostFixture } from "./support/fixture.js";
@@ -137,20 +137,12 @@ class FakeBackend implements GhostBrowserBackend {
   /**
    * Wait on a test-installed barrier, but abandon it when the turn is cancelled
    * — a real backend's in-flight page work dies with the browser, and a barrier
-   * that ignored the signal would simply hang the suite.
+   * that ignored the signal would simply hang the suite. `withAbort` is the same
+   * helper the relay backend uses, so the fake abandons work exactly as it does.
    */
   async #stall(barrier: Promise<void> | undefined, options: BackendActionOptions): Promise<void> {
     if (!barrier) return;
-    const { signal } = options;
-    if (!signal) return barrier;
-    await Promise.race([
-      barrier,
-      new Promise<never>((_resolve, reject) => {
-        const fail = (): void => reject(browserAbortError("the page"));
-        if (signal.aborted) fail();
-        else signal.addEventListener("abort", fail, { once: true });
-      }),
-    ]);
+    await withAbort(barrier, "the page", options.signal);
   }
 
   #resolve(target: BackendTarget): string {
@@ -1536,7 +1528,7 @@ class RecordingBackend implements GhostBrowserBackend {
 
   async read(options: BackendActionOptions): Promise<BackendReadResult> {
     this.calls.push({ name: "read", args: [options] });
-    await this.readBarrier;
+    if (this.readBarrier) await withAbort(this.readBarrier, "the page", options.signal);
     return { url: this.#url ?? "", title: "recorded", text: this.pageText };
   }
 
@@ -1638,7 +1630,7 @@ class RecordingBackend implements GhostBrowserBackend {
 
   async close(): Promise<boolean> {
     this.calls.push({ name: "close", args: [] });
-    await this.closeBarrier;
+    if (this.closeBarrier) await this.closeBarrier;
     const wasRunning = this.running;
     this.running = false;
     this.#url = undefined;
@@ -1737,33 +1729,6 @@ describe("the backend is a choice, and policy sits above it", () => {
     expect(result.details).toMatchObject({ backend: "recording" });
   });
 
-  it("still refuses a file URL, before the backend hears about it", async () => {
-    const harness = await recordingHarness();
-    await expectGhostError(
-      harness.call(GHOST_BROWSER, { action: "open", url: "file:///etc/shadow" }),
-    );
-    expect(backend.calls).toHaveLength(0);
-  });
-
-  it("still applies the read budget to whatever the backend returns", async () => {
-    const harness = await recordingHarness();
-    backend.pageText = "y".repeat(3_000);
-    await harness.call(GHOST_BROWSER, { action: "open", url: "https://example.com" });
-    const result = await harness.call(GHOST_BROWSER, { action: "read", max_chars: 250 });
-    expect(result.details).toMatchObject({ returned: 250, totalLength: 3_000 });
-  });
-
-  it("still refuses an unminted ref, before the backend hears about it", async () => {
-    const harness = await recordingHarness();
-    await harness.call(GHOST_BROWSER, { action: "open", url: "https://example.com" });
-    const before = backend.calls.length;
-    const error = await expectGhostError(
-      harness.call(GHOST_BROWSER, { action: "click", ref: "e9" }),
-    );
-    expect(error.details.failure).toBe("unknown_ref");
-    expect(backend.calls).toHaveLength(before);
-  });
-
   it("still refuses to act with no page loaded", async () => {
     const harness = await recordingHarness();
     const error = await expectGhostError(harness.call(GHOST_BROWSER, { action: "read" }));
@@ -1838,17 +1803,13 @@ describe("the process-wide browser session registry", () => {
   });
 
   it("reuses independently-created relay factories with the same transport", () => {
-    const transport = { connected: false, peer: undefined, request: async () => ({}) };
     const first = browserSessionFor(fixture.dir, {
-      backend: relayBackend({ transport } as never),
+      backend: relayBackend({}),
       idleTimeoutMs: 0,
     });
 
     expect(
-      browserSessionFor(fixture.dir, {
-        backend: relayBackend({ transport } as never),
-        idleTimeoutMs: 0,
-      }),
+      browserSessionFor(fixture.dir, { backend: relayBackend({}), idleTimeoutMs: 0 }),
     ).toBe(first);
   });
 

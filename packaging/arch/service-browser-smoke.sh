@@ -11,27 +11,20 @@ set -euo pipefail
 systemctl --user is-active --quiet graphical-session.target
 systemctl --user is-active --quiet ghostd.service
 
-status="$(/usr/bin/ghost status --json)"
-printf '%s' "$status" | python -c '
-import json
-import sys
-
-status = json.load(sys.stdin)
-if status.get("reachable") is not True:
-    raise SystemExit("ghost status did not report a reachable daemon")
-print(status["daemon"])
-' > /dev/null
-printf 'Ghost terminal client reached the packaged daemon.\n'
-
 # `GET /api/relay/status` is deliberately exempt from the API token: it returns
 # where to dial and whether an extension is connected, never the pairing token.
-printf '%s' "$status" | python -c '
+/usr/bin/ghost status --json | python -c '
 import json
 import sys
 import urllib.error
 import urllib.request
 
-daemon = json.load(sys.stdin)["daemon"].rstrip("/")
+status = json.load(sys.stdin)
+if status.get("reachable") is not True:
+    raise SystemExit("ghost status did not report a reachable daemon")
+print("Ghost terminal client reached the packaged daemon.")
+
+daemon = status["daemon"].rstrip("/")
 try:
     with urllib.request.urlopen(daemon + "/api/relay/status", timeout=10) as response:
         body = json.load(response)
@@ -42,5 +35,5 @@ if not isinstance(body.get("path"), str):
     raise SystemExit("relay status did not name the socket path")
 if body.get("enabled") is not True:
     raise SystemExit("the packaged daemon serves no relay endpoint")
+print("Browser relay endpoint is serving from the packaged daemon.")
 '
-printf 'Browser relay endpoint is serving from the packaged daemon.\n'

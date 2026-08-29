@@ -9,6 +9,7 @@ import {
   openMachineDocuments,
   openGhostHome,
   relayBackend,
+  type BrowserBackendFactory,
   type CharacterFile,
   type DocumentDirectoryPage,
   type DocumentsIndex,
@@ -52,6 +53,24 @@ export interface GhostExtensionOptions {
   extraSections?: readonly string[];
 }
 
+/**
+ * No transport means the daemon has no relay hub at all; the backend says so on
+ * every call rather than the tool disappearing from the conversation. Hoisted
+ * because it captures nothing.
+ */
+const NO_RELAY_BACKEND = relayBackend({});
+
+/**
+ * A factory is minted per call — once per pi session, once per Claude Code turn.
+ * That stays cheap only because `browserSessionFor` compares a factory's
+ * `sessionIdentity` (`["relay", transport]`) by contents rather than by identity,
+ * so every turn's factory matches the cached session's. Widening that comparison
+ * to the factory object would make each turn a session-configuration conflict.
+ */
+function browserBackend(transport: RelayTransport | undefined): BrowserBackendFactory {
+  return transport === undefined ? NO_RELAY_BACKEND : relayBackend({ transport });
+}
+
 export interface ResolvedGhostExtensions {
   /** Ghost's own extension, on the runtime-neutral seam; each runtime adapts it. */
   ghost: GhostExtensionFactory;
@@ -77,11 +96,7 @@ export function resolveGhostExtensions(
     ...(homeDir === undefined ? {} : { home: homeDir }),
     ...(options.ghostName === undefined ? {} : { ghostName: options.ghostName }),
     ...(options.documents === undefined ? {} : { documents: options.documents }),
-    // No transport means the daemon has no relay hub at all; the backend says so
-    // on every call rather than the tool disappearing from the conversation.
-    backend: options.relayTransport
-      ? relayBackend({ transport: options.relayTransport })
-      : relayBackend({}),
+    backend: browserBackend(options.relayTransport),
     ...(options.extraSections === undefined ? {} : { extraSections: options.extraSections }),
     capabilities,
   };
