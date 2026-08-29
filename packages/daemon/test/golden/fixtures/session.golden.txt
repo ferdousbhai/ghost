@@ -32,6 +32,14 @@ The owner's own files, shared with the owner and every ghost; not a place for th
 - file: "press.md"
 </untrusted id="ghost-documents-index">
 
+## Computer use
+For laptop, shell, and Omarchy-system actions, first inspect `omarchy commands --json` or the relevant `omarchy <group> --help`, then use the stable `omarchy <group> <action>` route through Bash.
+Use `ghost_desktop` and `ghost_screen` only when Omarchy has no route, a tried CLI route fails, or the task must manipulate content inside an arbitrary application. Use `ghost_browser` for browser pages.
+
+## Skills
+When a skill matches, read its listed `SKILL.md` before acting.
+- omarchy: Control this Omarchy laptop through its CLI. (<owner-home>/.agents/skills/omarchy/SKILL.md)
+
 ------------------------------------------------------------------------------
 [turn 1: provider round-trips]
 ------------------------------------------------------------------------------
@@ -90,6 +98,14 @@ The owner's own files, shared with the owner and every ghost; not a place for th
 - file: "ledger.md"
 - file: "press.md"
 </untrusted id="ghost-documents-index">
+
+## Computer use
+For laptop, shell, and Omarchy-system actions, first inspect `omarchy commands --json` or the relevant `omarchy <group> --help`, then use the stable `omarchy <group> <action>` route through Bash.
+Use `ghost_desktop` and `ghost_screen` only when Omarchy has no route, a tried CLI route fails, or the task must manipulate content inside an arbitrary application. Use `ghost_browser` for browser pages.
+
+## Skills
+When a skill matches, read its listed `SKILL.md` before acting.
+- omarchy: Control this Omarchy laptop through its CLI. (<owner-home>/.agents/skills/omarchy/SKILL.md)
 
 ------------------------------------------------------------------------------
 [turn 2: provider round-trips]

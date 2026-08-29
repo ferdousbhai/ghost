@@ -1,9 +1,13 @@
 # Desktop helper contract (`ghost-desktop-helper`)
 
-The ghost's computer-use on Omarchy rides a **Python sidecar** — because the
-hard capabilities (AT-SPI accessibility, background-safe capture, layout-safe
-input, Hyprland dispatcher-grammar correctness) are natural in PyGObject and
-already solved, MIT-licensed, in
+The ghost controls the laptop through **Omarchy CLI first**: discover stable
+routes with `omarchy commands --json` or group help, then run
+`omarchy <group> <action>` through Bash. The **Python sidecar is the fallback**
+when Omarchy has no route, a tried CLI route fails, or the task must manipulate
+content inside an arbitrary application. Its hard capabilities (AT-SPI
+accessibility, background-safe capture, layout-safe input, and Hyprland
+dispatcher-grammar correctness) are natural in PyGObject and already solved,
+MIT-licensed, in
 [omarchy-quattro-harness](https://github.com/fabiopauli/omarchy-quattro-harness)
 by Fabio Pauli. We **vendor its desktop modules** (attributed in
 THIRD_PARTY_NOTICES) behind our own thin JSON bridge, and drop its browser
@@ -11,9 +15,10 @@ THIRD_PARTY_NOTICES) behind our own thin JSON bridge, and drop its browser
 extensions shell to this sidecar — the same shape as `TrayBridge.qml` →
 `ghost-tray.py`.
 
-Vision is NOT in the helper. Semantic (AT-SPI) access is preferred where it
-exists (GTK); Ghost's `inspect_image` — which resolves the `vision_model` role
-Ghost binds from `models.json` — is the universal fallback for
+Vision is NOT in the helper. Once the helper fallback is needed, semantic
+(AT-SPI) access is preferred where it exists (GTK); Ghost's `inspect_image` —
+which resolves the `vision_model` role Ghost binds from `models.json` — is the
+universal fallback for
 canvas/Qt-without-a11y/web/games. The strongest path uses both: try semantic,
 fall back to a screenshot + vision.
 

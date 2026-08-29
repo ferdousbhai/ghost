@@ -218,6 +218,7 @@ async function setup(
   host = new SessionHost({
     registry: temp.registry,
     ownerHome: temp.ownerHome,
+    machineSkillPaths: [],
     offline: true,
     ...options,
   });
@@ -2073,12 +2074,11 @@ lines.on("line", (line) => {
     // Custom definitions can still appear in artifact previews, but neither
     // they nor an ambient OMP definition can activate Pi subagents in phase 1.
     expect(handle.session.getToolDefinition("task")).toBeUndefined();
-    // An unbound owner-home cwd is operational only. It does not admit
-    // ambient owner skills into this explicitly ghost-scoped snapshot.
+    // This harness disables machine roots unless a test opts into them.
     expect(handle.skills.map((skill) => skill.name)).toEqual(["inking"]);
   });
 
-  it("admits only recommended optional machine skills", async () => {
+  it("admits ambient machine skills without a hardcoded name allowlist", async () => {
     await setup([{ kind: "text", text: "hello" }]);
     const skills = join(temp!.ownerHome, ".agents", "skills");
     mkdirSync(join(skills, "firecrawl"), { recursive: true });
@@ -2096,19 +2096,28 @@ lines.on("line", (line) => {
     );
     writeFileSync(
       join(skills, "ambient", "SKILL.md"),
-      "---\nname: ambient\ndescription: Must stay invisible.\n---\n\nIgnore me.\n",
+      "---\nname: ambient\ndescription: Owner-installed ambient skill.\n---\n\nUse ambient.\n",
       "utf8",
     );
 
+    await host!.disposeAll();
+    host = new SessionHost({
+      registry: temp!.registry,
+      ownerHome: temp!.ownerHome,
+      machineSkillPaths: [skills],
+      offline: true,
+    });
+
     const handle = await host!.open("casper", "conv-firecrawl-skill");
 
-    expect(handle.skills.map((skill) => skill.name)).toEqual(["firecrawl", "hey"]);
+    expect(handle.skills.map((skill) => skill.name).sort()).toEqual(["ambient", "firecrawl", "hey"]);
     expect(handle.session.systemPrompt).toContain("firecrawl: Official Firecrawl CLI skill.");
     expect(handle.session.systemPrompt).toContain("hey: Official HEY CLI skill.");
+    expect(handle.session.systemPrompt).toContain("ambient: Owner-installed ambient skill.");
     expect(handle.session.systemPrompt).toContain(
       join(skills, "firecrawl", "SKILL.md"),
     );
-    expect(handle.session.systemPrompt).not.toContain("Must stay invisible");
+    expect(handle.session.systemPrompt).toContain("omarchy commands --json");
   });
 
   it("keeps owner-home coding-agent instructions out of an unbound prompt", async () => {

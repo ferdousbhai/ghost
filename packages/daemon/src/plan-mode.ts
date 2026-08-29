@@ -308,6 +308,18 @@ const READ_ONLY_COMMANDS = new Set([
 ]);
 const READ_ONLY_GIT = new Set(["status", "log", "diff", "show", "blame", "branch", "ls-files", "rev-parse", "describe", "remote", "tag", "shortlog", "grep"]);
 
+function isReadOnlyOmarchy(words: readonly string[]): boolean {
+  const args = words.slice(1);
+  if (args.length === 1 && (args[0] === "--help" || args[0] === "version")) return true;
+  if (args[0] === "commands") {
+    return args.slice(1).every((arg) => arg === "--json" || arg === "--all" || arg === "--help");
+  }
+  return args.length >= 2
+    && args.length <= 3
+    && args.at(-1) === "--help"
+    && args.slice(0, -1).every((arg) => /^[a-z0-9-]+$/u.test(arg));
+}
+
 /** A conservative judgement: every pipeline segment starts with a read-only command and nothing redirects output. */
 export function isReadOnlyCommand(command: string): boolean {
   if (/[>]|\btee\b|\bxargs\b|\bsudo\b|\bdoas\b/.test(command)) return false;
@@ -317,6 +329,7 @@ export function isReadOnlyCommand(command: string): boolean {
     const words = segment.replace(/^\s*(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*/, "").split(/\s+/);
     const head = words[0] ?? "";
     if (head === "git") return READ_ONLY_GIT.has(words[1] ?? "");
+    if (head === "omarchy") return isReadOnlyOmarchy(words);
     if (head === "sed") return words.includes("-n") && !words.includes("-i");
     return READ_ONLY_COMMANDS.has(head);
   });

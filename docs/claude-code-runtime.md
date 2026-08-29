@@ -71,8 +71,9 @@ For each turn Ghost:
 2. requires Claude.ai plan auth rather than accepting an API-key-backed
    status;
 3. rebuilds the persona and memory index from the ghost home, the shallow index
-   from the owner's shared XDG Documents root, and the always-active
-   declarative instructions;
+   from the owner's shared XDG Documents root, the Omarchy CLI-first
+   computer-use policy, the machine/ghost/project skill index, and the
+   always-active declarative instructions;
 4. applies the conversation's pre-turn project binding: owner home when
    unbound, or the trusted project cwd plus its approved declarative snapshot;
 5. captures the Ghost-specific `@ghost/extensions` tool definitions and
@@ -95,9 +96,11 @@ The query is deliberately unrestricted for its local owner:
   the same subset from its immutable snapshot with Pi's exact-name
   project-over-ghost shadowing. Skill, conditional-rule, prompt, and
   Markdown-command bodies do not become always-active instructions. Malformed
-  project resources cannot shadow accepted ghost siblings. Native SDK skill
-  discovery stays empty, and neither cwd nor hidden ghost providers add
-  resources;
+  project resources cannot shadow accepted ghost siblings. Valid skills from
+  the owner-trusted `~/.agents/skills/`, `~/.pi/agent/skills/`, and Omarchy's
+  packaged skill entrypoint are indexed by name, description, and path, but
+  their bodies remain on-demand. Native SDK skill discovery stays empty, and
+  neither cwd nor hidden ghost providers add resources;
 - because the first-turn MCP translation is persisted for resume, phase 1
   rejects any project MCP row containing environment expansion, stdio env,
   headers, auth/OAuth, or URL userinfo/query before starting Claude. It never
@@ -202,9 +205,11 @@ are:
 The full T3 provider graph, approvals UI, and long-lived queue were not copied.
 Claude Code's own coding tools and subagents remain native. Ghost passes
 `settingSources: []` and `skills: []`; declarative skills are not enabled
-through Claude's live discovery mechanism. Ghost appends only the admitted
+through Claude's live discovery mechanism because the SDK's `skills: "all"`
+filter cannot sandbox discovery to machine paths. Ghost appends the shared
+CLI-first policy and admitted machine/ghost/project skill index, plus only the
 ghost/project instruction files and `alwaysApply` rules from its bounded,
-descriptor-confined snapshot, plus scoped MCP explicitly. Other declarative
+descriptor-confined snapshot and scoped MCP explicitly. Other declarative
 project categories remain stored for resume parity but do not enter every query.
 Symbolic links, hidden ghost providers, and ambient cwd resources never enter
 that snapshot, and executable settings remain disabled.

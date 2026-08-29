@@ -66,7 +66,17 @@ describe("todo", () => {
 
 describe("plan mode", () => {
   it("judges read-only shell commands conservatively", () => {
-    for (const ok of ["ls -la", "git status && git diff --stat", "rg foo src | head -20", "FOO=1 cat file.txt", "sed -n 1,10p a.ts"]) {
+    for (const ok of [
+      "ls -la",
+      "git status && git diff --stat",
+      "rg foo src | head -20",
+      "FOO=1 cat file.txt",
+      "sed -n 1,10p a.ts",
+      "omarchy commands --json",
+      "omarchy theme --help",
+      "omarchy theme set --help",
+      "omarchy version",
+    ]) {
       expect(isReadOnlyCommand(ok), ok).toBe(true);
     }
     for (const bad of [
@@ -81,6 +91,8 @@ describe("plan mode", () => {
       "basecamp projects list",
       "obsidian read",
       "gws gmail users messages list",
+      "omarchy theme set catppuccin",
+      "omarchy system shutdown",
       "",
     ]) {
       expect(isReadOnlyCommand(bad), bad).toBe(false);

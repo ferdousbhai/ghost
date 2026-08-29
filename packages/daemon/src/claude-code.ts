@@ -87,6 +87,11 @@ import {
   type Ghost,
 } from "./ghosts.js";
 import { silentLogger, type Logger } from "./log.js";
+import {
+  loadMachineSkills,
+  machineSkillPaths,
+  OMARCHY_COMPUTER_USE_POLICY,
+} from "./machine-skills.js";
 import type { SettledMaintenanceTurn } from "./conversation-maintenance.js";
 import type { EffectiveProjectMcpRead } from "./mcp-catalog.js";
 import type { RunTurnOptions } from "./session-host.js";
@@ -191,6 +196,7 @@ export interface ClaudeCodeProbeOptions {
 
 export interface ClaudeCodeRuntimeOptions {
   ownerHome?: string;
+  machineSkillPaths?: readonly string[];
   logger?: Logger;
   extensionOptions?: GhostExtensionOptions;
   browserMode?: "relay" | "profile";
@@ -949,10 +955,13 @@ async function buildPersona(
     memoryRoot: home.memoryDir,
     memory: deriveMemoryIndex(memory.files),
     docs: deriveDocumentsIndex(documentPage),
-    // A seeded character.md means this ghost has not met its owner yet.
-    extraSections: isSeededCharacter(ghostName, character?.body ?? null)
-      ? [FIRST_MEETING_SECTION]
-      : [],
+    extraSections: [
+      OMARCHY_COMPUTER_USE_POLICY,
+      // A seeded character.md means this ghost has not met its owner yet.
+      ...(isSeededCharacter(ghostName, character?.body ?? null)
+        ? [FIRST_MEETING_SECTION]
+        : []),
+    ],
   });
 }
 
@@ -1415,6 +1424,7 @@ export class ClaudeCodeRuntime {
   private readonly probe: ClaudeCodeProbe;
   private readonly hooks: GhostHookRunner;
   private readonly ownerHome: string;
+  private readonly machineSkills: string[];
   private readonly busy = new Set<string>();
   private readonly active = new Map<
     string,
@@ -1429,6 +1439,9 @@ export class ClaudeCodeRuntime {
   constructor(options: ClaudeCodeRuntimeOptions = {}) {
     this.ownerHome = resolve(options.ownerHome ?? homedir());
     if (!isAbsolute(this.ownerHome)) throw new TypeError("ownerHome must be absolute");
+    this.machineSkills = options.machineSkillPaths
+      ? [...options.machineSkillPaths]
+      : machineSkillPaths(this.ownerHome);
     this.logger = options.logger ?? silentLogger;
     this.extensionOptions = options.extensionOptions ?? {};
     this.browserMode = options.browserMode ?? "relay";
@@ -1598,18 +1611,22 @@ export class ClaudeCodeRuntime {
         throw new ClaudeCodeProcessError("Claude Code's owner turn count overflowed.");
       }
       const ownerTurnId = ownerTurnCount + 1;
-      const [persona, ghostDeclarative] = await Promise.all([
+      const [persona, machineSkills, ghostDeclarative] = await Promise.all([
         buildPersona(
           paths.home,
           ghost.name,
           this.extensionOptions.documents,
         ),
+        loadMachineSkills(this.ownerHome, { paths: this.machineSkills }),
         loadProjectDeclarativeSnapshot(paths.home, { level: "user" }),
       ]);
       const approvedProject = project.admittedSnapshot
         ?? await requireMatchingClaudeProjectSnapshot(metadata, project);
       const effectiveDeclarative = mergeDeclarativePromptSnapshots([
-        declarativePromptSnapshot(mergeProjectDeclarativeSnapshots([ghostDeclarative])),
+        declarativePromptSnapshot(mergeProjectDeclarativeSnapshots([
+          ...(machineSkills ? [machineSkills] : []),
+          ghostDeclarative,
+        ])),
         approvedProject.declarative,
       ]);
       const declarativeAppend = renderClaudeDeclarativePrompt(effectiveDeclarative);
@@ -1618,6 +1635,9 @@ export class ClaudeCodeRuntime {
         logger.warn("Claude Ghost resource stayed disabled", {
           warning,
         });
+      }
+      for (const warning of machineSkills?.warnings ?? []) {
+        logger.warn("Claude machine skill stayed disabled", { warning });
       }
       for (const warning of approvedProject.resourceWarnings) {
         logger.warn("Claude project resource stayed disabled", {

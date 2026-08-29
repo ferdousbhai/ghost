@@ -1,9 +1,11 @@
 # ghost-desktop-helper
 
-The ghost's **computer-use sidecar** for Omarchy (Hyprland / Wayland). A single
-long-lived Python process that the ghost's TypeScript extensions
-(`ghost_desktop`, `ghost_screen`) drive over a line-oriented JSON protocol on
-stdin/stdout — the same shape as `TrayBridge.qml` → `ghost-tray.py`.
+The ghost's fallback **computer-use sidecar** for Omarchy (Hyprland / Wayland),
+used when `omarchy` CLI has no route, a tried route fails, or application
+content needs direct manipulation. A single long-lived Python process that the
+ghost's TypeScript extensions (`ghost_desktop`, `ghost_screen`) drive over a
+line-oriented JSON protocol on stdin/stdout — the same shape as
+`TrayBridge.qml` → `ghost-tray.py`.
 
 It gives the ghost the hard desktop capabilities that are natural in PyGObject
 and already solved, MIT-licensed, in

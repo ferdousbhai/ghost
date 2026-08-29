@@ -97,10 +97,18 @@ describe("golden: session", () => {
     mkdirSync(documentsRoot);
     writeFileSync(join(documentsRoot, "press.md"), PRESS_DOC);
     writeFileSync(join(documentsRoot, "ledger.md"), LEDGER_DOC);
+    const machineSkills = join(temp.ownerHome, ".agents", "skills");
+    const omarchySkill = join(machineSkills, "omarchy");
+    mkdirSync(omarchySkill, { recursive: true });
+    writeFileSync(
+      join(omarchySkill, "SKILL.md"),
+      "---\nname: omarchy\ndescription: Control this Omarchy laptop through its CLI.\n---\n\nUse the stable CLI routes.\n",
+    );
     const documents = new MachineDocuments(documentsRoot);
     host = new SessionHost({
       registry: temp.registry,
       ownerHome: temp.ownerHome,
+      machineSkillPaths: [machineSkills],
       offline: true,
       extensionOptions: { documents },
       // Titling is a background smol completion; pin it rather than let a

@@ -212,6 +212,7 @@ function setupClaudeHost(options: {
   hooks?: GhostHookRunner;
   logger?: Logger;
   maintenance?: SessionHostOptions["maintenance"];
+  machineSkill?: { name: string; description: string; body: string };
 } = {}) {
   temp = makeTempGhosts();
   const dir = seedGhost(temp.root, {
@@ -221,6 +222,15 @@ function setupClaudeHost(options: {
   const paths = ghostPaths(dir);
   mkdirSync(paths.agentDir, { recursive: true });
   setChatModelRole(paths.home, "claude-code", "default");
+  const machineSkills = join(temp.ownerHome, ".agents", "skills");
+  if (options.machineSkill) {
+    const skillDir = join(machineSkills, options.machineSkill.name);
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(
+      join(skillDir, "SKILL.md"),
+      `---\nname: ${options.machineSkill.name}\ndescription: ${options.machineSkill.description}\n---\n\n${options.machineSkill.body}\n`,
+    );
+  }
 
   const seenOptions: ClaudeQueryOptions[] = [];
   const seenPrompts: SDKUserMessage[] = [];
@@ -228,6 +238,7 @@ function setupClaudeHost(options: {
   host = new SessionHost({
     registry: temp.registry,
     ownerHome: temp.ownerHome,
+    machineSkillPaths: options.machineSkill ? [machineSkills] : [],
     offline: true,
     ...(options.logger ? { logger: options.logger } : {}),
     ...(options.hooks ? { hooks: options.hooks } : {}),
@@ -813,6 +824,8 @@ describe("Claude Code subscription runtime", () => {
 
     const append = JSON.stringify(seenOptions[0]?.systemPrompt);
     expect(append).toContain("UNBOUND-GHOST-INSTRUCTION");
+    expect(append).toContain("unbound: visible unbound skill");
+    expect(append).toContain(join(paths.home, "skills", "unbound", "SKILL.md"));
     expect(append).not.toContain("UNBOUND-GHOST-SKILL");
     expect(append).not.toContain("UNBOUND-GHOST-RULE");
     expect(append).not.toContain("UNBOUND-GHOST-PROMPT");
@@ -834,6 +847,30 @@ describe("Claude Code subscription runtime", () => {
         },
       },
     });
+  });
+
+  it("indexes ambient machine skills and applies Omarchy CLI-first policy without SDK discovery", async () => {
+    const { seenOptions } = setupClaudeHost({
+      machineSkill: {
+        name: "omarchy",
+        description: "Control an Omarchy desktop through its CLI.",
+        body: "MACHINE-SKILL-BODY",
+      },
+    });
+
+    await host!.runTurn("casper", {
+      sessionId: "machine-skill-index",
+      prompt: "change a desktop setting",
+      emit: () => {},
+    });
+
+    const append = JSON.stringify(seenOptions[0]?.systemPrompt);
+    expect(append).toContain("omarchy: Control an Omarchy desktop through its CLI.");
+    expect(append).toContain("omarchy commands --json");
+    expect(append).toContain("ghost_desktop");
+    expect(append).not.toContain("MACHINE-SKILL-BODY");
+    expect(seenOptions[0]?.skills).toEqual([]);
+    expect(seenOptions[0]?.settingSources).toEqual([]);
   });
 
   it("pins a trusted project before the first turn and injects only its declarative resources", async () => {
@@ -900,6 +937,7 @@ describe("Claude Code subscription runtime", () => {
     expect(seenOptions[0]?.mcpServers).not.toHaveProperty("explicit_cwd");
     expect(seenOptions[0]?.mcpServers?.project_fixture).not.toHaveProperty("cwd");
     expect(JSON.stringify(seenOptions[0]?.systemPrompt)).not.toContain("ALWAYS-ACTIVE-SKILL-SNAPSHOT");
+    expect(JSON.stringify(seenOptions[0]?.systemPrompt)).toContain("approved: approved");
     expect(JSON.stringify(seenOptions[0]?.systemPrompt)).toContain("TYPED-RULE-SNAPSHOT");
     expect(JSON.stringify(seenOptions[0]?.systemPrompt)).not.toContain("HOSTILE-SYMLINK-SKILL");
     writeFileSync(join(project, "AGENTS.md"), "MUTATED-AFTER-FIRST-TURN");
@@ -946,6 +984,7 @@ describe("Claude Code subscription runtime", () => {
     host = new SessionHost({
       registry: temp!.registry,
       ownerHome: temp!.ownerHome,
+      machineSkillPaths: [],
       offline: true,
       claudeCode: {
         binaryPath: process.execPath,
@@ -1057,6 +1096,7 @@ describe("Claude Code subscription runtime", () => {
     host = new SessionHost({
       registry: temp!.registry,
       ownerHome: temp!.ownerHome,
+      machineSkillPaths: [],
       offline: true,
       claudeCode: {
         binaryPath: process.execPath,

@@ -10,9 +10,8 @@ machine Documents index) is derived per session and never stored.
 
 The root is `~/ghosts` unless `ghostsRoot` says otherwise.
 
-A ghost home is the only user-level resource root a session sees, named
-explicitly by Ghost whenever it builds a declarative snapshot; pi's own
-resource discovery is disabled. Its plain `skills/`, `agents/`,
+A ghost home is the primary user-level resource root a session sees, named
+explicitly by Ghost whenever it builds a declarative snapshot. Its plain `skills/`, `agents/`,
 `commands/`, `rules/`, `prompts/`, `tools/`, and `hooks/` remain the ghost-owned
 sources. Its declarative snapshot admits only those visible directories plus
 visible `AGENTS.md`/`CLAUDE.md`; hidden `.agents`, `.claude`, `.pi`, and `.omp`
@@ -24,17 +23,17 @@ Owner-home or project executable extensions, hooks,
 TypeScript commands, and custom code tools are disabled until #31 can load them
 in a per-session isolated worker. A deliberately bound project's data-only
 instructions, skills, rules, Markdown prompts/commands, and MCP join the
-snapshot. The only machine-level declarative exceptions are recommended CLI
-skills installed under `~/.agents/skills/`: `basecamp`, `firecrawl`, `hey`;
-Obsidian's `json-canvas`, `obsidian-bases`, `obsidian-cli`, and
-`obsidian-markdown`; and Google Workspace's broad `gws-calendar`, `gws-chat`,
-`gws-docs`, `gws-drive`, `gws-forms`, `gws-gmail`, `gws-keep`, `gws-meet`,
-`gws-people`, `gws-shared`, `gws-sheets`, `gws-slides`, `gws-tasks`, and
-`gws-workflow` entrypoints. Pi reads only each listed directory's exact
-`SKILL.md`, requires its frontmatter name to match, and admits it at session
-construction with lowest name precedence, before ghost-home and then project
-resources. It scans no nested or sibling ambient skill and no other owner-home
-coding-agent directory. A pi session has no `task` tool, and every custom or
+snapshot. Machine skills are the one ambient declarative exception: Ghost uses
+pi's native skill parser to snapshot every valid skill visible under the owner's
+`~/.agents/skills/` and `~/.pi/agent/skills/`, following the symlinks those
+standard machine roots commonly contain. It also names Omarchy's packaged
+`/usr/share/omarchy/default/agents/skills/omarchy/SKILL.md` explicitly, so the
+stock skill remains available before an installer creates a user-level link.
+Native realpath deduplication and name validation apply. Machine skills enter at
+session construction with lowest name precedence, before ghost-home and then
+project resources; no hardcoded skill-name allowlist exists. This owner-trusted
+machine discovery is deliberately outside the descriptor-confined project
+scanner. A pi session has no `task` tool, and every custom or
 ambient subagent definition stays disabled until #31 supplies an isolated
 per-session agent boundary. Ghost and project `agents/*.md` definitions remain
 previewed but inert. Claude Code retains its own native subagents.
@@ -346,10 +345,10 @@ prompt prose is retained or subtracted by marker.
 
 The Ghost-owned pi prompt is ordered: the complete `character.md` body (or a
 two-line unwritten-character fallback); the fenced, bounded memory index; the
-fenced, shallow Documents index; accepted instruction files and unconditional
-`alwaysApply` rules; a compact index of visible skill names, descriptions, and
-`SKILL.md` locations; the discoverable-rule index; then the seeded first-meeting
-section when applicable.
+fenced, shallow Documents index; the shared Omarchy CLI-first computer-use
+policy; accepted instruction files and unconditional `alwaysApply` rules; a
+compact index of visible skill names, descriptions, and `SKILL.md` locations; the
+discoverable-rule index; then the seeded first-meeting section when applicable.
 Skill bodies, conditional-rule bodies,
 Markdown prompts, and Markdown commands enter model context only through their
 explicit invocation paths (`/skill:<name>`, an admitted Markdown command or
@@ -369,10 +368,12 @@ Claude Code retains its own native subagent behavior. Live voice (issue #44)
 and the encrypted collaboration relay (issue #45) are deferred; goals with
 budgets belong with always-on check-ins (issue #18). Ghost's `settings.yml`,
 `models.json`, and `mcp.json` are read from the ghost home, never the live cwd.
-pi's `DefaultResourceLoader` runs with `noExtensions`, `noSkills`,
-`noPromptTemplates`, `noThemes`, and `noContextFiles`; Ghost supplies every
-declarative category itself from the visible ghost home plus one trusted
-project snapshot. Ghost imports only its descriptor-pinned visible
+pi's `DefaultResourceLoader` runs with `noExtensions`, `noPromptTemplates`,
+`noThemes`, and `noContextFiles`. Native skill loading is enabled only for the
+machine paths above, while `projectTrusted` is false so pi cannot independently
+rescan the operational cwd. Ghost supplies the remaining declarative categories
+itself from the visible ghost home plus one trusted project snapshot. Ghost
+imports only its descriptor-pinned visible
 `hooks/pre` and `hooks/post` entries as already-admitted Ghost extension
 factories, adapted to pi by `packages/daemon/src/pi-extension-bridge.ts`;
 neither the ghost home's `tools/` nor any owner-home or bound-project root is
@@ -422,9 +423,13 @@ owner-home process cwd. An explicit absolute cwd remains explicit. Claude projec
 inherits the query's persisted operational cwd when `cwd` is omitted. The
 Claude SDK phase-1 translation has no cwd field, so an explicit stdio `cwd` row
 is rejected from the snapshot with a warning and publishes degraded project MCP
-status rather than silently running it elsewhere. `ghost_browser`,
-`ghost_desktop`, and `ghost_screen` own the browser and computer surfaces, and
-ghost memory is plain files in the ghost home (see the harness invariants).
+status rather than silently running it elsewhere. `ghost_browser` owns the
+browser surface. For laptop, shell, and Omarchy-system actions, both runtimes
+first discover a stable route with `omarchy commands --json` or group help and
+invoke `omarchy <group> <action>` through Bash. `ghost_desktop` and
+`ghost_screen` are the fallback when Omarchy has no route, a tried CLI route
+fails, or the task must manipulate arbitrary application content. Ghost memory
+is plain files in the ghost home (see the harness invariants).
 `vision_model` stays unset until bound; an image-inspection tool for pi
 sessions is a planned port (issue #3).
 
@@ -482,9 +487,10 @@ pi's `read`, which attaches image files itself; `ghost_screen` already points
 a blind model at `inspect_image` for its saved frames.
 
 Ghost registers neither `web_search` nor `web_fetch` for pi and packages no
-third-party CLI or skill. Arch packaging recommends the system prerequisites;
-the owner installs and updates each optional integration from its upstream
-source as the desktop user:
+third-party CLI or skill. Omarchy itself owns the canonical packaged skill and
+CLI command catalog; Ghost merely admits that installed file as described
+above. The owner installs and updates other optional integrations from their
+upstream source as the desktop user:
 
 - Firecrawl: `npx -y firecrawl-cli@latest init --all --skip-auth` (replace
   `--skip-auth` with `--browser` for its authenticated flow).
@@ -493,19 +499,20 @@ source as the desktop user:
   `hey skill install`.
 - Basecamp: `omarchy pkg add basecamp-cli`, then `basecamp skill install`.
 - Obsidian: `omarchy pkg add obsidian`, enable **Settings → General → Command
-  line interface** in Obsidian 1.12.7 or newer, then install the four
-  allowlisted skills from `https://github.com/kepano/obsidian-skills` with
-  `npx skills` globally.
+  line interface** in Obsidian 1.12.7 or newer, then install the desired skills
+  from `https://github.com/kepano/obsidian-skills` with `npx skills` globally.
 - Google Workspace: `npm install -g @googleworkspace/cli`, then install the
-  allowlisted broad service skills from `https://github.com/googleworkspace/cli`
-  with `npx skills` globally.
+  desired service skills from `https://github.com/googleworkspace/cli` with
+  `npx skills` globally.
 
 Firecrawl's main skill routes web work through its CLI over `bash` and links
-its other installed skills progressively. The other admitted skills similarly
-teach pi to invoke their CLIs through `bash`; Ghost adds no product-specific
-tool. Plan mode refuses those service commands because they are absent from its
-read-only Bash allowlist. Claude Code keeps its native integrations and
-receives none of these pi-only resources.
+its other installed skills progressively. Other admitted machine skills
+similarly teach the runtimes to invoke their CLIs through `bash`; Ghost adds no
+product-specific tool. Plan mode permits only Omarchy catalog/help/version
+inspection, not mutating Omarchy actions, and continues to refuse other service
+commands absent from its read-only Bash allowlist. Claude Code receives the same
+immutable machine-skill index in its prompt but does not enable the SDK's
+unscoped ambient skill discovery.
 
 Background jobs are Ghost-owned (`packages/daemon/src/jobs.ts`) and
 conversation-scoped. Ghost's own `bash` tool replaces pi's by name and runs
@@ -1151,13 +1158,16 @@ shape and streams emit one complete event object per line.
   `alwaysApply` rule bodies, and compact skill/discoverable-rule indexes. No
   lexical post-load filter is an authority boundary.
   Project and ghost-file agent definitions are counted but inactive. A pi
-  session has no `task` tool and performs no live/ambient agent
-  discovery. Claude keeps
-  native `skills:[]` and `settingSources:[]`. Its system-prompt append includes
-  accepted ghost/project instruction files and only rules explicitly marked
-  `alwaysApply`; skill, conditional-rule, prompt, and Markdown-command bodies do
-  not become always-active Claude instructions. Exact resource names still use
-  Pi's project-over-ghost shadowing; a malformed project resource is rejected
+  session has no `task` tool and performs no live/ambient agent discovery.
+  Machine-skill discovery is the explicit exception described above. Claude
+  keeps native `skills:[]` and `settingSources:[]`; the SDK's `skills: "all"`
+  option is not usable here because it is a context filter, not a path sandbox.
+  Its system-prompt append includes the shared computer-use policy, the compact
+  machine/ghost/project skill index, accepted ghost/project instruction files,
+  and only rules explicitly marked `alwaysApply`; skill, conditional-rule,
+  prompt, and Markdown-command bodies do not become always-active Claude
+  instructions. Exact resource names still use Pi's
+  project-over-ghost shadowing; a malformed project resource is rejected
   before that merge and cannot hide an accepted ghost sibling. Agent-definition
   content and executable project code enter neither runtime. This is
   declarative context, not Claude skill enablement, and cannot trigger later cwd
@@ -1844,7 +1854,8 @@ The runtime uses the owner's local Claude Code authentication, native system
 prompt, built-in tools, and web search in bypass-permissions mode. Filesystem
 setting sources are pinned to `[]`: neither owner-home cwd nor a trusted project
 may inject executable settings, hooks, or plugins. Every query appends the
-Ghost character, derived indexes, accepted instruction files, and rules marked
+Ghost character, derived indexes, shared Omarchy CLI-first policy, compact
+machine/ghost/project skill index, accepted instruction files, and rules marked
 `alwaysApply`, while keeping SDK `skills:[]`; skill, conditional-rule, prompt,
 and Markdown-command bodies are not injected into every turn. A bound project
 adds its stored accepted snapshot with Pi's exact-name project-over-ghost
@@ -1910,10 +1921,11 @@ whole model before any non-local exposure.
   disconnected message until an extension pairs, rather than falling back.
   `"profile"` selects "Ghost's browser", a dedicated Playwright Chromium profile
   under the ghost home, which remains the right choice for anything autonomous.
-- `packages/desktop-helper` — Python, not pnpm. A long-lived PyGObject sidecar
-  for Hyprland/Wayland computer-use, driven by the `ghost_desktop` and
-  `ghost_screen` extensions over line-oriented JSON on stdin/stdout. Managed with
-  `uv`; the root `pnpm -r` scripts do not reach it.
+- `packages/desktop-helper` — Python, not pnpm. The fallback PyGObject sidecar
+  for Hyprland/Wayland computer-use when Omarchy CLI cannot perform an action,
+  driven by the `ghost_desktop` and `ghost_screen` extensions over line-oriented
+  JSON on stdin/stdout. Managed with `uv`; the root `pnpm -r` scripts do not
+  reach it.
 
 ## Daemon harness invariants
 
@@ -1945,11 +1957,13 @@ stderr format. Filter one ghost with
 - Render the persona/system prompt in Ghost and pass it as the loader's
   `systemPrompt`; the persona extension replaces it wholesale before every
   turn. Never reintroduce inherited prompt prose or marker-based subtraction.
-- Give `DefaultResourceLoader` `noExtensions`, `noSkills`, `noPromptTemplates`,
-  `noThemes`, and `noContextFiles`. Ghost supplies every declarative category
-  itself, as an explicit immutable snapshot from the visible ghost home plus
-  one trusted project root; the admitted Markdown commands and prompt
-  templates reach pi only through the loader's `promptsOverride`, so pi's own
+- Give `DefaultResourceLoader` `noExtensions`, `noPromptTemplates`, `noThemes`,
+  and `noContextFiles`, set `projectTrusted` false, and enable native skills
+  only for the explicitly supplied machine roots. Ghost supplies every other
+  declarative category itself, as an explicit immutable snapshot from the
+  visible ghost home plus one trusted project root; the admitted Markdown
+  commands and prompt templates reach pi only through the loader's
+  `promptsOverride`, so pi's own
   `/name args` expansion runs against snapshot bytes and never the disk; hidden compatibility providers are admitted only
   for a trusted project, and project and visible Ghost `tools/` code stay
   disabled. Ghost separately preloads only direct, non-hidden regular

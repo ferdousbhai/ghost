@@ -77,7 +77,11 @@ import {
   type GhostRegistry,
 } from "./ghosts.js";
 import { silentLogger, type Logger } from "./log.js";
-import { loadOptionalMachineSkills } from "./optional-skills.js";
+import {
+  loadMachineSkills,
+  machineSkillPaths,
+  OMARCHY_COMPUTER_USE_POLICY,
+} from "./machine-skills.js";
 import {
   maintenanceStatePath,
   type ConversationMaintenance,
@@ -570,6 +574,8 @@ export type SessionTransactionProbeStage =
 export interface SessionHostOptions {
   registry: GhostRegistry;
   ownerHome?: string;
+  /** Test seam; production discovers the standard owner-machine skill paths. */
+  machineSkillPaths?: readonly string[];
   projectBindings?: ProjectBindingStore;
   sessionStartupProbe?: (
     stage: "model-runtime" | "mcp" | "session-manager" | "agent-session",
@@ -628,7 +634,7 @@ export interface SessionHostOptions {
    */
   claudeCode?: Omit<
     ClaudeCodeRuntimeOptions,
-    "logger" | "extensionOptions" | "browserMode" | "relayTransport" | "hooks"
+    "logger" | "extensionOptions" | "browserMode" | "relayTransport" | "hooks" | "machineSkillPaths"
   >;
   liveVoice?: LiveVoiceManager;
   collaboration?: CollaborationManager;
@@ -1518,6 +1524,7 @@ async function connectGhostProjectMCP(
 export class SessionHost {
   private readonly registry: GhostRegistry;
   private readonly ownerHome: string;
+  private readonly machineSkills: string[];
   private readonly projectBindings: ProjectBindingStore;
   private readonly sessionStartupProbe: NonNullable<SessionHostOptions["sessionStartupProbe"]>;
   private readonly toolCwdWriter: typeof writeToolCwds;
@@ -1585,6 +1592,9 @@ export class SessionHost {
     this.registry = options.registry;
     this.ownerHome = resolve(options.ownerHome ?? homedir());
     if (!isAbsolute(this.ownerHome)) throw new TypeError("ownerHome must be absolute");
+    this.machineSkills = options.machineSkillPaths
+      ? [...options.machineSkillPaths]
+      : machineSkillPaths(this.ownerHome);
     this.projectBindings = options.projectBindings
       ?? new ProjectBindingStore({ ownerHome: this.ownerHome });
     this.sessionStartupProbe = options.sessionStartupProbe ?? (() => {});
@@ -1644,6 +1654,7 @@ export class SessionHost {
     });
     this.claudeCode = new ClaudeCodeRuntime({
       ownerHome: this.ownerHome,
+      machineSkillPaths: this.machineSkills,
       logger: this.logger,
       extensionOptions: this.extensionOptions,
       browserMode: this.browserMode,
@@ -2578,9 +2589,9 @@ export class SessionHost {
     mkdirSync(paths.sessionDir, { recursive: true });
 
     const settings = loadGhostSettings(paths.home);
-    const [sessionCharacter, optionalSkills, ghostSnapshot] = await Promise.all([
+    const [sessionCharacter, machineSkills, ghostSnapshot] = await Promise.all([
       openGhostHome(paths.home).readCharacter(),
-      loadOptionalMachineSkills(this.ownerHome),
+      loadMachineSkills(this.ownerHome, { paths: this.machineSkills }),
       loadProjectDeclarativeSnapshot(paths.home, { level: "user" }),
     ]);
     const projectSnapshot = project.root && projectIdentity
@@ -2593,7 +2604,7 @@ export class SessionHost {
         })
       : null;
     const rootSnapshots = [
-      ...(optionalSkills ? [optionalSkills] : []),
+      ...(machineSkills ? [machineSkills] : []),
       ghostSnapshot,
       ...(projectSnapshot ? [projectSnapshot] : []),
     ];
@@ -2608,6 +2619,7 @@ export class SessionHost {
     // A seeded character marks a first meeting until the ghost writes its own.
     const extraSections = [
       ...(this.extensionOptions.extraSections ?? []),
+      OMARCHY_COMPUTER_USE_POLICY,
       ...(declarativeSection ? [declarativeSection] : []),
       ...(isSeededCharacter(ghostName, sessionCharacter?.body ?? null)
         ? [FIRST_MEETING_SECTION]
@@ -2724,7 +2736,7 @@ export class SessionHost {
       compaction: nativeCompactionSettings(this.compactionConfig, chatModel?.contextWindow),
       defaultTools: [...PI_NATIVE_TOOL_NAMES],
       enableSkillCommands: false,
-    });
+    }, { projectTrusted: false });
     const resourceLoader = new DefaultResourceLoader({
       cwd: runtimeCwd,
       agentDir: paths.agentDir,
@@ -2734,7 +2746,8 @@ export class SessionHost {
       // already descriptor-pinned and imported as inline factories above;
       // project hooks/extensions and Ghost custom-code tools stay disabled.
       noExtensions: true,
-      noSkills: true,
+      noSkills: false,
+      additionalSkillPaths: this.machineSkills,
       noPromptTemplates: true,
       promptsOverride: () => ({
         prompts: fileCommands.map((command) => ({

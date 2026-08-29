@@ -565,7 +565,10 @@ export function createHyprlandExtension(
       name: GHOST_DESKTOP,
       label: "Desktop",
       description:
-        "See and steer the Hyprland desktop through the computer-use helper. "
+        "Fallback computer use for actions with no Omarchy CLI route or after a tried route fails. "
+        + "For laptop, shell, and Omarchy-system actions, first inspect `omarchy commands --json` "
+        + "or `omarchy <group> --help` and run the stable route through Bash. See and steer the "
+        + "Hyprland desktop through the computer-use helper. "
         + "state: windows and workspaces, which is focused. see: find a window by "
         + "name. layers: on-screen overlay surfaces. focus: bring a window forward. "
         + "workspace: switch workspace. ax_query: find UI elements semantically "
