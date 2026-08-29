@@ -787,12 +787,10 @@ export function createBrowserExtension(
 }
 
 export {
-  identifiedBrowserBackendFactory,
 } from "./browser-backend.js";
 export {
   browserSessionFor,
   closeAllBrowserSessions,
-  screenshotDirFor,
 } from "./browser-session.js";
 export type {
   BackendScreenshotResult,

@@ -258,7 +258,7 @@ export class GhostBrowserSession {
     this.#actingBudget = options.actingBudget ?? DEFAULT_ACTING_BUDGET;
     this.#allowActionsOffOrigin = options.allowActionsOffOrigin ?? false;
     this.#actingRemaining = this.#actingBudget;
-    this.backend = options.backend({ homeDir: this.homeDir });
+    this.backend = options.backend();
   }
 
   get running(): boolean {
@@ -1179,8 +1179,6 @@ export class GhostBrowserSession {
 
 interface EffectiveSessionOptions {
   readonly backend: BrowserBackendFactory;
-  readonly backendIdentity: readonly unknown[];
-  readonly backendDescription: string;
   readonly idleTimeoutMs: number;
   readonly actionTimeoutMs: number;
   readonly allowLocal: boolean;
@@ -1203,11 +1201,8 @@ let closingAll: Promise<void> | undefined;
 function effectiveSessionOptions(
   options: Omit<BrowserSessionOptions, "homeDir">,
 ): EffectiveSessionOptions {
-  const backend = options.backend;
   return {
-    backend,
-    backendIdentity: Object.freeze([...(backend.sessionIdentity ?? [backend])]),
-    backendDescription: backend.sessionDescription ?? (backend.name || "custom backend"),
+    backend: options.backend,
     idleTimeoutMs: options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS,
     actionTimeoutMs: options.actionTimeoutMs ?? DEFAULT_ACTION_TIMEOUT_MS,
     allowLocal: options.allowLocal ?? false,
@@ -1220,17 +1215,13 @@ function effectiveSessionOptions(
   };
 }
 
-function sameIdentity(left: readonly unknown[], right: readonly unknown[]): boolean {
-  return left.length === right.length
-    && left.every((part, index) => Object.is(part, right[index]));
-}
-
 function changedSessionOptions(
   existing: EffectiveSessionOptions,
   requested: EffectiveSessionOptions,
 ): string[] {
+  // The backend is deliberately not compared: there is one, and which factory
+  // object produced it is not a setting the owner chose.
   const changed: string[] = [];
-  if (!sameIdentity(existing.backendIdentity, requested.backendIdentity)) changed.push("backend");
   if (existing.idleTimeoutMs !== requested.idleTimeoutMs) changed.push("idleTimeoutMs");
   if (existing.actionTimeoutMs !== requested.actionTimeoutMs) changed.push("actionTimeoutMs");
   if (existing.allowLocal !== requested.allowLocal) changed.push("allowLocal");
@@ -1247,7 +1238,6 @@ function changedSessionOptions(
 
 function sessionOptionSummary(options: EffectiveSessionOptions): Record<string, unknown> {
   return {
-    backend: options.backendDescription,
     idleTimeoutMs: options.idleTimeoutMs,
     actionTimeoutMs: options.actionTimeoutMs,
     allowLocal: options.allowLocal,
@@ -1258,10 +1248,6 @@ function sessionOptionSummary(options: EffectiveSessionOptions): Record<string, 
     actingBudget: options.actingBudget,
     allowActionsOffOrigin: options.allowActionsOffOrigin,
   };
-}
-
-export function screenshotDirFor(_homeDir: string): string {
-  return resolveScreenshotDirectory();
 }
 
 /**

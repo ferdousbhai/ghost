@@ -77,7 +77,6 @@ import {
 import {
   resolveGhostExtensions,
   type GhostExtensionOptions,
-  type RelayTransport,
 } from "./extensions.js";
 import { FIRST_MEETING_SECTION } from "./greeting.js";
 import {
@@ -199,7 +198,6 @@ export interface ClaudeCodeRuntimeOptions {
   machineSkillPaths?: readonly string[];
   logger?: Logger;
   extensionOptions?: GhostExtensionOptions;
-  relayTransport?: RelayTransport;
   binaryPath?: string;
   createQuery?: ClaudeCodeQueryFactory;
   readAuthStatus?: (binaryPath: string) => Promise<ClaudeCodeAuthStatus>;
@@ -1013,14 +1011,9 @@ async function buildMcpTools(
   homeDir: string,
   ghostName: string,
   extensionOptions: GhostExtensionOptions,
-  relayTransport: RelayTransport | undefined,
 ): Promise<{ tools: SdkMcpToolDefinition[]; names: string[] }> {
   const resolved = resolveGhostExtensions(
-    {
-      ...extensionOptions,
-      ghostName,
-      ...(relayTransport ? { relayTransport } : {}),
-    },
+    { ...extensionOptions, ghostName },
     homeDir,
     CLAUDE_CODE_TOOL_CAPABILITIES,
   );
@@ -1415,7 +1408,6 @@ function linkedTurnSignal(
 export class ClaudeCodeRuntime {
   private readonly logger: Logger;
   private readonly extensionOptions: GhostExtensionOptions;
-  private readonly relayTransport: RelayTransport | undefined;
   private readonly createQuery: ClaudeCodeQueryFactory;
   private readonly probe: ClaudeCodeProbe;
   private readonly hooks: GhostHookRunner;
@@ -1440,7 +1432,6 @@ export class ClaudeCodeRuntime {
       : machineSkillPaths(this.ownerHome);
     this.logger = options.logger ?? silentLogger;
     this.extensionOptions = options.extensionOptions ?? {};
-    this.relayTransport = options.relayTransport;
     this.createQuery = options.createQuery
       ?? ((input) => query({ prompt: input.prompt, options: input.options }));
     this.probe = options.probe ?? new ClaudeCodeProbe({
@@ -1691,7 +1682,6 @@ export class ClaudeCodeRuntime {
         paths.home,
         ghost.name,
         this.extensionOptions,
-        this.relayTransport,
       );
       this.assertTurnAdmitted();
 

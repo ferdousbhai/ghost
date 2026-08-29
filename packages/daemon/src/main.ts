@@ -432,9 +432,11 @@ async function serveDaemon(
     compaction: config.compaction,
     askTimeoutSeconds: config.askTimeoutSeconds,
     hooks,
-    extensionOptions: { documents: machineDocuments },
+    extensionOptions: {
+      documents: machineDocuments,
+      ...(relay ? { relayTransport: relay } : {}),
+    },
     claudeCode: { probe: claudeCodeProbe },
-    ...(relay ? { relayTransport: relay } : {}),
   });
   const maintenance = new ConversationMaintenance({
     registry,

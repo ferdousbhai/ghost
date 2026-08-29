@@ -49,7 +49,6 @@ import {
 } from "./screenshot-retention.js";
 import {
   GhostBrowserError,
-  identifiedBrowserBackendFactory,
   withAbort,
   type BackendActionOptions,
   type BackendBackResult,
@@ -68,7 +67,6 @@ import {
   type BackendTarget,
   type BackendTypeInput,
   type BackendUploadInput,
-  type BrowserBackendContext,
   type BrowserBackendFactory,
   type BrowserFailure,
   type ConsoleEntry,
@@ -598,9 +596,5 @@ function targetArgs(target: BackendTarget): Record<string, unknown> {
 
 /** The relay backend factory, for `createBrowserExtension({ backend })`. */
 export function relayBackend(options: RelayBackendOptions): BrowserBackendFactory {
-  return identifiedBrowserBackendFactory(
-    (_ctx: BrowserBackendContext) => new RelayBrowserBackend(options),
-    "relay",
-    ["relay", options.transport],
-  );
+  return () => new RelayBrowserBackend(options);
 }

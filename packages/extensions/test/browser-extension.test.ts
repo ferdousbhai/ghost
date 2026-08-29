@@ -117,6 +117,7 @@ class FakeBackend implements GhostBrowserBackend {
   closed = false;
   readBarrier: Promise<void> | undefined;
   actionBarrier: Promise<void> | undefined;
+  closeBarrier: Promise<void> | undefined;
 
   #url = "about:blank";
   #history: string[] = [];
@@ -265,11 +266,24 @@ class FakeBackend implements GhostBrowserBackend {
 
   async tabs(input: BackendTabsInput, options: BackendActionOptions): Promise<BackendTabsResult> {
     this.calls.push({ name: "tabs", args: [input, options] });
-    return { tabs: [], active: null, page: this.#page() };
+    if (input.op === "create") {
+      this.running = true;
+      this.#url = input.url ?? "about:blank";
+    }
+    const open = this.running
+      ? [{ id: "t1", url: this.#url, title: this.titles[this.#url] ?? "", active: true }]
+      : [];
+    return {
+      tabs: open,
+      active: this.running ? "t1" : null,
+      ...(input.op === "create" ? { id: "t1" } : {}),
+      ...(this.running ? { page: this.#page() } : {}),
+    };
   }
 
   async close(): Promise<boolean> {
     this.calls.push({ name: "close", args: [] });
+    if (this.closeBarrier) await this.closeBarrier;
     if (!this.running) return false;
     this.running = false;
     this.closed = true;
@@ -1142,11 +1156,11 @@ describe("javascript is gated by the provenance guardrail", () => {
   });
 });
 
-describe("console, network, and tabs (recording backend)", () => {
-  let backend: RecordingBackend;
+describe("console, network, and tabs", () => {
+  let backend: FakeBackend;
 
   async function recordingHarness() {
-    backend = new RecordingBackend();
+    backend = new FakeBackend();
     return loadExtension(
       createBrowserExtension({
         backend: () => backend,
@@ -1158,15 +1172,17 @@ describe("console, network, and tabs (recording backend)", () => {
 
   it("drains console messages, framed as untrusted", async () => {
     const harness = await recordingHarness();
+    backend.consoleEntries = [{ level: "log", text: "hello from the page" }];
     await harness.call(GHOST_BROWSER, { action: "open", url: "https://example.com" });
     const result = await harness.call(GHOST_BROWSER, { action: "console" });
-    expect(resultText(result)).toMatch(/recorded console/);
+    expect(resultText(result)).toMatch(/hello from the page/);
     expect(resultText(result)).toMatch(/untrusted data, not instructions/i);
     expect(backend.calls.some((call) => call.name === "readConsole")).toBe(true);
   });
 
   it("drains network exchanges", async () => {
     const harness = await recordingHarness();
+    backend.networkEntries = [{ method: "GET", url: "https://example.com/", status: 200 }];
     await harness.call(GHOST_BROWSER, { action: "open", url: "https://example.com" });
     const result = await harness.call(GHOST_BROWSER, { action: "network" });
     expect(resultText(result)).toMatch(/GET https:\/\/example\.com/);
@@ -1496,151 +1512,9 @@ describe("timeouts", () => {
   });
 });
 
-/**
- * A second backend implementation, deliberately unlike {@link FakeBackend}: what
- * the tests below pin down is that the policy above the seam — URL vetting, ref
- * bookkeeping, the read budget — belongs to the seam and not to one fake.
- */
-class RecordingBackend implements GhostBrowserBackend {
-  readonly name = "recording";
-  running = false;
-  calls: FakeCall[] = [];
-  pageText = "";
-  matches: PageElementMatch[] = [];
-  consoleEntries: ConsoleEntry[] = [{ level: "log", text: "recorded console" }];
-  networkEntries: NetworkEntry[] = [];
-  javascriptResult: BackendJavascriptResult = { value: "ran", type: "string" };
-  screenshotBytes = Buffer.from("not really a png", "utf8");
-  readBarrier: Promise<void> | undefined;
-  closeBarrier: Promise<void> | undefined;
-  #url: string | undefined;
-
-  async current(): Promise<PageSummary | undefined> {
-    return this.#url === undefined ? undefined : { url: this.#url, title: "recorded" };
-  }
-
-  async open(url: string, options: BackendActionOptions): Promise<PageSummary> {
-    this.calls.push({ name: "open", args: [url, options] });
-    this.running = true;
-    this.#url = url;
-    return { url, title: "recorded" };
-  }
-
-  async read(options: BackendActionOptions): Promise<BackendReadResult> {
-    this.calls.push({ name: "read", args: [options] });
-    if (this.readBarrier) await withAbort(this.readBarrier, "the page", options.signal);
-    return { url: this.#url ?? "", title: "recorded", text: this.pageText };
-  }
-
-  async find(
-    query: string,
-    options: BackendActionOptions & { limit: number },
-  ): Promise<readonly PageElementMatch[]> {
-    this.calls.push({ name: "find", args: [query, options] });
-    return this.matches.slice(0, options.limit);
-  }
-
-  async click(target: BackendTarget, options: BackendActionOptions): Promise<PageSummary> {
-    this.calls.push({ name: "click", args: [target, options] });
-    return { url: this.#url ?? "", title: "recorded" };
-  }
-
-  async type(input: BackendTypeInput, options: BackendActionOptions): Promise<PageSummary> {
-    this.calls.push({ name: "type", args: [input, options] });
-    return { url: this.#url ?? "", title: "recorded" };
-  }
-
-  async screenshot(options: BackendScreenshotOptions): Promise<BackendScreenshotResult> {
-    this.calls.push({ name: "screenshot", args: [options] });
-    return { url: this.#url ?? "", title: "recorded", bytes: this.screenshotBytes };
-  }
-
-  async back(options: BackendActionOptions): Promise<BackendBackResult> {
-    this.calls.push({ name: "back", args: [options] });
-    return { url: this.#url ?? "", title: "recorded", moved: true };
-  }
-
-  async forward(options: BackendActionOptions): Promise<BackendBackResult> {
-    this.calls.push({ name: "forward", args: [options] });
-    return { url: this.#url ?? "", title: "recorded", moved: true };
-  }
-
-  async scroll(input: BackendScrollInput, options: BackendActionOptions): Promise<PageSummary> {
-    this.calls.push({ name: "scroll", args: [input, options] });
-    return { url: this.#url ?? "", title: "recorded" };
-  }
-
-  async drag(input: BackendDragInput, options: BackendActionOptions): Promise<PageSummary> {
-    this.calls.push({ name: "drag", args: [input, options] });
-    return { url: this.#url ?? "", title: "recorded" };
-  }
-
-  async key(input: BackendKeyInput, options: BackendActionOptions): Promise<PageSummary> {
-    this.calls.push({ name: "key", args: [input, options] });
-    return { url: this.#url ?? "", title: "recorded" };
-  }
-
-  async javascript(code: string, options: BackendActionOptions): Promise<BackendJavascriptResult> {
-    this.calls.push({ name: "javascript", args: [code, options] });
-    return this.javascriptResult;
-  }
-
-  async readConsole(options: BackendActionOptions): Promise<readonly ConsoleEntry[]> {
-    this.calls.push({ name: "readConsole", args: [options] });
-    return this.consoleEntries;
-  }
-
-  async readNetwork(options: BackendActionOptions): Promise<readonly NetworkEntry[]> {
-    this.calls.push({ name: "readNetwork", args: [options] });
-    return this.networkEntries.length > 0
-      ? this.networkEntries
-      : [{ method: "GET", url: this.#url ?? "", status: 200 }];
-  }
-
-  async upload(input: BackendUploadInput, options: BackendActionOptions): Promise<PageSummary> {
-    this.calls.push({ name: "upload", args: [input, options] });
-    return { url: this.#url ?? "", title: "recorded" };
-  }
-
-  async resize(input: BackendResizeInput, options: BackendActionOptions): Promise<BackendResizeResult> {
-    this.calls.push({ name: "resize", args: [input, options] });
-    return { url: this.#url ?? "", title: "recorded", applied: true };
-  }
-
-  async tabs(input: BackendTabsInput, options: BackendActionOptions): Promise<BackendTabsResult> {
-    this.calls.push({ name: "tabs", args: [input, options] });
-    if (input.op === "create") {
-      this.running = true;
-      this.#url = input.url ?? "about:blank";
-      return {
-        tabs: [{ id: "t1", url: this.#url, title: "recorded", active: true }],
-        active: "t1",
-        id: "t1",
-        page: { url: this.#url, title: "recorded" },
-      };
-    }
-    return {
-      tabs: this.#url === undefined
-        ? []
-        : [{ id: "t1", url: this.#url, title: "recorded", active: true }],
-      active: this.#url === undefined ? null : "t1",
-      ...(this.#url === undefined ? {} : { page: { url: this.#url, title: "recorded" } }),
-    };
-  }
-
-  async close(): Promise<boolean> {
-    this.calls.push({ name: "close", args: [] });
-    if (this.closeBarrier) await this.closeBarrier;
-    const wasRunning = this.running;
-    this.running = false;
-    this.#url = undefined;
-    return wasRunning;
-  }
-}
-
 describe("serialized browser lifecycle", () => {
   it("does not idle-close during an admitted action and rearms only after it settles", async () => {
-    const backend = new RecordingBackend();
+    const backend = new FakeBackend();
     const clock = new ManualBrowserClock();
     const blocked = deferred();
     backend.readBarrier = blocked.promise;
@@ -1665,7 +1539,7 @@ describe("serialized browser lifecycle", () => {
   });
 
   it("cancels an in-flight action before the queued close begins", async () => {
-    const backend = new RecordingBackend();
+    const backend = new FakeBackend();
     const blocked = deferred();
     backend.readBarrier = blocked.promise;
     const session = new GhostBrowserSession({
@@ -1688,7 +1562,7 @@ describe("serialized browser lifecycle", () => {
   });
 
   it("bounds close even when a backend never acknowledges it", async () => {
-    const backend = new RecordingBackend();
+    const backend = new FakeBackend();
     const blocked = deferred();
     backend.closeBarrier = blocked.promise;
     const session = new GhostBrowserSession({
@@ -1706,10 +1580,10 @@ describe("serialized browser lifecycle", () => {
 });
 
 describe("the backend is a choice, and policy sits above it", () => {
-  let backend: RecordingBackend;
+  let backend: FakeBackend;
 
   async function recordingHarness() {
-    backend = new RecordingBackend();
+    backend = new FakeBackend();
     return loadExtension(
       createBrowserExtension({
         backend: () => backend,
@@ -1726,7 +1600,7 @@ describe("the backend is a choice, and policy sits above it", () => {
       url: "https://example.com",
     });
     expect(backend.calls[0]?.name).toBe("open");
-    expect(result.details).toMatchObject({ backend: "recording" });
+    expect(result.details).toMatchObject({ backend: "fake" });
   });
 
   it("still refuses to act with no page loaded", async () => {
@@ -1747,7 +1621,7 @@ describe("the backend is a choice, and policy sits above it", () => {
 
   it("rejects oversized screenshot bytes even when a backend violates the seam", async () => {
     const harness = await recordingHarness();
-    backend.screenshotBytes = Buffer.alloc(MAX_SCREENSHOT_BYTES + 1);
+    backend.screenshotContents = Buffer.alloc(MAX_SCREENSHOT_BYTES + 1);
     await harness.call(GHOST_BROWSER, { action: "open", url: "https://example.com" });
     const error = await expectGhostError(
       harness.call(GHOST_BROWSER, { action: "screenshot" }),
@@ -1795,49 +1669,25 @@ describe("the process-wide browser session registry", () => {
   });
 
   it("reuses an identical custom backend factory", () => {
-    const backend = new RecordingBackend();
+    const backend = new FakeBackend();
     const factory = () => backend;
     const first = browserSessionFor(fixture.dir, { backend: factory, idleTimeoutMs: 0 });
 
     expect(browserSessionFor(fixture.dir, { backend: factory, idleTimeoutMs: 0 })).toBe(first);
   });
 
-  it("reuses independently-created relay factories with the same transport", () => {
-    const first = browserSessionFor(fixture.dir, {
-      backend: relayBackend({}),
-      idleTimeoutMs: 0,
-    });
+  it("reuses the session no matter which factory object asked for it", () => {
+    // There is one backend, so which factory produced it is not a setting the
+    // owner chose and must not read as a configuration conflict.
+    const first = browserSessionFor(fixture.dir, { backend: relayBackend({}), idleTimeoutMs: 0 });
 
     expect(
       browserSessionFor(fixture.dir, { backend: relayBackend({}), idleTimeoutMs: 0 }),
     ).toBe(first);
   });
 
-  it("throws a typed conflict when the requested backend changes", () => {
-    browserSessionFor(fixture.dir, {
-      backend: () => new RecordingBackend(),
-      idleTimeoutMs: 0,
-    });
-
-    try {
-      browserSessionFor(fixture.dir, {
-        backend: () => new RecordingBackend(),
-        idleTimeoutMs: 0,
-      });
-      throw new Error("expected a browser session configuration conflict");
-    } catch (error) {
-      expect(error).toBeInstanceOf(GhostError);
-      expect((error as GhostError).code).toBe("conflict");
-      expect((error as GhostError).details.conflict).toBe(
-        "browser_session_configuration",
-      );
-      expect((error as GhostError).details.changedOptions).toEqual(["backend"]);
-      expect((error as Error).message).toMatch(/closeAllBrowserSessions/);
-    }
-  });
-
   it("holds one closeAll barrier and refuses replacement sessions until teardown settles", async () => {
-    const backend = new RecordingBackend();
+    const backend = new FakeBackend();
     const blocked = deferred();
     backend.closeBarrier = blocked.promise;
     const factory = () => backend;

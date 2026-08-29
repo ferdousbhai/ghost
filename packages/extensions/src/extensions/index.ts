@@ -60,7 +60,6 @@ export {
   type BackendScreenshotResult,
   type BackendTarget,
   type BackendTypeInput,
-  type BrowserBackendContext,
   type BrowserFailure,
   type PageSummary,
 } from "./browser-backend.js";
