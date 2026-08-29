@@ -1,4 +1,5 @@
-import type { CliWritable } from "./types.js";
+import { flagBoolean } from "./args.js";
+import type { CliContext, CliWritable } from "./types.js";
 
 export function writeJson(stream: CliWritable, value: unknown): void {
   stream.write(`${JSON.stringify(value)}\n`);
@@ -16,11 +17,27 @@ export function relativeTime(value: string | number | Date, now = Date.now()): s
   return `${Math.floor(hours / 24)}d`;
 }
 
-export function durationTime(elapsedMs: number): string {
-  const elapsed = Math.max(0, elapsedMs);
-  if (elapsed < 1_000) return `${elapsed}ms`;
-  if (elapsed < 60_000) return `${Math.round(elapsed / 1_000)}s`;
-  return `${Math.floor(elapsed / 60_000)}m`;
+export interface RenderedOutput {
+  human: string;
+  quiet?: string;
+}
+
+export type OutputRenderer<T> = (body: T) => string | RenderedOutput;
+
+export function emit<T>(
+  ctx: Pick<CliContext, "parsed" | "runtime">,
+  body: T,
+  render: OutputRenderer<T> = (value) => `${JSON.stringify(value)}\n`,
+): void {
+  if (flagBoolean(ctx.parsed, "json")) {
+    writeJson(ctx.runtime.stdout, body);
+    return;
+  }
+  const rendered = render(body);
+  const text = typeof rendered === "string"
+    ? (flagBoolean(ctx.parsed, "quiet") ? "" : rendered)
+    : (flagBoolean(ctx.parsed, "quiet") ? rendered.quiet : rendered.human);
+  if (text) ctx.runtime.stdout.write(text);
 }
 
 export function truncate(value: string, width: number): string {

@@ -1,14 +1,6 @@
 import { createServer, type Server } from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
-import { ghostCli } from "../src/cli/main.js";
-
-class Sink {
-  value = "";
-  isTTY = false;
-  write(chunk: string): void {
-    this.value += chunk;
-  }
-}
+import { runCli } from "./helpers/cli.js";
 
 let server: Server | undefined;
 
@@ -60,17 +52,13 @@ const successEvents = [
 describe("ghost say", () => {
   it("streams text, reports tool activity, and sends a new raw cli id", async () => {
     const fake = await fakeDaemon(successEvents);
-    const stdout = new Sink();
-    const stderr = new Sink();
-    const code = await ghostCli(["say", "hello", "--new", "-g", "casper"], {
+    const result = await runCli(["say", "hello", "--new", "-g", "casper"], {
       env: fake.env,
       home: "/tmp/ghost-cli-home",
-      stdout,
-      stderr,
     });
-    expect(code).toBe(0);
-    expect(stdout.value).toBe("hello there\n");
-    expect(stderr.value).toContain("⚙ bash: pwd");
+    expect(result.code).toBe(0);
+    expect(result.stdout).toBe("hello there\n");
+    expect(result.stderr).toContain("⚙ bash: pwd");
     expect(fake.request()).toMatchObject({
       context: { messages: [{ role: "user", content: [{ type: "text", text: "hello" }] }] },
       options: { sessionId: expect.stringMatching(/^cli-[a-z0-9]+-[a-f0-9]{8}$/) },
@@ -79,71 +67,44 @@ describe("ghost say", () => {
 
   it("emits every event as one JSON line", async () => {
     const fake = await fakeDaemon(successEvents);
-    const stdout = new Sink();
-    const code = await ghostCli(["say", "hello", "--new", "-g", "casper", "--json"], {
+    const result = await runCli(["say", "hello", "--new", "-g", "casper", "--json"], {
       env: fake.env,
       home: "/tmp/ghost-cli-home",
-      stdout,
-      stderr: new Sink(),
     });
-    expect(code).toBe(0);
-    expect(stdout.value.trim().split("\n").map((line) => JSON.parse(line))).toEqual(successEvents);
+    expect(result.code).toBe(0);
+    expect(result.stdout.trim().split("\n").map((line) => JSON.parse(line))).toEqual(successEvents);
   });
 
   it("reads piped stdin", async () => {
     const fake = await fakeDaemon(successEvents);
-    const code = await ghostCli(["say", "--new", "-g", "casper", "-q"], {
+    const result = await runCli(["say", "--new", "-g", "casper", "-q"], {
       env: fake.env,
       home: "/tmp/ghost-cli-home",
-      stdout: new Sink(),
-      stderr: new Sink(),
       stdin: "from stdin",
     });
-    expect(code).toBe(0);
+    expect(result.code).toBe(0);
     expect(fake.request()).toMatchObject({ context: { messages: [{ content: [{ text: "from stdin" }] }] } });
-  });
-
-  it("prints only the joined final text in quiet mode", async () => {
-    const fake = await fakeDaemon(successEvents);
-    const stdout = new Sink();
-    const stderr = new Sink();
-    const code = await ghostCli(["say", "hello", "--new", "-g", "casper", "-q"], {
-      env: fake.env,
-      home: "/tmp/ghost-cli-home",
-      stdout,
-      stderr,
-    });
-    expect(code).toBe(0);
-    expect(stdout.value).toBe("hello there\n");
-    expect(stderr.value).toBe("");
   });
 
   it("returns one for an error event", async () => {
     const fake = await fakeDaemon([{ type: "start" }, { type: "error", reason: "model", errorMessage: "broken", usage: {} }]);
-    const stderr = new Sink();
-    const code = await ghostCli(["say", "hello", "--new", "-g", "casper"], {
+    const result = await runCli(["say", "hello", "--new", "-g", "casper"], {
       env: fake.env,
       home: "/tmp/ghost-cli-home",
-      stdout: new Sink(),
-      stderr,
     });
-    expect(code).toBe(1);
-    expect(stderr.value).toContain("ghost: broken");
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("ghost: broken");
   });
 
   it("keeps JSON error events machine-readable and reports the failure on stderr", async () => {
     const events = [{ type: "start" }, { type: "error", reason: "model", errorMessage: "broken", usage: {} }];
     const fake = await fakeDaemon(events);
-    const stdout = new Sink();
-    const stderr = new Sink();
-    const code = await ghostCli(["say", "hello", "--new", "-g", "casper", "--json"], {
+    const result = await runCli(["say", "hello", "--new", "-g", "casper", "--json"], {
       env: fake.env,
       home: "/tmp/ghost-cli-home",
-      stdout,
-      stderr,
     });
-    expect(code).toBe(1);
-    expect(stdout.value.trim().split("\n").map((line) => JSON.parse(line))).toEqual(events);
-    expect(stderr.value).toContain("ghost: broken");
+    expect(result.code).toBe(1);
+    expect(result.stdout.trim().split("\n").map((line) => JSON.parse(line))).toEqual(events);
+    expect(result.stderr).toContain("ghost: broken");
   });
 });

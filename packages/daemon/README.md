@@ -38,10 +38,8 @@ ghostd [options]
 
 ## Terminal client
 
-The implementation in `src/cli/` is an HTTP client of ghostd's public contract;
-it never constructs a session or reads a ghost home. The division is simple:
-`ghostd` runs the machine (`api-token`, `remote`, `login`, `import`), while
-`ghost` talks to a ghost.
+The implementation in `src/cli/` follows the authoritative
+[`ghost` CLI contract](../../CONTRACTS.md#ghost-cli).
 
 ```sh
 ghost say "Summarize what we were doing"
@@ -52,12 +50,8 @@ ghost watch
 ghost smoke --no-turn
 ```
 
-Use `-g/--ghost` to choose a persona and `-s/--session` with an exact id or
-unique prefix. `ghost use <name>` persists the default ghost. Every command has
-`--json`, `--quiet`, and `--help`; `ghost help exit-codes` prints the stable
-automation contract. `ghost smoke` starts a scratch daemon and a scratch ghost;
-a real turn needs a provider signed in inside that scratch home, so CI uses
-`--no-turn`.
+`ghost smoke` starts a scratch daemon and a scratch ghost. A real turn needs a
+provider signed in inside that scratch home, so CI uses `--no-turn`.
 
 `config.json` carries the same settings plus `browserMode`, `compaction`, and
 `askTimeoutSeconds`. Compaction is pi's native compaction: `enabled` defaults

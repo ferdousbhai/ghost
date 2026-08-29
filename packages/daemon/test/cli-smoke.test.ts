@@ -2,14 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { ghostCli } from "../src/cli/main.js";
-
-class Sink {
-  value = "";
-  write(chunk: string): void {
-    this.value += chunk;
-  }
-}
+import { runCli } from "./helpers/cli.js";
 
 let home: string | undefined;
 
@@ -21,18 +14,15 @@ afterEach(() => {
 describe("ghost smoke", () => {
   it.skipIf(process.platform === "win32")("runs against bun src/main.ts without a provider turn", async () => {
     home = mkdtempSync(join(tmpdir(), "ghost-cli-smoke-test-"));
-    const stdout = new Sink();
-    const stderr = new Sink();
-    const code = await ghostCli(["smoke", "--no-turn"], {
+    const result = await runCli(["smoke", "--no-turn", "--json"], {
       env: { ...process.env, GHOSTD: "bun src/main.ts" },
       home,
-      stdout,
-      stderr,
-      stdin: { isTTY: true },
     });
-    expect(code, stderr.value).toBe(0);
-    expect(stdout.value).toContain("ok daemon");
-    expect(stdout.value).toContain("ok new probe");
-    expect(stdout.value).toContain("ok turn: skipped (--no-turn)");
+    expect(result.code, result.stderr).toBe(0);
+    expect(result.stdout.trim().split("\n").map((line) => JSON.parse(line))).toEqual([
+      { step: "daemon", ok: true, detail: "ok" },
+      { step: "new probe", ok: true },
+      { step: "turn", ok: true, detail: "skipped (--no-turn)" },
+    ]);
   }, 20_000);
 });

@@ -785,15 +785,12 @@ one must not be a leak of both.
 ### `ghost` CLI
 
 `ghost` is a consumer of this HTTP contract only; it does not open sessions or
-read a ghost home. `ghostd` runs the machine (`api-token`, `remote`, `login`,
-`import`), while `ghost` talks to a ghost. Ghost selection resolves in this
-order: `--ghost`, `$GHOST`, the private mode-`0600`
+read a ghost home. Ghost selection resolves in this order: `--ghost`, `$GHOST`,
+the private mode-`0600`
 `$XDG_CONFIG_HOME/ghost/cli.json` (default `~/.config/ghost/cli.json`) field
 `{ "ghost": "<name>" }`, then the sole ghost when exactly one exists. Session
 selection is `--session` by exact id or unique public/raw-id prefix, then the
-most recently updated conversation regardless of pinned listing order;
-`say --new` creates a raw `cli-…` conversation id. The stable process exit
-codes are:
+most recently updated conversation. The stable process exit codes are:
 
 | code | meaning |
 |---:|---|
@@ -805,9 +802,8 @@ codes are:
 | 5 | not found |
 | 6 | busy or conflict |
 
-Every command accepts `--json`, `--quiet`, and `--help`. API-backed
-non-streaming JSON preserves the exact response shape; streams emit one complete
-event object per line.
+With `--json`, API-backed non-streaming commands preserve the exact response
+shape and streams emit one complete event object per line.
 
 ### Routes
 

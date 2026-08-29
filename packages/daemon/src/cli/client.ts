@@ -10,6 +10,30 @@ export class CliError extends Error {
   }
 }
 
+export const EXIT_CODE = {
+  success: 0,
+  failure: 1,
+  usage: 2,
+  unreachable: 3,
+  unauthorized: 4,
+  notFound: 5,
+  conflict: 6,
+} as const;
+
+export const EXIT_CODES = [
+  { code: EXIT_CODE.success, meaning: "success" },
+  { code: EXIT_CODE.failure, meaning: "turn or action failed" },
+  { code: EXIT_CODE.usage, meaning: "usage error" },
+  { code: EXIT_CODE.unreachable, meaning: "daemon unreachable" },
+  { code: EXIT_CODE.unauthorized, meaning: "unauthorized" },
+  { code: EXIT_CODE.notFound, meaning: "not found" },
+  { code: EXIT_CODE.conflict, meaning: "busy or conflict" },
+] as const;
+
+export function notFound(what: string): CliError {
+  return new CliError(EXIT_CODE.notFound, `${what} was not found`);
+}
+
 export interface CliResponse<T = unknown> {
   status: number;
   body: T;
@@ -17,20 +41,20 @@ export interface CliResponse<T = unknown> {
 
 function networkError(error: unknown): CliError {
   const message = error instanceof Error ? error.message : String(error);
-  return new CliError(3, `cannot reach ghostd: ${message}`);
+  return new CliError(EXIT_CODE.unreachable, `cannot reach ghostd: ${message}`);
 }
 
 function statusError(status: number, body: unknown, tokenPath: string): CliError {
   if (status === 401) {
     return new CliError(
-      4,
+      EXIT_CODE.unauthorized,
       `unauthorized; run \`ghostd api-token\` as the machine owner (token file: ${tokenPath})`,
     );
   }
   const message = describeErrorBody(body, `daemon returned HTTP ${status}`);
-  if (status === 404) return new CliError(5, message);
-  if (status === 409) return new CliError(6, message);
-  return new CliError(1, message);
+  if (status === 404) return new CliError(EXIT_CODE.notFound, message);
+  if (status === 409) return new CliError(EXIT_CODE.conflict, message);
+  return new CliError(EXIT_CODE.failure, message);
 }
 
 async function responseBody(response: Response): Promise<unknown> {
@@ -47,6 +71,7 @@ export class DaemonClient {
   readonly baseUrl: string;
   readonly tokenPath: string;
   readonly #runtime: CliRuntime;
+  #tokenValue: string | undefined;
 
   constructor(runtime: CliRuntime) {
     this.#runtime = runtime;
@@ -54,22 +79,18 @@ export class DaemonClient {
     try {
       config = loadConfig({ env: runtime.env, home: runtime.home });
     } catch (error) {
-      throw new CliError(2, `invalid daemon configuration: ${(error as Error).message}`);
+      throw new CliError(EXIT_CODE.usage, `invalid daemon configuration: ${(error as Error).message}`);
     }
     const host = config.host === "::1" ? "[::1]" : config.host;
     this.baseUrl = `http://${host}:${config.port}`;
     this.tokenPath = defaultApiTokenPath(runtime.env, runtime.home);
-  }
-
-  #token(): string | undefined {
-    return readApiToken({ env: this.#runtime.env, home: this.#runtime.home });
+    this.#tokenValue = readApiToken({ env: runtime.env, home: runtime.home });
   }
 
   async #fetch(path: string, init: RequestInit, retry = true): Promise<Response> {
-    const token = this.#token();
     const headers = new Headers(init.headers);
     headers.set("accept", headers.get("accept") ?? "application/json");
-    if (token) headers.set("authorization", `Bearer ${token}`);
+    if (this.#tokenValue) headers.set("authorization", `Bearer ${this.#tokenValue}`);
     const timeout = new AbortController();
     const timer = setTimeout(() => timeout.abort(), 5_000);
     const signal = init.signal
@@ -89,6 +110,7 @@ export class DaemonClient {
     }
     if (response.status === 401 && retry) {
       await response.body?.cancel().catch(() => undefined);
+      this.#tokenValue = readApiToken({ env: this.#runtime.env, home: this.#runtime.home });
       return this.#fetch(path, init, false);
     }
     return response;
@@ -111,7 +133,7 @@ export class DaemonClient {
     try {
       return await this.request<T>(method, path);
     } catch (error) {
-      if (error instanceof CliError && error.exitCode === 5) return null;
+      if (error instanceof CliError && error.exitCode === EXIT_CODE.notFound) return null;
       throw error;
     }
   }
@@ -136,7 +158,7 @@ export class DaemonClient {
       const parsed = await responseBody(response);
       throw statusError(response.status, parsed, this.tokenPath);
     }
-    if (!response.body) throw new CliError(1, "daemon returned an empty event stream");
+    if (!response.body) throw new CliError(EXIT_CODE.failure, "daemon returned an empty event stream");
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
@@ -158,7 +180,7 @@ export class DaemonClient {
             return;
           }
         } catch (error) {
-          if (error instanceof SyntaxError) throw new CliError(1, "daemon sent invalid SSE JSON");
+          if (error instanceof SyntaxError) throw new CliError(EXIT_CODE.failure, "daemon sent invalid SSE JSON");
           throw error;
         }
       }

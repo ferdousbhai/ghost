@@ -1,9 +1,8 @@
-import { CliError, type DaemonClient } from "./client.js";
-import { flagBoolean, flagString, parseArgs, requirePositionals } from "./args.js";
+import { ArgsError, flagString, type ParsedCliArgs } from "./args.js";
+import { notFound } from "./client.js";
 import { resolveGhost } from "./common.js";
-import { relativeTime, table, truncate, writeJson } from "./output.js";
-import type { CliRuntime } from "./types.js";
-import { commandHelp } from "./usage.js";
+import { emit, relativeTime, table, truncate } from "./output.js";
+import type { CliContext } from "./types.js";
 
 interface MemoryRow {
   path: string;
@@ -18,36 +17,31 @@ interface MemoryBody {
 }
 
 export async function memoryCommand(
-  argv: readonly string[],
-  client: DaemonClient,
-  runtime: CliRuntime,
+  parsed: ParsedCliArgs,
+  ctx: CliContext,
 ): Promise<number> {
-  const action = argv[0] === "show" ? "show" : undefined;
-  const parsed = parseArgs(action ? argv.slice(1) : argv, { value: ["ghost"] });
-  if (flagBoolean(parsed, "help")) {
-    runtime.stdout.write(commandHelp("memory"));
-    return 0;
+  const action = parsed.positionals[0] === "show" ? "show" : undefined;
+  if ((parsed.positionals.length > 0 && !action) || (action && parsed.positionals.length !== 2)) {
+    throw new ArgsError("memory expects `show <name>` or no arguments");
   }
-  requirePositionals(parsed, action ? 1 : 0, action ? 1 : 0, "ghost memory [show <name>] [-g <name>]");
-  const { name } = await resolveGhost(client, runtime, flagString(parsed, "ghost"));
-  const body = (await client.request<MemoryBody>("GET", `/api/ghosts/${encodeURIComponent(name)}/memory`)).body;
-  if (flagBoolean(parsed, "json")) {
-    writeJson(runtime.stdout, body);
-    return 0;
-  }
+  const { name } = await resolveGhost(ctx.client, ctx.runtime, flagString(parsed, "ghost"));
+  const body = (await ctx.client.request<MemoryBody>("GET", `/api/ghosts/${encodeURIComponent(name)}/memory`)).body;
   if (action) {
-    const requested = parsed.positionals[0] as string;
+    const requested = parsed.positionals[1] as string;
     const memory = body.memory.find((row) => row.slug === requested || row.path === requested || row.path === `memory/${requested}.md`);
-    if (!memory) throw new CliError(5, `memory ${JSON.stringify(requested)} was not found`);
-    if (!flagBoolean(parsed, "quiet")) runtime.stdout.write(`${memory.content}${memory.content.endsWith("\n") ? "" : "\n"}`);
-  } else if (flagBoolean(parsed, "quiet")) {
-    runtime.stdout.write(body.memory.map((row) => row.slug).join("\n") + (body.memory.length ? "\n" : ""));
-  } else if (body.memory.length > 0) {
-    runtime.stdout.write(`${table(body.memory.map((row) => [
-      row.slug,
-      relativeTime(row.updated),
-      truncate((row.content.split("\n")[0] ?? "").trim(), 60),
-    ]), ["MEMORY", "UPDATED", "FACT"])}\n`);
+    if (!memory) throw notFound(`memory ${JSON.stringify(requested)}`);
+    emit(ctx, body, () => `${memory.content}${memory.content.endsWith("\n") ? "" : "\n"}`);
+  } else {
+    emit(ctx, body, () => ({
+      human: body.memory.length > 0
+        ? `${table(body.memory.map((row) => [
+            row.slug,
+            relativeTime(row.updated),
+            truncate((row.content.split("\n")[0] ?? "").trim(), 60),
+          ]), ["MEMORY", "UPDATED", "FACT"])}\n`
+        : "",
+      quiet: body.memory.map((row) => row.slug).join("\n") + (body.memory.length ? "\n" : ""),
+    }));
   }
   return 0;
 }

@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { acquireHomeReservation, HomeReservationBusyError } from "../src/home-reservation.js";
 import { importCommand, parseImportArgs } from "../src/import-command.js";
+import { freePort, waitUntilServing } from "../src/loopback.js";
 
 /**
  * A minimal, valid ghost-home/v1 archive as an extracted directory —
@@ -34,20 +35,6 @@ function makeArchiveDir(parent: string, ghostname: string): string {
   writeFileSync(join(dir, "character.md"), "# imported\n\nI am a ghost.\n");
   writeFileSync(join(dir, "memory", "tone.md"), "Terse.\n");
   return dir;
-}
-
-async function freeLoopbackPort(): Promise<number> {
-  const server = createServer();
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolve);
-  });
-  const address = server.address();
-  if (address === null || typeof address === "string") throw new Error("test listener has no TCP port");
-  await new Promise<void>((resolve, reject) => {
-    server.close((error) => (error ? reject(error) : resolve()));
-  });
-  return address.port;
 }
 
 async function listen(host: string, port = 0): Promise<Server> {
@@ -94,23 +81,6 @@ function collectProcess(
     });
   });
   return { child, result };
-}
-
-async function waitUntilServing(port: number, child: ChildProcessWithoutNullStreams): Promise<void> {
-  const deadline = Date.now() + 15_000;
-  while (Date.now() < deadline) {
-    if (child.exitCode !== null) throw new Error(`daemon exited before listening (${child.exitCode})`);
-    try {
-      const response = await fetch(`http://127.0.0.1:${port}/api/relay/status`, {
-        signal: AbortSignal.timeout(250),
-      });
-      if (response.status === 200) return;
-    } catch {
-      // The listener is not ready yet.
-    }
-    await new Promise((resolve) => setTimeout(resolve, 25));
-  }
-  throw new Error(`daemon did not listen on port ${port}`);
 }
 
 async function stopProcess(child: ChildProcessWithoutNullStreams): Promise<void> {
@@ -325,7 +295,7 @@ describe("importCommand", () => {
     expect(refused).toBe(1);
     expect(err.join("")).toMatch(/already exists/);
 
-    const port = await freeLoopbackPort();
+    const port = await freePort();
     const accepted = await importCommand(
       [archive, "--ghosts-root", ghostsRoot, "--overwrite", "--port", String(port)],
       io(),
@@ -396,7 +366,7 @@ describe("importCommand", () => {
     const home = join(ghostsRoot, "casper");
     mkdirSync(home, { recursive: true });
     writeFileSync(join(home, "character.md"), "# Before\n");
-    const port = await freeLoopbackPort();
+    const port = await freePort();
     let observedPublication = false;
     let observedReleaseOrder = false;
 
@@ -437,7 +407,7 @@ describe("importCommand", () => {
     mkdirSync(home, { recursive: true });
     writeFileSync(join(home, "character.md"), "# Before\n\nThe live daemon owns this home.\n");
 
-    const port = await freeLoopbackPort();
+    const port = await freePort();
     const entry = fileURLToPath(new URL("../src/main.ts", import.meta.url));
     const env = isolatedEnv(root, {
       GHOSTD_PORT: String(port),
@@ -578,7 +548,7 @@ describe("importCommand", () => {
     writeFileSync(join(secondRoot, "beta", "character.md"), "# Beta\n");
     symlinkSync(firstRoot, configuredRoot);
 
-    const port = await freeLoopbackPort();
+    const port = await freePort();
     const ready = join(root, "canonical-startup-ready");
     const release = join(root, "canonical-startup-release");
     const apiTokenPath = join(root, "canonical-api-token");

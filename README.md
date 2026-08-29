@@ -31,7 +31,7 @@ holds only keyring references; see [docs/keyring.md](docs/keyring.md).
 
 The `ghost` terminal client talks only to ghostd's authenticated HTTP API. Use
 it for a quick terminal conversation or to inspect the same sessions the HUD
-shows; `ghostd` remains the machine-management command.
+shows.
 
 ```sh
 ghost say "What should I focus on today?"

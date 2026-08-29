@@ -1,31 +1,20 @@
-import { flagBoolean, flagString, parseArgs, requirePositionals } from "./args.js";
-import type { DaemonClient } from "./client.js";
-import { listSessions, resolveGhost, resolveSession, sessionPath, type SessionRow } from "./common.js";
-import { relativeTime, table, textContent, truncate, writeJson } from "./output.js";
-import type { CliRuntime } from "./types.js";
-import { commandHelp } from "./usage.js";
+import type { SessionSummary } from "../session-host.js";
+import { flagString, type ParsedCliArgs } from "./args.js";
+import { listSessions, resolveGhost, resolveTarget } from "./common.js";
+import { emit, relativeTime, table, textContent, truncate } from "./output.js";
+import type { CliContext } from "./types.js";
 
-function displaySessionId(session: SessionRow): string {
+function displaySessionId(session: SessionSummary): string {
   return session.runtime === "pi" ? session.conversationId : session.id;
 }
 
 export async function sessionsCommand(
-  argv: readonly string[],
-  client: DaemonClient,
-  runtime: CliRuntime,
+  parsed: ParsedCliArgs,
+  ctx: CliContext,
 ): Promise<number> {
-  const parsed = parseArgs(argv, { value: ["ghost"] });
-  if (flagBoolean(parsed, "help")) {
-    runtime.stdout.write(commandHelp("sessions"));
-    return 0;
-  }
-  requirePositionals(parsed, 0, 0, "ghost sessions [-g <name>] [--json] [-q]");
-  const { name } = await resolveGhost(client, runtime, flagString(parsed, "ghost"));
-  const sessions = await listSessions(client, name);
-  if (flagBoolean(parsed, "json")) writeJson(runtime.stdout, { sessions });
-  else if (flagBoolean(parsed, "quiet")) {
-    runtime.stdout.write(sessions.map(displaySessionId).join("\n") + (sessions.length ? "\n" : ""));
-  } else if (sessions.length > 0) {
+  const { name } = await resolveGhost(ctx.client, ctx.runtime, flagString(parsed, "ghost"));
+  const sessions = await listSessions(ctx.client, name);
+  emit(ctx, { sessions }, () => {
     const rows = sessions.map((session) => [
       displaySessionId(session),
       truncate(session.title ?? "—", 42),
@@ -33,8 +22,11 @@ export async function sessionsCommand(
       String(session.messageCount),
       [session.unread ? "unread" : "", session.pinned ? "pinned" : ""].filter(Boolean).join(","),
     ]);
-    runtime.stdout.write(`${table(rows, ["ID", "TITLE", "UPDATED", "MESSAGES", "STATE"])}\n`);
-  }
+    return {
+      human: rows.length > 0 ? `${table(rows, ["ID", "TITLE", "UPDATED", "MESSAGES", "STATE"])}\n` : "",
+      quiet: sessions.map(displaySessionId).join("\n") + (sessions.length ? "\n" : ""),
+    };
+  });
   return 0;
 }
 
@@ -77,71 +69,53 @@ function transcriptMarkdown(body: TranscriptBody, ghost: string): string {
 }
 
 export async function showCommand(
-  argv: readonly string[],
-  client: DaemonClient,
-  runtime: CliRuntime,
+  parsed: ParsedCliArgs,
+  ctx: CliContext,
 ): Promise<number> {
-  const parsed = parseArgs(argv, { value: ["ghost", "session", "limit", "offset"] });
-  if (flagBoolean(parsed, "help")) {
-    runtime.stdout.write(commandHelp("show"));
-    return 0;
-  }
-  requirePositionals(parsed, 0, 0, "ghost show [-g <name>] [-s <id>] [--limit <n>] [--offset <n>]");
-  const { name } = await resolveGhost(client, runtime, flagString(parsed, "ghost"));
-  const { session } = await resolveSession(client, name, flagString(parsed, "session"));
+  const { name, path } = await resolveTarget(ctx.client, ctx, parsed);
   const query = new URLSearchParams();
   const limit = flagString(parsed, "limit");
   const offset = flagString(parsed, "offset");
   if (limit) query.set("limit", limit);
   if (offset) query.set("offset", offset);
   const suffix = query.size ? `?${query}` : "";
-  const response = await client.request<TranscriptBody>("GET", sessionPath(name, session.id, `/transcript${suffix}`));
-  if (flagBoolean(parsed, "json")) writeJson(runtime.stdout, response.body);
-  else {
-    const markdown = transcriptMarkdown(response.body, name);
-    if (markdown) runtime.stdout.write(`${markdown}\n`);
-  }
+  const response = await ctx.client.request<TranscriptBody>("GET", `${path}/transcript${suffix}`);
+  emit(ctx, response.body, (body) => {
+    const markdown = transcriptMarkdown(body, name);
+    return markdown ? `${markdown}\n` : "";
+  });
   return 0;
 }
 
 export async function sessionActionCommand(
   verb: "title" | "fork" | "pin" | "unpin",
-  argv: readonly string[],
-  client: DaemonClient,
-  runtime: CliRuntime,
+  parsed: ParsedCliArgs,
+  ctx: CliContext,
 ): Promise<number> {
-  const parsed = parseArgs(argv, { value: ["ghost", "session"] });
-  if (flagBoolean(parsed, "help")) {
-    runtime.stdout.write(commandHelp(verb));
-    return 0;
-  }
-  requirePositionals(parsed, verb === "pin" || verb === "unpin" ? 0 : 1, verb === "pin" || verb === "unpin" ? 0 : 1, `ghost ${verb}`);
-  const { name } = await resolveGhost(client, runtime, flagString(parsed, "ghost"));
-  const { session } = await resolveSession(client, name, flagString(parsed, "session"));
+  const { path, session } = await resolveTarget(ctx.client, ctx, parsed);
   let body: unknown;
   if (verb === "title") {
-    body = (await client.request("PUT", sessionPath(name, session.id, "/title"), {
+    body = (await ctx.client.request("PUT", `${path}/title`, {
       title: parsed.positionals[0],
     })).body;
   } else if (verb === "fork") {
-    body = (await client.request("POST", sessionPath(name, session.id, "/branch"), {
+    body = (await ctx.client.request("POST", `${path}/branch`, {
       action: "fork",
       entryId: parsed.positionals[0],
     })).body;
   } else {
-    body = (await client.request("PUT", sessionPath(name, session.id, "/pin"), {
+    body = (await ctx.client.request("PUT", `${path}/pin`, {
       pinned: verb === "pin",
     })).body;
   }
-  if (flagBoolean(parsed, "json")) writeJson(runtime.stdout, body);
-  else if (!flagBoolean(parsed, "quiet")) {
+  emit(ctx, body, () => {
     if (verb === "fork") {
       const result = body as { id?: unknown; draft?: unknown };
-      runtime.stdout.write(`${typeof result.id === "string" ? result.id : "forked"}\n`);
-      if (typeof result.draft === "string" && result.draft) runtime.stdout.write(`${result.draft}\n`);
-    } else if (verb === "title") {
-      runtime.stdout.write(`${(body as { title?: string }).title ?? parsed.positionals[0]}\n`);
-    } else runtime.stdout.write(`${verb === "pin" ? "pinned" : "unpinned"} ${session.id}\n`);
-  }
+      return `${typeof result.id === "string" ? result.id : "forked"}\n`
+        + (typeof result.draft === "string" && result.draft ? `${result.draft}\n` : "");
+    }
+    if (verb === "title") return `${(body as { title?: string }).title ?? parsed.positionals[0]}\n`;
+    return `${verb === "pin" ? "pinned" : "unpinned"} ${session.id}\n`;
+  });
   return 0;
 }

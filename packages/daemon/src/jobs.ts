@@ -247,7 +247,7 @@ export function jobSnapshot(job: GhostJob, now: number = Date.now()): GhostJobSn
   };
 }
 
-function formatDuration(ms: number): string {
+export function formatDuration(ms: number): string {
   if (ms < 1_000) return `${ms}ms`;
   if (ms < 60_000) return `${(ms / 1_000).toFixed(1)}s`;
   const minutes = Math.floor(ms / 60_000);

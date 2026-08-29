@@ -1,13 +1,12 @@
+import type { ParsedCliArgs } from "./args.js";
+import type { DaemonClient } from "./client.js";
+
 export interface CliWritable {
   write(chunk: string): unknown;
   isTTY?: boolean;
 }
 
-export type CliStdin =
-  | string
-  | { isTTY?: boolean; read?: () => unknown; on?: (...args: unknown[]) => unknown }
-  | AsyncIterable<unknown>
-  | Iterable<unknown>;
+export type CliStdin = string | (AsyncIterable<unknown> & { isTTY?: boolean });
 
 export type CliFetch = (
   input: string | URL,
@@ -30,4 +29,11 @@ export interface CliRuntime {
   stderr: CliWritable;
   fetch: CliFetch;
   stdin: CliStdin;
+}
+
+export interface CliContext {
+  parsed: ParsedCliArgs;
+  runtime: CliRuntime;
+  version: string;
+  readonly client: DaemonClient;
 }

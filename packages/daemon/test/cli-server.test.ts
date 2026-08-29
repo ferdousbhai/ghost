@@ -1,24 +1,12 @@
-import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { MachineDocuments } from "@ghost/extensions";
+import { readFileSync, statSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { ghostCli } from "../src/cli/main.js";
-import { DocumentsService } from "../src/documents.js";
-import { HomeOperationCoordinator } from "../src/home-operations.js";
-import { McpCatalog } from "../src/mcp-catalog.js";
-import { startDaemonServer, type ListeningServer } from "../src/server.js";
-import { SessionHost } from "../src/session-host.js";
-import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
+import type { ListeningServer } from "../src/server.js";
+import type { SessionHost } from "../src/session-host.js";
+import { runCli } from "./helpers/cli.js";
+import { startTestDaemon, type TempGhosts } from "./helpers/fixtures.js";
 import { fetchNoReuse } from "./helpers/http-fetch.js";
-import { startMockProvider, type MockProvider } from "./helpers/mock-provider.js";
-
-class Sink {
-  value = "";
-  isTTY = false;
-  write(chunk: string): void {
-    this.value += chunk;
-  }
-}
+import type { MockProvider } from "./helpers/mock-provider.js";
 
 const API_TOKEN = "a".repeat(64);
 let temp: TempGhosts;
@@ -29,45 +17,12 @@ let tokenFile: string;
 let env: NodeJS.ProcessEnv;
 
 beforeEach(async () => {
-  temp = makeTempGhosts();
-  temp.registry.ensureRoot();
-  provider = await startMockProvider({ script: [{ kind: "text", text: "hello" }] });
-  seedGhost(temp.root, {
-    name: "casper",
-    provider: { baseUrl: provider.url, modelId: provider.modelId },
+  const fixture = await startTestDaemon({
+    ghost: "casper",
+    memory: { "favorite-tea.md": "The owner likes oolong tea.\n" },
+    openSession: "conv-1",
   });
-  const memoryDir = join(temp.root, "casper", "memory");
-  mkdirSync(memoryDir, { recursive: true });
-  writeFileSync(join(memoryDir, "favorite-tea.md"), "The owner likes oolong tea.\n", { mode: 0o600 });
-  const documents = new DocumentsService(new MachineDocuments(temp.documentsDir));
-  const homeOperations = new HomeOperationCoordinator(temp.registry);
-  host = new SessionHost({
-    registry: temp.registry,
-    homeOperations,
-    ownerHome: temp.ownerHome,
-    offline: true,
-    extensionOptions: { documents: new MachineDocuments(temp.documentsDir) },
-  });
-  const mcp = new McpCatalog({ registry: temp.registry });
-  listening = await startDaemonServer({
-    registry: temp.registry,
-    host,
-    documents,
-    homeOperations,
-    mcp,
-    apiToken: API_TOKEN,
-    relay: null,
-    port: 0,
-  });
-  tokenFile = join(temp.root, ".state", "api-token");
-  mkdirSync(dirname(tokenFile), { recursive: true });
-  writeFileSync(tokenFile, `${API_TOKEN}\n`, { mode: 0o600 });
-  env = {
-    GHOSTD_PORT: String(listening.port),
-    GHOSTD_API_TOKEN_FILE: tokenFile,
-    XDG_CONFIG_HOME: join(temp.root, ".config"),
-  };
-  await host.open("casper", "conv-1");
+  ({ temp, provider, host, listening, tokenFile, env } = fixture);
 });
 
 afterEach(async () => {
@@ -78,24 +33,18 @@ afterEach(async () => {
 });
 
 async function cli(argv: string[], overrides: { env?: NodeJS.ProcessEnv } = {}) {
-  const stdout = new Sink();
-  const stderr = new Sink();
-  const code = await ghostCli(argv, {
+  return runCli(argv, {
     env: overrides.env ?? env,
     home: temp.ownerHome,
-    stdout,
-    stderr,
     fetch: fetchNoReuse,
-    stdin: { isTTY: true },
   });
-  return { code, stdout: stdout.value, stderr: stderr.value };
 }
 
 describe("ghost CLI against a real daemon server", () => {
   it("lists, creates, and persists a validated default mode 0600", async () => {
-    const listed = await cli(["list"]);
+    const listed = await cli(["list", "--json"]);
     expect(listed).toMatchObject({ code: 0 });
-    expect(listed.stdout).toContain("casper");
+    expect(JSON.parse(listed.stdout)).toEqual([expect.objectContaining({ name: "casper" })]);
 
     expect(await cli(["new", "probe", "--json"])).toMatchObject({ code: 0 });
     const used = await cli(["use", "casper"]);
@@ -103,30 +52,37 @@ describe("ghost CLI against a real daemon server", () => {
     const path = join(env.XDG_CONFIG_HOME!, "ghost", "cli.json");
     expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({ ghost: "casper" });
     expect(statSync(path).mode & 0o777).toBe(0o600);
-    expect(await cli(["use"])).toMatchObject({ code: 0, stdout: "casper\n" });
+    expect(JSON.parse((await cli(["use", "--json"])).stdout)).toEqual({ ghost: "casper" });
 
-    const defaultSessions = await cli(["sessions"]);
+    const defaultSessions = await cli(["sessions", "--json"]);
     expect(defaultSessions).toMatchObject({ code: 0 });
-    expect(defaultSessions.stdout).toContain("conv-1");
+    expect(JSON.parse(defaultSessions.stdout).sessions).toEqual([
+      expect.objectContaining({ conversationId: "conv-1" }),
+    ]);
   });
 
   it("lists sessions and reports status", async () => {
-    const sessions = await cli(["sessions", "-g", "casper"]);
+    const sessions = await cli(["sessions", "-g", "casper", "--json"]);
     expect(sessions.code).toBe(0);
-    expect(sessions.stdout).toContain("conv-1");
+    expect(JSON.parse(sessions.stdout).sessions).toEqual([
+      expect.objectContaining({ conversationId: "conv-1" }),
+    ]);
 
-    const status = await cli(["status"]);
+    const status = await cli(["status", "--json"]);
     expect(status.code).toBe(0);
-    expect(status.stdout).toContain(`http://127.0.0.1:${listening!.port}`);
-    expect(status.stdout).toContain("authenticated  yes");
+    expect(JSON.parse(status.stdout)).toMatchObject({
+      daemon: `http://127.0.0.1:${listening!.port}`,
+      authenticated: true,
+      version: expect.any(String),
+    });
   });
 
   it("reports no ask and empty plan, todo, and jobs", async () => {
-    expect(await cli(["ask", "-g", "casper", "-s", "conv"])).toMatchObject({
-      code: 0,
-      stdout: "No pending question.\n",
+    expect(JSON.parse((await cli(["ask", "-g", "casper", "-s", "conv", "--json"])).stdout)).toEqual({ ask: null });
+    expect(JSON.parse((await cli(["plan", "-g", "casper", "-s", "conv", "--json"])).stdout)).toMatchObject({
+      planning: false,
+      todo: [],
     });
-    expect((await cli(["plan", "-g", "casper", "-s", "conv"])).stdout).toContain("planning off");
     expect(await cli(["todo", "-g", "casper", "-s", "conv", "--json"])).toMatchObject({
       code: 0,
       stdout: "{\"todo\":[]}\n",
@@ -178,19 +134,14 @@ describe("ghost CLI against a real daemon server", () => {
       if (response.status === 401) writeFileSync(tokenFile, `${API_TOKEN}\n`, { mode: 0o600 });
       return response;
     };
-    const stdout = new Sink();
-    const stderr = new Sink();
-    const code = await ghostCli(["list", "--json"], {
+    const result = await runCli(["list", "--json"], {
       env,
       home: temp.ownerHome,
-      stdout,
-      stderr,
       fetch: retryingFetch,
-      stdin: { isTTY: true },
     });
-    expect(code, stderr.value).toBe(0);
+    expect(result.code, result.stderr).toBe(0);
     expect(calls).toBe(2);
-    expect(JSON.parse(stdout.value)).toEqual([expect.objectContaining({ name: "casper" })]);
+    expect(JSON.parse(result.stdout)).toEqual([expect.objectContaining({ name: "casper" })]);
   });
 
   it("maps a closed daemon to exit 3", async () => {

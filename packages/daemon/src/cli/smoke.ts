@@ -1,24 +1,32 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
-import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { ArgsError, flagBoolean, parseArgs, requirePositionals } from "./args.js";
-import { CliError, DaemonClient } from "./client.js";
-import { writeJson } from "./output.js";
-import type { CliRuntime } from "./types.js";
-import { commandHelp } from "./usage.js";
+import { freePort, waitUntilServing } from "../loopback.js";
+import { ArgsError, flagBoolean, type ParsedCliArgs } from "./args.js";
+import { EXIT_CODE } from "./client.js";
+import { ghostCli } from "./main.js";
+import { emit } from "./output.js";
+import type { CliContext, CliWritable, GhostCliOptions } from "./types.js";
+
+class Sink implements CliWritable {
+  value = "";
+  write(chunk: string): void {
+    this.value += chunk;
+  }
+}
 
 function splitCommand(value: string): string[] {
   const parts = value.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) ?? [];
   return parts.map((part) => {
-    const quoted = (part.startsWith('"') && part.endsWith('"')) || (part.startsWith("'") && part.endsWith("'"));
+    const quoted = (part.startsWith('"') && part.endsWith('"'))
+      || (part.startsWith("'") && part.endsWith("'"));
     return quoted ? part.slice(1, -1) : part;
   });
 }
 
-function daemonCommand(runtime: CliRuntime): string[] {
-  const configured = runtime.env.GHOSTD?.trim();
+function daemonCommand(ctx: CliContext): string[] {
+  const configured = ctx.runtime.env.GHOSTD?.trim();
   if (configured) {
     const command = splitCommand(configured);
     if (command.length === 0) throw new ArgsError("GHOSTD is empty.");
@@ -28,21 +36,7 @@ function daemonCommand(runtime: CliRuntime): string[] {
     join(dirname(process.execPath), "ghostd"),
     process.argv[1] ? join(dirname(process.argv[1]), "ghostd") : "",
   ].filter(Boolean);
-  const sibling = candidates.find(existsSync);
-  return [sibling ?? "ghostd"];
-}
-
-async function freePort(): Promise<number> {
-  const server = createServer();
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolve);
-  });
-  const address = server.address();
-  const port = typeof address === "object" && address ? address.port : 0;
-  await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
-  if (!port) throw new Error("could not allocate a loopback port");
-  return port;
+  return [candidates.find(existsSync) ?? "ghostd"];
 }
 
 async function stopProcess(child: ChildProcess): Promise<void> {
@@ -61,20 +55,29 @@ async function stopProcess(child: ChildProcess): Promise<void> {
   }
 }
 
-export async function smokeCommand(argv: readonly string[], runtime: CliRuntime): Promise<number> {
-  const parsed = parseArgs(argv, { boolean: ["keep", "no-turn"] });
-  if (flagBoolean(parsed, "help")) {
-    runtime.stdout.write(commandHelp("smoke"));
-    return 0;
+async function runScratchCli(
+  argv: string[],
+  options: Omit<GhostCliOptions, "stdout" | "stderr">,
+): Promise<{ stdout: string; stderr: string }> {
+  const stdout = new Sink();
+  const stderr = new Sink();
+  const code = await ghostCli(argv, { ...options, stdout, stderr });
+  if (code !== EXIT_CODE.success) {
+    throw new Error(stderr.value.trim() || `ghost ${argv[0]} exited ${code}`);
   }
-  requirePositionals(parsed, 0, 0, "ghost smoke [--keep] [--no-turn] [--json] [-q]");
+  return { stdout: stdout.value, stderr: stderr.value };
+}
+
+export async function smokeCommand(
+  parsed: ParsedCliArgs,
+  ctx: CliContext,
+): Promise<number> {
   const keep = flagBoolean(parsed, "keep");
-  const quiet = flagBoolean(parsed, "quiet");
   const scratch = mkdtempSync(join(tmpdir(), "ghost-smoke-"));
   const port = await freePort();
   const tokenFile = join(scratch, "state", "ghost", "api-token");
   const env: NodeJS.ProcessEnv = {
-    ...runtime.env,
+    ...ctx.runtime.env,
     GHOSTS_ROOT: join(scratch, "ghosts"),
     GHOSTD_PORT: String(port),
     GHOSTD_HOST: "127.0.0.1",
@@ -84,7 +87,7 @@ export async function smokeCommand(argv: readonly string[], runtime: CliRuntime)
     XDG_DATA_HOME: join(scratch, "data"),
     GHOSTD_OFFLINE: "1",
   };
-  const command = daemonCommand(runtime);
+  const command = daemonCommand(ctx);
   const child = spawn(command[0] as string, [...command.slice(1), "--port", String(port)], {
     cwd: process.cwd(),
     env,
@@ -97,53 +100,52 @@ export async function smokeCommand(argv: readonly string[], runtime: CliRuntime)
   child.stderr?.on("data", (chunk) => {
     daemonError = `${daemonError}${String(chunk)}`.slice(-2_000);
   });
-  const report = (step: string, ok: boolean, detail?: string) => {
+  const report = (step: string, ok: boolean, detail?: string, final = false) => {
     const result = { step, ok, ...(detail ? { detail } : {}) };
-    if (flagBoolean(parsed, "json")) writeJson(runtime.stdout, result);
-    else if (!quiet) runtime.stdout.write(`${ok ? "ok" : "fail"} ${step}${detail ? `: ${detail}` : ""}\n`);
+    emit(ctx, result, () => ({
+      human: `${ok ? "ok" : "fail"} ${step}${detail ? `: ${detail}` : ""}\n`,
+      ...(final ? { quiet: `${ok ? "ok" : "fail"} smoke\n` } : {}),
+    }));
   };
-  let code = 0;
+  let code: number = EXIT_CODE.success;
   let step = "daemon";
   try {
-    const smokeRuntime: CliRuntime = { ...runtime, env, home: scratch };
-    const client = new DaemonClient(smokeRuntime);
-    const deadline = Date.now() + 10_000;
-    while (true) {
-      try {
-        await client.request("GET", "/api/ghosts");
-        break;
-      } catch (error) {
-        if (Date.now() >= deadline || child.exitCode !== null) throw error;
-        await new Promise((resolve) => setTimeout(resolve, 50));
-      }
-    }
-    report("daemon", true, client.baseUrl);
+    await waitUntilServing(port, child, 10_000);
+    const options = {
+      env,
+      home: scratch,
+      fetch: ctx.runtime.fetch,
+      stdin: ctx.runtime.stdin,
+    };
+    const status = await runScratchCli(["status", "-q"], options);
+    report("daemon", true, status.stdout.trim());
     step = "new probe";
-    await client.request("POST", "/api/ghosts", { name: "probe" });
+    await runScratchCli(["new", "probe", "-q"], options);
     report("new probe", true);
-    if (!flagBoolean(parsed, "no-turn")) {
-      step = "turn";
-      let reply = "";
-      await client.stream("/api/ghosts/probe/messages", {
-        context: { messages: [{ role: "user", content: [{ type: "text", text: "Reply with the single word pong." }] }] },
-        options: { sessionId: `cli-${Date.now().toString(36)}-smoke` },
-      }, (event) => {
-        const row = event as { type?: unknown; delta?: unknown; errorMessage?: unknown };
-        if (row.type === "text_delta" && typeof row.delta === "string") reply += row.delta;
-        if (row.type === "error") throw new Error(typeof row.errorMessage === "string" ? row.errorMessage : "turn failed");
-      });
-      if (!reply.trim()) throw new Error("turn returned no text");
-      report("turn", true, reply.trim());
-    } else report("turn", true, "skipped (--no-turn)");
+    step = "turn";
+    if (flagBoolean(parsed, "no-turn")) {
+      report("turn", true, "skipped (--no-turn)", true);
+    } else {
+      const turn = await runScratchCli([
+        "say",
+        "-q",
+        "--new",
+        "-g",
+        "probe",
+        "Reply with pong",
+      ], options);
+      const reply = turn.stdout.trim();
+      if (!reply) throw new Error("turn returned no text");
+      report("turn", true, reply, true);
+    }
   } catch (error) {
-    code = 1;
-    const detail = error instanceof CliError ? error.message : (error as Error).message;
-    report(step, false, detail || daemonError.trim() || "daemon failed");
+    code = EXIT_CODE.failure;
+    const detail = (error as Error).message || daemonError.trim() || "daemon failed";
+    report(step, false, detail, true);
   } finally {
     await stopProcess(child);
     if (keep) report("scratch", true, scratch);
     else rmSync(scratch, { recursive: true, force: true });
   }
-  if (quiet && !flagBoolean(parsed, "json")) runtime.stdout.write(`${code === 0 ? "ok" : "fail"} smoke\n`);
   return code;
 }

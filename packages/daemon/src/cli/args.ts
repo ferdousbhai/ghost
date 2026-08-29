@@ -22,6 +22,7 @@ const COMMON_ALIASES: Readonly<Record<string, string>> = {
   g: "ghost",
   s: "session",
   m: "message",
+  v: "version",
 };
 
 function canonicalFlag(raw: string, aliases: Readonly<Record<string, string>>): string {
@@ -57,7 +58,7 @@ export function parseArgs(argv: readonly string[], spec: ArgsSpec = {}): ParsedC
       if (arg.length !== 2) throw new ArgsError(`Unknown option: ${arg}`);
       rawName = arg.slice(1);
     }
-    const name = canonicalFlag(rawName, aliases);
+    const name = arg.startsWith("--") ? rawName : canonicalFlag(rawName, aliases);
     if (boolean.has(name)) {
       if (inlineValue !== undefined) throw new ArgsError(`--${name} does not take a value.`);
       flags[name] = true;
@@ -86,15 +87,4 @@ export function flagBoolean(parsed: ParsedCliArgs, name: string): boolean {
 export function flagString(parsed: ParsedCliArgs, name: string): string | undefined {
   const value = parsed.flags[name];
   return typeof value === "string" ? value : undefined;
-}
-
-export function requirePositionals(
-  parsed: ParsedCliArgs,
-  minimum: number,
-  maximum = minimum,
-  usage: string,
-): void {
-  if (parsed.positionals.length < minimum || parsed.positionals.length > maximum) {
-    throw new ArgsError(`Usage: ${usage}`);
-  }
 }
