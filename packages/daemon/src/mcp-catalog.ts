@@ -14,6 +14,7 @@ import {
   type MCPStdioServerConfig,
 } from "./mcp-config.js";
 import { GhostMcpManager } from "./mcp-manager.js";
+import { silentLogger, type Logger } from "./log.js";
 import {
   homeOperationsFor,
   type HomeOperationCoordinator,
@@ -111,6 +112,7 @@ export interface McpConnectionTest {
 export interface McpCatalogOptions {
   registry: GhostRegistry;
   homeOperations?: HomeOperationCoordinator;
+  logger?: Logger;
   /** Test seam around the locked atomic config writer. */
   writer?: Partial<McpCatalogWriter>;
 }
@@ -463,11 +465,13 @@ export class McpCatalog {
   private readonly registry: GhostRegistry;
   private readonly homeOperations: HomeOperationCoordinator;
   private readonly writer: McpCatalogWriter;
+  private readonly logger: Logger;
 
   constructor(options: McpCatalogOptions) {
     this.registry = options.registry;
     this.homeOperations = options.homeOperations ?? homeOperationsFor(options.registry);
     this.writer = { ...defaultWriter, ...options.writer };
+    this.logger = options.logger ?? silentLogger;
   }
 
   private withHomeLease<T>(ghostName: string, operation: () => Promise<T>): Promise<T> {
@@ -615,7 +619,10 @@ export class McpCatalog {
           throw new GhostError("mcp_server_not_found", `No MCP server named ${JSON.stringify(name)}.`, 404);
         }
         validateMutation(name, server.config);
-        const manager = new GhostMcpManager({ cwd: home });
+        const manager = new GhostMcpManager({
+          cwd: home,
+          logger: this.logger.child({ ghost: ghostName }),
+        });
         try {
           const resolved = resolveMcpServerSecrets(server.config as MCPServerConfig, context);
           const expanded = expandMcpServerConfig(resolved);

@@ -1589,6 +1589,7 @@ describe("Claude Code subscription runtime", () => {
   it("rejects malformed or secret-bearing stored MCP rows before SDK launch or logging", async () => {
     const logs: string[] = [];
     const logger: Logger = {
+      child() { return this; },
       debug: (message, fields) => logs.push(JSON.stringify({ message, fields })),
       info: (message, fields) => logs.push(JSON.stringify({ message, fields })),
       warn: (message, fields) => logs.push(JSON.stringify({ message, fields })),
@@ -2133,6 +2134,7 @@ describe("Claude Code subscription runtime", () => {
   it("skips and logs malformed Claude Code sidecars without hiding valid sessions", async () => {
     const warnings: Array<{ message: string; fields?: Record<string, unknown> }> = [];
     const logger: Logger = {
+      child() { return this; },
       debug: () => {},
       info: () => {},
       warn: (message, fields) => warnings.push({ message, fields }),
@@ -2166,6 +2168,7 @@ describe("Claude Code subscription runtime", () => {
   it("listSessions skips insecure sidecar entries without hiding a valid sibling", async () => {
     const warnings: Array<{ message: string; fields?: Record<string, unknown> }> = [];
     const logger: Logger = {
+      child() { return this; },
       debug: () => {},
       info: () => {},
       warn: (message, fields) => warnings.push({ message, fields }),
@@ -2208,6 +2211,7 @@ describe("Claude Code subscription runtime", () => {
   it("never lists or resumes a Claude sidecar transplanted onto another id's hash", async () => {
     const warnings: Array<{ message: string; fields?: Record<string, unknown> }> = [];
     const logger: Logger = {
+      child() { return this; },
       debug: () => {},
       info: () => {},
       warn: (message, fields) => warnings.push({ message, fields }),
@@ -2492,6 +2496,7 @@ describe("Claude Code subscription runtime", () => {
     const { paths } = setupClaudeHost({
       maintenance,
       logger: {
+        child() { return this; },
         debug: () => {},
         info: () => {},
         warn: (message, fields) => warnings.push({ message, fields }),
@@ -2584,6 +2589,7 @@ describe("Claude Code subscription runtime", () => {
     const hooks = new GhostHookRunner();
     const warnings: Array<{ message: string; fields?: Record<string, unknown> }> = [];
     const logger: Logger = {
+      child() { return this; },
       debug: () => {},
       info: () => {},
       warn: (message, fields) => warnings.push({ message, fields }),

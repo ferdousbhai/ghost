@@ -813,10 +813,14 @@ export class GhostHookRunner {
     hook: CommandHook,
     event: GhostHookEvent,
   ): Promise<GhostHookResult | undefined> {
+    const logger = this.logger.child({
+      ghost: event.ghost_name,
+      conversation: event.conversation_id,
+    });
     try {
-      return parseCommandResult(hook, await this.commandRunner(hook, event), this.logger);
+      return parseCommandResult(hook, await this.commandRunner(hook, event), logger);
     } catch {
-      this.logger.warn(`${hook.eventName} hook failed open`, {
+      logger.warn(`${hook.eventName} hook failed open`, {
         source: hook.source,
         error: "command execution failed",
       });
@@ -889,6 +893,10 @@ export class GhostHookRunner {
     handlerTimeout = this.handlerTimeoutMs,
   ): Promise<GhostHookResult | undefined> {
     if (event.signal.aborted) return undefined;
+    const logger = this.logger.child({
+      ghost: event.ghost_name,
+      conversation: event.conversation_id,
+    });
     const controller = new AbortController();
     const onParentAbort = () => controller.abort(event.signal.reason);
     event.signal.addEventListener("abort", onParentAbort, { once: true });
@@ -913,7 +921,7 @@ export class GhostHookRunner {
       .then(() => handler(handlerEvent, context))
       .then((result) => ({ kind: "result" as const, result: result ?? undefined }))
       .catch((error) => {
-        this.logger.warn(`${event.type} hook failed open`, {
+        logger.warn(`${event.type} hook failed open`, {
           ghost: event.ghost_name,
           error: error instanceof Error ? error.message : String(error),
         });
@@ -925,7 +933,7 @@ export class GhostHookRunner {
     event.signal.removeEventListener("abort", onParentAbort);
     if (settled.kind === "timeout") {
       controller.abort(new Error(`${event.type} hook timed out`));
-      this.logger.warn(`${event.type} hook timed out`, {
+      logger.warn(`${event.type} hook timed out`, {
         ghost: event.ghost_name,
         timeoutMs: handlerTimeout,
       });

@@ -9,10 +9,14 @@ import {
 
 const previousStateHome = process.env.XDG_STATE_HOME;
 const previousTestStateHome = process.env.GHOST_TEST_XDG_STATE_HOME;
+const previousJournalStream = process.env.JOURNAL_STREAM;
+const previousInvocationId = process.env.INVOCATION_ID;
 const stateHome = mkdtempSync(join(tmpdir(), "ghostd-vitest-state-"));
 
 process.env.XDG_STATE_HOME = stateHome;
 process.env.GHOST_TEST_XDG_STATE_HOME = stateHome;
+delete process.env.JOURNAL_STREAM;
+delete process.env.INVOCATION_ID;
 
 export const testSecretService = new MemorySecretServiceClient();
 setSecretServiceClientFactoryForTests(() => testSecretService);
@@ -35,5 +39,9 @@ afterAll(() => {
   else process.env.XDG_STATE_HOME = previousStateHome;
   if (previousTestStateHome === undefined) delete process.env.GHOST_TEST_XDG_STATE_HOME;
   else process.env.GHOST_TEST_XDG_STATE_HOME = previousTestStateHome;
+  if (previousJournalStream === undefined) delete process.env.JOURNAL_STREAM;
+  else process.env.JOURNAL_STREAM = previousJournalStream;
+  if (previousInvocationId === undefined) delete process.env.INVOCATION_ID;
+  else process.env.INVOCATION_ID = previousInvocationId;
   rmSync(stateHome, { recursive: true, force: true });
 });

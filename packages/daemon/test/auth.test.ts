@@ -492,7 +492,7 @@ describe("logging never carries secrets", () => {
     const lines: string[] = [];
     const record = (message: string, fields?: Record<string, unknown>) =>
       lines.push(`${message} ${JSON.stringify(fields ?? {})}`);
-    const logger = { debug: record, info: record, warn: record, error: record };
+    const logger = { child() { return this; }, debug: record, info: record, warn: record, error: record };
     const login: LoginImpl = async (_id, _type, interaction) => {
       await interaction.prompt({ type: "secret", message: "key" });
       return apiKeyCredential();

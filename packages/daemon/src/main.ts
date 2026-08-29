@@ -19,7 +19,8 @@ import { acquireHomeReservation, HomeReservationBusyError, type HomeReservation 
 import { HomeOperationCoordinator } from "./home-operations.js";
 import { hookSmolCompleteCommand } from "./hook-smol-complete.js";
 import { migrateHostedConversations } from "./hosted-conversation-import.js";
-import { createLogger, type Logger, type LogLevel } from "./log.js";
+import { createJournalSink } from "./journal.js";
+import { createLogger, stderrSink, type Logger, type LogLevel } from "./log.js";
 import { McpCatalog } from "./mcp-catalog.js";
 import { ModelCatalog } from "./model-catalog.js";
 import { createRelayHub } from "./relay.js";
@@ -321,7 +322,8 @@ export async function main(argv: string[] = process.argv.slice(2), runtime: Main
     return 0;
   }
 
-  const logger = createLogger(parsed.logLevel);
+  const journalSink = createJournalSink();
+  const logger = createLogger(parsed.logLevel, journalSink ?? stderrSink);
   let config: DaemonConfig;
   try {
     config = loadConfig(parsed.overrides);
@@ -484,7 +486,7 @@ async function serveDaemon(
     // the next freshly built session: rebind the live cached sessions.
     onModelRoutingChanged: (name) => host.rebindModel(name),
   });
-  const mcp = new McpCatalog({ registry, homeOperations });
+  const mcp = new McpCatalog({ registry, homeOperations, logger });
   const remoteServe = new RemoteServe(config.port, { ...config.remote, configPath: config.configPath });
 
   let listening: ListeningServer;

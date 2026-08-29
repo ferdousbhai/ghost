@@ -197,6 +197,7 @@ describe("POST /api/ghosts/:name/greeting", () => {
     it(`keeps the route at 200 and preserves memory/Documents when character reads fail with ${code}`, async () => {
       const logLines: string[] = [];
       const logger: Logger = {
+        child() { return this; },
         debug: () => {},
         info: () => {},
         warn: (message, fields) => logLines.push(JSON.stringify({ message, fields })),
@@ -263,6 +264,7 @@ describe("POST /api/ghosts/:name/greeting", () => {
     it(`preserves every successful greeting input when ${testCase.label} is unavailable`, async () => {
       const logLines: string[] = [];
       const logger: Logger = {
+        child() { return this; },
         debug: () => {},
         info: () => {},
         warn: (message, fields) => logLines.push(JSON.stringify({ message, fields })),

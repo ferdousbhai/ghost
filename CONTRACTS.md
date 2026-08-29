@@ -1875,6 +1875,11 @@ Bind to `127.0.0.1`, and require the bearer token described under
 [Authentication](#authentication) above. Loopback bind ≠ auth. Revisit the
 whole model before any non-local exposure.
 
+Under systemd, daemon log records go directly to the journal with `PRIORITY`,
+`SYSLOG_IDENTIFIER=ghostd`, and `GHOST` / `CONVERSATION` whenever that identity
+is known; otherwise they retain the stderr line format. Filter one ghost with
+`journalctl --user -u ghostd GHOST=<name>`.
+
 ## Package boundaries
 
 - `packages/extensions` — Ghost's built-in extensions plus ghost-home and

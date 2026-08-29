@@ -416,7 +416,7 @@ function captureHostedMcpLogs(): {
   return {
     daemon,
     omp,
-    logger: { debug: record, info: record, warn: record, error: record },
+    logger: { child() { return this; }, debug: record, info: record, warn: record, error: record },
     dispose,
   };
 }
@@ -645,6 +645,7 @@ describe("SessionHost recap", () => {
     await setup([{ kind: "text", text: "Conversation established." }], {
       title: { enabled: false },
       logger: {
+        child() { return this; },
         debug: () => {},
         info: () => {},
         warn: (message, fields) => warnings.push({ message, fields }),
@@ -1193,7 +1194,7 @@ describe("SessionHost.open", () => {
     };
     const { dir } = await setup([{ kind: "text", text: "unused" }], {
       collaboration,
-      logger: { debug: record, info: record, warn: record, error: record },
+      logger: { child() { return this; }, debug: record, info: record, warn: record, error: record },
     });
     writeMcpFixture(dir);
     const firstProject = join(temp!.root, "cleanup-first-project");
@@ -1817,7 +1818,7 @@ describe("SessionHost.open", () => {
       logged.push({ message, fields });
     };
     const { dir } = await setup([{ kind: "text", text: "hello" }], {
-      logger: { debug: record, info: record, warn: record, error: record },
+      logger: { child() { return this; }, debug: record, info: record, warn: record, error: record },
     });
     const serverPath = join(dir, "ghost-mcp.mjs");
     writeFileSync(
@@ -2508,7 +2509,7 @@ describe("SessionHost shutdown", () => {
       logs.push({ message, fields });
     };
     await setup([{ kind: "text", text: "unused" }], {
-      logger: { debug: record, info: record, warn: record, error: record },
+      logger: { child() { return this; }, debug: record, info: record, warn: record, error: record },
     });
     const conversationId = "conv-shutdown-cleanup-retry";
     const key = sessionKeyOf("casper", conversationId);
@@ -4266,6 +4267,7 @@ describe("SessionHost.runTurn", () => {
         maintenance: recorded.maintenance,
         title: { enabled: false },
         logger: {
+          child() { return this; },
           debug: () => {},
           info: () => {},
           warn: (message, fields) => warnings.push({ message, fields }),
@@ -5070,6 +5072,7 @@ describe("SessionHost.runTurn", () => {
       hooks,
       maintenance: recorded.maintenance,
       logger: {
+        child() { return this; },
         debug: () => {},
         info: () => {},
         warn: (message, fields) => warnings.push({ message, fields }),
@@ -5214,6 +5217,7 @@ describe("SessionHost.runTurn", () => {
     await setup([{ kind: "text", text: "Direct answer." }], {
       hooks,
       logger: {
+        child() { return this; },
         debug: () => {},
         info: () => {},
         warn: (message, fields) => warnings.push({ message, fields }),
@@ -5678,6 +5682,7 @@ describe("SessionHost.runTurn", () => {
     await setup([{ kind: "text", text: "the model must not run" }], {
       maintenance,
       logger: {
+        child() { return this; },
         debug: () => {},
         info: () => {},
         warn: (message, fields) => warnings.push({ message, fields }),
@@ -6421,7 +6426,7 @@ describe("conversation branching", () => {
       logs.push({ message, fields });
     };
     await setup([{ kind: "text", text: "hello" }], {
-      logger: { debug: record, info: record, warn: record, error: record },
+      logger: { child() { return this; }, debug: record, info: record, warn: record, error: record },
     });
     await host!.runTurn("casper", {
       sessionId: "fork-marker-target",
@@ -6707,14 +6712,14 @@ describe("session listing", () => {
     const internals = host as unknown as {
       lifecycleAdmissions: Map<string, number>;
       opening: Map<string, Promise<unknown>>;
-      recoverForkTransactions(path: string): Promise<void>;
+      recoverForkTransactions(path: string, ghostName: string): Promise<void>;
       sessions: Map<string, typeof original>;
     };
     const recoverForkTransactions = internals.recoverForkTransactions.bind(internals);
-    vi.spyOn(internals, "recoverForkTransactions").mockImplementation(async (path) => {
+    vi.spyOn(internals, "recoverForkTransactions").mockImplementation(async (path, ghostName) => {
       entered.resolve();
       await release.promise;
-      await recoverForkTransactions(path);
+      await recoverForkTransactions(path, ghostName);
     });
 
     const reopening = host!.open("casper", id);
@@ -7422,7 +7427,7 @@ describe("session listing", () => {
       logs.push({ message, fields });
     };
     const { dir } = await setup([{ kind: "text", text: "hello" }], {
-      logger: { debug: record, info: record, warn: record, error: record },
+      logger: { child() { return this; }, debug: record, info: record, warn: record, error: record },
     });
     const piId = "pi-delete-marker-target";
     const claudeId = "claude-delete-marker-target";

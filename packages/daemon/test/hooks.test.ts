@@ -515,6 +515,7 @@ describe("GhostHookRunner", () => {
     const runner = GhostHookRunner.fromConfig(config, {
       commandRunner: async () => { throw new Error("must-not-leak execution sentinel"); },
       logger: {
+        child() { return this; },
         debug: () => {},
         info: () => {},
         warn: (message, fields) => { warnings.push({ message, fields }); },
@@ -576,6 +577,7 @@ describe("GhostHookRunner", () => {
     const runner = GhostHookRunner.fromConfig(config, {
       commandRunner,
       logger: {
+        child() { return this; },
         debug: record("debug"),
         info: record("info"),
         warn: record("warn"),

@@ -1549,6 +1549,7 @@ export class ClaudeCodeRuntime {
     project: ClaudeProjectSnapshot,
     finishMaintenance?: (turn?: SettledMaintenanceTurn) => Promise<void>,
   ): Promise<void> {
+    const logger = this.logger.child({ ghost: ghost.name, conversation: conversationId });
     const adapter = createClaudePiMessagesAdapter(options.emit, {
       includeThinking: options.includeThinking,
     });
@@ -1614,21 +1615,18 @@ export class ClaudeCodeRuntime {
       const declarativeAppend = renderClaudeDeclarativePrompt(effectiveDeclarative);
       const systemPrompt = declarativeAppend ? `${persona}\n\n${declarativeAppend}` : persona;
       for (const warning of ghostDeclarative.warnings) {
-        this.logger.warn("Claude Ghost resource stayed disabled", {
-          ghost: ghost.name,
+        logger.warn("Claude Ghost resource stayed disabled", {
           warning,
         });
       }
       for (const warning of approvedProject.resourceWarnings) {
-        this.logger.warn("Claude project resource stayed disabled", {
-          ghost: ghost.name,
+        logger.warn("Claude project resource stayed disabled", {
           project: project.root,
           warning,
         });
       }
       for (const warning of approvedProject.mcpWarnings) {
-        this.logger.warn("Claude project MCP stayed disabled", {
-          ghost: ghost.name,
+        logger.warn("Claude project MCP stayed disabled", {
           project: project.root,
           warning,
         });
@@ -1777,7 +1775,7 @@ export class ClaudeCodeRuntime {
           try {
             await acknowledge();
           } catch {
-            this.logger.warn("before_prompt hook acknowledgement failed", {
+            logger.warn("before_prompt hook acknowledgement failed", {
               ghost: ghost.name,
               runtime: "claude-code",
             });
@@ -1840,7 +1838,7 @@ export class ClaudeCodeRuntime {
           break;
         }
         if (continuationCount >= GHOST_SESSION_STOP_CONTINUATION_CAP) {
-          this.logger.warn("session_stop continuation cap reached", {
+          logger.warn("session_stop continuation cap reached", {
             ghost: ghost.name,
             session: completed.session_id,
             cap: GHOST_SESSION_STOP_CONTINUATION_CAP,
@@ -1859,7 +1857,7 @@ export class ClaudeCodeRuntime {
     } catch (cause) {
       if (options.signal?.aborted) settledTurn = undefined;
       else if (settledTurn) settledTurn = { ...settledTurn, outcome: "failed" };
-      this.logger.error("Claude Code turn failed", {
+      logger.error("Claude Code turn failed", {
         ghost: ghost.name,
         error: cause instanceof Error ? cause.message : String(cause),
       });
@@ -1871,7 +1869,7 @@ export class ClaudeCodeRuntime {
       try {
         await finishMaintenance?.(settledTurn);
       } catch {
-        this.logger.warn("conversation maintenance turn record failed", {
+        logger.warn("conversation maintenance turn record failed", {
           ghost: ghost.name,
           runtime: "claude-code",
         });
@@ -1890,6 +1888,7 @@ export class ClaudeCodeRuntime {
   }
 
   async listSessions(ghost: Ghost): Promise<ClaudeSessionMetadata[]> {
+    const logger = this.logger.child({ ghost: ghost.name });
     const { sessionDir } = ghostPaths(ghost.dir);
     await mkdir(sessionDir, { recursive: true });
     const names = await readdir(sessionDir);
@@ -1911,7 +1910,7 @@ export class ClaudeCodeRuntime {
         }
         result.push(metadata);
       } catch (cause) {
-        this.logger.warn("skipping invalid Claude Code session metadata", {
+        logger.warn("skipping invalid Claude Code session metadata", {
           path,
           error: cause instanceof Error ? cause.message : String(cause),
         });

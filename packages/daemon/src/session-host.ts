@@ -749,6 +749,7 @@ interface HostedRecap {
 }
 
 interface HostedSession extends GhostSessionHandle {
+  logger: Logger;
   project: ProjectBindingState;
   projectSnapshot: ProjectDeclarativeSnapshot | null;
   toolCwds: Map<string, string>;
@@ -1655,7 +1656,8 @@ export class SessionHost {
       try {
         await this.settleLiveVoiceSession(key);
       } catch (error) {
-        this.logger.warn("deferred session update after live voice failed", {
+        const [ghost, conversation] = sessionKeyParts(key);
+        this.logger.child({ ghost, conversation }).warn("deferred session update after live voice failed", {
           session: key,
           error: error instanceof Error ? error.message : String(error),
         });
@@ -1797,7 +1799,8 @@ export class SessionHost {
   /** Remove cache admission synchronously; a failed teardown gates replacement opens. */
   private retireHostedSession(key: string, reason: string): void {
     void this.closeHostedSession(key, reason).catch((error) => {
-      this.logger.warn("retained session disposal failed", {
+      const [ghost, conversation] = sessionKeyParts(key);
+      this.logger.child({ ghost, conversation }).warn("retained session disposal failed", {
         session: key,
         error: error instanceof Error ? error.message : String(error),
       });
@@ -1845,9 +1848,7 @@ export class SessionHost {
       try {
         listener(event);
       } catch (error) {
-        this.logger.warn("conversation event listener failed", {
-          ghost: ghostName,
-          conversation: identity.id,
+        this.logger.child({ ghost: ghostName, conversation: identity.conversationId }).warn("conversation event listener failed", {
           error: error instanceof Error ? error.message : String(error),
         });
       }
@@ -1907,7 +1908,7 @@ export class SessionHost {
     }
     const ghost = this.registry.get(ghostName);
     const paths = ghostPaths(ghost.dir);
-    await this.recoverForkTransactions(paths.sessionDir);
+    await this.recoverForkTransactions(paths.sessionDir, ghostName);
     if (await transactionMarkerEntryExists(
       forkTransactionPath(paths.sessionDir, conversationId),
     )) {
@@ -2212,7 +2213,7 @@ export class SessionHost {
   ): Promise<ProjectBindingState> {
     const ghost = this.registry.get(ghostName);
     const paths = ghostPaths(ghost.dir);
-    await this.recoverForkTransactions(paths.sessionDir);
+    await this.recoverForkTransactions(paths.sessionDir, ghostName);
     if (runtime === "pi" && await transactionMarkerEntryExists(
       forkTransactionPath(paths.sessionDir, conversationId),
     )) {
@@ -2481,7 +2482,7 @@ export class SessionHost {
       const ghost = this.registry.get(ghostName);
       const sessionDir = ghostPaths(ghost.dir).sessionDir;
       mkdirSync(sessionDir, { recursive: true });
-      await this.recoverForkTransactions(sessionDir);
+      await this.recoverForkTransactions(sessionDir, ghostName);
       const key = this.keyOf(ghostName, conversationId);
       const transcript = join(sessionDir, sessionFileNameFor(conversationId));
       const claudeSidecar = claudeSessionMetadataPath(sessionDir, conversationId);
@@ -2566,6 +2567,7 @@ export class SessionHost {
     key: string,
   ): Promise<HostedSession> {
     const ghost = this.registry.get(ghostName);
+    const logger = this.logger.child({ ghost: ghostName, conversation: sessionKey });
     const paths = ghostPaths(ghost.dir);
     let project = await this.projectState(ghostName, "pi", sessionKey);
     const projectIdentity = project.root
@@ -2645,7 +2647,7 @@ export class SessionHost {
     let createdSession: AgentSession | undefined;
     try {
     await this.sessionStartupProbe("model-runtime", modelRuntime);
-    const manager = new GhostMcpManager({ cwd: runtimeCwd, logger: this.logger });
+    const manager = new GhostMcpManager({ cwd: runtimeCwd, logger });
     const mcpResult = await connectGhostProjectMCP(
       manager,
       {
@@ -2655,7 +2657,7 @@ export class SessionHost {
           ? { project: { root: project.root, mcp: projectSnapshot.mcp } }
           : {}),
       },
-      this.logger,
+      logger,
     );
     mcp = { manager, configs: mcpResult.configs, sources: mcpResult.sources };
     await this.sessionStartupProbe("mcp", modelRuntime);
@@ -2689,7 +2691,7 @@ export class SessionHost {
     sessionManager = SessionManager.open(sessionFile, paths.sessionDir, runtimeCwd);
     await this.sessionStartupProbe("session-manager", modelRuntime);
     if (!sessionFileExists) bindConversationId(sessionManager, sessionKey);
-    this.promoteLegacySessionTitle(sessionManager, ghostName, sessionKey);
+    this.promoteLegacySessionTitle(sessionManager, ghostName, sessionKey, logger);
 
     const ask = new AskBroker();
     const jobs = new GhostJobManager({
@@ -2699,8 +2701,7 @@ export class SessionHost {
     const hookExtensions = await loadGhostHookExtensions(paths.home);
     extensionFactories.push(...hookExtensions.factories);
     for (const error of hookExtensions.errors) {
-      this.logger.error("extension failed to load", {
-        ghost: ghostName,
+      logger.error("extension failed to load", {
         path: error.path,
         error: error.error,
       });
@@ -2714,8 +2715,7 @@ export class SessionHost {
     const chatRef = resolveChatModelRef(readGhostModels(paths.home));
     const chatModel = resolveChatModel(chatRef, modelRuntime.getAvailableSnapshot());
     if (chatRef && (chatModel?.provider !== chatRef.provider || chatModel.id !== chatRef.modelId)) {
-      this.logger.warn("configured chat model is not available", {
-        ghost: ghostName,
+      logger.warn("configured chat model is not available", {
         provider: chatRef.provider,
         modelId: chatRef.modelId,
       });
@@ -2788,8 +2788,7 @@ export class SessionHost {
     await this.sessionStartupProbe("agent-session", modelRuntime);
 
     for (const error of extensionsResult.errors ?? []) {
-      this.logger.error("extension failed to load", {
-        ghost: ghostName,
+      logger.error("extension failed to load", {
         path: error.path,
         error: String(error.error),
       });
@@ -2802,14 +2801,14 @@ export class SessionHost {
       ? { provider: initialModel.provider, id: initialModel.id }
       : null;
 
-    this.logger.info("ghost session opened", {
-      ghost: ghostName,
+    logger.info("ghost session opened", {
       session: sessionKey,
       tools: toolNames.length,
       model: model ? `${model.provider}/${model.id}` : null,
     });
 
     const hosted: HostedSession = {
+      logger,
       ghost,
       sessionKey: key,
       session,
@@ -2877,7 +2876,7 @@ export class SessionHost {
       display: true,
       details: { attribution: "agent", jobId: job.id, status: job.status, exitCode: job.exitCode ?? null },
     }, { triggerTurn: true, deliverAs: "followUp" }).catch((error) => {
-      this.logger.warn("background job result could not be delivered", {
+      hosted.logger.warn("background job result could not be delivered", {
         session: key,
         job: job.id,
         error: error instanceof Error ? error.message : String(error),
@@ -2935,7 +2934,7 @@ export class SessionHost {
         await this.announceConversationUpdated(ghostName, "pi", conversationId);
         await this.settleDeferredSession(hosted);
       })().catch((error) => {
-        this.logger.warn("deferred session update after external turn failed", {
+        hosted.logger.warn("deferred session update after external turn failed", {
           session: hosted.sessionKey,
           error: error instanceof Error ? error.message : String(error),
         });
@@ -2947,12 +2946,12 @@ export class SessionHost {
     manager: SessionManager,
     ghostName: string,
     conversationId: string,
+    logger = this.logger.child({ ghost: ghostName, conversation: conversationId }),
   ): void {
     try {
       const title = migrateLegacySessionTitle(manager);
       if (title) {
-        this.logger.info("migrated legacy conversation title", {
-          ghost: ghostName,
+        logger.info("migrated legacy conversation title", {
           session: conversationId,
           title,
         });
@@ -2960,8 +2959,7 @@ export class SessionHost {
     } catch (error) {
       // Title recovery must never make an otherwise healthy conversation
       // impossible to resume. Listing still has the read-only fallback below.
-      this.logger.warn("legacy conversation title migration failed", {
-        ghost: ghostName,
+      logger.warn("legacy conversation title migration failed", {
         session: conversationId,
         error: error instanceof Error ? error.message : String(error),
       });
@@ -3280,7 +3278,7 @@ export class SessionHost {
               }
             : {}),
         },
-        this.logger,
+        hosted.logger,
       );
       await this.replaceHostedMcpManager(hosted, candidate, connected.configs, connected.sources);
       await this.updateHostedProjectMcpStatus(hosted, connected.result);
@@ -3329,9 +3327,11 @@ export class SessionHost {
             500,
           );
         }
-        this.logger.warn("conversation maintenance cleanup was not recorded", {
-          ghost: identity.ghostName,
-          runtime: identity.runtime,
+        this.logger
+          .child({ ghost: identity.ghostName, conversation: identity.conversationId })
+          .warn("conversation maintenance cleanup was not recorded", {
+            ghost: identity.ghostName,
+            runtime: identity.runtime,
         });
       } finally {
         release();
@@ -3486,7 +3486,7 @@ export class SessionHost {
       const additionalContext = ghostSessionStopContinuation(result);
       if (!additionalContext) return latestAssistantEntry;
       if (continuationCount >= GHOST_SESSION_STOP_CONTINUATION_CAP) {
-        this.logger.warn("session_stop continuation cap reached", {
+        hosted.logger.warn("session_stop continuation cap reached", {
           ghost: ghostName,
           session: hosted.session.sessionId,
           cap: GHOST_SESSION_STOP_CONTINUATION_CAP,
@@ -3549,7 +3549,7 @@ export class SessionHost {
             try {
               await pass.acknowledge();
             } catch {
-              this.logger.warn("before_prompt hook acknowledgement failed", {
+              hosted.logger.warn("before_prompt hook acknowledgement failed", {
                 ghost: hosted.ghost.name,
                 runtime: "pi",
               });
@@ -3650,7 +3650,7 @@ export class SessionHost {
       await this.settlePiOwnerPasses(hosted);
     } catch (error) {
       settlementError = error;
-      this.logger.warn("Pi owner pass settlement failed", {
+      hosted.logger.warn("Pi owner pass settlement failed", {
         ghost: hosted.ghost.name,
         error: error instanceof Error ? error.message : String(error),
       });
@@ -3680,7 +3680,7 @@ export class SessionHost {
   ): Promise<void> {
     if (!this.maintenance) return;
     if (!activity) {
-      this.logger.warn("conversation maintenance owner activity was not recorded", {
+      hosted.logger.warn("conversation maintenance owner activity was not recorded", {
         ghost: ghostName,
         runtime: "pi",
       });
@@ -3692,7 +3692,7 @@ export class SessionHost {
         activity,
       );
     } catch {
-      this.logger.warn("conversation maintenance owner activity was not recorded", {
+      hosted.logger.warn("conversation maintenance owner activity was not recorded", {
         ghost: ghostName,
         runtime: "pi",
       });
@@ -3836,7 +3836,7 @@ export class SessionHost {
   private createHostedMcpCandidate(hosted: HostedSession): GhostMcpManager {
     return new GhostMcpManager({
       cwd: hosted.session.sessionManager.getCwd(),
-      logger: this.logger,
+      logger: hosted.logger,
     });
   }
 
@@ -3852,8 +3852,7 @@ export class SessionHost {
       await hosted.session.reload();
     });
     mcp.refresh = run.catch(() => {
-      this.logger.warn("ghost project MCP tool refresh failed", {
-        ghost: hosted.ghost.name,
+      hosted.logger.warn("ghost project MCP tool refresh failed", {
         code: "mcp_tool_load_failed",
       });
     });
@@ -3911,8 +3910,7 @@ export class SessionHost {
         throw error;
       }
       await previous.disconnectAll().catch(() => {
-        this.logger.warn("previous project MCP manager did not close cleanly", {
-          ghost: hosted.ghost.name,
+        hosted.logger.warn("previous project MCP manager did not close cleanly", {
           code: "mcp_connection_failed",
         });
       });
@@ -3988,8 +3986,7 @@ export class SessionHost {
     })();
     hosted.toolCwdWrite = write;
     void write.catch((error) => {
-      this.logger.warn("could not persist a tool working directory", {
-        ghost: hosted.ghost.name,
+      hosted.logger.warn("could not persist a tool working directory", {
         toolCallId,
         error: error instanceof Error ? error.message : String(error),
       });
@@ -4083,8 +4080,7 @@ export class SessionHost {
         ghostName,
       );
     } catch (error) {
-      this.logger.warn("model rebind failed", {
-        ghost: ghostName,
+      hosted.logger.warn("model rebind failed", {
         error: (error as Error).message,
       });
     }
@@ -4108,8 +4104,7 @@ export class SessionHost {
     try {
       ref = resolveChatModelRef(readGhostModels(configDir));
     } catch (error) {
-      this.logger.error("models.json is unusable", {
-        ghost: ghostName,
+      this.logger.child({ ghost: ghostName }).error("models.json is unusable", {
         error: (error as Error).message,
       });
       const current = session.model;
@@ -4117,8 +4112,7 @@ export class SessionHost {
     }
     const model = resolveChatModel(ref, modelRuntime.getAvailableSnapshot());
     if (ref && (model?.provider !== ref.provider || model.id !== ref.modelId)) {
-      this.logger.warn("configured chat model is not available", {
-        ghost: ghostName,
+      this.logger.child({ ghost: ghostName }).warn("configured chat model is not available", {
         provider: ref.provider,
         modelId: ref.modelId,
       });
@@ -4252,7 +4246,7 @@ export class SessionHost {
         pendingTerminal = { type: "done", reason: "stop", usage: zeroUsage() };
       }
     } catch (error) {
-      this.logger.error("direct bash command failed", {
+      hosted.logger.error("direct bash command failed", {
         ghost: ghostName,
         error: error instanceof Error ? error.message : String(error),
       });
@@ -4335,8 +4329,7 @@ export class SessionHost {
         return { runtime: "claude-code", modelId: configured.modelId };
       }
     } catch (error) {
-      this.logger.error("models.json is unusable", {
-        ghost: ghostName,
+      this.logger.child({ ghost: ghostName }).error("models.json is unusable", {
         error: error instanceof Error ? error.message : String(error),
       });
     }
@@ -4729,7 +4722,7 @@ export class SessionHost {
       settlementBarrier = this.deferPiSettlement(hosted, finishMaintenance);
       await promptPiSession(hosted.session, options.prompt, hosted.skills);
     } catch (error) {
-      this.logger.error("turn failed", {
+      hosted.logger.error("turn failed", {
         ghost: ghostName,
         error: (error as Error).message,
       });
@@ -4858,7 +4851,7 @@ export class SessionHost {
     });
     tracked = generation.catch((error: unknown) => {
       if (!controller.signal.aborted) {
-        this.logger.warn("conversation recap generation failed", {
+        hosted.logger.warn("conversation recap generation failed", {
           ghost: ghostName,
           session: id,
           error: error instanceof Error ? error.message : String(error),
@@ -4922,7 +4915,7 @@ export class SessionHost {
         // A concurrent turn may have titled it first; do not overwrite.
         if (!title || hosted.session.sessionName) return;
         hosted.session.setSessionName(title);
-        this.logger.info("named ghost conversation", {
+        hosted.logger.info("named ghost conversation", {
           ghost: ghostName,
           session: hosted.session.sessionId,
           title,
@@ -4932,7 +4925,7 @@ export class SessionHost {
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted && !timedOut) return;
-        this.logger.warn("conversation title generation failed", {
+        hosted.logger.warn("conversation title generation failed", {
           ghost: ghostName,
           error: error instanceof Error ? error.message : String(error),
         });
@@ -4949,11 +4942,12 @@ export class SessionHost {
 
   async greeting(ghostName: string): Promise<GreetingResult> {
     const ghost = this.registry.get(ghostName);
+    const logger = this.logger.child({ ghost: ghost.name });
     const unavailable = new Set<GhostHomeDigestInput>();
     const reportUnavailable = (input: GhostHomeDigestInput) => {
       if (unavailable.has(input)) return;
       unavailable.add(input);
-      this.logger.warn("greeting input unavailable", { ghost: ghost.name, input });
+      logger.warn("greeting input unavailable", { input });
     };
     let character: string | null = null;
     let characterAvailable = true;
@@ -4979,7 +4973,7 @@ export class SessionHost {
         const context = await this.greetingContext(ghost, onboarding, reportUnavailable);
         return { greeting: await this.generateGreetingFor({ ghost, context }), onboarding };
       } catch {
-        this.logger.warn("greeting generation failed", { ghost: ghost.name });
+        logger.warn("greeting generation failed");
         return { greeting: null, onboarding };
       }
     });
@@ -4994,6 +4988,7 @@ export class SessionHost {
     onboarding: boolean,
     onUnavailable: (input: GhostHomeDigestInput) => void,
   ): Promise<GreetingContextInput> {
+    const logger = this.logger.child({ ghost: ghost.name });
     const paths = ghostPaths(ghost.dir);
     const digest: GhostHomeDigest = await readGhostHomeDigest(
       paths.home,
@@ -5013,7 +5008,7 @@ export class SessionHost {
         );
       if (newest) daysSinceLastConversation = wholeDaysSince(newest);
     } catch {
-      this.logger.warn("greeting conversation recency unavailable", { ghost: ghost.name });
+      logger.warn("greeting conversation recency unavailable");
     }
 
     return {
@@ -5255,8 +5250,7 @@ export class SessionHost {
     try {
       const stored = this.applySessionName(hosted?.session, manager, title);
       this.legacyTitles.delete(sessionFile);
-      this.logger.info("renamed ghost conversation", {
-        ghost: ghostName,
+      (hosted?.logger ?? this.logger.child({ ghost: ghostName, conversation: id })).info("renamed ghost conversation", {
         session: id,
         title: stored,
       });
@@ -5678,10 +5672,10 @@ export class SessionHost {
     await this.finishForkArtifactState(sessionDir, marker, record, artifacts, []);
   }
 
-  private recoverForkTransactions(sessionDir: string): Promise<void> {
+  private recoverForkTransactions(sessionDir: string, ghostName: string): Promise<void> {
     const existing = this.forkRecoveries.get(sessionDir);
     if (existing) return existing;
-    const recovery = this.recoverForkTransactionsOnce(sessionDir).finally(() => {
+    const recovery = this.recoverForkTransactionsOnce(sessionDir, ghostName).finally(() => {
       if (this.forkRecoveries.get(sessionDir) === recovery) {
         this.forkRecoveries.delete(sessionDir);
       }
@@ -5690,7 +5684,7 @@ export class SessionHost {
     return recovery;
   }
 
-  private async recoverForkTransactionsOnce(sessionDir: string): Promise<void> {
+  private async recoverForkTransactionsOnce(sessionDir: string, ghostName: string): Promise<void> {
     let names: string[];
     try {
       names = await readdir(sessionDir);
@@ -5702,6 +5696,7 @@ export class SessionHost {
       const marker = join(sessionDir, name);
       if (this.activeForks.has(marker)) continue;
       let markerValidated = false;
+      let conversationId: string | undefined;
       try {
         const value = JSON.parse(await readDaemonControlFile(
           marker,
@@ -5790,6 +5785,7 @@ export class SessionHost {
           throw new Error("invalid fork transaction artifact paths");
         }
         markerValidated = true;
+        conversationId = record.conversationId;
         let recoverable = true;
         for (const [temporary, final] of pairs) {
           if (!(await this.transactionEntryExists(temporary))
@@ -5823,7 +5819,11 @@ export class SessionHost {
           toolCwds,
         ]);
       } catch {
-        this.logger.error(markerValidated ? "fork recovery is still pending" : "fork recovery marker is invalid", {
+        const logger = this.logger.child({
+          ghost: ghostName,
+          ...(conversationId ? { conversation: conversationId } : {}),
+        });
+        logger.error(markerValidated ? "fork recovery is still pending" : "fork recovery marker is invalid", {
           path: marker,
           code: markerValidated ? "fork_recovery_pending" : "fork_marker_invalid",
         });
@@ -5836,7 +5836,7 @@ export class SessionHost {
   ): Promise<StoredSessionRow[]> {
     const paths = ghostPaths(ghost.dir);
     mkdirSync(paths.sessionDir, { recursive: true });
-    await this.recoverForkTransactions(paths.sessionDir);
+    await this.recoverForkTransactions(paths.sessionDir, ghost.name);
     const [sessions, claudeSessions] = await Promise.all([
       SessionManager.listAll(paths.sessionDir),
       this.claudeCode.listSessions(ghost),
@@ -6304,9 +6304,7 @@ export class SessionHost {
         Object.entries(reads).filter(([id]) => remainingIds.has(id)),
       ));
     } catch (error) {
-      this.logger.warn("could not discard an abandoned branch copy", {
-        ghost: ghostName,
-        conversation: forkId,
+      this.logger.child({ ghost: ghostName, conversation: forkId }).warn("could not discard an abandoned branch copy", {
         error: error instanceof Error ? error.message : String(error),
       });
     }
@@ -6804,8 +6802,7 @@ export class SessionHost {
         conversationId: id,
       });
       maintenanceDeleteOutcome = "completed";
-      this.logger.info("trashed ghost conversation", {
-        ghost: ghostName,
+      this.logger.child({ ghost: ghostName, conversation: id }).info("trashed ghost conversation", {
         session: identity.id,
         artifacts: artifacts.map((entry) => entry.artifact),
       });
@@ -6841,7 +6838,7 @@ export class SessionHost {
       const trashed = this.registry.trash(ghost.name);
       this.maintenance?.completeGhostDelete(ghost.name);
       this.forgetGhost(ghost.name, ghost.dir);
-      this.logger.info("trashed ghost", { ghost: ghost.name, trash: trashed.trash });
+      this.logger.child({ ghost: ghost.name }).info("trashed ghost", { trash: trashed.trash });
       return trashed;
     } finally {
       this.reservedGhosts.delete(ghost.name);
@@ -6885,7 +6882,7 @@ export class SessionHost {
       const renamed = this.registry.rename(ghost.name, nextName);
       await this.maintenance?.completeGhostRename(ghost.name, nextName);
       this.forgetGhost(ghost.name, ghost.dir);
-      this.logger.info("renamed ghost", { ghost: ghost.name, name: renamed.name });
+      this.logger.child({ ghost: ghost.name }).info("renamed ghost", { name: renamed.name });
       return renamed;
     } finally {
       this.reservedGhosts.delete(ghost.name);
@@ -6992,9 +6989,7 @@ export class SessionHost {
       await this.closeHostedSession(key, "project binding changed");
     } catch {
       try {
-        this.logger.warn("committed project session cleanup is pending retry", {
-          ghost: ghostName,
-          conversation: sessionId,
+        this.logger.child({ ghost: ghostName, conversation: sessionId }).warn("committed project session cleanup is pending retry", {
           code: "project_cleanup_pending",
         });
       } catch {
@@ -7174,7 +7169,7 @@ export class SessionHost {
 
   private reportCleanupFailure(hosted: HostedSession | undefined, stage: string, error: unknown): void {
     try {
-      this.logger.warn("session cleanup failed", {
+      (hosted?.logger ?? this.logger).warn("session cleanup failed", {
         ...(hosted ? { session: hosted.sessionKey } : {}),
         stage,
         error: error instanceof Error ? error.message : String(error),

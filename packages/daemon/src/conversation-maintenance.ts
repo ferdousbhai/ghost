@@ -1240,7 +1240,10 @@ export class ConversationMaintenance {
       };
       const running = this.dispatchIdle(slot, generation, pending, event, due, retryDue, wokeAt)
         .catch((error) => {
-          if (!controller.signal.aborted) this.logger.warn("conversation maintenance failed", {
+          if (!controller.signal.aborted) this.logger.child({
+            ghost: slot.identity.ghostName,
+            conversation: slot.identity.conversationId,
+          }).warn("conversation maintenance failed", {
             ghost: slot.identity.ghostName,
             runtime: slot.identity.runtime,
             error: error instanceof Error ? error.message : String(error),
@@ -1489,7 +1492,10 @@ export class ConversationMaintenance {
       });
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
-      this.logger.warn("conversation maintenance was not re-armed after a released reservation", {
+      this.logger.child({
+        ghost: slot.identity.ghostName,
+        conversation: slot.identity.conversationId,
+      }).warn("conversation maintenance was not re-armed after a released reservation", {
         ghost: slot.identity.ghostName,
         runtime: slot.identity.runtime,
         error: error instanceof Error ? error.name : "unknown",
@@ -1549,7 +1555,10 @@ export class ConversationMaintenance {
           last?.outcome ?? "completed",
         );
       } catch (error) {
-        this.logger.warn("renamed conversation maintenance state was not armed", {
+        this.logger.child({
+          ghost: next,
+          conversation: slot.identity.conversationId,
+        }).warn("renamed conversation maintenance state was not armed", {
           ghost: next,
           runtime: slot.identity.runtime,
           error: error instanceof Error ? error.name : "unknown",
@@ -1641,7 +1650,7 @@ export class ConversationMaintenance {
           restored += 1;
         } catch (error) {
           invalid += 1;
-          this.logger.warn("conversation maintenance state was not restored", {
+          this.logger.child({ ghost: ghostName }).warn("conversation maintenance state was not restored", {
             ghost: ghostName,
             file: name,
             error: error instanceof Error ? error.message : String(error),
