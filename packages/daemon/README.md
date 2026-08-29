@@ -9,9 +9,10 @@ in [`docs/claude-code-runtime.md`](../../docs/claude-code-runtime.md).
 ## Run it
 
 Ghost runs on Bun 1.3.14 or newer (`bun --bun`). `pnpm --filter @ghost/daemon
-build:binary` compiles `ghostd` into one self-contained executable
-(`packages/daemon/dist/ghostd`, Bun runtime included, version embedded); it
-needs no `node_modules` at runtime. Playwright's optional BiDi/Electron
+build:binary` compiles `ghostd` and its `ghost` terminal client into
+self-contained executables (`packages/daemon/dist/ghostd` and `dist/ghost`, Bun
+runtime included, version embedded); they need no `node_modules` at runtime.
+Playwright's optional BiDi/Electron
 modules and macOS `fsevents` are left external because Ghost drives Chromium
 over CDP and never loads them. The Arch development package installs this
 artifact directly as `/usr/bin/ghostd`; it does not install the daemon source
@@ -34,6 +35,29 @@ ghostd [options]
       --offline            disable pi catalogue network refresh
       --log-level <level>  debug | info | warn | error
 ```
+
+## Terminal client
+
+The implementation in `src/cli/` is an HTTP client of ghostd's public contract;
+it never constructs a session or reads a ghost home. The division is simple:
+`ghostd` runs the machine (`api-token`, `remote`, `login`, `import`), while
+`ghost` talks to a ghost.
+
+```sh
+ghost say "Summarize what we were doing"
+ghost sessions
+ghost show -s cli-abc
+ghost ask -s cli-abc
+ghost watch
+ghost smoke --no-turn
+```
+
+Use `-g/--ghost` to choose a persona and `-s/--session` with an exact id or
+unique prefix. `ghost use <name>` persists the default ghost. Every command has
+`--json`, `--quiet`, and `--help`; `ghost help exit-codes` prints the stable
+automation contract. `ghost smoke` starts a scratch daemon and a scratch ghost;
+a real turn needs a provider signed in inside that scratch home, so CI uses
+`--no-turn`.
 
 `config.json` carries the same settings plus `browserMode`, `compaction`, and
 `askTimeoutSeconds`. Compaction is pi's native compaction: `enabled` defaults
@@ -367,8 +391,8 @@ The authoritative route and payload contract is
 | GET | `/api/documents` | lazily list one shared Documents directory |
 | DELETE | `/api/documents` | move one confirmed regular Documents file to Trash |
 | PUT | `/api/ghosts/:name/name` | rename the ghost, moving its whole home |
-| GET | `/api/ghosts/:name/context` | derive browsable character and memory; `agents` is an empty compatibility array while Pi subagents remain disabled |
-| DELETE | `/api/ghosts/:name/context` | move one confirmed memory file to Trash |
+| GET/PUT | `/api/ghosts/:name/memory` | list or write the ghost's plain memory files |
+| DELETE | `/api/ghosts/:name/memory` | move one confirmed memory file to Trash |
 | GET/PUT | `/api/ghosts/:name/sessions/:id/project` | inspect, bind, or unbind one conversation project |
 | POST | `/api/ghosts/:name/sessions/:id/project/preview` | inspect a project and mint a short-lived trust receipt |
 | POST | `/api/ghosts/:name/sessions/:id/project/reload` | refresh an idle conversation's trusted snapshot |

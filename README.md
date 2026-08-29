@@ -29,6 +29,16 @@ index pressure; every memory write redacts common credential forms before disk.
 Provider and MCP secrets live in Linux Secret Service, while portable config
 holds only keyring references; see [docs/keyring.md](docs/keyring.md).
 
+The `ghost` terminal client talks only to ghostd's authenticated HTTP API. Use
+it for a quick terminal conversation or to inspect the same sessions the HUD
+shows; `ghostd` remains the machine-management command.
+
+```sh
+ghost say "What should I focus on today?"
+ghost sessions
+ghost show -s cli-abc
+```
+
 Status: beta release candidate. See CONTRACTS.md for the data and API
 contracts, and [docs/hooks.md](docs/hooks.md) for awaited model-harness hooks.
 
