@@ -72,7 +72,7 @@ describe("Pi project snapshot schema", () => {
     const piRendered = renderPiDeclarativePrompt(effective);
     expect(piRendered).toContain("TYPED-INSTRUCTION-SENTINEL");
     expect(piRendered).toContain("TYPED-RULE-SENTINEL");
-    expect(piRendered).toContain("- typed: typed");
+    expect(piRendered).toContain(`- typed: typed (${join(project, ".omp", "skills", "typed", "SKILL.md")})`);
     expect(piRendered).not.toContain("TYPED-SKILL-SENTINEL");
     expect(piRendered).not.toContain("TYPED-PROMPT-SENTINEL");
     expect(piRendered).not.toContain("TYPED-COMMAND-SENTINEL");

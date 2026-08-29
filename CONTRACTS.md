@@ -24,10 +24,20 @@ Owner-home or project executable extensions, hooks,
 TypeScript commands, and custom code tools are disabled until #31 can load them
 in a per-session isolated worker. A deliberately bound project's data-only
 instructions, skills, rules, Markdown prompts/commands, and MCP join the
-snapshot. A pi session has no `task` tool, and every custom or ambient subagent
-definition stays disabled until #31 supplies an isolated per-session agent
-boundary. Ghost and project `agents/*.md` definitions remain previewed but
-inert. Claude Code retains its own native subagents.
+snapshot. The only machine-level declarative exceptions are recommended CLI
+skills installed under `~/.agents/skills/`: `basecamp`, `firecrawl`, `hey`;
+Obsidian's `json-canvas`, `obsidian-bases`, `obsidian-cli`, and
+`obsidian-markdown`; and Google Workspace's broad `gws-calendar`, `gws-chat`,
+`gws-docs`, `gws-drive`, `gws-forms`, `gws-gmail`, `gws-keep`, `gws-meet`,
+`gws-people`, `gws-shared`, `gws-sheets`, `gws-slides`, `gws-tasks`, and
+`gws-workflow` entrypoints. Pi reads only each listed directory's exact
+`SKILL.md`, requires its frontmatter name to match, and admits it at session
+construction with lowest name precedence, before ghost-home and then project
+resources. It scans no nested or sibling ambient skill and no other owner-home
+coding-agent directory. A pi session has no `task` tool, and every custom or
+ambient subagent definition stays disabled until #31 supplies an isolated
+per-session agent boundary. Ghost and project `agents/*.md` definitions remain
+previewed but inert. Claude Code retains its own native subagents.
 
 ```
 ~/ghosts/<name>/
@@ -336,10 +346,11 @@ prompt prose is retained or subtracted by marker.
 
 The Ghost-owned pi prompt is ordered: the complete `character.md` body (or a
 two-line unwritten-character fallback); the fenced, bounded memory index; the
-fenced, shallow Documents index; accepted
-instruction files and unconditional `alwaysApply` rules; compact name and
-description indexes for visible skills and discoverable rules; then the seeded
-first-meeting section when applicable. Skill bodies, conditional-rule bodies,
+fenced, shallow Documents index; accepted instruction files and unconditional
+`alwaysApply` rules; a compact index of visible skill names, descriptions, and
+`SKILL.md` locations; the discoverable-rule index; then the seeded first-meeting
+section when applicable.
+Skill bodies, conditional-rule bodies,
 Markdown prompts, and Markdown commands enter model context only through their
 explicit invocation paths (`/skill:<name>`, an admitted Markdown command or
 prompt template, or native `read`). The golden session fixture records the
@@ -470,21 +481,31 @@ naming the role to bind. A chat model that accepts images is told to use
 pi's `read`, which attaches image files itself; `ghost_screen` already points
 a blind model at `inspect_image` for its saved frames.
 
-`web_search` is Ghost-owned (`packages/daemon/src/web-search.ts`): a provider
-chain read from `settings.yml`. The default order is Brave Search, Firecrawl's
-search API, then DuckDuckGo's no-JS HTML frontend (one page; a bot challenge
-is that provider's failure); a provider without its key is skipped, so the
-keyless default is Firecrawl then DuckDuckGo. `web.search.<provider>.apiKey`
-holds a `keyring:` reference (never a literal) per keyed provider — `brave`
-needs one, `firecrawl` lifts its rate limit with one — resolved through the
-ghost's secret policy on every call, and `web.search.providers` orders the
-chain explicitly. Titles and snippets are decoded and tag-stripped once, in
-the chain, before the model sees them. The tool takes `query`, `limit` (default 8, max 20), and
-`recency` (`day`/`week`/`month`/`year`), tries providers in order, and answers
-with numbered title/URL/snippet rows inside an `<untrusted>` fence; when every
-provider fails the error lists each failure. Keys are resolved through the
-ghost's secret resolver at call time and never enter settings, transcripts, or
-tool results.
+Ghost registers neither `web_search` nor `web_fetch` for pi and packages no
+third-party CLI or skill. Arch packaging recommends the system prerequisites;
+the owner installs and updates each optional integration from its upstream
+source as the desktop user:
+
+- Firecrawl: `npx -y firecrawl-cli@latest init --all --skip-auth` (replace
+  `--skip-auth` with `--browser` for its authenticated flow).
+- HEY: current Omarchy supplies a mise-backed `hey`; an older install with no
+  `hey` command runs `omarchy update` to receive that migration, then
+  `hey skill install`.
+- Basecamp: `omarchy pkg add basecamp-cli`, then `basecamp skill install`.
+- Obsidian: `omarchy pkg add obsidian`, enable **Settings → General → Command
+  line interface** in Obsidian 1.12.7 or newer, then install the four
+  allowlisted skills from `https://github.com/kepano/obsidian-skills` with
+  `npx skills` globally.
+- Google Workspace: `npm install -g @googleworkspace/cli`, then install the
+  allowlisted broad service skills from `https://github.com/googleworkspace/cli`
+  with `npx skills` globally.
+
+Firecrawl's main skill routes web work through its CLI over `bash` and links
+its other installed skills progressively. The other admitted skills similarly
+teach pi to invoke their CLIs through `bash`; Ghost adds no product-specific
+tool. Plan mode refuses those service commands because they are absent from its
+read-only Bash allowlist. Claude Code keeps its native integrations and
+receives none of these pi-only resources.
 
 Background jobs are Ghost-owned (`packages/daemon/src/jobs.ts`) and
 conversation-scoped. Ghost's own `bash` tool replaces pi's by name and runs

@@ -368,7 +368,7 @@ export function createBashTool(options: BashToolOptions): ToolDefinition<typeof 
   return {
     name: "bash",
     label: "Bash",
-    description: `Execute a bash command in the conversation's working directory. Set background:true for a long-running command; a foreground command that runs longer than ${Math.round(options.autoBackgroundMs / 1_000)}s becomes a background job automatically and its result is delivered when it finishes.`,
+    description: `Execute Bash in the conversation's working directory. Foreground commands running longer than ${Math.round(options.autoBackgroundMs / 1_000)}s continue as background jobs.`,
     parameters: bashToolSchema,
     async execute(_toolCallId, params, signal, onUpdate) {
       let lastUpdate = 0;

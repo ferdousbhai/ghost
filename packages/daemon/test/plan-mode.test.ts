@@ -69,7 +69,20 @@ describe("plan mode", () => {
     for (const ok of ["ls -la", "git status && git diff --stat", "rg foo src | head -20", "FOO=1 cat file.txt", "sed -n 1,10p a.ts"]) {
       expect(isReadOnlyCommand(ok), ok).toBe(true);
     }
-    for (const bad of ["rm -rf x", "echo hi > out.txt", "git commit -m x", "cat a | tee b", "sed -i s/a/b/ f", "npm install", ""]) {
+    for (const bad of [
+      "rm -rf x",
+      "echo hi > out.txt",
+      "git commit -m x",
+      "cat a | tee b",
+      "sed -i s/a/b/ f",
+      "npm install",
+      "firecrawl search cats",
+      "hey box list",
+      "basecamp projects list",
+      "obsidian read",
+      "gws gmail users messages list",
+      "",
+    ]) {
       expect(isReadOnlyCommand(bad), bad).toBe(false);
     }
   });

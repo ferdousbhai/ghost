@@ -238,10 +238,9 @@ isolated per-session boundary. A pi session has no `task` tool, so no
 bundled, project, ghost-file, or ambient subagent is invokable in phase 1.
 pi's native `bash`, `edit`, `find`, `grep`, `ls`, `read`, and `write` plus
 Ghost's own tools (registered directly as pi custom tools) remain available;
-Ghost's own `bash`/`jobs` (background jobs), `web_search`, and
-`inspect_image` (the `vision_model` role describes an image a blind chat model
-cannot see) join them. There is no tool approval; `ask` is not an approval
-prompt.
+Ghost's own `bash`/`jobs` (background jobs) and `inspect_image` (the
+`vision_model` role describes an image a blind chat model cannot see) join
+them. There is no tool approval; `ask` is not an approval prompt.
 
 Claude Code sessions retain Claude's native subagents.
 
@@ -334,10 +333,11 @@ ad-hoc prompts:
   conversation read-only until the model's `propose_plan` is approved through
   `ask`; the approved plan is pinned into every later turn. The `todo` tool and
   `/todo` keep a phased task list the shell can show (`GET …/sessions/:id/todo`).
-- `web_search` tries Brave Search, Firecrawl, then DuckDuckGo, skipping a
-  provider without its key — so it works keyless out of the box. A
-  `keyring:<service>/<account>` reference under `web.search.<provider>.apiKey`
-  in `settings.yml` supplies a key; `web.search.providers` orders the chain.
+- Pi can use recommended Firecrawl, HEY, Basecamp, Obsidian, and Google
+  Workspace CLI skills through `bash` when the owner installs them from their
+  upstream sources. Ghost admits only the exact allowlisted
+  `~/.agents/skills/<name>/SKILL.md` entrypoints with matching names, not nested
+  or other ambient skills.
 - Background jobs: `bash` with `background: true` starts a command as a job of
   the conversation, and a foreground command that runs longer than the
   auto-background budget (60 s by default) continues as one. The model's `jobs`
