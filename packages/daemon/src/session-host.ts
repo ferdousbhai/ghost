@@ -11,6 +11,7 @@ import { homedir } from "node:os";
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { collectGhostExtension, openGhostHome } from "@ghost/extensions";
 import {
+  convertToLlm,
   createAgentSession,
   createLocalBashOperations,
   createSyntheticSourceInfo,
@@ -160,6 +161,8 @@ import {
 import { GhostMcpManager } from "./mcp-manager.js";
 import { validateServerName, type MCPServerConfig } from "./mcp-config.js";
 import { resolveChatModel } from "./model-routing.js";
+import { buildRecapPrompt, normalizeRecap } from "./recap.js";
+import { assistantText } from "./smol.js";
 import {
   convertOmpTranscript,
   hasOmpTitleSlot,
@@ -740,6 +743,11 @@ interface HostedMCP {
   reload?: Promise<void>;
 }
 
+interface HostedRecap {
+  controller: AbortController;
+  task: Promise<string | null>;
+}
+
 interface HostedSession extends GhostSessionHandle {
   project: ProjectBindingState;
   projectSnapshot: ProjectDeclarativeSnapshot | null;
@@ -792,6 +800,8 @@ interface HostedSession extends GhostSessionHandle {
    */
   title?: Promise<void>;
   titleAbort?: AbortController;
+  /** One abortable, non-persisted completion over the current Pi context. */
+  recap?: HostedRecap;
   collaborationTransitions?: number;
   rawCollaborationPrompts?: number;
   rawCollaborationIdle?: Promise<void>;
@@ -2088,6 +2098,8 @@ export class SessionHost {
       return this.liveVoice.setMuted(key, action === "mute");
     }
 
+    const recapCancellation = this.cancelRecap(key);
+    if (recapCancellation) await recapCancellation;
     const current = this.liveVoice.status(key);
     const currentHosted = this.sessions.get(key);
     if (current.active && (currentHosted?.liveVoiceTransitions ?? 0) === 0) return current;
@@ -2908,7 +2920,12 @@ export class SessionHost {
     const [ghostName, conversationId] = sessionKeyParts(hosted.sessionKey);
     return hosted.session.subscribe((event) => {
       this.touchSession(hosted);
-      if (event.type === "agent_start") hosted.runSignal = hosted.session.agent.signal;
+      if (event.type === "agent_start") {
+        hosted.runSignal = hosted.session.agent.signal;
+        // Raw collaboration, voice, and job turns bypass HTTP admission; they
+        // still win over a presentation-only recap.
+        hosted.recap?.controller.abort();
+      }
       if (event.type === "tool_execution_start") {
         this.recordToolCwd(hosted, event.toolCallId, hosted.session.sessionManager.getCwd());
       }
@@ -3285,6 +3302,7 @@ export class SessionHost {
 
   private sessionOwned(hosted: HostedSession): boolean {
     return hosted.busy
+      || hosted.recap !== undefined
       || (hosted.rawCollaborationPrompts ?? 0) > 0
       || hosted.pendingOwnerPasses.length > 0
       || hosted.ownerPassSettlement !== undefined
@@ -4017,6 +4035,17 @@ export class SessionHost {
     }
   }
 
+  /** Cancel presentation-only recap work before admitting owner activity. */
+  private cancelRecap(key: string): Promise<void> | undefined {
+    const hosted = this.sessions.get(key);
+    const recap = hosted?.recap;
+    if (!recap) return undefined;
+    recap.controller.abort();
+    return recap.task.catch(() => {}).then(async () => {
+      if (hosted) await this.settleDeferredSession(hosted);
+    });
+  }
+
   private async settleLiveVoiceSession(key: string): Promise<void> {
     if (this.disposed) return;
     const hosted = this.sessions.get(key);
@@ -4451,6 +4480,10 @@ export class SessionHost {
       this.turnAdmissions.delete(admissionKey);
     };
     try {
+      // Reserve first so another owner cannot slip in while recap cancellation
+      // drains; owner work then wins this presentation-only boundary.
+      const recapCancellation = this.cancelRecap(admissionKey);
+      if (recapCancellation) await recapCancellation;
       const configured = this.selectedTurnRuntime(ghostName);
       await this.assertProjectRuntimeMatches(ghostName, conversationId, configured.runtime);
       const bashCommand = parseUserBashCommand(options.prompt);
@@ -4748,6 +4781,107 @@ export class SessionHost {
       }
       await this.announceConversationUpdated(ghostName, "pi", conversationId);
     }
+  }
+
+  /** Generate one transient recap without adding either message to the transcript. */
+  async recap(
+    ghostName: string,
+    conversationId: string | null | undefined,
+    runtime: ConversationRuntime = "pi",
+    signal?: AbortSignal,
+  ): Promise<string | null> {
+    assertPiConversation(runtime, "Conversation recap");
+    const ghost = this.assertPiRuntime(ghostName, "Conversation recap");
+    const id = requireRawConversationId(conversationId ?? DEFAULT_SESSION_KEY);
+    const key = this.keyOf(ghostName, id);
+    const paths = ghostPaths(ghost.dir);
+    const sessionFile = join(paths.sessionDir, sessionFileNameFor(id));
+
+    // `open` creates a transcript. A recap is only a view over existing
+    // history, so an unknown id stays unknown instead of creating an empty row.
+    if (!existsSync(sessionFile) && !this.sessions.has(key) && !this.opening.has(key)) {
+      throw new GhostError(
+        "not_found",
+        `This ghost has no conversation ${JSON.stringify(id)}.`,
+        404,
+      );
+    }
+    if (this.turnAdmissions.has(key)) {
+      throw new GhostError(
+        "session_busy",
+        "Wait for this conversation to finish before generating a recap.",
+        409,
+      );
+    }
+    if (signal?.aborted) return null;
+
+    const hosted = (await this.open(ghostName, id)) as HostedSession;
+    this.assertPiRuntime(ghostName, "Conversation recap");
+    if (this.turnAdmissions.has(key) || this.sessionOwned(hosted)) {
+      throw new GhostError(
+        "session_busy",
+        "Wait for this conversation to finish before generating a recap.",
+        409,
+      );
+    }
+    await hosted.mcp?.reload;
+    if (this.turnAdmissions.has(key) || this.sessionOwned(hosted)) {
+      throw new GhostError(
+        "session_busy",
+        "Wait for this conversation to finish before generating a recap.",
+        409,
+      );
+    }
+
+    const branchMessages = hosted.session.sessionManager.buildSessionContext().messages;
+    if (branchMessages.length === 0 || signal?.aborted) return null;
+
+    const controller = new AbortController();
+    const onAbort = () => controller.abort(signal?.reason);
+    signal?.addEventListener("abort", onAbort, { once: true });
+    if (signal?.aborted) controller.abort(signal.reason);
+
+    let tracked!: Promise<string | null>;
+    const generation = Promise.resolve().then(async () => {
+      const chatRef = resolveChatModelRef(readGhostModels(paths.home));
+      const model = resolveChatModel(chatRef, hosted.modelRuntime.getAvailableSnapshot());
+      if (!model) throw new Error("This ghost has no available chat model for a recap.");
+      const response = await hosted.modelRuntime.complete(model, {
+        systemPrompt: hosted.session.systemPrompt,
+        messages: [
+          ...convertToLlm(branchMessages),
+          {
+            role: "user",
+            content: buildRecapPrompt(hosted.session.sessionName),
+            timestamp: Date.now(),
+          },
+        ],
+      }, { signal: controller.signal });
+      if (response.stopReason === "error" || response.stopReason === "aborted") {
+        throw new Error(response.errorMessage || `Recap generation ${response.stopReason}.`);
+      }
+      const recap = normalizeRecap(assistantText(response));
+      if (!recap) throw new Error("The chat model returned no usable recap text.");
+      return recap;
+    });
+    tracked = generation.catch((error: unknown) => {
+      if (!controller.signal.aborted) {
+        this.logger.warn("conversation recap generation failed", {
+          ghost: ghostName,
+          session: id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      return null;
+    }).finally(() => {
+      signal?.removeEventListener("abort", onAbort);
+      if (hosted.recap?.task === tracked) hosted.recap = undefined;
+      this.touchSession(hosted);
+    });
+    hosted.recap = { controller, task: tracked };
+    const recap = await tracked;
+    await this.settleDeferredSession(hosted);
+    return recap;
   }
 
   /**
@@ -6478,6 +6612,10 @@ export class SessionHost {
     if (this.ghostMoveReserved(ghostName)) {
       throw new GhostError("ghost_busy", "Wait for this ghost's filesystem move to finish.", 409);
     }
+    if (runtime === "pi") {
+      const recapCancellation = this.cancelRecap(piKey);
+      if (recapCancellation) await recapCancellation;
+    }
     const hosted = runtime === "pi" ? this.sessions.get(piKey) : undefined;
     const runtimeBusy = runtime === "pi"
       ? this.opening.has(piKey)
@@ -6794,9 +6932,10 @@ export class SessionHost {
     const hosted = [...this.sessions].filter(([key]) => sessionKeyParts(key)[0] === ghostName);
     // Title generation can still append to an otherwise-idle transcript. Let
     // it settle before the home moves out from under it.
-    const background = hosted
-      .flatMap(([, entry]) => [entry.title])
-      .filter((task): task is Promise<void> => task !== undefined);
+    for (const [, entry] of hosted) entry.recap?.controller.abort();
+    const background: Promise<unknown>[] = hosted
+      .flatMap(([, entry]) => [entry.title, entry.recap?.task])
+      .filter((task) => task !== undefined);
     if (background.length > 0) await Promise.allSettled(background);
 
     for (const [key] of hosted) await this.closePi(ghostName, sessionKeyParts(key)[1]);
@@ -7074,6 +7213,8 @@ export class SessionHost {
   private async disposePiSession(hosted: HostedSession): Promise<void> {
     const failures: unknown[] = [];
     await this.collectCleanupFailure(failures, () => this.detachHostedOwnership(hosted));
+    await this.collectCleanupFailure(failures, () => hosted.recap?.controller.abort());
+    await this.collectCleanupFailure(failures, () => hosted.recap?.task);
     await this.collectCleanupFailure(failures, () => this.flushHostedToolCwds(hosted));
     await this.collectCleanupFailure(failures, () => this.abortHostedBash(hosted));
     await this.collectCleanupFailure(failures, () => this.abortHostedSession(hosted));
@@ -7112,6 +7253,7 @@ export class SessionHost {
       this.launchCleanupStep(hosted, "abort bash", () => this.abortHostedBash(hosted));
       this.launchCleanupStep(hosted, "close ask", () => this.closeHostedAsk(hosted));
       this.launchCleanupStep(hosted, "abort title", () => this.abortHostedTitle(hosted));
+      this.launchCleanupStep(hosted, "abort recap", () => hosted.recap?.controller.abort());
       this.launchCleanupStep(hosted, "abort session", () => this.abortHostedSession(hosted));
     }
   }
@@ -7177,6 +7319,7 @@ export class SessionHost {
       this.launchCleanupStep(entry, "force abort bash", () => this.abortHostedBash(entry));
       this.launchCleanupStep(entry, "force close ask", () => this.closeHostedAsk(entry));
       this.launchCleanupStep(entry, "force abort title", () => this.abortHostedTitle(entry));
+      this.launchCleanupStep(entry, "force abort recap", () => entry.recap?.controller.abort());
       this.launchCleanupStep(entry, "force detach ownership", () => this.detachHostedOwnership(entry));
       this.launchCleanupStep(entry, "force abort session", () => this.abortHostedSession(entry));
       if (entry.mcp) {

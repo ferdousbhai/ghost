@@ -145,6 +145,9 @@ stop the mock separately.
   arriving word by word with `**bold**` rendered as bold. The narration never
   reaches the transcript, and the `read_memory` call it announced settles behind
   the row's quiet "1 step" toggle rather than into a card of its own.
+- After a completed Pi turn, leaving the composer empty for four minutes shows
+  a dim `※ recap:` line. For a quick mock preview, temporarily lower
+  `Ghostd.recapIdleMs`; typing or changing conversations clears it immediately.
 - With the HUD closed, a finished turn raises a `notify-send` notification
   instead.
 - `Esc` cancels a running turn (nothing when idle — a normal window is not
