@@ -1,6 +1,6 @@
 pragma ComponentBehavior: Bound
 
-// The docs surface: a markdown file, edited.
+// A Markdown source file, edited without lossy rich-text round trips.
 //
 // This began as `TextEdit { textFormat: TextEdit.MarkdownText }` — Qt 6 does
 // parse CommonMark into an editable document and can serialise it back through

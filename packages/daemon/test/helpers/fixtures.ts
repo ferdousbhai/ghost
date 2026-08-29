@@ -7,7 +7,6 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { MachineDocuments } from "@ghost/extensions";
-import { DocumentsService } from "../../src/documents.js";
 import { GhostRegistry, ghostPaths } from "../../src/ghosts.js";
 import { HomeOperationCoordinator } from "../../src/home-operations.js";
 import { McpCatalog } from "../../src/mcp-catalog.js";
@@ -147,7 +146,6 @@ export async function startTestDaemon(options: StartTestDaemonOptions = {}): Pro
     memory: options.memory,
     provider: { baseUrl: provider.url, modelId: provider.modelId },
   });
-  const documents = new DocumentsService(new MachineDocuments(temp.documentsDir));
   const homeOperations = new HomeOperationCoordinator(temp.registry);
   const host = new SessionHost({
     registry: temp.registry,
@@ -159,7 +157,6 @@ export async function startTestDaemon(options: StartTestDaemonOptions = {}): Pro
   const listening = await startDaemonServer({
     registry: temp.registry,
     host,
-    documents,
     homeOperations,
     mcp: new McpCatalog({ registry: temp.registry }),
     apiToken,

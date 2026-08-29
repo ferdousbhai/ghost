@@ -9,16 +9,12 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
-  symlinkSync,
-  unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { execFileSync } from "node:child_process";
-import { DOCUMENT_INLINE_MAX_BYTES, MachineDocuments } from "@ghost/extensions";
+import { MachineDocuments } from "@ghost/extensions";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { claudeSessionMetadataPath } from "../src/claude-code.js";
-import { DocumentsService } from "../src/documents.js";
 import { ghostPaths } from "../src/ghosts.js";
 import { HomeOperationCoordinator } from "../src/home-operations.js";
 import { McpCatalog } from "../src/mcp-catalog.js";
@@ -71,7 +67,6 @@ async function serve(
     provider: { baseUrl: provider.url, modelId: provider.modelId },
   });
   const machineDocuments = new MachineDocuments(join(temp.root, ".documents"));
-  const documents = new DocumentsService(machineDocuments);
   const homeOperations = new HomeOperationCoordinator(temp.registry);
   host = new SessionHost({
     registry: temp.registry,
@@ -84,7 +79,6 @@ async function serve(
   listening = await startDaemonServer({
     registry: temp.registry,
     host,
-    documents,
     mcp,
     homeOperations,
     port: 0,
@@ -388,257 +382,6 @@ describe("/api/hooks/config", () => {
 
     const posted = await fetch(`${base}/api/hooks/config`, { method: "POST" });
     expect(posted.status).toBe(405);
-  });
-});
-
-describe("/api/documents", () => {
-  it("lists and filters one shared directory with direct-child counts", async () => {
-    const base = await serve();
-    const root = join(temp!.root, ".documents");
-    mkdirSync(join(root, "Projects", "deep"), { recursive: true });
-    writeFileSync(join(root, "Projects", "deep", "hidden-from-root.txt"), "deep");
-    writeFileSync(join(root, "project brief.txt"), "arbitrary bytes");
-    writeFileSync(join(root, "other.pdf"), "pdf bytes");
-    writeFileSync(join(root, ".hidden"), "hidden");
-
-    const response = await fetch(`${base}/api/documents?q=PROJECT&limit=1`);
-    expect(response.status).toBe(200);
-    const body = await response.json() as {
-      root: string;
-      path: string;
-      query: string;
-      entries: Array<{ name: string; path: string; kind: string }>;
-      total: number;
-      fileCount: number;
-      directoryCount: number;
-      nextCursor: string | null;
-    };
-    expect(body).toMatchObject({
-      root,
-      path: "",
-      query: "PROJECT",
-      total: 2,
-      fileCount: 1,
-      directoryCount: 1,
-    });
-    expect(body.entries).toEqual([
-      { name: "Projects", path: "Projects", kind: "directory", modifiedAt: expect.any(String) },
-    ]);
-    expect(JSON.stringify(body)).not.toContain("hidden-from-root");
-
-    const next = await fetch(
-      `${base}/api/documents?q=PROJECT&limit=1&cursor=${encodeURIComponent(body.nextCursor ?? "")}`,
-    );
-    expect(next.status).toBe(200);
-    expect((await next.json() as { entries: Array<{ name: string }> }).entries)
-      .toEqual([expect.objectContaining({ name: "project brief.txt" })]);
-  });
-
-  it("keeps exact non-numeric ordering stable across API pages", async () => {
-    const base = await serve();
-    const root = join(temp!.root, ".documents");
-    mkdirSync(root, { recursive: true });
-    for (const name of ["file-2", "file-10", "file-1", "Alpha", "alpha"]) {
-      writeFileSync(join(root, name), name);
-    }
-    mkdirSync(join(root, "file-20"));
-    mkdirSync(join(root, "file-3"));
-
-    const names: string[] = [];
-    let cursor: string | null = null;
-    do {
-      const query = new URLSearchParams({ limit: "2" });
-      if (cursor) query.set("cursor", cursor);
-      const response = await fetch(`${base}/api/documents?${query}`);
-      expect(response.status).toBe(200);
-      const page = await response.json() as {
-        entries: Array<{ name: string }>;
-        nextCursor: string | null;
-      };
-      names.push(...page.entries.map((entry) => entry.name));
-      cursor = page.nextCursor;
-    } while (cursor);
-
-    expect(names).toEqual([
-      "file-20",
-      "file-3",
-      "Alpha",
-      "alpha",
-      "file-1",
-      "file-10",
-      "file-2",
-    ]);
-  });
-
-  it("returns cursor_stale after the direct entry set changes", async () => {
-    const base = await serve();
-    const root = join(temp!.root, ".documents");
-    mkdirSync(root, { recursive: true });
-    writeFileSync(join(root, "a.txt"), "a");
-    writeFileSync(join(root, "b.txt"), "b");
-    const first = await fetch(`${base}/api/documents?limit=1`);
-    const cursor = (await first.json() as { nextCursor: string }).nextCursor;
-    writeFileSync(join(root, "c.txt"), "c");
-
-    const stale = await fetch(
-      `${base}/api/documents?limit=1&cursor=${encodeURIComponent(cursor)}`,
-    );
-    expect(stale.status).toBe(409);
-    expect(await stale.json()).toMatchObject({ error: { code: "cursor_stale" } });
-  });
-
-  it("returns not_found for a missing direct or nested directory", async () => {
-    const base = await serve();
-    for (const path of ["missing", "missing/deep"]) {
-      const response = await fetch(
-        `${base}/api/documents?path=${encodeURIComponent(path)}`,
-      );
-      expect(response.status).toBe(404);
-      expect(await response.json()).toMatchObject({ error: { code: "not_found" } });
-    }
-  });
-
-  it("serves only bounded strict UTF-8 content through the confined content route", async () => {
-    const base = await serve();
-    const root = join(temp!.root, ".documents");
-    mkdirSync(root, { recursive: true });
-    const atLimit = "x".repeat(DOCUMENT_INLINE_MAX_BYTES);
-    writeFileSync(join(root, "at limit.md"), atLimit);
-    writeFileSync(join(root, "too-large.md"), `${atLimit}x`);
-    writeFileSync(join(root, "invalid.txt"), new Uint8Array([0xc3, 0x28]));
-    writeFileSync(join(root, "nul.txt"), new Uint8Array([0x61, 0, 0x62]));
-
-    const content = await fetch(
-      `${base}/api/documents/content?path=${encodeURIComponent("at limit.md")}`,
-    );
-    expect(content.status).toBe(200);
-    expect(await content.json()).toMatchObject({
-      root,
-      path: "at limit.md",
-      size: DOCUMENT_INLINE_MAX_BYTES,
-      content: atLimit,
-      modifiedAt: expect.any(String),
-    });
-    for (const [path, status, code] of [
-      ["too-large.md", 413, "document_too_large"],
-      ["invalid.txt", 400, "invalid_document_content"],
-      ["nul.txt", 400, "invalid_document_content"],
-    ] as const) {
-      const response = await fetch(
-        `${base}/api/documents/content?path=${encodeURIComponent(path)}`,
-      );
-      expect(response.status).toBe(status);
-      expect(await response.json()).toMatchObject({ error: { code } });
-    }
-  });
-
-  it("fails closed when listed content is replaced by a large file, FIFO, or symlink", async () => {
-    const base = await serve();
-    const root = join(temp!.root, ".documents");
-    mkdirSync(root, { recursive: true });
-    const changing = join(root, "changing.txt");
-    const outside = join(temp!.root, "outside-content.txt");
-    writeFileSync(changing, "small");
-    const listed = await fetch(`${base}/api/documents`);
-    expect((await listed.json() as { entries: Array<{ name: string }> }).entries)
-      .toContainEqual(expect.objectContaining({ name: "changing.txt" }));
-
-    unlinkSync(changing);
-    writeFileSync(changing, "x".repeat(DOCUMENT_INLINE_MAX_BYTES + 1));
-    let response = await fetch(`${base}/api/documents/content?path=changing.txt`);
-    expect(response.status).toBe(413);
-    expect(await response.json()).toMatchObject({ error: { code: "document_too_large" } });
-
-    unlinkSync(changing);
-    execFileSync("mkfifo", [changing]);
-    const started = Date.now();
-    response = await fetch(`${base}/api/documents/content?path=changing.txt`);
-    expect(Date.now() - started).toBeLessThan(1_000);
-    expect(response.status).toBe(400);
-    expect(await response.json()).toMatchObject({ error: { code: "invalid_path" } });
-
-    unlinkSync(changing);
-    writeFileSync(outside, "outside secret");
-    symlinkSync(outside, changing);
-    response = await fetch(`${base}/api/documents/content?path=changing.txt`);
-    expect(response.status).toBe(400);
-    const raw = await response.text();
-    expect(raw).not.toContain("outside secret");
-    expect(JSON.parse(raw)).toMatchObject({ error: { code: "invalid_path" } });
-  });
-
-  it("moves one exactly confirmed regular file to recoverable Trash", async () => {
-    const base = await serve();
-    const root = join(temp!.root, ".documents");
-    mkdirSync(join(root, "folder"), { recursive: true });
-    const file = join(root, "folder", "keep name.bin");
-    writeFileSync(file, "kept bytes");
-    const remove = (confirm: string) => fetch(`${base}/api/documents`, {
-      method: "DELETE",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ path: "folder/keep name.bin", confirm }),
-    });
-
-    expect((await remove("wrong")).status).toBe(400);
-    expect(existsSync(file)).toBe(true);
-    const response = await remove("folder/keep name.bin");
-    expect(response.status).toBe(200);
-    const body = await response.json() as {
-      ok: boolean;
-      path: string;
-      trash: string;
-      kind: "freedesktop" | "fallback";
-    };
-    expect(body).toMatchObject({
-      ok: true,
-      path: "folder/keep name.bin",
-      kind: "freedesktop",
-    });
-    expect(readFileSync(body.trash, "utf8")).toBe("kept bytes");
-    expect(existsSync(file)).toBe(false);
-  });
-
-  it("serializes concurrent deletion of the same file", async () => {
-    const base = await serve();
-    const root = join(temp!.root, ".documents");
-    mkdirSync(root, { recursive: true });
-    writeFileSync(join(root, "one.txt"), "one");
-    const remove = () => fetch(`${base}/api/documents`, {
-      method: "DELETE",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ path: "one.txt", confirm: "one.txt" }),
-    });
-
-    const responses = await Promise.all([remove(), remove()]);
-    expect(responses.map((response) => response.status).sort()).toEqual([200, 404]);
-    const bodies = await Promise.all(responses.map((response) => response.json()));
-    expect(bodies).toEqual(expect.arrayContaining([
-      expect.objectContaining({ ok: true, path: "one.txt" }),
-      expect.objectContaining({ error: expect.objectContaining({ code: "not_found" }) }),
-    ]));
-  });
-
-  it("refuses a symbolic-link document without touching its target", async () => {
-    const base = await serve();
-    const root = join(temp!.root, ".documents");
-    mkdirSync(root, { recursive: true });
-    const outside = join(temp!.root, "outside.txt");
-    const link = join(root, "outside-link.txt");
-    writeFileSync(outside, "outside bytes");
-    symlinkSync(outside, link);
-
-    const response = await fetch(`${base}/api/documents`, {
-      method: "DELETE",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ path: "outside-link.txt", confirm: "outside-link.txt" }),
-    });
-
-    expect(response.status).toBe(400);
-    expect(await response.json()).toMatchObject({
-      error: { code: "invalid_documents_path" },
-    });
-    expect(readFileSync(outside, "utf8")).toBe("outside bytes");
-    expect(existsSync(link)).toBe(true);
   });
 });
 

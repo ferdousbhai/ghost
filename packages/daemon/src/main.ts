@@ -11,7 +11,6 @@ import { legacyDocumentsPlacementCommand } from "./legacy-documents-placement.js
 import { loginCommand } from "./login-command.js";
 import { loadConfig, type DaemonConfig, type DaemonConfigOverrides } from "./config.js";
 import { scrubProviderEnv } from "./env-scrub.js";
-import { DocumentsService } from "./documents.js";
 import { ConversationMaintenance, MEMORY_UPKEEP_SETTINGS_KEY } from "./conversation-maintenance.js";
 import { closeAllBrowserSessions, ensureGhostHomeLayout } from "./extensions.js";
 import { GhostRegistry } from "./ghosts.js";
@@ -420,7 +419,6 @@ async function serveDaemon(
   // the per-ghost profile).
   const relay = createRelayHub({ logger });
   const machineDocuments = openMachineDocuments();
-  const documents = new DocumentsService(machineDocuments);
   const homeOperations = new HomeOperationCoordinator(registry);
   const claudeCodeProbe = new ClaudeCodeProbe();
   const host = new SessionHost({
@@ -494,7 +492,6 @@ async function serveDaemon(
     listening = await startDaemonServer({
       registry,
       host,
-      documents,
       homeOperations,
       login,
       catalog,

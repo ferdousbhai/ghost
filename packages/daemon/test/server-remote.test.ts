@@ -1,7 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { DocumentsService } from "../src/documents.js";
 import { HomeOperationCoordinator } from "../src/home-operations.js";
 import { startDaemonServer, type ListeningServer } from "../src/server.js";
 import { RemoteServe, type RemoteStatus } from "../src/remote-serve.js";
@@ -37,7 +36,6 @@ async function serve(
   listening = await startDaemonServer({
     registry: temp.registry,
     host,
-    documents: new DocumentsService(),
     homeOperations,
     port: 0,
     apiToken: TOKEN,

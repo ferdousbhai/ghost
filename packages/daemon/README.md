@@ -113,14 +113,8 @@ non-hidden regular files and directories, with no content reads or descent,
 capped at 100 entries and 4,000 characters. Explicit native filesystem tools
 can traverse further when the task calls for it.
 
-The HTTP API browses one directory at a time with opaque pagination and current-
-directory name filtering. It never follows symbolic links. Its inline content
-route opens a regular file below pinned directory descriptors, reads at most
-1 MiB of strict UTF-8 text, and rejects NUL, replacement, and special-file
-swaps; the shell does not read Documents pathnames itself. File deletion is
-descriptor-confined, serialized through the shared filesystem lock, and moves
-one exactly confirmed regular file to recoverable Trash. Ghost rename, delete,
-and future home export never move or copy the owner-wide Documents tree.
+Ghost rename, delete, and future home export never move or copy the owner-wide
+Documents tree.
 
 The hosted importer retains its bounded archive safety and may leave legacy
 `notes/`/`docs/` Markdown under the imported ghost home for explicit manual
@@ -128,14 +122,15 @@ placement. That compatibility tree is not indexed or exposed as live Documents;
 there is no automatic startup/import migration into the owner's XDG directory.
 
 To retain those files, stop Ghost and choose one legacy home. The source is
-normally `<ghost-home>/docs` after hosted import compatibility has run; use the
-exact `root` reported by `GET /api/documents`. The operator command defaults to
-a read-only dry run:
+normally `<ghost-home>/docs` after hosted import compatibility has run. Pass the
+absolute owner-wide Documents root (`XDG_DOCUMENTS_DIR`, the configured XDG
+user directory, or `~/Documents`). The operator command defaults to a read-only
+dry run:
 
 ```bash
 ghostd place-legacy-documents \
   --source /absolute/path/to/ghost-home/docs \
-  --documents-root /absolute/path/from-api
+  --documents-root /absolute/path/to/Documents
 ```
 
 It refuses relative paths, symbolic links in either root or any traversed
@@ -149,7 +144,7 @@ source file is modified or removed:
 ```bash
 ghostd place-legacy-documents \
   --source /absolute/path/to/ghost-home/docs \
-  --documents-root /absolute/path/from-api \
+  --documents-root /absolute/path/to/Documents \
   --apply
 ```
 
@@ -170,8 +165,8 @@ The import's `--host` and `--port` options retain a listener check for older
 daemon versions that do not take the root reservation; they must match that
 older daemon's effective loopback listener.
 
-Ghost-home context listings are derived from disk for each request and never
-persist a catalog. Documents use their separate machine-level route.
+Ghost-home context listings and the owner-wide Documents index are derived from
+disk and never persist a catalog.
 
 The memory index is likewise derived, newest modification first, before each
 model turn. After a settled turn has been idle for 60 seconds, ordinary
@@ -207,7 +202,7 @@ owner-local boundary. Their daemon API and interfaces (`LiveVoiceManager`,
 `CollaborationManager`) are in place, but the default implementations answer
 `501 not_supported` until the Ghost-owned ports land (issue #3).
 
-Whole ghosts, documents, and memory files move to freedesktop Trash, with a
+Whole ghosts and memory files move to freedesktop Trash, with a
 same-filesystem fallback when needed. Conversation deletion pre-journals every
 owned transcript/sidecar destination inside a private same-filesystem fallback
 Trash root so a crash after rename can recover the complete receipt. Only
@@ -387,8 +382,6 @@ The authoritative route and payload contract is
 
 | method | path | purpose |
 |---|---|---|
-| GET | `/api/documents` | lazily list one shared Documents directory |
-| DELETE | `/api/documents` | move one confirmed regular Documents file to Trash |
 | PUT | `/api/ghosts/:name/name` | rename the ghost, moving its whole home |
 | GET/PUT | `/api/ghosts/:name/memory` | list or write the ghost's plain memory files |
 | DELETE | `/api/ghosts/:name/memory` | move one confirmed memory file to Trash |

@@ -141,11 +141,11 @@ structural rather than a rule somebody has to remember (#23).
 The owner's live Documents are neither per-ghost state nor write-once ghost
 artifacts. They are one owner-wide mutable tree shared by every session, rooted
 at `XDG_DOCUMENTS_DIR`, else `XDG_CONFIG_HOME/user-dirs.dirs`'s
-`XDG_DOCUMENTS_DIR`, else `~/Documents`. The root returned to trusted clients
-is absolute and canonical. It stays outside every ghost home and is therefore
-excluded from ghost rename, delete, and any ghost-home export. There is one
-owner and one Documents tree; Ghost does not create per-ghost partitions,
-import roots, or path mappings inside it.
+`XDG_DOCUMENTS_DIR`, else `~/Documents`. The root is absolute and canonical.
+It stays outside every ghost home and is therefore excluded from ghost rename,
+delete, and any ghost-home export. There is one owner and one Documents tree;
+Ghost does not create per-ghost partitions, import roots, or path mappings
+inside it.
 
 A trusted project is likewise owner/machine-wide live data, not ghost state.
 Ghost stores only a conversation's canonical root/cwd reference and immutable
@@ -192,13 +192,13 @@ The archive importer still accepts the hosted archive's legacy `notes/` and
 `docs/` entries under its existing bounded, collision-checking extraction
 rules. Its existing `ghost-home/v1` to `ghost-home/v2` compatibility pass may
 canonicalize those imported Markdown files inside the staged ghost home. Those
-files are not live Documents: sessions, the Documents API, and ghost context
-ignore them. Until the owner explicitly places them, they remain legacy files
-inside that home and follow its whole-directory rename, delete, and future
-export lifecycle. There is deliberately no automatic startup/import move into
-the live Documents tree and no general multi-ghost migration. Placing retained
-legacy files into the one owner's Documents tree is an explicit, collision-safe
-owner operation outside the daemon. New ghost homes do not create `docs/`.
+files are not live Documents: sessions and ghost context ignore them. Until the
+owner explicitly places them, they remain legacy files inside that home and
+follow its whole-directory rename, delete, and future export lifecycle. There
+is deliberately no automatic startup/import move into the live Documents tree
+and no general multi-ghost migration. Placing retained legacy files into the
+one owner's Documents tree is an explicit, collision-safe owner operation
+outside the daemon. New ghost homes do not create `docs/`.
 
 Hosted conversation JSON is also a migration fixture, not the daemon's live
 session store. `ghostd import` and daemon startup idempotently project each valid
@@ -442,7 +442,7 @@ discovery path.
 `GhostHome` retains only the private hosted-import compatibility walk that
 canonicalizes staged legacy `notes/`/`docs/` Markdown. It exposes no live
 legacy document list, read, find, write, or search API; live Documents are
-exclusively the machine-wide `MachineDocuments` boundary and daemon route.
+exclusively the machine-wide `MachineDocuments` boundary.
 
 Plan mode and the todo list are Ghost-owned (`packages/daemon/src/plan-mode.ts`)
 and conversation-scoped; both persist as custom transcript entries
@@ -867,66 +867,6 @@ shape and streams emit one complete event object per line.
 - `GET  /api/ghosts` → `[{ name, dir, createdAt }]`
 - `POST /api/ghosts` `{ name }` → creates `~/ghosts/<name>/` with a seeded
   `character.md`
-- `GET /api/documents?path=<relative-dir>&q=<name-query>&limit=<n>&cursor=<opaque>`
-  → `{ root, path, query, entries, total, fileCount, directoryCount,
-  nextCursor, truncated, skipped }` — lazily lists exactly one directory under
-  the owner-wide Documents root. `path` is normalized Documents-relative text
-  (`""` is the root); `root` is the same absolute canonical root on every page.
-  Entries are immediate non-hidden regular directories and files, folders
-  first and then plain lexical order of `name.toLocaleLowerCase("en-US")`, with
-  a plain case-sensitive lexical comparison of the original names as the tie
-  break. Numeric collation is not used. Entries are shaped as
-  `{ name, path, kind, modifiedAt, size? }`; only files
-  carry `size`. No response contains content or descendants. `q` trims its input
-  and filters both kinds by case-insensitive current-directory name substring.
-  `total`, `fileCount`, and `directoryCount` count that filtered direct result
-  before pagination, never descendants. `skipped` reports matching symbolic
-  links and special/inaccessible entries as `{ name, path, reason }`; hidden
-  entries are excluded, not reported. The default page size is 100 and the
-  maximum is 250. `nextCursor` is null at the end; `truncated` is true whenever
-  this response does not itself contain the whole filtered result. An opaque
-  cursor is bound to normalized `path`, query, offset, and the direct entry set:
-  malformed or mismatched is `400 invalid_cursor`, and a changed set is
-  `409 cursor_stale`, after which the client restarts that directory at page 1.
-  A missing directory is `404 not_found`. Paths are opened component by
-  component under pinned directory descriptors with `O_NOFOLLOW`; absolute,
-  dot, parent, empty-component, backslash, and symlink-traversing paths are
-  refused. Live directory depth and width have no Ghost policy cap.
-- `GET /api/documents/content?path=<relative-file>` →
-  `{ root, path, size, modifiedAt, content }` — reads one regular file for the
-  trusted shell's inline viewer. The file is opened below a pinned Documents
-  directory descriptor with `O_NOFOLLOW|O_NONBLOCK`, verified as regular, read
-  through that same descriptor with a strict inclusive limit of 1 MiB
-  (1,048,576 bytes), and checked again for replacement or mutation before any
-  content is returned. `content` is strict UTF-8 text; invalid UTF-8 and NUL are
-  `400 invalid_document_content`. A file already over the limit, or one that
-  grows past it while being read, is `413 document_too_large`; a concurrent
-  replacement is `409 conflict`. Missing files are `404 not_found`, and
-  symbolic links, FIFOs, special files, or escaping paths are refused with the
-  existing `invalid_path` error. The daemon never truncates or repairs content.
-  The shell renders returned content only as literal `Text.PlainText`:
-  Markdown images/links, raw HTML, data URLs, and local or network resource
-  references are displayed byte-for-byte and are never resolved, activated, or
-  fetched. Inline viewing is read-only and reloads explicitly; “Open
-  externally” is a deliberate owner action handed to the desktop for the
-  current absolute path, outside this confined content-read boundary.
-- `DELETE /api/documents` `{ path, confirm: path }` →
-  `{ ok: true, path, trash, kind: "freedesktop" | "fallback" }` — moves
-  exactly one regular file, of any type and at any depth, to recoverable Trash.
-  `kind` identifies the actual destination mechanism, not the source entry type.
-  Directories, symbolic links,
-  special files, and escaping paths are refused; `confirm` must byte-match
-  `path`. The parent directory is descriptor-confined and held under a shared
-  filesystem mutation lock through validation and rename. This lock serializes
-  Ghost callers and the descriptor-relative source means a swapped symbolic
-  link is moved as a link, never followed. Linux exposes no atomic
-  descriptor-to-freedesktop-Trash primitive, however, so an unrelated local
-  process that ignores the advisory lock can replace the final directory entry
-  between validation and `rename(2)`; this API does not claim inode-identity
-  deletion against that owner-local race. The ordinary
-  destination is freedesktop home Trash with the original absolute Documents
-  path in `.trashinfo`; `EXDEV` falls back to the Documents root's hidden
-  `.trash/`, still by rename rather than copy/unlink.
 - `DELETE /api/ghosts/:name?confirm=<name>` → `{ ok: true, trash: "<abs path>" }`
   — moves `<root>/<name>/` to the freedesktop home trash
   (`$XDG_DATA_HOME/Trash`, default `~/.local/share/Trash`): the home becomes

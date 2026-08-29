@@ -22,7 +22,6 @@ import "GhostRename.js" as GhostRename
 import "HookStatus.js" as HookStatus
 import "HookConfig.js" as HookConfig
 import "TurnBlocks.js" as TurnBlocks
-import "../components/DocumentModel.js" as DocumentModel
 import "../components/ProjectModel.js" as ProjectModel
 
 Singleton {
@@ -206,7 +205,7 @@ Singleton {
 
     // Daemon-global trusted configuration, projected as bounded display-only
     // metadata. It is deliberately independent of ghost, conversation,
-    // project, and the owner-wide Documents cache.
+    // project.
 
     function makeHooksRequest(): var {
         return typeof root.hooksRequestFactory === "function"
@@ -373,309 +372,6 @@ Singleton {
         root.dispatch(xhr, "PUT", "/api/hooks/config", ({ "Content-Type": "application/json" }),
             JSON.stringify(document), function () { return xhr === root.hookConfigMutation; });
     }
-
-
-    function documentSnapshot(path: string, query: string): var {
-        return DocumentModel.snapshot(root.documentDirectories, path, query);
-    }
-
-    function makeDocumentRequest(): var {
-        return typeof root.documentRequestFactory === "function"
-            ? root.documentRequestFactory() : new XMLHttpRequest();
-    }
-
-    function makeDocumentDeleteRequest(): var {
-        return typeof root.documentDeleteRequestFactory === "function"
-            ? root.documentDeleteRequestFactory() : new XMLHttpRequest();
-    }
-
-    function makeDocumentContentRequest(): var {
-        return typeof root.documentContentRequestFactory === "function"
-            ? root.documentContentRequestFactory() : new XMLHttpRequest();
-    }
-
-    function installDocumentRequest(key: string, xhr: var): void {
-        const next = DocumentModel.copyMap(root.documentRequests);
-        const previous = DocumentModel.mapValue(next, key, null);
-        delete next[key];
-        root.documentRequests = next;
-        if (previous && previous.readyState !== 4) previous.abort();
-        const installed = DocumentModel.copyMap(root.documentRequests);
-        installed[key] = xhr;
-        root.documentRequests = installed;
-    }
-
-    function retireDocumentRequest(key: string, xhr: var): void {
-        if (DocumentModel.mapValue(root.documentRequests, key, null) !== xhr) return;
-        const next = DocumentModel.copyMap(root.documentRequests);
-        delete next[key];
-        root.documentRequests = next;
-    }
-
-    /** Retire ownership before abort: fake/native XHR may finish synchronously. */
-    function retireDocumentRequests(): void {
-        const requests = root.documentRequests;
-        const content = root.documentContentRequest;
-        const deletion = root.documentDeleteRequest;
-        root.documentRequests = DocumentModel.emptyMap();
-        root.documentContentRequest = null;
-        root.documentDeleteRequest = null;
-        for (const key of Object.keys(requests || {})) {
-            if (requests[key] && requests[key].readyState !== 4) requests[key].abort();
-        }
-        if (content && content.readyState !== 4) content.abort();
-        if (deletion && deletion.readyState !== 4) deletion.abort();
-    }
-
-    function beginDocumentsConnectionEpoch(): void {
-        root.documentsEpoch += 1;
-        root.retireDocumentRequests();
-        root.documentsRoot = "";
-        root.documentDirectories = DocumentModel.emptyMap();
-        root.documentContentPath = "";
-        root.documentContent = "";
-        root.documentContentModifiedAt = "";
-        root.documentContentSize = -1;
-        root.documentContentLoading = false;
-        root.documentContentReady = false;
-        root.documentContentError = "";
-        root.documentDeletingPath = "";
-        root.documentDeleteError = "";
-        root.documentsConnectionReset(root.documentsEpoch);
-    }
-
-    /**
-     * A status-0 Documents result owns the whole Documents connection epoch,
-     * even during startup when the general daemon reachability latch is
-     * already false. Retiring the epoch clears every loading owner and makes a
-     * later healthy daemon establish its root from a fresh first page.
-     */
-    function failDocumentsTransport(epoch: int): void {
-        if (epoch !== root.documentsEpoch) return;
-        root.reachable = false;
-        // A true -> false transition already retired the epoch through
-        // onReachableChanged. When reachable was false already, do it here.
-        if (epoch === root.documentsEpoch) root.beginDocumentsConnectionEpoch();
-    }
-
-    /**
-     * Read one direct directory page. `append` consumes the cursor held by the
-     * cached first page; `force` starts that path/query over without dropping
-     * the prior rows while the replacement is in flight.
-     */
-    function fetchDocuments(path: string, query: string, append: bool, force: bool): void {
-        if (!DocumentModel.isCanonicalPath(path)) return;
-        const normalizedPath = DocumentModel.normalizePath(path);
-        const normalizedQuery = DocumentModel.normalizedQuery(query);
-        const firstRootPage = normalizedPath === "" && normalizedQuery === "" && !append;
-        // A daemon restart may legitimately resolve a different XDG Documents
-        // root. Only a new root page establishes that authority for this epoch.
-        if (root.documentsRoot === "" && !firstRootPage) {
-            root.fetchDocuments("", "", false, false);
-            return;
-        }
-        const cacheKey = DocumentModel.key(normalizedPath, normalizedQuery);
-        const current = root.documentSnapshot(normalizedPath, normalizedQuery);
-        if (append && (!current.loaded || current.nextCursor === "")) return;
-        if (!append && !force && (current.loaded || current.loading)) return;
-
-        const xhr = root.makeDocumentRequest();
-        const epoch = root.documentsEpoch;
-        root.installDocumentRequest(cacheKey, xhr);
-        root.documentDirectories = DocumentModel.begin(root.documentDirectories,
-            normalizedPath, normalizedQuery, append);
-        const cursor = append ? current.nextCursor : "";
-        const params = [
-            "path=" + encodeURIComponent(normalizedPath),
-            "q=" + encodeURIComponent(normalizedQuery),
-            "limit=100"
-        ];
-        if (cursor !== "") params.push("cursor=" + encodeURIComponent(cursor));
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || epoch !== root.documentsEpoch
-                    || DocumentModel.mapValue(root.documentRequests, cacheKey, null) !== xhr) return;
-            root.retireDocumentRequest(cacheKey, xhr);
-            if (xhr.status === 200) {
-                try {
-                    const body = JSON.parse(xhr.responseText);
-                    if (root.documentsRoot === "" && !firstRootPage) {
-                        throw new Error("Documents root was not established by a fresh first page");
-                    }
-                    if (root.documentsRoot !== "" && body.root !== root.documentsRoot) {
-                        root.documentDirectories = DocumentModel.fail(root.documentDirectories,
-                            normalizedPath, normalizedQuery,
-                            "ghostd changed the Documents root during a listing", false);
-                        root.documentDirectoryChanged(normalizedPath, normalizedQuery);
-                        return;
-                    }
-                    const applied = DocumentModel.applyPage(root.documentDirectories,
-                        normalizedPath, normalizedQuery, body, append);
-                    root.documentDirectories = applied.cache;
-                    if (applied.ok) {
-                        root.documentsRoot = body.root;
-                        root.reachable = true;
-                    }
-                } catch (error) {
-                    root.documentDirectories = DocumentModel.fail(root.documentDirectories,
-                        normalizedPath, normalizedQuery,
-                        "ghostd sent a malformed Documents page", false);
-                }
-            } else if (xhr.status === 0) {
-                root.failDocumentsTransport(epoch);
-                return;
-            } else {
-                const stale = xhr.status === 409 && root.errorCode(xhr) === "cursor_stale";
-                const detail = stale
-                    ? "This folder changed while more items were loading. Refresh it to continue."
-                    : root.describeError(xhr, "GET Documents");
-                root.documentDirectories = DocumentModel.fail(root.documentDirectories,
-                    normalizedPath, normalizedQuery, detail, stale);
-            }
-            root.documentDirectoryChanged(normalizedPath, normalizedQuery);
-        };
-        root.dispatch(xhr, "GET", "/api/documents?" + params.join("&"), ({}), null,
-            function () {
-                return epoch === root.documentsEpoch
-                    && DocumentModel.mapValue(root.documentRequests, cacheKey, null) === xhr;
-            });
-    }
-
-    function refreshDocuments(path: string, query: string): void {
-        root.fetchDocuments(path, query, false, true);
-    }
-
-    function loadMoreDocuments(path: string, query: string): void {
-        root.fetchDocuments(path, query, true, false);
-    }
-
-    function clearDocumentContent(): void {
-        const request = root.documentContentRequest;
-        root.documentContentRequest = null;
-        if (request && request.readyState !== 4) request.abort();
-        root.documentContentPath = "";
-        root.documentContent = "";
-        root.documentContentModifiedAt = "";
-        root.documentContentSize = -1;
-        root.documentContentLoading = false;
-        root.documentContentReady = false;
-        root.documentContentError = "";
-    }
-
-    /** Read one inline-safe file through ghostd; QML never opens its pathname. */
-    function fetchDocumentContent(path: string, force: bool): void {
-        if (!DocumentModel.isCanonicalPath(path) || path === "" || root.documentsRoot === "") {
-            root.clearDocumentContent();
-            return;
-        }
-        const normalized = DocumentModel.normalizePath(path);
-        if (!force && root.documentContentPath === normalized
-                && (root.documentContentReady || root.documentContentLoading)) return;
-        const previous = root.documentContentRequest;
-        root.documentContentRequest = null;
-        if (previous && previous.readyState !== 4) previous.abort();
-        const xhr = root.makeDocumentContentRequest();
-        const epoch = root.documentsEpoch;
-        root.documentContentRequest = xhr;
-        if (root.documentContentPath !== normalized) {
-            root.documentContent = "";
-            root.documentContentModifiedAt = "";
-            root.documentContentSize = -1;
-            root.documentContentReady = false;
-        }
-        root.documentContentPath = normalized;
-        root.documentContentLoading = true;
-        root.documentContentError = "";
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || epoch !== root.documentsEpoch
-                    || xhr !== root.documentContentRequest) return;
-            root.documentContentRequest = null;
-            root.documentContentLoading = false;
-            if (xhr.status === 200) {
-                try {
-                    const body = JSON.parse(xhr.responseText);
-                    if (!DocumentModel.exactKeys(body,
-                            ["root", "path", "size", "modifiedAt", "content"])
-                            || body.root !== root.documentsRoot || body.path !== normalized
-                            || !Number.isSafeInteger(body.size) || body.size < 0
-                            || body.size > DocumentModel.inlineFileMaxBytes()
-                            || !DocumentModel.validTimestamp(body.modifiedAt)
-                            || typeof body.content !== "string"
-                            || body.content.indexOf("\0") >= 0
-                            || DocumentModel.utf8ByteLength(body.content) !== body.size)
-                        throw new Error("invalid content result");
-                    root.documentContent = body.content;
-                    root.documentContentModifiedAt = body.modifiedAt;
-                    root.documentContentSize = body.size;
-                    root.documentContentReady = true;
-                    root.documentContentError = "";
-                    root.reachable = true;
-                } catch (error) {
-                    root.documentContentReady = false;
-                    root.documentContentError = "ghostd sent malformed Documents content";
-                }
-            } else if (xhr.status === 0) {
-                root.failDocumentsTransport(epoch);
-                return;
-            } else {
-                root.documentContentReady = false;
-                root.documentContentError = root.describeError(xhr, "GET Documents content");
-            }
-        };
-        root.dispatch(xhr, "GET", "/api/documents/content?path="
-            + encodeURIComponent(normalized), ({}), null, function () {
-                return epoch === root.documentsEpoch && root.documentContentRequest === xhr;
-            });
-    }
-
-    function deleteDocument(path: string): void {
-        if (!DocumentModel.isCanonicalPath(path)) return;
-        const normalized = DocumentModel.normalizePath(path);
-        if (normalized === "" || root.documentDeletingPath !== "") return;
-        if (root.documentDeleteRequest && root.documentDeleteRequest.readyState !== 4)
-            root.documentDeleteRequest.abort();
-        const xhr = root.makeDocumentDeleteRequest();
-        const epoch = root.documentsEpoch;
-        root.documentDeleteRequest = xhr;
-        root.documentDeletingPath = normalized;
-        root.documentDeleteError = "";
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || epoch !== root.documentsEpoch
-                    || xhr !== root.documentDeleteRequest) return;
-            root.documentDeleteRequest = null;
-            root.documentDeletingPath = "";
-            if (xhr.status === 200) {
-                try {
-                    const body = JSON.parse(xhr.responseText);
-                    if (!DocumentModel.exactKeys(body, ["ok", "path", "trash", "kind"])
-                            || body.ok !== true || body.path !== normalized
-                            || (body.kind !== "freedesktop" && body.kind !== "fallback")
-                            || !DocumentModel.validAbsolutePath(body.trash))
-                        throw new Error("invalid trash result");
-                    root.documentDirectories = DocumentModel.removePath(
-                        root.documentDirectories, normalized);
-                    root.documentDeleteError = "";
-                    root.documentDeleteFinished(normalized, true);
-                    root.refreshDocuments(DocumentModel.parent(normalized), "");
-                } catch (error) {
-                    root.documentDeleteError = "ghostd sent a malformed document trash result";
-                    root.documentDeleteFinished(normalized, false);
-                }
-            } else if (xhr.status === 0) {
-                root.failDocumentsTransport(epoch);
-                return;
-            } else {
-                root.documentDeleteError = root.describeError(xhr, "DELETE document");
-                root.documentDeleteFinished(normalized, false);
-            }
-        };
-        root.dispatch(xhr, "DELETE", "/api/documents",
-            ({ "Content-Type": "application/json" }),
-            JSON.stringify({ path: normalized, confirm: normalized }),
-            function () {
-                return epoch === root.documentsEpoch && root.documentDeleteRequest === xhr;
-            });
-    }
-
 
     function makeProjectRequest(kind: string): var {
         let factory = null;
@@ -1092,23 +788,7 @@ Singleton {
     readonly property bool hookConfigBusy: root.hookConfigMutation !== null
     property string hookConfigError: ""
 
-    // Machine Documents are deliberately not keyed by the active ghost. Each
-    // cache entry represents exactly one directory and one current-folder
-    // query; deeper folders arrive only when the owner opens them.
-    property string documentsRoot: ""
-    property var documentDirectories: DocumentModel.emptyMap()
-    property var documentRequests: DocumentModel.emptyMap()
-    property int documentsEpoch: 0
     property bool establishedConnection: false
-    property string documentContentPath: ""
-    property string documentContent: ""
-    property string documentContentModifiedAt: ""
-    property int documentContentSize: -1
-    property bool documentContentLoading: false
-    property bool documentContentReady: false
-    property string documentContentError: ""
-    property string documentDeletingPath: ""
-    property string documentDeleteError: ""
 
     // Project discovery is explicit and conversation-scoped. The ghost home
     // remains the persona/memory/session store; this state changes only what
@@ -1249,9 +929,6 @@ Singleton {
     signal collabActionFinished(string action, bool writable, bool ok)
     signal memoryWriteFinished(string path, bool ok)
     signal hookConfigWriteFinished(bool ok)
-    signal documentDirectoryChanged(string path, string query)
-    signal documentDeleteFinished(string path, bool ok)
-    signal documentsConnectionReset(int epoch)
     signal hooksConnectionReset(int epoch)
     signal projectPreviewFinished(bool ok)
     signal projectMutationFinished(string action, bool ok)
@@ -1332,12 +1009,6 @@ Singleton {
     property var hooksRequestFactory: null
     property var hookConfigRequest: null
     property var hookConfigMutation: null
-    /** Test seams; production constructs native QML XHRs. */
-    property var documentRequestFactory: null
-    property var documentContentRequestFactory: null
-    property var documentDeleteRequestFactory: null
-    property var documentContentRequest: null
-    property var documentDeleteRequest: null
     property var projectRequestFactory: null
     property var projectPreviewRequestFactory: null
     property var projectMutationRequestFactory: null
@@ -1491,15 +1162,8 @@ Singleton {
                         root.fetchHooks(false);
                 });
             }
-            if (root.documentsRoot === "") {
-                Qt.callLater(function () {
-                    if (root.reachable && root.documentsRoot === "")
-                        root.fetchDocuments("", "", false, true);
-                });
-            }
         } else if (root.establishedConnection) {
             root.beginHooksConnectionEpoch();
-            root.beginDocumentsConnectionEpoch();
         }
     }
 
@@ -1509,7 +1173,6 @@ Singleton {
         root.clearRecap();
         root.retireRemoteRequests();
         root.retireHooksRequest();
-        root.retireDocumentRequests();
         root.clearWork();
         for (const request of [root.projectRequest, root.projectPreviewRequest,
                 root.projectMutationRequest]) {

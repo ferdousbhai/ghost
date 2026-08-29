@@ -10,8 +10,6 @@ CommandsBrowser 1.0 CommandsBrowser.qml
 ConnectBrowser 1.0 ConnectBrowser.qml
 ConfirmDialog 1.0 ConfirmDialog.qml
 Conversations 1.0 Conversations.qml
-DocumentsBrowser 1.0 DocumentsBrowser.qml
-DocumentView 1.0 DocumentView.qml
 CopyGlyph 1.0 CopyGlyph.qml
 FilePane 1.0 FilePane.qml
 GhostGlyph 1.0 GhostGlyph.qml

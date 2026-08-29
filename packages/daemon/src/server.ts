@@ -16,7 +16,6 @@ import {
   trashGhostMemoryFile,
   writeGhostMemory,
 } from "./memory-files.js";
-import { DocumentsService } from "./documents.js";
 import type {
   McpCatalog,
   McpCatalogSnapshot,
@@ -52,7 +51,6 @@ import type { SessionHost } from "./session-host.js";
 export interface ServerOptions {
   registry: GhostRegistry;
   host: SessionHost;
-  documents?: DocumentsService;
   homeOperations?: HomeOperationCoordinator;
   /**
    * Provider login orchestration. Omit to leave the `/providers` and `/login`
@@ -298,7 +296,6 @@ export function createDaemonServer(options: ServerOptions): Server {
   const logger = options.logger ?? silentLogger;
   const maxBodyBytes = options.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
   const homeOperations = options.homeOperations ?? homeOperationsFor(options.registry);
-  const documents = options.documents ?? new DocumentsService();
   const liveStreams = new Set<ServerResponse>();
   // `undefined` means "decide for me"; `null` means "no relay on this server".
   const relay = options.relay === undefined
@@ -531,67 +528,6 @@ export function createDaemonServer(options: ServerOptions): Server {
     const ghost = options.registry.get(ghostName);
     const written = await writeGhostMemory(ghost.dir, { content, name });
     jsonResponse(response, 200, { ok: true, ...written });
-  };
-
-  const handleDocuments = async (
-    url: URL,
-    response: ServerResponse,
-  ): Promise<void> => {
-    const rawLimit = url.searchParams.get("limit");
-    let limit: number | undefined;
-    if (rawLimit !== null) {
-      if (!/^\d+$/.test(rawLimit)) {
-        errorResponse(response, 400, "invalid_request", '"limit" must be an integer.');
-        return;
-      }
-      limit = Number(rawLimit);
-    }
-    const page = await documents.list(url.searchParams.get("path") ?? "", {
-      query: url.searchParams.get("q") ?? "",
-      ...(limit === undefined ? {} : { limit }),
-      ...(url.searchParams.has("cursor")
-        ? { cursor: url.searchParams.get("cursor") ?? "" }
-        : {}),
-    });
-    jsonResponse(response, 200, page);
-  };
-
-  const handleDocumentContent = async (
-    url: URL,
-    response: ServerResponse,
-  ): Promise<void> => {
-    const path = url.searchParams.get("path");
-    if (path === null || path === "") {
-      errorResponse(response, 400, "invalid_request", '"path" must be a non-empty string.');
-      return;
-    }
-    jsonResponse(response, 200, await documents.content(path));
-  };
-
-  const handleTrashDocument = async (
-    request: IncomingMessage,
-    response: ServerResponse,
-  ): Promise<void> => {
-    const body = await readJsonBody(request, maxBodyBytes);
-    if (body === null || typeof body !== "object" || Array.isArray(body)) {
-      errorResponse(response, 400, "invalid_request", "Request body must be a JSON object.");
-      return;
-    }
-    const { path, confirm } = body as { path?: unknown; confirm?: unknown };
-    if (typeof path !== "string" || path === "") {
-      errorResponse(response, 400, "invalid_request", '"path" must be a non-empty string.');
-      return;
-    }
-    if (confirm !== path) {
-      errorResponse(
-        response,
-        400,
-        "confirmation_required",
-        '"confirm" must exactly repeat the Documents file path.',
-      );
-      return;
-    }
-    jsonResponse(response, 200, { ok: true, ...await documents.trash(path) });
   };
 
   const handleTrashMemory = async (
@@ -1904,17 +1840,6 @@ export function createDaemonServer(options: ServerOptions): Server {
             hooks: [],
             sessionStopContinuationCap: GHOST_SESSION_STOP_CONTINUATION_CAP,
           }));
-          return;
-        }
-        if (segments.length === 3 && segments[1] === "documents" && segments[2] === "content") {
-          if (method === "GET") return await handleDocumentContent(url, response);
-          errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-          return;
-        }
-        if (segments.length === 2 && segments[1] === "documents") {
-          if (method === "GET") return await handleDocuments(url, response);
-          if (method === "DELETE") return await handleTrashDocument(request, response);
-          errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
           return;
         }
         if (segments[1] !== "ghosts") {

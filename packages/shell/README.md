@@ -149,40 +149,8 @@ so a reload does not resurrect what streaming set aside.
 
 The restored 64px rail at the right edge is the successor to summon-ghost's
 final `AppSideNav` (`4852804cf4e09ca50c16e08e6106c06df82e2a94`): Chat,
-Docs, Memory, Agent definitions, Commands, MCP, Remote, Phone access, and Character stay
-reachable without covering the content. Docs preserves Ghost's visual language
-but uses an adaptive folder/list/detail hierarchy: wide windows show all three;
-narrow windows use a reversible stack.
-
-Documents is the one owner's machine-wide XDG Documents tree, not ghost-home
-state. The daemon returns metadata for one direct directory page at a time,
-folders first; expanding a folder is what loads its children, and neither the
-model nor the UI imposes a folder depth limit. Folder selection, search, scroll,
-and loaded pages survive ghost switches because renaming or deleting a ghost
-does not move, copy, or reset Documents.
-
-Regular files of any type appear in the list. The shell instantiates its inline
-viewer only for a supported text, code, or Markdown file with a validated size
-of at most 1 MiB (1,048,576 bytes). Content comes from ghostd's authenticated,
-descriptor-confined endpoint; the Documents surface never constructs a QML
-`FileView` or `FilePane` for the path. All admitted content, including Markdown
-and code, is shown as literal plain text: image syntax, raw HTML, links, data
-URLs, and local/network resource references are never resolved or fetched. A
-larger file, one without trustworthy size metadata, or content that is not
-strict UTF-8 text is not read inline; the detail pane says why and offers Open
-externally. Inline content is read-only and reloads explicitly. Opening
-externally deliberately hands the current absolute path to the owner's desktop
-outside the confined viewer boundary. Document deletion requires explicit
-confirmation and moves only a regular file to system Trash.
-
-Hosted imports may leave legacy `notes/` or `docs/` Markdown inside an imported
-ghost home. Those files are import-only: the Documents API, session context,
-and the Docs rail ignore them. Ghost performs no automatic migration and new
-ghost homes do not create `docs/`. Retaining one in live Documents is an
-explicit owner operation: choose a destination, refuse an existing-name
-collision rather than overwrite it, copy the selected source, verify the
-result, and only then decide separately whether to retain the legacy source.
-There is no generic multi-ghost migration path.
+Character, Memory, Commands, Hooks, MCP, Remote, and Phone access stay reachable
+without covering the content.
 
 The ghost-scoped context response remains derived rather than persisted. It
 contains character and read-only atomic memory; phase one exposes no runnable
@@ -280,7 +248,7 @@ qs -c ghost ipc call ghost ask "<prompt>"     # reply arrives as a notification
 qs -c ghost ipc call ghost login              # open "Connect a model"
 qs -c ghost ipc call ghost loginTo <id> <oauth|api_key>   # and start one
 qs -c ghost ipc call ghost switcher           # open the model switcher
-qs -c ghost ipc call ghost section docs       # chat|docs|memory|agents|commands|mcp|connect|remote|character
+qs -c ghost ipc call ghost section memory     # chat|character|memory|commands|hooks|mcp|connect|remote
 qs -c ghost ipc call ghost status             # JSON
 qs -c ghost ipc call ghost refresh            # re-read roster and theme
 ```

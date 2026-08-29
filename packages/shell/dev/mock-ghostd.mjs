@@ -8,21 +8,13 @@
  * model is present to decide when to ask.
  */
 import {
-  closeSync,
-  constants,
-  fstatSync,
   existsSync,
-  lstatSync,
   mkdirSync,
   mkdtempSync,
-  openSync,
-  readSync,
-  readdirSync,
   renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { homedir, tmpdir } from "node:os";
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -53,11 +45,7 @@ const MOCK_STARTED_AT = Date.now();
 const OWNS_GHOSTS_ROOT = !process.env.GHOSTS_ROOT;
 const GHOSTS_ROOT = process.env.GHOSTS_ROOT
   || mkdtempSync(join(tmpdir(), "ghost-shell-mock-"));
-const OWNS_DOCUMENTS_ROOT = !process.env.GHOST_DOCUMENTS_ROOT;
-const DOCUMENTS_ROOT = process.env.GHOST_DOCUMENTS_ROOT
-  || mkdtempSync(join(tmpdir(), "ghost-documents-mock-"));
 const TRASH_ROOT = join(process.env.XDG_DATA_HOME || join(homedir(), ".local", "share"), "Trash", "files");
-const DOCUMENT_INLINE_MAX_BYTES = 1_048_576;
 const REMOTE_HOSTNAME = "omarchy-thinkpad.tail58bdd3.ts.net";
 const REMOTE_PROBLEM = opt(
   "--remote-problem",
@@ -428,35 +416,7 @@ function memorySlug(text) {
   return slug || "memory";
 }
 
-function seedMockDocuments() {
-  mkdirSync(join(DOCUMENTS_ROOT, "Projects", "Ghost", "Research"), { recursive: true });
-  mkdirSync(join(DOCUMENTS_ROOT, "Reference"), { recursive: true });
-  mkdirSync(join(DOCUMENTS_ROOT, "Empty folder"), { recursive: true });
-  writeFileSync(join(DOCUMENTS_ROOT, "Welcome.md"),
-    "# Welcome to Documents\n\nThis file belongs to the machine, not to one ghost.\n", "utf8");
-  writeFileSync(join(DOCUMENTS_ROOT, "Launch notes.md"),
-    "# Launch notes\n\nFinish the shared Documents browser and verify its narrow layout.\n", "utf8");
-  writeFileSync(join(DOCUMENTS_ROOT, "Alpha.md"), "# Uppercase tie\n", "utf8");
-  writeFileSync(join(DOCUMENTS_ROOT, "alpha.md"), "# Lowercase tie\n", "utf8");
-  writeFileSync(join(DOCUMENTS_ROOT, "household-budget.csv"),
-    "month,amount\nAugust,420\n", "utf8");
-  writeFileSync(join(DOCUMENTS_ROOT, "note 10.md"), "# Lexical ten\n", "utf8");
-  writeFileSync(join(DOCUMENTS_ROOT, "note 2.md"), "# Lexical two\n", "utf8");
-  writeFileSync(join(DOCUMENTS_ROOT, "A Oversized draft.md"),
-    `# Oversized draft\n\n${"x".repeat(1048577)}`, "utf8");
-  writeFileSync(join(DOCUMENTS_ROOT, "reading-list.pdf"),
-    "%PDF-1.4 mock preview fixture\n", "utf8");
-  writeFileSync(join(DOCUMENTS_ROOT, "Projects", "roadmap.md"),
-    "# Project roadmap\n\nFolders load one level at a time.\n", "utf8");
-  writeFileSync(join(DOCUMENTS_ROOT, "Projects", "Ghost", "decisions.md"),
-    "# Decisions\n\nShared Documents stay independent from ghost selection.\n", "utf8");
-  writeFileSync(join(DOCUMENTS_ROOT, "Projects", "Ghost", "Research", "notes.txt"),
-    "No folder depth is a product limit.\n", "utf8");
-  writeFileSync(join(DOCUMENTS_ROOT, "Reference", "settings.json"),
-    "{\n  \"shared\": true\n}\n", "utf8");
-}
-
-function seedMockHome(name, includeLegacyDocs = false) {
+function seedMockHome(name) {
   const dir = join(GHOSTS_ROOT, name);
   mkdirSync(join(dir, "memory"), { recursive: true });
   mkdirSync(join(dir, "plans"), { recursive: true });
@@ -465,19 +425,6 @@ function seedMockHome(name, includeLegacyDocs = false) {
     `# ${name}\n\nI am ${name}, a quiet local ghost who answers directly.\n`,
     "utf8",
   );
-  if (includeLegacyDocs) {
-    mkdirSync(join(dir, "docs", "reference"), { recursive: true });
-    writeFileSync(
-      join(dir, "docs", "launch-notes.md"),
-      "# Legacy launch notes\n\nThis hosted-import fixture remains inside the ghost home.\n",
-      "utf8",
-    );
-    writeFileSync(
-      join(dir, "docs", "reference", "working-agreement.md"),
-      "# Legacy working agreement\n\nImport-only; never exposed as shared Documents.\n",
-      "utf8",
-    );
-  }
   writeFileSync(
     join(dir, "memory", "preferred-tone.md"),
     `${MOCK_MEMORY[0].content}\n`,
@@ -496,15 +443,11 @@ function seedMockHome(name, includeLegacyDocs = false) {
 }
 
 if (OWNS_GHOSTS_ROOT) {
-  for (const ghost of ghosts) seedMockHome(ghost.name, true);
+  for (const ghost of ghosts) seedMockHome(ghost.name);
   process.once("exit", () => rmSync(GHOSTS_ROOT, { recursive: true, force: true }));
   const stop = () => process.exit(0);
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);
-}
-if (OWNS_DOCUMENTS_ROOT) {
-  seedMockDocuments();
-  process.once("exit", () => rmSync(DOCUMENTS_ROOT, { recursive: true, force: true }));
 }
 
 // The daemon persists a ghost's conversations (pi sessions); the mock keeps
@@ -592,19 +535,19 @@ function ghostSessions(name) {
         entry({ role: "assistant", content: `I'm **${name}**. This thread was seeded by the mock so resume has history to show.`, timestamp: now - 7_195_000 }),
         entry({ role: "user", content: "and what do you remember about me?", timestamp: now - 3_610_000 }),
         entry({ role: "assistant", content: "Nothing yet — but branch that question and you get a second thread to ask it differently.", timestamp: now - 3_609_000 }),
-        entry({ role: "user", content: "open Launch notes.md in shared Documents and tell me what's left", timestamp: now - 3_608_000 }),
+        entry({ role: "user", content: "open the current HUD plan and tell me what's left", timestamp: now - 3_608_000 }),
         entry({
           role: "assistant",
           timestamp: now - 3_607_000,
           content: [
-            { type: "text", text: "Opening the shared Documents launch notes" },
+            { type: "text", text: "Opening the current HUD plan" },
             // A restored call has no live intent and no summary, so the card
             // falls back to the arguments: they have to say what it was for.
             {
               type: "toolCall",
               id: "call-seed-browser",
               name: "read",
-              arguments: { path: join(DOCUMENTS_ROOT, "Launch notes.md") },
+              arguments: { path: join(GHOSTS_ROOT, name, "plans", "hud-work-strip.md") },
               cwd: SESSION_CWD,
               failed: true,
             },
@@ -1340,7 +1283,7 @@ function* script(name, prompt, sessionId) {
     const toolName = step % 3 === 0 ? "grep" : (step % 3 === 1 ? "read" : "glob");
     const args = {
       step: step + 1,
-      path: join(DOCUMENTS_ROOT, "Projects", "Ghost", `step-${step + 1}.md`),
+      path: join(GHOSTS_ROOT, name, "plans", `step-${step + 1}.md`),
     };
     yield { type: "toolcall_start", contentIndex: index, id, toolName };
     yield { type: "toolcall_delta", contentIndex: index, delta: JSON.stringify(args) };
@@ -1834,326 +1777,6 @@ function routeState(name) {
   };
 }
 
-
-const DOCUMENT_DIRECTORY_FLAGS = constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW;
-const DOCUMENT_FILE_FLAGS = constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW;
-
-function mockDocumentError(status, code, message) {
-  return Object.assign(new Error(message), { status, code });
-}
-
-function documentSegments(relativePath, allowRoot = true) {
-  if (typeof relativePath !== "string" || relativePath.startsWith("/")) return null;
-  if (relativePath === "") return allowRoot ? [] : null;
-  const segments = relativePath.split("/");
-  return segments.some((segment) => segment === "" || segment === "." || segment === "..")
-    ? null : segments;
-}
-
-function documentDescriptorPath(directoryFd, name = "") {
-  const directory = `/proc/self/fd/${directoryFd}`;
-  return name === "" ? directory : `${directory}/${name}`;
-}
-
-function openMockDocumentDirectory(relativePath = "") {
-  const segments = documentSegments(relativePath);
-  if (!segments) throw mockDocumentError(400, "invalid_path", "invalid Documents path");
-  let directoryFd;
-  try {
-    directoryFd = openSync(DOCUMENTS_ROOT, DOCUMENT_DIRECTORY_FLAGS);
-    for (const segment of segments) {
-      const next = openSync(documentDescriptorPath(directoryFd, segment), DOCUMENT_DIRECTORY_FLAGS);
-      closeSync(directoryFd);
-      directoryFd = next;
-    }
-    return directoryFd;
-  } catch (error) {
-    if (directoryFd !== undefined) closeSync(directoryFd);
-    throw error;
-  }
-}
-
-function openMockDocumentParent(relativePath) {
-  const segments = documentSegments(relativePath, false);
-  if (!segments) throw mockDocumentError(400, "invalid_path", "invalid Documents path");
-  const name = segments.pop();
-  return {
-    directoryFd: openMockDocumentDirectory(segments.join("/")),
-    name,
-  };
-}
-
-function compareDocumentEntries(left, right) {
-  if (left.kind !== right.kind) return left.kind === "directory" ? -1 : 1;
-  const foldedLeft = left.name.toLocaleLowerCase("en-US");
-  const foldedRight = right.name.toLocaleLowerCase("en-US");
-  if (foldedLeft < foldedRight) return -1;
-  if (foldedLeft > foldedRight) return 1;
-  return left.name < right.name ? -1 : left.name > right.name ? 1 : 0;
-}
-
-function documentDigest(entries) {
-  return createHash("sha256")
-    .update(entries.map((entry) => `${entry.kind}\0${entry.name}`).join("\0"))
-    .digest("base64url");
-}
-
-function encodeDocumentCursor(payload) {
-  return Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
-}
-
-function decodeDocumentCursor(raw) {
-  try {
-    const parsed = JSON.parse(Buffer.from(raw, "base64url").toString("utf8"));
-    if (!parsed || !Number.isInteger(parsed.offset) || parsed.offset < 0
-        || typeof parsed.digest !== "string" || typeof parsed.path !== "string"
-        || typeof parsed.query !== "string") return null;
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
-function listMockDocuments(url) {
-  const path = url.searchParams.get("path") || "";
-  const query = (url.searchParams.get("q") || "").trim().toLowerCase();
-  const limitRaw = Number(url.searchParams.get("limit") || 100);
-  if (!Number.isInteger(limitRaw) || limitRaw < 1 || limitRaw > 250) {
-    return { status: 400, body: { error: { code: "invalid_request", message: "limit must be 1..250" } } };
-  }
-  if (!documentSegments(path)) {
-    return { status: 400, body: { error: { code: "invalid_path", message: "invalid Documents path" } } };
-  }
-  let directoryFd;
-  let dirents;
-  try {
-    directoryFd = openMockDocumentDirectory(path);
-    dirents = readdirSync(documentDescriptorPath(directoryFd), { withFileTypes: true });
-  } catch (error) {
-    if (directoryFd !== undefined) closeSync(directoryFd);
-    if (typeof error?.status === "number") {
-      return { status: error.status, body: { error: { code: error.code, message: error.message } } };
-    }
-    if (["ELOOP", "ENOTDIR"].includes(error?.code)) {
-      return { status: 400, body: { error: { code: "invalid_path", message: "folder is not a confined directory" } } };
-    }
-    return { status: 404, body: { error: { code: "not_found", message: "folder is unavailable" } } };
-  }
-  const entries = [];
-  const skipped = [];
-  try {
-    for (const dirent of dirents) {
-      if (dirent.name.startsWith(".")) continue;
-      const relative = path === "" ? dirent.name : `${path}/${dirent.name}`;
-      try {
-        const stats = lstatSync(documentDescriptorPath(directoryFd, dirent.name));
-        if (stats.isSymbolicLink() || (!stats.isDirectory() && !stats.isFile())) {
-          skipped.push({ name: dirent.name, path: relative, reason: "Not a regular file or directory" });
-          continue;
-        }
-        entries.push({
-          name: dirent.name,
-          path: relative,
-          kind: stats.isDirectory() ? "directory" : "file",
-          ...(stats.isFile() ? { size: stats.size } : {}),
-          modifiedAt: stats.mtime.toISOString(),
-        });
-      } catch (error) {
-        skipped.push({ name: dirent.name, path: relative, reason: String(error.message || error) });
-      }
-    }
-  } finally {
-    closeSync(directoryFd);
-  }
-  const filtered = entries
-    .filter((entry) => query === "" || entry.name.toLowerCase().includes(query))
-    .sort(compareDocumentEntries);
-  const digest = documentDigest(filtered);
-  const rawCursor = url.searchParams.get("cursor");
-  let offset = 0;
-  if (rawCursor) {
-    const cursor = decodeDocumentCursor(rawCursor);
-    if (!cursor || cursor.path !== path || cursor.query !== query) {
-      return { status: 400, body: { error: { code: "invalid_cursor", message: "cursor does not belong to this listing" } } };
-    }
-    if (cursor.digest !== digest) {
-      return { status: 409, body: { error: { code: "cursor_stale", message: "folder changed during pagination" } } };
-    }
-    offset = cursor.offset;
-  }
-  if (offset > filtered.length) {
-    return { status: 409, body: { error: { code: "cursor_stale", message: "folder changed during pagination" } } };
-  }
-  const page = filtered.slice(offset, offset + limitRaw);
-  const nextOffset = offset + page.length;
-  const hasNextPage = nextOffset < filtered.length;
-  return {
-    status: 200,
-    body: {
-      root: DOCUMENTS_ROOT,
-      path,
-      query,
-      entries: page,
-      total: filtered.length,
-      fileCount: filtered.filter((entry) => entry.kind === "file").length,
-      directoryCount: filtered.filter((entry) => entry.kind === "directory").length,
-      nextCursor: hasNextPage
-        ? encodeDocumentCursor({ offset: nextOffset, digest, path, query }) : null,
-      // Production's flag describes this response, not whether another page
-      // follows it. A final non-first page is still only part of the result.
-      truncated: page.length < filtered.length,
-      skipped,
-    },
-  };
-}
-
-function readMockDocumentContent(relativePath) {
-  if (!documentSegments(relativePath, false)) {
-    throw mockDocumentError(400, "invalid_path", "invalid Documents path");
-  }
-  let directoryFd;
-  let fileFd;
-  try {
-    const opened = openMockDocumentParent(relativePath);
-    directoryFd = opened.directoryFd;
-    const { name } = opened;
-    try {
-      fileFd = openSync(documentDescriptorPath(directoryFd, name), DOCUMENT_FILE_FLAGS);
-    } catch (error) {
-      if (error?.code === "ENOENT") {
-        throw mockDocumentError(404, "not_found", "No such Documents file");
-      }
-      throw error;
-    }
-    const before = fstatSync(fileFd, { bigint: true });
-    if (!before.isFile()) {
-      throw mockDocumentError(400, "invalid_path", "Documents content must be a regular file");
-    }
-    if (before.size > BigInt(DOCUMENT_INLINE_MAX_BYTES)) {
-      throw mockDocumentError(413, "document_too_large", "Documents inline content is limited to 1 MiB");
-    }
-    const bytes = Buffer.allocUnsafe(DOCUMENT_INLINE_MAX_BYTES + 1);
-    let length = 0;
-    while (length < bytes.length) {
-      const count = readSync(fileFd, bytes, length, bytes.length - length, null);
-      if (count === 0) break;
-      length += count;
-    }
-    const after = fstatSync(fileFd, { bigint: true });
-    if (length > DOCUMENT_INLINE_MAX_BYTES
-        || after.size > BigInt(DOCUMENT_INLINE_MAX_BYTES)) {
-      throw mockDocumentError(413, "document_too_large", "Documents inline content is limited to 1 MiB");
-    }
-    const live = lstatSync(documentDescriptorPath(directoryFd, name), { bigint: true });
-    if (!after.isFile() || !live.isFile() || before.dev !== after.dev
-        || before.ino !== after.ino || before.size !== after.size
-        || before.mtimeNs !== after.mtimeNs || before.ctimeNs !== after.ctimeNs
-        || after.size !== BigInt(length) || live.dev !== after.dev || live.ino !== after.ino
-        || live.size !== after.size || live.mtimeNs !== after.mtimeNs
-        || live.ctimeNs !== after.ctimeNs) {
-      throw mockDocumentError(409, "conflict", "The Documents file changed while it was being read");
-    }
-    let content;
-    try {
-      content = new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(0, length));
-    } catch {
-      throw mockDocumentError(400, "invalid_document_content", "This Documents file is not valid UTF-8 text");
-    }
-    if (content.includes("\0")) {
-      throw mockDocumentError(400, "invalid_document_content", "This Documents file contains NUL bytes");
-    }
-    return {
-      root: DOCUMENTS_ROOT,
-      path: relativePath,
-      size: length,
-      modifiedAt: new Date(Number(after.mtimeMs)).toISOString(),
-      content,
-    };
-  } catch (error) {
-    if (typeof error?.status === "number") throw error;
-    if (error?.code === "ENOENT") {
-      throw mockDocumentError(404, "not_found", "No such Documents file");
-    }
-    if (["ELOOP", "ENOTDIR", "ENXIO"].includes(error?.code)) {
-      throw mockDocumentError(400, "invalid_path", "Documents path is not a regular confined file");
-    }
-    throw error;
-  } finally {
-    if (fileFd !== undefined) closeSync(fileFd);
-    if (directoryFd !== undefined) closeSync(directoryFd);
-  }
-}
-
-function deleteMockDocument(relativePath) {
-  if (!documentSegments(relativePath, false)) {
-    throw mockDocumentError(400, "invalid_path", "invalid Documents path");
-  }
-  let directoryFd;
-  let sourceFd;
-  let rootFd;
-  let trashFd;
-  let bucketFd;
-  try {
-    const opened = openMockDocumentParent(relativePath);
-    directoryFd = opened.directoryFd;
-    const { name } = opened;
-    const sourcePath = documentDescriptorPath(directoryFd, name);
-    try {
-      sourceFd = openSync(sourcePath, DOCUMENT_FILE_FLAGS);
-    } catch (error) {
-      if (error?.code === "ENOENT") {
-        throw mockDocumentError(404, "not_found", "No such regular document");
-      }
-      throw error;
-    }
-    const openedStats = fstatSync(sourceFd, { bigint: true });
-    const liveStats = lstatSync(sourcePath, { bigint: true });
-    if (!openedStats.isFile() || !liveStats.isFile() || openedStats.dev !== liveStats.dev
-        || openedStats.ino !== liveStats.ino) {
-      throw mockDocumentError(404, "not_found", "No such regular document");
-    }
-
-    rootFd = openMockDocumentDirectory();
-    const trashRootPath = documentDescriptorPath(rootFd, ".mock-trash");
-    try {
-      mkdirSync(trashRootPath, { mode: 0o700 });
-    } catch (error) {
-      if (error?.code !== "EEXIST") throw error;
-    }
-    trashFd = openSync(trashRootPath, DOCUMENT_DIRECTORY_FLAGS);
-    const bucketPath = mkdtempSync(`${documentDescriptorPath(trashFd)}/delete-`);
-    bucketFd = openSync(bucketPath, DOCUMENT_DIRECTORY_FLAGS);
-    const destinationPath = documentDescriptorPath(bucketFd, name);
-
-    renameSync(sourcePath, destinationPath);
-    const trashedStats = lstatSync(destinationPath, { bigint: true });
-    if (!trashedStats.isFile() || trashedStats.dev !== openedStats.dev
-        || trashedStats.ino !== openedStats.ino) {
-      throw mockDocumentError(409, "conflict", "Document changed while it was moved to mock Trash");
-    }
-    return {
-      path: relativePath,
-      trash: join(DOCUMENTS_ROOT, ".mock-trash", basename(bucketPath), name),
-      kind: "fallback",
-    };
-  } catch (error) {
-    if (typeof error?.status === "number") throw error;
-    if (error?.code === "ENOENT") {
-      throw mockDocumentError(404, "not_found", "No such regular document");
-    }
-    if (["ELOOP", "ENOTDIR", "ENXIO"].includes(error?.code)) {
-      throw mockDocumentError(400, "invalid_path", "Document path is not a confined regular file");
-    }
-    throw error;
-  } finally {
-    if (bucketFd !== undefined) closeSync(bucketFd);
-    if (trashFd !== undefined) closeSync(trashFd);
-    if (rootFd !== undefined) closeSync(rootFd);
-    if (sourceFd !== undefined) closeSync(sourceFd);
-    if (directoryFd !== undefined) closeSync(directoryFd);
-  }
-}
-
 const mockServer = createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", `http://${HOST}:${PORT}`);
   const parts = url.pathname.split("/").filter(Boolean); // ["api","ghosts",...]
@@ -2175,41 +1798,6 @@ const mockServer = createServer(async (req, res) => {
       error: { code: "method_not_allowed", message: `${req.method} is not allowed here.` },
     });
     return json(res, 200, hooksStatus());
-  }
-
-  if (parts.length === 2 && parts[0] === "api" && parts[1] === "documents"
-      && req.method === "GET") {
-    const result = listMockDocuments(url);
-    return json(res, result.status, result.body);
-  }
-  if (parts.length === 3 && parts[0] === "api" && parts[1] === "documents"
-      && parts[2] === "content" && req.method === "GET") {
-    const path = url.searchParams.get("path") || "";
-    try {
-      return json(res, 200, readMockDocumentContent(path));
-    } catch (error) {
-      return json(res, error.status || 500, {
-        error: { code: error.code || "internal_error", message: error.message || "content read failed" },
-      });
-    }
-  }
-  if (parts.length === 2 && parts[0] === "api" && parts[1] === "documents"
-      && req.method === "DELETE") {
-    const body = await readBody(req).catch(() => ({}));
-    const path = typeof body?.path === "string" ? body.path : "";
-    if (!documentSegments(path, false) || body?.confirm !== path) {
-      return json(res, 400, {
-        error: { code: "confirmation_required", message: "document deletion requires its exact path" },
-      });
-    }
-    try {
-      const deleted = deleteMockDocument(path);
-      return json(res, 200, { ok: true, ...deleted });
-    } catch (error) {
-      return json(res, error.status || 500, {
-        error: { code: error.code || "internal_error", message: error.message || "document delete failed" },
-      });
-    }
   }
 
   if (parts.length === 2 && parts[0] === "api" && parts[1] === "remote") {

@@ -3,24 +3,6 @@
 No daemon, no OMP, no models needed. `mock-ghostd.mjs` implements enough of the
 CONTRACTS.md API to build and demo every surface.
 
-## Files and Documents contract
-
-The mock owns a temporary, machine-wide Documents root. `/api/documents` lists
-one directory at a time, folders first, with opaque pagination, and the bounded
-`/api/documents/content` fixture returns the same strict UTF-8, at-most-1-MiB
-shape as the live daemon. The browser uses returned content for its read-only
-literal plain-text viewer: Markdown/raw HTML images and links remain visible
-syntax and cannot load network, local, or data-URL resources. The absolute root
-is used only for explicit external-open actions. Its nested text, JSON, CSV, and
-unsupported PDF fixtures remain the same when a ghost is switched, renamed, or
-deleted.
-
-The two seeded ghosts also contain `docs/` Markdown solely as hosted-import
-compatibility fixtures. Those legacy files are import-only: sessions, context,
-and the Documents API ignore them, and nothing copies them into shared
-Documents. They move only with their ghost home. Ghosts created through the
-mock API do not get a `docs/` directory.
-
 ## Isolated HUD preview — the required verification path
 
 Development previews must **not** run directly on the owner's desktop. A plain
@@ -72,7 +54,6 @@ The ready message prints `XDG_RUNTIME_DIR`, `WAYLAND_DISPLAY`, and
 drive that exact nested instance:
 
 ```sh
-qs -p qml/shell.qml ipc call ghost section docs
 qs -p qml/shell.qml ipc call ghost section memory
 qs -p qml/shell.qml ipc call ghost ask "who lives here?"
 
@@ -112,20 +93,14 @@ stop the mock separately.
   layout like any app. The HUD uses a neutral reading canvas with the current
   Omarchy accent and semantic status colours. Roster on the left (`casper`,
   `moaning-myrtle`, `+ new ghost`), transcript in the middle, composer at the
-  bottom, and the permanent Chat / Documents / Memory / Agent definitions /
-  Commands / Hooks / MCP / Remote / Character rail at the right edge. `SUPER+CTRL+G` is
+  bottom, and the permanent Chat / Character / Memory / Commands / Hooks / MCP /
+  Remote / Phone access rail at the right edge. `SUPER+CTRL+G` is
   launch-or-focus: reveal+focus when
   hidden/unfocused, hide only when already focused.
-  `section docs` shows the adaptive shared Documents browser: a folder tree,
-  direct-file list, and read-only detail at wide sizes, with a reversible stack when
-  narrow. It loads one directory page at a time with no product depth cap,
-  renders bounded supported text files through the mock content route, and
-  offers unsupported files to the desktop.
-  Documents stay selected across ghost switches. Memory is read-only; the
+  Memory is read-only; the
   phase-one context returns no agent definitions because its isolated task
-  runtime is disabled; Character edits `character.md`. Document and memory rows
-  offer confirmed, recoverable deletion; the mock moves its owned fixtures into
-  temporary same-filesystem mock Trash and reports the real `fallback` result kind.
+  runtime is disabled; Character edits `character.md`. Memory rows offer
+  confirmed, recoverable deletion.
   Commands shows the session's searchable OMP catalog and stages a chosen slash
   command in chat; typing `/` opens its compact
   autocomplete, including clear partial/unsupported labels. Hooks shows the
@@ -138,8 +113,8 @@ stop the mock separately.
   encrypted collaboration with distinct read-only/writable relay links.
   `moaning-myrtle` deliberately returns structured `not_supported` for
   collaboration so that state is demoable too.
-  The mock's temporary ghost and shared Documents fixtures make every pane live
-  without touching `~/ghosts` or the owner's Documents directory.
+  The mock's temporary ghost fixtures make every pane live without touching
+  `~/ghosts`.
 - On `ask`: the spectral summoning orb saying "Checking what I remember about
   that" in the ghost's own words rather than a spectral phrase, then the reply
   arriving word by word with `**bold**` rendered as bold. The narration never

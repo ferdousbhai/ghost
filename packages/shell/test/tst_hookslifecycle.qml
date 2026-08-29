@@ -8,7 +8,6 @@ TestCase {
     name: "HooksLifecycle"
 
     property var requests: []
-    property var documentRequests: []
 
     function fakeRequest(bucket: var): var {
         const xhr = {
@@ -69,7 +68,6 @@ TestCase {
 
     function init(): void {
         requests = [];
-        documentRequests = [];
         Ghostd.hooksRequestFactory = function () { return tc.fakeRequest(tc.requests); };
         Ghostd.beginHooksConnectionEpoch();
         // The catalog is the only daemon connection this file asserts on, but
@@ -78,15 +76,10 @@ TestCase {
         // Ghostd's other connections open real sockets to the unreachable test
         // port; their status-0 failures land whenever the event loop reaches
         // them, which on a loaded machine is inside some later test. Disown the
-        // ones a neighbouring test file can leave in flight, and give Documents
-        // — the one a reachable Ghostd starts by itself — a fake transport so
-        // this file opens no socket of its own either.
+        // ones a neighbouring test file can leave in flight so this file opens
+        // no socket of its own either.
         Ghostd.listRequest = null;
         Ghostd.cancelAllTranscriptLoads();
-        Ghostd.documentRequestFactory = function () {
-            return tc.fakeRequest(tc.documentRequests);
-        };
-        Ghostd.beginDocumentsConnectionEpoch();
         Ghostd.establishedConnection = false;
         Ghostd.reachable = false;
         Ghostd.activeGhost = "casper";
@@ -99,9 +92,6 @@ TestCase {
         Ghostd.retireHooksRequest();
         Ghostd.hooksRequestFactory = null;
         Ghostd.beginHooksConnectionEpoch();
-        // Retire before dropping the factory: the epoch bump aborts the fakes.
-        Ghostd.beginDocumentsConnectionEpoch();
-        Ghostd.documentRequestFactory = null;
     }
 
     function test_initialLoadingReadyAndEmptyStates(): void {
@@ -186,7 +176,6 @@ TestCase {
         compare(Ghostd.activeHooks.length, 0);
 
         // A healthy daemon response elsewhere starts a fresh catalog request.
-        Ghostd.documentsRoot = "/owner/Documents";
         Ghostd.reachable = true;
         // The catalog request is deferred with Qt.callLater, so poll for it;
         // the timeout is a deadlock guard, not an expected wait. `reachable` is
@@ -267,7 +256,7 @@ TestCase {
         compare(requests.length, 1);
     }
 
-    function test_ghostSessionProjectAndDocumentsChangesDoNotOwnCatalog(): void {
+    function test_ghostSessionAndProjectChangesDoNotOwnCatalog(): void {
         Ghostd.fetchHooks(false);
         requests[0].complete(200, status("Machine global"));
         const epoch = Ghostd.hooksEpoch;
@@ -275,7 +264,6 @@ TestCase {
         Ghostd.activeGhost = "moaning-myrtle";
         Ghostd.currentSessionId = "claude-code:thread-2";
         Ghostd.projectGhost = "moaning-myrtle";
-        Ghostd.documentsRoot = "/different/Documents";
 
         compare(Ghostd.hooksEpoch, epoch);
         compare(Ghostd.activeHooks[0].name, "Machine global");

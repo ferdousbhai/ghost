@@ -88,10 +88,6 @@ export {
   type ResolvedGhostExtensions,
 } from "./extensions.js";
 export {
-  DocumentsService,
-  type TrashedDocument,
-} from "./documents.js";
-export {
   assertValidGhostName,
   GHOST_AGENT_DIRNAME,
   GHOST_CHARACTER_FILENAME,

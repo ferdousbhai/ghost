@@ -134,7 +134,7 @@ FloatingWindow {
     minimumSize: Qt.size(568, 360)
 
     function showSection(section: string): void {
-        if (["chat", "docs", "memory", "commands", "hooks", "mcp", "connect", "remote", "character"]
+        if (["chat", "memory", "commands", "hooks", "mcp", "connect", "remote", "character"]
                 .indexOf(section) < 0)
             return;
         hud.loginOpen = false;
@@ -151,8 +151,6 @@ FloatingWindow {
             Ghostd.fetchMcp(false);
         } else if (section === "connect") {
             Ghostd.fetchConnect(false);
-        } else if (section === "docs") {
-            Ghostd.fetchDocuments("", "", false, false);
         } else if (section === "memory") {
             Ghostd.fetchMemory(false);
         }
@@ -1092,16 +1090,6 @@ FloatingWindow {
                     filePath: characterPane.path
                     onClosed: hud.showSection("chat")
                 }
-            }
-
-            // Machine-shared Documents have their own lazy folder hierarchy;
-            // unlike ghost context, it survives ghost selection and rename.
-            DocumentsBrowser {
-                id: documentsBrowser
-                visible: hud.currentSection === "docs"
-                    && !hud.loginOpen && !hud.switcherOpen
-                Layout.fillWidth: true
-                Layout.fillHeight: true
             }
 
             // The effective command palette is conversation-scoped. A pick

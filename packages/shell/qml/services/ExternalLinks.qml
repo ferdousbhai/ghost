@@ -29,8 +29,7 @@ Singleton {
 
     /**
      * Hand an absolute local path — a file or a directory — to whatever the
-     * desktop has registered for it. Used by Workbench's editor fallback and
-     * by the authenticated Documents browser for daemon-confined local paths;
+     * desktop has registered for it. Used by Workbench's editor fallback;
      * model-authored strings never reach here.
      */
     function openPath(path: string): bool {
