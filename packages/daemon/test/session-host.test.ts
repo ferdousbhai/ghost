@@ -448,12 +448,18 @@ function deferred(): {
   return { promise, resolve };
 }
 
-async function cancelledRelayOpen(
+async function failedRelayOpen(
   homeDir: string,
+  failure: "cancelled" | "timeout",
   onClose: () => void | Promise<void> = () => {},
-): Promise<{ readonly sent: string[]; finishOpen(): void }> {
+): Promise<{
+  readonly sent: string[];
+  readonly closeRequested: Promise<void>;
+  settleCreate(): void;
+}> {
   const openStarted = deferred();
-  const heldOpen = deferred();
+  const createSettled = deferred();
+  const closeRequested = deferred();
   const sent: string[] = [];
   const transport: RelayTransport = {
     connected: true,
@@ -462,7 +468,10 @@ async function cancelledRelayOpen(
       sent.push(op);
       if (op === "open") {
         openStarted.resolve();
-        await heldOpen.promise;
+        if (failure === "timeout") {
+          return { ok: false, failure: "timeout", message: "relay deadline elapsed" };
+        }
+        await createSettled.promise;
         return {
           ok: true,
           result: {
@@ -472,6 +481,8 @@ async function cancelledRelayOpen(
         };
       }
       if (op === "close") {
+        closeRequested.resolve();
+        await createSettled.promise;
         await onClose();
         return { ok: true, result: { closed: true } };
       }
@@ -485,13 +496,23 @@ async function cancelledRelayOpen(
   const controller = new AbortController();
   const opening = browser.backend.open("https://example.com/", {
     timeoutMs: 1_000,
-    signal: controller.signal,
+    ...(failure === "cancelled" ? { signal: controller.signal } : {}),
   });
+  const observed = opening.then(
+    () => undefined,
+    (error: unknown) => error,
+  );
   await openStarted.promise;
-  controller.abort();
-  await expect(opening).rejects.toMatchObject({ details: { reason: "aborted" } });
+  if (failure === "cancelled") controller.abort();
+  expect(await observed).toMatchObject({
+    details: failure === "cancelled" ? { reason: "aborted" } : { failure: "timeout" },
+  });
   expect(browser.backend.running).toBe(true);
-  return { sent, finishOpen: heldOpen.resolve };
+  return {
+    sent,
+    closeRequested: closeRequested.promise,
+    settleCreate: createSettled.resolve,
+  };
 }
 
 function recordMaintenanceTurns(
@@ -8010,14 +8031,20 @@ describe("SessionHost.deleteGhost", () => {
     expect(existsSync(dir)).toBe(false);
   });
 
-  it("retires a cancelled browser open before moving the ghost home", async () => {
+  it.each([
+    ["cancelled", "cancelled"],
+    ["timed-out", "timeout"],
+  ] as const)("retires a %s browser open before moving the ghost home", async (_label, failure) => {
     const { dir } = await setup([{ kind: "text", text: "unused" }]);
-    const relay = await cancelledRelayOpen(dir, () => {
+    const relay = await failedRelayOpen(dir, failure, () => {
       expect(existsSync(dir)).toBe(true);
     });
 
-    await host!.deleteGhost("casper");
-    relay.finishOpen();
+    const deleting = host!.deleteGhost("casper");
+    await relay.closeRequested;
+    expect(existsSync(dir)).toBe(true);
+    relay.settleCreate();
+    await deleting;
 
     expect(relay.sent).toEqual(["open", "close"]);
     expect(existsSync(dir)).toBe(false);
@@ -8189,15 +8216,22 @@ describe("SessionHost.renameGhost", () => {
     expect(readdirSync(runtimeUnitDir)).toEqual([]);
   });
 
-  it("retires a cancelled browser open under the old home before the rename", async () => {
+  it.each([
+    ["cancelled", "cancelled"],
+    ["timed-out", "timeout"],
+  ] as const)("retires a %s browser open under the old home before the rename", async (_label, failure) => {
     const { dir } = await setup([{ kind: "text", text: "unused" }]);
-    const relay = await cancelledRelayOpen(dir, () => {
+    const relay = await failedRelayOpen(dir, failure, () => {
       expect(existsSync(dir)).toBe(true);
       expect(existsSync(join(temp!.root, "wisp"))).toBe(false);
     });
 
-    const renamed = await host!.renameGhost("casper", "wisp");
-    relay.finishOpen();
+    const renaming = host!.renameGhost("casper", "wisp");
+    await relay.closeRequested;
+    expect(existsSync(dir)).toBe(true);
+    expect(existsSync(join(temp!.root, "wisp"))).toBe(false);
+    relay.settleCreate();
+    const renamed = await renaming;
 
     expect(relay.sent).toEqual(["open", "close"]);
     expect(renamed.dir).toBe(join(temp!.root, "wisp"));

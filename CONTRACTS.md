@@ -2202,9 +2202,10 @@ not coupled to that release identity.
   Chromium close forgets only tabs confirmed closed or already gone; any live
   tab Chromium refused remains claimed by that session for the retry. Relay
   requests are serialized per protocol session inside the extension, so a
-  terminal close waits for any earlier canceled-but-still-running tab creation.
-  A successful close tombstones that protocol session against later work, and
-  the backend rotates to a fresh session id before a subsequent open. Whole-ghost
+  terminal close waits for any earlier canceled-or-timed-out tab creation's
+  underlying Chromium handler to settle, not merely for its deadline response.
+  A completed close tombstones that protocol session against later work, and the
+  backend rotates to a fresh session id before a subsequent open. Whole-ghost
   rename and delete retire that old-home entry before moving the directory;
   another ghost's browser session is untouched.
   The relay is the only browser: there is no second backend and no browser mode
