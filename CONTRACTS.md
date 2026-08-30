@@ -2207,7 +2207,9 @@ not coupled to that release identity.
   A completed close tombstones that protocol session against later work, and the
   backend rotates to a fresh session id before a subsequent open. Whole-ghost
   rename and delete retire that old-home entry before moving the directory;
-  another ghost's browser session is untouched.
+  another ghost's browser session is untouched. Graceful daemon shutdown retires
+  every browser session while the relay is live, then closes the relay/listener;
+  it attempts every cleanup stage and reports rather than masks any failure.
   The relay is the only browser: there is no second backend and no browser mode
   to choose. Browser calls fail with the disconnected message until an extension
   pairs. A ghost that needs Chromium running may start it from its shell, but

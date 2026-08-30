@@ -145,6 +145,28 @@ export interface ShutdownSignalOptions {
   timing?: Pick<StagedShutdownOptions, "graceMs" | "forceMs" | "wait">;
 }
 
+export async function closeDaemonResources(
+  options: Pick<ShutdownSignalOptions, "listening" | "host" | "browsers">,
+): Promise<void> {
+  const failures: unknown[] = [];
+  const attempt = async (close: () => Promise<void>): Promise<void> => {
+    try {
+      await close();
+    } catch (error) {
+      failures.push(error);
+    }
+  };
+  // Session teardown is independent, so start it immediately. Browser teardown
+  // is ordered: its protocol close needs the relay that listening.close() owns.
+  const host = attempt(() => options.host.disposeAll());
+  await attempt(() => options.browsers.closeAll());
+  await attempt(() => options.listening.close());
+  await host;
+  if (failures.length > 0) {
+    throw new AggregateError(failures, "daemon resources did not close cleanly");
+  }
+}
+
 export async function waitForShutdownSignal(options: ShutdownSignalOptions): Promise<void> {
   const signalProcess = process as unknown as {
     listeners(event: "SIGINT" | "SIGTERM"): Array<(...args: unknown[]) => void>;
@@ -186,13 +208,7 @@ export async function waitForShutdownSignal(options: ShutdownSignalOptions): Pro
               options.listening.server.closeIdleConnections();
             },
             abortActive: () => options.host.beginShutdown(),
-            graceful: async () => {
-              await Promise.allSettled([
-                options.listening.close(),
-                options.host.disposeAll(),
-                options.browsers.closeAll(),
-              ]);
-            },
+            graceful: () => closeDaemonResources(options),
             force,
             ...options.timing,
           });

@@ -2,6 +2,7 @@ import { pathToFileURL } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
 import { describe, expect, it, vi } from "vitest";
 import {
+  closeDaemonResources,
   isDirectInvocation,
   main,
   parseArgs,
@@ -195,6 +196,68 @@ describe("runStagedShutdown", () => {
     await output.waitFor("HOST_FORCE");
     await output.waitFor("DONE");
     await expect(exited).resolves.toBe(0);
+  });
+});
+
+describe("closeDaemonResources", () => {
+  it("retires browser sessions before closing their live relay", async () => {
+    const events: string[] = [];
+    await closeDaemonResources({
+      listening: {
+        server: {} as never,
+        relay: undefined,
+        close: async () => { events.push("listener"); },
+      },
+      host: {
+        beginShutdown() {},
+        forceDisposeAll() {},
+        disposeAll: async () => { events.push("host"); },
+      },
+      browsers: {
+        closeAll: async () => { events.push("browsers"); },
+      },
+    });
+
+    expect(events.indexOf("browsers")).toBeLessThan(events.indexOf("listener"));
+  });
+
+  it("attempts every stage and reports every cleanup failure", async () => {
+    const events: string[] = [];
+    const closing = closeDaemonResources({
+      listening: {
+        server: {} as never,
+        relay: undefined,
+        close: async () => {
+          events.push("listener");
+          throw new Error("listener close failed");
+        },
+      },
+      host: {
+        beginShutdown() {},
+        forceDisposeAll() {},
+        disposeAll: async () => {
+          events.push("host");
+          throw new Error("host close failed");
+        },
+      },
+      browsers: {
+        closeAll: async () => {
+          events.push("browsers");
+          throw new Error("browser close failed");
+        },
+      },
+    });
+
+    await expect(closing).rejects.toMatchObject({
+      name: "AggregateError",
+      errors: expect.arrayContaining([
+        expect.objectContaining({ message: "host close failed" }),
+        expect.objectContaining({ message: "browser close failed" }),
+        expect.objectContaining({ message: "listener close failed" }),
+      ]),
+    });
+    expect(events).toEqual(expect.arrayContaining(["host", "browsers", "listener"]));
+    expect(events.indexOf("browsers")).toBeLessThan(events.indexOf("listener"));
   });
 });
 
