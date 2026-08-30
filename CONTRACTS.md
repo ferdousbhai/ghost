@@ -686,9 +686,12 @@ to the session that started it: it survives the turn but not the session
 shutdown cancel it), it keeps a bounded output tail (the newest 64,000 bytes
 across process buffers and Ghost-added failure text, trimming within one
 oversized contribution when necessary) in memory only. Trimming never exposes
-a partial UTF-8 code point, and every individual output-bearing update,
-snapshot, foreground response/error, and settlement report consumes that same
-byte budget including Ghost's framing. The newest 50 settled jobs stay listed.
+a partial UTF-8 code point; while a job runs, an incomplete trailing scalar
+remains buffered and counts against the cap until its remaining process bytes
+arrive. Settlement flushes an incomplete final scalar. Every individual
+output-bearing update, snapshot, foreground response/error, and settlement
+report consumes that same byte budget including Ghost's framing. The newest 50
+settled jobs stay listed.
 When a job settles, its report enters the conversation as an agent-attributed
 `ghost-job-result` custom message (`details.jobId/status/exitCode`) delivered
 through pi's own queue: behind the live turn when one is streaming, otherwise

@@ -1,6 +1,12 @@
 import { type BashOperations, createLocalBashOperations } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
-import { createBashTool, formatJobResult, GhostJobManager, type GhostJob } from "../src/jobs.js";
+import {
+  createBashTool,
+  formatJobResult,
+  GhostJobManager,
+  type GhostJob,
+  jobSnapshot,
+} from "../src/jobs.js";
 
 interface FakeProcess {
   command: string;
@@ -64,13 +70,31 @@ describe("GhostJobManager", () => {
 
   it("keeps split and truncated multibyte output on UTF-8 boundaries", async () => {
     const split = manager({ maxOutputBytes: 8 });
-    const splitJob = split.jobs.start({ command: "split", cwd: "/tmp" });
+    const updates: string[] = [];
+    const splitJob = split.jobs.start({
+      command: "split",
+      cwd: "/tmp",
+      onOutput: (job) => updates.push(job.output),
+    });
     const face = Buffer.from("😀");
     split.processes[0]!.emit(face.subarray(0, 2));
+    expect(updates).toEqual([""]);
+    expect(jobSnapshot(splitJob).output).toBe("");
+    expect(splitJob.output).not.toContain("�");
     split.processes[0]!.emit(face.subarray(2));
+    expect(updates).toEqual(["", "😀"]);
+    expect(jobSnapshot(splitJob).output).toBe("😀");
     expect(splitJob.output).toBe("😀");
     split.processes[0]!.exit(0);
     await split.jobs.wait([splitJob.id], 1_000);
+
+    const incomplete = manager({ maxOutputBytes: 8 });
+    const incompleteJob = incomplete.jobs.start({ command: "incomplete", cwd: "/tmp" });
+    incomplete.processes[0]!.emit(face.subarray(0, 2));
+    expect(jobSnapshot(incompleteJob).output).toBe("");
+    incomplete.processes[0]!.exit(0);
+    await incomplete.jobs.wait([incompleteJob.id], 1_000);
+    expect(jobSnapshot(incompleteJob).output).toBe("�");
 
     const truncated = manager({ maxOutputBytes: 6 });
     const truncatedJob = truncated.jobs.start({ command: "truncate", cwd: "/tmp" });

@@ -93,6 +93,20 @@ function tailWithSuffix(tail: string, suffix: string, maxBytes: number): string 
   return utf8Tail(tail, remaining) + boundedSuffix;
 }
 
+function decodeAvailableUtf8(
+  chunks: readonly Buffer[],
+  bytes: number,
+  flush: boolean,
+): string {
+  // While the process runs, stream mode withholds a trailing partial scalar
+  // instead of exposing U+FFFD. The raw suffix stays in `chunks`, counts
+  // against the byte cap, and joins the next process buffer. Settlement flushes
+  // the decoder so genuinely incomplete process output is still represented.
+  const input = Buffer.concat(chunks, bytes);
+  const decoder = new TextDecoder("utf-8");
+  return flush ? decoder.decode(input) : decoder.decode(input, { stream: true });
+}
+
 function defaultLabel(command: string): string {
   const line = command.trim().split("\n")[0] ?? "";
   return line.length > 80 ? `${line.slice(0, 77)}...` : line;
@@ -159,12 +173,13 @@ class Job implements GhostJob {
   }
 
   get output(): string {
-    return utf8Tail(Buffer.concat(this.chunks, this.bytes).toString("utf8"), this.maxOutputBytes);
+    const decoded = decodeAvailableUtf8(this.chunks, this.bytes, this.status !== "running");
+    return utf8Tail(decoded, this.maxOutputBytes);
   }
 
   get outputTruncated(): boolean {
     if (this.rawOutputTruncated) return true;
-    const decoded = Buffer.concat(this.chunks, this.bytes).toString("utf8");
+    const decoded = decodeAvailableUtf8(this.chunks, this.bytes, this.status !== "running");
     return Buffer.byteLength(decoded) > this.maxOutputBytes;
   }
 }
