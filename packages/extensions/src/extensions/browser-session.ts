@@ -1193,6 +1193,7 @@ interface EffectiveSessionOptions {
 interface BrowserSessionEntry {
   readonly session: GhostBrowserSession;
   readonly options: EffectiveSessionOptions;
+  closing?: Promise<void>;
 }
 
 const sessions = new Map<string, BrowserSessionEntry>();
@@ -1271,6 +1272,13 @@ export function browserSessionFor(
   const requested = effectiveSessionOptions(options);
   const existing = sessions.get(key);
   if (existing) {
+    if (existing.closing) {
+      throw new GhostError(
+        "conflict",
+        `The browser session for ${key} is still closing; wait before using it again.`,
+        { conflict: "browser_session_closing", homeDir: key },
+      );
+    }
     const changed = changedSessionOptions(existing.options, requested);
     if (changed.length === 0) return existing.session;
     throw new GhostError(
@@ -1304,19 +1312,35 @@ export function browserSessionFor(
   return session;
 }
 
+function closeBrowserSessionEntry(
+  key: string,
+  entry: BrowserSessionEntry,
+): Promise<void> {
+  if (entry.closing) return entry.closing;
+  const closing = entry.session.close().then(() => {
+    if (sessions.get(key) === entry) sessions.delete(key);
+  }).finally(() => {
+    if (entry.closing === closing) delete entry.closing;
+  });
+  entry.closing = closing;
+  return closing;
+}
+
+/** Close and forget only the browser session keyed by this resolved ghost home. */
+export function closeBrowserSession(homeDir: string): Promise<void> {
+  const key = resolve(homeDir);
+  const entry = sessions.get(key);
+  return entry ? closeBrowserSessionEntry(key, entry) : Promise.resolve();
+}
+
 export async function closeAllBrowserSessions(): Promise<void> {
   if (closingAll) return closingAll;
   const open = [...sessions.entries()];
   if (open.length === 0) return;
   const closing = (async () => {
     const results = await Promise.allSettled(
-      open.map(([, entry]) => entry.session.close()),
+      open.map(([key, entry]) => closeBrowserSessionEntry(key, entry)),
     );
-    for (const [index, [key, entry]] of open.entries()) {
-      if (results[index]?.status === "fulfilled" && sessions.get(key) === entry) {
-        sessions.delete(key);
-      }
-    }
     const failures = results
       .filter((result): result is PromiseRejectedResult => result.status === "rejected")
       .map((result) => result.reason);

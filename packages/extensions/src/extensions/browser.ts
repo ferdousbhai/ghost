@@ -791,6 +791,7 @@ export {
 export {
   browserSessionFor,
   closeAllBrowserSessions,
+  closeBrowserSession,
 } from "./browser-session.js";
 export type {
   BackendScreenshotResult,

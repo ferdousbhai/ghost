@@ -31,6 +31,12 @@ import {
 import type { AddressInfo } from "node:net";
 import { basename, join, sep } from "node:path";
 import type { AgentSession, AgentSessionEvent } from "@earendil-works/pi-coding-agent";
+import {
+  browserSessionFor,
+  closeAllBrowserSessions,
+  relayBackend,
+  type RelayTransport,
+} from "@ghost/extensions";
 import { GhostMcpManager } from "../src/mcp-manager.js";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { CURRENT_SESSION_VERSION } from "@earendil-works/pi-coding-agent";
@@ -104,6 +110,7 @@ let provider: MockProvider | null = null;
 let host: SessionHost | null = null;
 
 afterEach(async () => {
+  await closeAllBrowserSessions();
   await host?.disposeAll();
   host = null;
   await provider?.close();
@@ -194,6 +201,7 @@ async function setup(
   options: Pick<
     SessionHostOptions,
     | "hooks"
+    | "browserSessionClose"
     | "homeOperations"
     | "askTimeoutSeconds"
     | "liveVoice"
@@ -7941,6 +7949,21 @@ describe("passive session recovery during whole-home moves", () => {
 });
 
 describe("SessionHost.deleteGhost", () => {
+  it("retires the old-home browser entry before moving a ghost with no Pi session", async () => {
+    const closed: string[] = [];
+    const { dir } = await setup([{ kind: "text", text: "unused" }], {
+      browserSessionClose: async (homeDir) => {
+        expect(existsSync(homeDir)).toBe(true);
+        closed.push(homeDir);
+      },
+    });
+
+    await host!.deleteGhost("casper");
+
+    expect(closed).toEqual([dir]);
+    expect(existsSync(dir)).toBe(false);
+  });
+
   it("closes the ghost's conversations and moves the whole home into the trash", async () => {
     const { dir } = await setup([{ kind: "text", text: "hello" }]);
     await host!.runTurn("casper", { sessionId: "conv-1", prompt: "one", emit: () => {} });
@@ -8105,6 +8128,65 @@ describe("SessionHost.renameGhost", () => {
     expect(replacement.name).toBe("casper");
     expect(temp.registry.list().map((ghost) => ghost.name)).toEqual(["casper", "wisp"]);
     expect(readdirSync(runtimeUnitDir)).toEqual([]);
+  });
+
+  it("retires the browser entry under the old home before the rename", async () => {
+    const { dir } = await setup([{ kind: "text", text: "unused" }]);
+    const sent: string[] = [];
+    const transport: RelayTransport = {
+      connected: true,
+      peer: "test relay",
+      request: async (op) => {
+        sent.push(op);
+        if (op === "open") {
+          return {
+            ok: true,
+            result: {
+              id: "test-tab",
+              page: { url: "https://example.com/", title: "Example" },
+            },
+          };
+        }
+        if (op === "close") {
+          expect(existsSync(dir)).toBe(true);
+          expect(existsSync(join(temp!.root, "wisp"))).toBe(false);
+          return { ok: true, result: { closed: true } };
+        }
+        return { ok: false, failure: "invalid_input", message: "unexpected test op" };
+      },
+    };
+    const browser = browserSessionFor(dir, {
+      backend: relayBackend({ transport }),
+      idleTimeoutMs: 0,
+    });
+    await browser.backend.open("https://example.com/", { timeoutMs: 1_000 });
+
+    const renamed = await host!.renameGhost("casper", "wisp");
+
+    expect(sent).toEqual(["open", "close"]);
+    expect(renamed.dir).toBe(join(temp!.root, "wisp"));
+  });
+
+  it("leaves the old home unmoved and retries the same browser entry after close fails", async () => {
+    let failClose = true;
+    const closed: string[] = [];
+    const { dir } = await setup([{ kind: "text", text: "unused" }], {
+      browserSessionClose: async (homeDir) => {
+        closed.push(homeDir);
+        if (failClose) throw new Error("relay close failed");
+      },
+    });
+
+    await expect(host!.renameGhost("casper", "wisp"))
+      .rejects.toMatchObject({ code: "browser_cleanup_pending", status: 503 });
+    expect(existsSync(dir)).toBe(true);
+    expect(existsSync(join(temp!.root, "wisp"))).toBe(false);
+    expect(temp!.registry.get("casper").dir).toBe(dir);
+
+    failClose = false;
+    await expect(host!.renameGhost("casper", "wisp"))
+      .resolves.toMatchObject({ name: "wisp" });
+    expect(closed).toEqual([dir, dir]);
   });
 
   it("drains maintenance and transfers its identity after the home rename but before release", async () => {

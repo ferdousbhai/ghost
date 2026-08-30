@@ -50,6 +50,7 @@ import {
   ghostSessionStopContinuation,
 } from "./hooks.js";
 import {
+  closeBrowserSession,
   piToolCapabilities,
   readGhostHomeDigest,
   resolveGhostExtensions,
@@ -583,6 +584,8 @@ export interface SessionHostOptions {
   /** Test seam; production discovers the standard owner-machine skill paths. */
   machineSkillPaths?: readonly string[];
   projectBindings?: ProjectBindingStore;
+  /** Test seam for retiring the process-wide browser entry before a home move. */
+  browserSessionClose?: (homeDir: string) => Promise<void>;
   sessionStartupProbe?: (
     stage: "model-runtime" | "mcp" | "session-manager" | "agent-session",
     runtime: GhostPiRuntime,
@@ -1532,6 +1535,7 @@ export class SessionHost {
   private readonly scheduleCommandRunner: CommandRunner | undefined;
   private readonly machineSkills: string[];
   private readonly projectBindings: ProjectBindingStore;
+  private readonly browserSessionClose: (homeDir: string) => Promise<void>;
   private readonly sessionStartupProbe: NonNullable<SessionHostOptions["sessionStartupProbe"]>;
   private readonly toolCwdWriter: typeof writeToolCwds;
   private readonly pinWriter: typeof writePins;
@@ -1619,6 +1623,7 @@ export class SessionHost {
       : machineSkillPaths(this.ownerHome);
     this.projectBindings = options.projectBindings
       ?? new ProjectBindingStore({ ownerHome: this.ownerHome });
+    this.browserSessionClose = options.browserSessionClose ?? closeBrowserSession;
     this.sessionStartupProbe = options.sessionStartupProbe ?? (() => {});
     this.toolCwdWriter = options.toolCwdWriter ?? writeToolCwds;
     this.pinWriter = options.pinWriter ?? writePins;
@@ -6993,8 +6998,7 @@ export class SessionHost {
       maintenanceReservation = this.maintenance?.reserveGhostMove(ghost.name);
       this.projectBindings.revokeScope(ghost.name);
       await maintenanceReservation?.drained;
-      await this.quiesceGhost(ghost.name);
-      await this.retireGhostSchedules(ghost.name, "deleted");
+      await this.quiesceGhost(ghost, "deleted");
       const trashed = this.registry.trash(ghost.name);
       this.forgetGhost(ghost.name);
       this.maintenance?.completeGhostDelete(ghost.name);
@@ -7038,8 +7042,7 @@ export class SessionHost {
       maintenanceReservation = this.maintenance?.reserveGhostMove(ghost.name);
       this.projectBindings.revokeScope(ghost.name);
       await maintenanceReservation?.drained;
-      await this.quiesceGhost(ghost.name);
-      await this.retireGhostSchedules(ghost.name, "renamed");
+      await this.quiesceGhost(ghost, "renamed");
       const renamed = this.registry.rename(ghost.name, nextName);
       this.forgetGhost(ghost.name);
       await this.maintenance?.completeGhostRename(ghost.name, nextName);
@@ -7098,7 +7101,11 @@ export class SessionHost {
    * that would otherwise land in a directory that is no longer there, then
    * dispose every session holding a path inside it.
    */
-  private async quiesceGhost(ghostName: string): Promise<void> {
+  private async quiesceGhost(
+    ghost: Ghost,
+    outcome: "deleted" | "renamed",
+  ): Promise<void> {
+    const ghostName = ghost.name;
     const alreadyClosing = [...this.closing.entries()]
       .filter(([key]) => sessionKeyParts(key)[0] === ghostName)
       .map(([, closing]) => closing.promise);
@@ -7114,6 +7121,16 @@ export class SessionHost {
 
     for (const [key] of hosted) await this.closePi(ghostName, sessionKeyParts(key)[1]);
     await this.claudeCode.closeGhost(ghostName);
+    try {
+      await this.browserSessionClose(ghost.dir);
+    } catch {
+      throw new GhostError(
+        "browser_cleanup_pending",
+        "The ghost's browser session did not close. Restore the browser relay and retry.",
+        503,
+      );
+    }
+    await this.retireGhostSchedules(ghost.name, outcome);
   }
 
   /**

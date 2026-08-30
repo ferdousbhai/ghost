@@ -59,6 +59,7 @@ import type {
 import {
   browserSessionFor,
   closeAllBrowserSessions,
+  closeBrowserSession,
   DEFAULT_BROWSER_SCREENSHOT_RETENTION,
   DEFAULT_ACTION_TIMEOUT_MS,
   DEFAULT_ACTING_BUDGET,
@@ -1707,6 +1708,101 @@ describe("the process-wide browser session registry", () => {
     })).toThrowError(/shutdown is still in progress/i);
     blocked.resolve();
     await Promise.all([first, second]);
+    expect(browserSessionFor(fixture.dir, {
+      backend: factory,
+      idleTimeoutMs: 0,
+      resolver: PUBLIC_RESOLVER,
+    })).not.toBe(session);
+  });
+
+  it("closes only the resolved home requested and leaves other ghosts reusable", async () => {
+    const otherHome = join(fixture.root, "mina");
+    const firstBackend = new FakeBackend();
+    const otherBackend = new FakeBackend();
+    const first = browserSessionFor(fixture.dir, {
+      backend: () => firstBackend,
+      idleTimeoutMs: 0,
+      resolver: PUBLIC_RESOLVER,
+    });
+    const other = browserSessionFor(otherHome, {
+      backend: () => otherBackend,
+      idleTimeoutMs: 0,
+      resolver: PUBLIC_RESOLVER,
+    });
+    await first.open("https://example.com");
+    await other.open("https://example.com");
+
+    await closeBrowserSession(join(fixture.dir, "."));
+
+    expect(firstBackend.closed).toBe(true);
+    expect(otherBackend.closed).toBe(false);
+    expect(browserSessionFor(otherHome, {
+      backend: () => otherBackend,
+      idleTimeoutMs: 0,
+      resolver: PUBLIC_RESOLVER,
+    })).toBe(other);
+    expect(browserSessionFor(fixture.dir, {
+      backend: () => firstBackend,
+      idleTimeoutMs: 0,
+      resolver: PUBLIC_RESOLVER,
+    })).not.toBe(first);
+    await closeBrowserSession(otherHome);
+  });
+
+  it("coalesces a targeted close and blocks replacement for that home only", async () => {
+    const otherHome = join(fixture.root, "mina");
+    const blocked = deferred();
+    const closingBackend = new FakeBackend();
+    closingBackend.closeBarrier = blocked.promise;
+    const factory = () => closingBackend;
+    const session = browserSessionFor(fixture.dir, {
+      backend: factory,
+      idleTimeoutMs: 0,
+      resolver: PUBLIC_RESOLVER,
+    });
+    await session.open("https://example.com");
+
+    const first = closeBrowserSession(fixture.dir);
+    const second = closeBrowserSession(fixture.dir);
+    expect(second).toBe(first);
+    await vi.waitFor(() => expect(closingBackend.calls.filter((call) =>
+      call.name === "close")).toHaveLength(1));
+    expect(() => browserSessionFor(fixture.dir, {
+      backend: factory,
+      idleTimeoutMs: 0,
+      resolver: PUBLIC_RESOLVER,
+    })).toThrowError(/still closing/i);
+    expect(() => browserSessionFor(otherHome, {
+      backend: SHARED_BACKEND,
+      idleTimeoutMs: 0,
+    })).not.toThrow();
+
+    blocked.resolve();
+    await Promise.all([first, second]);
+    await closeBrowserSession(otherHome);
+  });
+
+  it("preserves a failed targeted close for exact retry", async () => {
+    const failingBackend = new FakeBackend();
+    const factory = () => failingBackend;
+    const session = browserSessionFor(fixture.dir, {
+      backend: factory,
+      idleTimeoutMs: 0,
+      resolver: PUBLIC_RESOLVER,
+    });
+    await session.open("https://example.com");
+    vi.spyOn(failingBackend, "close")
+      .mockRejectedValueOnce(new Error("relay close failed"));
+
+    await expect(closeBrowserSession(fixture.dir)).rejects.toThrow("relay close failed");
+    expect(browserSessionFor(fixture.dir, {
+      backend: factory,
+      idleTimeoutMs: 0,
+      resolver: PUBLIC_RESOLVER,
+    })).toBe(session);
+
+    await closeBrowserSession(fixture.dir);
+    expect(failingBackend.closed).toBe(true);
     expect(browserSessionFor(fixture.dir, {
       backend: factory,
       idleTimeoutMs: 0,

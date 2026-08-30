@@ -1,5 +1,6 @@
 import {
   closeAllBrowserSessions as closeAllExtensionBrowserSessions,
+  closeBrowserSession as closeExtensionBrowserSession,
   createGhostExtension,
   deriveMemoryIndex,
   deriveDocumentsIndex,
@@ -25,6 +26,11 @@ export type { RelayTransport };
 /** Drain the process-wide browser registry through the one package boundary. */
 export async function closeAllBrowserSessions(): Promise<void> {
   await closeAllExtensionBrowserSessions();
+}
+
+/** Retire the process-wide browser session for one resolved ghost home. */
+export async function closeBrowserSession(homeDir: string): Promise<void> {
+  await closeExtensionBrowserSession(homeDir);
 }
 
 /** Ensure one discovered home has the required Ghost-owned directories. */

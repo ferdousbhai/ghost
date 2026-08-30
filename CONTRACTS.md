@@ -1075,8 +1075,12 @@ shape and streams emit one complete event object per line.
   (`400 confirmation_required`); an unknown ghost is `404 not_found`; a ghost
   with any conversation busy, opening, or mid-delete — pi or Claude Code — is
   `409 ghost_busy`, as is a second concurrent delete of the same ghost. Idle
-  cached Pi sessions are closed (disposed, not deleted) and pending
-  title work is awaited first. **Deletion is a move, never an `rm`**:
+  cached Pi and Claude Code sessions are closed (disposed, not deleted),
+  pending title work is awaited, and the process-wide browser session keyed by
+  the old ghost-home path is retired before the move. A browser teardown failure
+  leaves the home and registry entry in place so the same delete can retry,
+  reported as `503 browser_cleanup_pending`. **Deletion is a move, never an
+  `rm`**:
   the ghost home holds the only copy of a persona and its memory, so
   nothing on any path follows the rename with a recursive removal. Before that
   move, deletion applies the scheduled-work cleanup above; its
@@ -1100,9 +1104,12 @@ shape and streams emit one complete event object per line.
   already taken in the root — by a ghost or by anything else — is
   `409 already_exists`; a ghost with any conversation busy, opening, or
   mid-delete is `409 ghost_busy`, the same gate `DELETE` uses, as is a second
-  concurrent rename or delete. Idle cached Pi sessions are closed and pending title
-  work awaited first, so nothing holds a path under the old name across the
-  rename. A Claude Code conversation keeps its resume sidecar, but that runtime
+  concurrent rename or delete. Idle cached Pi and Claude Code sessions are
+  closed, pending title work is awaited, and the process-wide browser session
+  keyed by the old ghost-home path is retired first, so nothing holds the old
+  name across the rename. A failed browser teardown leaves the home unmoved and
+  retryable as `503 browser_cleanup_pending`. A Claude Code conversation keeps
+  its resume sidecar, but that runtime
   stores the transcript itself under its own `~/.claude/projects/<cwd>` path,
   which does not move with the home. Before the home moves, rename applies the
   same scheduled-work retirement as delete. A failure is
@@ -2187,6 +2194,15 @@ not coupled to that release identity.
   `open` answers with the tab id, the `tabs` op lists and switches within the
   asking session's own tabs and answers `active` for it alone, and session
   `close` sweeps every tab that session opened rather than only its current one.
+  Relay session ownership is therefore independent of the current-tab pointer:
+  losing or explicitly closing the current tab never suppresses the terminal
+  session `close`. The process registry is keyed by resolved ghost-home path;
+  targeted teardown removes an entry only after its protocol close succeeds,
+  coalesces concurrent closes, and keeps a failed entry for retry. A partial
+  Chromium close forgets only tabs confirmed closed or already gone; any live
+  tab Chromium refused remains claimed by that session for the retry. Whole-ghost
+  rename and delete retire that old-home entry before moving the directory;
+  another ghost's browser session is untouched.
   The relay is the only browser: there is no second backend and no browser mode
   to choose. Browser calls fail with the disconnected message until an extension
   pairs. A ghost that needs Chromium running may start it from its shell, but

@@ -325,6 +325,12 @@ export class RelayBrowserBackend implements GhostBrowserBackend {
    */
   readonly #session = randomUUID();
   /**
+   * Whether this protocol session may still own tabs in the extension. This is
+   * deliberately separate from #tabId: closing the current tab can leave older
+   * tabs owned by the same session, and terminal close must still sweep them.
+   */
+  #mayOwnTabs = false;
+  /**
    * The tab this session is driving now. `#call` puts it on every op so the
    * extension can keep that tab's attach state and isolated world apart from
    * every other session's. Undefined until the first `open`; the extension
@@ -337,7 +343,7 @@ export class RelayBrowserBackend implements GhostBrowserBackend {
   }
 
   get running(): boolean {
-    return this.#transport?.connected === true && this.#tabId !== undefined;
+    return this.#transport?.connected === true && this.#mayOwnTabs;
   }
 
   async #call(
@@ -397,6 +403,9 @@ export class RelayBrowserBackend implements GhostBrowserBackend {
 
   async open(url: string, options: BackendActionOptions): Promise<PageSummary> {
     const result = await this.#call("open", { url }, options);
+    // A successful open reply means the extension may own the new tab even if
+    // the rest of the reply is malformed. Preserve that ownership for close.
+    this.#mayOwnTabs = true;
     // The extension names the tab it opened. Every later op rides on that id, so
     // a reply without one is malformed rather than something to paper over.
     const id = result["id"];
@@ -552,6 +561,7 @@ export class RelayBrowserBackend implements GhostBrowserBackend {
       },
       options,
     );
+    if (input.op === "create") this.#mayOwnTabs = true;
     const tabs = readTabInfos(result["tabs"]);
     // The extension is authoritative on which tab this session now drives:
     // `active` is answered for this caller alone, so follow it across
@@ -571,17 +581,18 @@ export class RelayBrowserBackend implements GhostBrowserBackend {
   }
 
   /**
-   * Close this session's tab and let the extension drop its debugger attachment.
-   * Other conversations keep their own tabs, and the *browser* is emphatically
-   * not closed — it is the owner's, with the rest of their day open in it.
+   * Close every tab this session may own and let the extension drop their
+   * debugger attachments. The active tab may already be gone; ownership lives
+   * at protocol-session scope. Other sessions and the owner's browser remain.
    */
   async close(options: BackendActionOptions = { timeoutMs: 10_000 }): Promise<boolean> {
-    if (this.#tabId === undefined) return false;
+    if (!this.#mayOwnTabs) return false;
     const result = await this.#call("close", {}, options);
     // The extension closed every tab this session opened, not just #tabId.
     const closed = result["closed"];
     if (typeof closed !== "boolean") malformed("close", "closed is not a boolean");
     this.#tabId = undefined;
+    this.#mayOwnTabs = false;
     return closed;
   }
 }

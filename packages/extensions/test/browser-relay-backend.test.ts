@@ -445,6 +445,31 @@ describe("the relaxed one-tab invariant, on the relay backend", () => {
     await backend.open(PAGE.url, { timeoutMs: 5_000 });
     expect(backend.running).toBe(true);
   });
+
+  it("closes the protocol session after the current tab disappears", async () => {
+    const transport = transportWithPage();
+    transport.answer("tabs", {
+      tabs: [
+        { id: "t1", url: PAGE.url, title: PAGE.title, active: false },
+        { id: "t2", url: "https://example.com/second", title: "Second", active: true },
+      ],
+      active: "t2",
+      id: "t2",
+      page: { url: "https://example.com/second", title: "Second" },
+    });
+    const backend = await opened(transport);
+    await backend.tabs(
+      { op: "create", url: "https://example.com/second" },
+      { timeoutMs: 5_000 },
+    );
+    transport.refuse("current", "no_page", "the current tab was closed");
+
+    await expectGhostError(backend.current());
+    expect(backend.running).toBe(true);
+    expect(await backend.close()).toBe(true);
+    expect(sentArgs(transport, "close")).toEqual({});
+    expect(backend.running).toBe(false);
+  });
 });
 
 
@@ -538,13 +563,18 @@ describe("when the relay is not there", () => {
     expect(await backend.current()).toBeUndefined();
   });
 
-  it("reports a disconnected close as a relay failure, then remembers the tab is gone", async () => {
+  it("keeps a disconnected close retryable after the relay reconnects", async () => {
     const transport = transportWithPage();
     const backend = await opened(transport);
     transport.connected = false;
     const error = await expectGhostError(backend.close());
     expect(error.details["failure"]).toBe("browser_unavailable");
-    expect(await backend.close()).toBe(false);
+    expect(backend.running).toBe(false);
+
+    transport.connected = true;
+    expect(backend.running).toBe(true);
+    expect(await backend.close()).toBe(true);
+    expect(sentArgs(transport, "close")).toEqual({});
   });
 
   it("reports a disconnected current probe when it previously had a tab", async () => {
