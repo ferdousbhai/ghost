@@ -232,8 +232,8 @@ describe("POST /api/ghosts/:name/greeting", () => {
         onboarding: false,
       });
       expect(seen?.character).toBeNull();
-      expect(seen?.memoryLines).toEqual(["- survives.md"]);
-      expect(seen?.documents.lines).toEqual(['- file: "DOCUMENT_SURVIVES"']);
+      expect(seen?.memoryLines).toEqual(["survives"]);
+      expect(seen?.documents.lines).toEqual(["DOCUMENT_SURVIVES"]);
       expect(JSON.stringify(logger.records)).toContain('"input":"character"');
       expect(JSON.stringify(logger.records)).not.toContain("SENSITIVE-");
       expect(JSON.stringify(logger.records)).not.toContain("character.md");
@@ -292,10 +292,10 @@ describe("POST /api/ghosts/:name/greeting", () => {
       expect(body.greeting).toBe("Hello despite a missing input.");
       expect(seen?.character).toBe("CHARACTER_SURVIVES");
       expect(seen?.memoryLines).toEqual(
-        testCase.memoryFails ? [] : ["- survives.md"],
+        testCase.memoryFails ? [] : ["survives"],
       );
       expect(seen?.documents.lines).toEqual(
-        testCase.documentsFail ? [] : ['- file: "DOCUMENT_SURVIVES"'],
+        testCase.documentsFail ? [] : ["DOCUMENT_SURVIVES"],
       );
       if (testCase.memoryFails) {
         expect(JSON.stringify(logger.records)).toContain('"input":"memory"');

@@ -2,10 +2,11 @@
  * Golden: a conversation that writes a memory mid-session.
  *
  * Two turns through one hosted session against the scripted mock provider. The
- * model calls `ghost_memory_write` on turn one — the ideal golden tool: no
- * network, no clock, and its effect is a file on disk — and turn two's persona
- * must show that memory in the index, because the persona is rebuilt from the
- * ghost home before every agent start.
+ * model writes a memory on turn one — the ideal golden effect: no network, no
+ * clock, just a file on disk — and turn two must reach the provider under the
+ * byte-identical system prompt, because the persona and its indexes are derived
+ * once per session rather than before every agent start. The written fact lives
+ * on disk, where the native file tools read it.
  *
  * The fixture pins, per turn: the complete system prompt that reached the
  * model, the tool surface on the wire, and the whole pi-messages event stream;
@@ -69,7 +70,7 @@ The Heidelberg cost more than it should have.
 const OTHER_AUDITED_OMP_TOOLS = ["ask", "eval", "inspect_image", "task", "todo"] as const;
 
 describe("golden: session", () => {
-  it("writes a memory mid-conversation and carries it into the next system prompt", async () => {
+  it("writes a memory mid-conversation and holds the session's system prompt fixed", async () => {
     temp = makeTempGhosts();
     provider = await startMockProvider({
       script: [
@@ -84,7 +85,7 @@ describe("golden: session", () => {
         },
         // Turn 1, step 2: having written it, say so.
         { kind: "text", text: "Written down." },
-        // Turn 2: a plain answer, on a persona that now lists the memory.
+        // Turn 2: a plain answer, on the persona the session started with.
         { kind: "text", text: "That you want short answers." },
       ],
     });
@@ -127,6 +128,7 @@ describe("golden: session", () => {
       .path(temp.ownerHome, "<owner-home>")
       .path(temp.root, "<ghosts-root>");
     const sections: GoldenSection[] = [];
+    const systemPrompts: string[] = [];
 
     const prompts = ["Remember that I want short answers.", "What do you remember about me?"];
     for (const [index, prompt] of prompts.entries()) {
@@ -143,6 +145,7 @@ describe("golden: session", () => {
 
       sections.push({ title: `turn ${turn}: user prompt`, body: prompt });
       const systemPrompt = requests[0]!.system.trimEnd();
+      systemPrompts.push(systemPrompt);
       expect(systemPrompt).toContain(CHARACTER.trim());
       expect(systemPrompt).toContain(scheduleUnitDir);
       expect(systemPrompt).toContain("ghost-timer-v1-6-casper-<slug>");
@@ -169,6 +172,13 @@ describe("golden: session", () => {
         body: events.map((event) => normalizer.line(event)).join("\n"),
       });
     }
+
+    // The memory index is session-start state: turn 1 writes a memory, and
+    // turn 2 is answered under the same prompt it started with rather than a
+    // rewritten prefix. The fact is on disk, where the native file tools read
+    // it, and a conversation opened after the write indexes it.
+    expect(systemPrompts[1]).toBe(systemPrompts[0]);
+    expect(systemPrompts[1]).not.toContain("owner-prefers-short");
 
     // The session's own registry is wider than the wire list: OMP mounts some
     // of Ghost's capabilities through its xd:// device registry rather than

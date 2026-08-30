@@ -9,7 +9,7 @@ import {
   openConfinedDirectory,
 } from "./linux-fs.js";
 
-export const DOCUMENT_INDEX_MAX_ENTRIES = 100;
+export const DOCUMENT_INDEX_MAX_ENTRIES = 50;
 export const DOCUMENT_INDEX_BUDGET_CHARS = 4_000;
 
 export type DocumentEntryKind = "directory" | "file";
@@ -97,8 +97,17 @@ export function normalizeDocumentsDirectoryPath(input: string): string {
   return segments.join("/");
 }
 
+/**
+ * Newest first, name as the deterministic tie-break. Every caller of
+ * `listDirectory` builds the prompt's shallow Documents index, which is cut off
+ * at `DOCUMENT_INDEX_MAX_ENTRIES`; recency is what decides which entries earn
+ * that budget, so it is the listing order rather than a per-call option. Each
+ * line already names its kind, so directories are not grouped ahead of files.
+ */
 function compareEntries(left: DocumentDirectoryEntry, right: DocumentDirectoryEntry): number {
-  if (left.kind !== right.kind) return left.kind === "directory" ? -1 : 1;
+  if (left.modifiedAt !== right.modifiedAt) {
+    return left.modifiedAt < right.modifiedAt ? 1 : -1;
+  }
   const foldedLeft = left.name.toLocaleLowerCase("en-US");
   const foldedRight = right.name.toLocaleLowerCase("en-US");
   if (foldedLeft < foldedRight) return -1;

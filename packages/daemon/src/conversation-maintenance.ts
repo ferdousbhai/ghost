@@ -2,9 +2,8 @@ import { createHash, randomUUID } from "node:crypto";
 import { lstat, readdir } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import {
-  deriveMemoryIndex,
   fenceUntrusted,
-  MEMORY_INDEX_BUDGET_CHARS,
+  MEMORY_INDEX_MAX_ENTRIES,
   openGhostHome,
   type GhostHome,
   type MemoryDeleteIntent,
@@ -50,11 +49,15 @@ export const MEMORY_UPKEEP_SETTINGS_KEY = "memory_upkeep";
 export const CONVERSATION_MAINTENANCE_RETRY_SECONDS = 60;
 export const CONVERSATION_MAINTENANCE_STATE_MAX_BYTES = 16 * 1_048_576;
 export const CONVERSATION_MAINTENANCE_MAX_TOOL_ROUNDS = 8;
-export const MEMORY_CONSOLIDATION_COOLDOWN_MS = 6 * 60 * 60 * 1_000;
-export const MEMORY_CONSOLIDATION_FILE_THRESHOLD = 100;
-export const MEMORY_CONSOLIDATION_INDEX_PRESSURE_CHARS = Math.floor(
-  MEMORY_INDEX_BUDGET_CHARS * 0.8,
-);
+export const MEMORY_CONSOLIDATION_COOLDOWN_MS = 10 * 60 * 60 * 1_000;
+/**
+ * Consolidate once there are as many memory files as the index can show. At
+ * that count the index still holds every fact and the next write is the one
+ * that would push the stalest off the bottom, so this is the last moment the
+ * ghost can see everything it is about to lose. A separate hard file ceiling
+ * would sit above this and never decide anything.
+ */
+export const MEMORY_CONSOLIDATION_FILE_THRESHOLD = MEMORY_INDEX_MAX_ENTRIES;
 export const MEMORY_CONSOLIDATION_MAX_WRITES = 4;
 export const MEMORY_CONSOLIDATION_MAX_DELETES = 4;
 export const MEMORY_CONSOLIDATION_STATE_MAX_BYTES = 4_096;
@@ -486,10 +489,7 @@ export function memoryConsolidationStatePath(homeDir: string): string {
 }
 
 export function memoryNeedsConsolidation(files: readonly MemoryRecord[]): boolean {
-  const index = deriveMemoryIndex(files);
-  return files.length >= MEMORY_CONSOLIDATION_FILE_THRESHOLD
-    || index.chars >= MEMORY_CONSOLIDATION_INDEX_PRESSURE_CHARS
-    || index.omitted > 0;
+  return files.length >= MEMORY_CONSOLIDATION_FILE_THRESHOLD;
 }
 
 function parseConsolidationState(path: string, value: unknown): MemoryConsolidationStateV1 {

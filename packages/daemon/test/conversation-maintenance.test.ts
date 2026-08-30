@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { chmodSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { openGhostHome } from "@ghost/extensions";
+import { deriveMemoryIndex, openGhostHome } from "@ghost/extensions";
 import {
   ConversationMaintenance,
   MEMORY_CONSOLIDATION_COOLDOWN_MS,
@@ -125,13 +125,23 @@ async function settle(maintenance: ConversationMaintenance, value = turn()): Pro
 }
 
 describe("ConversationMaintenance", () => {
-  it("detects index pressure before the hard memory-file threshold", () => {
-    const files = Array.from({ length: 62 }, (_, position) => ({
+  it("consolidates once there are as many memories as the index can show", () => {
+    const files = Array.from({ length: MEMORY_CONSOLIDATION_FILE_THRESHOLD + 12 }, (_, position) => ({
       slug: `pressure-${String(position).padStart(3, "0")}-${"x".repeat(33)}`,
       content: `Stable fact ${position}.`,
       updated: "2026-08-27T08:00:00.000Z",
     }));
-    expect(memoryNeedsConsolidation(files.slice(0, 61))).toBe(false);
+    const full = MEMORY_CONSOLIDATION_FILE_THRESHOLD;
+    // One short of a full index: nothing has been omitted and the next write is
+    // still free, so there is nothing to consolidate yet.
+    expect(deriveMemoryIndex(files.slice(0, full - 1)).omitted).toBe(0);
+    expect(memoryNeedsConsolidation(files.slice(0, full - 1))).toBe(false);
+    // Exactly full: every fact is still visible, and this is the last moment
+    // the ghost can see everything it is about to start losing.
+    expect(deriveMemoryIndex(files.slice(0, full)).omitted).toBe(0);
+    expect(memoryNeedsConsolidation(files.slice(0, full))).toBe(true);
+    // And still true once the cap really does drop the stalest facts.
+    expect(deriveMemoryIndex(files).omitted).toBeGreaterThan(0);
     expect(memoryNeedsConsolidation(files)).toBe(true);
   });
 
@@ -208,7 +218,7 @@ describe("ConversationMaintenance", () => {
     await maintenance.disposeAll();
   });
 
-  it("runs consolidation under file pressure and observes the persisted six-hour cooldown", async () => {
+  it("runs consolidation under file pressure and observes the persisted cooldown", async () => {
     seedPressureMemories("pressure");
     let nowMs = Date.parse("2026-08-27T08:00:00.000Z");
     const modes: string[] = [];

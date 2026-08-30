@@ -70,8 +70,10 @@ For each turn Ghost:
    and turns, and invalidated after a successful login/auth refresh);
 2. requires Claude.ai plan auth rather than accepting an API-key-backed
    status;
-3. rebuilds the persona and memory index from the ghost home, the shallow index
-   from the owner's shared XDG Documents root, the Omarchy CLI-first
+3. reuses the conversation's persona — the character file, the memory index
+   from the ghost home, and the shallow index from the owner's shared XDG
+   Documents root — derived once when the daemon first ran a turn for that
+   conversation and held until `close`, then rebuilds the Omarchy CLI-first
    computer-use policy, the owner-deliverable policy, the scheduled-work policy
    rendered from ghostd's one resolved systemd user-unit directory, the
    machine/ghost/project skill index, and the always-active declarative
@@ -133,17 +135,24 @@ Claude Code authentication.
 ## Why one scoped query per turn
 
 T3 Code keeps a long-lived query fed by an Effect queue. That is correct for a
-coding session whose system instructions are stable. A Ghost system prompt is
-not stable: memory files and the shallow owner Documents index are derived
-again before every turn. Keeping one query alive would freeze those indexes.
+coding session whose system instructions are stable.
 
-Ghost therefore retains T3's important lifecycle—typed startup/stream
+Ghost's persona was originally re-derived before every turn, and that was the
+reason a query could not outlive one: keeping it alive would freeze indexes the
+next turn expected to be fresh. That is no longer the trade. The character file
+and both indexes are session-start state, derived once per conversation and held
+until `close` — a memory written mid-session is on disk, where the native file
+tools read it, and rewriting a prompt prefix the model has already read bought
+nothing. Re-derivation now happens only where it is load-bearing: the skill
+index and the always-active declarative instructions, per turn.
+
+So the remaining reason for one scoped query per turn is lifecycle, not
+freshness. Ghost retains T3's important lifecycle—typed startup/stream
 failures, async-iterable streaming, interruption through the SDK query, and
 scoped finalization—without the `effect` dependency, and closes after one
-turn. The next turn resumes with the
-opaque Claude session id and a freshly derived system prompt. A failed or
-malformed resume metadata file is an explicit error; Ghost does not silently
-start a replacement conversation.
+turn. The next turn resumes with the opaque Claude session id and the same held
+persona. A failed or malformed resume metadata file is an explicit error; Ghost
+does not silently start a replacement conversation.
 
 Claude owns the actual transcript under its normal `~/.claude/projects/`
 storage. Ghost stores a `0600` metadata sidecar in `<ghost>/sessions/` so a

@@ -698,6 +698,35 @@ describe("Claude Code subscription runtime", () => {
     });
   });
 
+  it("derives the persona once per conversation, and again for a new one", async () => {
+    const { paths, seenOptions } = setupClaudeHost();
+    const runTurn = (sessionId: string) => host!.runTurn("casper", {
+      sessionId,
+      prompt: "Who are you?",
+      emit: () => {},
+    });
+    const append = (position: number): string =>
+      JSON.stringify(seenOptions[position]?.systemPrompt);
+
+    await runTurn("conversation-1");
+    expect(append(0)).not.toContain("written-between-turns");
+    writeFileSync(
+      join(paths.home, "memory", "written-between-turns.md"),
+      "A fact the ghost learned mid-conversation.\n",
+      "utf8",
+    );
+
+    // The memory index is session-start state. It is on disk, where the native
+    // file tools read it; it does not rewrite a prompt prefix already read.
+    await runTurn("conversation-1");
+    expect(seenOptions).toHaveLength(2);
+    expect(append(1)).toBe(append(0));
+
+    // A conversation that starts after the write derives it fresh.
+    await runTurn("conversation-2");
+    expect(append(2)).toContain("written-between-turns");
+  });
+
   it("routes an explicit claude-code role through the isolated SDK harness and resumes it", async () => {
     const { paths, scheduleUnitDir, seenOptions, lifecycle } = setupClaudeHost();
     mkdirSync(temp!.documentsDir, { recursive: true });
@@ -739,7 +768,7 @@ describe("Claude Code subscription runtime", () => {
     ) throw new Error("Claude Code did not receive Ghost's appended persona.");
     const appended = systemPrompt.append;
     expect(appended).toContain(temp!.documentsDir);
-    expect(appended).toContain('file: "owner-plan.pdf"');
+    expect(appended).toContain("owner-plan.pdf");
     expect(appended).toContain(scheduleUnitDir);
     expect(appended).toContain("ghost-timer-v1-6-casper-<slug>");
     expect(appended).not.toContain("~/.config/systemd/user");

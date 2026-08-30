@@ -35,8 +35,10 @@ function memorySection(input: GhostSystemPromptInput): string[] {
     "## Memory",
     "This ghost's private notes about the owner and its own work — facts, preferences, "
       + `decisions — as one-fact files under ${JSON.stringify(input.memoryRoot)}; no other ghost `
-      + "sees them. The index lists file names, newest first; the name says what the fact is "
-      + "about. Read a file before relying on it; verify time-sensitive facts.",
+      + "sees them. The index lists slugs, newest first; the file is the slug plus `.md`, and "
+      + "the slug says what the fact is about. It is a snapshot taken when this session "
+      + "started, so list the directory yourself when currency matters. Read a file before "
+      + "relying on it; verify time-sensitive facts.",
     "",
     fenceUntrusted(lines.join("\n"), {
       source: "Memory index",
@@ -55,8 +57,10 @@ function docsSection(input: GhostSystemPromptInput): string[] {
   return [
     "## Documents",
     "The owner's own files, shared with the owner and every ghost; not a place for this "
-      + `ghost's notes. Top-level names under ${JSON.stringify(input.docs.root)}; directories `
-      + "are not expanded. Read an entry when relevant.",
+      + `ghost's notes. Top-level names under ${JSON.stringify(input.docs.root)}, newest first; `
+      + "a trailing `/` marks a directory, and directories are not expanded. It is a snapshot "
+      + "taken when this session started, so list the directory yourself when currency "
+      + "matters. Read an entry when relevant.",
     "",
     fenceUntrusted(lines.join("\n"), {
       source: "Documents index",

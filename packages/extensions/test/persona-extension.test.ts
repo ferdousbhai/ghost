@@ -25,7 +25,7 @@ beforeEach(async () => {
   fixture = await createGhostFixture();
   documentsDir = join(fixture.root, "Documents");
   await mkdir(join(documentsDir, "craft"), { recursive: true });
-  await writeFile(join(documentsDir, "estate-finances.md"), "arbitrary owner bytes\n");
+  await writeFile(join(documentsDir, FINANCE_DOC_PATH), "arbitrary owner bytes\n");
   await writeFile(join(documentsDir, "craft", "paper-guide.md"), "nested\n");
 });
 
@@ -70,14 +70,14 @@ describe("persona extension", () => {
     const prompt = (await harness.beforeAgentStart()) ?? "";
     expect(prompt).toContain("the ghost of a working typographer");
     expect(prompt).toContain("## Memory");
-    expect(prompt).toContain("- apprentice-question.md");
+    expect(prompt).toContain("apprentice-question");
     expect(prompt).not.toContain("I explained how to start");
-    expect(prompt.indexOf("- working-habit.md")).toBeLessThan(
-      prompt.indexOf("- apprentice-question.md"),
+    expect(prompt.indexOf("working-habit")).toBeLessThan(
+      prompt.indexOf("apprentice-question"),
     );
     expect(prompt).toContain("## Documents");
-    expect(prompt).toContain('directory: "craft"');
-    expect(prompt).toContain(`file: "${FINANCE_DOC_PATH}"`);
+    expect(prompt).toContain("craft/");
+    expect(prompt).toContain(FINANCE_DOC_PATH);
     expect(prompt).not.toContain("paper-guide.md");
   });
 
@@ -152,13 +152,28 @@ describe("persona extension", () => {
     expect(prompt).not.toContain(harnessPrompt);
   });
 
-  it("rebuilds the prompt on every agent start", async () => {
+  it("derives the prompt once per session, not once per turn", async () => {
     const harness = await loadExtension(persona(), fixture.dir);
-    expect(await harness.beforeAgentStart()).not.toContain("freshly-written");
+    const first = await harness.beforeAgentStart();
+    expect(first).not.toContain("freshly-written");
     await openGhostHome(fixture.dir).writeMemory({
       content: "freshly-written memory between turns",
     });
-    expect(await harness.beforeAgentStart()).toContain("- freshly-written-memory-between-turns.md");
+    // The index is session-start state. A memory written mid-session is on
+    // disk, where the native file tools read it; it does not rewrite a prompt
+    // prefix the model has already read.
+    expect(await harness.beforeAgentStart()).toBe(first);
+  });
+
+  it("picks up a memory written between sessions", async () => {
+    const before = await loadExtension(persona(), fixture.dir);
+    expect(await before.beforeAgentStart()).not.toContain("freshly-written");
+    await openGhostHome(fixture.dir).writeMemory({
+      content: "freshly-written memory between turns",
+    });
+    const after = await loadExtension(persona(), fixture.dir);
+    expect(await after.beforeAgentStart())
+      .toContain("freshly-written-memory-between-turns");
   });
 
   it("says so plainly when there is no character file", async () => {
@@ -192,8 +207,8 @@ describe("persona extension", () => {
       ]);
       expect(casperPrompt).toContain("# Casper");
       expect(minaPrompt).toContain("# Mina");
-      expect(casperPrompt).toContain(`file: "${FINANCE_DOC_PATH}"`);
-      expect(minaPrompt).toContain(`file: "${FINANCE_DOC_PATH}"`);
+      expect(casperPrompt).toContain(FINANCE_DOC_PATH);
+      expect(minaPrompt).toContain(FINANCE_DOC_PATH);
     } finally {
       await other.cleanup();
     }

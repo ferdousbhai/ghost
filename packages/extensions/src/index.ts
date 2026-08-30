@@ -15,6 +15,7 @@ export {
   MAX_MEMORY_FILE_SLUG_LENGTH,
   MAX_MEMORY_FILES,
   MEMORY_INDEX_BUDGET_CHARS,
+  MEMORY_INDEX_MAX_ENTRIES,
   memoryFileName,
   memorySlugForText,
   normalizeMemoryText,

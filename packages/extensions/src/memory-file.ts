@@ -10,6 +10,7 @@ export const MAX_MEMORY_FILE_BYTES = MAX_MEMORY_FILE_CONTENT_LENGTH * 3 + 1;
 export const MAX_MEMORY_FILE_SLUG_LENGTH = 64;
 export const MAX_MEMORY_FILES = 500;
 export const MEMORY_INDEX_BUDGET_CHARS = 4_000;
+export const MEMORY_INDEX_MAX_ENTRIES = 50;
 export const REDACTED_MEMORY_SECRET = "[REDACTED_SECRET]";
 
 const MEMORY_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -127,14 +128,19 @@ export function compareMemoryNewestFirst(left: MemoryFileMeta, right: MemoryFile
 
 /**
  * The per-session memory index: one file name per line in newest-first order,
- * cut off at the injection budget. The slug alone says what a fact is about,
- * so no preview of the content rides along. Derived on every session start
- * and never stored.
+ * cut off at whichever of `MEMORY_INDEX_MAX_ENTRIES` and the injection budget
+ * bites first. The slug alone says what a fact is about, so no preview of the
+ * content rides along. Derived on every session start and never stored;
+ * `omitted` still counts every memory the cut-off left out.
  */
 export function deriveMemoryIndex(files: readonly MemoryFileMeta[]): MemoryIndex {
-  const sorted = [...files]
-    .sort(compareMemoryNewestFirst)
-    .map((file) => `- ${memoryFileName(file.slug)}`);
+  const ordered = [...files].sort(compareMemoryNewestFirst);
+  // The slug alone. A validated slug never needs quoting, the `.md` extension
+  // is the only one memory files have, and a bullet marker in a fenced block
+  // says nothing the newline does not — each is dead weight repeated per entry.
+  const sorted = ordered
+    .slice(0, MEMORY_INDEX_MAX_ENTRIES)
+    .map((file) => file.slug);
   const lines: string[] = [];
   let chars = 0;
   for (const line of sorted) {
@@ -142,5 +148,5 @@ export function deriveMemoryIndex(files: readonly MemoryFileMeta[]): MemoryIndex
     chars += line.length + 1;
     lines.push(line);
   }
-  return { lines, chars, omitted: sorted.length - lines.length, total: sorted.length };
+  return { lines, chars, omitted: ordered.length - lines.length, total: ordered.length };
 }

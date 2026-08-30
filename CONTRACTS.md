@@ -342,7 +342,9 @@ memory, persona, keyring policy, and MCP/config sources remain explicit paths
 under the ghost home. Cwd is not storage and is not authority to
 discover a project. Ghost renders the persona/system prompt itself and passes
 it as the loader's `systemPrompt`; its persona extension then replaces that
-prompt before every model turn (`before_agent_start`). No pi coding-agent
+prompt (`before_agent_start`). The hook fires every model turn, but the prompt
+it returns is derived once per session and reused for the rest of it, so the
+character file and both indexes are fixed at session start. No pi coding-agent
 prompt prose is retained or subtracted by marker.
 
 The Ghost-owned pi prompt is ordered: the complete `character.md` body (or a
@@ -439,10 +441,24 @@ sessions is a planned port (issue #3).
 Documents and memory retrieval use those native filesystem tools directly.
 Ghost registers no duplicate document list/read/search/write tools, and
 keeps only `ghost_memory_write` for validated, atomic memory-file writes. The
-writer accepts only the fact content and an optional slug; the memory index and
-root-only Documents index are derived from disk before each model turn and are
-never stored. A foreground session rewrites a changed fact through that writer;
+writer accepts only the fact content and an optional slug. A foreground session
+rewrites a changed fact through that writer;
 it has no deletion tool. Idle consolidation alone retires obsolete memory.
+
+The memory index and the root-only Documents index are derived from disk once
+per session, never stored, and never re-derived mid-session — live truth is the
+files themselves, which the native filesystem tools read on demand. A
+conversation the daemon has dropped (pi session eviction, a `close`, or a daemon
+restart) derives them again on its next turn.
+
+Both indexes are newest-modified first and carry at most 50 entries, with a
+character budget behind that. Each is one entry per line with no bullet marker:
+memory as the bare slug (the file is that slug plus `.md`), Documents as the
+bare name with a trailing `/` for a directory. A Documents name is JSON-quoted
+only when it holds a control character, quote, or backslash, or has leading or
+trailing whitespace, so a newline in a name cannot forge an index line. When the
+cut-off drops entries the section ends with `(+N more)`, where `N` counts every
+entry left out.
 `/skill:<name> [args]` is explicit
 force-invocation of a discovered skill; native `read` remains the model-driven
 discovery path.
@@ -656,11 +672,13 @@ grounded in what the owner said or confirmed; assistant text alone may carry
 external or untrusted content and is not evidence worth memorizing.
 
 Pressure makes that idle delivery run consolidation instead of ordinary
-maintenance. Pressure means the derived index occupies at least 3,200 of its
-4,000 characters, the budget omits any memory, or the home has at least 100
-valid memory files. A mode-`0600` v1 `.memory-maintenance.json` records the ISO
-time at which consolidation is claimed; another consolidation may be claimed
-only after six hours. Claim publication precedes the generation, so concurrent
+maintenance. Pressure means the home holds at least as many valid memory files
+as the index can show — the 50-entry cap — so consolidation runs while every
+fact is still visible and the next write is the one that would push the stalest
+off the bottom. That single count subsumes a character-budget signal and any
+higher hard file ceiling; neither would ever decide anything. A mode-`0600` v1
+`.memory-maintenance.json` records the ISO time at which consolidation is
+claimed; another consolidation may be claimed only after ten hours. Claim publication precedes the generation, so concurrent
 conversations cannot both consolidate one ghost and a failed attempt also gets
 the cooldown rather than creating a provider-failure loop.
 

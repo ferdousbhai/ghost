@@ -1432,6 +1432,13 @@ export class ClaudeCodeRuntime {
     string,
     { controller: AbortController; promise: Promise<void> }
   >();
+  // The character file and the memory/Documents indexes are session-start
+  // state, not per-turn state. One scoped query per turn would otherwise derive
+  // them again for every owner turn; this keeps a conversation's persona fixed
+  // for as long as the daemon holds it, and `close` drops it so the next turn
+  // starts from disk. Live truth stays on disk, where the native file tools
+  // read it.
+  private readonly personas = new Map<string, string>();
   private disposed = false;
 
   constructor(options: ClaudeCodeRuntimeOptions = {}) {
@@ -1616,12 +1623,7 @@ export class ClaudeCodeRuntime {
       }
       const ownerTurnId = ownerTurnCount + 1;
       const [persona, machineSkills, ghostDeclarative] = await Promise.all([
-        buildPersona(
-          paths.home,
-          ghost.name,
-          this.scheduleUnitDir,
-          this.extensionOptions.documents,
-        ),
+        this.sessionPersona(key, paths.home, ghost.name),
         loadMachineSkills(this.ownerHome, { paths: this.machineSkills }),
         loadProjectDeclarativeSnapshot(paths.home, { level: "user" }),
       ]);
@@ -1939,6 +1941,9 @@ export class ClaudeCodeRuntime {
   }
 
   async closeGhost(ghostName: string): Promise<void> {
+    for (const key of [...this.personas.keys()]) {
+      if (runtimeKeyGhost(key) === ghostName) this.personas.delete(key);
+    }
     for (const key of [...this.active.keys()]) {
       const [keyGhost, conversationId] = JSON.parse(key) as [string, string];
       if (keyGhost !== ghostName) continue;
@@ -1946,8 +1951,29 @@ export class ClaudeCodeRuntime {
     }
   }
 
+  /** A conversation's persona, derived once and held until `close` drops it. */
+  private async sessionPersona(
+    key: string,
+    home: string,
+    ghostName: string,
+  ): Promise<string> {
+    const cached = this.personas.get(key);
+    if (cached !== undefined) return cached;
+    const persona = await buildPersona(
+      home,
+      ghostName,
+      this.scheduleUnitDir,
+      this.extensionOptions.documents,
+    );
+    // A turn racing another turn of the same conversation is already refused by
+    // `busy`, so the first derivation wins and there is nothing to reconcile.
+    this.personas.set(key, persona);
+    return persona;
+  }
+
   async close(ghostName: string, conversationId: string): Promise<void> {
     const key = JSON.stringify([ghostName, conversationId]);
+    this.personas.delete(key);
     const active = this.active.get(key);
     if (!active) return;
     this.active.delete(key);
@@ -1984,5 +2010,6 @@ export class ClaudeCodeRuntime {
     const shutdown = new GhostError("shutting_down", "The daemon is shutting down.", 503);
     for (const turn of turns) turn.controller.abort(shutdown);
     await Promise.allSettled(turns.map(({ promise }) => promise));
+    this.personas.clear();
   }
 }

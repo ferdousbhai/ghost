@@ -7,6 +7,7 @@ import {
   MAX_MEMORY_FILE_BYTES,
   MAX_MEMORY_FILE_CONTENT_LENGTH,
   MEMORY_INDEX_BUDGET_CHARS,
+  MEMORY_INDEX_MAX_ENTRIES,
   memorySlugForText,
   parseMemoryFile,
   parseMemoryFileName,
@@ -95,25 +96,29 @@ describe("deriveMemoryIndex", () => {
       { slug: "zebra", updated: "2026-08-27" },
       { slug: "apprentice-question", updated: "2026-08-27" },
     ]);
+    // The slug alone: no bullet, no `.md`, nothing repeated per entry.
     expect(index.lines).toEqual([
-      "- apprentice-question.md",
-      "- zebra.md",
-      "- working-habit.md",
+      "apprentice-question",
+      "zebra",
+      "working-habit",
     ]);
     expect(index.omitted).toBe(0);
     expect(index.total).toBe(3);
   });
 
-  it("cuts off at the injection budget and omits the stalest remainder", () => {
+  it("cuts off at the entry cap and omits the stalest remainder", () => {
     const files = Array.from({ length: 400 }, (_, position) => ({
       slug: `memory-${String(position).padStart(4, "0")}-${"x".repeat(40)}`,
       updated: position === 0 ? "2020-01-01" : "2026-08-27",
     }));
     const index = deriveMemoryIndex(files);
+    expect(index.lines).toHaveLength(MEMORY_INDEX_MAX_ENTRIES);
     expect(index.chars).toBeLessThanOrEqual(MEMORY_INDEX_BUDGET_CHARS);
-    expect(index.omitted).toBeGreaterThan(0);
-    expect(index.lines.length + index.omitted).toBe(400);
-    expect(index.lines.some((line) => line.startsWith("- memory-0000-"))).toBe(false);
-    expect(index.lines[0]).toBe(`- memory-0001-${"x".repeat(40)}.md`);
+    // `omitted` counts every memory the cut-off left out, not just the tail the
+    // character budget would have trimmed, and `total` still counts them all.
+    expect(index.omitted).toBe(400 - MEMORY_INDEX_MAX_ENTRIES);
+    expect(index.total).toBe(400);
+    expect(index.lines.some((line) => line.startsWith("memory-0000-"))).toBe(false);
+    expect(index.lines[0]).toBe(`memory-0001-${"x".repeat(40)}`);
   });
 });

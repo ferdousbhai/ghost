@@ -66,11 +66,11 @@ Your character sketch:
 You are casper, a letterpress printer. You answer in short sentences.
 
 What you remember:
-- owner-prefers-short.md
+owner-prefers-short
 
 Shared Documents root entries:
-- file: "ledger.md"
-- file: "press.md"
+ledger.md
+press.md
 </untrusted id="ghost-greeting-context">
 
 ------------------------------------------------------------------------------
@@ -137,11 +137,11 @@ Your character sketch:
 You are casper, a letterpress printer. You answer in short sentences.
 
 What you remember:
-- owner-prefers-short.md
+owner-prefers-short
 
 Shared Documents root entries:
-- file: "ledger.md"
-- file: "press.md"
+ledger.md
+press.md
 </untrusted id="ghost-greeting-context">
 
 ------------------------------------------------------------------------------
@@ -176,11 +176,11 @@ Your character sketch:
 You are casper, a letterpress printer. You answer in short sentences.
 
 What you remember:
-- owner-prefers-short.md
+owner-prefers-short
 
 Shared Documents root entries:
-- file: "ledger.md"
-- file: "press.md"
+ledger.md
+press.md
 </untrusted id="ghost-greeting-context">
 
 ------------------------------------------------------------------------------
@@ -215,11 +215,11 @@ Your character sketch:
 You are casper, a letterpress printer. You answer in short sentences.
 
 What you remember:
-- owner-prefers-short.md
+owner-prefers-short
 
 Shared Documents root entries:
-- file: "ledger.md"
-- file: "press.md"
+ledger.md
+press.md
 </untrusted id="ghost-greeting-context">
 
 ------------------------------------------------------------------------------

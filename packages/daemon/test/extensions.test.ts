@@ -37,9 +37,10 @@ describe("readGhostHomeDigest", () => {
         }),
       },
     });
+    // The slug alone, newest first: no bullet and no `.md` repeated per entry.
     expect(digest.memoryLines).toEqual([
-      "- fresh.md",
-      "- stale.md",
+      "fresh",
+      "stale",
     ]);
   });
 
@@ -130,12 +131,12 @@ describe("readGhostHomeDigest", () => {
         "character" in testCase.failed ? null : "CHARACTER_OK",
       );
       expect(digest.memoryLines).toEqual(
-        "memory" in testCase.failed ? [] : ["- remembered.md"],
+        "memory" in testCase.failed ? [] : ["remembered"],
       );
       expect(digest.documents).toMatchObject(
         "documents" in testCase.failed
           ? { root: "", lines: [], omitted: 0, total: 0 }
-          : { root: "/owner/Documents", lines: ['- file: "DOCUMENT_OK"'], omitted: 0, total: 1 },
+          : { root: "/owner/Documents", lines: ["DOCUMENT_OK"], omitted: 0, total: 1 },
       );
       expect(new Set(unavailable)).toEqual(new Set(Object.keys(testCase.failed)));
     });
