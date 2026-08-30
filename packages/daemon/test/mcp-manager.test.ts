@@ -17,10 +17,12 @@ import {
   readMCPConfigFile,
   removeMCPServer,
   updateMCPServer,
+  writeMCPConfigFile,
   type MCPServerConfig,
 } from "../src/mcp-config.js";
 import { GhostMcpManager, McpToolCallError, type McpToolDefinition } from "../src/mcp-manager.js";
 import { createMCPToolName, mintMcpToolNames } from "../src/mcp-tool-names.js";
+import { MAX_PRIVATE_FILE_BYTES } from "../src/private-file.js";
 import { tempDir, useCleanups } from "./helpers/fixtures.js";
 
 const cleanups = useCleanups();
@@ -208,6 +210,29 @@ describe("mcp.json writer", () => {
 
     writeFileSync(path, "{ not json");
     await expect(readMCPConfigFile(path)).rejects.toThrow();
+  });
+
+  it("bounds the complete pretty-printed mcp.json before publication", async () => {
+    const dir = tempDir("ghost-mcp-config-bounds-");
+    cleanups.push(dir.cleanup);
+    const path = join(dir.path, "mcp.json");
+    const empty = { mcpServers: {}, padding: "" };
+    const baseBytes = Buffer.byteLength(`${JSON.stringify(empty, null, 2)}\n`);
+    const exact = {
+      mcpServers: {},
+      padding: "x".repeat(MAX_PRIVATE_FILE_BYTES - baseBytes),
+    };
+
+    await writeMCPConfigFile(path, exact);
+    expect(readFileSync(path)).toHaveLength(MAX_PRIVATE_FILE_BYTES);
+    const before = readFileSync(path);
+
+    const prettyExpansion = { mcpServers: {}, future: Array(150_000).fill(0) };
+    expect(Buffer.byteLength(JSON.stringify(prettyExpansion))).toBeLessThan(MAX_PRIVATE_FILE_BYTES);
+    expect(Buffer.byteLength(`${JSON.stringify(prettyExpansion, null, 2)}\n`))
+      .toBeGreaterThan(MAX_PRIVATE_FILE_BYTES);
+    await expect(writeMCPConfigFile(path, prettyExpansion)).rejects.toThrow(/1 MiB/);
+    expect(readFileSync(path)).toEqual(before);
   });
 
   it.each(["symlink", "hardlink"] as const)(

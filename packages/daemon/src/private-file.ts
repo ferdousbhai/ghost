@@ -111,15 +111,27 @@ export function fsyncPath(path: string): void {
   }
 }
 
+/** Render one complete private JSON file and admit its exact published bytes. */
+export function renderPrivateJson(path: string, value: unknown): string {
+  const json = JSON.stringify(value, null, 2);
+  if (json === undefined) throw new TypeError(`${path} cannot be represented as JSON.`);
+  const rendered = `${json}\n`;
+  if (Buffer.byteLength(rendered, "utf8") > MAX_PRIVATE_FILE_BYTES) {
+    throw new RangeError(`${path} would exceed the 1 MiB private-file limit.`);
+  }
+  return rendered;
+}
+
 /**
  * Replace `path` with `value` as pretty JSON, private (0600), through a
  * per-writer temporary file and one rename, so a reader never sees a torn
  * file and two concurrent writers never share a temporary name.
  */
 export async function writePrivateJsonAtomic(path: string, value: unknown): Promise<void> {
+  const rendered = renderPrivateJson(path, value);
   const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
   try {
-    await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
+    await writeFile(temporary, rendered, { encoding: "utf8", flag: "wx", mode: 0o600 });
     await rename(temporary, path);
   } catch (error) {
     await rm(temporary, { force: true }).catch(() => {});

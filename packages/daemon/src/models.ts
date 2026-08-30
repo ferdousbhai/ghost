@@ -13,6 +13,7 @@ import {
   fsyncPath,
   PrivateReadError,
   readPrivateFileText,
+  renderPrivateJson,
   type PrivateReadRefusal,
 } from "./private-file.js";
 import {
@@ -318,7 +319,7 @@ function withSerializedModelsWrite<T>(path: string, mutation: () => T): T {
  * keyring reference during staging as well as after rename.
  */
 function persistGhostModels(path: string, file: GhostModelsFile): void {
-  const text = `${JSON.stringify(file, null, 2)}\n`;
+  const text = renderPrivateJson(path, file);
   const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
   try {
     writeFileSync(temporary, text, { encoding: "utf8", flag: "wx", mode: 0o600 });

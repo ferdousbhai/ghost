@@ -32,6 +32,7 @@ import {
   writeGhostModels,
 } from "../src/models.js";
 import { createGhostPiRuntime } from "../src/pi-runtime.js";
+import { MAX_PRIVATE_FILE_BYTES } from "../src/private-file.js";
 
 let dir: string | null = null;
 
@@ -96,6 +97,28 @@ describe("models.json round-trip", () => {
     // replacement publishes the fully-written temporary inode in one rename.
     expect(replaced.ino).not.toBe(originalInode);
     expect(readGhostModels(agentDir)?.providers.openrouter?.apiKey).toBe("sk-private");
+  });
+
+  it("bounds the complete pretty-printed models.json before publication", () => {
+    const agentDir = makeAgentDir();
+    const path = ghostModelsPath(agentDir);
+    const empty = { providers: {}, padding: "" };
+    const baseBytes = Buffer.byteLength(`${JSON.stringify(empty, null, 2)}\n`);
+    const exact = {
+      providers: {},
+      padding: "x".repeat(MAX_PRIVATE_FILE_BYTES - baseBytes),
+    };
+
+    writeGhostModels(agentDir, exact);
+    expect(readFileSync(path)).toHaveLength(MAX_PRIVATE_FILE_BYTES);
+    const before = readFileSync(path);
+
+    const prettyExpansion = { providers: {}, future: Array(150_000).fill(0) };
+    expect(Buffer.byteLength(JSON.stringify(prettyExpansion))).toBeLessThan(MAX_PRIVATE_FILE_BYTES);
+    expect(Buffer.byteLength(`${JSON.stringify(prettyExpansion, null, 2)}\n`))
+      .toBeGreaterThan(MAX_PRIVATE_FILE_BYTES);
+    expect(() => writeGhostModels(agentDir, prettyExpansion)).toThrow(/1 MiB/);
+    expect(readFileSync(path)).toEqual(before);
   });
 
   function lockHoldingChild(lockPath: string, holdMs: number) {
