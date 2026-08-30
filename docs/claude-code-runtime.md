@@ -82,10 +82,13 @@ For each turn Ghost:
    unbound, or the trusted project cwd plus its approved declarative snapshot;
 5. captures the Ghost-specific `@ghost/extensions` tool definitions and
    exposes them as one in-process SDK MCP server;
-6. starts one scoped Agent SDK query and maps the SDK's async message
-   stream onto Ghost's existing pi-messages SSE protocol;
+6. reuses the conversation's live Agent SDK query, starting one only if there
+   is none, and pushes the prompt into that query's open input channel, mapping
+   the SDK's async message stream onto Ghost's existing pi-messages SSE
+   protocol until that turn's `result` frame;
 7. persists the opaque Claude session id, listing metadata, and actual cwd
-   before it emits the terminal `done`, then closes the query process.
+   before it emits the terminal `done`, then leaves the query warm and arms its
+   idle timer.
 
 The query is deliberately unrestricted for its local owner:
 
@@ -140,27 +143,52 @@ fabricated as a fallback.
 The backend is owner-local by construction and uses the owner's external
 Claude Code authentication.
 
-## Why one scoped query per turn
+## Why the query stays warm
 
 T3 Code keeps a long-lived query fed by an Effect queue. That is correct for a
-coding session whose system instructions are stable.
+coding session whose system instructions are stable, and Ghost now agrees.
 
-Ghost's persona was originally re-derived before every turn, and that was the
-reason a query could not outlive one: keeping it alive would freeze indexes the
-next turn expected to be fresh. That is no longer the trade. The character file
-and both indexes are session-start state, derived once per conversation and held
-until `close` — a memory written mid-session is on disk, where the native file
-tools read it, and rewriting a prompt prefix the model has already read bought
-nothing. Re-derivation now happens only where it is load-bearing: the skill
-index and the always-active declarative instructions, per turn.
+Ghost originally started one scoped query per turn, because the persona was
+re-derived before every turn and keeping a query alive would freeze indexes the
+next turn expected to be fresh. That trade is gone: the character file and both
+indexes are session-start state, so freezing them is the intended behaviour, not
+a hazard. What per-turn queries cost was never mostly cache — it was process
+spawn, reloading Claude's transcript from disk, and respawning and
+re-handshaking every project stdio MCP server on every single turn.
 
-So the remaining reason for one scoped query per turn is lifecycle, not
-freshness. Ghost retains T3's important lifecycle—typed startup/stream
-failures, async-iterable streaming, interruption through the SDK query, and
-scoped finalization—without the `effect` dependency, and closes after one
-turn. The next turn resumes with the opaque Claude session id and the same held
-persona. A failed or malformed resume metadata file is an explicit error; Ghost
-does not silently start a replacement conversation.
+So a conversation now holds one query. The SDK takes one `AsyncIterable` for the
+life of a query, so turns after the first are pushed into that open channel;
+the SDK answers each with exactly one `result` frame and leaves the stream open,
+which is what lets a turn end without ending the process. `num_turns` is
+reported per result rather than cumulatively, so the sidecar's message
+accounting is unchanged from the per-turn design.
+
+A warm query is retired — and the next turn starts cold from the sidecar's
+resume id — whenever reuse would be wrong or wasteful:
+
+- **Idle.** `CLAUDE_WARM_QUERY_IDLE_TTL_MS`, 30 minutes, deliberately the same
+  as a pi hosted session's idle TTL. This is what bounds how stale a session's
+  indexes can get: a conversation nobody is talking to loses its process, and
+  its next turn derives everything again.
+- **Changed startup options.** Everything the query was built from — cwd, model,
+  the whole system prompt, the ghost tool names, and the project MCP
+  configuration — is compared verbatim before reuse. The SDK has no
+  `setSystemPrompt`, so a query that disagrees is retired rather than allowed to
+  answer under a stale prompt. Anything added to `queryOptions` that the SDK
+  fixes at startup belongs in that identity too.
+- **An aborted or failed turn.** Either leaves the message stream at an unknown
+  point, so the interrupt also closes the process.
+- **`close`, ghost close, conversation delete, and daemon shutdown.**
+
+Ghost keeps T3's important lifecycle — typed startup/stream failures,
+async-iterable streaming, interruption through the SDK query, and scoped
+finalization — without the `effect` dependency. A failed or malformed resume
+metadata file is still an explicit error; Ghost does not silently start a
+replacement conversation.
+
+Session-stop continuations are ordinary extra passes through the same warm
+query rather than new queries, capped by
+`GHOST_SESSION_STOP_CONTINUATION_CAP` as before.
 
 Claude owns the actual transcript under its normal `~/.claude/projects/`
 storage. Ghost stores a `0600` metadata sidecar in `<ghost>/sessions/` so a

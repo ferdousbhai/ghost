@@ -240,6 +240,8 @@ export interface ClaudeCodeRuntimeOptions {
   resolveExecutable?: (binaryPath: string) => Promise<string>;
   probe?: ClaudeCodeProbe;
   hooks?: GhostHookRunner;
+  /** Idle lifetime of a warm query; tests drive it down to observe expiry. */
+  warmIdleTtlMs?: number;
 }
 
 export class ClaudeCodeProcessError extends Error {
@@ -1105,26 +1107,6 @@ export async function bridgeClaudeCodeTools(
   });
 }
 
-async function* promptMessages(
-  prompt: string,
-  additionalContext?: string,
-): AsyncIterable<SDKUserMessage> {
-  if (additionalContext) {
-    yield {
-      type: "user",
-      message: { role: "user", content: [{ type: "text", text: additionalContext }] },
-      parent_tool_use_id: null,
-      isSynthetic: true,
-      shouldQuery: false,
-    };
-  }
-  yield {
-    type: "user",
-    message: { role: "user", content: [{ type: "text", text: prompt }] },
-    parent_tool_use_id: null,
-  };
-}
-
 function queryOptions(input: {
   binaryPath: string;
   cwd: string;
@@ -1373,47 +1355,125 @@ function requireMatchingClaudeProjectSnapshot(
 }
 
 /**
- * Effect owns the subprocess stream and its finalizer. This is the portable
- * core: SDK AsyncIterable consumed to completion, query interrupt on
- * cancellation, and query close on every exit path.
+ * How long a conversation's Claude process is kept alive with nothing to do.
+ * Deliberately the same 30 minutes as `DEFAULT_SESSION_IDLE_TTL_MS` for a pi
+ * hosted session — a warm query is the same kind of resource and the two
+ * runtimes should not disagree about how long "idle" is. It is duplicated
+ * rather than imported because session-host.ts already imports this module.
  */
-async function runQuery(input: {
-  createQuery: ClaudeCodeQueryFactory;
-  prompt: string;
-  additionalContext?: string;
-  options: ClaudeQueryOptions;
-  abortController: AbortController;
-  signal: AbortSignal | undefined;
-  onQuery: (query: Query | null) => void;
-  onMessage: (message: SDKMessage) => void;
-}): Promise<void> {
-  let runtime: Query;
-  try {
-    runtime = input.createQuery({
-      prompt: promptMessages(input.prompt, input.additionalContext),
-      options: input.options,
-    });
-  } catch (cause) {
-    throw new ClaudeCodeProcessError("Failed to start the Claude Code runtime.", { cause });
-  }
-  input.onQuery(runtime);
-  const interrupt = () => {
-    input.abortController.abort();
-    void runtime.interrupt().catch(() => {
-      // The finally block still closes the process. An interrupt racing a
-      // natural result is not itself a second user-visible failure.
-    });
+export const CLAUDE_WARM_QUERY_IDLE_TTL_MS = 30 * 60_000;
+
+/**
+ * The owner's side of a warm query's input. The SDK takes one AsyncIterable for
+ * the life of the query, so turns after the first are pushed into this channel
+ * rather than starting a second query.
+ */
+interface ClaudeInputChannel {
+  readonly messages: AsyncIterable<SDKUserMessage>;
+  push: (prompt: string, additionalContext?: string) => void;
+  close: () => void;
+}
+
+function claudeInputChannel(): ClaudeInputChannel {
+  const queued: SDKUserMessage[] = [];
+  let wake: (() => void) | null = null;
+  let closed = false;
+  const nudge = () => {
+    const resume = wake;
+    wake = null;
+    resume?.();
   };
-  if (input.signal?.aborted) interrupt();
-  input.signal?.addEventListener("abort", interrupt, { once: true });
-  try {
-    for await (const message of runtime) input.onMessage(message);
-  } catch (cause) {
-    throw new ClaudeCodeProcessError("Claude Code's message stream failed.", { cause });
-  } finally {
-    input.signal?.removeEventListener("abort", interrupt);
-    input.onQuery(null);
-    runtime.close();
+  return {
+    messages: (async function* messages(): AsyncIterable<SDKUserMessage> {
+      while (true) {
+        while (queued.length > 0) yield queued.shift() as SDKUserMessage;
+        if (closed) return;
+        await new Promise<void>((resolve) => { wake = resolve; });
+      }
+    })(),
+    push: (prompt, additionalContext) => {
+      if (closed) throw new ClaudeCodeProcessError("Claude Code's input channel is closed.");
+      if (additionalContext) {
+        queued.push({
+          type: "user",
+          message: { role: "user", content: [{ type: "text", text: additionalContext }] },
+          parent_tool_use_id: null,
+          isSynthetic: true,
+          shouldQuery: false,
+        } as SDKUserMessage);
+      }
+      queued.push({
+        type: "user",
+        message: { role: "user", content: [{ type: "text", text: prompt }] },
+        parent_tool_use_id: null,
+      } as SDKUserMessage);
+      nudge();
+    },
+    close: () => {
+      closed = true;
+      nudge();
+    },
+  };
+}
+
+/**
+ * A conversation's live Claude process. The identity fields are everything the
+ * query was constructed from and cannot be changed afterwards — the SDK has no
+ * `setSystemPrompt` — so a turn that disagrees with any of them retires this
+ * query and starts a new one rather than answering under a stale prompt.
+ */
+interface WarmClaudeQuery {
+  readonly query: Query;
+  readonly messages: AsyncIterator<SDKMessage>;
+  readonly input: ClaudeInputChannel;
+  readonly abortController: AbortController;
+  readonly identity: string;
+  idleTimer?: ReturnType<typeof setTimeout>;
+}
+
+/**
+ * Everything a warm query cannot change after construction. Compared verbatim,
+ * so anything added to `queryOptions` that the SDK fixes at startup belongs
+ * here too, or a stale query would silently answer under the old value.
+ */
+function warmQueryIdentity(input: {
+  cwd: string;
+  modelId: string;
+  systemPrompt: string;
+  toolNames: readonly string[];
+  projectMcpServers: Record<string, ClaudeMcpServerConfig>;
+}): string {
+  return JSON.stringify([
+    input.cwd,
+    input.modelId,
+    input.systemPrompt,
+    [...input.toolNames].sort(),
+    Object.keys(input.projectMcpServers).sort()
+      .map((name) => [name, input.projectMcpServers[name]]),
+  ]);
+}
+
+/**
+ * Pull one owner turn out of a live query. The SDK emits exactly one `result`
+ * per turn and leaves the stream open for the next one, so the turn ends at
+ * that frame rather than at the end of the iterator.
+ */
+async function pumpClaudeTurn(
+  warm: WarmClaudeQuery,
+  onMessage: (message: SDKMessage) => void,
+): Promise<SDKResultMessage> {
+  for (;;) {
+    let step: IteratorResult<SDKMessage>;
+    try {
+      step = await warm.messages.next();
+    } catch (cause) {
+      throw new ClaudeCodeProcessError("Claude Code's message stream failed.", { cause });
+    }
+    if (step.done) {
+      throw new ClaudeCodeProcessError("Claude Code ended without a terminal result.");
+    }
+    if (step.value.type === "result") return step.value;
+    onMessage(step.value);
   }
 }
 
@@ -1453,6 +1513,7 @@ export class ClaudeCodeRuntime {
   private readonly hooks: GhostHookRunner;
   private readonly ownerHome: string;
   private readonly scheduleUnitDir: string;
+  private readonly warmIdleTtlMs: number;
   private readonly machineSkills: string[];
   private readonly busy = new Set<string>();
   private readonly active = new Map<
@@ -1470,6 +1531,10 @@ export class ClaudeCodeRuntime {
   // starts from disk. Live truth stays on disk, where the native file tools
   // read it.
   private readonly personas = new Map<string, string>();
+  // One live Claude process per warm conversation. Turn one starts it; later
+  // turns push into its open input channel, so the persona, the project MCP
+  // servers, and Claude's own transcript all stay loaded between turns.
+  private readonly warm = new Map<string, WarmClaudeQuery>();
   private disposed = false;
 
   constructor(options: ClaudeCodeRuntimeOptions = {}) {
@@ -1483,6 +1548,11 @@ export class ClaudeCodeRuntime {
       throw new TypeError("scheduleUnitDir must be absolute");
     }
     this.scheduleUnitDir = resolve(scheduleUnitDir);
+    const warmIdleTtlMs = options.warmIdleTtlMs ?? CLAUDE_WARM_QUERY_IDLE_TTL_MS;
+    if (!Number.isFinite(warmIdleTtlMs) || warmIdleTtlMs <= 0) {
+      throw new RangeError("warmIdleTtlMs must be a finite positive number");
+    }
+    this.warmIdleTtlMs = warmIdleTtlMs;
     this.machineSkills = options.machineSkillPaths
       ? [...options.machineSkillPaths]
       : machineSkillPaths(this.ownerHome);
@@ -1740,65 +1810,103 @@ export class ClaudeCodeRuntime {
       let prompt = options.prompt;
       let stopHookActive = false;
       let continuationCount = 0;
+      const identity = warmQueryIdentity({
+        cwd: runtimeCwd,
+        modelId,
+        systemPrompt,
+        toolNames: bridge.names,
+        projectMcpServers: approvedProject.mcpServers,
+      });
+      // Nothing the query was built from may have changed under a warm process;
+      // the SDK fixes all of it at startup and offers no way to set it again.
+      const stale = this.warm.get(key);
+      if (stale && stale.identity !== identity) {
+        logger.debug?.("retiring Claude query whose startup options changed");
+        this.retireWarm(key);
+      }
+      let observedProjectMcpFailure = false;
+      const onMessage = (message: SDKMessage): void => {
+        if (message.type === "system" && message.subtype === "init") {
+          const statuses = new Map(
+            (message.mcp_servers ?? []).map((server) => [server.name, server.status]),
+          );
+          observedProjectMcpFailure = configuredProjectMcp.some((name) =>
+            statuses.get(name) !== "connected");
+        }
+        adapter.handle(message);
+      };
+
       while (!adapter.isTerminal()) {
         this.assertTurnAdmitted();
-        const abortController = new AbortController();
-        const sdkOptions = queryOptions({
-          binaryPath,
-          cwd: runtimeCwd,
-          ghostName: ghost.name,
-          modelId,
-          systemPrompt,
-          tools: bridge.tools,
-          toolNames: bridge.names,
-          metadata,
-          newSessionId: randomUUID(),
-          abortController,
-          projectMcpServers: approvedProject.mcpServers,
-        });
-
-        let terminalResult: SDKResultMessage | null = null;
-        let observedProjectMcpFailure = false;
-        await runQuery({
-          createQuery: this.createQuery,
-          prompt,
-          ...(continuationCount === 0 && beforePromptContext
-            ? { additionalContext: beforePromptContext }
-            : {}),
-          options: sdkOptions,
-          abortController,
-          signal: options.signal,
-          onQuery: (active) => {
-            if (active) this.active.set(key, { query: active, abortController });
-            else this.active.delete(key);
-          },
-          onMessage: (message) => {
-            if (message.type === "system" && message.subtype === "init") {
-              const statuses = new Map(
-                (message.mcp_servers ?? []).map((server) => [server.name, server.status]),
-              );
-              observedProjectMcpFailure = configuredProjectMcp.some((name) =>
-                statuses.get(name) !== "connected");
-            }
-            if (message.type === "result") {
-              // Hold the terminal frame until its resume metadata is durable. A
-              // `done` followed by a failed sidecar write would lie to the shell
-              // that this conversation can survive a daemon restart.
-              terminalResult = message;
-            } else {
-              adapter.handle(message);
-            }
-          },
-        });
+        let warm = this.warm.get(key);
+        if (warm) {
+          if (warm.idleTimer) clearTimeout(warm.idleTimer);
+          warm.idleTimer = undefined;
+        } else {
+          const abortController = new AbortController();
+          const input = claudeInputChannel();
+          const sdkOptions = queryOptions({
+            binaryPath,
+            cwd: runtimeCwd,
+            ghostName: ghost.name,
+            modelId,
+            systemPrompt,
+            tools: bridge.tools,
+            toolNames: bridge.names,
+            metadata,
+            newSessionId: randomUUID(),
+            abortController,
+            projectMcpServers: approvedProject.mcpServers,
+          });
+          let created: Query;
+          try {
+            created = this.createQuery({ prompt: input.messages, options: sdkOptions });
+          } catch (cause) {
+            input.close();
+            throw new ClaudeCodeProcessError("Failed to start the Claude Code runtime.", { cause });
+          }
+          warm = {
+            query: created,
+            messages: created[Symbol.asyncIterator]() as AsyncIterator<SDKMessage>,
+            input,
+            abortController,
+            identity,
+          };
+          this.warm.set(key, warm);
+        }
+        const live = warm;
+        this.active.set(key, { query: live.query, abortController: live.abortController });
+        // An abort leaves the message stream at an unknown point, so the turn's
+        // interrupt also retires the process rather than handing the next turn
+        // a query mid-frame; that turn resumes cold from the sidecar.
+        const interrupt = () => {
+          void live.query.interrupt().catch(() => {
+            // The retire below closes the process on every path anyway.
+          });
+          this.retireWarm(key);
+        };
+        const turnSignal = options.signal;
+        if (turnSignal?.aborted) interrupt();
+        turnSignal?.addEventListener("abort", interrupt, { once: true });
+        let completed: SDKResultMessage;
+        try {
+          live.input.push(
+            prompt,
+            ...(continuationCount === 0 && beforePromptContext ? [beforePromptContext] : []),
+          );
+          completed = await pumpClaudeTurn(live, onMessage);
+        } catch (cause) {
+          this.retireWarm(key);
+          throw cause;
+        } finally {
+          turnSignal?.removeEventListener("abort", interrupt);
+          this.active.delete(key);
+        }
         await publishProjectMcpStatus(
           approvedProject.mcpWarnings.length > 0 || observedProjectMcpFailure,
         );
         this.assertTurnAdmitted();
 
-        if (!terminalResult) {
-          throw new ClaudeCodeProcessError("Claude Code ended without a terminal result.");
-        }
-        const completed = terminalResult as SDKResultMessage;
         if (!Number.isSafeInteger(completed.num_turns) || completed.num_turns < 0) {
           throw new ClaudeCodeProcessError("Claude Code returned an invalid num_turns count.");
         }
@@ -1936,6 +2044,9 @@ export class ClaudeCodeRuntime {
       } else if (pendingFailure && !adapter.isTerminal()) {
         adapter.finishError(pendingFailure.cause, pendingFailure.aborted);
       }
+      // Whatever survived the turn starts its idle countdown here, so a warm
+      // process is never held by a conversation nobody is talking to.
+      this.armWarmIdle(key);
     }
   }
 
@@ -1975,11 +2086,45 @@ export class ClaudeCodeRuntime {
     for (const key of [...this.personas.keys()]) {
       if (runtimeKeyGhost(key) === ghostName) this.personas.delete(key);
     }
+    for (const key of [...this.warm.keys()]) {
+      if (runtimeKeyGhost(key) === ghostName) this.retireWarm(key);
+    }
     for (const key of [...this.active.keys()]) {
       const [keyGhost, conversationId] = JSON.parse(key) as [string, string];
       if (keyGhost !== ghostName) continue;
       await this.close(ghostName, conversationId);
     }
+  }
+
+  /**
+   * Drop a conversation's live query. Called whenever the process must not be
+   * reused: idle expiry, an aborted or failed turn that leaves the message
+   * stream at an unknown point, a changed persona or project, or shutdown.
+   */
+  private retireWarm(key: string): void {
+    const warm = this.warm.get(key);
+    if (!warm) return;
+    this.warm.delete(key);
+    if (warm.idleTimer) clearTimeout(warm.idleTimer);
+    warm.input.close();
+    warm.abortController.abort();
+    try {
+      warm.query.close();
+    } catch {
+      // A query whose process is already gone is exactly what we wanted.
+    }
+  }
+
+  /** Start the idle countdown; a conversation with no turns loses its process. */
+  private armWarmIdle(key: string): void {
+    const warm = this.warm.get(key);
+    if (!warm) return;
+    if (warm.idleTimer) clearTimeout(warm.idleTimer);
+    warm.idleTimer = setTimeout(() => {
+      this.logger.debug?.("retiring idle Claude query", { key });
+      this.retireWarm(key);
+    }, this.warmIdleTtlMs);
+    warm.idleTimer.unref?.();
   }
 
   /** A conversation's persona, derived once and held until `close` drops it. */
@@ -2005,6 +2150,7 @@ export class ClaudeCodeRuntime {
   async close(ghostName: string, conversationId: string): Promise<void> {
     const key = JSON.stringify([ghostName, conversationId]);
     this.personas.delete(key);
+    this.retireWarm(key);
     const active = this.active.get(key);
     if (!active) return;
     this.active.delete(key);
@@ -2041,6 +2187,7 @@ export class ClaudeCodeRuntime {
     const shutdown = new GhostError("shutting_down", "The daemon is shutting down.", 503);
     for (const turn of turns) turn.controller.abort(shutdown);
     await Promise.allSettled(turns.map(({ promise }) => promise));
+    for (const key of [...this.warm.keys()]) this.retireWarm(key);
     this.personas.clear();
   }
 }

@@ -462,6 +462,22 @@ derive a slug, so the filename and format convention is now carried by the
 system prompt. Ghost registers no dedicated foreground deletion tool; idle
 consolidation remains the daemon-owned path for retiring obsolete memory.
 
+A Claude Code conversation holds one warm Agent SDK query. Turn one starts it;
+later turns are pushed into that query's open input channel, so Claude's
+transcript and every project stdio MCP server stay loaded between turns, and
+each turn ends at its own `result` frame rather than at the end of the process.
+The query is retired — the next turn starting cold from the sidecar's resume id
+— after 30 idle minutes (the same idle TTL a pi hosted session uses), when any
+value the query was constructed from would differ (cwd, model, system prompt,
+ghost tool names, or project MCP configuration; the SDK fixes all of these at
+startup), when a turn is aborted or fails and leaves the stream at an unknown
+point, and on close, ghost close, conversation delete, or daemon shutdown.
+Session-stop continuations are further passes through the same warm query. The
+SDK reports `num_turns` per result rather than cumulatively, so the sidecar's
+message accounting is unchanged. That idle TTL is also what bounds index
+staleness: an untouched conversation loses its process and derives everything
+again on its next turn.
+
 The memory index and the root-only Documents index are derived from disk once
 per session, never stored, and never re-derived mid-session — live truth is the
 files themselves, which the native filesystem tools read on demand. A

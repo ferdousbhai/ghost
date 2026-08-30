@@ -92,14 +92,35 @@ function filesystemTreeContains(root: string, needle: string): boolean {
   return false;
 }
 
+/**
+ * A warm query the way the real SDK behaves: one `result` per owner prompt,
+ * with the stream left open for the next one. Pass `prompts` to drive it turn
+ * by turn — draining that channel eagerly would deadlock, because a warm
+ * query's input stays open for the life of the process. Omit it for a query
+ * that only ever serves one turn.
+ */
 function fakeQuery(
-  messages: SDKMessage[],
+  messages: SDKMessage[] | ((turn: number) => SDKMessage[]),
   lifecycle: { interrupted: number; closed: number },
-  before?: () => Promise<void>,
+  prompts?: AsyncIterable<SDKUserMessage>,
+  onPrompt?: (message: SDKUserMessage) => void,
 ): Query {
+  const forTurn = (turn: number): SDKMessage[] =>
+    typeof messages === "function" ? messages(turn) : messages;
   const stream = (async function* () {
-    await before?.();
-    for (const message of messages) yield message;
+    if (!prompts) {
+      for (const message of forTurn(1)) yield message;
+      return;
+    }
+    let turn = 0;
+    for await (const prompt of prompts) {
+      onPrompt?.(prompt);
+      // Synthetic context carries no turn of its own, exactly as the SDK treats
+      // a `shouldQuery: false` message.
+      if ((prompt as { shouldQuery?: boolean }).shouldQuery === false) continue;
+      turn += 1;
+      for (const message of forTurn(turn)) yield message;
+    }
   })();
   return Object.assign(stream, {
     interrupt: async () => {
@@ -213,6 +234,7 @@ function setupClaudeHost(options: {
   logger?: Logger;
   maintenance?: SessionHostOptions["maintenance"];
   machineSkill?: { name: string; description: string; body: string };
+  warmIdleTtlMs?: number;
 } = {}) {
   temp = makeTempGhosts();
   const dir = seedGhost(temp.root, {
@@ -246,6 +268,9 @@ function setupClaudeHost(options: {
     ...(options.hooks ? { hooks: options.hooks } : {}),
     ...(options.maintenance ? { maintenance: options.maintenance } : {}),
     claudeCode: {
+      ...(options.warmIdleTtlMs === undefined
+        ? {}
+        : { warmIdleTtlMs: options.warmIdleTtlMs }),
       ...(options.probe
         ? { probe: options.probe }
         : {
@@ -262,9 +287,12 @@ function setupClaudeHost(options: {
         if (options.createQuery) return options.createQuery(input, lifecycle);
         const sessionId = input.options.sessionId ?? input.options.resume;
         if (!sessionId) throw new Error("test query received no session id");
-        return fakeQuery(responseMessages(sessionId, "Hello from the plan."), lifecycle, async () => {
-          for await (const message of input.prompt) seenPrompts.push(message);
-        });
+        return fakeQuery(
+          responseMessages(sessionId, "Hello from the plan."),
+          lifecycle,
+          input.prompt,
+          (message) => seenPrompts.push(message),
+        );
       },
     },
   });
@@ -698,6 +726,55 @@ describe("Claude Code subscription runtime", () => {
     });
   });
 
+  it("retires an idle warm query, and the next turn resumes cold", async () => {
+    const { paths, seenOptions, lifecycle } = setupClaudeHost({ warmIdleTtlMs: 20 });
+    const turn = (prompt: string) => host!.runTurn("casper", {
+      sessionId: "conversation-idle",
+      prompt,
+      emit: () => {},
+    });
+
+    await turn("first");
+    expect(lifecycle.queries).toBe(1);
+    expect(lifecycle.closed).toBe(0);
+
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(lifecycle.closed).toBe(1);
+
+    // Cold again: a second query that resumes the id the sidecar kept.
+    await turn("after the idle timeout");
+    expect(lifecycle.queries).toBe(2);
+    const sidecar = claudeSessionMetadataPath(paths.sessionDir, "conversation-idle");
+    expect(seenOptions[1]?.resume).toBe(
+      (JSON.parse(readFileSync(sidecar, "utf8")) as { sessionId: string }).sessionId,
+    );
+  });
+
+  it("retires a warm query whose persona changed rather than answering under a stale one", async () => {
+    const { paths, seenOptions, lifecycle } = setupClaudeHost();
+    const turn = (prompt: string) => host!.runTurn("casper", {
+      sessionId: "conversation-restart",
+      prompt,
+      emit: () => {},
+    });
+
+    await turn("first");
+    expect(lifecycle.queries).toBe(1);
+
+    // The character file is part of the prompt the query was built from, and
+    // the SDK cannot be told about the change, so the process must go.
+    writeFileSync(
+      join(paths.home, "character.md"),
+      "# Casper\n\nYou are Casper, now a bookbinder.\n",
+      "utf8",
+    );
+    await host!.close("casper", "conversation-restart");
+
+    await turn("second");
+    expect(lifecycle.queries).toBe(2);
+    expect(JSON.stringify(seenOptions[1]?.systemPrompt)).toContain("bookbinder");
+  });
+
   it("derives the persona once per conversation, and again for a new one", async () => {
     const { paths, seenOptions } = setupClaudeHost();
     const runTurn = (sessionId: string) => host!.runTurn("casper", {
@@ -719,12 +796,13 @@ describe("Claude Code subscription runtime", () => {
     // The memory index is session-start state. It is on disk, where the native
     // file tools read it; it does not rewrite a prompt prefix already read.
     await runTurn("conversation-1");
-    expect(seenOptions).toHaveLength(2);
-    expect(append(1)).toBe(append(0));
+    // The turn rode the warm query, so it was answered under the very prompt
+    // the session started with — there is no second set of startup options.
+    expect(seenOptions).toHaveLength(1);
 
     // A conversation that starts after the write derives it fresh.
     await runTurn("conversation-2");
-    expect(append(2)).toContain("written-between-turns");
+    expect(append(1)).toContain("written-between-turns");
   });
 
   it("routes an explicit claude-code role through the isolated SDK harness and resumes it", async () => {
@@ -791,7 +869,8 @@ describe("Claude Code subscription runtime", () => {
     expect(appended).not.toContain("~/.config/systemd/user");
     expect(appended).not.toContain("legacy.md");
     expect(seenOptions[0]?.allowedTools).toContain("mcp__ghost__ghost_browser");
-    expect(lifecycle.closed).toBe(1);
+    // The query stays warm between turns, so nothing is closed yet.
+    expect(lifecycle.closed).toBe(0);
     const sessionId = seenOptions[0]?.sessionId;
     expect(sessionId).toMatch(/^[0-9a-f-]{36}$/);
     const sidecar = claudeSessionMetadataPath(paths.sessionDir, "conversation-1");
@@ -807,9 +886,11 @@ describe("Claude Code subscription runtime", () => {
       prompt: "And now?",
       emit: () => {},
     });
-    expect(seenOptions[1]?.resume).toBe(sessionId);
-    expect(seenOptions[1]?.sessionId).toBeUndefined();
-    expect(lifecycle.closed).toBe(2);
+    // Turn two rides the same live process: no second query, no resume, and
+    // Claude's transcript and MCP servers were never torn down.
+    expect(seenOptions).toHaveLength(1);
+    expect(lifecycle.queries).toBe(1);
+    expect(lifecycle.closed).toBe(0);
 
     const sessions = await host!.listSessions("casper");
     expect(sessions).toEqual([
@@ -995,6 +1076,10 @@ describe("Claude Code subscription runtime", () => {
     writeFileSync(join(project, ".omp", "mcp.json"), JSON.stringify({
       mcpServers: { replacement: { type: "stdio", command: "never-run" } },
     }));
+    // The point of this turn is that a cold start rebuilds from the stored
+    // project bytes rather than reopening the project, so retire the warm
+    // query first; a warm turn would never look at the mutated files at all.
+    await host!.close("casper", "bound-project");
     await host!.runTurn("casper", {
       sessionId: "bound-project",
       prompt: "resume without rereading",
@@ -1879,15 +1964,14 @@ describe("Claude Code subscription runtime", () => {
   });
 
   it("uses SDK num_turns across resume while preserving an existing sidecar count", async () => {
-    let queryNumber = 0;
     const { paths, seenOptions } = setupClaudeHost({
       createQuery: (input, lifecycle) => {
-        queryNumber += 1;
         const sessionId = input.options.sessionId ?? input.options.resume;
         if (!sessionId) throw new Error("test query received no session id");
         return fakeQuery(
-          responseMessages(sessionId, `response ${queryNumber}`, queryNumber === 1 ? 3 : 2),
+          (turn) => responseMessages(sessionId, `response ${turn}`, turn === 1 ? 3 : 2),
           lifecycle,
+          input.prompt,
         );
       },
     });
@@ -1942,6 +2026,7 @@ describe("Claude Code subscription runtime", () => {
         return fakeQuery(
           responseMessages(sessionId, `response ${queryNumber}`, queryNumber === 1 ? 0 : 1),
           lifecycle,
+          input.prompt,
         );
       },
     });
@@ -1959,6 +2044,8 @@ describe("Claude Code subscription runtime", () => {
       ownerTurnCount: 1,
     });
 
+    // Retiring the warm query is what makes the next turn a real resume.
+    await host!.close("casper", "conversation-zero-turn");
     await host!.runTurn("casper", {
       sessionId: "conversation-zero-turn",
       prompt: "resume",
@@ -2389,15 +2476,19 @@ describe("Claude Code subscription runtime", () => {
         }
       });
     });
-    let queryNumber = 0;
     const providerTurns = [4, 2, 3, 1];
     const { seenOptions, lifecycle, paths } = setupClaudeHost({
       hooks,
       createQuery: (input, state) => {
         const sessionId = input.options.sessionId ?? input.options.resume;
         if (!sessionId) throw new Error("test query received no session id");
-        const numTurns = providerTurns[queryNumber++] ?? 1;
-        return fakeQuery(responseMessages(sessionId, `pass ${queryNumber}`, numTurns), state);
+        // Each continuation is another pass through the one warm query, so the
+        // scripted turn counts are indexed by pass rather than by query.
+        return fakeQuery(
+          (pass) => responseMessages(sessionId, `pass ${pass}`, providerTurns[pass - 1] ?? 1),
+          state,
+          input.prompt,
+        );
       },
     });
     const events: PiMessagesEvent[] = [];
@@ -2409,12 +2500,13 @@ describe("Claude Code subscription runtime", () => {
     });
 
     // The hook always continues, so the cap ends each owner turn: one initial
-    // query plus GHOST_SESSION_STOP_CONTINUATION_CAP continuations.
+    // pass plus GHOST_SESSION_STOP_CONTINUATION_CAP continuations. Every pass
+    // is another prompt into the one warm query, not another query.
     const passCount = GHOST_SESSION_STOP_CONTINUATION_CAP + 1;
     const activePerTurn = [false, ...Array(passCount - 1).fill(true)];
-    expect(lifecycle.queries).toBe(passCount);
+    expect(lifecycle.queries).toBe(1);
+    expect(seenOptions).toHaveLength(1);
     expect(active).toEqual(activePerTurn);
-    expect(seenOptions[1]?.resume).toBe(seenOptions[0]?.sessionId);
     expect(events.filter((event) => event.type === "start")).toHaveLength(1);
     expect(events.filter((event) => event.type === "done")).toHaveLength(1);
     // The fake query reports two tokens per query.
@@ -2425,7 +2517,8 @@ describe("Claude Code subscription runtime", () => {
       prompt: "one more owner turn",
       emit: () => {},
     });
-    expect(lifecycle.queries).toBe(passCount * 2);
+    // A second owner turn on the same warm process: still one query.
+    expect(lifecycle.queries).toBe(1);
     expect(active).toEqual([...activePerTurn, ...activePerTurn]);
     expect(beforeTurnIds).toEqual([1, 2]);
     expect(turnIds).toEqual([...Array(passCount).fill(1), ...Array(passCount).fill(2)]);
@@ -2764,9 +2857,11 @@ describe("Claude Code subscription runtime", () => {
 
   it("does not change persisted counts when the SDK process fails before a result", async () => {
     const { paths, lifecycle } = setupClaudeHost({
-      createQuery: (_input, state) => fakeQuery([], state, async () => {
+      createQuery: (_input, state) => fakeQuery([], state, (async function* fail() {
         throw new Error("simulated process failure");
-      }),
+        // biome-ignore lint/correctness/noUnreachable: shapes the generator type.
+        yield undefined as unknown as SDKUserMessage;
+      })()),
     });
     const sidecar = claudeSessionMetadataPath(paths.sessionDir, "conversation-process-failure");
     mkdirSync(paths.sessionDir, { recursive: true });
