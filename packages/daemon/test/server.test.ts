@@ -73,6 +73,7 @@ async function serve(
     homeOperations,
     ownerHome: temp.ownerHome,
     offline: true,
+    scheduleCommandRunner: async () => ({ stdout: "", stderr: "", code: 0 }),
     extensionOptions: { documents: machineDocuments },
   });
   const mcp = new McpCatalog({ registry: temp.registry });

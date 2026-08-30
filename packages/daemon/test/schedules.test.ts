@@ -136,8 +136,12 @@ describe("sweeping a deleted ghost's schedules", () => {
     // Only the timer is disabled — disabling a .service a timer activates is
     // not a thing — and the reload happens once, after the files are gone.
     expect(calls).toEqual([
+      ["--user", "list-units", "--type=timer", "--all", "--full", "--plain", "--no-legend", "--no-pager"],
+      ["--user", "list-unit-files", "--type=timer", "--state=enabled,enabled-runtime", "--full", "--no-legend", "--no-pager"],
       ["--user", "disable", "--now", "ghost-timer-v1-4-aria-standup.timer"],
       ["--user", "daemon-reload"],
+      ["--user", "list-units", "--type=timer", "--all", "--full", "--plain", "--no-legend", "--no-pager"],
+      ["--user", "list-unit-files", "--type=timer", "--state=enabled,enabled-runtime", "--full", "--no-legend", "--no-pager"],
     ]);
     expect((await readdir(dir)).sort())
       .toEqual([
@@ -147,7 +151,7 @@ describe("sweeping a deleted ghost's schedules", () => {
       ]);
   });
 
-  it("touches nothing and runs no command when the ghost had no schedules", async () => {
+  it("inspects the manager but touches nothing when the ghost had no schedules", async () => {
     const dir = await unitDir(["spice-catalyst-research.timer"]);
     const calls: string[][] = [];
 
@@ -160,7 +164,7 @@ describe("sweeping a deleted ghost's schedules", () => {
     });
 
     expect(result.removed).toEqual([]);
-    expect(calls).toEqual([]);
+    expect(calls.map((args) => args[1])).toEqual(["list-units", "list-unit-files"]);
     expect(await readdir(dir)).toEqual(["spice-catalyst-research.timer"]);
   });
 
@@ -169,7 +173,9 @@ describe("sweeping a deleted ghost's schedules", () => {
 
     await expect(sweepGhostSchedules("aria", {
       unitDir: dir,
-      run: async () => ({ stdout: "", stderr: "user manager unavailable", code: 1 }),
+      run: async (args) => args[1] === "disable"
+        ? { stdout: "", stderr: "user manager unavailable", code: 1 }
+        : { stdout: "", stderr: "", code: 0 },
     })).rejects.toThrow("user manager unavailable");
 
     expect(await readdir(dir)).toEqual(["ghost-timer-v1-4-aria-standup.timer"]);
@@ -196,10 +202,8 @@ describe("sweeping a deleted ghost's schedules", () => {
     })).rejects.toThrow("unit directory is read-only");
 
     expect(await readdir(dir)).toEqual([service]);
-    expect(calls).toEqual([
-      ["--user", "disable", "--now", timer],
-      ["--user", "daemon-reload"],
-    ]);
+    expect(calls).toContainEqual(["--user", "disable", "--now", timer]);
+    expect(calls).toContainEqual(["--user", "daemon-reload"]);
 
     rejectService = false;
     await expect(sweepGhostSchedules("aria", {
@@ -208,7 +212,7 @@ describe("sweeping a deleted ghost's schedules", () => {
       unlinkUnit: unlink,
     })).resolves.toEqual({ removed: [service] });
     expect(await readdir(dir)).toEqual([]);
-    expect(calls.at(-1)).toEqual(["--user", "daemon-reload"]);
+    expect(calls).toContainEqual(["--user", "daemon-reload"]);
   });
 
   it("does not roll back safe cleanup when daemon-reload fails", async () => {
@@ -228,9 +232,120 @@ describe("sweeping a deleted ghost's schedules", () => {
 
     expect(result.removed).toEqual([timer]);
     expect(await readdir(dir)).toEqual([]);
-    expect(calls).toEqual([
-      ["--user", "disable", "--now", timer],
-      ["--user", "daemon-reload"],
+    expect(calls).toContainEqual(["--user", "disable", "--now", timer]);
+    expect(calls).toContainEqual(["--user", "daemon-reload"]);
+  });
+
+  it("retires loaded-only and enabled-only timers whose source files are absent", async () => {
+    const loadedTimer = "ghost-timer-v1-4-aria-standup.timer";
+    const enabledTimer = "ghost-timer-v1-4-aria-weekly.timer";
+    const dir = await unitDir([]);
+    let retired = false;
+    const calls: string[][] = [];
+
+    const result = await sweepGhostSchedules("aria", {
+      unitDir: dir,
+      run: async (args) => {
+        calls.push([...args]);
+        if (args[1] === "list-units") {
+          return {
+            stdout: `${loadedTimer} loaded ${retired ? "inactive dead" : "active waiting"} Standup\n`,
+            stderr: "",
+            code: 0,
+          };
+        }
+        if (args[1] === "list-unit-files") {
+          return {
+            stdout: retired ? "" : `${enabledTimer} enabled enabled\n`,
+            stderr: "",
+            code: 0,
+          };
+        }
+        if (args[1] === "disable") retired = true;
+        return { stdout: "", stderr: "", code: 0 };
+      },
+    });
+
+    expect(result).toEqual({ removed: [] });
+    expect(calls).toContainEqual([
+      "--user",
+      "disable",
+      "--now",
+      loadedTimer,
+      enabledTimer,
     ]);
+  });
+
+  it("fails closed when manager inventory is unavailable despite an empty source directory", async () => {
+    const dir = await unitDir([]);
+
+    await expect(sweepGhostSchedules("aria", {
+      unitDir: dir,
+      run: async () => ({ stdout: "", stderr: "manager unavailable", code: 1 }),
+    })).rejects.toThrow("manager unavailable");
+  });
+
+  it("fails verification when systemctl leaves a source-less timer active or enabled", async () => {
+    const timer = "ghost-timer-v1-4-aria-standup.timer";
+    const dir = await unitDir([]);
+
+    await expect(sweepGhostSchedules("aria", {
+      unitDir: dir,
+      run: async (args) => {
+        if (args[1] === "list-units") {
+          return { stdout: `${timer} loaded active waiting Standup\n`, stderr: "", code: 0 };
+        }
+        if (args[1] === "list-unit-files") {
+          return { stdout: `${timer} enabled enabled\n`, stderr: "", code: 0 };
+        }
+        return { stdout: "", stderr: "", code: 0 };
+      },
+    })).rejects.toThrow("left an owned timer active, enabled, or on disk");
+  });
+
+  it("keeps manager inventory prefix-free and ignores ambiguous or malformed names", async () => {
+    const timer = "ghost-timer-v1-4-aria-standup.timer";
+    const foreign = "ghost-timer-v1-8-aria-ops-standup.timer";
+    const dir = await unitDir([]);
+    let retired = false;
+    const disabled: string[][] = [];
+    const listed = [
+      timer,
+      foreign,
+      "ghost-timer-aria-legacy.timer",
+      "ghost-timer-v1-4-aria-Bad.timer",
+    ];
+
+    await sweepGhostSchedules("aria", {
+      unitDir: dir,
+      run: async (args) => {
+        if (args[1] === "list-units") {
+          return {
+            stdout: listed.map((name) => (
+              `${name} loaded ${name === timer && retired ? "inactive dead" : "active waiting"} Timer`
+            )).join("\n"),
+            stderr: "",
+            code: 0,
+          };
+        }
+        if (args[1] === "list-unit-files") {
+          return {
+            stdout: listed
+              .filter((name) => name !== timer || !retired)
+              .map((name) => `${name} enabled enabled`)
+              .join("\n"),
+            stderr: "",
+            code: 0,
+          };
+        }
+        if (args[1] === "disable") {
+          disabled.push([...args]);
+          retired = true;
+        }
+        return { stdout: "", stderr: "", code: 0 };
+      },
+    });
+
+    expect(disabled).toEqual([["--user", "disable", "--now", timer]]);
   });
 });

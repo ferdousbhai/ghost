@@ -211,17 +211,21 @@ the owner's graphical session, so scheduled work makes no promise about
 overnight or logged-out runs; #18 owns that.
 
 Whole-home deletion is fail-closed around those owned units. After the ghost is
-quiescent but before its home moves, the daemon must successfully stop and
-disable every matching timer and verify every matching timer/service file
-absent. A scan, stop, or removal failure returns
+quiescent but before its home moves, the daemon inventories the union of exact
+owned timer files, manager-loaded timers, and enabled timer unit files. It must
+successfully stop and disable that union, remove and verify every matching
+timer/service file absent, then verify no matching timer remains enabled or
+active in the manager. A filesystem or manager scan, stop, verification, or
+removal failure returns
 `503 schedule_cleanup_failed` and leaves the home at its original name. Cleanup
 already completed is not rolled back: retrying the same `DELETE` idempotently
 finishes the remaining units, while abandoning the deletion means the owner
 must recreate or re-enable any schedule already removed. Once the timers are
-stopped and their files are absent, `daemon-reload` is best-effort cleanup: a
-failure is logged but does not make the stopped triggers live or block the home
-move. Rename's unit scan is diagnostic only and can never make an already moved
-home look like a failed rename.
+stopped and their files are absent, `daemon-reload` itself is best-effort: a
+failure is logged, but the following strict manager verification still decides
+whether the stopped triggers are safely retired. Rename's unit scan is
+diagnostic only and can never make an already moved home look like a failed
+rename.
 
 A file a ghost authors *for the owner* — a report, an export, a generated image —
 belongs in the owner's Documents tree or the requested working directory, never

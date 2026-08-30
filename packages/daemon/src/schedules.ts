@@ -22,15 +22,39 @@
 import { readdir, unlink } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import { isValidGhostName } from "./ghosts.js";
-import { commandRunner, type CommandRunner } from "./tailscale-identity.js";
+import {
+  commandRunner,
+  type CommandResult,
+  type CommandRunner,
+} from "./tailscale-identity.js";
 import { silentLogger, type Logger } from "./log.js";
 
 /** Versioned so the original ambiguous `ghost-timer-<ghost>-` form stays inert. */
 export const SCHEDULE_UNIT_PREFIX = "ghost-timer-v1-";
 export const MAX_SCHEDULE_SLUG_LENGTH = 64;
 
-const UNIT_SUFFIXES = [".timer", ".service"] as const;
+const TIMER_SUFFIXES = [".timer"] as const;
+const UNIT_SUFFIXES = [...TIMER_SUFFIXES, ".service"] as const;
 const SCHEDULE_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
+const LIST_LOADED_TIMERS = [
+  "--user",
+  "list-units",
+  "--type=timer",
+  "--all",
+  "--full",
+  "--plain",
+  "--no-legend",
+  "--no-pager",
+] as const;
+const LIST_ENABLED_TIMERS = [
+  "--user",
+  "list-unit-files",
+  "--type=timer",
+  "--state=enabled,enabled-runtime",
+  "--full",
+  "--no-legend",
+  "--no-pager",
+] as const;
 
 export function isValidScheduleSlug(slug: string): boolean {
   return slug.length >= 1
@@ -46,6 +70,69 @@ export function scheduleUnitPrefix(ghostName: string): string {
   // Ghost names are ASCII by contract, so string length is the encoded byte
   // length. The delimiter cannot alias a longer name such as aria-ops to aria.
   return `${SCHEDULE_UNIT_PREFIX}${ghostName.length}-${ghostName}-`;
+}
+
+function isOwnedScheduleUnit(
+  name: string,
+  prefix: string,
+  suffixes: readonly string[] = UNIT_SUFFIXES,
+): boolean {
+  if (!name.startsWith(prefix)) return false;
+  return suffixes.some((suffix) => (
+    name.endsWith(suffix)
+    && isValidScheduleSlug(name.slice(prefix.length, -suffix.length))
+  ));
+}
+
+function commandOutput(result: CommandResult, fallback: string): string {
+  return result.stderr.trim() || result.stdout.trim() || fallback;
+}
+
+function requireCommandSuccess(result: CommandResult, action: string): void {
+  if (result.code === 0) return;
+  throw new Error(commandOutput(result, `${action} exited with code ${result.code}`));
+}
+
+interface LoadedTimer {
+  name: string;
+  activeState: string;
+}
+
+interface ManagedScheduleTimers {
+  loaded: LoadedTimer[];
+  enabled: string[];
+}
+
+function listedUnitFields(line: string): string[] {
+  const fields = line.trim().split(/\s+/u);
+  return fields[0] === "●" ? fields.slice(1) : fields;
+}
+
+async function inspectManagedScheduleTimers(
+  prefix: string,
+  run: CommandRunner,
+): Promise<ManagedScheduleTimers> {
+  const loadedResult = await run(LIST_LOADED_TIMERS);
+  requireCommandSuccess(loadedResult, "systemctl list-units");
+  const loaded = loadedResult.stdout
+    .split("\n")
+    .map(listedUnitFields)
+    .flatMap((fields) => {
+      const [name, , activeState] = fields;
+      return name && activeState && isOwnedScheduleUnit(name, prefix, TIMER_SUFFIXES)
+        ? [{ name, activeState }]
+        : [];
+    });
+
+  const enabledResult = await run(LIST_ENABLED_TIMERS);
+  requireCommandSuccess(enabledResult, "systemctl list-unit-files");
+  const enabled = enabledResult.stdout
+    .split("\n")
+    .map(listedUnitFields)
+    .map((fields) => fields[0] ?? "")
+    .filter((name) => isOwnedScheduleUnit(name, prefix, TIMER_SUFFIXES));
+
+  return { loaded, enabled };
 }
 
 /** `$XDG_CONFIG_HOME/systemd/user`, else `~/.config/systemd/user`. */
@@ -116,11 +203,7 @@ export async function listGhostScheduleUnits(
     throw error;
   }
   return entries
-    .filter((name) => name.startsWith(prefix))
-    .filter((name) => UNIT_SUFFIXES.some((suffix) => (
-      name.endsWith(suffix)
-      && isValidScheduleSlug(name.slice(prefix.length, -suffix.length))
-    )))
+    .filter((name) => isOwnedScheduleUnit(name, prefix))
     .sort();
 }
 
@@ -139,29 +222,30 @@ export interface ScheduleSweepResult {
 
 /**
  * Stop, disable, and delete every timer a ghost owned. Failure leaves the
- * caller free to retry before moving the ghost home. Reload is best-effort
- * after the safety boundary: stopped triggers plus absent unit files.
+ * caller free to retry before moving the ghost home. The systemd manager is
+ * authoritative alongside source files: it can retain a loaded timer or an
+ * enablement symlink after the source disappeared.
  */
 export async function sweepGhostSchedules(
   ghostName: string,
   options: ScheduleSweepOptions,
 ): Promise<ScheduleSweepResult> {
   const logger = options.logger ?? silentLogger;
-  const units = await listGhostScheduleUnits(ghostName, options.unitDir);
-  if (units.length === 0) return { removed: [] };
-
   const run = options.run ?? commandRunner("systemctl");
+  const prefix = scheduleUnitPrefix(ghostName);
+  const units = await listGhostScheduleUnits(ghostName, options.unitDir);
+  const managed = await inspectManagedScheduleTimers(prefix, run);
+
   const unlinkUnit = options.unlinkUnit ?? unlink;
-  const timers = units.filter((unit) => unit.endsWith(".timer"));
+  const timers = [...new Set([
+    ...units.filter((unit) => unit.endsWith(".timer")),
+    ...managed.loaded.map((unit) => unit.name),
+    ...managed.enabled,
+  ])].sort();
+  if (units.length === 0 && timers.length === 0) return { removed: [] };
   if (timers.length > 0) {
     const result = await run(["--user", "disable", "--now", ...timers]);
-    if (result.code !== 0) {
-      throw new Error(
-        result.stderr.trim()
-          || result.stdout.trim()
-          || `systemctl disable exited with code ${result.code}`,
-      );
-    }
+    requireCommandSuccess(result, "systemctl disable");
   }
 
   const removed: string[] = [];
@@ -183,13 +267,7 @@ export async function sweepGhostSchedules(
 
   try {
     const result = await run(["--user", "daemon-reload"]);
-    if (result.code !== 0) {
-      throw new Error(
-        result.stderr.trim()
-          || result.stdout.trim()
-          || `systemctl daemon-reload exited with code ${result.code}`,
-      );
-    }
+    requireCommandSuccess(result, "systemctl daemon-reload");
   } catch (error) {
     logger.warn("could not reload systemd after removing a ghost's timer units", {
       ghost: ghostName,
@@ -198,9 +276,12 @@ export async function sweepGhostSchedules(
   }
 
   const remaining = await listGhostScheduleUnits(ghostName, options.unitDir);
+  const remainingManaged = await inspectManagedScheduleTimers(prefix, run);
+  const active = remainingManaged.loaded
+    .filter((unit) => unit.activeState !== "inactive" && unit.activeState !== "failed");
   if (removalFailure !== undefined) throw removalFailure;
-  if (remaining.length > 0) {
-    throw new Error(`Ghost schedule cleanup left ${remaining.length} owned unit(s).`);
+  if (remaining.length > 0 || remainingManaged.enabled.length > 0 || active.length > 0) {
+    throw new Error("Ghost schedule cleanup left an owned timer active, enabled, or on disk.");
   }
   logger.info("swept ghost schedules", { ghost: ghostName, removed: removed.length });
   return { removed };

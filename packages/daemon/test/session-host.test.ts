@@ -220,6 +220,7 @@ async function setup(
     ownerHome: temp.ownerHome,
     machineSkillPaths: [],
     offline: true,
+    scheduleCommandRunner: async () => ({ stdout: "", stderr: "", code: 0 }),
     ...options,
   });
   return { dir, host, provider, temp };
@@ -7619,11 +7620,16 @@ describe("SessionHost.deleteGhost", () => {
     });
     expect(existsSync(dir)).toBe(false);
     expect(readdirSync(unitDir)).toEqual([]);
-    expect(calls).toEqual([
-      ["--user", "disable", "--now", timer],
-      ["--user", "disable", "--now", timer],
-      ["--user", "daemon-reload"],
+    expect(calls.map((args) => args[1])).toEqual([
+      "list-units",
+      "list-units",
+      "list-unit-files",
+      "disable",
+      "daemon-reload",
+      "list-units",
+      "list-unit-files",
     ]);
+    expect(calls).toContainEqual(["--user", "disable", "--now", timer]);
   });
 
   it("blocks a new conversation while the ghost home is moving to trash", async () => {
