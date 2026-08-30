@@ -8,9 +8,9 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   defaultOmarchyUsageDir,
-  resolveWorkerExecutable,
-  WorkerCatalog,
-} from "../src/worker-catalog.js";
+  resolveHarnessExecutable,
+  HarnessCatalog,
+} from "../src/harness-catalog.js";
 import { CodexMissingError } from "../src/codex-worker.js";
 import { GhostError } from "../src/ghosts.js";
 import { tempDir } from "./helpers/fixtures.js";
@@ -53,9 +53,9 @@ function writeUsage(
   })}\n`, { mode: 0o600 });
 }
 
-describe("WorkerCatalog", () => {
-  it("reports fixed worker identities, native installation, plan auth, and bounded Omarchy usage", async () => {
-    const usageDir = scratch("ghost-worker-usage-");
+describe("HarnessCatalog", () => {
+  it("reports fixed harness identities, native installation, plan auth, and bounded Omarchy usage", async () => {
+    const usageDir = scratch("ghost-harness-usage-");
     writeUsage(usageDir, "claude");
     writeUsage(usageDir, "codex", {
       usageStatusText: "Local stats are still available.\nRetry later.",
@@ -64,7 +64,7 @@ describe("WorkerCatalog", () => {
       binaryPath: "/resolved/codex",
       account: { accountPresent: true, requiresOpenaiAuth: true },
     }));
-    const catalog = new WorkerCatalog({
+    const catalog = new HarnessCatalog({
       usageDir,
       now: () => Date.parse("2026-08-30T09:10:00Z"),
       env: { PATH: "/usr/bin", GHOST_CODEX_BINARY: "owner-codex" },
@@ -75,16 +75,17 @@ describe("WorkerCatalog", () => {
         }),
       },
       codexProbe: { read: readCodex },
+      resolvePiExecutable: async () => "/resolved/pi",
     });
 
     const result = await catalog.list();
 
-    expect(result.workers.map((worker) => worker.id)).toEqual([
+    expect(result.harnesses.map((harness) => harness.id)).toEqual([
       "claude-code",
       "codex",
-      "pi-worker",
+      "pi",
     ]);
-    expect(result.workers[0]).toMatchObject({
+    expect(result.harnesses[0]).toMatchObject({
       kind: "native",
       nativeConfiguration: true,
       installation: "installed",
@@ -104,20 +105,20 @@ describe("WorkerCatalog", () => {
         today: { totalTokens: 12_345, prompts: 7, sessions: 2 },
       },
     });
-    expect(result.workers[1]).toMatchObject({
+    expect(result.harnesses[1]).toMatchObject({
       installation: "installed",
       authentication: "authenticated",
       usage: {
         status: "Local stats are still available. Retry later.",
       },
     });
-    expect(result.workers[2]).toEqual({
-      id: "pi-worker",
-      name: "Pi worker",
-      kind: "builtin",
-      nativeConfiguration: false,
+    expect(result.harnesses[2]).toEqual({
+      id: "pi",
+      name: "Pi",
+      kind: "native",
+      nativeConfiguration: true,
       installation: "installed",
-      authentication: "ghost-model",
+      authentication: "unknown",
       reason: null,
       usage: null,
     });
@@ -125,12 +126,12 @@ describe("WorkerCatalog", () => {
   });
 
   it("keeps stale, missing, and unsafe records categorical without failing discovery", async () => {
-    const usageDir = scratch("ghost-worker-usage-invalid-");
+    const usageDir = scratch("ghost-harness-usage-invalid-");
     writeUsage(usageDir, "claude");
-    const outside = join(scratch("ghost-worker-usage-outside-"), "codex.json");
+    const outside = join(scratch("ghost-harness-usage-outside-"), "codex.json");
     writeFileSync(outside, "{}\n", { mode: 0o600 });
     symlinkSync(outside, join(usageDir, "codex.json"));
-    const catalog = new WorkerCatalog({
+    const catalog = new HarnessCatalog({
       usageDir,
       now: () => Date.parse("2026-08-30T10:00:01Z"),
       claudeCodeProbe: {
@@ -141,16 +142,17 @@ describe("WorkerCatalog", () => {
           throw new CodexMissingError("codex is not installed\nwith extra detail");
         },
       },
+      resolvePiExecutable: async () => "/resolved/pi",
     });
 
     const result = await catalog.list();
 
-    expect(result.workers[0]).toMatchObject({
+    expect(result.harnesses[0]).toMatchObject({
       installation: "installed",
       authentication: "unauthenticated",
       usage: { state: "ready", stale: true },
     });
-    expect(result.workers[1]).toMatchObject({
+    expect(result.harnesses[1]).toMatchObject({
       installation: "missing",
       authentication: "unknown",
       reason: "Codex is unavailable. Install it or check `GHOST_CODEX_BINARY`.",
@@ -159,8 +161,8 @@ describe("WorkerCatalog", () => {
   });
 
   it("keeps a transient Claude probe failure distinct from a missing executable", async () => {
-    const usageDir = scratch("ghost-worker-usage-missing-");
-    const catalog = new WorkerCatalog({
+    const usageDir = scratch("ghost-harness-usage-missing-");
+    const catalog = new HarnessCatalog({
       usageDir,
       claudeCodeProbe: {
         read: async () => {
@@ -173,16 +175,17 @@ describe("WorkerCatalog", () => {
           account: { accountPresent: false, requiresOpenaiAuth: true },
         }),
       },
+      resolvePiExecutable: async () => "/resolved/pi",
     });
 
     const result = await catalog.list();
-    expect(result.workers[0]).toMatchObject({
+    expect(result.harnesses[0]).toMatchObject({
       installation: "unknown",
       authentication: "unknown",
       reason: "Could not verify Claude Code. Run `claude auth status --json` to diagnose it.",
       usage: { state: "missing", updatedAt: null, stale: true },
     });
-    expect(result.workers[1]).toMatchObject({
+    expect(result.harnesses[1]).toMatchObject({
       installation: "installed",
       authentication: "unauthenticated",
       reason: "Run `codex login` to use the owner's Codex account.",
@@ -192,8 +195,8 @@ describe("WorkerCatalog", () => {
   });
 
   it("reports a categorically missing Claude executable without exposing its configured path", async () => {
-    const catalog = new WorkerCatalog({
-      usageDir: scratch("ghost-worker-usage-missing-claude-"),
+    const catalog = new HarnessCatalog({
+      usageDir: scratch("ghost-harness-usage-missing-claude-"),
       claudeCodeProbe: {
         read: async () => {
           throw new GhostError(
@@ -209,10 +212,11 @@ describe("WorkerCatalog", () => {
           account: { accountPresent: true, requiresOpenaiAuth: true },
         }),
       },
+      resolvePiExecutable: async () => "/resolved/pi",
     });
 
     const result = await catalog.list();
-    expect(result.workers[0]).toMatchObject({
+    expect(result.harnesses[0]).toMatchObject({
       installation: "missing",
       authentication: "unknown",
       reason: "Install Claude Code, then run `claude auth login`.",
@@ -221,23 +225,23 @@ describe("WorkerCatalog", () => {
   });
 
   it("rejects a nonpositive staleness window", () => {
-    expect(() => new WorkerCatalog({ staleAfterMs: 0 })).toThrow(RangeError);
+    expect(() => new HarnessCatalog({ staleAfterMs: 0 })).toThrow(RangeError);
   });
 });
 
-describe("worker executable and state paths", () => {
+describe("harness executable and state paths", () => {
   it("resolves only executable files from absolute PATH entries", async () => {
-    const root = scratch("ghost-worker-executable-");
+    const root = scratch("ghost-harness-executable-");
     const bin = join(root, "bin");
     mkdirSync(bin);
     const executable = join(bin, "codex");
     writeFileSync(executable, "#!/bin/sh\n", { mode: 0o700 });
     chmodSync(executable, 0o700);
 
-    await expect(resolveWorkerExecutable("codex", {
+    await expect(resolveHarnessExecutable("codex", {
       PATH: `relative:${bin}`,
     })).resolves.toBe(executable);
-    await expect(resolveWorkerExecutable("./codex", { PATH: bin })).rejects.toThrow(
+    await expect(resolveHarnessExecutable("./codex", { PATH: bin })).rejects.toThrow(
       "must be absolute",
     );
   });

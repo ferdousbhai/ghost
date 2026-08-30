@@ -33,18 +33,21 @@ name validation apply. Machine skills enter at session construction with lowest
 name precedence, before ghost-home and then project resources; no hardcoded
 skill-name allowlist exists. This owner-trusted machine discovery is deliberately
 outside the descriptor-confined project scanner. A Ghost principal delegates
-through the daemon-owned `task` tools described below; project and ghost-file
-`agents/*.md` definitions remain previewed but inert and are never executable
-principal extensions. A native Claude worker retains Claude Code's own
-subagents; the Claude principal does not expose native `Agent` or legacy
-`Task`, because those would bypass the durable Ghost task boundary.
+through the daemon-owned `task` tools described below. Ghost does not discover,
+parse, merge, or execute agent definitions: the selected native coding harness
+owns its user, plugin, and project agent registry at the task cwd. Ghost-home
+and project agent files remain previewable principal resources only where an
+existing scanner already reports them; they do not form a Ghost registry. A
+native Claude task retains Claude Code's own subagents; the Claude principal
+does not expose native `Agent` or legacy `Task`, because those would bypass the
+durable Ghost task boundary.
 
 ```
 ~/ghosts/<name>/
   character.md                 plain Markdown persona → system prompt
   memory/*.md                  one concise fact per plain Markdown file
   skills/<name>/SKILL.md       the ghost's own skills
-  agents/<name>.md             reserved custom subagents (preview-only today)
+  agents/<name>.md             reserved custom agents (preview-only to the principal)
   commands/<name>.md           the ghost's own slash commands
   rules/, prompts/, tools/, hooks/
                                the remaining ghost-owned artifact directories
@@ -70,9 +73,8 @@ subagents; the Claude principal does not expose native `Agent` or legacy
   sessions/pins.json           v2 pinned state: { "version": 2, "pinned": ["<id>", …] }
   sessions/reads.json          v2 read state: { "version": 2, "reads": { "<id>": "<ISO timestamp>" } }
   .tasks/                      daemon-owned normalized worker-task lifecycle
-  .tasks/task-<uuid>.json      v2 bounded task/workspace state and event tail;
-                               the worker harness retains its own full native transcript
-  .tasks/pi/                   bundled pi-worker's native Pi JSONL transcripts
+  .tasks/task-<uuid>.json      v3 bounded task/workspace state and event tail;
+                               the coding harness retains its own full native transcript
   .pi/                         derived pi machine runtime; never credentials
   .pi/models.pi.json           secret-free provider/models view synced from
                                models.json
@@ -340,15 +342,20 @@ conversation. The collaboration route remains only as an unsupported legacy
 compatibility seam.
 
 A **principal harness** owns a Ghost conversation; today it is pi or Claude
-Code. A **worker** owns one coding task delegated by that Ghost; the code-owned
-worker ids are `claude-code`, `codex`, and `pi-worker`. Harness and worker are
-independent choices. `character.md`, memory, Documents, browser/desktop tools,
-and responsibility for the outcome belong to the Ghost principal. A vendor
-worker receives an ordinary task and a trusted cwd, then retains that vendor
-harness's own identity and native configuration. `pi-worker` is the bundled
-Ghost-defined fallback. The read-only worker catalogue and daemon task
-lifecycle below establish those names and provide the principal's delegation
-boundary without enabling ambient agent definitions.
+Code. A **coding harness** owns one task delegated by that Ghost. The public
+harness ids are `claude-code`, `codex`, and `pi`, and each means the owner's
+installed native executable and configuration. An **agent** is an optional,
+opaque native name requested inside the selected harness. A **task worker** is the native
+child process/session created for one task; it is an implementation detail, not
+a selectable product or profile. Principal harness, coding harness, and native
+agent are independent choices. `character.md`, memory, Documents,
+browser/desktop tools, and responsibility for the outcome belong to the Ghost
+principal. A coding harness receives an ordinary task and trusted cwd, then
+retains its own identity, configuration, agent discovery, models, tools,
+plugins, skills, instructions, and internal delegation. Ghost owns no parallel
+agent registry or agent model/tool policy. The read-only harness catalogue and
+daemon task lifecycle below provide the principal's one durable delegation
+boundary.
 
 A pi session uses pi's runtime (`@earendil-works/pi-coding-agent`,
 `pi-agent-core`, `pi-ai`) and native tools, but Ghost owns its roots and
@@ -385,12 +392,12 @@ identity blocks.
 
 pi's native tools in a Ghost session are `bash`, `edit`, `find`, `grep`, `ls`,
 `read`, and `write`. Ghost's own tools — `ghost_memory_write`, `ghost_browser`,
-`ghost_desktop`, `ghost_screen`, `ghost_character`, `ask`, `worker_status`,
+`ghost_desktop`, `ghost_screen`, `ghost_character`, `ask`, `harness_status`,
 `task`, `task_list`, `task_get`, `task_send`, `task_cancel`, and MCP tools named
 `mcp__<server>_<tool>` — are registered directly as pi custom tools and appear
 in `getActiveToolNames()`; there is no separate mount. The task tools reach
-only the daemon's built-in workers and do not activate project, ghost-file, or
-ambient agent definitions. A Claude principal exposes the same logical task
+only the three coding-harness adapters; agent discovery occurs inside the
+selected native task harness, never the principal. A Claude principal exposes the same logical task
 surface through its in-process Ghost MCP server and disables native `Agent`
 and `Task`; a native Claude worker retains native subagent behavior. Live voice
 (issue #44) is deferred; goals with budgets belong with
@@ -1195,9 +1202,10 @@ shape and streams emit one complete event object per line.
   its baseline system prompt includes only instruction bodies, unconditional
   `alwaysApply` rule bodies, and compact skill/discoverable-rule indexes. No
   lexical post-load filter is an authority boundary.
-  Project and ghost-file agent definitions are counted but inactive. A pi
-  session performs no live/ambient agent discovery; its daemon-owned `task`
-  tool selects only a built-in worker id. Machine-skill discovery is the
+  Project and ghost-file agent definitions are counted but inactive for the
+  principal. A principal pi session performs no live/ambient agent discovery;
+  its daemon-owned `task` tool selects a native coding harness and may pass that
+  harness an opaque requested agent name. Machine-skill discovery is the
   explicit exception described above. Claude
   keeps native `skills:[]` and `settingSources:[]`; the SDK's `skills: "all"`
   option is not usable here because it is a context filter, not a path sandbox.
@@ -1662,7 +1670,7 @@ shape and streams emit one complete event object per line.
   on that branch. Its response is an SSE stream and includes `branch_changed`.
   Re-answer and awaited Ghost hooks use the conversation's actual live cwd;
   the pi runtime never discovers agents from that cwd, and `task` still resolves
-  its worker and cwd through the daemon's trusted task boundary.
+  its harness and cwd through the daemon's trusted task boundary.
 - `POST /api/ghosts/:name/greeting` `{}` → `{ greeting: string | null,
   onboarding: boolean }` — one smol-lane completion (see below) writes a short
   in-persona opener for an empty chat from the character file, memory index,
@@ -1749,23 +1757,22 @@ file IS the completion latch — there is no separate onboarding state — and t
 section stops being injected on the first session after the file deviates from
 the seed.
 
-### Worker status
+### Harness status
 
-`GET /api/ghosts/:name/workers` is the authenticated, read-only worker
-catalogue. It returns `{ workers }` in the fixed order `claude-code`, `codex`,
-`pi-worker`. A row is
+`GET /api/ghosts/:name/harnesses` is the authenticated, read-only coding-harness
+catalogue. It returns `{ harnesses }` in the fixed order `claude-code`, `codex`,
+`pi`. A row is
 `{ id, name, kind, nativeConfiguration, installation, authentication, reason,
-usage }`, where `kind` is `native | builtin`, `installation` is
+usage }`, where `kind` is `native`, `installation` is
 `installed | missing | unknown`, `authentication` is
-`authenticated | unauthenticated | unknown | ghost-model`, and `reason` is a
+`authenticated | unauthenticated | unknown`, and `reason` is a
 bounded actionable string or null. `unknown` installation means the catalogue
 could not complete its probe, not that it proved the executable absent.
-`nativeConfiguration: true` means a future task launches the owner's installed
-vendor harness with its native user and project settings; it does not mean the
-task adapter is already active. The catalogue resolves only the two known
-vendor executable names, without a shell, and never returns their absolute
-paths or raw probe errors. `GHOST_CLAUDE_BINARY` and `GHOST_CODEX_BINARY` are
-their explicit executable overrides.
+`nativeConfiguration` is true for every row: a task launches the owner's
+installed harness with its native user and project settings. The catalogue
+resolves only the three known executable names, without a shell, and never
+returns their absolute paths or raw probe errors. `GHOST_CLAUDE_BINARY`,
+`GHOST_CODEX_BINARY`, and `GHOST_PI_BINARY` are explicit executable overrides.
 
 Claude authentication comes from the existing short-lived
 `claude auth status --json` probe and counts only the owner's `claude.ai` plan
@@ -1776,14 +1783,15 @@ login. A failed auth probe leaves Claude installation and authentication
 account counts as authenticated; a null account is unauthenticated only when the
 app server says OpenAI authentication is required. Probe or protocol failures
 leave the state unknown. Omarchy's display record is deliberately not treated
-as authentication evidence. `pi-worker` is bundled,
-reports installed with `ghost-model` authentication, and will resolve its model
-through Ghost's `task_model` role when task execution lands.
+as authentication evidence. Pi installation comes from resolving the native
+executable. Its authentication remains `unknown` because Pi has no stable,
+provider-neutral noninteractive authentication probe; native task startup is
+authoritative.
 
 Vendor `usage` is a bounded projection of Omarchy's existing schema-version-1
 record in `$XDG_STATE_HOME/omarchy/agents/usage/<claude|codex>.json` (default
 `~/.local/state/...`), read descriptor-pinned and never refreshed through a
-provider API by Ghost. It is null for `pi-worker`; otherwise it is
+provider API by Ghost. It is null for `pi`; otherwise it is
 `{ source:"omarchy", state, updatedAt, stale, tier, status, help, limits,
 today }`. `state` is `ready | missing | invalid`. A ready record older than 30
 minutes, or more than five minutes in the future, is stale. Each bounded limit
@@ -1794,27 +1802,30 @@ No per-model history, credential, provider response, executable pathname, or
 raw record is exposed. A missing or malformed record never makes installation
 discovery fail.
 
-### Worker tasks
+### Harness tasks
 
-The daemon owns one persistent task lifecycle shared by all worker harnesses.
+The daemon owns one persistent task lifecycle shared by all coding harnesses.
 It does not own or translate their full transcripts. Each task is stored as one
-mode-`0600`, atomically replaced v2 sidecar under the ghost home's `.tasks/`
+mode-`0600`, atomically replaced v3 sidecar under the ghost home's `.tasks/`
 directory. The machine-bound directory follows whole-home rename and deletion
 but is excluded from export: records contain local project paths and opaque
 native session ids that are meaningless or unsafe to resume on another
 machine. A record contains the daemon-issued `task-<uuid>` id,
-runtime-qualified parent conversation identity, built-in worker id, complete
-bounded task prompt,
-resolved canonical **source** project root and cwd, workspace view, state and
-timestamps, optional native session id, bounded terminal result or error, and
-a bounded normalized event tail. A v1 record is read as a preserved legacy
-in-place workspace and promotes on its next write; no native task is resumed.
+runtime-qualified parent conversation identity, coding harness id, optional
+opaque native agent name, complete bounded task prompt, resolved canonical
+**source** project root and cwd, workspace view, state and timestamps, optional
+native session id, bounded terminal result or error, and a bounded normalized
+event tail. V1 and v2 records retain their old `agent` worker id on disk;
+reading maps `claude-code` and `codex` directly and maps `pi-worker` to the
+`pi` harness, with no native agent requested. A v1 record additionally receives
+the preserved legacy in-place workspace. Either old version promotes to v3 on
+its next write; no native task is resumed.
 The event tail retains at most 100 state/output/notice/owner-message/
 principal-message events with monotonic sequence numbers; each event text is
 at most 4,000 UTF-16 code units. Task prompts and terminal results are at most
 64,000 and 128,000 code units respectively. Tail eviction, individual text,
 result, and error-message truncation are explicit flags. A native session id is
-never truncated; an invalid or oversized id fails the task. The worker's native
+never truncated; an invalid or oversized id fails the task. The harness's native
 storage remains authoritative for richer history and configuration.
 
 The exact pretty-printed UTF-8 sidecar, including its trailing newline, never
@@ -1840,6 +1851,21 @@ guesses how to reconnect an opaque vendor process. Malformed sidecars are
 skipped by listings and rejected by direct reads. Tasks run concurrently
 without a Ghost-level cap.
 
+The harness is required. The Ghost principal chooses it using task fit plus the
+read-only installation, authentication, and Omarchy usage context returned by
+`harness_status`; the daemon does not hide that policy behind another router.
+`agent` is optional. When omitted, the native harness's default coding agent
+owns the task and may delegate internally. When supplied, it is a bounded,
+non-empty opaque requested name that only the selected harness interprets.
+Claude Code provides a direct SDK selector. Current Codex app-server and Pi RPC
+do not, so their root agent receives an explicit native-delegation request and
+Ghost records that the handoff is unverified. Ghost does not list configuration
+directories, validate existence, snapshot the definition, translate model
+aliases, or restrict the agent's tools. Native agent definitions own model,
+effort, instructions, tools, skills, plugins, MCP, and nested delegation.
+Harness retry, delegation, and fallback behavior remains native and can only be
+reported—not proven—from those headless protocols.
+
 Every task has a workspace view
 `{ strategy, state, root, cwd, branch, baseCommit, headCommit, review, notice }`.
 `strategy` is `git-worktree | in-place`; `state` is
@@ -1858,7 +1884,7 @@ Ghost's default is one linked worktree per task under
 Ghost requires the source worktree to be clean including untracked files and
 pins its current `HEAD`. A bound root nested inside a larger Git worktree is
 rejected rather than broadening the trusted project boundary; an unborn
-repository is rejected because it has no committed snapshot. The v2 task
+repository is rejected because it has no committed snapshot. The v3 task
 record, planned path, branch, and base commit are durable before `git worktree
 add`. Under one short queue keyed by Git's canonical common directory, Ghost
 rechecks the source cleanliness and exact pinned `HEAD` immediately before it
@@ -1891,6 +1917,14 @@ clean/no-change worktrees are removed, a clean branch containing worker commits
 is retained as reviewable, and dirty or uncertain work is preserved. Restart
 interruption and emergency shutdown always preserve an existing workspace.
 
+Tasks do not inherit another task's review branch: every isolated task starts
+from the trusted source checkout's current `HEAD`, and this v3 wire has no
+`from_task` or base-ref field. An assignment that needs implementation followed
+by reviewer/simplifier agents must ask the selected native harness to perform
+those stages inside the same task workspace. Cross-task or cross-harness staged
+review requires a future explicit base-task contract; Ghost never guesses a
+branch relation from task order or an agent name.
+
 This is workflow isolation, not a sandbox. Maximum-trust workers can still
 address the source checkout, machine, and configured remotes. Ghost does not
 push, open a pull request, merge, or delete a review branch automatically;
@@ -1901,11 +1935,14 @@ or remove a preserved artifact.
 
 Both principal harnesses expose the same daemon-owned logical tools:
 
-- `worker_status {}` returns the bounded three-worker catalogue, including the
-  read-only Omarchy utilization windows used to choose a worker.
-- `task { agent, task, cwd? }` creates one durable task and immediately returns
-  its queued task handle. This is exactly the locked pi subagent example's
-  single-task core plus its optional cwd; it adds no mode or parent field.
+- `harness_status {}` returns the bounded three-harness catalogue, including
+  the read-only Omarchy utilization windows used to choose a harness.
+- `task { harness, task, agent?, cwd? }` creates one durable task and returns
+  its queued task handle after context admission and workspace provisioning.
+  Harness execution is asynchronous. `harness` selects
+  `claude-code | codex | pi`; optional `agent` is an opaque name for that native
+  harness to interpret. The shape retains Pi's `{ agent, task }` vocabulary while
+  making the responsible harness explicit and adding no mode or parent field.
 - `task_list { limit? }` lists only tasks attributed to the current principal
   conversation, newest first. `limit` defaults to 10 and is bounded to 1–20.
 - `task_get { task_id }`, `task_send { task_id, text }`, and
@@ -1928,18 +1965,17 @@ Pi registers these as custom tools under the logical names above. The Claude
 principal exposes them through its existing in-process `ghost` SDK MCP server,
 so Claude sees `mcp__ghost__<name>`. It keeps the native Claude Code tool preset
 but explicitly disallows native `Agent` and legacy `Task`: every principal
-coding delegation therefore has the same durable handle, worker choice, usage
+coding delegation therefore has the same durable handle, harness choice, usage
 context, steering, cancellation, and parent attribution. This restriction is
-principal-only; a `claude-code` worker keeps its native Agent behavior.
+principal-only; a `claude-code` task keeps its native Agent behavior.
 
 The authenticated HTTP boundary is:
 
 - `POST /api/ghosts/:name/sessions/:id/tasks` with exactly
-  `{ agent, task, cwd? }` → the v2 task view with `202`. It preserves the
-  locked pi-coding-agent dependency's shipped `examples/extensions/subagent`
-  single mode core `{ agent, task }` declaration:
-  `agent` names the responsible worker, `task` is its complete assignment, and
-  optional `cwd` refines the conversation's trusted project context. The
+  `{ harness, task, agent?, cwd? }` → the v3 task view with `202`. `harness`
+  names the responsible native coding harness, `agent` optionally requests one
+  of that harness's own agents, `task` is the complete assignment, and optional
+  `cwd` refines the conversation's trusted project context. The
   qualified session id in the route supplies the durable parent identity;
   clients cannot override it. Rejecting every extra field is Ghost's stricter
   policy, not a claim that pi defines one universal subagent schema.
@@ -1959,14 +1995,16 @@ The authenticated HTTP boundary is:
   controller captured when that task was spawned; Ghost never discovers or
   kills processes by name.
 
-The HUD has one ghost-scoped **Workers** destination. It reads the sanitized
-worker catalogue and durable task list, fetches a selected task's complete
-bounded view, and exposes the existing send/cancel reverse controls. It polls
+The HUD has one ghost-scoped **Harnesses** destination. It reads the sanitized
+machine harness catalogue and durable task list, fetches a selected task's
+complete bounded view, and exposes the existing send/cancel reverse controls.
+It does not present a second editable agent registry; native harnesses own that
+configuration. It polls
 only while the destination is visible (three seconds for unsettled tasks,
 thirty seconds for worker usage), retires every request on ghost change, and
 renders task/result/event/workspace text literally. It does not provide a
 parallel task-creation form: the owner delegates through the Ghost conversation
-and the Ghost remains responsible for choosing the worker, assignment, and
+and the Ghost remains responsible for choosing the harness, assignment, and
 trusted cwd. The HUD reports local branch/worktree artifacts but never turns
 them into implicit publish, PR, merge, or cleanup actions.
 
@@ -1976,67 +2014,54 @@ canonical, trusted project root. Every adapter revalidates that source machine
 trust receipt and canonical containment immediately before launch, then runs at
 the prepared workspace cwd and performs native project-policy/configuration
 discovery there. An adapter that is not active returns `503
-worker_unavailable` without changing this wire or persistence contract.
+harness_unavailable` without changing this wire or persistence contract.
 
 At daemon boot Ghost takes one in-memory snapshot of the launcher environment
-before applying the principal provider scrub. Only installed vendor worker
+before applying the principal provider scrub. Only installed coding-harness
 processes and their installation/authentication probes receive that snapshot;
-the Ghost principal and `pi-worker` retain the scrubbed environment. Values are
+the Ghost principal retains the scrubbed environment. Values are
 never logged, persisted, or returned by an API. This is the deliberate native
-worker exception to provider isolation: it preserves CLI configuration selected
+task-harness exception to provider isolation: it preserves CLI configuration selected
 through environment variables as well as the owner's home/XDG configuration,
 but cannot invent interactive-shell state that was absent from the service's
 launcher environment.
 
-`pi-worker` runs in an isolated child invocation of the installed `ghostd`
-program, never inside the daemon process and never through a separately
-installed Pi executable. The child uses the bundled locked Pi SDK and the
-Ghost's Secret Service/model runtime. Its primary model is `task_model` when
-bound, otherwise the Ghost's ordinary Pi model default; a Claude Code harness
-route is not a Pi model and is never inherited. The worker keeps Pi's native
-coding-agent prompt construction, including native project prompt overrides,
-tool guidance, cwd, and project context discovery, then appends only a compact
-Ghost-owned worker boundary: it is responsible for the delegated coding task,
-is not the Ghost persona, follows project policy, and reports the result to the
-Ghost. `character.md`, Ghost memory, Documents, browser/desktop tools, and the
-principal prompt are not injected.
+The `pi` harness runs one captured process of the owner's resolved, installed
+`pi` executable per task using Pi's native RPC JSON-lines protocol. Ghost does
+not use its bundled principal SDK as a task runtime and does not supply the
+ghost home's derived `.pi`, Secret Service model runtime, model roles, system
+prompt, tools, or resource filters. The process receives the captured native
+harness environment and task cwd, so Pi owns `~/.pi/agent`, authentication,
+models, settings, packages, extensions, user/project agents, `AGENTS.md`,
+skills, prompts, tools, project trust, transcripts, and fallback behavior.
+Ghost supplies only RPC mode, the task, optional native-agent request, and a
+session name. Native startup is authoritative for model and authentication
+availability.
 
-The child uses the seven bundled Pi coding tools `bash`, `edit`, `find`, `grep`,
-`ls`, `read`, and `write`. An extension cannot add a model-callable tool or
-replace one of those bundled definitions, although its lifecycle and tool-call
-hooks still run. It loads the trusted project's native Pi settings, packages,
-extensions, `AGENTS.md` context, prompts, and skills at the pinned cwd, plus the
-same owner-trusted machine skill roots available to a principal. Unlike Pi's
-ambient ancestor walk, admitted `AGENTS.md` files and project skills are
-canonical-path bounded to the captured trusted root; skills from outside that
-root enter only through those explicit machine roots. This is the deliberate
-trust-boundary exception to native project discovery.
+When `agent` is omitted, the task is the first ordinary Pi prompt. When it is
+present, Ghost asks Pi to delegate the complete task to that exact native agent
+through Pi's installed task/subagent capability. Pi—not Ghost—discovers and
+resolves the name. The prompt requires a visible failure instead of parent-agent
+fallback, but RPC exposes no delegation receipt: Ghost records the request as
+unverified and treats Pi's terminal outcome as authoritative. Project-local
+agent confirmation is not an interactive trust boundary because Ghost already
+admitted and revalidated the project before launch, and tasks run with maximum
+owner trust.
 
-That executable project discovery is safe for daemon integrity because it runs
-only in the captured child with the owner's normal OS authority. Headless task
-workers have no TUI or owner-facing interactive dialogs, model switcher, or
-session navigation, and no Ghost ask broker, MCP snapshot, browser relay,
-desktop helper, or principal hooks. Native extensions retain Pi's bound core
-actions, including programmatic model changes; print-mode UI requests receive
-Pi's native noninteractive cancellation values, and an extension handler that
-throws fails the task as an ordinary worker error. The child persists its full
-Pi transcript under `.tasks/pi/` and communicates with the daemon over bounded
-JSON-lines on its captured stdio. Steering is acknowledged before the
-normalized principal/owner message is persisted. Cancellation is a priority
-control path: neither the daemon nor the child queues it behind a steering
-request that may own another model turn. A steering acknowledgement that loses
-that cancellation race is not persisted as an owner/principal message.
-Cancellation first asks Pi to abort and run extension shutdown; if it does not
-settle, the adapter terminates only that captured child, escalating to a forced
-kill after a bounded grace period. Every terminal result, worker error,
-protocol failure, and cancellation is confirmed only after that captured child
-has exited and can no longer work.
+RPC `prompt`/`steer` acknowledgements gate durable owner/principal messages;
+`agent_settled` and the final root assistant message settle the task. Blocking
+extension UI requests are cancelled rather than answered or left hanging;
+fire-and-forget notifications may become bounded notices. Cancellation sends
+native `abort`, closes stdin after acknowledgement/settlement, then escalates
+`SIGTERM` to `SIGKILL` only for that captured process. Protocol framing splits
+only on LF, as Pi requires. Unsupported or incompatible native RPC behavior
+fails visibly rather than falling back to Ghost emulation.
 
-The `codex` worker runs one captured process of the owner's resolved `codex`
+The `codex` harness runs one captured process of the owner's resolved `codex`
 executable per task using the native app-server JSON-lines stdio protocol. Ghost
 does not bundle Codex, its SDK, generated protocol bindings, a model, or a
 parallel agent loop. It invokes only `codex app-server --listen stdio://`, with
-the captured native-worker environment and task cwd, initializes a narrow
+the captured native-harness environment and task cwd, initializes a narrow
 client connection, then creates a persistent thread with `cwd` and the two
 maximum-trust fields described below.
 It does not override model, provider, service tier, personality, collaboration
@@ -2044,7 +2069,16 @@ mode, instructions, permission profile, history, skills, plugins, MCP servers,
 hooks, rules, or user configuration. The deliberate worker-only exceptions to
 that minimal thread start are `approvalPolicy:"never"` and
 `sandbox:"danger-full-access"`, the app-server equivalents of Codex YOLO mode.
-The complete task is the first ordinary user input. Codex therefore owns its
+When `agent` is omitted, the complete task is the first ordinary user input.
+The current app-server protocol has no top-level custom-agent selector. When
+`agent` is present, the first ordinary input explicitly requires the root Codex
+agent to delegate the complete assignment to that exact native agent and to
+report failure if it cannot; Ghost does not parse Codex TOML or reproduce the
+agent's model, tools, skills, or instructions. App-server exposes no delegation
+receipt, so Ghost records this requested handoff as unverified and accepts the
+root thread's terminal outcome without claiming that the child ran. The thin
+root thread is therefore a native Codex delegation request, not a Ghost agent
+implementation. Codex owns its
 identity, prompt/tool guidance, `$CODEX_HOME` configuration and authentication,
 project configuration, `AGENTS.md`, skills, plugins, rules, nested agents,
 transcripts, and model/provider fallback behavior exactly as the installed
@@ -2081,15 +2115,15 @@ exits. Shutdown's force stage sends `SIGKILL` directly to the captured process,
 including during initialization; no PID discovery or name-based kill is
 permitted.
 
-The `claude-code` worker runs one official Claude Agent SDK query per task,
+The `claude-code` harness runs one official Claude Agent SDK query per task,
 always pointed at the owner's resolved, installed `claude` executable. The SDK
 is only the typed streaming client already required by Ghost's optional Claude
 principal runtime: the worker never selects the SDK package's bundled Claude
 binary and never implements a parallel Anthropic agent loop. Ghost supplies
-only the captured native-worker environment, canonical task cwd, installed
+only the captured native-harness environment, canonical task cwd, installed
 executable path, and the task as the first ordinary streaming user message. It
 omits `settingSources` (thereby retaining Claude Code's native all-sources
-default) and every model, fallback, system-prompt, agent, tool, skill, plugin,
+default) and every model, fallback, system-prompt, tool, skill, plugin,
 MCP, hook, allow/deny, sandbox, output-style, and settings override. As the
 deliberate worker-only maximum-trust exception, Ghost supplies
 `permissionMode:"bypassPermissions"` plus the SDK's required explicit
@@ -2102,7 +2136,9 @@ the installed headless harness resolves them at that cwd, except that its
 maximum-trust execution mode supersedes those rules where Claude permits. A
 protocol incompatibility between the installed executable and SDK fails
 visibly; Ghost does not fall back to a bundled executable or emulate Claude
-Code.
+Code. When `agent` is present, Ghost passes only that name through the SDK's
+native `agent` option; Claude Code resolves the definition and applies its own
+prompt, model, tools, and configuration. An unresolved name fails natively.
 
 The worker validates the cwd reported by Claude Code's native `system/init`
 message. That message's opaque session id identifies the task; Claude Code's
@@ -2153,9 +2189,9 @@ sidecars move with the home and remain readable under the new ghost name.
 Shutdown synchronously closes task admission and aborts live controllers before
 draining them under the daemon's existing bounded graceful/forced stages. If
 the graceful deadline expires, each registered captured-worker force action is
-invoked before its durable state becomes `interrupted`; `pi-worker` sends
-`SIGKILL` directly to only its captured child even when native initialization
-has not completed.
+invoked before its durable state becomes `interrupted`; every harness adapter
+sends `SIGKILL` directly to only its captured child when its native graceful
+shutdown cannot complete, including during initialization.
 
 ### Model indicator + switcher (which model a ghost uses, and switching it)
 
@@ -2353,8 +2389,8 @@ whole model before any non-local exposure.
   Exports the extension factories and typed readers/writers.
 - `packages/daemon` — per-ghost pi `AgentSession` and Claude Code query
   lifecycles, env scrubbing, model/runtime selection, the HTTP API, the
-  read-only known-worker/Omarchy-usage catalogue, persistent normalized worker
-  task lifecycle and adapter seam, and the systemd unit. Vendor
+  read-only native-harness/Omarchy-usage catalogue, persistent normalized task
+  lifecycle and harness-adapter seam, and the systemd unit. Vendor
   CLIs are detected on the machine and are not package dependencies. Depends
   on `extensions`. Both installed user services declare
   `WorkingDirectory=%h`; that sets process cwd only, while Ghost storage keeps

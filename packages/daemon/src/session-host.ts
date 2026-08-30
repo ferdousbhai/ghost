@@ -1732,7 +1732,7 @@ export class SessionHost {
     if (this.taskServices) {
       if (
         this.taskServices.tasks === services.tasks
-        && this.taskServices.workers === services.workers
+        && this.taskServices.harnesses === services.harnesses
       ) {
         return;
       }

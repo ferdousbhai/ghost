@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   CodexProbe,
   CodexWorkerAdapter,
+  codexTaskPrompt,
   readCodexAccount,
 } from "../src/codex-worker.js";
 import { conversationIdentity } from "../src/conversation-identity.js";
@@ -75,6 +76,7 @@ const task: WorkerTaskRequest = {
   taskId: "task-12345678-1234-4123-8123-123456789abc",
   ghostName: "casper",
   parent: conversationIdentity("pi", "conversation-1"),
+  agent: null,
   task: "Implement the focused change.",
   sourceRoot: "/trusted/source",
   sourceCwd: "/trusted/source/app",
@@ -82,17 +84,17 @@ const task: WorkerTaskRequest = {
   cwd: "/project/app",
 };
 
-function configureStartup(child: FakeCodexChild): void {
+function configureStartup(child: FakeCodexChild, request: WorkerTaskRequest = task): void {
   child.responders.set("initialize", () => ({ userAgent: "codex-test" }));
   child.responders.set("thread/start", (message) => {
     expect(message.params).toEqual({
-      cwd: task.cwd,
+      cwd: request.cwd,
       approvalPolicy: "never",
       sandbox: "danger-full-access",
     });
     return {
-      thread: { id: "thread-native-1", cwd: task.cwd },
-      cwd: task.cwd,
+      thread: { id: "thread-native-1", cwd: request.cwd },
+      cwd: request.cwd,
       model: "owner-model",
       instructionSources: ["/project/AGENTS.md"],
       approvalPolicy: "never",
@@ -102,7 +104,7 @@ function configureStartup(child: FakeCodexChild): void {
   child.responders.set("turn/start", (message) => {
     expect(message.params).toEqual({
       threadId: "thread-native-1",
-      input: [{ type: "text", text: task.task, text_elements: [] }],
+      input: [{ type: "text", text: codexTaskPrompt(request.task, request.agent), text_elements: [] }],
     });
     return { turn: { id: "turn-1", status: "inProgress" } };
   });
@@ -154,6 +156,30 @@ function adapterHarness(child: FakeCodexChild) {
 }
 
 describe("Codex native worker", () => {
+  it("asks native Codex to delegate an exact optional agent and exposes that routing is unverified", async () => {
+    expect(codexTaskPrompt(task.task, null)).toBe(task.task);
+    const prompt = codexTaskPrompt(task.task, "reviewer");
+    expect(prompt).toContain('"reviewer"');
+    expect(prompt).toContain("Codex's native multi-agent delegation");
+    expect(prompt).toContain("Do not perform the assignment in this root thread");
+    expect(prompt).toContain(task.task);
+
+    const request = { ...task, agent: "reviewer" };
+    const child = new FakeCodexChild();
+    configureStartup(child, request);
+    const harness = adapterHarness(child);
+    const controller = await harness.adapter.start(request, harness.context);
+    await until(() => harness.events.some((event) => event.type === "notice"
+      && event.text.includes("requested native agent")));
+    expect(harness.events).toContainEqual({
+      type: "notice",
+      text: 'Codex\'s root agent was asked to delegate to requested native agent "reviewer"; Ghost cannot verify that native delegation occurred.',
+    });
+    complete(child, "Reviewed.");
+    child.close(0, null);
+    await expect(controller.result).resolves.toMatchObject({ text: "Reviewed." });
+  });
+
   it("uses native app-server settings with maximum trust, validates cwd, and settles after exit", async () => {
     const child = new FakeCodexChild();
     configureStartup(child);
@@ -232,7 +258,7 @@ describe("Codex native worker", () => {
     });
     expect(harness.events).toContainEqual({
       type: "notice",
-      text: "Codex requested MCP input; the headless worker declined it.",
+      text: "Codex requested MCP input; the headless harness task declined it.",
     });
     complete(child);
     await controller.result;

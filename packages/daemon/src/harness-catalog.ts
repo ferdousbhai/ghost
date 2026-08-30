@@ -1,11 +1,4 @@
-/**
- * The machine worker catalogue.
- *
- * A worker is an agent harness Ghost can delegate a task to. This catalogue
- * reports only machine facts and Omarchy's read-only usage projection; model
- * routing remains a separate Ghost concern, and task execution remains owned
- * by the task manager and worker adapters.
- */
+/** Machine coding-harness status plus Omarchy's read-only usage projection. */
 import { homedir } from "node:os";
 import {
   isAbsolute,
@@ -20,63 +13,66 @@ import { CodexMissingError, CodexProbe } from "./codex-worker.js";
 import { GhostError } from "./ghosts.js";
 import { silentLogger, type Logger } from "./log.js";
 import { PrivateReadError, readPrivateFileText } from "./private-file.js";
-import { CODEX_BINARY_ENV } from "./worker-executable.js";
-import type { WorkerId } from "./worker-identity.js";
+import {
+  CODEX_BINARY_ENV,
+  PI_BINARY_ENV,
+  resolveHarnessExecutable,
+} from "./harness-executable.js";
+import type { HarnessId } from "./harness-identity.js";
 
-export { CODEX_BINARY_ENV, resolveWorkerExecutable } from "./worker-executable.js";
-export { WORKER_IDS, type WorkerId } from "./worker-identity.js";
+export { CODEX_BINARY_ENV, PI_BINARY_ENV, resolveHarnessExecutable } from "./harness-executable.js";
+export { HARNESS_IDS, type HarnessId } from "./harness-identity.js";
 
-export type WorkerAuthentication =
+export type HarnessAuthentication =
   | "authenticated"
   | "unauthenticated"
-  | "unknown"
-  | "ghost-model";
+  | "unknown";
 
-export type WorkerInstallation = "installed" | "missing" | "unknown";
+export type HarnessInstallation = "installed" | "missing" | "unknown";
 
-export type WorkerUsageState = "ready" | "missing" | "invalid";
+export type HarnessUsageState = "ready" | "missing" | "invalid";
 
-export interface WorkerUsageLimit {
+export interface HarnessUsageLimit {
   label: string;
   /** Fraction already used in the current window, in [0, 1]. */
   usedFraction: number;
   resetsAt: string | null;
 }
 
-export interface WorkerUsageToday {
+export interface HarnessUsageToday {
   totalTokens: number;
   prompts: number;
   sessions: number;
 }
 
-export interface WorkerUsageView {
+export interface HarnessUsageView {
   source: "omarchy";
-  state: WorkerUsageState;
+  state: HarnessUsageState;
   updatedAt: string | null;
   stale: boolean;
   tier: string | null;
   status: string | null;
   help: string | null;
-  limits: WorkerUsageLimit[];
-  today: WorkerUsageToday | null;
+  limits: HarnessUsageLimit[];
+  today: HarnessUsageToday | null;
 }
 
-export interface WorkerStatus {
-  id: WorkerId;
+export interface HarnessStatus {
+  id: HarnessId;
   name: string;
-  kind: "native" | "builtin";
+  kind: "native";
   nativeConfiguration: boolean;
-  installation: WorkerInstallation;
-  authentication: WorkerAuthentication;
+  installation: HarnessInstallation;
+  authentication: HarnessAuthentication;
   reason: string | null;
-  usage: WorkerUsageView | null;
+  usage: HarnessUsageView | null;
 }
 
-export interface WorkerCatalogView {
-  workers: WorkerStatus[];
+export interface HarnessCatalogView {
+  harnesses: HarnessStatus[];
 }
 
-export interface WorkerCatalogOptions {
+export interface HarnessCatalogOptions {
   ownerHome?: string;
   env?: NodeJS.ProcessEnv;
   usageDir?: string;
@@ -85,6 +81,7 @@ export interface WorkerCatalogOptions {
   claudeCodeProbe?: Pick<ClaudeCodeProbe, "read">;
   codexProbe?: Pick<CodexProbe, "read">;
   resolveCodexExecutable?: (configured: string) => Promise<string>;
+  resolvePiExecutable?: (configured: string) => Promise<string>;
   logger?: Logger;
 }
 
@@ -100,6 +97,7 @@ const CODEX_MISSING_REASON =
   "Codex is unavailable. Install it or check `GHOST_CODEX_BINARY`.";
 const CODEX_PROBE_FAILED_REASON =
   "Could not verify Codex. Run `codex login status` to diagnose it.";
+const PI_MISSING_REASON = "Pi is unavailable. Install it or check `GHOST_PI_BINARY`.";
 
 function compactText(value: unknown, maxLength: number): string | null {
   if (typeof value !== "string") return null;
@@ -119,7 +117,7 @@ function isoTimestamp(value: unknown): string | null {
   return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : null;
 }
 
-function emptyUsage(state: Exclude<WorkerUsageState, "ready">): WorkerUsageView {
+function emptyUsage(state: Exclude<HarnessUsageState, "ready">): HarnessUsageView {
   return {
     source: "omarchy",
     state,
@@ -138,7 +136,7 @@ function parseUsageRecord(
   expectedId: "claude" | "codex",
   now: number,
   staleAfterMs: number,
-): WorkerUsageView | null {
+): HarnessUsageView | null {
   let value: unknown;
   try {
     value = JSON.parse(raw);
@@ -153,7 +151,7 @@ function parseUsageRecord(
   const updatedAtMs = Date.parse(updatedAt);
   const age = now - updatedAtMs;
 
-  const limits: WorkerUsageLimit[] = [];
+  const limits: HarnessUsageLimit[] = [];
   if (Array.isArray(record.limits)) {
     for (const candidate of record.limits.slice(0, MAX_USAGE_LIMITS)) {
       if (candidate === null || typeof candidate !== "object" || Array.isArray(candidate)) continue;
@@ -206,23 +204,25 @@ export function defaultOmarchyUsageDir(
   return join(stateHome, "omarchy", "agents", "usage");
 }
 
-/** Read-only detection and usage status for the three code-owned worker ids. */
-export class WorkerCatalog {
+/** Read-only detection and usage status for the three native coding harnesses. */
+export class HarnessCatalog {
   private readonly usageDir: string;
   private readonly now: () => number;
   private readonly staleAfterMs: number;
   private readonly claudeCodeProbe: Pick<ClaudeCodeProbe, "read">;
   private readonly codexProbe: Pick<CodexProbe, "read">;
+  private readonly piBinary: string;
+  private readonly resolvePiExecutable: (configured: string) => Promise<string>;
   private readonly logger: Logger;
 
-  constructor(options: WorkerCatalogOptions = {}) {
+  constructor(options: HarnessCatalogOptions = {}) {
     const ownerHome = options.ownerHome ?? homedir();
     const env = options.env ?? process.env;
     this.usageDir = options.usageDir ?? defaultOmarchyUsageDir(ownerHome, env);
     this.now = options.now ?? Date.now;
     this.staleAfterMs = options.staleAfterMs ?? DEFAULT_USAGE_STALE_AFTER_MS;
     if (!Number.isFinite(this.staleAfterMs) || this.staleAfterMs <= 0) {
-      throw new RangeError("Worker usage staleAfterMs must be a positive finite number.");
+      throw new RangeError("Harness usage staleAfterMs must be a positive finite number.");
     }
     this.claudeCodeProbe = options.claudeCodeProbe ?? new ClaudeCodeProbe({
       env,
@@ -235,35 +235,30 @@ export class WorkerCatalog {
         ? { resolveExecutable: options.resolveCodexExecutable }
         : {}),
     });
+    this.piBinary = env[PI_BINARY_ENV]?.trim() || "pi";
+    this.resolvePiExecutable = options.resolvePiExecutable
+      ?? ((configured) => resolveHarnessExecutable(configured, env));
     this.logger = options.logger ?? silentLogger;
   }
 
-  async list(): Promise<WorkerCatalogView> {
-    const [claude, codex, claudeUsage, codexUsage] = await Promise.all([
+  async list(): Promise<HarnessCatalogView> {
+    const [claude, codex, pi, claudeUsage, codexUsage] = await Promise.all([
       this.claudeStatus(),
       this.codexStatus(),
+      this.piStatus(),
       this.readUsage("claude"),
       this.readUsage("codex"),
     ]);
     return {
-      workers: [
+      harnesses: [
         { ...claude, usage: claudeUsage },
         { ...codex, usage: codexUsage },
-        {
-          id: "pi-worker",
-          name: "Pi worker",
-          kind: "builtin",
-          nativeConfiguration: false,
-          installation: "installed",
-          authentication: "ghost-model",
-          reason: null,
-          usage: null,
-        },
+        { ...pi, usage: null },
       ],
     };
   }
 
-  private async claudeStatus(): Promise<Omit<WorkerStatus, "usage">> {
+  private async claudeStatus(): Promise<Omit<HarnessStatus, "usage">> {
     try {
       const result = await this.claudeCodeProbe.read();
       const authenticated = isClaudePlanAuth(result.authStatus);
@@ -294,7 +289,7 @@ export class WorkerCatalog {
     }
   }
 
-  private async codexStatus(): Promise<Omit<WorkerStatus, "usage">> {
+  private async codexStatus(): Promise<Omit<HarnessStatus, "usage">> {
     try {
       const result = await this.codexProbe.read();
       const authentication = result.account.accountPresent
@@ -327,7 +322,32 @@ export class WorkerCatalog {
     }
   }
 
-  private async readUsage(id: "claude" | "codex"): Promise<WorkerUsageView> {
+  private async piStatus(): Promise<Omit<HarnessStatus, "usage">> {
+    try {
+      await this.resolvePiExecutable(this.piBinary);
+      return {
+        id: "pi",
+        name: "Pi",
+        kind: "native",
+        nativeConfiguration: true,
+        installation: "installed",
+        authentication: "unknown",
+        reason: null,
+      };
+    } catch {
+      return {
+        id: "pi",
+        name: "Pi",
+        kind: "native",
+        nativeConfiguration: true,
+        installation: "missing",
+        authentication: "unknown",
+        reason: PI_MISSING_REASON,
+      };
+    }
+  }
+
+  private async readUsage(id: "claude" | "codex"): Promise<HarnessUsageView> {
     let raw: string;
     try {
       raw = readPrivateFileText(join(this.usageDir, `${id}.json`));
@@ -336,8 +356,8 @@ export class WorkerCatalog {
         ? error.cause as NodeJS.ErrnoException | undefined
         : undefined;
       if (openCause?.code !== "ENOENT") {
-        this.logger.warn("worker usage record was refused", {
-          worker: id,
+        this.logger.warn("harness usage record was refused", {
+          harness: id,
           reason: error instanceof PrivateReadError ? error.refusal : "read_failed",
         });
         return emptyUsage("invalid");
@@ -346,7 +366,7 @@ export class WorkerCatalog {
     }
     const usage = parseUsageRecord(raw, id, this.now(), this.staleAfterMs);
     if (usage) return usage;
-    this.logger.warn("worker usage record was invalid", { worker: id });
+    this.logger.warn("harness usage record was invalid", { harness: id });
     return emptyUsage("invalid");
   }
 }

@@ -8,7 +8,7 @@ issue tracker (#17 is the beta gate); contracts live in `../CONTRACTS.md`.
 A ghost is the owner's digital counterpart — character, memory, tools, and
 access to the owner's Documents — that lives entirely on its owner's machine as
 an Omarchy-native desktop app. It uses the computer and browser directly, and
-orchestrates coding work through isolated native or bundled workers instead of
+orchestrates coding work through isolated native harnesses instead of
 pretending every delegated task is part of its own identity. It is an
 owner-local desktop application, not a network-facing agent service. No server
 holds a copy. "Your ghost, not our copy of it."
@@ -19,11 +19,11 @@ The official repo is the point of collaboration on a narrow, opinionated core �
 ghost home, daemon, shell, and built-in extensions. An owner can modify the
 visible instructions, skills, rules, Markdown commands and prompts, model roles,
 and MCP owned by a ghost or explicitly trusted project. Executable project
-plugins, hooks, custom tools, LSP, and custom pi subagent definitions stay
-disabled in a Ghost principal session. The bundled `pi-worker` is the first #31
-isolation boundary: it runs native Pi project configuration, extensions, and
-hooks only in a captured task child after an explicit project trust decision;
-extension-defined model tools remain outside its fixed bundled tool set.
+plugins, hooks, custom tools, LSP, and agent definitions stay disabled in a
+Ghost principal session. Delegated tasks are the #31 isolation boundary: the
+owner's installed Claude Code, Codex, or Pi harness discovers its own native
+project configuration and agents only in a captured task process after an
+explicit project trust decision.
 Trusted visible ghost hook factories are the narrow in-process exception. Core
 stays small and holds the contracts.
 A capability generic enough for every ghost graduates into core or upstream pi;
@@ -52,10 +52,10 @@ ambient credential discovery, and no cloud custody.
   same Ghost persona, memory, Documents, and declarative layers and emit the
   pi-messages wire, while each keeps its native tool harness. Deviations from
   pi are named in `CONTRACTS.md` with the invariant that licenses them (#3).
-- **Delegate through native coding harnesses** — `claude-code` and `codex`
-  workers invoke the owner's installed harness with its own configuration at a
-  trusted cwd; `pi-worker` is the bundled fallback. Ghost owns task lifecycle
-  and normalized progress, not a second implementation of those agent loops.
+- **Delegate through native coding harnesses** — `claude-code`, `codex`, and
+  `pi` invoke the owner's installed harness with its own configuration at a
+  trusted cwd. Ghost owns task lifecycle and normalized progress, not agent
+  discovery or a second implementation of those loops.
 - **Model-agnostic; bring any provider.** Named requirements: existing **OpenAI
   Codex/ChatGPT subscriptions usable as auth** through pi's Codex OAuth,
   **Claude plans through the Claude Code harness** (a separate runtime from
@@ -86,7 +86,7 @@ ambient credential discovery, and no cloud custody.
   users, meter calls, or operate a money path.
 - **Env scrubbing** — a Ghost principal only sees credentials deliberately
   referenced and allowed by its `models.json`; stray shell API keys must never
-  leak cloud models into a sovereign ghost. Installed vendor workers are the
+  leak cloud models into a sovereign ghost. Installed native harnesses are the
   deliberate exception and receive the daemon launcher's preserved environment
   so their native configuration keeps working.
 - **No Obsidian integration promises** — plain files make it unnecessary.

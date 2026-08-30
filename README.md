@@ -11,19 +11,18 @@ its own `ask` tool, model roles and fallback chains, bounded declarative skills,
 rules, Markdown commands/prompts, and MCP from the visible ghost home plus one
 explicitly trusted project. Live voice remains deferred; remote sharing uses
 the built-in tailnet viewer over Tailscale Serve, and no separate collaboration
-relay is planned. Project plugins, hooks, custom code tools,
-and LSP stay disabled inside a Ghost principal session; the bundled
-`pi-worker` may run trusted project extensions and hooks in its isolated task
-child after the owner binds the project, while model-callable custom tools stay
-outside its fixed bundled tool set. Trusted visible `hooks/pre` and `hooks/post`
-files in the ghost home remain the explicit in-process extension surface. The
-native `codex` and `claude-code` workers use the owner's installed harnesses and
-native user/project configuration; see
-[docs/native-workers.md](docs/native-workers.md).
-Both principal runtimes expose Ghost's durable `task` controls for those three
-built-in workers; custom agent definitions remain inert. A Claude principal
+relay is planned. Project plugins, hooks, custom code tools, and LSP stay
+disabled inside a Ghost principal session. Delegated tasks instead run through
+the owner's installed Claude Code, Codex, or Pi harness at a trusted cwd, where
+that harness discovers its own project configuration and agents. Trusted visible
+`hooks/pre` and `hooks/post` files in the ghost home remain the explicit
+in-process extension surface. Those native harnesses use the owner's normal
+user/project configuration; see
+[docs/native-harnesses.md](docs/native-harnesses.md).
+Both principal runtimes expose Ghost's durable `task` controls for all three
+harnesses; custom agent definitions remain inert in the principal. A Claude principal
 disables Claude's native Agent/legacy Task shortcuts so delegation cannot
-bypass that lifecycle, while a delegated Claude worker retains native
+bypass that lifecycle, while a delegated Claude task retains native
 subagents. Clean Git tasks run in one linked worktree and local review branch;
 Ghost never pushes, opens a pull request, or merges without a separate explicit
 owner action. Ghost replaces pi's coding-oriented system prompt with its

@@ -1,6 +1,6 @@
 pragma ComponentBehavior: Bound
 
-// Owner-facing status and reverse controls for coding workers. Delegation
+// Owner-facing status and reverse controls for coding harnesses. Delegation
 // starts in chat; this pane observes durable tasks and can steer or stop the
 // exact native controller ghostd already owns.
 import Quickshell
@@ -10,7 +10,7 @@ import qs.services
 
 Rectangle {
     id: root
-    objectName: "workersBrowser"
+    objectName: "harnessesBrowser"
 
     readonly property var task: Ghostd.selectedCodingTask
     readonly property bool compact: width < 720
@@ -24,27 +24,28 @@ Rectangle {
     color: Theme.background
     clip: true
 
-    function workerState(worker: var): string {
-        if (worker.installation === "missing") return "Not installed";
-        if (worker.installation === "unknown") return "Install status unknown";
-        if (worker.authentication === "unauthenticated") return "Sign-in needed";
-        if (worker.authentication === "unknown") return "Sign-in status unknown";
+    function harnessState(harness: var): string {
+        if (harness.installation === "missing") return "Not installed";
+        if (harness.installation === "unknown") return "Install status unknown";
+        if (harness.authentication === "unauthenticated") return "Sign-in needed";
+        if (harness.authentication === "unknown" && harness.id !== "pi")
+            return "Sign-in status unknown";
         return "Ready";
     }
 
-    function workerColor(worker: var): var {
-        if (worker.installation === "missing") return Theme.foregroundFaint;
-        if (worker.installation === "unknown"
-                || worker.authentication === "unauthenticated"
-                || worker.authentication === "unknown") return Theme.warn;
+    function harnessColor(harness: var): var {
+        if (harness.installation === "missing") return Theme.foregroundFaint;
+        if (harness.installation === "unknown"
+                || harness.authentication === "unauthenticated"
+                || (harness.authentication === "unknown" && harness.id !== "pi")) return Theme.warn;
         return Theme.ok;
     }
 
-    function usageLine(worker: var): string {
-        const usage = worker.usage;
+    function usageLine(harness: var): string {
+        const usage = harness.usage;
         if (!usage) {
-            if (worker.reason) return String(worker.reason);
-            return worker.id === "pi-worker" ? "Ghost model routing" : "No usage snapshot";
+            if (harness.reason) return String(harness.reason);
+            return harness.id === "pi" ? "Native Pi configuration" : "No usage snapshot";
         }
         const limits = usage.limits;
         if (!limits || typeof limits.length !== "number" || limits.length === 0)
@@ -78,6 +79,12 @@ Rectangle {
         if (value === "failed" || value === "interrupted") return Theme.ghostRose;
         if (value === "cancelled") return Theme.foregroundFaint;
         return Theme.ghostAmber;
+    }
+
+    function taskHarness(task: var): string {
+        if (!task) return "Harness";
+        const harness = String(task.harness || "Harness");
+        return task.agent ? harness + " · requested " + String(task.agent) : harness;
     }
 
     function workspaceSummary(workspace: var): string {
@@ -150,12 +157,12 @@ Rectangle {
     }
 
     Timer {
-        id: workerPoll
-        objectName: "codingWorkerPoll"
+        id: harnessPoll
+        objectName: "codingHarnessPoll"
         interval: 30000
         repeat: true
         running: root.visible
-        onTriggered: Ghostd.fetchCodingWorkers(true)
+        onTriggered: Ghostd.fetchCodingHarnesses(true)
     }
 
     ColumnLayout {
@@ -171,9 +178,9 @@ Rectangle {
                 spacing: 2
 
                 Text {
-                    objectName: "workersTitle"
+                    objectName: "harnessesTitle"
                     Layout.fillWidth: true
-                    text: "Coding workers"
+                    text: "Coding harnesses"
                     textFormat: Text.PlainText
                     color: Theme.foregroundBright
                     font.family: Theme.fontFamily
@@ -193,10 +200,10 @@ Rectangle {
             }
 
             ActionButton {
-                objectName: "workersRefresh"
-                label: Ghostd.codingWorkersLoading || Ghostd.codingTasksLoading
+                objectName: "harnessesRefresh"
+                label: Ghostd.codingHarnessesLoading || Ghostd.codingTasksLoading
                     ? "Refreshing…" : "Refresh"
-                enabled: !Ghostd.codingWorkersLoading && !Ghostd.codingTasksLoading
+                enabled: !Ghostd.codingHarnessesLoading && !Ghostd.codingTasksLoading
                 onClicked: Ghostd.fetchCoding(true)
             }
         }
@@ -206,21 +213,21 @@ Rectangle {
             spacing: Theme.gap
 
             Repeater {
-                model: Ghostd.codingWorkers
+                model: Ghostd.codingHarnesses
 
                 Rectangle {
-                    id: workerCard
+                    id: harnessCard
                     required property var modelData
-                    objectName: "codingWorker-" + String(modelData.id || "")
+                    objectName: "codingHarness-" + String(modelData.id || "")
                     Layout.fillWidth: true
-                    Layout.preferredHeight: workerContent.implicitHeight + Theme.pad
+                    Layout.preferredHeight: harnessContent.implicitHeight + Theme.pad
                     radius: Theme.radius
                     color: Theme.surface
                     border.width: 1
                     border.color: Theme.border
 
                     Column {
-                        id: workerContent
+                        id: harnessContent
                         anchors.left: parent.left
                         anchors.leftMargin: Theme.gap
                         anchors.right: parent.right
@@ -230,7 +237,7 @@ Rectangle {
 
                         Text {
                             width: parent.width
-                            text: String(workerCard.modelData.name || workerCard.modelData.id || "Worker")
+                            text: String(harnessCard.modelData.name || harnessCard.modelData.id || "Harness")
                             textFormat: Text.PlainText
                             color: Theme.foregroundBright
                             font.family: Theme.fontFamily
@@ -240,19 +247,19 @@ Rectangle {
                         }
 
                         Text {
-                            objectName: "codingWorkerState-" + String(workerCard.modelData.id || "")
+                            objectName: "codingHarnessState-" + String(harnessCard.modelData.id || "")
                             width: parent.width
-                            text: root.workerState(workerCard.modelData)
+                            text: root.harnessState(harnessCard.modelData)
                             textFormat: Text.PlainText
-                            color: root.workerColor(workerCard.modelData)
+                            color: root.harnessColor(harnessCard.modelData)
                             font.family: Theme.fontFamily
                             font.pixelSize: Theme.fontSizeSmall
                         }
 
                         Text {
-                            objectName: "codingWorkerUsage-" + String(workerCard.modelData.id || "")
+                            objectName: "codingHarnessUsage-" + String(harnessCard.modelData.id || "")
                             width: parent.width
-                            text: root.usageLine(workerCard.modelData)
+                            text: root.usageLine(harnessCard.modelData)
                             textFormat: Text.PlainText
                             color: Theme.foregroundDim
                             font.family: Theme.fontFamily
@@ -265,13 +272,13 @@ Rectangle {
         }
 
         Text {
-            visible: Ghostd.codingWorkersError !== ""
-                || (Ghostd.codingWorkersLoaded && Ghostd.codingWorkers.length === 0)
+            visible: Ghostd.codingHarnessesError !== ""
+                || (Ghostd.codingHarnessesLoaded && Ghostd.codingHarnesses.length === 0)
             Layout.fillWidth: true
-            text: Ghostd.codingWorkersError !== "" ? Ghostd.codingWorkersError
-                : "No coding workers were discovered."
+            text: Ghostd.codingHarnessesError !== "" ? Ghostd.codingHarnessesError
+                : "No coding harnesses were discovered."
             textFormat: Text.PlainText
-            color: Ghostd.codingWorkersError !== "" ? Theme.warn : Theme.foregroundDim
+            color: Ghostd.codingHarnessesError !== "" ? Theme.warn : Theme.foregroundDim
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontSizeSmall
             wrapMode: Text.WordWrap
@@ -360,7 +367,7 @@ Rectangle {
 
                                 Text {
                                     width: parent.width
-                                    text: String(taskRow.modelData.agent || "worker") + " · "
+                                    text: root.taskHarness(taskRow.modelData) + " · "
                                         + root.stateName(taskRow.modelData.state) + " · "
                                         + root.workspaceSummary(taskRow.modelData.workspace)
                                     textFormat: Text.PlainText
@@ -461,7 +468,7 @@ Rectangle {
                             Text {
                                 objectName: "codingTaskState"
                                 Layout.fillWidth: true
-                                text: root.task ? String(root.task.agent || "worker") + " · "
+                                text: root.task ? root.taskHarness(root.task) + " · "
                                     + root.stateName(root.task.state) : ""
                                 textFormat: Text.PlainText
                                 color: root.task ? root.stateColor(root.task.state) : Theme.foreground

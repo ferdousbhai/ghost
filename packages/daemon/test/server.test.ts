@@ -58,7 +58,7 @@ async function serve(
     maxBodyBytes?: number;
     apiToken?: string | null;
     hooks?: ServerOptions["hooks"];
-    workers?: ServerOptions["workers"];
+    harnesses?: ServerOptions["harnesses"];
     tasks?: ServerOptions["tasks"];
   } = {},
 ) {
@@ -92,7 +92,7 @@ async function serve(
       : { maxBodyBytes: serverOptions.maxBodyBytes }),
     ...(serverOptions.apiToken === undefined ? {} : { apiToken: serverOptions.apiToken }),
     ...(serverOptions.hooks === undefined ? {} : { hooks: serverOptions.hooks }),
-    ...(serverOptions.workers === undefined ? {} : { workers: serverOptions.workers }),
+    ...(serverOptions.harnesses === undefined ? {} : { harnesses: serverOptions.harnesses }),
     ...(serverOptions.tasks === undefined ? {} : { tasks: serverOptions.tasks }),
   });
   return `http://127.0.0.1:${listening.port}`;
@@ -211,18 +211,18 @@ describe("GET /api/ghosts", () => {
   });
 });
 
-describe("GET /api/ghosts/:name/workers", () => {
-  it("returns the injected worker projection only for an existing ghost", async () => {
-    const view = { workers: [] };
+describe("GET /api/ghosts/:name/harnesses", () => {
+  it("returns the injected harness projection only for an existing ghost", async () => {
+    const view = { harnesses: [] };
     const list = vi.fn(async () => view);
-    const base = await serve(undefined, { workers: { list } });
+    const base = await serve(undefined, { harnesses: { list } });
 
-    const response = await fetch(`${base}/api/ghosts/casper/workers`);
+    const response = await fetch(`${base}/api/ghosts/casper/harnesses`);
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual(view);
     expect(list).toHaveBeenCalledTimes(1);
 
-    const missing = await fetch(`${base}/api/ghosts/missing/workers`);
+    const missing = await fetch(`${base}/api/ghosts/missing/harnesses`);
     expect(missing.status).toBe(404);
     expect(await missing.json()).toEqual({
       error: { code: "not_found", message: 'No ghost named "missing".' },
@@ -230,10 +230,10 @@ describe("GET /api/ghosts/:name/workers", () => {
     expect(list).toHaveBeenCalledTimes(1);
   });
 
-  it("rejects mutations and is absent when no worker catalogue is composed", async () => {
-    const list = vi.fn(async () => ({ workers: [] }));
-    const base = await serve(undefined, { workers: { list } });
-    const mutation = await fetch(`${base}/api/ghosts/casper/workers`, { method: "POST" });
+  it("rejects mutations and is absent when no harness catalogue is composed", async () => {
+    const list = vi.fn(async () => ({ harnesses: [] }));
+    const base = await serve(undefined, { harnesses: { list } });
+    const mutation = await fetch(`${base}/api/ghosts/casper/harnesses`, { method: "POST" });
     expect(mutation.status).toBe(405);
     expect(list).not.toHaveBeenCalled();
 
@@ -247,17 +247,18 @@ describe("GET /api/ghosts/:name/workers", () => {
     temp = null;
 
     const without = await serve();
-    const absent = await fetch(`${without}/api/ghosts/casper/workers`);
+    const absent = await fetch(`${without}/api/ghosts/casper/harnesses`);
     expect(absent.status).toBe(404);
   });
 });
 
 describe("task lifecycle routes", () => {
   const task: TaskView = {
-    version: 2,
+    version: 3,
     id: "task-00000000-0000-4000-8000-000000000001",
     parent: { id: "pi:conv-1", conversationId: "conv-1", runtime: "pi" },
-    agent: "pi-worker",
+    harness: "pi",
+    agent: null,
     task: "Implement it.",
     root: "/project",
     cwd: "/project/packages/app",
@@ -305,7 +306,7 @@ describe("task lifecycle routes", () => {
     const response = await fetch(`${base}/api/ghosts/casper/sessions/${piSegment("conv-1")}/tasks`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ agent: "pi-worker", task: "Implement it.", cwd: "/project/packages/app" }),
+      body: JSON.stringify({ harness: "pi", agent: "reviewer", task: "Implement it.", cwd: "/project/packages/app" }),
     });
 
     expect(response.status).toBe(202);
@@ -313,7 +314,8 @@ describe("task lifecycle routes", () => {
     expect(tasks.create).toHaveBeenCalledWith({
       ghostName: "casper",
       parent: { id: "pi:conv-1", conversationId: "conv-1", runtime: "pi" },
-      agent: "pi-worker",
+      harness: "pi",
+      agent: "reviewer",
       task: "Implement it.",
       cwd: "/project/packages/app",
     });
@@ -321,7 +323,7 @@ describe("task lifecycle routes", () => {
     const extra = await fetch(`${base}/api/ghosts/casper/sessions/${piSegment("conv-1")}/tasks`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ agent: "pi-worker", task: "No.", description: "not in the schema" }),
+      body: JSON.stringify({ harness: "pi", task: "No.", description: "not in the schema" }),
     });
     expect(extra.status).toBe(400);
     expect(tasks.create).toHaveBeenCalledTimes(1);

@@ -93,11 +93,11 @@ stop the mock separately.
   layout like any app. The HUD uses a neutral reading canvas with the current
   Omarchy accent and semantic status colours. Roster on the left (`casper`,
   `moaning-myrtle`, `+ new ghost`), transcript in the middle, composer at the
-  bottom, and the permanent Chat / Workers / Character / Memory / Commands /
+  bottom, and the permanent Chat / Harnesses / Character / Memory / Commands /
   Hooks / MCP / Remote / Phone access rail at the right edge. `SUPER+CTRL+G` is
   launch-or-focus: reveal+focus when
   hidden/unfocused, hide only when already focused.
-  Workers shows Claude Code, Codex, and pi-worker capacity plus the active
+  Harnesses shows Claude Code, Codex, and Pi capacity plus the active
   ghost's durable task list. Selecting a task exposes its literal assignment,
   progress, result, worktree/branch review state, follow-up input, and cancel
   control; task creation remains in chat. Character edits `character.md`.

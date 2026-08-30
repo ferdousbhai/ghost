@@ -121,6 +121,7 @@ const task: WorkerTaskRequest = {
   taskId: "task-12345678-1234-4123-8123-123456789abc",
   ghostName: "casper",
   parent: conversationIdentity("pi", "conversation-1"),
+  agent: null,
   task: "Implement the focused change.",
   sourceRoot: "/trusted/source",
   sourceCwd: "/trusted/source/app",
@@ -328,6 +329,26 @@ describe("Claude Code native worker", () => {
     });
     expect(harness.events).toContainEqual({ type: "output", text: "Implemented." });
     expect(query.closeCalls).toHaveLength(1);
+  });
+
+  it("passes an optional agent name directly to Claude Code", async () => {
+    const query = new FakeClaudeQuery();
+    const harness = adapterHarness(query);
+    const starting = harness.adapter.start({ ...task, agent: "reviewer" }, harness.context);
+    await until(() => harness.createQuery.mock.calls.length === 1);
+    expect(harness.getQueryInput()?.options.agent).toBe("reviewer");
+
+    query.push(initMessage());
+    const controller = await starting;
+    await until(() => harness.events.some((event) => event.type === "notice"
+      && event.text.includes("selected native agent")));
+    expect(harness.events).toContainEqual({
+      type: "notice",
+      text: 'Claude Code selected native agent "reviewer" through its Agent SDK.',
+    });
+    query.push(resultMessage());
+    query.end();
+    await expect(controller.result).resolves.toMatchObject({ text: "Implemented." });
   });
 
   it("passes the explicit unattended SDK arguments through and captures the process", async () => {
@@ -657,7 +678,7 @@ describe("Claude Code native worker", () => {
       const created = await manager.create({
         ghostName: "casper",
         parent: conversationIdentity("pi", "conversation-1"),
-        agent: "claude-code",
+        harness: "claude-code",
         task: "Implement the focused change.",
       });
       query.push(initMessage({ cwd }));

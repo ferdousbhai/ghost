@@ -8,17 +8,18 @@ import {
   type PrincipalTaskServices,
 } from "../src/principal-task-tools.js";
 import type { TaskSummary, TaskView } from "../src/tasks.js";
-import type { WorkerCatalogView } from "../src/worker-catalog.js";
+import type { HarnessCatalogView } from "../src/harness-catalog.js";
 
 const parent = conversationIdentity("pi", "conversation-1");
 const sibling = conversationIdentity("pi", "conversation-2");
 
 function taskView(overrides: Partial<TaskView> = {}): TaskView {
   return {
-    version: 2,
+    version: 3,
     id: "task-11111111-1111-4111-8111-111111111111",
     parent,
-    agent: "codex",
+    harness: "codex",
+    agent: null,
     task: "Implement the parser.",
     root: "/repo",
     cwd: "/repo/packages/parser",
@@ -55,6 +56,7 @@ function taskSummary(task: TaskView): TaskSummary {
   return {
     id: task.id,
     parent: task.parent,
+    harness: task.harness,
     agent: task.agent,
     taskPreview: task.task,
     root: task.root,
@@ -70,9 +72,9 @@ function taskSummary(task: TaskView): TaskSummary {
   };
 }
 
-function workerView(): WorkerCatalogView {
+function harnessView(): HarnessCatalogView {
   return {
-    workers: [{
+    harnesses: [{
       id: "codex",
       name: "Codex",
       kind: "native",
@@ -123,7 +125,7 @@ function fakeServices(tasks: TaskView[] = [taskView()]): {
         send,
         cancel,
       },
-      workers: { list: vi.fn(async () => workerView()) },
+      harnesses: { list: vi.fn(async () => harnessView()) },
     },
   };
 }
@@ -157,9 +159,10 @@ describe("principal task tools", () => {
     ]));
     expect(extension.tools.get("task")?.parameters).toMatchObject({
       type: "object",
-      required: ["agent", "task"],
+      required: ["harness", "task"],
       additionalProperties: false,
       properties: {
+        harness: expect.any(Object),
         agent: expect.any(Object),
         task: expect.any(Object),
         cwd: expect.any(Object),
@@ -167,7 +170,8 @@ describe("principal task tools", () => {
     });
 
     const result = await call(fixture.services, "task", {
-      agent: "codex",
+      harness: "codex",
+      agent: "reviewer",
       task: "Implement the parser.",
       cwd: "/repo/packages/parser",
     });
@@ -175,7 +179,8 @@ describe("principal task tools", () => {
     expect(fixture.create).toHaveBeenCalledWith({
       ghostName: "casper",
       parent,
-      agent: "codex",
+      harness: "codex",
+      agent: "reviewer",
       task: "Implement the parser.",
       cwd: "/repo/packages/parser",
     });
@@ -220,13 +225,13 @@ describe("principal task tools", () => {
 
   it("projects Omarchy windows as remaining capacity", async () => {
     const fixture = fakeServices();
-    const status = await call(fixture.services, "worker_status", {});
+    const status = await call(fixture.services, "harness_status", {});
     expect(status.details).toMatchObject({
-      workers: [{
+      harnesses: [{
         id: "codex",
         usage: { limits: [{ label: "Session", remainingFraction: 0.75 }] },
       }],
     });
-    expect(status.details).not.toHaveProperty("workers.0.usage.source");
+    expect(status.details).not.toHaveProperty("harnesses.0.usage.source");
   });
 });

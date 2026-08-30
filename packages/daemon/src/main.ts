@@ -19,8 +19,7 @@ import { GhostHookRunner } from "./hooks.js";
 import { acquireHomeReservation, HomeReservationBusyError, type HomeReservation } from "./home-reservation.js";
 import { HomeOperationCoordinator } from "./home-operations.js";
 import { hookSmolCompleteCommand } from "./hook-smol-complete.js";
-import { piWorkerCommand } from "./pi-worker-child.js";
-import { PiWorkerAdapter } from "./pi-worker.js";
+import { PiHarnessAdapter } from "./pi-harness.js";
 import { createJournalSink } from "./journal.js";
 import { createLogger, stderrSink, type Logger, type LogLevel } from "./log.js";
 import { McpCatalog } from "./mcp-catalog.js";
@@ -34,7 +33,7 @@ import { SessionHost } from "./session-host.js";
 import { resolveScheduleUnitDirectory } from "./schedules.js";
 import { TaskManager } from "./tasks.js";
 import { GitTaskWorkspaceManager } from "./task-workspaces.js";
-import { WorkerCatalog } from "./worker-catalog.js";
+import { HarnessCatalog } from "./harness-catalog.js";
 
 const USAGE = `ghostd — your ghost, on your machine
 
@@ -312,7 +311,6 @@ export async function main(argv: string[] = process.argv.slice(2), runtime: Main
   if (argv[0] === "remote") return remoteCommand(argv.slice(1));
   if (argv[0] === "login") return loginCommand(argv.slice(1));
   if (argv[0] === "hook-smol-complete") return hookSmolCompleteCommand(argv.slice(1));
-  if (argv[0] === "worker-pi") return piWorkerCommand(argv.slice(1));
   if (argv[0] === "place-legacy-documents") {
     return legacyDocumentsPlacementCommand(argv.slice(1));
   }
@@ -343,9 +341,9 @@ export async function main(argv: string[] = process.argv.slice(2), runtime: Main
     return 1;
   }
 
-  // Native vendor workers intentionally receive the launcher's environment;
-  // principals and pi-worker still inherit the scrubbed process environment.
-  const nativeWorkerEnv = { ...process.env };
+  // Native coding harnesses intentionally receive the launcher's environment;
+  // principals still inherit the scrubbed process environment.
+  const nativeHarnessEnv = { ...process.env };
   // Before pi, before any session. Idempotent, but this is the call that
   // matters: everything downstream inherits this environment.
   const { removed } = scrubProviderEnv(process.env, { offline: config.offline });
@@ -387,7 +385,7 @@ export async function main(argv: string[] = process.argv.slice(2), runtime: Main
       logger,
       hooks,
       hooksPath,
-      nativeWorkerEnv,
+      nativeHarnessEnv,
     );
   } finally {
     await homeReservation.close();
@@ -399,7 +397,7 @@ async function serveDaemon(
   logger: ReturnType<typeof createLogger>,
   hooks: GhostHookRunner,
   hooksPath: string,
-  nativeWorkerEnv: NodeJS.ProcessEnv,
+  nativeHarnessEnv: NodeJS.ProcessEnv,
 ): Promise<number> {
   const registry = new GhostRegistry(config.ghostsRoot);
   const ownerHome = homedir();
@@ -490,11 +488,11 @@ async function serveDaemon(
     // the next freshly built session: rebind the live cached sessions.
     onModelRoutingChanged: (name) => host.rebindModel(name),
   });
-  const nativeClaudeCodeProbe = new ClaudeCodeProbe({ env: nativeWorkerEnv });
-  const codexProbe = new CodexProbe({ env: nativeWorkerEnv });
-  const workers = new WorkerCatalog({
+  const nativeClaudeCodeProbe = new ClaudeCodeProbe({ env: nativeHarnessEnv });
+  const codexProbe = new CodexProbe({ env: nativeHarnessEnv });
+  const harnesses = new HarnessCatalog({
     ownerHome,
-    env: nativeWorkerEnv,
+    env: nativeHarnessEnv,
     claudeCodeProbe: nativeClaudeCodeProbe,
     codexProbe,
     logger,
@@ -503,26 +501,25 @@ async function serveDaemon(
     registry,
     homeOperations,
     logger,
-    workspace: new GitTaskWorkspaceManager({ ownerHome, env: nativeWorkerEnv }),
+    workspace: new GitTaskWorkspaceManager({ ownerHome, env: nativeHarnessEnv }),
     adapters: [
       new ClaudeWorkerAdapter({
-        env: nativeWorkerEnv,
+        env: nativeHarnessEnv,
         assertContext: ({ root, cwd }) => host.resolveTaskContextForStart(root, cwd),
       }),
       new CodexWorkerAdapter({
-        env: nativeWorkerEnv,
+        env: nativeHarnessEnv,
         assertContext: ({ root, cwd }) => host.resolveTaskContextForStart(root, cwd),
       }),
-      new PiWorkerAdapter({
-        registry,
-        offline: config.offline,
+      new PiHarnessAdapter({
+        env: nativeHarnessEnv,
         assertContext: ({ root, cwd }) => host.resolveTaskContextForStart(root, cwd),
       }),
     ],
     resolveContext: ({ ghostName, parent, requestedCwd }) =>
       host.resolveTaskContext(ghostName, parent, requestedCwd),
   });
-  host.attachTaskServices({ tasks, workers });
+  host.attachTaskServices({ tasks, harnesses });
   for (const ghost of registry.list()) {
     const restored = await tasks.restoreGhost(ghost.name);
     if (restored.interrupted > 0) {
@@ -549,7 +546,7 @@ async function serveDaemon(
       homeOperations,
       login,
       catalog,
-      workers,
+      harnesses,
       tasks,
       mcp,
       hooks,

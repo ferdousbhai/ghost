@@ -77,9 +77,9 @@ the structured field contract.
 ## Storage and isolation
 
 Ghost-owned persona state and Pi principal transcripts stay inside the ghost
-home. Durable normalized worker records and bundled `pi-worker` transcripts are
-per-ghost there too. Linked task worktrees deliberately live under
-`$XDG_STATE_HOME/ghost/task-worktrees/`, while installed vendor workers retain
+home. Durable normalized task records are per-ghost there too. Linked task
+worktrees deliberately live under `$XDG_STATE_HOME/ghost/task-worktrees/`,
+while installed native harnesses retain
 their full transcripts in their native stores:
 
 ```text
@@ -107,7 +107,6 @@ their full transcripts in their native stores:
                            durable idle-maintenance state
   .tasks/
     task-<uuid>.json       bounded task/workspace state and event tail
-    pi/                    bundled pi-worker's native Pi transcripts
   .trash/                  recoverable per-home deletion state
   .memory-maintenance.json last consolidation claim time
 ```
@@ -239,15 +238,17 @@ conversation may explicitly trust and bind one project, after which Ghost pins
 its data-only instructions, skills, rules, Markdown commands/prompts, and scoped
 MCP configuration. Project executable extensions, hooks, custom code tools,
 LSP, and custom agent definitions stay disabled. Both principal runtimes expose
-daemon-owned `worker_status`, `task`, `task_list`, `task_get`, `task_send`, and
-`task_cancel` controls for the built-in `claude-code`, `codex`, and `pi-worker`
-workers; project, ghost-file, and ambient agent definitions remain inert.
+daemon-owned `harness_status`, `task`, `task_list`, `task_get`, `task_send`, and
+`task_cancel` controls for the native `claude-code`, `codex`, and `pi`
+harnesses; project, ghost-file, and ambient agent definitions remain inert in
+the principal. A task may pass an opaque native agent name through to its
+selected harness.
 Clean committed Git projects use one daemon-managed linked worktree and local
 review branch per task. Task views distinguish the trusted source `root`/`cwd`
 from the execution `workspace`; Ghost preserves uncertain work and never
 pushes, opens a pull request, or merges implicitly. Non-Git projects run in
 place with an explicit notice. See
-[`docs/native-workers.md`](../../docs/native-workers.md#task-workspaces-and-review).
+[`docs/native-harnesses.md`](../../docs/native-harnesses.md#task-workspaces-and-review).
 Pi supplies its native `edit`, `find`, `grep`, `ls`, `read`, and `write` tools
 alongside Ghost's custom tools. Ghost replaces pi's `bash` by name with its
 job-aware `bash`; `jobs` for background work and `inspect_image` (the
@@ -256,7 +257,7 @@ active tool set. There is no tool approval; `ask` is not an approval prompt.
 
 A Claude principal keeps the native tool preset but uses Ghost's complete
 custom identity prompt and disables native `Agent`/legacy `Task`; a delegated
-Claude worker retains Claude Code's native subagents and configuration.
+Claude task retains Claude Code's native subagents and configuration.
 
 
 ## Models and routing
@@ -304,7 +305,7 @@ provider's best-ranked model). `task_model`, `smol_model`, `slow_model`, and
 `designer_model` inherit the chat default when unbound; `tiny_model` and
 `advisor_model` follow Ghost's preference lists; `vision_model`, `plan_model`,
 and `commit_model` stay unset until bound. `task_model` and `advisor_model` do
-not select a coding worker or create a durable task; worker choice belongs to
+not select a coding harness or create a durable task; harness choice belongs to
 the principal's explicit `task` call.
 
 Fallback arrays are ordered Ghost policy stored in `models.json`. The switcher
@@ -357,9 +358,9 @@ ad-hoc prompts:
   every later turn. The `todo` tool is view-only while planning; `/todo` keeps a
   phased task list the shell can show (`GET …/sessions/:id/todo`). Claude Code
   conversations do not support this Ghost-owned mode.
-- Coding delegation is asynchronous and durable. `worker_status`, `task_list`,
+- Coding delegation is asynchronous and durable. `harness_status`, `task_list`,
   and `task_get` remain observational in Pi plan mode; starting, steering, or
-  cancelling a worker task remains blocked until the plan is approved.
+  cancelling a harness task remains blocked until the plan is approved.
 - Pi can use Firecrawl, HEY, Basecamp, Obsidian, Google Workspace, and other
   CLI skills through `bash` when the owner installs them. At session
   construction, Ghost uses pi's native parser to snapshot every valid skill
@@ -430,7 +431,7 @@ The authoritative route and payload contract is
 | GET/POST | `/api/ghosts/:name/sessions/:id/queue` | inspect or enqueue steer/follow-up |
 | POST | `/api/ghosts/:name/sessions/:id/branch` | fork the conversation at a message |
 | POST | `/api/ghosts/:name/sessions/:id/reanswer` | branch an ask answer and resume via SSE |
-| GET | `/api/ghosts/:name/workers` | inspect native-worker availability, auth, and Omarchy usage |
+| GET | `/api/ghosts/:name/harnesses` | inspect native-harness availability, auth, and Omarchy usage |
 | POST | `/api/ghosts/:name/sessions/:id/tasks` | start a durable coding task attributed to one conversation |
 | GET | `/api/ghosts/:name/tasks` | list the ghost's durable coding tasks |
 | GET | `/api/ghosts/:name/tasks/:taskId` | inspect one task |

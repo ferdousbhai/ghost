@@ -44,8 +44,8 @@ Memory is private context for this ghost; Documents are owner-wide files shared 
 For authoritative information about Ghost itself, run `ghost skill`. Use `ghost help <command>` for command-specific help.
 
 # Coding delegation
-You are the owner's Ghost: remain responsible for the outcome, but delegate project coding and code review to a coding worker instead of acting as the coding agent yourself.
-Use worker_status before choosing among claude-code, codex, and pi-worker when availability or current limits matter. Start work with task { agent, task, cwd? }; give the worker a complete assignment and the correct absolute project cwd. The task is durable and asynchronous: retain its id, use task_get or task_list on a later interaction, and use task_send or task_cancel when needed. Do not poll in a tight loop or claim completion you have not read.
+You are the owner's Ghost: remain responsible for the outcome, but delegate project coding and code review through a coding harness instead of acting as the coding agent yourself.
+Use harness_status before choosing among claude-code, codex, and pi when availability or current limits matter. Start work with task { harness, task, agent?, cwd? }; agent is an optional requested native name owned by that harness. Give the harness a complete assignment and the correct absolute project cwd. If implementation needs native reviewer or simplifier stages, include them in the same assignment because a later task does not inherit this task's review branch. The task is durable and asynchronous: retain its id, use task_get or task_list on a later interaction, and use task_send or task_cancel when needed. Do not poll in a tight loop or claim completion you have not read.
 For a clean committed Git project, task runs in an isolated worktree and returns a local review branch when changes are ready. Report that artifact to the owner; do not claim it was pushed, opened as a pull request, or merged unless a separate explicit action did so. A non-Git project runs in place.
 Your own Bash, edit, and write tools remain available for general computer use and for maintaining your character, memory, Documents, and other Ghost-owned files.
 
@@ -94,7 +94,7 @@ Active tools:
 - ghost_screen
 - ghost_desktop
 - ghost_browser
-- worker_status
+- harness_status
 - task
 - task_list
 - task_get
@@ -177,8 +177,8 @@ Memory is private context for this ghost; Documents are owner-wide files shared 
 For authoritative information about Ghost itself, run `ghost skill`. Use `ghost help <command>` for command-specific help.
 
 # Coding delegation
-You are the owner's Ghost: remain responsible for the outcome, but delegate project coding and code review to a coding worker instead of acting as the coding agent yourself.
-Use worker_status before choosing among claude-code, codex, and pi-worker when availability or current limits matter. Start work with task { agent, task, cwd? }; give the worker a complete assignment and the correct absolute project cwd. The task is durable and asynchronous: retain its id, use task_get or task_list on a later interaction, and use task_send or task_cancel when needed. Do not poll in a tight loop or claim completion you have not read.
+You are the owner's Ghost: remain responsible for the outcome, but delegate project coding and code review through a coding harness instead of acting as the coding agent yourself.
+Use harness_status before choosing among claude-code, codex, and pi when availability or current limits matter. Start work with task { harness, task, agent?, cwd? }; agent is an optional requested native name owned by that harness. Give the harness a complete assignment and the correct absolute project cwd. If implementation needs native reviewer or simplifier stages, include them in the same assignment because a later task does not inherit this task's review branch. The task is durable and asynchronous: retain its id, use task_get or task_list on a later interaction, and use task_send or task_cancel when needed. Do not poll in a tight loop or claim completion you have not read.
 For a clean committed Git project, task runs in an isolated worktree and returns a local review branch when changes are ready. Report that artifact to the owner; do not claim it was pushed, opened as a pull request, or merged unless a separate explicit action did so. A non-Git project runs in place.
 Your own Bash, edit, and write tools remain available for general computer use and for maintaining your character, memory, Documents, and other Ghost-owned files.
 
@@ -227,7 +227,7 @@ Active tools:
 - ghost_screen
 - ghost_desktop
 - ghost_browser
-- worker_status
+- harness_status
 - task
 - task_list
 - task_get
@@ -271,6 +271,7 @@ ghost_desktop       registry=yes  wire=yes  invokable=yes
 ghost_memory_write  registry=yes  wire=yes  invokable=yes
 ghost_screen        registry=yes  wire=yes  invokable=yes
 grep                registry=yes  wire=yes  invokable=yes
+harness_status      registry=yes  wire=yes  invokable=yes
 inspect_image       registry=yes  wire=yes  invokable=yes
 ls                  registry=yes  wire=yes  invokable=yes
 read                registry=yes  wire=yes  invokable=yes
@@ -280,7 +281,6 @@ task_get            registry=yes  wire=yes  invokable=yes
 task_list           registry=yes  wire=yes  invokable=yes
 task_send           registry=yes  wire=yes  invokable=yes
 todo                registry=yes  wire=yes  invokable=yes
-worker_status       registry=yes  wire=yes  invokable=yes
 write               registry=yes  wire=yes  invokable=yes
 (tools outside this universe are not compared)
 

@@ -1,4 +1,4 @@
-/** Persistent task lifecycle shared by every worker harness. */
+/** Persistent task lifecycle shared by every coding harness. */
 import { randomUUID } from "node:crypto";
 import {
   lstatSync,
@@ -39,11 +39,17 @@ import {
   type TaskWorkspaceOutcome,
   type TaskWorkspaceView,
 } from "./task-workspaces.js";
-import { WORKER_IDS, type WorkerId } from "./worker-identity.js";
+import {
+  HARNESS_IDS,
+  LEGACY_WORKER_IDS,
+  harnessFromLegacyWorker,
+  type HarnessId,
+  type LegacyWorkerId,
+} from "./harness-identity.js";
 
 export const TASKS_DIRNAME = GHOST_TASKS_DIRNAME;
-export const TASK_RECORD_VERSION = 2;
-const LEGACY_TASK_RECORD_VERSION = 1;
+export const TASK_RECORD_VERSION = 3;
+const LEGACY_TASK_RECORD_VERSIONS = [1, 2] as const;
 export const TASK_STATES = [
   "queued",
   "starting",
@@ -69,6 +75,7 @@ const MAX_NATIVE_SESSION_ID_LENGTH = 2_000;
 const MAX_ERROR_CODE_LENGTH = 100;
 const MAX_ERROR_MESSAGE_LENGTH = 4_000;
 const MAX_TASK_PREVIEW_LENGTH = 160;
+export const MAX_NATIVE_AGENT_NAME_LENGTH = 200;
 
 export interface TaskErrorView {
   code: string;
@@ -89,7 +96,8 @@ export interface TaskView {
   version: typeof TASK_RECORD_VERSION;
   id: string;
   parent: ConversationIdentity;
-  agent: WorkerId;
+  harness: HarnessId;
+  agent: string | null;
   task: string;
   root: string;
   cwd: string;
@@ -108,7 +116,8 @@ export interface TaskView {
 export interface TaskSummary {
   id: string;
   parent: ConversationIdentity;
-  agent: WorkerId;
+  harness: HarnessId;
+  agent: string | null;
   taskPreview: string;
   root: string;
   cwd: string;
@@ -130,7 +139,8 @@ export interface TaskListView {
 export interface StartTaskInput {
   ghostName: string;
   parent: ConversationIdentity;
-  agent: WorkerId;
+  harness: HarnessId;
+  agent?: string;
   task: string;
   cwd?: string;
 }
@@ -144,7 +154,7 @@ export type TaskContextResolver = (input: {
   ghostName: string;
   parent: ConversationIdentity;
   requestedCwd?: string;
-  agent: WorkerId;
+  harness: HarnessId;
 }) => Promise<ResolvedTaskContext>;
 
 export type WorkerAdapterEvent =
@@ -157,6 +167,7 @@ export interface WorkerTaskRequest {
   taskId: string;
   ghostName: string;
   parent: ConversationIdentity;
+  agent: string | null;
   task: string;
   sourceRoot: string;
   sourceCwd: string;
@@ -183,7 +194,7 @@ export interface WorkerTaskController {
 }
 
 export interface WorkerAdapter {
-  readonly id: WorkerId;
+  readonly id: HarnessId;
   start(
     request: WorkerTaskRequest,
     context: {
@@ -267,8 +278,20 @@ const TASK_TRANSITIONS: Record<TaskState, readonly TaskState[]> = {
   interrupted: [],
 };
 
-export function isWorkerId(value: unknown): value is WorkerId {
-  return typeof value === "string" && WORKER_IDS.includes(value as WorkerId);
+export function isHarnessId(value: unknown): value is HarnessId {
+  return typeof value === "string" && HARNESS_IDS.includes(value as HarnessId);
+}
+
+function isLegacyWorkerId(value: unknown): value is LegacyWorkerId {
+  return typeof value === "string" && LEGACY_WORKER_IDS.includes(value as LegacyWorkerId);
+}
+
+function validNativeAgentName(value: unknown): value is string | null {
+  return value === null
+    || (typeof value === "string"
+      && value.trim().length > 0
+      && value.length <= MAX_NATIVE_AGENT_NAME_LENGTH
+      && !value.includes("\0"));
 }
 
 export function isTaskId(value: string): boolean {
@@ -365,11 +388,27 @@ function parseTaskEvents(value: unknown): TaskEvent[] | null {
 function parseStoredTask(value: unknown, expectedGhost: string, expectedId: string): StoredTask | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const record = value as Partial<StoredTask>;
-  const version = (value as { version?: unknown }).version;
-  if ((version !== TASK_RECORD_VERSION && version !== LEGACY_TASK_RECORD_VERSION)
+  const raw = value as Record<string, unknown>;
+  const version = raw.version;
+  const currentVersion = version === TASK_RECORD_VERSION;
+  const legacyVersion = LEGACY_TASK_RECORD_VERSIONS.includes(
+    version as typeof LEGACY_TASK_RECORD_VERSIONS[number],
+  );
+  const harness = currentVersion && isHarnessId(raw.harness)
+    ? raw.harness
+    : legacyVersion && isLegacyWorkerId(raw.agent)
+    ? harnessFromLegacyWorker(raw.agent)
+    : null;
+  const agent = currentVersion && validNativeAgentName(raw.agent)
+    ? raw.agent
+    : legacyVersion
+    ? null
+    : undefined;
+  if ((!currentVersion && !legacyVersion)
     || record.id !== expectedId
     || !isTaskId(record.id)
-    || !isWorkerId(record.agent)
+    || harness === null
+    || agent === undefined
     || typeof record.task !== "string"
     || record.task.trim() === ""
     || record.task.length > MAX_TASK_PROMPT_LENGTH
@@ -402,7 +441,7 @@ function parseStoredTask(value: unknown, expectedGhost: string, expectedId: stri
     sourceRoot: record.root,
     sourceCwd: record.cwd,
   };
-  const workspace = version === LEGACY_TASK_RECORD_VERSION
+  const workspace = version === 1
     ? legacyInPlaceTaskWorkspace(workspaceInput)
     : parseTaskWorkspace(record.workspace, workspaceInput);
   if (!workspace) return null;
@@ -411,7 +450,8 @@ function parseStoredTask(value: unknown, expectedGhost: string, expectedId: stri
     id: record.id,
     ghostName: expectedGhost,
     parent,
-    agent: record.agent,
+    harness,
+    agent,
     task: record.task,
     root: record.root,
     cwd: record.cwd,
@@ -437,6 +477,7 @@ function taskSummary(record: StoredTask): TaskSummary {
   return {
     id: record.id,
     parent: record.parent,
+    harness: record.harness,
     agent: record.agent,
     taskPreview: preview(record.task) ?? "",
     root: record.root,
@@ -571,7 +612,7 @@ class TaskStore {
 export class TaskManager {
   private readonly registry: GhostRegistry;
   private readonly store: TaskStore;
-  private readonly adapters = new Map<WorkerId, WorkerAdapter>();
+  private readonly adapters = new Map<HarnessId, WorkerAdapter>();
   private readonly resolveContext: TaskContextResolver;
   private readonly workspace: TaskWorkspaceLifecycle;
   private readonly now: () => number;
@@ -605,7 +646,7 @@ export class TaskManager {
         if (this.hasActiveTask(ghostName)) {
           throw new GhostError(
             "ghost_busy",
-            "Wait for this ghost's worker tasks to settle before moving it.",
+            "Wait for this ghost's harness tasks to settle before moving it.",
             409,
           );
         }
@@ -648,15 +689,22 @@ export class TaskManager {
 
   private async createFresh(input: StartTaskInput): Promise<TaskView> {
     await this.restoreGhost(input.ghostName);
-    if (!isWorkerId(input.agent)) {
-      throw new GhostError("unknown_worker", "Choose claude-code, codex, or pi-worker.", 400);
+    if (!isHarnessId(input.harness)) {
+      throw new GhostError("unknown_harness", "Choose claude-code, codex, or pi.", 400);
     }
-    const adapter = this.adapters.get(input.agent);
+    const adapter = this.adapters.get(input.harness);
     if (!adapter) {
       throw new GhostError(
-        "worker_unavailable",
-        `The ${input.agent} task adapter is not available yet.`,
+        "harness_unavailable",
+        `The ${input.harness} task adapter is not available yet.`,
         503,
+      );
+    }
+    if (input.agent !== undefined && !validNativeAgentName(input.agent)) {
+      throw new GhostError(
+        "invalid_native_agent",
+        `agent must be a non-empty name of at most ${MAX_NATIVE_AGENT_NAME_LENGTH} characters.`,
+        400,
       );
     }
     if (typeof input.task !== "string" || input.task.trim() === "") {
@@ -679,7 +727,7 @@ export class TaskManager {
     const context = await this.resolveContext({
       ghostName: input.ghostName,
       parent,
-      agent: input.agent,
+      harness: input.harness,
       ...(input.cwd === undefined ? {} : { requestedCwd: input.cwd }),
     });
     if (!isAbsolute(context.root) || !isAbsolute(context.cwd) || !isWithin(context.root, context.cwd)) {
@@ -705,7 +753,8 @@ export class TaskManager {
       id,
       ghostName: input.ghostName,
       parent,
-      agent: input.agent,
+      harness: input.harness,
+      agent: input.agent ?? null,
       task: input.task,
       root: context.root,
       cwd: context.cwd,
@@ -827,16 +876,16 @@ export class TaskManager {
       throw new GhostError("task_settled", "This task has already settled.", 409);
     }
     if (record.state === "cancelling" || !live?.controller?.send) {
-      throw new GhostError("task_not_steerable", "This worker cannot accept a message right now.", 409);
+      throw new GhostError("task_not_steerable", "This harness task cannot accept a message right now.", 409);
     }
     try {
       await live.controller.send(text);
     } catch {
       await this.mutate(ghostName, taskId, (current) => {
         if (isTerminalTaskState(current.state)) return false;
-        this.appendEvent(current, "notice", "The worker did not accept that message.");
+        this.appendEvent(current, "notice", "The harness did not accept that message.");
       });
-      throw new GhostError("task_send_failed", "The worker did not accept that message.", 502);
+      throw new GhostError("task_send_failed", "The harness did not accept that message.", 502);
     }
     await this.mutate(ghostName, taskId, (current) => {
       if (current.state === "cancelling"
@@ -882,7 +931,7 @@ export class TaskManager {
         } else {
           await this.failCancellation(ghostName, taskId, error);
           live.cancellation = undefined;
-          throw new GhostError("task_cancel_failed", "The worker did not confirm cancellation.", 502);
+          throw new GhostError("task_cancel_failed", "The harness did not confirm cancellation.", 502);
         }
       }
       task = await this.finishStoppedLive(live);
@@ -990,6 +1039,7 @@ export class TaskManager {
         taskId,
         ghostName,
         parent: starting.parent,
+        agent: starting.agent,
         task: starting.task,
         sourceRoot: starting.root,
         sourceCwd: starting.cwd,
@@ -1047,7 +1097,7 @@ export class TaskManager {
       });
       const result = await controller.result;
       if (!result || typeof result.text !== "string") {
-        throw new Error("The worker returned an invalid result.");
+        throw new Error("The harness returned an invalid result.");
       }
       if (result.nativeSessionId !== undefined) this.requireNativeSessionId(result.nativeSessionId);
       await this.settleLive(live, "completed", (record) => {
@@ -1082,7 +1132,7 @@ export class TaskManager {
       switch (event.type) {
         case "output":
         case "notice":
-          if (typeof event.text !== "string") throw new Error("The worker emitted invalid text.");
+          if (typeof event.text !== "string") throw new Error("The harness emitted invalid text.");
           this.appendEvent(record, event.type, event.text);
           break;
         case "waiting_for_owner":
@@ -1350,7 +1400,7 @@ export class TaskManager {
       record.error = this.taskError(
         "worker_failed",
         error instanceof Error ? error.message : String(error),
-        "The worker failed.",
+        "The harness task failed.",
       );
       this.changeState(record, "failed");
     });
@@ -1362,7 +1412,7 @@ export class TaskManager {
       record.error = this.taskError(
         "cancellation_failed",
         error instanceof Error ? error.message : String(error),
-        "The worker did not confirm cancellation.",
+        "The harness did not confirm cancellation.",
       );
     });
   }
@@ -1394,7 +1444,7 @@ export class TaskManager {
 
   private requireNativeSessionId(value: string): void {
     if (typeof value !== "string" || value.length === 0 || value.length > MAX_NATIVE_SESSION_ID_LENGTH) {
-      throw new Error("The worker returned an invalid native session id.");
+      throw new Error("The harness returned an invalid native session id.");
     }
   }
 

@@ -31,7 +31,7 @@ interface ControlledRun {
   reject(error: Error): void;
 }
 
-function controlledAdapter(id: WorkerAdapter["id"] = "pi-worker"): {
+function controlledAdapter(id: WorkerAdapter["id"] = "pi"): {
   adapter: WorkerAdapter;
   runs: ControlledRun[];
 } {
@@ -176,7 +176,7 @@ describe("TaskManager lifecycle", () => {
     const task = await manager.create({
       ghostName: "casper",
       parent,
-      agent: "pi-worker",
+      harness: "pi",
       task: "Implement in isolation.",
     });
     await until(() => controlled.runs.length === 1);
@@ -211,13 +211,14 @@ describe("TaskManager lifecycle", () => {
     const first = await manager.create({
       ghostName: "casper",
       parent,
-      agent: "pi-worker",
+      harness: "pi",
+      agent: "reviewer",
       task: "Implement the parser.",
     });
     const second = await manager.create({
       ghostName: "casper",
       parent,
-      agent: "pi-worker",
+      harness: "pi",
       task: "Review the tests.",
     });
     await until(() => controlled.runs.length === 2);
@@ -226,6 +227,7 @@ describe("TaskManager lifecycle", () => {
       ghostName: "casper",
       root,
       cwd,
+      agent: "reviewer",
       task: "Implement the parser.",
     });
 
@@ -235,6 +237,8 @@ describe("TaskManager lifecycle", () => {
 
     await expect(manager.wait("casper", first.id)).resolves.toMatchObject({
       state: "completed",
+      harness: "pi",
+      agent: "reviewer",
       result: "Implemented.",
       nativeSessionId: "pi-native-1",
       events: expect.arrayContaining([expect.objectContaining({ type: "output", text: "working\n" })]),
@@ -255,6 +259,8 @@ describe("TaskManager lifecycle", () => {
     const reopened = new TaskManager({ registry: temp!.registry });
     await expect(reopened.get("casper", first.id)).resolves.toMatchObject({
       state: "completed",
+      harness: "pi",
+      agent: "reviewer",
       result: "Implemented.",
     });
   });
@@ -265,13 +271,13 @@ describe("TaskManager lifecycle", () => {
     const first = await manager.create({
       ghostName: "casper",
       parent,
-      agent: "pi-worker",
+      harness: "pi",
       task: "Choose an implementation.",
     });
     const second = await manager.create({
       ghostName: "casper",
       parent,
-      agent: "pi-worker",
+      harness: "pi",
       task: "Keep working.",
     });
     await until(() => controlled.runs.length === 2);
@@ -311,7 +317,7 @@ describe("TaskManager lifecycle", () => {
     const sendStarted = Promise.withResolvers<void>();
     const releaseSend = Promise.withResolvers<void>();
     const adapter: WorkerAdapter = {
-      id: "pi-worker",
+      id: "pi",
       start: async (request, context) => {
         const controller = await controlled.adapter.start(request, context);
         return {
@@ -328,7 +334,7 @@ describe("TaskManager lifecycle", () => {
     const task = await manager.create({
       ghostName: "casper",
       parent,
-      agent: "pi-worker",
+      harness: "pi",
       task: "Accept guidance before stopping.",
     });
     await untilTaskState(manager, task.id, "running");
@@ -352,7 +358,7 @@ describe("TaskManager lifecycle", () => {
     const controlled = controlledAdapter();
     const releaseSend = Promise.withResolvers<void>();
     const adapter: WorkerAdapter = {
-      id: "pi-worker",
+      id: "pi",
       start: async (request, context) => {
         const controller = await controlled.adapter.start(request, context);
         return {
@@ -369,7 +375,7 @@ describe("TaskManager lifecycle", () => {
     const task = await manager.create({
       ghostName: "casper",
       parent,
-      agent: "pi-worker",
+      harness: "pi",
       task: "Complete after guidance.",
     });
     await untilTaskState(manager, task.id, "running");
@@ -398,7 +404,7 @@ describe("TaskManager lifecycle", () => {
     const acknowledgement = Promise.withResolvers<void>();
     let cancellationCalls = 0;
     const adapter: WorkerAdapter = {
-      id: "pi-worker",
+      id: "pi",
       start: async (request, context) => {
         const controller = await controlled.adapter.start(request, context);
         return {
@@ -414,7 +420,7 @@ describe("TaskManager lifecycle", () => {
     const task = await manager.create({
       ghostName: "casper",
       parent,
-      agent: "pi-worker",
+      harness: "pi",
       task: "Wait for native cancellation.",
     });
     await untilTaskState(manager, task.id, "running");
@@ -436,7 +442,7 @@ describe("TaskManager lifecycle", () => {
     const controlled = controlledAdapter();
     const acknowledgement = Promise.withResolvers<void>();
     const adapter: WorkerAdapter = {
-      id: "pi-worker",
+      id: "pi",
       start: async (request, context) => ({
         ...(await controlled.adapter.start(request, context)),
         cancel: () => acknowledgement.promise,
@@ -446,7 +452,7 @@ describe("TaskManager lifecycle", () => {
     const task = await manager.create({
       ghostName: "casper",
       parent,
-      agent: "pi-worker",
+      harness: "pi",
       task: "Allow an honest completion.",
     });
     await untilTaskState(manager, task.id, "running");
@@ -469,7 +475,7 @@ describe("TaskManager lifecycle", () => {
     const task = await manager.create({
       ghostName: "casper",
       parent,
-      agent: "pi-worker",
+      harness: "pi",
       task: "Stream progress.",
     });
     const states: string[] = [];
@@ -489,7 +495,7 @@ describe("TaskManager lifecycle", () => {
     const task = await manager.create({
       ghostName: "casper",
       parent,
-      agent: "pi-worker",
+      harness: "pi",
       task: "Long-running work.",
     });
     await until(() => controlled.runs.length === 1);
@@ -513,7 +519,7 @@ describe("TaskManager lifecycle", () => {
     const task = await manager.create({
       ghostName: "casper",
       parent,
-      agent: "pi-worker",
+      harness: "pi",
       task: "Finish before this home moves.",
     });
     await until(() => controlled.runs.length === 1);
@@ -541,7 +547,7 @@ describe("TaskManager lifecycle", () => {
     const task = await manager.create({
       ghostName: "casper",
       parent,
-      agent: "pi-worker",
+      harness: "pi",
       task: "Stop during shutdown.",
     });
     await until(() => controlled.runs.length === 1);
@@ -550,7 +556,7 @@ describe("TaskManager lifecycle", () => {
     await expect(manager.create({
       ghostName: "casper",
       parent,
-      agent: "pi-worker",
+      harness: "pi",
       task: "Too late.",
     })).rejects.toMatchObject({ code: "daemon_shutting_down", status: 503 });
     await manager.disposeAll();
@@ -565,7 +571,7 @@ describe("TaskManager lifecycle", () => {
     const task = await manager.create({
       ghostName: "casper",
       parent,
-      agent: "pi-worker",
+      harness: "pi",
       task: "Return a large result.",
     });
     await until(() => controlled.runs.length === 1);
@@ -590,7 +596,7 @@ describe("TaskManager lifecycle", () => {
     const task = await manager.create({
       ghostName: "casper",
       parent,
-      agent: "pi-worker",
+      harness: "pi",
       task: "\ud800".repeat(MAX_TASK_PROMPT_LENGTH),
     });
     await until(() => controlled.runs.length === 1);
@@ -613,14 +619,14 @@ describe("TaskManager lifecycle", () => {
     const started = Promise.withResolvers<Awaited<ReturnType<WorkerAdapter["start"]>>>();
     let cancelled = false;
     const adapter: WorkerAdapter = {
-      id: "pi-worker",
+      id: "pi",
       start: () => started.promise,
     };
     const { manager } = setup(adapter);
     const task = await manager.create({
       ghostName: "casper",
       parent,
-      agent: "pi-worker",
+      harness: "pi",
       task: "Start slowly.",
     });
     await untilTaskState(manager, task.id, "starting");
@@ -643,7 +649,7 @@ describe("TaskManager lifecycle", () => {
     let steeringStarted = false;
     let cancelled = false;
     const adapter: WorkerAdapter = {
-      id: "pi-worker",
+      id: "pi",
       start: async () => ({
         result: new Promise(() => {}),
         send: () => {
@@ -657,7 +663,7 @@ describe("TaskManager lifecycle", () => {
     const task = await manager.create({
       ghostName: "casper",
       parent,
-      agent: "pi-worker",
+      harness: "pi",
       task: "Wait for steering.",
     });
     await untilTaskState(manager, task.id, "running");
@@ -677,7 +683,7 @@ describe("TaskManager lifecycle", () => {
     const neverStarted = Promise.withResolvers<Awaited<ReturnType<WorkerAdapter["start"]>>>();
     let forced = 0;
     const adapter: WorkerAdapter = {
-      id: "pi-worker",
+      id: "pi",
       start: (_request, context) => {
         context.registerForce(() => { forced += 1; });
         return neverStarted.promise;
@@ -687,7 +693,7 @@ describe("TaskManager lifecycle", () => {
     const task = await manager.create({
       ghostName: "casper",
       parent,
-      agent: "pi-worker",
+      harness: "pi",
       task: "Initialize forever.",
     });
     await untilTaskState(manager, task.id, "starting");
@@ -702,7 +708,7 @@ describe("TaskManager lifecycle", () => {
     const failure = new WorkerStoppedError("native shutdown failed");
     const result = Promise.withResolvers<{ text: string }>();
     const adapter: WorkerAdapter = {
-      id: "pi-worker",
+      id: "pi",
       start: async () => ({
         result: result.promise,
         cancel: () => {
@@ -715,7 +721,7 @@ describe("TaskManager lifecycle", () => {
     const task = await manager.create({
       ghostName: "casper",
       parent,
-      agent: "pi-worker",
+      harness: "pi",
       task: "Fail while stopping.",
     });
     await untilTaskState(manager, task.id, "running");
@@ -745,7 +751,7 @@ describe("TaskManager boundaries", () => {
     await expect(planned.manager.create({
       ghostName: "casper",
       parent,
-      agent: "pi-worker",
+      harness: "pi",
       task: "Do not persist this.",
     })).rejects.toMatchObject({ code: "task_project_dirty", status: 409 });
     expect(controlled.runs).toEqual([]);
@@ -774,12 +780,12 @@ describe("TaskManager boundaries", () => {
     const failed = await provisioned.manager.create({
       ghostName: "casper",
       parent,
-      agent: "pi-worker",
+      harness: "pi",
       task: "Persist preparation failure.",
     });
 
     expect(failed).toMatchObject({
-      version: 2,
+      version: 3,
       state: "failed",
       error: { code: "task_project_changed" },
       workspace: { state: "preserved", review: "needs_attention" },
@@ -822,7 +828,9 @@ describe("TaskManager boundaries", () => {
 
     const manager = new TaskManager({ registry: temp.registry });
     await expect(manager.get("casper", id)).resolves.toMatchObject({
-      version: 2,
+      version: 3,
+      harness: "pi",
+      agent: null,
       state: "interrupted",
       workspace: {
         strategy: "in-place",
@@ -833,13 +841,42 @@ describe("TaskManager boundaries", () => {
       },
     });
     expect(JSON.parse(readFileSync(path, "utf8"))).toMatchObject({
-      version: 2,
+      version: 3,
       state: "interrupted",
       workspace: { strategy: "in-place", state: "preserved" },
     });
   });
 
-  it("rejects unavailable workers, invalid contexts, and unbounded task input before persistence", async () => {
+  it("migrates a v2 worker id to a harness without inventing a native agent", async () => {
+    const controlled = controlledAdapter();
+    const { manager } = setup(controlled.adapter);
+    const created = await manager.create({
+      ghostName: "casper",
+      parent,
+      harness: "pi",
+      task: "Legacy completed task.",
+    });
+    await until(() => controlled.runs.length === 1);
+    controlled.runs[0]!.resolve("done");
+    await manager.wait("casper", created.id);
+
+    const path = join(ghostPaths(temp!.registry.get("casper").dir).taskDir, `${created.id}.json`);
+    const legacy = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+    legacy.version = 2;
+    legacy.agent = "codex";
+    delete legacy.harness;
+    writeFileSync(path, `${JSON.stringify(legacy, null, 2)}\n`, { mode: 0o600 });
+
+    const reopened = new TaskManager({ registry: temp!.registry });
+    await expect(reopened.get("casper", created.id)).resolves.toMatchObject({
+      version: 3,
+      harness: "codex",
+      agent: null,
+      state: "completed",
+    });
+  });
+
+  it("rejects unavailable harnesses, invalid contexts, and unbounded task input before persistence", async () => {
     temp = makeTempGhosts();
     temp.registry.ensureRoot();
     seedGhost(temp.root, { name: "casper" });
@@ -847,9 +884,9 @@ describe("TaskManager boundaries", () => {
     await expect(empty.create({
       ghostName: "casper",
       parent,
-      agent: "codex",
+      harness: "codex",
       task: "Do work.",
-    })).rejects.toMatchObject({ code: "worker_unavailable", status: 503 });
+    })).rejects.toMatchObject({ code: "harness_unavailable", status: 503 });
 
     const controlled = controlledAdapter();
     const manager = new TaskManager({
@@ -860,15 +897,29 @@ describe("TaskManager boundaries", () => {
     await expect(manager.create({
       ghostName: "casper",
       parent,
-      agent: "pi-worker",
+      harness: "pi",
       task: "Do work.",
     })).rejects.toMatchObject({ code: "invalid_task_context", status: 409 });
     await expect(manager.create({
       ghostName: "casper",
       parent,
-      agent: "pi-worker",
+      harness: "pi",
       task: "   ",
     })).rejects.toMatchObject({ code: "invalid_task", status: 400 });
+    await expect(manager.create({
+      ghostName: "casper",
+      parent,
+      harness: "pi",
+      agent: "   ",
+      task: "Do work.",
+    })).rejects.toMatchObject({ code: "invalid_native_agent", status: 400 });
+    await expect(manager.create({
+      ghostName: "casper",
+      parent,
+      harness: "pi",
+      agent: "x".repeat(201),
+      task: "Do work.",
+    })).rejects.toMatchObject({ code: "invalid_native_agent", status: 400 });
   });
 
   it("lists a malformed daemon record as skipped and rejects direct reads", async () => {
@@ -893,7 +944,7 @@ describe("TaskManager boundaries", () => {
     const task = await manager.create({
       ghostName: "casper",
       parent,
-      agent: "pi-worker",
+      harness: "pi",
       task: "Fail cleanly.",
     });
     await until(() => controlled.runs.length === 1);
@@ -908,7 +959,7 @@ describe("TaskManager boundaries", () => {
   it("stops a controller with invalid native identity before failing the task", async () => {
     let cancelled = false;
     const adapter: WorkerAdapter = {
-      id: "pi-worker",
+      id: "pi",
       start: async () => ({
         nativeSessionId: "x".repeat(2_001),
         result: new Promise(() => {}),
@@ -919,7 +970,7 @@ describe("TaskManager boundaries", () => {
     const task = await manager.create({
       ghostName: "casper",
       parent,
-      agent: "pi-worker",
+      harness: "pi",
       task: "Reject invalid controller metadata.",
     });
 
@@ -927,7 +978,7 @@ describe("TaskManager boundaries", () => {
       state: "failed",
       error: {
         code: "worker_failed",
-        message: "The worker returned an invalid native session id.",
+        message: "The harness returned an invalid native session id.",
       },
     });
     expect(cancelled).toBe(true);
@@ -936,7 +987,7 @@ describe("TaskManager boundaries", () => {
   it("does not record or resume a message the native worker rejects", async () => {
     const controlled = controlledAdapter();
     const rejecting: WorkerAdapter = {
-      id: "pi-worker",
+      id: "pi",
       start: async (request, context) => {
         const controller = await controlled.adapter.start(request, context);
         return {
@@ -949,7 +1000,7 @@ describe("TaskManager boundaries", () => {
     const task = await manager.create({
       ghostName: "casper",
       parent,
-      agent: "pi-worker",
+      harness: "pi",
       task: "Wait for guidance.",
     });
     await until(() => controlled.runs.length === 1);
@@ -967,7 +1018,7 @@ describe("TaskManager boundaries", () => {
   it("keeps failed cancellation non-terminal until the native task actually settles", async () => {
     const controlled = controlledAdapter();
     const refusing: WorkerAdapter = {
-      id: "pi-worker",
+      id: "pi",
       start: async (request, context) => {
         const controller = await controlled.adapter.start(request, context);
         return {
@@ -980,7 +1031,7 @@ describe("TaskManager boundaries", () => {
     const task = await manager.create({
       ghostName: "casper",
       parent,
-      agent: "pi-worker",
+      harness: "pi",
       task: "Do not pretend cancellation worked.",
     });
     await until(() => controlled.runs.length === 1);

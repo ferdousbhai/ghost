@@ -297,6 +297,7 @@ export class ClaudeWorkerAdapter implements WorkerAdapter {
         prompt: input,
         options: {
           cwd: request.cwd,
+          ...(request.agent === null ? {} : { agent: request.agent }),
           pathToClaudeCodeExecutable: executable,
           env: this.env,
           extraArgs: { "replay-user-messages": null },
@@ -311,7 +312,7 @@ export class ClaudeWorkerAdapter implements WorkerAdapter {
         },
       });
     } catch (cause) {
-      const error = new ClaudeWorkerProcessError("Failed to start the Claude Code worker.", {
+      const error = new ClaudeWorkerProcessError("Failed to start the Claude Code task.", {
         cause,
       });
       input.abort(error);
@@ -358,8 +359,8 @@ export class ClaudeWorkerAdapter implements WorkerAdapter {
     };
     const stopError = () => new ClaudeWorkerProcessError(
       stopReason === "forced"
-        ? "Claude Code worker was force-closed."
-        : "Claude Code worker was interrupted.",
+        ? "Claude Code task was force-closed."
+        : "Claude Code task was interrupted.",
     );
     const waitForExitOr = async (milliseconds: number): Promise<boolean> => {
       const captured = capturedProcess();
@@ -548,6 +549,12 @@ export class ClaudeWorkerAdapter implements WorkerAdapter {
       type: "notice",
       text: `Claude Code started with native configuration and maximum trust (${message.model}; ${skills} skills; ${plugins} plugins; ${mcp} MCP servers).`,
     });
+    if (request.agent !== null) {
+      emit({
+        type: "notice",
+        text: `Claude Code selected native agent ${JSON.stringify(request.agent)} through its Agent SDK.`,
+      });
+    }
     return message.session_id;
   }
 }

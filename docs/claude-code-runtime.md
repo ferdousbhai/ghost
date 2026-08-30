@@ -4,9 +4,9 @@ Status: implemented for the owner-local runtime. Last policy review: 2026-08-30.
 
 This page describes Claude Code as the harness for the Ghost principal, where
 Ghost supplies its complete identity prompt and its own tools. Delegated
-`claude-code` coding tasks are a separate native worker mode: they keep the
+`claude-code` coding tasks are a separate native harness mode: they keep the
 owner's normal Claude Code identity and configuration and are documented in
-[native-workers.md](native-workers.md#claude-code).
+[native-harnesses.md](native-harnesses.md#claude-code).
 
 ## What this path buys us
 
@@ -85,7 +85,7 @@ For each turn Ghost:
 4. applies the conversation's pre-turn project binding: owner home when
    unbound, or the trusted project cwd plus its approved declarative snapshot;
 5. captures the Ghost-specific `@ghost/extensions` tools and daemon-owned
-   durable worker-task controls and exposes them as one in-process SDK MCP server;
+   durable harness-task controls and exposes them as one in-process SDK MCP server;
 6. starts one scoped Agent SDK query and maps the SDK's async message
    stream onto Ghost's existing pi-messages SSE protocol;
 7. persists the opaque Claude session id, listing metadata, and actual cwd
@@ -125,7 +125,7 @@ The query runs in maximum-trust mode for its local owner:
 - project executable extensions, hooks, custom code tools, LSP, and ghost or
   project agent definitions remain disabled. Agent-definition content never
   enters Claude's prompt;
-- Ghost's own browser, desktop, character, structured memory writer, worker
+- Ghost's own browser, desktop, character, structured memory writer, harness
   status, and durable task lifecycle are added through an in-process MCP server;
 - `bypassPermissions` is explicit because the HUD has no Claude approval UI;
 - inherited provider credential variables are still scrubbed from the child
@@ -215,7 +215,7 @@ are:
 
 The full T3 provider graph, approvals UI, and long-lived queue were not copied.
 Claude Code's own computer and coding tools remain native in the principal;
-native subagents remain available only inside delegated `claude-code` workers.
+native subagents remain available only inside delegated `claude-code` tasks.
 Ghost passes
 `settingSources: []` and `skills: []`; declarative skills are not enabled
 through Claude's live discovery mechanism because the SDK's `skills: "all"`

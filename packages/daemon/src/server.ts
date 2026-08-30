@@ -47,8 +47,8 @@ import {
 } from "./pi-messages.js";
 import { attachRelay, createRelayHub, type RelayHub } from "./relay.js";
 import type { SessionHost } from "./session-host.js";
-import { isWorkerId, type TaskManager } from "./tasks.js";
-import type { WorkerCatalog } from "./worker-catalog.js";
+import { isHarnessId, type TaskManager } from "./tasks.js";
+import type { HarnessCatalog } from "./harness-catalog.js";
 
 export interface ServerOptions {
   registry: GhostRegistry;
@@ -66,8 +66,8 @@ export interface ServerOptions {
    * needs no switcher surface.
    */
   catalog?: ModelCatalog;
-  /** Known task-worker installation, authentication, and read-only usage status. */
-  workers?: Pick<WorkerCatalog, "list">;
+  /** Known coding-harness installation, authentication, and read-only usage status. */
+  harnesses?: Pick<HarnessCatalog, "list">;
   /** Durable task lifecycle. Omit only when task routes are disabled. */
   tasks?: Pick<TaskManager, "create" | "list" | "get" | "send" | "cancel">;
   mcp?: McpCatalog;
@@ -1876,9 +1876,9 @@ export function createDaemonServer(options: ServerOptions): Server {
           }
           return await handleMessages(ghostName, request, response);
         }
-        if (segments.length === 4 && segments[3] === "workers") {
-          if (!options.workers) {
-            errorResponse(response, 404, "not_found", "Worker status is not enabled on this daemon.");
+        if (segments.length === 4 && segments[3] === "harnesses") {
+          if (!options.harnesses) {
+            errorResponse(response, 404, "not_found", "Harness status is not enabled on this daemon.");
             return;
           }
           if (method !== "GET") {
@@ -1886,7 +1886,7 @@ export function createDaemonServer(options: ServerOptions): Server {
             return;
           }
           options.registry.get(ghostName);
-          jsonResponse(response, 200, await options.workers.list());
+          jsonResponse(response, 200, await options.harnesses.list());
           return;
         }
         if (segments.length >= 4 && segments[3] === "tasks") {
@@ -1996,19 +1996,20 @@ export function createDaemonServer(options: ServerOptions): Server {
           }
           const body = await readJsonBody(request, maxBodyBytes);
           if (!body || typeof body !== "object" || Array.isArray(body)
-            || Object.keys(body).some((key) => !["agent", "task", "cwd"].includes(key))) {
-            errorResponse(response, 400, "invalid_request", "Expected { agent, task, cwd? }.");
+            || Object.keys(body).some((key) => !["harness", "agent", "task", "cwd"].includes(key))) {
+            errorResponse(response, 400, "invalid_request", "Expected { harness, task, agent?, cwd? }.");
             return;
           }
-          const input = body as { agent?: unknown; task?: unknown; cwd?: unknown };
-          if (!isWorkerId(input.agent)
+          const input = body as { harness?: unknown; agent?: unknown; task?: unknown; cwd?: unknown };
+          if (!isHarnessId(input.harness)
+            || (input.agent !== undefined && typeof input.agent !== "string")
             || typeof input.task !== "string"
             || (input.cwd !== undefined && typeof input.cwd !== "string")) {
             errorResponse(
               response,
               400,
               "invalid_request",
-              '"agent" must name a built-in worker, "task" must be a string, and "cwd" must be a string when supplied.',
+              '"harness" must name claude-code, codex, or pi; "agent" and "cwd" must be strings when supplied; and "task" must be a string.',
             );
             return;
           }
@@ -2016,7 +2017,8 @@ export function createDaemonServer(options: ServerOptions): Server {
           const task = await options.tasks.create({
             ghostName,
             parent,
-            agent: input.agent,
+            harness: input.harness,
+            ...(input.agent === undefined ? {} : { agent: input.agent }),
             task: input.task,
             ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
           });

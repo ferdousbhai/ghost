@@ -825,17 +825,17 @@ Singleton {
     // Installed coding harnesses and daemon-owned durable tasks are one
     // ghost-scoped owner view. Task creation remains a Ghost conversation
     // action; this state owns observation, steering, and cancellation only.
-    property var codingWorkers: []
+    property var codingHarnesses: []
     property var codingTasks: []
     property string selectedCodingTaskId: ""
     property var selectedCodingTask: null
-    property bool codingWorkersLoaded: false
+    property bool codingHarnessesLoaded: false
     property bool codingTasksLoaded: false
-    readonly property bool codingWorkersLoading: root.codingWorkersRequest !== null
+    readonly property bool codingHarnessesLoading: root.codingHarnessesRequest !== null
     readonly property bool codingTasksLoading: root.codingTasksRequest !== null
     readonly property bool codingTaskLoading: root.codingTaskRequest !== null
     readonly property bool codingTaskMutating: root.codingTaskMutationRequest !== null
-    property string codingWorkersError: ""
+    property string codingHarnessesError: ""
     property string codingTasksError: ""
     property string codingTaskError: ""
     property string codingGhost: ""
@@ -1042,7 +1042,7 @@ Singleton {
     property var commandsRequest: null
     property var mcpRequest: null
     property var mcpMutationRequest: null
-    property var codingWorkersRequest: null
+    property var codingHarnessesRequest: null
     property var codingTasksRequest: null
     property var codingTaskRequest: null
     property var codingTaskMutationRequest: null
@@ -2442,24 +2442,24 @@ Singleton {
             .indexOf(String(state || "")) >= 0;
     }
 
-    function validCodingWorker(worker: var): bool {
-        if (!worker || typeof worker !== "object" || Array.isArray(worker)
-                || ["claude-code", "codex", "pi-worker"].indexOf(worker.id) < 0
-                || typeof worker.name !== "string"
-                || ["native", "builtin"].indexOf(worker.kind) < 0
-                || typeof worker.nativeConfiguration !== "boolean"
-                || ["installed", "missing", "unknown"].indexOf(worker.installation) < 0
-                || ["authenticated", "unauthenticated", "unknown", "ghost-model"]
-                    .indexOf(worker.authentication) < 0
-                || (worker.reason !== null && typeof worker.reason !== "string"))
+    function validCodingHarness(harness: var): bool {
+        if (!harness || typeof harness !== "object" || Array.isArray(harness)
+                || ["claude-code", "codex", "pi"].indexOf(harness.id) < 0
+                || typeof harness.name !== "string"
+                || harness.kind !== "native"
+                || harness.nativeConfiguration !== true
+                || ["installed", "missing", "unknown"].indexOf(harness.installation) < 0
+                || ["authenticated", "unauthenticated", "unknown"]
+                    .indexOf(harness.authentication) < 0
+                || (harness.reason !== null && typeof harness.reason !== "string"))
             return false;
-        if (worker.usage === null) return true;
-        return worker.usage && typeof worker.usage === "object"
-            && !Array.isArray(worker.usage)
-            && typeof worker.usage.state === "string"
-            && typeof worker.usage.stale === "boolean"
-            && Array.isArray(worker.usage.limits)
-            && worker.usage.limits.every(function (limit) {
+        if (harness.usage === null) return true;
+        return harness.usage && typeof harness.usage === "object"
+            && !Array.isArray(harness.usage)
+            && typeof harness.usage.state === "string"
+            && typeof harness.usage.stale === "boolean"
+            && Array.isArray(harness.usage.limits)
+            && harness.usage.limits.every(function (limit) {
                 return limit && typeof limit === "object"
                     && typeof limit.label === "string"
                     && typeof limit.usedFraction === "number"
@@ -2487,7 +2487,8 @@ Singleton {
     function validCodingTaskCommon(task: var): bool {
         return task && typeof task === "object" && !Array.isArray(task)
             && typeof task.id === "string" && task.id.indexOf("task-") === 0
-            && ["claude-code", "codex", "pi-worker"].indexOf(task.agent) >= 0
+            && ["claude-code", "codex", "pi"].indexOf(task.harness) >= 0
+            && (task.agent === null || typeof task.agent === "string")
             && typeof task.root === "string" && typeof task.cwd === "string"
             && ["queued", "starting", "running", "waiting_for_owner", "cancelling",
                 "completed", "failed", "cancelled", "interrupted"].indexOf(task.state) >= 0
@@ -2506,7 +2507,7 @@ Singleton {
     }
 
     function validCodingTaskDetail(task: var): bool {
-        return root.validCodingTaskCommon(task) && task.version === 2
+        return root.validCodingTaskCommon(task) && task.version === 3
             && typeof task.task === "string"
             && (task.result === null || typeof task.result === "string")
             && typeof task.resultTruncated === "boolean"
@@ -2523,19 +2524,19 @@ Singleton {
 
     /** Retire ownership before abort because test/native XHR may finish inline. */
     function clearCoding(): void {
-        const requests = [root.codingWorkersRequest, root.codingTasksRequest,
+        const requests = [root.codingHarnessesRequest, root.codingTasksRequest,
             root.codingTaskRequest, root.codingTaskMutationRequest];
-        root.codingWorkersRequest = null;
+        root.codingHarnessesRequest = null;
         root.codingTasksRequest = null;
         root.codingTaskRequest = null;
         root.codingTaskMutationRequest = null;
-        root.codingWorkers = [];
+        root.codingHarnesses = [];
         root.codingTasks = [];
         root.selectedCodingTaskId = "";
         root.selectedCodingTask = null;
-        root.codingWorkersLoaded = false;
+        root.codingHarnessesLoaded = false;
         root.codingTasksLoaded = false;
-        root.codingWorkersError = "";
+        root.codingHarnessesError = "";
         root.codingTasksError = "";
         root.codingTaskError = "";
         root.codingGhost = "";
@@ -2549,45 +2550,45 @@ Singleton {
         root.codingGhost = ghost;
     }
 
-    function fetchCodingWorkers(force: bool): void {
+    function fetchCodingHarnesses(force: bool): void {
         const ghost = root.activeGhost;
         if (ghost === "") {
             root.clearCoding();
             return;
         }
         root.prepareCodingGhost(ghost);
-        if (!force && (root.codingWorkersLoaded || root.codingWorkersLoading)) return;
-        const previous = root.codingWorkersRequest;
-        root.codingWorkersRequest = null;
+        if (!force && (root.codingHarnessesLoaded || root.codingHarnessesLoading)) return;
+        const previous = root.codingHarnessesRequest;
+        root.codingHarnessesRequest = null;
         if (previous && previous.readyState !== 4) previous.abort();
         const xhr = root.makeCodingRequest();
-        root.codingWorkersRequest = xhr;
-        root.codingWorkersError = "";
+        root.codingHarnessesRequest = xhr;
+        root.codingHarnessesError = "";
         xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.codingWorkersRequest) return;
-            root.codingWorkersRequest = null;
+            if (xhr.readyState !== 4 || xhr !== root.codingHarnessesRequest) return;
+            root.codingHarnessesRequest = null;
             if (ghost !== root.activeGhost || ghost !== root.codingGhost) return;
             if (xhr.status === 200) {
                 try {
                     const body = JSON.parse(xhr.responseText);
-                    if (!body || !Array.isArray(body.workers)
-                            || !body.workers.every(root.validCodingWorker))
-                        throw new Error("invalid worker catalogue");
-                    root.codingWorkers = body.workers;
-                    root.codingWorkersLoaded = true;
-                    root.codingWorkersError = "";
+                    if (!body || !Array.isArray(body.harnesses)
+                            || !body.harnesses.every(root.validCodingHarness))
+                        throw new Error("invalid harness catalogue");
+                    root.codingHarnesses = body.harnesses;
+                    root.codingHarnessesLoaded = true;
+                    root.codingHarnessesError = "";
                     root.reachable = true;
                 } catch (error) {
-                    root.codingWorkersLoaded = false;
-                    root.codingWorkersError = "ghostd sent malformed worker status";
+                    root.codingHarnessesLoaded = false;
+                    root.codingHarnessesError = "ghostd sent malformed harness status";
                 }
             } else {
-                root.codingWorkersLoaded = false;
-                root.codingWorkersError = root.describeError(xhr, "GET workers");
+                root.codingHarnessesLoaded = false;
+                root.codingHarnessesError = root.describeError(xhr, "GET harnesses");
             }
         };
-        root.dispatch(xhr, "GET", root.codingRoute(ghost) + "/workers", ({}), null,
-            function () { return xhr === root.codingWorkersRequest; });
+        root.dispatch(xhr, "GET", root.codingRoute(ghost) + "/harnesses", ({}), null,
+            function () { return xhr === root.codingHarnessesRequest; });
     }
 
     function fetchCodingTasks(force: bool): void {
@@ -2643,7 +2644,7 @@ Singleton {
     }
 
     function fetchCoding(force: bool): void {
-        root.fetchCodingWorkers(force);
+        root.fetchCodingHarnesses(force);
         root.fetchCodingTasks(force);
     }
 

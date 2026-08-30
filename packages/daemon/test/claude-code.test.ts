@@ -833,7 +833,7 @@ describe("Claude Code subscription runtime", () => {
         send: unavailable,
         cancel: unavailable,
       },
-      workers: { list: async () => ({ workers: [] }) },
+      harnesses: { list: async () => ({ harnesses: [] }) },
     } as unknown as PrincipalTaskServices;
     const { seenOptions } = setupClaudeHost({ taskServices });
 
@@ -844,7 +844,7 @@ describe("Claude Code subscription runtime", () => {
     });
 
     expect(seenOptions[0]?.allowedTools).toEqual(expect.arrayContaining([
-      "mcp__ghost__worker_status",
+      "mcp__ghost__harness_status",
       "mcp__ghost__task",
       "mcp__ghost__task_list",
       "mcp__ghost__task_get",

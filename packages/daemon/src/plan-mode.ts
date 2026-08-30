@@ -306,7 +306,7 @@ const PLAN_ALWAYS_ALLOWED_TOOLS = new Set([
   "ls",
   ASK_TOOL_NAME,
   "inspect_image",
-  "worker_status",
+  "harness_status",
   "task_list",
   "task_get",
   "propose_plan",

@@ -1,7 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams, type SpawnOptionsWithoutStdio } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 import { WorkerStoppedError, type WorkerAdapter, type WorkerTaskController, type WorkerTaskRequest } from "./tasks.js";
-import { CODEX_BINARY_ENV, resolveWorkerExecutable } from "./worker-executable.js";
+import { CODEX_BINARY_ENV, resolveHarnessExecutable } from "./harness-executable.js";
 
 const APP_SERVER_ARGS = ["app-server", "--listen", "stdio://"] as const;
 const MAX_PROTOCOL_LINE_BYTES = 8 * 1_048_576;
@@ -332,7 +332,7 @@ export async function readCodexAccount(
   }
 }
 
-/** Short-lived structured installation and account snapshot for the worker catalogue. */
+/** Short-lived structured installation and account snapshot for the harness catalogue. */
 export class CodexProbe {
   private readonly env: NodeJS.ProcessEnv;
   private readonly binaryPath: string;
@@ -349,7 +349,7 @@ export class CodexProbe {
     if (!Number.isFinite(this.ttlMs) || this.ttlMs < 0) throw new RangeError("Codex probe ttlMs is invalid.");
     this.now = options.now ?? Date.now;
     this.resolveExecutable = options.resolveExecutable
-      ?? ((configured) => resolveWorkerExecutable(configured, this.env));
+      ?? ((configured) => resolveHarnessExecutable(configured, this.env));
     this.readAccount = options.readAccount ?? readCodexAccount;
   }
 
@@ -416,6 +416,19 @@ function completedAgentMessage(params: unknown): string | null {
   return item?.type === "agentMessage" && typeof item.text === "string" ? item.text : null;
 }
 
+export function codexTaskPrompt(task: string, agent: string | null): string {
+  if (agent === null) return task;
+  return [
+    "Delegate the assignment below to your configured native sub-agent whose exact name is given here:",
+    JSON.stringify(agent),
+    "Use Codex's native multi-agent delegation. Do not perform the assignment in this root thread. If that agent is unavailable or delegation cannot start, report that failure clearly instead of falling back.",
+    "",
+    "<assignment>",
+    task,
+    "</assignment>",
+  ].join("\n");
+}
+
 function turnTerminal(params: unknown): { threadId: string; turnId: string; status: string; error: string | null } | null {
   const record = objectValue(params);
   const turn = objectValue(record?.turn);
@@ -444,7 +457,7 @@ export class CodexWorkerAdapter implements WorkerAdapter {
     this.binary = this.env[CODEX_BINARY_ENV]?.trim() || "codex";
     this.assertContext = options.assertContext;
     this.resolveExecutable = options.resolveExecutable
-      ?? ((configured) => resolveWorkerExecutable(configured, this.env));
+      ?? ((configured) => resolveHarnessExecutable(configured, this.env));
     this.spawnWorker = options.spawnWorker ?? defaultSpawnWorker;
     this.timings = {
       interruptGraceMs: options.timings?.interruptGraceMs ?? INTERRUPT_GRACE_MS,
@@ -527,7 +540,7 @@ export class CodexWorkerAdapter implements WorkerAdapter {
     const handleServerRequest = (method: string): unknown => {
       switch (method) {
         case "mcpServer/elicitation/request":
-          emit({ type: "notice", text: "Codex requested MCP input; the headless worker declined it." });
+          emit({ type: "notice", text: "Codex requested MCP input; the headless harness task declined it." });
           return { action: "decline", content: null, _meta: null };
         case "item/commandExecution/requestApproval":
         case "item/fileChange/requestApproval":
@@ -593,7 +606,7 @@ export class CodexWorkerAdapter implements WorkerAdapter {
         } else if (terminal?.status === "failed") {
           result.reject(childError(terminal.error ?? "Codex turn failed.", stderr));
         } else if (terminal?.status === "interrupted") {
-          result.reject(new CodexProcessError("Codex worker was interrupted."));
+          result.reject(new CodexProcessError("Codex task was interrupted."));
         } else result.reject(stopped);
       };
       void eventChain.then(settle, settle);
@@ -636,9 +649,15 @@ export class CodexWorkerAdapter implements WorkerAdapter {
       }), request.cwd);
       threadId = started.threadId;
       emit({ type: "notice", text: started.notice });
+      if (request.agent !== null) {
+        emit({
+          type: "notice",
+          text: `Codex's root agent was asked to delegate to requested native agent ${JSON.stringify(request.agent)}; Ghost cannot verify that native delegation occurred.`,
+        });
+      }
       turnId = turnStartResult(await app.request("turn/start", {
         threadId,
-        input: [{ type: "text", text: request.task, text_elements: [] }],
+        input: [{ type: "text", text: codexTaskPrompt(request.task, request.agent), text_elements: [] }],
       }));
     } catch (error) {
       fail(asError(error));

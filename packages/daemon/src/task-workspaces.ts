@@ -324,7 +324,7 @@ export class GitTaskWorkspaceManager implements TaskWorkspaceLifecycle {
       if (!pathExists(join(input.sourceRoot, ".git"))) {
         return inPlaceWorkspace(
           input,
-          "This project is not a Git repository, so the coding worker is running in place and no review branch will be created.",
+          "This project is not a Git repository, so the harness task is running in place and no review branch will be created.",
         );
       }
       throw new TaskWorkspaceError(

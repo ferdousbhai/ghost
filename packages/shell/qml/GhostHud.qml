@@ -134,7 +134,7 @@ FloatingWindow {
     minimumSize: Qt.size(568, 360)
 
     function showSection(section: string): void {
-        if (["chat", "workers", "memory", "commands", "hooks", "mcp", "connect", "remote", "character"]
+        if (["chat", "harnesses", "memory", "commands", "hooks", "mcp", "connect", "remote", "character"]
                 .indexOf(section) < 0)
             return;
         hud.loginOpen = false;
@@ -1075,9 +1075,9 @@ FloatingWindow {
                 Layout.fillHeight: true
             }
 
-            WorkersBrowser {
-                id: workersBrowser
-                visible: hud.currentSection === "workers"
+            HarnessesBrowser {
+                id: harnessesBrowser
+                visible: hud.currentSection === "harnesses"
                     && !hud.loginOpen && !hud.switcherOpen
                 Layout.fillWidth: true
                 Layout.fillHeight: true

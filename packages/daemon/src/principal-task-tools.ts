@@ -8,13 +8,14 @@ import type { ConversationIdentity } from "./conversation-identity.js";
 import { GhostError } from "./ghosts.js";
 import {
   MAX_TASK_PROMPT_LENGTH,
+  MAX_NATIVE_AGENT_NAME_LENGTH,
   type CancelTaskResult,
   type TaskListView,
   type TaskManager,
   type TaskSummary,
   type TaskView,
 } from "./tasks.js";
-import type { WorkerCatalog, WorkerCatalogView } from "./worker-catalog.js";
+import type { HarnessCatalog, HarnessCatalogView } from "./harness-catalog.js";
 
 const MAX_LISTED_TASKS = 20;
 const DEFAULT_LISTED_TASKS = 10;
@@ -24,7 +25,7 @@ const MAX_TOOL_RESULT_LENGTH = 32_000;
 const MAX_TOOL_TASK_PREVIEW_LENGTH = 160;
 
 export const PRINCIPAL_TASK_TOOL_NAMES = [
-  "worker_status",
+  "harness_status",
   "task",
   "task_list",
   "task_get",
@@ -34,8 +35,8 @@ export const PRINCIPAL_TASK_TOOL_NAMES = [
 
 export const GHOST_CODING_ORCHESTRATION_POLICY = [
   "# Coding delegation",
-  "You are the owner's Ghost: remain responsible for the outcome, but delegate project coding and code review to a coding worker instead of acting as the coding agent yourself.",
-  "Use worker_status before choosing among claude-code, codex, and pi-worker when availability or current limits matter. Start work with task { agent, task, cwd? }; give the worker a complete assignment and the correct absolute project cwd. The task is durable and asynchronous: retain its id, use task_get or task_list on a later interaction, and use task_send or task_cancel when needed. Do not poll in a tight loop or claim completion you have not read.",
+  "You are the owner's Ghost: remain responsible for the outcome, but delegate project coding and code review through a coding harness instead of acting as the coding agent yourself.",
+  "Use harness_status before choosing among claude-code, codex, and pi when availability or current limits matter. Start work with task { harness, task, agent?, cwd? }; agent is an optional requested native name owned by that harness. Give the harness a complete assignment and the correct absolute project cwd. If implementation needs native reviewer or simplifier stages, include them in the same assignment because a later task does not inherit this task's review branch. The task is durable and asynchronous: retain its id, use task_get or task_list on a later interaction, and use task_send or task_cancel when needed. Do not poll in a tight loop or claim completion you have not read.",
   "For a clean committed Git project, task runs in an isolated worktree and returns a local review branch when changes are ready. Report that artifact to the owner; do not claim it was pushed, opened as a pull request, or merged unless a separate explicit action did so. A non-Git project runs in place.",
   "Your own Bash, edit, and write tools remain available for general computer use and for maintaining your character, memory, Documents, and other Ghost-owned files.",
 ].join("\n");
@@ -45,7 +46,7 @@ export interface PrincipalTaskServices {
     TaskManager,
     "create" | "list" | "get" | "send" | "cancel"
   >;
-  workers: Pick<WorkerCatalog, "list">;
+  harnesses: Pick<HarnessCatalog, "list">;
 }
 
 export interface PrincipalTaskToolsOptions {
@@ -56,6 +57,7 @@ export interface PrincipalTaskToolsOptions {
 
 interface TaskProjection {
   id: string;
+  harness: TaskView["harness"];
   agent: TaskView["agent"];
   taskPreview: string;
   root: string;
@@ -74,6 +76,7 @@ interface TaskProjection {
 
 interface TaskSummaryProjection {
   id: string;
+  harness: TaskSummary["harness"];
   agent: TaskSummary["agent"];
   taskPreview: string;
   root: string;
@@ -106,6 +109,7 @@ function taskProjection(task: TaskView): TaskProjection {
   const result = task.result === null ? null : truncate(task.result, MAX_TOOL_RESULT_LENGTH);
   return {
     id: task.id,
+    harness: task.harness,
     agent: task.agent,
     taskPreview: compactPreview(task.task),
     root: task.root,
@@ -134,6 +138,7 @@ function taskProjection(task: TaskView): TaskProjection {
 function taskSummaryProjection(task: TaskSummary): TaskSummaryProjection {
   return {
     id: task.id,
+    harness: task.harness,
     agent: task.agent,
     taskPreview: compactPreview(task.taskPreview),
     root: task.root,
@@ -175,31 +180,31 @@ function result<T>(value: T): GhostToolResult<T> {
   return textResult(JSON.stringify(value, null, 2), value);
 }
 
-function workerProjection(view: WorkerCatalogView): object {
+function harnessProjection(view: HarnessCatalogView): object {
   return {
-    workers: view.workers.map((worker) => ({
-      id: worker.id,
-      name: worker.name,
-      kind: worker.kind,
-      nativeConfiguration: worker.nativeConfiguration,
-      installation: worker.installation,
-      authentication: worker.authentication,
-      reason: worker.reason,
-      usage: worker.usage === null
+    harnesses: view.harnesses.map((harness) => ({
+      id: harness.id,
+      name: harness.name,
+      kind: harness.kind,
+      nativeConfiguration: harness.nativeConfiguration,
+      installation: harness.installation,
+      authentication: harness.authentication,
+      reason: harness.reason,
+      usage: harness.usage === null
         ? null
         : {
-            state: worker.usage.state,
-            updatedAt: worker.usage.updatedAt,
-            stale: worker.usage.stale,
-            tier: worker.usage.tier,
-            status: worker.usage.status,
-            help: worker.usage.help,
-            limits: worker.usage.limits.map((limit) => ({
+            state: harness.usage.state,
+            updatedAt: harness.usage.updatedAt,
+            stale: harness.usage.stale,
+            tier: harness.usage.tier,
+            status: harness.usage.status,
+            help: harness.usage.help,
+            limits: harness.usage.limits.map((limit) => ({
               label: limit.label,
               remainingFraction: Math.max(0, Math.min(1, 1 - limit.usedFraction)),
               resetsAt: limit.resetsAt,
             })),
-            today: worker.usage.today,
+            today: harness.usage.today,
           },
     })),
   };
@@ -227,27 +232,32 @@ function cancellationProjection(cancelled: CancelTaskResult): object {
 export function createPrincipalTaskTools(options: PrincipalTaskToolsOptions): GhostExtensionFactory {
   return (api) => {
     api.registerTool({
-      name: "worker_status",
-      label: "Worker status",
-      description: "Check installed coding workers, authentication, and Omarchy usage windows before delegating.",
+      name: "harness_status",
+      label: "Harness status",
+      description: "Check installed coding harnesses, authentication, and Omarchy usage windows before delegating.",
       parameters: Type.Object({}, { additionalProperties: false }),
-      execute: async () => result(workerProjection(await options.services.workers.list())),
+      execute: async () => result(harnessProjection(await options.services.harnesses.list())),
     });
 
     api.registerTool({
       name: "task",
       label: "Delegate task",
-      description: "Start one durable asynchronous coding task. Use worker_status first when worker availability or limits matter; retain the returned task id for later task_get, task_send, or task_cancel calls.",
+      description: "Start one durable asynchronous coding task. Use harness_status first when harness availability or limits matter; retain the returned task id for later task_get, task_send, or task_cancel calls.",
       parameters: Type.Object({
-        agent: Type.Union([
+        harness: Type.Union([
           Type.Literal("claude-code"),
           Type.Literal("codex"),
-          Type.Literal("pi-worker"),
-        ], { description: "Coding worker responsible for this task" }),
+          Type.Literal("pi"),
+        ], { description: "Native coding harness responsible for this task" }),
+        agent: Type.Optional(Type.String({
+          minLength: 1,
+          maxLength: MAX_NATIVE_AGENT_NAME_LENGTH,
+          description: "Optional native agent name requested from the selected harness",
+        })),
         task: Type.String({
           minLength: 1,
           maxLength: MAX_TASK_PROMPT_LENGTH,
-          description: "Complete assignment for the coding worker",
+          description: "Complete assignment for the native task agent",
         }),
         cwd: Type.Optional(Type.String({
           minLength: 1,
@@ -258,7 +268,8 @@ export function createPrincipalTaskTools(options: PrincipalTaskToolsOptions): Gh
         const task = await options.services.tasks.create({
           ghostName: options.ghostName,
           parent: options.parent,
-          agent: params.agent,
+          harness: params.harness,
+          ...(params.agent === undefined ? {} : { agent: params.agent }),
           task: params.task,
           ...(params.cwd === undefined ? {} : { cwd: params.cwd }),
         });

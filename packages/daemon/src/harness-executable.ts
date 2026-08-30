@@ -3,6 +3,7 @@ import { access, realpath, stat } from "node:fs/promises";
 import { delimiter, isAbsolute, join } from "node:path";
 
 export const CODEX_BINARY_ENV = "GHOST_CODEX_BINARY";
+export const PI_BINARY_ENV = "GHOST_PI_BINARY";
 
 async function executableFile(path: string): Promise<string | null> {
   try {
@@ -16,15 +17,15 @@ async function executableFile(path: string): Promise<string | null> {
 }
 
 /** Resolve one known executable without invoking a shell or accepting cwd-relative PATH entries. */
-export async function resolveWorkerExecutable(
+export async function resolveHarnessExecutable(
   configured: string,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<string> {
   if (configured.includes("/")) {
-    if (!isAbsolute(configured)) throw new Error("Configured worker executable must be absolute.");
+    if (!isAbsolute(configured)) throw new Error("Configured harness executable must be absolute.");
     const resolved = await executableFile(configured);
     if (resolved) return resolved;
-    throw new Error(`Worker executable ${JSON.stringify(configured)} is unavailable.`);
+    throw new Error(`Harness executable ${JSON.stringify(configured)} is unavailable.`);
   }
 
   for (const directory of (env.PATH ?? "").split(delimiter)) {
@@ -32,5 +33,5 @@ export async function resolveWorkerExecutable(
     const resolved = await executableFile(join(directory, configured));
     if (resolved) return resolved;
   }
-  throw new Error(`Worker executable ${JSON.stringify(configured)} was not found in PATH.`);
+  throw new Error(`Harness executable ${JSON.stringify(configured)} was not found in PATH.`);
 }

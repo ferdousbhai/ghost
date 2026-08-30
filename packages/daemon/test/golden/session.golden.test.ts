@@ -132,7 +132,7 @@ describe("golden: session", () => {
         send: unavailable,
         cancel: unavailable,
       },
-      workers: { list: async () => ({ workers: [] }) },
+      harnesses: { list: async () => ({ harnesses: [] }) },
     } as unknown as PrincipalTaskServices);
 
     const normalizer = new Normalizer()

@@ -121,8 +121,8 @@ const ghosts = ["casper", "moaning-myrtle"].map((name) => ({
   createdAt: new Date(Date.now() - 86_400_000).toISOString(),
 }));
 
-const MOCK_WORKERS = {
-  workers: [
+const MOCK_HARNESSES = {
+  harnesses: [
     {
       id: "claude-code",
       name: "Claude Code",
@@ -170,12 +170,12 @@ const MOCK_WORKERS = {
       },
     },
     {
-      id: "pi-worker",
-      name: "Pi worker",
-      kind: "builtin",
-      nativeConfiguration: false,
+      id: "pi",
+      name: "Pi",
+      kind: "native",
+      nativeConfiguration: true,
       installation: "installed",
-      authentication: "ghost-model",
+      authentication: "unknown",
       reason: null,
       usage: null,
     },
@@ -195,17 +195,18 @@ function mockWorkspace(taskId, state = "active", review = "pending") {
     review,
     notice: review === "ready"
       ? "Local review branch is ready. Ghost did not push or open a pull request."
-      : "The worker is running in an isolated Git worktree.",
+      : "The harness is running in an isolated Git worktree.",
   };
 }
 
-function makeMockTask(name, id, agent, assignment, state, result = null) {
+function makeMockTask(name, id, harness, assignment, state, result = null, agent = null) {
   const now = new Date().toISOString();
   const settled = ["completed", "failed", "cancelled", "interrupted"].includes(state);
   return {
-    version: 2,
+    version: 3,
     id,
     parent: conversationIdentity("pi", `mock-${name}`),
+    harness,
     agent,
     task: assignment,
     root: join(GHOSTS_ROOT, `${name}-project`),
@@ -220,7 +221,7 @@ function makeMockTask(name, id, agent, assignment, state, result = null) {
     error: null,
     events: [
       { sequence: 1, at: now, type: "state", state: "queued" },
-      { sequence: 2, at: now, type: "notice", text: "Native worker started in maximum trust.", textTruncated: false },
+      { sequence: 2, at: now, type: "notice", text: "Native harness started in maximum trust.", textTruncated: false },
       { sequence: 3, at: now, type: "state", state },
     ],
     eventsTruncated: false,
@@ -234,12 +235,14 @@ const codingTasks = new Map(ghosts.map((ghost) => [ghost.name, [
     "codex",
     "Simplify the durable task parser and verify its boundary tests.",
     "running",
+    null,
+    "reviewer",
   ),
   makeMockTask(
     ghost.name,
     "task-22222222-2222-4222-8222-222222222222",
     "claude-code",
-    "Review the native worker integration for configuration drift.",
+    "Review the native harness integration for configuration drift.",
     "completed",
     "Review complete; no configuration drift found.",
   ),
@@ -249,6 +252,7 @@ function codingTaskSummary(task) {
   return {
     id: task.id,
     parent: task.parent,
+    harness: task.harness,
     agent: task.agent,
     taskPreview: task.task,
     root: task.root,
@@ -1992,8 +1996,8 @@ const mockServer = createServer(async (req, res) => {
   const ghost = ghosts.find((g) => g.name === name);
   if (!ghost) return json(res, 404, { error: { message: `no ghost named ${name}`, code: "not_found" } });
 
-  if (parts.length === 4 && parts[3] === "workers" && req.method === "GET") {
-    return json(res, 200, MOCK_WORKERS);
+  if (parts.length === 4 && parts[3] === "harnesses" && req.method === "GET") {
+    return json(res, 200, MOCK_HARNESSES);
   }
 
   if (parts.length === 4 && parts[3] === "tasks" && req.method === "GET") {

@@ -1756,10 +1756,11 @@ describe("SessionHost.open", () => {
     const create = vi.fn(async (
       input: Parameters<PrincipalTaskServices["tasks"]["create"]>[0],
     ): Promise<TaskView> => ({
-      version: 2,
+      version: 3,
       id: "task-11111111-1111-4111-8111-111111111111",
       parent: input.parent,
-      agent: input.agent,
+      harness: input.harness,
+      agent: input.agent ?? null,
       task: input.task,
       root: temp!.ownerHome,
       cwd: input.cwd ?? temp!.ownerHome,
@@ -1792,14 +1793,14 @@ describe("SessionHost.open", () => {
         send: unavailable,
         cancel: unavailable,
       },
-      workers: { list: async () => ({ workers: [] }) },
+      harnesses: { list: async () => ({ harnesses: [] }) },
     } as unknown as PrincipalTaskServices;
     host!.attachTaskServices(services);
 
     const prompt = await modelSystemPrompt("durable-task-tools");
     const handle = await host!.open("casper", "durable-task-tools");
     expect(handle.session.getActiveToolNames()).toEqual(expect.arrayContaining([
-      "worker_status",
+      "harness_status",
       "task",
       "task_list",
       "task_get",
@@ -1813,7 +1814,7 @@ describe("SessionHost.open", () => {
     if (!taskTool) throw new Error("task tool was not registered");
     await taskTool.execute(
       "task-call",
-      { agent: "codex", task: "Implement it." },
+      { harness: "codex", task: "Implement it." },
       undefined,
       undefined,
       { cwd: temp!.ownerHome } as never,
@@ -1825,10 +1826,10 @@ describe("SessionHost.open", () => {
         runtime: "pi",
         conversationId: "durable-task-tools",
       },
-      agent: "codex",
+      harness: "codex",
       task: "Implement it.",
     }));
-    expect(() => host!.attachTaskServices({ ...services, workers: { list: async () => ({ workers: [] }) } }))
+    expect(() => host!.attachTaskServices({ ...services, harnesses: { list: async () => ({ harnesses: [] }) } }))
       .toThrow(/already attached/);
   });
 

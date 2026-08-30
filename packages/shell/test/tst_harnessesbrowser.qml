@@ -5,7 +5,7 @@ import qs.services
 
 TestCase {
     id: tc
-    name: "WorkersBrowser"
+    name: "HarnessesBrowser"
     when: windowShown
     width: 940
     height: 720
@@ -15,7 +15,7 @@ TestCase {
 
     Component {
         id: browserComponent
-        WorkersBrowser {
+        HarnessesBrowser {
             width: 900
             height: 680
         }
@@ -72,10 +72,11 @@ TestCase {
 
     function detail(overrides: var): var {
         return Object.assign({
-            version: 2,
+            version: 3,
             id: "task-11111111-1111-4111-8111-111111111111",
             parent: { id: "pi:conversation-1", runtime: "pi", conversationId: "conversation-1" },
-            agent: "codex",
+            harness: "codex",
+            agent: "reviewer",
             task: "Implement the parser and verify the boundary tests.",
             root: "/project",
             cwd: "/project/packages/app",
@@ -100,6 +101,7 @@ TestCase {
         return {
             id: task.id,
             parent: task.parent,
+            harness: task.harness,
             agent: task.agent,
             taskPreview: task.task,
             root: task.root,
@@ -115,9 +117,9 @@ TestCase {
         };
     }
 
-    function workers(): var {
+    function harnesses(): var {
         return {
-            workers: [
+            harnesses: [
                 {
                     id: "claude-code", name: "Claude Code", kind: "native",
                     nativeConfiguration: true, installation: "installed",
@@ -137,9 +139,9 @@ TestCase {
                     }
                 },
                 {
-                    id: "pi-worker", name: "Pi worker", kind: "builtin",
-                    nativeConfiguration: false, installation: "installed",
-                    authentication: "ghost-model", reason: null, usage: null
+                    id: "pi", name: "Pi", kind: "native",
+                    nativeConfiguration: true, installation: "installed",
+                    authentication: "unknown", reason: null, usage: null
                 }
             ]
         };
@@ -156,7 +158,7 @@ TestCase {
         const browser = createTemporaryObject(browserComponent, tc);
         verify(browser !== null);
         tryCompare(requests, "length", 2);
-        requestEnding("/workers", 0).complete(200, workers());
+        requestEnding("/harnesses", 0).complete(200, harnesses());
         requestEnding("/tasks", 0).complete(200, { tasks: [summary()], skipped: [] });
         wait(0);
         waitForRendering(browser);
@@ -178,10 +180,10 @@ TestCase {
 
     function test_statusTasksAndDetailAreLiteralAndReviewable(): void {
         const browser = createLoadedBrowser();
-        compare(Ghostd.codingWorkers.length, 3);
-        compare(findChild(browser, "codingWorkerUsage-claude-code").text, "Session 75% left");
-        compare(findChild(browser, "codingWorkerUsage-codex").text, "Week 40% left");
-        compare(findChild(browser, "codingWorkerState-pi-worker").text, "Ready");
+        compare(Ghostd.codingHarnesses.length, 3);
+        compare(findChild(browser, "codingHarnessUsage-claude-code").text, "Session 75% left");
+        compare(findChild(browser, "codingHarnessUsage-codex").text, "Week 40% left");
+        compare(findChild(browser, "codingHarnessState-pi").text, "Ready");
         verify(findChild(browser, "codingTaskList") !== null);
 
         const row = findChild(browser, "codingTask-task-11111111-1111-4111-8111-111111111111");
@@ -193,6 +195,8 @@ TestCase {
         requests[2].complete(200, detail());
         wait(0);
 
+        compare(findChild(browser, "codingTaskState").text,
+            "codex · requested reviewer · Running");
         compare(findChild(browser, "codingTaskAssignment").text,
             "Implement the parser and verify the boundary tests.");
         compare(findChild(browser, "codingTaskWorkspaceSummary").text, "Isolated worktree");
@@ -258,33 +262,33 @@ TestCase {
     function test_pollingAndGhostChangeRetireOwnedRequests(): void {
         const browser = createLoadedBrowser();
         const taskTimer = findChild(browser, "codingTaskPoll");
-        const workerTimer = findChild(browser, "codingWorkerPoll");
+        const harnessTimer = findChild(browser, "codingHarnessPoll");
         verify(taskTimer.running);
-        verify(workerTimer.running);
+        verify(harnessTimer.running);
         compare(taskTimer.interval, 3000);
-        compare(workerTimer.interval, 30000);
+        compare(harnessTimer.interval, 30000);
 
         taskTimer.triggered();
-        workerTimer.triggered();
+        harnessTimer.triggered();
         compare(requests.length, 4);
         const pendingTasks = requestEnding("/tasks", 2);
-        const pendingWorkers = requestEnding("/workers", 2);
+        const pendingHarnesses = requestEnding("/harnesses", 2);
         Ghostd.activeGhost = "moaning-myrtle";
         verify(pendingTasks.aborted);
-        verify(pendingWorkers.aborted);
+        verify(pendingHarnesses.aborted);
         compare(Ghostd.codingTasks.length, 0);
-        compare(Ghostd.codingWorkers.length, 0);
+        compare(Ghostd.codingHarnesses.length, 0);
     }
 
     function test_malformedPayloadFailsClosed(): void {
         const browser = createTemporaryObject(browserComponent, tc);
         verify(browser !== null);
         tryCompare(requests, "length", 2);
-        requestEnding("/workers", 0).complete(200, { workers: [{ id: "unknown" }] });
+        requestEnding("/harnesses", 0).complete(200, { harnesses: [{ id: "unknown" }] });
         requestEnding("/tasks", 0).complete(200, { tasks: [{ id: "task-bad" }], skipped: [] });
-        compare(Ghostd.codingWorkers.length, 0);
+        compare(Ghostd.codingHarnesses.length, 0);
         compare(Ghostd.codingTasks.length, 0);
-        compare(Ghostd.codingWorkersError, "ghostd sent malformed worker status");
+        compare(Ghostd.codingHarnessesError, "ghostd sent malformed harness status");
         compare(Ghostd.codingTasksError, "ghostd sent malformed coding task state");
     }
 }
