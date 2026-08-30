@@ -36,13 +36,13 @@
  *   they are re-mapped to first-seen ordinals `#1`, `#2`, … which still pins
  *   the parent/child *shape* of the branch tree.
  * - **Absolute paths**: the temp ghosts root is a fresh mkdtemp every run.
- * - **Tool presentation.** OMP can move non-core capabilities between the
- *   top-level surface and xd:// as load-mode policy evolves. The
- *   fixture therefore records a *presence table* over a named universe of tools
- *   (`toolSurfaceTable`) rather than the raw list, so a strip that drops or
- *   renames a tool still fails without pinning presentation internals. Ambient
- *   machine MCP is no longer a source of variation: focused SessionHost tests
- *   pin the visible ghost config plus the explicitly bound project snapshot.
+ * - **Tool presentation.** Ghost composes Pi's native tools with its custom
+ *   tools. The fixture records a *presence table* over a named universe of
+ *   tools (`toolSurfaceTable`) rather than the raw list, so a strip that drops
+ *   or renames a tool still fails without pinning unrelated catalogue growth.
+ *   Ambient machine MCP is no longer a source of variation: focused SessionHost
+ *   tests pin the visible ghost config plus the explicitly bound project
+ *   snapshot.
  *
  * Tool-call ids (`call_1`, …) and token usage are NOT normalised: the mock
  * provider mints both deterministically, so a change there is a real change.
@@ -175,10 +175,9 @@ export class Normalizer {
  * sorted by path.
  *
  * Two directories are listed by name only, never by content:
- * `.pi/` (OMP's agent dir — `models.db` is SQLite, plus WAL/shm files that
- * differ byte-for-byte every run) and `sessions/` (raw OMP transcripts, full
- * of ids and clock values; the rendered transcript covers the same ground in a
- * stable shape). Listing their *filenames* still pins the contract that
+ * `.pi/` (derived Pi runtime state) and `sessions/` (raw Pi transcripts, full
+ * of ids and clock values; the rendered transcript covers the same ground in
+ * a stable shape). Listing their *filenames* still pins the contract that
  * sessions and derived agent state live inside the ghost home — and that
  * credentials do not: no `agent.db` is created there any more.
  *
@@ -235,10 +234,9 @@ export function ghostHomeSnapshot(
  * A presence table over a named universe of tool names.
  *
  * `registry` is what `session.getActiveToolNames()` reports; `wire` is what was
- * advertised to the model in the request body. The two differ on purpose: OMP
- * mounts some capabilities through its `xd://` device registry instead of
- * advertising them as top-level functions, and that split is itself behaviour
- * worth pinning.
+ * advertised to the model in the request body. Ghost registers its custom
+ * tools directly beside Pi's native tools, so the fixture pins both views and
+ * makes any accidental divergence visible.
  *
  * Names outside `universe` are counted, never listed — see the header on why a
  * session's raw tool list is not portable.

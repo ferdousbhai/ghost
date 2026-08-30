@@ -1,9 +1,9 @@
 /**
  * HTTP tests over a real listening server on an ephemeral loopback port.
  *
- * The SSE assertions parse the body with the same algorithm the pinned
- * pi-messages client uses (see `parseSseStream`), so a framing change that
- * would break the real UI breaks these tests.
+ * The SSE assertions use Ghost's in-repo conformance parser
+ * (`parseSseStream`), matching the shell's framing rules so a change that would
+ * break the real UI breaks these tests.
  */
 import {
   existsSync,
@@ -1795,7 +1795,7 @@ describe("POST /api/ghosts/:name/messages", () => {
     expect(status).toBe(200);
     expect(headers.get("content-type")).toContain("text/event-stream");
     expect(headers.get("cache-control")).toBe("no-store");
-    // Frames are `data: <json>\n\n`, the only shape the pinned client reads.
+    // Frames are `data: <json>\n\n`, the canonical shape Ghost's client reads.
     expect(raw.startsWith("data: ")).toBe(true);
 
     const types = events.map((event) => event.type);
@@ -2726,7 +2726,7 @@ describe("GET /api/ghosts/:name/sessions/:id/transcript", () => {
   });
 });
 
-describe("OMP conversation tree routes", () => {
+describe("Ghost conversation tree routes", () => {
   it("branches a user message off into a new conversation over HTTP", async () => {
     const base = await serve([{ kind: "text", text: "Branch answer." }]);
     await postTurn(base, { ...TURN_BODY, options: { sessionId: "conv-tree" } });

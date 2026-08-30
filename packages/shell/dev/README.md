@@ -1,6 +1,6 @@
 # Developing the ghost shell
 
-No daemon, no OMP, no models needed. `mock-ghostd.mjs` implements enough of the
+No daemon or models needed. `mock-ghostd.mjs` implements enough of the
 CONTRACTS.md API to build and demo every surface.
 
 ## Isolated HUD preview — the required verification path
@@ -101,7 +101,7 @@ stop the mock separately.
   phase-one context returns no agent definitions because its isolated task
   runtime is disabled; Character edits `character.md`. Memory rows offer
   confirmed, recoverable deletion.
-  Commands shows the session's searchable OMP catalog and stages a chosen slash
+  Commands shows the session's searchable Ghost catalog and stages a chosen slash
   command in chat; typing `/` opens its compact
   autocomplete, including clear partial/unsupported labels. Hooks shows the
   daemon-global redacted catalog: bounded labels, lifecycle triggers, idle

@@ -1,6 +1,6 @@
 .pragma library
 
-// Standalone OMP builtins deliberately produce command_output rather than an
+// Standalone Ghost builtins deliberately produce command_output rather than an
 // assistant message. The daemon transcript therefore has no row to restore
 // after the turn. Keep the small presentation-only exchange beside the stored
 // rows, anchored at the number of persisted rows that preceded it.

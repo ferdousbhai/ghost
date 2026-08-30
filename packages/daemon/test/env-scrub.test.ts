@@ -162,7 +162,7 @@ describe("scrubProviderEnv", () => {
     expect(env[PI_OFFLINE_ENV_VAR]).toBe("1");
   });
 
-  it("disables the upstream duplicate title completion", () => {
+  it("retains the historical PI_NO_TITLE no-op without relying on it for titling", () => {
     const env: NodeJS.ProcessEnv = {};
     scrubProviderEnv(env);
     expect(env[PI_NO_TITLE_ENV_VAR]).toBe("1");

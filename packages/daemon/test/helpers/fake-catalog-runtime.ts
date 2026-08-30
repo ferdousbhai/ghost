@@ -2,7 +2,7 @@
  * A fake `ModelCatalogRuntime`: an in-memory catalogue with a set of
  * credentialed providers, so the model switcher can be exercised over every
  * path (current-model resolution, available vs catalogue listing, provider/q
- * filters, the cap) without a real OMP registry, a provider, or a network
+ * filters, the cap) without a real Pi registry, a provider, or a network
  * call.
  */
 import type { Api, Model } from "@earendil-works/pi-ai";

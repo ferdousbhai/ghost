@@ -1,6 +1,6 @@
 /**
  * The model indicator + switcher HTTP surface, end to end over a real
- * listening loopback server, with a fake catalogue so no real OMP registry,
+ * listening loopback server, with a fake catalogue so no real Pi registry,
  * provider, or network is touched.
  *
  *   GET /api/ghosts/:name/model
@@ -80,7 +80,7 @@ async function getJson(url: string): Promise<{ status: number; body: Record<stri
 }
 
 describe("GET /api/ghosts/:name/model", () => {
-  it("reports the external Claude Code runtime without asking OMP to resolve it", async () => {
+  it("reports the external Claude Code runtime without asking Pi to resolve it", async () => {
     const base = await serve({ claudePlan: true });
     setChatModelRole(agentDir(), "claude-code", "default");
     const { status, body } = await getJson(`${base}/api/ghosts/casper/model`);
@@ -128,7 +128,7 @@ describe("GET /api/ghosts/:name/model", () => {
     expect(body.current).toMatchObject({ provider: "anthropic", id: "claude-opus-4" });
   });
 
-  it("matches the provider-aware default OMP gives a fresh session", async () => {
+  it("matches Ghost's provider-aware catalogue default for a fresh session", async () => {
     const base = await serve({
       models: [
         { provider: "anthropic", id: "claude-sonnet-4-6", input: ["text"] },
@@ -186,7 +186,7 @@ describe("GET /api/ghosts/:name/models?scope=available", () => {
     expect(body.total).toBe(0);
   });
 
-  it("orders models by provider priority, then newest version like OMP", async () => {
+  it("orders models by provider priority, then newest version", async () => {
     const models: FakeCatalogModel[] = [
       { provider: "openai-codex", id: "gpt-5.3-codex-spark", input: ["text"] },
       { provider: "openai-codex", id: "gpt-5.6-terra", input: ["text"] },
@@ -215,7 +215,7 @@ describe("GET /api/ghosts/:name/models?scope=available", () => {
     ]);
   });
 
-  it("ranks dashed versions, latest aliases, and dated snapshots like OMP", async () => {
+  it("ranks dashed versions, latest aliases, and dated snapshots", async () => {
     const models: FakeCatalogModel[] = [
       { provider: "anthropic", id: "claude-opus-4-5", input: ["text"] },
       { provider: "anthropic", id: "claude-opus-4-6", input: ["text"] },
@@ -235,7 +235,7 @@ describe("GET /api/ghosts/:name/models?scope=available", () => {
     ]);
   });
 
-  it("keeps providers in catalogue order while using OMP order within each provider", async () => {
+  it("keeps providers in catalogue order while using semantic order within each provider", async () => {
     const base = await serve({
       models: [
         { provider: "z-provider", id: "model-1", input: ["text"] },
@@ -412,7 +412,7 @@ describe("PUT /api/ghosts/:name/model", () => {
   });
 });
 
-describe("OMP model roles and fallback chains", () => {
+describe("Ghost model roles and fallback chains", () => {
   async function putRouting(
     base: string,
     payload: unknown,
@@ -425,7 +425,7 @@ describe("OMP model roles and fallback chains", () => {
     return { status: response.status, body: (await response.json()) as Record<string, unknown> };
   }
 
-  it("lists every OMP built-in with effective source metadata and hides empty legacy roles", async () => {
+  it("lists every Ghost built-in with effective source metadata and hides empty legacy roles", async () => {
     const base = await serve({ credentialed: ["openai-codex", "anthropic"] });
     const route = await getJson(`${base}/api/ghosts/casper/model-routing`);
     const roles = route.body.roles as Array<Record<string, unknown>>;
@@ -481,7 +481,7 @@ describe("OMP model roles and fallback chains", () => {
     });
   });
 
-  it("enforces vision capability and excludes Claude Code from OMP fallbacks", async () => {
+  it("enforces vision capability and excludes Claude Code from Ghost fallbacks", async () => {
     const base = await serve({ claudePlan: true });
     const noVision = await putRouting(base, {
       role: "vision_model",

@@ -2,8 +2,8 @@
  * Session host against a mock provider. No real model is ever called.
  *
  * The properties under test are the ones the spike found are easy to lose:
- * sessions inside the ghost home, native OMP tools and discovery, a
- * Ghost persona layered onto the harness, and two ghosts staying separate
+ * sessions inside the ghost home, native Pi tools, Ghost-owned discovery and
+ * provider prompt, and two ghosts staying separate
  * while answering at the same time in one process.
  */
 import {
@@ -1993,7 +1993,7 @@ lines.on("line", (line) => {
     }
   });
 
-  it("redacts an immediate hosted MCP HTTP connection failure from daemon and OMP logs", async () => {
+  it("redacts an immediate hosted MCP HTTP connection failure from daemon and Pi logs", async () => {
     const responseSecret = "MCP_IMMEDIATE_RESPONSE_BODY_SECRET";
     const urlSecret = "MCP_IMMEDIATE_CONFIGURED_URL_SECRET";
     const captured = captureHostedMcpLogs();
@@ -2159,7 +2159,7 @@ lines.on("line", (line) => {
     expect(handle.commands.map((command) => command.name))
       .toContain("proofsheet");
     // Custom definitions can still appear in artifact previews, but neither
-    // they nor an ambient OMP definition can activate Pi subagents in phase 1.
+    // they nor an ambient project definition can activate Pi subagents in phase 1.
     expect(handle.session.getToolDefinition("task")).toBeUndefined();
     // This harness disables machine roots unless a test opts into them.
     expect(handle.skills.map((skill) => skill.name)).toEqual(["inking"]);
@@ -4635,7 +4635,7 @@ describe("SessionHost.runTurn", () => {
     }, 15_000);
   });
 
-  it("queues OMP steering and follow-up messages while a turn is live", async () => {
+  it("queues Pi steering and follow-up messages while a turn is live", async () => {
     const hooks = new GhostHookRunner();
     const beforePrompts: string[] = [];
     const stoppedOwners: string[] = [];
@@ -5602,7 +5602,7 @@ describe("SessionHost.runTurn", () => {
     }
   });
 
-  it("runs !command through OMP without asking the model", async () => {
+  it("runs !command through Pi without asking the model", async () => {
     await setup([{ kind: "text", text: "the model must not run" }]);
     const events: PiMessagesEvent[] = [];
     await host!.runTurn("casper", {
@@ -9028,7 +9028,7 @@ describe("model switch reaches a live cached session", () => {
     expect(provider.requests.at(-1)?.model).toBe("model-b");
   });
 
-  it("rebinds a cleared chat role through the same OMP default resolver", async () => {
+  it("rebinds a cleared chat role through the same Ghost catalogue-default resolver", async () => {
     temp = makeTempGhosts();
     provider = await startMockProvider({ script: [{ kind: "text", text: "unused" }] });
     const dir = seedGhost(temp.root, { name: "casper" });

@@ -167,11 +167,10 @@ function publicHookStatus(status: GhostHookStatus): GhostHookStatus {
 }
 
 /**
- * The `{ error: { message, code } }` envelope is fixed by its consumers, not
- * chosen here: the pinned pi-messages client parses `parsed.error.message` /
- * `parsed.error.code` out of a non-2xx response, and the hosted relay returns
- * the same shape, so a client needs no daemon-specific branch. Flattening it
- * breaks both silently.
+ * The `{ error: { message, code } }` envelope is fixed by Ghost's HTTP contract
+ * and in-repo consumers, not chosen here: the shell, CLI, and remote viewer all
+ * parse the nested error from a non-2xx response. Flattening it silently breaks
+ * those clients.
  */
 function errorResponse(
   response: ServerResponse,
@@ -1406,8 +1405,8 @@ export function createDaemonServer(options: ServerOptions): Server {
 
     const connection = abortOnClose(request, response);
     response.writeHead(200, { ...SSE_HEADERS, "x-ghost-turn-id": turnId });
-    // A turn can idle behind a slow model; keep the connection warm. The
-    // pinned client skips frames without a `data:` line, so a comment costs
+    // A turn can idle behind a slow model; keep the connection warm. Ghost's
+    // in-repo SSE parsers skip frames without a `data:` line, so a comment costs
     // nothing on the far end.
     const keepalive = setInterval(() => {
       if (!response.writableEnded) response.write(SSE_KEEPALIVE_COMMENT);

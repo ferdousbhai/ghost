@@ -4,7 +4,7 @@
  * This boots the production Registry -> SessionHost -> HTTP server chain on an
  * ephemeral loopback port. The ghost home, XDG roots, and process HOME all
  * point inside one OS-temp directory, inherited provider credentials are
- * scrubbed before OMP is constructed, and the only model endpoint is the
+ * scrubbed before Pi is constructed, and the only model endpoint is the
  * scripted loopback provider.
  *
  * The clients below use node:http with pooling disabled. SSE is decoded from

@@ -382,7 +382,7 @@ describe("GhostHookRunner", () => {
     }
   });
 
-  it("loads Claude-style command groups and passes the OMP-compatible payload", async () => {
+  it("loads Claude-style command groups and passes the Ghost hook payload", async () => {
     const directory = temporaryDirectory();
     const script = join(directory, "hook.mjs");
     const observed = join(directory, "observed.json");

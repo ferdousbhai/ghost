@@ -2204,7 +2204,7 @@ Singleton {
     }
 
     /**
-     * Discover the effective OMP slash commands for the active conversation.
+     * Discover Ghost's effective slash commands for the active conversation.
      * `ensureSession` may mint the id for a blank chat, but the daemon still
      * creates its transcript lazily: browsing commands does not add a row to
      * the conversation list.
@@ -4390,7 +4390,7 @@ Singleton {
             && state.toolActivities.length === 0
             && Object.keys(state.blocks).length === 0;
         if (emptyPlaceholder) {
-            // OMP can dequeue a batch of owner messages before starting the
+            // Pi can dequeue a batch of owner messages before starting the
             // next provider step. Keep those as consecutive owner rows rather
             // than manufacturing a blank assistant row between each pair.
             root.removeTurnRow(state, state.assistantRow);
@@ -4543,7 +4543,7 @@ Singleton {
         state.queueSubmitting = true;
         state.queueError = "";
         // Show the chip immediately; the authoritative GET will remove it once
-        // OMP consumes it into the next provider boundary.
+        // Pi consumes it into the next provider boundary.
         if (mode === "followUp") state.followUpQueue = state.followUpQueue.concat([prompt]);
         else state.steeringQueue = state.steeringQueue.concat([prompt]);
 
@@ -5137,7 +5137,7 @@ Singleton {
             JSON.stringify({ role: role, target: "clear_primary" }));
     }
 
-    /** Atomically replace an OMP role's complete ordered retry chain. */
+    /** Atomically replace a Ghost role's complete ordered retry chain. */
     function replaceModelFallbacks(role: string, fallbacks: var): void {
         const ghost = root.activeGhost;
         if (ghost === "" || role === "" || !Array.isArray(fallbacks)) return;

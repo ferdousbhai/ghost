@@ -1,5 +1,5 @@
 /**
- * The login state machine, driven through a fake OMP runtime that simulates
+ * The login state machine, driven through a fake Pi runtime that simulates
  * each auth callback path — URL, device code, paste, select, failure,
  * timeout — with no real provider and no network.
  */
@@ -98,7 +98,7 @@ describe("listProviders", () => {
     expect(anthropic.billingNote).toContain("not Claude plan limits");
   });
 
-  it("does not advertise providers an empty OMP registry cannot start", async () => {
+  it("does not advertise providers an empty Pi registry cannot start", async () => {
     const login: LoginImpl = async () => oauthCredential();
     const { manager } = setup(login, {
       createRuntime: async () => makeFakeRuntime({ login, providers: [] }),

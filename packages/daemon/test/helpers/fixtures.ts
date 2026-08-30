@@ -1,6 +1,6 @@
 /**
  * Temp-directory fixtures: a ghosts root, a ghost home, and the SSE reader
- * the pinned pi-messages client uses.
+ * used by Ghost's daemon/client conformance tests.
  */
 import { afterEach } from "vitest";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";

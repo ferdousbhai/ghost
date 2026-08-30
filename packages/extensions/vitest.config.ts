@@ -1,7 +1,7 @@
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
-  // OMP ships prompt text as Bun-native `.md` imports. Vitest only needs these
+  // Pi ships prompt text as Bun-native `.md` imports. Vitest only needs these
   // modules to resolve while exercising the extension SDK surface.
   assetsInclude: [
     "**/*.md",
@@ -33,7 +33,7 @@ export default defineConfig({
       if (id.startsWith("\0ghost-omp-file:")) {
         return `export default ${JSON.stringify(`/unused/${id.slice("\0ghost-omp-file:".length)}`)};`;
       }
-      // OMP imports this browser script with Bun's `{ type: "file" }`. Vite
+      // Pi imports this browser script with Bun's `{ type: "file" }`. Vite
       // would execute it in the test worker instead of returning its path.
       if (id.endsWith("/src/export/html/template.js")) {
         return `export default ${JSON.stringify(id)};`;

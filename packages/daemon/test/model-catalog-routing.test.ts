@@ -79,8 +79,8 @@ function byRole(roles: ModelRouteView[], role: ModelRouteView["role"]): ModelRou
   return found;
 }
 
-describe("ModelCatalog OMP role inventory and effective routing", () => {
-  it("exposes every OMP built-in without empty legacy custom roles and reports automatic sources", async () => {
+describe("ModelCatalog Ghost role inventory and effective routing", () => {
+  it("exposes every Ghost built-in without empty legacy custom roles and reports automatic sources", async () => {
     const { catalog, agentDir } = setup();
     writeGhostModels(agentDir, {
       providers: {},
@@ -112,8 +112,8 @@ describe("ModelCatalog OMP role inventory and effective routing", () => {
       primary: { provider: "anthropic", id: "claude-sonnet-4-6" },
       effective: { provider: "anthropic", id: "claude-sonnet-4-6" },
     });
-    // Ghost's fast/slow/designer roles inherit a configured default before their
-    // own priority lists; the task role inherits the active chat model.
+    // Ghost's fast, slow, designer, and task roles inherit the configured chat
+    // default when unbound.
     for (const role of ["smol_model", "slow_model", "designer_model", "task_model"] as const) {
       expect(byRole(routing.roles, role)).toMatchObject({
         source: "auto",
@@ -144,7 +144,7 @@ describe("ModelCatalog OMP role inventory and effective routing", () => {
     }
   });
 
-  it("keeps General and Research bindings as explicit custom OMP roles", async () => {
+  it("keeps General and Research bindings as explicit legacy custom roles", async () => {
     const { catalog, agentDir } = setup();
     writeGhostModels(agentDir, {
       providers: {},
@@ -228,7 +228,7 @@ describe("ModelCatalog primary and full-chain mutations", () => {
     ])).rejects.toMatchObject({ code: "duplicate_route_model", status: 400 });
   });
 
-  it("enforces vision capability and keeps Claude Code out of every OMP role/chain", async () => {
+  it("enforces vision capability and keeps Claude Code out of every Ghost role/chain", async () => {
     const { catalog } = setup();
 
     await expect(catalog.setModelRoute(

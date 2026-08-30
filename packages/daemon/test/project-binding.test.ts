@@ -500,7 +500,7 @@ describe("ProjectBindingStore", () => {
     expect(JSON.stringify(snapshot.skills)).not.toContain("MALFORMED-SKILL-BODY");
   });
 
-  it("preserves OMP rule globs and interrupt modes in the immutable Pi snapshot", async () => {
+  it("preserves .omp-compatible rule globs and interrupt modes in the immutable Pi snapshot", async () => {
     const { sessionDir, project, store } = fixture();
     const rulesDir = join(project, ".omp", "rules");
     mkdirSync(rulesDir, { recursive: true });

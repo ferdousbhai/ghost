@@ -1,6 +1,6 @@
 /**
  * The login HTTP surface, end to end over a real listening loopback server,
- * with a fake OMP login runtime so no real provider is touched.
+ * with a fake Pi login runtime so no real provider is touched.
  *
  *   GET  /api/ghosts/:name/providers
  *   POST /api/ghosts/:name/login

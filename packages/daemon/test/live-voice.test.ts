@@ -35,7 +35,7 @@ function fixture(startGate?: Promise<void>) {
 }
 
 describe("LiveVoiceManager", () => {
-  it("starts OMP live voice and reports levels and transcripts", async () => {
+  it("starts Ghost live voice and reports levels and transcripts", async () => {
     const { manager, callbacks } = fixture();
     await expect(manager.start("ghost/session", session())).resolves.toMatchObject({
       active: true,

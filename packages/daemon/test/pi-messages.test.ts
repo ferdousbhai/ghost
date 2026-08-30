@@ -212,7 +212,7 @@ describe("createPiMessagesAdapter", () => {
     expect(textStart).toMatchObject({ contentIndex: 1 });
   });
 
-  it("forwards OMP tool execution state with bounded text summaries", () => {
+  it("forwards Pi tool execution state with bounded text summaries", () => {
     const { events, emit } = collect();
     const adapter = createPiMessagesAdapter(emit);
     adapter.handle({
@@ -252,7 +252,7 @@ describe("createPiMessagesAdapter", () => {
     expect(end.summary?.endsWith("…")).toBe(true);
   });
 
-  it("surfaces OMP model fallback application and recovery", () => {
+  it("surfaces Pi model fallback application and recovery", () => {
     const { events, emit } = collect();
     const adapter = createPiMessagesAdapter(emit);
     adapter.handle({
@@ -354,7 +354,7 @@ describe("createPiMessagesAdapter", () => {
     expect(events.at(-1)?.type).toBe("done");
   });
 
-  it("holds a failed provider step open for OMP recovery, then terminates if it stays failed", () => {
+  it("holds a failed provider step open for Pi recovery, then terminates if it stays failed", () => {
     const { events, emit } = collect();
     const adapter = createPiMessagesAdapter(emit);
     adapter.handle({ type: "agent_start" } as AgentSessionEvent);
@@ -383,7 +383,7 @@ describe("createPiMessagesAdapter", () => {
 });
 
 describe("SSE framing", () => {
-  it("round-trips through the pinned client's parser", () => {
+  it("round-trips through Ghost's in-repo conformance parser", () => {
     const events: PiMessagesEvent[] = [
       { type: "start" },
       { type: "text_start", contentIndex: 0 },

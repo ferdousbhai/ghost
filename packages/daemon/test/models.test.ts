@@ -66,7 +66,7 @@ describe("models.json round-trip", () => {
     });
   });
 
-  it("preserves unknown top-level OMP/provider configuration while mutating routing", () => {
+  it("preserves unknown top-level provider configuration while mutating routing", () => {
     const agentDir = makeAgentDir();
     writeFileSync(ghostModelsPath(agentDir), `${JSON.stringify({
       providers: {},
@@ -406,7 +406,7 @@ describe("the legacy title_model role", () => {
   });
 });
 
-describe("OMP compatibility", () => {
+describe("Pi runtime compatibility", () => {
   it("loads our models.json after projecting Ghost-only routing keys", async () => {
     const agentDir = makeAgentDir();
     writeGhostModels(

@@ -63,11 +63,11 @@ The Heidelberg cost more than it should have.
 `;
 
 /**
- * Additional OMP tools worth auditing beside the phase-1 minimum. Ghost does
+ * Additional Pi tool names worth auditing beside the phase-1 minimum. Ghost does
  * not contract for these. `task` is included specifically to pin the deliberate
  * phase-1 subtraction while the fixture records the rest of the harness.
  */
-const OTHER_AUDITED_OMP_TOOLS = ["ask", "eval", "inspect_image", "task", "todo"] as const;
+const OTHER_AUDITED_PI_TOOLS = ["ask", "eval", "inspect_image", "task", "todo"] as const;
 
 describe("golden: session", () => {
   it("writes a memory mid-conversation and holds the session's system prompt fixed", async () => {
@@ -184,14 +184,13 @@ describe("golden: session", () => {
     expect(systemPrompts[1]).toBe(systemPrompts[0]);
     expect(systemPrompts[1]).not.toContain("owner-prefers-short");
 
-    // The session's own registry is wider than the wire list: OMP mounts some
-    // of Ghost's capabilities through its xd:// device registry rather than
-    // advertising them as functions. Record a presence table so OMP may change
-    // presentation without hiding a missing native or Ghost-owned capability.
+    // Record both the session registry and provider-facing wire list so an
+    // accidental presentation mismatch cannot hide a missing native or
+    // Ghost-owned capability.
     const handle = await host.open("casper", "conv-golden");
     const universe = [
       ...PI_NATIVE_TOOL_NAMES,
-      ...OTHER_AUDITED_OMP_TOOLS,
+      ...OTHER_AUDITED_PI_TOOLS,
       ...resolveGhostExtensions({ documents }, dir, { vision: false }).toolNames,
     ];
     sections.push({
@@ -200,9 +199,8 @@ describe("golden: session", () => {
         universe,
         handle.session.getActiveToolNames(),
         provider.requests.at(-1)?.toolNames ?? [],
-        // `invokable` is the column that matters for Ghost's own capabilities:
-        // OMP mounts them under xd:// so they are absent from both other
-        // columns while remaining callable — which the events above prove.
+        // `invokable` independently proves that every advertised definition is
+        // callable through the session registry.
         (name) => handle.session.getToolDefinition(name) !== undefined,
       ),
     });

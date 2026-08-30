@@ -1,7 +1,7 @@
 /**
  * Errors the ghost tools raise.
  *
- * OMP marks tool failures when `execute()` throws rather than from a returned
+ * Pi marks tool failures when `execute()` throws rather than from a returned
  * `{ isError: true }` payload. So every
  * failure path here is a `throw`, and the thrown value carries a machine-readable
  * `code` plus a model-facing message, because that message is what the agent
