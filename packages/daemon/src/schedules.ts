@@ -252,6 +252,24 @@ interface ScheduleEnablementLink {
   path: string;
 }
 
+interface ScheduleUnitFile {
+  name: string;
+  path: string;
+}
+
+async function listScheduleUnitFiles(
+  ghostName: string,
+  unitDirs: readonly string[],
+): Promise<ScheduleUnitFile[]> {
+  const files: ScheduleUnitFile[] = [];
+  for (const unitDir of new Set(unitDirs)) {
+    for (const name of await listGhostScheduleUnits(ghostName, unitDir)) {
+      files.push({ name, path: join(unitDir, name) });
+    }
+  }
+  return files;
+}
+
 async function listScheduleEnablementLinks(
   prefix: string,
   unitDir: string,
@@ -285,14 +303,15 @@ export async function sweepGhostSchedules(
   const run = options.run ?? commandRunner("systemctl");
   const prefix = scheduleUnitPrefix(ghostName);
   const runtimeUnitDir = options.runtimeUnitDir ?? join(options.unitDir, ".runtime");
-  const units = await listGhostScheduleUnits(ghostName, options.unitDir);
+  const unitDirs = [options.unitDir, runtimeUnitDir];
+  const unitFiles = await listScheduleUnitFiles(ghostName, unitDirs);
   const managed = await inspectManagedScheduleTimers(prefix, run);
   const persistentLinks = await listScheduleEnablementLinks(prefix, options.unitDir);
   const runtimeLinks = await listScheduleEnablementLinks(prefix, runtimeUnitDir);
 
   const unlinkUnit = options.unlinkUnit ?? unlink;
   if (
-    units.length === 0
+    unitFiles.length === 0
     && managed.loaded.length === 0
     && managed.enabled.length === 0
     && persistentLinks.length === 0
@@ -302,7 +321,7 @@ export async function sweepGhostSchedules(
   }
 
   const stopTargets = [...new Set([
-    ...units.filter((unit) => unit.endsWith(".timer")),
+    ...unitFiles.filter((unit) => unit.name.endsWith(".timer")).map((unit) => unit.name),
     ...managed.loaded.map((unit) => unit.name),
   ])].sort();
   if (stopTargets.length > 0) {
@@ -339,18 +358,18 @@ export async function sweepGhostSchedules(
     }
   }
 
-  const removed: string[] = [];
+  const removed = new Set<string>();
   let removalFailure: unknown;
-  for (const unit of units) {
+  for (const unit of unitFiles) {
     try {
-      await unlinkUnit(join(options.unitDir, unit));
-      removed.push(unit);
+      await unlinkUnit(unit.path);
+      removed.add(unit.name);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
       removalFailure ??= error;
       logger.warn("could not remove a ghost's timer unit", {
         ghost: ghostName,
-        unit,
+        unit: unit.name,
         error: (error as Error).message,
       });
     }
@@ -379,7 +398,7 @@ export async function sweepGhostSchedules(
     });
   }
 
-  const remaining = await listGhostScheduleUnits(ghostName, options.unitDir);
+  const remaining = await listScheduleUnitFiles(ghostName, unitDirs);
   const remainingManaged = await inspectManagedScheduleTimers(prefix, run);
   const remainingPersistentLinks = await listScheduleEnablementLinks(prefix, options.unitDir);
   const remainingRuntimeLinks = await listScheduleEnablementLinks(prefix, runtimeUnitDir);
@@ -396,6 +415,7 @@ export async function sweepGhostSchedules(
     if (disableFailures.length > 0) throw disableFailures[0];
     throw new Error("Ghost schedule cleanup left an owned timer active, enabled, or on disk.");
   }
-  logger.info("swept ghost schedules", { ghost: ghostName, removed: removed.length });
-  return { removed };
+  const removedNames = [...removed].sort();
+  logger.info("swept ghost schedules", { ghost: ghostName, removed: removedNames.length });
+  return { removed: removedNames };
 }

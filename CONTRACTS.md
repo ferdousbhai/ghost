@@ -215,7 +215,8 @@ overnight or logged-out runs; #18 owns that.
 
 Whole-home moves are fail-closed around those owned units. After the ghost is
 quiescent but before its home moves, the daemon inventories the union of exact
-owned timer files, manager-loaded timers, and enabled timer unit files. It must
+owned timer/service source files in both the persistent and runtime user-unit
+directories, manager-loaded timers, and enabled timer unit files. It must
 successfully stop and disable that union, remove and verify every matching
 timer/service file absent, then verify no matching timer remains enabled or
 active in the manager. A filesystem or manager scan, stop, verification, or
@@ -231,8 +232,9 @@ whether the stopped triggers are safely retired. Manager state determines the
 commands: loaded or on-disk timers are stopped, persistent enablement is
 disabled persistently, and `enabled-runtime` is disabled with `--runtime`; a
 source-less loaded-only timer is never sent through a disable operation that
-requires its missing unit file. Exact owned symbolic links are also inventoried
-and verified in both directories' `timers.target.wants/`, because a dangling
+requires its missing unit file. Exact owned source files and symbolic links are
+inventoried and verified in both user-unit scopes; links are inspected in each
+scope's `timers.target.wants/`, because a dangling
 enablement link can outlive its source and manager listing. A name enabled in
 both scopes is disabled once per scope in the same cleanup attempt. Delete and
 rename share this commit barrier and error: partial retirement remains retry

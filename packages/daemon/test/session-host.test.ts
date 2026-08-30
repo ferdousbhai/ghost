@@ -7601,11 +7601,17 @@ describe("SessionHost.deleteGhost", () => {
       },
     });
     const unitDir = join(temp.ownerHome, ".config", "systemd", "user");
+    const runtimeUnitDir = join(temp.ownerHome, ".runtime", "systemd", "user");
     const timer = "ghost-timer-v1-6-casper-standup.timer";
     const service = "ghost-timer-v1-6-casper-standup.service";
+    const runtimeTimer = "ghost-timer-v1-6-casper-weekly.timer";
+    const runtimeService = "ghost-timer-v1-6-casper-weekly.service";
     mkdirSync(unitDir, { recursive: true });
+    mkdirSync(runtimeUnitDir, { recursive: true });
     writeFileSync(join(unitDir, timer), "[Timer]\n");
     writeFileSync(join(unitDir, service), "[Service]\n");
+    writeFileSync(join(runtimeUnitDir, runtimeTimer), "[Timer]\n");
+    writeFileSync(join(runtimeUnitDir, runtimeService), "[Service]\n");
 
     await expect(host!.deleteGhost("casper")).rejects.toMatchObject({
       code: "schedule_cleanup_failed",
@@ -7614,6 +7620,7 @@ describe("SessionHost.deleteGhost", () => {
     expect(existsSync(dir)).toBe(true);
     expect(temp.registry.list().map((ghost) => ghost.name)).toEqual(["casper"]);
     expect(readdirSync(unitDir).sort()).toEqual([service, timer]);
+    expect(readdirSync(runtimeUnitDir).sort()).toEqual([runtimeService, runtimeTimer]);
 
     systemdAvailable = true;
     await expect(host!.deleteGhost("casper")).resolves.toMatchObject({
@@ -7621,6 +7628,7 @@ describe("SessionHost.deleteGhost", () => {
     });
     expect(existsSync(dir)).toBe(false);
     expect(readdirSync(unitDir)).toEqual([]);
+    expect(readdirSync(runtimeUnitDir)).toEqual([]);
     expect(calls.map((args) => args[1])).toEqual([
       "list-units",
       "list-units",
@@ -7630,7 +7638,7 @@ describe("SessionHost.deleteGhost", () => {
       "list-units",
       "list-unit-files",
     ]);
-    expect(calls).toContainEqual(["--user", "stop", timer]);
+    expect(calls).toContainEqual(["--user", "stop", timer, runtimeTimer]);
   });
 
   it("blocks a new conversation while the ghost home is moving to trash", async () => {
@@ -7692,20 +7700,20 @@ describe("SessionHost.renameGhost", () => {
 
   it("retires old-name schedules before rename so a new ghost can reuse the name", async () => {
     const { temp } = await setup([{ kind: "text", text: "hello" }]);
-    const unitDir = join(temp.ownerHome, ".config", "systemd", "user");
+    const runtimeUnitDir = join(temp.ownerHome, ".runtime", "systemd", "user");
     const timer = "ghost-timer-v1-6-casper-standup.timer";
     const service = "ghost-timer-v1-6-casper-standup.service";
-    mkdirSync(unitDir, { recursive: true });
-    writeFileSync(join(unitDir, timer), "[Timer]\n");
-    writeFileSync(join(unitDir, service), "[Service]\n");
+    mkdirSync(runtimeUnitDir, { recursive: true });
+    writeFileSync(join(runtimeUnitDir, timer), "[Timer]\n");
+    writeFileSync(join(runtimeUnitDir, service), "[Service]\n");
 
     await expect(host!.renameGhost("casper", "wisp")).resolves.toMatchObject({ name: "wisp" });
-    expect(readdirSync(unitDir)).toEqual([]);
+    expect(readdirSync(runtimeUnitDir)).toEqual([]);
 
     const replacement = temp.registry.create("casper");
     expect(replacement.name).toBe("casper");
     expect(temp.registry.list().map((ghost) => ghost.name)).toEqual(["casper", "wisp"]);
-    expect(readdirSync(unitDir)).toEqual([]);
+    expect(readdirSync(runtimeUnitDir)).toEqual([]);
   });
 
   it("drains maintenance and transfers its identity after the home rename but before release", async () => {

@@ -161,6 +161,33 @@ describe("sweeping a deleted ghost's schedules", () => {
       ]);
   });
 
+  it("removes exact-owned source files from the runtime user-unit scope", async () => {
+    const timer = "ghost-timer-v1-4-aria-standup.timer";
+    const service = "ghost-timer-v1-4-aria-standup.service";
+    const foreign = "ghost-timer-v1-8-aria-ops-standup.timer";
+    const legacy = "ghost-timer-aria-standup.timer";
+    const dir = await unitDir([]);
+    const runtimeUnitDir = join(dir, "runtime-user");
+    await mkdir(runtimeUnitDir, { recursive: true });
+    for (const name of [timer, service, foreign, legacy]) {
+      await writeFile(join(runtimeUnitDir, name), "[Unit]\n", "utf8");
+    }
+    const calls: string[][] = [];
+
+    const result = await sweepGhostSchedules("aria", {
+      unitDir: dir,
+      runtimeUnitDir,
+      run: async (args) => {
+        calls.push([...args]);
+        return { stdout: "", stderr: "", code: 0 };
+      },
+    });
+
+    expect(result.removed).toEqual([service, timer]);
+    expect(calls).toContainEqual(["--user", "stop", timer]);
+    expect((await readdir(runtimeUnitDir)).sort()).toEqual([legacy, foreign]);
+  });
+
   it("inspects the manager but touches nothing when the ghost had no schedules", async () => {
     const dir = await unitDir(["spice-catalyst-research.timer"]);
     const calls: string[][] = [];
