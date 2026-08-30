@@ -2252,7 +2252,9 @@ not coupled to that release identity.
   still current; live claims and poison win over an older storage snapshot.
   Stored ownership is capped at 1,024 tabs, 1,024 workspace owners, 2,048 retired
   owners, 1,024 poison claims, 128 characters per owner id, and signed 31-bit tab
-  ids. Restore validates those limits before tab I/O, verifies at most 16 tabs at
+  ids. The complete ownership and poison ledgers may also name at most 1,024
+  distinct tabs and 1,024 distinct owners between them. Restore validates those
+  individual and combined limits before tab I/O, verifies at most 16 tabs at
   once, and shares one five-second verification deadline across poison and claim
   restoration.
   Session/local settings and ownership reads, writes, and restored-tab existence
@@ -2280,9 +2282,12 @@ not coupled to that release identity.
   fire-and-forget work and cannot retain connection preparation or retry.
   Relay request starts are serialized per ghost-wide protocol owner until
   each deadline response. Terminal close first durably tombstones its session,
-  then makes a bounded attempt against every currently known tab, so it can
+  then makes a bounded attempt across its currently known tabs, so it can
   advance when a raw Chromium create, update, get, detach, or remove Promise
-  never settles. A late tab creation atomically observes that tombstone, durably
+  never settles. Aggregate retirement runs at most 16 tab attempts at once under
+  one one-second deadline and publishes the resulting ownership snapshot once,
+  rather than serializing one storage publication per removed tab. A late tab
+  creation atomically observes that tombstone, durably
   claims its result, and immediately removes it; a failed removal stays claimed
   and the keepalive alarm autonomously retries it after the daemon has rotated
   away from that session. A durable tombstone is garbage-collected only after no
