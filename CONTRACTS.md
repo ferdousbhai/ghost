@@ -2201,20 +2201,27 @@ not coupled to that release identity.
   losing or explicitly closing the current tab never suppresses the terminal
   session `close`. The process registry is keyed by resolved ghost-home path;
   targeted teardown removes an entry only after its protocol close succeeds,
-  coalesces concurrent closes, and keeps a failed entry for retry. A partial
-  Chromium close forgets only tabs confirmed closed or already gone; any live
-  tab Chromium refused remains claimed by that session for the retry. Only a
+  coalesces concurrent closes, and keeps a failed entry for retry. Chromium
+  close attempts every tab even after one fails and forgets only tabs confirmed
+  closed or already gone; every live or indeterminate tab remains claimed by
+  that session for the retry, and the aggregate failure names them. Only a
   resolved `tabs.remove`, the exact Chromium no-such-tab result, or `onRemoved`
   proves absence; another `tabs.get` failure is indeterminate and retains the
   claim. Before acknowledging a new tab, the extension publishes the strict
-  version-1 `{version,tabs,sessions}` claim to `chrome.storage.session`; a write
-  failure rolls the tab back, and an unreadable or indeterminate worker restore
-  refuses the relay connection rather than forgetting possible owners. Relay
-  requests are serialized per protocol session inside the extension, so a
-  terminal close waits for any earlier canceled-or-timed-out tab creation's
-  underlying Chromium handler to settle, not merely for its deadline response.
-  A completed close tombstones that protocol session against later work, and the
-  backend rotates to a fresh session id before a subsequent open. Whole-ghost
+  version-2 `{version,tabs,sessions,retired}` claim to `chrome.storage.session`;
+  a write failure rolls the tab back. If both rollback and a second claim
+  publication are indeterminate, a `chrome.storage.local` poison marker makes
+  later worker starts refuse the relay rather than forget a possible owner; the
+  live worker clears it only after authoritative removal or durable claim. An
+  unreadable or indeterminate worker restore likewise refuses the relay
+  connection. Relay request starts are serialized per protocol session until
+  each deadline response. Terminal close first durably tombstones its session,
+  then makes a bounded attempt against every currently known tab, so it can
+  advance when a raw Chromium create, update, get, detach, or remove Promise
+  never settles. A late tab creation atomically observes that tombstone, durably
+  claims its result, and immediately removes it; a failed removal stays claimed
+  for close retry. The backend rotates to a fresh session id before a subsequent
+  open. Whole-ghost
   rename and delete retire that old-home entry before moving the directory;
   another ghost's browser session is untouched. Graceful daemon shutdown retires
   every browser session while the relay is live, then closes the relay/listener;
