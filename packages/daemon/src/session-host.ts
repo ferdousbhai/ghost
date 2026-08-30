@@ -82,6 +82,7 @@ import {
   resolveScheduleUnitDirectory,
   sweepGhostSchedules,
 } from "./schedules.js";
+import type { CommandRunner } from "./tailscale-identity.js";
 import {
   loadMachineSkills,
   machineSkillPaths,
@@ -572,6 +573,8 @@ export interface SessionHostOptions {
   ownerHome?: string;
   /** One absolute systemd user-unit directory for prompts and lifecycle. */
   scheduleUnitDir?: string;
+  /** Test seam over schedule lifecycle's `systemctl --user` calls. */
+  scheduleCommandRunner?: CommandRunner;
   /** Test seam; production discovers the standard owner-machine skill paths. */
   machineSkillPaths?: readonly string[];
   projectBindings?: ProjectBindingStore;
@@ -1497,6 +1500,7 @@ export class SessionHost {
   private readonly registry: GhostRegistry;
   private readonly ownerHome: string;
   private readonly scheduleUnitDir: string;
+  private readonly scheduleCommandRunner: CommandRunner | undefined;
   private readonly machineSkills: string[];
   private readonly projectBindings: ProjectBindingStore;
   private readonly sessionStartupProbe: NonNullable<SessionHostOptions["sessionStartupProbe"]>;
@@ -1569,6 +1573,7 @@ export class SessionHost {
       throw new TypeError("scheduleUnitDir must be absolute");
     }
     this.scheduleUnitDir = resolve(scheduleUnitDir);
+    this.scheduleCommandRunner = options.scheduleCommandRunner;
     this.machineSkills = options.machineSkillPaths
       ? [...options.machineSkillPaths]
       : machineSkillPaths(this.ownerHome);
@@ -6752,15 +6757,28 @@ export class SessionHost {
       this.projectBindings.revokeScope(ghost.name);
       await maintenanceReservation?.drained;
       await this.quiesceGhost(ghost.name);
+      // A deleted ghost's timers would keep firing at a name that is gone, so
+      // schedule teardown is the commit barrier before its home can move.
+      try {
+        await sweepGhostSchedules(ghost.name, {
+          unitDir: this.scheduleUnitDir,
+          ...(this.scheduleCommandRunner === undefined
+            ? {}
+            : { run: this.scheduleCommandRunner }),
+          logger: this.logger,
+        });
+      } catch (error) {
+        this.logger.error("could not clean up a ghost's schedules before deletion", {
+          ghost: ghost.name,
+          error: (error as Error).message,
+        });
+        throw new GhostError(
+          "schedule_cleanup_failed",
+          "Could not stop and remove this ghost's schedules. The ghost was not deleted; retry after checking its systemd user timers.",
+          503,
+        );
+      }
       const trashed = this.registry.trash(ghost.name);
-      // A trashed ghost's timers would keep firing at a ghost that is gone, so
-      // they go with it. Trash is recoverable; a schedule is not restored with
-      // it, because a timer that fired into an empty roster is worse than one
-      // the owner writes again.
-      await sweepGhostSchedules(ghost.name, {
-        unitDir: this.scheduleUnitDir,
-        logger: this.logger,
-      });
       this.maintenance?.completeGhostDelete(ghost.name);
       this.forgetGhost(ghost.name);
       this.logger.info("trashed ghost", { ghost: ghost.name, trash: trashed.trash });
@@ -6804,6 +6822,19 @@ export class SessionHost {
       this.projectBindings.revokeScope(ghost.name);
       await maintenanceReservation?.drained;
       await this.quiesceGhost(ghost.name);
+      let staleUnits: string[] = [];
+      try {
+        staleUnits = await listGhostScheduleUnits(
+          ghost.name,
+          this.scheduleUnitDir,
+        );
+      } catch (error) {
+        this.logger.warn("could not inspect a renamed ghost's timers", {
+          ghost: ghost.name,
+          name: nextName,
+          error: (error as Error).message,
+        });
+      }
       const renamed = this.registry.rename(ghost.name, nextName);
       await this.maintenance?.completeGhostRename(ghost.name, nextName);
       this.forgetGhost(ghost.name);
@@ -6811,10 +6842,6 @@ export class SessionHost {
       // filename and ExecStart. They remain the owner's files; log them instead
       // of silently deleting or rewriting them. Pre-v1 names are deliberately
       // outside Ghost ownership and are not inferred here.
-      const staleUnits = await listGhostScheduleUnits(
-        ghost.name,
-        this.scheduleUnitDir,
-      );
       if (staleUnits.length > 0) {
         this.logger.warn("renamed ghost still has timers under its old name", {
           ghost: ghost.name,

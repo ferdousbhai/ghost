@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -70,6 +70,16 @@ describe("which units belong to a ghost", () => {
   it("answers empty for a ghost with no schedules and for no unit directory", async () => {
     expect(await listGhostScheduleUnits("aria", await unitDir([]))).toEqual([]);
     expect(await listGhostScheduleUnits("aria", "/nonexistent/unit/dir")).toEqual([]);
+  });
+
+  it("does not mistake an unreadable unit location for an empty one", async () => {
+    const dir = await unitDir([]);
+    const notDirectory = join(dir, "not-a-directory");
+    await writeFile(notDirectory, "ordinary file", "utf8");
+
+    await expect(listGhostScheduleUnits("aria", notDirectory)).rejects.toMatchObject({
+      code: "ENOTDIR",
+    });
   });
 
   it("length-delimits and lists the full 64-character ghost-name boundary", async () => {
@@ -154,19 +164,73 @@ describe("sweeping a deleted ghost's schedules", () => {
     expect(await readdir(dir)).toEqual(["spice-catalyst-research.timer"]);
   });
 
-  it("still removes the unit files when systemctl refuses to disable them", async () => {
-    // The ghost is going away either way. A timer left on disk after its ghost
-    // is gone would keep firing, which is worse than a failed disable.
+  it("leaves the unit files for retry when systemctl cannot stop the timer", async () => {
     const dir = await unitDir(["ghost-timer-v1-4-aria-standup.timer"]);
+
+    await expect(sweepGhostSchedules("aria", {
+      unitDir: dir,
+      run: async () => ({ stdout: "", stderr: "user manager unavailable", code: 1 }),
+    })).rejects.toThrow("user manager unavailable");
+
+    expect(await readdir(dir)).toEqual(["ghost-timer-v1-4-aria-standup.timer"]);
+  });
+
+  it("keeps partial removals as retry progress and reloads before reporting failure", async () => {
+    const timer = "ghost-timer-v1-4-aria-standup.timer";
+    const service = "ghost-timer-v1-4-aria-standup.service";
+    const dir = await unitDir([timer, service]);
+    const calls: string[][] = [];
+    let rejectService = true;
+    const run = async (args: readonly string[]) => {
+      calls.push([...args]);
+      return { stdout: "", stderr: "", code: 0 };
+    };
+
+    await expect(sweepGhostSchedules("aria", {
+      unitDir: dir,
+      run,
+      unlinkUnit: async (path) => {
+        if (rejectService && path.endsWith(service)) throw new Error("unit directory is read-only");
+        await unlink(path);
+      },
+    })).rejects.toThrow("unit directory is read-only");
+
+    expect(await readdir(dir)).toEqual([service]);
+    expect(calls).toEqual([
+      ["--user", "disable", "--now", timer],
+      ["--user", "daemon-reload"],
+    ]);
+
+    rejectService = false;
+    await expect(sweepGhostSchedules("aria", {
+      unitDir: dir,
+      run,
+      unlinkUnit: unlink,
+    })).resolves.toEqual({ removed: [service] });
+    expect(await readdir(dir)).toEqual([]);
+    expect(calls.at(-1)).toEqual(["--user", "daemon-reload"]);
+  });
+
+  it("does not roll back safe cleanup when daemon-reload fails", async () => {
+    const timer = "ghost-timer-v1-4-aria-standup.timer";
+    const dir = await unitDir([timer]);
+    const calls: string[][] = [];
 
     const result = await sweepGhostSchedules("aria", {
       unitDir: dir,
-      run: async () => {
-        throw new Error("systemctl is not on PATH");
+      run: async (args) => {
+        calls.push([...args]);
+        return args.includes("daemon-reload")
+          ? { stdout: "", stderr: "reload failed", code: 1 }
+          : { stdout: "", stderr: "", code: 0 };
       },
     });
 
-    expect(result.removed).toEqual(["ghost-timer-v1-4-aria-standup.timer"]);
+    expect(result.removed).toEqual([timer]);
     expect(await readdir(dir)).toEqual([]);
+    expect(calls).toEqual([
+      ["--user", "disable", "--now", timer],
+      ["--user", "daemon-reload"],
+    ]);
   });
 });

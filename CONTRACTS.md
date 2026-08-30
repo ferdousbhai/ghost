@@ -210,6 +210,19 @@ cgroup. Timers fire only while the user manager runs and the daemon is up with
 the owner's graphical session, so scheduled work makes no promise about
 overnight or logged-out runs; #18 owns that.
 
+Whole-home deletion is fail-closed around those owned units. After the ghost is
+quiescent but before its home moves, the daemon must successfully stop and
+disable every matching timer and verify every matching timer/service file
+absent. A scan, stop, or removal failure returns
+`503 schedule_cleanup_failed` and leaves the home at its original name. Cleanup
+already completed is not rolled back: retrying the same `DELETE` idempotently
+finishes the remaining units, while abandoning the deletion means the owner
+must recreate or re-enable any schedule already removed. Once the timers are
+stopped and their files are absent, `daemon-reload` is best-effort cleanup: a
+failure is logged but does not make the stopped triggers live or block the home
+move. Rename's unit scan is diagnostic only and can never make an already moved
+home look like a failed rename.
+
 A file a ghost authors *for the owner* — a report, an export, a generated image —
 belongs in the owner's Documents tree or the requested working directory, never
 in ghost-home persona, memory, or runtime files. Memory is private context for
@@ -961,7 +974,10 @@ shape and streams emit one complete event object per line.
   cached Pi sessions are closed (disposed, not deleted) and pending
   title work is awaited first. **Deletion is a move, never an `rm`**:
   the ghost home holds the only copy of a persona and its memory, so
-  nothing on any path follows the rename with a recursive removal.
+  nothing on any path follows the rename with a recursive removal. Before that
+  move, deletion applies the scheduled-work cleanup above; its
+  `503 schedule_cleanup_failed` response guarantees the home has not moved and
+  the same confirmed request is the retry path.
 - `PUT  /api/ghosts/:name/name` `{ name: "<new>" }` → `{ ok: true, name }` — the
   ghost's name IS its home directory's name, so renaming one is anchored by a
   same-filesystem rename of `<root>/<old>/` to `<root>/<new>/`. Persona, memory,

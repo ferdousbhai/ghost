@@ -204,6 +204,7 @@ async function setup(
     | "logger"
     | "maintenance"
     | "jobs"
+    | "scheduleCommandRunner"
   > = {},
   providerOptions: Omit<Parameters<typeof startMockProvider>[0], "script"> = {},
 ) {
@@ -7586,6 +7587,45 @@ describe("SessionHost.deleteGhost", () => {
     });
   });
 
+  it("leaves the home in place when schedule cleanup fails and completes on retry", async () => {
+    let systemdAvailable = false;
+    const calls: string[][] = [];
+    const { dir, temp } = await setup([{ kind: "text", text: "hello" }], {
+      scheduleCommandRunner: async (args) => {
+        calls.push([...args]);
+        return systemdAvailable
+          ? { stdout: "", stderr: "", code: 0 }
+          : { stdout: "", stderr: "user manager unavailable", code: 1 };
+      },
+    });
+    const unitDir = join(temp.ownerHome, ".config", "systemd", "user");
+    const timer = "ghost-timer-v1-6-casper-standup.timer";
+    const service = "ghost-timer-v1-6-casper-standup.service";
+    mkdirSync(unitDir, { recursive: true });
+    writeFileSync(join(unitDir, timer), "[Timer]\n");
+    writeFileSync(join(unitDir, service), "[Service]\n");
+
+    await expect(host!.deleteGhost("casper")).rejects.toMatchObject({
+      code: "schedule_cleanup_failed",
+      status: 503,
+    });
+    expect(existsSync(dir)).toBe(true);
+    expect(temp.registry.list().map((ghost) => ghost.name)).toEqual(["casper"]);
+    expect(readdirSync(unitDir).sort()).toEqual([service, timer]);
+
+    systemdAvailable = true;
+    await expect(host!.deleteGhost("casper")).resolves.toMatchObject({
+      trash: join(temp.trashDir, "files", "casper"),
+    });
+    expect(existsSync(dir)).toBe(false);
+    expect(readdirSync(unitDir)).toEqual([]);
+    expect(calls).toEqual([
+      ["--user", "disable", "--now", timer],
+      ["--user", "disable", "--now", timer],
+      ["--user", "daemon-reload"],
+    ]);
+  });
+
   it("blocks a new conversation while the ghost home is moving to trash", async () => {
     await setup([{ kind: "text", text: "hello" }]);
     await host!.open("casper", "existing");
@@ -7623,6 +7663,24 @@ describe("SessionHost.deleteGhost", () => {
 });
 
 describe("SessionHost.renameGhost", () => {
+  it("keeps an unreadable schedule scan diagnostic from becoming a post-move failure", async () => {
+    const logger = recordingLogger("warn");
+    const { temp } = await setup([{ kind: "text", text: "hello" }], { logger });
+    const systemdDir = join(temp.ownerHome, ".config", "systemd");
+    mkdirSync(systemdDir, { recursive: true });
+    writeFileSync(join(systemdDir, "user"), "not a directory");
+
+    await expect(host!.renameGhost("casper", "specter")).resolves.toMatchObject({
+      name: "specter",
+    });
+    expect(temp.registry.list().map((ghost) => ghost.name)).toEqual(["specter"]);
+    expect(logger.records).toContainEqual(expect.objectContaining({
+      level: "warn",
+      message: "could not inspect a renamed ghost's timers",
+      fields: expect.objectContaining({ ghost: "casper", name: "specter" }),
+    }));
+  });
+
   it("drains maintenance and transfers its identity after the home rename but before release", async () => {
     const moveDrained = deferred();
     let reservedGhost = "";

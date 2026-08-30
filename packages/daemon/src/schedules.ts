@@ -110,9 +110,10 @@ export async function listGhostScheduleUnits(
   let entries: string[];
   try {
     entries = await readdir(unitDir);
-  } catch {
+  } catch (error) {
     // No unit directory means no schedules, which is the common case.
-    return [];
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
   }
   return entries
     .filter((name) => name.startsWith(prefix))
@@ -127,6 +128,8 @@ export interface ScheduleSweepOptions {
   readonly unitDir: string;
   /** Test seam over `systemctl --user`. */
   readonly run?: CommandRunner;
+  /** Test seam over `fs.unlink`. */
+  readonly unlinkUnit?: (path: string) => Promise<void>;
   readonly logger?: Logger;
 }
 
@@ -135,9 +138,9 @@ export interface ScheduleSweepResult {
 }
 
 /**
- * Stop, disable, and delete every timer a ghost owned, then reload so systemd
- * forgets them too. Best-effort by design: a unit that will not disable must
- * still have its file removed, or the ghost is gone and its schedule is not.
+ * Stop, disable, and delete every timer a ghost owned. Failure leaves the
+ * caller free to retry before moving the ghost home. Reload is best-effort
+ * after the safety boundary: stopped triggers plus absent unit files.
  */
 export async function sweepGhostSchedules(
   ghostName: string,
@@ -148,17 +151,28 @@ export async function sweepGhostSchedules(
   if (units.length === 0) return { removed: [] };
 
   const run = options.run ?? commandRunner("systemctl");
+  const unlinkUnit = options.unlinkUnit ?? unlink;
   const timers = units.filter((unit) => unit.endsWith(".timer"));
   if (timers.length > 0) {
-    await run(["--user", "disable", "--now", ...timers]).catch(() => undefined);
+    const result = await run(["--user", "disable", "--now", ...timers]);
+    if (result.code !== 0) {
+      throw new Error(
+        result.stderr.trim()
+          || result.stdout.trim()
+          || `systemctl disable exited with code ${result.code}`,
+      );
+    }
   }
 
   const removed: string[] = [];
+  let removalFailure: unknown;
   for (const unit of units) {
     try {
-      await unlink(join(options.unitDir, unit));
+      await unlinkUnit(join(options.unitDir, unit));
       removed.push(unit);
     } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+      removalFailure ??= error;
       logger.warn("could not remove a ghost's timer unit", {
         ghost: ghostName,
         unit,
@@ -166,7 +180,28 @@ export async function sweepGhostSchedules(
       });
     }
   }
-  if (removed.length > 0) await run(["--user", "daemon-reload"]).catch(() => undefined);
+
+  try {
+    const result = await run(["--user", "daemon-reload"]);
+    if (result.code !== 0) {
+      throw new Error(
+        result.stderr.trim()
+          || result.stdout.trim()
+          || `systemctl daemon-reload exited with code ${result.code}`,
+      );
+    }
+  } catch (error) {
+    logger.warn("could not reload systemd after removing a ghost's timer units", {
+      ghost: ghostName,
+      error: (error as Error).message,
+    });
+  }
+
+  const remaining = await listGhostScheduleUnits(ghostName, options.unitDir);
+  if (removalFailure !== undefined) throw removalFailure;
+  if (remaining.length > 0) {
+    throw new Error(`Ghost schedule cleanup left ${remaining.length} owned unit(s).`);
+  }
   logger.info("swept ghost schedules", { ghost: ghostName, removed: removed.length });
   return { removed };
 }
