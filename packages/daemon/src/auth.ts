@@ -224,6 +224,8 @@ export async function bindDefaultChatModelIfUnset(
     signal?: AbortSignal;
     /** Re-checked at the serialized models.json commit boundary. */
     commitAllowed?: () => boolean;
+    /** Resolve a renamed inode-owned home again immediately before commit. */
+    resolveConfigDir?: () => string | null;
   } = {},
 ): Promise<{ provider: string; modelId: string } | null> {
   const commitAllowed = () => {
@@ -234,8 +236,17 @@ export async function bindDefaultChatModelIfUnset(
       return false;
     }
   };
+  const resolveConfigDir = (): string | null => {
+    try {
+      return options.resolveConfigDir ? options.resolveConfigDir() : configDir;
+    } catch {
+      return null;
+    }
+  };
   if (!commitAllowed()) return null;
-  const existing = readGhostModels(configDir);
+  const initialConfigDir = resolveConfigDir();
+  if (!initialConfigDir) return null;
+  const existing = readGhostModels(initialConfigDir);
   if (resolveChatModelRef(existing)) return null;
 
   const candidatesOrAborted = await discoverAvailableModels(
@@ -249,7 +260,14 @@ export async function bindDefaultChatModelIfUnset(
   const model = resolveChatModel(null, candidates);
   if (!model || !commitAllowed()) return null;
 
-  return setChatModelRoleIfUnset(configDir, model.provider, model.id, commitAllowed);
+  const commitConfigDir = resolveConfigDir();
+  if (!commitConfigDir) return null;
+  return setChatModelRoleIfUnset(
+    commitConfigDir,
+    model.provider,
+    model.id,
+    () => commitAllowed() && resolveConfigDir() === commitConfigDir,
+  );
 }
 
 async function discoverAvailableModels(
@@ -730,15 +748,17 @@ export class LoginManager {
     const ghost = this.currentGhost(session);
     if (!ghost) return;
     session.ghostName = ghost.name;
-    const targetDir = ghost.dir;
     const bound = await bindDefaultChatModelIfUnset(
-      ghostPaths(targetDir).home,
+      ghostPaths(ghost.dir).home,
       session.runtime,
       session.view.providerId,
       {
         signal: session.controller.signal,
-        commitAllowed: () => this.isActive(session)
-          && this.currentGhost(session)?.dir === targetDir,
+        commitAllowed: () => this.isActive(session),
+        resolveConfigDir: () => {
+          const current = this.currentGhost(session);
+          return current ? ghostPaths(current.dir).home : null;
+        },
       },
     );
     if (bound && this.isActive(session)) session.view.modelBound = bound;

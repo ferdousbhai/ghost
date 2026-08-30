@@ -544,10 +544,11 @@ Both indexes are newest-modified first and carry at most 50 entries, with a
 character budget behind that. Each is one entry per line with no bullet marker:
 memory as the bare slug (the file is that slug plus `.md`), Documents as the
 bare name with a trailing `/` for a directory. A Documents name is JSON-quoted
-when it holds a control character, rendered line separator, quote, or backslash,
-or has leading or trailing whitespace. U+007F through U+009F, U+2028, and
-U+2029 are escaped inside that quoted form, so no filesystem name can forge an
-index line or inject a terminal control. When
+when it holds a control character, rendered line separator, invisible/bidi
+formatting control, quote, or backslash, or has leading or trailing whitespace.
+U+007F through U+009F, U+2028, U+2029, and the formatting controls recognized
+by the untrusted-content detector are escaped inside that quoted form, so no
+filesystem name can forge, reorder, or hide part of an index line. When
 the cut-off drops entries the section ends with `(+N more)`, where `N` counts
 every entry left out.
 `/skill:<name> [args]` is explicit

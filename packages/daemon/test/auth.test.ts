@@ -309,6 +309,39 @@ describe("successful login refresh", () => {
     )).resolves.toMatchObject({ status: "succeeded" });
   });
 
+  it("binds the default model in a renamed home when discovery was already pending", async () => {
+    const discoveryStarted = deferred<void>();
+    const finishDiscovery = deferred<readonly ReturnType<typeof fakePiModel>[]>();
+    const { manager, root } = setup(async () => oauthCredential(), {
+      createRuntime: async () => {
+        const runtime = makeFakeRuntime({
+          login: async () => oauthCredential(),
+          models: { openrouter: ["rename-default"] },
+        });
+        runtime.getAvailable = async () => {
+          discoveryStarted.resolve();
+          return finishDiscovery.promise;
+        };
+        return runtime;
+      },
+    });
+
+    const started = await manager.start("casper", "openrouter", "oauth");
+    await discoveryStarted.promise;
+    const renamed = temp!.registry.rename("casper", "wisp");
+    manager.renameGhost(renamed);
+    finishDiscovery.resolve([fakePiModel({ provider: "openrouter", id: "rename-default" })]);
+
+    const done = await waitFor(
+      () => manager.view("wisp", started.loginId),
+      (view) => view.status === "succeeded",
+    );
+    expect(done.modelBound).toEqual({ provider: "openrouter", modelId: "rename-default" });
+    expect(existsSync(join(root, "casper"))).toBe(false);
+    expect(readGhostModels(ghostPaths(join(root, "wisp")).home)?.roles?.chat_model)
+      .toEqual({ provider: "openrouter", modelId: "rename-default" });
+  });
+
   it("aborts a finishing hook at the login TTL and never resurrects success", async () => {
     const entered = deferred<void>();
     const finished = deferred<void>();

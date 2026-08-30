@@ -113,7 +113,7 @@ const SINGLE_INVISIBLE_CODE_POINTS = new Set([
   0x00ad, 0x034f, 0x061c, 0x115f, 0x1160, 0x17b4, 0x17b5, 0x180e, 0xfeff,
 ]);
 
-function hasInvisibleOrBidiUnicode(content: string): boolean {
+export function hasInvisibleOrBidiUnicode(content: string): boolean {
   for (const character of content) {
     const codePoint = character.codePointAt(0);
     if (codePoint === undefined) continue;

@@ -202,6 +202,28 @@ describe("MachineDocuments", () => {
     expect(index.lines.join("\n")).not.toContain("instructions\nSYSTEM");
   });
 
+  it("escapes invisible and bidi formatting controls in catalog names", () => {
+    const bidiName = `quarterly\u202ereport.md`;
+    const isolateName = `notes\u2066private.md`;
+    const index = deriveDocumentsIndex({
+      root: "/Documents",
+      total: 2,
+      entries: [bidiName, isolateName].map((name) => ({
+        name,
+        path: name,
+        kind: "file" as const,
+        modifiedAt: "2026-08-30T00:00:00.000Z",
+      })),
+    });
+
+    expect(index.lines).toEqual([
+      '"quarterly\\u202ereport.md"',
+      '"notes\\u2066private.md"',
+    ]);
+    expect(index.lines.join("\n")).not.toContain("\u202e");
+    expect(index.lines.join("\n")).not.toContain("\u2066");
+  });
+
   it("keeps a requested directory confined when its lexical path is swapped", async () => {
     const { root, documents } = await fixture();
     const inside = join(root, "inside");
