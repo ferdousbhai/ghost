@@ -486,7 +486,7 @@ export class ModelCatalog {
     provider: string,
     id: string,
   ): Promise<ModelRoutingView> {
-    return this.withMutationRuntime(ghostName, async ({ runtime, configDir }) => {
+    return this.withRuntime(ghostName, async ({ runtime, configDir }) => {
       const model = this.validateRoutingModel(runtime, role, target, provider, id);
       if (target === "primary") {
         setGhostModelRole(configDir, role, model.provider, model.id);
@@ -511,7 +511,7 @@ export class ModelCatalog {
     ghostName: string,
     role: GhostModelRole,
   ): Promise<ModelRoutingView> {
-    return this.withMutationRuntime(ghostName, async ({ runtime, configDir }) => {
+    return this.withRuntime(ghostName, async ({ runtime, configDir }) => {
       clearGhostModelFallbacks(configDir, role);
       await this.notifyModelRoutingChanged(ghostName);
       return this.resolveModelRouting(ghostName, runtime, configDir);
@@ -522,7 +522,7 @@ export class ModelCatalog {
     ghostName: string,
     role: GhostModelRole,
   ): Promise<ModelRoutingView> {
-    return this.withMutationRuntime(ghostName, async ({ runtime, configDir }) => {
+    return this.withRuntime(ghostName, async ({ runtime, configDir }) => {
       clearGhostModelRole(configDir, role);
       await this.notifyModelRoutingChanged(ghostName);
       return this.resolveModelRouting(ghostName, runtime, configDir);
@@ -539,7 +539,7 @@ export class ModelCatalog {
     role: GhostModelRole,
     selections: readonly ModelRouteSelection[],
   ): Promise<ModelRoutingView> {
-    return this.withMutationRuntime(ghostName, async ({ runtime, configDir }) => {
+    return this.withRuntime(ghostName, async ({ runtime, configDir }) => {
       const file = this.readModelsFile(configDir, ghostName);
       const primary = role === "chat_model" ? resolveChatModelRef(file) : file?.roles?.[role];
       const bindings: GhostModelRoleBinding[] = [];
@@ -584,19 +584,21 @@ export class ModelCatalog {
     ghostName: string,
     operation: (prepared: { runtime: ModelCatalogRuntime; configDir: string }) => T | Promise<T>,
   ): Promise<T> {
+    return this.homeOperations.withLease(ghostName, () =>
+      this.withRuntimeLeased(ghostName, operation)
+    );
+  }
+
+  private async withRuntimeLeased<T>(
+    ghostName: string,
+    operation: (prepared: { runtime: ModelCatalogRuntime; configDir: string }) => T | Promise<T>,
+  ): Promise<T> {
     const prepared = await this.prepare(ghostName);
     try {
       return await operation(prepared);
     } finally {
       prepared.runtime.close();
     }
-  }
-
-  private withMutationRuntime<T>(
-    ghostName: string,
-    operation: (prepared: { runtime: ModelCatalogRuntime; configDir: string }) => T | Promise<T>,
-  ): Promise<T> {
-    return this.homeOperations.withLease(ghostName, () => this.withRuntime(ghostName, operation));
   }
 
   private async prepare(ghostName: string): Promise<{ runtime: ModelCatalogRuntime; configDir: string }> {
@@ -790,7 +792,7 @@ export class ModelCatalog {
    * shell can prompt a login rather than the switch silently failing.
    */
   async setChatModel(ghostName: string, provider: string, id: string): Promise<SetModelResult> {
-    return this.withMutationRuntime(ghostName, ({ runtime, configDir }) =>
+    return this.withRuntime(ghostName, ({ runtime, configDir }) =>
       this.setChatModelWithRuntime(ghostName, runtime, configDir, provider, id));
   }
 

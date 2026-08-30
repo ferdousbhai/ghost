@@ -3,8 +3,8 @@
  * each auth callback path — URL, device code, paste, select, failure,
  * timeout — with no real provider and no network.
  */
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { AuthInteraction } from "../src/auth.js";
 import {
@@ -14,6 +14,7 @@ import {
   type LoginView,
 } from "../src/auth.js";
 import { ghostPaths } from "../src/ghosts.js";
+import { HomeOperationCoordinator } from "../src/home-operations.js";
 import {
   ghostModelsPath,
   readGhostModels,
@@ -108,6 +109,69 @@ describe("listProviders", () => {
       code: "unknown_provider",
       status: 400,
     });
+  });
+});
+
+describe("short-lived auth runtime home leases", () => {
+  it.each([
+    ["provider listing", (manager: LoginManager) => manager.listProviders("casper"), "rename"],
+    [
+      "logout",
+      (manager: LoginManager) => manager.logout("casper", "openrouter", "personal"),
+      "delete",
+    ],
+  ] as const)("holds the lease through %s runtime construction and use", async (
+    _label,
+    use,
+    move,
+  ) => {
+    temp = makeTempGhosts();
+    temp.registry.ensureRoot();
+    const oldHome = seedGhost(temp.root, { name: "casper" });
+    const homeOperations = new HomeOperationCoordinator(temp.registry);
+    const entered = Promise.withResolvers<void>();
+    const resume = Promise.withResolvers<void>();
+    const probeName = "auth-runtime-probe";
+    const runtime = {
+      ...makeFakeRuntime({ login: async () => oauthCredential() }),
+      logout: async () => {},
+    };
+    const manager = new LoginManager({
+      registry: temp.registry,
+      homeOperations,
+      createRuntime: async (input) => {
+        entered.resolve();
+        await resume.promise;
+        mkdirSync(dirname(input.authPath), { recursive: true });
+        writeFileSync(join(dirname(input.authPath), probeName), "leased\n");
+        return runtime;
+      },
+    });
+    managers.push(manager);
+
+    const using = use(manager);
+    await entered.promise;
+    let moved = false;
+    let movedHome = "";
+    const moving = homeOperations.reserveMove("casper").then((release) => {
+      try {
+        movedHome = move === "rename"
+          ? temp!.registry.rename("casper", "wisp").dir
+          : temp!.registry.trash("casper").trash;
+        moved = true;
+      } finally {
+        release();
+      }
+    });
+    await Promise.resolve();
+    expect(homeOperations.moveReservationCount).toBe(1);
+    expect(moved).toBe(false);
+
+    resume.resolve();
+    await using;
+    await moving;
+    expect(existsSync(oldHome)).toBe(false);
+    expect(existsSync(join(ghostPaths(movedHome).agentDir, probeName))).toBe(true);
   });
 });
 

@@ -1,5 +1,8 @@
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ghostPaths } from "../src/ghosts.js";
+import { HomeOperationCoordinator } from "../src/home-operations.js";
 import {
   ModelCatalog,
   type ModelCatalogRuntime,
@@ -304,5 +307,65 @@ describe("ModelCatalog runtime lifecycle", () => {
 
     expect(createRuntime).toHaveBeenCalledTimes(1);
     expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["current model", (catalog: ModelCatalog) => catalog.getCurrent("casper"), "rename"],
+    ["model listing", (catalog: ModelCatalog) => catalog.listModels("casper"), "delete"],
+    ["model routing", (catalog: ModelCatalog) => catalog.getModelRouting("casper"), "rename"],
+  ] as const)("holds the home lease through %s runtime construction and use", async (
+    _label,
+    use,
+    move,
+  ) => {
+    temp = makeTempGhosts();
+    temp.registry.ensureRoot();
+    const oldHome = seedGhost(temp.root, { name: "casper" });
+    const homeOperations = new HomeOperationCoordinator(temp.registry);
+    const entered = Promise.withResolvers<void>();
+    const resume = Promise.withResolvers<void>();
+    const probeName = "catalog-runtime-probe";
+    const runtime = makeFakeCatalogRuntime({
+      models,
+      credentialed: ["anthropic", "openai-codex"],
+    });
+    const catalog = new ModelCatalog({
+      registry: temp.registry,
+      homeOperations,
+      offline: true,
+      createRuntime: async (input) => {
+        entered.resolve();
+        await resume.promise;
+        mkdirSync(dirname(input.authPath), { recursive: true });
+        writeFileSync(join(dirname(input.authPath), probeName), "leased\n");
+        return runtime;
+      },
+      claudeCodePlanStatus: async () => false,
+    });
+
+    const reading = use(catalog);
+    await entered.promise;
+    let moved = false;
+    let movedHome = "";
+    const moving = homeOperations.reserveMove("casper").then((release) => {
+      try {
+        movedHome = move === "rename"
+          ? temp!.registry.rename("casper", "wisp").dir
+          : temp!.registry.trash("casper").trash;
+        moved = true;
+      } finally {
+        release();
+      }
+    });
+    await Promise.resolve();
+    expect(homeOperations.moveReservationCount).toBe(1);
+    expect(moved).toBe(false);
+
+    resume.resolve();
+    await reading;
+    await moving;
+    expect(existsSync(oldHome)).toBe(false);
+    expect(existsSync(join(ghostPaths(movedHome).agentDir, probeName))).toBe(true);
+    if (move === "rename") expect(existsSync(join(temp.root, "wisp"))).toBe(true);
   });
 });

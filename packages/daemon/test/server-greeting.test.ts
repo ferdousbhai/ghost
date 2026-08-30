@@ -7,8 +7,12 @@
  * there. A generation failure must never reach the shell as a 5xx — it would
  * turn "no greeting today" into an error dialog over an empty chat window.
  */
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { GhostHomeDigestReaders } from "../src/extensions.js";
+import { ghostPaths } from "../src/ghosts.js";
+import { homeOperationsFor } from "../src/home-operations.js";
 import type { Logger } from "../src/log.js";
 import { startDaemonServer, type ListeningServer } from "../src/server.js";
 import {
@@ -106,6 +110,52 @@ describe("POST /api/ghosts/:name/greeting", () => {
     await postGreeting(base);
     expect(seenName).toBe("casper");
     expect(seenCharacter).toContain("letterpress printer");
+  });
+
+  it("holds the home lease through greeting runtime construction and use", async () => {
+    const entered = Promise.withResolvers<void>();
+    const resume = Promise.withResolvers<void>();
+    const probeName = "greeting-runtime-probe";
+    const base = await serve({
+      written: true,
+      greeting: {
+        createRuntime: async (input) => {
+          entered.resolve();
+          await resume.promise;
+          mkdirSync(dirname(input.authPath), { recursive: true });
+          writeFileSync(join(dirname(input.authPath), probeName), "leased\n");
+          throw new Error("intentional greeting runtime failure");
+        },
+      },
+    });
+    const oldHome = `${temp!.root}/casper`;
+    const greeting = postGreeting(base);
+    await entered.promise;
+
+    let deleteSettled = false;
+    const deleting = fetch(`${base}/api/ghosts/casper?confirm=casper`, { method: "DELETE" })
+      .then((response) => {
+        deleteSettled = true;
+        return response;
+      });
+    const homeOperations = homeOperationsFor(temp!.registry);
+    const deadline = Date.now() + 3_000;
+    while (homeOperations.moveReservationCount !== 1) {
+      if (Date.now() > deadline) throw new Error("timed out waiting for greeting home move");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    expect(deleteSettled).toBe(false);
+
+    resume.resolve();
+    expect(await greeting).toEqual({
+      status: 200,
+      body: { greeting: null, onboarding: false },
+    });
+    const deleted = await deleting;
+    expect(deleted.status).toBe(200);
+    const { trash } = await deleted.json() as { trash: string };
+    expect(existsSync(oldHome)).toBe(false);
+    expect(existsSync(join(ghostPaths(trash).agentDir, probeName))).toBe(true);
   });
 
   it("answers 200 with a null greeting when no model can write one", async () => {

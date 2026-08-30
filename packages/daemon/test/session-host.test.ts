@@ -205,6 +205,7 @@ async function setup(
     | "toolCwdWriter"
     | "pinWriter"
     | "readWriter"
+    | "conversationFileProbe"
     | "transactionProbe"
     | "transactionMarkerLstat"
     | "logger"
@@ -7600,6 +7601,22 @@ describe("passive session recovery during whole-home moves", () => {
     return { move, ready: () => ready };
   }
 
+  function pauseConversationFile(
+    operation: "plan-read" | "plan-write" | "title-write",
+  ) {
+    const entered = deferred();
+    const resume = deferred();
+    return {
+      entered,
+      resume,
+      probe: async (candidate: "plan-read" | "plan-write" | "title-write") => {
+        if (candidate !== operation) return;
+        entered.resolve();
+        await resume.promise;
+      },
+    };
+  }
+
   it("holds a list recovery lease until a concurrent rename can safely move the home", async () => {
     const recovery = pauseFirstForkCleanup();
     const { dir } = await setup([{ kind: "text", text: "unused" }], {
@@ -7737,6 +7754,122 @@ describe("passive session recovery during whole-home moves", () => {
     expect(await readReads(ghostPaths(trash).sessionDir)).toEqual({
       "pi:read-race": openedAt.toISOString(),
     });
+  });
+
+  it("holds a plan read through rename and blocks old-name reuse", async () => {
+    const plan = pauseConversationFile("plan-read");
+    const conversationId = "plan-read-race";
+    const { dir } = await setup([{ kind: "text", text: "persisted" }], {
+      title: { enabled: false },
+      conversationFileProbe: plan.probe,
+    });
+    await host!.runTurn("casper", { sessionId: conversationId, prompt: "remember", emit: () => {} });
+    await host!.close("casper", conversationId);
+    const coordinator = homeOperationsFor(temp!.registry);
+
+    const reading = host!.planState("casper", conversationId);
+    await plan.entered.promise;
+    const reserved = await reserveBlockedMove(coordinator);
+    expect(reserved.ready()).toBe(false);
+
+    plan.resume.resolve();
+    await expect(reading).resolves.toEqual({ planning: false, plan: null, todo: [] });
+    const releaseMove = await reserved.move;
+    try {
+      await host!.renameGhost("casper", "wisp");
+      expect(() => host!.createGhost("casper")).toThrowError(/finish moving/);
+    } finally {
+      releaseMove();
+    }
+    expect(existsSync(dir)).toBe(false);
+    const replacement = host!.createGhost("casper");
+
+    expect(await host!.planState("wisp", conversationId))
+      .toEqual({ planning: false, plan: null, todo: [] });
+    expect(existsSync(join(
+      ghostPaths(replacement.dir).sessionDir,
+      sessionFileNameFor(conversationId),
+    ))).toBe(false);
+  });
+
+  it("publishes plan mode before delete and cannot write into a reused old name", async () => {
+    const plan = pauseConversationFile("plan-write");
+    const conversationId = "plan-write-race";
+    const { dir } = await setup([{ kind: "text", text: "persisted" }], {
+      title: { enabled: false },
+      conversationFileProbe: plan.probe,
+    });
+    await host!.runTurn("casper", { sessionId: conversationId, prompt: "remember", emit: () => {} });
+    await host!.close("casper", conversationId);
+    const coordinator = homeOperationsFor(temp!.registry);
+
+    const starting = host!.setPlanMode("casper", conversationId, "start");
+    await plan.entered.promise;
+    const reserved = await reserveBlockedMove(coordinator);
+    expect(reserved.ready()).toBe(false);
+
+    plan.resume.resolve();
+    await expect(starting).resolves.toMatchObject({ planning: true });
+    const releaseMove = await reserved.move;
+    let trash = "";
+    try {
+      ({ trash } = await host!.deleteGhost("casper"));
+      expect(() => host!.createGhost("casper")).toThrowError(/finish moving/);
+    } finally {
+      releaseMove();
+    }
+    expect(existsSync(dir)).toBe(false);
+    const replacement = host!.createGhost("casper");
+    const transcript = readFileSync(
+      join(ghostPaths(trash).sessionDir, sessionFileNameFor(conversationId)),
+      "utf8",
+    ).trim().split("\n").map((line) => JSON.parse(line) as {
+      customType?: string;
+      data?: { state?: { planning?: boolean } };
+    });
+
+    expect(transcript.some((entry) =>
+      entry.customType === "ghost-plan" && entry.data?.state?.planning === true)).toBe(true);
+    expect(existsSync(join(
+      ghostPaths(replacement.dir).sessionDir,
+      sessionFileNameFor(conversationId),
+    ))).toBe(false);
+  });
+
+  it("publishes a title before rename and cannot append into a reused old name", async () => {
+    const title = pauseConversationFile("title-write");
+    const conversationId = "title-write-race";
+    const { dir } = await setup([{ kind: "text", text: "persisted" }], {
+      title: { enabled: false },
+      conversationFileProbe: title.probe,
+    });
+    await host!.runTurn("casper", { sessionId: conversationId, prompt: "remember", emit: () => {} });
+    await host!.close("casper", conversationId);
+    const coordinator = homeOperationsFor(temp!.registry);
+
+    const naming = host!.renameConversation("casper", conversationId, "Moved safely");
+    await title.entered.promise;
+    const reserved = await reserveBlockedMove(coordinator);
+    expect(reserved.ready()).toBe(false);
+
+    title.resume.resolve();
+    await expect(naming).resolves.toBe("Moved safely");
+    const releaseMove = await reserved.move;
+    try {
+      await host!.renameGhost("casper", "wisp");
+      expect(() => host!.createGhost("casper")).toThrowError(/finish moving/);
+    } finally {
+      releaseMove();
+    }
+    expect(existsSync(dir)).toBe(false);
+    const replacement = host!.createGhost("casper");
+
+    expect((await host!.listSessions("wisp"))
+      .find((row) => row.conversationId === conversationId)?.title).toBe("Moved safely");
+    expect(existsSync(join(
+      ghostPaths(replacement.dir).sessionDir,
+      sessionFileNameFor(conversationId),
+    ))).toBe(false);
   });
 });
 

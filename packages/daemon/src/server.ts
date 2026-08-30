@@ -417,7 +417,7 @@ export function createDaemonServer(options: ServerOptions): Server {
       errorResponse(response, 400, "invalid_request", "\"name\" must be a string.");
       return;
     }
-    const ghost = options.registry.create(name);
+    const ghost = options.host.createGhost(name);
     logger.info("ghost created", { ghost: ghost.name });
     jsonResponse(response, 201, ghost);
   };

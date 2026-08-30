@@ -2,6 +2,10 @@ import { randomUUID } from "node:crypto";
 import { statSync } from "node:fs";
 import type { Api, Credential, Model } from "@earendil-works/pi-ai";
 import { GhostError, ghostPaths, type Ghost, type GhostRegistry } from "./ghosts.js";
+import {
+  homeOperationsFor,
+  type HomeOperationCoordinator,
+} from "./home-operations.js";
 import { silentLogger, type Logger } from "./log.js";
 import {
   ghostAuthPath,
@@ -173,6 +177,7 @@ function startingLogin(ghostName: string, ghostHome: GhostHomeIdentity): Startin
 
 export interface LoginManagerOptions {
   registry: GhostRegistry;
+  homeOperations?: HomeOperationCoordinator;
   logger?: Logger;
   offline?: boolean;
   loginTtlMs?: number;
@@ -299,6 +304,7 @@ function assertAccountName(providerId: string, account: string): void {
 
 export class LoginManager {
   private readonly registry: GhostRegistry;
+  private readonly homeOperations: HomeOperationCoordinator;
   private readonly logger: Logger;
   private readonly offline: boolean;
   private readonly loginTtlMs: number;
@@ -313,6 +319,7 @@ export class LoginManager {
 
   constructor(options: LoginManagerOptions) {
     this.registry = options.registry;
+    this.homeOperations = options.homeOperations ?? homeOperationsFor(options.registry);
     this.logger = options.logger ?? silentLogger;
     this.offline = options.offline ?? false;
     this.loginTtlMs = options.loginTtlMs ?? DEFAULT_LOGIN_TTL_MS;
@@ -331,20 +338,26 @@ export class LoginManager {
     });
   }
 
+  private withRuntime<T>(
+    ghostName: string,
+    use: (runtime: LoginRuntime) => T | Promise<T>,
+  ): Promise<T> {
+    return this.homeOperations.withLease(ghostName, async () => {
+      const runtime = await this.buildRuntime(this.registry.get(ghostName).dir);
+      try {
+        return await use(runtime);
+      } finally {
+        runtime.close?.();
+      }
+    });
+  }
+
   async listProviders(ghostName: string): Promise<ProviderInfo[]> {
-    const ghost = this.registry.get(ghostName);
-    const runtime = await this.buildRuntime(ghost.dir);
-    try {
-      return this.providersFrom(runtime);
-    } finally {
-      runtime.close?.();
-    }
+    return this.withRuntime(ghostName, (runtime) => this.providersFrom(runtime));
   }
 
   async logout(ghostName: string, providerId: string, account: string): Promise<void> {
-    const ghost = this.registry.get(ghostName);
-    const runtime = await this.buildRuntime(ghost.dir);
-    try {
+    return this.withRuntime(ghostName, async (runtime) => {
       if (!runtime.logout) {
         throw new GhostError("not_supported", "This credential runtime does not support logout.", 409);
       }
@@ -355,9 +368,7 @@ export class LoginManager {
       assertAccountName(providerId, account);
       await runtime.logout(providerId, account);
       await this.onLoginSucceeded(ghostName, new AbortController().signal);
-    } finally {
-      runtime.close?.();
-    }
+    });
   }
 
   private providersFrom(runtime: LoginRuntime): ProviderInfo[] {

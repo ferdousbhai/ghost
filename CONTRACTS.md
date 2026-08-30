@@ -1000,7 +1000,9 @@ shape and streams emit one complete event object per line.
   never assume its value.
 - `GET  /api/ghosts` → `[{ name, dir, createdAt }]`
 - `POST /api/ghosts` `{ name }` → creates `~/ghosts/<name>/` with a seeded
-  `character.md`
+  `character.md`. A spelling reserved by an in-flight whole-home rename or
+  delete is `409 ghost_busy`; the old name cannot be reused until that move and
+  every path-bound operation it drained have finished.
 - `DELETE /api/ghosts/:name?confirm=<name>` → `{ ok: true, trash: "<abs path>" }`
   — moves `<root>/<name>/` to the freedesktop home trash
   (`$XDG_DATA_HOME/Trash`, default `~/.local/share/Trash`): the home becomes
@@ -1507,7 +1509,8 @@ shape and streams emit one complete event object per line.
   printable, or one over 120 characters is `400 invalid_request`; an unknown
   conversation id is `404 not_found`; a Claude Code conversation is
   `409 not_supported`, because that runtime owns its own conversation's name.
-  Renaming works while a turn is streaming.
+  Renaming works while a turn is streaming. One ghost-home identity lease spans
+  path resolution, `session_info` publication, and the resulting invalidation.
 - `GET  /api/ghosts/:name/sessions/:id/commands` → `{ commands }` — Ghost's
   slash-command catalog for that conversation, rebuilt from its pinned project
   snapshot so admitted Markdown commands/prompts and skills remain current
@@ -1544,7 +1547,9 @@ shape and streams emit one complete event object per line.
   background job remains running; it never cancels that job, and the owner may
   retry after the job finishes or is cancelled. `stop` and `clear` remain
   available in that reverse state. Claude Code conversations return `409` with
-  `not_supported`.
+  `not_supported`. GET and POST each hold one home identity lease from before
+  transcript/path resolution through recovery, binding, state append, and
+  invalidation, so a whole-home move cannot redirect either operation.
 - `GET  /api/ghosts/:name/sessions/:id/todo` → `{ todo }` — the phase list
   alone, same rules as GET plan.
 - `GET  /api/ghosts/:name/sessions/:id/jobs` → `{ jobs }` — the background
@@ -1783,7 +1788,9 @@ shape and streams emit one complete event object per line.
   input defaults only its own section, never discards successful siblings, and
   never exposes its error or path. An unreadable character fails closed to
   `onboarding: false`. Only an unknown ghost makes the endpoint fail. Cached per ghost (TTL ~10 min,
-  single-flight), invalidated when `character.md` changes.
+  single-flight), invalidated when `character.md` changes. The request holds
+  the home identity lease through every input read, runtime construction/use,
+  conversation-recency recovery, and cache publication.
 
 ### The smol lane (the `smol_model` role)
 
@@ -1862,6 +1869,13 @@ cached in `.pi/models-store.json`. One runtime entry is code-owned:
 than an API model. Its usability comes from the boolean result of external
 `claude auth status --json`; no credential is read into or emitted from a
 response.
+
+Current-model, catalogue, and routing reads hold the ghost-home identity lease
+from before runtime construction until the pi runtime closes. This covers pi's
+local catalogue synchronization, credential locks, and any runtime-owned cache
+directory creation, so a concurrent whole-home move cannot recreate or mutate
+the captured old path. Model mutations use the same boundary through their
+durable write and live-session notification.
 
 - `GET  /api/ghosts/:name/model` → the current selection:
   `{ current: { provider, id, name?, contextWindow?, hasVision } | null,
@@ -1946,7 +1960,8 @@ body, or logged.
   connectedVia?, accounts: [{ account, configured, connectedVia? }] }] }`,
   derived from pi's provider table (openai-codex, openrouter, anthropic, github-copilot,
   xai, …). Ambient-only providers and the externally authenticated
-  `claude-code` runtime are omitted.
+  `claude-code` runtime are omitted. Provider listing holds the home identity
+  lease through pi runtime construction, inspection, and close.
 - `POST /api/ghosts/:name/login` `{ providerId, authType, account? }` → `201`
   with the initial **login view** (below), including `loginId`.
 - `GET  /api/ghosts/:name/login/:loginId` → the current **login view**: the step
@@ -1958,7 +1973,9 @@ body, or logged.
   service/account item, then applies the ordinary credential refresh boundary
   to live sessions. Another account and every ghost policy remain untouched;
   every ghost referencing the removed machine account fails closed until it is
-  restored or logged in again.
+  restored or logged in again. Logout holds the same home identity lease from
+  before runtime/path construction through credential removal, refresh, and
+  runtime close.
 
 The **login view** is
 `{ loginId, providerId, account, authType, status, message?, authUrl?,

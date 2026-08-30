@@ -460,6 +460,7 @@ async function serveDaemon(
   }
   const login = new LoginManager({
     registry,
+    homeOperations,
     logger,
     offline: config.offline,
     onLoginSucceeded: (name, signal) => host.refreshAuth(name, signal),

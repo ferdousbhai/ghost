@@ -1463,6 +1463,45 @@ describe("POST /api/ghosts", () => {
     expect(traversal.status).toBe(400);
     expect(await traversal.json()).toMatchObject({ error: { code: "invalid_name" } });
   });
+
+  it("blocks old-name reuse until a whole-home rename releases its reservation", async () => {
+    const cleanupEntered = Promise.withResolvers<void>();
+    const resumeCleanup = Promise.withResolvers<void>();
+    let paused = false;
+    const base = await serve(undefined, {
+      scheduleCommandRunner: async () => {
+        if (!paused) {
+          paused = true;
+          cleanupEntered.resolve();
+          await resumeCleanup.promise;
+        }
+        return { stdout: "", stderr: "", code: 0 };
+      },
+    });
+    const renaming = fetch(`${base}/api/ghosts/casper/name`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "wisp" }),
+    });
+    await cleanupEntered.promise;
+
+    const blocked = await fetch(`${base}/api/ghosts`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "casper" }),
+    });
+    expect(blocked.status).toBe(409);
+    expect(await blocked.json()).toMatchObject({ error: { code: "ghost_busy" } });
+
+    resumeCleanup.resolve();
+    expect((await renaming).status).toBe(200);
+    const reused = await fetch(`${base}/api/ghosts`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "casper" }),
+    });
+    expect(reused.status).toBe(201);
+  });
 });
 
 describe("POST /api/ghosts/:name/messages", () => {

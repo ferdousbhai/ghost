@@ -524,6 +524,8 @@ export interface GreetingConfig {
   generate?: GreetingGenerator;
   readRawCharacter?: typeof readCharacterFile;
   inputReaders?: GhostHomeDigestReaders;
+  /** Test seam for pausing the short-lived greeting runtime. */
+  createRuntime?: typeof createGhostPiRuntime;
 }
 
 export interface SessionRetentionTimer {
@@ -590,6 +592,11 @@ export interface SessionHostOptions {
   /** Test seams for pausing owner sidebar-state publication. */
   pinWriter?: typeof writePins;
   readWriter?: typeof writeReads;
+  /** Test seam at plan/title path ownership boundaries. */
+  conversationFileProbe?: (
+    operation: "plan-read" | "plan-write" | "title-write",
+    path: string,
+  ) => void | Promise<void>;
   /** Deterministic fault seam around durable fork/delete transaction boundaries. */
   transactionProbe?: (
     stage: SessionTransactionProbeStage,
@@ -1519,6 +1526,7 @@ export class SessionHost {
   private readonly toolCwdWriter: typeof writeToolCwds;
   private readonly pinWriter: typeof writePins;
   private readonly readWriter: typeof writeReads;
+  private readonly conversationFileProbe: NonNullable<SessionHostOptions["conversationFileProbe"]>;
   private readonly transactionProbe: NonNullable<SessionHostOptions["transactionProbe"]>;
   private readonly transactionMarkerLstat: NonNullable<SessionHostOptions["transactionMarkerLstat"]>;
   private readonly logger: Logger;
@@ -1536,6 +1544,7 @@ export class SessionHost {
   private readonly generateGreetingFor: GreetingGenerator;
   private readonly greetingReadRawCharacter: typeof readCharacterFile;
   private readonly greetingInputReaders: GhostHomeDigestReaders | undefined;
+  private readonly createGreetingRuntime: typeof createGhostPiRuntime;
   private readonly claudeCode: ClaudeCodeRuntime;
   private readonly hooks: GhostHookRunner;
   private maintenance: SessionConversationMaintenance | undefined;
@@ -1604,6 +1613,7 @@ export class SessionHost {
     this.toolCwdWriter = options.toolCwdWriter ?? writeToolCwds;
     this.pinWriter = options.pinWriter ?? writePins;
     this.readWriter = options.readWriter ?? writeReads;
+    this.conversationFileProbe = options.conversationFileProbe ?? (() => {});
     this.transactionProbe = options.transactionProbe ?? (() => {});
     this.transactionMarkerLstat = options.transactionMarkerLstat ?? lstat;
     this.logger = options.logger ?? silentLogger;
@@ -1627,6 +1637,7 @@ export class SessionHost {
       ?? ((input) => this.defaultGreeting(input));
     this.greetingReadRawCharacter = options.greeting?.readRawCharacter ?? readCharacterFile;
     this.greetingInputReaders = options.greeting?.inputReaders;
+    this.createGreetingRuntime = options.greeting?.createRuntime ?? createGhostPiRuntime;
     this.hooks = options.hooks ?? new GhostHookRunner({ logger: this.logger });
     this.maintenance = options.maintenance;
     this.homeOperations = options.homeOperations ?? homeOperationsFor(options.registry);
@@ -1992,7 +2003,17 @@ export class SessionHost {
     runtime: ConversationRuntime = "pi",
   ): Promise<PlanStateView> {
     assertPiConversation(runtime, "Plan mode");
-    const book = await this.planBook(ghostName, sessionId, false);
+    return this.homeOperations.withLease(ghostName, () =>
+      this.planStateLeased(ghostName, sessionId)
+    );
+  }
+
+  private async planStateLeased(
+    ghostName: string,
+    sessionId: string | null | undefined,
+  ): Promise<PlanStateView> {
+    const ghost = this.registry.get(ghostName);
+    const book = await this.planBookLeased(ghost, sessionId, false);
     return book ? planStateView(book) : { planning: false, plan: null, todo: [] };
   }
 
@@ -2005,7 +2026,18 @@ export class SessionHost {
   ): Promise<PlanStateView> {
     assertPiConversation(runtime, "Plan mode");
     const conversationId = requireRawConversationId(sessionId ?? DEFAULT_SESSION_KEY);
-    const book = (await this.planBook(ghostName, sessionId, true)) as PlanBook;
+    return this.homeOperations.withLease(ghostName, () =>
+      this.setPlanModeLeased(ghostName, conversationId, action)
+    );
+  }
+
+  private async setPlanModeLeased(
+    ghostName: string,
+    conversationId: string,
+    action: "start" | "stop" | "clear",
+  ): Promise<PlanStateView> {
+    const ghost = this.registry.get(ghostName);
+    const book = (await this.planBookLeased(ghost, conversationId, true)) as PlanBook;
     if (action === "start" && this.sessions.get(this.keyOf(ghostName, conversationId))?.jobs.hasRunning()) {
       throw new GhostError(
         "session_busy",
@@ -2029,8 +2061,12 @@ export class SessionHost {
    * order; a conversation without a transcript is created for a write and
    * reported empty for a read.
    */
-  private async planBook(ghostName: string, sessionId: string | null | undefined, write: boolean): Promise<PlanBook | null> {
-    const ghost = this.registry.get(ghostName);
+  private async planBookLeased(
+    ghost: Ghost,
+    sessionId: string | null | undefined,
+    write: boolean,
+  ): Promise<PlanBook | null> {
+    const ghostName = ghost.name;
     const conversationId = requireRawConversationId(sessionId ?? DEFAULT_SESSION_KEY);
     const key = this.keyOf(ghostName, conversationId);
     const opening = this.opening.get(key);
@@ -2044,6 +2080,7 @@ export class SessionHost {
     }
     const paths = ghostPaths(ghost.dir);
     const sessionFile = join(paths.sessionDir, sessionFileNameFor(conversationId));
+    await this.conversationFileProbe(write ? "plan-write" : "plan-read", sessionFile);
     if (!existsSync(sessionFile)) {
       if (!write) return null;
       mkdirSync(paths.sessionDir, { recursive: true });
@@ -2051,7 +2088,7 @@ export class SessionHost {
     } else {
       await requireSessionFileConversationId(sessionFile, conversationId);
     }
-    const project = await this.projectState(ghostName, "pi", conversationId);
+    const project = await this.projectStateLeased(ghostName, "pi", conversationId);
     const manager = SessionManager.open(sessionFile, paths.sessionDir, project.cwd);
     if (!existsSync(sessionFile) || manager.getEntries().length <= 1) bindConversationId(manager, conversationId);
     return new PlanBook(manager);
@@ -4935,6 +4972,10 @@ export class SessionHost {
   }
 
   async greeting(ghostName: string): Promise<GreetingResult> {
+    return this.homeOperations.withLease(ghostName, () => this.greetingLeased(ghostName));
+  }
+
+  private async greetingLeased(ghostName: string): Promise<GreetingResult> {
     const ghost = this.registry.get(ghostName);
     const logger = this.logger.child({ ghost: ghost.name });
     const unavailable = new Set<GhostHomeDigestInput>();
@@ -4995,7 +5036,7 @@ export class SessionHost {
       // The most recent conversation is the last time the owner and this ghost
       // actually spoke. Taken as a max rather than off the head of the
       // listing, which is ordered pinned-first.
-      const newest = (await this.collectSessions(ghost.name))
+      const newest = (await this.collectSessionsLeased(ghost))
         .reduce<string | null>(
           (latest, row) => (latest === null || row.updatedAt > latest ? row.updatedAt : latest),
           null,
@@ -5050,7 +5091,7 @@ export class SessionHost {
       if (hosted.ghost.name === ghost.name) return use(hosted.modelRuntime);
     }
     const paths = ghostPaths(ghost.dir);
-    const runtime = await createGhostPiRuntime({
+    const runtime = await this.createGreetingRuntime({
       authPath: ghostAuthPath(paths.agentDir),
       modelsPath: ghostModelsPath(paths.home),
       allowModelNetwork: !this.offline,
@@ -5225,11 +5266,22 @@ export class SessionHost {
         400,
       );
     }
+    return this.homeOperations.withLease(ghostName, () =>
+      this.renameConversationLeased(ghostName, conversationId, title)
+    );
+  }
+
+  private async renameConversationLeased(
+    ghostName: string,
+    conversationId: string | null | undefined,
+    title: string,
+  ): Promise<string> {
     const ghost = this.registry.get(ghostName);
     const paths = ghostPaths(ghost.dir);
     const id = conversationId ?? DEFAULT_SESSION_KEY;
     const key = this.keyOf(ghostName, conversationId);
     const sessionFile = join(paths.sessionDir, sessionFileNameFor(id));
+    await this.conversationFileProbe("title-write", sessionFile);
     if (!existsSync(sessionFile) && !this.sessions.has(key) && !this.opening.has(key)) {
       // Claude Code owns its own conversation's name; Ghost only mirrors the
       // runtime label into the listing and has nothing to write to.
@@ -5260,7 +5312,7 @@ export class SessionHost {
     if (opening) await opening.catch(() => {});
 
     const hosted = this.sessions.get(key);
-    const project = hosted?.project ?? await this.projectState(ghostName, "pi", id);
+    const project = hosted?.project ?? await this.projectStateLeased(ghostName, "pi", id);
     const manager = hosted?.session.sessionManager ?? SessionManager.open(
       sessionFile,
       paths.sessionDir,
@@ -6804,6 +6856,19 @@ export class SessionHost {
       }
       maintenanceReservation?.release(maintenanceDeleteOutcome);
     }
+  }
+
+  /** Create one ghost only while its spelling is not reserved by a whole-home move. */
+  createGhost(name: string): Ghost {
+    assertValidGhostName(name);
+    if (this.ghostMoveReserved(name)) {
+      throw new GhostError(
+        "ghost_busy",
+        "Wait for the previous ghost home to finish moving before reusing this name.",
+        409,
+      );
+    }
+    return this.registry.create(name);
   }
 
   /**
