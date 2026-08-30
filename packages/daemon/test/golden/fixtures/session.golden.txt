@@ -42,18 +42,19 @@ Memory is private context for this ghost; Documents are owner-wide files shared 
 
 ## Scheduled work
 To do something on a clock, write a systemd **user timer** through Bash — Ghost has no scheduler of its own, and a timer is something the owner can see in `systemctl --user list-timers`, stop with `systemctl --user disable --now`, and edit in a text file.
-Name both units `ghost-timer-<your-ghost-name>-<slug>` in `~/.config/systemd/user/`. That exact prefix is how your timers are found and removed if your ghost is deleted; a differently named unit is left behind forever.
+Write both unit files in this exact absolute directory: "<owner-home>/.xdg-config/systemd/user".
+Name both units `ghost-timer-v1-6-casper-<slug>`. The `<slug>` must be 1–64 characters matching `[a-z0-9]+(?:-[a-z0-9]+)*`: lowercase ASCII letters or digits, separated only by single hyphens. That exact versioned prefix is how your timers are found and removed if your ghost is deleted; an older or differently named unit is left untouched.
 The service runs the `ghost` CLI, which authenticates itself:
 ```ini
-# ghost-timer-<ghost>-<slug>.service
+# ghost-timer-v1-6-casper-<slug>.service
 [Service]
 Type=oneshot
 # Without this the turn is SIGTERMed after ~90s and dies mid-answer.
 TimeoutStartSec=infinity
-ExecStart=/usr/bin/ghost say --new --ghost <ghost> "<the prompt>"
+ExecStart=/usr/bin/ghost say --new --ghost casper "<the prompt>"
 ```
 ```ini
-# ghost-timer-<ghost>-<slug>.timer
+# ghost-timer-v1-6-casper-<slug>.timer
 [Timer]
 OnCalendar=Mon..Fri 09:00 America/New_York
 # Catch up after the laptop was asleep or off at the scheduled moment.
@@ -137,18 +138,19 @@ Memory is private context for this ghost; Documents are owner-wide files shared 
 
 ## Scheduled work
 To do something on a clock, write a systemd **user timer** through Bash — Ghost has no scheduler of its own, and a timer is something the owner can see in `systemctl --user list-timers`, stop with `systemctl --user disable --now`, and edit in a text file.
-Name both units `ghost-timer-<your-ghost-name>-<slug>` in `~/.config/systemd/user/`. That exact prefix is how your timers are found and removed if your ghost is deleted; a differently named unit is left behind forever.
+Write both unit files in this exact absolute directory: "<owner-home>/.xdg-config/systemd/user".
+Name both units `ghost-timer-v1-6-casper-<slug>`. The `<slug>` must be 1–64 characters matching `[a-z0-9]+(?:-[a-z0-9]+)*`: lowercase ASCII letters or digits, separated only by single hyphens. That exact versioned prefix is how your timers are found and removed if your ghost is deleted; an older or differently named unit is left untouched.
 The service runs the `ghost` CLI, which authenticates itself:
 ```ini
-# ghost-timer-<ghost>-<slug>.service
+# ghost-timer-v1-6-casper-<slug>.service
 [Service]
 Type=oneshot
 # Without this the turn is SIGTERMed after ~90s and dies mid-answer.
 TimeoutStartSec=infinity
-ExecStart=/usr/bin/ghost say --new --ghost <ghost> "<the prompt>"
+ExecStart=/usr/bin/ghost say --new --ghost casper "<the prompt>"
 ```
 ```ini
-# ghost-timer-<ghost>-<slug>.timer
+# ghost-timer-v1-6-casper-<slug>.timer
 [Timer]
 OnCalendar=Mon..Fri 09:00 America/New_York
 # Catch up after the laptop was asleep or off at the scheduled moment.

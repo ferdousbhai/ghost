@@ -171,25 +171,38 @@ browser's, landing wherever the owner configured it and deduplicated by the
 browser itself. Recordings do not exist yet; when they do they follow the
 screenshot pattern exactly, and never prune the file currently being written.
 
+### Scheduled work
+
 Scheduled work is a systemd user timer, and the timer is the only record of it.
 Ghost ships no scheduler: a ghost writes its own units through Bash, the way
 `omarchy-games-retro-install` writes one `.desktop` file into the standard user
-directory and stops. The pair is named `ghost-timer-<ghost>-<slug>.timer` and
-`.service` under `XDG_CONFIG_HOME/systemd/user`, else `~/.config/systemd/user`,
-and the service's `ExecStart` is the `ghost` CLI, which authenticates itself from
+directory and stops. At daemon composition, Ghost resolves one absolute user
+unit directory: `$XDG_CONFIG_HOME/systemd/user` when `XDG_CONFIG_HOME` is
+absolute, otherwise `~/.config/systemd/user`. Pi and Claude prompts, deletion,
+and rename diagnostics all use that same value; none re-read the environment.
+
+The pair is named
+`ghost-timer-v1-<ASCII ghost-name length>-<ghost>-<slug>.timer` and `.service`.
+The length field makes ownership prefix-free: `aria` cannot claim `aria-ops`.
+The slug is 1–64 characters matching `[a-z0-9]+(?:-[a-z0-9]+)*` — lowercase
+ASCII letters and digits separated only by single hyphens. The original
+unversioned `ghost-timer-<ghost>-<slug>` form is ambiguous and therefore outside
+Ghost ownership: it is ignored, never inferred or automatically migrated.
+The service's `ExecStart` is the `ghost` CLI, which authenticates itself from
 the API token file. `TimeoutStartSec` must be lifted, because a `oneshot`
 inherits systemd's ~90s start timeout and the daemon aborts a turn whose caller
 disconnects, so a longer check-in would otherwise be killed mid-answer.
 
-That prefix is the entire daemon-side contract. Deleting a ghost disables and
-removes only units matching its exact `ghost-timer-<ghost>-` prefix — the same
-exact-name rule screenshot retention follows, so the owner's own timers and
-another ghost's share the directory untouched. Renaming does not sweep: the ghost
-still exists, the units are the owner's files, and a timer naming a ghost that
-moved fails visibly in `systemctl --user --failed`; the daemon logs which units
-were left behind rather than deleting or rewriting them. A timer-activated
-service is a sibling of `ghostd.service`, never a child of it, which is what lets
-a schedule survive a daemon restart that would kill anything in ghostd's own
+That versioned, length-delimited prefix plus the slug grammar is the entire
+daemon-side ownership contract. Deleting a ghost disables and removes only
+matching current-version units, so the owner's own timers, another ghost's, and
+all legacy ambiguous units share the directory untouched. Renaming does not
+sweep: the ghost still exists, the units are the owner's files, and a timer
+naming a ghost that moved fails visibly in `systemctl --user --failed`; the
+daemon logs matching current-version units left under the old name rather than
+deleting, rewriting, or guessing about legacy names. A timer-activated service
+is a sibling of `ghostd.service`, never a child of it, which is what lets a
+schedule survive a daemon restart that would kill anything in ghostd's own
 cgroup. Timers fire only while the user manager runs and the daemon is up with
 the owner's graphical session, so scheduled work makes no promise about
 overnight or logged-out runs; #18 owns that.
@@ -333,8 +346,9 @@ prompt prose is retained or subtracted by marker.
 
 The Ghost-owned pi prompt is ordered: the complete `character.md` body (or a
 two-line unwritten-character fallback); the fenced, bounded memory index; the
-fenced, shallow Documents index; the shared Omarchy CLI-first computer-use
-policy; accepted instruction files and unconditional `alwaysApply` rules; a
+fenced, shallow Documents index; the shared Omarchy CLI-first computer-use,
+owner-deliverable, and rendered scheduled-work policies; accepted instruction
+files and unconditional `alwaysApply` rules; a
 compact index of visible skill names, descriptions, and `SKILL.md` locations; the
 discoverable-rule index; then the seeded first-meeting section when applicable.
 Skill bodies, conditional-rule bodies,
@@ -1840,12 +1854,13 @@ The runtime uses the owner's local Claude Code authentication, native system
 prompt, built-in tools, and web search in bypass-permissions mode. Filesystem
 setting sources are pinned to `[]`: neither owner-home cwd nor a trusted project
 may inject executable settings, hooks, or plugins. Every query appends the
-Ghost character, derived indexes, shared Omarchy CLI-first policy, compact
-machine/ghost/project skill index, accepted instruction files, and rules marked
-`alwaysApply`, while keeping SDK `skills:[]`; skill, conditional-rule, prompt,
-and Markdown-command bodies are not injected into every turn. A bound project
-adds its stored accepted snapshot with Pi's exact-name project-over-ghost
-shadowing and translates only its validated native MCP rows into the SDK config.
+Ghost character, derived indexes, shared Omarchy CLI-first, owner-deliverable,
+and rendered scheduled-work policies, compact machine/ghost/project skill index,
+accepted instruction files, and rules marked `alwaysApply`, while keeping SDK
+`skills:[]`; skill, conditional-rule, prompt, and Markdown-command bodies are not
+injected into every turn. A bound project adds its stored accepted snapshot with
+Pi's exact-name project-over-ghost shadowing and translates only its validated
+native MCP rows into the SDK config.
 Unbound sessions enable no cwd-discovered skills. Existing Ghost extension
 tools are added through one in-process SDK MCP server, and output is normalized
 back to pi-messages. Ambient provider credentials remain scrubbed.

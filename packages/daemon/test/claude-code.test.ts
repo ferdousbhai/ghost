@@ -235,9 +235,11 @@ function setupClaudeHost(options: {
   const seenOptions: ClaudeQueryOptions[] = [];
   const seenPrompts: SDKUserMessage[] = [];
   const lifecycle = { queries: 0, interrupted: 0, closed: 0 };
+  const scheduleUnitDir = join(temp.ownerHome, ".xdg-config", "systemd", "user");
   host = new SessionHost({
     registry: temp.registry,
     ownerHome: temp.ownerHome,
+    scheduleUnitDir,
     machineSkillPaths: options.machineSkill ? [machineSkills] : [],
     offline: true,
     ...(options.logger ? { logger: options.logger } : {}),
@@ -266,7 +268,7 @@ function setupClaudeHost(options: {
       },
     },
   });
-  return { paths, seenOptions, seenPrompts, lifecycle };
+  return { paths, scheduleUnitDir, seenOptions, seenPrompts, lifecycle };
 }
 
 function deferred<T = void>(): {
@@ -697,7 +699,7 @@ describe("Claude Code subscription runtime", () => {
   });
 
   it("routes an explicit claude-code role through the isolated SDK harness and resumes it", async () => {
-    const { paths, seenOptions, lifecycle } = setupClaudeHost();
+    const { paths, scheduleUnitDir, seenOptions, lifecycle } = setupClaudeHost();
     mkdirSync(temp!.documentsDir, { recursive: true });
     writeFileSync(join(temp!.documentsDir, "owner-plan.pdf"), "owner bytes");
     mkdirSync(join(paths.home, "docs"), { recursive: true });
@@ -738,6 +740,9 @@ describe("Claude Code subscription runtime", () => {
     const appended = systemPrompt.append;
     expect(appended).toContain(temp!.documentsDir);
     expect(appended).toContain('file: "owner-plan.pdf"');
+    expect(appended).toContain(scheduleUnitDir);
+    expect(appended).toContain("ghost-timer-v1-6-casper-<slug>");
+    expect(appended).not.toContain("~/.config/systemd/user");
     expect(appended).not.toContain("legacy.md");
     expect(seenOptions[0]?.allowedTools).toContain("mcp__ghost__ghost_memory_write");
     expect(lifecycle.closed).toBe(1);

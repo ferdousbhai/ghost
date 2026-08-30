@@ -78,15 +78,15 @@ import {
 import { silentLogger, type Logger } from "./log.js";
 import {
   listGhostScheduleUnits,
+  renderScheduledWorkPolicy,
+  resolveScheduleUnitDirectory,
   sweepGhostSchedules,
-  userUnitDirectory,
 } from "./schedules.js";
 import {
   loadMachineSkills,
   machineSkillPaths,
   OMARCHY_COMPUTER_USE_POLICY,
   OWNER_DELIVERABLE_POLICY,
-  SCHEDULED_WORK_POLICY,
 } from "./machine-skills.js";
 import {
   maintenanceStatePath,
@@ -576,6 +576,8 @@ export type SessionTransactionProbeStage =
 export interface SessionHostOptions {
   registry: GhostRegistry;
   ownerHome?: string;
+  /** One absolute systemd user-unit directory for prompts and lifecycle. */
+  scheduleUnitDir?: string;
   /** Test seam; production discovers the standard owner-machine skill paths. */
   machineSkillPaths?: readonly string[];
   projectBindings?: ProjectBindingStore;
@@ -629,7 +631,12 @@ export interface SessionHostOptions {
    */
   claudeCode?: Omit<
     ClaudeCodeRuntimeOptions,
-    "logger" | "extensionOptions" | "hooks" | "machineSkillPaths"
+    | "logger"
+    | "extensionOptions"
+    | "hooks"
+    | "machineSkillPaths"
+    | "ownerHome"
+    | "scheduleUnitDir"
   >;
   liveVoice?: LiveVoiceManager;
   collaboration?: CollaborationManager;
@@ -1512,6 +1519,7 @@ async function connectGhostProjectMCP(
 export class SessionHost {
   private readonly registry: GhostRegistry;
   private readonly ownerHome: string;
+  private readonly scheduleUnitDir: string;
   private readonly machineSkills: string[];
   private readonly projectBindings: ProjectBindingStore;
   private readonly sessionStartupProbe: NonNullable<SessionHostOptions["sessionStartupProbe"]>;
@@ -1578,6 +1586,14 @@ export class SessionHost {
     this.registry = options.registry;
     this.ownerHome = resolve(options.ownerHome ?? homedir());
     if (!isAbsolute(this.ownerHome)) throw new TypeError("ownerHome must be absolute");
+    // main.ts supplies the XDG-resolved production value. Direct/test hosts
+    // stay under their own ownerHome rather than inheriting the live desktop.
+    const scheduleUnitDir = options.scheduleUnitDir
+      ?? resolveScheduleUnitDirectory(this.ownerHome, {});
+    if (!isAbsolute(scheduleUnitDir)) {
+      throw new TypeError("scheduleUnitDir must be absolute");
+    }
+    this.scheduleUnitDir = resolve(scheduleUnitDir);
     this.machineSkills = options.machineSkillPaths
       ? [...options.machineSkillPaths]
       : machineSkillPaths(this.ownerHome);
@@ -1643,6 +1659,7 @@ export class SessionHost {
       extensionOptions: this.extensionOptions,
       hooks: this.hooks,
       ...(options.claudeCode ?? {}),
+      scheduleUnitDir: this.scheduleUnitDir,
     });
     this.liveVoice = options.liveVoice ?? new LiveVoiceManager();
     this.liveVoice.setOnInactive(async (key) => {
@@ -2603,7 +2620,7 @@ export class SessionHost {
       ...(this.extensionOptions.extraSections ?? []),
       OMARCHY_COMPUTER_USE_POLICY,
       OWNER_DELIVERABLE_POLICY,
-      SCHEDULED_WORK_POLICY,
+      renderScheduledWorkPolicy(ghostName, this.scheduleUnitDir),
       ...(declarativeSection ? [declarativeSection] : []),
       ...(isSeededCharacter(ghostName, sessionCharacter?.body ?? null)
         ? [FIRST_MEETING_SECTION]
@@ -6815,7 +6832,7 @@ export class SessionHost {
       // it, because a timer that fired into an empty roster is worse than one
       // the owner writes again.
       await sweepGhostSchedules(ghost.name, {
-        unitDir: userUnitDirectory(this.ownerHome),
+        unitDir: this.scheduleUnitDir,
         logger: this.logger,
       });
       this.maintenance?.completeGhostDelete(ghost.name);
@@ -6864,15 +6881,13 @@ export class SessionHost {
       const renamed = this.registry.rename(ghost.name, nextName);
       await this.maintenance?.completeGhostRename(ghost.name, nextName);
       this.forgetGhost(ghost.name, ghost.dir);
-      // A rename leaves the ghost's timers naming the old name, in their
-      // filename and in their ExecStart. They are not swept: unlike a delete
-      // the ghost still exists, the units are the owner's own files, and a
-      // timer that fires against a missing ghost fails loudly in
-      // `systemctl --user --failed` rather than disappearing quietly. Say which
-      // ones so the owner does not have to wait for the next fire to find out.
+      // A rename leaves current-version units naming the old ghost in both
+      // filename and ExecStart. They remain the owner's files; log them instead
+      // of silently deleting or rewriting them. Pre-v1 names are deliberately
+      // outside Ghost ownership and are not inferred here.
       const staleUnits = await listGhostScheduleUnits(
         ghost.name,
-        userUnitDirectory(this.ownerHome),
+        this.scheduleUnitDir,
       );
       if (staleUnits.length > 0) {
         this.logger.warn("renamed ghost still has timers under its old name", {

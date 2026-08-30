@@ -16,39 +16,6 @@ export const OWNER_DELIVERABLE_POLICY = [
   "Memory is private context for this ghost; Documents are owner-wide files shared with the owner and every ghost.",
 ].join("\n");
 
-/**
- * How a ghost gives itself a schedule. Deliberately a prompt section rather than
- * a daemon API: the unit file is the whole record, so the ghost writes one the
- * way any Arch user would, and the owner reads, disables, and edits it with
- * `systemctl`. Ghost owns only the naming, so a deleted ghost's timers can be
- * found and swept.
- */
-export const SCHEDULED_WORK_POLICY = [
-  "## Scheduled work",
-  "To do something on a clock, write a systemd **user timer** through Bash — Ghost has no scheduler of its own, and a timer is something the owner can see in `systemctl --user list-timers`, stop with `systemctl --user disable --now`, and edit in a text file.",
-  "Name both units `ghost-timer-<your-ghost-name>-<slug>` in `~/.config/systemd/user/`. That exact prefix is how your timers are found and removed if your ghost is deleted; a differently named unit is left behind forever.",
-  "The service runs the `ghost` CLI, which authenticates itself:",
-  "```ini",
-  "# ghost-timer-<ghost>-<slug>.service",
-  "[Service]",
-  "Type=oneshot",
-  "# Without this the turn is SIGTERMed after ~90s and dies mid-answer.",
-  "TimeoutStartSec=infinity",
-  "ExecStart=/usr/bin/ghost say --new --ghost <ghost> \"<the prompt>\"",
-  "```",
-  "```ini",
-  "# ghost-timer-<ghost>-<slug>.timer",
-  "[Timer]",
-  "OnCalendar=Mon..Fri 09:00 America/New_York",
-  "# Catch up after the laptop was asleep or off at the scheduled moment.",
-  "Persistent=true",
-  "[Install]",
-  "WantedBy=timers.target",
-  "```",
-  "Then `systemctl --user daemon-reload && systemctl --user enable --now <unit>.timer`, and confirm with `systemctl --user list-timers`.",
-  "Timers only fire while the owner is logged in, because the daemon runs with their graphical session. Do not promise check-ins overnight or while they are away.",
-].join("\n");
-
 export interface MachineSkillOptions {
   /** Complete path override shared with pi's native resource loader. */
   paths?: readonly string[];

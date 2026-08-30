@@ -91,8 +91,11 @@ import {
   machineSkillPaths,
   OMARCHY_COMPUTER_USE_POLICY,
   OWNER_DELIVERABLE_POLICY,
-  SCHEDULED_WORK_POLICY,
 } from "./machine-skills.js";
+import {
+  renderScheduledWorkPolicy,
+  resolveScheduleUnitDirectory,
+} from "./schedules.js";
 import type { SettledMaintenanceTurn } from "./conversation-maintenance.js";
 import type { EffectiveProjectMcpRead } from "./mcp-catalog.js";
 import type { RunTurnOptions } from "./session-host.js";
@@ -197,6 +200,7 @@ export interface ClaudeCodeProbeOptions {
 
 export interface ClaudeCodeRuntimeOptions {
   ownerHome?: string;
+  scheduleUnitDir?: string;
   machineSkillPaths?: readonly string[];
   logger?: Logger;
   extensionOptions?: GhostExtensionOptions;
@@ -937,6 +941,7 @@ async function writeMetadata(
 async function buildPersona(
   homeDir: string,
   ghostName: string,
+  scheduleUnitDir: string,
   configuredDocuments?: MachineDocuments | string,
 ): Promise<string> {
   const home = openGhostHome(homeDir);
@@ -957,7 +962,7 @@ async function buildPersona(
     extraSections: [
       OMARCHY_COMPUTER_USE_POLICY,
       OWNER_DELIVERABLE_POLICY,
-      SCHEDULED_WORK_POLICY,
+      renderScheduledWorkPolicy(ghostName, scheduleUnitDir),
       // A seeded character.md means this ghost has not met its owner yet.
       ...(isSeededCharacter(ghostName, character?.body ?? null)
         ? [FIRST_MEETING_SECTION]
@@ -1416,6 +1421,7 @@ export class ClaudeCodeRuntime {
   private readonly probe: ClaudeCodeProbe;
   private readonly hooks: GhostHookRunner;
   private readonly ownerHome: string;
+  private readonly scheduleUnitDir: string;
   private readonly machineSkills: string[];
   private readonly busy = new Set<string>();
   private readonly active = new Map<
@@ -1431,6 +1437,14 @@ export class ClaudeCodeRuntime {
   constructor(options: ClaudeCodeRuntimeOptions = {}) {
     this.ownerHome = resolve(options.ownerHome ?? homedir());
     if (!isAbsolute(this.ownerHome)) throw new TypeError("ownerHome must be absolute");
+    // SessionHost supplies the shared production value. A directly constructed
+    // runtime stays under its explicit ownerHome instead of ambient XDG state.
+    const scheduleUnitDir = options.scheduleUnitDir
+      ?? resolveScheduleUnitDirectory(this.ownerHome, {});
+    if (!isAbsolute(scheduleUnitDir)) {
+      throw new TypeError("scheduleUnitDir must be absolute");
+    }
+    this.scheduleUnitDir = resolve(scheduleUnitDir);
     this.machineSkills = options.machineSkillPaths
       ? [...options.machineSkillPaths]
       : machineSkillPaths(this.ownerHome);
@@ -1605,6 +1619,7 @@ export class ClaudeCodeRuntime {
         buildPersona(
           paths.home,
           ghost.name,
+          this.scheduleUnitDir,
           this.extensionOptions.documents,
         ),
         loadMachineSkills(this.ownerHome, { paths: this.machineSkills }),

@@ -72,8 +72,10 @@ For each turn Ghost:
    status;
 3. rebuilds the persona and memory index from the ghost home, the shallow index
    from the owner's shared XDG Documents root, the Omarchy CLI-first
-   computer-use policy, the machine/ghost/project skill index, and the
-   always-active declarative instructions;
+   computer-use policy, the owner-deliverable policy, the scheduled-work policy
+   rendered from ghostd's one resolved systemd user-unit directory, the
+   machine/ghost/project skill index, and the always-active declarative
+   instructions;
 4. applies the conversation's pre-turn project binding: owner home when
    unbound, or the trusted project cwd plus its approved declarative snapshot;
 5. captures the Ghost-specific `@ghost/extensions` tool definitions and

@@ -105,9 +105,11 @@ describe("golden: session", () => {
       "---\nname: omarchy\ndescription: Control this Omarchy laptop through its CLI.\n---\n\nUse the stable CLI routes.\n",
     );
     const documents = new MachineDocuments(documentsRoot);
+    const scheduleUnitDir = join(temp.ownerHome, ".xdg-config", "systemd", "user");
     host = new SessionHost({
       registry: temp.registry,
       ownerHome: temp.ownerHome,
+      scheduleUnitDir,
       machineSkillPaths: [machineSkills],
       offline: true,
       extensionOptions: { documents },
@@ -142,6 +144,9 @@ describe("golden: session", () => {
       sections.push({ title: `turn ${turn}: user prompt`, body: prompt });
       const systemPrompt = requests[0]!.system.trimEnd();
       expect(systemPrompt).toContain(CHARACTER.trim());
+      expect(systemPrompt).toContain(scheduleUnitDir);
+      expect(systemPrompt).toContain("ghost-timer-v1-6-casper-<slug>");
+      expect(systemPrompt).not.toContain("~/.config/systemd/user");
       for (const inherited of [
         "Oh My Pi",
         "§ Runtime",
