@@ -339,7 +339,7 @@ Rectangle {
             }
 
             // Re-answering still commits a sibling in this conversation — that
-            // is OMP's own two-phase Ask tree, not the branch route — but the
+            // is Ghost's two-phase ask tree, not the branch route — but the
             // shell no longer offers a way to step between those siblings,
             // because the daemon no longer has one to offer.
         }

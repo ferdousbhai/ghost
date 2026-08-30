@@ -637,9 +637,9 @@ export function createScreenExtension(
         }
 
         // The model cannot see. An image block in a *tool result* is not covered
-        // by OMP's describe-for-text-models fallback — the provider layer would
-        // quietly swap it for a placeholder — so return text and point at the
-        // file, the way OMP's own `read` tool does. `inspect_image` reads it
+        // by the provider adapter's describe-for-text-models fallback — it would
+        // quietly swap the image for a placeholder — so return text and point at
+        // the file, the way Pi's `read` tool does. `inspect_image` reads it
         // through the vision role.
         return untrustedTextResult(
           `Screenshot of ${targetLabel(params)} saved to ${capture.path} `

@@ -1079,7 +1079,7 @@ describe("POST /api/ghosts/:name/messages runtime admission", () => {
 });
 
 describe("GET /api/ghosts/:name/sessions/:id/commands", () => {
-  it("serves OMP's session command catalog and enforces GET", async () => {
+  it("serves Ghost's session command catalog and enforces GET", async () => {
     const base = await serve();
     const url = `${base}/api/ghosts/casper/sessions/${piSegment("conv-commands")}/commands`;
 
@@ -1887,7 +1887,7 @@ describe("POST /api/ghosts/:name/messages", () => {
   });
 });
 
-describe("OMP ask interaction", () => {
+describe("Ghost ask interaction", () => {
   it("publishes a blocking ask and accepts the first validated answer", async () => {
     const base = await serve([
       {

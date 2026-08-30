@@ -43,7 +43,7 @@ Rectangle {
     readonly property bool searching: searchField.text.trim() !== ""
 
     // Available models, flattened into provider-header + model rows for a single
-    // Repeater. The list arrives in ghostd's OMP-style semantic model order.
+    // Repeater. The list arrives in ghostd's semantic model order.
     readonly property var availableRows: {
         const rows = [];
         let lastProvider = "";
@@ -234,6 +234,7 @@ Rectangle {
 
         // A one-line status: what the list below is showing.
         Text {
+            objectName: "modelStatusText"
             visible: !root.routingView
             Layout.fillWidth: true
             text: {
@@ -241,7 +242,7 @@ Rectangle {
                 if (Ghostd.modelWarning !== "") return Ghostd.modelWarning;
                 if (root.pickingRoute) {
                     return root.routeTarget === "fallback"
-                        ? "Choose the next model OMP should try"
+                        ? "Choose the next fallback model"
                         : "Choose the model for this role";
                 }
                 if (root.searching) {
@@ -334,10 +335,11 @@ Rectangle {
                 spacing: Theme.gap
 
                 Text {
+                    objectName: "routingSummaryText"
                     width: parent.width
                     text: Ghostd.modelRoutingLoading
-                        ? "Loading OMP routes…"
-                        : "Auto follows OMP's role defaults. Set a primary only when you want to override it."
+                        ? "Loading routes…"
+                        : "Auto follows Ghost's role defaults. Set a primary only when you want to override it."
                     color: Theme.foregroundDim
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.fontSizeSmall
@@ -400,7 +402,8 @@ Rectangle {
                                         font.weight: Font.DemiBold
                                     }
                                     Text {
-                                        text: routeEntry.route ? "OMP @" + routeEntry.route.ompRole : ""
+                                        objectName: routeEntry.route ? "roleCompatibilityName" : ""
+                                        text: routeEntry.route ? "Ghost @" + routeEntry.route.ompRole : ""
                                         color: Theme.foregroundDim
                                         font.family: Theme.fontFamily
                                         font.pixelSize: Theme.fontSizeSmall - 1

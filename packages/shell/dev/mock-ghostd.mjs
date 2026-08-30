@@ -182,7 +182,7 @@ const MOCK_COMMANDS = [
   {
     name: "help",
     aliases: ["?"],
-    description: "Show OMP's command help and keyboard shortcuts.",
+    description: "Show command help and keyboard shortcuts.",
     input: null,
     subcommands: [],
     source: "built-in",
@@ -200,12 +200,12 @@ const MOCK_COMMANDS = [
   {
     name: "settings",
     aliases: ["config"],
-    description: "Open OMP settings for this ghost.",
+    description: "Open settings for this ghost.",
     input: null,
     subcommands: [],
     source: "built-in",
     availability: "partial",
-    unavailableReason: "Model routing is available in Ghost's model switcher; other OMP settings remain file-backed.",
+    unavailableReason: "Model routing is available in Ghost's model switcher; other settings remain file-backed.",
   },
   {
     name: "skill:research",
@@ -1117,9 +1117,9 @@ const readBody = (req) =>
     req.on("error", reject);
   });
 
-// OMP's ask tool pauses the turn while the SSE stream stays open, so the mock
+// Ghost's ask tool pauses the turn while the SSE stream stays open, so the mock
 // pauses the same way: the turn script awaits a promise and the HTTP routes
-// settle it. One ask per conversation, which is all OMP allows.
+// settle it. One ask per conversation, matching the daemon's broker.
 
 const pendingAsks = new Map();
 const askKey = (name, sessionId) => JSON.stringify([name, sessionId]);
@@ -1394,7 +1394,7 @@ async function pump(res, events, stream, turn) {
     }
     if (event.type === "text_end") assistantText = event.content;
     res.write(`data: ${JSON.stringify(event)}\n\n`);
-    // OMP injects accepted steering at the next provider boundary and emits a
+    // Pi injects accepted steering at the next provider boundary and emits a
     // user message before the following assistant step. QueueLine owns it until
     // this point; owner_message moves it into transcript order.
     if (event.type === "tool_execution_end" && turn.steering.length > 0) {
@@ -2379,7 +2379,7 @@ const mockServer = createServer(async (req, res) => {
     const conversation = routeConversation(parts);
     if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
     if (conversation.runtime !== "pi") {
-      return json(res, 409, { error: { code: "not_supported", message: "Claude Code has no OMP commands" } });
+      return json(res, 409, { error: { code: "not_supported", message: "Claude Code does not support Ghost's command catalog" } });
     }
     return json(res, 200, { commands: MOCK_COMMANDS });
   }
@@ -2426,7 +2426,7 @@ const mockServer = createServer(async (req, res) => {
     const conversation = routeConversation(parts);
     if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
     if (conversation.runtime !== "pi") {
-      return json(res, 409, { error: { code: "not_supported", message: "Claude Code has no OMP queue" } });
+      return json(res, 409, { error: { code: "not_supported", message: "Claude Code does not support Ghost's Pi queue" } });
     }
     const turn = activeTurns.get(turnKey(name, conversation.conversationId));
     const snapshot = () => ({
@@ -2511,7 +2511,7 @@ const mockServer = createServer(async (req, res) => {
     const conversation = routeConversation(parts);
     if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
     if (conversation.runtime !== "pi") {
-      return json(res, 409, { error: { code: "not_supported", message: "Claude Code has no OMP ask" } });
+      return json(res, 409, { error: { code: "not_supported", message: "Claude Code does not support Ghost's ask interaction" } });
     }
     const pending = pendingAsks.get(askKey(name, conversation.conversationId));
     return json(res, 200, { ask: pending ? pending.view : null });
@@ -2521,7 +2521,7 @@ const mockServer = createServer(async (req, res) => {
     const conversation = routeConversation(parts);
     if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
     if (conversation.runtime !== "pi") {
-      return json(res, 409, { error: { code: "not_supported", message: "Claude Code has no OMP ask" } });
+      return json(res, 409, { error: { code: "not_supported", message: "Claude Code does not support Ghost's ask interaction" } });
     }
     const pending = pendingAsks.get(askKey(name, conversation.conversationId));
     // Settled or superseded reads the same from here: the question this client
@@ -2543,7 +2543,7 @@ const mockServer = createServer(async (req, res) => {
     const conversation = routeConversation(parts);
     if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
     if (conversation.runtime !== "pi") {
-      return json(res, 409, { error: { code: "not_supported", message: "Claude Code has no OMP ask" } });
+      return json(res, 409, { error: { code: "not_supported", message: "Claude Code does not support Ghost's ask interaction" } });
     }
     const s = ghostSessions(name).get(conversation.id);
     if (!s) return json(res, 404, { error: { message: "no such session", code: "not_found" } });

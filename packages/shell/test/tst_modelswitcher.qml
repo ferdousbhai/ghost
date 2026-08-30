@@ -14,6 +14,11 @@ TestCase {
         }
     }
 
+    function cleanup(): void {
+        Ghostd.modelRouting = [];
+        Ghostd.modelRoutingLoading = false;
+    }
+
     function test_pendingIntentIsDistinctAndAnnotated(): void {
         const switcher = createTemporaryObject(switcherComponent, this);
         verify(switcher !== null);
@@ -44,5 +49,44 @@ TestCase {
 
         verify(!switcher.hasPendingModel);
         compare(switcher.pendingModel, null);
+    }
+
+    function test_routingCopyNamesGhostWhileKeepingCompatibilityRole(): void {
+        const switcher = createTemporaryObject(switcherComponent, this);
+        verify(switcher !== null);
+        Ghostd.modelRouting = [{
+            role: "chat_model",
+            ompRole: "default",
+            label: "Chat",
+            primary: null,
+            effective: { provider: "openai", id: "gpt" },
+            source: "auto",
+            fallbacks: []
+        }];
+        Ghostd.modelRoutingLoading = false;
+        switcher.routingView = true;
+        wait(0);
+
+        const summary = findChild(switcher, "routingSummaryText");
+        const compatibilityName = findChild(switcher, "roleCompatibilityName");
+        verify(summary !== null);
+        verify(compatibilityName !== null);
+        compare(summary.text,
+            "Auto follows Ghost's role defaults. Set a primary only when you want to override it.");
+        compare(compatibilityName.text, "Ghost @default");
+
+        Ghostd.modelRoutingLoading = true;
+        compare(summary.text, "Loading routes…");
+    }
+
+    function test_fallbackPickerUsesGhostNeutralCopy(): void {
+        const switcher = createTemporaryObject(switcherComponent, this);
+        verify(switcher !== null);
+        switcher.beginRoutePick("chat_model", "Chat", "fallback");
+        wait(0);
+
+        const status = findChild(switcher, "modelStatusText");
+        verify(status !== null);
+        compare(status.text, "Choose the next fallback model");
     }
 }

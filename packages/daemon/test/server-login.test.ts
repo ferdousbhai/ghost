@@ -181,7 +181,7 @@ describe("POST /api/ghosts/:name/login", () => {
     expect(await unknown.json()).toMatchObject({ error: { code: "unknown_provider" } });
   });
 
-  it("binds OMP's provider default after login instead of the first catalogue row", async () => {
+  it("binds the Pi provider default after login instead of the first catalogue row", async () => {
     const base = await serve(
       async () => apiKeyCredential(),
       { openrouter: ["deepseek/deepseek-r1:free", "openai/gpt-5.5"] },

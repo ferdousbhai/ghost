@@ -603,7 +603,7 @@ describe("sessionKeyOf", () => {
 });
 
 describe("parseUserBashCommand", () => {
-  it("recognizes OMP's contextual and context-free command sigils", () => {
+  it("recognizes Ghost's contextual and context-free Bash sigils", () => {
     expect(parseUserBashCommand("!pwd")).toEqual({
       command: "pwd",
       excludeFromContext: false,
@@ -616,8 +616,8 @@ describe("parseUserBashCommand", () => {
   });
 });
 
-describe("OMP slash commands", () => {
-  it("discovers the live OMP catalog and annotates Ghost's execution policy", async () => {
+describe("Ghost slash commands", () => {
+  it("discovers the live Ghost catalog and annotates its execution policy", async () => {
     await setup([{ kind: "text", text: "unused" }]);
     const commands = await host!.availableCommands("casper", "conv-commands");
 
@@ -631,8 +631,8 @@ describe("OMP slash commands", () => {
       source: "builtin",
       availability: "unsupported",
     }));
-    // Ghost augments OMP's headless builder result with the unified registry so
-    // an OMP user's familiar TUI-only commands remain discoverable but honest.
+    // Ghost combines its headless builtins with the unified registry so
+    // familiar Pi TUI-only commands remain discoverable but honest.
     expect(commands).toContainEqual(expect.objectContaining({
       name: "help",
       source: "builtin",
@@ -642,7 +642,7 @@ describe("OMP slash commands", () => {
     expect(commands).toContainEqual(expect.objectContaining({ name: "plan", availability: "available" }));
   });
 
-  it("reports that an active Claude Code runtime has no OMP command catalog", async () => {
+  it("reports that an active Claude Code runtime has no Ghost command catalog", async () => {
     const { dir } = await setup([{ kind: "text", text: "unused" }]);
     setChatModelRole(ghostPaths(dir).home, "claude-code", "default");
 
@@ -1809,7 +1809,7 @@ describe("SessionHost.open", () => {
     expect(handle.session.model?.provider).toBe("ghost-local");
   });
 
-  it("inherits OMP's native tools and adds Ghost's own capabilities", async () => {
+  it("inherits Pi's native tools and adds Ghost's own capabilities", async () => {
     await setup([{ kind: "text", text: "hello" }]);
     const handle = await host!.open("casper", "conv-1");
     const names = handle.session.getActiveToolNames();
@@ -4125,7 +4125,7 @@ describe("SessionHost.runTurn", () => {
     expect(calls.map((call) => call.cwd)).toEqual([null, temp!.ownerHome]);
   });
 
-  it("pauses OMP's built-in ask until the shell supplies a validated answer", async () => {
+  it("pauses Ghost's ask until the shell supplies a validated answer", async () => {
     await setup([
       {
         kind: "tool",
@@ -4146,7 +4146,7 @@ describe("SessionHost.runTurn", () => {
       { kind: "text", text: "Matte it is." },
     ]);
     await host!.open("casper", "conv-ask");
-    // Ghost owns the desktop interaction. OMP's notifier hard-codes its own
+    // Ghost owns the desktop interaction. The upstream notifier hard-codes its
     // product identity, so it must stay off even though the HTTP broker can
     // still present and resolve the ask.
     const events: PiMessagesEvent[] = [];
@@ -5067,7 +5067,7 @@ describe("SessionHost.runTurn", () => {
       });
     });
     // The hook blocks every pass, so the cap ends the turn: one initial pass
-    // plus GHOST_SESSION_STOP_CONTINUATION_CAP continuations. Avoid OMP's own
+    // plus GHOST_SESSION_STOP_CONTINUATION_CAP continuations. Avoid the upstream
     // canned-phrasing retry: this test owns the retry via Ghost's session_stop
     // hook and must observe every pass itself.
     const passCount = GHOST_SESSION_STOP_CONTINUATION_CAP + 1;
@@ -5457,7 +5457,7 @@ describe("SessionHost.runTurn", () => {
     expect(turnIds).toEqual([1, 2]);
   });
 
-  it("layers the ghost persona onto OMP's native prompt and tools", async () => {
+  it("replaces Pi's prompt with the ghost persona while keeping its tools", async () => {
     await setup([{ kind: "text", text: "hi" }]);
     const handle = await host!.open("casper", "conv-1");
     await host!.runTurn("casper", {
@@ -5633,7 +5633,7 @@ describe("SessionHost.runTurn", () => {
     });
   });
 
-  it("lets !cd move OMP's cwd without moving or forgetting the ghost home", async () => {
+  it("lets !cd move Pi's cwd without moving or forgetting the ghost home", async () => {
     const { dir } = await setup([{ kind: "text", text: "still Casper" }]);
     const ownerDocs = join(temp!.ownerHome, "docs");
     mkdirSync(ownerDocs, { recursive: true });

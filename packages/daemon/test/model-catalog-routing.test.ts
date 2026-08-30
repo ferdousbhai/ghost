@@ -112,8 +112,8 @@ describe("ModelCatalog OMP role inventory and effective routing", () => {
       primary: { provider: "anthropic", id: "claude-sonnet-4-6" },
       effective: { provider: "anthropic", id: "claude-sonnet-4-6" },
     });
-    // OMP's fast/slow/designer roles inherit a configured default before their
-    // own priority lists; @task inherits the active model in the task executor.
+    // Ghost's fast/slow/designer roles inherit a configured default before their
+    // own priority lists; the task role inherits the active chat model.
     for (const role of ["smol_model", "slow_model", "designer_model", "task_model"] as const) {
       expect(byRole(routing.roles, role)).toMatchObject({
         source: "auto",
@@ -121,8 +121,8 @@ describe("ModelCatalog OMP role inventory and effective routing", () => {
         effective: { provider: "anthropic", id: "claude-sonnet-4-6", usable: true },
       });
     }
-    // Tiny and advisor use OMP's built-in priority semantics without any Ghost
-    // model ids. They resolve against whatever the current OMP catalog offers.
+    // Tiny and advisor use Ghost's built-in priority semantics without any
+    // hard-coded model ids. They resolve against the current Pi catalogue.
     expect(byRole(routing.roles, "tiny_model")).toMatchObject({
       source: "auto",
       effective: { provider: "anthropic", id: "claude-haiku-4-5" },

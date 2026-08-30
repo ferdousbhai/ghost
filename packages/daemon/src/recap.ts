@@ -3,7 +3,7 @@ import { fenceUntrusted } from "@ghost/extensions";
 /** The shell renders a recap as one compact status line. */
 export const RECAP_MAX_CHARACTERS = 280;
 
-/** Build OMP's recap side-channel prompt without trusting a generated/user title. */
+/** Build Ghost's recap side-channel prompt without trusting a generated/user title. */
 export function buildRecapPrompt(title?: string | null): string {
   const goal = title?.trim();
   const goalHint = goal

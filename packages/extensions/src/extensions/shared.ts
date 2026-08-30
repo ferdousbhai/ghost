@@ -123,7 +123,7 @@ export function budgetFooter(result: BudgetedText): string | null {
  * programs — `grim`, `hyprctl`, `notify-send`. They do it through `execFile`
  * with an **argument array and no shell**, so nothing the model emits is ever
  * parsed by `/bin/sh`. There is deliberately no `runShell` here; sessions
- * already have OMP's audited Bash runner.
+ * already have Ghost's Bash tool.
  */
 export interface CommandResult {
   readonly stdout: string;

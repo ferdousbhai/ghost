@@ -72,7 +72,7 @@ function askSettlement(activity) {
 /**
  * The questions this ask put to the user, normalised. Gated on the tool name
  * rather than on the shape of the arguments: some other tool is free to take a
- * `questions` array without meaning OMP's ask dialog by it.
+ * `questions` array without meaning Ghost's ask dialog by it.
  */
 function askQuestions(activity) {
     const args = activity.arguments;
@@ -218,7 +218,7 @@ function fileTarget(activity) {
     switch (String(activity.name || "")) {
     case "write":
     case "edit":
-        // OMP's native file tools take `path`; some providers emit `file_path`.
+        // Pi's native file tools take `path`; some providers emit `file_path`.
         return argument(activity, "path") || argument(activity, "file_path");
     // Historical transcripts keep the old tool name and target retired
     // per-ghost files. They are never shared Documents paths.
@@ -274,7 +274,7 @@ function fallback(activity, completed, failed, preparedAsk, preparedFileTarget) 
                 ? "Time ran out — answered " + quoted(taken) + " for you"
                 : "Time ran out — nothing was answered";
         }
-        // OMP's "Chat about this": the question was set aside for the
+        // Ghost's "Chat about this": the question was set aside for the
         // conversation rather than answered in the card.
         case "chat":
             return "Talked it through instead";
@@ -308,7 +308,7 @@ function fallback(activity, completed, failed, preparedAsk, preparedFileTarget) 
             ? (completed ? "Updated " : "Updating ") + path
             : (completed ? "Saved a document" : "Saving a document");
     }
-    // OMP's own file tools. A session writes docs and memory through
+    // Pi's native file tools. A session writes docs and memory through
     // these rather than the ghost_* ones, so without them a restored transcript
     // shows nothing where the ghost changed a file.
     case "write": {
@@ -345,8 +345,8 @@ function fallback(activity, completed, failed, preparedAsk, preparedFileTarget) 
     }
     case "write_memory":
         return completed ? "Saved something to memory" : "Saving something to memory";
-    // `look_at_image` was ghost's own tool before OMP's native `inspect_image`
-    // took the job. Historical transcripts still replay the old name.
+    // `look_at_image` was Ghost's tool before `inspect_image` took the job.
+    // Historical transcripts still replay the old name.
     case "inspect_image":
     case "look_at_image":
         return completed ? "Looked closely at the image" : "Looking closely at the image";

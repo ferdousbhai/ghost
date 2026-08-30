@@ -1236,8 +1236,12 @@ shape and streams emit one complete event object per line.
   delete cannot overtake that composite operation.
 - `POST /api/ghosts/:name/messages` — the **pi-messages wire protocol** over
   pi's `AgentSession` (request `{ model, context, options }` → SSE stream).
-  The pinned client in the summon-ghost repo is the normative spec
-  (`~/github.com/ferdousbhai/summon-ghost`, read-only reference).
+  This contract, Ghost's in-repo client
+  (`packages/shell/qml/services/Ghostd.qml`), and the protocol/conformance tests
+  in `packages/daemon/test/pi-messages.test.ts`,
+  `packages/daemon/test/server.test.ts`, and
+  `packages/shell/test/tst_ghostdstream.qml` are normative. The former pinned
+  client in the `summon-ghost` repo is historical provenance only.
   Every native `tool_execution_start` includes `cwd`, the absolute
   `SessionManager.getCwd()` snapshot captured at execution start. It is
   activity-local: a client must not substitute a later session cwd for it.

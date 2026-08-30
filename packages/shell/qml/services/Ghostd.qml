@@ -1122,7 +1122,7 @@ Singleton {
         onTriggered: root.pollLogin()
     }
 
-    // OMP's ask tool pauses the provider turn while the HTTP SSE stream stays
+    // Ghost's ask tool pauses the provider turn while the HTTP SSE stream stays
     // open. The dialog itself is a separate, reconnectable resource, so poll
     // only during the short gap between seeing the ask tool call and receiving
     // its payload.

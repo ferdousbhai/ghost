@@ -162,7 +162,7 @@ describe("scrubProviderEnv", () => {
     expect(env[PI_OFFLINE_ENV_VAR]).toBe("1");
   });
 
-  it("disables OMP's duplicate title completion", () => {
+  it("disables the upstream duplicate title completion", () => {
     const env: NodeJS.ProcessEnv = {};
     scrubProviderEnv(env);
     expect(env[PI_NO_TITLE_ENV_VAR]).toBe("1");
