@@ -237,8 +237,9 @@ ready sidecar's counters and project snapshot. After a valid result, Ghost
 writes the exact candidate as `<sidecar>.settling`, fsyncs it, atomically
 publishes the candidate as ready, removes both markers, and fsyncs the
 directory. Restart recovery may publish an exact settling candidate; it never
-guesses past a started-only marker. Conversation deletion removes all three
-files.
+guesses past a started-only marker. Session listing performs the same recovery
+before returning rows, including when a first turn left only the settling
+candidate. Conversation deletion removes all three files.
 
 A new conversation must choose its trusted project before its first owner
 turn. The daemon scans and validates that project's declarative/MCP snapshot

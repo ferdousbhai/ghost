@@ -2274,25 +2274,44 @@ export class ClaudeCodeRuntime {
     await mkdir(sessionDir, { recursive: true });
     const names = await readdir(sessionDir);
     const result: ClaudeSessionMetadata[] = [];
+    const candidates = new Set<string>();
     for (const name of names) {
-      if (!name.startsWith(CLAUDE_SESSION_PREFIX) || !name.endsWith(CLAUDE_SESSION_SUFFIX)) {
-        continue;
+      const base = name.endsWith(`${CLAUDE_SESSION_SUFFIX}.settling`)
+        ? name.slice(0, -".settling".length)
+        : name;
+      if (base.startsWith(CLAUDE_SESSION_PREFIX) && base.endsWith(CLAUDE_SESSION_SUFFIX)) {
+        candidates.add(base);
       }
+    }
+    for (const name of candidates) {
       const path = join(sessionDir, name);
+      const settling = `${path}.settling`;
+      let inspectedPath = settling;
       try {
-        const metadata = parseMetadata(path, await readClaudeSessionMetadataFile(path));
+        let admitted: ClaudeSessionMetadata;
+        try {
+          admitted = parseMetadata(settling, await readClaudeSessionMetadataFile(settling));
+        } catch (cause) {
+          if ((cause as NodeJS.ErrnoException).code !== "ENOENT") throw cause;
+          inspectedPath = path;
+          admitted = parseMetadata(path, await readClaudeSessionMetadataFile(path));
+        }
         if (!CLAUDE_SESSION_FILE_PATTERN.test(name)
-          || claudeSessionMetadataPath(sessionDir, metadata.conversationId) !== path) {
+          || claudeSessionMetadataPath(sessionDir, admitted.conversationId) !== path) {
           throw new GhostError(
             "session_identity_mismatch",
             "The stored Claude conversation identity does not match its sidecar filename.",
             409,
           );
         }
+        const loaded = await readMetadata(sessionDir, admitted.conversationId);
+        if (!loaded) continue;
+        const metadata: ClaudeSessionMetadata = { ...loaded };
+        delete (metadata as LoadedClaudeSessionMetadata).resumeBlocked;
         result.push(metadata);
       } catch (cause) {
         logger.warn("skipping invalid Claude Code session metadata", {
-          path,
+          path: inspectedPath,
           error: cause instanceof Error ? cause.message : String(cause),
         });
       }

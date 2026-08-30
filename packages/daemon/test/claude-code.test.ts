@@ -2487,6 +2487,64 @@ describe("Claude Code subscription runtime", () => {
     expect(existsSync(`${sidecar}.started`)).toBe(false);
   });
 
+  it("publishes a first-turn settling candidate before listing the session", async () => {
+    const { paths } = setupClaudeHost();
+    const conversationId = "first-turn-list-recovery";
+    const sidecar = claudeSessionMetadataPath(paths.sessionDir, conversationId);
+    mkdirSync(paths.sessionDir, { recursive: true });
+    writeFileSync(`${sidecar}.started`, `${JSON.stringify({
+      version: 1,
+      runtime: "claude-code",
+      conversationId,
+    })}\n`, { mode: 0o600 });
+    writeFileSync(`${sidecar}.settling`, storedClaudeV1(conversationId), { mode: 0o600 });
+
+    expect(existsSync(sidecar)).toBe(false);
+    expect(await host!.listSessions("casper")).toEqual([
+      expect.objectContaining({
+        conversationId,
+        runtime: "claude-code",
+        messageCount: 2,
+      }),
+    ]);
+    expect(JSON.parse(readFileSync(sidecar, "utf8"))).toMatchObject({ conversationId, messageCount: 2 });
+    expect(existsSync(`${sidecar}.started`)).toBe(false);
+    expect(existsSync(`${sidecar}.settling`)).toBe(false);
+  });
+
+  it("lists the recovered settling candidate instead of stale ready metadata", async () => {
+    const { paths } = setupClaudeHost();
+    const conversationId = "existing-list-recovery";
+    const sidecar = claudeSessionMetadataPath(paths.sessionDir, conversationId);
+    mkdirSync(paths.sessionDir, { recursive: true });
+    const ready = JSON.parse(storedClaudeV1(conversationId)) as Record<string, unknown>;
+    const settling = {
+      ...ready,
+      sessionId: "sdk-existing-list-recovered",
+      modified: "2026-02-01T00:00:00.000Z",
+      messageCount: 4,
+      ownerTurnCount: 2,
+    };
+    writeFileSync(sidecar, `${JSON.stringify(ready)}\n`, { mode: 0o600 });
+    writeFileSync(`${sidecar}.started`, `${JSON.stringify({
+      version: 1,
+      runtime: "claude-code",
+      conversationId,
+    })}\n`, { mode: 0o600 });
+    writeFileSync(`${sidecar}.settling`, `${JSON.stringify(settling)}\n`, { mode: 0o600 });
+
+    expect(await host!.listSessions("casper")).toEqual([
+      expect.objectContaining({
+        conversationId,
+        messageCount: 4,
+        updatedAt: "2026-02-01T00:00:00.000Z",
+      }),
+    ]);
+    expect(JSON.parse(readFileSync(sidecar, "utf8"))).toMatchObject(settling);
+    expect(existsSync(`${sidecar}.started`)).toBe(false);
+    expect(existsSync(`${sidecar}.settling`)).toBe(false);
+  });
+
   it("skips and logs malformed Claude Code sidecars without hiding valid sessions", async () => {
     const logger = recordingLogger("warn");
     const { paths } = setupClaudeHost({ logger });

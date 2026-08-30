@@ -1375,9 +1375,11 @@ shape and streams emit one complete event object per line.
   fail during turn admission, before maintenance reservation or any Claude
   executable/auth probe. The `.started` and `.settling` markers use the same
   mode, link, UTF-8, bounded-read, and pinned-path rules. Listing continues to
-  expose the last ready sidecar while a started marker exists; conversation
-  deletion removes the ready sidecar and both markers. Before a
-  stored project snapshot can reach the SDK, every MCP row must match exactly
+  expose the last ready sidecar while only a started marker exists. A settling
+  marker is exact recovery authority: listing publishes it first, including
+  after a first-turn crash with no ready sidecar, then reports its recovered
+  counts. Conversation deletion removes the ready sidecar and both markers.
+  Before a stored project snapshot can reach the SDK, every MCP row must match exactly
   one complete serializable SDK stdio, HTTP, or SSE transport schema: the
   discriminator, allowed keys, and every nested value are validated, unknown
   fields are rejected, and the credential-free restrictions below are applied
