@@ -1,8 +1,9 @@
 /**
  * Browser actions are serialized because parallel tool calls cannot safely
- * navigate and act on the same page. Sessions are keyed by ghost home because a
- * ghost has one browser, not one per conversation; the tab, not the session, is
- * what keeps two conversations out of each other's way.
+ * navigate and act on the same page. The registry keys one shared workspace by
+ * resolved ghost home: conversations of that ghost share its current tab and
+ * tab list, while another ghost home gets an independent protocol owner. Tabs
+ * isolate Chromium attachment and page state, not conversations from each other.
  */
 import { writeFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
@@ -92,7 +93,7 @@ export interface BrowserSessionOptions {
    */
   readonly actingBudget?: number;
   /**
-   * Per-conversation escape hatch: let consequential actions run off the
+   * Per-ghost-workspace escape hatch: let consequential actions run off the
    * opened origin's registrable domain by default, for an owner who is running
    * a deliberate multi-site workflow. Off by default; the per-call
    * `allowCrossDomain` is the usual, more legible way to widen scope.

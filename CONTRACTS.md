@@ -2281,8 +2281,12 @@ not coupled to that release identity.
   every other relay operation fails closed. Badge updates are cosmetic,
   fire-and-forget work and cannot retain connection preparation or retry.
   Relay request starts are serialized per ghost-wide protocol owner until
-  each deadline response. Terminal close first durably tombstones its session,
-  then makes a bounded attempt across its currently known tabs, so it can
+  each deadline response. Terminal close first durably tombstones its session
+  when it has a tab claim or in-flight create lease; closing a claimless owner
+  records only the bounded in-worker recent retirement needed to reject a late
+  request and cannot consume the durable-retirement ledger. A new tombstone is
+  refused at that ledger's cap until automatic cleanup makes room.
+  Close then makes a bounded attempt across its currently known tabs, so it can
   advance when a raw Chromium create, update, get, detach, or remove Promise
   never settles. Aggregate retirement runs at most 16 tab attempts at once under
   one one-second deadline and publishes the resulting ownership snapshot once,

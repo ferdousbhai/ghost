@@ -387,7 +387,7 @@ describe("the Tier-1 relay ops translate the seam to the wire", () => {
   });
 });
 
-describe("the relaxed one-tab invariant, on the relay backend", () => {
+describe("ghost-wide multi-tab ownership on the relay backend", () => {
   it.each([
     ["open", "open" as const],
     ["tab create", "tabs" as const],
@@ -464,7 +464,7 @@ describe("the relaxed one-tab invariant, on the relay backend", () => {
     expect(backend.running).toBe(true);
   });
 
-  it("names one stable session on every op, and a different one per backend", async () => {
+  it("names one stable ghost-wide owner on every op and a different one per backend", async () => {
     const transport = transportWithPage();
     transport.answer("read", { page: PAGE, text: "hi" });
     const backend = await opened(transport);
@@ -476,11 +476,12 @@ describe("the relaxed one-tab invariant, on the relay backend", () => {
     expect(typeof session).toBe("string");
     expect(sessionOf("read")).toBe(session);
 
-    // A second conversation is a second owner, or the extension could not tell
-    // whose tab is whose over the one socket they share.
-    const other = new RelayBrowserBackend({ transport: transportWithPage() });
+    // Production reuses one backend through the resolved-home registry. A
+    // separately constructed backend therefore represents another ghost home.
+    const otherTransport = transportWithPage();
+    const other = new RelayBrowserBackend({ transport: otherTransport });
     await other.open(PAGE.url, { timeoutMs: 5_000 });
-    expect(new RelayBrowserBackend({ transport }).running).toBe(false);
+    expect(otherTransport.lastFor("open")?.args["session"]).not.toBe(session);
   });
 
   it("records the tab id the extension names on open", async () => {
