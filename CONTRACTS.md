@@ -2264,7 +2264,10 @@ not coupled to that release identity.
   authoritative. Ownership, poison, and incarnation repairs carry pending
   revisions until the newest value is durably published. A rejected repair stays
   fail-closed, is retried by connection preparation and the keepalive alarm, and
-  refuses non-cleanup browser work until it succeeds. The short-lived popup never
+  refuses non-cleanup browser work until it succeeds. An ownership publication
+  rejected after Chromium authoritatively removes a tab enters that same repair
+  lane, so removing an uncertain claim cannot leave poison without an automatic
+  recovery retry. The short-lived popup never
   writes settings storage. It sends validated patches to the background worker,
   which serializes them and first publishes a strict version-1 local settings
   fence containing the complete settings plus a monotonic revision. Settings,
