@@ -4,7 +4,6 @@
  * auto-background budget and otherwise leaves it running. Jobs die with the
  * session and report back into the conversation when they settle.
  */
-import { StringDecoder } from "node:string_decoder";
 import type { BashOperations, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
@@ -19,6 +18,7 @@ export interface GhostJob {
   readonly endedAt: number | undefined;
   /** `null` when the process was killed or never reported a code. */
   readonly exitCode: number | null | undefined;
+  readonly maxOutputBytes: number;
   /** The most recent output, bounded to `maxOutputBytes`. */
   readonly output: string;
   readonly outputTruncated: boolean;
@@ -61,6 +61,38 @@ export type CancelJobOutcome = "cancelled" | "not_found" | "already_settled";
 const DEFAULT_MAX_OUTPUT_BYTES = 64_000;
 const MAX_SETTLED_JOBS = 50;
 
+function isUtf8Continuation(byte: number | undefined): boolean {
+  return byte !== undefined && (byte & 0xc0) === 0x80;
+}
+
+function utf8Prefix(value: string, maxBytes: number): string {
+  const bytes = Buffer.from(value);
+  if (bytes.length <= maxBytes) return value;
+  let end = Math.max(0, maxBytes);
+  while (end > 0 && isUtf8Continuation(bytes[end])) end -= 1;
+  return bytes.subarray(0, end).toString("utf8");
+}
+
+function utf8Tail(value: string, maxBytes: number): string {
+  const bytes = Buffer.from(value);
+  if (bytes.length <= maxBytes) return value;
+  let start = Math.max(0, bytes.length - maxBytes);
+  while (start < bytes.length && isUtf8Continuation(bytes[start])) start += 1;
+  return bytes.subarray(start).toString("utf8");
+}
+
+function prefixWithTail(prefix: string, tail: string, maxBytes: number): string {
+  const boundedPrefix = utf8Prefix(prefix, maxBytes);
+  const remaining = Math.max(0, maxBytes - Buffer.byteLength(boundedPrefix));
+  return boundedPrefix + utf8Tail(tail, remaining);
+}
+
+function tailWithSuffix(tail: string, suffix: string, maxBytes: number): string {
+  const boundedSuffix = utf8Tail(suffix, maxBytes);
+  const remaining = Math.max(0, maxBytes - Buffer.byteLength(boundedSuffix));
+  return utf8Tail(tail, remaining) + boundedSuffix;
+}
+
 function defaultLabel(command: string): string {
   const line = command.trim().split("\n")[0] ?? "";
   return line.length > 80 ? `${line.slice(0, 77)}...` : line;
@@ -71,11 +103,11 @@ class Job implements GhostJob {
   status: GhostJobStatus = "running";
   endedAt: number | undefined;
   exitCode: number | null | undefined;
-  outputTruncated = false;
   cancelled = false;
   settled: Promise<void> = Promise.resolve();
   private chunks: Buffer[] = [];
   private bytes = 0;
+  private rawOutputTruncated = false;
 
   constructor(
     readonly id: string,
@@ -83,7 +115,7 @@ class Job implements GhostJob {
     readonly command: string,
     readonly startedAt: number,
     readonly cancel: () => void,
-    private readonly maxOutputBytes: number,
+    readonly maxOutputBytes: number,
   ) {}
 
   append(chunk: Buffer): void {
@@ -92,7 +124,7 @@ class Job implements GhostJob {
     this.bytes += chunk.length;
     let excess = this.bytes - this.maxOutputBytes;
     if (excess <= 0) return;
-    this.outputTruncated = true;
+    this.rawOutputTruncated = true;
     while (excess > 0) {
       const first = this.chunks[0];
       if (!first) break;
@@ -106,6 +138,19 @@ class Job implements GhostJob {
         excess = 0;
       }
     }
+    while (this.chunks.length > 0) {
+      const first = this.chunks[0];
+      if (!first) break;
+      let skip = 0;
+      while (skip < first.length && isUtf8Continuation(first[skip])) skip += 1;
+      if (skip === 0) break;
+      this.bytes -= skip;
+      if (skip === first.length) this.chunks.shift();
+      else {
+        this.chunks[0] = first.subarray(skip);
+        break;
+      }
+    }
   }
 
   /** Text appended after the process output, such as pi's failure reason. */
@@ -114,8 +159,13 @@ class Job implements GhostJob {
   }
 
   get output(): string {
-    const decoder = new StringDecoder("utf8");
-    return this.chunks.map((chunk) => decoder.write(chunk)).join("") + decoder.end();
+    return utf8Tail(Buffer.concat(this.chunks, this.bytes).toString("utf8"), this.maxOutputBytes);
+  }
+
+  get outputTruncated(): boolean {
+    if (this.rawOutputTruncated) return true;
+    const decoded = Buffer.concat(this.chunks, this.bytes).toString("utf8");
+    return Buffer.byteLength(decoded) > this.maxOutputBytes;
   }
 }
 
@@ -134,6 +184,9 @@ export class GhostJobManager {
     this.onSettled = options.onSettled;
     this.now = options.now ?? Date.now;
     this.maxOutputBytes = options.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
+    if (!Number.isSafeInteger(this.maxOutputBytes) || this.maxOutputBytes <= 0) {
+      throw new RangeError("maxOutputBytes must be a positive integer.");
+    }
   }
 
   start(input: StartJobInput): GhostJob {
@@ -305,9 +358,9 @@ export function formatJobResult(job: GhostJob): string {
   const duration = formatDuration((job.endedAt ?? job.startedAt) - job.startedAt);
   const header = `Background job ${job.id} (${job.label}) ${describeOutcome(job)} after ${duration}.`;
   const output = job.output.trim();
-  if (!output) return `${header}\n\n(no output)`;
+  if (!output) return utf8Prefix(`${header}\n\n(no output)`, job.maxOutputBytes);
   const note = job.outputTruncated ? " (earlier output dropped)" : "";
-  return `${header}\n\nOutput${note}:\n${output}`;
+  return prefixWithTail(`${header}\n\nOutput${note}:\n`, output, job.maxOutputBytes);
 }
 
 export const JOB_RESULT_MESSAGE_TYPE = "ghost-job-result";
@@ -411,7 +464,10 @@ export function createBashTool(options: BashToolOptions): ToolDefinition<typeof 
       });
       const notice = `background job ${job.id} (${job.label}). Its result will be delivered when it finishes; use the jobs tool to wait or cancel.`;
       if (params.background) {
-        return { content: [{ type: "text", text: `Started ${notice}` }], details: { backgroundJobId: job.id } };
+        return {
+          content: [{ type: "text", text: utf8Prefix(`Started ${notice}`, job.maxOutputBytes) }],
+          details: { backgroundJobId: job.id },
+        };
       }
       // A deadline about to fire resolves inline rather than backgrounding
       // moments before the command times out anyway.
@@ -425,18 +481,22 @@ export function createBashTool(options: BashToolOptions): ToolDefinition<typeof 
       }
       if (job.status === "running") {
         const soFar = job.output.trim();
+        const suffix = `${soFar ? "\n\n" : ""}Still running after ${formatDuration(waitMs)}; continuing as ${notice}`;
         return {
           content: [{
             type: "text",
-            text: `${soFar ? `${soFar}\n\n` : ""}Still running after ${formatDuration(waitMs)}; continuing as ${notice}`,
+            text: tailWithSuffix(soFar, suffix, job.maxOutputBytes),
           }],
           details: { backgroundJobId: job.id },
         };
       }
-      const output = job.output.trim() || "(no output)";
-      if (job.status === "cancelled") throw new Error(`${output}\n\nCommand aborted`);
+      const output = utf8Prefix(job.output.trim() || "(no output)", job.maxOutputBytes);
+      if (job.status === "cancelled") {
+        throw new Error(tailWithSuffix(output, "\n\nCommand aborted", job.maxOutputBytes));
+      }
       if (job.status === "failed") {
-        throw new Error(job.exitCode === null ? output : `${output}\n\nCommand exited with code ${job.exitCode}`);
+        const suffix = job.exitCode === null ? "" : `\n\nCommand exited with code ${job.exitCode}`;
+        throw new Error(tailWithSuffix(output, suffix, job.maxOutputBytes));
       }
       return { content: [{ type: "text", text: output }], details: undefined };
     },

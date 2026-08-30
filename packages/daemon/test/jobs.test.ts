@@ -5,7 +5,7 @@ import { createBashTool, formatJobResult, GhostJobManager, type GhostJob } from 
 interface FakeProcess {
   command: string;
   timeoutSeconds: number | undefined;
-  emit(text: string): void;
+  emit(data: string | Buffer): void;
   exit(code: number | null): void;
 }
 
@@ -17,7 +17,7 @@ function fakeOperations(): { operations: BashOperations; processes: FakeProcess[
       const process: FakeProcess = {
         command,
         timeoutSeconds: options.timeout,
-        emit: (text) => options.onData(Buffer.from(text)),
+        emit: (data) => options.onData(Buffer.from(data)),
         exit: (exitCode) => resolve({ exitCode }),
       };
       options.signal?.addEventListener("abort", () => resolve({ exitCode: null }), { once: true });
@@ -60,8 +60,43 @@ describe("GhostJobManager", () => {
       outputTruncated: true,
     });
     expect(settled).toEqual([job]);
-    expect(formatJobResult(job)).toContain("Background job job-1 (build) completed after 2.5s.");
-    expect(formatJobResult(job)).toContain("earlier output dropped");
+  });
+
+  it("keeps split and truncated multibyte output on UTF-8 boundaries", async () => {
+    const split = manager({ maxOutputBytes: 8 });
+    const splitJob = split.jobs.start({ command: "split", cwd: "/tmp" });
+    const face = Buffer.from("😀");
+    split.processes[0]!.emit(face.subarray(0, 2));
+    split.processes[0]!.emit(face.subarray(2));
+    expect(splitJob.output).toBe("😀");
+    split.processes[0]!.exit(0);
+    await split.jobs.wait([splitJob.id], 1_000);
+
+    const truncated = manager({ maxOutputBytes: 6 });
+    const truncatedJob = truncated.jobs.start({ command: "truncate", cwd: "/tmp" });
+    const source = Buffer.from("old😀tail");
+    truncated.processes[0]!.emit(source.subarray(0, 5));
+    truncated.processes[0]!.emit(source.subarray(5));
+    expect(truncatedJob).toMatchObject({ output: "tail", outputTruncated: true });
+    expect(truncatedJob.output).not.toContain("�");
+    expect(Buffer.byteLength(truncatedJob.output)).toBeLessThanOrEqual(6);
+    truncated.processes[0]!.exit(0);
+    await truncated.jobs.wait([truncatedJob.id], 1_000);
+  });
+
+  it("bounds the complete UTF-8 settlement delivery, including its framing", async () => {
+    const { jobs, processes, tick } = manager({ maxOutputBytes: 96 });
+    const job = jobs.start({ command: "unicode", cwd: "/tmp", label: "unicode" });
+    processes[0]!.emit("😀".repeat(100));
+    tick(500);
+    processes[0]!.exit(0);
+    await jobs.wait([job.id], 1_000);
+
+    const delivered = formatJobResult(job);
+    expect(delivered).toMatch(/^Background job job-1 \(unicode\) completed after 500ms\./);
+    expect(delivered).toContain("earlier output dropped");
+    expect(delivered).not.toContain("�");
+    expect(Buffer.byteLength(delivered)).toBeLessThanOrEqual(job.maxOutputBytes);
   });
 
   it("trims one oversized process buffer to the exact newest-byte budget", async () => {
@@ -218,6 +253,46 @@ describe("createBashTool", () => {
       content: [{ type: "text", text: "(no output)" }],
       details: undefined,
     });
+  });
+
+  it("bounds decorated foreground failure and background messages as valid UTF-8", async () => {
+    const failed = manager({ maxOutputBytes: 32 });
+    const failedTool = createBashTool({ cwd: process.cwd(), manager: failed.jobs, autoBackgroundMs: 0 });
+    const execution = failedTool.execute(
+      "call-failed",
+      { command: "fail" },
+      undefined,
+      undefined,
+      {} as never,
+    );
+    failed.processes[0]!.emit("😀".repeat(20));
+    failed.processes[0]!.exit(3);
+    let failure: unknown;
+    try {
+      await execution;
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(Error);
+    const message = (failure as Error).message;
+    expect(message).toMatch(/Command exited with code 3$/);
+    expect(message).not.toContain("�");
+    expect(Buffer.byteLength(message)).toBeLessThanOrEqual(32);
+
+    const background = manager({ maxOutputBytes: 32 });
+    const backgroundTool = createBashTool({ cwd: process.cwd(), manager: background.jobs, autoBackgroundMs: 10 });
+    const started = await backgroundTool.execute(
+      "call-background",
+      { command: "wait", background: true, label: "😀".repeat(40) },
+      undefined,
+      undefined,
+      {} as never,
+    );
+    const text = (started.content[0] as { text: string }).text;
+    expect(text).not.toContain("�");
+    expect(Buffer.byteLength(text)).toBeLessThanOrEqual(32);
+    background.processes[0]!.exit(0);
+    await background.jobs.wait(undefined, 1_000);
   });
 
   it("keeps a no-deadline foreground wait abortable", async () => {
