@@ -2228,12 +2228,17 @@ not coupled to that release identity.
   proves absence; another `tabs.get` failure is indeterminate and retains the
   claim. Before acknowledging a new tab, the extension publishes the strict
   version-2 `{version,tabs,sessions,retired}` claim to `chrome.storage.session`;
-  its publication carries a monotonic revision and first writes the same complete
-  snapshot as a version-1 `chrome.storage.local` durability fence. Restore admits
-  the higher revision and rejects equal revisions with different snapshots, so a
-  stale session write cannot become authoritative after its in-memory repair and
-  worker both fail. A write failure rolls the tab back. If both rollback and a
-  second claim publication are indeterminate, a `chrome.storage.local` poison marker makes
+  its publication carries a monotonic revision and browser-session UUID and first
+  writes the same complete snapshot as a version-2 `chrome.storage.local`
+  durability fence. A service-worker restart retains the session UUID and may
+  recover that fence. A Chromium restart clears `storage.session`, so the worker
+  mints a new UUID, ignores the prior browser's tab-id fence, and publishes empty
+  ownership without probing or adopting those reusable numeric ids. Restore
+  otherwise admits the higher revision and rejects equal revisions with different
+  snapshots, so a stale session write cannot become authoritative after its
+  in-memory repair and worker both fail. A write failure rolls the tab back. If
+  both rollback and a second claim publication are indeterminate, a
+  `chrome.storage.local` poison marker makes
   later worker starts refuse the relay rather than forget a possible owner; the
   live worker clears it only after authoritative removal or durable claim. A
   poison-only live tab is reverified and promoted into the complete fenced claim
@@ -2249,10 +2254,14 @@ not coupled to that release identity.
   authoritative. Ownership, poison, and incarnation repairs carry pending
   revisions until the newest value is durably published. A rejected repair stays
   fail-closed, is retried by connection preparation and the keepalive alarm, and
-  refuses non-cleanup browser work until it succeeds. Popup settings writes carry
-  per-field generations; if a timed-out raw write settles after a newer owner
-  choice, the popup republishes the newest values rather than leaving the late
-  result authoritative.
+  refuses non-cleanup browser work until it succeeds. The short-lived popup never
+  writes settings storage. It sends validated patches to the background worker,
+  which serializes them and first publishes a strict version-1 local settings
+  fence containing the complete settings plus a monotonic revision. The fence
+  remains authoritative across popup and worker exits; a late raw write is
+  repaired to its newest fenced value by observation, connection preparation, or
+  the keepalive alarm. Badge updates are cosmetic, fire-and-forget work and cannot
+  retain connection preparation or retry.
   Relay request starts are serialized per ghost-wide protocol owner until
   each deadline response. Terminal close first durably tombstones its session,
   then makes a bounded attempt against every currently known tab, so it can
