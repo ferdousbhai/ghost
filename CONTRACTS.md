@@ -78,9 +78,10 @@ previewed but inert. Claude Code retains its own native subagents.
 `character.md` has no frontmatter. Its leading Markdown heading
 (`#` through `######`) is the derived display title, while the complete
 Markdown body is the persona injected into the system prompt. The body is at
-most 20,000 JavaScript UTF-16 code units. Tool writes and direct home writes
-reject a larger body, and a larger hand-edited file fails session construction
-rather than being truncated into the prompt.
+most 20,000 JavaScript UTF-16 code units. `GhostHome` API writes reject a larger
+body. A larger body written with a runtime's native file tools or by hand fails
+prompt construction on the next model pass rather than being truncated into
+the prompt.
 
 Memory files have no frontmatter and no required heading. Their complete
 Markdown content is the fact. The per-session index is one file name per line
@@ -102,10 +103,11 @@ truncating, replacing bytes, or treating invalid state as absence.
 Every `GhostHome` memory write first redacts PEM private-key blocks, common
 `sk-`, GitHub, Slack, bearer, and named key/token/secret/password credential
 forms to `[REDACTED_SECRET]`, then validates and serializes the redacted text.
-The limit therefore applies to what reaches disk, and the session writer,
-idle updater, and consolidation writer share one secret boundary. An omitted
-slug is derived from that redacted text, so credentials cannot escape through a
-filename.
+The limit therefore applies to what reaches disk, and the HUD writer, idle
+updater, and consolidation writer share one secret boundary. An omitted slug is
+derived from that redacted text, so credentials cannot escape through a
+filename. Foreground runtime file tools write directly and do not pass through
+this `GhostHome` boundary.
 
 `GhostHome.deleteMemory` accepts only one valid memory slug and moves that
 descriptor-pinned regular Markdown file by same-filesystem rename into the
@@ -364,8 +366,8 @@ particular Anthropic OAuth adds its billing/fingerprint and Claude Agent SDK
 identity blocks.
 
 pi's native tools in a Ghost session are `bash`, `edit`, `find`, `grep`, `ls`,
-`read`, and `write`. Ghost's own tools — `ghost_memory_write`, `ghost_browser`,
-`ghost_desktop`, `ghost_screen`, `ghost_character`, the `ask` tool, and MCP
+`read`, and `write`. Ghost's own tools — `ghost_browser`, `ghost_desktop`,
+`ghost_screen`, the `ask` tool, and MCP
 tools named `mcp__<server>_<tool>` — are registered directly as pi custom
 tools and appear in `getActiveToolNames()`; there is no separate mount. There
 is no `task` tool; no bundled, custom, or ambient subagent can be spawned.
@@ -438,12 +440,14 @@ is plain files in the ghost home (see the harness invariants).
 `vision_model` stays unset until bound; an image-inspection tool for pi
 sessions is a planned port (issue #3).
 
-Documents and memory retrieval use those native filesystem tools directly.
-Ghost registers no duplicate document list/read/search/write tools, and
-keeps only `ghost_memory_write` for validated, atomic memory-file writes. The
-writer accepts only the fact content and an optional slug. A foreground session
-rewrites a changed fact through that writer;
-it has no deletion tool. Idle consolidation alone retires obsolete memory.
+Documents and memory retrieval and foreground memory writes use those native
+filesystem tools directly. Ghost registers no duplicate document or memory
+list/read/search/write tools. A foreground session writes or replaces the
+entire one-fact Markdown file under the rendered memory root. Those writes are
+no longer serialized through the home writer's mutation queue and no longer
+derive a slug, so the filename and format convention is now carried by the
+system prompt. Ghost registers no dedicated foreground deletion tool; idle
+consolidation remains the daemon-owned path for retiring obsolete memory.
 
 The memory index and the root-only Documents index are derived from disk once
 per session, never stored, and never re-derived mid-session — live truth is the
@@ -478,15 +482,18 @@ Starting is `409 session_busy` while any conversation job is running, leaves
 those jobs untouched, and succeeds after each job finishes or the owner cancels
 it. Every later turn's system prompt carries a plan-mode section, and a
 fail-closed `tool_call` hook admits only pi's native `read`, `grep`, `find`, and
-`ls`; `ask`, `inspect_image`, and `propose_plan`; `ghost_character` action
-`read`; `jobs` operations `list` and `wait`; `todo` operation `view`;
+`ls`; `ask`, `inspect_image`, and `propose_plan`;
+`jobs` operations `list` and `wait`; `todo` operation `view`;
 `ghost_desktop` actions `state`, `see`, `layers`, `ax_query`, `ax_roles`, and
 `hit_test`; and non-persisting `ghost_browser` observation/navigation actions
 `open`, `read`, `find`, `back`, `forward`, `scroll`, `console`, `network`,
 `tabs`, and `tab_switch`. A missing, malformed, or unknown action/operation is
 blocked. Bash, generic `edit`/`write`, `ghost_screen`, browser screenshots,
-memory and character writes, MCP, todo/job mutations, and every unknown tool
-are blocked with a reason the model sees. Direct owner `!`/`!!` commands and
+MCP, todo/job mutations, and every unknown tool
+are blocked with a reason the model sees. Native `read` may inspect
+`character.md` and memory in plan mode; because character and memory are now
+written with the generic `edit`/`write` tools, those writes are blocked by that
+same rule rather than by a tool-specific case. Direct owner `!`/`!!` commands and
 owner HTTP APIs do not pass through this model-tool guard. The system packages
 `ripgrep` and `fd` are runtime dependencies, so native `grep`/`find` never turn
 a planning read into pi's on-demand cache download. `propose_plan` with
@@ -961,8 +968,8 @@ shape and streams emit one complete event object per line.
   offering a refresh.
 - `PUT  /api/ghosts/:name/memory` `{ content, name? }` →
   `{ ok: true, slug, path, created }` — creates or replaces exactly one memory
-  file through the same validating, redacting, atomic `GhostHome` writer as
-  `ghost_memory_write`; an omitted `name` derives the slug from the fact. A
+  file through the validating, redacting, atomic `GhostHome` writer used by the
+  HUD and idle maintenance; an omitted `name` derives the slug from the fact. A
   format rejection (empty, over the limit, bad slug) is a 400 with the writer's
   own message.
 - `DELETE /api/ghosts/:name/memory` `{ path, confirm: path }` →
@@ -1734,11 +1741,11 @@ While `character.md` is missing, blank, or byte-equal to the seed, sessions —
 pi and Claude Code runtimes alike — get a
 "first meeting" system-prompt section: help with the owner's request first,
 learn about them one question at a time during quiet moments, save stable facts
-as memory, and eventually draft and write the character with the
-`ghost_character` tool (read/write `character.md`). The populated character
-file IS the completion latch — there is no separate onboarding state — and the
-section stops being injected on the first session after the file deviates from
-the seed.
+as memory, and eventually draft the character, get the owner's approval, and
+write `<ghost-home>/character.md` with the runtime's native file tool. The
+populated character file IS the completion latch — there is no separate
+onboarding state — and the section stops being injected on the first session
+after the file deviates from the seed.
 
 ### Model indicator + switcher (which model a ghost uses, and switching it)
 

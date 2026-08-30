@@ -186,11 +186,8 @@ export function readCharacterFile(dir: string): string | null {
  * Missing and blank both count as seeded. An empty character.md is not a persona
  * somebody wrote; it is the same "the owner has not been here" the seed means.
  *
- * The comparison is exact. `@ghost/extensions` has its own advisory
- * `isSeededCharacterBody` (it cannot import the daemon, so it matches marker
- * lines instead); this is the authoritative one, and it is deliberately the
- * stricter of the two — being wrong here means offering onboarding to a ghost
- * that has already been written, which is worse than missing it once.
+ * The comparison is exact: being wrong here means offering onboarding to a
+ * ghost that has already been written, which is worse than missing it once.
  */
 export function isSeededCharacter(name: string, text: string | null | undefined): boolean {
   if (text === null || text === undefined) return true;

@@ -57,9 +57,9 @@ export async function listGhostMemory(dir: string): Promise<GhostMemoryListing> 
 }
 
 /**
- * The owner's writes go through the same validated, redacting, atomic writer
- * as the model's `ghost_memory_write`, so a hand-typed fact obeys the same
- * limits and a rejection carries the writer's own reason.
+ * The owner's writes go through the validated, redacting, atomic home writer,
+ * so a hand-typed fact obeys its limits and a rejection carries the writer's
+ * own reason.
  */
 export async function writeGhostMemory(
   dir: string,

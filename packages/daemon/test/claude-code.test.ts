@@ -773,7 +773,7 @@ describe("Claude Code subscription runtime", () => {
     expect(appended).toContain("ghost-timer-v1-6-casper-<slug>");
     expect(appended).not.toContain("~/.config/systemd/user");
     expect(appended).not.toContain("legacy.md");
-    expect(seenOptions[0]?.allowedTools).toContain("mcp__ghost__ghost_memory_write");
+    expect(seenOptions[0]?.allowedTools).toContain("mcp__ghost__ghost_browser");
     expect(lifecycle.closed).toBe(1);
     const sessionId = seenOptions[0]?.sessionId;
     expect(sessionId).toMatch(/^[0-9a-f-]{36}$/);

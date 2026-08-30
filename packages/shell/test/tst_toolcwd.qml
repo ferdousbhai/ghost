@@ -50,15 +50,6 @@ TestCase {
         verify(!card.openable);
     }
 
-    function test_ghostCharacterRemainsGhostHomeRelative(): void {
-        const card = makeCard({
-            name: "ghost_character", status: "complete", cwd: "/home/owner/project",
-            arguments: { action: "write" }, intent: "", summary: ""
-        });
-        verify(card !== null);
-        compare(card.workbenchPath, "/tmp/ghost-home/character.md");
-    }
-
     function test_absoluteTargetNeedsNoRecordedCwd(): void {
         const card = makeCard({
             name: "edit", status: "complete",

@@ -102,43 +102,6 @@ TestCase {
         );
     }
 
-    function test_characterReadNamesTheGhostItself(): void {
-        const activity = {
-            name: "ghost_character",
-            status: "running",
-            arguments: { action: "read" },
-            intent: "",
-            summary: ""
-        };
-        const trace = ToolTrace.text(activity, false, false, false);
-        compare(trace, "Reading its own character");
-        verify(!trace.includes("character.md"));
-    }
-
-    function test_characterWriteIsSelfAuthorship(): void {
-        const activity = {
-            name: "ghost_character",
-            status: "complete",
-            arguments: { action: "write", content: "# Casper\n\nGentle." },
-            intent: "",
-            summary: ""
-        };
-        compare(ToolTrace.text(activity, true, false, false), "Wrote its character");
-    }
-
-    // Onboarding calls arrive mid-stream, before the arguments have finished
-    // buffering, so the card must read as something before `action` exists.
-    function test_characterWithoutActionStillReads(): void {
-        const activity = {
-            name: "ghost_character",
-            status: "preparing",
-            arguments: ({}),
-            intent: "",
-            summary: ""
-        };
-        compare(ToolTrace.text(activity, false, false, false), "Reading its own character");
-    }
-
     // One settled ask, reused: the question the user closed the app on rather
     // than answering.
     function askActivity(settled: string): var {

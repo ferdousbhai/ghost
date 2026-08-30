@@ -51,7 +51,7 @@ describe("persona extension", () => {
     const characterStart = 0;
 
     expect(prompt?.slice(characterStart, characterStart + body.length)).toBe(body);
-    expect(prompt?.slice(characterStart + body.length)).toMatch(/^\n\n## Memory\n/);
+    expect(prompt?.slice(characterStart + body.length)).toMatch(/^\n\n## Character file\n/);
     expect(prompt).not.toContain("---\ntitle:");
   });
 
@@ -69,7 +69,14 @@ describe("persona extension", () => {
     const harness = await loadExtension(persona(), fixture.dir);
     const prompt = (await harness.beforeAgentStart()) ?? "";
     expect(prompt).toContain("the ghost of a working typographer");
+    expect(prompt).toContain(JSON.stringify(join(fixture.dir, "character.md")));
+    expect(prompt).toContain("IS your persona");
+    expect(prompt).toContain("rebuilt from disk at the start of every session");
     expect(prompt).toContain("## Memory");
+    expect(prompt).toContain(JSON.stringify(join(fixture.dir, "memory")));
+    expect(prompt).toContain("each memory as one concise fact");
+    expect(prompt).toContain("lowercase words joined by dashes and ending in `.md`");
+    expect(prompt).toContain("Reusing a filename replaces that memory");
     expect(prompt).toContain("apprentice-question");
     expect(prompt).not.toContain("I explained how to start");
     expect(prompt.indexOf("working-habit")).toBeLessThan(

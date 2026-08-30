@@ -14,7 +14,6 @@ import { basename, join } from "node:path";
 import type { ExtensionFactory, SessionManager, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import {
   GHOST_BROWSER,
-  GHOST_CHARACTER,
   GHOST_DESKTOP,
   READ_ONLY_BROWSER_ACTIONS,
   READ_ONLY_DESKTOP_ACTIONS,
@@ -316,7 +315,6 @@ const PLAN_ALWAYS_ALLOWED_TOOLS = new Set([
 ]);
 const PLAN_JOB_OPS = new Set(["list", "wait"]);
 const PLAN_TODO_OPS = new Set(["view"]);
-const PLAN_CHARACTER_ACTIONS = new Set(["read"]);
 
 function selectorAllowed(
   input: unknown,
@@ -347,10 +345,6 @@ export function planModeRefusal(state: PlanState, toolName: string, input: unkno
       return selectorAllowed(input, "op", PLAN_TODO_OPS)
         ? null
         : "Plan mode: the todo list is read-only until the plan is approved.";
-    case GHOST_CHARACTER:
-      return selectorAllowed(input, "action", PLAN_CHARACTER_ACTIONS)
-        ? null
-        : "Plan mode: the character may be read but not changed.";
     case GHOST_BROWSER:
       return selectorAllowed(input, "action", READ_ONLY_BROWSER_ACTIONS)
         ? null

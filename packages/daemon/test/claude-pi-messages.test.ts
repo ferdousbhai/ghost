@@ -102,7 +102,7 @@ describe("Claude Agent SDK -> pi-messages", () => {
         content_block: {
           type: "mcp_tool_use",
           id: "tool-1",
-          name: "mcp__ghost__ghost_character",
+          name: "mcp__ghost__ghost_browser",
           server_name: "ghost",
           input: {},
         },
@@ -116,7 +116,7 @@ describe("Claude Agent SDK -> pi-messages", () => {
       event: {
         type: "content_block_delta",
         index: 0,
-        delta: { type: "input_json_delta", partial_json: "{\"action\":\"read\"}" },
+        delta: { type: "input_json_delta", partial_json: "{\"action\":\"tabs\"}" },
       },
     }));
     adapter.handle(message({
@@ -131,7 +131,7 @@ describe("Claude Agent SDK -> pi-messages", () => {
       type: "toolcall_start",
       contentIndex: 0,
       id: "tool-1",
-      toolName: "ghost_character",
+      toolName: "ghost_browser",
     });
     expect(events).toContainEqual({
       type: "toolcall_end",
@@ -139,8 +139,8 @@ describe("Claude Agent SDK -> pi-messages", () => {
       toolCall: {
         type: "toolCall",
         id: "tool-1",
-        name: "ghost_character",
-        arguments: { action: "read" },
+        name: "ghost_browser",
+        arguments: { action: "tabs" },
       },
     });
   });

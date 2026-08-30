@@ -1275,18 +1275,19 @@ function* script(name, prompt, sessionId) {
       summary: `Completed step ${step + 1}`,
     };
   }
-  // A ghost whose greeting said it has no character writes one during the turn,
-  // which is what puts a `ghost_character` card in the trace to look at.
+  // A ghost whose greeting said it has no character writes one during the turn
+  // with the same native file tool the real runtimes use.
   if (GREETINGS[name]?.onboarding) {
     const character = contentIndex++;
     const content = `# ${name}\n\nDrafted in the dev harness, from: ${prompt.slice(0, 40)}`;
-    yield { type: "toolcall_start", contentIndex: character, id: "call_2", toolName: "ghost_character" };
-    yield { type: "toolcall_delta", contentIndex: character, delta: '{"action":"write"' };
+    const path = join(GHOSTS_ROOT, name, "character.md");
+    yield { type: "toolcall_start", contentIndex: character, id: "call_2", toolName: "write" };
+    yield { type: "toolcall_delta", contentIndex: character, delta: `{"path":${JSON.stringify(path)}` };
     yield { type: "toolcall_delta", contentIndex: character, delta: `,"content":${JSON.stringify(content)}}` };
     yield {
       type: "toolcall_end",
       contentIndex: character,
-      toolCall: { type: "toolCall", id: "call_2", name: "ghost_character", arguments: { action: "write", content } },
+      toolCall: { type: "toolCall", id: "call_2", name: "write", arguments: { path, content } },
     };
   }
   // The ask surface, on the documented trigger word. `toolcall_end` clears the

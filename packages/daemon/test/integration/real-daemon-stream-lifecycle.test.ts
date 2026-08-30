@@ -57,15 +57,11 @@ async function waitUntilCommandsAreAccepted(
   })(), "the disconnected conversation to release its busy gate");
 }
 
-function memoryStep(index: number, barrier?: ReturnType<typeof createMockProviderBarrier>): MockStep {
+function browserStep(barrier?: ReturnType<typeof createMockProviderBarrier>): MockStep {
   return {
     kind: "tool",
-    name: "ghost_memory_write",
-    args: {
-      name: `integration-step-${index}.md`,
-      description: `Integration tool step ${index}`,
-      content: `The owner requested deterministic integration tool step ${index}.`,
-    },
+    name: "ghost_browser",
+    args: { action: "tabs" },
     ...(barrier ? { barrier } : {}),
   };
 }
@@ -75,14 +71,14 @@ describe("real ghostd streaming lifecycle", () => {
     const dequeueBoundary = createMockProviderBarrier();
     daemon = await startRealDaemonHarness({
       script: [
-        memoryStep(1),
-        memoryStep(2),
-        memoryStep(3),
-        memoryStep(4, dequeueBoundary),
-        memoryStep(5),
-        memoryStep(6),
-        memoryStep(7),
-        memoryStep(8),
+        browserStep(),
+        browserStep(),
+        browserStep(),
+        browserStep(dequeueBoundary),
+        browserStep(),
+        browserStep(),
+        browserStep(),
+        browserStep(),
         { kind: "text", text: "The steered tool-heavy turn is complete." },
       ],
     });

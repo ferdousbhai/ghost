@@ -2,11 +2,11 @@
  * Golden: a conversation that writes a memory mid-session.
  *
  * Two turns through one hosted session against the scripted mock provider. The
- * model writes a memory on turn one — the ideal golden effect: no network, no
- * clock, just a file on disk — and turn two must reach the provider under the
- * byte-identical system prompt, because the persona and its indexes are derived
- * once per session rather than before every agent start. The written fact lives
- * on disk, where the native file tools read it.
+ * model calls the native `write` tool on turn one — the ideal golden effect: no
+ * network, no clock, just a file on disk — and turn two must reach the provider
+ * under the byte-identical system prompt, because the persona and its indexes
+ * are derived once per session rather than before every agent start. The
+ * written fact lives on disk, where the native file tools read it.
  *
  * The fixture pins, per turn: the complete system prompt that reached the
  * model, the tool surface on the wire, and the whole pi-messages event stream;
@@ -15,7 +15,7 @@
  * See ./harness.ts for the normalisation rules and the regeneration command.
  */
 import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { MachineDocuments } from "@ghost/extensions";
 import { afterEach, describe, expect, it } from "vitest";
 import { resolveGhostExtensions } from "../../src/extensions.js";
@@ -72,14 +72,18 @@ const OTHER_AUDITED_OMP_TOOLS = ["ask", "eval", "inspect_image", "task", "todo"]
 describe("golden: session", () => {
   it("writes a memory mid-conversation and holds the session's system prompt fixed", async () => {
     temp = makeTempGhosts();
+    const memoryPath = relative(
+      temp.ownerHome,
+      join(temp.root, "casper", "memory", "owner-prefers-short.md"),
+    );
     provider = await startMockProvider({
       script: [
-        // Turn 1, step 1: reach for the ghost's own memory capability.
+        // Turn 1, step 1: use the runtime's native file writer at the rendered root.
         {
           kind: "tool",
-          name: "ghost_memory_write",
+          name: "write",
           args: {
-            name: "owner-prefers-short.md",
+            path: memoryPath,
             content: "The owner wants short answers. They asked for the story, not the spec sheet. Keep replies to a line or two.",
           },
         },

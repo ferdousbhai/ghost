@@ -1740,7 +1740,7 @@ describe("SessionHost.open", () => {
     expect(names).not.toContain("web_fetch");
     expect(names).not.toContain("task");
     expect(handle.session.getToolDefinition("task")).toBeUndefined();
-    for (const name of ["ghost_memory_write", "ghost_browser", "ghost_desktop"]) {
+    for (const name of ["ghost_browser", "ghost_desktop", "ghost_screen"]) {
       expect(handle.session.getToolDefinition(name), `${name} must be available`).toBeDefined();
     }
   });
@@ -3883,7 +3883,7 @@ describe("SessionHost.runTurn", () => {
     const releaseWriter = deferred();
     await setup(
       [
-        { kind: "tool", name: "ghost_character", args: { action: "read" } },
+        { kind: "tool", name: "read", args: { path: join(process.cwd(), "package.json") } },
         { kind: "text", text: "Saved." },
       ],
       {
@@ -3917,7 +3917,7 @@ describe("SessionHost.runTurn", () => {
     let writes = 0;
     await setup(
       [
-        { kind: "tool", name: "ghost_character", args: { action: "read" } },
+        { kind: "tool", name: "read", args: { path: join(process.cwd(), "package.json") } },
         { kind: "text", text: "Saved." },
       ],
       {
@@ -3948,7 +3948,7 @@ describe("SessionHost.runTurn", () => {
     let writes = 0;
     await setup(
       [
-        { kind: "tool", name: "ghost_character", args: { action: "read" } },
+        { kind: "tool", name: "read", args: { path: join(process.cwd(), "package.json") } },
         { kind: "text", text: "Saved." },
       ],
       {
@@ -3990,8 +3990,8 @@ describe("SessionHost.runTurn", () => {
   it("restores an evicted old tool cwd as null after compaction and restart", async () => {
     await setup(
       [
-        { kind: "tool", name: "ghost_character", args: { action: "read" } },
-        { kind: "tool", name: "ghost_character", args: { action: "read" } },
+        { kind: "tool", name: "read", args: { path: join(process.cwd(), "package.json") } },
+        { kind: "tool", name: "read", args: { path: join(process.cwd(), "package.json") } },
         { kind: "text", text: "Read twice." },
       ],
       { title: { enabled: false } },
@@ -5385,7 +5385,7 @@ describe("SessionHost.runTurn", () => {
       "bash",
       "edit",
     ]));
-    expect(handle.session.getToolDefinition("ghost_memory_write")).toBeDefined();
+    expect(handle.session.getToolDefinition("ghost_browser")).toBeDefined();
   });
 
   it("rejects direct Bash under Claude before creating Pi session or cwd state", async () => {
@@ -5707,24 +5707,39 @@ describe("SessionHost.runTurn", () => {
   });
 
   it("persists a memory file the ghost writes", async () => {
-    const { dir } = await setup([
-      {
-        kind: "tool",
-        name: "ghost_memory_write",
-        args: {
-          content: "I explained the press. They wanted the story, not the spec sheet.",
-          name: "explained-the-press.md",
+    temp = makeTempGhosts();
+    const memoryDir = join(temp.root, "casper", "memory");
+    provider = await startMockProvider({
+      script: [
+        {
+          kind: "tool",
+          name: "write",
+          args: {
+            path: join(memoryDir, "explained-the-press.md"),
+            content: "I explained the press. They wanted the story, not the spec sheet.",
+          },
         },
-      },
-      { kind: "text", text: "Written down." },
-    ]);
+        { kind: "text", text: "Written down." },
+      ],
+    });
+    const dir = seedGhost(temp.root, {
+      name: "casper",
+      docs: { "press.md": TEST_DOC },
+      provider: { baseUrl: provider.url, modelId: provider.modelId },
+    });
+    host = new SessionHost({
+      registry: temp.registry,
+      ownerHome: temp.ownerHome,
+      machineSkillPaths: [],
+      offline: true,
+    });
     await host!.runTurn("casper", {
       sessionId: "conv-1",
       prompt: "Remember that.",
       emit: () => {},
     });
 
-    const memoryDir = join(dir, "memory");
+    expect(memoryDir).toBe(join(dir, "memory"));
     const files = readdirSync(memoryDir).filter((name) => name.endsWith(".md"));
     expect(files).toContain("explained-the-press.md");
     expect(readFileSync(join(memoryDir, files[0]!), "utf8")).toContain("spec sheet");
@@ -6544,63 +6559,84 @@ describe("multi-ghost", () => {
       script: [
         {
           kind: "tool",
-          name: "ghost_memory_write",
-          args: { content: "Someone asked who I am." },
+          name: "write",
+          args: {
+            path: join(temp.root, "casper", "memory", "asked-who-i-am.md"),
+            content: "Someone asked who casper is.",
+          },
         },
         { kind: "text", text: "I am who I am." },
       ],
     });
-    const casper = seedGhost(temp.root, {
-      name: "casper",
-      character: "# casper\n\nYou set type.\n",
-      provider: { baseUrl: provider.url, modelId: provider.modelId },
+    const minaProvider = await startMockProvider({
+      script: [
+        {
+          kind: "tool",
+          name: "write",
+          args: {
+            path: join(temp.root, "mina", "memory", "asked-who-i-am.md"),
+            content: "Someone asked who mina is.",
+          },
+        },
+        { kind: "text", text: "I am who I am." },
+      ],
     });
-    const mina = seedGhost(temp.root, {
-      name: "mina",
-      character: "# mina\n\nYou keep bees.\n",
-      provider: { baseUrl: provider.url, modelId: provider.modelId },
-    });
-    for (const [dir, shellPath] of [[casper, "/bin/bash"], [mina, "/bin/sh"]] as const) {
-      writeFileSync(ghostPaths(dir).settingsFile, `shellPath: ${shellPath}\n`);
-    }
-    host = new SessionHost({
-      registry: temp.registry,
-      ownerHome: temp.ownerHome,
-      offline: true,
-    });
+    try {
+      const casper = seedGhost(temp.root, {
+        name: "casper",
+        character: "# casper\n\nYou set type.\n",
+        provider: { baseUrl: provider.url, modelId: provider.modelId },
+      });
+      const mina = seedGhost(temp.root, {
+        name: "mina",
+        character: "# mina\n\nYou keep bees.\n",
+        provider: { baseUrl: minaProvider.url, modelId: minaProvider.modelId },
+      });
+      for (const [dir, shellPath] of [[casper, "/bin/bash"], [mina, "/bin/sh"]] as const) {
+        writeFileSync(ghostPaths(dir).settingsFile, `shellPath: ${shellPath}\n`);
+      }
+      host = new SessionHost({
+        registry: temp.registry,
+        ownerHome: temp.ownerHome,
+        offline: true,
+      });
 
-    await Promise.all([
-      host.runTurn("casper", { sessionId: "c", prompt: "Who are you?", emit: () => {} }),
-      host.runTurn("mina", { sessionId: "c", prompt: "Who are you?", emit: () => {} }),
-    ]);
+      await Promise.all([
+        host.runTurn("casper", { sessionId: "c", prompt: "Who are you?", emit: () => {} }),
+        host.runTurn("mina", { sessionId: "c", prompt: "Who are you?", emit: () => {} }),
+      ]);
 
-    // Each ghost's session file and memory landed in its own home.
-    for (const dir of [casper, mina]) {
-      const paths = ghostPaths(dir);
-      expect(existsSync(paths.sessionDir)).toBe(true);
-      expect(readdirSync(paths.sessionDir).filter((name) => name.endsWith(".jsonl"))).toHaveLength(1);
-      expect(readdirSync(join(dir, "memory")).some((f) => f.endsWith(".md"))).toBe(true);
-    }
-    // Personas did not cross: each provider request carried one ghost's prompt.
-    const systems = provider.requests.map((request) => request.system);
-    expect(systems.some((system) => system.includes("set type"))).toBe(true);
-    expect(systems.some((system) => system.includes("keep bees"))).toBe(true);
-    for (const system of systems) {
-      expect(system.includes("set type") && system.includes("keep bees")).toBe(false);
-    }
+      // Each ghost's native file write and session transcript landed in its own home.
+      for (const [dir, expected] of [[casper, "casper"], [mina, "mina"]] as const) {
+        const paths = ghostPaths(dir);
+        expect(existsSync(paths.sessionDir)).toBe(true);
+        expect(readdirSync(paths.sessionDir).filter((name) => name.endsWith(".jsonl"))).toHaveLength(1);
+        expect(readFileSync(join(dir, "memory", "asked-who-i-am.md"), "utf8")).toContain(expected);
+      }
+      // Personas did not cross: each provider request carried one ghost's prompt.
+      const systems = [...provider.requests, ...minaProvider.requests]
+        .map((request) => request.system);
+      expect(systems.some((system) => system.includes("set type"))).toBe(true);
+      expect(systems.some((system) => system.includes("keep bees"))).toBe(true);
+      for (const system of systems) {
+        expect(system.includes("set type") && system.includes("keep bees")).toBe(false);
+      }
 
-    // Bash execution runs in each session's own working directory; nothing
-    // process-global leaks one ghost's shell into the other's.
-    const [casperSession, minaSession] = await Promise.all([
-      host.open("casper", "c"),
-      host.open("mina", "c"),
-    ]);
-    const [casperBash, minaBash] = await Promise.all([
-      casperSession.session.executeBash("printf casper"),
-      minaSession.session.executeBash("printf mina"),
-    ]);
-    expect(casperBash.output.trim()).toBe("casper");
-    expect(minaBash.output.trim()).toBe("mina");
+      // Bash execution runs in each session's own working directory; nothing
+      // process-global leaks one ghost's shell into the other's.
+      const [casperSession, minaSession] = await Promise.all([
+        host.open("casper", "c"),
+        host.open("mina", "c"),
+      ]);
+      const [casperBash, minaBash] = await Promise.all([
+        casperSession.session.executeBash("printf casper"),
+        minaSession.session.executeBash("printf mina"),
+      ]);
+      expect(casperBash.output.trim()).toBe("casper");
+      expect(minaBash.output.trim()).toBe("mina");
+    } finally {
+      await minaProvider.close();
+    }
   });
 });
 
@@ -8512,7 +8548,7 @@ describe("transcript resume", () => {
   it("marks a restored tool call that failed, and leaves a successful one unmarked", async () => {
     await setup([
       { kind: "tool", name: "read", args: { file_path: "/nonexistent/never-written.md" } },
-      { kind: "tool", name: "ghost_character", args: { action: "read" } },
+      { kind: "tool", name: "read", args: { path: join(process.cwd(), "package.json") } },
       { kind: "text", text: "One of those worked." },
     ]);
     const events: PiMessagesEvent[] = [];
@@ -8526,7 +8562,7 @@ describe("transcript resume", () => {
       .filter((event): event is Extract<PiMessagesEvent, { type: "tool_execution_end" }> =>
         event.type === "tool_execution_end")
       .map((event) => [event.toolName, event.isError]);
-    expect(live).toEqual([["read", true], ["ghost_character", false]]);
+    expect(live).toEqual([["read", true], ["read", false]]);
 
     const calls = (await host!.readTranscript("casper", "conv-1")).messages
       .flatMap((message) => Array.isArray(message.content) ? message.content : [])
@@ -8536,7 +8572,7 @@ describe("transcript resume", () => {
         cwd?: string | null;
       }>;
     expect(calls.map((call) => [call.name, call.failed === true]))
-      .toEqual([["read", true], ["ghost_character", false]]);
+      .toEqual([["read", true], ["read", false]]);
     expect(calls.map((call) => call.cwd)).toEqual([temp!.ownerHome, temp!.ownerHome]);
   });
 
@@ -8587,8 +8623,9 @@ describe("the first meeting", () => {
     const system = await systemPromptFor("wisp");
     expect(system).toContain("## First meeting");
     expect(system).toContain("one question at a time");
-    // The interview ends by writing the character file with the ghost's own tool.
-    expect(system).toContain("ghost_character");
+    // The interview ends by writing the approved character with a native file tool.
+    expect(system).toContain("write it to `character.md`");
+    expect(system).toContain("native file-writing tool");
     // And it is a ritual, not a gate.
     expect(system).toContain("Help with the owner's request first");
   });

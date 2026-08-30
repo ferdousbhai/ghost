@@ -227,10 +227,6 @@ function fileTarget(activity) {
         const doc = argument(activity, "path");
         return doc === "" ? "" : "docs/" + doc;
     }
-    case "ghost_character":
-        // Only the write action changes the file; the path is fixed by the
-        // ghost-home layout rather than carried in the arguments.
-        return argument(activity, "action") === "write" ? "character.md" : "";
     default:
         return "";
     }
@@ -244,7 +240,6 @@ function fileBase(activity) {
     case "edit":
         return "cwd";
     case "ghost_notes_write":
-    case "ghost_character":
         return "ghost";
     default:
         return "";
@@ -348,17 +343,8 @@ function fallback(activity, completed, failed, preparedAsk, preparedFileTarget) 
                 + quoted(query) + " in memory"
             : (completed ? "Recalled a memory" : "Recalling a memory");
     }
-    case "ghost_memory_write":
     case "write_memory":
         return completed ? "Saved something to memory" : "Saving something to memory";
-    // The ghost's own character.md. It is the only file the ghost is the
-    // subject of rather than the reader of, so the trace says "its own".
-    case "ghost_character": {
-        const action = argument(activity, "action");
-        if (action === "write")
-            return completed ? "Wrote its character" : "Writing its character";
-        return completed ? "Read its own character" : "Reading its own character";
-    }
     // `look_at_image` was ghost's own tool before OMP's native `inspect_image`
     // took the job. Historical transcripts still replay the old name.
     case "inspect_image":

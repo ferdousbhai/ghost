@@ -95,7 +95,8 @@ describe("plan mode", () => {
       expect(planModeRefusal(planning, "jobs", { op }), `jobs:${op}`).toBeNull();
     }
     expect(planModeRefusal(planning, "todo", { op: "view" })).toBeNull();
-    expect(planModeRefusal(planning, "ghost_character", { action: "read" })).toBeNull();
+    // The character file is read with native `read`, which is already admitted.
+    expect(planModeRefusal(planning, "read", { path: "/ghost/character.md" })).toBeNull();
 
     const browserObservation = [
       "open", "read", "find", "back", "forward", "scroll", "console", "network", "tabs", "tab_switch",
@@ -114,7 +115,10 @@ describe("plan mode", () => {
       ["edit", { path: "/ghost/plans/plan.md" }],
       ["write", { path: "/ghost/plans/plan.md" }],
       ["ghost_screen", { target: "screen" }],
+      // Retired tools: unknown to the guard, so refused fail-closed. Re-adding
+      // either means deciding its plan-mode boundary again, not inheriting one.
       ["ghost_memory_write", { content: "fact" }],
+      ["ghost_character", { action: "read" }],
       ["mcp__server_tool", {}],
       ["unknown_tool", {}],
       ["jobs", { op: "cancel" }],
@@ -134,7 +138,7 @@ describe("plan mode", () => {
 
   it("fails closed when an action or op selector is missing or malformed", () => {
     const planning = { planning: true };
-    for (const tool of ["ghost_browser", "ghost_desktop", "ghost_character", "jobs", "todo"]) {
+    for (const tool of ["ghost_browser", "ghost_desktop", "jobs", "todo"]) {
       for (const input of [undefined, null, [], {}, { action: 1 }, { action: {} }, { op: 1 }, { op: {} }]) {
         expect(planModeRefusal(planning, tool, input), `${tool}:${JSON.stringify(input)}`).not.toBeNull();
       }

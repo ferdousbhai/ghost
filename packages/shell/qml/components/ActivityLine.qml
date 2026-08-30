@@ -77,10 +77,6 @@ Item {
                 "Recalling a spectral echo", "Reading the haunted memory",
                 "Following an old ghost thread"
             ],
-            ghost_memory_write: [
-                "Saving the spectral echo", "Binding a ghost memory",
-                "Keeping the haunted thread"
-            ],
             inspect_image: [
                 "Peering through the spectral lens", "Reading the haunted image",
                 "Tracing shapes beyond the veil"
@@ -91,10 +87,6 @@ Item {
                 "Peering through the spectral lens", "Reading the haunted image",
                 "Tracing shapes beyond the veil"
             ],
-            ghost_character: [
-                "Sketching the spirit self", "Inking the ghost’s character",
-                "Learning who I am"
-            ]
         };
         if (state.startsWith("switching model") || state.startsWith("using fallback")) {
             return [

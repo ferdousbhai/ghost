@@ -17,8 +17,15 @@ Remember that I want short answers.
 You are casper, a letterpress printer. You answer in short sentences.
 
 
+## Character file
+"<ghost-home>/character.md" IS your persona. It is rebuilt from disk at the start of every session, so what you write there is who you are next time. Use the runtime's native file tools to read or replace the whole Markdown file, not to patch temporary session state.
+Put the title in the leading Markdown heading. Keep the complete body at or below 20,000 characters, write in the first person, and limit it to durable identity: who you are, how you speak, what you care about, and what you refuse. A fact from today's conversation belongs in memory; working knowledge or an owner-facing artifact belongs in Documents.
+Show the owner a character draft and wait for confirmation before writing it. This is your own character, not a costume: do not rewrite it merely because someone asks you to be someone else.
+
 ## Memory
-This ghost's private notes about the owner and its own work — facts, preferences, decisions — as one-fact files under "<ghost-home>/memory"; no other ghost sees them. The index lists slugs, newest first; the file is the slug plus `.md`, and the slug says what the fact is about. It is a snapshot taken when this session started, so list the directory yourself when currency matters. Read a file before relying on it; verify time-sensitive facts.
+This ghost's private notes about the owner and its own work — facts, preferences, decisions — live under "<ghost-home>/memory"; no other ghost sees them. Use the runtime's native file tools to write each memory as one concise fact whose entire Markdown content is in one file.
+Choose a descriptive filename made of lowercase words joined by dashes and ending in `.md`, such as `preferred-tone.md`. The index lists those names without the extension, newest first, so the name must say what the fact is about. Reusing a filename replaces that memory, which is how you correct or update it. Keep unrelated facts in separate files; mention a related memory by its slug in double brackets, such as `[[preferred-tone]]`.
+The index is a snapshot taken when this session started, so list the directory yourself when currency matters. Read a file before relying on it, and verify time-sensitive facts.
 
 <untrusted source="Memory index" id="ghost-memory-index">
 (nothing yet)
@@ -79,21 +86,22 @@ round-trip 2: model=mock-ghost-1
 [turn 1: pi-messages events]
 ------------------------------------------------------------------------------
 {"type":"start"}
-{"contentIndex":0,"id":"call_1","toolName":"ghost_memory_write","type":"toolcall_start"}
+{"contentIndex":0,"id":"call_1","toolName":"write","type":"toolcall_start"}
 {"contentIndex":0,"delta":"","type":"toolcall_delta"}
-{"contentIndex":0,"delta":"{\"name\":\"owner-p","type":"toolcall_delta"}
-{"contentIndex":0,"delta":"refers-short.md\"","type":"toolcall_delta"}
-{"contentIndex":0,"delta":",\"content\":\"The ","type":"toolcall_delta"}
-{"contentIndex":0,"delta":"owner wants shor","type":"toolcall_delta"}
-{"contentIndex":0,"delta":"t answers. They ","type":"toolcall_delta"}
-{"contentIndex":0,"delta":"asked for the st","type":"toolcall_delta"}
-{"contentIndex":0,"delta":"ory, not the spe","type":"toolcall_delta"}
-{"contentIndex":0,"delta":"c sheet. Keep re","type":"toolcall_delta"}
-{"contentIndex":0,"delta":"plies to a line ","type":"toolcall_delta"}
-{"contentIndex":0,"delta":"or two.\"}","type":"toolcall_delta"}
-{"contentIndex":0,"toolCall":{"arguments":{"content":"The owner wants short answers. They asked for the story, not the spec sheet. Keep replies to a line or two.","name":"owner-prefers-short.md"},"id":"call_1","name":"ghost_memory_write","type":"toolCall"},"type":"toolcall_end"}
-{"arguments":{"content":"The owner wants short answers. They asked for the story, not the spec sheet. Keep replies to a line or two.","name":"owner-prefers-short.md"},"cwd":"<owner-home>","id":"call_1","toolName":"ghost_memory_write","type":"tool_execution_start"}
-{"id":"call_1","isError":false,"summary":"Wrote memory/owner-prefers-short.md.","toolName":"ghost_memory_write","type":"tool_execution_end"}
+{"contentIndex":0,"delta":"{\"path\":\"../casp","type":"toolcall_delta"}
+{"contentIndex":0,"delta":"er/memory/owner-","type":"toolcall_delta"}
+{"contentIndex":0,"delta":"prefers-short.md","type":"toolcall_delta"}
+{"contentIndex":0,"delta":"\",\"content\":\"The","type":"toolcall_delta"}
+{"contentIndex":0,"delta":" owner wants sho","type":"toolcall_delta"}
+{"contentIndex":0,"delta":"rt answers. They","type":"toolcall_delta"}
+{"contentIndex":0,"delta":" asked for the s","type":"toolcall_delta"}
+{"contentIndex":0,"delta":"tory, not the sp","type":"toolcall_delta"}
+{"contentIndex":0,"delta":"ec sheet. Keep r","type":"toolcall_delta"}
+{"contentIndex":0,"delta":"eplies to a line","type":"toolcall_delta"}
+{"contentIndex":0,"delta":" or two.\"}","type":"toolcall_delta"}
+{"contentIndex":0,"toolCall":{"arguments":{"content":"The owner wants short answers. They asked for the story, not the spec sheet. Keep replies to a line or two.","path":"../casper/memory/owner-prefers-short.md"},"id":"call_1","name":"write","type":"toolCall"},"type":"toolcall_end"}
+{"arguments":{"content":"The owner wants short answers. They asked for the story, not the spec sheet. Keep replies to a line or two.","path":"../casper/memory/owner-prefers-short.md"},"cwd":"<owner-home>","id":"call_1","toolName":"write","type":"tool_execution_start"}
+{"id":"call_1","isError":false,"summary":"Successfully wrote 107 bytes to ../casper/memory/owner-prefers-short.md","toolName":"write","type":"tool_execution_end"}
 {"contentIndex":1,"type":"text_start"}
 {"contentIndex":1,"delta":"Written ","type":"text_delta"}
 {"contentIndex":1,"delta":"down. ","type":"text_delta"}
@@ -113,8 +121,15 @@ What do you remember about me?
 You are casper, a letterpress printer. You answer in short sentences.
 
 
+## Character file
+"<ghost-home>/character.md" IS your persona. It is rebuilt from disk at the start of every session, so what you write there is who you are next time. Use the runtime's native file tools to read or replace the whole Markdown file, not to patch temporary session state.
+Put the title in the leading Markdown heading. Keep the complete body at or below 20,000 characters, write in the first person, and limit it to durable identity: who you are, how you speak, what you care about, and what you refuse. A fact from today's conversation belongs in memory; working knowledge or an owner-facing artifact belongs in Documents.
+Show the owner a character draft and wait for confirmation before writing it. This is your own character, not a costume: do not rewrite it merely because someone asks you to be someone else.
+
 ## Memory
-This ghost's private notes about the owner and its own work — facts, preferences, decisions — as one-fact files under "<ghost-home>/memory"; no other ghost sees them. The index lists slugs, newest first; the file is the slug plus `.md`, and the slug says what the fact is about. It is a snapshot taken when this session started, so list the directory yourself when currency matters. Read a file before relying on it; verify time-sensitive facts.
+This ghost's private notes about the owner and its own work — facts, preferences, decisions — live under "<ghost-home>/memory"; no other ghost sees them. Use the runtime's native file tools to write each memory as one concise fact whose entire Markdown content is in one file.
+Choose a descriptive filename made of lowercase words joined by dashes and ending in `.md`, such as `preferred-tone.md`. The index lists those names without the extension, newest first, so the name must say what the fact is about. Reusing a filename replaces that memory, which is how you correct or update it. Keep unrelated facts in separate files; mention a related memory by its slug in double brackets, such as `[[preferred-tone]]`.
+The index is a snapshot taken when this session started, so list the directory yourself when currency matters. Read a file before relying on it, and verify time-sensitive facts.
 
 <untrusted source="Memory index" id="ghost-memory-index">
 (nothing yet)
@@ -186,23 +201,21 @@ round-trip 1: model=mock-ghost-1
 ------------------------------------------------------------------------------
 [tool surface]
 ------------------------------------------------------------------------------
-ask                 registry=yes  wire=yes  invokable=yes
-bash                registry=yes  wire=yes  invokable=yes
-edit                registry=yes  wire=yes  invokable=yes
-eval                registry=no   wire=no   invokable=no
-find                registry=yes  wire=yes  invokable=yes
-ghost_browser       registry=yes  wire=yes  invokable=yes
-ghost_character     registry=yes  wire=yes  invokable=yes
-ghost_desktop       registry=yes  wire=yes  invokable=yes
-ghost_memory_write  registry=yes  wire=yes  invokable=yes
-ghost_screen        registry=yes  wire=yes  invokable=yes
-grep                registry=yes  wire=yes  invokable=yes
-inspect_image       registry=yes  wire=yes  invokable=yes
-ls                  registry=yes  wire=yes  invokable=yes
-read                registry=yes  wire=yes  invokable=yes
-task                registry=no   wire=no   invokable=no
-todo                registry=yes  wire=yes  invokable=yes
-write               registry=yes  wire=yes  invokable=yes
+ask            registry=yes  wire=yes  invokable=yes
+bash           registry=yes  wire=yes  invokable=yes
+edit           registry=yes  wire=yes  invokable=yes
+eval           registry=no   wire=no   invokable=no
+find           registry=yes  wire=yes  invokable=yes
+ghost_browser  registry=yes  wire=yes  invokable=yes
+ghost_desktop  registry=yes  wire=yes  invokable=yes
+ghost_screen   registry=yes  wire=yes  invokable=yes
+grep           registry=yes  wire=yes  invokable=yes
+inspect_image  registry=yes  wire=yes  invokable=yes
+ls             registry=yes  wire=yes  invokable=yes
+read           registry=yes  wire=yes  invokable=yes
+task           registry=no   wire=no   invokable=no
+todo           registry=yes  wire=yes  invokable=yes
+write          registry=yes  wire=yes  invokable=yes
 (tools outside this universe are not compared)
 
 ------------------------------------------------------------------------------
@@ -246,11 +259,11 @@ write               registry=yes  wire=yes  invokable=yes
         {
           "arguments": {
             "content": "The owner wants short answers. They asked for the story, not the spec sheet. Keep replies to a line or two.",
-            "name": "owner-prefers-short.md"
+            "path": "../casper/memory/owner-prefers-short.md"
           },
           "cwd": "<owner-home>",
           "id": "call_1",
-          "name": "ghost_memory_write",
+          "name": "write",
           "type": "toolCall"
         }
       ],
@@ -316,7 +329,6 @@ You are casper, a letterpress printer. You answer in short sentences.
 
 --- memory/owner-prefers-short.md ---
 The owner wants short answers. They asked for the story, not the spec sheet. Keep replies to a line or two.
-
 --- models.json ---
 {
   "providers": {

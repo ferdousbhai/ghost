@@ -119,8 +119,9 @@ The query is deliberately unrestricted for its local owner:
 - project executable extensions, hooks, custom code tools, LSP, and ghost or
   project agent definitions remain disabled pending the per-session isolation
   work in #31. Agent-definition content is never appended to Claude's prompt;
-- Ghost's own browser, desktop, character, and structured memory writer are
-  added through an in-process MCP server;
+- Ghost's own browser, desktop, and screen tools are added through an in-process
+  MCP server. Claude's native `Read`/`Edit`/`Write`/`Glob`/`Grep` preset owns
+  character and foreground memory file access;
 - `bypassPermissions` is explicit because the HUD has no Claude approval UI;
 - inherited provider credential variables are still scrubbed from the child
   environment, including Anthropic API and OAuth token variables.
