@@ -901,8 +901,9 @@ Three checks, applied to every `/api` request before routing:
    time, where `<token>` is 64 hex characters read from
    `$XDG_STATE_HOME/ghost/api-token` (default
    `~/.local/state/ghost/api-token`; override with `GHOSTD_API_TOKEN_FILE`),
-   mode `0600` in a `0700` directory. An existing token is exactly 64 lowercase
-   hex bytes plus newline, read through one bounded `O_NOFOLLOW|O_NONBLOCK`
+   mode `0600` in a `0700` directory. An existing token is exactly 64 raw
+   lowercase ASCII hex bytes plus newline, validated before decoding and read
+   through one bounded `O_NOFOLLOW|O_NONBLOCK`
    single-link regular-file descriptor whose before/after and live-path state
    stays identical; the existing state directory must still be mode `0700`.
    The daemon mints it through an owned exclusive descriptor when the server

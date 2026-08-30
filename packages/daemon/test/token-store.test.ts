@@ -105,6 +105,15 @@ describe("shared token-store persistence", () => {
     expect(store.read({ path })).toBe(token);
   });
 
+  it("rejects high-bit bytes instead of decoding them as ASCII hex", async () => {
+    await mkdir(join(dir, "state"), { mode: 0o700 });
+    await writeFile(path, Buffer.concat([Buffer.alloc(64, 0xe1), Buffer.from("\n")]), {
+      mode: 0o600,
+    });
+
+    expect(() => store.read({ path })).toThrow(/malformed/);
+  });
+
   it("returns the one winning token when processes mint concurrently", async () => {
     const moduleUrl = new URL("../src/token-store.ts", import.meta.url).href;
     const script = `

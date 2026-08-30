@@ -239,9 +239,12 @@ function readToken(path: string): string | undefined {
     closeSync(descriptor);
   }
   if (bytes[TOKEN_FILE_BYTES - 1] !== 0x0a) throw malformedToken(path);
-  const token = bytes.subarray(0, TOKEN_FILE_BYTES - 1).toString("ascii");
-  if (!TOKEN_PATTERN.test(token)) throw malformedToken(path);
-  return token;
+  const tokenBytes = bytes.subarray(0, TOKEN_FILE_BYTES - 1);
+  for (const byte of tokenBytes) {
+    const lowercaseHex = (byte >= 0x30 && byte <= 0x39) || (byte >= 0x61 && byte <= 0x66);
+    if (!lowercaseHex) throw malformedToken(path);
+  }
+  return tokenBytes.toString("utf8");
 }
 
 function createToken(path: string, token: string): void {
