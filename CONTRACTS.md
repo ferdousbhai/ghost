@@ -2214,14 +2214,21 @@ not coupled to that release identity.
   later worker starts refuse the relay rather than forget a possible owner; the
   live worker clears it only after authoritative removal or durable claim. An
   unreadable or indeterminate worker restore likewise refuses the relay
-  connection. Relay request starts are serialized per protocol session until
+  connection. Session/local storage reads, writes, and restored-tab existence
+  checks have bounded waits so a silent Chrome API cannot retain the ownership
+  lane or connection latch; a write that settles after its deadline queues the
+  latest ownership/poison snapshot again before it can remain authoritative.
+  Relay request starts are serialized per protocol session until
   each deadline response. Terminal close first durably tombstones its session,
   then makes a bounded attempt against every currently known tab, so it can
   advance when a raw Chromium create, update, get, detach, or remove Promise
   never settles. A late tab creation atomically observes that tombstone, durably
   claims its result, and immediately removes it; a failed removal stays claimed
-  for close retry. The backend rotates to a fresh session id before a subsequent
-  open. Whole-ghost
+  for close retry. Debugger release likewise attempts every attached tab with a
+  bounded wait; only a confirmed detach resets attachment state, while an
+  indeterminate tab remains attached in memory for the next release or close
+  retry. The backend rotates to a fresh session id before a subsequent open.
+  Whole-ghost
   rename and delete retire that old-home entry before moving the directory;
   another ghost's browser session is untouched. Graceful daemon shutdown retires
   every browser session while the relay is live, then closes the relay/listener;
