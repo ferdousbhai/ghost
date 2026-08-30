@@ -9,14 +9,21 @@
  */
 import { randomUUID } from "node:crypto";
 import { rename, rm, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
 import {
+  chmodSync,
   closeSync,
   constants,
   fstatSync,
   fsyncSync,
   lstatSync,
+  linkSync,
   openSync,
   readSync,
+  renameSync,
+  rmSync,
+  unlinkSync,
+  writeFileSync,
   type BigIntStats,
 } from "node:fs";
 
@@ -44,6 +51,15 @@ export interface PrivateFileIdentity {
 export interface PrivateFileRead {
   text: string;
   identity: PrivateFileIdentity;
+}
+
+export class PrivateWriteConflictError extends Error {
+  readonly code = "private_write_conflict";
+
+  constructor(readonly path: string) {
+    super(`${path} changed before its private migration could be committed; retry it.`);
+    this.name = "PrivateWriteConflictError";
+  }
 }
 
 function validPrivateDescriptor(stats: BigIntStats): boolean {
@@ -139,6 +155,144 @@ export function renderPrivateJson(path: string, value: unknown): string {
     throw new RangeError(`${path} would exceed the 1 MiB private-file limit.`);
   }
   return rendered;
+}
+
+function samePrivateIdentity(stats: BigIntStats, identity: PrivateFileIdentity): boolean {
+  return validPrivateDescriptor(stats)
+    && stats.dev === identity.device
+    && stats.ino === identity.inode;
+}
+
+function restoreCasClaim(claim: string, path: string): void {
+  try {
+    lstatSync(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") return;
+    try {
+      linkSync(claim, path);
+      unlinkSync(claim);
+      fsyncPath(dirname(path));
+    } catch {
+      // Preserve the claim when the public path cannot safely be restored.
+    }
+  }
+}
+
+const PRIVATE_CAS_CLAIM_SUFFIX = ".ghost-migration-cas";
+const PRIVATE_CAS_NEXT_SUFFIX = ".ghost-migration-next";
+
+function recoverPrivateCasCandidate(path: string): void {
+  const candidate = `${path}${PRIVATE_CAS_NEXT_SUFFIX}`;
+  let stats: BigIntStats;
+  try {
+    stats = lstatSync(candidate, { bigint: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw error;
+  }
+  let safe = stats.isFile() && !stats.isSymbolicLink() && stats.nlink === 1n;
+  if (!safe && stats.isFile() && !stats.isSymbolicLink() && stats.nlink === 2n) {
+    try {
+      const published = lstatSync(path, { bigint: true });
+      safe = published.dev === stats.dev && published.ino === stats.ino;
+    } catch {
+      safe = false;
+    }
+  }
+  if (!safe) throw new PrivateWriteConflictError(path);
+  unlinkSync(candidate);
+  fsyncPath(dirname(path));
+}
+
+/** Finish the last durable private migration publication before rereading it. */
+export function recoverPrivateJsonAtomicCas(path: string): void {
+  const claim = `${path}${PRIVATE_CAS_CLAIM_SUFFIX}`;
+  let claimed: BigIntStats;
+  try {
+    claimed = lstatSync(claim, { bigint: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      recoverPrivateCasCandidate(path);
+      return;
+    }
+    throw error;
+  }
+  if (!validPrivateDescriptor(claimed)) {
+    throw new PrivateWriteConflictError(path);
+  }
+  if (missingPrivatePath(path)) restoreCasClaim(claim, path);
+  else {
+    unlinkSync(claim);
+    fsyncPath(dirname(path));
+  }
+  recoverPrivateCasCandidate(path);
+}
+
+/** Publish private JSON only if the admitted source identity still owns `path`. */
+export function writePrivateJsonAtomicCas(
+  path: string,
+  value: unknown,
+  expected: PrivateFileIdentity | null,
+): void {
+  recoverPrivateJsonAtomicCas(path);
+  const rendered = renderPrivateJson(path, value);
+  const temporary = `${path}${PRIVATE_CAS_NEXT_SUFFIX}`;
+  const claim = `${path}${PRIVATE_CAS_CLAIM_SUFFIX}`;
+  try {
+    writeFileSync(temporary, rendered, { encoding: "utf8", flag: "wx", mode: 0o600 });
+    chmodSync(temporary, 0o600);
+    fsyncPath(temporary);
+    if (expected === null) {
+      try {
+        linkSync(temporary, path);
+      } catch {
+        throw new PrivateWriteConflictError(path);
+      }
+      unlinkSync(temporary);
+      fsyncPath(dirname(path));
+      return;
+    }
+
+    try {
+      renameSync(path, claim);
+    } catch {
+      throw new PrivateWriteConflictError(path);
+    }
+    fsyncPath(dirname(path));
+    let claimed: BigIntStats;
+    try {
+      claimed = lstatSync(claim, { bigint: true });
+    } catch {
+      throw new PrivateWriteConflictError(path);
+    }
+    if (!samePrivateIdentity(claimed, expected)) {
+      restoreCasClaim(claim, path);
+      throw new PrivateWriteConflictError(path);
+    }
+    try {
+      linkSync(temporary, path);
+    } catch {
+      if (missingPrivatePath(path)) restoreCasClaim(claim, path);
+      else rmSync(claim, { force: true });
+      throw new PrivateWriteConflictError(path);
+    }
+    fsyncPath(dirname(path));
+    unlinkSync(temporary);
+    unlinkSync(claim);
+    fsyncPath(dirname(path));
+  } catch (error) {
+    rmSync(temporary, { force: true });
+    throw error;
+  }
+}
+
+function missingPrivatePath(path: string): boolean {
+  try {
+    lstatSync(path);
+    return false;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ENOENT";
+  }
 }
 
 /**

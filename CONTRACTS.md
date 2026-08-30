@@ -338,7 +338,12 @@ header literals plus sensitive MCP environment/header/client-secret/URL and
 recognized credential-argument values with references, read-verifies every
 Secret Service write, atomically and durably replaces portable config, then
 removes `auth.json` and empties and vacuums `agent.db` down to its schema and
-change-counter rows. Every other table goes, not only the credential ones:
+change-counter rows. A portable replacement holds that file's writer lock,
+rereads its current inode, and publishes only while the admitted identity still
+owns the pathname. An external replacement wins and migration retries against
+it; an interrupted private CAS is reconciled before the next locked read.
+New `models.json.accounts` authorization is durable before `mcp.json` can
+publish a reference to it. Every other table goes, not only the credential ones:
 `usage_history` carries a provider email and account id per sample, `clients` a
 hostname, `client_usage` per-model spend, and `cache` usage payloads keyed by
 account, and none of it is read again. Migration admits `agent.db` and every

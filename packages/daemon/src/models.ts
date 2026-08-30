@@ -11,8 +11,9 @@ import {
 import { dirname, join } from "node:path";
 import {
   fsyncPath,
+  type PrivateFileIdentity,
   PrivateReadError,
-  readPrivateFileText,
+  readPrivateFile,
   renderPrivateJson,
   type PrivateReadRefusal,
 } from "./private-file.js";
@@ -290,7 +291,7 @@ function acquireModelsLock(path: string): { lockPath: string; owner: GhostModels
   }
 }
 
-function withSerializedModelsWrite<T>(path: string, mutation: () => T): T {
+export function withSerializedModelsWrite<T>(path: string, mutation: () => T): T {
   const { lockPath, owner } = acquireModelsLock(path);
   let value: T;
   try {
@@ -414,20 +415,12 @@ function assertProviderShape(path: string, providers: Record<string, unknown>): 
   }
 }
 
-export function readGhostModels(configDir: string): GhostModelsFile | null {
-  const path = ghostModelsPath(configDir);
-  let text: string;
-  try {
-    text = readPrivateFileText(path);
-  } catch (error) {
-    if (!(error instanceof PrivateReadError)) throw error;
-    if (error.refusal === "open") {
-      const cause = error.cause as NodeJS.ErrnoException;
-      if (cause.code === "ENOENT") return null;
-      throw cause;
-    }
-    throw new Error(`${path} ${MODELS_READ_REFUSAL[error.refusal]}.`);
-  }
+export interface GhostModelsSnapshot {
+  file: GhostModelsFile;
+  identity: PrivateFileIdentity;
+}
+
+function parseGhostModels(path: string, text: string): GhostModelsFile {
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
@@ -465,6 +458,27 @@ export function readGhostModels(configDir: string): GhostModelsFile | null {
     roles: migrateLegacySmolRole(file.roles as GhostModelsFile["roles"]),
     fallbacks: migrateLegacySmolRole(file.fallbacks as GhostModelsFile["fallbacks"]),
   };
+}
+
+export function readGhostModelsSnapshot(configDir: string): GhostModelsSnapshot | null {
+  const path = ghostModelsPath(configDir);
+  let source: ReturnType<typeof readPrivateFile>;
+  try {
+    source = readPrivateFile(path);
+  } catch (error) {
+    if (!(error instanceof PrivateReadError)) throw error;
+    if (error.refusal === "open") {
+      const cause = error.cause as NodeJS.ErrnoException;
+      if (cause.code === "ENOENT") return null;
+      throw cause;
+    }
+    throw new Error(`${path} ${MODELS_READ_REFUSAL[error.refusal]}.`);
+  }
+  return { file: parseGhostModels(path, source.text), identity: source.identity };
+}
+
+export function readGhostModels(configDir: string): GhostModelsFile | null {
+  return readGhostModelsSnapshot(configDir)?.file ?? null;
 }
 
 export function addGhostAccounts(configDir: string, additions: readonly string[]): GhostModelsFile {

@@ -21,13 +21,14 @@ import {
 import { basename, dirname, join } from "node:path";
 import { Database } from "bun:sqlite";
 import type { Credential as AuthCredential } from "@earendil-works/pi-ai";
-import type { MCPServerConfig } from "./mcp-config.js";
+import { type MCPServerConfig, withMCPConfigWriteLock } from "./mcp-config.js";
 import {
   addGhostAccounts,
-  readGhostModels,
-  writeGhostModels,
+  ghostModelsPath,
+  readGhostModelsSnapshot,
   type GhostModelsFile,
   type GhostProviderConfig,
+  withSerializedModelsWrite,
 } from "./models.js";
 import {
   authorizedSecretReference,
@@ -41,6 +42,8 @@ import {
   type PrivateFileIdentity,
   PrivateReadError,
   readPrivateFile,
+  recoverPrivateJsonAtomicCas,
+  writePrivateJsonAtomicCas,
 } from "./private-file.js";
 import {
   DEFAULT_SECRET_FIELD,
@@ -81,6 +84,8 @@ export interface GhostSecretMigrationOptions {
   plainFileProbe?: (stage: "removing", path: string) => void;
   /** Test-only abrupt-stop seam; durable claim evidence is deliberately retained. */
   agentDbFault?: (stage: AgentDbFaultStage, path: string) => void;
+  /** Synchronous adversarial seam immediately before portable CAS publication. */
+  portableCommitProbe?: (source: "models" | "mcp", path: string) => void;
 }
 
 export type AgentDbFaultStage =
@@ -1048,10 +1053,18 @@ export function materializeMcpSecretReferences(
 function migrateMcpFile(
   home: string,
   context: GhostSecretContext,
-): { document: McpConfigDocument | null; changed: boolean; addedAccounts: string[] } {
+): {
+  document: McpConfigDocument | null;
+  identity: PrivateFileIdentity | null;
+  changed: boolean;
+  addedAccounts: string[];
+} {
   const path = join(home, MCP_FILENAME);
-  if (!plaintextSourceExists(path)) return { document: null, changed: false, addedAccounts: [] };
-  const parsed = privateJson(path).value;
+  if (!plaintextSourceExists(path)) {
+    return { document: null, identity: null, changed: false, addedAccounts: [] };
+  }
+  const source = privateJson(path);
+  const parsed = source.value;
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new SecretServiceError("secret_migration_failed", `${path} must contain a JSON object.`);
   }
@@ -1077,7 +1090,7 @@ function migrateMcpFile(
     }
     for (const account of migrated.addedAccounts) accounts.add(account);
   }
-  return { document, changed, addedAccounts: [...accounts] };
+  return { document, identity: source.identity, changed, addedAccounts: [...accounts] };
 }
 
 function importCredentials(
@@ -1201,29 +1214,42 @@ function migrateWithContext(
   const agentDbClaim = recoverOrClaimAgentDb(agentDb, options);
   let agentDbPublished = false;
   try {
-    const models = readGhostModels(options.home) ?? { providers: {} };
     const addedAccounts = new Set<string>();
-    const modelsChanged = migrateModels(models, context, addedAccounts);
-    const mcp = migrateMcpFile(options.home, context);
-    for (const account of mcp.addedAccounts) addedAccounts.add(account);
-
     const database = agentDbClaim?.evidence.phase === "claimed"
       ? readAgentDb(agentDbClaim)
       : [];
     const legacy = legacyCredentials(authPath);
     importCredentials([...database, ...(legacy?.rows ?? [])], context, addedAccounts);
 
-    const previousAccounts = models.accounts ?? [];
-    const mergedAccounts = [...new Set([...previousAccounts, ...addedAccounts])];
-    if (mergedAccounts.length > 0) models.accounts = mergedAccounts;
-    context.allowAccounts(mergedAccounts);
-
-    if (modelsChanged || mergedAccounts.length !== previousAccounts.length) {
-      writeGhostModels(options.home, models);
-    }
-    if (mcp.changed && mcp.document) {
-      atomicPrivateJson(join(options.home, MCP_FILENAME), mcp.document);
-    }
+    const mcpPath = join(options.home, MCP_FILENAME);
+    withMCPConfigWriteLock(mcpPath, () => {
+      recoverPrivateJsonAtomicCas(mcpPath);
+      const modelsPath = ghostModelsPath(options.home);
+      const mcp = withSerializedModelsWrite(modelsPath, () => {
+        recoverPrivateJsonAtomicCas(modelsPath);
+        const snapshot = readGhostModelsSnapshot(options.home);
+        const models = snapshot?.file ?? { providers: {} };
+        context.allowAccounts(models.accounts ?? []);
+        const migratedMcp = migrateMcpFile(options.home, context);
+        for (const account of migratedMcp.addedAccounts) addedAccounts.add(account);
+        const modelsChanged = migrateModels(models, context, addedAccounts);
+        const previousAccounts = models.accounts ?? [];
+        const mergedAccounts = [...new Set([...previousAccounts, ...addedAccounts])];
+        if (mergedAccounts.length > 0) models.accounts = mergedAccounts;
+        context.allowAccounts(mergedAccounts);
+        if (modelsChanged || mergedAccounts.length !== previousAccounts.length) {
+          options.portableCommitProbe?.("models", modelsPath);
+          writePrivateJsonAtomicCas(modelsPath, models, snapshot?.identity ?? null);
+        }
+        return migratedMcp;
+      });
+      // Accounts are durable policy before the config can publish references
+      // to them; a failed MCP CAS leaves only harmless extra authorization.
+      if (mcp.changed && mcp.document) {
+        options.portableCommitProbe?.("mcp", mcpPath);
+        writePrivateJsonAtomicCas(mcpPath, mcp.document, mcp.identity);
+      }
+    });
 
     // Plaintext is removed only after every keyring write was read back and
     // both portable config replacements are durable. Every preceding step is
@@ -1261,9 +1287,8 @@ function migrateWithContext(
 }
 
 export function openGhostSecretContext(options: GhostSecretMigrationOptions): GhostSecretContext {
-  const models = readGhostModels(options.home);
   const context = new GhostSecretContext({
-    allowedAccounts: models?.accounts ?? [],
+    allowedAccounts: [],
     ...(options.client ? { client: options.client } : {}),
     ...(options.metadataPath ? { metadataPath: options.metadataPath } : {}),
   });

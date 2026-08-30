@@ -300,6 +300,98 @@ describe("Secret Service boundary", () => {
 });
 
 describe("plaintext migration", () => {
+  it("preserves a concurrent models.json replacement and migrates it on retry", () => {
+    const home = literalHome(root(), "ghost", "admitted-model-secret");
+    const path = join(home, "models.json");
+    const displaced = `${path}.admitted`;
+    const client = new MemorySecretServiceClient();
+    let replaced = false;
+
+    expect(() => openGhostSecretContext({
+      home,
+      client,
+      metadataPath: join(home, "state.sqlite"),
+      portableCommitProbe: (source, sourcePath) => {
+        if (source !== "models" || replaced) return;
+        replaced = true;
+        renameSync(sourcePath, displaced);
+        writeFileSync(sourcePath, JSON.stringify({
+          providers: { winner: { apiKey: "replacement-model-secret" } },
+          roles: { chat_model: { provider: "winner", modelId: "winner-model" } },
+        }));
+      },
+    })).toThrow(/changed before its private migration could be committed/);
+
+    expect(readFileSync(path, "utf8")).toContain("replacement-model-secret");
+    expect(readFileSync(displaced, "utf8")).toContain("admitted-model-secret");
+
+    openContext(home, client).close();
+    const migrated = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+    expect(migrated).toMatchObject({
+      providers: { winner: { apiKey: "keyring:winner/personal" } },
+      roles: { chat_model: { provider: "winner", modelId: "winner-model" } },
+      accounts: ["winner/personal"],
+    });
+  });
+
+  it("preserves a concurrent mcp.json replacement and authorizes its references on retry", () => {
+    const home = root();
+    const path = join(home, "mcp.json");
+    const displaced = `${path}.admitted`;
+    writeFileSync(path, JSON.stringify({
+      mcpServers: {
+        admitted: { type: "http", url: "https://admitted.test", headers: { Authorization: "admitted-mcp-secret" } },
+      },
+    }));
+    const client = new MemorySecretServiceClient();
+    let replaced = false;
+
+    expect(() => openGhostSecretContext({
+      home,
+      client,
+      metadataPath: join(home, "state.sqlite"),
+      portableCommitProbe: (source, sourcePath) => {
+        if (source !== "mcp" || replaced) return;
+        replaced = true;
+        renameSync(sourcePath, displaced);
+        writeFileSync(sourcePath, JSON.stringify({
+          mcpServers: {
+            winner: { type: "http", url: "https://winner.test/path", headers: { Authorization: "replacement-mcp-secret" } },
+          },
+        }));
+      },
+    })).toThrow(/changed before its private migration could be committed/);
+
+    expect(readFileSync(path, "utf8")).toContain("replacement-mcp-secret");
+    expect(readFileSync(displaced, "utf8")).toContain("admitted-mcp-secret");
+
+    openContext(home, client).close();
+    const migratedMcp = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+    const winner = (migratedMcp.mcpServers as Record<string, Record<string, unknown>>).winner!;
+    const authorization = (winner.headers as Record<string, string>).Authorization!;
+    expect(winner).toMatchObject({ type: "http", url: "https://winner.test/path" });
+    expect(authorization).toMatch(/^keyring:mcp\.winner\.[0-9a-f]+\/personal#header\./);
+    const reference = parseSecretReference(authorization)!;
+    const migratedModels = JSON.parse(readFileSync(join(home, "models.json"), "utf8")) as { accounts: string[] };
+    expect(migratedModels.accounts).toContain(`${reference.service}/${reference.account}`);
+    expect(migratedModels.accounts).toHaveLength(2);
+  });
+
+  it.each(["models.json", "mcp.json"])("recovers an interrupted %s CAS before retry", (name) => {
+    const home = root();
+    const path = join(home, name);
+    const value = name === "models.json"
+      ? { providers: { openrouter: { apiKey: "recover-model-secret" } } }
+      : { mcpServers: { recover: { type: "http", url: "https://recover.test", headers: { Authorization: "recover-mcp-secret" } } } };
+    writeFileSync(path, JSON.stringify(value));
+    renameSync(path, `${path}.ghost-migration-cas`);
+
+    openContext(home, new MemorySecretServiceClient()).close();
+
+    expect(existsSync(`${path}.ghost-migration-cas`)).toBe(false);
+    expect(readFileSync(path, "utf8")).toContain("keyring:");
+  });
+
   it("allocates distinct machine accounts instead of overwriting another literal", () => {
     const machine = root();
     const firstHome = literalHome(machine, "one", "first-key");
