@@ -592,9 +592,9 @@ export interface SessionHostOptions {
   /** Test seams for pausing owner sidebar-state publication. */
   pinWriter?: typeof writePins;
   readWriter?: typeof writeReads;
-  /** Test seam at plan/title path ownership boundaries. */
+  /** Test seam at conversation-file path ownership boundaries. */
   conversationFileProbe?: (
-    operation: "plan-read" | "plan-write" | "title-write",
+    operation: "plan-read" | "plan-write" | "title-write" | "transcript-read",
     path: string,
   ) => void | Promise<void>;
   /** Deterministic fault seam around durable fork/delete transaction boundaries. */
@@ -5989,10 +5989,21 @@ export class SessionHost {
     runtime: ConversationRuntime = "pi",
   ): Promise<Transcript> {
     assertPiConversation(runtime, "Transcript reading");
+    return this.homeOperations.withLease(ghostName, () =>
+      this.readTranscriptLeased(ghostName, conversationId, options)
+    );
+  }
+
+  private async readTranscriptLeased(
+    ghostName: string,
+    conversationId: string | null | undefined,
+    options: { limit?: number; offset?: number },
+  ): Promise<Transcript> {
     const ghost = this.registry.get(ghostName);
     const paths = ghostPaths(ghost.dir);
     const id = conversationId ?? DEFAULT_SESSION_KEY;
     const path = join(paths.sessionDir, sessionFileNameFor(id));
+    await this.conversationFileProbe("transcript-read", path);
     if (!existsSync(path)) {
       throw new GhostError(
         "not_found",
@@ -6005,7 +6016,7 @@ export class SessionHost {
     // right after the first turn carries the freshly generated title.
     const hosted = this.sessions.get(this.keyOf(ghostName, conversationId));
     if (hosted?.title) await hosted.title.catch(() => {});
-    const project = hosted?.project ?? await this.projectState(ghostName, "pi", id);
+    const project = hosted?.project ?? await this.projectStateLeased(ghostName, "pi", id);
 
     const manager = SessionManager.open(path, paths.sessionDir, project.cwd);
     const toolCwds = await readToolCwds(paths.sessionDir, id);

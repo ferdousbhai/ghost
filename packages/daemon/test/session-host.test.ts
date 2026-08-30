@@ -7609,7 +7609,9 @@ describe("passive session recovery during whole-home moves", () => {
     return {
       entered,
       resume,
-      probe: async (candidate: "plan-read" | "plan-write" | "title-write") => {
+      probe: async (
+        candidate: "plan-read" | "plan-write" | "title-write" | "transcript-read",
+      ) => {
         if (candidate !== operation) return;
         entered.resolve();
         await resume.promise;

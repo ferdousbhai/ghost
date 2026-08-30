@@ -1063,7 +1063,9 @@ shape and streams emit one complete event object per line.
   ghost-home-relative; a client already gets that home's absolute `dir` from
   `GET /api/ghosts`. The shell shows this list as it is: one editable row per
   fact, no derived title or preview, and it watches the directory instead of
-  offering a refresh.
+  offering a refresh. The route holds the ghost-home identity lease from before
+  path resolution until the complete listing is read, so rename/delete cannot
+  redirect an admitted read into a later ghost that reuses the old name.
 - `PUT  /api/ghosts/:name/memory` `{ content, name? }` →
   `{ ok: true, slug, path, created }` — creates or replaces exactly one memory
   file through the validating, redacting, atomic `GhostHome` writer used by the
@@ -1704,7 +1706,9 @@ shape and streams emit one complete event object per line.
   adapters do not record a duplicate cwd.
   `404 not_found` for an unknown conversation id. Only pi
   conversations are readable here; a Claude Code conversation's transcript lives
-  in that runtime's own storage.
+  in that runtime's own storage. The read holds one ghost-home identity lease
+  from before transcript/project path resolution through the complete projected
+  page; rename/delete waits, and old-name reuse cannot change the admitted read.
 - `GET /api/ghosts/:name/sessions/:id/ask` → `{ ask }`, where `ask` is the
   currently pending `ask` interaction or `null`. A pending ask carries `timeoutAt`
   when one is armed.

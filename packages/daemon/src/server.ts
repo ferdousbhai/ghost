@@ -52,6 +52,8 @@ export interface ServerOptions {
   registry: GhostRegistry;
   host: SessionHost;
   homeOperations?: HomeOperationCoordinator;
+  /** Test seam for pausing the plain owner memory listing. */
+  memoryReader?: typeof listGhostMemory;
   /** Test seam for pausing the validated owner memory writer. */
   memoryWriter?: typeof writeGhostMemory;
   /**
@@ -298,6 +300,7 @@ export function createDaemonServer(options: ServerOptions): Server {
   const logger = options.logger ?? silentLogger;
   const maxBodyBytes = options.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
   const homeOperations = options.homeOperations ?? homeOperationsFor(options.registry);
+  const memoryReader = options.memoryReader ?? listGhostMemory;
   const memoryWriter = options.memoryWriter ?? writeGhostMemory;
   const liveStreams = new Set<ServerResponse>();
   // `undefined` means "decide for me"; `null` means "no relay on this server".
@@ -514,8 +517,11 @@ export function createDaemonServer(options: ServerOptions): Server {
     ghostName: string,
     response: ServerResponse,
   ): Promise<void> => {
-    const ghost = options.registry.get(ghostName);
-    jsonResponse(response, 200, await listGhostMemory(ghost.dir));
+    const listing = await homeOperations.withLease(ghostName, () => {
+      const ghost = options.registry.get(ghostName);
+      return memoryReader(ghost.dir);
+    });
+    jsonResponse(response, 200, listing);
   };
 
   const handleWriteMemory = async (

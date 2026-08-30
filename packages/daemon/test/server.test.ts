@@ -9,6 +9,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { MachineDocuments } from "@ghost/extensions";
@@ -18,7 +19,7 @@ import { claudeSessionMetadataPath } from "../src/claude-code.js";
 import { ghostPaths } from "../src/ghosts.js";
 import { HomeOperationCoordinator } from "../src/home-operations.js";
 import { McpCatalog } from "../src/mcp-catalog.js";
-import { writeGhostMemory } from "../src/memory-files.js";
+import { listGhostMemory, writeGhostMemory } from "../src/memory-files.js";
 import { setChatModelRole } from "../src/models.js";
 import type { PiMessagesEvent } from "../src/pi-messages.js";
 import { projectBindingPath } from "../src/project-binding.js";
@@ -64,7 +65,9 @@ async function serve(
     maxBodyBytes?: number;
     apiToken?: string | null;
     hooks?: ServerOptions["hooks"];
+    memoryReader?: ServerOptions["memoryReader"];
     memoryWriter?: ServerOptions["memoryWriter"];
+    conversationFileProbe?: SessionHostOptions["conversationFileProbe"];
     scheduleCommandRunner?: SessionHostOptions["scheduleCommandRunner"];
   } = {},
 ) {
@@ -84,6 +87,9 @@ async function serve(
     offline: true,
     scheduleCommandRunner: serverOptions.scheduleCommandRunner
       ?? (async () => ({ stdout: "", stderr: "", code: 0 })),
+    ...(serverOptions.conversationFileProbe === undefined
+      ? {}
+      : { conversationFileProbe: serverOptions.conversationFileProbe }),
     extensionOptions: { documents: machineDocuments },
   });
   const mcp = new McpCatalog({ registry: temp.registry });
@@ -100,6 +106,9 @@ async function serve(
       : { maxBodyBytes: serverOptions.maxBodyBytes }),
     ...(serverOptions.apiToken === undefined ? {} : { apiToken: serverOptions.apiToken }),
     ...(serverOptions.hooks === undefined ? {} : { hooks: serverOptions.hooks }),
+    ...(serverOptions.memoryReader === undefined
+      ? {}
+      : { memoryReader: serverOptions.memoryReader }),
     ...(serverOptions.memoryWriter === undefined
       ? {}
       : { memoryWriter: serverOptions.memoryWriter }),
@@ -743,6 +752,66 @@ describe("/api/ghosts/:name/memory", () => {
     expect(readFileSync(join(trash, "memory", "the-memory-write-owns-its-home.md"), "utf8"))
       .toBe("The memory write owns its home path.\n");
   });
+
+  it.each(["rename", "delete"] as const)(
+    "finishes an admitted memory read from the original home before %s and old-name reuse",
+    async (move) => {
+      const readerEntered = Promise.withResolvers<void>();
+      const releaseReader = Promise.withResolvers<void>();
+      let resolvedDir = "";
+      const base = await serve(undefined, {
+        memoryReader: async (dir) => {
+          resolvedDir = dir;
+          readerEntered.resolve();
+          await releaseReader.promise;
+          return listGhostMemory(dir);
+        },
+      });
+      const originalHome = join(temp!.root, "casper");
+      const memoryPath = join(originalHome, "memory", "original-home.md");
+      writeFileSync(memoryPath, "This fact belongs to the original home.\n", "utf8");
+      const originalInode = statSync(originalHome, { bigint: true }).ino;
+
+      const reading = fetch(`${base}/api/ghosts/casper/memory`);
+      await readerEntered.promise;
+      expect(resolvedDir).toBe(originalHome);
+      const moving = move === "rename"
+        ? fetch(`${base}/api/ghosts/casper/name`, {
+            method: "PUT",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ name: "wisp" }),
+          })
+        : fetch(`${base}/api/ghosts/casper?confirm=casper`, { method: "DELETE" });
+      await waitForHomeMove();
+
+      releaseReader.resolve();
+      const readResponse = await reading;
+      expect(readResponse.status).toBe(200);
+      expect(await readResponse.json()).toMatchObject({
+        memory: [{
+          path: "memory/original-home.md",
+          content: "This fact belongs to the original home.",
+        }],
+      });
+      const movedResponse = await moving;
+      expect(movedResponse.status).toBe(200);
+      const movedBody = await movedResponse.json() as { trash?: string };
+      const movedHome = move === "rename" ? join(temp!.root, "wisp") : movedBody.trash!;
+      expect(statSync(movedHome, { bigint: true }).ino).toBe(originalInode);
+
+      const recreated = await fetch(`${base}/api/ghosts`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: "casper" }),
+      });
+      expect(recreated.status).toBe(201);
+      expect(statSync(originalHome, { bigint: true }).ino).not.toBe(originalInode);
+      expect(await (await fetch(`${base}/api/ghosts/casper/memory`)).json())
+        .toEqual({ memory: [], skipped: [] });
+      expect(readFileSync(join(movedHome, "memory", "original-home.md"), "utf8"))
+        .toBe("This fact belongs to the original home.\n");
+    },
+  );
 
   it("moves confirmed memory files to Trash and refuses everything else", async () => {
     const base = await serve();
@@ -2429,6 +2498,79 @@ describe("GET /api/ghosts/:name/sessions/:id/transcript", () => {
     expect(transcript.messages[0]?.role).toBe("user");
     expect(transcript.messages.some((message) => message.role === "assistant")).toBe(true);
   });
+
+  it.each(["rename", "delete"] as const)(
+    "finishes an admitted transcript read from the original home before %s and old-name reuse",
+    async (move) => {
+      const readerEntered = Promise.withResolvers<void>();
+      const releaseReader = Promise.withResolvers<void>();
+      let resolvedPath = "";
+      const base = await serve([{ kind: "text", text: "Original-home answer." }], {
+        conversationFileProbe: async (operation, path) => {
+          if (operation !== "transcript-read") return;
+          resolvedPath = path;
+          readerEntered.resolve();
+          await releaseReader.promise;
+        },
+      });
+      await postTurn(base, TURN_BODY);
+      const originalHome = join(temp!.root, "casper");
+      const originalTranscript = join(
+        ghostPaths(originalHome).sessionDir,
+        sessionFileNameFor("conv-1"),
+      );
+      const originalInode = statSync(originalHome, { bigint: true }).ino;
+
+      const reading = fetch(
+        `${base}/api/ghosts/casper/sessions/${piSegment("conv-1")}/transcript`,
+      );
+      await readerEntered.promise;
+      expect(resolvedPath).toBe(originalTranscript);
+      const moving = move === "rename"
+        ? fetch(`${base}/api/ghosts/casper/name`, {
+            method: "PUT",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ name: "wisp" }),
+          })
+        : fetch(`${base}/api/ghosts/casper?confirm=casper`, { method: "DELETE" });
+      await waitForHomeMove();
+
+      releaseReader.resolve();
+      const readResponse = await reading;
+      expect(readResponse.status).toBe(200);
+      const originalResult = await readResponse.json() as {
+        messages: Array<{ content: unknown }>;
+      };
+      expect(JSON.stringify(originalResult.messages)).toContain("Original-home answer.");
+      const movedResponse = await moving;
+      expect(movedResponse.status).toBe(200);
+      const movedBody = await movedResponse.json() as { trash?: string };
+      const movedHome = move === "rename" ? join(temp!.root, "wisp") : movedBody.trash!;
+      expect(statSync(movedHome, { bigint: true }).ino).toBe(originalInode);
+      expect(existsSync(join(
+        ghostPaths(movedHome).sessionDir,
+        sessionFileNameFor("conv-1"),
+      ))).toBe(true);
+
+      const recreated = await fetch(`${base}/api/ghosts`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: "casper" }),
+      });
+      expect(recreated.status).toBe(201);
+      expect(statSync(originalHome, { bigint: true }).ino).not.toBe(originalInode);
+      expect((await fetch(
+        `${base}/api/ghosts/casper/sessions/${piSegment("conv-1")}/transcript`,
+      )).status).toBe(404);
+      if (move === "rename") {
+        const renamed = await fetch(
+          `${base}/api/ghosts/wisp/sessions/${piSegment("conv-1")}/transcript`,
+        );
+        expect(renamed.status).toBe(200);
+        expect(JSON.stringify(await renamed.json())).toContain("Original-home answer.");
+      }
+    },
+  );
 
   it("404s an unknown conversation id", async () => {
     const base = await serve();
