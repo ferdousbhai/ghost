@@ -251,6 +251,8 @@ function setupClaudeHost(options: {
   warmIdleTtlMs?: number;
   exitWaitTimeoutMs?: number;
   useSdkSpawnExitBoundary?: boolean;
+  browserSessionClose?: SessionHostOptions["browserSessionClose"];
+  scheduleCommandRunner?: SessionHostOptions["scheduleCommandRunner"];
 } = {}) {
   temp = makeTempGhosts();
   const dir = seedGhost(temp.root, {
@@ -285,6 +287,12 @@ function setupClaudeHost(options: {
     ...(options.logger ? { logger: options.logger } : {}),
     ...(options.hooks ? { hooks: options.hooks } : {}),
     ...(options.maintenance ? { maintenance: options.maintenance } : {}),
+    ...(options.browserSessionClose
+      ? { browserSessionClose: options.browserSessionClose }
+      : {}),
+    ...(options.scheduleCommandRunner
+      ? { scheduleCommandRunner: options.scheduleCommandRunner }
+      : {}),
     claudeCode: {
       ...(options.warmIdleTtlMs === undefined
         ? {}
@@ -3618,10 +3626,24 @@ describe("Claude Code subscription runtime", () => {
     expect(events.at(-1)).toMatchObject({ type: "error" });
   });
 
-  it("does not move a ghost home until the retired SDK subprocess confirms exit", async () => {
+  it("quiesces Claude, the browser, and schedules before moving a ghost home", async () => {
     const processExit = deferred();
+    const cleanupOrder: string[] = [];
+    const expectHomeUnmoved = () => {
+      expect(existsSync(join(temp!.root, "casper"))).toBe(true);
+      expect(existsSync(join(temp!.root, "wisp"))).toBe(false);
+    };
     const { lifecycle } = setupClaudeHost({
       useSdkSpawnExitBoundary: true,
+      browserSessionClose: async () => {
+        expectHomeUnmoved();
+        cleanupOrder.push("browser");
+      },
+      scheduleCommandRunner: async (args) => {
+        expectHomeUnmoved();
+        cleanupOrder.push(`schedule:${args[1]}`);
+        return { stdout: "", stderr: "", code: 0 };
+      },
       createQuery: (input, state) => {
         const sessionId = input.options.sessionId ?? input.options.resume;
         if (!sessionId) throw new Error("test query received no session id");
@@ -3638,7 +3660,10 @@ describe("Claude Code subscription runtime", () => {
           env: { ...process.env },
           signal: new AbortController().signal,
         });
-        child.once("exit", () => processExit.resolve());
+        child.once("exit", () => {
+          cleanupOrder.push("claude-exit");
+          processExit.resolve();
+        });
         const stream = (async function* () {
           for (const message of responseMessages(sessionId, "ready to close")) yield message;
         })();
@@ -3663,12 +3688,19 @@ describe("Claude Code subscription runtime", () => {
     let renamed = false;
     const renaming = host!.renameGhost("casper", "wisp").then(() => {
       renamed = true;
+      cleanupOrder.push("move");
     });
     await vi.waitFor(() => expect(lifecycle.closed).toBe(1));
     expect(renamed).toBe(false);
-    expect(temp!.registry.list().map((ghost) => ghost.name)).toContain("casper");
+    expectHomeUnmoved();
     await processExit.promise;
+    expectHomeUnmoved();
     await renaming;
+    expect(cleanupOrder.slice(0, 2)).toEqual(["claude-exit", "browser"]);
+    expect(cleanupOrder.slice(2, -1).every((entry) => entry.startsWith("schedule:")))
+      .toBe(true);
+    expect(cleanupOrder).toContain("schedule:list-units");
+    expect(cleanupOrder.at(-1)).toBe("move");
     expect(temp!.registry.list().map((ghost) => ghost.name)).toContain("wisp");
   });
 
