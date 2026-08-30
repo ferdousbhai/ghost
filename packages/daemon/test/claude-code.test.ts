@@ -752,6 +752,23 @@ describe("Claude Code subscription runtime", () => {
       allowDangerouslySkipPermissions: true,
       persistSession: true,
     });
+    // Scheduling, plan mode, and asking the owner are Ghost-owned; Claude's own
+    // versions would keep state or reach the owner outside Ghost's surfaces.
+    for (const tool of [
+      "AskUserQuestion",
+      "CronCreate",
+      "CronDelete",
+      "CronList",
+      "EnterPlanMode",
+      "ExitPlanMode",
+      "PushNotification",
+      "RemoteTrigger",
+      "ScheduleWakeup",
+    ]) expect(seenOptions[0]?.disallowedTools, tool).toContain(tool);
+    // Claude's own way of working is untouched.
+    for (const tool of ["Agent", "Task", "Bash", "Read", "Write", "TodoWrite", "WebSearch"]) {
+      expect(seenOptions[0]?.disallowedTools, tool).not.toContain(tool);
+    }
     expect(seenOptions[0]).not.toHaveProperty("plugins");
     expect(seenOptions[0]).not.toHaveProperty("strictMcpConfig");
     const systemPrompt = seenOptions[0]?.systemPrompt;

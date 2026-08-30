@@ -126,6 +126,36 @@ const MODEL_TURN_PERSISTENCE_ERROR = "Could not durably settle this owner turn."
 export const CLAUDE_SESSION_METADATA_MAX_BYTES = 16 * 1_048_576;
 const AUTH_STATUS_TIMEOUT_MS = 10_000;
 export const CLAUDE_CODE_TOOL_CAPABILITIES: GhostToolCapabilities = { vision: true };
+
+/**
+ * Native preset tools Ghost takes away, and the only reason it takes any away:
+ * they create durable state or reach for the owner outside Ghost's own
+ * surfaces. Scheduling is a systemd user timer the ghost writes itself and the
+ * owner can see in `systemctl --user list-timers`; a Claude cron job would live
+ * in Claude's private store, fire outside ghostd with no persona, and survive
+ * the ghost's deletion. Plan mode is Ghost-owned and pi-only — this runtime
+ * answers `409 not_supported` for it — so leaving Claude's own plan mode in the
+ * preset would contradict that contract, and under `bypassPermissions` its
+ * approval step has no surface anyway. `AskUserQuestion` has no handler in the
+ * daemon and no HUD surface, and it would bypass Ghost's deliberate policy that
+ * a timed-out ask is never answered by a guessing model. Push and remote
+ * triggers are claude.ai session infrastructure with nothing behind them here.
+ *
+ * Everything that is merely Claude's own way of working stays: subagents,
+ * worktrees, the REPL, todos, web search and fetch. Ghosts run unthrottled, and
+ * this list is not a throttle.
+ */
+export const CLAUDE_CODE_DISALLOWED_TOOLS = [
+  "AskUserQuestion",
+  "CronCreate",
+  "CronDelete",
+  "CronList",
+  "EnterPlanMode",
+  "ExitPlanMode",
+  "PushNotification",
+  "RemoteTrigger",
+  "ScheduleWakeup",
+] as const;
 const execFileAsync = promisify(execFile);
 
 export interface ClaudeCodeAuthStatus {
@@ -1131,6 +1161,7 @@ function queryOptions(input: {
     skills: [],
     tools: { type: "preset", preset: "claude_code" },
     allowedTools: input.toolNames.map((name) => `mcp__ghost__${name}`),
+    disallowedTools: [...CLAUDE_CODE_DISALLOWED_TOOLS],
     permissionMode: "bypassPermissions",
     allowDangerouslySkipPermissions: true,
     mcpServers: mcpServerRecord([

@@ -371,7 +371,20 @@ pi's native tools in a Ghost session are `bash`, `edit`, `find`, `grep`, `ls`,
 tools named `mcp__<server>_<tool>` — are registered directly as pi custom
 tools and appear in `getActiveToolNames()`; there is no separate mount. There
 is no `task` tool; no bundled, custom, or ambient subagent can be spawned.
-Claude Code retains its own native subagent behavior. Live voice (issue #44) is
+Claude Code retains its own native subagent behavior, and its native tool preset
+is subtracted from exactly once, by `disallowedTools`: a native tool is removed
+when it would keep durable state or reach the owner outside Ghost's surfaces,
+and kept when it is merely Claude's own way of working. That removes
+`CronCreate`, `CronDelete`, `CronList`, and `ScheduleWakeup` (scheduled work is
+a systemd user timer the ghost writes itself, visible to the owner and removed
+with the ghost), `EnterPlanMode` and `ExitPlanMode` (plan mode is Ghost-owned
+and pi-only; this runtime answers `409 not_supported`), `AskUserQuestion` (the
+daemon has no handler and the HUD no surface, and Ghost's `ask` decides
+deliberately that a timed-out ask is never answered by a guessing model), and
+`PushNotification` and `RemoteTrigger` (claude.ai session infrastructure with
+nothing behind it here). Subagents, worktrees, the REPL, todos, and the web
+tools stay; this is a boundary, not a throttle. A mid-turn ask is therefore
+unsupported on Claude Code. Live voice (issue #44) is
 deferred; goals with budgets belong with always-on check-ins (issue #18).
 Ghost's `settings.yml`,
 `models.json`, and `mcp.json` are read from the ghost home, never the live cwd.

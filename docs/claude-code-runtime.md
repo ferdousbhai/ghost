@@ -92,7 +92,14 @@ The query is deliberately unrestricted for its local owner:
 - Claude Code's native system prompt is preserved and the Ghost persona is
   appended;
 - the native Claude Code tool preset, including Bash/Read/Edit/Write, web
-  search, subagents, and background work, remains enabled;
+  search, subagents, and background work, remains enabled, with one subtraction:
+  `disallowedTools` removes the native tools that would keep durable state or
+  reach the owner outside Ghost's surfaces — `CronCreate`, `CronDelete`,
+  `CronList`, `ScheduleWakeup`, `EnterPlanMode`, `ExitPlanMode`,
+  `AskUserQuestion`, `PushNotification`, and `RemoteTrigger`. Ghost owns
+  scheduling as a systemd user timer and plan mode as a pi-only boundary, and
+  the daemon has no handler or HUD surface for a native ask. Nothing that is
+  merely Claude's own working style is removed, and this is not a throttle;
 - filesystem setting sources are pinned to none, so changing cwd cannot admit
   owner/project executable settings, hooks, plugins, or arbitrary MCP;
 - the visible ghost home contributes accepted instruction files and rules
