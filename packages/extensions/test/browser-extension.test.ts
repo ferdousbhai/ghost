@@ -395,7 +395,7 @@ describe("registration", () => {
   it("offers a closed action enum with no free-form escape hatch", async () => {
     const harness = await browserHarness();
     const schema = harness.tools.get(GHOST_BROWSER)?.parameters as {
-      properties: Record<string, { enum?: string[]; type?: string }>;
+      properties: Record<string, { description?: string; enum?: string[]; type?: string }>;
       required?: string[];
     };
     expect(schema.properties.action?.enum).toEqual([...BROWSER_ACTIONS]);
@@ -403,6 +403,9 @@ describe("registration", () => {
     expect(schema.properties.allow_local).toBeUndefined();
     expect(schema.properties.headless).toBeUndefined();
     expect(schema.required).toEqual(["action"]);
+    expect(schema.properties.action?.description).toMatch(
+      /tab_close: close one ghost-created tab.*close: release this ghost's entire browser workspace across conversations/is,
+    );
   });
 });
 
@@ -1015,7 +1018,7 @@ describe("screenshot, back, close", () => {
 
     await harness.call(GHOST_BROWSER, { action: "open", url: "https://example.com" });
     expect(resultText(await harness.call(GHOST_BROWSER, { action: "close" })))
-      .toMatch(/Closed the browser/i);
+      .toMatch(/Closed this ghost's browser workspace across all conversations/i);
     expect(backend.closed).toBe(true);
   });
 

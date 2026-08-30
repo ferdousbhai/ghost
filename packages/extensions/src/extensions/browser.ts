@@ -160,7 +160,9 @@ export function createBrowserExtension(
             + "elements by text or CSS selector and get refs for them. click: "
             + "click a ref or selector. type: put text into a field. screenshot: "
             + "save a PNG of the page and get its path. back: go back one page. "
-            + "close: let go of the tabs you opened. The owner's browser stays open.",
+            + "tab_close: close one ghost-created tab. close: release this ghost's "
+            + "entire browser workspace across conversations and close all of its "
+            + "ghost-created tabs. The owner's browser stays open.",
         }),
         url: Type.Optional(Type.String({
           description: "For open. A full https URL, or a bare domain.",
@@ -776,7 +778,9 @@ export function createBrowserExtension(
           case "close": {
             const wasOpen = await session.close(operation);
             return textResult(
-              wasOpen ? "Closed the browser." : "The browser was not open.",
+              wasOpen
+                ? "Closed this ghost's browser workspace across all conversations."
+                : "This ghost's browser workspace was not open.",
               { action: "close", wasOpen },
             );
           }

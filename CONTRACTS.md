@@ -2193,9 +2193,13 @@ not coupled to that release identity.
   owner id and every page operation the tab id it opened. The daemon's welcome
   carries a fresh process-incarnation UUID. Before answering hello, the extension
   compares it with the bounded local marker, durably retires and sweeps claims
-  from a prior daemon process, and publishes the new incarnation; failure keeps
-  the socket unadmitted for automatic retry. A same-incarnation reconnect keeps
-  live claims. An authenticated socket earns the single relay slot only after
+  from a prior daemon process, and tombstones every still-running tab-create
+  lease so its late result self-retires. Incarnation reconciliation is serialized
+  through publication of the new marker; a timed-out marker write that settles
+  late is generation-gated and queues the newest safe marker again rather than
+  regressing it. Failure keeps the socket unadmitted for automatic retry. A
+  same-incarnation reconnect keeps live claims. An authenticated socket earns
+  the single relay slot only after
   that reconciliation and a compatible `hello` within five seconds; until then
   status stays disconnected, no work is dispatched to it, and a new authenticated
   socket may replace it. Superseded pre-hello sockets are force-terminated, and
