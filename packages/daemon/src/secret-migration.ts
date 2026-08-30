@@ -4,7 +4,6 @@ import {
   chmodSync,
   closeSync,
   constants,
-  existsSync,
   fstatSync,
   fsyncSync,
   linkSync,
@@ -38,8 +37,9 @@ import { mcpServerValidationErrors } from "./mcp-server-shape.js";
 import {
   fsyncPath,
   MAX_PRIVATE_FILE_BYTES,
+  type PrivateFileIdentity,
   PrivateReadError,
-  readPrivateFileText,
+  readPrivateFile,
 } from "./private-file.js";
 import {
   DEFAULT_SECRET_FIELD,
@@ -76,6 +76,8 @@ export interface GhostSecretMigrationOptions {
     stage: "admitted" | "opening" | "claimed" | "scrubbing" | "scrubbed",
     path: string,
   ) => void;
+  /** Synchronous adversarial seam around a read plaintext source. */
+  plainFileProbe?: (stage: "removing", path: string) => void;
 }
 
 function refusedSource(path: string, error: PrivateReadError): SecretServiceError {
@@ -105,18 +107,33 @@ function refusedSource(path: string, error: PrivateReadError): SecretServiceErro
   }
 }
 
-function privateJson(path: string): unknown {
-  let text: string;
+interface PrivateJsonRead {
+  value: unknown;
+  identity: PrivateFileIdentity;
+}
+
+function privateJson(path: string): PrivateJsonRead {
+  let source: ReturnType<typeof readPrivateFile>;
   try {
-    text = readPrivateFileText(path);
+    source = readPrivateFile(path);
   } catch (error) {
     if (!(error instanceof PrivateReadError)) throw error;
     throw refusedSource(path, error);
   }
   try {
-    return JSON.parse(text) as unknown;
+    return { value: JSON.parse(source.text) as unknown, identity: source.identity };
   } catch {
     throw new SecretServiceError("secret_migration_failed", `${path} is not valid JSON.`);
+  }
+}
+
+function plaintextSourceExists(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
   }
 }
 
@@ -417,9 +434,15 @@ function readAgentDb(claim: AgentDbClaim | null): PlainCredentialRow[] {
   }
 }
 
-function legacyCredentials(path: string): PlainCredentialRow[] {
-  if (!existsSync(path)) return [];
-  const parsed = privateJson(path);
+interface LegacyCredentialRead {
+  rows: PlainCredentialRow[];
+  identity: PrivateFileIdentity;
+}
+
+function legacyCredentials(path: string): LegacyCredentialRead | null {
+  if (!plaintextSourceExists(path)) return null;
+  const source = privateJson(path);
+  const parsed = source.value;
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new SecretServiceError("secret_migration_failed", `${path} must contain a credential object.`);
   }
@@ -437,7 +460,7 @@ function legacyCredentials(path: string): PlainCredentialRow[] {
       }
     }
   }
-  return rows;
+  return { rows, identity: source.identity };
 }
 
 function fieldToken(value: string): string {
@@ -647,8 +670,8 @@ function migrateMcpFile(
   context: GhostSecretContext,
 ): { document: McpConfigDocument | null; changed: boolean; addedAccounts: string[] } {
   const path = join(home, MCP_FILENAME);
-  if (!existsSync(path)) return { document: null, changed: false, addedAccounts: [] };
-  const parsed = privateJson(path);
+  if (!plaintextSourceExists(path)) return { document: null, changed: false, addedAccounts: [] };
+  const parsed = privateJson(path).value;
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new SecretServiceError("secret_migration_failed", `${path} must contain a JSON object.`);
   }
@@ -743,9 +766,47 @@ function scrubAgentDb(claim: AgentDbClaim | null): void {
   verifyAgentDbFile(claim.main);
 }
 
-function removePlainFile(path: string): void {
-  if (!existsSync(path)) return;
-  unlinkSync(path);
+function restoreRemovalClaim(claimedPath: string, path: string): void {
+  try {
+    if (missingPath(path)) {
+      linkSync(claimedPath, path);
+      unlinkSync(claimedPath);
+    }
+  } catch {
+    // A later arrival keeps its public name; the moved entry remains recoverable.
+  }
+}
+
+function changedPlaintextSource(path: string): SecretServiceError {
+  return new SecretServiceError(
+    "secret_migration_failed",
+    `Ghost refused to remove changed plaintext source ${path}.`,
+  );
+}
+
+function removePlainFile(path: string, identity: PrivateFileIdentity): void {
+  const claimedPath = `${path}.${process.pid}.${randomUUID()}.removal`;
+  try {
+    renameSync(path, claimedPath);
+  } catch {
+    throw changedPlaintextSource(path);
+  }
+  let claimed: BigIntStats;
+  try {
+    claimed = lstatSync(claimedPath, { bigint: true });
+  } catch {
+    restoreRemovalClaim(claimedPath, path);
+    throw changedPlaintextSource(path);
+  }
+  if (!claimed.isFile()
+    || claimed.isSymbolicLink()
+    || claimed.nlink !== 1n
+    || claimed.dev !== identity.device
+    || claimed.ino !== identity.inode) {
+    restoreRemovalClaim(claimedPath, path);
+    throw changedPlaintextSource(path);
+  }
+  unlinkSync(claimedPath);
   fsyncPath(dirname(path));
 }
 
@@ -766,7 +827,7 @@ function migrateWithContext(
 
     const database = readAgentDb(agentDbClaim);
     const legacy = legacyCredentials(authPath);
-    importCredentials([...database, ...legacy], context, addedAccounts);
+    importCredentials([...database, ...(legacy?.rows ?? [])], context, addedAccounts);
 
     const previousAccounts = models.accounts ?? [];
     const mergedAccounts = [...new Set([...previousAccounts, ...addedAccounts])];
@@ -788,7 +849,10 @@ function migrateWithContext(
       publishAgentDbClaim(agentDbClaim);
       agentDbPublished = true;
     }
-    removePlainFile(authPath);
+    if (legacy) {
+      options.plainFileProbe?.("removing", authPath);
+      removePlainFile(authPath, legacy.identity);
+    }
   } catch (error) {
     if (agentDbClaim && !agentDbPublished) restoreAgentDbClaim(agentDbClaim);
     throw error;

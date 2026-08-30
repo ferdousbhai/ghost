@@ -304,7 +304,11 @@ that list is forbidden even when the item exists.
 with a 1 MiB cap, fatal UTF-8 decoding, and unchanged descriptor and live-path
 identity. Their models/MCP JSON writers admit the complete pretty-printed UTF-8
 publication at the same 1 MiB cap before creating a temporary file. Unsafe,
-changing, or oversized input is invalid, never absent or partially published.
+changing, dangling-linked, or oversized input is invalid, never absent or
+partially published. Removing a migrated `auth.json` first moves the public path
+to an unpredictable claim and unlinks it only when it is still the exact inode
+admitted by that read; a replacement login remains in place and migration fails
+for retry.
 
 References resolve in memory only, immediately before provider or MCP
 connection. pi's `ModelRuntime` receives Ghost's `GhostPiCredentialStore` (pi's

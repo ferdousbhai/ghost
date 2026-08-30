@@ -2,6 +2,7 @@ import {
   copyFileSync,
   existsSync,
   linkSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -550,6 +551,47 @@ describe("plaintext migration", () => {
     const claimDir = readdirSync(agentDir).find((entry) => entry.endsWith(".migration"));
     expect(claimDir).toBeDefined();
     expect(credentialRowCount(join(agentDir, claimDir!, "agent.db"))).toBeGreaterThan(0);
+  });
+
+  it.each(["auth", "mcp"] as const)("refuses a dangling %s plaintext source", (source) => {
+    const home = root();
+    const agentDir = join(home, ".pi");
+    mkdirSync(agentDir, { recursive: true });
+    const path = source === "auth" ? join(agentDir, "auth.json") : join(home, "mcp.json");
+    symlinkSync("missing.json", path);
+
+    expect(() => openContext(home, new MemorySecretServiceClient()))
+      .toThrow(SecretServiceError);
+    expect(lstatSync(path).isSymbolicLink()).toBe(true);
+  });
+
+  it("does not delete a replacement auth.json after migrating the admitted login", () => {
+    const home = root();
+    const agentDir = join(home, ".pi");
+    mkdirSync(agentDir, { recursive: true });
+    const path = join(agentDir, "auth.json");
+    const displaced = join(agentDir, "admitted-auth.json");
+    writeFileSync(path, JSON.stringify({
+      openai: { type: "api_key", key: "admitted-login" },
+    }));
+    let replaced = false;
+
+    expect(() => openGhostSecretContext({
+      home,
+      client: new MemorySecretServiceClient(),
+      metadataPath: join(home, "state.sqlite"),
+      plainFileProbe: (stage, sourcePath) => {
+        if (stage !== "removing" || replaced) return;
+        replaced = true;
+        renameSync(sourcePath, displaced);
+        writeFileSync(sourcePath, JSON.stringify({
+          openai: { type: "api_key", key: "replacement-login" },
+        }));
+      },
+    })).toThrow(/changed plaintext source/);
+
+    expect(readFileSync(path, "utf8")).toContain("replacement-login");
+    expect(readFileSync(displaced, "utf8")).toContain("admitted-login");
   });
 
   it("reverifies the claimed agent.db before destructive cleanup", () => {

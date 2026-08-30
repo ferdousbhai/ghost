@@ -36,6 +36,16 @@ export class PrivateReadError extends Error {
 
 export type PrivateReadProbe = (stage: "opened" | "read", path: string) => void;
 
+export interface PrivateFileIdentity {
+  device: bigint;
+  inode: bigint;
+}
+
+export interface PrivateFileRead {
+  text: string;
+  identity: PrivateFileIdentity;
+}
+
 function validPrivateDescriptor(stats: BigIntStats): boolean {
   return stats.isFile() && stats.nlink === 1n && stats.size >= 0n;
 }
@@ -52,13 +62,14 @@ function samePrivateFileState(left: BigIntStats, right: BigIntStats): boolean {
     && left.mode === right.mode;
 }
 
-export function readPrivateFileText(path: string, probe?: PrivateReadProbe): string {
+export function readPrivateFile(path: string, probe?: PrivateReadProbe): PrivateFileRead {
   let fd: number;
   try {
     fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   } catch (error) {
     throw new PrivateReadError("open", error);
   }
+  let identity: PrivateFileIdentity;
   let bytes: Buffer;
   try {
     const before = fstatSync(fd, { bigint: true });
@@ -91,14 +102,22 @@ export function readPrivateFileText(path: string, probe?: PrivateReadProbe): str
       || !samePrivateFileState(after, current)) {
       throw new PrivateReadError("changed");
     }
+    identity = { device: after.dev, inode: after.ino };
   } finally {
     closeSync(fd);
   }
   try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    return {
+      text: new TextDecoder("utf-8", { fatal: true }).decode(bytes),
+      identity,
+    };
   } catch (error) {
     throw new PrivateReadError("encoding", error);
   }
+}
+
+export function readPrivateFileText(path: string, probe?: PrivateReadProbe): string {
+  return readPrivateFile(path, probe).text;
 }
 
 /** Flush a file or a directory so a preceding write, rename, or unlink is durable. */
