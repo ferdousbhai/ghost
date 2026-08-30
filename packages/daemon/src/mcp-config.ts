@@ -5,9 +5,14 @@
  * `src/mcp/{types,config,config-writer}.ts`), kept so existing homes keep
  * loading; the implementation is Ghost's.
  */
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
-import { writePrivateJsonAtomic } from "./private-file.js";
+import {
+  PrivateReadError,
+  readPrivateFileText,
+  type PrivateReadProbe,
+  writePrivateJsonAtomic,
+} from "./private-file.js";
 import { serializeByKey } from "./promise-chain.js";
 
 export interface MCPAuthConfig {
@@ -116,13 +121,22 @@ export function expandEnvVarsDeep<T>(value: T, extraEnv?: Record<string, string>
   return value;
 }
 
-export async function readMCPConfigFile(filePath: string): Promise<MCPConfigFile> {
+export async function readMCPConfigFile(
+  filePath: string,
+  probe?: PrivateReadProbe,
+): Promise<MCPConfigFile> {
+  let text: string;
   try {
-    return JSON.parse(await readFile(filePath, "utf8")) as MCPConfigFile;
+    text = readPrivateFileText(filePath, probe);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { mcpServers: {} };
+    if (error instanceof PrivateReadError && error.refusal === "open") {
+      const cause = error.cause as NodeJS.ErrnoException;
+      if (cause.code === "ENOENT") return { mcpServers: {} };
+      throw cause;
+    }
     throw error;
   }
+  return JSON.parse(text) as MCPConfigFile;
 }
 
 export async function writeMCPConfigFile(filePath: string, config: MCPConfigFile): Promise<void> {
@@ -132,13 +146,23 @@ export async function writeMCPConfigFile(filePath: string, config: MCPConfigFile
 
 const fileLocks = new Map<string, Promise<unknown>>();
 
-async function putServer(filePath: string, name: string, config: MCPServerConfig, mustBeNew: boolean): Promise<void> {
+export interface MCPConfigMutationOptions {
+  readProbe?: PrivateReadProbe;
+}
+
+async function putServer(
+  filePath: string,
+  name: string,
+  config: MCPServerConfig,
+  mustBeNew: boolean,
+  options: MCPConfigMutationOptions,
+): Promise<void> {
   const nameError = validateServerName(name);
   if (nameError) throw new Error(nameError);
   const errors = validateServerConfig(name, config);
   if (errors.length > 0) throw new Error(`Invalid server config: ${errors.join("; ")}`);
   return serializeByKey(fileLocks, filePath, async () => {
-    const existing = await readMCPConfigFile(filePath);
+    const existing = await readMCPConfigFile(filePath, options.readProbe);
     if (mustBeNew && Object.hasOwn(existing.mcpServers ?? {}, name)) {
       throw new Error(`Server "${name}" already exists in ${filePath}`);
     }
@@ -146,17 +170,31 @@ async function putServer(filePath: string, name: string, config: MCPServerConfig
   });
 }
 
-export function addMCPServer(filePath: string, name: string, config: MCPServerConfig): Promise<void> {
-  return putServer(filePath, name, config, true);
+export function addMCPServer(
+  filePath: string,
+  name: string,
+  config: MCPServerConfig,
+  options: MCPConfigMutationOptions = {},
+): Promise<void> {
+  return putServer(filePath, name, config, true, options);
 }
 
-export function updateMCPServer(filePath: string, name: string, config: MCPServerConfig): Promise<void> {
-  return putServer(filePath, name, config, false);
+export function updateMCPServer(
+  filePath: string,
+  name: string,
+  config: MCPServerConfig,
+  options: MCPConfigMutationOptions = {},
+): Promise<void> {
+  return putServer(filePath, name, config, false, options);
 }
 
-export function removeMCPServer(filePath: string, name: string): Promise<void> {
+export function removeMCPServer(
+  filePath: string,
+  name: string,
+  options: MCPConfigMutationOptions = {},
+): Promise<void> {
   return serializeByKey(fileLocks, filePath, async () => {
-    const existing = await readMCPConfigFile(filePath);
+    const existing = await readMCPConfigFile(filePath, options.readProbe);
     if (!Object.hasOwn(existing.mcpServers ?? {}, name)) {
       throw new Error(`Server "${name}" not found in ${filePath}`);
     }

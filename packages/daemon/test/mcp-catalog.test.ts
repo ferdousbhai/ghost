@@ -1,4 +1,13 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  linkSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  symlinkSync,
+  truncateSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { GhostMcpManager } from "../src/mcp-manager.js";
@@ -352,6 +361,54 @@ describe("McpCatalog ghost-only discovery", () => {
       { path: "mcp.json", reason: "MCP config exceeds the 1 MiB limit" },
     ]);
   });
+
+  it.each(["symlink", "hardlink"] as const)(
+    "refuses a %s MCP catalog source",
+    async (kind) => {
+      const { catalog, home } = setup();
+      const target = join(home, "outside-mcp.json");
+      const path = join(home, "mcp.json");
+      writeFileSync(target, '{"mcpServers":{"outside":{"command":"never"}}}\n');
+      if (kind === "symlink") symlinkSync(target, path);
+      else linkSync(target, path);
+
+      await expect(catalog.list("casper")).resolves.toEqual({
+        servers: [],
+        skipped: [{ path: "mcp.json", reason: "MCP config could not be read or parsed." }],
+      });
+    },
+  );
+
+  it.each(["replacement", "truncation"] as const)(
+    "rejects pathname %s during pinned MCP catalog discovery",
+    async (race) => {
+      const { home } = setup();
+      const path = join(home, "mcp.json");
+      const displaced = join(home, "mcp-original.json");
+      writeJson(home, "mcp.json", {
+        mcpServers: { original: { type: "stdio", command: "original" } },
+      });
+      const catalog = new McpCatalog({
+        registry: temp!.registry,
+        privateReadProbe: (stage) => {
+          if (stage !== "opened") return;
+          if (race === "truncation") {
+            truncateSync(path, 0);
+            return;
+          }
+          renameSync(path, displaced);
+          writeJson(home, "mcp.json", {
+            mcpServers: { replacement: { type: "stdio", command: "replacement" } },
+          });
+        },
+      });
+
+      await expect(catalog.list("casper")).resolves.toEqual({
+        servers: [],
+        skipped: [{ path: "mcp.json", reason: "MCP config could not be read or parsed." }],
+      });
+    },
+  );
 
   it("does not fall back to a former hidden row", async () => {
     const { catalog, home } = setup();

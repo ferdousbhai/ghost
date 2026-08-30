@@ -16,7 +16,8 @@ import {
   fsyncSync,
   lstatSync,
   openSync,
-  readFileSync,
+  readSync,
+  type BigIntStats,
 } from "node:fs";
 
 export const MAX_PRIVATE_FILE_BYTES = 1_048_576;
@@ -33,7 +34,25 @@ export class PrivateReadError extends Error {
   }
 }
 
-export function readPrivateFileText(path: string): string {
+export type PrivateReadProbe = (stage: "opened" | "read", path: string) => void;
+
+function validPrivateDescriptor(stats: BigIntStats): boolean {
+  return stats.isFile() && stats.nlink === 1n && stats.size >= 0n;
+}
+
+function samePrivateFileState(left: BigIntStats, right: BigIntStats): boolean {
+  return validPrivateDescriptor(left)
+    && validPrivateDescriptor(right)
+    && left.dev === right.dev
+    && left.ino === right.ino
+    && left.size === right.size
+    && left.mtimeNs === right.mtimeNs
+    && left.ctimeNs === right.ctimeNs
+    && left.nlink === right.nlink
+    && left.mode === right.mode;
+}
+
+export function readPrivateFileText(path: string, probe?: PrivateReadProbe): string {
   let fd: number;
   try {
     fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
@@ -42,16 +61,34 @@ export function readPrivateFileText(path: string): string {
   }
   let bytes: Buffer;
   try {
-    const before = fstatSync(fd);
-    if (!before.isFile() || before.nlink !== 1) throw new PrivateReadError("unsafe");
-    if (before.size > MAX_PRIVATE_FILE_BYTES) throw new PrivateReadError("too_large");
-    bytes = readFileSync(fd);
-    const after = fstatSync(fd);
-    const current = lstatSync(path);
-    if (before.dev !== after.dev || before.ino !== after.ino
-      || before.size !== after.size || before.mtimeMs !== after.mtimeMs
-      || current.dev !== after.dev || current.ino !== after.ino
-      || current.isSymbolicLink() || current.nlink !== 1) {
+    const before = fstatSync(fd, { bigint: true });
+    if (!validPrivateDescriptor(before)) throw new PrivateReadError("unsafe");
+    if (before.size > BigInt(MAX_PRIVATE_FILE_BYTES)) throw new PrivateReadError("too_large");
+    probe?.("opened", path);
+
+    const admittedSize = Number(before.size);
+    bytes = Buffer.allocUnsafe(admittedSize);
+    let offset = 0;
+    while (offset < admittedSize) {
+      const count = readSync(fd, bytes, offset, admittedSize - offset, offset);
+      if (count === 0) break;
+      offset += count;
+    }
+    const overflow = Buffer.allocUnsafe(1);
+    const grew = readSync(fd, overflow, 0, 1, offset) !== 0;
+    probe?.("read", path);
+
+    const after = fstatSync(fd, { bigint: true });
+    let current: BigIntStats;
+    try {
+      current = lstatSync(path, { bigint: true });
+    } catch (error) {
+      throw new PrivateReadError("changed", error);
+    }
+    if (offset !== admittedSize
+      || grew
+      || !samePrivateFileState(before, after)
+      || !samePrivateFileState(after, current)) {
       throw new PrivateReadError("changed");
     }
   } finally {

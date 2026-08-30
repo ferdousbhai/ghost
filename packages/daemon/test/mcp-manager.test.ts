@@ -1,4 +1,11 @@
-import { writeFileSync } from "node:fs";
+import {
+  linkSync,
+  readFileSync,
+  renameSync,
+  symlinkSync,
+  truncateSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -201,6 +208,68 @@ describe("mcp.json writer", () => {
 
     writeFileSync(path, "{ not json");
     await expect(readMCPConfigFile(path)).rejects.toThrow();
+  });
+
+  it.each(["symlink", "hardlink"] as const)(
+    "refuses a %s during the locked mutation reread",
+    async (kind) => {
+      const dir = tempDir("ghost-mcp-config-unsafe-");
+      cleanups.push(dir.cleanup);
+      const target = join(dir.path, "target.json");
+      const path = join(dir.path, "mcp.json");
+      writeFileSync(target, '{"mcpServers":{"kept":{"command":"kept"}}}\n');
+      if (kind === "symlink") symlinkSync(target, path);
+      else linkSync(target, path);
+
+      await expect(addMCPServer(path, "added", { type: "stdio", command: "added" }))
+        .rejects.toThrow();
+      expect(JSON.parse(readFileSync(target, "utf8"))).toEqual({
+        mcpServers: { kept: { command: "kept" } },
+      });
+    },
+  );
+
+  it("refuses pathname replacement during the locked mutation reread", async () => {
+    const dir = tempDir("ghost-mcp-config-replaced-");
+    cleanups.push(dir.cleanup);
+    const path = join(dir.path, "mcp.json");
+    const displaced = join(dir.path, "mcp-original.json");
+    writeFileSync(path, '{"mcpServers":{"original":{"command":"original"}}}\n');
+
+    await expect(addMCPServer(
+      path,
+      "added",
+      { type: "stdio", command: "added" },
+      {
+        readProbe: (stage) => {
+          if (stage !== "opened") return;
+          renameSync(path, displaced);
+          writeFileSync(path, '{"mcpServers":{"replacement":{"command":"replacement"}}}\n');
+        },
+      },
+    )).rejects.toThrow(/changed/);
+
+    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({
+      mcpServers: { replacement: { command: "replacement" } },
+    });
+    expect(JSON.parse(readFileSync(displaced, "utf8"))).toEqual({
+      mcpServers: { original: { command: "original" } },
+    });
+  });
+
+  it("refuses truncation during the locked mutation reread", async () => {
+    const dir = tempDir("ghost-mcp-config-truncated-");
+    cleanups.push(dir.cleanup);
+    const path = join(dir.path, "mcp.json");
+    writeFileSync(path, '{"mcpServers":{"original":{"command":"original"}}}\n');
+
+    await expect(updateMCPServer(
+      path,
+      "original",
+      { type: "stdio", command: "updated" },
+      { readProbe: (stage) => stage === "opened" && truncateSync(path, 0) },
+    )).rejects.toThrow(/changed/);
+    expect(readFileSync(path)).toHaveLength(0);
   });
 
   it("expands environment references with optional defaults", () => {

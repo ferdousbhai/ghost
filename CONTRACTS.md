@@ -1110,7 +1110,11 @@ shape and streams emit one complete event object per line.
   `connected`, `connecting`, `disconnected`, `mixed`, `disabled`, or
   `not_loaded`; GET only inspects already-open pi conversations and never
   opens one. Malformed files/rows appear in `skipped` without hiding valid
-  siblings. One ghost-home identity lease spans config path resolution, the
+  siblings. Sanitized discovery and every mutation writer's locked reread use
+  the shared private-file reader: one `O_NOFOLLOW` single-link regular-file
+  descriptor, a 1 MiB cap before allocation, fatal UTF-8, stable descriptor
+  state, and matching live-path device/inode identity. One ghost-home identity
+  lease spans config path resolution, the
   complete sanitized read, and connection-status projection, so a whole-home
   move cannot redirect an admitted listing into a reused old name.
 - MCP mutations use Ghost's locked atomic `mcp.json` writer and return the

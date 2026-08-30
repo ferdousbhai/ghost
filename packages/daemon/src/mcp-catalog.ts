@@ -20,14 +20,14 @@ import {
   type HomeOperationCoordinator,
 } from "./home-operations.js";
 import {
-  descriptorPath,
-  openDirectoryNoFollow,
-  openRegularFileNoFollow,
-} from "@ghost/extensions";
-import {
   isRecord,
   mcpServerValidationErrors,
 } from "./mcp-server-shape.js";
+import {
+  PrivateReadError,
+  readPrivateFileText,
+  type PrivateReadProbe,
+} from "./private-file.js";
 import {
   authorizeGhostAccounts,
   materializeMcpSecretReferences,
@@ -115,6 +115,8 @@ export interface McpCatalogOptions {
   logger?: Logger;
   /** Test seam after home resolution and before catalog bytes are read. */
   readProbe?: (home: string) => void | Promise<void>;
+  /** Synchronous adversarial seam inside the pinned private-file read. */
+  privateReadProbe?: PrivateReadProbe;
   /** Test seam around the locked atomic config writer. */
   writer?: Partial<McpCatalogWriter>;
 }
@@ -389,51 +391,30 @@ export function parseEffectiveProjectMcpInputs(
   return parseProjectMcpInputs(inputs).effective;
 }
 
-async function readMcpConfigAtMost(
-  file: Awaited<ReturnType<typeof openRegularFileNoFollow>>,
-  maxBytes = 1_048_576,
-): Promise<string> {
-  const buffer = Buffer.allocUnsafe(maxBytes + 1);
-  let bytes = 0;
-  while (bytes < buffer.byteLength) {
-    const result = await file.read(buffer, bytes, buffer.byteLength - bytes, bytes);
-    if (result.bytesRead === 0) break;
-    bytes += result.bytesRead;
-  }
-  if (bytes > maxBytes) throw new Error("MCP config exceeds the 1 MiB limit");
-  try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(buffer.subarray(0, bytes));
-  } catch {
-    throw new Error("MCP config is not valid UTF-8");
-  }
-}
-
 /**
  * Resolve the visible ghost source. Trusted-project MCP bytes are admitted by
  * the project declarative scan and enter through parseEffectiveProjectMcpInputs.
  */
-async function readProjectMcp(home: string): Promise<ParsedProjectMcpInputs> {
+async function readProjectMcp(
+  home: string,
+  probe?: PrivateReadProbe,
+): Promise<ParsedProjectMcpInputs> {
   const inputs: EffectiveProjectMcpInput[] = [];
   const source = ghostMcpSource(home);
-  let root: Awaited<ReturnType<typeof openDirectoryNoFollow>> | undefined;
-  let file: Awaited<ReturnType<typeof openRegularFileNoFollow>> | undefined;
   try {
-    root = await openDirectoryNoFollow(home, "MCP root");
-    file = await openRegularFileNoFollow(descriptorPath(root, "mcp.json"), "MCP config");
-    inputs.push({ source, content: await readMcpConfigAtMost(file) });
+    inputs.push({ source, content: readPrivateFileText(source.absolutePath, probe) });
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-      const reason = error instanceof Error && (
-        error.message === "MCP config exceeds the 1 MiB limit"
-        || error.message === "MCP config is not valid UTF-8"
-      )
-        ? error.message
-        : "MCP config could not be read or parsed.";
-      inputs.push({ source, error: reason });
+    if (error instanceof PrivateReadError
+      && error.refusal === "open"
+      && (error.cause as NodeJS.ErrnoException).code === "ENOENT") {
+      return parseProjectMcpInputs(inputs);
     }
-  } finally {
-    await file?.close().catch(() => {});
-    await root?.close().catch(() => {});
+    const reason = error instanceof PrivateReadError && error.refusal === "too_large"
+      ? "MCP config exceeds the 1 MiB limit"
+      : error instanceof PrivateReadError && error.refusal === "encoding"
+        ? "MCP config is not valid UTF-8"
+        : "MCP config could not be read or parsed.";
+    inputs.push({ source, error: reason });
   }
 
   return parseProjectMcpInputs(inputs);
@@ -469,6 +450,7 @@ export class McpCatalog {
   private readonly writer: McpCatalogWriter;
   private readonly logger: Logger;
   private readonly readProbe: NonNullable<McpCatalogOptions["readProbe"]>;
+  private readonly privateReadProbe: McpCatalogOptions["privateReadProbe"];
 
   constructor(options: McpCatalogOptions) {
     this.registry = options.registry;
@@ -476,6 +458,7 @@ export class McpCatalog {
     this.writer = { ...defaultWriter, ...options.writer };
     this.logger = options.logger ?? silentLogger;
     this.readProbe = options.readProbe ?? (() => {});
+    this.privateReadProbe = options.privateReadProbe;
   }
 
   private withHomeLease<T>(ghostName: string, operation: () => Promise<T>): Promise<T> {
@@ -491,7 +474,7 @@ export class McpCatalog {
   private async effective(ghostName: string): Promise<ParsedProjectMcpInputs> {
     const home = this.registry.get(ghostName).dir;
     await this.readProbe(home);
-    return readProjectMcp(home);
+    return readProjectMcp(home, this.privateReadProbe);
   }
 
   async list(ghostName: string): Promise<McpCatalogSnapshot> {
