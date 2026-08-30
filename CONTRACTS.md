@@ -82,8 +82,8 @@ previewed but inert. Claude Code retains its own native subagents.
 Markdown body is the persona injected into the system prompt. The body is at
 most 20,000 JavaScript UTF-16 code units. `GhostHome` API writes reject a larger
 body. A larger body written with a runtime's native file tools or by hand fails
-prompt construction on the next model pass rather than being truncated into
-the prompt.
+the next cold session's persona derivation rather than being truncated into the
+prompt; an already-derived warm session keeps its snapshot until retirement.
 
 Memory files have no frontmatter and no required heading. Their complete
 Markdown content is the fact. The per-session index is one file name per line
@@ -545,8 +545,9 @@ character budget behind that. Each is one entry per line with no bullet marker:
 memory as the bare slug (the file is that slug plus `.md`), Documents as the
 bare name with a trailing `/` for a directory. A Documents name is JSON-quoted
 when it holds a control character, rendered line separator, quote, or backslash,
-or has leading or trailing whitespace. U+0085, U+2028, and U+2029 are escaped
-inside that quoted form, so no filesystem name can forge an index line. When
+or has leading or trailing whitespace. U+007F through U+009F, U+2028, and
+U+2029 are escaped inside that quoted form, so no filesystem name can forge an
+index line or inject a terminal control. When
 the cut-off drops entries the section ends with `(+N more)`, where `N` counts
 every entry left out.
 `/skill:<name> [args]` is explicit
@@ -1193,6 +1194,11 @@ shape and streams emit one complete event object per line.
   `title` is a short auto-generated name or `null` until one is generated (see
   "Conversation titles" below). pi transcripts and Claude Code resume sidecars
   share this shape (a Claude conversation's `title` is `"Claude Code"`).
+  Session listing and project GET acquire the ghost-home identity lease before
+  resolving its path. Those reads may finish a pending fork or exact Claude
+  settling recovery and may create the sessions directory; a concurrent
+  whole-home rename/delete waits for that recovery, and the read cannot
+  recreate the old name after the move.
 - `GET /api/ghosts/:name/sessions/:id/project` →
   `{ id, conversationId, runtime, root, cwd, relativeCwd, name, generation,
   status, error, mcpStatus, resources, canRebind, lastRefreshAt, reason }`.

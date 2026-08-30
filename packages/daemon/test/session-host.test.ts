@@ -84,7 +84,10 @@ import {
   toolCwdsPath,
   writeToolCwds,
 } from "../src/tool-cwds.js";
-import { homeOperationsFor } from "../src/home-operations.js";
+import {
+  homeOperationsFor,
+  type HomeOperationCoordinator,
+} from "../src/home-operations.js";
 import type { GhostPiRuntime } from "../src/pi-runtime.js";
 import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
 import {
@@ -2447,7 +2450,7 @@ describe("SessionHost shutdown", () => {
     host!.beginShutdown();
     expect(beginCalls).toBe(1);
     const disposing = host!.disposeAll();
-    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(disposeCalls).toBe(0);
     drained.resolve();
     await disposing;
@@ -7547,6 +7550,121 @@ describe("session listing", () => {
     rmSync(unrelated);
   });
 
+});
+
+describe("passive session recovery during whole-home moves", () => {
+  function seedRollbackFork(sessionDir: string, conversationId: string): void {
+    mkdirSync(sessionDir, { recursive: true });
+    const binding = projectBindingPath(sessionDir, "pi", conversationId);
+    const toolCwds = toolCwdsPath(sessionDir, conversationId);
+    const stem = sessionFileNameFor(conversationId).slice(0, -".jsonl".length);
+    writeFileSync(join(sessionDir, `.ghost-fork-${stem}.pending.json`), `${JSON.stringify({
+      version: 1,
+      kind: "fork",
+      conversationId,
+      tempTranscript: join(sessionDir, `.${sessionFileNameFor(conversationId)}.race.pending`),
+      tempProjectBinding: `${binding}.race.pending`,
+      tempToolCwds: `${toolCwds}.race.pending`,
+    })}\n`, { mode: 0o600 });
+  }
+
+  function pauseFirstForkCleanup() {
+    const entered = deferred();
+    const resume = deferred();
+    let paused = false;
+    return {
+      entered,
+      resume,
+      probe: async (stage: string) => {
+        if (stage !== "fork-cleanup-unlink" || paused) return;
+        paused = true;
+        entered.resolve();
+        await resume.promise;
+      },
+    };
+  }
+
+  async function reserveBlockedMove(coordinator: HomeOperationCoordinator): Promise<{
+    move: Promise<() => void>;
+    ready: () => boolean;
+  }> {
+    let ready = false;
+    const move = coordinator.reserveMove("casper").then((release) => {
+      ready = true;
+      return release;
+    });
+    await Promise.resolve();
+    return { move, ready: () => ready };
+  }
+
+  it("holds a list recovery lease until a concurrent rename can safely move the home", async () => {
+    const recovery = pauseFirstForkCleanup();
+    const { dir } = await setup([{ kind: "text", text: "unused" }], {
+      transactionProbe: recovery.probe,
+    });
+    const sessionDir = ghostPaths(dir).sessionDir;
+    seedRollbackFork(sessionDir, "list-race");
+    const coordinator = homeOperationsFor(temp!.registry);
+
+    const listing = host!.listSessions("casper");
+    await recovery.entered.promise;
+    const reserved = await reserveBlockedMove(coordinator);
+    expect(reserved.ready()).toBe(false);
+    expect(coordinator.moveReservationCount).toBe(1);
+
+    recovery.resume.resolve();
+    await listing;
+    const releaseMove = await reserved.move;
+    try {
+      await host!.renameGhost("casper", "wisp");
+    } finally {
+      releaseMove();
+    }
+
+    expect(existsSync(dir)).toBe(false);
+    expect(existsSync(join(temp!.root, "wisp"))).toBe(true);
+  });
+
+  it("holds project and Claude recovery until a concurrent delete can safely move the home", async () => {
+    const recovery = pauseFirstForkCleanup();
+    const { dir } = await setup([{ kind: "text", text: "unused" }], {
+      transactionProbe: recovery.probe,
+    });
+    const conversationId = "project-race";
+    const sessionDir = ghostPaths(dir).sessionDir;
+    seedRollbackFork(sessionDir, conversationId);
+    const sidecar = claudeSessionMetadataPath(sessionDir, conversationId);
+    writeFileSync(`${sidecar}.settling`, `${JSON.stringify({
+      version: 1,
+      runtime: "claude-code",
+      conversationId,
+      sessionId: "sdk-project-race",
+      created: "2026-08-30T00:00:00.000Z",
+      modified: "2026-08-30T00:00:01.000Z",
+      messageCount: 2,
+      ownerTurnCount: 1,
+    })}\n`, { mode: 0o600 });
+    const coordinator = homeOperationsFor(temp!.registry);
+
+    const project = host!.getProject("casper", conversationId, "claude-code");
+    await recovery.entered.promise;
+    const reserved = await reserveBlockedMove(coordinator);
+    expect(reserved.ready()).toBe(false);
+    expect(coordinator.moveReservationCount).toBe(1);
+
+    recovery.resume.resolve();
+    await expect(project).resolves.toMatchObject({ root: null, canRebind: false });
+    expect(existsSync(sidecar)).toBe(true);
+    expect(existsSync(`${sidecar}.settling`)).toBe(false);
+    const releaseMove = await reserved.move;
+    try {
+      await host!.deleteGhost("casper");
+    } finally {
+      releaseMove();
+    }
+
+    expect(existsSync(dir)).toBe(false);
+  });
 });
 
 describe("SessionHost.deleteGhost", () => {

@@ -20,7 +20,7 @@ function plainName(name: string): boolean {
   if (name !== name.trim()) return false;
   for (const character of name) {
     const code = character.codePointAt(0) ?? 0;
-    if (code < 0x20 || code === 0x7f || code === 0x85 || code === 0x2028 || code === 0x2029) {
+    if (code < 0x20 || (code >= 0x7f && code <= 0x9f) || code === 0x2028 || code === 0x2029) {
       return false;
     }
     if (character === '"' || character === "\\") return false;
@@ -29,10 +29,10 @@ function plainName(name: string): boolean {
 }
 
 function quotedName(name: string): string {
-  // JSON escapes ASCII newlines, but permits Unicode's remaining rendered line
-  // separators literally. Escape them as well so one filesystem entry can
-  // never manufacture another visual index line.
-  return JSON.stringify(name).replace(/[\u0085\u2028\u2029]/gu, (separator) =>
+  // JSON escapes C0 newlines, but permits C1 controls and Unicode's remaining
+  // rendered line separators literally. Escape them as well so one filesystem
+  // entry cannot control the terminal or manufacture another visual line.
+  return JSON.stringify(name).replace(/[\u007f-\u009f\u2028\u2029]/gu, (separator) =>
     `\\u${separator.charCodeAt(0).toString(16).padStart(4, "0")}`
   );
 }

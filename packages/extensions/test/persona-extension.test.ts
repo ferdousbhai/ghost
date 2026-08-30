@@ -153,8 +153,8 @@ describe("persona extension", () => {
     expect(prompt.indexOf("TRUSTED-AFTER-DOCUMENTS")).toBeGreaterThan(genuineClose);
   });
 
-  it("escapes every rendered line separator inside one Documents index entry", () => {
-    const hostileName = "one\u0085two\u2028three\u2029four.txt";
+  it("escapes C1 controls and every rendered line separator inside one index entry", () => {
+    const hostileName = "one\u007ftwo\u0085three\u009bfour\u2028five\u2029six.txt";
     const index = deriveDocumentsIndex({
       root: documentsDir,
       total: 1,
@@ -167,8 +167,10 @@ describe("persona extension", () => {
       }],
     });
 
-    expect(index.lines).toEqual(["\"one\\u0085two\\u2028three\\u2029four.txt\""]);
-    expect(index.lines[0]).not.toMatch(/[\u0085\u2028\u2029]/u);
+    expect(index.lines).toEqual([
+      "\"one\\u007ftwo\\u0085three\\u009bfour\\u2028five\\u2029six.txt\"",
+    ]);
+    expect(index.lines[0]).not.toMatch(/[\u007f-\u009f\u2028\u2029]/u);
   });
 
   it("does not carry any text from the inherited harness prompt", async () => {
