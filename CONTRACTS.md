@@ -55,6 +55,8 @@ previewed but inert. Claude Code retains its own native subagents.
                                and fallback chains; secrets are references only
   mcp.json                     the ghost's MCP servers; secrets are references only
   sessions/                    daemon-owned pi transcripts and runtime sidecars
+  sessions/claude-<hash>.json.{started,settling}
+                               mode-0600 Claude per-pass resume fence/recovery
   sessions/<stem>.<runtime>.project.json
                                conversation project root, actual cwd, immutable
                                resource summary, status, generation
@@ -498,8 +500,8 @@ A Claude Code conversation holds one warm Agent SDK query. Turn one starts it;
 later turns are pushed into that query's open input channel, so Claude's
 transcript and every project stdio MCP server stay loaded between turns, and
 each turn ends at its own `result` frame rather than at the end of the process.
-The query is retired — the next turn starting cold from the sidecar's resume id
-— after 30 idle minutes (the same idle TTL a pi hosted session uses), when any
+The query is retired — the next turn normally starting cold from the sidecar's
+resume id — after 30 idle minutes (the same idle TTL a pi hosted session uses), when any
 value the query was constructed from would differ (cwd, model, system prompt,
 ghost tool names, or project MCP configuration; the SDK fixes all of these at
 startup), on cancellation, after every terminal non-success SDK result, after
@@ -507,15 +509,30 @@ any post-result validation, metadata, hook, or maintenance failure, and on
 close, ghost close, conversation delete, or daemon shutdown. Cancellation and
 active close use the SDK abort controller plus forceful `close`; Ghost never
 sends an interrupt request over a transport it is simultaneously retiring. A
-turn synchronously claims the query's idle timer at admission, before any async
-setup. Close aborts and drains even a turn still in that setup, then retires the
-query and persona snapshot again before returning so drained work cannot
-resurrect session state.
+turn synchronously claims the session's idle timer at admission, before any
+async setup. The persona snapshot owns that timer independently, so
+cancellation, terminal failure, or query startup failure cannot retain it
+forever after the query is gone. Close aborts and drains even a turn still in
+setup, retires the query and persona snapshot again, and waits for the SDK
+subprocess's real exit event before returning. An unconfirmed exit fails with
+retryable `503 claude_code_exit_unconfirmed`; a whole-home delete or rename has
+not moved the home and a later retry waits on the same exit boundary.
 Session-stop continuations are further passes through the same warm query. The
 SDK reports `num_turns` per result rather than cumulatively, so the sidecar's
 message accounting is unchanged. Idle expiry drops the session's character and
 index snapshot together with the query; that is what bounds snapshot staleness,
 and an untouched conversation derives everything again on its next turn.
+
+Before every prompt pushed into the SDK, including a session-stop continuation,
+Ghost atomically writes and fsyncs a mode-`0600` `.started` marker while leaving
+the last ready sidecar intact for listing and history. While that marker is the
+newest recovery state, SDK resume is forbidden and a retry starts a new SDK
+session from the ready sidecar's durable counters and project snapshot. A
+validated result is first written and fsynced as the exact `.settling`
+candidate, then atomically published as the ready sidecar; marker removal and
+the directory are fsynced last. Recovery publishes an exact settling candidate
+before another turn. A started-only marker never guesses whether Claude
+advanced.
 
 The memory index and the root-only Documents index are derived from disk once
 per session, never stored, and never re-derived mid-session — live truth is the
@@ -1301,7 +1318,10 @@ shape and streams emit one complete event object per line.
   and `modified` must each be the exact canonical string produced by
   `Date.toISOString()`; invalid or merely equivalent noncanonical timestamps
   fail during turn admission, before maintenance reservation or any Claude
-  executable/auth probe. Before a
+  executable/auth probe. The `.started` and `.settling` markers use the same
+  mode, link, UTF-8, bounded-read, and pinned-path rules. Listing continues to
+  expose the last ready sidecar while a started marker exists; conversation
+  deletion removes the ready sidecar and both markers. Before a
   stored project snapshot can reach the SDK, every MCP row must match exactly
   one complete serializable SDK stdio, HTTP, or SSE transport schema: the
   discriminator, allowed keys, and every nested value are validated, unknown
@@ -1987,19 +2007,26 @@ turns. A new conversation uses its pre-turn project cwd, or owner home while
 unbound. That choice is fixed at the first owner turn:
 later PUT/reload is rejected and the shell must start a new conversation.
 Every accepted metadata version stores exact canonical ISO `created` and
-`modified` timestamps. Version-3 mode-`0600` metadata stores the actual cwd and the exact first-turn
-project snapshot beside the opaque Claude resume id. A version-1 sidecar
+`modified` timestamps. Version-3 mode-`0600` metadata stores the actual cwd and
+the exact first-turn project snapshot beside the opaque Claude resume id. A version-1 sidecar
 predates cwd and resumes at ghost home for history safety; version 2 has cwd but
 no project snapshot. Either legacy version may promote while unbound, but a
 bound legacy resume fails closed rather than rereading mutable project inputs.
 The runtime derives the Ghost character and memory/Documents indexes once for
 the session, rebuilds the visible declarative additions per owner turn, reuses
 the stored project bytes and MCP rows, and pushes each prompt into the warm
-query only while its fixed startup identity still matches. It atomically writes
-metadata and completes post-result hooks and maintenance before the terminal
+query only while its fixed startup identity still matches. Before each SDK
+pass it durably fences resume without replacing the last ready metadata, then
+atomically publishes a validated result through an exact settling candidate.
+It completes post-result hooks and maintenance before the terminal
 event. A fully settled success remains warm; idle/session expiry, cancellation,
 terminal SDK errors, and post-result failures retire the query so the next turn
 resumes cold from durable metadata.
+Because the SDK's public `Query.close()` returns before its delayed process kill
+completes, Ghost deliberately supplies the public `spawnClaudeCodeProcess` seam
+and records the child `exit` event. This is the quiescence boundary for
+conversation deletion, whole-home moves, and shutdown; `killed` or an abort
+signal alone is not acknowledgement.
 Claude Code owns the actual transcript under its own
 `~/.claude/projects/` storage; the sidecar is not a transcript. Full rationale,
 T3 Code provenance, policy caveat, and legal boundary:

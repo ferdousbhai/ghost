@@ -12,7 +12,7 @@
  * or an explicit close drops both the query and that snapshot, and Claude's
  * opaque session id supplies continuity when the next query resumes cold.
  */
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { constants as fsConstants, existsSync, readdirSync } from "node:fs";
 import {
@@ -37,6 +37,8 @@ import {
   type SDKResultMessage,
   type SDKUserMessage,
   type SdkMcpToolDefinition,
+  type SpawnOptions as ClaudeSpawnOptions,
+  type SpawnedProcess as ClaudeSpawnedProcess,
   type McpServerConfig as ClaudeMcpServerConfig,
 } from "@anthropic-ai/claude-agent-sdk";
 import type {
@@ -116,6 +118,7 @@ export const CLAUDE_CODE_DEFAULT_MODEL_ID = "default";
 export const CLAUDE_CODE_BINARY_ENV = "GHOST_CLAUDE_BINARY";
 export const CLAUDE_CODE_PROBE_TTL_MS = 5_000;
 export const MAX_CLAUDE_CODE_PROBE_TTL_MS = 30_000;
+export const CLAUDE_CODE_EXIT_WAIT_TIMEOUT_MS = 10_000;
 
 const CLAUDE_SESSION_PREFIX = "claude-";
 const CLAUDE_SESSION_SUFFIX = ".json";
@@ -177,6 +180,8 @@ export interface ClaudeSessionMetadata {
   projectSnapshot?: ClaudePersistedProjectSnapshot;
 }
 
+type LoadedClaudeSessionMetadata = ClaudeSessionMetadata & { resumeBlocked?: true };
+
 export interface ClaudePersistedProjectSnapshot {
   root: string | null;
   identity?: ProjectFilesystemIdentity;
@@ -213,6 +218,7 @@ export interface ClaudeCodeQueryInput {
 }
 
 export type ClaudeCodeQueryFactory = (input: ClaudeCodeQueryInput) => Query;
+export type ClaudeCodeQueryExitObserver = (query: Query) => Promise<void>;
 
 export interface ClaudeCodeProbeResult {
   binaryPath: string;
@@ -239,8 +245,12 @@ export interface ClaudeCodeRuntimeOptions {
   resolveExecutable?: (binaryPath: string) => Promise<string>;
   probe?: ClaudeCodeProbe;
   hooks?: GhostHookRunner;
-  /** Idle lifetime of a warm query; tests drive it down to observe expiry. */
+  /** Idle lifetime of a query/persona session; tests drive it down. */
   warmIdleTtlMs?: number;
+  /** Test seam for the SDK subprocess exit boundary. */
+  observeQueryExit?: ClaudeCodeQueryExitObserver;
+  /** Maximum close wait for an acknowledged SDK subprocess exit. */
+  exitWaitTimeoutMs?: number;
 }
 
 export class ClaudeCodeProcessError extends Error {
@@ -494,6 +504,14 @@ export function claudeSessionMetadataPath(
   return nativeClaudeSessionMetadataPath(sessionDir, conversationId);
 }
 
+export function claudeSessionResumeMarkerPaths(
+  sessionDir: string,
+  conversationId: string,
+): { started: string; settling: string } {
+  const sidecar = claudeSessionMetadataPath(sessionDir, conversationId);
+  return { started: `${sidecar}.started`, settling: `${sidecar}.settling` };
+}
+
 /**
  * The Claude Code SDK's own session transcript for a resume id, when it exists.
  * The SDK persists under `$CLAUDE_CONFIG_DIR/projects/<encoded cwd>/<id>.jsonl`;
@@ -654,6 +672,7 @@ const CLAUDE_METADATA_V3_FIELDS = new Set([
   "cwd",
   "projectSnapshot",
 ]);
+const CLAUDE_RESUME_STARTED_FIELDS = new Set(["version", "runtime", "conversationId"]);
 const CLAUDE_PROJECT_SNAPSHOT_FIELDS = new Set([
   "root",
   "identity",
@@ -922,10 +941,46 @@ export async function readClaudeSessionMetadataFile(
 async function readMetadata(
   sessionDir: string,
   conversationId: string,
-): Promise<ClaudeSessionMetadata | null> {
+): Promise<LoadedClaudeSessionMetadata | null> {
   const path = claudeSessionMetadataPath(sessionDir, conversationId);
+  const { settling, started } = claudeSessionResumeMarkerPaths(sessionDir, conversationId);
+  let recovery: ClaudeSessionMetadata | null = null;
   try {
-    const metadata = parseMetadata(path, await readClaudeSessionMetadataFile(path));
+    recovery = parseMetadata(settling, await readClaudeSessionMetadataFile(settling));
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code !== "ENOENT") throw cause;
+  }
+  if (recovery) {
+    if (recovery.conversationId !== conversationId) throw invalidMetadataFile(settling);
+    await writeMetadata(sessionDir, recovery);
+    await removeResumeMarkers(path);
+  }
+  let resumeBlocked = false;
+  if (!recovery) {
+    try {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(await readClaudeSessionMetadataFile(started));
+      } catch (cause) {
+        if ((cause as NodeJS.ErrnoException).code === "ENOENT") throw cause;
+        throw invalidMetadataFile(started);
+      }
+      const record = objectRecord(parsed);
+      if (!record
+        || !hasOnlyFields(record, CLAUDE_RESUME_STARTED_FIELDS)
+        || record.version !== 1
+        || record.runtime !== "claude-code"
+        || record.conversationId !== conversationId) {
+        throw invalidMetadataFile(started);
+      }
+      resumeBlocked = true;
+    } catch (cause) {
+      if ((cause as NodeJS.ErrnoException).code !== "ENOENT") throw cause;
+    }
+  }
+  try {
+    const metadata = recovery
+      ?? parseMetadata(path, await readClaudeSessionMetadataFile(path));
     if (metadata.conversationId !== conversationId) {
       throw new GhostError(
         "session_identity_mismatch",
@@ -933,10 +988,38 @@ async function readMetadata(
         409,
       );
     }
-    return metadata;
+    return resumeBlocked ? { ...metadata, resumeBlocked: true } : metadata;
   } catch (cause) {
     if ((cause as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw cause;
+  }
+}
+
+async function writeDurableJson(path: string, value: unknown): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
+  const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
+  let file: Awaited<ReturnType<typeof openFile>> | undefined;
+  try {
+    file = await openFile(temporary, "wx", 0o600);
+    await file.writeFile(`${JSON.stringify(value, null, 2)}\n`, "utf8");
+    await file.sync();
+    await file.close();
+    file = undefined;
+    await rename(temporary, path);
+    await syncDirectory(dirname(path));
+  } catch (error) {
+    await file?.close().catch(() => {});
+    await unlink(temporary).catch(() => {});
+    throw error;
+  }
+}
+
+async function syncDirectory(path: string): Promise<void> {
+  const directory = await openFile(path, "r");
+  try {
+    await directory.sync();
+  } finally {
+    await directory.close();
   }
 }
 
@@ -944,29 +1027,45 @@ async function writeMetadata(
   sessionDir: string,
   metadata: ClaudeSessionMetadata,
 ): Promise<string> {
-  await mkdir(sessionDir, { recursive: true });
   const path = claudeSessionMetadataPath(sessionDir, metadata.conversationId);
-  const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
-  let file: Awaited<ReturnType<typeof openFile>> | undefined;
-  try {
-    file = await openFile(temporary, "wx", 0o600);
-    await file.writeFile(`${JSON.stringify(metadata, null, 2)}\n`, "utf8");
-    await file.sync();
-    await file.close();
-    file = undefined;
-    await rename(temporary, path);
-    const directory = await openFile(dirname(path), "r");
-    try {
-      await directory.sync();
-    } finally {
-      await directory.close();
-    }
-  } catch (error) {
-    await file?.close().catch(() => {});
-    await unlink(temporary).catch(() => {});
-    throw error;
-  }
+  await writeDurableJson(path, metadata);
   return path;
+}
+
+async function markResumeStarted(sessionDir: string, conversationId: string): Promise<void> {
+  const { started } = claudeSessionResumeMarkerPaths(sessionDir, conversationId);
+  await writeDurableJson(started, {
+    version: 1,
+    runtime: "claude-code",
+    conversationId,
+  });
+}
+
+async function settleResumeMetadata(
+  sessionDir: string,
+  metadata: ClaudeSessionMetadata,
+): Promise<void> {
+  const path = claudeSessionMetadataPath(sessionDir, metadata.conversationId);
+  const { settling } = claudeSessionResumeMarkerPaths(sessionDir, metadata.conversationId);
+  await writeDurableJson(settling, metadata);
+  await writeMetadata(sessionDir, metadata);
+  await removeResumeMarkers(path);
+}
+
+async function removeResumeMarkers(metadataPath: string): Promise<boolean> {
+  let removed = false;
+  // Settling is the recovery authority, so it is always removed last. A crash
+  // between unlinks remains recoverable rather than degrading to started-only.
+  for (const suffix of [".started", ".settling"]) {
+    try {
+      await unlink(`${metadataPath}${suffix}`);
+      removed = true;
+    } catch (cause) {
+      if ((cause as NodeJS.ErrnoException).code !== "ENOENT") throw cause;
+    }
+  }
+  if (removed) await syncDirectory(dirname(metadataPath));
+  return removed;
 }
 
 async function buildPersona(
@@ -1114,10 +1213,11 @@ function queryOptions(input: {
   systemPrompt: string;
   tools: SdkMcpToolDefinition[];
   toolNames: string[];
-  metadata: ClaudeSessionMetadata | null;
+  metadata: LoadedClaudeSessionMetadata | null;
   newSessionId: string;
   abortController: AbortController;
   projectMcpServers: Record<string, ClaudeMcpServerConfig>;
+  spawnClaudeCodeProcess?: (options: ClaudeSpawnOptions) => ClaudeSpawnedProcess;
 }): ClaudeQueryOptions {
   const mcp = createSdkMcpServer({
     name: "ghost",
@@ -1153,7 +1253,10 @@ function queryOptions(input: {
     persistSession: true,
     promptSuggestions: false,
     abortController: input.abortController,
-    ...(input.metadata
+    ...(input.spawnClaudeCodeProcess
+      ? { spawnClaudeCodeProcess: input.spawnClaudeCodeProcess }
+      : {}),
+    ...(input.metadata && input.metadata.resumeBlocked !== true
       ? { resume: input.metadata.sessionId }
       : { sessionId: input.newSessionId }),
     env: credentialFreeEnvironment(),
@@ -1373,6 +1476,52 @@ interface ClaudeInputChannel {
   close: () => void;
 }
 
+interface ClaudeProcessExitBoundary {
+  readonly exited: Promise<void>;
+  readonly spawn: (options: ClaudeSpawnOptions) => ClaudeSpawnedProcess;
+}
+
+/** Capture the public SDK spawn seam's real child `exit` event. */
+function claudeProcessExitBoundary(): ClaudeProcessExitBoundary {
+  let settled = false;
+  let resolveExit!: () => void;
+  const exited = new Promise<void>((resolve) => {
+    resolveExit = resolve;
+  });
+  return {
+    exited,
+    spawn: (options) => {
+      let child: ReturnType<typeof spawn>;
+      try {
+        child = spawn(options.command, options.args, {
+          cwd: options.cwd,
+          env: options.env,
+          signal: options.signal,
+          windowsHide: true,
+          stdio: ["pipe", "pipe", "ignore"],
+        });
+      } catch (cause) {
+        settled = true;
+        resolveExit();
+        throw cause;
+      }
+      child.once("exit", () => {
+        if (settled) return;
+        settled = true;
+        resolveExit();
+      });
+      child.once("error", () => {
+        // A spawn failure has no child left to await. Later process errors do
+        // not acknowledge exit; the exit event or close timeout owns them.
+        if (settled || child.pid !== undefined) return;
+        settled = true;
+        resolveExit();
+      });
+      return child as unknown as ClaudeSpawnedProcess;
+    },
+  };
+}
+
 function claudeInputChannel(): ClaudeInputChannel {
   const queued: SDKUserMessage[] = [];
   let wake: (() => void) | null = null;
@@ -1427,6 +1576,11 @@ interface WarmClaudeQuery {
   readonly input: ClaudeInputChannel;
   readonly abortController: AbortController;
   readonly identity: string;
+  readonly exited: Promise<void>;
+}
+
+interface ClaudeSessionPersona {
+  readonly prompt: string;
   idleTimer?: ReturnType<typeof setTimeout>;
 }
 
@@ -1513,6 +1667,8 @@ export class ClaudeCodeRuntime {
   private readonly ownerHome: string;
   private readonly scheduleUnitDir: string;
   private readonly warmIdleTtlMs: number;
+  private readonly exitWaitTimeoutMs: number;
+  private readonly observeQueryExit: ClaudeCodeQueryExitObserver | undefined;
   private readonly machineSkills: string[];
   private readonly busy = new Set<string>();
   private readonly active = new Map<
@@ -1527,11 +1683,14 @@ export class ClaudeCodeRuntime {
   // not per-turn state. Explicit close and idle expiry drop this snapshot so
   // the next cold resume starts from disk. Live truth remains available there
   // through the native file tools throughout the session.
-  private readonly personas = new Map<string, string>();
+  private readonly personas = new Map<string, ClaudeSessionPersona>();
   // One live Claude process per warm conversation. Turn one starts it; later
   // turns push into its open input channel, so the persona, the project MCP
   // servers, and Claude's own transcript all stay loaded between turns.
   private readonly warm = new Map<string, WarmClaudeQuery>();
+  // Exit promises outlive warm-map removal. Whole-home moves must still wait
+  // for every retired SDK subprocess to acknowledge exit.
+  private readonly retiring = new Map<string, Set<Promise<void>>>();
   private disposed = false;
 
   constructor(options: ClaudeCodeRuntimeOptions = {}) {
@@ -1550,6 +1709,12 @@ export class ClaudeCodeRuntime {
       throw new RangeError("warmIdleTtlMs must be a finite positive number");
     }
     this.warmIdleTtlMs = warmIdleTtlMs;
+    const exitWaitTimeoutMs = options.exitWaitTimeoutMs ?? CLAUDE_CODE_EXIT_WAIT_TIMEOUT_MS;
+    if (!Number.isFinite(exitWaitTimeoutMs) || exitWaitTimeoutMs <= 0) {
+      throw new RangeError("exitWaitTimeoutMs must be a finite positive number");
+    }
+    this.exitWaitTimeoutMs = exitWaitTimeoutMs;
+    this.observeQueryExit = options.observeQueryExit;
     this.machineSkills = options.machineSkillPaths
       ? [...options.machineSkillPaths]
       : machineSkillPaths(this.ownerHome);
@@ -1643,9 +1808,9 @@ export class ClaudeCodeRuntime {
     }
     // Claim a warm query synchronously with admission. Its idle deadline must
     // not expire while this turn is awaiting auth, persona, hooks, or MCP setup.
-    const warm = this.warm.get(key);
-    if (warm?.idleTimer) clearTimeout(warm.idleTimer);
-    if (warm) warm.idleTimer = undefined;
+    const persona = this.personas.get(key);
+    if (persona?.idleTimer) clearTimeout(persona.idleTimer);
+    if (persona) persona.idleTimer = undefined;
     this.busy.add(key);
     const controller = new AbortController();
     const linked = linkedTurnSignal(options.signal, controller.signal);
@@ -1734,6 +1899,9 @@ export class ClaudeCodeRuntime {
         throw new ClaudeCodeProcessError("Claude Code's owner turn count overflowed.");
       }
       const ownerTurnId = ownerTurnCount + 1;
+      const admittedSdkSessionId = metadata && metadata.resumeBlocked !== true
+        ? metadata.sessionId
+        : randomUUID();
       const [persona, machineSkills, ghostDeclarative] = await Promise.all([
         this.sessionPersona(key, paths.home, ghost.name),
         loadMachineSkills(this.ownerHome, { paths: this.machineSkills }),
@@ -1797,7 +1965,7 @@ export class ClaudeCodeRuntime {
           type: "before_prompt",
           prompt: options.prompt,
           turn_id: ownerTurnId,
-          session_id: metadata?.sessionId ?? conversationId,
+          session_id: admittedSdkSessionId,
           session_file: claudeSessionMetadataPath(paths.sessionDir, conversationId),
           signal: options.signal ?? new AbortController().signal,
           ghost_name: ghost.name,
@@ -1855,6 +2023,7 @@ export class ClaudeCodeRuntime {
         if (!warm) {
           const abortController = new AbortController();
           const input = claudeInputChannel();
+          const processExit = this.observeQueryExit ? undefined : claudeProcessExitBoundary();
           const sdkOptions = queryOptions({
             binaryPath,
             cwd: runtimeCwd,
@@ -1864,9 +2033,10 @@ export class ClaudeCodeRuntime {
             tools: bridge.tools,
             toolNames: bridge.names,
             metadata,
-            newSessionId: randomUUID(),
+            newSessionId: admittedSdkSessionId,
             abortController,
             projectMcpServers: approvedProject.mcpServers,
+            ...(processExit ? { spawnClaudeCodeProcess: processExit.spawn } : {}),
           });
           let created: Query;
           try {
@@ -1875,12 +2045,26 @@ export class ClaudeCodeRuntime {
             input.close();
             throw new ClaudeCodeProcessError("Failed to start the Claude Code runtime.", { cause });
           }
+          let exited: Promise<void>;
+          try {
+            exited = this.observeQueryExit
+              ? Promise.resolve(this.observeQueryExit(created))
+              : processExit?.exited ?? Promise.reject(new ClaudeCodeProcessError(
+                "Claude Code did not install its subprocess exit boundary.",
+              ));
+          } catch (cause) {
+            exited = Promise.reject(cause);
+          }
+          // Retirement owns this promise later. Install a rejection handler
+          // now in case the SDK adapter itself is incompatible.
+          void exited.catch(() => {});
           warm = {
             query: created,
             messages: created[Symbol.asyncIterator]() as AsyncIterator<SDKMessage>,
             input,
             abortController,
             identity,
+            exited,
           };
           this.warm.set(key, warm);
         }
@@ -1897,6 +2081,8 @@ export class ClaudeCodeRuntime {
         turnSignal?.addEventListener("abort", interrupt, { once: true });
         let completed: SDKResultMessage;
         try {
+          await markResumeStarted(paths.sessionDir, conversationId);
+          this.assertTurnAdmitted(options.signal);
           live.input.push(
             prompt,
             ...(continuationCount === 0 && beforePromptContext ? [beforePromptContext] : []),
@@ -1939,7 +2125,7 @@ export class ClaudeCodeRuntime {
           projectSnapshot: approvedProject,
         };
         this.assertTurnAdmitted(options.signal);
-        await writeMetadata(paths.sessionDir, metadata);
+        await settleResumeMetadata(paths.sessionDir, metadata);
         this.assertTurnAdmitted(options.signal);
         if (beforePromptAcknowledge) {
           const acknowledge = beforePromptAcknowledge;
@@ -2077,7 +2263,7 @@ export class ClaudeCodeRuntime {
       }
       // Whatever survived the turn starts its idle countdown here, so a warm
       // process is never held by a conversation nobody is talking to.
-      this.armWarmIdle(key);
+      this.armSessionIdle(key);
     }
     if (terminalEmissionFailure) throw terminalEmissionFailure.cause;
   }
@@ -2117,17 +2303,17 @@ export class ClaudeCodeRuntime {
   async closeGhost(ghostName: string): Promise<void> {
     // Start every close together so all admitted turns are aborted before this
     // method waits for any one of them to finish its current setup boundary.
-    const liveKeys = new Set([...this.turns.keys(), ...this.active.keys()]);
+    const liveKeys = new Set([
+      ...this.turns.keys(),
+      ...this.active.keys(),
+      ...this.warm.keys(),
+      ...this.retiring.keys(),
+      ...this.personas.keys(),
+    ]);
     await Promise.all([...liveKeys].flatMap((key) => {
       const [keyGhost, conversationId] = JSON.parse(key) as [string, string];
       return keyGhost === ghostName ? [this.close(ghostName, conversationId)] : [];
     }));
-    for (const key of [...this.personas.keys()]) {
-      if (runtimeKeyGhost(key) === ghostName) this.personas.delete(key);
-    }
-    for (const key of [...this.warm.keys()]) {
-      if (runtimeKeyGhost(key) === ghostName) this.retireWarm(key);
-    }
   }
 
   /**
@@ -2139,7 +2325,20 @@ export class ClaudeCodeRuntime {
     const warm = this.warm.get(key);
     if (!warm || (expected && warm !== expected)) return;
     this.warm.delete(key);
-    if (warm.idleTimer) clearTimeout(warm.idleTimer);
+    let exits = this.retiring.get(key);
+    if (!exits) {
+      exits = new Set();
+      this.retiring.set(key, exits);
+    }
+    exits.add(warm.exited);
+    void warm.exited.then(() => {
+      const current = this.retiring.get(key);
+      current?.delete(warm.exited);
+      if (current?.size === 0) this.retiring.delete(key);
+    }, () => {
+      // An unacknowledged exit remains visible so close/quiesce fails closed
+      // and a later retry can observe the same boundary again.
+    });
     warm.input.close();
     warm.abortController.abort();
     try {
@@ -2149,20 +2348,21 @@ export class ClaudeCodeRuntime {
     }
   }
 
-  /** Start the idle countdown for both the query and its persona snapshot. */
-  private armWarmIdle(key: string): void {
-    const warm = this.warm.get(key);
-    if (!warm) return;
-    if (warm.idleTimer) clearTimeout(warm.idleTimer);
-    warm.idleTimer = setTimeout(() => {
-      this.logger.debug?.("retiring idle Claude query", { key });
-      // The callback may already be queued while a replacement is installed;
-      // only the query whose timer fired may expire the session snapshot.
-      if (this.warm.get(key) !== warm) return;
-      this.personas.delete(key);
-      this.retireWarm(key, warm);
+  /** Start one session-idle countdown, even when its query already failed. */
+  private armSessionIdle(key: string): void {
+    const persona = this.personas.get(key);
+    if (!persona) return;
+    if (persona.idleTimer) clearTimeout(persona.idleTimer);
+    const timer = setTimeout(() => {
+      // Clearing a timer cannot dequeue an already-ready callback. The timer
+      // identity prevents an admitted replacement turn from expiring itself.
+      if (this.personas.get(key) !== persona || persona.idleTimer !== timer) return;
+      this.logger.debug?.("expiring idle Claude session", { key });
+      this.deletePersona(key, persona);
+      this.retireWarm(key);
     }, this.warmIdleTtlMs);
-    warm.idleTimer.unref?.();
+    persona.idleTimer = timer;
+    timer.unref?.();
   }
 
   /** A conversation's persona, held until close or idle expiry drops it. */
@@ -2172,8 +2372,8 @@ export class ClaudeCodeRuntime {
     ghostName: string,
   ): Promise<string> {
     const cached = this.personas.get(key);
-    if (cached !== undefined) return cached;
-    const persona = await buildPersona(
+    if (cached !== undefined) return cached.prompt;
+    const prompt = await buildPersona(
       home,
       ghostName,
       this.scheduleUnitDir,
@@ -2181,8 +2381,8 @@ export class ClaudeCodeRuntime {
     );
     // A turn racing another turn of the same conversation is already refused by
     // `busy`, so the first derivation wins and there is nothing to reconcile.
-    this.personas.set(key, persona);
-    return persona;
+    this.personas.set(key, { prompt });
+    return prompt;
   }
 
   async close(ghostName: string, conversationId: string): Promise<void> {
@@ -2195,10 +2395,11 @@ export class ClaudeCodeRuntime {
     // retirement. Closing does not finish until that admitted turn drains, and
     // the second pass makes resurrection impossible after the returned promise.
     this.retireSessionState(key);
+    await this.awaitQueryExits(key);
   }
 
   private retireSessionState(key: string): void {
-    this.personas.delete(key);
+    this.deletePersona(key);
     const active = this.active.get(key);
     this.active.delete(key);
     this.retireWarm(key);
@@ -2214,6 +2415,36 @@ export class ClaudeCodeRuntime {
     }
   }
 
+  private deletePersona(key: string, expected?: ClaudeSessionPersona): void {
+    const persona = this.personas.get(key);
+    if (!persona || (expected && persona !== expected)) return;
+    this.personas.delete(key);
+    if (persona.idleTimer) clearTimeout(persona.idleTimer);
+  }
+
+  private async awaitQueryExits(key: string): Promise<void> {
+    const exits = [...(this.retiring.get(key) ?? [])];
+    if (exits.length === 0) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        Promise.all(exits),
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(() => reject(new Error("exit wait timed out")), this.exitWaitTimeoutMs);
+          timer.unref?.();
+        }),
+      ]);
+    } catch {
+      throw new GhostError(
+        "claude_code_exit_unconfirmed",
+        "Claude Code did not confirm that its subprocess exited. Retry after it finishes shutting down.",
+        503,
+      );
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
   async deleteSession(ghost: Ghost, conversationId: string): Promise<boolean> {
     if (this.isBusy(ghost.name, conversationId)) {
       throw new GhostError(
@@ -2224,22 +2455,31 @@ export class ClaudeCodeRuntime {
     }
     await this.close(ghost.name, conversationId);
     const path = claudeSessionMetadataPath(ghostPaths(ghost.dir).sessionDir, conversationId);
+    const removedMarkers = await removeResumeMarkers(path);
     try {
       await unlink(path);
       return true;
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return removedMarkers;
       throw error;
     }
   }
 
   async disposeAll(): Promise<void> {
     this.disposed = true;
+    const keys = new Set([
+      ...this.turns.keys(),
+      ...this.active.keys(),
+      ...this.warm.keys(),
+      ...this.retiring.keys(),
+      ...this.personas.keys(),
+    ]);
     const turns = [...this.turns.values()];
     const shutdown = new GhostError("shutting_down", "The daemon is shutting down.", 503);
     for (const turn of turns) turn.controller.abort(shutdown);
-    await Promise.allSettled(turns.map(({ promise }) => promise));
-    for (const key of [...this.warm.keys()]) this.retireWarm(key);
-    this.personas.clear();
+    await Promise.all([...keys].map(async (key) => {
+      const [ghostName, conversationId] = JSON.parse(key) as [string, string];
+      await this.close(ghostName, conversationId);
+    }));
   }
 }

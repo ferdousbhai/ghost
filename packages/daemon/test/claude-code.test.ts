@@ -66,6 +66,7 @@ import { recordingLogger } from "./helpers/recording-logger.js";
 
 let temp: TempGhosts | null = null;
 let host: SessionHost | null = null;
+const FAKE_QUERY_EXIT = Symbol("fake-query-exit");
 
 afterEach(async () => {
   await host?.disposeAll();
@@ -104,6 +105,8 @@ function fakeQuery(
   lifecycle: { interrupted: number; closed: number },
   prompts?: AsyncIterable<SDKUserMessage>,
   onPrompt?: (message: SDKUserMessage) => void,
+  processExit = deferred(),
+  resolveExitOnClose = true,
 ): Query {
   let transportClosed = false;
   const forTurn = (turn: number): SDKMessage[] =>
@@ -132,8 +135,15 @@ function fakeQuery(
       if (transportClosed) return;
       transportClosed = true;
       lifecycle.closed += 1;
+      if (resolveExitOnClose) processExit.resolve();
     },
+    [FAKE_QUERY_EXIT]: processExit.promise,
   }) as unknown as Query;
+}
+
+function observeFakeQueryExit(query: Query): Promise<void> {
+  return (query as Query & { [FAKE_QUERY_EXIT]?: Promise<void> })[FAKE_QUERY_EXIT]
+    ?? Promise.resolve();
 }
 
 function responseMessages(sessionId: string, text: string, numTurns = 1): SDKMessage[] {
@@ -239,6 +249,8 @@ function setupClaudeHost(options: {
   maintenance?: SessionHostOptions["maintenance"];
   machineSkill?: { name: string; description: string; body: string };
   warmIdleTtlMs?: number;
+  exitWaitTimeoutMs?: number;
+  useSdkSpawnExitBoundary?: boolean;
 } = {}) {
   temp = makeTempGhosts();
   const dir = seedGhost(temp.root, {
@@ -275,6 +287,9 @@ function setupClaudeHost(options: {
       ...(options.warmIdleTtlMs === undefined
         ? {}
         : { warmIdleTtlMs: options.warmIdleTtlMs }),
+      ...(options.exitWaitTimeoutMs === undefined
+        ? {}
+        : { exitWaitTimeoutMs: options.exitWaitTimeoutMs }),
       ...(options.probe
         ? { probe: options.probe }
         : {
@@ -298,6 +313,7 @@ function setupClaudeHost(options: {
           (message) => seenPrompts.push(message),
         );
       },
+      ...(options.useSdkSpawnExitBoundary ? {} : { observeQueryExit: observeFakeQueryExit }),
     },
   });
   return { paths, scheduleUnitDir, seenOptions, seenPrompts, lifecycle };
@@ -802,6 +818,111 @@ describe("Claude Code subscription runtime", () => {
     expect(lifecycle).toMatchObject({ queries: 1, closed: 0 });
   });
 
+  it("expires a persona snapshot after a terminal non-success retires its query", async () => {
+    const { paths, lifecycle, seenOptions } = setupClaudeHost({
+      warmIdleTtlMs: 20,
+      createQuery: (input, state) => {
+        const sessionId = input.options.sessionId ?? input.options.resume;
+        if (!sessionId) throw new Error("test query received no session id");
+        return fakeQuery(
+          state.queries === 1
+            ? [errorResultMessage(sessionId, "error_max_turns", 1)]
+            : responseMessages(sessionId, "recovered"),
+          state,
+          input.prompt,
+        );
+      },
+    });
+    await host!.runTurn("casper", {
+      sessionId: "persona-after-terminal-error",
+      prompt: "fail once",
+      emit: () => {},
+    });
+    writeFileSync(
+      join(paths.home, "character.md"),
+      "# Casper\n\nYou are Casper, now a bookbinder.\n",
+      "utf8",
+    );
+    await new Promise((resolve) => setTimeout(resolve, 80));
+
+    await host!.runTurn("casper", {
+      sessionId: "persona-after-terminal-error",
+      prompt: "retry after idle",
+      emit: () => {},
+    });
+    expect(lifecycle.queries).toBe(2);
+    expect(JSON.stringify(seenOptions[1]?.systemPrompt)).toContain("bookbinder");
+  });
+
+  it("expires a persona snapshot after query startup fails", async () => {
+    const { paths, lifecycle, seenOptions } = setupClaudeHost({
+      warmIdleTtlMs: 20,
+      createQuery: (input, state) => {
+        if (state.queries === 1) throw new Error("simulated startup failure");
+        const sessionId = input.options.sessionId ?? input.options.resume;
+        if (!sessionId) throw new Error("test query received no session id");
+        return fakeQuery(responseMessages(sessionId, "recovered"), state, input.prompt);
+      },
+    });
+    await host!.runTurn("casper", {
+      sessionId: "persona-after-startup-failure",
+      prompt: "fail to start",
+      emit: () => {},
+    });
+    writeFileSync(
+      join(paths.home, "character.md"),
+      "# Casper\n\nYou are Casper, now a bookbinder.\n",
+      "utf8",
+    );
+    await new Promise((resolve) => setTimeout(resolve, 80));
+
+    await host!.runTurn("casper", {
+      sessionId: "persona-after-startup-failure",
+      prompt: "retry after idle",
+      emit: () => {},
+    });
+    expect(lifecycle.queries).toBe(2);
+    expect(JSON.stringify(seenOptions[1]?.systemPrompt)).toContain("bookbinder");
+  });
+
+  it("expires a persona snapshot after cancellation retires its query", async () => {
+    const firstPrompt = deferred();
+    const { paths, lifecycle, seenOptions } = setupClaudeHost({
+      warmIdleTtlMs: 20,
+      createQuery: (input, state) => {
+        const sessionId = input.options.sessionId ?? input.options.resume;
+        if (!sessionId) throw new Error("test query received no session id");
+        return state.queries === 1
+          ? fakeQuery([], state, input.prompt, () => firstPrompt.resolve())
+          : fakeQuery(responseMessages(sessionId, "recovered"), state, input.prompt);
+      },
+    });
+    const controller = new AbortController();
+    const first = host!.runTurn("casper", {
+      sessionId: "persona-after-cancellation",
+      prompt: "wait for cancellation",
+      signal: controller.signal,
+      emit: () => {},
+    });
+    await firstPrompt.promise;
+    controller.abort();
+    await first;
+    writeFileSync(
+      join(paths.home, "character.md"),
+      "# Casper\n\nYou are Casper, now a bookbinder.\n",
+      "utf8",
+    );
+    await new Promise((resolve) => setTimeout(resolve, 80));
+
+    await host!.runTurn("casper", {
+      sessionId: "persona-after-cancellation",
+      prompt: "retry after idle",
+      emit: () => {},
+    });
+    expect(lifecycle.queries).toBe(2);
+    expect(JSON.stringify(seenOptions[1]?.systemPrompt)).toContain("bookbinder");
+  });
+
   it("retires a warm query whose persona changed rather than answering under a stale one", async () => {
     const { paths, seenOptions, lifecycle } = setupClaudeHost();
     const turn = (prompt: string) => host!.runTurn("casper", {
@@ -1176,6 +1297,7 @@ describe("Claude Code subscription runtime", () => {
       claudeCode: {
         binaryPath: process.execPath,
         readAuthStatus: async () => ({ loggedIn: true, authMethod: "claude.ai" }),
+        observeQueryExit: observeFakeQueryExit,
         createQuery: (input) => {
           restartedOptions.push(input.options);
           const sessionId = input.options.resume;
@@ -1288,6 +1410,7 @@ describe("Claude Code subscription runtime", () => {
       claudeCode: {
         binaryPath: process.execPath,
         readAuthStatus: async () => ({ loggedIn: true, authMethod: "claude.ai" }),
+        observeQueryExit: observeFakeQueryExit,
         createQuery: (input) => {
           resumedOptions.push(input.options);
           const sessionId = input.options.resume;
@@ -2342,16 +2465,24 @@ describe("Claude Code subscription runtime", () => {
   });
 
   it("deletes a Claude Code resume sidecar", async () => {
-    setupClaudeHost();
+    const { paths } = setupClaudeHost();
     await host!.runTurn("casper", {
       sessionId: "conversation-delete",
       prompt: "Remember this",
       emit: () => {},
     });
     expect(await host!.listSessions("casper")).toHaveLength(1);
+    const sidecar = claudeSessionMetadataPath(paths.sessionDir, "conversation-delete");
+    writeFileSync(`${sidecar}.started`, `${JSON.stringify({
+      version: 1,
+      runtime: "claude-code",
+      conversationId: "conversation-delete",
+    })}\n`, { mode: 0o600 });
 
     await host!.deleteSession("casper", "conversation-delete", "claude-code");
     expect(await host!.listSessions("casper")).toEqual([]);
+    expect(existsSync(sidecar)).toBe(false);
+    expect(existsSync(`${sidecar}.started`)).toBe(false);
   });
 
   it("skips and logs malformed Claude Code sidecars without hiding valid sessions", async () => {
@@ -2968,8 +3099,8 @@ describe("Claude Code subscription runtime", () => {
     expect(seenOptions[1]?.sessionId).toEqual(expect.any(String));
   });
 
-  it("retires a query when its result metadata cannot be written", async () => {
-    const { paths, lifecycle, seenOptions } = setupClaudeHost();
+  it("does not submit a prompt when its durable resume fence cannot be written", async () => {
+    const { paths, lifecycle, seenOptions, seenPrompts } = setupClaudeHost();
     mkdirSync(paths.sessionDir, { recursive: true });
     chmodSync(paths.sessionDir, 0o500);
     const failedEvents: PiMessagesEvent[] = [];
@@ -2985,6 +3116,7 @@ describe("Claude Code subscription runtime", () => {
 
     expect(failedEvents.at(-1)).toMatchObject({ type: "error" });
     expect(lifecycle).toMatchObject({ queries: 1, closed: 1 });
+    expect(seenPrompts).toEqual([]);
     expect(existsSync(claudeSessionMetadataPath(
       paths.sessionDir,
       "conversation-metadata-write-failure",
@@ -2999,6 +3131,120 @@ describe("Claude Code subscription runtime", () => {
     expect(retryEvents.at(-1)?.type).toBe("done");
     expect(lifecycle.queries).toBe(2);
     expect(seenOptions[1]?.resume).toBeUndefined();
+  });
+
+  it("preserves history but cold-restarts after an existing sidecar cannot advance", async () => {
+    let prompted = 0;
+    let sessionDir = "";
+    const { paths, lifecycle, seenOptions } = setupClaudeHost({
+      createQuery: (input, state) => {
+        const sessionId = input.options.sessionId ?? input.options.resume;
+        if (!sessionId) throw new Error("test query received no session id");
+        return fakeQuery(
+          responseMessages(sessionId, "durable turn"),
+          state,
+          input.prompt,
+          () => {
+            prompted += 1;
+            if (prompted === 2) chmodSync(sessionDir, 0o500);
+          },
+        );
+      },
+    });
+    sessionDir = paths.sessionDir;
+    const sidecar = claudeSessionMetadataPath(
+      paths.sessionDir,
+      "conversation-existing-write-failure",
+    );
+
+    await host!.runTurn("casper", {
+      sessionId: "conversation-existing-write-failure",
+      prompt: "first durable turn",
+      emit: () => {},
+    });
+    const first = JSON.parse(readFileSync(sidecar, "utf8")) as {
+      sessionId: string;
+    };
+
+    const failedEvents: PiMessagesEvent[] = [];
+    try {
+      await host!.runTurn("casper", {
+        sessionId: "conversation-existing-write-failure",
+        prompt: "advance while the final write fails",
+        emit: (event) => failedEvents.push(event),
+      });
+    } finally {
+      chmodSync(paths.sessionDir, 0o700);
+    }
+
+    expect(failedEvents.at(-1)).toMatchObject({ type: "error" });
+    expect(lifecycle).toMatchObject({ queries: 1, closed: 1 });
+    expect(JSON.parse(readFileSync(sidecar, "utf8"))).toMatchObject({
+      version: 3,
+      sessionId: first.sessionId,
+      ownerTurnCount: 1,
+      messageCount: 2,
+    });
+    expect(existsSync(`${sidecar}.started`)).toBe(true);
+    expect((await host!.listSessions("casper")).find((row) =>
+      row.id === "claude-code:conversation-existing-write-failure"))
+      .toMatchObject({ messageCount: 2 });
+
+    await host!.runTurn("casper", {
+      sessionId: "conversation-existing-write-failure",
+      prompt: "restart cold without losing durable history",
+      emit: () => {},
+    });
+    expect(seenOptions[1]?.resume).toBeUndefined();
+    expect(seenOptions[1]?.sessionId).not.toBe(first.sessionId);
+    expect(JSON.parse(readFileSync(sidecar, "utf8"))).toMatchObject({
+      version: 3,
+      sessionId: seenOptions[1]?.sessionId,
+      ownerTurnCount: 2,
+      messageCount: 4,
+    });
+    expect(existsSync(`${sidecar}.started`)).toBe(false);
+  });
+
+  it("recovers an exact settling candidate before resuming another turn", async () => {
+    const { paths, seenOptions } = setupClaudeHost();
+    const conversationId = "conversation-settling-recovery";
+    const sidecar = claudeSessionMetadataPath(paths.sessionDir, conversationId);
+    await host!.runTurn("casper", {
+      sessionId: conversationId,
+      prompt: "publish the first result",
+      emit: () => {},
+    });
+    await host!.close("casper", conversationId);
+    const first = JSON.parse(readFileSync(sidecar, "utf8")) as Record<string, unknown>;
+    const settling = {
+      ...first,
+      sessionId: "recovered-sdk-session",
+      modified: "2026-08-30T12:00:00.000Z",
+      messageCount: 4,
+      ownerTurnCount: 2,
+    };
+    writeFileSync(`${sidecar}.started`, `${JSON.stringify({
+      version: 1,
+      runtime: "claude-code",
+      conversationId,
+    })}\n`, { mode: 0o600 });
+    writeFileSync(`${sidecar}.settling`, `${JSON.stringify(settling)}\n`, { mode: 0o600 });
+
+    await host!.runTurn("casper", {
+      sessionId: conversationId,
+      prompt: "continue after recovery",
+      emit: () => {},
+    });
+
+    expect(seenOptions[1]?.resume).toBe("recovered-sdk-session");
+    expect(JSON.parse(readFileSync(sidecar, "utf8"))).toMatchObject({
+      sessionId: "recovered-sdk-session",
+      messageCount: 6,
+      ownerTurnCount: 3,
+    });
+    expect(existsSync(`${sidecar}.started`)).toBe(false);
+    expect(existsSync(`${sidecar}.settling`)).toBe(false);
   });
 
   it("rejects the exact terminal emit failure and resumes cold afterward", async () => {
@@ -3028,7 +3274,7 @@ describe("Claude Code subscription runtime", () => {
     expect(seenOptions[1]?.resume).toBe(metadata.sessionId);
   });
 
-  it("does not change persisted counts when the SDK process fails before a result", async () => {
+  it("fences resume while preserving persisted counts when the SDK fails before a result", async () => {
     const { paths, lifecycle } = setupClaudeHost({
       createQuery: (_input, state) => fakeQuery([], state, (async function* fail() {
         throw new Error("simulated process failure");
@@ -3063,7 +3309,13 @@ describe("Claude Code subscription runtime", () => {
       reason: "error",
       errorMessage: expect.stringContaining("message stream failed"),
     });
-    expect(readFileSync(sidecar, "utf8")).toBe(original);
+    expect(JSON.parse(readFileSync(sidecar, "utf8"))).toMatchObject({
+      version: 1,
+      sessionId: "existing-sdk-session",
+      messageCount: 8,
+      ownerTurnCount: 3,
+    });
+    expect(existsSync(`${sidecar}.started`)).toBe(true);
   });
 
   it("does not start a query for an already-aborted turn", async () => {
@@ -3174,6 +3426,94 @@ describe("Claude Code subscription runtime", () => {
     expect(order).toEqual(["close"]);
     expect(lifecycle).toMatchObject({ interrupted: 0, closed: 1 });
     expect(events.at(-1)).toMatchObject({ type: "error" });
+  });
+
+  it("does not move a ghost home until the retired SDK subprocess confirms exit", async () => {
+    const processExit = deferred();
+    const { lifecycle } = setupClaudeHost({
+      useSdkSpawnExitBoundary: true,
+      createQuery: (input, state) => {
+        const sessionId = input.options.sessionId ?? input.options.resume;
+        if (!sessionId) throw new Error("test query received no session id");
+        const spawnProcess = input.options.spawnClaudeCodeProcess;
+        if (!spawnProcess) throw new Error("SDK spawn exit boundary was not installed");
+        const child = spawnProcess({
+          command: process.execPath,
+          args: [
+            "-e",
+            "process.stdin.resume(); process.stdin.once('end', () => "
+              + "setTimeout(() => process.exit(0), 80));",
+          ],
+          cwd: temp!.ownerHome,
+          env: { ...process.env },
+          signal: new AbortController().signal,
+        });
+        child.once("exit", () => processExit.resolve());
+        const stream = (async function* () {
+          for (const message of responseMessages(sessionId, "ready to close")) yield message;
+        })();
+        let closed = false;
+        return Object.assign(stream, {
+          interrupt: async () => {},
+          close: () => {
+            if (closed) return;
+            closed = true;
+            state.closed += 1;
+            child.stdin.end();
+          },
+        }) as unknown as Query;
+      },
+    });
+    await host!.runTurn("casper", {
+      sessionId: "conversation-delayed-process-exit",
+      prompt: "start the subprocess",
+      emit: () => {},
+    });
+
+    let renamed = false;
+    const renaming = host!.renameGhost("casper", "wisp").then(() => {
+      renamed = true;
+    });
+    await vi.waitFor(() => expect(lifecycle.closed).toBe(1));
+    expect(renamed).toBe(false);
+    expect(temp!.registry.list().map((ghost) => ghost.name)).toContain("casper");
+    await processExit.promise;
+    await renaming;
+    expect(temp!.registry.list().map((ghost) => ghost.name)).toContain("wisp");
+  });
+
+  it("fails a home move with a retryable type when SDK exit remains unconfirmed", async () => {
+    const processExit = deferred();
+    setupClaudeHost({
+      exitWaitTimeoutMs: 20,
+      createQuery: (input, state) => {
+        const sessionId = input.options.sessionId ?? input.options.resume;
+        if (!sessionId) throw new Error("test query received no session id");
+        return fakeQuery(
+          responseMessages(sessionId, "ready to close"),
+          state,
+          input.prompt,
+          undefined,
+          processExit,
+          false,
+        );
+      },
+    });
+    await host!.runTurn("casper", {
+      sessionId: "conversation-exit-timeout",
+      prompt: "start the subprocess",
+      emit: () => {},
+    });
+
+    await expect(host!.renameGhost("casper", "wisp")).rejects.toMatchObject({
+      code: "claude_code_exit_unconfirmed",
+      status: 503,
+    });
+    expect(temp!.registry.list().map((ghost) => ghost.name)).toContain("casper");
+
+    processExit.resolve();
+    await expect(host!.renameGhost("casper", "wisp"))
+      .resolves.toMatchObject({ name: "wisp" });
   });
 
   it("aborts and drains a pre-query turn before close can return", async () => {

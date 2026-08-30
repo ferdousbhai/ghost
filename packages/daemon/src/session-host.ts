@@ -29,6 +29,7 @@ import {
   CLAUDE_CODE_PROVIDER_ID,
   ClaudeCodeRuntime,
   claudeSessionMetadataPath,
+  claudeSessionResumeMarkerPaths,
   type ClaudeProjectSnapshot,
   type ClaudeCodeRuntimeOptions,
 } from "./claude-code.js";
@@ -1088,9 +1089,14 @@ function exactDeleteStaticSource(
     case "omp-transcript":
       return runtime === "pi"
         && artifact.source === join(sessionDir, sessionFileNameFor(conversationId));
-    case "claude-sidecar":
+    case "claude-sidecar": {
+      const sidecar = claudeSessionMetadataPath(sessionDir, conversationId);
+      const markers = claudeSessionResumeMarkerPaths(sessionDir, conversationId);
       return runtime === "claude-code"
-        && artifact.source === claudeSessionMetadataPath(sessionDir, conversationId);
+        && (artifact.source === sidecar
+          || artifact.source === markers.started
+          || artifact.source === markers.settling);
+    }
     case "project-binding":
       return artifact.source === projectBindingPath(sessionDir, runtime, conversationId);
     case "tool-cwds":
@@ -6637,6 +6643,9 @@ export class SessionHost {
       else await this.claudeCode.close(ghostName, id);
       const piPath = join(paths.sessionDir, sessionFileNameFor(id));
       const claudePath = claudeSessionMetadataPath(paths.sessionDir, id);
+      const claudeResumeMarkers = Object.values(
+        claudeSessionResumeMarkerPaths(paths.sessionDir, id),
+      );
       const bindingPath = projectBindingPath(paths.sessionDir, runtime, id);
       const cwdPath = toolCwdsPath(paths.sessionDir, id);
       const maintenancePath = maintenanceStatePath(paths.sessionDir, runtime, id);
@@ -6663,6 +6672,10 @@ export class SessionHost {
           ]
         : [
             { artifact: "claude-sidecar", path: claudePath },
+            ...claudeResumeMarkers.map((path) => ({
+              artifact: "claude-sidecar" as const,
+              path,
+            })),
             { artifact: "project-binding", path: bindingPath },
             { artifact: "maintenance-state", path: maintenancePath },
           ];

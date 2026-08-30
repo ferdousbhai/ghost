@@ -169,8 +169,10 @@ resume id — whenever reuse would be wrong or wasteful:
 - **Idle.** `CLAUDE_WARM_QUERY_IDLE_TTL_MS`, 30 minutes, deliberately the same
   as a pi hosted session's idle TTL. The timer drops both the process and the
   cached character/index snapshot, so the next turn derives everything again.
-  Turn admission clears that timer synchronously before auth, persona, hook, or
-  MCP setup can yield; an admitted turn cannot expire its own session.
+  The snapshot owns the timer independently of the query, so a cancellation,
+  terminal error, or startup failure cannot retain it forever after the process
+  is gone. Turn admission clears the timer synchronously before auth, persona,
+  hook, or MCP setup can yield; an admitted turn cannot expire its own session.
 - **Changed startup options.** Everything the query was built from — cwd, model,
   the whole system prompt, the ghost tool names, and the project MCP
   configuration — is compared verbatim before reuse. The SDK has no
@@ -189,6 +191,14 @@ resume id — whenever reuse would be wrong or wasteful:
   before reuse. Any failure retires the query so another prompt cannot advance
   its in-memory transcript beyond Ghost's durable sidecar state.
 - **`close`, ghost close, conversation delete, and daemon shutdown.**
+
+The SDK's public `Query.close()` is fire-and-forget: its process transport gives
+stdin a grace window, then escalates TERM/KILL later. Ghost therefore uses the
+SDK's public `spawnClaudeCodeProcess` option to retain the real child `exit`
+promise. Close drains admitted setup and waits for every generation's exit. If
+that cannot be confirmed within 10 seconds, the operation fails with retryable
+`503 claude_code_exit_unconfirmed`; a ghost home has not moved, and retry waits
+on the same promise. A sent signal or `ChildProcess.killed` is not the boundary.
 
 Ghost keeps T3's important lifecycle — typed startup/stream failures,
 async-iterable streaming, authoritative cancellation/close, and scoped
@@ -217,6 +227,18 @@ exception to “the ghost directory is the whole backup”: backing up only the
 ghost home does not back up Claude's own transcript. We do not copy that
 transcript because doing so would couple Ghost to Claude Code's private storage
 format.
+
+The ready sidecar is never replaced merely because another prompt started.
+Before every SDK pass, including hidden session-stop continuations, Ghost
+atomically writes and fsyncs `<sidecar>.started`. Listing and durable counts
+continue to come from the ready sidecar, but resume is blocked while only that
+marker describes the uncertain pass; retry starts a fresh SDK session with the
+ready sidecar's counters and project snapshot. After a valid result, Ghost
+writes the exact candidate as `<sidecar>.settling`, fsyncs it, atomically
+publishes the candidate as ready, removes both markers, and fsyncs the
+directory. Restart recovery may publish an exact settling candidate; it never
+guesses past a started-only marker. Conversation deletion removes all three
+files.
 
 A new conversation must choose its trusted project before its first owner
 turn. The daemon scans and validates that project's declarative/MCP snapshot
