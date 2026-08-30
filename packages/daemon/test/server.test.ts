@@ -18,6 +18,7 @@ import { claudeSessionMetadataPath } from "../src/claude-code.js";
 import { ghostPaths } from "../src/ghosts.js";
 import { HomeOperationCoordinator } from "../src/home-operations.js";
 import { McpCatalog } from "../src/mcp-catalog.js";
+import { writeGhostMemory } from "../src/memory-files.js";
 import { setChatModelRole } from "../src/models.js";
 import type { PiMessagesEvent } from "../src/pi-messages.js";
 import { projectBindingPath } from "../src/project-binding.js";
@@ -41,10 +42,12 @@ let temp: TempGhosts | null = null;
 let provider: MockProvider | null = null;
 let host: SessionHost | null = null;
 let listening: ListeningServer | null = null;
+let homeOperations: HomeOperationCoordinator | null = null;
 
 afterEach(async () => {
   await listening?.close();
   listening = null;
+  homeOperations = null;
   await host?.disposeAll();
   host = null;
   await provider?.close();
@@ -61,6 +64,7 @@ async function serve(
     maxBodyBytes?: number;
     apiToken?: string | null;
     hooks?: ServerOptions["hooks"];
+    memoryWriter?: ServerOptions["memoryWriter"];
     scheduleCommandRunner?: SessionHostOptions["scheduleCommandRunner"];
   } = {},
 ) {
@@ -72,7 +76,7 @@ async function serve(
     provider: { baseUrl: provider.url, modelId: provider.modelId },
   });
   const machineDocuments = new MachineDocuments(join(temp.root, ".documents"));
-  const homeOperations = new HomeOperationCoordinator(temp.registry);
+  homeOperations = new HomeOperationCoordinator(temp.registry);
   host = new SessionHost({
     registry: temp.registry,
     homeOperations,
@@ -96,8 +100,19 @@ async function serve(
       : { maxBodyBytes: serverOptions.maxBodyBytes }),
     ...(serverOptions.apiToken === undefined ? {} : { apiToken: serverOptions.apiToken }),
     ...(serverOptions.hooks === undefined ? {} : { hooks: serverOptions.hooks }),
+    ...(serverOptions.memoryWriter === undefined
+      ? {}
+      : { memoryWriter: serverOptions.memoryWriter }),
   });
   return `http://127.0.0.1:${listening.port}`;
+}
+
+async function waitForHomeMove(): Promise<void> {
+  const deadline = Date.now() + 3_000;
+  while (homeOperations?.moveReservationCount !== 1) {
+    if (Date.now() > deadline) throw new Error("timed out waiting for the home-operation gate");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
 }
 
 async function postTurn(
@@ -690,6 +705,43 @@ describe("/api/ghosts/:name/memory", () => {
     expect((await put({ content: "   " })).status).toBe(400);
     expect((await put({ content: 42 })).status).toBe(400);
     expect((await put({ name: "Not A Slug", content: "x" })).status).toBe(400);
+  });
+
+  it("holds the home lease through memory publication before a concurrent delete", async () => {
+    const writerEntered = Promise.withResolvers<void>();
+    const releaseWriter = Promise.withResolvers<void>();
+    const base = await serve(undefined, {
+      memoryWriter: async (...args) => {
+        writerEntered.resolve();
+        await releaseWriter.promise;
+        return writeGhostMemory(...args);
+      },
+    });
+    const ghostDir = join(temp!.root, "casper");
+    const writing = fetch(`${base}/api/ghosts/casper/memory`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ content: "The memory write owns its home path." }),
+    });
+    await writerEntered.promise;
+
+    let deleteSettled = false;
+    const deleting = fetch(`${base}/api/ghosts/casper?confirm=casper`, { method: "DELETE" })
+      .then((response) => {
+        deleteSettled = true;
+        return response;
+      });
+    await waitForHomeMove();
+    expect(deleteSettled).toBe(false);
+
+    releaseWriter.resolve();
+    const [written, deleted] = await Promise.all([writing, deleting]);
+    expect(written.status).toBe(200);
+    expect(deleted.status).toBe(200);
+    const { trash } = await deleted.json() as { trash: string };
+    expect(existsSync(ghostDir)).toBe(false);
+    expect(readFileSync(join(trash, "memory", "the-memory-write-owns-its-home.md"), "utf8"))
+      .toBe("The memory write owns its home path.\n");
   });
 
   it("moves confirmed memory files to Trash and refuses everything else", async () => {

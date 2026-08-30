@@ -52,6 +52,8 @@ export interface ServerOptions {
   registry: GhostRegistry;
   host: SessionHost;
   homeOperations?: HomeOperationCoordinator;
+  /** Test seam for pausing the validated owner memory writer. */
+  memoryWriter?: typeof writeGhostMemory;
   /**
    * Provider login orchestration. Omit to leave the `/providers` and `/login`
    * routes out entirely (they 404) — a server that only ever runs turns needs
@@ -296,6 +298,7 @@ export function createDaemonServer(options: ServerOptions): Server {
   const logger = options.logger ?? silentLogger;
   const maxBodyBytes = options.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
   const homeOperations = options.homeOperations ?? homeOperationsFor(options.registry);
+  const memoryWriter = options.memoryWriter ?? writeGhostMemory;
   const liveStreams = new Set<ServerResponse>();
   // `undefined` means "decide for me"; `null` means "no relay on this server".
   const relay = options.relay === undefined
@@ -525,8 +528,10 @@ export function createDaemonServer(options: ServerOptions): Server {
       errorResponse(response, 400, "invalid_request", '"name" must be a string when present.');
       return;
     }
-    const ghost = options.registry.get(ghostName);
-    const written = await writeGhostMemory(ghost.dir, { content, name });
+    const written = await homeOperations.withLease(ghostName, async () => {
+      const ghost = options.registry.get(ghostName);
+      return memoryWriter(ghost.dir, { content, name });
+    });
     jsonResponse(response, 200, { ok: true, ...written });
   };
 

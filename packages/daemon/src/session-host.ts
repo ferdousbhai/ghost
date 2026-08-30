@@ -587,6 +587,9 @@ export interface SessionHostOptions {
   ) => void | Promise<void>;
   /** Test seam for fault-injecting durable per-tool cwd publication. */
   toolCwdWriter?: typeof writeToolCwds;
+  /** Test seams for pausing owner sidebar-state publication. */
+  pinWriter?: typeof writePins;
+  readWriter?: typeof writeReads;
   /** Deterministic fault seam around durable fork/delete transaction boundaries. */
   transactionProbe?: (
     stage: SessionTransactionProbeStage,
@@ -1514,6 +1517,8 @@ export class SessionHost {
   private readonly projectBindings: ProjectBindingStore;
   private readonly sessionStartupProbe: NonNullable<SessionHostOptions["sessionStartupProbe"]>;
   private readonly toolCwdWriter: typeof writeToolCwds;
+  private readonly pinWriter: typeof writePins;
+  private readonly readWriter: typeof writeReads;
   private readonly transactionProbe: NonNullable<SessionHostOptions["transactionProbe"]>;
   private readonly transactionMarkerLstat: NonNullable<SessionHostOptions["transactionMarkerLstat"]>;
   private readonly logger: Logger;
@@ -1597,6 +1602,8 @@ export class SessionHost {
       ?? new ProjectBindingStore({ ownerHome: this.ownerHome });
     this.sessionStartupProbe = options.sessionStartupProbe ?? (() => {});
     this.toolCwdWriter = options.toolCwdWriter ?? writeToolCwds;
+    this.pinWriter = options.pinWriter ?? writePins;
+    this.readWriter = options.readWriter ?? writeReads;
     this.transactionProbe = options.transactionProbe ?? (() => {});
     this.transactionMarkerLstat = options.transactionMarkerLstat ?? lstat;
     this.logger = options.logger ?? silentLogger;
@@ -1837,18 +1844,10 @@ export class SessionHost {
     const listeners = this.conversationListeners.get(ghostName);
     if (!listeners || listeners.size === 0) return;
     const identity = conversationIdentity(runtime, conversationId);
-    let updatedAt = new Date().toISOString();
-    try {
-      const row = (await this.collectSessions(ghostName))
-        .find((session) => session.id === identity.id);
-      if (row) updatedAt = row.updatedAt;
-    } catch {
-      // Whole-home deletion can remove the ghost before the final invalidation.
-    }
     const event: ConversationUpdatedEvent = {
       type: "conversation-updated",
       ...identity,
-      updatedAt,
+      updatedAt: new Date().toISOString(),
       ...(reason ? { reason } : {}),
     };
     for (const listener of [...listeners]) {
@@ -5124,11 +5123,22 @@ export class SessionHost {
     pinned: boolean,
     runtime: ConversationRuntime = "pi",
   ): Promise<void> {
+    return this.homeOperations.withLease(ghostName, () =>
+      this.setPinnedLeased(ghostName, sessionId, pinned, runtime)
+    );
+  }
+
+  private async setPinnedLeased(
+    ghostName: string,
+    sessionId: string | null | undefined,
+    pinned: boolean,
+    runtime: ConversationRuntime,
+  ): Promise<void> {
     const ghost = this.registry.get(ghostName);
     const conversationId = sessionId ?? DEFAULT_SESSION_KEY;
     const identity = conversationIdentity(runtime, conversationId);
     const paths = ghostPaths(ghost.dir);
-    const rows = await this.collectSessions(ghost.name);
+    const rows = await this.collectSessionsLeased(ghost);
     const existing = new Set(rows.map((row) => row.id));
     if (!existing.has(identity.id)) {
       throw new GhostError(
@@ -5143,7 +5153,7 @@ export class SessionHost {
       : new Set(state.pinned);
     stored.delete(identity.id);
     const kept = [...stored].filter((pin) => existing.has(pin));
-    await writePins(paths.sessionDir, pinned ? [...kept, identity.id] : kept);
+    await this.pinWriter(paths.sessionDir, pinned ? [...kept, identity.id] : kept);
     await this.announceConversationUpdated(ghostName, runtime, conversationId);
   }
 
@@ -5157,11 +5167,22 @@ export class SessionHost {
     openedAt = new Date(),
     runtime: ConversationRuntime = "pi",
   ): Promise<string> {
+    return this.homeOperations.withLease(ghostName, () =>
+      this.markReadLeased(ghostName, sessionId, openedAt, runtime)
+    );
+  }
+
+  private async markReadLeased(
+    ghostName: string,
+    sessionId: string | null | undefined,
+    openedAt: Date,
+    runtime: ConversationRuntime,
+  ): Promise<string> {
     const ghost = this.registry.get(ghostName);
     const conversationId = sessionId ?? DEFAULT_SESSION_KEY;
     const identity = conversationIdentity(runtime, conversationId);
     const paths = ghostPaths(ghost.dir);
-    const rows = await this.collectSessions(ghost.name);
+    const rows = await this.collectSessionsLeased(ghost);
     const existing = new Set(rows.map((row) => row.id));
     if (!existing.has(identity.id)) {
       throw new GhostError(
@@ -5178,7 +5199,7 @@ export class SessionHost {
       Object.entries(reads).filter(([id]) => existing.has(id)),
     );
     const readAt = openedAt.toISOString();
-    await writeReads(paths.sessionDir, { ...kept, [identity.id]: readAt });
+    await this.readWriter(paths.sessionDir, { ...kept, [identity.id]: readAt });
     await this.announceConversationUpdated(ghostName, runtime, conversationId);
     return readAt;
   }

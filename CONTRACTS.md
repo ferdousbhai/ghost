@@ -1067,7 +1067,9 @@ shape and streams emit one complete event object per line.
   file through the validating, redacting, atomic `GhostHome` writer used by the
   HUD and idle maintenance; an omitted `name` derives the slug from the fact. A
   format rejection (empty, over the limit, bad slug) is a 400 with the writer's
-  own message.
+  own message. The route holds the ghost-home identity lease from before it
+  resolves `ghost.dir` until the atomic writer completes, so a concurrent
+  whole-home move cannot redirect the write or leave it targeting the old name.
 - `DELETE /api/ghosts/:name/memory` `{ path, confirm: path }` →
   `{ ok: true, path, trash, kind }` — moves exactly one Markdown file under
   `memory/` to recoverable Trash. `confirm` must byte-match `path`; absolute
@@ -1478,7 +1480,9 @@ shape and streams emit one complete event object per line.
   A non-boolean
   `pinned` is `400 invalid_request`; an unknown conversation id is `404 not_found`.
   Deleting a conversation drops its pin; a stale id (conversation gone) is
-  ignored on read and pruned on the next write.
+  ignored on read and pruned on the next write. The mutation holds one
+  ghost-home identity lease across recovery/listing, state read, atomic write,
+  and conversation invalidation.
 - `PUT  /api/ghosts/:name/sessions/:id/read` `{}` →
   `{ ok: true, readAt }` — mark a stored conversation opened using the daemon's
   clock. Read state lives in `sessions/reads.json` as conversation id to
@@ -1489,7 +1493,7 @@ shape and streams emit one complete event object per line.
   to version 2 on the next owner-state mutation. A row is unread when it has
   `updatedAt` is later than `readAt`. An unknown conversation id is
   `404 not_found`; deletion drops its read entry, and stale ids are pruned on
-  the next write.
+  the next write. It uses the same whole-mutation home lease as pinning.
 - `PUT  /api/ghosts/:name/sessions/:id/title` `{ title: string }` →
   `{ ok: true, title }` — rename one conversation. The API trims the title, then
   writes the same native `session_info` entry the smol lane uses through

@@ -75,6 +75,7 @@ import {
 } from "../src/session-host.js";
 import type { PiMessagesEvent } from "../src/pi-messages.js";
 import { readPins, writePins } from "../src/pins.js";
+import { readReads, writeReads } from "../src/reads.js";
 import { ProjectBindingStore, projectBindingPath } from "../src/project-binding.js";
 import { PROJECT_SCAN_MAX_ENTRIES } from "../src/project-resources.js";
 import { piProjectSnapshotPath, piProjectSnapshotPaths } from "../src/project-snapshot.js";
@@ -202,6 +203,8 @@ async function setup(
     | "retention"
     | "sessionStartupProbe"
     | "toolCwdWriter"
+    | "pinWriter"
+    | "readWriter"
     | "transactionProbe"
     | "transactionMarkerLstat"
     | "logger"
@@ -7664,6 +7667,76 @@ describe("passive session recovery during whole-home moves", () => {
     }
 
     expect(existsSync(dir)).toBe(false);
+  });
+
+  it("holds pin publication and its announcement until a concurrent rename moves the home", async () => {
+    const entered = deferred();
+    const resume = deferred();
+    const { dir } = await setup([{ kind: "text", text: "persisted" }], {
+      pinWriter: async (...args) => {
+        entered.resolve();
+        await resume.promise;
+        return writePins(...args);
+      },
+    });
+    await host!.runTurn("casper", {
+      sessionId: "pin-race",
+      prompt: "remember this",
+      emit: () => {},
+    });
+    const coordinator = homeOperationsFor(temp!.registry);
+
+    const pinning = host!.setPinned("casper", "pin-race", true);
+    await entered.promise;
+    const reserved = await reserveBlockedMove(coordinator);
+    expect(reserved.ready()).toBe(false);
+
+    resume.resolve();
+    await pinning;
+    const releaseMove = await reserved.move;
+    try {
+      await host!.renameGhost("casper", "wisp");
+    } finally {
+      releaseMove();
+    }
+
+    expect(existsSync(dir)).toBe(false);
+    expect(await readPins(ghostPaths(join(temp!.root, "wisp")).sessionDir))
+      .toEqual(["pi:pin-race"]);
+  });
+
+  it("holds read publication and its announcement until a concurrent delete moves the home", async () => {
+    const entered = deferred();
+    const resume = deferred();
+    const openedAt = new Date("2026-08-30T12:00:00.000Z");
+    const { dir } = await setup([{ kind: "text", text: "persisted" }], {
+      readWriter: async (...args) => {
+        entered.resolve();
+        await resume.promise;
+        return writeReads(...args);
+      },
+    });
+    await host!.runTurn("casper", {
+      sessionId: "read-race",
+      prompt: "remember this",
+      emit: () => {},
+    });
+    const coordinator = homeOperationsFor(temp!.registry);
+
+    const marking = host!.markRead("casper", "read-race", openedAt);
+    await entered.promise;
+    const reserved = await reserveBlockedMove(coordinator);
+    expect(reserved.ready()).toBe(false);
+
+    resume.resolve();
+    await expect(marking).resolves.toBe(openedAt.toISOString());
+    const releaseMove = await reserved.move;
+    const { trash } = await host!.deleteGhost("casper").finally(releaseMove);
+
+    expect(existsSync(dir)).toBe(false);
+    expect(await readReads(ghostPaths(trash).sessionDir)).toEqual({
+      "pi:read-race": openedAt.toISOString(),
+    });
   });
 });
 
