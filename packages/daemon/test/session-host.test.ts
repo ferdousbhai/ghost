@@ -448,6 +448,52 @@ function deferred(): {
   return { promise, resolve };
 }
 
+async function cancelledRelayOpen(
+  homeDir: string,
+  onClose: () => void | Promise<void> = () => {},
+): Promise<{ readonly sent: string[]; finishOpen(): void }> {
+  const openStarted = deferred();
+  const heldOpen = deferred();
+  const sent: string[] = [];
+  const transport: RelayTransport = {
+    connected: true,
+    peer: "test relay",
+    request: async (op) => {
+      sent.push(op);
+      if (op === "open") {
+        openStarted.resolve();
+        await heldOpen.promise;
+        return {
+          ok: true,
+          result: {
+            id: "test-tab",
+            page: { url: "https://example.com/", title: "Example" },
+          },
+        };
+      }
+      if (op === "close") {
+        await onClose();
+        return { ok: true, result: { closed: true } };
+      }
+      return { ok: false, failure: "invalid_input", message: "unexpected test op" };
+    },
+  };
+  const browser = browserSessionFor(homeDir, {
+    backend: relayBackend({ transport }),
+    idleTimeoutMs: 0,
+  });
+  const controller = new AbortController();
+  const opening = browser.backend.open("https://example.com/", {
+    timeoutMs: 1_000,
+    signal: controller.signal,
+  });
+  await openStarted.promise;
+  controller.abort();
+  await expect(opening).rejects.toMatchObject({ details: { reason: "aborted" } });
+  expect(browser.backend.running).toBe(true);
+  return { sent, finishOpen: heldOpen.resolve };
+}
+
 function recordMaintenanceTurns(
   finishTurn?: (turn: SettledMaintenanceTurn | undefined) => Promise<void>,
   recordActivity?: (
@@ -7964,6 +8010,19 @@ describe("SessionHost.deleteGhost", () => {
     expect(existsSync(dir)).toBe(false);
   });
 
+  it("retires a cancelled browser open before moving the ghost home", async () => {
+    const { dir } = await setup([{ kind: "text", text: "unused" }]);
+    const relay = await cancelledRelayOpen(dir, () => {
+      expect(existsSync(dir)).toBe(true);
+    });
+
+    await host!.deleteGhost("casper");
+    relay.finishOpen();
+
+    expect(relay.sent).toEqual(["open", "close"]);
+    expect(existsSync(dir)).toBe(false);
+  });
+
   it("closes the ghost's conversations and moves the whole home into the trash", async () => {
     const { dir } = await setup([{ kind: "text", text: "hello" }]);
     await host!.runTurn("casper", { sessionId: "conv-1", prompt: "one", emit: () => {} });
@@ -8130,40 +8189,17 @@ describe("SessionHost.renameGhost", () => {
     expect(readdirSync(runtimeUnitDir)).toEqual([]);
   });
 
-  it("retires the browser entry under the old home before the rename", async () => {
+  it("retires a cancelled browser open under the old home before the rename", async () => {
     const { dir } = await setup([{ kind: "text", text: "unused" }]);
-    const sent: string[] = [];
-    const transport: RelayTransport = {
-      connected: true,
-      peer: "test relay",
-      request: async (op) => {
-        sent.push(op);
-        if (op === "open") {
-          return {
-            ok: true,
-            result: {
-              id: "test-tab",
-              page: { url: "https://example.com/", title: "Example" },
-            },
-          };
-        }
-        if (op === "close") {
-          expect(existsSync(dir)).toBe(true);
-          expect(existsSync(join(temp!.root, "wisp"))).toBe(false);
-          return { ok: true, result: { closed: true } };
-        }
-        return { ok: false, failure: "invalid_input", message: "unexpected test op" };
-      },
-    };
-    const browser = browserSessionFor(dir, {
-      backend: relayBackend({ transport }),
-      idleTimeoutMs: 0,
+    const relay = await cancelledRelayOpen(dir, () => {
+      expect(existsSync(dir)).toBe(true);
+      expect(existsSync(join(temp!.root, "wisp"))).toBe(false);
     });
-    await browser.backend.open("https://example.com/", { timeoutMs: 1_000 });
 
     const renamed = await host!.renameGhost("casper", "wisp");
+    relay.finishOpen();
 
-    expect(sent).toEqual(["open", "close"]);
+    expect(relay.sent).toEqual(["open", "close"]);
     expect(renamed.dir).toBe(join(temp!.root, "wisp"));
   });
 

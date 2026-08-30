@@ -2200,7 +2200,11 @@ not coupled to that release identity.
   targeted teardown removes an entry only after its protocol close succeeds,
   coalesces concurrent closes, and keeps a failed entry for retry. A partial
   Chromium close forgets only tabs confirmed closed or already gone; any live
-  tab Chromium refused remains claimed by that session for the retry. Whole-ghost
+  tab Chromium refused remains claimed by that session for the retry. Relay
+  requests are serialized per protocol session inside the extension, so a
+  terminal close waits for any earlier canceled-but-still-running tab creation.
+  A successful close tombstones that protocol session against later work, and
+  the backend rotates to a fresh session id before a subsequent open. Whole-ghost
   rename and delete retire that old-home entry before moving the directory;
   another ghost's browser session is untouched.
   The relay is the only browser: there is no second backend and no browser mode

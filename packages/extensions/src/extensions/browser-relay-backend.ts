@@ -323,7 +323,7 @@ export class RelayBrowserBackend implements GhostBrowserBackend {
    * alone, refuses a switch or close aimed at another's, and on `close` sweeps
    * every tab this session opened rather than only the one it last drove.
    */
-  readonly #session = randomUUID();
+  #session = randomUUID();
   /**
    * Whether this protocol session may still own tabs in the extension. This is
    * deliberately separate from #tabId: closing the current tab can leave older
@@ -350,6 +350,7 @@ export class RelayBrowserBackend implements GhostBrowserBackend {
     op: RelayOp,
     args: Readonly<Record<string, unknown>>,
     options: BackendActionOptions,
+    mayCreateTab = false,
   ): Promise<Record<string, unknown>> {
     const transport = this.#transport;
     if (!transport?.connected) {
@@ -360,6 +361,10 @@ export class RelayBrowserBackend implements GhostBrowserBackend {
         { op },
       );
     }
+    // The relay has no cancel frame. Once a tab-creating request is handed to
+    // a connected transport, its late completion must be retired even if the
+    // local caller stops waiting before a reply arrives.
+    if (mayCreateTab) this.#mayOwnTabs = true;
     const reply = await withAbort(
       transport.request(op, {
         ...args,
@@ -402,10 +407,7 @@ export class RelayBrowserBackend implements GhostBrowserBackend {
   }
 
   async open(url: string, options: BackendActionOptions): Promise<PageSummary> {
-    const result = await this.#call("open", { url }, options);
-    // A successful open reply means the extension may own the new tab even if
-    // the rest of the reply is malformed. Preserve that ownership for close.
-    this.#mayOwnTabs = true;
+    const result = await this.#call("open", { url }, options, true);
     // The extension names the tab it opened. Every later op rides on that id, so
     // a reply without one is malformed rather than something to paper over.
     const id = result["id"];
@@ -560,8 +562,8 @@ export class RelayBrowserBackend implements GhostBrowserBackend {
         ...(input.url === undefined ? {} : { url: input.url }),
       },
       options,
+      input.op === "create",
     );
-    if (input.op === "create") this.#mayOwnTabs = true;
     const tabs = readTabInfos(result["tabs"]);
     // The extension is authoritative on which tab this session now drives:
     // `active` is answered for this caller alone, so follow it across
@@ -593,6 +595,9 @@ export class RelayBrowserBackend implements GhostBrowserBackend {
     if (typeof closed !== "boolean") malformed("close", "closed is not a boolean");
     this.#tabId = undefined;
     this.#mayOwnTabs = false;
+    // A successful protocol close permanently retires its session id. Reopening
+    // this backend starts a fresh protocol owner rather than reviving a tombstone.
+    this.#session = randomUUID();
     return closed;
   }
 }

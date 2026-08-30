@@ -123,6 +123,14 @@ async function expectGhostError(work: Promise<unknown>): Promise<GhostError> {
   throw new Error("expected a GhostError");
 }
 
+function deferred(): { promise: Promise<void>; resolve(): void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((settle) => {
+    resolve = settle;
+  });
+  return { promise, resolve };
+}
+
 
 describe("the protocol constants are a contract", () => {
   it("names exactly the verbs the seam has, plus current and status", () => {
@@ -380,6 +388,43 @@ describe("the Tier-1 relay ops translate the seam to the wire", () => {
 });
 
 describe("the relaxed one-tab invariant, on the relay backend", () => {
+  it.each([
+    ["open", "open" as const],
+    ["tab create", "tabs" as const],
+  ])("retires a cancelled %s and rotates before reopening", async (_label, op) => {
+    const transport = transportWithPage();
+    transport.answer("tabs", {
+      tabs: [{ id: "t2", url: PAGE.url, title: PAGE.title, active: true }],
+      active: "t2",
+      id: "t2",
+      page: PAGE,
+    });
+    const held = deferred();
+    transport.barriers.set(op, held.promise);
+    const backend = new RelayBrowserBackend({ transport });
+    const controller = new AbortController();
+    const creating: Promise<unknown> = op === "open"
+      ? backend.open(PAGE.url, { timeoutMs: 5_000, signal: controller.signal })
+      : backend.tabs(
+          { op: "create", url: PAGE.url },
+          { timeoutMs: 5_000, signal: controller.signal },
+        );
+    await vi.waitFor(() => expect(transport.lastFor(op)).toBeDefined());
+    const retiredSession = transport.lastFor(op)?.args["session"];
+
+    controller.abort();
+    const cancelled = await expectGhostError(creating);
+    expect(cancelled.details["reason"]).toBe("aborted");
+    expect(backend.running).toBe(true);
+    expect(await backend.close()).toBe(true);
+    expect(transport.lastFor("close")?.args["session"]).toBe(retiredSession);
+
+    transport.barriers.delete(op);
+    held.resolve();
+    await backend.open(PAGE.url, { timeoutMs: 5_000 });
+    expect(transport.lastFor("open")?.args["session"]).not.toBe(retiredSession);
+  });
+
   it("tracks several tabs as a set and stays running while any remain", async () => {
     const transport = transportWithPage();
     transport.replies.set("tabs", (args) => {
