@@ -1678,6 +1678,7 @@ export class ClaudeCodeRuntime {
     let settledTurn: SettledMaintenanceTurn | undefined;
     let pendingTerminalResult: SDKResultMessage | undefined;
     let pendingFailure: { cause: unknown; aborted: boolean } | undefined;
+    let terminalEmissionFailure: { cause: unknown } | undefined;
     // A result has advanced Claude's transcript. Until all durable side effects
     // for that result settle, any failure must prevent another prompt from
     // entering this live process; the next turn resumes cold from its sidecar.
@@ -2062,12 +2063,13 @@ export class ClaudeCodeRuntime {
         }
       } catch (cause) {
         this.retireWarm(key);
-        throw cause;
+        terminalEmissionFailure = { cause };
       }
       // Whatever survived the turn starts its idle countdown here, so a warm
       // process is never held by a conversation nobody is talking to.
       this.armWarmIdle(key);
     }
+    if (terminalEmissionFailure) throw terminalEmissionFailure.cause;
   }
 
   async listSessions(ghost: Ghost): Promise<ClaudeSessionMetadata[]> {
