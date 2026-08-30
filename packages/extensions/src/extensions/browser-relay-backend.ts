@@ -344,6 +344,10 @@ export class RelayBrowserBackend implements GhostBrowserBackend {
     return this.#transport?.connected === true && this.#mayOwnTabs;
   }
 
+  get mayOwnTabs(): boolean {
+    return this.#mayOwnTabs;
+  }
+
   async #call(
     op: RelayOp,
     args: Readonly<Record<string, unknown>>,

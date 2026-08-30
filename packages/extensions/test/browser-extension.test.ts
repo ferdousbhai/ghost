@@ -100,6 +100,7 @@ interface FakeCall {
  */
 class FakeBackend implements GhostBrowserBackend {
   readonly name = "fake";
+  mayOwnTabs = false;
   running = false;
   calls: FakeCall[] = [];
   titles: Record<string, string> = {};
@@ -119,6 +120,7 @@ class FakeBackend implements GhostBrowserBackend {
   readBarrier: Promise<void> | undefined;
   actionBarrier: Promise<void> | undefined;
   closeBarrier: Promise<void> | undefined;
+  closeFailure: Error | undefined;
 
   #url = "about:blank";
   #history: string[] = [];
@@ -164,6 +166,7 @@ class FakeBackend implements GhostBrowserBackend {
 
   async open(url: string, options: BackendActionOptions): Promise<PageSummary> {
     this.calls.push({ name: "open", args: [url, options] });
+    this.mayOwnTabs = true;
     this.running = true;
     this.#navigate(url);
     return this.#page();
@@ -268,6 +271,7 @@ class FakeBackend implements GhostBrowserBackend {
   async tabs(input: BackendTabsInput, options: BackendActionOptions): Promise<BackendTabsResult> {
     this.calls.push({ name: "tabs", args: [input, options] });
     if (input.op === "create") {
+      this.mayOwnTabs = true;
       this.running = true;
       this.#url = input.url ?? "about:blank";
     }
@@ -285,7 +289,9 @@ class FakeBackend implements GhostBrowserBackend {
   async close(): Promise<boolean> {
     this.calls.push({ name: "close", args: [] });
     if (this.closeBarrier) await this.closeBarrier;
-    if (!this.running) return false;
+    if (this.closeFailure) throw this.closeFailure;
+    if (!this.mayOwnTabs) return false;
+    this.mayOwnTabs = false;
     this.running = false;
     this.closed = true;
     this.#url = "about:blank";
@@ -320,6 +326,10 @@ class ManualBrowserClock implements BrowserPolicyClock {
   clearTimeout(timer: ReturnType<typeof setTimeout>): void {
     const id = (timer as unknown as { __manualBrowserClockId: number }).__manualBrowserClockId;
     this.#callbacks.delete(id);
+  }
+
+  get pendingCount(): number {
+    return this.#callbacks.size;
   }
 
   runAll(): void {
@@ -1540,6 +1550,37 @@ describe("serialized browser lifecycle", () => {
     await reading;
     clock.runAll();
     await vi.waitFor(() => expect(backend.calls.some((call) => call.name === "close")).toBe(true));
+  });
+
+  it("keeps idle workspace release armed across a relay disconnect and reconnect", async () => {
+    const backend = new FakeBackend();
+    const clock = new ManualBrowserClock();
+    const session = new GhostBrowserSession({
+      homeDir: fixture.dir,
+      backend: () => backend,
+      idleTimeoutMs: 25,
+      resolver: PUBLIC_RESOLVER,
+      clock,
+    });
+    await session.open("https://example.com");
+
+    backend.running = false;
+    backend.closeFailure = new GhostBrowserError(
+      "browser_unavailable",
+      "The relay disconnected.",
+    );
+    clock.runAll();
+    await vi.waitFor(() => {
+      expect(backend.calls.filter((call) => call.name === "close")).toHaveLength(1);
+      expect(clock.pendingCount).toBe(1);
+    });
+
+    backend.closeFailure = undefined;
+    backend.running = true;
+    clock.runAll();
+    await vi.waitFor(() => expect(backend.closed).toBe(true));
+    expect(backend.calls.filter((call) => call.name === "close")).toHaveLength(2);
+    expect(clock.pendingCount).toBe(0);
   });
 
   it("cancels an in-flight action before the queued close begins", async () => {

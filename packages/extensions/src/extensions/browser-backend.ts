@@ -174,6 +174,8 @@ export interface BackendTabsResult {
 
 export interface GhostBrowserBackend {
   readonly name: string;
+  /** True while this backend may still own tabs, even if its transport is offline. */
+  readonly mayOwnTabs: boolean;
   readonly running: boolean;
 
   /**

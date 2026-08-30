@@ -329,7 +329,7 @@ export class GhostBrowserSession {
 
   #touchIdleTimer(): void {
     this.#clearIdleTimer();
-    if (this.#queuedActions > 0 || !this.backend.running || this.#idleTimeoutMs <= 0) return;
+    if (this.#queuedActions > 0 || !this.backend.mayOwnTabs || this.#idleTimeoutMs <= 0) return;
     this.#idleTimer = this.#clock.setTimeout(() => {
       void this.close().catch(() => undefined);
     }, this.#idleTimeoutMs);

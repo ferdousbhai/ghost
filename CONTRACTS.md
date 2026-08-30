@@ -2236,7 +2236,10 @@ not coupled to that release identity.
   checks have bounded waits so a silent Chrome API cannot retain the ownership
   lane, connection latch, popup, or alarm retry; a write that settles after its
   deadline queues the latest ownership/poison snapshot again before it can remain
-  authoritative.
+  authoritative. Ownership, poison, and incarnation repairs carry pending
+  revisions until the newest value is durably published. A rejected repair stays
+  fail-closed, is retried by connection preparation and the keepalive alarm, and
+  refuses non-cleanup browser work until it succeeds.
   Relay request starts are serialized per ghost-wide protocol owner until
   each deadline response. Terminal close first durably tombstones its session,
   then makes a bounded attempt against every currently known tab, so it can
@@ -2251,7 +2254,9 @@ not coupled to that release identity.
   whose result is indeterminate keeps the attachment visible and quarantines the
   tab from a newer attach until the old call settles, so late cleanup cannot
   detach a newer generation. The backend rotates to a fresh session id before a
-  subsequent open.
+  subsequent open. The session-layer idle timer follows possible tab ownership,
+  not relay connectivity: a disconnected close failure rearms the timer so a
+  same-incarnation reconnect gets another bounded workspace-release attempt.
   Whole-ghost
   rename and delete retire that old-home entry before moving the directory;
   another ghost's browser session is untouched. Graceful daemon shutdown retires

@@ -615,10 +615,12 @@ describe("when the relay is not there", () => {
     const error = await expectGhostError(backend.close());
     expect(error.details["failure"]).toBe("browser_unavailable");
     expect(backend.running).toBe(false);
+    expect(backend.mayOwnTabs).toBe(true);
 
     transport.connected = true;
     expect(backend.running).toBe(true);
     expect(await backend.close()).toBe(true);
+    expect(backend.mayOwnTabs).toBe(false);
     expect(sentArgs(transport, "close")).toEqual({});
   });
 
