@@ -81,6 +81,8 @@ export interface GhostSecretMigrationOptions {
   ) => void;
   /** Synchronous adversarial seam around a read plaintext source. */
   plainFileProbe?: (stage: "removing", path: string) => void;
+  /** Test-only abrupt-stop seam for durable auth.json removal recovery. */
+  plainFileFault?: (stage: PlainFileFaultStage, path: string) => void;
   /** Test-only abrupt-stop seam; durable claim evidence is deliberately retained. */
   agentDbFault?: (stage: AgentDbFaultStage, path: string) => void;
   /** Synchronous adversarial seam immediately before portable CAS publication. */
@@ -97,6 +99,14 @@ export type AgentDbFaultStage =
   | "main-linked"
   | "main-unlinked"
   | "claim-entry-unlinked"
+  | "state-unlinked";
+
+export type PlainFileFaultStage =
+  | "state-written"
+  | "file-renamed"
+  | "phase-claimed"
+  | "claim-unlinked"
+  | "replacement-linked"
   | "state-unlinked";
 
 function refusedSource(path: string, error: PrivateReadError): SecretServiceError {
@@ -1160,17 +1170,6 @@ function scrubAgentDb(claim: AgentDbClaim | null): void {
   verifyAgentDbFile(claim.main);
 }
 
-function restoreRemovalClaim(claimedPath: string, path: string): void {
-  try {
-    if (missingPath(path)) {
-      linkSync(claimedPath, path);
-      unlinkSync(claimedPath);
-    }
-  } catch {
-    // A later arrival keeps its public name; the moved entry remains recoverable.
-  }
-}
-
 function changedPlaintextSource(path: string): SecretServiceError {
   return new SecretServiceError(
     "secret_migration_failed",
@@ -1178,30 +1177,232 @@ function changedPlaintextSource(path: string): SecretServiceError {
   );
 }
 
-function removePlainFile(path: string, identity: PrivateFileIdentity): void {
-  const claimedPath = `${path}.${process.pid}.${randomUUID()}.removal`;
+type PlainRemovalPhase = "prepared" | "claimed";
+
+interface PlainRemovalEvidence {
+  version: 1;
+  phase: PlainRemovalPhase;
+  originalName: string;
+  claimName: string;
+  device: string;
+  inode: string;
+}
+
+interface PlainRemovalClaim {
+  path: string;
+  claimedPath: string;
+  statePath: string;
+  evidence: PlainRemovalEvidence;
+  fault?: GhostSecretMigrationOptions["plainFileFault"];
+}
+
+class PlainFileAbruptStop extends Error {
+  constructor(options?: ErrorOptions) {
+    super("Simulated abrupt stop during plaintext removal.", options);
+  }
+}
+
+const PLAIN_REMOVAL_SUFFIX = ".removal";
+const PLAIN_REMOVAL_STATE_SUFFIX = ".state.json";
+
+function injectPlainFileFault(
+  claim: Pick<PlainRemovalClaim, "fault" | "path">,
+  stage: PlainFileFaultStage,
+): void {
+  if (!claim.fault) return;
   try {
-    renameSync(path, claimedPath);
-  } catch {
-    throw changedPlaintextSource(path);
+    claim.fault(stage, claim.path);
+  } catch (cause) {
+    throw new PlainFileAbruptStop({ cause });
   }
-  let claimed: BigIntStats;
+}
+
+function plainRemovalMatches(
+  path: string,
+  evidence: PlainRemovalEvidence,
+  links: bigint,
+): boolean {
   try {
-    claimed = lstatSync(claimedPath, { bigint: true });
+    const stats = lstatSync(path, { bigint: true });
+    return stats.isFile()
+      && !stats.isSymbolicLink()
+      && stats.nlink === links
+      && stats.dev === BigInt(evidence.device)
+      && stats.ino === BigInt(evidence.inode);
   } catch {
-    restoreRemovalClaim(claimedPath, path);
+    return false;
+  }
+}
+
+function sameTwoLinkPlainRemoval(left: string, right: string): boolean {
+  try {
+    const first = lstatSync(left, { bigint: true });
+    const second = lstatSync(right, { bigint: true });
+    return first.isFile()
+      && !first.isSymbolicLink()
+      && first.nlink === 2n
+      && second.isFile()
+      && !second.isSymbolicLink()
+      && second.nlink === 2n
+      && first.dev === second.dev
+      && first.ino === second.ino;
+  } catch {
+    return false;
+  }
+}
+
+function writePlainRemovalEvidence(claim: PlainRemovalClaim, phase: PlainRemovalPhase): void {
+  claim.evidence = { ...claim.evidence, phase };
+  atomicPrivateJson(claim.statePath, claim.evidence);
+}
+
+function finishPlainRemovalEvidence(claim: PlainRemovalClaim): void {
+  unlinkSync(claim.statePath);
+  fsyncPath(dirname(claim.path));
+  injectPlainFileFault(claim, "state-unlinked");
+}
+
+function parsePlainRemovalEvidence(path: string, statePath: string): PlainRemovalEvidence {
+  const parsed = privateJson(statePath).value as Partial<PlainRemovalEvidence> | null;
+  const originalName = basename(path);
+  if (parsed?.version !== 1
+    || (parsed.phase !== "prepared" && parsed.phase !== "claimed")
+    || parsed.originalName !== originalName
+    || typeof parsed.claimName !== "string"
+    || parsed.claimName.length > 255
+    || !parsed.claimName.startsWith(`${originalName}.`)
+    || !parsed.claimName.endsWith(PLAIN_REMOVAL_SUFFIX)
+    || basename(parsed.claimName) !== parsed.claimName
+    || basename(statePath) !== `${parsed.claimName}${PLAIN_REMOVAL_STATE_SUFFIX}`
+    || typeof parsed.device !== "string"
+    || typeof parsed.inode !== "string"
+    || !/^\d+$/.test(parsed.device)
+    || !/^\d+$/.test(parsed.inode)) {
     throw changedPlaintextSource(path);
   }
-  if (!claimed.isFile()
-    || claimed.isSymbolicLink()
-    || claimed.nlink !== 1n
-    || claimed.dev !== identity.device
-    || claimed.ino !== identity.inode) {
-    restoreRemovalClaim(claimedPath, path);
-    throw changedPlaintextSource(path);
+  return parsed as PlainRemovalEvidence;
+}
+
+function restoreUnadmittedPlainRemoval(claim: PlainRemovalClaim): void {
+  if (!missingPath(claim.path)) throw changedPlaintextSource(claim.path);
+  try {
+    linkSync(claim.claimedPath, claim.path);
+    fsyncPath(dirname(claim.path));
+    injectPlainFileFault(claim, "replacement-linked");
+    unlinkSync(claim.claimedPath);
+    fsyncPath(dirname(claim.path));
+    finishPlainRemovalEvidence(claim);
+  } catch (error) {
+    if (error instanceof PlainFileAbruptStop) throw error;
+    throw changedPlaintextSource(claim.path);
   }
-  unlinkSync(claimedPath);
-  fsyncPath(dirname(path));
+}
+
+function reconcilePlainRemoval(claim: PlainRemovalClaim, recovering: boolean): void {
+  // Restoring an unadmitted replacement stopped between link and unlink. Its
+  // public name already owns that exact inode, so finish the no-replace move.
+  if (sameTwoLinkPlainRemoval(claim.claimedPath, claim.path)) {
+    unlinkSync(claim.claimedPath);
+    fsyncPath(dirname(claim.path));
+    finishPlainRemovalEvidence(claim);
+    return;
+  }
+
+  if (!missingPath(claim.claimedPath)) {
+    if (!plainRemovalMatches(claim.claimedPath, claim.evidence, 1n)) {
+      restoreUnadmittedPlainRemoval(claim);
+      if (!recovering) throw changedPlaintextSource(claim.path);
+      return;
+    }
+    if (claim.evidence.phase !== "claimed") {
+      writePlainRemovalEvidence(claim, "claimed");
+      injectPlainFileFault(claim, "phase-claimed");
+    }
+    const replacementWon = !missingPath(claim.path);
+    unlinkSync(claim.claimedPath);
+    fsyncPath(dirname(claim.path));
+    injectPlainFileFault(claim, "claim-unlinked");
+    finishPlainRemovalEvidence(claim);
+    if (replacementWon && !recovering) throw changedPlaintextSource(claim.path);
+    return;
+  }
+
+  if (claim.evidence.phase === "claimed") {
+    // The admitted claim was already unlinked. Any public path is a later
+    // winner and is deliberately left for the ordinary migration pass.
+    finishPlainRemovalEvidence(claim);
+    return;
+  }
+  if (!plainRemovalMatches(claim.path, claim.evidence, 1n)) {
+    finishPlainRemovalEvidence(claim);
+    if (!recovering) throw changedPlaintextSource(claim.path);
+    return;
+  }
+  try {
+    renameSync(claim.path, claim.claimedPath);
+    fsyncPath(dirname(claim.path));
+  } catch {
+    throw changedPlaintextSource(claim.path);
+  }
+  injectPlainFileFault(claim, "file-renamed");
+  reconcilePlainRemoval(claim, recovering);
+}
+
+function recoverPlainFileRemovals(
+  path: string,
+  fault?: GhostSecretMigrationOptions["plainFileFault"],
+): void {
+  const directory = dirname(path);
+  const prefix = `${basename(path)}.`;
+  let names: string[];
+  try {
+    names = readdirSync(directory);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw error;
+  }
+  const states = names.filter((name) =>
+    name.startsWith(prefix)
+      && name.endsWith(`${PLAIN_REMOVAL_SUFFIX}${PLAIN_REMOVAL_STATE_SUFFIX}`));
+  if (states.length > 1) throw changedPlaintextSource(path);
+  const stateName = states[0];
+  if (!stateName) return;
+  const statePath = join(directory, stateName);
+  const evidence = parsePlainRemovalEvidence(path, statePath);
+  reconcilePlainRemoval({
+    path,
+    claimedPath: join(directory, evidence.claimName),
+    statePath,
+    evidence,
+    ...(fault ? { fault } : {}),
+  }, true);
+}
+
+function removePlainFile(
+  path: string,
+  identity: PrivateFileIdentity,
+  fault?: GhostSecretMigrationOptions["plainFileFault"],
+): void {
+  const claimName = `${basename(path)}.${process.pid}-${randomUUID()}${PLAIN_REMOVAL_SUFFIX}`;
+  const claimedPath = join(dirname(path), claimName);
+  const statePath = `${claimedPath}${PLAIN_REMOVAL_STATE_SUFFIX}`;
+  const claim: PlainRemovalClaim = {
+    path,
+    claimedPath,
+    statePath,
+    evidence: {
+      version: 1,
+      phase: "prepared",
+      originalName: basename(path),
+      claimName,
+      device: identity.device.toString(),
+      inode: identity.inode.toString(),
+    },
+    ...(fault ? { fault } : {}),
+  };
+  writePlainRemovalEvidence(claim, "prepared");
+  injectPlainFileFault(claim, "state-written");
+  reconcilePlainRemoval(claim, false);
 }
 
 function migrateWithContext(
@@ -1209,6 +1410,7 @@ function migrateWithContext(
   context: GhostSecretContext,
 ): void {
   const authPath = options.authPath ?? join(options.home, ".pi", "auth.json");
+  recoverPlainFileRemovals(authPath, options.plainFileFault);
   const agentDb = join(dirname(authPath), "agent.db");
   const agentDbClaim = recoverOrClaimAgentDb(agentDb, options);
   let agentDbPublished = false;
@@ -1271,7 +1473,7 @@ function migrateWithContext(
     }
     if (legacy) {
       options.plainFileProbe?.("removing", authPath);
-      removePlainFile(authPath, legacy.identity);
+      removePlainFile(authPath, legacy.identity, options.plainFileFault);
     }
   } catch (error) {
     if (agentDbClaim && !agentDbPublished && !(error instanceof AgentDbAbruptStop)) {

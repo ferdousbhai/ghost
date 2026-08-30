@@ -777,6 +777,97 @@ describe("plaintext migration", () => {
     "state-written",
     "file-renamed",
     "phase-claimed",
+    "claim-unlinked",
+    "state-unlinked",
+  ] as const)("reconciles an abrupt auth.json removal stop after %s", (targetStage) => {
+    const home = root();
+    const agentDir = join(home, ".pi");
+    const path = join(agentDir, "auth.json");
+    mkdirSync(agentDir, { recursive: true });
+    writeFileSync(path, JSON.stringify({
+      openai: { type: "api_key", key: "restart-safe-login" },
+    }));
+    const client = new MemorySecretServiceClient();
+    let stopped = false;
+
+    expect(() => openGhostSecretContext({
+      home,
+      client,
+      metadataPath: join(home, "state.sqlite"),
+      plainFileFault: (stage) => {
+        if (stage !== targetStage || stopped) return;
+        stopped = true;
+        throw new Error("stop auth removal now");
+      },
+    })).toThrow(/abrupt stop/);
+    expect(stopped).toBe(true);
+
+    const context = openContext(home, client);
+    expect(listCredentials(context).find((row) => row.provider === "openai")).toMatchObject({
+      credential: { key: "restart-safe-login" },
+    });
+    context.close();
+    expect(existsSync(path)).toBe(false);
+    expect(readdirSync(agentDir).filter((name) => name.includes(".removal"))).toEqual([]);
+  });
+
+  it("restores and migrates an unadmitted auth replacement across its own link crash", () => {
+    const home = root();
+    const agentDir = join(home, ".pi");
+    const path = join(agentDir, "auth.json");
+    mkdirSync(agentDir, { recursive: true });
+    writeFileSync(path, JSON.stringify({
+      openai: { type: "api_key", key: "admitted-before-replacement" },
+    }));
+    const client = new MemorySecretServiceClient();
+    let replaced = false;
+
+    expect(() => openGhostSecretContext({
+      home,
+      client,
+      metadataPath: join(home, "state.sqlite"),
+      plainFileFault: (stage) => {
+        if (stage !== "file-renamed" || replaced) return;
+        replaced = true;
+        const claimName = readdirSync(agentDir).find((name) => name.endsWith(".removal"));
+        expect(claimName).toBeDefined();
+        const claimPath = join(agentDir, claimName!);
+        unlinkSync(claimPath);
+        writeFileSync(claimPath, JSON.stringify({
+          anthropic: { type: "api_key", key: "replacement-after-rename" },
+        }), { mode: 0o600 });
+        throw new Error("stop after replacing the claim");
+      },
+    })).toThrow(/abrupt stop/);
+    expect(replaced).toBe(true);
+
+    let stoppedDuringRestore = false;
+    expect(() => openGhostSecretContext({
+      home,
+      client,
+      metadataPath: join(home, "state.sqlite"),
+      plainFileFault: (stage) => {
+        if (stage !== "replacement-linked" || stoppedDuringRestore) return;
+        stoppedDuringRestore = true;
+        throw new Error("stop during replacement restore");
+      },
+    })).toThrow(/abrupt stop/);
+    expect(stoppedDuringRestore).toBe(true);
+    expect(lstatSync(path).nlink).toBe(2);
+
+    const context = openContext(home, client);
+    expect(listCredentials(context).find((row) => row.provider === "anthropic")).toMatchObject({
+      credential: { key: "replacement-after-rename" },
+    });
+    context.close();
+    expect(existsSync(path)).toBe(false);
+    expect(readdirSync(agentDir).filter((name) => name.includes(".removal"))).toEqual([]);
+  });
+
+  it.each([
+    "state-written",
+    "file-renamed",
+    "phase-claimed",
     "phase-committed",
     "phase-scrubbing",
     "phase-scrubbed",
