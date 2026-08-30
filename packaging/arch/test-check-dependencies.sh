@@ -66,6 +66,7 @@ python -c 'import yaml' >/dev/null 2>&1 || {
 }
 
 bash "$script_dir/test-ci-dependencies.sh"
+bash "$source_root/packaging/release/test-release-version.sh"
 
 rg -q 'rg[[:space:]]+-l' \
   "$source_root/packages/shell/dev/test.sh"

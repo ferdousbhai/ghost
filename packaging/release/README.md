@@ -28,7 +28,11 @@ The v2 runtime archive contains `bin/ghostd` and `bin/ghost`, compiled by
 `source_commit`. Release CI builds it from a frozen offline pnpm install behind
 dead proxies; the stable package then verifies the archive's fixed checksum,
 manifest, two-binary layout, executable x86-64 ELF files, and each binary's
-`--help`/`--version` behavior before installation.
+`--help`/`--version` behavior before installation. Before constructing those
+artifacts, CI also requires the root, daemon, extensions, shell, Chromium
+package, and Chromium extension manifest to carry one canonical three-component
+numeric release version that is valid in the browser manifest. The desktop
+helper keeps its independent protocol/package version.
 
 ## Release procedure
 

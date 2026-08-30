@@ -2148,6 +2148,14 @@ whole model before any non-local exposure.
 
 ## Package boundaries
 
+The root workspace, daemon, extensions, shell, Chromium package, and Chromium
+extension manifest carry one identical release version. It is exactly three
+canonical decimal components (`X.Y.Z`), each from 0 through 65535, with no
+leading zero on a multi-digit component and at least one nonzero component, so
+the `v<version>` stable-release identity is also a valid Chromium extension
+version. The desktop helper has an independent protocol/package version and is
+not coupled to that release identity.
+
 - `packages/extensions` — Ghost's built-in extensions plus ghost-home and
   machine Documents filesystem helpers. No HTTP, no daemon lifecycle, and no
   runtime package: extensions are written against the Ghost extension seam in

@@ -17,9 +17,8 @@ source_tree="$workspace/packaging/arch/src/ghost"
 release_out="$GHOST_CI_RELEASE_OUT"
 release_work="$GHOST_CI_RELEASE_WORK"
 
-version="$(bun -e \
-  'const p = await Bun.file(process.argv[1]).json(); process.stdout.write(p.version)' \
-  "$source_tree/package.json")"
+version="$(bash "$source_tree/packaging/release/verify-release-version.sh" \
+  "$source_tree")"
 commit="$(git -C "$source_tree" rev-parse HEAD)"
 epoch="$(git -C "$source_tree" show -s --format=%ct "$commit")"
 runtime="ghost-runtime-$version-linux-x86_64.tar.zst"
