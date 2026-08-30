@@ -2194,13 +2194,16 @@ not coupled to that release identity.
   carries a fresh process-incarnation UUID. Before answering hello, the extension
   compares it with the bounded local marker, durably retires and sweeps claims
   from a prior daemon process, and tombstones every still-running tab-create
-  lease so its late result self-retires. Incarnation reconciliation is serialized
-  through publication of the new marker; a timed-out marker write that settles
-  late is generation-gated and queues the newest safe marker again rather than
-  regressing it. Failure keeps the socket unadmitted for automatic retry. A
-  same-incarnation reconnect keeps live claims. An authenticated socket earns
-  the single relay slot only after
-  that reconciliation and a compatible `hello` within five seconds; until then
+  lease so its late result self-retires. Every retry with prior claims or create
+  leases republishes the complete ownership snapshot even when the tombstone is
+  already present in memory, so a failed first write cannot turn durable recovery
+  into an in-memory assumption. Incarnation reconciliation is serialized through
+  publication of the new marker; a timed-out marker write that settles late is
+  generation-gated and queues the newest safe marker again rather than regressing
+  it. Failure keeps the socket unadmitted for automatic retry. A
+  same-incarnation reconnect keeps live claims. An authenticated socket earns the
+  single relay slot only after that reconciliation and a compatible `hello`
+  within five seconds; until then
   status stays disconnected, no work is dispatched to it, and a new authenticated
   socket may replace it. Superseded pre-hello sockets are force-terminated, and
   shutdown closes or force-terminates every upgraded client tracked by the hub.
