@@ -15,18 +15,25 @@
  */
 import {
   chmodSync,
+  closeSync,
+  constants,
+  fstatSync,
   lstatSync,
   mkdirSync,
-  readFileSync,
+  openSync,
+  readSync,
   renameSync,
   unlinkSync,
   writeFileSync,
+  type BigIntStats,
+  type Stats,
 } from "node:fs";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
 
 const TOKEN_BYTES = 32;
+const TOKEN_FILE_BYTES = TOKEN_BYTES * 2 + 1;
 const TOKEN_CREATE_ATTEMPTS = 8;
 export const TOKEN_PATTERN = /^[0-9a-f]{64}$/;
 
@@ -75,50 +82,128 @@ function mintToken(): string {
   return randomBytes(TOKEN_BYTES).toString("hex");
 }
 
-function ensureTokenDirectory(path: string): void {
+function validateTokenDirectory(path: string): boolean {
   const directory = dirname(path);
-  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  let stats: BigIntStats;
+  try {
+    stats = lstatSync(directory, { bigint: true });
+  } catch (error) {
+    if (isErrno(error, "ENOENT")) return false;
+    throw error;
+  }
+  if (!stats.isDirectory() || stats.isSymbolicLink()) {
+    throw new Error(`Token directory ${directory} is not a real directory.`);
+  }
+  if ((stats.mode & 0o777n) !== 0o700n) {
+    throw new Error(`Token directory ${directory} must have mode 0700.`);
+  }
+  return true;
+}
+
+function ensureTokenDirectory(path: string): void {
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  validateTokenDirectory(path);
 }
 
 function isErrno(error: unknown, code: string): boolean {
   return (error as NodeJS.ErrnoException | null)?.code === code;
 }
 
-function readToken(path: string): string | undefined {
-  let text: string;
-  try {
-    text = readFileSync(path, "utf8");
-  } catch (error) {
-    if (isErrno(error, "ENOENT")) {
-      try {
-        const entry = lstatSync(path);
-        if (entry.isSymbolicLink()) {
-          throw new Error(
-            `Token file ${path} is a dangling symlink; rotate it explicitly to replace it.`,
-          );
-        }
-        if (!entry.isFile()) {
-          throw new Error(`Token file ${path} is not a regular file.`);
-        }
-      } catch (entryError) {
-        if (isErrno(entryError, "ENOENT")) return undefined;
-        throw entryError;
-      }
+function malformedToken(path: string): Error {
+  return new Error(`Token file ${path} is malformed; rotate it explicitly to replace it.`);
+}
 
-      // Another process can exclusively create the token after readFileSync
-      // reports ENOENT but before lstatSync checks for a dangling symlink. A
-      // regular entry means that first ENOENT is stale, so read the winner
-      // once. Do not recurse or spin: if the entry changes again, surface that
-      // second read exactly as any other concurrent filesystem mutation.
-      text = readFileSync(path, "utf8");
-    } else {
-      throw error;
+function invalidTokenEntry(path: string, entry: Stats): Error {
+  if (entry.isSymbolicLink()) {
+    return new Error(`Token file ${path} is a symbolic link; rotate it explicitly to replace it.`);
+  }
+  return new Error(`Token file ${path} is not a regular file.`);
+}
+
+function openToken(path: string): number | undefined {
+  const flags = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
+  try {
+    return openSync(path, flags);
+  } catch (error) {
+    if (isErrno(error, "ELOOP")) {
+      throw new Error(`Token file ${path} is a symbolic link; rotate it explicitly to replace it.`);
     }
+    if (!isErrno(error, "ENOENT")) throw error;
   }
-  const token = text.trim();
-  if (!TOKEN_PATTERN.test(token)) {
-    throw new Error(`Token file ${path} is malformed; rotate it explicitly to replace it.`);
+
+  let entry: Stats;
+  try {
+    entry = lstatSync(path);
+  } catch (error) {
+    if (isErrno(error, "ENOENT")) return undefined;
+    throw error;
   }
+  if (!entry.isFile() || entry.isSymbolicLink()) throw invalidTokenEntry(path, entry);
+
+  // An exclusive creator can win after the first open reports ENOENT. Admit
+  // that one winner exactly once; a second race is surfaced rather than spun.
+  try {
+    return openSync(path, flags);
+  } catch (error) {
+    if (isErrno(error, "ELOOP")) {
+      throw new Error(`Token file ${path} is a symbolic link; rotate it explicitly to replace it.`);
+    }
+    throw error;
+  }
+}
+
+function sameTokenFileState(left: BigIntStats, right: BigIntStats): boolean {
+  return right.isFile()
+    && !right.isSymbolicLink()
+    && left.dev === right.dev
+    && left.ino === right.ino
+    && left.size === right.size
+    && left.mtimeNs === right.mtimeNs
+    && left.ctimeNs === right.ctimeNs
+    && left.nlink === right.nlink
+    && left.mode === right.mode;
+}
+
+function readToken(path: string): string | undefined {
+  if (!validateTokenDirectory(path)) return undefined;
+  const descriptor = openToken(path);
+  if (descriptor === undefined) return undefined;
+  let bytes: Buffer;
+  try {
+    const before = fstatSync(descriptor, { bigint: true });
+    if (!before.isFile() || before.nlink !== 1n) {
+      throw new Error(`Token file ${path} must be a single-link regular file.`);
+    }
+    if ((before.mode & 0o777n) !== 0o600n) {
+      throw new Error(`Token file ${path} must have mode 0600.`);
+    }
+    if (before.size !== BigInt(TOKEN_FILE_BYTES)) throw malformedToken(path);
+
+    bytes = Buffer.alloc(TOKEN_FILE_BYTES + 1);
+    let length = 0;
+    while (length < bytes.length) {
+      const count = readSync(descriptor, bytes, length, bytes.length - length, length);
+      if (count === 0) break;
+      length += count;
+    }
+    const after = fstatSync(descriptor, { bigint: true });
+    let current: BigIntStats;
+    try {
+      current = lstatSync(path, { bigint: true });
+    } catch {
+      throw new Error(`Token file ${path} changed while it was read.`);
+    }
+    if (length !== TOKEN_FILE_BYTES
+      || !sameTokenFileState(before, after)
+      || !sameTokenFileState(after, current)) {
+      throw new Error(`Token file ${path} changed while it was read.`);
+    }
+  } finally {
+    closeSync(descriptor);
+  }
+  if (bytes[TOKEN_FILE_BYTES - 1] !== 0x0a) throw malformedToken(path);
+  const token = bytes.subarray(0, TOKEN_FILE_BYTES - 1).toString("ascii");
+  if (!TOKEN_PATTERN.test(token)) throw malformedToken(path);
   return token;
 }
 

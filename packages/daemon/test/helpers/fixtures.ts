@@ -163,7 +163,7 @@ export async function startTestDaemon(options: StartTestDaemonOptions = {}): Pro
     port: 0,
   });
   const tokenFile = join(temp.root, ".state", "api-token");
-  mkdirSync(dirname(tokenFile), { recursive: true });
+  mkdirSync(dirname(tokenFile), { recursive: true, mode: 0o700 });
   writeFileSync(tokenFile, `${apiToken}\n`, { mode: 0o600 });
   const env = {
     GHOSTD_PORT: String(listening.port),

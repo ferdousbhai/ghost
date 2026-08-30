@@ -864,7 +864,11 @@ Three checks, applied to every `/api` request before routing:
    time, where `<token>` is 64 hex characters read from
    `$XDG_STATE_HOME/ghost/api-token` (default
    `~/.local/state/ghost/api-token`; override with `GHOSTD_API_TOKEN_FILE`),
-   mode `0600` in a `0700` directory. The daemon mints it when the server
+   mode `0600` in a `0700` directory. An existing token is exactly 64 lowercase
+   hex bytes plus newline, read through one bounded `O_NOFOLLOW|O_NONBLOCK`
+   single-link regular-file descriptor whose before/after and live-path state
+   stays identical; the existing state directory must still be mode `0700`.
+   The daemon mints it with exclusive creation when the server
    starts — not lazily on first use, so a client starting alongside it finds
    the file. Missing or wrong → `401 unauthorized` with
    `www-authenticate: Bearer`. A local client authenticates by *reading the
