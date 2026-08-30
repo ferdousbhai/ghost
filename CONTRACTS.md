@@ -2232,13 +2232,16 @@ not coupled to that release identity.
   writes the same complete snapshot as a version-2 `chrome.storage.local`
   durability fence. A service-worker restart retains the session UUID and may
   recover that fence. A Chromium restart clears `storage.session`, so the worker
-  mints a new UUID, ignores the prior browser's tab-id fence, and publishes empty
-  ownership without probing or adopting those reusable numeric ids. Restore
+  mints a new UUID and ignores the prior browser's tab-id fence. The strict
+  version-2 poison ledger is scoped by that UUID; both of its local durability
+  slots must contain an empty tombstone for the new browser before the worker
+  publishes the new session UUID, so a partial reset cannot make reusable numeric
+  ids admissible. Restore
   otherwise admits the higher revision and rejects equal revisions with different
   snapshots, so a stale session write cannot become authoritative after its
   in-memory repair and worker both fail. A write failure rolls the tab back. If
   both rollback and a second claim publication are indeterminate, a
-  `chrome.storage.local` poison marker makes
+  `chrome.storage.local` poison ledger makes
   later worker starts refuse the relay rather than forget a possible owner; the
   live worker clears it only after authoritative removal or durable claim. A
   poison-only live tab is reverified and promoted into the complete fenced claim
@@ -2247,6 +2250,11 @@ not coupled to that release identity.
   unreadable or indeterminate worker restore likewise refuses the relay
   connection. A restore may publish only if the ownership generation it read is
   still current; live claims and poison win over an older storage snapshot.
+  Stored ownership is capped at 1,024 tabs, 1,024 workspace owners, 2,048 retired
+  owners, 1,024 poison claims, 128 characters per owner id, and signed 31-bit tab
+  ids. Restore validates those limits before tab I/O, verifies at most 16 tabs at
+  once, and shares one five-second verification deadline across poison and claim
+  restoration.
   Session/local settings and ownership reads, writes, and restored-tab existence
   checks have bounded waits so a silent Chrome API cannot retain the ownership
   lane, connection latch, popup, or alarm retry; a write that settles after its
@@ -2257,11 +2265,19 @@ not coupled to that release identity.
   refuses non-cleanup browser work until it succeeds. The short-lived popup never
   writes settings storage. It sends validated patches to the background worker,
   which serializes them and first publishes a strict version-1 local settings
-  fence containing the complete settings plus a monotonic revision. The fence
-  remains authoritative across popup and worker exits; a late raw write is
+  fence containing the complete settings plus a monotonic revision. Settings,
+  poison, and daemon-incarnation ledgers each use two fixed local slots. A worker
+  writes the slots sequentially and does not start the next slot mutation until
+  the previous one settles; revisions advance by two, so after a worker death the
+  one possibly invisible older write cannot outrank a newer publication. Readers
+  select the higher slot; at an equal conflicting revision, the second slot wins
+  because it is the commit record and only an unacknowledged first-slot write may
+  still arrive from the old worker. The settings
+  fence remains authoritative across popup and worker exits; a late raw write is
   repaired to its newest fenced value by observation, connection preparation, or
-  the keepalive alarm. Badge updates are cosmetic, fire-and-forget work and cannot
-  retain connection preparation or retry.
+  the keepalive alarm. If settings cannot be read, status remains available but
+  every other relay operation fails closed. Badge updates are cosmetic,
+  fire-and-forget work and cannot retain connection preparation or retry.
   Relay request starts are serialized per ghost-wide protocol owner until
   each deadline response. Terminal close first durably tombstones its session,
   then makes a bounded attempt against every currently known tab, so it can
