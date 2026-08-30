@@ -184,11 +184,9 @@ Remote collects only the capabilities which cross the local machine boundary.
 Live voice is scoped to the active conversation, uses the machine microphone
 and OpenAI Codex Realtime with the ghost's Codex OAuth, and shows the current
 phase, mute state, audio levels, and any transcript returned by the daemon.
-Collaboration is conversation-scoped encrypted relay collaboration with
-visibly distinct read-only and writable URLs. Read-only can start directly;
-writable access requires typing `WRITABLE` after a warning that its holder can
-steer the ghost and exercise local tools. A structured `not_supported` response
-renders as a neutral product-status explanation.
+The legacy collaboration controls remain as compatibility UI and render their
+structured `not_supported` response as a neutral product-status explanation;
+Ghost plans no encrypted collaboration relay.
 
 Phone access is the machine-global sibling to that conversation-scoped Remote
 view. “Reach me from my phone” asks ghostd to enable or disable Tailscale Serve,

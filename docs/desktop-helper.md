@@ -69,7 +69,11 @@ Capture (the ladder + honesty)
 Compositor control (dispatcher-grammar correct — auto-detect 0.55 string vs 0.56+ `hl.dsp.*` Lua grammar via an `hl.dsp.no_op()` probe; env override `OMAHARNESS_DISPATCH_API`-style)
 - `focus` `{ address | name }` → focus a window.
 - `workspace` `{ id | name }` → switch workspace.
-- (No `exec` here — the helper stays scoped to desktop control, not arbitrary process launch. OMP already provides native Bash; the helper's value is the GUI/Wayland/accessibility reach a shell lacks, with honesty metadata and lock-safe routing.)
+- (No `exec` here — the helper stays scoped to desktop control, not arbitrary
+  process launch. Ghost's pi runtime provides Bash through a job-aware
+  replacement for pi's native tool; the helper's value is the
+  GUI/Wayland/accessibility reach a shell lacks, with honesty metadata and
+  lock-safe routing.)
 
 Safety
 - Mutating ops (input, ax_perform/set, focus, workspace) refuse when the session is locked (check `hyprctl`/`logind`; fail closed if unknown).
@@ -85,8 +89,8 @@ ax_set | hit_test | notify`. `ax_*` + `hit_test` are the semantic path;
 execFile arg arrays; no shell interpolation of model input.
 
 `ghost_screen`: uses `capture` (ladder + honesty), returns the image natively
-to a vision-capable model — a text-only model reaches it through OMP's
-`inspect_image` or its attachment describe-fallback instead — and surfaces
+to a vision-capable model — a text-only model reaches it through Ghost's
+`inspect_image`, which uses the bound `vision_model` — and surfaces
 `background_safe`/`warnings` to the model so it knows whether the shot
 disturbed the desktop. `mode: "watch"` loops the same `capture` op N times over
 an interval and returns the frames as an **image sequence** (multiple image

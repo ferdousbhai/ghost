@@ -5,10 +5,10 @@ owner-local beta. The `ghost-git` AUR name already belongs to an unrelated
 screenshot utility, hence the collision-free package name. The daemon and
 terminal client are self-contained x86_64 executables at `/usr/bin/ghostd` and
 `/usr/bin/ghost`, with Bun embedded and no installed source or JavaScript
-dependency tree. Bun remains a package runtime dependency only because the
-installed service-context Chromium smoke test uses it. The stable `ghost-ai`
-template and release-source machinery live under `packaging/release/`; its
-runtime source carries the same compiled executables.
+dependency tree. Bun is a build dependency for both recipes, not an installed
+runtime dependency. The stable `ghost-ai` template and release-source machinery
+live under `packaging/release/`; its runtime source carries the same compiled
+executables.
 
 Build and install from this directory:
 
@@ -75,9 +75,10 @@ npx -y skills@latest add https://github.com/googleworkspace/cli \
 gws auth setup
 ```
 
-Open a new pi session after installing skills. Ghost admits only the exact
-recommended `~/.agents/skills/<name>/SKILL.md` entrypoints listed in
-`CONTRACTS.md`; it does not scan nested or other ambient skills.
+Open a new pi session after installing skills. Ghost uses pi's native parser to
+snapshot every valid skill visible under `~/.agents/skills/` and
+`~/.pi/agent/skills/`, following symlinks in those standard machine roots.
+There is no hardcoded skill-name allowlist or integration-specific package path.
 
 Before opening a session, install `libsecret` (for `secret-tool`) and run a
 user-session Secret Service provider such as `gnome-keyring`; its default

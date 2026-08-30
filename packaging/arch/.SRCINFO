@@ -9,12 +9,12 @@ pkgbase = ghost-ai-git
 	checkdepends = nodejs
 	checkdepends = python-yaml
 	checkdepends = ripgrep
+	makedepends = bun>=1.3.14
 	makedepends = desktop-file-utils
 	makedepends = git
 	makedepends = pnpm>=10.12.2
 	makedepends = uv
 	depends = at-spi2-core>=2.58
-	depends = bun>=1.3.14
 	depends = grim>=1.5
 	depends = hyprland>=0.56
 	depends = libnotify>=0.8

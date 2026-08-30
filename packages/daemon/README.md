@@ -199,10 +199,11 @@ targets managers that are already loaded.
 
 ### Connect and recoverable deletion
 
-The session-scoped live-voice and collaboration routes deliberately cross the
-owner-local boundary. Their daemon API and interfaces (`LiveVoiceManager`,
-`CollaborationManager`) are in place, but the default implementations answer
-`501 not_supported` until the Ghost-owned ports land (issue #3).
+The session-scoped live-voice route deliberately crosses the owner-local
+boundary; its daemon API and `LiveVoiceManager` interface remain reserved, and
+the default implementation answers `501 not_supported`. The legacy
+`CollaborationManager` compatibility seam also remains unsupported, but no
+encrypted relay is planned. Remote sharing uses the built-in Tailscale viewer.
 
 Whole ghosts and memory files move to freedesktop Trash, with a
 same-filesystem fallback when needed. Conversation deletion pre-journals every
@@ -335,11 +336,11 @@ ad-hoc prompts:
   conversation read-only until the model's `propose_plan` is approved through
   `ask`; the approved plan is pinned into every later turn. The `todo` tool and
   `/todo` keep a phased task list the shell can show (`GET …/sessions/:id/todo`).
-- Pi can use recommended Firecrawl, HEY, Basecamp, Obsidian, and Google
-  Workspace CLI skills through `bash` when the owner installs them from their
-  upstream sources. Ghost admits only the exact allowlisted
-  `~/.agents/skills/<name>/SKILL.md` entrypoints with matching names, not nested
-  or other ambient skills.
+- Pi can use Firecrawl, HEY, Basecamp, Obsidian, Google Workspace, and other
+  CLI skills through `bash` when the owner installs them. At session
+  construction, Ghost uses pi's native parser to snapshot every valid skill
+  visible under `~/.agents/skills/` and `~/.pi/agent/skills/`, including
+  symlinked entries. There is no hardcoded skill-name allowlist.
 - Background jobs: `bash` with `background: true` starts a command as a job of
   the conversation, and a foreground command that runs longer than the
   auto-background budget (60 s by default) continues as one. The model's `jobs`
@@ -400,7 +401,7 @@ The authoritative route and payload contract is
 | POST | `/api/ghosts/:name/sessions/:id/recap` | generate a transient Pi recap |
 | DELETE | `/api/ghosts/:name/sessions/:id` | move every owned conversation artifact to Trash |
 | GET/POST | `/api/ghosts/:name/sessions/:id/live` | inspect or control realtime voice |
-| GET/POST | `/api/ghosts/:name/sessions/:id/collab` | inspect or control encrypted relay collaboration |
+| GET/POST | `/api/ghosts/:name/sessions/:id/collab` | unsupported legacy collaboration compatibility seam |
 | GET/POST | `/api/ghosts/:name/sessions/:id/ask` | poll or resolve the active ask |
 | GET/POST | `/api/ghosts/:name/sessions/:id/queue` | inspect or enqueue steer/follow-up |
 | POST | `/api/ghosts/:name/sessions/:id/branch` | fork the conversation at a message |

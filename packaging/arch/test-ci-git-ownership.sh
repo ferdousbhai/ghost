@@ -103,6 +103,21 @@ def in_stable(old: str, new: str) -> str:
     return before + stable_name + after.replace(old, new, 1)
 
 fixtures = {
+    "quality-command.yml": once(
+        "          uv run --frozen mypy",
+        "          uv run mypy",
+    ),
+    "quality-directory.yml": once(
+        "        working-directory: packages/desktop-helper",
+        "        working-directory: .",
+    ),
+    "quality-continue.yml": once(
+        "        working-directory: packages/desktop-helper",
+        (
+            "        working-directory: packages/desktop-helper\n"
+            "        continue-on-error: true"
+        ),
+    ),
     "direct.yml": in_stable(
         stable_exec,
         "          bash packaging/release/ci-build-stable.sh",
@@ -224,6 +239,7 @@ for name, text in fixtures.items():
 PY
 
 for invalid in \
+  quality-command.yml quality-directory.yml quality-continue.yml \
   direct.yml mixed-command.yml basename.yml option-before-c.yml \
   alias.yml eval.yml dynamic.yml extra-step.yml comment-evasion.yml \
   comment-only.yml folded-style.yml shell.yml step-env.yml \

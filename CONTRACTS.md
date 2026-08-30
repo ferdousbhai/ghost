@@ -195,11 +195,10 @@ the owner's graphical session, so scheduled work makes no promise about
 overnight or logged-out runs; #18 owns that.
 
 A file a ghost authors *for the owner* — a report, an export, a generated image —
-is a write-once artifact too, and belongs in the owner's Documents tree or the
-working directory the request was about, never in the ghost's `docs/`. `docs/`
-is the ghost's own notebook; Documents are owner-wide and shared with every
-session, so a deliverable left in `docs/` is hidden from the person who asked
-for it. Both runtimes carry this rule in their prompt.
+belongs in the owner's Documents tree or the requested working directory, never
+in ghost-home persona, memory, or runtime files. Memory is private context for
+one ghost; Documents are owner-wide files shared with the owner and every
+ghost. Both runtimes carry this rule in their prompt.
 
 Documents may be regular files of any type and may nest to any depth or width;
 Ghost imposes no folder-depth or sibling-count policy on the live tree. It does
@@ -316,10 +315,10 @@ credential exception: portable files contain references rather than values.
 
 Ghost is owner-local by default: the owner is the only local caller, and every
 session uses the same ghost home, memory, owner-wide Documents tree, tools, and
-route behavior. The session-scoped Remote voice and collaboration routes below
-are the only
-deliberate exceptions. They are explicitly initiated off-machine capabilities
-and never broaden another ghost or conversation.
+route behavior. The tailnet viewer and session-scoped Remote voice route below
+are deliberate off-machine capabilities and never broaden another ghost or
+conversation. The collaboration route remains only as an unsupported legacy
+compatibility seam.
 
 A pi session uses pi's runtime (`@earendil-works/pi-coding-agent`,
 `pi-agent-core`, `pi-ai`) and native tools, but Ghost owns its roots and
@@ -353,9 +352,9 @@ pi's native tools in a Ghost session are `bash`, `edit`, `find`, `grep`, `ls`,
 tools named `mcp__<server>_<tool>` — are registered directly as pi custom
 tools and appear in `getActiveToolNames()`; there is no separate mount. There
 is no `task` tool; no bundled, custom, or ambient subagent can be spawned.
-Claude Code retains its own native subagent behavior. Live voice (issue #44)
-and the encrypted collaboration relay (issue #45) are deferred; goals with
-budgets belong with always-on check-ins (issue #18). Ghost's `settings.yml`,
+Claude Code retains its own native subagent behavior. Live voice (issue #44) is
+deferred; goals with budgets belong with always-on check-ins (issue #18).
+Ghost's `settings.yml`,
 `models.json`, and `mcp.json` are read from the ghost home, never the live cwd.
 pi's `DefaultResourceLoader` runs with `noExtensions`, `noPromptTemplates`,
 `noThemes`, and `noContextFiles`. Native skill loading is enabled only for the
@@ -1468,14 +1467,17 @@ shape and streams emit one complete event object per line.
   remote URL; `404 not_found` while remote access is off.
 - `GET /manifest.webmanifest` → the unauthenticated, icon-free manifest for
   installing the built-in viewer as a standalone app.
-- `GET|POST /api/ghosts/:name/sessions/:id/collab` owns one encrypted relay
-  host through the `CollaborationManager` interface. GET returns
+- `GET|POST /api/ghosts/:name/sessions/:id/collab` retains the legacy
+  `CollaborationManager` compatibility boundary for an injected encrypted
+  relay host. GET returns
   `{ supported, active, readOnlyUrl?, writableUrl?, participants }` without
   opening a session. Start is
   `{ action: "start", relayUrl?, writable, confirmed }`; stop is
-  `{ action: "stop" }`. The default implementation answers `501 not_supported`
-  until the Ghost-owned port lands (issue #3). When active, a read-only start
-  never returns the write-token URL; a writable start requires
+  `{ action: "stop" }`. Ghost ships no host and plans no relay; the default
+  implementation answers `501 not_supported`. The supported remote-sharing
+  path is the built-in viewer over Tailscale Serve. When an injected host is
+  active, a read-only start never returns the write-token URL; a writable start
+  requires
   `confirmed: true` and returns a distinct capability whose holder may prompt or
   interrupt the model and thereby run the host ghost's tools with the host's
   local authority. Links are never logged or copied automatically. At most one

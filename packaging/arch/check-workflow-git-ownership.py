@@ -14,12 +14,13 @@ from yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
 from yaml.tokens import AliasToken, AnchorToken
 
 
-PACKAGE_SHA256 = "aef2e84fe5e2d7dceb71af79e1b0f8644838e9fb4d8d3e751b90057537820047"
+PACKAGE_SHA256 = "78a359ffedd0fda8b6918c88ec6b846ee30d460b80e928f05a8963d0b795711d"
 EXPECTED_STEP_NAMES = [
     "Update package database and install checkout dependency",
     None,
     "Verify container-local source resolution",
     "Install declared package dependencies",
+    "Lint and type-check desktop helper",
     "Create unprivileged package builder",
     "Verify CI privilege boundaries",
     "Prepare builder-owned release paths",
@@ -33,9 +34,10 @@ EXPECTED_STEP_NAMES = [
 ]
 EXPECTED_USES = {
     1: "actions/checkout@v4",
-    11: "actions/upload-artifact@v4",
     12: "actions/upload-artifact@v4",
+    13: "actions/upload-artifact@v4",
 }
+EXPECTED_WORKING_DIRECTORIES = {4: "packages/desktop-helper"}
 JOB_KEYS = {"runs-on", "container", "steps"}
 STEP_KEYS = {
     "name",
@@ -177,9 +179,17 @@ def structural_errors(text: str) -> list[str]:
                 errors.append(f"post-transfer run step {index} is not literal style")
             elif not one_exec_command(run_node.value):
                 errors.append(f"post-transfer run step {index} is not one exec command")
-        for forbidden in ("working-directory", "continue-on-error"):
-            if forbidden in step:
-                errors.append(f"package step {index} sets forbidden {forbidden}")
+        expected_working_directory = EXPECTED_WORKING_DIRECTORIES.get(index)
+        working_directory = step.get("working-directory")
+        if expected_working_directory is None:
+            if working_directory is not None:
+                errors.append(f"package step {index} sets forbidden working-directory")
+        elif not isinstance(working_directory, ScalarNode) or (
+            working_directory.value != expected_working_directory
+        ):
+            errors.append(f"package step {index} working-directory changed")
+        if "continue-on-error" in step:
+            errors.append(f"package step {index} sets forbidden continue-on-error")
 
     digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
     if digest != PACKAGE_SHA256:

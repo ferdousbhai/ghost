@@ -9,7 +9,6 @@ url="https://github.com/ferdousbhai/ghost"
 license=('Apache-2.0')
 depends=(
   'at-spi2-core>=2.58'
-  'bun>=1.3.14'
   'grim>=1.5'
   'hyprland>=0.56'
   'libnotify>=0.8'
@@ -25,7 +24,10 @@ depends=(
   'xdg-utils>=1.2'
   'ydotool>=1.0'
 )
-makedepends=('desktop-file-utils')
+makedepends=(
+  'bun>=1.3.14'
+  'desktop-file-utils'
+)
 checkdepends=(
   'nodejs'
   'python-yaml'

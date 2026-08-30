@@ -45,6 +45,13 @@ jobs:
           pacman -S --needed --noconfirm -- "${packages[@]}"
           pacman -T -- "${constraints[@]}"
 
+      - name: Lint and type-check desktop helper
+        working-directory: packages/desktop-helper
+        shell: bash
+        run: |
+          uv run --frozen ruff check src tests
+          uv run --frozen mypy
+
       - name: Create unprivileged package builder
         shell: bash
         run: /usr/bin/useradd --create-home builder
