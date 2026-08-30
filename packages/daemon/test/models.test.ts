@@ -5,6 +5,7 @@ import {
   existsSync,
   mkdtempSync,
   readFileSync,
+  renameSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -82,6 +83,27 @@ describe("models.json round-trip", () => {
     });
     clearGhostModelFallbacks(agentDir, "vision_model");
     expect(readGhostModels(agentDir)?.fallbacks?.vision_model).toBeUndefined();
+  });
+
+  it("recovers an interrupted portable CAS before an ordinary role mutation", () => {
+    const agentDir = makeAgentDir();
+    const path = ghostModelsPath(agentDir);
+    writeFileSync(path, `${JSON.stringify({
+      providers: { retained: { apiKey: "keyring:retained/personal" } },
+      accounts: ["retained/personal"],
+      futureSetting: { retained: true },
+    })}\n`, { mode: 0o600 });
+    renameSync(path, `${path}.ghost-migration-cas`);
+
+    setChatModelRole(agentDir, "retained", "model-after-recovery");
+
+    expect(readGhostModels(agentDir)).toMatchObject({
+      providers: { retained: { apiKey: "keyring:retained/personal" } },
+      accounts: ["retained/personal"],
+      futureSetting: { retained: true },
+      roles: { chat_model: { provider: "retained", modelId: "model-after-recovery" } },
+    });
+    expect(existsSync(`${path}.ghost-migration-cas`)).toBe(false);
   });
 
   it("replaces a permissive models.json atomically with mode 0600", () => {

@@ -11,6 +11,7 @@ import { dirname } from "node:path";
 import {
   PrivateReadError,
   readPrivateFileText,
+  recoverPrivateJsonAtomicCas,
   type PrivateReadProbe,
   writePrivateJsonAtomic,
 } from "./private-file.js";
@@ -163,6 +164,7 @@ function acquireMCPWriterLock(filePath: string): () => void {
 export function withMCPConfigWriteLock<T>(filePath: string, operation: () => T): T {
   const release = acquireMCPWriterLock(filePath);
   try {
+    recoverPrivateJsonAtomicCas(filePath);
     return operation();
   } finally {
     release();
@@ -172,6 +174,7 @@ export function withMCPConfigWriteLock<T>(filePath: string, operation: () => T):
 async function withAsyncMCPConfigWriteLock<T>(filePath: string, operation: () => Promise<T>): Promise<T> {
   const release = acquireMCPWriterLock(filePath);
   try {
+    recoverPrivateJsonAtomicCas(filePath);
     return await operation();
   } finally {
     release();

@@ -217,6 +217,26 @@ export function recoverPrivateJsonAtomicCas(path: string): void {
     }
     throw error;
   }
+  if (claimed.isFile() && !claimed.isSymbolicLink() && claimed.nlink === 2n) {
+    let published: BigIntStats | undefined;
+    try {
+      published = lstatSync(path, { bigint: true });
+    } catch {
+      // The ordinary invalid/recovery states below remain fail-closed.
+    }
+    if (published?.isFile()
+      && !published.isSymbolicLink()
+      && published.nlink === 2n
+      && published.dev === claimed.dev
+      && published.ino === claimed.ino) {
+      // Restore stopped after link(claim, path), before unlink(claim). The
+      // public path already owns the exact source inode; finish that operation.
+      unlinkSync(claim);
+      fsyncPath(dirname(path));
+      recoverPrivateCasCandidate(path);
+      return;
+    }
+  }
   if (!validPrivateDescriptor(claimed)) {
     throw new PrivateWriteConflictError(path);
   }

@@ -12,6 +12,7 @@ import {
   type PrivateFileIdentity,
   PrivateReadError,
   readPrivateFile,
+  recoverPrivateJsonAtomicCas,
   renderPrivateJson,
   type PrivateReadRefusal,
 } from "./private-file.js";
@@ -231,6 +232,7 @@ export function withSerializedModelsWrite<T>(path: string, mutation: () => T): T
   const lease = acquireModelsLock(path);
   let value: T;
   try {
+    recoverPrivateJsonAtomicCas(path);
     value = mutation();
   } catch (error) {
     try {

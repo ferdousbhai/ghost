@@ -212,6 +212,28 @@ describe("mcp.json writer", () => {
     await expect(readMCPConfigFile(path)).rejects.toThrow();
   });
 
+  it("recovers an interrupted portable CAS before ordinary update and remove mutations", async () => {
+    const dir = tempDir("ghost-mcp-config-cas-recovery-");
+    cleanups.push(dir.cleanup);
+    const path = join(dir.path, "mcp.json");
+    writeFileSync(path, JSON.stringify({
+      mcpServers: {
+        retained: { type: "stdio", command: "before" },
+        removed: { type: "stdio", command: "removed" },
+      },
+      futureSetting: { retained: true },
+    }), { mode: 0o600 });
+    renameSync(path, `${path}.ghost-migration-cas`);
+
+    await updateMCPServer(path, "retained", { type: "stdio", command: "after" });
+    await removeMCPServer(path, "removed");
+
+    expect(await readMCPConfigFile(path)).toEqual({
+      mcpServers: { retained: { type: "stdio", command: "after" } },
+      futureSetting: { retained: true },
+    });
+  });
+
   it("bounds the complete pretty-printed mcp.json before publication", async () => {
     const dir = tempDir("ghost-mcp-config-bounds-");
     cleanups.push(dir.cleanup);

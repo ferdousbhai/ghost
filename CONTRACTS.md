@@ -344,9 +344,13 @@ owns the pathname. An external replacement wins and migration retries against
 it. Writer ownership carries both PID and Linux process-start identity; a
 contender reclaims only a lock whose exact admitted inode belongs to a verified
 dead process, and reconciles an interrupted reclaim before proceeding.
+Concurrent reclaimers treat a claim another contender already reconciled as a
+lost race and retry; they never turn that expected absence into manual state.
 Malformed or unverifiable owner evidence remains fail-closed for explicit
 manual inspection. After reclaim, an interrupted private CAS is reconciled
-before the next locked read.
+before every generic locked models/MCP mutation reads. Recovery recognizes both
+the one-path claim and the exact two-link state left when restoring the claimed
+source stopped between linking the public path and unlinking the claim.
 New `models.json.accounts` authorization is durable before `mcp.json` can
 publish a reference to it. Every other table goes, not only the credential ones:
 `usage_history` carries a provider email and account id per sample, `clients` a

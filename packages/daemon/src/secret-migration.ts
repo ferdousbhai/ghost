@@ -42,7 +42,6 @@ import {
   type PrivateFileIdentity,
   PrivateReadError,
   readPrivateFile,
-  recoverPrivateJsonAtomicCas,
   writePrivateJsonAtomicCas,
 } from "./private-file.js";
 import {
@@ -1223,10 +1222,8 @@ function migrateWithContext(
 
     const mcpPath = join(options.home, MCP_FILENAME);
     withMCPConfigWriteLock(mcpPath, () => {
-      recoverPrivateJsonAtomicCas(mcpPath);
       const modelsPath = ghostModelsPath(options.home);
       const mcp = withSerializedModelsWrite(modelsPath, () => {
-        recoverPrivateJsonAtomicCas(modelsPath);
         const snapshot = readGhostModelsSnapshot(options.home);
         const models = snapshot?.file ?? { providers: {} };
         context.allowAccounts(models.accounts ?? []);

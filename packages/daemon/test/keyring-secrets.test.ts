@@ -393,6 +393,41 @@ describe("plaintext migration", () => {
     expect(readFileSync(path, "utf8")).toContain("keyring:");
   });
 
+  it.each(["models.json", "mcp.json"])(
+    "finishes an interrupted %s CAS restore after its public link was published",
+    (name) => {
+      const home = root();
+      const path = join(home, name);
+      const claim = `${path}.ghost-migration-cas`;
+      const value = name === "models.json"
+        ? { providers: { openrouter: { apiKey: "linked-model-secret" } } }
+        : {
+            mcpServers: {
+              linked: {
+                type: "http",
+                url: "https://linked.test",
+                headers: { Authorization: "linked-mcp-secret" },
+              },
+            },
+          };
+      writeFileSync(path, JSON.stringify(value));
+      const crashed = spawnSync(process.execPath, ["--eval", `
+        const { linkSync, renameSync } = require("node:fs");
+        renameSync(process.argv[1], process.argv[2]);
+        linkSync(process.argv[2], process.argv[1]);
+        process.exit(29);
+      `, path, claim], { encoding: "utf8" });
+      expect(crashed.status, crashed.stderr).toBe(29);
+      expect(lstatSync(path).nlink).toBe(2);
+
+      openContext(home, new MemorySecretServiceClient()).close();
+
+      expect(existsSync(claim)).toBe(false);
+      expect(lstatSync(path).nlink).toBe(1);
+      expect(readFileSync(path, "utf8")).toContain("keyring:");
+    },
+  );
+
   it.each(["models", "mcp"] as const)(
     "recovers a dead %s writer lock and its interrupted CAS",
     (source) => {

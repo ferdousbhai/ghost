@@ -28,6 +28,13 @@ export interface WriterLockLease {
   owner: WriterLockOwner;
 }
 
+export interface WriterLockOptions {
+  waitMs: number;
+  pollMs: number;
+  /** Fault/concurrency seam after the public dead lock becomes a claim. */
+  reclaimProbe?: (claim: string) => void;
+}
+
 export class WriterLockBusyError extends Error {
   constructor(
     readonly path: string,
@@ -154,12 +161,26 @@ function recoverClaim(claim: string, path: string): void {
   } catch {
     // The ordinary one-path states are handled below.
   }
-  const admitted = readOwner(claim);
+  let admitted: ReadOwner | null;
+  try {
+    admitted = readOwner(claim);
+  } catch (cause) {
+    try {
+      lstatSync(claim);
+    } catch (missing) {
+      if ((missing as NodeJS.ErrnoException).code === "ENOENT") return;
+    }
+    throw cause;
+  }
   if (!admitted) return;
   switch (ownerState(admitted.owner)) {
     case "dead":
-      unlinkSync(claim);
-      fsyncPath(dirname(path));
+      try {
+        unlinkSync(claim);
+        fsyncPath(dirname(path));
+      } catch (cause) {
+        if ((cause as NodeJS.ErrnoException).code !== "ENOENT") throw cause;
+      }
       return;
     case "live":
       restoreClaim(claim, path);
@@ -184,7 +205,11 @@ function recoverClaims(path: string): void {
   }
 }
 
-function reclaimDeadOwner(path: string, admitted: ReadOwner): boolean {
+function reclaimDeadOwner(
+  path: string,
+  admitted: ReadOwner,
+  probe?: (claim: string) => void,
+): boolean {
   const claim = `${path}.reclaim-${process.pid}-${randomUUID()}`;
   try {
     renameSync(path, claim);
@@ -192,17 +217,35 @@ function reclaimDeadOwner(path: string, admitted: ReadOwner): boolean {
     if ((cause as NodeJS.ErrnoException).code === "ENOENT") return false;
     throw cause;
   }
-  const moved = readOwner(claim);
-  if (!moved
-    || moved.identity.device !== admitted.identity.device
+  probe?.(claim);
+  let moved: ReadOwner | null;
+  try {
+    moved = readOwner(claim);
+  } catch (cause) {
+    try {
+      lstatSync(claim);
+    } catch (missing) {
+      if ((missing as NodeJS.ErrnoException).code === "ENOENT") return false;
+    }
+    throw cause;
+  }
+  // Another contender may have reconciled this dead claim while we were
+  // verifying it. That is a lost race, not corrupt/manual state.
+  if (!moved) return false;
+  if (moved.identity.device !== admitted.identity.device
     || moved.identity.inode !== admitted.identity.inode
     || moved.owner.token !== admitted.owner.token
     || ownerState(moved.owner) !== "dead") {
     restoreClaim(claim, path);
     return false;
   }
-  unlinkSync(claim);
-  fsyncPath(dirname(path));
+  try {
+    unlinkSync(claim);
+    fsyncPath(dirname(path));
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw cause;
+  }
   return true;
 }
 
@@ -224,7 +267,7 @@ function tryCreate(path: string): WriterLockLease | null {
 
 export function acquireWriterLock(
   path: string,
-  options: { waitMs: number; pollMs: number },
+  options: WriterLockOptions,
 ): WriterLockLease {
   const deadline = Date.now() + options.waitMs;
   const sleep = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
@@ -247,7 +290,7 @@ export function acquireWriterLock(
     }
     const state = ownerState(admitted.owner);
     if (state === "dead") {
-      reclaimDeadOwner(path, admitted);
+      reclaimDeadOwner(path, admitted, options.reclaimProbe);
       continue;
     }
     if (Date.now() >= deadline) {
