@@ -1,4 +1,5 @@
 import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { claudeSessionMetadataPath } from "../src/claude-code.js";
 import { ghostPaths } from "../src/ghosts.js";
@@ -33,6 +34,11 @@ async function setup(): Promise<string> {
   });
   host = new SessionHost({
     registry: temp.registry,
+    ownerHome: temp.ownerHome,
+    scheduleUnitDir: join(temp.ownerHome, ".config", "systemd", "user"),
+    scheduleRuntimeUnitDir: join(temp.ownerHome, ".runtime", "systemd", "user"),
+    scheduleCommandRunner: async () => ({ stdout: "", stderr: "", code: 0 }),
+    machineSkillPaths: [],
     offline: true,
     title: { enabled: false },
   });

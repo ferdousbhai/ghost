@@ -278,6 +278,8 @@ function setupClaudeHost(options: {
     registry: temp.registry,
     ownerHome: temp.ownerHome,
     scheduleUnitDir,
+    scheduleRuntimeUnitDir: join(temp.ownerHome, ".runtime", "systemd", "user"),
+    scheduleCommandRunner: async () => ({ stdout: "", stderr: "", code: 0 }),
     machineSkillPaths: options.machineSkill ? [machineSkills] : [],
     offline: true,
     ...(options.logger ? { logger: options.logger } : {}),
