@@ -14,17 +14,18 @@
  * here, so a hardening fix applied once applies to both.
  */
 import {
-  chmodSync,
   closeSync,
   constants,
+  fchmodSync,
   fstatSync,
+  fsyncSync,
   lstatSync,
   mkdirSync,
   openSync,
   readSync,
   renameSync,
   unlinkSync,
-  writeFileSync,
+  writeSync,
   type BigIntStats,
   type Stats,
 } from "node:fs";
@@ -218,14 +219,33 @@ function readToken(path: string): string | undefined {
 }
 
 function createToken(path: string, token: string): void {
-  writeFileSync(path, `${token}\n`, {
-    encoding: "utf8",
-    flag: "wx",
-    mode: 0o600,
-  });
-  // Keep this explicit for filesystems whose creation-mode handling is less
-  // strict than Linux's; the exclusive create means no prior mode is retained.
-  chmodSync(path, 0o600);
+  const descriptor = openSync(
+    path,
+    constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+    0o600,
+  );
+  try {
+    // A restrictive umask may clear creation bits. Set the exact mode through
+    // the inode we own before complete token bytes can become readable; no
+    // pathname metadata mutation may invalidate a concurrent reader afterward.
+    fchmodSync(descriptor, 0o600);
+    const bytes = Buffer.from(`${token}\n`, "ascii");
+    let offset = 0;
+    while (offset < bytes.length) {
+      const written = writeSync(
+        descriptor,
+        bytes,
+        offset,
+        bytes.length - offset,
+        offset,
+      );
+      if (written === 0) throw new Error(`Token file ${path} could not be written completely.`);
+      offset += written;
+    }
+    fsyncSync(descriptor);
+  } finally {
+    closeSync(descriptor);
+  }
 }
 
 function replaceToken(path: string, token: string): void {

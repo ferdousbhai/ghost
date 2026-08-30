@@ -127,6 +127,128 @@ describe("shared token-store persistence", () => {
     expect(results.filter((result) => result.created)).toHaveLength(1);
   });
 
+  it("never mutates token metadata after a concurrent reader admits complete bytes", async () => {
+    await mkdir(join(dir, "state"), { mode: 0o700 });
+    const ready = join(dir, "winner-ready");
+    const admitted = join(dir, "loser-admitted");
+    const settled = join(dir, "winner-settled");
+    const moduleUrl = new URL("../src/token-store.ts", import.meta.url).href;
+    const storeSource = `
+      const { createTokenStore } = await import(${JSON.stringify(moduleUrl)});
+      const store = createTokenStore({
+        filename: "test-token",
+        envVar: "GHOSTD_TEST_TOKEN_FILE",
+        command: "test-token",
+        purpose: "Test token.",
+      });
+    `;
+    const winnerScript = `
+      import fs from "node:fs";
+      import { syncBuiltinESMExports } from "node:module";
+
+      const tokenPath = ${JSON.stringify(path)};
+      const readyPath = ${JSON.stringify(ready)};
+      const admittedPath = ${JSON.stringify(admitted)};
+      const settledPath = ${JSON.stringify(settled)};
+      const sleep = new Int32Array(new SharedArrayBuffer(4));
+      const originalChmodSync = fs.chmodSync;
+      const originalFstatSync = fs.fstatSync;
+      const originalFsyncSync = fs.fsyncSync;
+      const originalWriteFileSync = fs.writeFileSync;
+      const originalWriteSync = fs.writeSync;
+      let coordinated = false;
+      function waitFor(candidate) {
+        const deadline = Date.now() + 5_000;
+        while (!fs.existsSync(candidate)) {
+          if (Date.now() >= deadline) throw new Error("timed out waiting for " + candidate);
+          Atomics.wait(sleep, 0, 0, 2);
+        }
+      }
+      function afterCompleteWrite() {
+        if (coordinated) return;
+        coordinated = true;
+        originalWriteFileSync(readyPath, "", { flag: "wx" });
+        waitFor(admittedPath);
+      }
+      fs.writeFileSync = function (candidate, data, options) {
+        const result = originalWriteFileSync.call(this, candidate, data, options);
+        if (candidate === tokenPath) afterCompleteWrite();
+        return result;
+      };
+      fs.writeSync = function (descriptor, ...args) {
+        const written = originalWriteSync.call(this, descriptor, ...args);
+        if (!coordinated && originalFstatSync(descriptor).size === 65) afterCompleteWrite();
+        return written;
+      };
+      fs.chmodSync = function (candidate, mode) {
+        const result = originalChmodSync.call(this, candidate, mode);
+        if (coordinated && candidate === tokenPath) {
+          originalWriteFileSync(settledPath, "", { flag: "wx" });
+        }
+        return result;
+      };
+      fs.fsyncSync = function (descriptor) {
+        const result = originalFsyncSync.call(this, descriptor);
+        if (coordinated) originalWriteFileSync(settledPath, "", { flag: "wx" });
+        return result;
+      };
+      syncBuiltinESMExports();
+      ${storeSource}
+      const result = store.readOrCreate({ path: tokenPath });
+      process.stdout.write(JSON.stringify(result));
+    `;
+    const loserScript = `
+      import fs from "node:fs";
+      import { syncBuiltinESMExports } from "node:module";
+
+      const tokenPath = ${JSON.stringify(path)};
+      const admittedPath = ${JSON.stringify(admitted)};
+      const settledPath = ${JSON.stringify(settled)};
+      const sleep = new Int32Array(new SharedArrayBuffer(4));
+      const originalFstatSync = fs.fstatSync;
+      const originalWriteFileSync = fs.writeFileSync;
+      let admitted = false;
+      function waitFor(candidate) {
+        const deadline = Date.now() + 5_000;
+        while (!fs.existsSync(candidate)) {
+          if (Date.now() >= deadline) throw new Error("timed out waiting for " + candidate);
+          Atomics.wait(sleep, 0, 0, 2);
+        }
+      }
+      fs.fstatSync = function (descriptor, options) {
+        const state = originalFstatSync.call(this, descriptor, options);
+        if (!admitted && state.size === 65n) {
+          admitted = true;
+          originalWriteFileSync(admittedPath, "", { flag: "wx" });
+          waitFor(settledPath);
+        }
+        return state;
+      };
+      syncBuiltinESMExports();
+      ${storeSource}
+      const result = store.readOrCreate({ path: tokenPath });
+      process.stdout.write(JSON.stringify(result));
+    `;
+
+    const winner = execFileAsync("node", ["--eval", winnerScript], { timeout: 8_000 });
+    for (let attempt = 0; attempt < 500; attempt += 1) {
+      try {
+        await stat(ready);
+        break;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        if (attempt === 499) throw new Error("token winner did not reach the complete write");
+        await new Promise((resolve) => setTimeout(resolve, 2));
+      }
+    }
+    const loser = execFileAsync("node", ["--eval", loserScript], { timeout: 8_000 });
+    const [winningOutput, losingOutput] = await Promise.all([winner, loser]);
+    const winningResult = JSON.parse(winningOutput.stdout) as { token: string; created: boolean };
+    const losingResult = JSON.parse(losingOutput.stdout) as { token: string; created: boolean };
+    expect(winningResult).toMatchObject({ created: true });
+    expect(losingResult).toEqual({ ...winningResult, created: false });
+  }, 10_000);
+
   it("waits for an exclusive winner to finish its complete token write", async () => {
     await mkdir(join(dir, "state"), { mode: 0o700 });
     const token = "e".repeat(64);

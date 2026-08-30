@@ -905,11 +905,13 @@ Three checks, applied to every `/api` request before routing:
    hex bytes plus newline, read through one bounded `O_NOFOLLOW|O_NONBLOCK`
    single-link regular-file descriptor whose before/after and live-path state
    stays identical; the existing state directory must still be mode `0700`.
-   The daemon mints it with exclusive creation when the server
+   The daemon mints it through an owned exclusive descriptor when the server
    starts — not lazily on first use, so a client starting alongside it finds
-   the file. A competing read-or-create waits through the bounded wrong-length
-   window between that exclusive inode creation and its complete write; every
-   other unsafe or malformed state still fails closed. Missing or wrong → `401 unauthorized` with
+   the file. It sets the descriptor to mode `0600` before writing the exact
+   bytes, fsyncs, and closes it without a later pathname metadata mutation. A
+   competing read-or-create waits through the bounded wrong-length window
+   between that exclusive inode creation and its complete write; every other
+   unsafe or malformed state still fails closed. Missing or wrong → `401 unauthorized` with
    `www-authenticate: Bearer`. A local client authenticates by *reading the
    file*; a web page cannot read files, which is the whole mechanism.
 2. **Origin.** A request that carries an `Origin` header must carry a loopback
