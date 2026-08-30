@@ -127,8 +127,11 @@ describe("shared token-store persistence", () => {
     expect(results.filter((result) => result.created)).toHaveLength(1);
   });
 
-  it("never mutates token metadata after a concurrent reader admits complete bytes", async () => {
+  it("settles restrictive-umask publication without invalidating a complete read", async () => {
     await mkdir(join(dir, "state"), { mode: 0o700 });
+    const published = join(dir, "winner-published");
+    const permissionObserved = join(dir, "loser-observed-permission");
+    const modeFixed = join(dir, "winner-mode-fixed");
     const ready = join(dir, "winner-ready");
     const admitted = join(dir, "loser-admitted");
     const settled = join(dir, "winner-settled");
@@ -147,15 +150,20 @@ describe("shared token-store persistence", () => {
       import { syncBuiltinESMExports } from "node:module";
 
       const tokenPath = ${JSON.stringify(path)};
+      const publishedPath = ${JSON.stringify(published)};
+      const permissionObservedPath = ${JSON.stringify(permissionObserved)};
+      const modeFixedPath = ${JSON.stringify(modeFixed)};
       const readyPath = ${JSON.stringify(ready)};
       const admittedPath = ${JSON.stringify(admitted)};
       const settledPath = ${JSON.stringify(settled)};
       const sleep = new Int32Array(new SharedArrayBuffer(4));
       const originalChmodSync = fs.chmodSync;
+      const originalFchmodSync = fs.fchmodSync;
       const originalFstatSync = fs.fstatSync;
       const originalFsyncSync = fs.fsyncSync;
       const originalWriteFileSync = fs.writeFileSync;
       const originalWriteSync = fs.writeSync;
+      let permissionCoordinated = false;
       let coordinated = false;
       function waitFor(candidate) {
         const deadline = Date.now() + 5_000;
@@ -170,6 +178,16 @@ describe("shared token-store persistence", () => {
         originalWriteFileSync(readyPath, "", { flag: "wx" });
         waitFor(admittedPath);
       }
+      fs.fchmodSync = function (descriptor, mode) {
+        if (!permissionCoordinated) {
+          permissionCoordinated = true;
+          originalWriteFileSync(publishedPath, "", { flag: "wx" });
+          waitFor(permissionObservedPath);
+        }
+        const result = originalFchmodSync.call(this, descriptor, mode);
+        originalWriteFileSync(modeFixedPath, "", { flag: "wx" });
+        return result;
+      };
       fs.writeFileSync = function (candidate, data, options) {
         const result = originalWriteFileSync.call(this, candidate, data, options);
         if (candidate === tokenPath) afterCompleteWrite();
@@ -193,6 +211,7 @@ describe("shared token-store persistence", () => {
         return result;
       };
       syncBuiltinESMExports();
+      process.umask(0o777);
       ${storeSource}
       const result = store.readOrCreate({ path: tokenPath });
       process.stdout.write(JSON.stringify(result));
@@ -202,11 +221,15 @@ describe("shared token-store persistence", () => {
       import { syncBuiltinESMExports } from "node:module";
 
       const tokenPath = ${JSON.stringify(path)};
+      const permissionObservedPath = ${JSON.stringify(permissionObserved)};
+      const modeFixedPath = ${JSON.stringify(modeFixed)};
       const admittedPath = ${JSON.stringify(admitted)};
       const settledPath = ${JSON.stringify(settled)};
       const sleep = new Int32Array(new SharedArrayBuffer(4));
       const originalFstatSync = fs.fstatSync;
+      const originalLstatSync = fs.lstatSync;
       const originalWriteFileSync = fs.writeFileSync;
+      let permissionObserved = false;
       let admitted = false;
       function waitFor(candidate) {
         const deadline = Date.now() + 5_000;
@@ -215,6 +238,15 @@ describe("shared token-store persistence", () => {
           Atomics.wait(sleep, 0, 0, 2);
         }
       }
+      fs.lstatSync = function (candidate, options) {
+        const state = originalLstatSync.call(this, candidate, options);
+        if (!permissionObserved && candidate === tokenPath && state.size === 0n) {
+          permissionObserved = true;
+          originalWriteFileSync(permissionObservedPath, "", { flag: "wx" });
+          waitFor(modeFixedPath);
+        }
+        return state;
+      };
       fs.fstatSync = function (descriptor, options) {
         const state = originalFstatSync.call(this, descriptor, options);
         if (!admitted && state.size === 65n) {
@@ -233,11 +265,11 @@ describe("shared token-store persistence", () => {
     const winner = execFileAsync("node", ["--eval", winnerScript], { timeout: 8_000 });
     for (let attempt = 0; attempt < 500; attempt += 1) {
       try {
-        await stat(ready);
+        await stat(published);
         break;
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-        if (attempt === 499) throw new Error("token winner did not reach the complete write");
+        if (attempt === 499) throw new Error("token winner did not publish its exclusive inode");
         await new Promise((resolve) => setTimeout(resolve, 2));
       }
     }
@@ -247,6 +279,7 @@ describe("shared token-store persistence", () => {
     const losingResult = JSON.parse(losingOutput.stdout) as { token: string; created: boolean };
     expect(winningResult).toMatchObject({ created: true });
     expect(losingResult).toEqual({ ...winningResult, created: false });
+    expect((await stat(path)).mode & 0o777).toBe(0o600);
   }, 10_000);
 
   it("waits for an exclusive winner to finish its complete token write", async () => {

@@ -910,8 +910,10 @@ Three checks, applied to every `/api` request before routing:
    the file. It sets the descriptor to mode `0600` before writing the exact
    bytes, fsyncs, and closes it without a later pathname metadata mutation. A
    competing read-or-create waits through the bounded wrong-length window
-   between that exclusive inode creation and its complete write; every other
-   unsafe or malformed state still fails closed. Missing or wrong → `401 unauthorized` with
+   between that exclusive inode creation and its complete write, including an
+   unreadable or wrong-mode short single-link regular inode before descriptor
+   `fchmod`; every other unsafe or malformed state still fails closed. Missing
+   or wrong → `401 unauthorized` with
    `www-authenticate: Bearer`. A local client authenticates by *reading the
    file*; a web page cannot read files, which is the whole mechanism.
 2. **Origin.** A request that carries an `Origin` header must carry a loopback

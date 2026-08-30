@@ -130,6 +130,20 @@ function invalidTokenEntry(path: string, entry: Stats): Error {
   return new Error(`Token file ${path} is not a regular file.`);
 }
 
+function isIncompletePublishedToken(path: string): boolean {
+  let entry: BigIntStats;
+  try {
+    entry = lstatSync(path, { bigint: true });
+  } catch (error) {
+    if (isErrno(error, "ENOENT")) return false;
+    throw error;
+  }
+  return entry.isFile()
+    && !entry.isSymbolicLink()
+    && entry.nlink === 1n
+    && entry.size < BigInt(TOKEN_FILE_BYTES);
+}
+
 function openToken(path: string): number | undefined {
   const flags = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
   try {
@@ -176,7 +190,19 @@ function sameTokenFileState(left: BigIntStats, right: BigIntStats): boolean {
 
 function readToken(path: string): string | undefined {
   if (!validateTokenDirectory(path)) return undefined;
-  const descriptor = openToken(path);
+  let descriptor: number | undefined;
+  try {
+    descriptor = openToken(path);
+  } catch (error) {
+    // Exclusive creation publishes an empty inode before its owner can correct
+    // a restrictive inherited umask. Retry only that bounded, lstat-proven
+    // short single-link regular file; never soften unsafe entry rejection.
+    if ((isErrno(error, "EACCES") || isErrno(error, "EPERM"))
+      && isIncompletePublishedToken(path)) {
+      throw new IncompleteTokenError(path);
+    }
+    throw error;
+  }
   if (descriptor === undefined) return undefined;
   let bytes: Buffer;
   try {
@@ -184,10 +210,10 @@ function readToken(path: string): string | undefined {
     if (!before.isFile() || before.nlink !== 1n) {
       throw new Error(`Token file ${path} must be a single-link regular file.`);
     }
+    if (before.size < BigInt(TOKEN_FILE_BYTES)) throw new IncompleteTokenError(path);
     if ((before.mode & 0o777n) !== 0o600n) {
       throw new Error(`Token file ${path} must have mode 0600.`);
     }
-    if (before.size < BigInt(TOKEN_FILE_BYTES)) throw new IncompleteTokenError(path);
     if (before.size > BigInt(TOKEN_FILE_BYTES)) throw malformedToken(path);
 
     bytes = Buffer.alloc(TOKEN_FILE_BYTES + 1);
