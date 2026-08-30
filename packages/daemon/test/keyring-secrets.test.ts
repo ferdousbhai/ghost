@@ -1,8 +1,11 @@
 import {
+  copyFileSync,
+  existsSync,
   linkSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   renameSync,
   rmSync,
   symlinkSync,
@@ -58,8 +61,8 @@ function literalHome(machine: string, name: string, apiKey: string): string {
  * `AUTOINCREMENT` earns its place — it makes SQLite create `sqlite_sequence`,
  * so the enumeration meets a table the keep-list skips by prefix.
  */
-function legacyAgentDb(agentDir: string): void {
-  const db = new Database(join(agentDir, "agent.db"));
+function legacyAgentDb(agentDir: string, fileName = "agent.db"): void {
+  const db = new Database(join(agentDir, fileName));
   db.exec(`
     CREATE TABLE auth_schema_version (id INTEGER PRIMARY KEY, version INTEGER NOT NULL);
     CREATE TABLE auth_change_revision (id INTEGER PRIMARY KEY, revision INTEGER NOT NULL);
@@ -93,6 +96,30 @@ function legacyAgentDb(agentDir: string): void {
   credential.run("openai", JSON.stringify({ key: "live-secret" }), null);
   credential.run("anthropic", JSON.stringify({ key: "disabled-secret" }), "revoked by provider");
   db.close();
+}
+
+/** A stable copied SQLite set whose only enabled credential lives in the WAL. */
+function hotWalAgentDb(agentDir: string): void {
+  const source = join(agentDir, "wal-source.db");
+  legacyAgentDb(agentDir, "wal-source.db");
+  const writer = new Database(source);
+  writer.exec("PRAGMA journal_mode = WAL");
+  writer.exec("PRAGMA wal_autocheckpoint = 0");
+  writer.exec("DELETE FROM auth_credentials");
+  writer.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+  writer.query(`
+    INSERT INTO auth_credentials(provider, credential_type, data, disabled_cause)
+    VALUES (?, 'api_key', ?, NULL)
+  `).run("wal-provider", JSON.stringify({ key: "wal-secret" }));
+
+  const target = join(agentDir, "agent.db");
+  copyFileSync(source, target);
+  copyFileSync(`${source}-wal`, `${target}-wal`);
+  copyFileSync(`${source}-shm`, `${target}-shm`);
+  writer.close();
+  rmSync(source, { force: true });
+  rmSync(`${source}-wal`, { force: true });
+  rmSync(`${source}-shm`, { force: true });
 }
 
 function credentialRowCount(path: string): number {
@@ -413,6 +440,47 @@ describe("plaintext migration", () => {
     }
   });
 
+  it("imports a hot-WAL credential and removes every plaintext SQLite sidecar", () => {
+    const home = root();
+    const agentDir = join(home, ".pi");
+    mkdirSync(agentDir, { recursive: true });
+    hotWalAgentDb(agentDir);
+    expect(existsSync(join(agentDir, "agent.db-wal"))).toBe(true);
+    expect(existsSync(join(agentDir, "agent.db-shm"))).toBe(true);
+
+    const context = openContext(home, new MemorySecretServiceClient());
+    expect(listCredentials(context)).toMatchObject([
+      { provider: "wal-provider", credential: { key: "wal-secret" } },
+    ]);
+    context.close();
+
+    expect(existsSync(join(agentDir, "agent.db-wal"))).toBe(false);
+    expect(existsSync(join(agentDir, "agent.db-shm"))).toBe(false);
+    expect(readFileSync(join(agentDir, "agent.db")).includes(Buffer.from("wal-secret"))).toBe(false);
+  });
+
+  it.each([
+    ["-wal", "symlink"],
+    ["-wal", "hardlink"],
+    ["-shm", "symlink"],
+    ["-shm", "hardlink"],
+  ] as const)("refuses an unsafe agent.db%s %s", (suffix, kind) => {
+    const home = root();
+    const agentDir = join(home, ".pi");
+    mkdirSync(agentDir, { recursive: true });
+    legacyAgentDb(agentDir);
+    const target = join(agentDir, `sidecar-target${suffix}`);
+    const sidecar = join(agentDir, `agent.db${suffix}`);
+    writeFileSync(target, "plaintext-sidecar");
+    if (kind === "symlink") symlinkSync(target, sidecar);
+    else linkSync(target, sidecar);
+
+    expect(() => openContext(home, new MemorySecretServiceClient()))
+      .toThrow(SecretServiceError);
+    expect(readFileSync(join(agentDir, "agent.db")).includes(Buffer.from("live-secret"))).toBe(true);
+    expect(readFileSync(target, "utf8")).toBe("plaintext-sidecar");
+  });
+
   it.each(["symlink", "hardlink"] as const)(
     "refuses to scrub an agent.db %s",
     (kind) => {
@@ -455,6 +523,33 @@ describe("plaintext migration", () => {
 
     expect(credentialRowCount(path)).toBeGreaterThan(0);
     expect(credentialRowCount(displaced)).toBeGreaterThan(0);
+  });
+
+  it("never opens an original-path replacement at the SQLite constructor boundary", () => {
+    const home = root();
+    const agentDir = join(home, ".pi");
+    mkdirSync(agentDir, { recursive: true });
+    legacyAgentDb(agentDir);
+    const path = join(agentDir, "agent.db");
+    const replacement = readFileSync(path);
+    let replaced = false;
+
+    expect(() => openGhostSecretContext({
+      home,
+      client: new MemorySecretServiceClient(),
+      metadataPath: join(home, "state.sqlite"),
+      agentDbProbe: (stage, originalPath) => {
+        if (stage !== "opening" || replaced) return;
+        replaced = true;
+        expect(originalPath).toBe(path);
+        writeFileSync(originalPath, replacement);
+      },
+    })).toThrow(SecretServiceError);
+
+    expect(credentialRowCount(path)).toBeGreaterThan(0);
+    const claimDir = readdirSync(agentDir).find((entry) => entry.endsWith(".migration"));
+    expect(claimDir).toBeDefined();
+    expect(credentialRowCount(join(agentDir, claimDir!, "agent.db"))).toBeGreaterThan(0);
   });
 
   it("reverifies the claimed agent.db before destructive cleanup", () => {
