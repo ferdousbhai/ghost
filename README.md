@@ -2,13 +2,13 @@
 
 Your ghost, on your machine. An AI persona with memory, docs, and tools —
 running locally as an [Omarchy](https://omarchy.org)-native desktop app,
-built on the [pi](https://github.com/earendil-works/pi) coding agent
+implemented with the [pi](https://github.com/earendil-works/pi) agent runtime
 (`@earendil-works/pi-coding-agent`, `pi-agent-core`, `pi-ai`).
 
-Ghost pins pi 0.84.3. pi sessions keep its native filesystem tools and Bash,
-steering/follow-ups, and branchable conversations; Ghost adds its own `ask`
-tool, model roles and fallback chains, bounded declarative skills, rules,
-Markdown commands/prompts, and MCP from the visible ghost home plus one
+Ghost pins pi 0.84.3. Pi sessions keep its native filesystem tools,
+steering/follow-ups, and branchable conversations; Ghost adds job-aware Bash,
+its own `ask` tool, model roles and fallback chains, bounded declarative skills,
+rules, Markdown commands/prompts, and MCP from the visible ghost home plus one
 explicitly trusted project. Live voice remains deferred; remote sharing uses
 the built-in tailnet viewer over Tailscale Serve, and no separate collaboration
 relay is planned. Project plugins, hooks, custom code tools,
@@ -26,11 +26,11 @@ disables Claude's native Agent/legacy Task shortcuts so delegation cannot
 bypass that lifecycle, while a delegated Claude worker retains native
 subagents. Clean Git tasks run in one linked worktree and local review branch;
 Ghost never pushes, opens a pull request, or merges without a separate explicit
-owner action. Ghost replaces pi's coding-oriented system prompt with its character, bounded memory,
-shallow owner Documents indexes, and minimal
-runtime guidance. Claude receives the same complete Ghost-owned identity as a
-custom prompt while keeping its native tool preset. Browser and desktop capabilities remain
-available. The Quickshell client renders
+owner action. Ghost replaces pi's coding-oriented system prompt with its
+character, bounded memory, shallow owner Documents indexes, and minimal runtime
+guidance. Claude receives the same complete Ghost-owned identity as a custom
+prompt while keeping its native tool preset. Browser and desktop capabilities
+remain available. The Quickshell client renders
 live tool activity and the recovered summoning orb from the earlier
 summon-ghost interface.
 

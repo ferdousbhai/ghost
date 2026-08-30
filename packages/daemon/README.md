@@ -76,7 +76,11 @@ the structured field contract.
 
 ## Storage and isolation
 
-Everything Ghost owns for a pi conversation stays inside the ghost home:
+Ghost-owned persona state and Pi principal transcripts stay inside the ghost
+home. Durable normalized worker records and bundled `pi-worker` transcripts are
+per-ghost there too. Linked task worktrees deliberately live under
+`$XDG_STATE_HOME/ghost/task-worktrees/`, while installed vendor workers retain
+their full transcripts in their native stores:
 
 ```text
 ~/ghosts/<name>/
@@ -101,6 +105,9 @@ Everything Ghost owns for a pi conversation stays inside the ghost home:
                            execution cwd for persisted Pi tool calls
     <stem>.<runtime>.maintenance.json
                            durable idle-maintenance state
+  .tasks/
+    task-<uuid>.json       bounded task/workspace state and event tail
+    pi/                    bundled pi-worker's native Pi transcripts
   .trash/                  recoverable per-home deletion state
   .memory-maintenance.json last consolidation claim time
 ```
@@ -238,14 +245,14 @@ workers; project, ghost-file, and ambient agent definitions remain inert.
 Clean committed Git projects use one daemon-managed linked worktree and local
 review branch per task. Task views distinguish the trusted source `root`/`cwd`
 from the execution `workspace`; Ghost preserves uncertain work and never
-publishes, opens, or merges a pull request implicitly. Non-Git projects run in
+pushes, opens a pull request, or merges implicitly. Non-Git projects run in
 place with an explicit notice. See
 [`docs/native-workers.md`](../../docs/native-workers.md#task-workspaces-and-review).
-pi's native `bash`, `edit`, `find`, `grep`, `ls`, `read`, and `write` plus
-Ghost's own tools (registered directly as pi custom tools) remain available;
-Ghost's own `bash`/`jobs` (background jobs) and `inspect_image` (the
-`vision_model` role describes an image a blind chat model cannot see) join
-them. There is no tool approval; `ask` is not an approval prompt.
+Pi supplies its native `edit`, `find`, `grep`, `ls`, `read`, and `write` tools
+alongside Ghost's custom tools. Ghost replaces pi's `bash` by name with its
+job-aware `bash`; `jobs` for background work and `inspect_image` (the
+`vision_model` role describes an image a blind chat model cannot see) join that
+active tool set. There is no tool approval; `ask` is not an approval prompt.
 
 A Claude principal keeps the native tool preset but uses Ghost's complete
 custom identity prompt and disables native `Agent`/legacy `Task`; a delegated
@@ -424,16 +431,17 @@ The authoritative route and payload contract is
 | POST | `/api/ghosts/:name/sessions/:id/branch` | fork the conversation at a message |
 | POST | `/api/ghosts/:name/sessions/:id/reanswer` | branch an ask answer and resume via SSE |
 | GET | `/api/ghosts/:name/workers` | inspect native-worker availability, auth, and Omarchy usage |
-| GET/POST | `/api/ghosts/:name/sessions/:id/tasks` | list or start durable coding tasks |
-| GET | `/api/ghosts/:name/sessions/:id/tasks/:taskId` | inspect one task |
-| POST | `/api/ghosts/:name/sessions/:id/tasks/:taskId/send` | steer one task as the owner |
-| POST | `/api/ghosts/:name/sessions/:id/tasks/:taskId/cancel` | cancel one task |
+| POST | `/api/ghosts/:name/sessions/:id/tasks` | start a durable coding task attributed to one conversation |
+| GET | `/api/ghosts/:name/tasks` | list the ghost's durable coding tasks |
+| GET | `/api/ghosts/:name/tasks/:taskId` | inspect one task |
+| POST | `/api/ghosts/:name/tasks/:taskId/messages` | steer one task as the owner |
+| POST | `/api/ghosts/:name/tasks/:taskId/cancel` | cancel one task |
 | GET/PUT | `/api/ghosts/:name/model-routing` | inspect or mutate role/fallback policy |
 
 Every `/api` route except the deliberately public relay status requires the
 machine-local bearer token, rejects non-loopback browser origins, and requires
 JSON for POST/PUT. The pi-messages SSE response remains the client wire format;
-pi is the harness behind it.
+the selected principal harness behind it is either pi or Claude Code.
 
 ## Validate
 

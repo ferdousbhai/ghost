@@ -35,8 +35,9 @@ extend without surrendering the local trust model.
 
 The product shape Grok Bot validated — always-on AI teammates with a messenger
 UI, per-bot screens, teach-by-demonstration — but **local, private, open source
-(Apache-2.0), and on the OS they skipped (Linux/Omarchy)**. Ghosts are hired
-teammates, not configured assistants: name, job, a chat thread, check-ins.
+(Apache-2.0), and on the OS they skipped (Linux/Omarchy)**. Ghosts are
+owner-bound digital counterparts, not generic configured assistants: character,
+memory, a chat thread, and check-ins.
 Where Grok Bot gives every bot one shared cloud computer and pooled
 credentials, each ghost works on your actual Hyprland desktop, with a per-ghost
 home and explicit credential policy over machine Secret Service accounts, no
