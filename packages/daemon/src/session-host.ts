@@ -80,6 +80,7 @@ import {
   loadMachineSkills,
   machineSkillPaths,
   OMARCHY_COMPUTER_USE_POLICY,
+  OWNER_DELIVERABLE_POLICY,
 } from "./machine-skills.js";
 import {
   maintenanceStatePath,
@@ -2606,6 +2607,7 @@ export class SessionHost {
     const extraSections = [
       ...(this.extensionOptions.extraSections ?? []),
       OMARCHY_COMPUTER_USE_POLICY,
+      OWNER_DELIVERABLE_POLICY,
       ...(declarativeSection ? [declarativeSection] : []),
       ...(isSeededCharacter(ghostName, sessionCharacter?.body ?? null)
         ? [FIRST_MEETING_SECTION]

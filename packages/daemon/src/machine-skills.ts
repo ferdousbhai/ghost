@@ -9,6 +9,17 @@ export const OMARCHY_COMPUTER_USE_POLICY = [
   "Use `ghost_desktop` and `ghost_screen` only when Omarchy has no route, a tried CLI route fails, or the task must manipulate content inside an arbitrary application. Use `ghost_browser` for browser pages.",
 ].join("\n");
 
+/**
+ * Where finished work goes. A ghost's `docs/` is its own notebook; a file it
+ * authored *for the owner* is a write-once artifact and belongs in the owner's
+ * tree, the same rule screenshots already follow.
+ */
+export const OWNER_DELIVERABLE_POLICY = [
+  "## Finished work",
+  "A file you write for the owner — a report, an export, a generated image — goes in their Documents tree or the working directory you were asked about, not in your own `docs/`.",
+  "Your `docs/` is your notebook: what you wrote for yourself. Documents are the owner's, shared with them and with every other ghost, so leaving deliverables in `docs/` hides them from the person who asked.",
+].join("\n");
+
 export interface MachineSkillOptions {
   /** Complete path override shared with pi's native resource loader. */
   paths?: readonly string[];

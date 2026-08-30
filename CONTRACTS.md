@@ -168,13 +168,18 @@ deliberate exposure: a ghost captures far more often than a person does,
 sometimes over a password manager, and `~/Pictures` is a common sync target
 whose versioning keeps even the captures retention removed.
 
-The same rule governs every write-once artifact a ghost produces, and the rest
-of them do not exist yet. Downloads land in `XDG_DOWNLOAD_DIR` under the name
-the page suggested, sanitised to a basename, deduplicated the way a browser
-does; they are never pruned, because a download is a deliberate act with no
-Omarchy retention convention to match, and their attribution lives in the
-transcript rather than the filename. Recordings follow the screenshot pattern
-exactly, and never prune the file currently being written.
+The same rule governs every write-once artifact a ghost produces. Downloads are
+not one of them: Ghost drives the owner's own Chromium, so a download is the
+browser's, landing wherever the owner configured it and deduplicated by the
+browser itself. Recordings do not exist yet; when they do they follow the
+screenshot pattern exactly, and never prune the file currently being written.
+
+A file a ghost authors *for the owner* — a report, an export, a generated image —
+is a write-once artifact too, and belongs in the owner's Documents tree or the
+working directory the request was about, never in the ghost's `docs/`. `docs/`
+is the ghost's own notebook; Documents are owner-wide and shared with every
+session, so a deliverable left in `docs/` is hidden from the person who asked
+for it. Both runtimes carry this rule in their prompt.
 
 Documents may be regular files of any type and may nest to any depth or width;
 Ghost imposes no folder-depth or sibling-count policy on the live tree. It does

@@ -36,6 +36,10 @@ The owner's own files, shared with the owner and every ghost; not a place for th
 For laptop, shell, and Omarchy-system actions, first inspect `omarchy commands --json` or the relevant `omarchy <group> --help`, then use the stable `omarchy <group> <action>` route through Bash.
 Use `ghost_desktop` and `ghost_screen` only when Omarchy has no route, a tried CLI route fails, or the task must manipulate content inside an arbitrary application. Use `ghost_browser` for browser pages.
 
+## Finished work
+A file you write for the owner — a report, an export, a generated image — goes in their Documents tree or the working directory you were asked about, not in your own `docs/`.
+Your `docs/` is your notebook: what you wrote for yourself. Documents are the owner's, shared with them and with every other ghost, so leaving deliverables in `docs/` hides them from the person who asked.
+
 ## Skills
 When a skill matches, read its listed `SKILL.md` before acting.
 - omarchy: Control this Omarchy laptop through its CLI. (<owner-home>/.agents/skills/omarchy/SKILL.md)
@@ -102,6 +106,10 @@ The owner's own files, shared with the owner and every ghost; not a place for th
 ## Computer use
 For laptop, shell, and Omarchy-system actions, first inspect `omarchy commands --json` or the relevant `omarchy <group> --help`, then use the stable `omarchy <group> <action>` route through Bash.
 Use `ghost_desktop` and `ghost_screen` only when Omarchy has no route, a tried CLI route fails, or the task must manipulate content inside an arbitrary application. Use `ghost_browser` for browser pages.
+
+## Finished work
+A file you write for the owner — a report, an export, a generated image — goes in their Documents tree or the working directory you were asked about, not in your own `docs/`.
+Your `docs/` is your notebook: what you wrote for yourself. Documents are the owner's, shared with them and with every other ghost, so leaving deliverables in `docs/` hides them from the person who asked.
 
 ## Skills
 When a skill matches, read its listed `SKILL.md` before acting.
