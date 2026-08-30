@@ -101,6 +101,21 @@ async function nextEvent(
   ]);
 }
 
+async function expectStreamClosed(
+  reader: Pick<ReadableStreamDefaultReader<Uint8Array>, "read">,
+): Promise<void> {
+  await Promise.race([
+    (async () => {
+      for (;;) {
+        if ((await reader.read()).done) return;
+      }
+    })(),
+    new Promise<never>((_resolve, reject) => {
+      setTimeout(() => reject(new Error("timed out waiting for conversation stream close")), 2_000);
+    }),
+  ]);
+}
+
 describe("conversation unread state", () => {
   it("starts unread, marks read, then becomes unread after a newer turn", async () => {
     await setup();
@@ -245,5 +260,79 @@ describe("GET /api/ghosts/:name/events", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(internals.conversationListeners.has("casper")).toBe(false);
     expect(internals.sessions.size).toBe(0);
+  });
+
+  it.each(["rename", "delete"] as const)(
+    "closes the old stream on %s and isolates a recreated old name",
+    async (move) => {
+      const base = await setup();
+      const oldResponse = await fetch(`${base}/api/ghosts/casper/events`);
+      expect(oldResponse.status).toBe(200);
+      const oldReader = oldResponse.body!.getReader();
+
+      const moved = move === "rename"
+        ? await fetch(`${base}/api/ghosts/casper/name`, {
+            method: "PUT",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ name: "wisp" }),
+          })
+        : await fetch(`${base}/api/ghosts/casper?confirm=casper`, { method: "DELETE" });
+      expect(moved.status).toBe(200);
+      await expectStreamClosed(oldReader);
+
+      const recreated = await fetch(`${base}/api/ghosts`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: "casper" }),
+      });
+      expect(recreated.status).toBe(201);
+      seedGhost(temp!.root, {
+        name: "casper",
+        provider: { baseUrl: provider!.url, modelId: provider!.modelId },
+      });
+
+      const controller = new AbortController();
+      const newResponse = await fetch(`${base}/api/ghosts/casper/events`, {
+        signal: controller.signal,
+      });
+      const newReader = newResponse.body!.getReader();
+      await postTurn(base);
+      expect(await nextEvent(newReader)).toMatchObject({
+        type: "conversation-updated",
+        id: "pi:conv-1",
+      });
+      const internals = host as unknown as {
+        conversationListeners: Map<string, Set<unknown>>;
+      };
+      expect(internals.conversationListeners.get("casper")?.size).toBe(1);
+
+      controller.abort();
+      await expect(newReader.closed).rejects.toBeDefined();
+    },
+  );
+
+  it("does not let a delayed old unsubscribe remove the replacement incarnation", async () => {
+    const base = await setup();
+    const unsubscribeOld = host!.subscribeConversationEvents("casper", () => {}, () => {});
+    const renamed = await fetch(`${base}/api/ghosts/casper/name`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "wisp" }),
+    });
+    expect(renamed.status).toBe(200);
+    expect((await fetch(`${base}/api/ghosts`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "casper" }),
+    })).status).toBe(201);
+
+    const unsubscribeNew = host!.subscribeConversationEvents("casper", () => {});
+    unsubscribeOld();
+    const internals = host as unknown as {
+      conversationListeners: Map<string, Set<unknown>>;
+    };
+    expect(internals.conversationListeners.get("casper")?.size).toBe(1);
+    unsubscribeNew();
+    expect(internals.conversationListeners.has("casper")).toBe(false);
   });
 });

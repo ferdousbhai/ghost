@@ -1470,7 +1470,11 @@ shape and streams emit one complete event object per line.
   Disconnect or abort unregisters the listener and keepalive immediately, and
   subscribing never opens or retains an agent session. Project transitions and
   every completed Claude owner turn use `reason:"project"`, so the active shell
-  refetches eligibility/status as well as the ordinary session listing.
+  refetches eligibility/status as well as the ordinary session listing. A
+  successful whole-home rename or delete closes every stream subscribed under
+  the old name. Rename clients reconnect at the new name; a later ghost that
+  reuses the old spelling has a separate stream incarnation and cannot publish
+  onto, or be unregistered by, the closed one.
 - `PUT  /api/ghosts/:name/sessions/:id/pin` `{ pinned: boolean }` →
   `{ ok: true, pinned }` — pin or unpin one conversation, idempotently. Pin
   state lives in `sessions/pins.json` (atomic replace, never partial), works

@@ -1219,6 +1219,11 @@ export interface ConversationUpdatedEvent {
 
 export type ConversationEventListener = (event: ConversationUpdatedEvent) => void;
 
+interface ConversationEventSubscription {
+  listener: ConversationEventListener;
+  close: () => void;
+}
+
 export interface TranscriptMessage {
   role: "user" | "assistant";
   content: unknown;
@@ -1552,7 +1557,7 @@ export class SessionHost {
   private readonly collaboration: CollaborationManager;
   private readonly homeOperations: HomeOperationCoordinator;
   private readonly sessions = new Map<string, HostedSession>();
-  private readonly conversationListeners = new Map<string, Set<ConversationEventListener>>();
+  private readonly conversationListeners = new Map<string, Set<ConversationEventSubscription>>();
   /** Prevents parallel turns from constructing duplicate sessions. */
   private readonly opening = new Map<string, Promise<HostedSession>>();
   /** In-flight closes, so a reopen cannot race a still-disposing session. */
@@ -1835,15 +1840,35 @@ export class SessionHost {
   subscribeConversationEvents(
     ghostName: string,
     listener: ConversationEventListener,
+    close: () => void = () => {},
   ): () => void {
     this.registry.get(ghostName);
     const listeners = this.conversationListeners.get(ghostName) ?? new Set();
-    listeners.add(listener);
+    const subscription = { listener, close };
+    listeners.add(subscription);
     this.conversationListeners.set(ghostName, listeners);
     return () => {
-      listeners.delete(listener);
-      if (listeners.size === 0) this.conversationListeners.delete(ghostName);
+      listeners.delete(subscription);
+      if (listeners.size === 0 && this.conversationListeners.get(ghostName) === listeners) {
+        this.conversationListeners.delete(ghostName);
+      }
     };
+  }
+
+  private closeConversationEventStreams(ghostName: string): void {
+    const listeners = this.conversationListeners.get(ghostName);
+    if (!listeners) return;
+    this.conversationListeners.delete(ghostName);
+    for (const subscription of [...listeners]) {
+      try {
+        subscription.close();
+      } catch (error) {
+        this.logger.child({ ghost: ghostName }).warn("conversation event stream close failed", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    listeners.clear();
   }
 
   private async announceConversationUpdated(
@@ -1861,7 +1886,7 @@ export class SessionHost {
       updatedAt: new Date().toISOString(),
       ...(reason ? { reason } : {}),
     };
-    for (const listener of [...listeners]) {
+    for (const { listener } of [...listeners]) {
       try {
         listener(event);
       } catch (error) {
@@ -6890,8 +6915,8 @@ export class SessionHost {
       await this.quiesceGhost(ghost.name);
       await this.retireGhostSchedules(ghost.name, "deleted");
       const trashed = this.registry.trash(ghost.name);
-      this.maintenance?.completeGhostDelete(ghost.name);
       this.forgetGhost(ghost.name);
+      this.maintenance?.completeGhostDelete(ghost.name);
       this.logger.info("trashed ghost", { ghost: ghost.name, trash: trashed.trash });
       return trashed;
     } finally {
@@ -6935,8 +6960,8 @@ export class SessionHost {
       await this.quiesceGhost(ghost.name);
       await this.retireGhostSchedules(ghost.name, "renamed");
       const renamed = this.registry.rename(ghost.name, nextName);
-      await this.maintenance?.completeGhostRename(ghost.name, nextName);
       this.forgetGhost(ghost.name);
+      await this.maintenance?.completeGhostRename(ghost.name, nextName);
       this.logger.info("renamed ghost", { ghost: ghost.name, name: renamed.name });
       return renamed;
     } finally {
@@ -7017,6 +7042,7 @@ export class SessionHost {
    */
   private forgetGhost(ghostName: string): void {
     this.greetings.clear(ghostName);
+    this.closeConversationEventStreams(ghostName);
   }
 
   private ghostBusy(ghostName: string): boolean {

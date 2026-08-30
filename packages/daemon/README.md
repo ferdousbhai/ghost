@@ -379,6 +379,7 @@ The authoritative route and payload contract is
 | method | path | purpose |
 |---|---|---|
 | PUT | `/api/ghosts/:name/name` | rename the ghost, moving its whole home |
+| GET | `/api/ghosts/:name/events` | stream conversation-list invalidations until disconnect or a whole-home move |
 | GET/PUT | `/api/ghosts/:name/memory` | list or write the ghost's plain memory files |
 | DELETE | `/api/ghosts/:name/memory` | move one confirmed memory file to Trash |
 | GET/PUT | `/api/ghosts/:name/sessions/:id/project` | inspect, bind, or unbind one conversation project |
@@ -404,7 +405,8 @@ The authoritative route and payload contract is
 Every `/api` route except the deliberately public relay status requires the
 machine-local bearer token, rejects non-loopback browser origins, and requires
 JSON for POST/PUT. The pi-messages SSE response remains the client wire format;
-pi is the harness behind it.
+pi is the harness behind it. A rename or delete closes the old-name event
+stream; reconnect a renamed ghost at its new name.
 
 ## Validate
 

@@ -475,26 +475,35 @@ export function createDaemonServer(options: ServerOptions): Server {
   ): void => {
     options.registry.get(ghostName);
     let closed = false;
-    const unsubscribe = options.host.subscribeConversationEvents(ghostName, (event) => {
-      if (!closed && !response.writableEnded) {
-        response.write(`data: ${JSON.stringify(event)}\n\n`);
-      }
-    });
-    response.writeHead(200, SSE_HEADERS);
-    response.write(SSE_KEEPALIVE_COMMENT);
-    liveStreams.add(response);
-    const keepalive = setInterval(() => {
-      if (!closed && !response.writableEnded) response.write(SSE_KEEPALIVE_COMMENT);
-    }, SSE_KEEPALIVE_INTERVAL_MS);
+    let keepalive: ReturnType<typeof setInterval> | undefined;
+    let unsubscribe = () => {};
     const connection = abortOnClose(request, response);
     const cleanup = () => {
       if (closed) return;
       closed = true;
-      clearInterval(keepalive);
+      if (keepalive) clearInterval(keepalive);
       unsubscribe();
       liveStreams.delete(response);
       connection.release();
     };
+    unsubscribe = options.host.subscribeConversationEvents(
+      ghostName,
+      (event) => {
+        if (!closed && !response.writableEnded) {
+          response.write(`data: ${JSON.stringify(event)}\n\n`);
+        }
+      },
+      () => {
+        cleanup();
+        if (!response.writableEnded) response.end();
+      },
+    );
+    response.writeHead(200, SSE_HEADERS);
+    response.write(SSE_KEEPALIVE_COMMENT);
+    liveStreams.add(response);
+    keepalive = setInterval(() => {
+      if (!closed && !response.writableEnded) response.write(SSE_KEEPALIVE_COMMENT);
+    }, SSE_KEEPALIVE_INTERVAL_MS);
     connection.signal.addEventListener("abort", cleanup, { once: true });
   };
 
