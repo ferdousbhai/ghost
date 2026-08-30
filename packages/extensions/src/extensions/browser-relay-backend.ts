@@ -81,7 +81,7 @@ import {
  * in `hello`; a daemon that does not recognize it refuses the connection rather
  * than guessing, because a half-understood relay drives someone's real browser.
  */
-export const RELAY_PROTOCOL_VERSION = 3;
+export const RELAY_PROTOCOL_VERSION = 4;
 
 /** The negotiated WebSocket subprotocol. */
 export const RELAY_SUBPROTOCOL = "ghost-relay.v1";
@@ -317,21 +317,19 @@ export class RelayBrowserBackend implements GhostBrowserBackend {
 
   readonly #transport: RelayTransport | undefined;
   /**
-   * Who this backend is, for the extension. One extension serves every ghost and
-   * conversation over a single socket, so the session id is what makes a tab
-   * *belong* to someone: the extension answers `tabs` with this session's tabs
-   * alone, refuses a switch or close aimed at another's, and on `close` sweeps
-   * every tab this session opened rather than only the one it last drove.
+   * Who this ghost-wide backend is, for the extension. One extension serves every
+   * ghost over a single socket, so this id keeps one resolved ghost home's tabs
+   * apart from another's. Conversations of the same ghost deliberately share it.
    */
   #session = randomUUID();
   /**
-   * Whether this protocol session may still own tabs in the extension. This is
+   * Whether this ghost-wide protocol owner may still hold tabs in the extension. This is
    * deliberately separate from #tabId: closing the current tab can leave older
    * tabs owned by the same session, and terminal close must still sweep them.
    */
   #mayOwnTabs = false;
   /**
-   * The tab this session is driving now. `#call` puts it on every op so the
+   * The tab this ghost workspace is driving now. `#call` puts it on every op so the
    * extension can keep that tab's attach state and isolated world apart from
    * every other session's. Undefined until the first `open`; the extension
    * remains the authority and corrects it on every reply.
@@ -565,7 +563,7 @@ export class RelayBrowserBackend implements GhostBrowserBackend {
       input.op === "create",
     );
     const tabs = readTabInfos(result["tabs"]);
-    // The extension is authoritative on which tab this session now drives:
+    // The extension is authoritative on which tab this ghost workspace now drives:
     // `active` is answered for this caller alone, so follow it across
     // create/switch/close rather than trusting the local value.
     // `readNonEmpty`, not a bare string check: an empty `active` would otherwise
@@ -583,14 +581,14 @@ export class RelayBrowserBackend implements GhostBrowserBackend {
   }
 
   /**
-   * Close every tab this session may own and let the extension drop their
+   * Close every tab this ghost workspace may own and let the extension drop their
    * debugger attachments. The active tab may already be gone; ownership lives
-   * at protocol-session scope. Other sessions and the owner's browser remain.
+   * at protocol-owner scope. Other ghosts and the owner's browser remain.
    */
   async close(options: BackendActionOptions = { timeoutMs: 10_000 }): Promise<boolean> {
     if (!this.#mayOwnTabs) return false;
     const result = await this.#call("close", {}, options);
-    // The extension closed every tab this session opened, not just #tabId.
+    // The extension closed every tab this ghost workspace opened, not just #tabId.
     const closed = result["closed"];
     if (typeof closed !== "boolean") malformed("close", "closed is not a boolean");
     this.#tabId = undefined;

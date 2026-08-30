@@ -2186,25 +2186,34 @@ not coupled to that release identity.
   branching UI, live tool cards, and summoning indicator.
 - `packages/chromium-extension` — the browser relay, driving tabs of the
   browser the user is already signed into. One extension serves every ghost and
-  conversation over one socket, so the tab is the unit of isolation: relay
-  protocol 3 requires every operation to carry its `session` id and every page
-  operation the `tab` id that session opened. An authenticated socket earns the
-  single relay slot only after a compatible `hello` within five seconds; until
-  then status stays disconnected, no work is dispatched to it, and a new
-  authenticated socket may replace it. The extension keeps each tab's
-  debugger attachment, isolated world, and console/network buffers separate from
-  every other tab's, and each session's tabs separate from every other session's:
-  `open` answers with the tab id, the `tabs` op lists and switches within the
-  asking session's own tabs and answers `active` for it alone, and session
-  `close` sweeps every tab that session opened rather than only its current one.
-  Relay session ownership is therefore independent of the current-tab pointer:
+  conversation over one socket. The daemon deliberately has one browser
+  workspace per resolved ghost home, shared by that ghost's pi and Claude Code
+  conversations; another ghost home gets a separate workspace and protocol
+  owner. Relay protocol 4 requires every operation to carry that ghost-wide
+  owner id and every page operation the tab id it opened. The daemon's welcome
+  carries a fresh process-incarnation UUID. Before answering hello, the extension
+  compares it with the bounded local marker, durably retires and sweeps claims
+  from a prior daemon process, and publishes the new incarnation; failure keeps
+  the socket unadmitted for automatic retry. A same-incarnation reconnect keeps
+  live claims. An authenticated socket earns the single relay slot only after
+  that reconciliation and a compatible `hello` within five seconds; until then
+  status stays disconnected, no work is dispatched to it, and a new authenticated
+  socket may replace it. Superseded pre-hello sockets are force-terminated, and
+  shutdown closes or force-terminates every upgraded client tracked by the hub.
+  The extension keeps each tab's debugger attachment, isolated world, and
+  console/network buffers separate from every other tab's, and each ghost-wide
+  owner's tabs separate from every other ghost's: `open` answers with the tab id,
+  the `tabs` op lists and switches within the asking ghost's own tabs and answers
+  `active` for it alone, and owner `close` sweeps every tab that ghost opened
+  rather than only its current one. Relay ownership is therefore independent of
+  any conversation and of the current-tab pointer:
   losing or explicitly closing the current tab never suppresses the terminal
-  session `close`. The process registry is keyed by resolved ghost-home path;
+  owner `close`. The process registry is keyed by resolved ghost-home path;
   targeted teardown removes an entry only after its protocol close succeeds,
   coalesces concurrent closes, and keeps a failed entry for retry. Chromium
   close attempts every tab even after one fails and forgets only tabs confirmed
   closed or already gone; every live or indeterminate tab remains claimed by
-  that session for the retry, and the aggregate failure names them. Only a
+  that owner for the retry, and the aggregate failure names them. Only a
   resolved `tabs.remove`, the exact Chromium no-such-tab result, or `onRemoved`
   proves absence; another `tabs.get` failure is indeterminate and retains the
   claim. Before acknowledging a new tab, the extension publishes the strict
@@ -2221,7 +2230,7 @@ not coupled to that release identity.
   lane, connection latch, popup, or alarm retry; a write that settles after its
   deadline queues the latest ownership/poison snapshot again before it can remain
   authoritative.
-  Relay request starts are serialized per protocol session until
+  Relay request starts are serialized per ghost-wide protocol owner until
   each deadline response. Terminal close first durably tombstones its session,
   then makes a bounded attempt against every currently known tab, so it can
   advance when a raw Chromium create, update, get, detach, or remove Promise

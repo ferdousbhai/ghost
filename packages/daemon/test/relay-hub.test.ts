@@ -28,6 +28,7 @@ import {
 } from "../src/relay-protocol.js";
 
 const TOKEN = "f".repeat(64);
+const INCARNATION = "11111111-1111-4111-8111-111111111111";
 
 let server: Server;
 let hub: RelayHub;
@@ -40,6 +41,7 @@ beforeEach(async () => {
     pingIntervalMs: 60_000,
     helloTimeoutMs: 100,
     closeTimeoutMs: 100,
+    incarnation: INCARNATION,
   });
   server = createServer((_request, response) => response.writeHead(404).end());
   attachRelay(server, hub);
@@ -238,15 +240,31 @@ describe("pairing", () => {
     expect(requests).toBe(0);
   });
 
-  it("replaces a silent socket rather than letting it block the real extension", async () => {
+  it("force-retires a silent predecessor and still shuts down its replacement", async () => {
     const silent = await connectExtension({ skipHello: true });
     const silentClosed = new Promise<number>((resolve) => silent.once("close", resolve));
 
-    await connectExtension();
+    const replacement = await connectExtension();
 
-    expect(await silentClosed).toBe(1008);
+    expect(await silentClosed).toBe(1006);
     expect(hub.connected).toBe(true);
     expect(hub.peer).toBe("Chromium/141 via fake-extension/1");
+    const replacementClosed = new Promise<number>((resolve) => replacement.once("close", resolve));
+    await hub.close();
+    expect(await replacementClosed).toBe(1001);
+  });
+
+  it("shuts down after a silent raw predecessor is replaced", async () => {
+    const silent = await connectSilentUpgrade();
+    const replacement = await connectExtension();
+    const replacementClosed = new Promise<number>((resolve) => replacement.once("close", resolve));
+
+    try {
+      await hub.close();
+      expect(await replacementClosed).toBe(1001);
+    } finally {
+      silent.destroy();
+    }
   });
 
   it("closes a silent socket when its hello deadline expires", async () => {
@@ -268,7 +286,7 @@ describe("pairing", () => {
     expect(hub.connected).toBe(true);
   });
 
-  it("refuses an old protocol-2 extension with update guidance", async () => {
+  it("refuses an old protocol-3 extension with update guidance", async () => {
     // Watch for the close *before* sending the bad hello: the hub answers it
     // immediately, and a listener attached afterwards would miss the event and
     // wait forever.
@@ -276,11 +294,14 @@ describe("pairing", () => {
     const closed = new Promise<{ code: number; reason: string }>((resolve) => {
       socket.once("close", (code, reason) => resolve({ code, reason: reason.toString() }));
     });
-    socket.send(JSON.stringify({ t: "hello", protocol: 2 }));
+    const priorProtocol = RELAY_PROTOCOL_VERSION - 1;
+    socket.send(JSON.stringify({ t: "hello", protocol: priorProtocol }));
 
     const result = await closed;
     expect(result.code).toBe(4000);
-    expect(result.reason).toMatch(/relay protocol 3, not 2/i);
+    expect(result.reason).toMatch(
+      new RegExp(`relay protocol ${RELAY_PROTOCOL_VERSION}, not ${priorProtocol}`, "i"),
+    );
     expect(result.reason).toMatch(/update whichever.*older/i);
     await waitFor(() => !hub.connected);
   });
@@ -295,7 +316,11 @@ describe("pairing", () => {
       socket.once("message", (data) => resolve(JSON.parse(data.toString())));
       socket.once("error", reject);
     });
-    expect(welcome).toMatchObject({ t: "welcome", protocol: RELAY_PROTOCOL_VERSION });
+    expect(welcome).toMatchObject({
+      t: "welcome",
+      protocol: RELAY_PROTOCOL_VERSION,
+      incarnation: INCARNATION,
+    });
   });
 });
 

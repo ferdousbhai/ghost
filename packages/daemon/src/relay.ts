@@ -27,6 +27,7 @@
  * Provenance: the outbound-WebSocket + semantic-verb relay shape is ported from the
  * MIT-licensed `browser-relay` package in https://github.com/can1357/oh-my-pi.
  */
+import { randomUUID } from "node:crypto";
 import type { IncomingMessage, Server } from "node:http";
 import type { Duplex } from "node:stream";
 import { WebSocketServer, type RawData, type WebSocket } from "ws";
@@ -70,6 +71,7 @@ export interface RelayHubOptions {
   pingIntervalMs?: number;
   helloTimeoutMs?: number;
   closeTimeoutMs?: number;
+  incarnation?: string;
   publicUrl?: string;
 }
 
@@ -122,6 +124,8 @@ export class RelayHub implements RelayTransport {
   readonly #closeTimeoutMs: number;
   readonly #wss: WebSocketServer;
   readonly #pending = new Map<number, Pending>();
+  readonly #clients = new Set<WebSocket>();
+  readonly #incarnation: string;
 
   #socket: WebSocket | undefined;
   #negotiatedSocket: WebSocket | undefined;
@@ -145,6 +149,7 @@ export class RelayHub implements RelayTransport {
     this.#pingIntervalMs = options.pingIntervalMs ?? RELAY_PING_INTERVAL_MS;
     this.#helloTimeoutMs = options.helloTimeoutMs ?? RELAY_HELLO_TIMEOUT_MS;
     this.#closeTimeoutMs = options.closeTimeoutMs ?? RELAY_CLOSE_TIMEOUT_MS;
+    this.#incarnation = options.incarnation ?? randomUUID();
     this.#publicUrl = options.publicUrl;
     // ws applies maxPayload while assembling fragmented messages, before the
     // complete string reaches #onFrame.
@@ -308,9 +313,9 @@ export class RelayHub implements RelayTransport {
       this.#since = undefined;
       this.#stopHelloDeadline();
       try {
-        unnegotiated.close(1008, "relay hello was not completed");
-      } catch {
         unnegotiated.terminate();
+      } catch {
+        // Its close event, or bounded hub shutdown, performs the final cleanup.
       }
     }
 
@@ -330,6 +335,11 @@ export class RelayHub implements RelayTransport {
   }
 
   #adopt(ws: WebSocket): void {
+    if (this.#closed) {
+      ws.terminate();
+      return;
+    }
+    this.#clients.add(ws);
     this.#socket = ws;
     this.#negotiatedSocket = undefined;
     this.#peer = undefined;
@@ -359,6 +369,7 @@ export class RelayHub implements RelayTransport {
       this.#logger.warn("relay socket error", { error: error.message });
     });
     ws.on("close", (code: number, reason: Buffer) => {
+      this.#clients.delete(ws);
       if (this.#socket !== ws) return;
       this.#socket = undefined;
       this.#negotiatedSocket = undefined;
@@ -377,6 +388,7 @@ export class RelayHub implements RelayTransport {
       t: "welcome",
       protocol: RELAY_PROTOCOL_VERSION,
       daemon: "ghostd",
+      incarnation: this.#incarnation,
     }));
     this.#startHelloDeadline(ws);
   }
@@ -519,9 +531,10 @@ export class RelayHub implements RelayTransport {
     this.#negotiatedSocket = undefined;
     this.#peer = undefined;
     this.#since = undefined;
-    if (socket) {
-      await closeRelaySocket(socket, this.#closeTimeoutMs);
-    }
+    await Promise.allSettled(
+      [...this.#clients].map((client) => closeRelaySocket(client, this.#closeTimeoutMs)),
+    );
+    this.#clients.clear();
     if (this.#socket === socket) this.#socket = undefined;
 
     const serverClosed = new Promise<void>((resolve) => {

@@ -66,6 +66,7 @@ export interface RelayWelcomeFrame {
   readonly t: "welcome";
   readonly protocol: number;
   readonly daemon: string;
+  readonly incarnation: string;
 }
 
 export interface RelayRequestFrame {

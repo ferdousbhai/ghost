@@ -174,7 +174,7 @@ describe("the protocol constants are a contract", () => {
   });
 
   it("pins the version and subprotocol the extension has to agree with", () => {
-    expect(RELAY_PROTOCOL_VERSION).toBe(3);
+    expect(RELAY_PROTOCOL_VERSION).toBe(4);
     expect(RELAY_SUBPROTOCOL).toBe("ghost-relay.v1");
   });
 });
