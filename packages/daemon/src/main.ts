@@ -28,6 +28,7 @@ import { RemoteServe } from "./remote-serve.js";
 import { startDaemonServer, type ListeningServer } from "./server.js";
 import { SessionHost } from "./session-host.js";
 import { resolveScheduleUnitDirectory } from "./schedules.js";
+import { TaskManager } from "./tasks.js";
 import { WorkerCatalog } from "./worker-catalog.js";
 
 const USAGE = `ghostd — your ghost, on your machine
@@ -140,6 +141,7 @@ export interface ShutdownSignalOptions {
   login: Pick<LoginManager, "dispose">;
   listening: Pick<ListeningServer, "server" | "relay" | "close">;
   host: Pick<SessionHost, "beginShutdown" | "disposeAll" | "forceDisposeAll">;
+  tasks?: Pick<TaskManager, "beginShutdown" | "disposeAll" | "forceDisposeAll">;
   browsers: { closeAll(): Promise<void> };
   logger: Pick<Logger, "info" | "warn">;
   timing?: Pick<StagedShutdownOptions, "graceMs" | "forceMs" | "wait">;
@@ -169,6 +171,7 @@ export async function waitForShutdownSignal(options: ShutdownSignalOptions): Pro
       options.listening.server.closeAllConnections();
       void options.listening.relay?.close().catch(() => {});
       options.host.forceDisposeAll();
+      options.tasks?.forceDisposeAll();
     };
     const shutdown = (signal: "SIGINT" | "SIGTERM") => {
       if (shuttingDown) {
@@ -185,11 +188,15 @@ export async function waitForShutdownSignal(options: ShutdownSignalOptions): Pro
               options.listening.server.close();
               options.listening.server.closeIdleConnections();
             },
-            abortActive: () => options.host.beginShutdown(),
+            abortActive: () => {
+              options.host.beginShutdown();
+              options.tasks?.beginShutdown();
+            },
             graceful: async () => {
               await Promise.allSettled([
                 options.listening.close(),
                 options.host.disposeAll(),
+                options.tasks?.disposeAll(),
                 options.browsers.closeAll(),
               ]);
             },
@@ -473,6 +480,25 @@ async function serveDaemon(
     onModelRoutingChanged: (name) => host.rebindModel(name),
   });
   const workers = new WorkerCatalog({ ownerHome, claudeCodeProbe, logger });
+  // Adapters are added independently. Keeping the manager composed now makes
+  // existing task state visible and reports an explicit unavailable worker
+  // instead of making the lifecycle routes disappear.
+  const tasks = new TaskManager({ registry, homeOperations, logger });
+  for (const ghost of registry.list()) {
+    const restored = await tasks.restoreGhost(ghost.name);
+    if (restored.interrupted > 0) {
+      logger.warn("interrupted task state restored after daemon restart", {
+        ghost: ghost.name,
+        tasks: restored.interrupted,
+      });
+    }
+    if (restored.invalid > 0) {
+      logger.warn("some task state could not be restored", {
+        ghost: ghost.name,
+        tasks: restored.invalid,
+      });
+    }
+  }
   const mcp = new McpCatalog({ registry, homeOperations, logger });
   const remoteServe = new RemoteServe(config.port, { ...config.remote, configPath: config.configPath });
 
@@ -485,6 +511,7 @@ async function serveDaemon(
       login,
       catalog,
       workers,
+      tasks,
       mcp,
       hooks,
       logger,
@@ -524,6 +551,7 @@ async function serveDaemon(
     login,
     listening,
     host,
+    tasks,
     browsers: { closeAll: closeAllBrowserSessions },
     logger,
   });

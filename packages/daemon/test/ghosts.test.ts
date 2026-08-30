@@ -84,7 +84,7 @@ describe("GhostRegistry.create", () => {
     const character = readFileSync(ghostPaths(ghost.dir).characterFile, "utf8");
     expect(character).toMatch(/^# casper\n/);
     expect(character).not.toContain("title:");
-    for (const sub of ["memory", "conversations"]) {
+    for (const sub of ["memory", "conversations", ".tasks"]) {
       expect(existsSync(join(ghost.dir, sub)), sub).toBe(true);
     }
     expect(existsSync(join(ghost.dir, "docs"))).toBe(false);

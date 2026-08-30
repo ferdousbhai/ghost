@@ -23,6 +23,7 @@ export interface Ghost {
 }
 
 export const GHOST_SESSIONS_DIRNAME = "sessions";
+export const GHOST_TASKS_DIRNAME = ".tasks";
 export const GHOST_AGENT_DIRNAME = ".pi";
 export const GHOST_CHARACTER_FILENAME = "character.md";
 export const GHOST_SETTINGS_FILENAME = "settings.yml";
@@ -128,6 +129,7 @@ export function ghostPaths(dir: string): {
   settingsRuntimeDir: string;
   settingsFile: string;
   sessionDir: string;
+  taskDir: string;
   characterFile: string;
 } {
   const home = resolve(dir);
@@ -138,6 +140,7 @@ export function ghostPaths(dir: string): {
     settingsRuntimeDir: join(agentDir, "runtime"),
     settingsFile: join(home, GHOST_SETTINGS_FILENAME),
     sessionDir: join(home, GHOST_SESSIONS_DIRNAME),
+    taskDir: join(home, GHOST_TASKS_DIRNAME),
     characterFile: join(home, GHOST_CHARACTER_FILENAME),
   };
 }
@@ -313,7 +316,7 @@ export class GhostRegistry {
       throw new GhostError("already_exists", `A ghost named ${JSON.stringify(name)} already exists.`, 409);
     }
     mkdirSync(dir, { recursive: true });
-    for (const sub of ["memory", "conversations"]) {
+    for (const sub of ["memory", "conversations", GHOST_TASKS_DIRNAME]) {
       mkdirSync(join(dir, sub), { recursive: true });
     }
     writeFileSync(join(dir, GHOST_CHARACTER_FILENAME), SEEDED_CHARACTER(name), {

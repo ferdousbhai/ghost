@@ -118,6 +118,11 @@ describe("runStagedShutdown", () => {
           disposeAll: () => graceful,
           forceDisposeAll() { console.log("HOST_FORCE"); settle(); },
         },
+        tasks: {
+          beginShutdown() { console.log("TASK_ABORT"); },
+          async disposeAll() { console.log("TASKS"); },
+          forceDisposeAll() { console.log("TASK_FORCE"); },
+        },
         browsers: {
           async closeAll() { console.log("BROWSERS"); },
         },
@@ -145,12 +150,15 @@ describe("runStagedShutdown", () => {
     await output.waitFor("READY");
     expect(spawnSync("/usr/bin/kill", ["-INT", String(child.pid)]).status).toBe(0);
     await output.waitFor("STARTED");
+    await output.waitFor("TASK_ABORT");
+    await output.waitFor("TASKS");
     await output.waitFor("BROWSERS");
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(child.exitCode).toBeNull();
     expect(spawnSync("/usr/bin/kill", ["-INT", String(child.pid)]).status).toBe(0);
     await output.waitFor("FORCED");
     await output.waitFor("HOST_FORCE");
+    await output.waitFor("TASK_FORCE");
     await output.waitFor("DONE");
     await expect(exited).resolves.toBe(0);
   });

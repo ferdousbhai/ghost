@@ -47,6 +47,7 @@ import {
 } from "./pi-messages.js";
 import { attachRelay, createRelayHub, type RelayHub } from "./relay.js";
 import type { SessionHost } from "./session-host.js";
+import { isWorkerId, type TaskManager } from "./tasks.js";
 import type { WorkerCatalog } from "./worker-catalog.js";
 
 export interface ServerOptions {
@@ -67,6 +68,8 @@ export interface ServerOptions {
   catalog?: ModelCatalog;
   /** Known task-worker installation, authentication, and read-only usage status. */
   workers?: Pick<WorkerCatalog, "list">;
+  /** Durable task lifecycle. Omit only when task routes are disabled. */
+  tasks?: Pick<TaskManager, "create" | "list" | "get" | "send" | "cancel">;
   mcp?: McpCatalog;
   hooks?: Pick<GhostHookRunner, "status" | "config" | "replaceConfig">;
   logger?: Logger;
@@ -1886,6 +1889,63 @@ export function createDaemonServer(options: ServerOptions): Server {
           jsonResponse(response, 200, await options.workers.list());
           return;
         }
+        if (segments.length >= 4 && segments[3] === "tasks") {
+          if (!options.tasks) {
+            errorResponse(response, 404, "not_found", "Task execution is not enabled on this daemon.");
+            return;
+          }
+          if (segments.length === 4) {
+            if (method !== "GET") {
+              errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+              return;
+            }
+            jsonResponse(response, 200, await options.tasks.list(ghostName));
+            return;
+          }
+          const taskId = decodePathSegment(segments[4] ?? "");
+          if (segments.length === 5) {
+            if (method !== "GET") {
+              errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+              return;
+            }
+            jsonResponse(response, 200, await options.tasks.get(ghostName, taskId));
+            return;
+          }
+          if (segments.length === 6 && segments[5] === "messages") {
+            if (method !== "POST") {
+              errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+              return;
+            }
+            const body = await readJsonBody(request, maxBodyBytes);
+            if (!body || typeof body !== "object" || Array.isArray(body)
+              || Object.keys(body).some((key) => key !== "text")
+              || typeof (body as { text?: unknown }).text !== "string") {
+              errorResponse(response, 400, "invalid_request", 'Expected exactly { "text": string }.');
+              return;
+            }
+            jsonResponse(
+              response,
+              200,
+              await options.tasks.send(ghostName, taskId, (body as { text: string }).text),
+            );
+            return;
+          }
+          if (segments.length === 6 && segments[5] === "cancel") {
+            if (method !== "POST") {
+              errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+              return;
+            }
+            const body = await readJsonBody(request, maxBodyBytes);
+            if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).length !== 0) {
+              errorResponse(response, 400, "invalid_request", "Expected an empty JSON object.");
+              return;
+            }
+            jsonResponse(response, 200, await options.tasks.cancel(ghostName, taskId));
+            return;
+          }
+          errorResponse(response, 404, "not_found", "Not found.");
+          return;
+        }
         if (segments.length === 4 && segments[3] === "events") {
           if (method !== "GET") {
             errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
@@ -1924,6 +1984,44 @@ export function createDaemonServer(options: ServerOptions): Server {
             decodeConversationIdentity(segments[4] ?? ""),
             response,
           );
+        }
+        if (segments.length === 6 && segments[3] === "sessions" && segments[5] === "tasks") {
+          if (!options.tasks) {
+            errorResponse(response, 404, "not_found", "Task execution is not enabled on this daemon.");
+            return;
+          }
+          if (method !== "POST") {
+            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+            return;
+          }
+          const body = await readJsonBody(request, maxBodyBytes);
+          if (!body || typeof body !== "object" || Array.isArray(body)
+            || Object.keys(body).some((key) => !["agent", "task", "cwd"].includes(key))) {
+            errorResponse(response, 400, "invalid_request", "Expected { agent, task, cwd? }.");
+            return;
+          }
+          const input = body as { agent?: unknown; task?: unknown; cwd?: unknown };
+          if (!isWorkerId(input.agent)
+            || typeof input.task !== "string"
+            || (input.cwd !== undefined && typeof input.cwd !== "string")) {
+            errorResponse(
+              response,
+              400,
+              "invalid_request",
+              '"agent" must name a built-in worker, "task" must be a string, and "cwd" must be a string when supplied.',
+            );
+            return;
+          }
+          const parent = decodeConversationIdentity(segments[4] ?? "");
+          const task = await options.tasks.create({
+            ghostName,
+            parent,
+            agent: input.agent,
+            task: input.task,
+            ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
+          });
+          jsonResponse(response, 202, task);
+          return;
         }
         if (segments.length === 6 && segments[3] === "sessions" && segments[5] === "pin") {
           if (method !== "PUT") {

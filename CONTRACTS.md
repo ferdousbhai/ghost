@@ -68,6 +68,9 @@ previewed but inert. Claude Code retains its own native subagents.
                                mutations; never cloned by fork
   sessions/pins.json           v2 pinned state: { "version": 2, "pinned": ["<id>", …] }
   sessions/reads.json          v2 read state: { "version": 2, "reads": { "<id>": "<ISO timestamp>" } }
+  .tasks/                      daemon-owned normalized worker-task lifecycle
+  .tasks/task-<uuid>.json      v1 bounded task state and event tail; the vendor
+                               harness retains its own full native transcript
   .pi/                         derived pi machine runtime; never credentials
   .pi/models.pi.json           secret-free provider/models view synced from
                                models.json
@@ -321,7 +324,8 @@ plain-named entry in a ghost home is part of that ghost's identity and travels
 with it, including `settings.yml`, `models.json`, and `mcp.json`. A dot-prefixed
 entry is bound to this machine and never leaves it: `.pi/` (derived pi
 runtime), `.trash/` (recoverable per-home deletion state), and
-`.memory-maintenance.json` (the consolidation cooldown). Export needs no
+`.memory-maintenance.json` (the consolidation cooldown), plus `.tasks/`
+(machine-local native worker state). Export needs no
 credential exception: portable files contain references rather than values.
 
 ### Session capabilities
@@ -341,8 +345,9 @@ and responsibility for the outcome belong to the Ghost principal. A vendor
 worker receives an ordinary task and a trusted cwd, then retains that vendor
 harness's own identity and native configuration. `pi-worker` is the bundled
 Ghost-defined fallback. The read-only worker catalogue below establishes these
-names but does not yet add a `task` tool or change the subagent prohibition in
-this section.
+names. The daemon task lifecycle below is already the shared persistence and
+control boundary, but it does not yet add a `task` tool or change the subagent
+prohibition in this section.
 
 A pi session uses pi's runtime (`@earendil-works/pi-coding-agent`,
 `pi-agent-core`, `pi-ai`) and native tools, but Ghost owns its roots and
@@ -1774,6 +1779,95 @@ No per-model history, credential, provider response, executable pathname, or
 raw record is exposed. A missing or malformed record never makes installation
 discovery fail.
 
+### Worker tasks
+
+The daemon owns one persistent task lifecycle shared by all worker harnesses.
+It does not own or translate their full transcripts. Each task is stored as one
+mode-`0600`, atomically replaced v1 sidecar under the ghost home's `.tasks/`
+directory. The machine-bound directory follows whole-home rename and deletion
+but is excluded from export: records contain local project paths and opaque
+native session ids that are meaningless or unsafe to resume on another
+machine. A record contains the daemon-issued `task-<uuid>` id,
+runtime-qualified parent conversation identity, built-in worker id, complete
+bounded task prompt,
+resolved canonical project root and cwd, state and timestamps, optional native
+session id, bounded terminal result or error, and a bounded normalized event
+tail. The event tail retains at most 100 state/output/notice/owner-message/
+principal-message events with monotonic sequence numbers; each event text is
+at most 4,000 UTF-16 code units. Task prompts and terminal results are at most
+64,000 and 128,000 code units respectively. Tail eviction, individual text,
+result, and error-message truncation are explicit flags. A native session id is
+never truncated; an invalid or oversized id fails the task. The worker's native
+storage remains authoritative for richer history and configuration.
+
+The exact pretty-printed UTF-8 sidecar, including its trailing newline, never
+exceeds the private-file reader's 1 MiB ceiling. Before each atomic write the
+store evicts the oldest normalized events while retaining the newest sequence;
+if necessary it then truncates the terminal result. Those reductions set
+`eventsTruncated` and `resultTruncated` respectively. The complete admitted task
+prompt is never truncated. A record that still cannot fit is rejected rather
+than writing state the daemon cannot read back.
+
+Task states are `queued`, `starting`, `running`, `waiting_for_owner`,
+`cancelling`, `completed`, `failed`, `cancelled`, and `interrupted`. The first
+five are non-terminal; `waiting_for_owner` is an explicit reversible state, so
+the owner or principal can send a follow-up message and return it to `running`
+only after the worker accepts that message. Owner and principal messages retain
+distinct event types. Cancellation first enters `cancelling`; it becomes
+`cancelled` only after the captured native controller confirms the worker can
+no longer continue. A failed cancellation remains `cancelling` with a bounded
+error and the native task still blocks home moves; if that worker completes
+despite the request, its honest terminal state is `completed`. A daemon restart
+marks every previously non-terminal durable record `interrupted`; Ghost never
+guesses how to reconnect an opaque vendor process. Malformed sidecars are
+skipped by listings and rejected by direct reads. Tasks run concurrently
+without a Ghost-level cap.
+
+The authenticated HTTP boundary is:
+
+- `POST /api/ghosts/:name/sessions/:id/tasks` with exactly
+  `{ agent, task, cwd? }` → the v1 task view with `202`. It preserves the
+  locked pi-coding-agent dependency's shipped `examples/extensions/subagent`
+  single mode core `{ agent, task }` declaration:
+  `agent` names the responsible worker, `task` is its complete assignment, and
+  optional `cwd` refines the conversation's trusted project context. The
+  qualified session id in the route supplies the durable parent identity;
+  clients cannot override it. Rejecting every extra field is Ghost's stricter
+  policy, not a claim that pi defines one universal subagent schema.
+- `GET /api/ghosts/:name/tasks` → `{ tasks, skipped }`, with bounded summaries
+  ordered by most recently updated first.
+- `GET /api/ghosts/:name/tasks/:taskId` → the complete normalized task view.
+- `POST /api/ghosts/:name/tasks/:taskId/messages` with exactly `{ text }` → the
+  updated view, or a conflict when the selected native worker cannot currently
+  accept steering.
+- `POST /api/ghosts/:name/tasks/:taskId/cancel` with exactly `{}` →
+  `{ outcome, task }`, where
+  `outcome` is `cancelled | cancellation_requested | already_settled`.
+  `cancellation_requested` means an abort was delivered while the native
+  controller was still starting; the durable state remains `cancelling` until
+  it confirms. `already_settled` also reports the honest terminal task when its
+  result wins a race with native cancellation. Cancellation signals only the
+  controller captured when that task was spawned; Ghost never discovers or
+  kills processes by name.
+
+The context resolver, not request input, is the authority for project root and
+cwd. It accepts only an absolute cwd within the conversation's canonical,
+trusted project root. Vendor workers receive that cwd and then perform their
+own native project-policy/configuration discovery there. In this first
+lifecycle slice no production adapters are registered: listings and recovery
+are live, while creation returns `503 worker_unavailable`. Each adapter lands
+independently without changing this wire or persistence contract.
+
+The captured root/cwd remain pinned for the task's lifetime even if its parent
+conversation is later deleted; conversation deletion and fork neither cancel
+nor copy tasks, and the runtime-qualified parent becomes historical
+attribution. A non-terminal task, or an accepted controller send/cancel still
+draining after terminal state, blocks whole-ghost rename or deletion with `409
+ghost_busy`. Once tasks and controller operations settle, their `.tasks/`
+sidecars move with the home and remain readable under the new ghost name.
+Shutdown synchronously closes task admission and aborts live controllers before
+draining them under the daemon's existing bounded graceful/forced stages.
+
 ### Model indicator + switcher (which model a ghost uses, and switching it)
 
 Provider models come from pi's model catalogue (`@earendil-works/pi-ai`),
@@ -1966,7 +2060,8 @@ whole model before any non-local exposure.
   Exports the extension factories and typed readers/writers.
 - `packages/daemon` — per-ghost pi `AgentSession` and Claude Code query
   lifecycles, env scrubbing, model/runtime selection, the HTTP API, the
-  read-only known-worker/Omarchy-usage catalogue, and the systemd unit. Vendor
+  read-only known-worker/Omarchy-usage catalogue, persistent normalized worker
+  task lifecycle and adapter seam, and the systemd unit. Vendor
   CLIs are detected on the machine and are not package dependencies. Depends
   on `extensions`. Both installed user services declare
   `WorkingDirectory=%h`; that sets process cwd only, while Ghost storage keeps

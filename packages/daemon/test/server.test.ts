@@ -28,6 +28,7 @@ import {
 } from "../src/server.js";
 import { GHOST_SESSION_STOP_CONTINUATION_CAP } from "../src/hooks.js";
 import { SessionHost, sessionFileNameFor } from "../src/session-host.js";
+import type { TaskView } from "../src/tasks.js";
 import { toolCwdsPath } from "../src/tool-cwds.js";
 import { makeTempGhosts, parseSseStream, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
 import { startMockProvider, type MockProvider } from "./helpers/mock-provider.js";
@@ -58,6 +59,7 @@ async function serve(
     apiToken?: string | null;
     hooks?: ServerOptions["hooks"];
     workers?: ServerOptions["workers"];
+    tasks?: ServerOptions["tasks"];
   } = {},
 ) {
   temp = makeTempGhosts();
@@ -91,6 +93,7 @@ async function serve(
     ...(serverOptions.apiToken === undefined ? {} : { apiToken: serverOptions.apiToken }),
     ...(serverOptions.hooks === undefined ? {} : { hooks: serverOptions.hooks }),
     ...(serverOptions.workers === undefined ? {} : { workers: serverOptions.workers }),
+    ...(serverOptions.tasks === undefined ? {} : { tasks: serverOptions.tasks }),
   });
   return `http://127.0.0.1:${listening.port}`;
 }
@@ -246,6 +249,108 @@ describe("GET /api/ghosts/:name/workers", () => {
     const without = await serve();
     const absent = await fetch(`${without}/api/ghosts/casper/workers`);
     expect(absent.status).toBe(404);
+  });
+});
+
+describe("task lifecycle routes", () => {
+  const task: TaskView = {
+    version: 1,
+    id: "task-00000000-0000-4000-8000-000000000001",
+    parent: { id: "pi:conv-1", conversationId: "conv-1", runtime: "pi" },
+    agent: "pi-worker",
+    task: "Implement it.",
+    root: "/project",
+    cwd: "/project/packages/app",
+    state: "running",
+    createdAt: "2026-08-30T09:00:00.000Z",
+    updatedAt: "2026-08-30T09:00:01.000Z",
+    nativeSessionId: null,
+    result: null,
+    resultTruncated: false,
+    error: null,
+    events: [],
+    eventsTruncated: false,
+  };
+
+  function fakeTasks(): NonNullable<ServerOptions["tasks"]> & {
+    create: ReturnType<typeof vi.fn>;
+    list: ReturnType<typeof vi.fn>;
+    get: ReturnType<typeof vi.fn>;
+    send: ReturnType<typeof vi.fn>;
+    cancel: ReturnType<typeof vi.fn>;
+  } {
+    return {
+      create: vi.fn(async () => task),
+      list: vi.fn(async () => ({ tasks: [], skipped: [] })),
+      get: vi.fn(async () => task),
+      send: vi.fn(async () => task),
+      cancel: vi.fn(async () => ({ outcome: "cancelled" as const, task })),
+    };
+  }
+
+  it("keeps the Pi-compatible creation body and injects the qualified parent", async () => {
+    const tasks = fakeTasks();
+    const base = await serve(undefined, { tasks });
+    const response = await fetch(`${base}/api/ghosts/casper/sessions/${piSegment("conv-1")}/tasks`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ agent: "pi-worker", task: "Implement it.", cwd: "/project/packages/app" }),
+    });
+
+    expect(response.status).toBe(202);
+    expect(await response.json()).toEqual(task);
+    expect(tasks.create).toHaveBeenCalledWith({
+      ghostName: "casper",
+      parent: { id: "pi:conv-1", conversationId: "conv-1", runtime: "pi" },
+      agent: "pi-worker",
+      task: "Implement it.",
+      cwd: "/project/packages/app",
+    });
+
+    const extra = await fetch(`${base}/api/ghosts/casper/sessions/${piSegment("conv-1")}/tasks`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ agent: "pi-worker", task: "No.", description: "not in the schema" }),
+    });
+    expect(extra.status).toBe(400);
+    expect(tasks.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("lists, reads, steers, and cancels through explicit reverse routes", async () => {
+    const tasks = fakeTasks();
+    const base = await serve(undefined, { tasks });
+    const taskSegment = encodeURIComponent(task.id);
+
+    expect((await fetch(`${base}/api/ghosts/casper/tasks`)).status).toBe(200);
+    expect((await fetch(`${base}/api/ghosts/casper/tasks/${taskSegment}`)).status).toBe(200);
+    const steered = await fetch(`${base}/api/ghosts/casper/tasks/${taskSegment}/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "Use the stable API." }),
+    });
+    expect(steered.status).toBe(200);
+    expect(tasks.send).toHaveBeenCalledWith("casper", task.id, "Use the stable API.");
+    const cancelled = await fetch(`${base}/api/ghosts/casper/tasks/${taskSegment}/cancel`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(cancelled.status).toBe(200);
+    expect(tasks.cancel).toHaveBeenCalledWith("casper", task.id);
+
+    const extra = await fetch(`${base}/api/ghosts/casper/tasks/${taskSegment}/cancel`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ force: true }),
+    });
+    expect(extra.status).toBe(400);
+    expect(tasks.cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps task routes absent when no task manager is composed", async () => {
+    const base = await serve();
+    const response = await fetch(`${base}/api/ghosts/casper/tasks`);
+    expect(response.status).toBe(404);
   });
 });
 
