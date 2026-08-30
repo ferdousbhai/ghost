@@ -2207,6 +2207,9 @@ not coupled to that release identity.
   status stays disconnected, no work is dispatched to it, and a new authenticated
   socket may replace it. Superseded pre-hello sockets are force-terminated, and
   shutdown closes or force-terminates every upgraded client tracked by the hub.
+  Extension reconnect failures, alarms, protocol retry, successful welcome, and
+  settings redial share one tracked timer: another failure coalesces, while a
+  real new attempt, success, or settings change cancels the obsolete timer.
   The extension keeps each tab's debugger attachment, isolated world, and
   console/network buffers separate from every other tab's, and each ghost-wide
   owner's tabs separate from every other ghost's: `open` answers with the tab id,
@@ -2225,10 +2228,17 @@ not coupled to that release identity.
   proves absence; another `tabs.get` failure is indeterminate and retains the
   claim. Before acknowledging a new tab, the extension publishes the strict
   version-2 `{version,tabs,sessions,retired}` claim to `chrome.storage.session`;
-  a write failure rolls the tab back. If both rollback and a second claim
-  publication are indeterminate, a `chrome.storage.local` poison marker makes
+  its publication carries a monotonic revision and first writes the same complete
+  snapshot as a version-1 `chrome.storage.local` durability fence. Restore admits
+  the higher revision and rejects equal revisions with different snapshots, so a
+  stale session write cannot become authoritative after its in-memory repair and
+  worker both fail. A write failure rolls the tab back. If both rollback and a
+  second claim publication are indeterminate, a `chrome.storage.local` poison marker makes
   later worker starts refuse the relay rather than forget a possible owner; the
-  live worker clears it only after authoritative removal or durable claim. An
+  live worker clears it only after authoritative removal or durable claim. A
+  poison-only live tab is reverified and promoted into the complete fenced claim
+  before that poison can clear; a failed verification remains poison for the
+  next restore rather than publishing empty ownership. An
   unreadable or indeterminate worker restore likewise refuses the relay
   connection. A restore may publish only if the ownership generation it read is
   still current; live claims and poison win over an older storage snapshot.
@@ -2239,7 +2249,10 @@ not coupled to that release identity.
   authoritative. Ownership, poison, and incarnation repairs carry pending
   revisions until the newest value is durably published. A rejected repair stays
   fail-closed, is retried by connection preparation and the keepalive alarm, and
-  refuses non-cleanup browser work until it succeeds.
+  refuses non-cleanup browser work until it succeeds. Popup settings writes carry
+  per-field generations; if a timed-out raw write settles after a newer owner
+  choice, the popup republishes the newest values rather than leaving the late
+  result authoritative.
   Relay request starts are serialized per ghost-wide protocol owner until
   each deadline response. Terminal close first durably tombstones its session,
   then makes a bounded attempt against every currently known tab, so it can
