@@ -1418,7 +1418,9 @@ shape and streams emit one complete event object per line.
   scan/validation/translation warnings. General resource warnings remain
   visible diagnostics but do not degrade MCP health; only MCP-specific warnings
   or observed MCP connection failure make `mcpStatus` and project status
-  `degraded`. A project with no admitted MCP rows remains `mcpStatus:"off"`.
+  `degraded`. An observed Claude MCP startup failure stays on that warm query
+  across owner turns, which do not emit another startup frame, until the query
+  retires. A project with no admitted MCP rows remains `mcpStatus:"off"`.
 - `PUT …/sessions/:id/project`
   `{ root: string|null, cwd?, trustToken?, expectedGeneration }` returns the
   full state. A non-null root requires the matching unused preview token; cwd

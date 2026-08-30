@@ -1536,6 +1536,66 @@ describe("Claude Code subscription runtime", () => {
       .toMatchObject({ status: "degraded", mcpStatus: "degraded" });
   });
 
+  it("keeps an observed project MCP failure degraded across warm owner turns", async () => {
+    const { lifecycle } = setupClaudeHost({
+      createQuery: (input, queryLifecycle) => {
+        const sessionId = input.options.sessionId ?? input.options.resume;
+        if (!sessionId) throw new Error("warm MCP fixture received no session id");
+        return fakeQuery(
+          (turnNumber) => [
+            ...(turnNumber === 1
+              ? [sdkMessage({
+                  type: "system",
+                  subtype: "init",
+                  session_id: sessionId,
+                  mcp_servers: [{ name: "broken", status: "failed" }],
+                })]
+              : []),
+            ...responseMessages(sessionId, `turn ${turnNumber}`),
+          ],
+          queryLifecycle,
+          input.prompt,
+        );
+      },
+    });
+    const project = join(temp!.root, "claude-warm-mcp-failure");
+    mkdirSync(join(project, ".omp"), { recursive: true });
+    writeFileSync(join(project, ".omp", "mcp.json"), JSON.stringify({
+      mcpServers: {
+        broken: { type: "stdio", command: process.execPath, args: ["--version"] },
+      },
+    }));
+    const preview = await host!.previewProject(
+      "casper",
+      "warm-mcp-failure",
+      "claude-code",
+      project,
+    );
+    await host!.bindProject("casper", "warm-mcp-failure", "claude-code", {
+      root: project,
+      trustToken: preview.trustToken,
+      expectedGeneration: 0,
+    });
+
+    await host!.runTurn("casper", {
+      sessionId: "warm-mcp-failure",
+      prompt: "first turn observes the failed startup",
+      emit: () => {},
+    });
+    expect(await host!.getProject("casper", "warm-mcp-failure", "claude-code"))
+      .toMatchObject({ status: "degraded", mcpStatus: "degraded" });
+
+    await host!.runTurn("casper", {
+      sessionId: "warm-mcp-failure",
+      prompt: "second turn receives no init frame",
+      emit: () => {},
+    });
+
+    expect(lifecycle.queries).toBe(1);
+    expect(await host!.getProject("casper", "warm-mcp-failure", "claude-code"))
+      .toMatchObject({ status: "degraded", mcpStatus: "degraded" });
+  });
+
   it("uses Pi's instruction merge while keeping invoked resources out of Claude's prompt", async () => {
     const { paths, seenOptions } = setupClaudeHost();
     const ghostSkill = join(paths.home, "skills", "shared");

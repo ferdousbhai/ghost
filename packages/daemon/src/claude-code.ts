@@ -1577,6 +1577,7 @@ interface WarmClaudeQuery {
   readonly abortController: AbortController;
   readonly identity: string;
   readonly exited: Promise<void>;
+  projectMcpFailed: boolean;
 }
 
 interface ClaudeSessionPersona {
@@ -1956,8 +1957,6 @@ export class ClaudeCodeRuntime {
             : configuredProjectMcp.length > 0 ? "ready" : "off",
         });
       };
-      await publishProjectMcpStatus(approvedProject.mcpWarnings.length > 0);
-      this.assertTurnAdmitted(options.signal);
       let beforePromptContext: string | undefined;
       let beforePromptAcknowledge: (() => void | Promise<void>) | undefined;
       if (this.hooks.hasHandlers("before_prompt")) {
@@ -2005,17 +2004,11 @@ export class ClaudeCodeRuntime {
         logger.debug?.("retiring Claude query whose startup options changed");
         this.retireWarm(key);
       }
-      let observedProjectMcpFailure = false;
-      const onMessage = (message: SDKMessage): void => {
-        if (message.type === "system" && message.subtype === "init") {
-          const statuses = new Map(
-            (message.mcp_servers ?? []).map((server) => [server.name, server.status]),
-          );
-          observedProjectMcpFailure = configuredProjectMcp.some((name) =>
-            statuses.get(name) !== "connected");
-        }
-        adapter.handle(message);
-      };
+      await publishProjectMcpStatus(
+        approvedProject.mcpWarnings.length > 0
+          || this.warm.get(key)?.projectMcpFailed === true,
+      );
+      this.assertTurnAdmitted(options.signal);
 
       while (!adapter.isTerminal()) {
         this.assertTurnAdmitted(options.signal);
@@ -2065,10 +2058,21 @@ export class ClaudeCodeRuntime {
             abortController,
             identity,
             exited,
+            projectMcpFailed: false,
           };
           this.warm.set(key, warm);
         }
         const live = warm;
+        const onMessage = (message: SDKMessage): void => {
+          if (message.type === "system" && message.subtype === "init") {
+            const statuses = new Map(
+              (message.mcp_servers ?? []).map((server) => [server.name, server.status]),
+            );
+            live.projectMcpFailed = configuredProjectMcp.some((name) =>
+              statuses.get(name) !== "connected");
+          }
+          adapter.handle(message);
+        };
         this.active.set(key, { query: live.query, abortController: live.abortController });
         // Cancellation is forceful: SDK close/abort owns transport teardown.
         // `interrupt()` is a request over that same transport, so sending it and
@@ -2097,7 +2101,7 @@ export class ClaudeCodeRuntime {
           this.active.delete(key);
         }
         await publishProjectMcpStatus(
-          approvedProject.mcpWarnings.length > 0 || observedProjectMcpFailure,
+          approvedProject.mcpWarnings.length > 0 || live.projectMcpFailed,
         );
         this.assertTurnAdmitted(options.signal);
 
