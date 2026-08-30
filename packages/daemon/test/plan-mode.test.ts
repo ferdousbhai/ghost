@@ -161,7 +161,19 @@ describe("plan mode", () => {
 
     await expect(call({ title: "x", content: "y" })).rejects.toThrow(/only works in plan mode/);
     book.setState({ planning: true });
-    expect(planSections(book)[0]).toMatch(/^# Plan mode/);
+    const planningSections = planSections(book);
+    expect(planningSections[0]).toMatch(/^# Plan mode/);
+    expect(planningSections[0]).toContain("native read (including for character.md)");
+    for (const retired of [
+      "ghost_character",
+      "ghost_memory_write",
+      "ghost_memory_list",
+      "ghost_memory_read",
+      "ghost_memory_delete",
+    ]) {
+      expect(planningSections.join("\n"), retired).not.toContain(retired);
+    }
+    expect(planningSections[0]).not.toContain("todo, character");
 
     const revised = await call({ title: "Ship the thing!", content: "# Plan\n1. do it" });
     expect(revised.details).toMatchObject({ outcome: "revise", note: "tighter scope", path: join(dir, "plans", "ship-the-thing.md") });

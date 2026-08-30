@@ -366,7 +366,7 @@ export function planSections(book: PlanBook): string[] {
     sections.push([
       "# Plan mode",
       "You are planning, not doing: read, search, inspect, and think, but change nothing. Bash, generic file writes/edits, screenshots, memory writes, and every other mutation are blocked.",
-      "Use native read, grep, find, and ls for files; ask for decisions; and use only the observational forms of browser, desktop, jobs, todo, character, and image inspection tools.",
+      "Use native read (including for character.md), grep, find, and ls for files; ask for decisions; and use only the observational forms of browser, desktop, jobs, todo, and image inspection tools.",
       "When the approach is clear, call propose_plan with a title and the complete plan in Markdown. It is the only plan writer. The owner approves or asks for revisions; approval ends plan mode.",
     ].join("\n"));
   } else if (state.plan) {

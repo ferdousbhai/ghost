@@ -43,8 +43,8 @@ export interface GhostExtensionOptions {
   relayTransport?: RelayTransport;
   /**
    * Extra system-prompt sections, appended after the persona's derived ones.
-   * Fixed for the session's lifetime — the persona extension rebuilds the
-   * prompt every turn, but from the sections it was constructed with.
+   * Fixed for the session's lifetime — the persona extension reads them into
+   * the session-start prompt and reuses that prompt for later turns.
    */
   extraSections?: readonly string[];
 }
@@ -57,11 +57,11 @@ export interface GhostExtensionOptions {
 const NO_RELAY_BACKEND = relayBackend({});
 
 /**
- * A factory is minted per call — once per pi session, once per Claude Code turn.
+ * A factory is minted per resolver call.
  * That stays cheap only because `browserSessionFor` compares a factory's
  * `sessionIdentity` (`["relay", transport]`) by contents rather than by identity,
- * so every turn's factory matches the cached session's. Widening that comparison
- * to the factory object would make each turn a session-configuration conflict.
+ * so a later resolver call's factory matches the cached session's. Widening
+ * that comparison to the factory object would make it a configuration conflict.
  */
 function browserBackend(transport: RelayTransport | undefined): BrowserBackendFactory {
   return transport === undefined ? NO_RELAY_BACKEND : relayBackend({ transport });
@@ -106,8 +106,8 @@ export function resolveGhostExtensions(
  * What the persona prompt is assembled from, read once outside any session.
  *
  * The greeting generator needs the same material the persona extension derives
- * per turn, but it has no `AgentSession` to derive it inside of — so the read
- * crosses the seam here rather than in `greeting.ts`, which never imports
+ * at session start, but it has no `AgentSession` to derive it inside of — so the
+ * read crosses the seam here rather than in `greeting.ts`, which never imports
  * `@ghost/extensions` directly.
  *
  * Derived, never stored, exactly as it is in a session.
