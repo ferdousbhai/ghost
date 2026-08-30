@@ -2102,7 +2102,10 @@ Pi's exact-name project-over-ghost shadowing and translates only its validated
 native MCP rows into the SDK config.
 Unbound sessions enable no cwd-discovered skills. Existing Ghost extension
 tools are added through one in-process SDK MCP server, and output is normalized
-back to pi-messages. Ambient provider credentials remain scrubbed.
+back to pi-messages. Project MCP names remain opaque, including `ghost`; the
+internal server deterministically takes the first free name in `ghost`,
+`ghost-1`, `ghost-2`, … and that exact name owns its allowed-tool prefix and is
+excluded from project health. Ambient provider credentials remain scrubbed.
 
 A conversation holds one streamed Agent SDK query across successful owner
 turns. A new conversation uses its pre-turn project cwd, or owner home while

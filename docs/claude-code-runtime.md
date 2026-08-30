@@ -81,7 +81,8 @@ For each turn Ghost:
 4. applies the conversation's pre-turn project binding: owner home when
    unbound, or the trusted project cwd plus its approved declarative snapshot;
 5. captures the Ghost-specific `@ghost/extensions` tool definitions and
-   exposes them as one in-process SDK MCP server;
+   exposes them as one in-process SDK MCP server whose deterministic name does
+   not collide with any opaque project MCP name;
 6. reuses the conversation's live Agent SDK query, starting one only if there
    is none, and pushes the prompt into that query's open input channel, mapping
    the SDK's async message stream onto Ghost's existing pi-messages SSE

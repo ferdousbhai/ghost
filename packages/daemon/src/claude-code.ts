@@ -844,8 +844,7 @@ function validPersistedProjectSnapshot(value: unknown): value is ClaudePersisted
     return false;
   }
   if (!Object.entries(snapshot.mcpServers).every(([name, config]) =>
-    name !== "ghost"
-    && validateServerName(name) === undefined
+    validateServerName(name) === undefined
     && validPersistedClaudeMcpConfig(config))) {
     return false;
   }
@@ -1216,11 +1215,12 @@ function queryOptions(input: {
   metadata: LoadedClaudeSessionMetadata | null;
   newSessionId: string;
   abortController: AbortController;
+  internalMcpServerName: string;
   projectMcpServers: Record<string, ClaudeMcpServerConfig>;
   spawnClaudeCodeProcess?: (options: ClaudeSpawnOptions) => ClaudeSpawnedProcess;
 }): ClaudeQueryOptions {
   const mcp = createSdkMcpServer({
-    name: "ghost",
+    name: input.internalMcpServerName,
     version: "1.0.0",
     tools: input.tools,
     alwaysLoad: true,
@@ -1241,13 +1241,14 @@ function queryOptions(input: {
     settingSources: [],
     skills: [],
     tools: { type: "preset", preset: "claude_code" },
-    allowedTools: input.toolNames.map((name) => `mcp__ghost__${name}`),
+    allowedTools: input.toolNames.map((name) =>
+      `mcp__${input.internalMcpServerName}__${name}`),
     disallowedTools: [...CLAUDE_CODE_DISALLOWED_TOOLS],
     permissionMode: "bypassPermissions",
     allowDangerouslySkipPermissions: true,
     mcpServers: mcpServerRecord([
       ...Object.entries(input.projectMcpServers),
-      ["ghost", mcp],
+      [input.internalMcpServerName, mcp],
     ]),
     includePartialMessages: true,
     persistSession: true,
@@ -1277,10 +1278,6 @@ function projectMcpServers(
   const entries: Array<[string, ClaudeMcpServerConfig]> = [];
   const warnings: string[] = [];
   for (const server of effective.servers) {
-    if (server.name === "ghost") {
-      warnings.push("ghost: this MCP name is reserved by the Ghost runtime.");
-      continue;
-    }
     if (server.errors.length > 0) {
       warnings.push(`${server.name}: ${server.errors.join("; ")}`);
       continue;
@@ -1335,6 +1332,17 @@ function projectMcpServers(
     warnings.push(`${server.name}: unsupported MCP transport ${String(type)}.`);
   }
   return { servers: mcpServerRecord(entries), warnings };
+}
+
+function internalMcpServerName(
+  projectMcpServers: Record<string, ClaudeMcpServerConfig>,
+): string {
+  let suffix = 0;
+  for (;;) {
+    const candidate = suffix === 0 ? "ghost" : `ghost-${suffix}`;
+    if (!Object.hasOwn(projectMcpServers, candidate)) return candidate;
+    suffix += 1;
+  }
 }
 
 function containsEnvironmentExpansion(value: unknown): boolean {
@@ -1912,6 +1920,8 @@ export class ClaudeCodeRuntime {
       const approvedProject = project.admittedSnapshot
         ?? await requireMatchingClaudeProjectSnapshot(metadata, project);
       this.assertTurnAdmitted(options.signal);
+      const sdkMcpServerName = internalMcpServerName(approvedProject.mcpServers);
+      adapter.setInternalMcpServerName(sdkMcpServerName);
       const effectiveDeclarative = mergeDeclarativePromptSnapshots([
         declarativePromptSnapshot(mergeProjectDeclarativeSnapshots([
           ...(machineSkills ? [machineSkills] : []),
@@ -2028,6 +2038,7 @@ export class ClaudeCodeRuntime {
             metadata,
             newSessionId: admittedSdkSessionId,
             abortController,
+            internalMcpServerName: sdkMcpServerName,
             projectMcpServers: approvedProject.mcpServers,
             ...(processExit ? { spawnClaudeCodeProcess: processExit.spawn } : {}),
           });

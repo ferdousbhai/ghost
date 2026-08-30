@@ -1434,6 +1434,76 @@ describe("Claude Code subscription runtime", () => {
     }
   });
 
+  it("keeps a project MCP server named ghost distinct from Ghost's internal server", async () => {
+    const { paths, seenOptions } = setupClaudeHost({
+      createQuery: (input, lifecycle) => {
+        const sessionId = input.options.sessionId ?? input.options.resume;
+        if (!sessionId) throw new Error("MCP collision fixture received no session id");
+        return fakeQuery([
+          sdkMessage({
+            type: "system",
+            subtype: "init",
+            session_id: sessionId,
+            mcp_servers: [
+              { name: "ghost", status: "failed" },
+              { name: "ghost-1", status: "connected" },
+            ],
+          }),
+          ...responseMessages(sessionId, "collision-safe"),
+        ], lifecycle, input.prompt);
+      },
+    });
+    const project = join(temp!.root, "claude-ghost-mcp-name");
+    mkdirSync(join(project, ".omp"), { recursive: true });
+    writeFileSync(join(project, ".omp", "mcp.json"), JSON.stringify({
+      mcpServers: {
+        ghost: {
+          type: "stdio",
+          command: process.execPath,
+          args: ["--version"],
+        },
+      },
+    }));
+    const preview = await host!.previewProject(
+      "casper",
+      "ghost-mcp-name",
+      "claude-code",
+      project,
+    );
+    expect(preview.resources.mcpServers).toBe(1);
+    expect(preview.warnings).toEqual([]);
+    await host!.bindProject("casper", "ghost-mcp-name", "claude-code", {
+      root: project,
+      trustToken: preview.trustToken,
+      expectedGeneration: 0,
+    });
+
+    await host!.runTurn("casper", {
+      sessionId: "ghost-mcp-name",
+      prompt: "keep both MCP servers distinct",
+      emit: () => {},
+    });
+
+    const launched = seenOptions[0]?.mcpServers as Record<string, unknown>;
+    expect(launched.ghost).toMatchObject({
+      type: "stdio",
+      command: process.execPath,
+      args: ["--version"],
+    });
+    expect(launched["ghost-1"]).toMatchObject({ type: "sdk", name: "ghost-1" });
+    expect(seenOptions[0]?.allowedTools).toContain("mcp__ghost-1__ghost_browser");
+    expect(await host!.getProject("casper", "ghost-mcp-name", "claude-code"))
+      .toMatchObject({ status: "degraded", mcpStatus: "degraded" });
+    const persisted = JSON.parse(readFileSync(
+      claudeSessionMetadataPath(paths.sessionDir, "ghost-mcp-name"),
+      "utf8",
+    )) as { projectSnapshot: { mcpServers: Record<string, unknown> } };
+    expect(persisted.projectSnapshot.mcpServers.ghost).toMatchObject({
+      type: "stdio",
+      command: process.execPath,
+    });
+  });
+
   it("keeps Claude MCP counts, health, launch, and persistence on admitted rows only", async () => {
     const { paths, seenOptions } = setupClaudeHost();
     const disabledProject = join(temp!.root, "claude-disabled-only-mcp");

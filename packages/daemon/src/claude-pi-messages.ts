@@ -16,6 +16,7 @@ import type {
 import { addUsage, copyUsage, zeroUsage, type PiMessagesEvent, type Usage } from "./pi-messages.js";
 
 export interface ClaudePiMessagesAdapter {
+  setInternalMcpServerName(name: string): void;
   handle(message: SDKMessage): void;
   recordUsage(result: SDKResultMessage): void;
   finishError(error: unknown, aborted?: boolean): void;
@@ -60,8 +61,8 @@ function usageFromResult(result: SDKResultMessage): Usage {
   };
 }
 
-function visibleToolName(name: string): string {
-  const prefix = "mcp__ghost__";
+function visibleToolName(name: string, internalMcpServerName: string): string {
+  const prefix = `mcp__${internalMcpServerName}__`;
   return name.startsWith(prefix) ? name.slice(prefix.length) : name;
 }
 
@@ -107,6 +108,7 @@ export function createClaudePiMessagesAdapter(
   let started = false;
   let terminal = false;
   let emittedText = false;
+  let internalMcpServerName = "ghost";
   const totalUsage = zeroUsage();
 
   const addResultUsage = (result: SDKResultMessage): void => {
@@ -160,7 +162,7 @@ export function createClaudePiMessagesAdapter(
       kind: "tool",
       wireIndex: nextWireIndex++,
       id: content.id,
-      name: visibleToolName(content.name),
+      name: visibleToolName(content.name, internalMcpServerName),
       inputJson: "",
       initialInput: content.input,
     };
@@ -254,6 +256,9 @@ export function createClaudePiMessagesAdapter(
   };
 
   return {
+    setInternalMcpServerName(name) {
+      internalMcpServerName = name;
+    },
     handle(message) {
       if (terminal) return;
       if (message.type === "stream_event") {

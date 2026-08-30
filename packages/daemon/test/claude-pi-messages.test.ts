@@ -88,9 +88,10 @@ describe("Claude Agent SDK -> pi-messages", () => {
     ]);
   });
 
-  it("normalizes in-process MCP tool names for the existing shell", () => {
+  it("normalizes the chosen in-process MCP tool prefix for the existing shell", () => {
     const events: PiMessagesEvent[] = [];
     const adapter = createClaudePiMessagesAdapter((event) => events.push(event));
+    adapter.setInternalMcpServerName("ghost-1");
     adapter.handle(message({
       type: "stream_event",
       parent_tool_use_id: null,
@@ -102,8 +103,8 @@ describe("Claude Agent SDK -> pi-messages", () => {
         content_block: {
           type: "mcp_tool_use",
           id: "tool-1",
-          name: "mcp__ghost__ghost_browser",
-          server_name: "ghost",
+          name: "mcp__ghost-1__ghost_browser",
+          server_name: "ghost-1",
           input: {},
         },
       },
