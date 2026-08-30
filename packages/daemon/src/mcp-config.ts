@@ -5,8 +5,7 @@
  * `src/mcp/{types,config,config-writer}.ts`), kept so existing homes keep
  * loading; the implementation is Ghost's.
  */
-import { randomUUID } from "node:crypto";
-import { chmodSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import {
@@ -16,6 +15,7 @@ import {
   writePrivateJsonAtomic,
 } from "./private-file.js";
 import { serializeByKey } from "./promise-chain.js";
+import { acquireWriterLock, releaseWriterLock } from "./writer-lock.js";
 
 export interface MCPAuthConfig {
   type: "oauth" | "apikey";
@@ -149,51 +149,15 @@ export async function writeMCPConfigFile(filePath: string, config: MCPConfigFile
 const fileLocks = new Map<string, Promise<unknown>>();
 const MCP_WRITER_LOCK_WAIT_MS = 500;
 const MCP_WRITER_LOCK_POLL_MS = 10;
-const mcpLockSleep = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
-
-interface MCPWriterLockOwner {
-  token: string;
-  pid: number;
-}
-
-function readMCPWriterLock(path: string): MCPWriterLockOwner | null {
-  try {
-    const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<MCPWriterLockOwner>;
-    return typeof parsed.token === "string"
-      && typeof parsed.pid === "number"
-      && Number.isSafeInteger(parsed.pid)
-      ? parsed as MCPWriterLockOwner
-      : null;
-  } catch {
-    return null;
-  }
-}
 
 function acquireMCPWriterLock(filePath: string): () => void {
   mkdirSync(dirname(filePath), { recursive: true, mode: 0o700 });
   const lockPath = `${filePath}.lock`;
-  const owner: MCPWriterLockOwner = { token: randomUUID(), pid: process.pid };
-  const deadline = Date.now() + MCP_WRITER_LOCK_WAIT_MS;
-  for (;;) {
-    try {
-      writeFileSync(lockPath, `${JSON.stringify(owner)}\n`, { flag: "wx", mode: 0o600 });
-      chmodSync(lockPath, 0o600);
-      break;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      const current = readMCPWriterLock(lockPath);
-      if (current?.pid === process.pid) {
-        throw new Error(`${filePath} has a re-entrant MCP writer.`);
-      }
-      if (Date.now() >= deadline) throw new Error(`${filePath} is locked by another MCP writer; retry.`);
-      Atomics.wait(mcpLockSleep, 0, 0, MCP_WRITER_LOCK_POLL_MS);
-    }
-  }
-  return () => {
-    const current = readMCPWriterLock(lockPath);
-    if (current?.token !== owner.token) throw new Error(`${filePath} MCP writer lock ownership was lost.`);
-    unlinkSync(lockPath);
-  };
+  const lease = acquireWriterLock(lockPath, {
+    waitMs: MCP_WRITER_LOCK_WAIT_MS,
+    pollMs: MCP_WRITER_LOCK_POLL_MS,
+  });
+  return () => releaseWriterLock(lease);
 }
 
 export function withMCPConfigWriteLock<T>(filePath: string, operation: () => T): T {

@@ -20,6 +20,7 @@ import {
   ghostModelsLockPath,
   ghostModelsPath,
   GhostModelsWriteConflictError,
+  GhostModelsLockError,
   openAiCompatiblePreset,
   openRouterPreset,
   OPENROUTER_BASE_URL,
@@ -29,6 +30,7 @@ import {
   resolveSmolModelRef,
   setChatModelRole,
   setGhostModelRole,
+  withSerializedModelsWrite,
   writeGhostModels,
 } from "../src/models.js";
 import { createGhostPiRuntime } from "../src/pi-runtime.js";
@@ -128,8 +130,10 @@ describe("models.json round-trip", () => {
         "const fs = require('node:fs');",
         "const lockPath = process.argv[1];",
         "const holdMs = Number(process.argv[2]);",
+        "const raw = fs.readFileSync('/proc/self/stat', 'utf8');",
+        "const startTicks = raw.slice(raw.lastIndexOf(')') + 1).trim().split(/\\s+/)[19];",
         "fs.writeFileSync(lockPath, JSON.stringify({",
-        "  token: 'child-owner', pid: process.pid,",
+        "  token: 'child-owner', pid: process.pid, startTicks,",
         "}) + '\\n', { mode: 0o600 });",
         "process.stdout.write('ready\\n');",
         "setTimeout(() => {",
@@ -178,26 +182,76 @@ describe("models.json round-trip", () => {
     const exited = once(child, "exit");
     child.kill("SIGKILL");
     await exited;
-    // Crash leftovers are deliberately fail-closed and require explicit
-    // operator inspection/removal; tests clean up their own fixture.
     expect(existsSync(lockPath)).toBe(true);
+
+    setChatModelRole(agentDir, "local", "after-crash");
+    expect(existsSync(lockPath)).toBe(false);
+    expect(readGhostModels(agentDir)?.roles?.chat_model?.modelId).toBe("after-crash");
   });
 
   it("reports a re-entrant same-process lock without breaking it", () => {
     const agentDir = makeAgentDir();
     const lockPath = ghostModelsLockPath(agentDir);
+    withSerializedModelsWrite(ghostModelsPath(agentDir), () => {
+      expect(() => setChatModelRole(agentDir, "local", "blocked")).toThrowError(
+        expect.objectContaining({
+          code: "ghost_models_write_conflict",
+          ownerPid: process.pid,
+          retryable: false,
+        }),
+      );
+      expect(existsSync(lockPath)).toBe(true);
+    });
+    expect(existsSync(lockPath)).toBe(false);
+  });
+
+  it("reclaims a reused PID only when its process-start identity differs", () => {
+    const agentDir = makeAgentDir();
+    const lockPath = ghostModelsLockPath(agentDir);
     writeFileSync(lockPath, `${JSON.stringify({
-      token: "same-process-owner",
+      token: "old-incarnation",
       pid: process.pid,
+      startTicks: "1",
     })}\n`, { mode: 0o600 });
 
-    expect(() => setChatModelRole(agentDir, "local", "blocked")).toThrowError(
-      expect.objectContaining({
-        code: "ghost_models_write_conflict",
-        ownerPid: process.pid,
-        retryable: false,
-      }),
-    );
+    setChatModelRole(agentDir, "local", "after-pid-reuse");
+
+    expect(existsSync(lockPath)).toBe(false);
+    expect(readGhostModels(agentDir)?.roles?.chat_model?.modelId).toBe("after-pid-reuse");
+  });
+
+  it("finishes a dead owner's interrupted reclaim before acquiring", () => {
+    const agentDir = makeAgentDir();
+    const lockPath = ghostModelsLockPath(agentDir);
+    const claim = `${lockPath}.reclaim-dead-fixture`;
+    writeFileSync(claim, `${JSON.stringify({
+      token: "dead-reclaimer",
+      pid: process.pid,
+      startTicks: "1",
+    })}\n`, { mode: 0o600 });
+
+    setChatModelRole(agentDir, "local", "after-reclaim");
+
+    expect(existsSync(claim)).toBe(false);
+    expect(readGhostModels(agentDir)?.roles?.chat_model?.modelId).toBe("after-reclaim");
+  });
+
+  it("leaves ambiguous owner evidence for explicit manual cleanup", () => {
+    const agentDir = makeAgentDir();
+    const lockPath = ghostModelsLockPath(agentDir);
+    writeFileSync(lockPath, `${JSON.stringify({
+      token: "legacy-owner-without-start-identity",
+      pid: 999_999,
+    })}\n`, { mode: 0o600 });
+
+    let failure: unknown;
+    try {
+      setChatModelRole(agentDir, "local", "blocked");
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(GhostModelsLockError);
+    expect((failure as Error).message).toContain("remove it manually");
     expect(existsSync(lockPath)).toBe(true);
   });
 

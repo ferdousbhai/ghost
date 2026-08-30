@@ -341,7 +341,12 @@ removes `auth.json` and empties and vacuums `agent.db` down to its schema and
 change-counter rows. A portable replacement holds that file's writer lock,
 rereads its current inode, and publishes only while the admitted identity still
 owns the pathname. An external replacement wins and migration retries against
-it; an interrupted private CAS is reconciled before the next locked read.
+it. Writer ownership carries both PID and Linux process-start identity; a
+contender reclaims only a lock whose exact admitted inode belongs to a verified
+dead process, and reconciles an interrupted reclaim before proceeding.
+Malformed or unverifiable owner evidence remains fail-closed for explicit
+manual inspection. After reclaim, an interrupted private CAS is reconciled
+before the next locked read.
 New `models.json.accounts` authorization is durable before `mcp.json` can
 publish a reference to it. Every other table goes, not only the credential ones:
 `usage_history` carries a provider email and account id per sample, `clients` a

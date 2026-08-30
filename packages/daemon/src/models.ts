@@ -2,10 +2,8 @@ import { randomUUID } from "node:crypto";
 import {
   chmodSync,
   mkdirSync,
-  readFileSync,
   renameSync,
   rmSync,
-  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
@@ -22,6 +20,12 @@ import {
   parseSecretReference,
   SECRET_REFERENCE_PREFIX,
 } from "./secret-reference.js";
+import {
+  acquireWriterLock,
+  releaseWriterLock,
+  WriterLockBusyError,
+  WriterLockManualError,
+} from "./writer-lock.js";
 
 export interface GhostModelDefinition {
   id: string;
@@ -160,13 +164,6 @@ const MODELS_READ_REFUSAL: Record<Exclude<PrivateReadRefusal, "open">, string> =
   changed: "changed while it was being read",
   encoding: "is not valid UTF-8",
 };
-const lockSleepCell = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
-
-interface GhostModelsLockOwner {
-  token: string;
-  pid: number;
-}
-
 export class GhostModelsWriteConflictError extends Error {
   readonly code = "ghost_models_write_conflict";
 
@@ -207,98 +204,37 @@ export function ghostModelsLockPath(configDir: string): string {
   return `${ghostModelsPath(configDir)}${MODELS_LOCK_SUFFIX}`;
 }
 
-function parseLockOwner(raw: string): GhostModelsLockOwner | null {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return null;
-  }
-  const owner = parsed as Partial<GhostModelsLockOwner> | null;
-  if (typeof owner?.token !== "string"
-    || !owner.token
-    || typeof owner.pid !== "number"
-    || !Number.isSafeInteger(owner.pid)
-    || owner.pid <= 0) {
-    return null;
-  }
-  return owner as GhostModelsLockOwner;
-}
-
-function readLockOwner(lockPath: string): GhostModelsLockOwner | null {
-  let raw: string;
-  try {
-    raw = readFileSync(lockPath, "utf8");
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    // Missing/malformed ownership is ambiguous: fail closed and leave the lock
-    // for explicit operator inspection/removal rather than guessing it is stale.
-    if (code === "ENOENT" || code === "EISDIR") return null;
-    throw error;
-  }
-  return parseLockOwner(raw);
-}
-
-function releaseModelsLock(lockPath: string, owner: GhostModelsLockOwner): void {
-  const current = readLockOwner(lockPath);
-  if (current?.token !== owner.token) {
-    throw new GhostModelsLockError(lockPath, "lock ownership was lost before release.");
-  }
-  try {
-    unlinkSync(lockPath);
-  } catch (error) {
-    throw new GhostModelsLockError(lockPath, "the owned lock could not be released.", { cause: error });
-  }
-}
-
-function tryCreateModelsLock(lockPath: string): GhostModelsLockOwner | null {
-  const owner: GhostModelsLockOwner = {
-    token: randomUUID(),
-    pid: process.pid,
-  };
-  try {
-    writeFileSync(lockPath, `${JSON.stringify(owner)}\n`, {
-      encoding: "utf8",
-      flag: "wx",
-      mode: 0o600,
-    });
-    chmodSync(lockPath, 0o600);
-    return owner;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "EEXIST") return null;
-    throw new GhostModelsLockError(
-      lockPath,
-      "the writer lock could not be initialized; inspect and remove it before retrying if it exists.",
-      { cause: error },
-    );
-  }
-}
-
-function acquireModelsLock(path: string): { lockPath: string; owner: GhostModelsLockOwner } {
+function acquireModelsLock(path: string): ReturnType<typeof acquireWriterLock> {
   const lockPath = `${path}${MODELS_LOCK_SUFFIX}`;
-  const deadline = Date.now() + MODELS_LOCK_WAIT_MS;
-  for (;;) {
-    const acquired = tryCreateModelsLock(lockPath);
-    if (acquired) return { lockPath, owner: acquired };
-    const owner = readLockOwner(lockPath);
-    if (owner?.pid === process.pid) {
-      throw new GhostModelsWriteConflictError(path, lockPath, owner.pid, false);
+  try {
+    return acquireWriterLock(lockPath, {
+      waitMs: MODELS_LOCK_WAIT_MS,
+      pollMs: MODELS_LOCK_POLL_MS,
+    });
+  } catch (error) {
+    if (error instanceof WriterLockBusyError) {
+      throw new GhostModelsWriteConflictError(
+        path,
+        lockPath,
+        error.ownerPid,
+        !error.reentrant,
+      );
     }
-    if (Date.now() >= deadline) {
-      throw new GhostModelsWriteConflictError(path, lockPath, owner?.pid, true);
+    if (error instanceof WriterLockManualError) {
+      throw new GhostModelsLockError(lockPath, error.message, { cause: error });
     }
-    Atomics.wait(lockSleepCell, 0, 0, MODELS_LOCK_POLL_MS);
+    throw new GhostModelsLockError(lockPath, "the writer lock could not be initialized.", { cause: error });
   }
 }
 
 export function withSerializedModelsWrite<T>(path: string, mutation: () => T): T {
-  const { lockPath, owner } = acquireModelsLock(path);
+  const lease = acquireModelsLock(path);
   let value: T;
   try {
     value = mutation();
   } catch (error) {
     try {
-      releaseModelsLock(lockPath, owner);
+      releaseWriterLock(lease);
     } catch (releaseError) {
       throw new AggregateError(
         [error, releaseError],
@@ -307,7 +243,11 @@ export function withSerializedModelsWrite<T>(path: string, mutation: () => T): T
     }
     throw error;
   }
-  releaseModelsLock(lockPath, owner);
+  try {
+    releaseWriterLock(lease);
+  } catch (error) {
+    throw new GhostModelsLockError(lease.path, "the owned lock could not be released.", { cause: error });
+  }
   return value;
 }
 

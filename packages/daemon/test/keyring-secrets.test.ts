@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import {
   copyFileSync,
   existsSync,
@@ -391,6 +392,53 @@ describe("plaintext migration", () => {
     expect(existsSync(`${path}.ghost-migration-cas`)).toBe(false);
     expect(readFileSync(path, "utf8")).toContain("keyring:");
   });
+
+  it.each(["models", "mcp"] as const)(
+    "recovers a dead %s writer lock and its interrupted CAS",
+    (source) => {
+      const home = root();
+      const name = source === "models" ? "models.json" : "mcp.json";
+      const path = join(home, name);
+      const value = source === "models"
+        ? { providers: { openrouter: { apiKey: "crashed-model-secret" } } }
+        : {
+            mcpServers: {
+              crashed: {
+                type: "http",
+                url: "https://crashed.test",
+                headers: { Authorization: "crashed-mcp-secret" },
+              },
+            },
+          };
+      writeFileSync(path, JSON.stringify(value));
+      const moduleUrl = new URL(
+        source === "models" ? "../src/models.ts" : "../src/mcp-config.ts",
+        import.meta.url,
+      ).href;
+      const exportName = source === "models"
+        ? "withSerializedModelsWrite"
+        : "withMCPConfigWriteLock";
+      const crashed = spawnSync(process.execPath, ["--eval", `
+        import { renameSync } from "node:fs";
+        const module = await import(${JSON.stringify(moduleUrl)});
+        module[${JSON.stringify(exportName)}](${JSON.stringify(path)}, () => {
+          renameSync(${JSON.stringify(path)}, ${JSON.stringify(`${path}.ghost-migration-cas`)});
+          process.exit(29);
+        });
+      `], { encoding: "utf8" });
+      expect(crashed.status, crashed.stderr).toBe(29);
+      expect(existsSync(`${path}.lock`)).toBe(true);
+      expect(existsSync(path)).toBe(false);
+      expect(existsSync(`${path}.ghost-migration-cas`)).toBe(true);
+
+      openContext(home, new MemorySecretServiceClient()).close();
+
+      expect(readFileSync(path, "utf8")).toContain("keyring:");
+      expect(existsSync(`${path}.lock`)).toBe(false);
+      expect(existsSync(`${path}.ghost-migration-cas`)).toBe(false);
+      expect(readdirSync(home).filter((entry) => entry.includes(".lock.reclaim-"))).toEqual([]);
+    },
+  );
 
   it("allocates distinct machine accounts instead of overwriting another literal", () => {
     const machine = root();
