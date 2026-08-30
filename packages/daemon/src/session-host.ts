@@ -77,10 +77,16 @@ import {
 } from "./ghosts.js";
 import { silentLogger, type Logger } from "./log.js";
 import {
+  listGhostScheduleUnits,
+  sweepGhostSchedules,
+  userUnitDirectory,
+} from "./schedules.js";
+import {
   loadMachineSkills,
   machineSkillPaths,
   OMARCHY_COMPUTER_USE_POLICY,
   OWNER_DELIVERABLE_POLICY,
+  SCHEDULED_WORK_POLICY,
 } from "./machine-skills.js";
 import {
   maintenanceStatePath,
@@ -2608,6 +2614,7 @@ export class SessionHost {
       ...(this.extensionOptions.extraSections ?? []),
       OMARCHY_COMPUTER_USE_POLICY,
       OWNER_DELIVERABLE_POLICY,
+      SCHEDULED_WORK_POLICY,
       ...(declarativeSection ? [declarativeSection] : []),
       ...(isSeededCharacter(ghostName, sessionCharacter?.body ?? null)
         ? [FIRST_MEETING_SECTION]
@@ -6827,6 +6834,14 @@ export class SessionHost {
       await maintenanceReservation?.drained;
       await this.quiesceGhost(ghost.name);
       const trashed = this.registry.trash(ghost.name);
+      // A trashed ghost's timers would keep firing at a ghost that is gone, so
+      // they go with it. Trash is recoverable; a schedule is not restored with
+      // it, because a timer that fired into an empty roster is worse than one
+      // the owner writes again.
+      await sweepGhostSchedules(ghost.name, {
+        unitDir: userUnitDirectory(this.ownerHome),
+        logger: this.logger,
+      });
       this.maintenance?.completeGhostDelete(ghost.name);
       this.forgetGhost(ghost.name, ghost.dir);
       this.logger.info("trashed ghost", { ghost: ghost.name, trash: trashed.trash });
@@ -6873,6 +6888,23 @@ export class SessionHost {
       const renamed = this.registry.rename(ghost.name, nextName);
       await this.maintenance?.completeGhostRename(ghost.name, nextName);
       this.forgetGhost(ghost.name, ghost.dir);
+      // A rename leaves the ghost's timers naming the old name, in their
+      // filename and in their ExecStart. They are not swept: unlike a delete
+      // the ghost still exists, the units are the owner's own files, and a
+      // timer that fires against a missing ghost fails loudly in
+      // `systemctl --user --failed` rather than disappearing quietly. Say which
+      // ones so the owner does not have to wait for the next fire to find out.
+      const staleUnits = await listGhostScheduleUnits(
+        ghost.name,
+        userUnitDirectory(this.ownerHome),
+      );
+      if (staleUnits.length > 0) {
+        this.logger.warn("renamed ghost still has timers under its old name", {
+          ghost: ghost.name,
+          name: renamed.name,
+          units: staleUnits,
+        });
+      }
       this.logger.info("renamed ghost", { ghost: ghost.name, name: renamed.name });
       return renamed;
     } finally {

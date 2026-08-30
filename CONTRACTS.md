@@ -174,6 +174,29 @@ browser's, landing wherever the owner configured it and deduplicated by the
 browser itself. Recordings do not exist yet; when they do they follow the
 screenshot pattern exactly, and never prune the file currently being written.
 
+Scheduled work is a systemd user timer, and the timer is the only record of it.
+Ghost ships no scheduler: a ghost writes its own units through Bash, the way
+`omarchy-games-retro-install` writes one `.desktop` file into the standard user
+directory and stops. The pair is named `ghost-timer-<ghost>-<slug>.timer` and
+`.service` under `XDG_CONFIG_HOME/systemd/user`, else `~/.config/systemd/user`,
+and the service's `ExecStart` is the `ghost` CLI, which authenticates itself from
+the API token file. `TimeoutStartSec` must be lifted, because a `oneshot`
+inherits systemd's ~90s start timeout and the daemon aborts a turn whose caller
+disconnects, so a longer check-in would otherwise be killed mid-answer.
+
+That prefix is the entire daemon-side contract. Deleting a ghost disables and
+removes only units matching its exact `ghost-timer-<ghost>-` prefix — the same
+exact-name rule screenshot retention follows, so the owner's own timers and
+another ghost's share the directory untouched. Renaming does not sweep: the ghost
+still exists, the units are the owner's files, and a timer naming a ghost that
+moved fails visibly in `systemctl --user --failed`; the daemon logs which units
+were left behind rather than deleting or rewriting them. A timer-activated
+service is a sibling of `ghostd.service`, never a child of it, which is what lets
+a schedule survive a daemon restart that would kill anything in ghostd's own
+cgroup. Timers fire only while the user manager runs and the daemon is up with
+the owner's graphical session, so scheduled work makes no promise about
+overnight or logged-out runs; #18 owns that.
+
 A file a ghost authors *for the owner* — a report, an export, a generated image —
 is a write-once artifact too, and belongs in the owner's Documents tree or the
 working directory the request was about, never in the ghost's `docs/`. `docs/`
