@@ -470,8 +470,9 @@ export class CodexWorkerAdapter implements WorkerAdapter {
   }
 
   private async requireTaskContext(request: WorkerTaskRequest): Promise<void> {
-    const validated = await this.assertContext({ root: request.root, cwd: request.cwd });
-    if (!sameContext(request, validated)) {
+    const source = { root: request.sourceRoot, cwd: request.sourceCwd };
+    const validated = await this.assertContext(source);
+    if (!sameContext(source, validated)) {
       throw new CodexProcessError("The task project identity changed before Codex could start.");
     }
   }

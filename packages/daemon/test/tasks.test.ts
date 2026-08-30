@@ -1,4 +1,4 @@
-import { mkdirSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { conversationIdentity } from "../src/conversation-identity.js";
@@ -15,6 +15,11 @@ import {
   type WorkerAdapterEvent,
   type WorkerTaskRequest,
 } from "../src/tasks.js";
+import {
+  TaskWorkspaceError,
+  type TaskWorkspaceLifecycle,
+  type TaskWorkspaceView,
+} from "../src/task-workspaces.js";
 import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
 
 interface ControlledRun {
@@ -83,7 +88,11 @@ afterEach(() => {
   temp = null;
 });
 
-function setup(adapter: WorkerAdapter, now: () => number = Date.now): {
+function setup(
+  adapter: WorkerAdapter,
+  now: () => number = Date.now,
+  workspace?: TaskWorkspaceLifecycle,
+): {
   manager: TaskManager;
   homeOperations: HomeOperationCoordinator;
   root: string;
@@ -105,6 +114,7 @@ function setup(adapter: WorkerAdapter, now: () => number = Date.now): {
       adapters: [adapter],
       homeOperations,
       now,
+      ...(workspace === undefined ? {} : { workspace }),
       resolveContext: async (input) => {
         expect(input.ghostName).toBe("casper");
         expect(input.parent).toEqual(conversationIdentity("pi", "conversation-1"));
@@ -116,7 +126,84 @@ function setup(adapter: WorkerAdapter, now: () => number = Date.now): {
 
 const parent = conversationIdentity("pi", "conversation-1");
 
+function isolatedWorkspace(
+  taskId: string,
+  sourceRoot: string,
+  sourceCwd: string,
+  state: TaskWorkspaceView["state"] = "preparing",
+): TaskWorkspaceView {
+  const root = join(sourceRoot, "..", "isolated", taskId);
+  const cwd = join(root, sourceCwd.slice(sourceRoot.length + 1));
+  return {
+    strategy: "git-worktree",
+    state,
+    root,
+    cwd,
+    branch: `ghost/${taskId}`,
+    baseCommit: "a".repeat(40),
+    headCommit: state === "preparing" ? null : "a".repeat(40),
+    review: state === "removed" ? "ready" : state === "preserved" ? "needs_attention" : "pending",
+    notice: `Workspace is ${state}.`,
+  };
+}
+
 describe("TaskManager lifecycle", () => {
+  it("keeps trusted source context separate from the worker workspace and finalizes it", async () => {
+    const controlled = controlledAdapter();
+    const calls: string[] = [];
+    const workspace: TaskWorkspaceLifecycle = {
+      plan: async (input) => {
+        calls.push("plan");
+        return isolatedWorkspace(input.taskId, input.sourceRoot, input.sourceCwd);
+      },
+      provision: async (input) => {
+        calls.push("provision");
+        return isolatedWorkspace(input.taskId, input.sourceRoot, input.sourceCwd, "active");
+      },
+      finish: async (input) => {
+        calls.push(`finish:${input.outcome}`);
+        return {
+          ...input.workspace,
+          state: "removed",
+          headCommit: "b".repeat(40),
+          review: "ready",
+          notice: "Local review branch is ready.",
+        };
+      },
+      preserve: (view, notice) => ({ ...view, state: "preserved", review: "needs_attention", notice }),
+    };
+    const { manager, root, cwd } = setup(controlled.adapter, Date.now, workspace);
+    const task = await manager.create({
+      ghostName: "casper",
+      parent,
+      agent: "pi-worker",
+      task: "Implement in isolation.",
+    });
+    await until(() => controlled.runs.length === 1);
+
+    expect(controlled.runs[0]!.request).toMatchObject({
+      sourceRoot: root,
+      sourceCwd: cwd,
+      root: task.workspace.root,
+      cwd: task.workspace.cwd,
+    });
+    expect(calls).toEqual(["plan", "provision"]);
+    controlled.runs[0]!.resolve("done");
+
+    await expect(manager.wait("casper", task.id)).resolves.toMatchObject({
+      state: "completed",
+      workspace: {
+        state: "removed",
+        review: "ready",
+        headCommit: "b".repeat(40),
+      },
+      events: expect.arrayContaining([
+        expect.objectContaining({ type: "notice", text: "Local review branch is ready." }),
+      ]),
+    });
+    expect(calls).toEqual(["plan", "provision", "finish:completed"]);
+  });
+
   it("runs tasks without a concurrency cap and persists bounded normalized results", async () => {
     const controlled = controlledAdapter();
     const { manager, root, cwd } = setup(controlled.adapter);
@@ -644,6 +731,114 @@ describe("TaskManager lifecycle", () => {
 });
 
 describe("TaskManager boundaries", () => {
+  it("rejects workspace planning before persistence and records provisioning failure durably", async () => {
+    const controlled = controlledAdapter();
+    const planningFailure: TaskWorkspaceLifecycle = {
+      plan: async () => {
+        throw new TaskWorkspaceError("task_project_dirty", "Commit source changes first.");
+      },
+      provision: async (input) => input.workspace,
+      finish: async (input) => input.workspace,
+      preserve: (view, notice) => ({ ...view, state: "preserved", review: "needs_attention", notice }),
+    };
+    const planned = setup(controlled.adapter, Date.now, planningFailure);
+    await expect(planned.manager.create({
+      ghostName: "casper",
+      parent,
+      agent: "pi-worker",
+      task: "Do not persist this.",
+    })).rejects.toMatchObject({ code: "task_project_dirty", status: 409 });
+    expect(controlled.runs).toEqual([]);
+    await expect(planned.manager.list("casper")).resolves.toMatchObject({ tasks: [] });
+
+    temp?.cleanup();
+    temp = null;
+    const provisioningFailure: TaskWorkspaceLifecycle = {
+      plan: async (input) => isolatedWorkspace(input.taskId, input.sourceRoot, input.sourceCwd),
+      provision: async (input) => {
+        throw new TaskWorkspaceError(
+          "task_project_changed",
+          "The source changed during preparation.",
+          {
+            ...input.workspace,
+            state: "preserved",
+            review: "needs_attention",
+            notice: "Inspect uncertain task artifacts.",
+          },
+        );
+      },
+      finish: async (input) => input.workspace,
+      preserve: (view, notice) => ({ ...view, state: "preserved", review: "needs_attention", notice }),
+    };
+    const provisioned = setup(controlled.adapter, Date.now, provisioningFailure);
+    const failed = await provisioned.manager.create({
+      ghostName: "casper",
+      parent,
+      agent: "pi-worker",
+      task: "Persist preparation failure.",
+    });
+
+    expect(failed).toMatchObject({
+      version: 2,
+      state: "failed",
+      error: { code: "task_project_changed" },
+      workspace: { state: "preserved", review: "needs_attention" },
+    });
+    expect(controlled.runs).toEqual([]);
+    await expect(provisioned.manager.get("casper", failed.id)).resolves.toEqual(failed);
+  });
+
+  it("loads a v1 task as preserved in-place state and promotes it on interruption", async () => {
+    temp = makeTempGhosts();
+    temp.registry.ensureRoot();
+    seedGhost(temp.root, { name: "casper" });
+    const taskDir = ghostPaths(temp.registry.get("casper").dir).taskDir;
+    mkdirSync(taskDir, { recursive: true });
+    const id = "task-00000000-0000-4000-8000-000000000001";
+    const path = join(taskDir, `${id}.json`);
+    writeFileSync(path, `${JSON.stringify({
+      version: 1,
+      id,
+      parent,
+      agent: "pi-worker",
+      task: "Legacy running task.",
+      root: "/project",
+      cwd: "/project/app",
+      state: "running",
+      createdAt: "2026-08-30T09:00:00.000Z",
+      updatedAt: "2026-08-30T09:00:01.000Z",
+      nativeSessionId: null,
+      result: null,
+      resultTruncated: false,
+      error: null,
+      events: [{
+        sequence: 1,
+        at: "2026-08-30T09:00:00.000Z",
+        type: "state",
+        state: "running",
+      }],
+      eventsTruncated: false,
+    }, null, 2)}\n`, { mode: 0o600 });
+
+    const manager = new TaskManager({ registry: temp.registry });
+    await expect(manager.get("casper", id)).resolves.toMatchObject({
+      version: 2,
+      state: "interrupted",
+      workspace: {
+        strategy: "in-place",
+        state: "preserved",
+        root: "/project",
+        cwd: "/project/app",
+        review: "not_applicable",
+      },
+    });
+    expect(JSON.parse(readFileSync(path, "utf8"))).toMatchObject({
+      version: 2,
+      state: "interrupted",
+      workspace: { strategy: "in-place", state: "preserved" },
+    });
+  });
+
   it("rejects unavailable workers, invalid contexts, and unbounded task input before persistence", async () => {
     temp = makeTempGhosts();
     temp.registry.ensureRoot();

@@ -15,13 +15,24 @@ const sibling = conversationIdentity("pi", "conversation-2");
 
 function taskView(overrides: Partial<TaskView> = {}): TaskView {
   return {
-    version: 1,
+    version: 2,
     id: "task-11111111-1111-4111-8111-111111111111",
     parent,
     agent: "codex",
     task: "Implement the parser.",
     root: "/repo",
     cwd: "/repo/packages/parser",
+    workspace: {
+      strategy: "git-worktree",
+      state: "active",
+      root: "/state/ghost/task-worktrees/repo/task-11111111-1111-4111-8111-111111111111",
+      cwd: "/state/ghost/task-worktrees/repo/task-11111111-1111-4111-8111-111111111111/packages/parser",
+      branch: "ghost/task-11111111-1111-4111-8111-111111111111",
+      baseCommit: "a".repeat(40),
+      headCommit: "a".repeat(40),
+      review: "pending",
+      notice: "Running in an isolated worktree.",
+    },
     state: "running",
     createdAt: "2026-08-30T09:00:00.000Z",
     updatedAt: "2026-08-30T09:01:00.000Z",
@@ -48,6 +59,7 @@ function taskSummary(task: TaskView): TaskSummary {
     taskPreview: task.task,
     root: task.root,
     cwd: task.cwd,
+    workspace: task.workspace,
     state: task.state,
     createdAt: task.createdAt,
     updatedAt: task.updatedAt,

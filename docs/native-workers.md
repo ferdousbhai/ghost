@@ -6,6 +6,29 @@ for the outcome. A worker keeps its coding harness's own identity and project
 behavior. The authoritative lifecycle and trust rules are in
 [`CONTRACTS.md`](../CONTRACTS.md#worker-tasks).
 
+## Task workspaces and review
+
+For a clean, committed Git project, Ghost creates one linked worktree and one
+local `ghost/task-<uuid>` branch per coding task. The worker starts at the same
+project-relative cwd inside that worktree, so its native project instructions,
+skills, plugins, hooks, and settings are discovered normally. The owner's
+source checkout remains untouched. Ignored and untracked source files are not
+copied into the task worktree; projects that depend on them need an explicit
+worktree setup convention.
+
+On success, Ghost stages any remaining worker changes and creates one ordinary
+local commit, preserving commits the worker already made. A changed, clean
+branch is retained for review and its linked worktree is removed. A no-change
+task removes both. Failed or cancelled dirty work is never auto-committed and
+is preserved at the path reported in the task's `workspace` view; restart and
+emergency interruption preserve the workspace too. A genuinely non-Git
+project runs in place with an explicit notice.
+
+Ghost does not push, open a pull request, merge, or delete a review branch.
+Those are separate owner-authorized actions. A worktree is workflow isolation,
+not a security sandbox: maximum-trust workers can still use the machine,
+source checkout, network, and configured remotes.
+
 ## Codex
 
 The Codex worker requires an installed `codex` executable. Ghost starts one

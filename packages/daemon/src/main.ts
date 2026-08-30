@@ -33,6 +33,7 @@ import { startDaemonServer, type ListeningServer } from "./server.js";
 import { SessionHost } from "./session-host.js";
 import { resolveScheduleUnitDirectory } from "./schedules.js";
 import { TaskManager } from "./tasks.js";
+import { GitTaskWorkspaceManager } from "./task-workspaces.js";
 import { WorkerCatalog } from "./worker-catalog.js";
 
 const USAGE = `ghostd — your ghost, on your machine
@@ -502,6 +503,7 @@ async function serveDaemon(
     registry,
     homeOperations,
     logger,
+    workspace: new GitTaskWorkspaceManager({ ownerHome, env: nativeWorkerEnv }),
     adapters: [
       new ClaudeWorkerAdapter({
         env: nativeWorkerEnv,

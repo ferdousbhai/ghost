@@ -24,7 +24,9 @@ Both principal runtimes expose Ghost's durable `task` controls for those three
 built-in workers; custom agent definitions remain inert. A Claude principal
 disables Claude's native Agent/legacy Task shortcuts so delegation cannot
 bypass that lifecycle, while a delegated Claude worker retains native
-subagents. Ghost replaces pi's coding-oriented system prompt with its character, bounded memory,
+subagents. Clean Git tasks run in one linked worktree and local review branch;
+Ghost never pushes, opens a pull request, or merges without a separate explicit
+owner action. Ghost replaces pi's coding-oriented system prompt with its character, bounded memory,
 shallow owner Documents indexes, and minimal
 runtime guidance. Claude receives the same complete Ghost-owned identity as a
 custom prompt while keeping its native tool preset. Browser and desktop capabilities remain

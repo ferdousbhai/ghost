@@ -30,10 +30,20 @@ import {
   writePrivateJsonAtomic,
 } from "./private-file.js";
 import { serializeByKey } from "./promise-chain.js";
+import {
+  InPlaceTaskWorkspaceLifecycle,
+  legacyInPlaceTaskWorkspace,
+  parseTaskWorkspace,
+  TaskWorkspaceError,
+  type TaskWorkspaceLifecycle,
+  type TaskWorkspaceOutcome,
+  type TaskWorkspaceView,
+} from "./task-workspaces.js";
 import { WORKER_IDS, type WorkerId } from "./worker-identity.js";
 
 export const TASKS_DIRNAME = GHOST_TASKS_DIRNAME;
-export const TASK_RECORD_VERSION = 1;
+export const TASK_RECORD_VERSION = 2;
+const LEGACY_TASK_RECORD_VERSION = 1;
 export const TASK_STATES = [
   "queued",
   "starting",
@@ -83,6 +93,7 @@ export interface TaskView {
   task: string;
   root: string;
   cwd: string;
+  workspace: TaskWorkspaceView;
   state: TaskState;
   createdAt: string;
   updatedAt: string;
@@ -101,6 +112,7 @@ export interface TaskSummary {
   taskPreview: string;
   root: string;
   cwd: string;
+  workspace: TaskWorkspaceView;
   state: TaskState;
   createdAt: string;
   updatedAt: string;
@@ -146,6 +158,8 @@ export interface WorkerTaskRequest {
   ghostName: string;
   parent: ConversationIdentity;
   task: string;
+  sourceRoot: string;
+  sourceCwd: string;
   root: string;
   cwd: string;
 }
@@ -185,6 +199,7 @@ export interface TaskManagerOptions {
   registry: GhostRegistry;
   adapters?: readonly WorkerAdapter[];
   resolveContext?: TaskContextResolver;
+  workspace?: TaskWorkspaceLifecycle;
   homeOperations?: HomeOperationCoordinator;
   now?: () => number;
   logger?: Logger;
@@ -216,6 +231,7 @@ interface LiveTask {
   failureAfterStop?: TaskErrorView;
   force?: () => void;
   forceRequested?: boolean;
+  workspaceFinish?: Promise<TaskWorkspaceView>;
   settled: Promise<void>;
   settle(): void;
 }
@@ -240,7 +256,7 @@ export function isTerminalTaskState(state: TaskState): boolean {
 }
 
 const TASK_TRANSITIONS: Record<TaskState, readonly TaskState[]> = {
-  queued: ["starting", "cancelling", "interrupted"],
+  queued: ["starting", "cancelling", "failed", "interrupted"],
   starting: ["running", "waiting_for_owner", "cancelling", "failed", "interrupted"],
   running: ["waiting_for_owner", "cancelling", "completed", "failed", "interrupted"],
   waiting_for_owner: ["running", "cancelling", "completed", "failed", "interrupted"],
@@ -349,7 +365,8 @@ function parseTaskEvents(value: unknown): TaskEvent[] | null {
 function parseStoredTask(value: unknown, expectedGhost: string, expectedId: string): StoredTask | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const record = value as Partial<StoredTask>;
-  if (record.version !== TASK_RECORD_VERSION
+  const version = (value as { version?: unknown }).version;
+  if ((version !== TASK_RECORD_VERSION && version !== LEGACY_TASK_RECORD_VERSION)
     || record.id !== expectedId
     || !isTaskId(record.id)
     || !isWorkerId(record.agent)
@@ -358,8 +375,11 @@ function parseStoredTask(value: unknown, expectedGhost: string, expectedId: stri
     || record.task.length > MAX_TASK_PROMPT_LENGTH
     || typeof record.root !== "string"
     || !isAbsolute(record.root)
+    || record.root.length > MAX_CWD_LENGTH
     || typeof record.cwd !== "string"
     || !isAbsolute(record.cwd)
+    || record.cwd.length > MAX_CWD_LENGTH
+    || !isWithin(record.root, record.cwd)
     || !isTaskState(record.state)
     || !validTimestamp(record.createdAt)
     || !validTimestamp(record.updatedAt)
@@ -377,6 +397,15 @@ function parseStoredTask(value: unknown, expectedGhost: string, expectedId: stri
   const parent = parseTaskParent(record.parent);
   const events = parseTaskEvents(record.events);
   if (!parent || !events) return null;
+  const workspaceInput = {
+    taskId: record.id,
+    sourceRoot: record.root,
+    sourceCwd: record.cwd,
+  };
+  const workspace = version === LEGACY_TASK_RECORD_VERSION
+    ? legacyInPlaceTaskWorkspace(workspaceInput)
+    : parseTaskWorkspace(record.workspace, workspaceInput);
+  if (!workspace) return null;
   return {
     version: TASK_RECORD_VERSION,
     id: record.id,
@@ -386,6 +415,7 @@ function parseStoredTask(value: unknown, expectedGhost: string, expectedId: stri
     task: record.task,
     root: record.root,
     cwd: record.cwd,
+    workspace,
     state: record.state,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
@@ -411,6 +441,7 @@ function taskSummary(record: StoredTask): TaskSummary {
     taskPreview: preview(record.task) ?? "",
     root: record.root,
     cwd: record.cwd,
+    workspace: structuredClone(record.workspace),
     state: record.state,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
@@ -542,6 +573,7 @@ export class TaskManager {
   private readonly store: TaskStore;
   private readonly adapters = new Map<WorkerId, WorkerAdapter>();
   private readonly resolveContext: TaskContextResolver;
+  private readonly workspace: TaskWorkspaceLifecycle;
   private readonly now: () => number;
   private readonly logger: Logger;
   private readonly live = new Map<string, LiveTask>();
@@ -565,6 +597,7 @@ export class TaskManager {
     this.resolveContext = options.resolveContext ?? (async () => {
       throw new GhostError("task_context_unavailable", "Task project context is not available.", 503);
     });
+    this.workspace = options.workspace ?? new InPlaceTaskWorkspaceLifecycle();
     this.now = options.now ?? Date.now;
     this.logger = options.logger ?? silentLogger;
     this.unregisterHomeMoveParticipant = options.homeOperations?.registerMoveParticipant({
@@ -656,6 +689,17 @@ export class TaskManager {
 
     const now = this.timestamp();
     const id = `task-${randomUUID()}`;
+    let workspace: TaskWorkspaceView;
+    try {
+      workspace = await this.workspace.plan({
+        taskId: id,
+        sourceRoot: context.root,
+        sourceCwd: context.cwd,
+      });
+    } catch (error) {
+      throw this.workspaceGhostError(error);
+    }
+    this.assertAdmission(input.ghostName);
     const record: StoredTask = {
       version: TASK_RECORD_VERSION,
       id,
@@ -665,6 +709,7 @@ export class TaskManager {
       task: input.task,
       root: context.root,
       cwd: context.cwd,
+      workspace,
       state: "queued",
       createdAt: now,
       updatedAt: now,
@@ -672,11 +717,60 @@ export class TaskManager {
       result: null,
       resultTruncated: false,
       error: null,
-      events: [{ sequence: 1, at: now, type: "state", state: "queued" }],
+      events: [
+        { sequence: 1, at: now, type: "state", state: "queued" },
+        ...(workspace.notice === null
+          ? []
+          : [{
+              sequence: 2,
+              at: now,
+              type: "notice" as const,
+              text: workspace.notice,
+              textTruncated: false,
+            }]),
+      ],
       eventsTruncated: false,
     };
     await this.store.write(record);
     this.publish(record);
+    try {
+      const prepared = await this.workspace.provision({
+        taskId: id,
+        sourceRoot: context.root,
+        sourceCwd: context.cwd,
+        workspace,
+      });
+      record.workspace = prepared;
+      if (prepared.notice !== workspace.notice && prepared.notice !== null) {
+        this.appendEvent(record, "notice", prepared.notice);
+      }
+      record.updatedAt = this.timestamp();
+      await this.store.write(record);
+      this.publish(record);
+    } catch (error) {
+      const workspaceError = error instanceof TaskWorkspaceError
+        ? error
+        : new TaskWorkspaceError(
+            "task_workspace_prepare_failed",
+            "The task workspace could not be prepared.",
+            this.workspace.preserve(
+              workspace,
+              "Workspace preparation did not complete safely; inspect any task artifacts manually.",
+            ),
+            { cause: error },
+          );
+      record.workspace = workspaceError.workspace
+        ?? this.workspace.preserve(workspace, workspaceError.message);
+      record.error = this.taskError(workspaceError.code, workspaceError.message);
+      this.changeState(record, "failed", workspaceError.message);
+      if (record.workspace.notice !== null) {
+        this.appendEvent(record, "notice", record.workspace.notice);
+      }
+      record.updatedAt = this.timestamp();
+      await this.store.write(record);
+      this.publish(record);
+      return publicTask(record);
+    }
     this.start(record, adapter);
     return publicTask(record);
   }
@@ -849,6 +943,15 @@ export class TaskManager {
       void this.mutate(live.ghostName, live.taskId, (record) => {
         if (isTerminalTaskState(record.state)) return false;
         record.error = this.taskError("daemon_stopped", "The daemon stopped before cancellation settled.");
+        this.setWorkspace(
+          record,
+          this.workspace.preserve(
+            record.workspace,
+            record.workspace.strategy === "git-worktree"
+              ? `The daemon stopped during this task; inspect preserved worktree ${record.workspace.root}.`
+              : "The daemon stopped during this in-place task; project files remain where it ran.",
+          ),
+        );
         this.changeState(record, "interrupted");
       }).catch(() => {});
       this.detachLive(live);
@@ -880,7 +983,7 @@ export class TaskManager {
         this.changeState(record, "starting");
       });
       if (starting.state !== "starting") {
-        if (starting.state === "cancelling") await this.finishCancellation(ghostName, taskId);
+        if (starting.state === "cancelling") await this.finishCancellation(live);
         return;
       }
       const controller = await adapter.start({
@@ -888,8 +991,10 @@ export class TaskManager {
         ghostName,
         parent: starting.parent,
         task: starting.task,
-        root: starting.root,
-        cwd: starting.cwd,
+        sourceRoot: starting.root,
+        sourceCwd: starting.cwd,
+        root: starting.workspace.root,
+        cwd: starting.workspace.cwd,
       }, {
         signal: live.abort.signal,
         emit: (event) => this.onAdapterEvent(ghostName, taskId, event),
@@ -945,7 +1050,7 @@ export class TaskManager {
         throw new Error("The worker returned an invalid result.");
       }
       if (result.nativeSessionId !== undefined) this.requireNativeSessionId(result.nativeSessionId);
-      await this.mutate(ghostName, taskId, (record) => {
+      await this.settleLive(live, "completed", (record) => {
         if (isTerminalTaskState(record.state)) return false;
         const boundedResult = bounded(result.text, MAX_TASK_RESULT_LENGTH);
         record.result = boundedResult.text;
@@ -1001,6 +1106,15 @@ export class TaskManager {
       record.error = this.taskError(
         "daemon_restarted",
         "The daemon restarted before this task settled.",
+      );
+      this.setWorkspace(
+        record,
+        this.workspace.preserve(
+          record.workspace,
+          record.workspace.strategy === "git-worktree"
+            ? `The daemon restarted during this task; inspect preserved worktree ${record.workspace.root}.`
+            : "The daemon restarted during this in-place task; project files remain where it ran.",
+        ),
       );
       this.changeState(record, "interrupted");
       record.updatedAt = this.timestamp();
@@ -1127,8 +1241,43 @@ export class TaskManager {
     live.settle();
   }
 
-  private finishCancellation(ghostName: string, taskId: string): Promise<TaskView> {
-    return this.mutate(ghostName, taskId, (record) => {
+  private async settleLive(
+    live: LiveTask,
+    outcome: Exclude<TaskWorkspaceOutcome, "interrupted">,
+    settle: (record: StoredTask) => boolean | void,
+  ): Promise<TaskView> {
+    const current = this.requireRecord(live.ghostName, live.taskId);
+    if (isTerminalTaskState(current.state)) return publicTask(current);
+    live.workspaceFinish ??= this.workspace.finish({
+      taskId: live.taskId,
+      sourceRoot: current.root,
+      sourceCwd: current.cwd,
+      workspace: current.workspace,
+      outcome,
+    }).catch(() => this.workspace.preserve(
+      current.workspace,
+      current.workspace.strategy === "git-worktree"
+        ? `Ghost could not safely finalize task worktree ${current.workspace.root}; inspect it manually.`
+        : "Ghost could not finalize this in-place task; project files remain where it ran.",
+    ));
+    const workspace = await live.workspaceFinish;
+    return this.mutate(live.ghostName, live.taskId, (record) => {
+      if (isTerminalTaskState(record.state)) return false;
+      this.setWorkspace(record, workspace);
+      return settle(record);
+    });
+  }
+
+  private setWorkspace(record: StoredTask, workspace: TaskWorkspaceView): void {
+    const previousNotice = record.workspace.notice;
+    record.workspace = workspace;
+    if (workspace.notice !== null && workspace.notice !== previousNotice) {
+      this.appendEvent(record, "notice", workspace.notice);
+    }
+  }
+
+  private finishCancellation(live: LiveTask): Promise<TaskView> {
+    return this.settleLive(live, "cancelled", (record) => {
       if (record.state !== "cancelling") return false;
       record.error = null;
       this.changeState(record, "cancelled");
@@ -1137,9 +1286,9 @@ export class TaskManager {
 
   private finishStoppedLive(live: LiveTask): Promise<TaskView> {
     if (!live.failureAfterStop) {
-      return this.finishCancellation(live.ghostName, live.taskId);
+      return this.finishCancellation(live);
     }
-    return this.mutate(live.ghostName, live.taskId, (record) => {
+    return this.settleLive(live, "failed", (record) => {
       if (isTerminalTaskState(record.state)) return false;
       record.error = live.failureAfterStop ?? null;
       this.changeState(record, "failed");
@@ -1168,16 +1317,16 @@ export class TaskManager {
 
   private async settleRunError(live: LiveTask, error: unknown): Promise<void> {
     if (error instanceof WorkerStoppedError) {
-      await this.failWorker(live.ghostName, live.taskId, error);
+      await this.failWorker(live, error);
       return;
     }
     if (!live.abort.signal.aborted) {
-      await this.failWorker(live.ghostName, live.taskId, error);
+      await this.failWorker(live, error);
       return;
     }
     const current = this.requireRecord(live.ghostName, live.taskId);
     if (current.state === "cancelling" && current.error?.code === "cancellation_failed") {
-      await this.failWorker(live.ghostName, live.taskId, error);
+      await this.failWorker(live, error);
       return;
     }
     await this.mutate(live.ghostName, live.taskId, (record) => {
@@ -1189,14 +1338,14 @@ export class TaskManager {
       await this.stopLive(live);
     } catch {
       live.cancellation = undefined;
-      await this.failWorker(live.ghostName, live.taskId, error);
+      await this.failWorker(live, error);
       return;
     }
     await this.finishStoppedLive(live);
   }
 
-  private failWorker(ghostName: string, taskId: string, error: unknown): Promise<TaskView> {
-    return this.mutate(ghostName, taskId, (record) => {
+  private failWorker(live: LiveTask, error: unknown): Promise<TaskView> {
+    return this.settleLive(live, "failed", (record) => {
       if (isTerminalTaskState(record.state)) return false;
       record.error = this.taskError(
         "worker_failed",
@@ -1226,6 +1375,21 @@ export class TaskManager {
       message: boundedMessage.text,
       messageTruncated: boundedMessage.truncated,
     };
+  }
+
+  private workspaceGhostError(error: unknown): GhostError {
+    if (error instanceof TaskWorkspaceError) {
+      return new GhostError(
+        error.code,
+        error.message,
+        error.code === "task_workspace_unavailable" ? 503 : 409,
+      );
+    }
+    return new GhostError(
+      "task_workspace_unavailable",
+      "The task workspace could not be planned.",
+      503,
+    );
   }
 
   private requireNativeSessionId(value: string): void {

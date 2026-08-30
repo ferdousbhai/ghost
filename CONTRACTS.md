@@ -70,8 +70,8 @@ subagents; the Claude principal does not expose native `Agent` or legacy
   sessions/pins.json           v2 pinned state: { "version": 2, "pinned": ["<id>", …] }
   sessions/reads.json          v2 read state: { "version": 2, "reads": { "<id>": "<ISO timestamp>" } }
   .tasks/                      daemon-owned normalized worker-task lifecycle
-  .tasks/task-<uuid>.json      v1 bounded task state and event tail; the worker
-                               harness retains its own full native transcript
+  .tasks/task-<uuid>.json      v2 bounded task/workspace state and event tail;
+                               the worker harness retains its own full native transcript
   .tasks/pi/                   bundled pi-worker's native Pi JSONL transcripts
   .pi/                         derived pi machine runtime; never credentials
   .pi/models.pi.json           secret-free provider/models view synced from
@@ -1798,16 +1798,18 @@ discovery fail.
 
 The daemon owns one persistent task lifecycle shared by all worker harnesses.
 It does not own or translate their full transcripts. Each task is stored as one
-mode-`0600`, atomically replaced v1 sidecar under the ghost home's `.tasks/`
+mode-`0600`, atomically replaced v2 sidecar under the ghost home's `.tasks/`
 directory. The machine-bound directory follows whole-home rename and deletion
 but is excluded from export: records contain local project paths and opaque
 native session ids that are meaningless or unsafe to resume on another
 machine. A record contains the daemon-issued `task-<uuid>` id,
 runtime-qualified parent conversation identity, built-in worker id, complete
 bounded task prompt,
-resolved canonical project root and cwd, state and timestamps, optional native
-session id, bounded terminal result or error, and a bounded normalized event
-tail. The event tail retains at most 100 state/output/notice/owner-message/
+resolved canonical **source** project root and cwd, workspace view, state and
+timestamps, optional native session id, bounded terminal result or error, and
+a bounded normalized event tail. A v1 record is read as a preserved legacy
+in-place workspace and promotes on its next write; no native task is resumed.
+The event tail retains at most 100 state/output/notice/owner-message/
 principal-message events with monotonic sequence numbers; each event text is
 at most 4,000 UTF-16 code units. Task prompts and terminal results are at most
 64,000 and 128,000 code units respectively. Tail eviction, individual text,
@@ -1837,6 +1839,65 @@ marks every previously non-terminal durable record `interrupted`; Ghost never
 guesses how to reconnect an opaque vendor process. Malformed sidecars are
 skipped by listings and rejected by direct reads. Tasks run concurrently
 without a Ghost-level cap.
+
+Every task has a workspace view
+`{ strategy, state, root, cwd, branch, baseCommit, headCommit, review, notice }`.
+`strategy` is `git-worktree | in-place`; `state` is
+`preparing | active | removed | preserved`; and `review` is
+`pending | ready | no_changes | needs_attention | not_applicable`. Task-level
+`root` and `cwd` remain the trusted source checkout; workspace `root` and `cwd`
+are where the worker actually runs. Commit ids are full lowercase hexadecimal
+object ids, branch is the daemon-issued `ghost/task-<uuid>` local branch, and
+every nullable field is explicit. The workspace view is present in complete
+task views and list summaries.
+
+For a bound project whose canonical root is exactly a non-bare Git worktree,
+Ghost's default is one linked worktree per task under
+`$XDG_STATE_HOME/ghost/task-worktrees/<repository-hash>/<task-id>` (default
+`~/.local/state/...`), never under a ghost home. Before it admits the task,
+Ghost requires the source worktree to be clean including untracked files and
+pins its current `HEAD`. A bound root nested inside a larger Git worktree is
+rejected rather than broadening the trusted project boundary; an unborn
+repository is rejected because it has no committed snapshot. The v2 task
+record, planned path, branch, and base commit are durable before `git worktree
+add`. Under one short queue keyed by Git's canonical common directory, Ghost
+rechecks the source cleanliness and exact pinned `HEAD` immediately before it
+creates the branch/worktree. A racing change fails visibly and preserves any
+uncertain artifact; Ghost never force-removes it.
+
+The task cwd keeps its source-relative path inside the linked worktree. Native
+workers still use the owner's normal user/XDG harness configuration and discover
+project configuration from that execution cwd. The checkout contains Git's
+committed snapshot and normal checkout/filter results; Ghost does not copy
+ignored or untracked files, secrets, build outputs, or source-checkout-local
+settings into it. Repositories that require such state must provide their own
+worktree setup convention or commit the non-secret configuration. A directory
+that is genuinely not a Git repository runs in place with an explicit notice
+and no review artifact. Git being unavailable is an error for a root that
+advertises Git metadata, not silent in-place execution.
+
+After a successful worker process settles, Ghost verifies it is still on the
+daemon-issued branch, stages the isolated worktree's remaining changes, and
+creates one ordinary local commit using the owner's Git configuration and the
+task id as its message. Existing worker commits are retained. Hooks and signing
+configuration remain native; if staging, commit, validation, or cleanup fails,
+the worktree is preserved with `review:"needs_attention"` and a bounded notice.
+If the branch differs from the base and the worktree is clean, Ghost removes
+only the linked worktree and retains the local branch with
+`review:"ready"` plus its head commit. If there are no changes it removes the
+clean worktree, deletes only the still-base task branch by expected object id,
+and records `no_changes`. A failed or cancelled worker is never auto-committed:
+clean/no-change worktrees are removed, a clean branch containing worker commits
+is retained as reviewable, and dirty or uncertain work is preserved. Restart
+interruption and emergency shutdown always preserve an existing workspace.
+
+This is workflow isolation, not a sandbox. Maximum-trust workers can still
+address the source checkout, machine, and configured remotes. Ghost does not
+push, open a pull request, merge, or delete a review branch automatically;
+remote publication is a separate explicit owner-authorized workflow. The
+recorded branch, commit, path, and notice are the inspection/recovery boundary,
+and ordinary Git commands remain the explicit way to merge, publish, retain,
+or remove a preserved artifact.
 
 Both principal harnesses expose the same daemon-owned logical tools:
 
@@ -1874,7 +1935,7 @@ principal-only; a `claude-code` worker keeps its native Agent behavior.
 The authenticated HTTP boundary is:
 
 - `POST /api/ghosts/:name/sessions/:id/tasks` with exactly
-  `{ agent, task, cwd? }` → the v1 task view with `202`. It preserves the
+  `{ agent, task, cwd? }` → the v2 task view with `202`. It preserves the
   locked pi-coding-agent dependency's shipped `examples/extensions/subagent`
   single mode core `{ agent, task }` declaration:
   `agent` names the responsible worker, `task` is its complete assignment, and
@@ -1898,13 +1959,13 @@ The authenticated HTTP boundary is:
   controller captured when that task was spawned; Ghost never discovers or
   kills processes by name.
 
-The context resolver, not request input, is the authority for project root and
-cwd. It accepts only an absolute cwd within the conversation's canonical,
-trusted project root. Every adapter revalidates that machine trust receipt and
-canonical containment immediately before launch. Vendor workers receive that
-cwd and then perform their own native project-policy/configuration discovery
-there. An adapter that is not active returns `503 worker_unavailable` without
-changing this wire or persistence contract.
+The context resolver, not request input, is the authority for source project
+root and cwd. It accepts only an absolute cwd within the conversation's
+canonical, trusted project root. Every adapter revalidates that source machine
+trust receipt and canonical containment immediately before launch, then runs at
+the prepared workspace cwd and performs native project-policy/configuration
+discovery there. An adapter that is not active returns `503
+worker_unavailable` without changing this wire or persistence contract.
 
 At daemon boot Ghost takes one in-memory snapshot of the launcher environment
 before applying the principal provider scrub. Only installed vendor worker

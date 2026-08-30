@@ -254,13 +254,24 @@ describe("GET /api/ghosts/:name/workers", () => {
 
 describe("task lifecycle routes", () => {
   const task: TaskView = {
-    version: 1,
+    version: 2,
     id: "task-00000000-0000-4000-8000-000000000001",
     parent: { id: "pi:conv-1", conversationId: "conv-1", runtime: "pi" },
     agent: "pi-worker",
     task: "Implement it.",
     root: "/project",
     cwd: "/project/packages/app",
+    workspace: {
+      strategy: "in-place",
+      state: "active",
+      root: "/project",
+      cwd: "/project/packages/app",
+      branch: null,
+      baseCommit: null,
+      headCommit: null,
+      review: "not_applicable",
+      notice: "Running in place.",
+    },
     state: "running",
     createdAt: "2026-08-30T09:00:00.000Z",
     updatedAt: "2026-08-30T09:00:01.000Z",

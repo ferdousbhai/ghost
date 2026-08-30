@@ -117,8 +117,9 @@ export class PiWorkerAdapter implements WorkerAdapter {
     request: WorkerTaskRequest,
     context: Parameters<WorkerAdapter["start"]>[1],
   ): Promise<WorkerTaskController> {
-    const validated = await this.assertContext({ root: request.root, cwd: request.cwd });
-    if (!sameContext(request, validated)) {
+    const source = { root: request.sourceRoot, cwd: request.sourceCwd };
+    const validated = await this.assertContext(source);
+    if (!sameContext(source, validated)) {
       throw new Error("The task project identity changed before pi-worker could start.");
     }
     const ghost = this.registry.get(request.ghostName);

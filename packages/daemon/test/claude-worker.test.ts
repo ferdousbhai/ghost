@@ -122,6 +122,8 @@ const task: WorkerTaskRequest = {
   ghostName: "casper",
   parent: conversationIdentity("pi", "conversation-1"),
   task: "Implement the focused change.",
+  sourceRoot: "/trusted/source",
+  sourceCwd: "/trusted/source/app",
   root: "/project",
   cwd: "/project/app",
 };
@@ -575,7 +577,7 @@ describe("Claude Code native worker", () => {
   it("revalidates project identity before resolving or starting Claude Code", async () => {
     const createQuery = vi.fn(() => new FakeClaudeQuery().asQuery());
     const adapter = new ClaudeWorkerAdapter({
-      assertContext: async () => ({ root: task.root, cwd: "/project/elsewhere" }),
+      assertContext: async () => ({ root: task.sourceRoot, cwd: "/trusted/source/elsewhere" }),
       resolveExecutable: async () => "/owner/bin/claude",
       createQuery,
     });
@@ -595,8 +597,8 @@ describe("Claude Code native worker", () => {
       assertContext: async () => {
         validations += 1;
         return validations === 1
-          ? { root: task.root, cwd: task.cwd }
-          : { root: task.root, cwd: "/project/elsewhere" };
+          ? { root: task.sourceRoot, cwd: task.sourceCwd }
+          : { root: task.sourceRoot, cwd: "/trusted/source/elsewhere" };
       },
       resolveExecutable: async () => "/owner/bin/claude",
       createQuery,

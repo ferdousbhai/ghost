@@ -484,6 +484,9 @@ describe("PiWorkerAdapter", () => {
     const root = join(temp.root, "project");
     const cwd = join(root, "app");
     mkdirSync(cwd, { recursive: true });
+    const workspaceRoot = join(temp.root, "workspace");
+    const workspaceCwd = join(workspaceRoot, "app");
+    mkdirSync(workspaceCwd, { recursive: true });
     const script = `
       let input = "";
       process.stdin.on("data", chunk => {
@@ -511,8 +514,10 @@ describe("PiWorkerAdapter", () => {
       ghostName: "casper",
       parent: conversationIdentity("pi", "parent"),
       task: "Implement it.",
-      root,
-      cwd,
+      sourceRoot: root,
+      sourceCwd: cwd,
+      root: workspaceRoot,
+      cwd: workspaceCwd,
     }, {
       signal: new AbortController().signal,
       emit: async () => {},
@@ -549,6 +554,8 @@ describe("PiWorkerAdapter", () => {
       ghostName: "casper",
       parent: conversationIdentity("pi", "parent"),
       task: "Implement it.",
+      sourceRoot: root,
+      sourceCwd: cwd,
       root,
       cwd,
     }, {
@@ -586,6 +593,8 @@ describe("PiWorkerAdapter", () => {
       ghostName: "casper",
       parent: conversationIdentity("pi", "parent"),
       task: "Initialize.",
+      sourceRoot: root,
+      sourceCwd: root,
       root,
       cwd: root,
     }, {
@@ -630,6 +639,8 @@ describe("PiWorkerAdapter", () => {
       ghostName: "casper",
       parent: conversationIdentity("pi", "parent"),
       task: "Finish but linger.",
+      sourceRoot: root,
+      sourceCwd: root,
       root,
       cwd: root,
     }, {
@@ -665,6 +676,8 @@ describe("PiWorkerAdapter", () => {
       ghostName: "casper",
       parent: conversationIdentity("pi", "parent"),
       task: "Never initializes.",
+      sourceRoot: root,
+      sourceCwd: root,
       root,
       cwd: root,
     }, {
@@ -714,6 +727,8 @@ describe("PiWorkerAdapter", () => {
       ghostName: "casper",
       parent: conversationIdentity("pi", "parent"),
       task: "Cancel with teardown failure.",
+      sourceRoot: root,
+      sourceCwd: root,
       root,
       cwd: root,
     }, {

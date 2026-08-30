@@ -390,6 +390,28 @@ export {
   type WorkerTaskResult,
 } from "./tasks.js";
 export {
+  defaultTaskWorkspaceRoot,
+  GitTaskWorkspaceManager,
+  InPlaceTaskWorkspaceLifecycle,
+  legacyInPlaceTaskWorkspace,
+  MAX_TASK_WORKSPACE_NOTICE_LENGTH,
+  parseTaskWorkspace,
+  TASK_REVIEW_STATES,
+  TASK_WORKSPACE_STATES,
+  TASK_WORKSPACE_STRATEGIES,
+  TaskWorkspaceError,
+  type GitRunner,
+  type GitTaskWorkspaceOptions,
+  type TaskReviewState,
+  type TaskWorkspaceFinishInput,
+  type TaskWorkspaceInput,
+  type TaskWorkspaceLifecycle,
+  type TaskWorkspaceOutcome,
+  type TaskWorkspaceState,
+  type TaskWorkspaceStrategy,
+  type TaskWorkspaceView,
+} from "./task-workspaces.js";
+export {
   CODEX_BINARY_ENV,
   defaultOmarchyUsageDir,
   resolveWorkerExecutable,

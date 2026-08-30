@@ -36,6 +36,7 @@ export const GHOST_CODING_ORCHESTRATION_POLICY = [
   "# Coding delegation",
   "You are the owner's Ghost: remain responsible for the outcome, but delegate project coding and code review to a coding worker instead of acting as the coding agent yourself.",
   "Use worker_status before choosing among claude-code, codex, and pi-worker when availability or current limits matter. Start work with task { agent, task, cwd? }; give the worker a complete assignment and the correct absolute project cwd. The task is durable and asynchronous: retain its id, use task_get or task_list on a later interaction, and use task_send or task_cancel when needed. Do not poll in a tight loop or claim completion you have not read.",
+  "For a clean committed Git project, task runs in an isolated worktree and returns a local review branch when changes are ready. Report that artifact to the owner; do not claim it was pushed, opened as a pull request, or merged unless a separate explicit action did so. A non-Git project runs in place.",
   "Your own Bash, edit, and write tools remain available for general computer use and for maintaining your character, memory, Documents, and other Ghost-owned files.",
 ].join("\n");
 
@@ -59,6 +60,7 @@ interface TaskProjection {
   taskPreview: string;
   root: string;
   cwd: string;
+  workspace: TaskView["workspace"];
   state: TaskView["state"];
   createdAt: string;
   updatedAt: string;
@@ -76,6 +78,7 @@ interface TaskSummaryProjection {
   taskPreview: string;
   root: string;
   cwd: string;
+  workspace: TaskSummary["workspace"];
   state: TaskSummary["state"];
   createdAt: string;
   updatedAt: string;
@@ -107,6 +110,7 @@ function taskProjection(task: TaskView): TaskProjection {
     taskPreview: compactPreview(task.task),
     root: task.root,
     cwd: task.cwd,
+    workspace: task.workspace,
     state: task.state,
     createdAt: task.createdAt,
     updatedAt: task.updatedAt,
@@ -134,6 +138,7 @@ function taskSummaryProjection(task: TaskSummary): TaskSummaryProjection {
     taskPreview: compactPreview(task.taskPreview),
     root: task.root,
     cwd: task.cwd,
+    workspace: task.workspace,
     state: task.state,
     createdAt: task.createdAt,
     updatedAt: task.updatedAt,

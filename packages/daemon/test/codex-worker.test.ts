@@ -76,6 +76,8 @@ const task: WorkerTaskRequest = {
   ghostName: "casper",
   parent: conversationIdentity("pi", "conversation-1"),
   task: "Implement the focused change.",
+  sourceRoot: "/trusted/source",
+  sourceCwd: "/trusted/source/app",
   root: "/project",
   cwd: "/project/app",
 };
@@ -301,7 +303,7 @@ describe("Codex native worker", () => {
     const child = new FakeCodexChild();
     const spawnWorker = vi.fn(() => child.asChild());
     const adapter = new CodexWorkerAdapter({
-      assertContext: async () => ({ root: task.root, cwd: "/project/elsewhere" }),
+      assertContext: async () => ({ root: task.sourceRoot, cwd: "/trusted/source/elsewhere" }),
       resolveExecutable: async () => "/owner/bin/codex",
       spawnWorker,
     });
@@ -322,8 +324,8 @@ describe("Codex native worker", () => {
       assertContext: async () => {
         validations += 1;
         return validations === 1
-          ? { root: task.root, cwd: task.cwd }
-          : { root: task.root, cwd: "/project/elsewhere" };
+          ? { root: task.sourceRoot, cwd: task.sourceCwd }
+          : { root: task.sourceRoot, cwd: "/trusted/source/elsewhere" };
       },
       resolveExecutable: async () => "/owner/bin/codex",
       spawnWorker,

@@ -235,6 +235,12 @@ LSP, and custom agent definitions stay disabled. Both principal runtimes expose
 daemon-owned `worker_status`, `task`, `task_list`, `task_get`, `task_send`, and
 `task_cancel` controls for the built-in `claude-code`, `codex`, and `pi-worker`
 workers; project, ghost-file, and ambient agent definitions remain inert.
+Clean committed Git projects use one daemon-managed linked worktree and local
+review branch per task. Task views distinguish the trusted source `root`/`cwd`
+from the execution `workspace`; Ghost preserves uncertain work and never
+publishes, opens, or merges a pull request implicitly. Non-Git projects run in
+place with an explicit notice. See
+[`docs/native-workers.md`](../../docs/native-workers.md#task-workspaces-and-review).
 pi's native `bash`, `edit`, `find`, `grep`, `ls`, `read`, and `write` plus
 Ghost's own tools (registered directly as pi custom tools) remain available;
 Ghost's own `bash`/`jobs` (background jobs) and `inspect_image` (the
