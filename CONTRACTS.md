@@ -2200,7 +2200,13 @@ not coupled to that release identity.
   targeted teardown removes an entry only after its protocol close succeeds,
   coalesces concurrent closes, and keeps a failed entry for retry. A partial
   Chromium close forgets only tabs confirmed closed or already gone; any live
-  tab Chromium refused remains claimed by that session for the retry. Relay
+  tab Chromium refused remains claimed by that session for the retry. Only a
+  resolved `tabs.remove`, the exact Chromium no-such-tab result, or `onRemoved`
+  proves absence; another `tabs.get` failure is indeterminate and retains the
+  claim. Before acknowledging a new tab, the extension publishes the strict
+  version-1 `{version,tabs,sessions}` claim to `chrome.storage.session`; a write
+  failure rolls the tab back, and an unreadable or indeterminate worker restore
+  refuses the relay connection rather than forgetting possible owners. Relay
   requests are serialized per protocol session inside the extension, so a
   terminal close waits for any earlier canceled-or-timed-out tab creation's
   underlying Chromium handler to settle, not merely for its deadline response.
