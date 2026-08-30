@@ -2187,7 +2187,7 @@ not coupled to that release identity.
 - `packages/chromium-extension` — the browser relay, driving tabs of the
   browser the user is already signed into. One extension serves every ghost and
   conversation over one socket, so the tab is the unit of isolation: relay
-  protocol 2 requires every operation to carry its `session` id and every page
+  protocol 3 requires every operation to carry its `session` id and every page
   operation the `tab` id that session opened. The extension keeps each tab's
   debugger attachment, isolated world, and console/network buffers separate from
   every other tab's, and each session's tabs separate from every other session's:

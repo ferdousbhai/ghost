@@ -189,7 +189,7 @@ describe("pairing", () => {
     expect(hub.connected).toBe(true);
   });
 
-  it("hangs up on an extension that speaks a different protocol version", async () => {
+  it("refuses an old protocol-2 extension with update guidance", async () => {
     // Watch for the close *before* sending the bad hello: the hub answers it
     // immediately, and a listener attached afterwards would miss the event and
     // wait forever.
@@ -197,11 +197,12 @@ describe("pairing", () => {
     const closed = new Promise<{ code: number; reason: string }>((resolve) => {
       socket.once("close", (code, reason) => resolve({ code, reason: reason.toString() }));
     });
-    socket.send(JSON.stringify({ t: "hello", protocol: 99 }));
+    socket.send(JSON.stringify({ t: "hello", protocol: 2 }));
 
     const result = await closed;
     expect(result.code).toBe(4000);
-    expect(result.reason).toMatch(/relay protocol 2/);
+    expect(result.reason).toMatch(/relay protocol 3, not 2/i);
+    expect(result.reason).toMatch(/update whichever.*older/i);
     await waitFor(() => !hub.connected);
   });
 

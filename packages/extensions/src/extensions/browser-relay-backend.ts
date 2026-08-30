@@ -81,7 +81,7 @@ import {
  * in `hello`; a daemon that does not recognize it refuses the connection rather
  * than guessing, because a half-understood relay drives someone's real browser.
  */
-export const RELAY_PROTOCOL_VERSION = 2;
+export const RELAY_PROTOCOL_VERSION = 3;
 
 /** The negotiated WebSocket subprotocol. */
 export const RELAY_SUBPROTOCOL = "ghost-relay.v1";

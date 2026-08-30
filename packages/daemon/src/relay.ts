@@ -364,7 +364,8 @@ export class RelayHub implements RelayTransport {
           });
           this.#socket?.close(
             RELAY_CLOSE_SHUTDOWN,
-            `This daemon speaks relay protocol ${RELAY_PROTOCOL_VERSION}, not ${frame.protocol}.`,
+            `This daemon speaks relay protocol ${RELAY_PROTOCOL_VERSION}, not ${frame.protocol}. `
+              + "Update whichever of ghostd or the Chromium extension is older.",
           );
           return;
         }
