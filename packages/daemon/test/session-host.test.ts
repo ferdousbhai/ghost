@@ -7624,12 +7624,12 @@ describe("SessionHost.deleteGhost", () => {
       "list-units",
       "list-units",
       "list-unit-files",
-      "disable",
+      "stop",
       "daemon-reload",
       "list-units",
       "list-unit-files",
     ]);
-    expect(calls).toContainEqual(["--user", "disable", "--now", timer]);
+    expect(calls).toContainEqual(["--user", "stop", timer]);
   });
 
   it("blocks a new conversation while the ghost home is moving to trash", async () => {

@@ -98,9 +98,16 @@ interface LoadedTimer {
   activeState: string;
 }
 
+type TimerEnablement = "enabled" | "enabled-runtime";
+
+interface EnabledTimer {
+  name: string;
+  state: TimerEnablement;
+}
+
 interface ManagedScheduleTimers {
   loaded: LoadedTimer[];
-  enabled: string[];
+  enabled: EnabledTimer[];
 }
 
 function listedUnitFields(line: string): string[] {
@@ -114,23 +121,25 @@ async function inspectManagedScheduleTimers(
 ): Promise<ManagedScheduleTimers> {
   const loadedResult = await run(LIST_LOADED_TIMERS);
   requireCommandSuccess(loadedResult, "systemctl list-units");
-  const loaded = loadedResult.stdout
-    .split("\n")
-    .map(listedUnitFields)
-    .flatMap((fields) => {
-      const [name, , activeState] = fields;
-      return name && activeState && isOwnedScheduleUnit(name, prefix, TIMER_SUFFIXES)
-        ? [{ name, activeState }]
-        : [];
-    });
+  const loaded: LoadedTimer[] = [];
+  for (const line of loadedResult.stdout.split("\n")) {
+    const [name, , activeState] = listedUnitFields(line);
+    if (!name || !isOwnedScheduleUnit(name, prefix, TIMER_SUFFIXES)) continue;
+    if (!activeState) throw new Error(`systemctl list-units returned no state for ${name}.`);
+    loaded.push({ name, activeState });
+  }
 
   const enabledResult = await run(LIST_ENABLED_TIMERS);
   requireCommandSuccess(enabledResult, "systemctl list-unit-files");
-  const enabled = enabledResult.stdout
-    .split("\n")
-    .map(listedUnitFields)
-    .map((fields) => fields[0] ?? "")
-    .filter((name) => isOwnedScheduleUnit(name, prefix, TIMER_SUFFIXES));
+  const enabled: EnabledTimer[] = [];
+  for (const line of enabledResult.stdout.split("\n")) {
+    const [name, state] = listedUnitFields(line);
+    if (!name || !isOwnedScheduleUnit(name, prefix, TIMER_SUFFIXES)) continue;
+    if (state !== "enabled" && state !== "enabled-runtime") {
+      throw new Error(`systemctl list-unit-files returned an unexpected state for ${name}.`);
+    }
+    enabled.push({ name, state });
+  }
 
   return { loaded, enabled };
 }
@@ -237,15 +246,33 @@ export async function sweepGhostSchedules(
   const managed = await inspectManagedScheduleTimers(prefix, run);
 
   const unlinkUnit = options.unlinkUnit ?? unlink;
-  const timers = [...new Set([
+  if (units.length === 0 && managed.loaded.length === 0 && managed.enabled.length === 0) {
+    return { removed: [] };
+  }
+
+  const stopTargets = [...new Set([
     ...units.filter((unit) => unit.endsWith(".timer")),
     ...managed.loaded.map((unit) => unit.name),
-    ...managed.enabled,
   ])].sort();
-  if (units.length === 0 && timers.length === 0) return { removed: [] };
-  if (timers.length > 0) {
-    const result = await run(["--user", "disable", "--now", ...timers]);
+  if (stopTargets.length > 0) {
+    const result = await run(["--user", "stop", ...stopTargets]);
+    requireCommandSuccess(result, "systemctl stop");
+  }
+  const persistent = managed.enabled
+    .filter((unit) => unit.state === "enabled")
+    .map((unit) => unit.name)
+    .sort();
+  if (persistent.length > 0) {
+    const result = await run(["--user", "disable", ...persistent]);
     requireCommandSuccess(result, "systemctl disable");
+  }
+  const runtime = managed.enabled
+    .filter((unit) => unit.state === "enabled-runtime")
+    .map((unit) => unit.name)
+    .sort();
+  if (runtime.length > 0) {
+    const result = await run(["--user", "disable", "--runtime", ...runtime]);
+    requireCommandSuccess(result, "systemctl disable --runtime");
   }
 
   const removed: string[] = [];

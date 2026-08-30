@@ -133,12 +133,12 @@ describe("sweeping a deleted ghost's schedules", () => {
       "ghost-timer-v1-4-aria-standup.service",
       "ghost-timer-v1-4-aria-standup.timer",
     ]);
-    // Only the timer is disabled — disabling a .service a timer activates is
-    // not a thing — and the reload happens once, after the files are gone.
+    // Only the timer is stopped — stopping a .service a timer activates is not
+    // needed here — and the reload happens once, after the files are gone.
     expect(calls).toEqual([
       ["--user", "list-units", "--type=timer", "--all", "--full", "--plain", "--no-legend", "--no-pager"],
       ["--user", "list-unit-files", "--type=timer", "--state=enabled,enabled-runtime", "--full", "--no-legend", "--no-pager"],
-      ["--user", "disable", "--now", "ghost-timer-v1-4-aria-standup.timer"],
+      ["--user", "stop", "ghost-timer-v1-4-aria-standup.timer"],
       ["--user", "daemon-reload"],
       ["--user", "list-units", "--type=timer", "--all", "--full", "--plain", "--no-legend", "--no-pager"],
       ["--user", "list-unit-files", "--type=timer", "--state=enabled,enabled-runtime", "--full", "--no-legend", "--no-pager"],
@@ -173,7 +173,7 @@ describe("sweeping a deleted ghost's schedules", () => {
 
     await expect(sweepGhostSchedules("aria", {
       unitDir: dir,
-      run: async (args) => args[1] === "disable"
+      run: async (args) => args[1] === "stop"
         ? { stdout: "", stderr: "user manager unavailable", code: 1 }
         : { stdout: "", stderr: "", code: 0 },
     })).rejects.toThrow("user manager unavailable");
@@ -202,7 +202,7 @@ describe("sweeping a deleted ghost's schedules", () => {
     })).rejects.toThrow("unit directory is read-only");
 
     expect(await readdir(dir)).toEqual([service]);
-    expect(calls).toContainEqual(["--user", "disable", "--now", timer]);
+    expect(calls).toContainEqual(["--user", "stop", timer]);
     expect(calls).toContainEqual(["--user", "daemon-reload"]);
 
     rejectService = false;
@@ -232,7 +232,7 @@ describe("sweeping a deleted ghost's schedules", () => {
 
     expect(result.removed).toEqual([timer]);
     expect(await readdir(dir)).toEqual([]);
-    expect(calls).toContainEqual(["--user", "disable", "--now", timer]);
+    expect(calls).toContainEqual(["--user", "stop", timer]);
     expect(calls).toContainEqual(["--user", "daemon-reload"]);
   });
 
@@ -267,13 +267,8 @@ describe("sweeping a deleted ghost's schedules", () => {
     });
 
     expect(result).toEqual({ removed: [] });
-    expect(calls).toContainEqual([
-      "--user",
-      "disable",
-      "--now",
-      loadedTimer,
-      enabledTimer,
-    ]);
+    expect(calls).toContainEqual(["--user", "stop", loadedTimer]);
+    expect(calls).toContainEqual(["--user", "disable", enabledTimer]);
   });
 
   it("fails closed when manager inventory is unavailable despite an empty source directory", async () => {
@@ -301,6 +296,104 @@ describe("sweeping a deleted ghost's schedules", () => {
         return { stdout: "", stderr: "", code: 0 };
       },
     })).rejects.toThrow("left an owned timer active, enabled, or on disk");
+  });
+
+  it("stops a loaded-only missing-file timer without trying to disable it", async () => {
+    const timer = "ghost-timer-v1-4-aria-standup.timer";
+    const dir = await unitDir([]);
+    let stopped = false;
+    const calls: string[][] = [];
+
+    await sweepGhostSchedules("aria", {
+      unitDir: dir,
+      run: async (args) => {
+        calls.push([...args]);
+        if (args[1] === "list-units") {
+          return {
+            stdout: `${timer} loaded ${stopped ? "inactive dead" : "active waiting"} Standup\n`,
+            stderr: "",
+            code: 0,
+          };
+        }
+        if (args[1] === "list-unit-files") {
+          return { stdout: "", stderr: "", code: 0 };
+        }
+        if (args[1] === "stop") stopped = true;
+        return { stdout: "", stderr: "", code: 0 };
+      },
+    });
+
+    expect(calls).toContainEqual(["--user", "stop", timer]);
+    expect(calls.some((args) => args[1] === "disable")).toBe(false);
+  });
+
+  it("uses runtime disable for enabled-runtime and preserves retry after failure", async () => {
+    const timer = "ghost-timer-v1-4-aria-standup.timer";
+    const dir = await unitDir([]);
+    let disableAvailable = false;
+    let enabled = true;
+    const calls: string[][] = [];
+    const run = async (args: readonly string[]) => {
+      calls.push([...args]);
+      if (args[1] === "list-units") return { stdout: "", stderr: "", code: 0 };
+      if (args[1] === "list-unit-files") {
+        return {
+          stdout: enabled ? `${timer} enabled-runtime enabled\n` : "",
+          stderr: "",
+          code: 0,
+        };
+      }
+      if (args[1] === "disable") {
+        if (!disableAvailable) return { stdout: "", stderr: "runtime disable failed", code: 1 };
+        enabled = false;
+      }
+      return { stdout: "", stderr: "", code: 0 };
+    };
+
+    await expect(sweepGhostSchedules("aria", { unitDir: dir, run }))
+      .rejects.toThrow("runtime disable failed");
+    expect(enabled).toBe(true);
+
+    disableAvailable = true;
+    await expect(sweepGhostSchedules("aria", { unitDir: dir, run }))
+      .resolves.toEqual({ removed: [] });
+    expect(calls.filter((args) => args[1] === "disable")).toEqual([
+      ["--user", "disable", "--runtime", timer],
+      ["--user", "disable", "--runtime", timer],
+    ]);
+  });
+
+  it("keeps a loaded-only stop failure retryable without a disable attempt", async () => {
+    const timer = "ghost-timer-v1-4-aria-standup.timer";
+    const dir = await unitDir([]);
+    let stopAvailable = false;
+    let stopped = false;
+    const calls: string[][] = [];
+    const run = async (args: readonly string[]) => {
+      calls.push([...args]);
+      if (args[1] === "list-units") {
+        return {
+          stdout: `${timer} loaded ${stopped ? "inactive dead" : "active waiting"} Standup\n`,
+          stderr: "",
+          code: 0,
+        };
+      }
+      if (args[1] === "list-unit-files") return { stdout: "", stderr: "", code: 0 };
+      if (args[1] === "stop") {
+        if (!stopAvailable) return { stdout: "", stderr: "stop failed", code: 1 };
+        stopped = true;
+      }
+      return { stdout: "", stderr: "", code: 0 };
+    };
+
+    await expect(sweepGhostSchedules("aria", { unitDir: dir, run }))
+      .rejects.toThrow("stop failed");
+    expect(calls.some((args) => args[1] === "disable")).toBe(false);
+
+    stopAvailable = true;
+    await expect(sweepGhostSchedules("aria", { unitDir: dir, run }))
+      .resolves.toEqual({ removed: [] });
+    expect(stopped).toBe(true);
   });
 
   it("keeps manager inventory prefix-free and ignores ambiguous or malformed names", async () => {
@@ -346,6 +439,6 @@ describe("sweeping a deleted ghost's schedules", () => {
       },
     });
 
-    expect(disabled).toEqual([["--user", "disable", "--now", timer]]);
+    expect(disabled).toEqual([["--user", "disable", timer]]);
   });
 });

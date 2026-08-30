@@ -223,7 +223,11 @@ finishes the remaining units, while abandoning the deletion means the owner
 must recreate or re-enable any schedule already removed. Once the timers are
 stopped and their files are absent, `daemon-reload` itself is best-effort: a
 failure is logged, but the following strict manager verification still decides
-whether the stopped triggers are safely retired. Rename's unit scan is
+whether the stopped triggers are safely retired. Manager state determines the
+commands: loaded or on-disk timers are stopped, persistent enablement is
+disabled persistently, and `enabled-runtime` is disabled with `--runtime`; a
+source-less loaded-only timer is never sent through a disable operation that
+requires its missing unit file. Rename's unit scan is
 diagnostic only and can never make an already moved home look like a failed
 rename.
 
