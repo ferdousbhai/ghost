@@ -10,10 +10,12 @@
  */
 import { createServer, request, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import type { Duplex } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 import {
   attachRelay,
+  closeRelaySocket,
   createRelayHub,
   MAX_RELAY_MESSAGE_BYTES,
   RelayHub,
@@ -33,7 +35,12 @@ let port: number;
 const openSockets: WebSocket[] = [];
 
 beforeEach(async () => {
-  hub = new RelayHub({ token: TOKEN, pingIntervalMs: 60_000, helloTimeoutMs: 100 });
+  hub = new RelayHub({
+    token: TOKEN,
+    pingIntervalMs: 60_000,
+    helloTimeoutMs: 100,
+    closeTimeoutMs: 100,
+  });
   server = createServer((_request, response) => response.writeHead(404).end());
   attachRelay(server, hub);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -138,6 +145,37 @@ async function expectUpgradeRefused(options: Parameters<typeof connectExtension>
   });
   expect(status, "expected the upgrade to be refused").not.toBe(101);
   return new Error(`HTTP ${status}`);
+}
+
+async function connectSilentUpgrade(): Promise<Duplex> {
+  return new Promise((resolve, reject) => {
+    const upgrade = request({
+      host: "127.0.0.1",
+      port,
+      path: RELAY_PATH,
+      headers: {
+        Connection: "Upgrade",
+        Upgrade: "websocket",
+        Origin: "chrome-extension://fakefakefake",
+        "Sec-WebSocket-Key": Buffer.from("ghost-relay-test").toString("base64"),
+        "Sec-WebSocket-Version": "13",
+        "Sec-WebSocket-Protocol": [
+          RELAY_SUBPROTOCOL,
+          `${RELAY_TOKEN_SUBPROTOCOL_PREFIX}${TOKEN}`,
+        ].join(", "),
+      },
+    });
+    upgrade.once("upgrade", (_response, socket) => {
+      socket.pause();
+      resolve(socket);
+    });
+    upgrade.once("response", (response) => {
+      response.resume();
+      reject(new Error(`upgrade was refused with ${response.statusCode}`));
+    });
+    upgrade.once("error", reject);
+    upgrade.end();
+  });
 }
 
 function waitFor(predicate: () => boolean, timeoutMs = 2_000): Promise<void> {
@@ -449,6 +487,40 @@ describe("shutdown", () => {
 
     const error = await expectUpgradeRefused();
     expect(error.message).toMatch(/503/);
+  });
+
+  it("force-terminates an upgraded peer that never answers the close handshake", async () => {
+    const silent = await connectSilentUpgrade();
+    const started = Date.now();
+
+    try {
+      await hub.close();
+    } finally {
+      silent.destroy();
+    }
+
+    const elapsed = Date.now() - started;
+    expect(elapsed).toBeLessThan(1_000);
+    expect(hub.status()).toMatchObject({ connected: false, peer: null, since: null });
+  });
+
+  it("force-terminates a relay socket whose close handshake never settles", async () => {
+    let onClose: (() => void) | undefined;
+    let terminations = 0;
+    await closeRelaySocket({
+      readyState: 1,
+      CLOSED: 3,
+      once: (_event, listener) => {
+        onClose = listener;
+      },
+      close: () => {},
+      terminate: () => {
+        terminations += 1;
+        onClose?.();
+      },
+    }, 10);
+
+    expect(terminations).toBe(1);
   });
 });
 

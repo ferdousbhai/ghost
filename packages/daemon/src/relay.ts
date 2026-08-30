@@ -51,6 +51,7 @@ import { defaultRelayTokenPath, readOrCreateRelayToken } from "./relay-token.js"
 
 export const RELAY_PING_INTERVAL_MS = 20_000;
 export const RELAY_HELLO_TIMEOUT_MS = 5_000;
+export const RELAY_CLOSE_TIMEOUT_MS = 1_000;
 export const RELAY_TIMEOUT_GRACE_MS = 2_000;
 export const RELAY_CLOSE_GOING_AWAY = 1001;
 export const RELAY_CLOSE_SHUTDOWN = 4000;
@@ -68,6 +69,7 @@ export interface RelayHubOptions {
   logger?: Logger;
   pingIntervalMs?: number;
   helloTimeoutMs?: number;
+  closeTimeoutMs?: number;
   publicUrl?: string;
 }
 
@@ -117,6 +119,7 @@ export class RelayHub implements RelayTransport {
   readonly #logger: Logger;
   readonly #pingIntervalMs: number;
   readonly #helloTimeoutMs: number;
+  readonly #closeTimeoutMs: number;
   readonly #wss: WebSocketServer;
   readonly #pending = new Map<number, Pending>();
 
@@ -130,6 +133,7 @@ export class RelayHub implements RelayTransport {
   #alive = true;
   #publicUrl: string | undefined;
   #closed = false;
+  #closePromise: Promise<void> | undefined;
 
   constructor(options: RelayHubOptions = {}) {
     // The token file is *not* touched here. Constructing a hub is something every
@@ -140,6 +144,7 @@ export class RelayHub implements RelayTransport {
     this.#logger = options.logger ?? silentLogger;
     this.#pingIntervalMs = options.pingIntervalMs ?? RELAY_PING_INTERVAL_MS;
     this.#helloTimeoutMs = options.helloTimeoutMs ?? RELAY_HELLO_TIMEOUT_MS;
+    this.#closeTimeoutMs = options.closeTimeoutMs ?? RELAY_CLOSE_TIMEOUT_MS;
     this.#publicUrl = options.publicUrl;
     // ws applies maxPayload while assembling fragmented messages, before the
     // complete string reaches #onFrame.
@@ -499,25 +504,82 @@ export class RelayHub implements RelayTransport {
   }
 
   /** Stop accepting, hang up on the extension, and fail anything in flight. */
-  async close(): Promise<void> {
+  close(): Promise<void> {
+    if (this.#closePromise) return this.#closePromise;
+    this.#closePromise = this.#closeNow();
+    return this.#closePromise;
+  }
+
+  async #closeNow(): Promise<void> {
     this.#closed = true;
     this.#stopHelloDeadline();
     this.#stopPinging();
     this.#failPending("The daemon is shutting down.");
     const socket = this.#socket;
-    this.#socket = undefined;
     this.#negotiatedSocket = undefined;
     this.#peer = undefined;
     this.#since = undefined;
     if (socket) {
-      try {
-        socket.close(RELAY_CLOSE_GOING_AWAY, "ghostd is shutting down");
-      } catch {
-        socket.terminate();
-      }
+      await closeRelaySocket(socket, this.#closeTimeoutMs);
     }
-    await new Promise<void>((resolve) => this.#wss.close(() => resolve()));
+    if (this.#socket === socket) this.#socket = undefined;
+
+    const serverClosed = new Promise<void>((resolve) => {
+      try {
+        this.#wss.close(() => resolve());
+      } catch {
+        resolve();
+      }
+    });
+    await settlesWithin(serverClosed, this.#closeTimeoutMs);
   }
+}
+
+/** Give one upgraded relay peer a bounded close handshake, then force it down. */
+export async function closeRelaySocket(
+  socket: {
+    readonly readyState: number;
+    readonly CLOSED: number;
+    once(event: "close", listener: () => void): unknown;
+    close(code: number, reason: string): void;
+    terminate(): void;
+  },
+  timeoutMs: number,
+): Promise<void> {
+  const closed = new Promise<void>((resolve) => {
+    if (socket.readyState === socket.CLOSED) resolve();
+    else socket.once("close", () => resolve());
+  });
+  try {
+    socket.close(RELAY_CLOSE_GOING_AWAY, "ghostd is shutting down");
+  } catch {
+    try {
+      socket.terminate();
+    } catch {
+      return;
+    }
+  }
+  if (await settlesWithin(closed, timeoutMs)) return;
+  try {
+    socket.terminate();
+  } catch {
+    // The socket may have closed between the deadline and this call.
+  }
+  await settlesWithin(closed, timeoutMs);
+}
+
+function settlesWithin(promise: Promise<unknown>, timeoutMs: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value: boolean): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(value);
+    };
+    const timer = setTimeout(() => finish(false), timeoutMs);
+    void promise.then(() => finish(true), () => finish(true));
+  });
 }
 
 function refuse(socket: Duplex, status: number, reason: string): void {
