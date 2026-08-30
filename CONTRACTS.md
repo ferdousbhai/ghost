@@ -20,8 +20,8 @@ inside a ghost home. The daemon resolves the declarative categories into an
 immutable session snapshot and passes the ghost's absolute extension roots
 explicitly. It never lets the operational cwd become an implicit package root.
 Owner-home or project executable extensions, hooks,
-TypeScript commands, and custom code tools are disabled until #31 can load them
-in a per-session isolated worker. A deliberately bound project's data-only
+TypeScript commands, and custom code tools are disabled in a Ghost principal
+session. A deliberately bound project's data-only
 instructions, skills, rules, Markdown prompts/commands, and MCP join the
 snapshot. Machine skills are the one ambient declarative exception: Ghost uses
 pi's native skill parser to snapshot every valid skill visible under the owner's
@@ -69,8 +69,9 @@ previewed but inert. Claude Code retains its own native subagents.
   sessions/pins.json           v2 pinned state: { "version": 2, "pinned": ["<id>", …] }
   sessions/reads.json          v2 read state: { "version": 2, "reads": { "<id>": "<ISO timestamp>" } }
   .tasks/                      daemon-owned normalized worker-task lifecycle
-  .tasks/task-<uuid>.json      v1 bounded task state and event tail; the vendor
+  .tasks/task-<uuid>.json      v1 bounded task state and event tail; the worker
                                harness retains its own full native transcript
+  .tasks/pi/                   bundled pi-worker's native Pi JSONL transcripts
   .pi/                         derived pi machine runtime; never credentials
   .pi/models.pi.json           secret-free provider/models view synced from
                                models.json
@@ -1852,11 +1853,55 @@ The authenticated HTTP boundary is:
 
 The context resolver, not request input, is the authority for project root and
 cwd. It accepts only an absolute cwd within the conversation's canonical,
-trusted project root. Vendor workers receive that cwd and then perform their
-own native project-policy/configuration discovery there. In this first
-lifecycle slice no production adapters are registered: listings and recovery
-are live, while creation returns `503 worker_unavailable`. Each adapter lands
-independently without changing this wire or persistence contract.
+trusted project root. Every adapter revalidates that machine trust receipt and
+canonical containment immediately before launch. Vendor workers receive that
+cwd and then perform their own native project-policy/configuration discovery
+there. An adapter that is not active returns `503 worker_unavailable` without
+changing this wire or persistence contract.
+
+`pi-worker` runs in an isolated child invocation of the installed `ghostd`
+program, never inside the daemon process and never through a separately
+installed Pi executable. The child uses the bundled locked Pi SDK and the
+Ghost's Secret Service/model runtime. Its primary model is `task_model` when
+bound, otherwise the Ghost's ordinary Pi model default; a Claude Code harness
+route is not a Pi model and is never inherited. The worker keeps Pi's native
+coding-agent prompt construction, including native project prompt overrides,
+tool guidance, cwd, and project context discovery, then appends only a compact
+Ghost-owned worker boundary: it is responsible for the delegated coding task,
+is not the Ghost persona, follows project policy, and reports the result to the
+Ghost. `character.md`, Ghost memory, Documents, browser/desktop tools, and the
+principal prompt are not injected.
+
+The child uses the seven bundled Pi coding tools `bash`, `edit`, `find`, `grep`,
+`ls`, `read`, and `write`. An extension cannot add a model-callable tool or
+replace one of those bundled definitions, although its lifecycle and tool-call
+hooks still run. It loads the trusted project's native Pi settings, packages,
+extensions, `AGENTS.md` context, prompts, and skills at the pinned cwd, plus the
+same owner-trusted machine skill roots available to a principal. Unlike Pi's
+ambient ancestor walk, admitted `AGENTS.md` files and project skills are
+canonical-path bounded to the captured trusted root; skills from outside that
+root enter only through those explicit machine roots. This is the deliberate
+trust-boundary exception to native project discovery.
+
+That executable project discovery is safe for daemon integrity because it runs
+only in the captured child with the owner's normal OS authority. Headless task
+workers have no TUI or owner-facing interactive dialogs, model switcher, or
+session navigation, and no Ghost ask broker, MCP snapshot, browser relay,
+desktop helper, or principal hooks. Native extensions retain Pi's bound core
+actions, including programmatic model changes; print-mode UI requests receive
+Pi's native noninteractive cancellation values, and an extension handler that
+throws fails the task as an ordinary worker error. The child persists its full
+Pi transcript under `.tasks/pi/` and communicates with the daemon over bounded
+JSON-lines on its captured stdio. Steering is acknowledged before the
+normalized principal/owner message is persisted. Cancellation is a priority
+control path: neither the daemon nor the child queues it behind a steering
+request that may own another model turn. A steering acknowledgement that loses
+that cancellation race is not persisted as an owner/principal message.
+Cancellation first asks Pi to abort and run extension shutdown; if it does not
+settle, the adapter terminates only that captured child, escalating to a forced
+kill after a bounded grace period. Every terminal result, worker error,
+protocol failure, and cancellation is confirmed only after that captured child
+has exited and can no longer work.
 
 The captured root/cwd remain pinned for the task's lifetime even if its parent
 conversation is later deleted; conversation deletion and fork neither cancel
@@ -1866,7 +1911,11 @@ draining after terminal state, blocks whole-ghost rename or deletion with `409
 ghost_busy`. Once tasks and controller operations settle, their `.tasks/`
 sidecars move with the home and remain readable under the new ghost name.
 Shutdown synchronously closes task admission and aborts live controllers before
-draining them under the daemon's existing bounded graceful/forced stages.
+draining them under the daemon's existing bounded graceful/forced stages. If
+the graceful deadline expires, each registered captured-worker force action is
+invoked before its durable state becomes `interrupted`; `pi-worker` sends
+`SIGKILL` directly to only its captured child even when native initialization
+has not completed.
 
 ### Model indicator + switcher (which model a ghost uses, and switching it)
 

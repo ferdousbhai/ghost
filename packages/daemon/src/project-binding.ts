@@ -988,7 +988,7 @@ export class ProjectBindingStore {
     }
   }
 
-  async resolveOperationalCwd(current: ProjectBindingState, cwd: string): Promise<string> {
+  private async resolveCwdDirectory(cwd: string): Promise<string> {
     if (!isAbsolute(cwd)) {
       throw new GhostError("invalid_project_path", "A working directory must be absolute.", 400);
     }
@@ -1003,6 +1003,11 @@ export class ProjectBindingStore {
     if (!info.isDirectory()) {
       throw new GhostError("invalid_project_path", "The requested working directory is not a directory.", 400);
     }
+    return resolvedCwd;
+  }
+
+  async resolveOperationalCwd(current: ProjectBindingState, cwd: string): Promise<string> {
+    const resolvedCwd = await this.resolveCwdDirectory(cwd);
     if (current.root) {
       const identity = await this.assertTrusted(current.root);
       if (!isWithin(identity.root, resolvedCwd)) {
@@ -1014,6 +1019,20 @@ export class ProjectBindingStore {
       }
     }
     return resolvedCwd;
+  }
+
+  /** Revalidate a task's pinned project identity and cwd immediately before a worker starts. */
+  async resolveTrustedTaskCwd(root: string, cwd: string): Promise<{ root: string; cwd: string }> {
+    const identity = await this.assertTrusted(root);
+    const resolvedCwd = await this.resolveCwdDirectory(cwd);
+    if (!isWithin(identity.root, resolvedCwd)) {
+      throw new GhostError(
+        "cwd_outside_project",
+        "Leaving a bound project requires an explicit project rebind.",
+        409,
+      );
+    }
+    return { root: identity.root, cwd: resolvedCwd };
   }
 
   async writeOperationalCwd(

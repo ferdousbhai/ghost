@@ -17,6 +17,8 @@ import { GhostHookRunner } from "./hooks.js";
 import { acquireHomeReservation, HomeReservationBusyError, type HomeReservation } from "./home-reservation.js";
 import { HomeOperationCoordinator } from "./home-operations.js";
 import { hookSmolCompleteCommand } from "./hook-smol-complete.js";
+import { piWorkerCommand } from "./pi-worker-child.js";
+import { PiWorkerAdapter } from "./pi-worker.js";
 import { createJournalSink } from "./journal.js";
 import { createLogger, stderrSink, type Logger, type LogLevel } from "./log.js";
 import { McpCatalog } from "./mcp-catalog.js";
@@ -307,6 +309,7 @@ export async function main(argv: string[] = process.argv.slice(2), runtime: Main
   if (argv[0] === "remote") return remoteCommand(argv.slice(1));
   if (argv[0] === "login") return loginCommand(argv.slice(1));
   if (argv[0] === "hook-smol-complete") return hookSmolCompleteCommand(argv.slice(1));
+  if (argv[0] === "worker-pi") return piWorkerCommand(argv.slice(1));
   if (argv[0] === "place-legacy-documents") {
     return legacyDocumentsPlacementCommand(argv.slice(1));
   }
@@ -480,10 +483,18 @@ async function serveDaemon(
     onModelRoutingChanged: (name) => host.rebindModel(name),
   });
   const workers = new WorkerCatalog({ ownerHome, claudeCodeProbe, logger });
-  // Adapters are added independently. Keeping the manager composed now makes
-  // existing task state visible and reports an explicit unavailable worker
-  // instead of making the lifecycle routes disappear.
-  const tasks = new TaskManager({ registry, homeOperations, logger });
+  const tasks = new TaskManager({
+    registry,
+    homeOperations,
+    logger,
+    adapters: [new PiWorkerAdapter({
+      registry,
+      offline: config.offline,
+      assertContext: ({ root, cwd }) => host.resolveTaskContextForStart(root, cwd),
+    })],
+    resolveContext: ({ ghostName, parent, requestedCwd }) =>
+      host.resolveTaskContext(ghostName, parent, requestedCwd),
+  });
   for (const ghost of registry.list()) {
     const restored = await tasks.restoreGhost(ghost.name);
     if (restored.interrupted > 0) {

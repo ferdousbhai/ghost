@@ -143,6 +143,7 @@ export type WorkerAdapterEvent =
 
 export interface WorkerTaskRequest {
   taskId: string;
+  ghostName: string;
   parent: ConversationIdentity;
   task: string;
   root: string;
@@ -152,6 +153,11 @@ export interface WorkerTaskRequest {
 export interface WorkerTaskResult {
   text: string;
   nativeSessionId?: string;
+}
+
+/** A native controller confirmed it stopped, but its terminal outcome was a worker failure. */
+export class WorkerStoppedError extends Error {
+  override readonly name = "WorkerStoppedError";
 }
 
 export interface WorkerTaskController {
@@ -169,6 +175,8 @@ export interface WorkerAdapter {
     context: {
       signal: AbortSignal;
       emit(event: WorkerAdapterEvent): Promise<void>;
+      /** Register the one captured native operation's emergency shutdown action. */
+      registerForce(force: () => void): void;
     },
   ): Promise<WorkerTaskController>;
 }
@@ -206,6 +214,8 @@ interface LiveTask {
   controller?: WorkerTaskController;
   cancellation?: Promise<void>;
   failureAfterStop?: TaskErrorView;
+  force?: () => void;
+  forceRequested?: boolean;
   settled: Promise<void>;
   settle(): void;
 }
@@ -735,6 +745,9 @@ export class TaskManager {
       throw new GhostError("task_send_failed", "The worker did not accept that message.", 502);
     }
     await this.mutate(ghostName, taskId, (current) => {
+      if (current.state === "cancelling"
+        || current.state === "cancelled"
+        || current.state === "interrupted") return false;
       this.appendEvent(current, actor === "owner" ? "owner_message" : "principal_message", text);
       if (current.state === "waiting_for_owner") this.changeState(current, "running");
     });
@@ -744,11 +757,9 @@ export class TaskManager {
   async cancel(ghostName: string, taskId: string): Promise<CancelTaskResult> {
     return this.withControllerOperation(ghostName, true, async () => {
       await this.restoreGhost(ghostName);
-      return serializeByKey(
-        this.controllerOperations,
-        this.key(ghostName, taskId),
-        () => this.cancelFresh(ghostName, taskId),
-      );
+      // Cancellation is a priority control path. It must not queue behind a
+      // steering request that the native worker may keep open for a full turn.
+      return this.cancelFresh(ghostName, taskId);
     });
   }
 
@@ -772,9 +783,13 @@ export class TaskManager {
       try {
         await this.stopLive(live);
       } catch (error) {
-        await this.failCancellation(ghostName, taskId, error);
-        live.cancellation = undefined;
-        throw new GhostError("task_cancel_failed", "The worker did not confirm cancellation.", 502);
+        if (error instanceof WorkerStoppedError) {
+          live.failureAfterStop = this.taskError("worker_failed", error.message);
+        } else {
+          await this.failCancellation(ghostName, taskId, error);
+          live.cancellation = undefined;
+          throw new GhostError("task_cancel_failed", "The worker did not confirm cancellation.", 502);
+        }
       }
       task = await this.finishStoppedLive(live);
       this.detachLive(live);
@@ -816,11 +831,11 @@ export class TaskManager {
   async disposeAll(): Promise<void> {
     this.beginShutdown();
     await Promise.allSettled([...this.openings].map((opening) => opening.settled));
+    const active = [...this.live.values()];
+    await Promise.allSettled(active.map((task) => this.cancel(task.ghostName, task.taskId)));
     await Promise.allSettled(
       [...this.pendingControllerOperations].map((operation) => operation.settled),
     );
-    const active = [...this.live.values()];
-    await Promise.allSettled(active.map((task) => this.cancel(task.ghostName, task.taskId)));
     await Promise.allSettled(active.map((task) => task.settled));
     this.unregisterHomeMoveParticipant?.();
   }
@@ -828,6 +843,8 @@ export class TaskManager {
   forceDisposeAll(): void {
     this.beginShutdown();
     for (const live of [...this.live.values()]) {
+      live.forceRequested = true;
+      live.force?.();
       void this.stopLive(live).catch(() => {});
       void this.mutate(live.ghostName, live.taskId, (record) => {
         if (isTerminalTaskState(record.state)) return false;
@@ -868,6 +885,7 @@ export class TaskManager {
       }
       const controller = await adapter.start({
         taskId,
+        ghostName,
         parent: starting.parent,
         task: starting.task,
         root: starting.root,
@@ -875,6 +893,10 @@ export class TaskManager {
       }, {
         signal: live.abort.signal,
         emit: (event) => this.onAdapterEvent(ghostName, taskId, event),
+        registerForce: (force) => {
+          live.force = force;
+          if (live.forceRequested) force();
+        },
       });
       live.controller = controller;
       // Cancellation can settle the task before this run reaches its normal
@@ -1145,6 +1167,10 @@ export class TaskManager {
   }
 
   private async settleRunError(live: LiveTask, error: unknown): Promise<void> {
+    if (error instanceof WorkerStoppedError) {
+      await this.failWorker(live.ghostName, live.taskId, error);
+      return;
+    }
     if (!live.abort.signal.aborted) {
       await this.failWorker(live.ghostName, live.taskId, error);
       return;

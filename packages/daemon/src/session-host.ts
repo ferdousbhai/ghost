@@ -122,6 +122,7 @@ import {
   conversationIdentity,
   isValidConversationId,
   requireRawConversationId,
+  type ConversationIdentity,
   type ConversationRuntime,
 } from "./conversation-identity.js";
 import { generateTitle } from "./title.js";
@@ -2277,6 +2278,31 @@ export class SessionHost {
     runtime: ConversationRuntime,
   ): Promise<ProjectBindingState> {
     return this.projectState(ghostName, runtime, requireRawConversationId(conversationId));
+  }
+
+  /** Resolve a worker task only from its parent's already-trusted project binding. */
+  async resolveTaskContext(
+    ghostName: string,
+    parent: ConversationIdentity,
+    requestedCwd?: string,
+  ): Promise<{ root: string; cwd: string }> {
+    const project = await this.projectState(ghostName, parent.runtime, parent.conversationId);
+    if (!project.root) {
+      throw new GhostError(
+        "task_project_required",
+        "Bind and trust a project on this conversation before delegating a coding task.",
+        409,
+      );
+    }
+    return this.projectBindings.resolveTrustedTaskCwd(
+      project.root,
+      requestedCwd ?? project.cwd,
+    );
+  }
+
+  /** Revalidate the machine trust receipt and pinned cwd immediately before spawning a worker. */
+  resolveTaskContextForStart(root: string, cwd: string): Promise<{ root: string; cwd: string }> {
+    return this.projectBindings.resolveTrustedTaskCwd(root, cwd);
   }
 
   async previewProject(

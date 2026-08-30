@@ -10,6 +10,7 @@ import {
   MAX_TASK_RECORD_BYTES,
   MAX_TASK_RESULT_LENGTH,
   TaskManager,
+  WorkerStoppedError,
   type WorkerAdapter,
   type WorkerAdapterEvent,
   type WorkerTaskRequest,
@@ -134,7 +135,12 @@ describe("TaskManager lifecycle", () => {
     });
     await until(() => controlled.runs.length === 2);
     expect(controlled.runs.map((run) => run.request.taskId)).toEqual([first.id, second.id]);
-    expect(controlled.runs[0]?.request).toMatchObject({ root, cwd, task: "Implement the parser." });
+    expect(controlled.runs[0]?.request).toMatchObject({
+      ghostName: "casper",
+      root,
+      cwd,
+      task: "Implement the parser.",
+    });
 
     await controlled.runs[0]!.emit({ type: "output", text: "working\n" });
     controlled.runs[0]!.resolve("Implemented.", "pi-native-1");
@@ -213,7 +219,7 @@ describe("TaskManager lifecycle", () => {
     });
   });
 
-  it("serializes an accepted native message before cancellation", async () => {
+  it("does not persist a steering acknowledgement that loses to cancellation", async () => {
     const controlled = controlledAdapter();
     const sendStarted = Promise.withResolvers<void>();
     const releaseSend = Promise.withResolvers<void>();
@@ -243,14 +249,11 @@ describe("TaskManager lifecycle", () => {
     const message = manager.send("casper", task.id, "Use the stable API.");
     await sendStarted.promise;
     const cancellation = manager.cancel("casper", task.id);
-    expect(controlled.runs[0]!.cancelled).toBe(false);
+    await until(() => controlled.runs[0]!.cancelled);
     releaseSend.resolve();
 
-    await expect(message).resolves.toMatchObject({
-      events: expect.arrayContaining([
-        expect.objectContaining({ type: "owner_message", text: "Use the stable API." }),
-      ]),
-    });
+    const afterMessage = await message;
+    expect(afterMessage.events.some((event) => event.type === "owner_message")).toBe(false);
     await expect(cancellation).resolves.toMatchObject({
       outcome: "cancelled",
       task: { state: "cancelled" },
@@ -546,6 +549,93 @@ describe("TaskManager lifecycle", () => {
 
     await expect(manager.wait("casper", task.id)).resolves.toMatchObject({ state: "cancelled" });
     expect(cancelled).toBe(true);
+  });
+
+  it("delivers cancellation without waiting for an in-flight steering turn", async () => {
+    const steering = Promise.withResolvers<void>();
+    let steeringStarted = false;
+    let cancelled = false;
+    const adapter: WorkerAdapter = {
+      id: "pi-worker",
+      start: async () => ({
+        result: new Promise(() => {}),
+        send: () => {
+          steeringStarted = true;
+          return steering.promise;
+        },
+        cancel: () => { cancelled = true; },
+      }),
+    };
+    const { manager } = setup(adapter);
+    const task = await manager.create({
+      ghostName: "casper",
+      parent,
+      agent: "pi-worker",
+      task: "Wait for steering.",
+    });
+    await untilTaskState(manager, task.id, "running");
+    const sending = manager.send("casper", task.id, "Take another turn.");
+    await until(() => steeringStarted);
+
+    await expect(manager.cancel("casper", task.id)).resolves.toMatchObject({
+      outcome: "cancelled",
+      task: { state: "cancelled" },
+    });
+    expect(cancelled).toBe(true);
+    steering.reject(new Error("cancelled"));
+    await expect(sending).rejects.toMatchObject({ code: "task_send_failed" });
+  });
+
+  it("force-stops a captured worker that is still initializing before detaching it", async () => {
+    const neverStarted = Promise.withResolvers<Awaited<ReturnType<WorkerAdapter["start"]>>>();
+    let forced = 0;
+    const adapter: WorkerAdapter = {
+      id: "pi-worker",
+      start: (_request, context) => {
+        context.registerForce(() => { forced += 1; });
+        return neverStarted.promise;
+      },
+    };
+    const { manager } = setup(adapter);
+    const task = await manager.create({
+      ghostName: "casper",
+      parent,
+      agent: "pi-worker",
+      task: "Initialize forever.",
+    });
+    await untilTaskState(manager, task.id, "starting");
+
+    manager.forceDisposeAll();
+
+    expect(forced).toBe(1);
+    await untilTaskState(manager, task.id, "interrupted");
+  });
+
+  it("records a confirmed stopped-worker failure instead of masking it as cancellation", async () => {
+    const failure = new WorkerStoppedError("native shutdown failed");
+    const adapter: WorkerAdapter = {
+      id: "pi-worker",
+      start: async () => ({
+        result: Promise.reject(failure),
+        cancel: () => { throw failure; },
+      }),
+    };
+    const { manager } = setup(adapter);
+    const task = await manager.create({
+      ghostName: "casper",
+      parent,
+      agent: "pi-worker",
+      task: "Fail while stopping.",
+    });
+    await untilTaskState(manager, task.id, "running");
+
+    await expect(manager.cancel("casper", task.id)).resolves.toMatchObject({
+      outcome: "already_settled",
+      task: {
+        state: "failed",
+        error: { code: "worker_failed", message: "native shutdown failed" },
+      },
+    });
   });
 });
 

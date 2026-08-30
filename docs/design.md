@@ -18,9 +18,13 @@ The official repo is the point of collaboration on a narrow, opinionated core â€
 ghost home, daemon, shell, and built-in extensions. An owner can modify the
 visible instructions, skills, rules, Markdown commands and prompts, model roles,
 and MCP owned by a ghost or explicitly trusted project. Executable project
-plugins, hooks, custom tools, LSP, and pi subagents stay disabled until #31
-supplies a per-session isolation boundary; trusted visible ghost hook factories
-are the narrow in-process exception. Core stays small and holds the contracts.
+plugins, hooks, custom tools, LSP, and custom pi subagent definitions stay
+disabled in a Ghost principal session. The bundled `pi-worker` is the first #31
+isolation boundary: it runs native Pi project configuration, extensions, and
+hooks only in a captured task child after an explicit project trust decision;
+extension-defined model tools remain outside its fixed bundled tool set.
+Trusted visible ghost hook factories are the narrow in-process exception. Core
+stays small and holds the contracts.
 A capability generic enough for every ghost graduates into core or upstream pi;
 private executable additions follow the isolation boundary rather than being
 discovered implicitly from cwd. The measure of success is what owners can
