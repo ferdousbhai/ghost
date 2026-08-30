@@ -134,7 +134,7 @@ FloatingWindow {
     minimumSize: Qt.size(568, 360)
 
     function showSection(section: string): void {
-        if (["chat", "memory", "commands", "hooks", "mcp", "connect", "remote", "character"]
+        if (["chat", "workers", "memory", "commands", "hooks", "mcp", "connect", "remote", "character"]
                 .indexOf(section) < 0)
             return;
         hud.loginOpen = false;
@@ -1073,6 +1073,15 @@ FloatingWindow {
                     && !hud.loginOpen && !hud.switcherOpen
                 Layout.fillWidth: true
                 Layout.fillHeight: true
+            }
+
+            WorkersBrowser {
+                id: workersBrowser
+                visible: hud.currentSection === "workers"
+                    && !hud.loginOpen && !hud.switcherOpen
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                onCloseRequested: hud.showSection("chat")
             }
 
             // character.md is a real file, so it gets the real file editor.

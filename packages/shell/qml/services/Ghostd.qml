@@ -822,6 +822,27 @@ Singleton {
     property string mcpNotice: ""
     property string mcpGhost: ""
 
+    // Installed coding harnesses and daemon-owned durable tasks are one
+    // ghost-scoped owner view. Task creation remains a Ghost conversation
+    // action; this state owns observation, steering, and cancellation only.
+    property var codingWorkers: []
+    property var codingTasks: []
+    property string selectedCodingTaskId: ""
+    property var selectedCodingTask: null
+    property bool codingWorkersLoaded: false
+    property bool codingTasksLoaded: false
+    readonly property bool codingWorkersLoading: root.codingWorkersRequest !== null
+    readonly property bool codingTasksLoading: root.codingTasksRequest !== null
+    readonly property bool codingTaskLoading: root.codingTaskRequest !== null
+    readonly property bool codingTaskMutating: root.codingTaskMutationRequest !== null
+    property string codingWorkersError: ""
+    property string codingTasksError: ""
+    property string codingTaskError: ""
+    property string codingGhost: ""
+    readonly property bool codingHasUnsettledTasks: root.codingTasks.some(function (task) {
+        return task && !root.terminalCodingTaskState(task.state);
+    })
+
     // Plan mode, todo phases, and jobs are one conversation-scoped work view.
     // The GETs stay separate so neither a slow plan-file read nor a large job
     // output tail holds the other row back, while the stamps make both caches
@@ -932,6 +953,7 @@ Singleton {
     signal projectPreviewFinished(bool ok)
     signal projectMutationFinished(string action, bool ok)
     signal remoteSetFinished(bool enabled, bool ok)
+    signal codingTaskMutationFinished(string action, string taskId, bool ok)
 
     property var providers: []
     property string loginId: ""
@@ -1020,6 +1042,12 @@ Singleton {
     property var commandsRequest: null
     property var mcpRequest: null
     property var mcpMutationRequest: null
+    property var codingWorkersRequest: null
+    property var codingTasksRequest: null
+    property var codingTaskRequest: null
+    property var codingTaskMutationRequest: null
+    /** Test seam; production constructs native QML XHRs. */
+    property var codingRequestFactory: null
     property var workPlanRequest: null
     property var workJobsRequest: null
     property var workMutationRequest: null
@@ -1173,6 +1201,7 @@ Singleton {
         root.retireRemoteRequests();
         root.retireHooksRequest();
         root.clearWork();
+        root.clearCoding();
         for (const request of [root.projectRequest, root.projectPreviewRequest,
                 root.projectMutationRequest]) {
             if (request && request.readyState !== 4) request.abort();
@@ -1187,6 +1216,8 @@ Singleton {
         root.modelRequest = null;
         if (root.workGhost !== "" && root.workGhost !== root.activeGhost)
             root.clearWork();
+        if (root.codingGhost !== "" && root.codingGhost !== root.activeGhost)
+            root.clearCoding();
         // A rename moves loginGhost before activeGhost, preserving a live flow.
         // Any other selection change makes the old ghost's requests stale.
         if (root.loginGhost === "" || root.loginGhost !== root.activeGhost)
@@ -1347,6 +1378,7 @@ Singleton {
         root.clearCommands();
         root.clearProject();
         root.clearMcp();
+        root.clearCoding();
         root.clearConnect();
         root.refresh();
     }
@@ -1569,6 +1601,7 @@ Singleton {
         root.clearCommands();
         root.clearProject();
         root.clearMcp();
+        root.clearCoding();
         root.clearConnect();
     }
 
@@ -1600,6 +1633,7 @@ Singleton {
         root.clearCommands();
         root.clearProject();
         root.clearMcp();
+        root.clearCoding();
         root.clearConnect();
         root.fetchCurrentModel();
         root.fetchSessions(name);
@@ -2391,6 +2425,332 @@ Singleton {
         if (name === "") return;
         root.mutateMcp("DELETE", "/" + encodeURIComponent(name), null,
             "delete", name);
+    }
+
+
+    function makeCodingRequest(): var {
+        return typeof root.codingRequestFactory === "function"
+            ? root.codingRequestFactory() : new XMLHttpRequest();
+    }
+
+    function codingRoute(ghost: string): string {
+        return "/api/ghosts/" + encodeURIComponent(ghost);
+    }
+
+    function terminalCodingTaskState(state: var): bool {
+        return ["completed", "failed", "cancelled", "interrupted"]
+            .indexOf(String(state || "")) >= 0;
+    }
+
+    function validCodingWorker(worker: var): bool {
+        if (!worker || typeof worker !== "object" || Array.isArray(worker)
+                || ["claude-code", "codex", "pi-worker"].indexOf(worker.id) < 0
+                || typeof worker.name !== "string"
+                || ["native", "builtin"].indexOf(worker.kind) < 0
+                || typeof worker.nativeConfiguration !== "boolean"
+                || ["installed", "missing", "unknown"].indexOf(worker.installation) < 0
+                || ["authenticated", "unauthenticated", "unknown", "ghost-model"]
+                    .indexOf(worker.authentication) < 0
+                || (worker.reason !== null && typeof worker.reason !== "string"))
+            return false;
+        if (worker.usage === null) return true;
+        return worker.usage && typeof worker.usage === "object"
+            && !Array.isArray(worker.usage)
+            && typeof worker.usage.state === "string"
+            && typeof worker.usage.stale === "boolean"
+            && Array.isArray(worker.usage.limits)
+            && worker.usage.limits.every(function (limit) {
+                return limit && typeof limit === "object"
+                    && typeof limit.label === "string"
+                    && typeof limit.usedFraction === "number"
+                    && Number.isFinite(limit.usedFraction)
+                    && (limit.resetsAt === null || typeof limit.resetsAt === "string");
+            });
+    }
+
+    function validCodingWorkspace(workspace: var): bool {
+        if (!workspace || typeof workspace !== "object" || Array.isArray(workspace)
+                || ["git-worktree", "in-place"].indexOf(workspace.strategy) < 0
+                || ["preparing", "active", "removed", "preserved"]
+                    .indexOf(workspace.state) < 0
+                || typeof workspace.root !== "string" || typeof workspace.cwd !== "string"
+                || (workspace.branch !== null && typeof workspace.branch !== "string")
+                || (workspace.baseCommit !== null && typeof workspace.baseCommit !== "string")
+                || (workspace.headCommit !== null && typeof workspace.headCommit !== "string")
+                || ["pending", "ready", "no_changes", "needs_attention", "not_applicable"]
+                    .indexOf(workspace.review) < 0
+                || (workspace.notice !== null && typeof workspace.notice !== "string"))
+            return false;
+        return true;
+    }
+
+    function validCodingTaskCommon(task: var): bool {
+        return task && typeof task === "object" && !Array.isArray(task)
+            && typeof task.id === "string" && task.id.indexOf("task-") === 0
+            && ["claude-code", "codex", "pi-worker"].indexOf(task.agent) >= 0
+            && typeof task.root === "string" && typeof task.cwd === "string"
+            && ["queued", "starting", "running", "waiting_for_owner", "cancelling",
+                "completed", "failed", "cancelled", "interrupted"].indexOf(task.state) >= 0
+            && typeof task.createdAt === "string" && typeof task.updatedAt === "string"
+            && (task.nativeSessionId === null || typeof task.nativeSessionId === "string")
+            && (task.error === null || (task.error && typeof task.error === "object"
+                && typeof task.error.code === "string" && typeof task.error.message === "string"))
+            && root.validCodingWorkspace(task.workspace);
+    }
+
+    function validCodingTaskSummary(task: var): bool {
+        return root.validCodingTaskCommon(task)
+            && typeof task.taskPreview === "string"
+            && (task.resultPreview === null || typeof task.resultPreview === "string")
+            && typeof task.resultTruncated === "boolean";
+    }
+
+    function validCodingTaskDetail(task: var): bool {
+        return root.validCodingTaskCommon(task) && task.version === 2
+            && typeof task.task === "string"
+            && (task.result === null || typeof task.result === "string")
+            && typeof task.resultTruncated === "boolean"
+            && Array.isArray(task.events)
+            && task.events.every(function (event) {
+                return event && typeof event === "object"
+                    && typeof event.sequence === "number" && typeof event.at === "string"
+                    && ["state", "output", "notice", "owner_message", "principal_message"]
+                        .indexOf(event.type) >= 0
+                    && (event.text === undefined || typeof event.text === "string");
+            })
+            && typeof task.eventsTruncated === "boolean";
+    }
+
+    /** Retire ownership before abort because test/native XHR may finish inline. */
+    function clearCoding(): void {
+        const requests = [root.codingWorkersRequest, root.codingTasksRequest,
+            root.codingTaskRequest, root.codingTaskMutationRequest];
+        root.codingWorkersRequest = null;
+        root.codingTasksRequest = null;
+        root.codingTaskRequest = null;
+        root.codingTaskMutationRequest = null;
+        root.codingWorkers = [];
+        root.codingTasks = [];
+        root.selectedCodingTaskId = "";
+        root.selectedCodingTask = null;
+        root.codingWorkersLoaded = false;
+        root.codingTasksLoaded = false;
+        root.codingWorkersError = "";
+        root.codingTasksError = "";
+        root.codingTaskError = "";
+        root.codingGhost = "";
+        for (const request of requests) {
+            if (request && request.readyState !== 4) request.abort();
+        }
+    }
+
+    function prepareCodingGhost(ghost: string): void {
+        if (root.codingGhost !== "" && root.codingGhost !== ghost) root.clearCoding();
+        root.codingGhost = ghost;
+    }
+
+    function fetchCodingWorkers(force: bool): void {
+        const ghost = root.activeGhost;
+        if (ghost === "") {
+            root.clearCoding();
+            return;
+        }
+        root.prepareCodingGhost(ghost);
+        if (!force && (root.codingWorkersLoaded || root.codingWorkersLoading)) return;
+        const previous = root.codingWorkersRequest;
+        root.codingWorkersRequest = null;
+        if (previous && previous.readyState !== 4) previous.abort();
+        const xhr = root.makeCodingRequest();
+        root.codingWorkersRequest = xhr;
+        root.codingWorkersError = "";
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || xhr !== root.codingWorkersRequest) return;
+            root.codingWorkersRequest = null;
+            if (ghost !== root.activeGhost || ghost !== root.codingGhost) return;
+            if (xhr.status === 200) {
+                try {
+                    const body = JSON.parse(xhr.responseText);
+                    if (!body || !Array.isArray(body.workers)
+                            || !body.workers.every(root.validCodingWorker))
+                        throw new Error("invalid worker catalogue");
+                    root.codingWorkers = body.workers;
+                    root.codingWorkersLoaded = true;
+                    root.codingWorkersError = "";
+                    root.reachable = true;
+                } catch (error) {
+                    root.codingWorkersLoaded = false;
+                    root.codingWorkersError = "ghostd sent malformed worker status";
+                }
+            } else {
+                root.codingWorkersLoaded = false;
+                root.codingWorkersError = root.describeError(xhr, "GET workers");
+            }
+        };
+        root.dispatch(xhr, "GET", root.codingRoute(ghost) + "/workers", ({}), null,
+            function () { return xhr === root.codingWorkersRequest; });
+    }
+
+    function fetchCodingTasks(force: bool): void {
+        const ghost = root.activeGhost;
+        if (ghost === "") {
+            root.clearCoding();
+            return;
+        }
+        root.prepareCodingGhost(ghost);
+        if (!force && (root.codingTasksLoaded || root.codingTasksLoading)) return;
+        const previous = root.codingTasksRequest;
+        root.codingTasksRequest = null;
+        if (previous && previous.readyState !== 4) previous.abort();
+        const xhr = root.makeCodingRequest();
+        root.codingTasksRequest = xhr;
+        root.codingTasksError = "";
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || xhr !== root.codingTasksRequest) return;
+            root.codingTasksRequest = null;
+            if (ghost !== root.activeGhost || ghost !== root.codingGhost) return;
+            if (xhr.status === 200) {
+                try {
+                    const body = JSON.parse(xhr.responseText);
+                    if (!body || !Array.isArray(body.tasks) || !Array.isArray(body.skipped)
+                            || !body.tasks.every(root.validCodingTaskSummary))
+                        throw new Error("invalid task list");
+                    root.codingTasks = body.tasks;
+                    root.codingTasksLoaded = true;
+                    root.codingTasksError = body.skipped.length > 0
+                        ? body.skipped.length + " malformed task record(s) were skipped." : "";
+                    root.reachable = true;
+                    const selectedId = root.selectedCodingTaskId;
+                    if (selectedId !== "" && !root.codingTaskLoading) {
+                        if (body.tasks.some(function (task) { return task.id === selectedId; })) {
+                            root.fetchCodingTask(selectedId, true);
+                        } else {
+                            root.selectedCodingTaskId = "";
+                            root.selectedCodingTask = null;
+                            root.codingTaskError = "";
+                        }
+                    }
+                } catch (error) {
+                    root.codingTasksLoaded = false;
+                    root.codingTasksError = "ghostd sent malformed coding task state";
+                }
+            } else {
+                root.codingTasksLoaded = false;
+                root.codingTasksError = root.describeError(xhr, "GET coding tasks");
+            }
+        };
+        root.dispatch(xhr, "GET", root.codingRoute(ghost) + "/tasks", ({}), null,
+            function () { return xhr === root.codingTasksRequest; });
+    }
+
+    function fetchCoding(force: bool): void {
+        root.fetchCodingWorkers(force);
+        root.fetchCodingTasks(force);
+    }
+
+    function fetchCodingTask(taskId: string, force: bool): void {
+        const ghost = root.activeGhost;
+        if (ghost === "" || taskId === "") return;
+        root.prepareCodingGhost(ghost);
+        root.selectedCodingTaskId = taskId;
+        if (!force && root.selectedCodingTask && root.selectedCodingTask.id === taskId
+                && !root.codingTaskLoading) return;
+        const previous = root.codingTaskRequest;
+        root.codingTaskRequest = null;
+        if (previous && previous.readyState !== 4) previous.abort();
+        const xhr = root.makeCodingRequest();
+        root.codingTaskRequest = xhr;
+        root.codingTaskError = "";
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || xhr !== root.codingTaskRequest) return;
+            root.codingTaskRequest = null;
+            if (ghost !== root.activeGhost || ghost !== root.codingGhost
+                    || taskId !== root.selectedCodingTaskId) return;
+            if (xhr.status === 200) {
+                try {
+                    const task = JSON.parse(xhr.responseText);
+                    if (!root.validCodingTaskDetail(task) || task.id !== taskId)
+                        throw new Error("invalid task detail");
+                    root.selectedCodingTask = task;
+                    root.codingTaskError = "";
+                    root.reachable = true;
+                } catch (error) {
+                    root.codingTaskError = "ghostd sent malformed coding task detail";
+                }
+            } else {
+                root.codingTaskError = root.describeError(xhr, "GET coding task");
+            }
+        };
+        root.dispatch(xhr, "GET", root.codingRoute(ghost) + "/tasks/"
+            + encodeURIComponent(taskId), ({}), null,
+            function () { return xhr === root.codingTaskRequest; });
+    }
+
+    function selectCodingTask(taskId: string): void {
+        if (taskId === "") {
+            const request = root.codingTaskRequest;
+            root.codingTaskRequest = null;
+            if (request && request.readyState !== 4) request.abort();
+            root.selectedCodingTaskId = "";
+            root.selectedCodingTask = null;
+            root.codingTaskError = "";
+            return;
+        }
+        if (taskId !== root.selectedCodingTaskId) root.selectedCodingTask = null;
+        root.fetchCodingTask(taskId, true);
+    }
+
+    function mutateCodingTask(action: string, taskId: string, text: string): void {
+        const ghost = root.activeGhost;
+        if (ghost === "" || taskId === "" || root.codingTaskMutating
+                || ["send", "cancel"].indexOf(action) < 0) return;
+        const trimmed = text.trim();
+        if (action === "send" && trimmed === "") return;
+        const xhr = root.makeCodingRequest();
+        root.codingTaskMutationRequest = xhr;
+        root.codingTaskError = "";
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || xhr !== root.codingTaskMutationRequest) return;
+            root.codingTaskMutationRequest = null;
+            if (ghost !== root.activeGhost || ghost !== root.codingGhost) return;
+            if (xhr.status === 200) {
+                try {
+                    const body = JSON.parse(xhr.responseText);
+                    const task = action === "cancel" ? body.task : body;
+                    if (!root.validCodingTaskDetail(task) || task.id !== taskId)
+                        throw new Error("invalid task mutation");
+                    if (taskId === root.selectedCodingTaskId) {
+                        root.selectedCodingTask = task;
+                        root.codingTaskError = "";
+                    }
+                    root.reachable = true;
+                    root.codingTaskMutationFinished(action, taskId, true);
+                    root.fetchCodingTasks(true);
+                } catch (error) {
+                    if (taskId === root.selectedCodingTaskId)
+                        root.codingTaskError = "ghostd sent malformed coding task result";
+                    root.codingTaskMutationFinished(action, taskId, false);
+                }
+            } else {
+                if (taskId === root.selectedCodingTaskId) {
+                    root.codingTaskError = root.describeError(xhr,
+                        action === "send" ? "POST task message" : "POST task cancellation");
+                }
+                root.codingTaskMutationFinished(action, taskId, false);
+            }
+        };
+        root.dispatch(xhr, "POST", root.codingRoute(ghost) + "/tasks/"
+            + encodeURIComponent(taskId) + (action === "send" ? "/messages" : "/cancel"),
+            ({ "Content-Type": "application/json" }),
+            JSON.stringify(action === "send" ? { text: trimmed } : {}),
+            function () { return xhr === root.codingTaskMutationRequest; });
+    }
+
+    function sendCodingTaskMessage(taskId: string, text: string): void {
+        root.mutateCodingTask("send", taskId, text);
+    }
+
+    function cancelCodingTask(taskId: string): void {
+        root.mutateCodingTask("cancel", taskId, "");
     }
 
 

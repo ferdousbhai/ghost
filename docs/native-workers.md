@@ -29,6 +29,16 @@ Those are separate owner-authorized actions. A worktree is workflow isolation,
 not a security sandbox: maximum-trust workers can still use the machine,
 source checkout, network, and configured remotes.
 
+## Owner view
+
+The HUD's ghost-scoped **Workers** destination shows the sanitized worker
+catalogue, Omarchy usage snapshots, and durable tasks. Selecting a task exposes
+its bounded assignment, events, terminal result, and local workspace artifacts.
+The owner can send a follow-up to the exact native session or cancel it there.
+The pane intentionally has no task-creation or publishing controls: delegation
+begins in conversation, and push, pull request, merge, review-branch deletion,
+and preserved-worktree cleanup remain separate explicit workflows.
+
 ## Codex
 
 The Codex worker requires an installed `codex` executable. Ghost starts one

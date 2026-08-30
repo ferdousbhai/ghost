@@ -121,6 +121,149 @@ const ghosts = ["casper", "moaning-myrtle"].map((name) => ({
   createdAt: new Date(Date.now() - 86_400_000).toISOString(),
 }));
 
+const MOCK_WORKERS = {
+  workers: [
+    {
+      id: "claude-code",
+      name: "Claude Code",
+      kind: "native",
+      nativeConfiguration: true,
+      installation: "installed",
+      authentication: "authenticated",
+      reason: null,
+      usage: {
+        source: "omarchy",
+        state: "ready",
+        updatedAt: new Date().toISOString(),
+        stale: false,
+        tier: "Max",
+        status: null,
+        help: null,
+        limits: [
+          { label: "Session", usedFraction: 0.31, resetsAt: null },
+          { label: "Week", usedFraction: 0.46, resetsAt: null },
+        ],
+        today: { totalTokens: 18400, prompts: 16, sessions: 3 },
+      },
+    },
+    {
+      id: "codex",
+      name: "Codex",
+      kind: "native",
+      nativeConfiguration: true,
+      installation: "installed",
+      authentication: "authenticated",
+      reason: null,
+      usage: {
+        source: "omarchy",
+        state: "ready",
+        updatedAt: new Date().toISOString(),
+        stale: false,
+        tier: "Plus",
+        status: null,
+        help: null,
+        limits: [
+          { label: "Session", usedFraction: 0.18, resetsAt: null },
+          { label: "Week", usedFraction: 0.62, resetsAt: null },
+        ],
+        today: { totalTokens: 22100, prompts: 19, sessions: 4 },
+      },
+    },
+    {
+      id: "pi-worker",
+      name: "Pi worker",
+      kind: "builtin",
+      nativeConfiguration: false,
+      installation: "installed",
+      authentication: "ghost-model",
+      reason: null,
+      usage: null,
+    },
+  ],
+};
+
+function mockWorkspace(taskId, state = "active", review = "pending") {
+  const root = join(GHOSTS_ROOT, ".mock-task-worktrees", taskId);
+  return {
+    strategy: "git-worktree",
+    state,
+    root,
+    cwd: join(root, "packages", "daemon"),
+    branch: `ghost/${taskId}`,
+    baseCommit: "a".repeat(40),
+    headCommit: state === "preparing" ? null : "b".repeat(40),
+    review,
+    notice: review === "ready"
+      ? "Local review branch is ready. Ghost did not push or open a pull request."
+      : "The worker is running in an isolated Git worktree.",
+  };
+}
+
+function makeMockTask(name, id, agent, assignment, state, result = null) {
+  const now = new Date().toISOString();
+  const settled = ["completed", "failed", "cancelled", "interrupted"].includes(state);
+  return {
+    version: 2,
+    id,
+    parent: conversationIdentity("pi", `mock-${name}`),
+    agent,
+    task: assignment,
+    root: join(GHOSTS_ROOT, `${name}-project`),
+    cwd: join(GHOSTS_ROOT, `${name}-project`, "packages", "daemon"),
+    workspace: mockWorkspace(id, settled ? "removed" : "active", settled ? "ready" : "pending"),
+    state,
+    createdAt: now,
+    updatedAt: now,
+    nativeSessionId: `mock-native-${id}`,
+    result,
+    resultTruncated: false,
+    error: null,
+    events: [
+      { sequence: 1, at: now, type: "state", state: "queued" },
+      { sequence: 2, at: now, type: "notice", text: "Native worker started in maximum trust.", textTruncated: false },
+      { sequence: 3, at: now, type: "state", state },
+    ],
+    eventsTruncated: false,
+  };
+}
+
+const codingTasks = new Map(ghosts.map((ghost) => [ghost.name, [
+  makeMockTask(
+    ghost.name,
+    "task-11111111-1111-4111-8111-111111111111",
+    "codex",
+    "Simplify the durable task parser and verify its boundary tests.",
+    "running",
+  ),
+  makeMockTask(
+    ghost.name,
+    "task-22222222-2222-4222-8222-222222222222",
+    "claude-code",
+    "Review the native worker integration for configuration drift.",
+    "completed",
+    "Review complete; no configuration drift found.",
+  ),
+]]));
+
+function codingTaskSummary(task) {
+  return {
+    id: task.id,
+    parent: task.parent,
+    agent: task.agent,
+    taskPreview: task.task,
+    root: task.root,
+    cwd: task.cwd,
+    workspace: task.workspace,
+    state: task.state,
+    createdAt: task.createdAt,
+    updatedAt: task.updatedAt,
+    nativeSessionId: task.nativeSessionId,
+    resultPreview: task.result,
+    resultTruncated: task.resultTruncated,
+    error: task.error,
+  };
+}
+
 const conversationEventClients = new Map();
 
 function conversationIdentity(runtime, conversationId) {
@@ -1840,6 +1983,7 @@ const mockServer = createServer(async (req, res) => {
     if (ghosts.some((g) => g.name === name)) return json(res, 409, { error: "already exists" });
     const ghost = { name, dir: join(GHOSTS_ROOT, name), createdAt: new Date().toISOString() };
     ghosts.push(ghost);
+    codingTasks.set(name, []);
     if (OWNS_GHOSTS_ROOT) seedMockHome(name);
     return json(res, 201, ghost);
   }
@@ -1847,6 +1991,61 @@ const mockServer = createServer(async (req, res) => {
   const name = parts[2] ? decodeURIComponent(parts[2]) : "";
   const ghost = ghosts.find((g) => g.name === name);
   if (!ghost) return json(res, 404, { error: { message: `no ghost named ${name}`, code: "not_found" } });
+
+  if (parts.length === 4 && parts[3] === "workers" && req.method === "GET") {
+    return json(res, 200, MOCK_WORKERS);
+  }
+
+  if (parts.length === 4 && parts[3] === "tasks" && req.method === "GET") {
+    return json(res, 200, {
+      tasks: (codingTasks.get(name) ?? []).map(codingTaskSummary),
+      skipped: [],
+    });
+  }
+
+  if (parts[3] === "tasks" && parts.length >= 5) {
+    const taskId = decodeURIComponent(parts[4]);
+    const task = (codingTasks.get(name) ?? []).find((candidate) => candidate.id === taskId);
+    if (!task) return json(res, 404, {
+      error: { code: "task_not_found", message: "No such task." },
+    });
+    if (parts.length === 5 && req.method === "GET") return json(res, 200, task);
+    if (parts.length === 6 && parts[5] === "messages" && req.method === "POST") {
+      const body = await readBody(req).catch(() => null);
+      if (typeof body?.text !== "string" || body.text.trim() === "") {
+        return json(res, 400, {
+          error: { code: "invalid_task_message", message: "Task messages must be non-empty." },
+        });
+      }
+      task.events.push({
+        sequence: task.events.length + 1,
+        at: new Date().toISOString(),
+        type: "owner_message",
+        text: body.text.trim(),
+        textTruncated: false,
+      });
+      task.updatedAt = new Date().toISOString();
+      return json(res, 200, task);
+    }
+    if (parts.length === 6 && parts[5] === "cancel" && req.method === "POST") {
+      task.state = "cancelled";
+      task.updatedAt = new Date().toISOString();
+      task.workspace = {
+        ...task.workspace,
+        state: "removed",
+        headCommit: task.workspace.baseCommit,
+        review: "no_changes",
+        notice: "The cancelled task produced no changes; its worktree and branch were removed.",
+      };
+      task.events.push({
+        sequence: task.events.length + 1,
+        at: task.updatedAt,
+        type: "state",
+        state: "cancelled",
+      });
+      return json(res, 200, { outcome: "cancelled", task });
+    }
+  }
 
   if (parts[3] === "events" && parts.length === 4 && req.method === "GET") {
     res.writeHead(200, {
@@ -1959,6 +2158,7 @@ const mockServer = createServer(async (req, res) => {
     collabStates.delete(name);
     roles.delete(name);
     routing.delete(name);
+    codingTasks.delete(name);
     return json(res, 200, { ok: true, trash: join(TRASH_ROOT, name) });
   }
 
@@ -1982,7 +2182,7 @@ const mockServer = createServer(async (req, res) => {
       });
     }
     for (const store of [sessionStore, projectStore, deletedContext, writtenMemory, mcpStore,
-        liveStates, collabStates, roles, routing]) {
+        liveStates, collabStates, roles, routing, codingTasks]) {
       if (store.has(name)) {
         store.set(next, store.get(name));
         store.delete(name);

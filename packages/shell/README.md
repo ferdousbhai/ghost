@@ -149,14 +149,22 @@ so a reload does not resurrect what streaming set aside.
 
 The restored 64px rail at the right edge is the successor to summon-ghost's
 final `AppSideNav` (`4852804cf4e09ca50c16e08e6106c06df82e2a94`): Chat,
-Character, Memory, Commands, Hooks, MCP, Remote, and Phone access stay reachable
-without covering the content.
+Workers, Character, Memory, Commands, Hooks, MCP, Remote, and Phone access stay
+reachable without covering the content.
 
 The ghost-scoped context response remains derived rather than persisted. It
-contains character and read-only atomic memory; phase one exposes no runnable
-agent definitions because isolated task/subagent execution is disabled. Memory
-deletion is confirmed and recoverable. Character and agent-definition deletion
-are not offered.
+contains character and read-only atomic memory. Custom agent definitions remain
+preview-only; coding delegation uses the fixed `claude-code`, `codex`, and
+`pi-worker` task boundary. Memory deletion is confirmed and recoverable.
+Character and agent-definition deletion are not offered.
+
+Workers is the owner-facing view of that task boundary. It shows installed
+harness availability and Omarchy's current usage snapshots, then lists the
+selected ghost's durable coding tasks with assignment, progress, result, and
+workspace review artifacts. Follow-up messages and cancellation target the
+daemon-owned worker session. New tasks still begin through conversation so the
+Ghost chooses the worker and trusted cwd; the pane never pushes, opens a pull
+request, merges, or deletes a review branch.
 
 Commands is the effective, conversation-scoped Ghost slash-command catalog:
 headless builtins, admitted Markdown commands and prompt templates, and

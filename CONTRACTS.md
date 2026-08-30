@@ -1959,6 +1959,17 @@ The authenticated HTTP boundary is:
   controller captured when that task was spawned; Ghost never discovers or
   kills processes by name.
 
+The HUD has one ghost-scoped **Workers** destination. It reads the sanitized
+worker catalogue and durable task list, fetches a selected task's complete
+bounded view, and exposes the existing send/cancel reverse controls. It polls
+only while the destination is visible (three seconds for unsettled tasks,
+thirty seconds for worker usage), retires every request on ghost change, and
+renders task/result/event/workspace text literally. It does not provide a
+parallel task-creation form: the owner delegates through the Ghost conversation
+and the Ghost remains responsible for choosing the worker, assignment, and
+trusted cwd. The HUD reports local branch/worktree artifacts but never turns
+them into implicit publish, PR, merge, or cleanup actions.
+
 The context resolver, not request input, is the authority for source project
 root and cwd. It accepts only an absolute cwd within the conversation's
 canonical, trusted project root. Every adapter revalidates that source machine
