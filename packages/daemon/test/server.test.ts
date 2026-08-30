@@ -2580,5 +2580,50 @@ describe("plan mode routes", () => {
     const bad = await fetch(route, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "dance" }) });
     expect(bad.status).toBe(400);
     expect(await (await fetch(`${base}/api/ghosts/casper/sessions/${piSegment("conv-plan")}/todo`)).json()).toEqual({ todo: [] });
+
+    seedClaudeSidecar("conv-claude-plan");
+    const claude = await fetch(
+      `${base}/api/ghosts/casper/sessions/${claudeSegment("conv-claude-plan")}/plan`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "start" }),
+      },
+    );
+    expect(claude.status).toBe(409);
+    expect(await claude.json()).toMatchObject({ error: { code: "not_supported" } });
+  });
+
+  it("returns typed session_busy without cancelling a running job", async () => {
+    const base = await serve([
+      { kind: "tool", name: "bash", args: { command: "sleep 30", background: true } },
+      { kind: "text", text: "The job is running." },
+      { kind: "text", text: "The job was cancelled." },
+    ]);
+    const turn = await postTurn(base, {
+      ...TURN_BODY,
+      options: { sessionId: "conv-plan-job" },
+    });
+    expect(turn.status).toBe(200);
+    const [job] = host!.listJobs("casper", "conv-plan-job");
+    expect(job).toMatchObject({ status: "running" });
+
+    const response = await fetch(
+      `${base}/api/ghosts/casper/sessions/${piSegment("conv-plan-job")}/plan`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "start" }),
+      },
+    );
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: {
+        code: "session_busy",
+        message: "Wait for this conversation's background jobs to finish or cancel them before starting plan mode.",
+      },
+    });
+    expect(host!.listJobs("casper", "conv-plan-job")[0]).toMatchObject({ status: "running" });
+    expect(host!.cancelJob("casper", "conv-plan-job", job!.id)).toMatchObject({ outcome: "cancelled" });
   });
 });

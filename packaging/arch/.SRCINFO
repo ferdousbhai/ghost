@@ -8,13 +8,13 @@ pkgbase = ghost-ai-git
 	license = Apache-2.0
 	checkdepends = nodejs
 	checkdepends = python-yaml
-	checkdepends = ripgrep
 	makedepends = bun>=1.3.14
 	makedepends = desktop-file-utils
 	makedepends = git
 	makedepends = pnpm>=10.12.2
 	makedepends = uv
 	depends = at-spi2-core>=2.58
+	depends = fd
 	depends = grim>=1.5
 	depends = hyprland>=0.56
 	depends = libnotify>=0.8
@@ -24,6 +24,7 @@ pkgbase = ghost-ai-git
 	depends = python-gobject>=3.50
 	depends = python-pillow>=10
 	depends = qrencode
+	depends = ripgrep
 	depends = qt6-5compat>=6.8
 	depends = quickshell>=0.3
 	depends = wtype>=0.4

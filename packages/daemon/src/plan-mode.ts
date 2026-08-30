@@ -10,13 +10,12 @@
  * until the owner clears it.
  */
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { basename, join, resolve, sep } from "node:path";
+import { basename, join } from "node:path";
 import type { ExtensionFactory, SessionManager, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import {
   GHOST_BROWSER,
   GHOST_CHARACTER,
   GHOST_DESKTOP,
-  GHOST_SCREEN,
   READ_ONLY_BROWSER_ACTIONS,
   READ_ONLY_DESKTOP_ACTIONS,
   slugifyDocTag,
@@ -300,61 +299,60 @@ export function planFileName(title: string): string {
   return `${stem}.md`;
 }
 
-const READ_ONLY_COMMANDS = new Set([
-  "ls", "cat", "head", "tail", "less", "more", "wc", "grep", "rg", "egrep", "fgrep", "find", "fd", "tree", "stat", "file",
-  "pwd", "echo", "printf", "which", "type", "env", "printenv", "uname", "date", "whoami", "id", "du", "df", "ps", "sort",
-  "uniq", "cut", "tr", "awk", "diff", "cmp", "md5sum", "sha256sum", "basename", "dirname", "realpath", "readlink", "jq", "yq",
-  "column", "nl", "od", "xxd", "strings", "test", "true", "false", "bat", "eza", "lsof",
+const PLAN_ALWAYS_ALLOWED_TOOLS = new Set([
+  "read",
+  "grep",
+  "find",
+  "ls",
+  ASK_TOOL_NAME,
+  "inspect_image",
+  "propose_plan",
 ]);
-const READ_ONLY_GIT = new Set(["status", "log", "diff", "show", "blame", "branch", "ls-files", "rev-parse", "describe", "remote", "tag", "shortlog", "grep"]);
+const PLAN_JOB_OPS = new Set(["list", "wait"]);
+const PLAN_TODO_OPS = new Set(["view"]);
+const PLAN_CHARACTER_ACTIONS = new Set(["read"]);
 
-function isReadOnlyOmarchy(words: readonly string[]): boolean {
-  const args = words.slice(1);
-  if (args.length === 1 && (args[0] === "--help" || args[0] === "version")) return true;
-  if (args[0] === "commands") {
-    return args.slice(1).every((arg) => arg === "--json" || arg === "--all" || arg === "--help");
-  }
-  return args.length >= 2
-    && args.length <= 3
-    && args.at(-1) === "--help"
-    && args.slice(0, -1).every((arg) => /^[a-z0-9-]+$/u.test(arg));
+function selectorAllowed(
+  input: unknown,
+  key: "action" | "op",
+  allowed: ReadonlySet<string>,
+): boolean {
+  if (input === null || typeof input !== "object" || Array.isArray(input)) return false;
+  const value = (input as Record<string, unknown>)[key];
+  return typeof value === "string" && allowed.has(value);
 }
-
-/** A conservative judgement: every pipeline segment starts with a read-only command and nothing redirects output. */
-export function isReadOnlyCommand(command: string): boolean {
-  if (/[>]|\btee\b|\bxargs\b|\bsudo\b|\bdoas\b/.test(command)) return false;
-  const segments = command.split(/\|\|?|&&|;|\n/).map((segment) => segment.trim()).filter(Boolean);
-  if (segments.length === 0) return false;
-  return segments.every((segment) => {
-    const words = segment.replace(/^\s*(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*/, "").split(/\s+/);
-    const head = words[0] ?? "";
-    if (head === "git") return READ_ONLY_GIT.has(words[1] ?? "");
-    if (head === "omarchy") return isReadOnlyOmarchy(words);
-    if (head === "sed") return words.includes("-n") && !words.includes("-i");
-    return READ_ONLY_COMMANDS.has(head);
-  });
-}
-
-const ALWAYS_ALLOWED = new Set(["read", "grep", "find", "ls", "todo", "propose_plan", "jobs", "inspect_image", ASK_TOOL_NAME, GHOST_SCREEN, GHOST_CHARACTER]);
 
 /** Why a tool call is refused while planning, or null when it may run. */
-export function planModeRefusal(state: PlanState, plansDir: string, toolName: string, input: Record<string, unknown>): string | null {
-  if (!state.planning || ALWAYS_ALLOWED.has(toolName)) return null;
+export function planModeRefusal(state: PlanState, toolName: string, input: unknown): string | null {
+  if (!state.planning) return null;
+  if (PLAN_ALWAYS_ALLOWED_TOOLS.has(toolName)) return null;
+
   switch (toolName) {
     case "edit":
-    case "write": {
-      const path = input.path;
-      const inside = typeof path === "string" && (resolve(path) + sep).startsWith(resolve(plansDir) + sep);
-      return inside ? null : "Plan mode: files are read-only; write your plan with propose_plan.";
-    }
+    case "write":
+      return "Plan mode: files are read-only; propose_plan is the only plan writer.";
     case "bash":
-      return input.background !== true && typeof input.command === "string" && isReadOnlyCommand(input.command)
+      return "Plan mode: Bash is unavailable to the model; use read, grep, find, or ls.";
+    case "jobs":
+      return selectorAllowed(input, "op", PLAN_JOB_OPS)
         ? null
-        : "Plan mode: only read-only commands run; propose the plan first.";
+        : "Plan mode: jobs may only list or wait; cancellation remains the owner's decision.";
+    case "todo":
+      return selectorAllowed(input, "op", PLAN_TODO_OPS)
+        ? null
+        : "Plan mode: the todo list is read-only until the plan is approved.";
+    case GHOST_CHARACTER:
+      return selectorAllowed(input, "action", PLAN_CHARACTER_ACTIONS)
+        ? null
+        : "Plan mode: the character may be read but not changed.";
     case GHOST_BROWSER:
-      return READ_ONLY_BROWSER_ACTIONS.has(String(input.action)) ? null : "Plan mode: the browser is read-only until the plan is approved.";
+      return selectorAllowed(input, "action", READ_ONLY_BROWSER_ACTIONS)
+        ? null
+        : "Plan mode: only non-persisting browser observation and navigation are available; screenshots and actions are blocked.";
     case GHOST_DESKTOP:
-      return READ_ONLY_DESKTOP_ACTIONS.has(String(input.action)) ? null : "Plan mode: the desktop is read-only until the plan is approved.";
+      return selectorAllowed(input, "action", READ_ONLY_DESKTOP_ACTIONS)
+        ? null
+        : "Plan mode: only desktop observation is available until the plan is approved.";
     default:
       return `Plan mode: ${toolName} is not available until the plan is approved.`;
   }
@@ -367,8 +365,9 @@ export function planSections(book: PlanBook): string[] {
   if (state.planning) {
     sections.push([
       "# Plan mode",
-      "You are planning, not doing: read, search, and think, but change nothing. Only read-only commands and the plans folder are open to you.",
-      "When the approach is clear, call propose_plan with a title and the complete plan in Markdown. The owner approves or asks for revisions; approval ends plan mode.",
+      "You are planning, not doing: read, search, inspect, and think, but change nothing. Bash, generic file writes/edits, screenshots, memory writes, and every other mutation are blocked.",
+      "Use native read, grep, find, and ls for files; ask for decisions; and use only the observational forms of browser, desktop, jobs, todo, character, and image inspection tools.",
+      "When the approach is clear, call propose_plan with a title and the complete plan in Markdown. It is the only plan writer. The owner approves or asks for revisions; approval ends plan mode.",
     ].join("\n"));
   } else if (state.plan) {
     const content = book.planContent();
@@ -382,10 +381,10 @@ export function planSections(book: PlanBook): string[] {
 }
 
 /** The read-only guard while planning; pi refuses the call with the reason the model sees. */
-export function createPlanModeGuard(book: PlanBook, plansDir: string): ExtensionFactory {
+export function createPlanModeGuard(book: PlanBook): ExtensionFactory {
   return (api) => {
     api.on("tool_call", (event) => {
-      const reason = planModeRefusal(book.getState(), plansDir, event.toolName, event.input);
+      const reason = planModeRefusal(book.getState(), event.toolName, event.input);
       return reason ? { block: true, reason } : undefined;
     });
   };

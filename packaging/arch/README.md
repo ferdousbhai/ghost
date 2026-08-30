@@ -6,8 +6,11 @@ screenshot utility, hence the collision-free package name. The daemon and
 terminal client are self-contained x86_64 executables at `/usr/bin/ghostd` and
 `/usr/bin/ghost`, with Bun embedded and no installed source or JavaScript
 dependency tree. Bun is a build dependency for both recipes, not an installed
-runtime dependency. The stable `ghost-ai` template and release-source machinery
-live under `packaging/release/`; its runtime source carries the same compiled
+runtime dependency. `fd` and `ripgrep` remain explicit runtime dependencies:
+pi's native `find` and `grep` tools invoke them, and providing the system
+binaries prevents a read-only planning turn from downloading either tool into
+pi's cache. The stable `ghost-ai` template and release-source machinery live
+under `packaging/release/`; its runtime source carries the same compiled
 executables.
 
 Build and install from this directory:

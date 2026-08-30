@@ -8067,6 +8067,17 @@ describe("plan mode", () => {
     await host!.setPlanMode("casper", "conv-plan", "start");
     expect(await host!.planState("casper", "conv-plan")).toEqual({ planning: true, plan: null, todo: [] });
 
+    const directEvents: PiMessagesEvent[] = [];
+    await host!.runTurn("casper", {
+      sessionId: "conv-plan",
+      prompt: "!printf direct-owner-command",
+      emit: (event) => directEvents.push(event),
+    });
+    expect(provider!.requests).toHaveLength(0);
+    expect(directEvents.some((event) => event.type === "text_delta"
+      && event.delta.includes("direct-owner-command"))).toBe(true);
+    expect((await host!.planState("casper", "conv-plan")).planning).toBe(true);
+
     const events: PiMessagesEvent[] = [];
     const turn = host!.runTurn("casper", { sessionId: "conv-plan", prompt: "Plan the fix.", emit: (event) => events.push(event) });
     const pending = await waitFor(() => host!.pendingAsk("casper", "conv-plan"), 10_000);
@@ -8093,6 +8104,31 @@ describe("plan mode", () => {
     await host!.runTurn("casper", { sessionId: "conv-plan", prompt: "/todo", emit: (event) => shown.push(event) });
     expect(shown).toContainEqual(expect.objectContaining({ type: "command_output", command: "/todo", output: "## Tasks\n[>] patch\n[ ] test" }));
     expect(await host!.setPlanMode("casper", "conv-plan", "clear")).toMatchObject({ planning: false, plan: null });
+  });
+
+  it("refuses to start while a background job runs and succeeds after the owner settles it", async () => {
+    await setup([
+      { kind: "tool", name: "bash", args: { command: "sleep 30", background: true, label: "blocking plan" } },
+      { kind: "text", text: "The job is running." },
+      { kind: "text", text: "The job was cancelled." },
+    ]);
+    await host!.runTurn("casper", { sessionId: "conv-plan-job", prompt: "Start the job.", emit: () => {} });
+    const [job] = host!.listJobs("casper", "conv-plan-job");
+    expect(job).toMatchObject({ status: "running", label: "blocking plan" });
+
+    await expect(host!.setPlanMode("casper", "conv-plan-job", "start")).rejects.toMatchObject({
+      code: "session_busy",
+      status: 409,
+    });
+    expect(host!.listJobs("casper", "conv-plan-job")[0]).toMatchObject({ status: "running" });
+    expect((await host!.planState("casper", "conv-plan-job")).planning).toBe(false);
+
+    expect(host!.cancelJob("casper", "conv-plan-job", job!.id)).toMatchObject({ outcome: "cancelled" });
+    await waitFor(() => host!.listJobs("casper", "conv-plan-job")[0]?.status === "cancelled"
+      ? true
+      : null, 10_000);
+    await host!.setPlanMode("casper", "conv-plan-job", "start");
+    expect((await host!.planState("casper", "conv-plan-job")).planning).toBe(true);
   });
 });
 

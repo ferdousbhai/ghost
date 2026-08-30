@@ -15,7 +15,10 @@ dependencies are compiled into those x86-64 executables. QML, the desktop
 helper, browser extension, services, launchers, licenses, and docs still come
 from the same tagged source archive, so a stable package never mixes an old UI
 with a new daemon or client. Bun verifies that source at package build time; it
-is not an installed runtime dependency.
+is not an installed runtime dependency. The package still declares system
+runtime dependencies, including `fd` and `ripgrep` for pi's native `find` and
+`grep`; shipping those binaries prevents pi from downloading them into its cache
+during an otherwise read-only planning turn.
 
 ## Reproducibility boundary
 

@@ -455,15 +455,25 @@ and conversation-scoped; both persist as custom transcript entries
 (`ghost-plan`, `ghost-todo`), so they follow branches and survive restarts.
 The `todo` tool keeps phases of tasks (`init`/`view`/`start`/`done`/`rm`/
 `drop`/`block`/`unblock`/`append`; exactly one task is in progress) and
-`/todo` prints them. Plan mode starts from the owner (`POST …/plan
-{action:"start"}`): every later turn's system prompt carries a plan-mode
-section, and a `tool_call` hook refuses mutations — `edit`/`write` outside
-the conversation's `plans/` folder, `bash` unless the command is read-only by
-a conservative allowlist (no redirection, `tee`, `xargs`, `sudo`; `git` only
-for its read subcommands), browser actions beyond open/read/find/screenshot/
-back/console/network/tabs/wait/scroll, desktop ops beyond see/state/layers/
-toplevels/ax_query/ax_roles/hit_test/capture/watch, MCP tools, and memory
-writes — with a reason the model sees. `propose_plan {title, content}` writes
+`/todo` prints them. Plan mode is a Pi-only model boundary started by the owner
+(`POST …/plan {action:"start"}`); Claude Code returns `409 not_supported`.
+Starting is `409 session_busy` while any conversation job is running, leaves
+those jobs untouched, and succeeds after each job finishes or the owner cancels
+it. Every later turn's system prompt carries a plan-mode section, and a
+fail-closed `tool_call` hook admits only pi's native `read`, `grep`, `find`, and
+`ls`; `ask`, `inspect_image`, and `propose_plan`; `ghost_character` action
+`read`; `jobs` operations `list` and `wait`; `todo` operation `view`;
+`ghost_desktop` actions `state`, `see`, `layers`, `ax_query`, `ax_roles`, and
+`hit_test`; and non-persisting `ghost_browser` observation/navigation actions
+`open`, `read`, `find`, `back`, `forward`, `scroll`, `console`, `network`,
+`tabs`, and `tab_switch`. A missing, malformed, or unknown action/operation is
+blocked. Bash, generic `edit`/`write`, `ghost_screen`, browser screenshots,
+memory and character writes, MCP, todo/job mutations, and every unknown tool
+are blocked with a reason the model sees. Direct owner `!`/`!!` commands and
+owner HTTP APIs do not pass through this model-tool guard. The system packages
+`ripgrep` and `fd` are runtime dependencies, so native `grep`/`find` never turn
+a planning read into pi's on-demand cache download. `propose_plan` with
+`{title, content}` writes
 `<ghost-home>/plans/<conversation>/<slug>.md` and asks the owner through
 `ask` (Approve / Revise, the note or free text carried back to the model);
 approval persists `{planning:false, plan}` and every later turn's system
@@ -509,10 +519,10 @@ their upstream source as the desktop user:
 Firecrawl's main skill routes web work through its CLI over `bash` and links
 its other installed skills progressively. Other admitted machine skills
 similarly teach the runtimes to invoke their CLIs through `bash`; Ghost adds no
-product-specific tool. Plan mode permits only Omarchy catalog/help/version
-inspection, not mutating Omarchy actions, and continues to refuse other service
-commands absent from its read-only Bash allowlist. Claude Code receives the same
-immutable machine-skill index in its prompt but does not enable the SDK's
+product-specific tool. Plan mode blocks model Bash entirely, including Omarchy
+catalog inspection and optional service CLIs; perform that discovery before
+planning or after the owner approves/stops the plan. Claude Code receives the
+same immutable machine-skill index in its prompt but does not enable the SDK's
 unscoped ambient skill discovery.
 
 Background jobs are Ghost-owned (`packages/daemon/src/jobs.ts`) and
@@ -1395,7 +1405,11 @@ shape and streams emit one complete event object per line.
   `{ action: "start"|"stop"|"clear" }` (anything else is `400
   invalid_request`), appends the change to the transcript (creating one for a
   new conversation), and answers the new state; an open session with a turn
-  running is `409 session_busy`.
+  running is `409 session_busy`. `start` is also `409 session_busy` while a
+  background job remains running; it never cancels that job, and the owner may
+  retry after the job finishes or is cancelled. `stop` and `clear` remain
+  available in that reverse state. Claude Code conversations return `409` with
+  `not_supported`.
 - `GET  /api/ghosts/:name/sessions/:id/todo` → `{ todo }` — the phase list
   alone, same rules as GET plan.
 - `GET  /api/ghosts/:name/sessions/:id/jobs` → `{ jobs }` — the background
@@ -1905,7 +1919,9 @@ whole model before any non-local exposure.
   cwd when the CLI is launched directly. The Arch development package installs
   the daemon as the single self-contained `/usr/bin/ghostd` executable, with
   its Bun runtime and version embedded and no daemon source or `node_modules`
-  tree.
+  tree. Both development and stable packages declare `fd` and `ripgrep` as
+  runtime dependencies for pi's native read-only search tools; the executable
+  must not populate pi's cache by downloading them during a plan-mode read.
 - `packages/shell` — the Omarchy/Quickshell HUD, model routing, ask/queue and
   branching UI, live tool cards, and summoning indicator.
 - `packages/chromium-extension` — the browser relay, driving tabs of the

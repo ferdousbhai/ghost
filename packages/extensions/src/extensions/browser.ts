@@ -29,9 +29,9 @@ import {
 export const GHOST_BROWSER = "ghost_browser";
 
 export const GHOST_BROWSER_TOOL_NAMES = [GHOST_BROWSER] as const;
-/** Actions that only look: what a read-only conversation (plan mode) may still run. */
+/** Non-persisting observation/navigation admitted by the model plan boundary. */
 export const READ_ONLY_BROWSER_ACTIONS: ReadonlySet<string> = new Set([
-  "open", "read", "find", "screenshot", "back", "forward", "scroll", "console", "network",
+  "open", "read", "find", "back", "forward", "scroll", "console", "network", "tabs", "tab_switch",
 ]);
 
 export function browserToolNames(): string[] {

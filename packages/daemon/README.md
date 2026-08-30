@@ -332,10 +332,14 @@ ad-hoc prompts:
   but never appends its prompt or reply to the transcript. The request is
   abortable and presentation-only; Claude Code has no equivalent non-mutating
   conversation context.
-- Plan mode (`POST …/sessions/:id/plan {action: start}`) makes the
-  conversation read-only until the model's `propose_plan` is approved through
-  `ask`; the approved plan is pinned into every later turn. The `todo` tool and
-  `/todo` keep a phased task list the shell can show (`GET …/sessions/:id/todo`).
+- Pi plan mode (`POST …/sessions/:id/plan {action: start}`) exposes only native
+  file reads/search, structured observation, and `propose_plan`; model Bash,
+  generic writes, screenshots, and state-changing tool actions are blocked.
+  Starting is refused until the owner settles any running background jobs; it
+  never cancels them. Approval through `ask` ends planning and pins the plan into
+  every later turn. The `todo` tool is view-only while planning; `/todo` keeps a
+  phased task list the shell can show (`GET …/sessions/:id/todo`). Claude Code
+  conversations do not support this Ghost-owned mode.
 - Pi can use Firecrawl, HEY, Basecamp, Obsidian, Google Workspace, and other
   CLI skills through `bash` when the owner installs them. At session
   construction, Ghost uses pi's native parser to snapshot every valid skill

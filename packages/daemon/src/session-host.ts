@@ -2008,13 +2008,21 @@ export class SessionHost {
     runtime: ConversationRuntime = "pi",
   ): Promise<PlanStateView> {
     assertPiConversation(runtime, "Plan mode");
+    const conversationId = requireRawConversationId(sessionId ?? DEFAULT_SESSION_KEY);
     const book = (await this.planBook(ghostName, sessionId, true)) as PlanBook;
+    if (action === "start" && this.sessions.get(this.keyOf(ghostName, conversationId))?.jobs.hasRunning()) {
+      throw new GhostError(
+        "session_busy",
+        "Wait for this conversation's background jobs to finish or cancel them before starting plan mode.",
+        409,
+      );
+    }
     const current = book.getState();
     book.setState({
       planning: action === "start",
       ...(action !== "clear" && current.plan ? { plan: current.plan } : {}),
     });
-    await this.announceConversationUpdated(ghostName, "pi", requireRawConversationId(sessionId ?? DEFAULT_SESSION_KEY));
+    await this.announceConversationUpdated(ghostName, "pi", conversationId);
     return planStateView(book);
   }
 
@@ -2722,7 +2730,7 @@ export class SessionHost {
     const plansDir = join(paths.home, "plans", sessionFileNameFor(sessionKey).replace(/\.jsonl$/, ""));
     const plan = new PlanBook(sessionManager);
     planBookRef.book = plan;
-    extensionFactories.push(createPlanModeGuard(plan, plansDir));
+    extensionFactories.push(createPlanModeGuard(plan));
     const chatRef = resolveChatModelRef(readGhostModels(paths.home));
     const chatModel = resolveChatModel(chatRef, modelRuntime.getAvailableSnapshot());
     if (chatRef && (chatModel?.provider !== chatRef.provider || chatModel.id !== chatRef.modelId)) {

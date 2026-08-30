@@ -2,13 +2,13 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { BROWSER_ACTIONS, DESKTOP_ACTIONS } from "@ghost/extensions";
 import { afterEach, describe, expect, it } from "vitest";
 import type { AskBroker } from "../src/ask-broker.js";
 import {
   createProposePlanTool,
   createTodoTool,
   formatTodo,
-  isReadOnlyCommand,
   PlanBook,
   planModeRefusal,
   planSections,
@@ -65,56 +65,80 @@ describe("todo", () => {
 });
 
 describe("plan mode", () => {
-  it("judges read-only shell commands conservatively", () => {
-    for (const ok of [
+  it("blocks model Bash without trying to classify shell syntax", () => {
+    const planning = { planning: true };
+    for (const command of [
       "ls -la",
       "git status && git diff --stat",
       "rg foo src | head -20",
-      "FOO=1 cat file.txt",
-      "sed -n 1,10p a.ts",
       "omarchy commands --json",
-      "omarchy theme --help",
-      "omarchy theme set --help",
-      "omarchy version",
-    ]) {
-      expect(isReadOnlyCommand(ok), ok).toBe(true);
-    }
-    for (const bad of [
-      "rm -rf x",
       "echo hi > out.txt",
-      "git commit -m x",
-      "cat a | tee b",
-      "sed -i s/a/b/ f",
-      "npm install",
-      "firecrawl search cats",
-      "hey box list",
-      "basecamp projects list",
-      "obsidian read",
-      "gws gmail users messages list",
-      "omarchy theme set catppuccin",
-      "omarchy system shutdown",
+      "cat file | tee copy",
+      "git status --porcelain=v1; touch escaped",
+      "printf '%s' \"$(touch escaped)\"",
+      "FOO=$(touch escaped) env",
       "",
     ]) {
-      expect(isReadOnlyCommand(bad), bad).toBe(false);
+      expect(planModeRefusal(planning, "bash", { command }), JSON.stringify(command)).not.toBeNull();
     }
   });
 
-  it("refuses mutations while planning except inside the plans folder", () => {
+  it("admits only the explicit observational model-tool surface", () => {
     const planning = { planning: true };
     const idle = { planning: false };
-    expect(planModeRefusal(idle, "/p", "write", { path: "/x" })).toBeNull();
-    expect(planModeRefusal(planning, "/p", "read", { path: "/x" })).toBeNull();
-    expect(planModeRefusal(planning, "/p", "write", { path: "/p/plan.md" })).toBeNull();
-    expect(planModeRefusal(planning, "/p", "write", { path: "/px/plan.md" })).toMatch(/read-only/);
-    expect(planModeRefusal(planning, "/p", "bash", { command: "git log" })).toBeNull();
-    expect(planModeRefusal(planning, "/p", "bash", { command: "ls", background: true })).toMatch(/read-only commands/);
-    expect(planModeRefusal(planning, "/p", "ghost_browser", { action: "read" })).toBeNull();
-    expect(planModeRefusal(planning, "/p", "ghost_browser", { action: "click" })).toMatch(/browser is read-only/);
-    expect(planModeRefusal(planning, "/p", "ghost_desktop", { action: "see" })).toBeNull();
-    expect(planModeRefusal(planning, "/p", "ghost_desktop", { action: "click" })).toMatch(/desktop is read-only/);
-    expect(planModeRefusal(planning, "/p", "ghost_screen", { target: "screen" })).toBeNull();
-    expect(planModeRefusal(planning, "/p", "mcp__server_tool", {})).toMatch(/not available/);
-    expect(planModeRefusal(planning, "/p", "ghost_memory_write", {})).toMatch(/not available/);
+    expect(planModeRefusal(idle, "write", { path: "/x" })).toBeNull();
+
+    for (const tool of ["read", "grep", "find", "ls", "ask", "inspect_image", "propose_plan"]) {
+      expect(planModeRefusal(planning, tool, {}), tool).toBeNull();
+    }
+    for (const op of ["list", "wait"]) {
+      expect(planModeRefusal(planning, "jobs", { op }), `jobs:${op}`).toBeNull();
+    }
+    expect(planModeRefusal(planning, "todo", { op: "view" })).toBeNull();
+    expect(planModeRefusal(planning, "ghost_character", { action: "read" })).toBeNull();
+
+    const browserObservation = [
+      "open", "read", "find", "back", "forward", "scroll", "console", "network", "tabs", "tab_switch",
+    ];
+    for (const action of browserObservation) {
+      expect(planModeRefusal(planning, "ghost_browser", { action }), `browser:${action}`).toBeNull();
+    }
+    const desktopObservation = ["state", "see", "layers", "ax_query", "ax_roles", "hit_test"];
+    for (const action of desktopObservation) {
+      expect(planModeRefusal(planning, "ghost_desktop", { action }), `desktop:${action}`).toBeNull();
+    }
+
+    const refused: Array<[string, unknown]> = [
+      ["bash", { command: "git status" }],
+      ["bash", { command: "ls" }],
+      ["edit", { path: "/ghost/plans/plan.md" }],
+      ["write", { path: "/ghost/plans/plan.md" }],
+      ["ghost_screen", { target: "screen" }],
+      ["ghost_memory_write", { content: "fact" }],
+      ["mcp__server_tool", {}],
+      ["unknown_tool", {}],
+      ["jobs", { op: "cancel" }],
+      ["todo", { op: "init" }],
+      ["ghost_character", { action: "write" }],
+      ...BROWSER_ACTIONS
+        .filter((action) => !browserObservation.includes(action))
+        .map((action): [string, unknown] => ["ghost_browser", { action }]),
+      ...DESKTOP_ACTIONS
+        .filter((action) => !desktopObservation.includes(action))
+        .map((action): [string, unknown] => ["ghost_desktop", { action }]),
+    ];
+    for (const [tool, input] of refused) {
+      expect(planModeRefusal(planning, tool, input), `${tool}:${JSON.stringify(input)}`).not.toBeNull();
+    }
+  });
+
+  it("fails closed when an action or op selector is missing or malformed", () => {
+    const planning = { planning: true };
+    for (const tool of ["ghost_browser", "ghost_desktop", "ghost_character", "jobs", "todo"]) {
+      for (const input of [undefined, null, [], {}, { action: 1 }, { action: {} }, { op: 1 }, { op: {} }]) {
+        expect(planModeRefusal(planning, tool, input), `${tool}:${JSON.stringify(input)}`).not.toBeNull();
+      }
+    }
   });
 
   it("saves a proposed plan, ends plan mode on approval, and pins it into the prompt", async () => {
