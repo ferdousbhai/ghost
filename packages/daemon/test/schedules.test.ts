@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, rm, unlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -6,6 +6,7 @@ import {
   isValidScheduleSlug,
   listGhostScheduleUnits,
   renderScheduledWorkPolicy,
+  resolveScheduleRuntimeUnitDirectory,
   resolveScheduleUnitDirectory,
   scheduleUnitPrefix,
   sweepGhostSchedules,
@@ -39,6 +40,15 @@ describe("where a schedule's units live", () => {
       .toBe("/home/o/.config/systemd/user");
     expect(() => resolveScheduleUnitDirectory("relative/home", {}))
       .toThrow("ownerHome must be absolute");
+  });
+
+  it("uses absolute XDG_RUNTIME_DIR and falls back to systemd's uid path", () => {
+    expect(resolveScheduleRuntimeUnitDirectory({ XDG_RUNTIME_DIR: "/run/custom/../owner" }, 1000))
+      .toBe("/run/owner/systemd/user");
+    expect(resolveScheduleRuntimeUnitDirectory({ XDG_RUNTIME_DIR: "relative" }, 1000))
+      .toBe("/run/user/1000/systemd/user");
+    expect(() => resolveScheduleRuntimeUnitDirectory({}, null))
+      .toThrow("XDG_RUNTIME_DIR must be absolute");
   });
 });
 
@@ -361,6 +371,62 @@ describe("sweeping a deleted ghost's schedules", () => {
       ["--user", "disable", "--runtime", timer],
       ["--user", "disable", "--runtime", timer],
     ]);
+  });
+
+  it("retires dangling persistent and runtime enablement in both scopes", async () => {
+    const timer = "ghost-timer-v1-4-aria-standup.timer";
+    const foreign = "ghost-timer-v1-8-aria-ops-standup.timer";
+    const dir = await unitDir([]);
+    const runtimeUnitDir = join(dir, "runtime-user");
+    const persistentWants = join(dir, "timers.target.wants");
+    const runtimeWants = join(runtimeUnitDir, "timers.target.wants");
+    await mkdir(persistentWants, { recursive: true });
+    await mkdir(runtimeWants, { recursive: true });
+    await symlink(`../${timer}`, join(persistentWants, timer));
+    await symlink(`../${timer}`, join(runtimeWants, timer));
+    await symlink(`../${foreign}`, join(persistentWants, foreign));
+    const calls: string[][] = [];
+
+    await sweepGhostSchedules("aria", {
+      unitDir: dir,
+      runtimeUnitDir,
+      run: async (args) => {
+        calls.push([...args]);
+        return { stdout: "", stderr: "", code: 0 };
+      },
+    });
+
+    expect(calls).toContainEqual(["--user", "disable", timer]);
+    expect(calls).toContainEqual(["--user", "disable", "--runtime", timer]);
+    expect(await readdir(persistentWants)).toEqual([foreign]);
+    expect(await readdir(runtimeWants)).toEqual([]);
+  });
+
+  it("fails closed on an enablement-link removal error and completes on retry", async () => {
+    const timer = "ghost-timer-v1-4-aria-standup.timer";
+    const dir = await unitDir([]);
+    const runtimeUnitDir = join(dir, "runtime-user");
+    const link = join(runtimeUnitDir, "timers.target.wants", timer);
+    await mkdir(join(runtimeUnitDir, "timers.target.wants"), { recursive: true });
+    await symlink(`../${timer}`, link);
+
+    await expect(sweepGhostSchedules("aria", {
+      unitDir: dir,
+      runtimeUnitDir,
+      run: async () => ({ stdout: "", stderr: "", code: 0 }),
+      unlinkUnit: async (path) => {
+        if (path === link) throw new Error("runtime wants directory is read-only");
+        await unlink(path);
+      },
+    })).rejects.toThrow("runtime wants directory is read-only");
+
+    expect(await readdir(join(runtimeUnitDir, "timers.target.wants"))).toEqual([timer]);
+    await expect(sweepGhostSchedules("aria", {
+      unitDir: dir,
+      runtimeUnitDir,
+      run: async () => ({ stdout: "", stderr: "", code: 0 }),
+    })).resolves.toEqual({ removed: [] });
+    expect(await readdir(join(runtimeUnitDir, "timers.target.wants"))).toEqual([]);
   });
 
   it("keeps a loaded-only stop failure retryable without a disable attempt", async () => {

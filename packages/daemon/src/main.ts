@@ -27,7 +27,10 @@ import { remoteCommand } from "./remote-command.js";
 import { RemoteServe } from "./remote-serve.js";
 import { startDaemonServer, type ListeningServer } from "./server.js";
 import { SessionHost } from "./session-host.js";
-import { resolveScheduleUnitDirectory } from "./schedules.js";
+import {
+  resolveScheduleRuntimeUnitDirectory,
+  resolveScheduleUnitDirectory,
+} from "./schedules.js";
 
 const USAGE = `ghostd — your ghost, on your machine
 
@@ -383,6 +386,7 @@ async function serveDaemon(
   const registry = new GhostRegistry(config.ghostsRoot);
   const ownerHome = homedir();
   const scheduleUnitDir = resolveScheduleUnitDirectory(ownerHome);
+  const scheduleRuntimeUnitDir = resolveScheduleRuntimeUnitDirectory();
   registry.ensureRoot();
   try {
     await Promise.all(registry.list().map(async (ghost) => {
@@ -409,6 +413,7 @@ async function serveDaemon(
     homeOperations,
     ownerHome,
     scheduleUnitDir,
+    scheduleRuntimeUnitDir,
     logger,
     offline: config.offline,
     compaction: config.compaction,

@@ -573,6 +573,8 @@ export interface SessionHostOptions {
   ownerHome?: string;
   /** One absolute systemd user-unit directory for prompts and lifecycle. */
   scheduleUnitDir?: string;
+  /** Runtime systemd user-unit directory; main supplies the XDG-resolved path. */
+  scheduleRuntimeUnitDir?: string;
   /** Test seam over schedule lifecycle's `systemctl --user` calls. */
   scheduleCommandRunner?: CommandRunner;
   /** Test seam; production discovers the standard owner-machine skill paths. */
@@ -1500,6 +1502,7 @@ export class SessionHost {
   private readonly registry: GhostRegistry;
   private readonly ownerHome: string;
   private readonly scheduleUnitDir: string;
+  private readonly scheduleRuntimeUnitDir: string;
   private readonly scheduleCommandRunner: CommandRunner | undefined;
   private readonly machineSkills: string[];
   private readonly projectBindings: ProjectBindingStore;
@@ -1573,6 +1576,12 @@ export class SessionHost {
       throw new TypeError("scheduleUnitDir must be absolute");
     }
     this.scheduleUnitDir = resolve(scheduleUnitDir);
+    const scheduleRuntimeUnitDir = options.scheduleRuntimeUnitDir
+      ?? join(this.ownerHome, ".runtime", "systemd", "user");
+    if (!isAbsolute(scheduleRuntimeUnitDir)) {
+      throw new TypeError("scheduleRuntimeUnitDir must be absolute");
+    }
+    this.scheduleRuntimeUnitDir = resolve(scheduleRuntimeUnitDir);
     this.scheduleCommandRunner = options.scheduleCommandRunner;
     this.machineSkills = options.machineSkillPaths
       ? [...options.machineSkillPaths]
@@ -6762,6 +6771,7 @@ export class SessionHost {
       try {
         await sweepGhostSchedules(ghost.name, {
           unitDir: this.scheduleUnitDir,
+          runtimeUnitDir: this.scheduleRuntimeUnitDir,
           ...(this.scheduleCommandRunner === undefined
             ? {}
             : { run: this.scheduleCommandRunner }),

@@ -20,6 +20,7 @@
  * the same rule screenshot retention follows.
  */
 import { readdir, unlink } from "node:fs/promises";
+import type { Dirent } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import { isValidGhostName } from "./ghosts.js";
 import {
@@ -55,6 +56,7 @@ const LIST_ENABLED_TIMERS = [
   "--no-legend",
   "--no-pager",
 ] as const;
+const TIMER_WANTS_DIRECTORY = "timers.target.wants";
 
 export function isValidScheduleSlug(slug: string): boolean {
   return slug.length >= 1
@@ -157,6 +159,21 @@ export function resolveScheduleUnitDirectory(
   return join(base, "systemd", "user");
 }
 
+/** `$XDG_RUNTIME_DIR/systemd/user`, with systemd's standard uid fallback. */
+export function resolveScheduleRuntimeUnitDirectory(
+  env: NodeJS.ProcessEnv = process.env,
+  uid: number | null | undefined = process.getuid?.(),
+): string {
+  const runtimeHome = env.XDG_RUNTIME_DIR?.trim();
+  if (runtimeHome && isAbsolute(runtimeHome)) {
+    return join(resolve(runtimeHome), "systemd", "user");
+  }
+  if (uid != null && Number.isInteger(uid) && uid >= 0) {
+    return join("/run/user", String(uid), "systemd", "user");
+  }
+  throw new TypeError("XDG_RUNTIME_DIR must be absolute when the uid is unavailable");
+}
+
 /** The exact runtime policy rendered from schedule ownership, not a second copy. */
 export function renderScheduledWorkPolicy(
   ghostName: string,
@@ -218,6 +235,8 @@ export async function listGhostScheduleUnits(
 
 export interface ScheduleSweepOptions {
   readonly unitDir: string;
+  /** Production supplies the XDG runtime scope; direct tests stay under unitDir. */
+  readonly runtimeUnitDir?: string;
   /** Test seam over `systemctl --user`. */
   readonly run?: CommandRunner;
   /** Test seam over `fs.unlink`. */
@@ -227,6 +246,30 @@ export interface ScheduleSweepOptions {
 
 export interface ScheduleSweepResult {
   readonly removed: string[];
+}
+
+interface ScheduleEnablementLink {
+  name: string;
+  path: string;
+}
+
+async function listScheduleEnablementLinks(
+  prefix: string,
+  unitDir: string,
+): Promise<ScheduleEnablementLink[]> {
+  const wantsDir = join(unitDir, TIMER_WANTS_DIRECTORY);
+  let entries: Dirent[];
+  try {
+    entries = await readdir(wantsDir, { withFileTypes: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
+  return entries
+    .filter((entry) => entry.isSymbolicLink())
+    .filter((entry) => isOwnedScheduleUnit(entry.name, prefix, TIMER_SUFFIXES))
+    .map((entry) => ({ name: entry.name, path: join(wantsDir, entry.name) }))
+    .sort((left, right) => left.name.localeCompare(right.name));
 }
 
 /**
@@ -242,11 +285,20 @@ export async function sweepGhostSchedules(
   const logger = options.logger ?? silentLogger;
   const run = options.run ?? commandRunner("systemctl");
   const prefix = scheduleUnitPrefix(ghostName);
+  const runtimeUnitDir = options.runtimeUnitDir ?? join(options.unitDir, ".runtime");
   const units = await listGhostScheduleUnits(ghostName, options.unitDir);
   const managed = await inspectManagedScheduleTimers(prefix, run);
+  const persistentLinks = await listScheduleEnablementLinks(prefix, options.unitDir);
+  const runtimeLinks = await listScheduleEnablementLinks(prefix, runtimeUnitDir);
 
   const unlinkUnit = options.unlinkUnit ?? unlink;
-  if (units.length === 0 && managed.loaded.length === 0 && managed.enabled.length === 0) {
+  if (
+    units.length === 0
+    && managed.loaded.length === 0
+    && managed.enabled.length === 0
+    && persistentLinks.length === 0
+    && runtimeLinks.length === 0
+  ) {
     return { removed: [] };
   }
 
@@ -258,21 +310,34 @@ export async function sweepGhostSchedules(
     const result = await run(["--user", "stop", ...stopTargets]);
     requireCommandSuccess(result, "systemctl stop");
   }
-  const persistent = managed.enabled
-    .filter((unit) => unit.state === "enabled")
-    .map((unit) => unit.name)
-    .sort();
+  const persistent = [...new Set([
+    ...managed.enabled
+      .filter((unit) => unit.state === "enabled")
+      .map((unit) => unit.name),
+    ...persistentLinks.map((link) => link.name),
+  ])].sort();
+  const disableFailures: unknown[] = [];
   if (persistent.length > 0) {
-    const result = await run(["--user", "disable", ...persistent]);
-    requireCommandSuccess(result, "systemctl disable");
+    try {
+      const result = await run(["--user", "disable", ...persistent]);
+      requireCommandSuccess(result, "systemctl disable");
+    } catch (error) {
+      disableFailures.push(error);
+    }
   }
-  const runtime = managed.enabled
-    .filter((unit) => unit.state === "enabled-runtime")
-    .map((unit) => unit.name)
-    .sort();
+  const runtime = [...new Set([
+    ...managed.enabled
+      .filter((unit) => unit.state === "enabled-runtime")
+      .map((unit) => unit.name),
+    ...runtimeLinks.map((link) => link.name),
+  ])].sort();
   if (runtime.length > 0) {
-    const result = await run(["--user", "disable", "--runtime", ...runtime]);
-    requireCommandSuccess(result, "systemctl disable --runtime");
+    try {
+      const result = await run(["--user", "disable", "--runtime", ...runtime]);
+      requireCommandSuccess(result, "systemctl disable --runtime");
+    } catch (error) {
+      disableFailures.push(error);
+    }
   }
 
   const removed: string[] = [];
@@ -291,6 +356,19 @@ export async function sweepGhostSchedules(
       });
     }
   }
+  for (const link of [...persistentLinks, ...runtimeLinks]) {
+    try {
+      await unlinkUnit(link.path);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+      removalFailure ??= error;
+      logger.warn("could not remove a ghost's timer enablement link", {
+        ghost: ghostName,
+        unit: link.name,
+        error: (error as Error).message,
+      });
+    }
+  }
 
   try {
     const result = await run(["--user", "daemon-reload"]);
@@ -304,10 +382,19 @@ export async function sweepGhostSchedules(
 
   const remaining = await listGhostScheduleUnits(ghostName, options.unitDir);
   const remainingManaged = await inspectManagedScheduleTimers(prefix, run);
+  const remainingPersistentLinks = await listScheduleEnablementLinks(prefix, options.unitDir);
+  const remainingRuntimeLinks = await listScheduleEnablementLinks(prefix, runtimeUnitDir);
   const active = remainingManaged.loaded
     .filter((unit) => unit.activeState !== "inactive" && unit.activeState !== "failed");
   if (removalFailure !== undefined) throw removalFailure;
-  if (remaining.length > 0 || remainingManaged.enabled.length > 0 || active.length > 0) {
+  if (
+    remaining.length > 0
+    || remainingManaged.enabled.length > 0
+    || remainingPersistentLinks.length > 0
+    || remainingRuntimeLinks.length > 0
+    || active.length > 0
+  ) {
+    if (disableFailures.length > 0) throw disableFailures[0];
     throw new Error("Ghost schedule cleanup left an owned timer active, enabled, or on disk.");
   }
   logger.info("swept ghost schedules", { ghost: ghostName, removed: removed.length });

@@ -179,10 +179,13 @@ screenshot pattern exactly, and never prune the file currently being written.
 Scheduled work is a systemd user timer, and the timer is the only record of it.
 Ghost ships no scheduler: a ghost writes its own units through Bash, the way
 `omarchy-games-retro-install` writes one `.desktop` file into the standard user
-directory and stops. At daemon composition, Ghost resolves one absolute user
-unit directory: `$XDG_CONFIG_HOME/systemd/user` when `XDG_CONFIG_HOME` is
-absolute, otherwise `~/.config/systemd/user`. Pi and Claude prompts, deletion,
-and rename diagnostics all use that same value; none re-read the environment.
+directory and stops. At daemon composition, Ghost resolves the persistent user
+unit directory as `$XDG_CONFIG_HOME/systemd/user` when `XDG_CONFIG_HOME` is
+absolute, otherwise `~/.config/systemd/user`, plus the runtime user unit
+directory as `$XDG_RUNTIME_DIR/systemd/user` (falling back to systemd's
+`/run/user/<uid>/systemd/user`). Pi and Claude prompts author only in the
+persistent directory. Lifecycle cleanup uses both fixed values and never
+re-reads the environment.
 
 The pair is named
 `ghost-timer-v1-<ASCII ghost-name length>-<ghost>-<slug>.timer` and `.service`.
@@ -227,7 +230,10 @@ whether the stopped triggers are safely retired. Manager state determines the
 commands: loaded or on-disk timers are stopped, persistent enablement is
 disabled persistently, and `enabled-runtime` is disabled with `--runtime`; a
 source-less loaded-only timer is never sent through a disable operation that
-requires its missing unit file. Rename's unit scan is
+requires its missing unit file. Exact owned symbolic links are also inventoried
+and verified in both directories' `timers.target.wants/`, because a dangling
+enablement link can outlive its source and manager listing. A name enabled in
+both scopes is disabled once per scope in the same cleanup attempt. Rename's unit scan is
 diagnostic only and can never make an already moved home look like a failed
 rename.
 
