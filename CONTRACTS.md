@@ -669,7 +669,9 @@ pi's tool: its output, or an error carrying the output plus
 to the session that started it: it survives the turn but not the session
 (`close`, retention eviction — which a running job prevents — and daemon
 shutdown cancel it), it keeps a bounded output tail (the newest 64,000 bytes
-of whole chunks) in memory only, and the newest 50 settled jobs stay listed.
+across process buffers and Ghost-added failure text, trimming within one
+oversized contribution when necessary) in memory only, and the newest 50
+settled jobs stay listed.
 When a job settles, its report enters the conversation as an agent-attributed
 `ghost-job-result` custom message (`details.jobId/status/exitCode`) delivered
 through pi's own queue: behind the live turn when one is streaming, otherwise

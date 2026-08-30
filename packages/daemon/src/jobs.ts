@@ -76,7 +76,6 @@ class Job implements GhostJob {
   settled: Promise<void> = Promise.resolve();
   private chunks: Buffer[] = [];
   private bytes = 0;
-  private trailer = "";
 
   constructor(
     readonly id: string,
@@ -88,22 +87,35 @@ class Job implements GhostJob {
   ) {}
 
   append(chunk: Buffer): void {
+    if (chunk.length === 0) return;
     this.chunks.push(chunk);
     this.bytes += chunk.length;
-    while (this.bytes > this.maxOutputBytes && this.chunks.length > 1) {
-      this.bytes -= this.chunks.shift()?.length ?? 0;
-      this.outputTruncated = true;
+    let excess = this.bytes - this.maxOutputBytes;
+    if (excess <= 0) return;
+    this.outputTruncated = true;
+    while (excess > 0) {
+      const first = this.chunks[0];
+      if (!first) break;
+      if (first.length <= excess) {
+        this.chunks.shift();
+        this.bytes -= first.length;
+        excess -= first.length;
+      } else {
+        this.chunks[0] = first.subarray(excess);
+        this.bytes -= excess;
+        excess = 0;
+      }
     }
   }
 
   /** Text appended after the process output, such as pi's failure reason. */
   appendText(text: string): void {
-    this.trailer += text;
+    this.append(Buffer.from(text));
   }
 
   get output(): string {
     const decoder = new StringDecoder("utf8");
-    return this.chunks.map((chunk) => decoder.write(chunk)).join("") + decoder.end() + this.trailer;
+    return this.chunks.map((chunk) => decoder.write(chunk)).join("") + decoder.end();
   }
 }
 

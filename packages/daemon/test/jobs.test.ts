@@ -53,10 +53,46 @@ describe("GhostJobManager", () => {
     processes[0]!.exit(0);
     await jobs.wait(["job-1"], 1_000);
 
-    expect(job).toMatchObject({ status: "completed", exitCode: 0, output: "line two\n", outputTruncated: true });
+    expect(job).toMatchObject({
+      status: "completed",
+      exitCode: 0,
+      output: "ne\nline two\n",
+      outputTruncated: true,
+    });
     expect(settled).toEqual([job]);
     expect(formatJobResult(job)).toContain("Background job job-1 (build) completed after 2.5s.");
     expect(formatJobResult(job)).toContain("earlier output dropped");
+  });
+
+  it("trims one oversized process buffer to the exact newest-byte budget", async () => {
+    const { jobs, processes } = manager({ maxOutputBytes: 12 });
+    const job = jobs.start({ command: "oversized", cwd: "/tmp" });
+
+    processes[0]!.emit("0123456789abcdef");
+    expect(job).toMatchObject({ output: "456789abcdef", outputTruncated: true });
+    expect(Buffer.byteLength(job.output)).toBe(12);
+    processes[0]!.exit(0);
+    await jobs.wait([job.id], 1_000);
+  });
+
+  it("bounds a rejected process reason together with its preceding output", async () => {
+    const reason = "failure-0123456789abcdef";
+    const operations: BashOperations = {
+      exec: async (_command, _cwd, options) => {
+        options.onData(Buffer.from("process-prefix"));
+        throw new Error(reason);
+      },
+    };
+    const { jobs } = manager({ operations, maxOutputBytes: 12 });
+    const job = jobs.start({ command: "reject", cwd: "/tmp" });
+    await jobs.wait([job.id], 1_000);
+
+    expect(job).toMatchObject({
+      status: "failed",
+      output: reason.slice(-12),
+      outputTruncated: true,
+    });
+    expect(Buffer.byteLength(job.output)).toBe(12);
   });
 
   it("marks a non-zero exit as failed and an aborted job as cancelled", async () => {
