@@ -107,7 +107,9 @@ The limit therefore applies to what reaches disk, and the HUD writer, idle
 updater, and consolidation writer share one secret boundary. An omitted slug is
 derived from that redacted text, so credentials cannot escape through a
 filename. Foreground runtime file tools write directly and do not pass through
-this `GhostHome` boundary.
+this `GhostHome` boundary. The session prompt therefore states both hard limits
+and warns that native writes do not validate them; an over-limit native file
+can remain on disk but is omitted by the next derived memory index.
 
 `GhostHome.deleteMemory` accepts only one valid memory slug and moves that
 descriptor-pinned regular Markdown file by same-filesystem rename into the
@@ -521,10 +523,11 @@ Both indexes are newest-modified first and carry at most 50 entries, with a
 character budget behind that. Each is one entry per line with no bullet marker:
 memory as the bare slug (the file is that slug plus `.md`), Documents as the
 bare name with a trailing `/` for a directory. A Documents name is JSON-quoted
-only when it holds a control character, quote, or backslash, or has leading or
-trailing whitespace, so a newline in a name cannot forge an index line. When the
-cut-off drops entries the section ends with `(+N more)`, where `N` counts every
-entry left out.
+when it holds a control character, rendered line separator, quote, or backslash,
+or has leading or trailing whitespace. U+0085, U+2028, and U+2029 are escaped
+inside that quoted form, so no filesystem name can forge an index line. When
+the cut-off drops entries the section ends with `(+N more)`, where `N` counts
+every entry left out.
 `/skill:<name> [args]` is explicit
 force-invocation of a discovered skill; native `read` remains the model-driven
 discovery path.

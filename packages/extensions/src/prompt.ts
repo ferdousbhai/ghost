@@ -1,6 +1,10 @@
 import { dirname, join } from "node:path";
 import { CHARACTER_FILENAME, MAX_CHARACTER_BODY_LENGTH } from "./home.js";
-import type { MemoryIndex } from "./memory-file.js";
+import {
+  MAX_MEMORY_FILE_BYTES,
+  MAX_MEMORY_FILE_CONTENT_LENGTH,
+  type MemoryIndex,
+} from "./memory-file.js";
 import type { CharacterFile, DocumentsIndex } from "./types.js";
 import { fenceUntrusted } from "./untrusted.js";
 
@@ -64,6 +68,10 @@ function memorySection(input: GhostSystemPromptInput): string[] {
       + "first, so the name must say what the fact is about. Reusing a filename replaces that "
       + "memory, which is how you correct or update it. Keep unrelated facts in separate files; "
       + "mention a related memory by its slug in double brackets, such as `[[preferred-tone]]`.",
+    `Keep the complete content within both hard limits: ${MAX_MEMORY_FILE_CONTENT_LENGTH.toLocaleString("en-US")} `
+      + `JavaScript UTF-16 code units and ${MAX_MEMORY_FILE_BYTES.toLocaleString("en-US")} bytes on disk, `
+      + "including any final newline. Native file writes do not validate these limits; an "
+      + "oversized file stays on disk but is omitted from the memory index.",
     "The index is a snapshot taken when this session started, so list the directory yourself when "
       + "currency matters. Read a file before relying on it, and verify time-sensitive facts.",
     "",

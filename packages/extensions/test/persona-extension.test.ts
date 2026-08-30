@@ -77,6 +77,9 @@ describe("persona extension", () => {
     expect(prompt).toContain("each memory as one concise fact");
     expect(prompt).toContain("lowercase words joined by dashes and ending in `.md`");
     expect(prompt).toContain("Reusing a filename replaces that memory");
+    expect(prompt).toContain("2,000 JavaScript UTF-16 code units");
+    expect(prompt).toContain("6,001 bytes on disk");
+    expect(prompt).toContain("Native file writes do not validate these limits");
     expect(prompt).toContain("apprentice-question");
     expect(prompt).not.toContain("I explained how to start");
     expect(prompt.indexOf("working-habit")).toBeLessThan(
@@ -148,6 +151,24 @@ describe("persona extension", () => {
       expect(at).toBeLessThan(genuineClose);
     }
     expect(prompt.indexOf("TRUSTED-AFTER-DOCUMENTS")).toBeGreaterThan(genuineClose);
+  });
+
+  it("escapes every rendered line separator inside one Documents index entry", () => {
+    const hostileName = "one\u0085two\u2028three\u2029four.txt";
+    const index = deriveDocumentsIndex({
+      root: documentsDir,
+      total: 1,
+      entries: [{
+        name: hostileName,
+        path: hostileName,
+        kind: "file",
+        size: 0,
+        modifiedAt: "2026-08-27T00:00:00.000Z",
+      }],
+    });
+
+    expect(index.lines).toEqual(["\"one\\u0085two\\u2028three\\u2029four.txt\""]);
+    expect(index.lines[0]).not.toMatch(/[\u0085\u2028\u2029]/u);
   });
 
   it("does not carry any text from the inherited harness prompt", async () => {

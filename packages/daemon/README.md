@@ -112,8 +112,8 @@ resolves `XDG_DOCUMENTS_DIR`, then `user-dirs.dirs`, then `~/Documents`; every
 ghost shares that one root. Files may have any type and folders may nest to any
 depth or width. A model's automatic index contains only the root's immediate
 non-hidden regular files and directories, with no content reads or descent,
-capped at 100 entries and 4,000 characters. Explicit native filesystem tools
-can traverse further when the task calls for it.
+capped at 50 newest-modified entries and 4,000 characters. Explicit native
+filesystem tools can traverse further when the task calls for it.
 
 Ghost rename, delete, and future home export never move or copy the owner-wide
 Documents tree.
@@ -156,14 +156,17 @@ migration.
 Ghost-home context listings and the owner-wide Documents index are derived from
 disk and never persist a catalog.
 
-The memory index is likewise derived, newest modification first, before each
-model turn. After a settled turn has been idle for 60 seconds, ordinary
-maintenance may write one owner-grounded fact. Only index pressure switches
-that delivery to consolidation: at least 3,200 of 4,000 index characters, any
-omitted memory, or 100 valid files. Consolidation is limited to four writes and
-four recoverable `.trash/` deletions and has a six-hour claimed cooldown.
-Foreground turns get no deletion tool. Every write path redacts common secret
-forms before validation, slug derivation, or disk.
+The memory index is likewise derived newest-modified first, once when a session
+starts, with at most 50 entries and 4,000 characters. After a settled turn has
+been idle for 60 seconds, ordinary maintenance may write one owner-grounded
+fact. Reaching 50 valid memory files switches that delivery to consolidation,
+limited to four writes and four recoverable `.trash/` deletions with a ten-hour
+claimed cooldown. Foreground turns get no deletion tool and write through the
+runtime's native filesystem tools; the prompt carries the filename and hard
+limits of 2,000 JavaScript UTF-16 code units and 6,001 on-disk bytes, but those
+native writes do not pass through GhostHome validation or redaction. HUD and
+background writers do, and redact common secret forms before validation, slug
+derivation, or disk.
 
 ### Ghost and conversation-project MCP
 

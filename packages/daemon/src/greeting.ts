@@ -75,7 +75,7 @@ function documentOmissionLine(omitted: number, total: number): string {
 /**
  * A complete-line prefix plus an exact omission summary, all within the
  * greeting's Documents budget. The source index may already omit entries at
- * its own 100-entry/4,000-character cap; a tighter greeting cut adds to that
+ * its own 50-entry/4,000-character cap; a tighter greeting cut adds to that
  * count rather than hiding it.
  */
 function greetingDocumentLines(index: DocumentsIndex): string[] {

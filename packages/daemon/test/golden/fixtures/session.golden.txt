@@ -25,6 +25,7 @@ Show the owner a character draft and wait for confirmation before writing it. Th
 ## Memory
 This ghost's private notes about the owner and its own work — facts, preferences, decisions — live under "<ghost-home>/memory"; no other ghost sees them. Use the runtime's native file tools to write each memory as one concise fact whose entire Markdown content is in one file.
 Choose a descriptive filename made of lowercase words joined by dashes and ending in `.md`, such as `preferred-tone.md`. The index lists those names without the extension, newest first, so the name must say what the fact is about. Reusing a filename replaces that memory, which is how you correct or update it. Keep unrelated facts in separate files; mention a related memory by its slug in double brackets, such as `[[preferred-tone]]`.
+Keep the complete content within both hard limits: 2,000 JavaScript UTF-16 code units and 6,001 bytes on disk, including any final newline. Native file writes do not validate these limits; an oversized file stays on disk but is omitted from the memory index.
 The index is a snapshot taken when this session started, so list the directory yourself when currency matters. Read a file before relying on it, and verify time-sensitive facts.
 
 <untrusted source="Memory index" id="ghost-memory-index">
@@ -129,6 +130,7 @@ Show the owner a character draft and wait for confirmation before writing it. Th
 ## Memory
 This ghost's private notes about the owner and its own work — facts, preferences, decisions — live under "<ghost-home>/memory"; no other ghost sees them. Use the runtime's native file tools to write each memory as one concise fact whose entire Markdown content is in one file.
 Choose a descriptive filename made of lowercase words joined by dashes and ending in `.md`, such as `preferred-tone.md`. The index lists those names without the extension, newest first, so the name must say what the fact is about. Reusing a filename replaces that memory, which is how you correct or update it. Keep unrelated facts in separate files; mention a related memory by its slug in double brackets, such as `[[preferred-tone]]`.
+Keep the complete content within both hard limits: 2,000 JavaScript UTF-16 code units and 6,001 bytes on disk, including any final newline. Native file writes do not validate these limits; an oversized file stays on disk but is omitted from the memory index.
 The index is a snapshot taken when this session started, so list the directory yourself when currency matters. Read a file before relying on it, and verify time-sensitive facts.
 
 <untrusted source="Memory index" id="ghost-memory-index">
