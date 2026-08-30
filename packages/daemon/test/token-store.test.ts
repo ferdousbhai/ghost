@@ -127,6 +127,47 @@ describe("shared token-store persistence", () => {
     expect(results.filter((result) => result.created)).toHaveLength(1);
   });
 
+  it("waits for an exclusive winner to finish its complete token write", async () => {
+    await mkdir(join(dir, "state"), { mode: 0o700 });
+    const token = "e".repeat(64);
+    const moduleUrl = new URL("../src/token-store.ts", import.meta.url).href;
+    const script = `
+      import fs from "node:fs";
+      import { syncBuiltinESMExports } from "node:module";
+
+      const tokenPath = ${JSON.stringify(path)};
+      const token = ${JSON.stringify(token)};
+      fs.writeFileSync(tokenPath, "", { flag: "wx", mode: 0o600 });
+      const originalFstatSync = fs.fstatSync;
+      let completed = false;
+      fs.fstatSync = function (descriptor, options) {
+        const admitted = originalFstatSync.call(this, descriptor, options);
+        if (!completed && admitted.size === 0n) {
+          completed = true;
+          fs.writeFileSync(tokenPath, token + "\\n", { mode: 0o600 });
+        }
+        return admitted;
+      };
+      syncBuiltinESMExports();
+
+      const { createTokenStore } = await import(${JSON.stringify(moduleUrl)});
+      const store = createTokenStore({
+        filename: "test-token",
+        envVar: "GHOSTD_TEST_TOKEN_FILE",
+        command: "test-token",
+        purpose: "Test token.",
+      });
+      const result = store.readOrCreate({ path: tokenPath });
+      process.stdout.write(JSON.stringify({ completed, result }));
+    `;
+
+    const { stdout } = await execFileAsync("node", ["--eval", script]);
+    expect(JSON.parse(stdout)).toEqual({
+      completed: true,
+      result: { token, path, created: false },
+    });
+  });
+
   it("reads a concurrent winner that appears between read and symlink inspection", async () => {
     await mkdir(join(dir, "state"), { mode: 0o700 });
     const token = "b".repeat(64);

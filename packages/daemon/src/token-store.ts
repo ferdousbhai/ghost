@@ -34,7 +34,9 @@ import { dirname, isAbsolute, join } from "node:path";
 
 const TOKEN_BYTES = 32;
 const TOKEN_FILE_BYTES = TOKEN_BYTES * 2 + 1;
-const TOKEN_CREATE_ATTEMPTS = 8;
+const TOKEN_CREATE_ATTEMPTS = 50;
+const TOKEN_CREATE_RETRY_MS = 2;
+const tokenCreateSleep = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
 export const TOKEN_PATTERN = /^[0-9a-f]{64}$/;
 
 export interface TokenStoreOptions {
@@ -113,6 +115,13 @@ function malformedToken(path: string): Error {
   return new Error(`Token file ${path} is malformed; rotate it explicitly to replace it.`);
 }
 
+class IncompleteTokenError extends Error {
+  constructor(path: string) {
+    super(malformedToken(path).message);
+    this.name = "IncompleteTokenError";
+  }
+}
+
 function invalidTokenEntry(path: string, entry: Stats): Error {
   if (entry.isSymbolicLink()) {
     return new Error(`Token file ${path} is a symbolic link; rotate it explicitly to replace it.`);
@@ -177,7 +186,8 @@ function readToken(path: string): string | undefined {
     if ((before.mode & 0o777n) !== 0o600n) {
       throw new Error(`Token file ${path} must have mode 0600.`);
     }
-    if (before.size !== BigInt(TOKEN_FILE_BYTES)) throw malformedToken(path);
+    if (before.size < BigInt(TOKEN_FILE_BYTES)) throw new IncompleteTokenError(path);
+    if (before.size > BigInt(TOKEN_FILE_BYTES)) throw malformedToken(path);
 
     bytes = Buffer.alloc(TOKEN_FILE_BYTES + 1);
     let length = 0;
@@ -265,7 +275,19 @@ export function createTokenStore(spec: TokenStoreSpec): TokenStore {
   ): { token: string; path: string; created: boolean } => {
     const path = resolvePath(options);
     for (let attempt = 0; attempt < TOKEN_CREATE_ATTEMPTS; attempt += 1) {
-      const existing = read({ ...options, path });
+      let existing: string | undefined;
+      try {
+        existing = read({ ...options, path });
+      } catch (error) {
+        // `wx` publishes the inode before its one synchronous write completes.
+        // Only that bounded wrong-length state is retryable; a linked, replaced,
+        // wrong-mode, or exact-length malformed file remains an immediate error.
+        if (!(error instanceof IncompleteTokenError) || attempt === TOKEN_CREATE_ATTEMPTS - 1) {
+          throw error;
+        }
+        Atomics.wait(tokenCreateSleep, 0, 0, TOKEN_CREATE_RETRY_MS);
+        continue;
+      }
       if (existing) return { token: existing, path, created: false };
 
       ensureTokenDirectory(path);
@@ -277,6 +299,7 @@ export function createTokenStore(spec: TokenStoreSpec): TokenStore {
         if (isErrno(error, "EEXIST")) {
           // Another daemon or CLI won the exclusive create. Loop so its token
           // is returned; never overwrite it with the losing process's value.
+          Atomics.wait(tokenCreateSleep, 0, 0, TOKEN_CREATE_RETRY_MS);
           continue;
         }
         throw error;

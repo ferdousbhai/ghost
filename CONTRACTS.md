@@ -893,7 +893,9 @@ Three checks, applied to every `/api` request before routing:
    stays identical; the existing state directory must still be mode `0700`.
    The daemon mints it with exclusive creation when the server
    starts — not lazily on first use, so a client starting alongside it finds
-   the file. Missing or wrong → `401 unauthorized` with
+   the file. A competing read-or-create waits through the bounded wrong-length
+   window between that exclusive inode creation and its complete write; every
+   other unsafe or malformed state still fails closed. Missing or wrong → `401 unauthorized` with
    `www-authenticate: Bearer`. A local client authenticates by *reading the
    file*; a web page cannot read files, which is the whole mechanism.
 2. **Origin.** A request that carries an `Origin` header must carry a loopback
