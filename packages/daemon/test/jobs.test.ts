@@ -4,6 +4,7 @@ import { createBashTool, formatJobResult, GhostJobManager, type GhostJob } from 
 
 interface FakeProcess {
   command: string;
+  timeoutSeconds: number | undefined;
   emit(text: string): void;
   exit(code: number | null): void;
 }
@@ -15,6 +16,7 @@ function fakeOperations(): { operations: BashOperations; processes: FakeProcess[
     exec: (command, _cwd, options) => new Promise((resolve) => {
       const process: FakeProcess = {
         command,
+        timeoutSeconds: options.timeout,
         emit: (text) => options.onData(Buffer.from(text)),
         exit: (exitCode) => resolve({ exitCode }),
       };
@@ -94,6 +96,28 @@ describe("GhostJobManager", () => {
 });
 
 describe("createBashTool", () => {
+  it("forwards timeout seconds unchanged", async () => {
+    const { jobs, processes } = manager();
+    const tool = createBashTool({ cwd: process.cwd(), manager: jobs, autoBackgroundMs: 150 });
+
+    await tool.execute(
+      "call-timeout",
+      { command: "sleep 100", timeout: 10, background: true },
+      undefined,
+      undefined,
+      {} as never,
+    );
+
+    expect(processes[0]).toMatchObject({ timeoutSeconds: 10 });
+    expect(jobs.hasRunning()).toBe(true);
+
+    processes[0]!.exit(0);
+    await jobs.wait(["job-1"], 1_000);
+
+    expect(jobs.get("job-1")).toMatchObject({ status: "completed" });
+    expect(jobs.hasRunning()).toBe(false);
+  });
+
   it("runs every command as a job: background at once, foreground until the wait budget", async () => {
     const settled: GhostJob[] = [];
     const jobs = new GhostJobManager({

@@ -50,7 +50,8 @@ export interface StartJobInput {
   command: string;
   cwd: string;
   label?: string;
-  timeoutMs?: number;
+  /** Seconds, matching pi's Bash operations contract. */
+  timeoutSeconds?: number;
   /** Each raw output chunk, for a caller streaming a foreground wait. */
   onOutput?: (job: GhostJob) => void;
 }
@@ -142,7 +143,7 @@ export class GhostJobManager {
         input.onOutput?.(job);
       },
       signal: controller.signal,
-      ...(input.timeoutMs === undefined ? {} : { timeout: input.timeoutMs }),
+      ...(input.timeoutSeconds === undefined ? {} : { timeout: input.timeoutSeconds }),
     }).then(
       (result) => this.settle(job, result.exitCode === 0 ? "completed" : "failed", result.exitCode),
       (error) => {
@@ -376,7 +377,7 @@ export function createBashTool(options: BashToolOptions): ToolDefinition<typeof 
         command: params.command,
         cwd: options.cwd,
         ...(params.label ? { label: params.label } : {}),
-        ...(params.timeout === undefined ? {} : { timeoutMs: params.timeout * 1_000 }),
+        ...(params.timeout === undefined ? {} : { timeoutSeconds: params.timeout }),
         onOutput: (running) => {
           const now = Date.now();
           if (!onUpdate || now - lastUpdate < UPDATE_THROTTLE_MS) return;
