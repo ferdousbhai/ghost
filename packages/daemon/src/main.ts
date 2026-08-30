@@ -520,6 +520,7 @@ async function serveDaemon(
     resolveContext: ({ ghostName, parent, requestedCwd }) =>
       host.resolveTaskContext(ghostName, parent, requestedCwd),
   });
+  host.attachTaskServices({ tasks, workers });
   for (const ghost of registry.list()) {
     const restored = await tasks.restoreGhost(ghost.name);
     if (restored.interrupted > 0) {

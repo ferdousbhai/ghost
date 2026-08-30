@@ -1,0 +1,220 @@
+import { collectGhostExtension, type GhostToolResult } from "@ghost/extensions";
+import { describe, expect, it, vi } from "vitest";
+import { conversationIdentity } from "../src/conversation-identity.js";
+import { GhostError } from "../src/ghosts.js";
+import {
+  createPrincipalTaskTools,
+  PRINCIPAL_TASK_TOOL_NAMES,
+  type PrincipalTaskServices,
+} from "../src/principal-task-tools.js";
+import type { TaskSummary, TaskView } from "../src/tasks.js";
+import type { WorkerCatalogView } from "../src/worker-catalog.js";
+
+const parent = conversationIdentity("pi", "conversation-1");
+const sibling = conversationIdentity("pi", "conversation-2");
+
+function taskView(overrides: Partial<TaskView> = {}): TaskView {
+  return {
+    version: 1,
+    id: "task-11111111-1111-4111-8111-111111111111",
+    parent,
+    agent: "codex",
+    task: "Implement the parser.",
+    root: "/repo",
+    cwd: "/repo/packages/parser",
+    state: "running",
+    createdAt: "2026-08-30T09:00:00.000Z",
+    updatedAt: "2026-08-30T09:01:00.000Z",
+    nativeSessionId: "native-1",
+    result: null,
+    resultTruncated: false,
+    error: null,
+    events: [{
+      sequence: 1,
+      at: "2026-08-30T09:00:00.000Z",
+      type: "state",
+      state: "running",
+    }],
+    eventsTruncated: false,
+    ...overrides,
+  };
+}
+
+function taskSummary(task: TaskView): TaskSummary {
+  return {
+    id: task.id,
+    parent: task.parent,
+    agent: task.agent,
+    taskPreview: task.task,
+    root: task.root,
+    cwd: task.cwd,
+    state: task.state,
+    createdAt: task.createdAt,
+    updatedAt: task.updatedAt,
+    nativeSessionId: task.nativeSessionId,
+    resultPreview: task.result,
+    resultTruncated: task.resultTruncated,
+    error: task.error,
+  };
+}
+
+function workerView(): WorkerCatalogView {
+  return {
+    workers: [{
+      id: "codex",
+      name: "Codex",
+      kind: "native",
+      nativeConfiguration: true,
+      installation: "installed",
+      authentication: "authenticated",
+      reason: null,
+      usage: {
+        source: "omarchy",
+        state: "ready",
+        updatedAt: "2026-08-30T09:00:00.000Z",
+        stale: false,
+        tier: "Plus",
+        status: null,
+        help: null,
+        limits: [{ label: "Session", usedFraction: 0.25, resetsAt: null }],
+        today: { totalTokens: 42, prompts: 2, sessions: 1 },
+      },
+    }],
+  };
+}
+
+function fakeServices(tasks: TaskView[] = [taskView()]): {
+  services: PrincipalTaskServices;
+  create: ReturnType<typeof vi.fn>;
+  get: ReturnType<typeof vi.fn>;
+  send: ReturnType<typeof vi.fn>;
+  cancel: ReturnType<typeof vi.fn>;
+} {
+  const create = vi.fn(async () => tasks[0]!);
+  const get = vi.fn(async (_ghostName: string, id: string) => {
+    const found = tasks.find((task) => task.id === id);
+    if (!found) throw new GhostError("task_not_found", "No such task.", 404);
+    return found;
+  });
+  const send = vi.fn(async () => tasks[0]!);
+  const cancel = vi.fn(async () => ({ outcome: "cancellation_requested" as const, task: tasks[0]! }));
+  return {
+    create,
+    get,
+    send,
+    cancel,
+    services: {
+      tasks: {
+        create,
+        list: vi.fn(async () => ({ tasks: tasks.map(taskSummary), skipped: [] })),
+        get,
+        send,
+        cancel,
+      },
+      workers: { list: vi.fn(async () => workerView()) },
+    },
+  };
+}
+
+async function toolsFor(services: PrincipalTaskServices) {
+  return collectGhostExtension(createPrincipalTaskTools({
+    ghostName: "casper",
+    parent,
+    services,
+  }));
+}
+
+async function call(
+  services: PrincipalTaskServices,
+  name: string,
+  input: Record<string, unknown>,
+): Promise<GhostToolResult<unknown>> {
+  const extension = await toolsFor(services);
+  const definition = extension.tools.get(name);
+  if (!definition) throw new Error(`Missing principal tool ${name}`);
+  return definition.execute("call-1", input as never, undefined, undefined, { cwd: "/repo" });
+}
+
+describe("principal task tools", () => {
+  it("registers the fixed Pi-compatible task surface and returns an asynchronous handle", async () => {
+    const fixture = fakeServices();
+    const extension = await toolsFor(fixture.services);
+    expect([...extension.tools]).toEqual(PRINCIPAL_TASK_TOOL_NAMES.map((name) => [
+      name,
+      expect.objectContaining({ name }),
+    ]));
+    expect(extension.tools.get("task")?.parameters).toMatchObject({
+      type: "object",
+      required: ["agent", "task"],
+      additionalProperties: false,
+      properties: {
+        agent: expect.any(Object),
+        task: expect.any(Object),
+        cwd: expect.any(Object),
+      },
+    });
+
+    const result = await call(fixture.services, "task", {
+      agent: "codex",
+      task: "Implement the parser.",
+      cwd: "/repo/packages/parser",
+    });
+
+    expect(fixture.create).toHaveBeenCalledWith({
+      ghostName: "casper",
+      parent,
+      agent: "codex",
+      task: "Implement the parser.",
+      cwd: "/repo/packages/parser",
+    });
+    expect(result.details).toMatchObject({
+      id: "task-11111111-1111-4111-8111-111111111111",
+      state: "running",
+      taskPreview: "Implement the parser.",
+    });
+    expect(result.details).not.toHaveProperty("parent");
+    expect(result.details).not.toHaveProperty("task");
+  });
+
+  it("keeps list/get/send/cancel within one runtime-qualified parent", async () => {
+    const own = taskView();
+    const foreign = taskView({
+      id: "task-22222222-2222-4222-8222-222222222222",
+      parent: sibling,
+      task: "A sibling's private assignment.",
+    });
+    const fixture = fakeServices([own, foreign]);
+
+    const listed = await call(fixture.services, "task_list", { limit: 20 });
+    expect(listed.details).toMatchObject({
+      shown: 1,
+      total: 1,
+      tasks: [expect.objectContaining({ id: own.id })],
+    });
+    expect(JSON.stringify(listed.details)).not.toContain("private assignment");
+    await expect(call(fixture.services, "task_get", { task_id: foreign.id }))
+      .rejects.toMatchObject({ code: "task_not_found", status: 404 });
+
+    await call(fixture.services, "task_send", { task_id: own.id, text: "Check edge cases." });
+    expect(fixture.send).toHaveBeenCalledWith(
+      "casper",
+      own.id,
+      "Check edge cases.",
+      "principal",
+    );
+    await call(fixture.services, "task_cancel", { task_id: own.id });
+    expect(fixture.cancel).toHaveBeenCalledWith("casper", own.id);
+  });
+
+  it("projects Omarchy windows as remaining capacity", async () => {
+    const fixture = fakeServices();
+    const status = await call(fixture.services, "worker_status", {});
+    expect(status.details).toMatchObject({
+      workers: [{
+        id: "codex",
+        usage: { limits: [{ label: "Session", remainingFraction: 0.75 }] },
+      }],
+    });
+    expect(status.details).not.toHaveProperty("workers.0.usage.source");
+  });
+});

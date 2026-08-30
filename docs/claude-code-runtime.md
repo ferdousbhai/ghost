@@ -1,9 +1,9 @@
 # Claude Code plan runtime
 
-Status: implemented for the owner-local runtime. Last policy review: 2026-08-22.
+Status: implemented for the owner-local runtime. Last policy review: 2026-08-30.
 
 This page describes Claude Code as the harness for the Ghost principal, where
-Ghost deliberately appends its persona and supplies its own tools. Delegated
+Ghost supplies its complete identity prompt and its own tools. Delegated
 `claude-code` coding tasks are a separate native worker mode: they keep the
 owner's normal Claude Code identity and configuration and are documented in
 [native-workers.md](native-workers.md#claude-code).
@@ -78,25 +78,27 @@ For each turn Ghost:
    status;
 3. rebuilds the persona and memory index from the ghost home, the shallow index
    from the owner's shared XDG Documents root, the Omarchy CLI-first
-   computer-use policy, the owner-deliverable policy, the scheduled-work policy
+   computer-use policy, the owner-deliverable, Ghost self-reference, coding
+   delegation, and current-runtime/cwd policies, the scheduled-work policy
    rendered from ghostd's one resolved systemd user-unit directory, the
-   machine/ghost/project skill index, and the always-active declarative
-   instructions;
+   machine/ghost/project skill index, and the always-active declarative instructions;
 4. applies the conversation's pre-turn project binding: owner home when
    unbound, or the trusted project cwd plus its approved declarative snapshot;
-5. captures the Ghost-specific `@ghost/extensions` tool definitions and
-   exposes them as one in-process SDK MCP server;
+5. captures the Ghost-specific `@ghost/extensions` tools and daemon-owned
+   durable worker-task controls and exposes them as one in-process SDK MCP server;
 6. starts one scoped Agent SDK query and maps the SDK's async message
    stream onto Ghost's existing pi-messages SSE protocol;
 7. persists the opaque Claude session id, listing metadata, and actual cwd
    before it emits the terminal `done`, then closes the query process.
 
-The query is deliberately unrestricted for its local owner:
+The query runs in maximum-trust mode for its local owner:
 
-- Claude Code's native system prompt is preserved and the Ghost persona is
-  appended;
+- Ghost's complete custom principal system prompt replaces Claude Code's
+  coding-agent identity;
 - the native Claude Code tool preset, including Bash/Read/Edit/Write, web
-  search, subagents, and background work, remains enabled;
+  search, and background work, remains enabled, but native `Agent` and legacy
+  `Task` are explicitly disallowed for the principal so coding delegation
+  cannot bypass Ghost's durable task boundary;
 - filesystem setting sources are pinned to none, so changing cwd cannot admit
   owner/project executable settings, hooks, plugins, or arbitrary MCP;
 - the visible ghost home contributes accepted instruction files and rules
@@ -121,10 +123,10 @@ The query is deliberately unrestricted for its local owner:
   with an MCP-specific degraded-state warning because the SDK cannot preserve
   them; values at least 1000 are passed through exactly, including on resume;
 - project executable extensions, hooks, custom code tools, LSP, and ghost or
-  project agent definitions remain disabled pending the per-session isolation
-  work in #31. Agent-definition content is never appended to Claude's prompt;
-- Ghost's own browser, desktop, character, and structured memory writer are
-  added through an in-process MCP server;
+  project agent definitions remain disabled. Agent-definition content never
+  enters Claude's prompt;
+- Ghost's own browser, desktop, character, structured memory writer, worker
+  status, and durable task lifecycle are added through an in-process MCP server;
 - `bypassPermissions` is explicit because the HUD has no Claude approval UI;
 - inherited provider credential variables are still scrubbed from the child
   environment, including Anthropic API and OAuth token variables.
@@ -208,14 +210,16 @@ are:
 - [`ClaudeExecutable.ts`](https://github.com/pingdotgg/t3code/blob/2c4158f87a1b6a586d0aa5e0338f122cb7887c4f/apps/server/src/provider/Drivers/ClaudeExecutable.ts):
   explicit installed-executable boundary (Ghost retains the Linux/Omarchy
   subset and adds mise-launcher unwrapping for this desktop environment);
-- T3's parent-tool-use filtering: subagent text/thinking is never merged into
-  the parent response.
+- T3's parent-tool-use filtering behavior, although the Ghost principal now
+  disables native subagent invocation entirely.
 
 The full T3 provider graph, approvals UI, and long-lived queue were not copied.
-Claude Code's own coding tools and subagents remain native. Ghost passes
+Claude Code's own computer and coding tools remain native in the principal;
+native subagents remain available only inside delegated `claude-code` workers.
+Ghost passes
 `settingSources: []` and `skills: []`; declarative skills are not enabled
 through Claude's live discovery mechanism because the SDK's `skills: "all"`
-filter cannot sandbox discovery to machine paths. Ghost appends the shared
+filter cannot sandbox discovery to machine paths. Ghost supplies the shared
 CLI-first policy and admitted machine/ghost/project skill index, plus only the
 ghost/project instruction files and `alwaysApply` rules from its bounded,
 descriptor-confined snapshot and scoped MCP explicitly. Other declarative

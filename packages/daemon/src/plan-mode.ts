@@ -306,6 +306,9 @@ const PLAN_ALWAYS_ALLOWED_TOOLS = new Set([
   "ls",
   ASK_TOOL_NAME,
   "inspect_image",
+  "worker_status",
+  "task_list",
+  "task_get",
   "propose_plan",
 ]);
 const PLAN_JOB_OPS = new Set(["list", "wait"]);
@@ -333,6 +336,10 @@ export function planModeRefusal(state: PlanState, toolName: string, input: unkno
       return "Plan mode: files are read-only; propose_plan is the only plan writer.";
     case "bash":
       return "Plan mode: Bash is unavailable to the model; use read, grep, find, or ls.";
+    case "task":
+    case "task_send":
+    case "task_cancel":
+      return "Plan mode: coding tasks may be inspected but not started, steered, or cancelled until the plan is approved.";
     case "jobs":
       return selectorAllowed(input, "op", PLAN_JOB_OPS)
         ? null

@@ -40,6 +40,14 @@ Use `ghost_desktop` and `ghost_screen` only when Omarchy has no route, a tried C
 A file you write for the owner — a report, an export, a generated image — goes in the owner's Documents tree or the requested working directory. Never put a deliverable in ghost-home persona, memory, or runtime files.
 Memory is private context for this ghost; Documents are owner-wide files shared with the owner and every ghost.
 
+## Ghost reference
+For authoritative information about Ghost itself, run `ghost skill`. Use `ghost help <command>` for command-specific help.
+
+# Coding delegation
+You are the owner's Ghost: remain responsible for the outcome, but delegate project coding and code review to a coding worker instead of acting as the coding agent yourself.
+Use worker_status before choosing among claude-code, codex, and pi-worker when availability or current limits matter. Start work with task { agent, task, cwd? }; give the worker a complete assignment and the correct absolute project cwd. The task is durable and asynchronous: retain its id, use task_get or task_list on a later interaction, and use task_send or task_cancel when needed. Do not poll in a tight loop or claim completion you have not read.
+Your own Bash, edit, and write tools remain available for general computer use and for maintaining your character, memory, Documents, and other Ghost-owned files.
+
 ## Scheduled work
 To do something on a clock, write a systemd **user timer** through Bash — Ghost has no scheduler of its own, and a timer is something the owner can see in `systemctl --user list-timers`, stop with `systemctl --user disable --now`, and edit in a text file.
 Write both unit files in this exact absolute directory: "<owner-home>/.xdg-config/systemd/user".
@@ -68,6 +76,34 @@ Timers only fire while the owner is logged in, because the daemon runs with thei
 ## Skills
 When a skill matches, read its listed `SKILL.md` before acting.
 - omarchy: Control this Omarchy laptop through its CLI. (<owner-home>/.agents/skills/omarchy/SKILL.md)
+
+
+# Runtime
+Current working directory: <owner-home>
+Active tools:
+- bash
+- edit: Make precise file edits with exact text replacement, including multiple disjoint edits in one call
+- find: Find files by glob pattern (respects .gitignore)
+- grep: Search file contents for patterns (respects .gitignore)
+- ls: List directory contents
+- read: Read file contents
+- write: Create or overwrite files
+- ghost_character
+- ghost_memory_write
+- ghost_screen
+- ghost_desktop
+- ghost_browser
+- worker_status
+- task
+- task_list
+- task_get
+- task_send
+- task_cancel
+- ask
+- jobs
+- todo
+- propose_plan
+- inspect_image
 
 ------------------------------------------------------------------------------
 [turn 1: provider round-trips]
@@ -136,6 +172,14 @@ Use `ghost_desktop` and `ghost_screen` only when Omarchy has no route, a tried C
 A file you write for the owner — a report, an export, a generated image — goes in the owner's Documents tree or the requested working directory. Never put a deliverable in ghost-home persona, memory, or runtime files.
 Memory is private context for this ghost; Documents are owner-wide files shared with the owner and every ghost.
 
+## Ghost reference
+For authoritative information about Ghost itself, run `ghost skill`. Use `ghost help <command>` for command-specific help.
+
+# Coding delegation
+You are the owner's Ghost: remain responsible for the outcome, but delegate project coding and code review to a coding worker instead of acting as the coding agent yourself.
+Use worker_status before choosing among claude-code, codex, and pi-worker when availability or current limits matter. Start work with task { agent, task, cwd? }; give the worker a complete assignment and the correct absolute project cwd. The task is durable and asynchronous: retain its id, use task_get or task_list on a later interaction, and use task_send or task_cancel when needed. Do not poll in a tight loop or claim completion you have not read.
+Your own Bash, edit, and write tools remain available for general computer use and for maintaining your character, memory, Documents, and other Ghost-owned files.
+
 ## Scheduled work
 To do something on a clock, write a systemd **user timer** through Bash — Ghost has no scheduler of its own, and a timer is something the owner can see in `systemctl --user list-timers`, stop with `systemctl --user disable --now`, and edit in a text file.
 Write both unit files in this exact absolute directory: "<owner-home>/.xdg-config/systemd/user".
@@ -164,6 +208,34 @@ Timers only fire while the owner is logged in, because the daemon runs with thei
 ## Skills
 When a skill matches, read its listed `SKILL.md` before acting.
 - omarchy: Control this Omarchy laptop through its CLI. (<owner-home>/.agents/skills/omarchy/SKILL.md)
+
+
+# Runtime
+Current working directory: <owner-home>
+Active tools:
+- bash
+- edit: Make precise file edits with exact text replacement, including multiple disjoint edits in one call
+- find: Find files by glob pattern (respects .gitignore)
+- grep: Search file contents for patterns (respects .gitignore)
+- ls: List directory contents
+- read: Read file contents
+- write: Create or overwrite files
+- ghost_character
+- ghost_memory_write
+- ghost_screen
+- ghost_desktop
+- ghost_browser
+- worker_status
+- task
+- task_list
+- task_get
+- task_send
+- task_cancel
+- ask
+- jobs
+- todo
+- propose_plan
+- inspect_image
 
 ------------------------------------------------------------------------------
 [turn 2: provider round-trips]
@@ -200,8 +272,13 @@ grep                registry=yes  wire=yes  invokable=yes
 inspect_image       registry=yes  wire=yes  invokable=yes
 ls                  registry=yes  wire=yes  invokable=yes
 read                registry=yes  wire=yes  invokable=yes
-task                registry=no   wire=no   invokable=no
+task                registry=yes  wire=yes  invokable=yes
+task_cancel         registry=yes  wire=yes  invokable=yes
+task_get            registry=yes  wire=yes  invokable=yes
+task_list           registry=yes  wire=yes  invokable=yes
+task_send           registry=yes  wire=yes  invokable=yes
 todo                registry=yes  wire=yes  invokable=yes
+worker_status       registry=yes  wire=yes  invokable=yes
 write               registry=yes  wire=yes  invokable=yes
 (tools outside this universe are not compared)
 

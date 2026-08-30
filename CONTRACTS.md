@@ -32,11 +32,12 @@ no Omarchy-specific file or directory path. Native realpath deduplication and
 name validation apply. Machine skills enter at session construction with lowest
 name precedence, before ghost-home and then project resources; no hardcoded
 skill-name allowlist exists. This owner-trusted machine discovery is deliberately
-outside the descriptor-confined project scanner. A pi session has no `task`
-tool, and every custom or
-ambient subagent definition stays disabled until #31 supplies an isolated
-per-session agent boundary. Ghost and project `agents/*.md` definitions remain
-previewed but inert. Claude Code retains its own native subagents.
+outside the descriptor-confined project scanner. A Ghost principal delegates
+through the daemon-owned `task` tools described below; project and ghost-file
+`agents/*.md` definitions remain previewed but inert and are never executable
+principal extensions. A native Claude worker retains Claude Code's own
+subagents; the Claude principal does not expose native `Agent` or legacy
+`Task`, because those would bypass the durable Ghost task boundary.
 
 ```
 ~/ghosts/<name>/
@@ -345,10 +346,9 @@ independent choices. `character.md`, memory, Documents, browser/desktop tools,
 and responsibility for the outcome belong to the Ghost principal. A vendor
 worker receives an ordinary task and a trusted cwd, then retains that vendor
 harness's own identity and native configuration. `pi-worker` is the bundled
-Ghost-defined fallback. The read-only worker catalogue below establishes these
-names. The daemon task lifecycle below is already the shared persistence and
-control boundary, but it does not yet add a `task` tool or change the subagent
-prohibition in this section.
+Ghost-defined fallback. The read-only worker catalogue and daemon task
+lifecycle below establish those names and provide the principal's delegation
+boundary without enabling ambient agent definitions.
 
 A pi session uses pi's runtime (`@earendil-works/pi-coding-agent`,
 `pi-agent-core`, `pi-ai`) and native tools, but Ghost owns its roots and
@@ -364,10 +364,16 @@ prompt prose is retained or subtracted by marker.
 The Ghost-owned pi prompt is ordered: the complete `character.md` body (or a
 two-line unwritten-character fallback); the fenced, bounded memory index; the
 fenced, shallow Documents index; the shared Omarchy CLI-first computer-use,
-owner-deliverable, and rendered scheduled-work policies; accepted instruction
-files and unconditional `alwaysApply` rules; a
+owner-deliverable, Ghost self-documentation, coding-orchestration, and rendered
+scheduled-work policies;
+accepted instruction files and unconditional `alwaysApply` rules; a
 compact index of visible skill names, descriptions, and `SKILL.md` locations; the
-discoverable-rule index; then the seeded first-meeting section when applicable.
+discoverable-rule index; then the seeded first-meeting section when applicable;
+and finally a dynamic runtime section containing the current cwd and active
+tool names plus only their registered one-line snippets. Ghost does not carry
+pi's coding identity, generic guidelines, documentation pointers,
+`APPEND_SYSTEM.md`, or a second native skill/context rendering across the
+replacement boundary.
 Skill bodies, conditional-rule bodies,
 Markdown prompts, and Markdown commands enter model context only through their
 explicit invocation paths (`/skill:<name>`, an admitted Markdown command or
@@ -379,12 +385,16 @@ identity blocks.
 
 pi's native tools in a Ghost session are `bash`, `edit`, `find`, `grep`, `ls`,
 `read`, and `write`. Ghost's own tools — `ghost_memory_write`, `ghost_browser`,
-`ghost_desktop`, `ghost_screen`, `ghost_character`, the `ask` tool, and MCP
-tools named `mcp__<server>_<tool>` — are registered directly as pi custom
-tools and appear in `getActiveToolNames()`; there is no separate mount. There
-is no `task` tool; no bundled, custom, or ambient subagent can be spawned.
-Claude Code retains its own native subagent behavior. Live voice (issue #44) is
-deferred; goals with budgets belong with always-on check-ins (issue #18).
+`ghost_desktop`, `ghost_screen`, `ghost_character`, `ask`, `worker_status`,
+`task`, `task_list`, `task_get`, `task_send`, `task_cancel`, and MCP tools named
+`mcp__<server>_<tool>` — are registered directly as pi custom tools and appear
+in `getActiveToolNames()`; there is no separate mount. The task tools reach
+only the daemon's built-in workers and do not activate project, ghost-file, or
+ambient agent definitions. A Claude principal exposes the same logical task
+surface through its in-process Ghost MCP server and disables native `Agent`
+and `Task`; a native Claude worker retains native subagent behavior. Live voice
+(issue #44) is deferred; goals with budgets belong with
+always-on check-ins (issue #18).
 Ghost's `settings.yml`,
 `models.json`, and `mcp.json` are read from the ghost home, never the live cwd.
 pi's `DefaultResourceLoader` runs with `noExtensions`, `noPromptTemplates`,
@@ -1186,11 +1196,12 @@ shape and streams emit one complete event object per line.
   `alwaysApply` rule bodies, and compact skill/discoverable-rule indexes. No
   lexical post-load filter is an authority boundary.
   Project and ghost-file agent definitions are counted but inactive. A pi
-  session has no `task` tool and performs no live/ambient agent discovery.
-  Machine-skill discovery is the explicit exception described above. Claude
+  session performs no live/ambient agent discovery; its daemon-owned `task`
+  tool selects only a built-in worker id. Machine-skill discovery is the
+  explicit exception described above. Claude
   keeps native `skills:[]` and `settingSources:[]`; the SDK's `skills: "all"`
   option is not usable here because it is a context filter, not a path sandbox.
-  Its system-prompt append includes the shared computer-use policy, the compact
+  Its custom Ghost system prompt includes the shared computer-use policy, the compact
   machine/ghost/project skill index, accepted ghost/project instruction files,
   and only rules explicitly marked `alwaysApply`; skill, conditional-rule,
   prompt, and Markdown-command bodies do not become always-active Claude
@@ -1650,8 +1661,8 @@ shape and streams emit one complete event object per line.
   persisted `ask` result, commits the answer as a sibling, and resumes the model
   on that branch. Its response is an SSE stream and includes `branch_changed`.
   Re-answer and awaited Ghost hooks use the conversation's actual live cwd;
-  the pi runtime still has no `task` tool and never discovers agents from
-  that cwd.
+  the pi runtime never discovers agents from that cwd, and `task` still resolves
+  its worker and cwd through the daemon's trusted task boundary.
 - `POST /api/ghosts/:name/greeting` `{}` → `{ greeting: string | null,
   onboarding: boolean }` — one smol-lane completion (see below) writes a short
   in-persona opener for an empty chat from the character file, memory index,
@@ -1826,6 +1837,39 @@ marks every previously non-terminal durable record `interrupted`; Ghost never
 guesses how to reconnect an opaque vendor process. Malformed sidecars are
 skipped by listings and rejected by direct reads. Tasks run concurrently
 without a Ghost-level cap.
+
+Both principal harnesses expose the same daemon-owned logical tools:
+
+- `worker_status {}` returns the bounded three-worker catalogue, including the
+  read-only Omarchy utilization windows used to choose a worker.
+- `task { agent, task, cwd? }` creates one durable task and immediately returns
+  its queued task handle. This is exactly the locked pi subagent example's
+  single-task core plus its optional cwd; it adds no mode or parent field.
+- `task_list { limit? }` lists only tasks attributed to the current principal
+  conversation, newest first. `limit` defaults to 10 and is bounded to 1–20.
+- `task_get { task_id }`, `task_send { task_id, text }`, and
+  `task_cancel { task_id }` inspect, steer, and cancel a task attributed to that
+  same principal conversation. A principal send is durably distinguished from
+  an owner send.
+
+Ghost name and runtime-qualified parent identity are closure-bound by the
+session and never model input. Task-control calls cannot reach a sibling
+conversation's task. `task`, `task_send`, and `task_cancel` are mutating tools
+and stay blocked by Pi plan mode; catalogue/list/get remain observational.
+Tool-facing task projections retain at most 20 summaries, ten newest events
+with 2,000 characters of text each, and a 32,000-character result preview; the
+durable record and owner HTTP API remain authoritative for the full bounded
+view. A principal turn or MCP call ending never implicitly cancels a created
+task. The task remains daemon-owned and recoverable through its handle; the
+principal does not poll in a tight loop or invent a completion it has not read.
+
+Pi registers these as custom tools under the logical names above. The Claude
+principal exposes them through its existing in-process `ghost` SDK MCP server,
+so Claude sees `mcp__ghost__<name>`. It keeps the native Claude Code tool preset
+but explicitly disallows native `Agent` and legacy `Task`: every principal
+coding delegation therefore has the same durable handle, worker choice, usage
+context, steering, cancellation, and parent attribution. This restriction is
+principal-only; a `claude-code` worker keeps its native Agent behavior.
 
 The authenticated HTTP boundary is:
 
@@ -2184,12 +2228,16 @@ The owner runs `claude auth login` outside Ghost. Ghost accepts no Claude
 credential, stores no Claude credential, and removes ambient API/OAuth-token
 variables from the subprocess environment.
 
-The runtime uses the owner's local Claude Code authentication, native system
-prompt, built-in tools, and web search in bypass-permissions mode. Filesystem
+The runtime uses the owner's local Claude Code authentication, built-in tools,
+and web search in bypass-permissions mode. Ghost supplies the complete custom
+principal system prompt instead of Claude Code's coding-agent system prompt,
+while retaining the native tool preset and explicitly disallowing native
+`Agent` and legacy `Task`. Filesystem
 setting sources are pinned to `[]`: neither owner-home cwd nor a trusted project
-may inject executable settings, hooks, or plugins. Every query appends the
-Ghost character, derived indexes, shared Omarchy CLI-first, owner-deliverable,
-and rendered scheduled-work policies, compact machine/ghost/project skill index,
+may inject executable settings, hooks, or plugins. Every query's custom prompt
+contains the Ghost character, derived indexes, shared Omarchy CLI-first, owner-deliverable,
+Ghost self-documentation, coding-orchestration, runtime/cwd, and rendered
+scheduled-work policies, compact machine/ghost/project skill index,
 accepted instruction files, and rules marked `alwaysApply`, while keeping SDK
 `skills:[]`; skill, conditional-rule, prompt, and Markdown-command bodies are not
 injected into every turn. A bound project adds its stored accepted snapshot with
@@ -2304,7 +2352,11 @@ stderr format. Filter one ghost with
   `models.omp.json` under `.pi/`.
 - Render the persona/system prompt in Ghost and pass it as the loader's
   `systemPrompt`; the persona extension replaces it wholesale before every
-  turn. Never reintroduce inherited prompt prose or marker-based subtraction.
+  turn. Append only Ghost's dynamic plan/todo section and a runtime section
+  derived from pi's structured current cwd, selected tool names, and registered
+  one-line tool snippets. Never reintroduce inherited prompt prose,
+  `APPEND_SYSTEM.md`, native context/skill rendering, prompt guidelines, or
+  marker-based subtraction.
 - Give `DefaultResourceLoader` `noExtensions`, `noPromptTemplates`, `noThemes`,
   and `noContextFiles`, set `projectTrusted` false, and enable native skills
   only for the explicitly supplied machine roots. Ghost supplies every other

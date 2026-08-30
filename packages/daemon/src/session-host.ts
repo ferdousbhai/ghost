@@ -85,6 +85,7 @@ import {
 import {
   loadMachineSkills,
   machineSkillPaths,
+  GHOST_SELF_DOCUMENTATION_POLICY,
   OMARCHY_COMPUTER_USE_POLICY,
   OWNER_DELIVERABLE_POLICY,
 } from "./machine-skills.js";
@@ -219,6 +220,11 @@ import {
   readPiProjectSnapshot,
 } from "./project-snapshot.js";
 import { readToolCwds, toolCwdsPath, writeToolCwds } from "./tool-cwds.js";
+import {
+  createPrincipalTaskTools,
+  GHOST_CODING_ORCHESTRATION_POLICY,
+  type PrincipalTaskServices,
+} from "./principal-task-tools.js";
 
 type SessionConversationMaintenance = Pick<ConversationMaintenance,
   | "admitOwnerAction"
@@ -1545,6 +1551,7 @@ export class SessionHost {
   private readonly claudeCode: ClaudeCodeRuntime;
   private readonly hooks: GhostHookRunner;
   private maintenance: SessionConversationMaintenance | undefined;
+  private taskServices: PrincipalTaskServices | undefined;
   private readonly liveVoice: LiveVoiceManager;
   private readonly collaboration: CollaborationManager;
   private readonly sessions = new Map<string, HostedSession>();
@@ -1718,6 +1725,29 @@ export class SessionHost {
       throw new Error("Conversation maintenance is already attached.");
     }
     this.maintenance = maintenance;
+  }
+
+  /** Attach the daemon-owned worker boundary before any principal session opens. */
+  attachTaskServices(services: PrincipalTaskServices): void {
+    if (this.taskServices) {
+      if (
+        this.taskServices.tasks === services.tasks
+        && this.taskServices.workers === services.workers
+      ) {
+        return;
+      }
+      throw new Error("Principal task services are already attached.");
+    }
+    if (
+      this.sessions.size > 0
+      || this.opening.size > 0
+      || this.turnAdmissions.size > 0
+      || this.lifecycleAdmissions.size > 0
+    ) {
+      throw new Error("Principal task services must be attached before opening a session.");
+    }
+    this.claudeCode.attachTaskServices(services);
+    this.taskServices = services;
   }
 
   async withMaintenanceRuntime<T>(
@@ -2654,6 +2684,8 @@ export class SessionHost {
       ...(this.extensionOptions.extraSections ?? []),
       OMARCHY_COMPUTER_USE_POLICY,
       OWNER_DELIVERABLE_POLICY,
+      GHOST_SELF_DOCUMENTATION_POLICY,
+      ...(this.taskServices ? [GHOST_CODING_ORCHESTRATION_POLICY] : []),
       renderScheduledWorkPolicy(ghostName, this.scheduleUnitDir),
       ...(declarativeSection ? [declarativeSection] : []),
       ...(isSeededCharacter(ghostName, sessionCharacter?.body ?? null)
@@ -2673,12 +2705,23 @@ export class SessionHost {
     // transcript, compaction, and any reader between turns see the ghost
     // rather than pi's default; the hook re-renders it before every turn.
     const ghostExtension = await collectGhostExtension(extensions.ghost);
+    const principalTaskExtension = this.taskServices
+      ? await collectGhostExtension(createPrincipalTaskTools({
+          ghostName,
+          parent: conversationIdentity("pi", sessionKey),
+          services: this.taskServices,
+        }))
+      : null;
     const personaSections = await renderPersonaPrompt(ghostExtension, { cwd: runtimeCwd });
+    const planBookRef: { book: PlanBook } = { book: undefined as unknown as PlanBook };
     const extensionFactories: ExtensionFactory[] = [
-      piExtensionFromGhost(ghostExtension, { dynamicSections: () => planSections(planBookRef.book) }),
+      piExtensionFromGhost(ghostExtension, {
+        dynamicSections: () => planSections(planBookRef.book),
+        includeRuntimeGuidance: true,
+      }),
+      ...(principalTaskExtension ? [piExtensionFromGhost(principalTaskExtension)] : []),
       ghostCompactionExtension,
     ];
-    const planBookRef: { book: PlanBook } = { book: undefined as unknown as PlanBook };
 
     const modelRuntime = await createGhostPiRuntime({
       authPath: ghostAuthPath(paths.agentDir),

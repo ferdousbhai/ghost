@@ -88,7 +88,18 @@ describe("plan mode", () => {
     const idle = { planning: false };
     expect(planModeRefusal(idle, "write", { path: "/x" })).toBeNull();
 
-    for (const tool of ["read", "grep", "find", "ls", "ask", "inspect_image", "propose_plan"]) {
+    for (const tool of [
+      "read",
+      "grep",
+      "find",
+      "ls",
+      "ask",
+      "inspect_image",
+      "worker_status",
+      "task_list",
+      "task_get",
+      "propose_plan",
+    ]) {
       expect(planModeRefusal(planning, tool, {}), tool).toBeNull();
     }
     for (const op of ["list", "wait"]) {
@@ -115,6 +126,9 @@ describe("plan mode", () => {
       ["write", { path: "/ghost/plans/plan.md" }],
       ["ghost_screen", { target: "screen" }],
       ["ghost_memory_write", { content: "fact" }],
+      ["task", { agent: "codex", task: "Implement it." }],
+      ["task_send", { task_id: "task-1", text: "Continue." }],
+      ["task_cancel", { task_id: "task-1" }],
       ["mcp__server_tool", {}],
       ["unknown_tool", {}],
       ["jobs", { op: "cancel" }],

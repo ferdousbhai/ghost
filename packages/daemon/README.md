@@ -231,16 +231,19 @@ items. The cwd alone grants no discovery authority. A
 conversation may explicitly trust and bind one project, after which Ghost pins
 its data-only instructions, skills, rules, Markdown commands/prompts, and scoped
 MCP configuration. Project executable extensions, hooks, custom code tools,
-LSP, and custom agent definitions stay disabled until they can run through an
-isolated per-session boundary. A pi session has no `task` tool, so no
-bundled, project, ghost-file, or ambient subagent is invokable in phase 1.
+LSP, and custom agent definitions stay disabled. Both principal runtimes expose
+daemon-owned `worker_status`, `task`, `task_list`, `task_get`, `task_send`, and
+`task_cancel` controls for the built-in `claude-code`, `codex`, and `pi-worker`
+workers; project, ghost-file, and ambient agent definitions remain inert.
 pi's native `bash`, `edit`, `find`, `grep`, `ls`, `read`, and `write` plus
 Ghost's own tools (registered directly as pi custom tools) remain available;
 Ghost's own `bash`/`jobs` (background jobs) and `inspect_image` (the
 `vision_model` role describes an image a blind chat model cannot see) join
 them. There is no tool approval; `ask` is not an approval prompt.
 
-Claude Code sessions retain Claude's native subagents.
+A Claude principal keeps the native tool preset but uses Ghost's complete
+custom identity prompt and disables native `Agent`/legacy `Task`; a delegated
+Claude worker retains Claude Code's native subagents and configuration.
 
 
 ## Models and routing
@@ -288,7 +291,8 @@ provider's best-ranked model). `task_model`, `smol_model`, `slow_model`, and
 `designer_model` inherit the chat default when unbound; `tiny_model` and
 `advisor_model` follow Ghost's preference lists; `vision_model`, `plan_model`,
 and `commit_model` stay unset until bound. `task_model` and `advisor_model` do
-not make any subagent available while spawning is disabled in phase 1.
+not select a coding worker or create a durable task; worker choice belongs to
+the principal's explicit `task` call.
 
 Fallback arrays are ordered Ghost policy stored in `models.json`. The switcher
 orders a provider's models using provider priority and then descending
@@ -340,6 +344,9 @@ ad-hoc prompts:
   every later turn. The `todo` tool is view-only while planning; `/todo` keeps a
   phased task list the shell can show (`GET …/sessions/:id/todo`). Claude Code
   conversations do not support this Ghost-owned mode.
+- Coding delegation is asynchronous and durable. `worker_status`, `task_list`,
+  and `task_get` remain observational in Pi plan mode; starting, steering, or
+  cancelling a worker task remains blocked until the plan is approved.
 - Pi can use Firecrawl, HEY, Basecamp, Obsidian, Google Workspace, and other
   CLI skills through `bash` when the owner installs them. At session
   construction, Ghost uses pi's native parser to snapshot every valid skill
@@ -410,6 +417,11 @@ The authoritative route and payload contract is
 | GET/POST | `/api/ghosts/:name/sessions/:id/queue` | inspect or enqueue steer/follow-up |
 | POST | `/api/ghosts/:name/sessions/:id/branch` | fork the conversation at a message |
 | POST | `/api/ghosts/:name/sessions/:id/reanswer` | branch an ask answer and resume via SSE |
+| GET | `/api/ghosts/:name/workers` | inspect native-worker availability, auth, and Omarchy usage |
+| GET/POST | `/api/ghosts/:name/sessions/:id/tasks` | list or start durable coding tasks |
+| GET | `/api/ghosts/:name/sessions/:id/tasks/:taskId` | inspect one task |
+| POST | `/api/ghosts/:name/sessions/:id/tasks/:taskId/send` | steer one task as the owner |
+| POST | `/api/ghosts/:name/sessions/:id/tasks/:taskId/cancel` | cancel one task |
 | GET/PUT | `/api/ghosts/:name/model-routing` | inspect or mutate role/fallback policy |
 
 Every `/api` route except the deliberately public relay status requires the

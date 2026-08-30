@@ -23,6 +23,10 @@ import {
   SessionHost,
 } from "../../src/session-host.js";
 import type { PiMessagesEvent } from "../../src/pi-messages.js";
+import {
+  PRINCIPAL_TASK_TOOL_NAMES,
+  type PrincipalTaskServices,
+} from "../../src/principal-task-tools.js";
 import { makeTempGhosts, seedGhost, type TempGhosts } from "../helpers/fixtures.js";
 import { startMockProvider, type MockProvider } from "../helpers/mock-provider.js";
 import {
@@ -62,11 +66,9 @@ The Heidelberg cost more than it should have.
 `;
 
 /**
- * Additional OMP tools worth auditing beside the phase-1 minimum. Ghost does
- * not contract for these. `task` is included specifically to pin the deliberate
- * phase-1 subtraction while the fixture records the rest of the harness.
+ * Additional OMP tools worth auditing beside Ghost's contracted surface.
  */
-const OTHER_AUDITED_OMP_TOOLS = ["ask", "eval", "inspect_image", "task", "todo"] as const;
+const OTHER_AUDITED_OMP_TOOLS = ["ask", "eval", "inspect_image", "todo"] as const;
 
 describe("golden: session", () => {
   it("writes a memory mid-conversation and carries it into the next system prompt", async () => {
@@ -119,6 +121,19 @@ describe("golden: session", () => {
       // The greeting has its own fixture and is not part of a turn.
       greeting: { enabled: false },
     });
+    const unavailable = async () => {
+      throw new Error("the golden provider does not call coding-task tools");
+    };
+    host.attachTaskServices({
+      tasks: {
+        create: unavailable,
+        list: async () => ({ tasks: [], skipped: [] }),
+        get: unavailable,
+        send: unavailable,
+        cancel: unavailable,
+      },
+      workers: { list: async () => ({ workers: [] }) },
+    } as unknown as PrincipalTaskServices);
 
     const normalizer = new Normalizer()
       .path(provider.url, "<mock-provider>")
@@ -178,6 +193,7 @@ describe("golden: session", () => {
     const universe = [
       ...PI_NATIVE_TOOL_NAMES,
       ...OTHER_AUDITED_OMP_TOOLS,
+      ...PRINCIPAL_TASK_TOOL_NAMES,
       ...resolveGhostExtensions({ documents }, dir, { vision: false }).toolNames,
     ];
     sections.push({

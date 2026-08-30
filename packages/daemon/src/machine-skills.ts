@@ -16,6 +16,12 @@ export const OWNER_DELIVERABLE_POLICY = [
   "Memory is private context for this ghost; Documents are owner-wide files shared with the owner and every ghost.",
 ].join("\n");
 
+/** The installed CLI is Ghost's authoritative, discoverable self-reference. */
+export const GHOST_SELF_DOCUMENTATION_POLICY = [
+  "## Ghost reference",
+  "For authoritative information about Ghost itself, run `ghost skill`. Use `ghost help <command>` for command-specific help.",
+].join("\n");
+
 export interface MachineSkillOptions {
   /** Complete path override shared with pi's native resource loader. */
   paths?: readonly string[];

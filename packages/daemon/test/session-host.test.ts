@@ -74,6 +74,8 @@ import {
   type TrashedConversation,
 } from "../src/session-host.js";
 import type { PiMessagesEvent } from "../src/pi-messages.js";
+import type { PrincipalTaskServices } from "../src/principal-task-tools.js";
+import type { TaskView } from "../src/tasks.js";
 import { readPins, writePins } from "../src/pins.js";
 import { ProjectBindingStore, projectBindingPath } from "../src/project-binding.js";
 import { PROJECT_SCAN_MAX_ENTRIES } from "../src/project-resources.js";
@@ -1007,6 +1009,7 @@ describe("SessionHost.open", () => {
     expectProjectRules(reopened.session);
     const reopenedSystem = await modelSystemPrompt("conv-project");
     expect(reopenedSystem).toContain("TRUSTED-PROJECT-INSTRUCTION");
+    expect(reopenedSystem).toContain(`Current working directory: ${child}`);
     expect(reopenedSystem).not.toContain("HOSTILE-AFTER-CACHE-EVICTION");
 
     await host!.disposeAll();
@@ -1745,6 +1748,79 @@ describe("SessionHost.open", () => {
     }
   });
 
+  it("attaches durable coding tools to a Pi principal before its first open", async () => {
+    await setup([{ kind: "text", text: "ready" }]);
+    const unavailable = async () => {
+      throw new Error("not called by this provider fixture");
+    };
+    const create = vi.fn(async (
+      input: Parameters<PrincipalTaskServices["tasks"]["create"]>[0],
+    ): Promise<TaskView> => ({
+      version: 1,
+      id: "task-11111111-1111-4111-8111-111111111111",
+      parent: input.parent,
+      agent: input.agent,
+      task: input.task,
+      root: temp!.ownerHome,
+      cwd: input.cwd ?? temp!.ownerHome,
+      state: "queued",
+      createdAt: "2026-08-30T09:00:00.000Z",
+      updatedAt: "2026-08-30T09:00:00.000Z",
+      nativeSessionId: null,
+      result: null,
+      resultTruncated: false,
+      error: null,
+      events: [],
+      eventsTruncated: false,
+    }));
+    const services = {
+      tasks: {
+        create,
+        list: async () => ({ tasks: [], skipped: [] }),
+        get: unavailable,
+        send: unavailable,
+        cancel: unavailable,
+      },
+      workers: { list: async () => ({ workers: [] }) },
+    } as unknown as PrincipalTaskServices;
+    host!.attachTaskServices(services);
+
+    const prompt = await modelSystemPrompt("durable-task-tools");
+    const handle = await host!.open("casper", "durable-task-tools");
+    expect(handle.session.getActiveToolNames()).toEqual(expect.arrayContaining([
+      "worker_status",
+      "task",
+      "task_list",
+      "task_get",
+      "task_send",
+      "task_cancel",
+    ]));
+    expect(prompt).toContain("# Coding delegation");
+    expect(prompt).toContain("Current working directory:");
+    expect(prompt).toContain("- task");
+    const taskTool = handle.session.getToolDefinition("task");
+    if (!taskTool) throw new Error("task tool was not registered");
+    await taskTool.execute(
+      "task-call",
+      { agent: "codex", task: "Implement it." },
+      undefined,
+      undefined,
+      { cwd: temp!.ownerHome } as never,
+    );
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({
+      ghostName: "casper",
+      parent: {
+        id: "pi:durable-task-tools",
+        runtime: "pi",
+        conversationId: "durable-task-tools",
+      },
+      agent: "codex",
+      task: "Implement it.",
+    }));
+    expect(() => host!.attachTaskServices({ ...services, workers: { list: async () => ({ workers: [] }) } }))
+      .toThrow(/already attached/);
+  });
+
   it("reuses one session per conversation id and separates different ids", async () => {
     await setup([{ kind: "text", text: "hello" }]);
     const first = await host!.open("casper", "conv-1");
@@ -2120,16 +2196,23 @@ lines.on("line", (line) => {
   });
 
   it("keeps owner-home coding-agent instructions out of an unbound prompt", async () => {
-    await setup([{ kind: "text", text: "hello" }]);
+    const { dir } = await setup([{ kind: "text", text: "hello" }]);
     mkdirSync(join(temp!.ownerHome, ".claude"), { recursive: true });
     mkdirSync(join(temp!.ownerHome, ".agents"), { recursive: true });
     writeFileSync(join(temp!.ownerHome, ".claude", "CLAUDE.md"), "HOSTILE-CLAUDE-IDENTITY");
     writeFileSync(join(temp!.ownerHome, ".agents", "AGENTS.md"), "HOSTILE-AGENTS-IDENTITY");
+    mkdirSync(ghostPaths(dir).agentDir, { recursive: true });
+    writeFileSync(
+      join(ghostPaths(dir).agentDir, "APPEND_SYSTEM.md"),
+      "HOSTILE-PI-APPEND-SYSTEM",
+    );
 
     const handle = await host!.open("casper", "conv-owner-context");
-    const prompt = handle.session.systemPrompt;
+    const prompt = await modelSystemPrompt("conv-owner-context");
     expect(prompt).not.toContain("HOSTILE-CLAUDE-IDENTITY");
     expect(prompt).not.toContain("HOSTILE-AGENTS-IDENTITY");
+    expect(prompt).not.toContain("HOSTILE-PI-APPEND-SYSTEM");
+    expect(handle.session.systemPrompt).not.toContain("HOSTILE-PI-APPEND-SYSTEM");
   });
 
   it("discovers visible Ghost context and supports /skill:name invocation", async () => {

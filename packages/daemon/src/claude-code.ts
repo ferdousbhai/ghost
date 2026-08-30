@@ -59,12 +59,14 @@ import {
   openRegularFileNoFollow,
   type GhostToolCapabilities,
   type AnyGhostToolDefinition,
+  type CollectedGhostExtension,
   type GhostToolContext,
   type GhostToolResult,
 } from "@ghost/extensions";
 import * as z from "zod";
 import { createClaudePiMessagesAdapter } from "./claude-pi-messages.js";
 import {
+  conversationIdentity,
   isValidConversationId,
   requireRawConversationId,
 } from "./conversation-identity.js";
@@ -89,6 +91,7 @@ import { silentLogger, type Logger } from "./log.js";
 import {
   loadMachineSkills,
   machineSkillPaths,
+  GHOST_SELF_DOCUMENTATION_POLICY,
   OMARCHY_COMPUTER_USE_POLICY,
   OWNER_DELIVERABLE_POLICY,
 } from "./machine-skills.js";
@@ -98,6 +101,12 @@ import {
 } from "./schedules.js";
 import type { SettledMaintenanceTurn } from "./conversation-maintenance.js";
 import type { EffectiveProjectMcpRead } from "./mcp-catalog.js";
+import {
+  createPrincipalTaskTools,
+  GHOST_CODING_ORCHESTRATION_POLICY,
+  PRINCIPAL_TASK_TOOL_NAMES,
+  type PrincipalTaskServices,
+} from "./principal-task-tools.js";
 import type { RunTurnOptions } from "./session-host.js";
 import { claudeSessionMetadataPath as nativeClaudeSessionMetadataPath } from "./session-files.js";
 import {
@@ -963,6 +972,8 @@ async function buildPersona(
   homeDir: string,
   ghostName: string,
   scheduleUnitDir: string,
+  cwd: string,
+  includeTaskDelegation: boolean,
   configuredDocuments?: MachineDocuments | string,
 ): Promise<string> {
   const home = openGhostHome(homeDir);
@@ -983,11 +994,18 @@ async function buildPersona(
     extraSections: [
       OMARCHY_COMPUTER_USE_POLICY,
       OWNER_DELIVERABLE_POLICY,
+      GHOST_SELF_DOCUMENTATION_POLICY,
+      ...(includeTaskDelegation ? [GHOST_CODING_ORCHESTRATION_POLICY] : []),
       renderScheduledWorkPolicy(ghostName, scheduleUnitDir),
       // A seeded character.md means this ghost has not met its owner yet.
       ...(isSeededCharacter(ghostName, character?.body ?? null)
         ? [FIRST_MEETING_SECTION]
         : []),
+      [
+        "# Runtime",
+        "This principal conversation runs on the Claude Code harness with its native computer, browser, and file tools.",
+        `Current working directory: ${cwd}`,
+      ].join("\n"),
     ],
   });
 }
@@ -1041,6 +1059,10 @@ async function buildMcpTools(
   homeDir: string,
   ghostName: string,
   extensionOptions: GhostExtensionOptions,
+  principalTasks?: {
+    services: PrincipalTaskServices;
+    conversationId: string;
+  },
 ): Promise<{ tools: SdkMcpToolDefinition[]; names: string[] }> {
   const resolved = resolveGhostExtensions(
     { ...extensionOptions, ghostName },
@@ -1048,7 +1070,23 @@ async function buildMcpTools(
     CLAUDE_CODE_TOOL_CAPABILITIES,
   );
   const tools = await bridgeClaudeCodeTools(resolved, homeDir);
-  return { tools, names: resolved.toolNames };
+  if (!principalTasks) return { tools, names: resolved.toolNames };
+  const taskExtension = await collectGhostExtension(createPrincipalTaskTools({
+    ghostName,
+    parent: conversationIdentity("claude-code", principalTasks.conversationId),
+    services: principalTasks.services,
+  }));
+  return {
+    tools: [
+      ...tools,
+      ...bridgeCollectedClaudeCodeTools(
+        taskExtension,
+        PRINCIPAL_TASK_TOOL_NAMES,
+        { cwd: homeDir },
+      ),
+    ],
+    names: [...resolved.toolNames, ...PRINCIPAL_TASK_TOOL_NAMES],
+  };
 }
 
 export async function bridgeClaudeCodeTools(
@@ -1058,10 +1096,18 @@ export async function bridgeClaudeCodeTools(
   // buildPersona adapts Ghost's prompt hook outside the session runtime; this
   // bridge needs the tools alone. Claude Code has no pi Model instance, so the
   // tool context deliberately carries none.
-  const definitions = (await collectGhostExtension(resolved.ghost)).tools;
+  const extension = await collectGhostExtension(resolved.ghost);
   const context: GhostToolContext = { cwd: homeDir };
-  return resolved.toolNames.map((name): SdkMcpToolDefinition => {
-    const definition = definitions.get(name);
+  return bridgeCollectedClaudeCodeTools(extension, resolved.toolNames, context);
+}
+
+function bridgeCollectedClaudeCodeTools(
+  extension: CollectedGhostExtension,
+  names: readonly string[],
+  context: GhostToolContext,
+): SdkMcpToolDefinition[] {
+  return names.map((name): SdkMcpToolDefinition => {
+    const definition = extension.tools.get(name);
     if (!definition) {
       throw new ClaudeCodeProcessError(
         `Ghost declared tool ${JSON.stringify(name)} but its extension did not register it.`,
@@ -1139,11 +1185,7 @@ function queryOptions(input: {
     cwd: input.cwd,
     ...(input.modelId === CLAUDE_CODE_DEFAULT_MODEL_ID ? {} : { model: input.modelId }),
     pathToClaudeCodeExecutable: input.binaryPath,
-    systemPrompt: {
-      type: "preset",
-      preset: "claude_code",
-      append: input.systemPrompt,
-    },
+    systemPrompt: input.systemPrompt,
     title: `${input.ghostName} in Ghost`,
     // The subprocess cwd must not implicitly authorize project settings,
     // hooks, plugins, or MCP. Ghost injects the approved declarative snapshot
@@ -1152,6 +1194,7 @@ function queryOptions(input: {
     skills: [],
     tools: { type: "preset", preset: "claude_code" },
     allowedTools: input.toolNames.map((name) => `mcp__ghost__${name}`),
+    disallowedTools: ["Agent", "Task"],
     permissionMode: "bypassPermissions",
     allowDangerouslySkipPermissions: true,
     mcpServers: mcpServerRecord([
@@ -1453,6 +1496,7 @@ export class ClaudeCodeRuntime {
     string,
     { controller: AbortController; promise: Promise<void> }
   >();
+  private taskServices: PrincipalTaskServices | undefined;
   private disposed = false;
 
   constructor(options: ClaudeCodeRuntimeOptions = {}) {
@@ -1479,6 +1523,23 @@ export class ClaudeCodeRuntime {
       ...(options.readAuthStatus ? { readAuthStatus: options.readAuthStatus } : {}),
     });
     this.hooks = options.hooks ?? new GhostHookRunner({ logger: this.logger });
+  }
+
+  /** Attach task services before a Claude principal turn can begin. */
+  attachTaskServices(services: PrincipalTaskServices): void {
+    if (this.taskServices) {
+      if (
+        this.taskServices.tasks === services.tasks
+        && this.taskServices.workers === services.workers
+      ) {
+        return;
+      }
+      throw new Error("Principal task services are already attached to Claude Code.");
+    }
+    if (this.disposed || this.busy.size > 0 || this.active.size > 0 || this.turns.size > 0) {
+      throw new Error("Principal task services must be attached before a Claude Code turn.");
+    }
+    this.taskServices = services;
   }
 
   invalidateAuthProbe(): void {
@@ -1641,6 +1702,8 @@ export class ClaudeCodeRuntime {
           paths.home,
           ghost.name,
           this.scheduleUnitDir,
+          runtimeCwd,
+          this.taskServices !== undefined,
           this.extensionOptions.documents,
         ),
         loadMachineSkills(this.ownerHome, { paths: this.machineSkills }),
@@ -1722,6 +1785,9 @@ export class ClaudeCodeRuntime {
         paths.home,
         ghost.name,
         this.extensionOptions,
+        this.taskServices
+          ? { services: this.taskServices, conversationId }
+          : undefined,
       );
       this.assertTurnAdmitted();
 

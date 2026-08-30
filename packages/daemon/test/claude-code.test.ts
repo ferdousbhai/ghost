@@ -51,6 +51,7 @@ import type { Logger } from "../src/log.js";
 import { ModelCatalog } from "../src/model-catalog.js";
 import { setChatModelRole } from "../src/models.js";
 import type { PiMessagesEvent } from "../src/pi-messages.js";
+import type { PrincipalTaskServices } from "../src/principal-task-tools.js";
 import {
   loadProjectDeclarativeSnapshot,
   PROJECT_SCAN_MAX_ENTRIES,
@@ -213,6 +214,7 @@ function setupClaudeHost(options: {
   logger?: Logger;
   maintenance?: SessionHostOptions["maintenance"];
   machineSkill?: { name: string; description: string; body: string };
+  taskServices?: PrincipalTaskServices;
 } = {}) {
   temp = makeTempGhosts();
   const dir = seedGhost(temp.root, {
@@ -268,6 +270,7 @@ function setupClaudeHost(options: {
       },
     },
   });
+  if (options.taskServices) host.attachTaskServices(options.taskServices);
   return { paths, scheduleUnitDir, seenOptions, seenPrompts, lifecycle };
 }
 
@@ -747,23 +750,17 @@ describe("Claude Code subscription runtime", () => {
       settingSources: [],
       permissionMode: "bypassPermissions",
       allowDangerouslySkipPermissions: true,
+      disallowedTools: ["Agent", "Task"],
       persistSession: true,
     });
     expect(seenOptions[0]).not.toHaveProperty("plugins");
     expect(seenOptions[0]).not.toHaveProperty("strictMcpConfig");
     const systemPrompt = seenOptions[0]?.systemPrompt;
-    expect(systemPrompt).toMatchObject({
-      type: "preset",
-      preset: "claude_code",
-      append: expect.stringContaining("letterpress printer"),
-    });
-    if (
-      typeof systemPrompt !== "object"
-      || systemPrompt === null
-      || !("append" in systemPrompt)
-      || typeof systemPrompt.append !== "string"
-    ) throw new Error("Claude Code did not receive Ghost's appended persona.");
-    const appended = systemPrompt.append;
+    expect(systemPrompt).toEqual(expect.stringContaining("letterpress printer"));
+    if (typeof systemPrompt !== "string") {
+      throw new Error("Claude Code did not receive Ghost's custom persona.");
+    }
+    const appended = systemPrompt;
     expect(appended).toContain(temp!.documentsDir);
     expect(appended).toContain('file: "owner-plan.pdf"');
     expect(appended).toContain(scheduleUnitDir);
@@ -822,6 +819,41 @@ describe("Claude Code subscription runtime", () => {
         mcpWarnings: [],
       },
     });
+  });
+
+  it("exposes durable Ghost task controls while disabling native principal delegation", async () => {
+    const unavailable = async () => {
+      throw new Error("not called by this query fixture");
+    };
+    const taskServices = {
+      tasks: {
+        create: unavailable,
+        list: unavailable,
+        get: unavailable,
+        send: unavailable,
+        cancel: unavailable,
+      },
+      workers: { list: async () => ({ workers: [] }) },
+    } as unknown as PrincipalTaskServices;
+    const { seenOptions } = setupClaudeHost({ taskServices });
+
+    await host!.runTurn("casper", {
+      sessionId: "durable-delegation",
+      prompt: "Delegate this later.",
+      emit: () => {},
+    });
+
+    expect(seenOptions[0]?.allowedTools).toEqual(expect.arrayContaining([
+      "mcp__ghost__worker_status",
+      "mcp__ghost__task",
+      "mcp__ghost__task_list",
+      "mcp__ghost__task_get",
+      "mcp__ghost__task_send",
+      "mcp__ghost__task_cancel",
+    ]));
+    expect(seenOptions[0]?.disallowedTools).toEqual(["Agent", "Task"]);
+    expect(seenOptions[0]?.tools).toEqual({ type: "preset", preset: "claude_code" });
+    expect(seenOptions[0]?.systemPrompt).toEqual(expect.stringContaining("# Coding delegation"));
   });
 
   it("injects only always-active Ghost instructions while unbound", async () => {
@@ -962,7 +994,7 @@ describe("Claude Code subscription runtime", () => {
         project_fixture: { type: "stdio", command: process.execPath },
         ghost: expect.any(Object),
       },
-      systemPrompt: { append: expect.stringContaining("PROJECT-SNAPSHOT") },
+      systemPrompt: expect.stringContaining("PROJECT-SNAPSHOT"),
     });
     expect(seenOptions[0]?.mcpServers).not.toHaveProperty("explicit_cwd");
     expect(seenOptions[0]?.mcpServers?.project_fixture).not.toHaveProperty("cwd");
@@ -1373,13 +1405,10 @@ describe("Claude Code subscription runtime", () => {
     });
 
     const systemPrompt = seenOptions[0]?.systemPrompt;
-    if (typeof systemPrompt !== "object"
-      || systemPrompt === null
-      || !("append" in systemPrompt)
-      || typeof systemPrompt.append !== "string") {
-      throw new Error("Claude Code did not receive its declarative prompt append.");
+    if (typeof systemPrompt !== "string") {
+      throw new Error("Claude Code did not receive its custom declarative prompt.");
     }
-    const append = systemPrompt.append;
+    const append = systemPrompt;
     for (const entry of piEffective.instructions) expect(append).toContain(entry.content);
     for (const entry of [
       ...piEffective.skills,

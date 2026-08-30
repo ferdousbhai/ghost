@@ -11,8 +11,7 @@ tool, model roles and fallback chains, bounded declarative skills, rules,
 Markdown commands/prompts, and MCP from the visible ghost home plus one
 explicitly trusted project. Live voice remains deferred; remote sharing uses
 the built-in tailnet viewer over Tailscale Serve, and no separate collaboration
-relay is planned. There is not yet a principal-facing `task` tool and custom
-subagent definitions remain inert. Project plugins, hooks, custom code tools,
+relay is planned. Project plugins, hooks, custom code tools,
 and LSP stay disabled inside a Ghost principal session; the bundled
 `pi-worker` may run trusted project extensions and hooks in its isolated task
 child after the owner binds the project, while model-callable custom tools stay
@@ -21,11 +20,14 @@ files in the ghost home remain the explicit in-process extension surface. The
 native `codex` and `claude-code` workers use the owner's installed harnesses and
 native user/project configuration; see
 [docs/native-workers.md](docs/native-workers.md).
-The optional Claude Code runtime retains Claude's native subagents. Ghost
-replaces pi's coding-oriented system prompt with its character, bounded memory,
+Both principal runtimes expose Ghost's durable `task` controls for those three
+built-in workers; custom agent definitions remain inert. A Claude principal
+disables Claude's native Agent/legacy Task shortcuts so delegation cannot
+bypass that lifecycle, while a delegated Claude worker retains native
+subagents. Ghost replaces pi's coding-oriented system prompt with its character, bounded memory,
 shallow owner Documents indexes, and minimal
-runtime guidance; Claude keeps its native preset and receives the same
-Ghost-owned context as an append. Browser and desktop capabilities remain
+runtime guidance. Claude receives the same complete Ghost-owned identity as a
+custom prompt while keeping its native tool preset. Browser and desktop capabilities remain
 available. The Quickshell client renders
 live tool activity and the recovered summoning orb from the earlier
 summon-ghost interface.
