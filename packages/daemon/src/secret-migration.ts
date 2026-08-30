@@ -10,6 +10,7 @@ import {
   lstatSync,
   mkdirSync,
   openSync,
+  readdirSync,
   renameSync,
   rmSync,
   rmdirSync,
@@ -78,7 +79,21 @@ export interface GhostSecretMigrationOptions {
   ) => void;
   /** Synchronous adversarial seam around a read plaintext source. */
   plainFileProbe?: (stage: "removing", path: string) => void;
+  /** Test-only abrupt-stop seam; durable claim evidence is deliberately retained. */
+  agentDbFault?: (stage: AgentDbFaultStage, path: string) => void;
 }
+
+export type AgentDbFaultStage =
+  | "state-written"
+  | "file-renamed"
+  | "phase-claimed"
+  | "phase-committed"
+  | "phase-scrubbing"
+  | "phase-scrubbed"
+  | "main-linked"
+  | "main-unlinked"
+  | "claim-entry-unlinked"
+  | "state-unlinked";
 
 function refusedSource(path: string, error: PrivateReadError): SecretServiceError {
   switch (error.refusal) {
@@ -192,12 +207,35 @@ interface AgentDbFileClaim {
   inode: bigint;
 }
 
+type AgentDbPhase = "claiming" | "claimed" | "committed" | "scrubbing" | "scrubbed";
+
+interface AgentDbEvidenceFile {
+  name: string;
+  device: string;
+  inode: string;
+}
+
+interface AgentDbEvidence {
+  version: 1;
+  phase: AgentDbPhase;
+  files: AgentDbEvidenceFile[];
+}
+
 interface AgentDbClaim {
   originalPath: string;
   main: AgentDbFileClaim;
   claimDir: string;
+  statePath: string;
+  evidence: AgentDbEvidence;
   files: AgentDbFileClaim[];
   probe?: GhostSecretMigrationOptions["agentDbProbe"];
+  fault?: GhostSecretMigrationOptions["agentDbFault"];
+}
+
+class AgentDbAbruptStop extends Error {
+  constructor(options?: ErrorOptions) {
+    super("Simulated abrupt stop during agent.db migration.", options);
+  }
 }
 
 function isClaimedAgentDb(
@@ -213,6 +251,9 @@ function isClaimedAgentDb(
 }
 
 const AGENT_DB_COMPANION_SUFFIXES = ["-wal", "-shm", "-journal"] as const;
+const AGENT_DB_STATE_FILENAME = "state.json";
+const AGENT_DB_CLAIM_PREFIX = ".agent-db-";
+const AGENT_DB_CLAIM_SUFFIX = ".migration";
 
 function unsafeAgentDb(path: string): SecretServiceError {
   return new SecretServiceError(
@@ -228,6 +269,74 @@ function missingPath(path: string): boolean {
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return true;
     throw error;
+  }
+}
+
+function agentDbEvidenceFile(file: AgentDbFileClaim): AgentDbEvidenceFile {
+  return {
+    name: basename(file.originalPath),
+    device: file.device.toString(),
+    inode: file.inode.toString(),
+  };
+}
+
+function writeAgentDbEvidence(claim: AgentDbClaim, phase: AgentDbPhase): void {
+  claim.evidence = { ...claim.evidence, phase };
+  atomicPrivateJson(claim.statePath, claim.evidence);
+}
+
+function injectAgentDbFault(
+  claim: Pick<AgentDbClaim, "fault">,
+  stage: AgentDbFaultStage,
+  path: string,
+): void {
+  if (!claim.fault) return;
+  try {
+    claim.fault(stage, path);
+  } catch (error) {
+    throw new AgentDbAbruptStop({ cause: error });
+  }
+}
+
+function parseAgentDbEvidence(path: string): AgentDbEvidence {
+  const parsed = privateJson(path).value as Partial<AgentDbEvidence> | null;
+  const phases: readonly AgentDbPhase[] = [
+    "claiming",
+    "claimed",
+    "committed",
+    "scrubbing",
+    "scrubbed",
+  ];
+  if (parsed?.version !== 1
+    || !phases.includes(parsed.phase as AgentDbPhase)
+    || !Array.isArray(parsed.files)
+    || parsed.files.length === 0
+    || parsed.files.some((file) => !file
+      || typeof file.name !== "string"
+      || typeof file.device !== "string"
+      || typeof file.inode !== "string"
+      || !/^agent\.db(?:-(?:wal|shm|journal))?$/.test(file.name)
+      || !/^\d+$/.test(file.device)
+      || !/^\d+$/.test(file.inode))) {
+    throw unsafeAgentDb(path);
+  }
+  const names = parsed.files.map((file) => file.name);
+  if (names[0] !== "agent.db" || new Set(names).size !== names.length) {
+    throw unsafeAgentDb(path);
+  }
+  return parsed as AgentDbEvidence;
+}
+
+function pathMatchesEvidence(path: string, evidence: AgentDbEvidenceFile, links: bigint): boolean {
+  try {
+    const stats = lstatSync(path, { bigint: true });
+    return stats.isFile()
+      && !stats.isSymbolicLink()
+      && stats.nlink === links
+      && stats.dev === BigInt(evidence.device)
+      && stats.ino === BigInt(evidence.inode);
+  } catch {
+    return false;
   }
 }
 
@@ -252,6 +361,37 @@ function admitAgentDbFile(path: string): AgentDbFileClaim | null {
       device: admitted.dev,
       inode: admitted.ino,
     };
+  } catch (error) {
+    closeSync(descriptor);
+    throw error;
+  }
+}
+
+function openAgentDbEvidenceFile(
+  originalPath: string,
+  claimedPath: string,
+  evidence: AgentDbEvidenceFile,
+  links = 1n,
+): AgentDbFileClaim {
+  let descriptor: number;
+  try {
+    descriptor = openSync(
+      claimedPath,
+      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+    );
+  } catch {
+    throw unsafeAgentDb(originalPath);
+  }
+  const claim: AgentDbFileClaim = {
+    originalPath,
+    claimedPath,
+    descriptor,
+    device: BigInt(evidence.device),
+    inode: BigInt(evidence.inode),
+  };
+  try {
+    verifyAgentDbFile(claim, links);
+    return claim;
   } catch (error) {
     closeSync(descriptor);
     throw error;
@@ -292,6 +432,7 @@ function verifyOriginalAgentDbPathsVacant(claim: AgentDbClaim): void {
 function claimAgentDb(
   path: string,
   probe?: GhostSecretMigrationOptions["agentDbProbe"],
+  fault?: GhostSecretMigrationOptions["agentDbFault"],
 ): AgentDbClaim | null {
   const main = admitAgentDbFile(path);
   if (!main) {
@@ -302,31 +443,55 @@ function claimAgentDb(
   }
   const files = [main];
   let claimDir = "";
+  let claim: AgentDbClaim | undefined;
   try {
     for (const suffix of AGENT_DB_COMPANION_SUFFIXES) {
       const companion = admitAgentDbFile(`${path}${suffix}`);
       if (companion) files.push(companion);
     }
     probe?.("admitted", path);
-    claimDir = join(dirname(path), `.agent-db-${process.pid}-${randomUUID()}.migration`);
+    claimDir = join(
+      dirname(path),
+      `${AGENT_DB_CLAIM_PREFIX}${process.pid}-${randomUUID()}${AGENT_DB_CLAIM_SUFFIX}`,
+    );
     mkdirSync(claimDir, { mode: 0o700 });
     for (const file of files) {
       file.claimedPath = join(claimDir, basename(file.originalPath));
-      renameSync(file.originalPath, file.claimedPath);
-      verifyAgentDbFile(file);
     }
-    const claim: AgentDbClaim = {
+    claim = {
       originalPath: path,
       main,
       claimDir,
+      statePath: join(claimDir, AGENT_DB_STATE_FILENAME),
+      evidence: {
+        version: 1,
+        phase: "claiming",
+        files: files.map(agentDbEvidenceFile),
+      },
       files,
       ...(probe ? { probe } : {}),
+      ...(fault ? { fault } : {}),
     };
+    writeAgentDbEvidence(claim, "claiming");
+    injectAgentDbFault(claim, "state-written", claim.statePath);
+    for (const file of files) {
+      renameSync(file.originalPath, file.claimedPath);
+      verifyAgentDbFile(file);
+      fsyncPath(claimDir);
+      fsyncPath(dirname(path));
+      injectAgentDbFault(claim, "file-renamed", file.originalPath);
+    }
     verifyOriginalAgentDbPathsVacant(claim);
+    writeAgentDbEvidence(claim, "claimed");
+    injectAgentDbFault(claim, "phase-claimed", claim.statePath);
     fsyncPath(claimDir);
     fsyncPath(dirname(path));
     return claim;
   } catch (error) {
+    if (error instanceof AgentDbAbruptStop) {
+      for (const file of files) closeSync(file.descriptor);
+      throw error;
+    }
     for (const file of files.toReversed()) {
       try {
         if (file.claimedPath && missingPath(file.originalPath)) {
@@ -342,6 +507,7 @@ function claimAgentDb(
     }
     if (claimDir) {
       try {
+        rmSync(join(claimDir, AGENT_DB_STATE_FILENAME), { force: true });
         rmdirSync(claimDir);
       } catch {
         // A non-empty private claim is deliberate recovery evidence.
@@ -352,18 +518,220 @@ function claimAgentDb(
   }
 }
 
+function removePublishedClaimArtifacts(
+  claimDir: string,
+  statePath: string,
+  originalPath: string,
+  fault?: GhostSecretMigrationOptions["agentDbFault"],
+): void {
+  for (const name of readdirSync(claimDir)) {
+    const path = join(claimDir, name);
+    if (path === statePath) continue;
+    const stats = lstatSync(path);
+    if (!stats.isFile() || stats.isSymbolicLink()) throw unsafeAgentDb(path);
+    unlinkSync(path);
+    fsyncPath(claimDir);
+    injectAgentDbFault({ fault }, "claim-entry-unlinked", path);
+  }
+  unlinkSync(statePath);
+  fsyncPath(claimDir);
+  injectAgentDbFault({ fault }, "state-unlinked", statePath);
+  rmdirSync(claimDir);
+  fsyncPath(dirname(originalPath));
+}
+
+function recoverAgentDbClaim(
+  path: string,
+  probe?: GhostSecretMigrationOptions["agentDbProbe"],
+  fault?: GhostSecretMigrationOptions["agentDbFault"],
+): AgentDbClaim | null | undefined {
+  const parent = dirname(path);
+  let names: string[];
+  try {
+    names = readdirSync(parent)
+      .filter((name) => name.startsWith(AGENT_DB_CLAIM_PREFIX)
+        && name.endsWith(AGENT_DB_CLAIM_SUFFIX));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
+  }
+  const claims: string[] = [];
+  for (const name of names) {
+    const claimDir = join(parent, name);
+    const claimStats = lstatSync(claimDir);
+    if (!claimStats.isDirectory()
+      || claimStats.isSymbolicLink()
+      || (claimStats.mode & 0o777) !== 0o700) {
+      throw unsafeAgentDb(claimDir);
+    }
+    const entries = readdirSync(claimDir);
+    if (entries.length === 0) {
+      rmdirSync(claimDir);
+      fsyncPath(parent);
+    } else if (!entries.includes(AGENT_DB_STATE_FILENAME)) {
+      const temporaryState = /^state\.json\.\d+\.[0-9a-f-]+\.tmp$/;
+      if (!entries.every((entry) => temporaryState.test(entry))) {
+        throw unsafeAgentDb(claimDir);
+      }
+      for (const entry of entries) {
+        const temporary = join(claimDir, entry);
+        const stats = lstatSync(temporary);
+        if (!stats.isFile() || stats.isSymbolicLink() || stats.nlink !== 1) {
+          throw unsafeAgentDb(temporary);
+        }
+        unlinkSync(temporary);
+      }
+      rmdirSync(claimDir);
+      fsyncPath(parent);
+    } else {
+      claims.push(claimDir);
+    }
+  }
+  if (claims.length === 0) return undefined;
+  if (claims.length !== 1) throw unsafeAgentDb(path);
+
+  const claimDir = claims[0] as string;
+  const statePath = join(claimDir, AGENT_DB_STATE_FILENAME);
+  if (missingPath(statePath)) throw unsafeAgentDb(claimDir);
+  const evidence = parseAgentDbEvidence(statePath);
+  const records = evidence.files.map((file) => ({
+    evidence: file,
+    originalPath: join(parent, file.name),
+    claimedPath: join(claimDir, file.name),
+  }));
+
+  if (evidence.phase === "scrubbing") {
+    const opened: AgentDbFileClaim[] = [];
+    try {
+      for (const record of records) {
+        if (!missingPath(record.originalPath)) throw unsafeAgentDb(record.originalPath);
+        if (record !== records[0] && missingPath(record.claimedPath)) continue;
+        opened.push(openAgentDbEvidenceFile(
+          record.originalPath,
+          record.claimedPath,
+          record.evidence,
+        ));
+      }
+      if (opened.length === 0) throw unsafeAgentDb(path);
+      return {
+        originalPath: path,
+        main: opened[0] as AgentDbFileClaim,
+        claimDir,
+        statePath,
+        evidence,
+        files: opened,
+        ...(probe ? { probe } : {}),
+        ...(fault ? { fault } : {}),
+      };
+    } catch (error) {
+      for (const file of opened) closeSync(file.descriptor);
+      throw error;
+    }
+  }
+
+  if (evidence.phase === "scrubbed") {
+    const main = records[0] as (typeof records)[number];
+    const claimedOne = pathMatchesEvidence(main.claimedPath, main.evidence, 1n);
+    const originalOne = pathMatchesEvidence(main.originalPath, main.evidence, 1n);
+    const linked = pathMatchesEvidence(main.claimedPath, main.evidence, 2n)
+      && pathMatchesEvidence(main.originalPath, main.evidence, 2n);
+    for (const record of records.slice(1)) {
+      if (!missingPath(record.originalPath)) throw unsafeAgentDb(record.originalPath);
+    }
+    if (originalOne && missingPath(main.claimedPath)) {
+      removePublishedClaimArtifacts(claimDir, statePath, path, fault);
+      return null;
+    }
+    if ((!claimedOne || !missingPath(main.originalPath)) && !linked) {
+      throw unsafeAgentDb(path);
+    }
+    const mainClaim = openAgentDbEvidenceFile(
+      main.originalPath,
+      main.claimedPath,
+      main.evidence,
+      linked ? 2n : 1n,
+    );
+    return {
+      originalPath: path,
+      main: mainClaim,
+      claimDir,
+      statePath,
+      evidence,
+      files: [mainClaim],
+      ...(probe ? { probe } : {}),
+      ...(fault ? { fault } : {}),
+    };
+  }
+
+  const opened: AgentDbFileClaim[] = [];
+  try {
+    for (const record of records) {
+      if ((evidence.phase === "claiming" || evidence.phase === "claimed")
+        && pathMatchesEvidence(record.originalPath, record.evidence, 1n)
+        && missingPath(record.claimedPath)) {
+        renameSync(record.originalPath, record.claimedPath);
+        fsyncPath(claimDir);
+        fsyncPath(parent);
+        injectAgentDbFault({ fault }, "file-renamed", record.originalPath);
+      }
+      if ((evidence.phase === "claiming" || evidence.phase === "claimed")
+        && pathMatchesEvidence(record.originalPath, record.evidence, 2n)
+        && pathMatchesEvidence(record.claimedPath, record.evidence, 2n)) {
+        unlinkSync(record.originalPath);
+        fsyncPath(parent);
+      }
+      if (!missingPath(record.originalPath)) throw unsafeAgentDb(record.originalPath);
+      opened.push(openAgentDbEvidenceFile(
+        record.originalPath,
+        record.claimedPath,
+        record.evidence,
+      ));
+    }
+    const claim: AgentDbClaim = {
+      originalPath: path,
+      main: opened[0] as AgentDbFileClaim,
+      claimDir,
+      statePath,
+      evidence,
+      files: opened,
+      ...(probe ? { probe } : {}),
+      ...(fault ? { fault } : {}),
+    };
+    if (evidence.phase === "claiming") {
+      writeAgentDbEvidence(claim, "claimed");
+      injectAgentDbFault(claim, "phase-claimed", statePath);
+    }
+    return claim;
+  } catch (error) {
+    for (const file of opened) closeSync(file.descriptor);
+    throw error;
+  }
+}
+
+function recoverOrClaimAgentDb(
+  path: string,
+  options: GhostSecretMigrationOptions,
+): AgentDbClaim | null {
+  const recovered = recoverAgentDbClaim(path, options.agentDbProbe, options.agentDbFault);
+  return recovered === undefined
+    ? claimAgentDb(path, options.agentDbProbe, options.agentDbFault)
+    : recovered;
+}
+
 function verifyAgentDbClaim(claim: AgentDbClaim): void {
   for (const file of claim.files) verifyAgentDbFile(file);
   verifyOriginalAgentDbPathsVacant(claim);
 }
 
 function restoreAgentDbClaim(claim: AgentDbClaim): void {
+  if (claim.evidence.phase !== "claimed" && claim.evidence.phase !== "claiming") return;
   try {
     verifyAgentDbClaim(claim);
     for (const file of claim.files) {
       linkSync(file.claimedPath, file.originalPath);
       unlinkSync(file.claimedPath);
     }
+    unlinkSync(claim.statePath);
     rmdirSync(claim.claimDir);
     fsyncPath(dirname(claim.originalPath));
   } catch {
@@ -374,14 +742,20 @@ function restoreAgentDbClaim(claim: AgentDbClaim): void {
 
 function publishAgentDbClaim(claim: AgentDbClaim): void {
   const { main } = claim;
-  verifyAgentDbFile(main);
-  verifyOriginalAgentDbPathsVacant(claim);
-  try {
-    // link(2) is the no-replace publication primitive: an adversarial final
-    // pathname makes it fail instead of being overwritten by rename(2).
-    linkSync(main.claimedPath, claim.originalPath);
-  } catch {
-    throw unsafeAgentDb(claim.originalPath);
+  const alreadyLinked = pathMatchesEvidence(main.claimedPath, agentDbEvidenceFile(main), 2n)
+    && pathMatchesEvidence(claim.originalPath, agentDbEvidenceFile(main), 2n);
+  if (!alreadyLinked) {
+    verifyAgentDbFile(main);
+    verifyOriginalAgentDbPathsVacant(claim);
+    try {
+      // link(2) is the no-replace publication primitive: an adversarial final
+      // pathname makes it fail instead of being overwritten by rename(2).
+      linkSync(main.claimedPath, claim.originalPath);
+    } catch {
+      throw unsafeAgentDb(claim.originalPath);
+    }
+    fsyncPath(dirname(claim.originalPath));
+    injectAgentDbFault(claim, "main-linked", claim.originalPath);
   }
   const descriptor = fstatSync(main.descriptor, { bigint: true });
   const claimed = lstatSync(main.claimedPath, { bigint: true });
@@ -392,14 +766,20 @@ function publishAgentDbClaim(claim: AgentDbClaim): void {
     throw unsafeAgentDb(claim.originalPath);
   }
   unlinkSync(main.claimedPath);
+  fsyncPath(claim.claimDir);
+  injectAgentDbFault(claim, "main-unlinked", main.claimedPath);
   const finalDescriptor = fstatSync(main.descriptor, { bigint: true });
   const finalPath = lstatSync(claim.originalPath, { bigint: true });
   if (!isClaimedAgentDb(finalDescriptor, main, 1n)
     || !isClaimedAgentDb(finalPath, main, 1n)) {
     throw unsafeAgentDb(claim.originalPath);
   }
-  rmSync(claim.claimDir, { recursive: true });
-  fsyncPath(dirname(claim.originalPath));
+  removePublishedClaimArtifacts(
+    claim.claimDir,
+    claim.statePath,
+    claim.originalPath,
+    claim.fault,
+  );
 }
 
 /**
@@ -739,11 +1119,13 @@ const AGENT_DB_SCHEMA_TABLES = new Set(["auth_schema_version", "auth_change_revi
  */
 function scrubAgentDb(claim: AgentDbClaim | null): void {
   if (!claim) return;
-  verifyAgentDbClaim(claim);
+  verifyAgentDbFile(claim.main);
+  verifyOriginalAgentDbPathsVacant(claim);
   const db = new Database(claim.main.claimedPath, { create: false, strict: true });
   try {
     claim.probe?.("scrubbing", claim.main.claimedPath);
-    verifyAgentDbClaim(claim);
+    verifyAgentDbFile(claim.main);
+    verifyOriginalAgentDbPathsVacant(claim);
     const rows = db.query("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
       .all() as Array<{ name: string }>;
     const tables = rows
@@ -816,7 +1198,7 @@ function migrateWithContext(
 ): void {
   const authPath = options.authPath ?? join(options.home, ".pi", "auth.json");
   const agentDb = join(dirname(authPath), "agent.db");
-  const agentDbClaim = claimAgentDb(agentDb, options.agentDbProbe);
+  const agentDbClaim = recoverOrClaimAgentDb(agentDb, options);
   let agentDbPublished = false;
   try {
     const models = readGhostModels(options.home) ?? { providers: {} };
@@ -825,7 +1207,9 @@ function migrateWithContext(
     const mcp = migrateMcpFile(options.home, context);
     for (const account of mcp.addedAccounts) addedAccounts.add(account);
 
-    const database = readAgentDb(agentDbClaim);
+    const database = agentDbClaim?.evidence.phase === "claimed"
+      ? readAgentDb(agentDbClaim)
+      : [];
     const legacy = legacyCredentials(authPath);
     importCredentials([...database, ...(legacy?.rows ?? [])], context, addedAccounts);
 
@@ -844,8 +1228,21 @@ function migrateWithContext(
     // Plaintext is removed only after every keyring write was read back and
     // both portable config replacements are durable. Every preceding step is
     // idempotent, so a crash is resumed from the surviving source.
-    scrubAgentDb(agentDbClaim);
     if (agentDbClaim) {
+      if (agentDbClaim.evidence.phase === "claimed") {
+        writeAgentDbEvidence(agentDbClaim, "committed");
+        injectAgentDbFault(agentDbClaim, "phase-committed", agentDbClaim.statePath);
+      }
+      if (agentDbClaim.evidence.phase === "committed") {
+        verifyAgentDbClaim(agentDbClaim);
+        writeAgentDbEvidence(agentDbClaim, "scrubbing");
+        injectAgentDbFault(agentDbClaim, "phase-scrubbing", agentDbClaim.statePath);
+      }
+      if (agentDbClaim.evidence.phase === "scrubbing") {
+        scrubAgentDb(agentDbClaim);
+        writeAgentDbEvidence(agentDbClaim, "scrubbed");
+        injectAgentDbFault(agentDbClaim, "phase-scrubbed", agentDbClaim.statePath);
+      }
       publishAgentDbClaim(agentDbClaim);
       agentDbPublished = true;
     }
@@ -854,7 +1251,9 @@ function migrateWithContext(
       removePlainFile(authPath, legacy.identity);
     }
   } catch (error) {
-    if (agentDbClaim && !agentDbPublished) restoreAgentDbClaim(agentDbClaim);
+    if (agentDbClaim && !agentDbPublished && !(error instanceof AgentDbAbruptStop)) {
+      restoreAgentDbClaim(agentDbClaim);
+    }
     throw error;
   } finally {
     if (agentDbClaim) closeAgentDbClaim(agentDbClaim);

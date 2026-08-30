@@ -349,7 +349,12 @@ basename, so hot-WAL credentials are read and no replacement at the vacated
 public pathname can redirect its open. Ghost holds every admitted descriptor
 through SQLite read and cleanup, reverifies the claims before destructive work,
 publishes the scrubbed main inode back without replacement, and removes the
-private sidecars. A dangling symlink, symlink, hardlink, unsafe sidecar, or
+private sidecars. A durably fsynced phase record precedes every destructive
+boundary (`claiming`, `claimed`, `committed`, `scrubbing`, `scrubbed`); the next
+open completes a partial multi-file claim, resumes an idempotent scrub only
+after the keyring/config commit, or finishes either link/unlink publication
+state before starting new work. Empty post-publication claim directories are
+also retired. A dangling symlink, symlink, hardlink, unsafe sidecar, or
 pathname replacement fails without scrubbing the replacement. A credential the
 OMP-era runtime had disabled is not
 migrated and is deleted with the rest — Ghost's keyring store has no disabled

@@ -10,14 +10,18 @@ import {
   renameSync,
   rmSync,
   symlinkSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import type { GhostSecretContext } from "../src/keyring-credential-store.js";
-import { openGhostSecretContext } from "../src/secret-migration.js";
+import {
+  type AgentDbFaultStage,
+  openGhostSecretContext,
+} from "../src/secret-migration.js";
 import {
   formatSecretReference,
   parseSecretReference,
@@ -592,6 +596,143 @@ describe("plaintext migration", () => {
 
     expect(readFileSync(path, "utf8")).toContain("replacement-login");
     expect(readFileSync(displaced, "utf8")).toContain("admitted-login");
+  });
+
+  it.each([
+    "state-written",
+    "file-renamed",
+    "phase-claimed",
+    "phase-committed",
+    "phase-scrubbing",
+    "phase-scrubbed",
+    "main-linked",
+    "main-unlinked",
+    "state-unlinked",
+  ] as const)("reconciles an abrupt agent.db stop after %s", (targetStage) => {
+    const home = root();
+    const agentDir = join(home, ".pi");
+    mkdirSync(agentDir, { recursive: true });
+    legacyAgentDb(agentDir);
+    const client = new MemorySecretServiceClient();
+    let stopped = false;
+
+    expect(() => openGhostSecretContext({
+      home,
+      client,
+      metadataPath: join(home, "state.sqlite"),
+      agentDbFault: (stage) => {
+        if (stage !== targetStage || stopped) return;
+        stopped = true;
+        throw new Error("stop now");
+      },
+    })).toThrow(/abrupt stop/);
+    expect(stopped).toBe(true);
+
+    const context = openContext(home, client);
+    expect(listCredentials(context)).toMatchObject([
+      { provider: "openai", credential: { key: "live-secret" } },
+    ]);
+    context.close();
+    expect(readdirSync(agentDir).filter((name) => name.endsWith(".migration"))).toEqual([]);
+    expect(credentialRowCount(join(agentDir, "agent.db"))).toBe(0);
+  });
+
+  it("finishes every partially claimed hot-WAL file after restart", () => {
+    const home = root();
+    const agentDir = join(home, ".pi");
+    mkdirSync(agentDir, { recursive: true });
+    hotWalAgentDb(agentDir);
+    const client = new MemorySecretServiceClient();
+    let stopped = false;
+
+    expect(() => openGhostSecretContext({
+      home,
+      client,
+      metadataPath: join(home, "state.sqlite"),
+      agentDbFault: (stage, path) => {
+        if (stage !== "file-renamed" || !path.endsWith("-wal") || stopped) return;
+        stopped = true;
+        throw new Error("stop after WAL rename");
+      },
+    })).toThrow(/abrupt stop/);
+
+    const context = openContext(home, client);
+    expect(listCredentials(context)).toMatchObject([
+      { provider: "wal-provider", credential: { key: "wal-secret" } },
+    ]);
+    context.close();
+    expect(readdirSync(agentDir).filter((name) => name.endsWith(".migration"))).toEqual([]);
+  });
+
+  it("retries after interruption while removing private claim evidence", () => {
+    const home = root();
+    const agentDir = join(home, ".pi");
+    mkdirSync(agentDir, { recursive: true });
+    legacyAgentDb(agentDir);
+    const client = new MemorySecretServiceClient();
+    let stopped = false;
+
+    expect(() => openGhostSecretContext({
+      home,
+      client,
+      metadataPath: join(home, "state.sqlite"),
+      agentDbFault: (stage: AgentDbFaultStage, path) => {
+        if (stage === "phase-scrubbed") {
+          writeFileSync(join(dirname(path), "cleanup-marker"), "durable evidence");
+        }
+        if (stage !== "claim-entry-unlinked" || stopped) return;
+        stopped = true;
+        throw new Error("stop during private cleanup");
+      },
+    })).toThrow(/abrupt stop/);
+
+    openContext(home, client).close();
+    expect(readdirSync(agentDir).filter((name) => name.endsWith(".migration"))).toEqual([]);
+    expect(credentialRowCount(join(agentDir, "agent.db"))).toBe(0);
+  });
+
+  it.each(["linked", "unlinked"] as const)(
+    "reconciles a crash after a restore %s the public inode",
+    (point) => {
+      const home = root();
+      const agentDir = join(home, ".pi");
+      mkdirSync(agentDir, { recursive: true });
+      legacyAgentDb(agentDir);
+      const client = new MemorySecretServiceClient();
+
+      expect(() => openGhostSecretContext({
+        home,
+        client,
+        metadataPath: join(home, "state.sqlite"),
+        agentDbFault: (stage) => {
+          if (stage === "phase-claimed") throw new Error("stop with a complete claim");
+        },
+      })).toThrow(/abrupt stop/);
+
+      const claimDir = readdirSync(agentDir).find((name) => name.endsWith(".migration"))!;
+      const claimed = join(agentDir, claimDir, "agent.db");
+      const original = join(agentDir, "agent.db");
+      linkSync(claimed, original);
+      if (point === "unlinked") unlinkSync(claimed);
+
+      openContext(home, client).close();
+      expect(readdirSync(agentDir).filter((name) => name.endsWith(".migration"))).toEqual([]);
+      expect(credentialRowCount(original)).toBe(0);
+    },
+  );
+
+  it("retires a claim directory left before its initial state publication", () => {
+    const home = root();
+    const agentDir = join(home, ".pi");
+    mkdirSync(agentDir, { recursive: true });
+    legacyAgentDb(agentDir);
+    const orphan = join(agentDir, ".agent-db-1-deadbeef.migration");
+    mkdirSync(orphan, { mode: 0o700 });
+    writeFileSync(join(orphan, "state.json.1.deadbeef.tmp"), "partial state");
+
+    openContext(home, new MemorySecretServiceClient()).close();
+    expect(existsSync(orphan)).toBe(false);
+    expect(credentialRowCount(join(agentDir, "agent.db"))).toBe(0);
   });
 
   it("reverifies the claimed agent.db before destructive cleanup", () => {
