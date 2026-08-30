@@ -279,12 +279,6 @@ export {
   type RelayTokenStoreOptions,
 } from "./relay-token.js";
 export {
-  hostedConversationSourcePaths,
-  migrateHostedConversations,
-  type HostedConversationImportFailure,
-  type HostedConversationImportResult,
-} from "./hosted-conversation-import.js";
-export {
   homeTrashDir,
   trashPath,
   type TrashPathOptions,

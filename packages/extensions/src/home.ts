@@ -36,7 +36,6 @@ import {
   openRegularFileNoFollow,
   withDescriptorLock,
 } from "./linux-fs.js";
-import { GHOST_HOME_FORMAT } from "./types.js";
 import type {
   CharacterFile,
   MemoryRecord,
@@ -44,13 +43,10 @@ import type {
 
 export const DOCS_DIRNAME = "docs";
 const LEGACY_NOTES_DIRNAME = "notes";
-const LEGACY_GHOST_HOME_FORMAT = "ghost-home/v1";
 export const MEMORY_DIRNAME = "memory";
 export const MEMORY_TRASH_DIRNAME = ".trash";
-export const CONVERSATIONS_DIRNAME = "conversations";
 export const CHARACTER_FILENAME = "character.md";
 export const MAX_CHARACTER_BODY_LENGTH = 20_000;
-export const EXPORT_MANIFEST_FILENAME = "export-manifest.json";
 
 const MEMORY_INTENT_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
@@ -558,58 +554,6 @@ async function openChildDirectoryIfPresent(
   }
 }
 
-function parseExportManifest(text: string): Record<string, unknown> {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text) as unknown;
-  } catch (error) {
-    throw new GhostError(
-      "invalid_format",
-      `${EXPORT_MANIFEST_FILENAME} is not readable JSON: ${message(error)}`,
-    );
-  }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    throw new GhostError(
-      "invalid_format",
-      `${EXPORT_MANIFEST_FILENAME} must contain a JSON object.`,
-    );
-  }
-  return parsed as Record<string, unknown>;
-}
-
-async function migrateExportManifest(
-  dir: string,
-  directory: FileHandle,
-): Promise<void> {
-  const fullPath = join(dir, EXPORT_MANIFEST_FILENAME);
-  await withFileMutationQueue(fullPath, async () => {
-    const text = await readEntryText(
-      directory,
-      EXPORT_MANIFEST_FILENAME,
-      "Manifest path",
-    );
-    if (text === null) return;
-
-    const manifest = parseExportManifest(text);
-    if (manifest.format === GHOST_HOME_FORMAT) return;
-    if (manifest.format !== LEGACY_GHOST_HOME_FORMAT) {
-      throw new GhostError(
-        "invalid_format",
-        `Unsupported home format ${JSON.stringify(manifest.format)}; expected `
-        + `${JSON.stringify(GHOST_HOME_FORMAT)}.`,
-        { format: manifest.format },
-      );
-    }
-
-    await atomicWriteFile(
-      dir,
-      fullPath,
-      `${JSON.stringify({ ...manifest, format: GHOST_HOME_FORMAT }, null, 2)}\n`,
-      directory,
-    );
-  });
-}
-
 export class GhostHome {
   readonly dir: string;
   readonly name: string;
@@ -635,10 +579,6 @@ export class GhostHome {
 
   get memoryTrashDir(): string {
     return join(this.dir, MEMORY_TRASH_DIRNAME);
-  }
-
-  get conversationsDir(): string {
-    return join(this.dir, CONVERSATIONS_DIRNAME);
   }
 
   relative(absolutePath: string): string {
@@ -700,7 +640,6 @@ export class GhostHome {
             await docs?.close().catch(() => undefined);
             await legacyNotes?.close().catch(() => undefined);
           }
-          await migrateExportManifest(this.dir, directory);
 
           const memory = await openOrCreateChildDirectory(
             directory,
@@ -708,12 +647,6 @@ export class GhostHome {
             "Memory path",
           );
           await memory.close();
-          const conversations = await openOrCreateChildDirectory(
-            directory,
-            CONVERSATIONS_DIRNAME,
-            "Conversations path",
-          );
-          await conversations.close();
         });
       } finally {
         await directory.close();
@@ -1119,55 +1052,6 @@ export class GhostHome {
   }
 
 
-  async listConversations(): Promise<string[]> {
-    if (!(await exists(this.conversationsDir))) return [];
-    const directory = await openConfinedDirectory(this.dir, this.conversationsDir, {
-      label: "Conversations path",
-    });
-    try {
-      const conversations: string[] = [];
-      for (const entry of await readdir(descriptorPath(directory), {
-        withFileTypes: true,
-      })) {
-        if (!entry.name.endsWith(".json")) continue;
-        let file: FileHandle | undefined;
-        try {
-          file = await openRegularFileNoFollow(
-            descriptorPath(directory, entry.name),
-            "Conversation path",
-          );
-          conversations.push(entry.name.slice(0, -".json".length));
-        } catch (error) {
-          const code = (error as NodeJS.ErrnoException).code;
-          if (
-            code !== "ENOENT"
-            && !(error instanceof GhostError && error.code === "invalid_path")
-          ) throw error;
-        } finally {
-          await file?.close();
-        }
-      }
-      return conversations.sort((left, right) => left.localeCompare(right));
-    } finally {
-      await directory.close();
-    }
-  }
-
-  async readExportManifest(): Promise<Record<string, unknown> | null> {
-    const fullPath = join(this.dir, EXPORT_MANIFEST_FILENAME);
-    const text = await readConfinedText(this.dir, fullPath, "Manifest path");
-    if (text === null) return null;
-    const manifest = parseExportManifest(text);
-    if (manifest.format !== GHOST_HOME_FORMAT) {
-      throw new GhostError(
-        "invalid_format",
-        `Unsupported home format ${JSON.stringify(manifest.format)}; expected `
-        + `${JSON.stringify(GHOST_HOME_FORMAT)}.`,
-        { format: manifest.format },
-      );
-    }
-    return manifest;
-  }
 }
 
 export function openGhostHome(dir: string, options: GhostHomeOptions = {}): GhostHome {

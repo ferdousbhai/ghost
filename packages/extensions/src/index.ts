@@ -74,8 +74,6 @@ export {
 export {
   CHARACTER_FILENAME,
   MAX_CHARACTER_BODY_LENGTH,
-  CONVERSATIONS_DIRNAME,
-  EXPORT_MANIFEST_FILENAME,
   GhostHome,
   MEMORY_DIRNAME,
   MEMORY_TRASH_DIRNAME,
@@ -110,13 +108,6 @@ export {
   type MemoryRecord,
   type DocumentsIndex,
 } from "./types.js";
-
-export {
-  importGhostArchive,
-  type GhostArchiveManifest,
-  type ImportGhostArchiveOptions,
-  type ImportGhostArchiveResult,
-} from "./import.js";
 
 export {
   buildGhostSystemPrompt,

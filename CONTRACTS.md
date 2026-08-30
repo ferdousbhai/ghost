@@ -48,8 +48,9 @@ previewed but inert. Claude Code retains its own native subagents.
   rules/, prompts/, tools/, hooks/
                                the remaining ghost-owned artifact directories
   settings.yml                 the ghost's own plain YAML mapping; Ghost reads
-                               `collab.relayUrl`, `collab.webUrl`, and
-                               `ttsr.disabledRules`
+                               `ttsr.disabledRules`; the unsupported legacy
+                               collaboration seam still parses
+                               `collab.relayUrl` and `collab.webUrl`
   models.json                  providers, allowed keyring accounts, model roles,
                                and fallback chains; secrets are references only
   mcp.json                     the ghost's MCP servers; secrets are references only
@@ -71,10 +72,6 @@ previewed but inert. Claude Code retains its own native subagents.
   .pi/models.pi.json           secret-free provider/models view synced from
                                models.json
   .pi/models-store.json        pi's catalogue cache
-  conversations/*.json         lossless source transcripts from the hosted export;
-                               retained unchanged until that conversation is trashed
-  export-manifest.json         present in imported archives; counts, pathRewrites,
-                               notIncluded
   .memory-maintenance.json     v1 machine-bound last consolidation-run time
 ```
 
@@ -215,42 +212,7 @@ content, follows no symbolic link, and never descends. At most 100 entries and
 4,000 characters enter the prompt; the index states the exact number of
 eligible root entries omitted. Names are fenced and treated as untrusted data.
 
-The archive importer still accepts the hosted archive's legacy `notes/` and
-`docs/` entries under its existing bounded, collision-checking extraction
-rules. Its existing `ghost-home/v1` to `ghost-home/v2` compatibility pass may
-canonicalize those imported Markdown files inside the staged ghost home. Those
-files are not live Documents: sessions and ghost context ignore them. Until the
-owner explicitly places them, they remain legacy files inside that home and
-follow its whole-directory rename, delete, and future export lifecycle. There
-is deliberately no automatic startup/import move into the live Documents tree
-and no general multi-ghost migration. Placing retained legacy files into the
-one owner's Documents tree is an explicit, collision-safe owner operation
-outside the daemon. New ghost homes do not create `docs/`.
-
-Hosted conversation JSON is also a migration fixture, not the daemon's live
-session store. `ghostd import` and daemon startup idempotently project each valid
-`conversations/*.json` file into a native pi transcript in `sessions/`, keeping
-the conversation and message ids, roles, title, available message timestamps,
-conversation created/updated times, readable text and attachments, and paired
-tool calls/results. A missing message timestamp is placed deterministically
-between the conversation timestamps; the export did not contain a value to
-preserve. The source JSON is never rewritten during activation. An existing native
-target always wins and is never overwritten; malformed fixtures remain in place
-and are reported without preventing the ghost from starting. User-triggered
-conversation deletion moves every valid source fixture for that conversation
-to Trash before moving its native projection, so daemon restart cannot recreate
-a conversation the owner removed.
-
-`packages/daemon/src/hosted-conversation-import.ts` is therefore a second writer
-of the pi session format: it writes the header, the entries, and a
-`session_info` title entry directly. Round-trip validation of its exact staged
-bytes through `SessionManager.open` is the invariant that licenses this
-exception. `CURRENT_SESSION_VERSION` comes from pi's own exports, so a format
-bump breaks loudly at import time.
-
-New hosted projections write the OS owner's home into the pi session header,
-matching new unbound conversations. Already-released Pi transcript headers are
-history: a legacy conversation resumes at the absolute cwd in its header rather
+Already-released Pi transcript headers are history: a legacy conversation resumes at the absolute cwd in its header rather
 than silently changing the meaning of its relative tool paths. Project-state
 inspection reads the runtime-qualified binding sidecar first and never opens the
 Pi transcript when that sidecar exists. Only when the binding is absent may it
@@ -471,10 +433,9 @@ it has no deletion tool. Idle consolidation alone retires obsolete memory.
 force-invocation of a discovered skill; native `read` remains the model-driven
 discovery path.
 
-`GhostHome` retains only the private hosted-import compatibility walk that
-canonicalizes staged legacy `notes/`/`docs/` Markdown. It exposes no live
-legacy document list, read, find, write, or search API; live Documents are
-exclusively the machine-wide `MachineDocuments` boundary.
+`GhostHome` exposes no live legacy document list, read, find, write, or search
+API; live Documents are exclusively the machine-wide `MachineDocuments`
+boundary.
 
 Plan mode and the todo list are Ghost-owned (`packages/daemon/src/plan-mode.ts`)
 and conversation-scoped; both persist as custom transcript entries
@@ -1439,11 +1400,8 @@ shape and streams emit one complete event object per line.
   Command output is not an assistant message and is not persisted as one.
 - `DELETE /api/ghosts/:name/sessions/:id` →
   `{ ok: true, trash: [{ artifact, source, trash, kind }, …] }` — moves every
-  Ghost-owned artifact for the conversation to recoverable Trash. Hosted-import
-  source fixtures move first, followed by the pi transcript and/or Claude Code
-  resume sidecar; this order prevents startup from resurrecting a removed
-  projection. `artifact` is `hosted-source`, `omp-transcript` (the pi
-  transcript; the label is kept for compatibility),
+  Ghost-owned artifact for the conversation to recoverable Trash. `artifact` is
+  `omp-transcript` (the pi transcript; the label is kept for compatibility),
   `claude-sidecar`, `project-binding`, `project-snapshot`, `tool-cwds`, or
   `maintenance-state`.
   Every generation-qualified Pi project snapshot is included. Claude Code's actual
@@ -1462,9 +1420,8 @@ shape and streams emit one complete event object per line.
   so far.
   Before any reconciliation or cleanup, every v2/v3 row's artifact label and
   source must match the exact runtime/conversation-derived allow-list: the one
-  Pi transcript or Claude sidecar, that runtime's binding, the Pi tool-cwd
-  sidecar and generation-qualified snapshot names, or a hosted fixture whose
-  parsed conversation id matches. Sources and destinations are globally
+  Pi transcript or Claude sidecar, that runtime's binding, and the Pi tool-cwd
+  sidecar and generation-qualified snapshot names. Sources and destinations are globally
   distinct and completed receipts require source absent plus Trash destination
   present. A v3 pending move additionally requires the exact private
   `.trash/.conversation-<uuid>` root and its next sequential, collision-reserved

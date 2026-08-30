@@ -57,7 +57,6 @@ import {
   GHOST_SESSION_STOP_CONTINUATION_CAP,
   GhostHookRunner,
 } from "../src/hooks.js";
-import { migrateHostedConversations } from "../src/hosted-conversation-import.js";
 import { LiveVoiceManager, type LiveVoiceStatus } from "../src/live-voice.js";
 import {
   CollaborationManager,
@@ -7111,7 +7110,7 @@ describe("session listing", () => {
       artifacts?: TrashedConversation["artifacts"];
       pending: TrashedConversation["artifacts"][number];
     }]> = [
-      ["character", { pending: pending("hosted-source", character) }],
+      ["character", { pending: pending("omp-transcript", character) }],
       ["credential store", { pending: pending("project-binding", agentDb) }],
       ["other transcript", { pending: pending("omp-transcript", victimTranscript) }],
       ["wrong label", { pending: pending("project-binding", targetTranscript) }],
@@ -7506,35 +7505,6 @@ describe("session listing", () => {
     rmSync(unrelated);
   });
 
-  it("trashes a hosted fixture with its projection so startup cannot resurrect it", async () => {
-    const { dir } = await setup([{ kind: "text", text: "hello" }]);
-    const conversations = join(dir, "conversations");
-    const source = join(conversations, "imported.json");
-    writeFileSync(source, JSON.stringify({
-      id: "imported",
-      catalog: {
-        id: "imported",
-        title: "Imported chat",
-        createdAt: "2026-01-01T00:00:00.000Z",
-        updatedAt: "2026-01-02T00:00:00.000Z",
-      },
-      messages: [],
-    }));
-    expect(await migrateHostedConversations(dir)).toMatchObject({ imported: 1 });
-
-    const trashed = await host!.deleteSession("casper", "imported");
-
-    expect(trashed.artifacts.map((entry) => entry.artifact))
-      .toEqual(["hosted-source", "omp-transcript"]);
-    expect(existsSync(source)).toBe(false);
-    expect(await migrateHostedConversations(dir)).toEqual({
-      found: 0,
-      imported: 0,
-      existing: 0,
-      failures: [],
-    });
-    expect(await host!.listSessions("casper")).toEqual([]);
-  });
 });
 
 describe("SessionHost.deleteGhost", () => {

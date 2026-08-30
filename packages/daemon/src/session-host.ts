@@ -125,10 +125,6 @@ import {
   type ConversationRuntime,
 } from "./conversation-identity.js";
 import { generateTitle } from "./title.js";
-import {
-  hostedConversationSourceMatches,
-  hostedConversationSourcePaths,
-} from "./hosted-conversation-import.js";
 import type { TrashPathResult } from "./trash.js";
 import {
   bindConversationId,
@@ -721,7 +717,7 @@ export interface QueuedMessages {
 }
 
 export interface TrashedConversationArtifact extends TrashPathResult {
-  artifact: "hosted-source" | "omp-transcript" | "claude-sidecar"
+  artifact: "omp-transcript" | "claude-sidecar"
     | "project-binding" | "project-snapshot" | "tool-cwds" | "maintenance-state";
   source: string;
 }
@@ -925,7 +921,6 @@ interface ForkTransactionRecord {
 }
 
 const DELETE_ARTIFACT_KINDS = new Set<TrashedConversationArtifact["artifact"]>([
-  "hosted-source",
   "omp-transcript",
   "claude-sidecar",
   "project-binding",
@@ -1105,12 +1100,6 @@ function exactDeleteStaticSource(
       const prefix = `${conversationTransactionStem(conversationId)}.pi.project-snapshot.`;
       const name = basename(artifact.source);
       return name.startsWith(prefix) && /^\d+\.json$/u.test(name.slice(prefix.length));
-    }
-    case "hosted-source": {
-      if (runtime !== "pi") return false;
-      const conversations = join(ghostDir, "conversations");
-      const name = basename(artifact.source);
-      return name.endsWith(".json") && artifact.source === join(conversations, name);
     }
   }
 }
@@ -5367,20 +5356,9 @@ export class SessionHost {
         || sources.some((source) => destinations.includes(source))) {
         throw invalidMarker();
       }
-      const liveHostedSources = new Set(
-        await hostedConversationSourcePaths(ghostDir, conversationId),
-      );
       for (const artifact of allArtifacts) {
         if (!exactDeleteStaticSource(ghostDir, runtime, conversationId, artifact)) {
           throw invalidMarker();
-        }
-        if (artifact.artifact === "hosted-source"
-          && !liveHostedSources.has(artifact.source)) {
-          const sourceExists = await this.transactionEntryExists(artifact.source);
-          if (sourceExists
-            || !(await hostedConversationSourceMatches(artifact.trash, conversationId))) {
-            throw invalidMarker();
-          }
         }
       }
       for (const artifact of artifacts) {
@@ -6717,8 +6695,6 @@ export class SessionHost {
         path: string;
       }> = runtime === "pi"
         ? [
-            ...(await hostedConversationSourcePaths(ghost.dir, id))
-              .map((path) => ({ artifact: "hosted-source" as const, path })),
             { artifact: "omp-transcript", path: piPath },
             { artifact: "tool-cwds", path: cwdPath },
             { artifact: "project-binding", path: bindingPath },

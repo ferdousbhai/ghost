@@ -140,47 +140,6 @@ The details.
     }
   });
 
-  it("atomically migrates a v1 export manifest and leaves v2 untouched on rerun", async () => {
-    const manifestHome = await createGhostFixture("manifest", {
-      "docs/doc.md": "# Doc\n",
-      "export-manifest.json": JSON.stringify({
-        format: "ghost-home/v1",
-        ghostname: "manifest",
-        counts: { notes: 1 },
-        custom: ["preserved"],
-      }),
-    });
-    try {
-      const opened = openGhostHome(manifestHome.dir);
-      await expect(opened.readExportManifest())
-        .rejects.toMatchObject({ code: "invalid_format" });
-      await opened.ensure();
-      expect(await opened.readExportManifest()).toEqual({
-        format: "ghost-home/v2",
-        ghostname: "manifest",
-        counts: { notes: 1 },
-        custom: ["preserved"],
-      });
-      const manifestPath = join(manifestHome.dir, "export-manifest.json");
-      const inode = (await stat(manifestPath)).ino;
-      await opened.ensure();
-      expect((await stat(manifestPath)).ino).toBe(inode);
-    } finally {
-      await manifestHome.cleanup();
-    }
-  });
-
-  it("rejects non-object and non-v2 live manifests", async () => {
-    const manifestPath = join(fixture.dir, "export-manifest.json");
-    await writeFile(manifestPath, '{"format":"ghost-home/v3"}');
-    await expect(home.readExportManifest())
-      .rejects.toMatchObject({ code: "invalid_format" });
-    await expect(home.ensure()).rejects.toMatchObject({ code: "invalid_format" });
-    await writeFile(manifestPath, "[]");
-    await expect(home.readExportManifest())
-      .rejects.toMatchObject({ code: "invalid_format" });
-  });
-
   it("refuses to guess when legacy notes and canonical docs both exist", async () => {
     const ambiguous = await createGhostFixture("ambiguous", {
       "character.md": "# Ambiguous\n",
@@ -610,8 +569,3 @@ describe("memory", () => {
   });
 });
 
-describe("conversations", () => {
-  it("lists imported transcripts", async () => {
-    expect(await home.listConversations()).toEqual(["conv-1"]);
-  });
-});

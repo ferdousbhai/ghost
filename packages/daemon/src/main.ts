@@ -6,7 +6,6 @@ import { apiTokenCommand } from "./api-token.js";
 import { RemoteAccess } from "./tailscale-identity.js";
 import { LoginManager } from "./auth.js";
 import { ClaudeCodeProbe } from "./claude-code.js";
-import { importCommand } from "./import-command.js";
 import { legacyDocumentsPlacementCommand } from "./legacy-documents-placement.js";
 import { loginCommand } from "./login-command.js";
 import { loadConfig, type DaemonConfig, type DaemonConfigOverrides } from "./config.js";
@@ -18,7 +17,6 @@ import { GhostHookRunner } from "./hooks.js";
 import { acquireHomeReservation, HomeReservationBusyError, type HomeReservation } from "./home-reservation.js";
 import { HomeOperationCoordinator } from "./home-operations.js";
 import { hookSmolCompleteCommand } from "./hook-smol-complete.js";
-import { migrateHostedConversations } from "./hosted-conversation-import.js";
 import { createJournalSink } from "./journal.js";
 import { createLogger, stderrSink, type Logger, type LogLevel } from "./log.js";
 import { McpCatalog } from "./mcp-catalog.js";
@@ -43,7 +41,6 @@ Usage:
   ghostd hook-smol-complete
 
 Subcommands:
-  import                   Import a ghost from a "Download my ghost" archive
                            (zip or directory) into ~/ghosts/<name>.
   place-legacy-documents   Dry-run or explicitly copy one retained legacy docs
                            tree into Documents without following or overwriting.
@@ -300,7 +297,6 @@ export async function main(argv: string[] = process.argv.slice(2), runtime: Main
   if (argv[0] === "api-token") return apiTokenCommand(argv.slice(1));
   if (argv[0] === "remote") return remoteCommand(argv.slice(1));
   if (argv[0] === "login") return loginCommand(argv.slice(1));
-  if (argv[0] === "import") return importCommand(argv.slice(1));
   if (argv[0] === "hook-smol-complete") return hookSmolCompleteCommand(argv.slice(1));
   if (argv[0] === "place-legacy-documents") {
     return legacyDocumentsPlacementCommand(argv.slice(1));
@@ -391,24 +387,9 @@ async function serveDaemon(
   try {
     await Promise.all(registry.list().map(async (ghost) => {
       await ensureGhostHomeLayout(ghost.dir);
-      const conversations = await migrateHostedConversations(ghost.dir, ownerHome);
-      if (conversations.imported > 0) {
-        logger.info("activated hosted conversations as native sessions", {
-          ghost: ghost.name,
-          imported: conversations.imported,
-          existing: conversations.existing,
-        });
-      }
-      for (const failure of conversations.failures) {
-        logger.warn("could not activate hosted conversation; source left unchanged", {
-          ghost: ghost.name,
-          source: failure.source,
-          error: failure.error,
-        });
-      }
     }));
   } catch (error) {
-    logger.error("could not migrate a ghost home layout", {
+    logger.error("could not ensure a ghost home layout", {
       error: (error as Error).message,
     });
     return 1;
