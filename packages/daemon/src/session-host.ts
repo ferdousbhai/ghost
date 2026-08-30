@@ -34,7 +34,7 @@ import {
 } from "./claude-code.js";
 import {
   readDaemonControlFile,
-  readDaemonControlPrefix,
+  readDaemonControlLine,
 } from "./control-file.js";
 import {
   DEFAULT_COMPACTION_CONFIG,
@@ -169,12 +169,6 @@ import { validateServerName, type MCPServerConfig } from "./mcp-config.js";
 import { resolveChatModel } from "./model-routing.js";
 import { buildRecapPrompt, normalizeRecap } from "./recap.js";
 import { assistantText } from "./smol.js";
-import {
-  convertOmpTranscript,
-  hasOmpTitleSlot,
-  readSessionEntries,
-  sessionTitle,
-} from "./session-transcript.js";
 import type { Rule, Skill } from "./declarative-types.js";
 import {
   buildGhostAvailableSlashCommands,
@@ -1125,20 +1119,12 @@ function persistentCdTarget(command: string, cwd: string, ownerHome: string): st
   return isAbsolute(rest) ? resolve(rest) : resolve(cwd, rest);
 }
 
-const LEGACY_PI_SESSION_PREFIX_MAX_BYTES = 64 * 1024;
+const LEGACY_PI_SESSION_HEADER_MAX_BYTES = 64 * 1024;
 
 async function legacyPiSessionCwd(path: string): Promise<string | undefined> {
   try {
-    const prefix = await readDaemonControlPrefix(path, LEGACY_PI_SESSION_PREFIX_MAX_BYTES);
-    const lines = prefix.split("\n");
-    const first = lines[0];
-    if (!first) return undefined;
-    let header = JSON.parse(first) as { type?: unknown; cwd?: unknown };
-    if (header.type === "title") {
-      const second = lines[1];
-      if (!second) return undefined;
-      header = JSON.parse(second) as { type?: unknown; cwd?: unknown };
-    }
+    const first = await readDaemonControlLine(path, LEGACY_PI_SESSION_HEADER_MAX_BYTES);
+    const header = JSON.parse(first) as { type?: unknown; cwd?: unknown };
     return header.type === "session"
       && typeof header.cwd === "string"
       && !header.cwd.includes("\0")
@@ -1374,15 +1360,6 @@ export function forkConversationTitle(
   return `${base} (${counter})`;
 }
 
-/** Carry an OMP-era title (header or `title_change`) into pi's `session_info`. */
-export function migrateLegacySessionTitle(manager: SessionManager): string | null {
-  if (manager.getSessionName()) return null;
-  const title = sessionTitle(manager.getEntries());
-  if (!title) return null;
-  manager.appendSessionInfo(title);
-  return title;
-}
-
 interface ProjectMcpConnectionResult {
   projectConfigured: number;
   projectFailed: number;
@@ -1571,8 +1548,6 @@ export class SessionHost {
   /** Route-level claims bridge preclaim and host mutation admission. */
   private readonly homeMoveClaims = new Set<string>();
   private readonly unregisterHomeMoveParticipant: (() => void) | undefined;
-  /** Read-through cache for legacy titles that have not had a writable open yet. */
-  private readonly legacyTitles = new Map<string, { modifiedMs: number; title: string | null }>();
   private readonly retentionIdleTtlMs: number;
   private readonly retentionMaxSessions: number;
   private readonly retentionNow: () => number;
@@ -2695,8 +2670,6 @@ export class SessionHost {
     const sessionFileExists = existsSync(sessionFile);
     if (sessionFileExists) {
       await requireSessionFileConversationId(sessionFile, sessionKey);
-      // A transcript the Oh My Pi runtime wrote is converted once, in place.
-      if (await hasOmpTitleSlot(sessionFile)) await convertOmpTranscript(sessionFile);
     }
     // pi defers a new transcript until its first assistant message; Ghost
     // persists direct bash turns and hook context before any model pass, so
@@ -2710,7 +2683,6 @@ export class SessionHost {
     sessionManager = SessionManager.open(sessionFile, paths.sessionDir, runtimeCwd);
     await this.sessionStartupProbe("session-manager", modelRuntime);
     if (!sessionFileExists) bindConversationId(sessionManager, sessionKey);
-    this.promoteLegacySessionTitle(sessionManager, ghostName, sessionKey, logger);
 
     const ask = new AskBroker();
     const jobs = new GhostJobManager({
@@ -2960,30 +2932,6 @@ export class SessionHost {
         });
       });
     });
-  }
-
-  private promoteLegacySessionTitle(
-    manager: SessionManager,
-    ghostName: string,
-    conversationId: string,
-    logger = this.logger.child({ ghost: ghostName, conversation: conversationId }),
-  ): void {
-    try {
-      const title = migrateLegacySessionTitle(manager);
-      if (title) {
-        logger.info("migrated legacy conversation title", {
-          session: conversationId,
-          title,
-        });
-      }
-    } catch (error) {
-      // Title recovery must never make an otherwise healthy conversation
-      // impossible to resume. Listing still has the read-only fallback below.
-      logger.warn("legacy conversation title migration failed", {
-        session: conversationId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
   }
 
   pendingAsk(
@@ -5200,9 +5148,8 @@ export class SessionHost {
    * Name one conversation through pi's `session_info`. The background titler
    * only names a conversation that has no name yet, so it cannot undo a rename.
    *
-   * Naming is allowed mid-turn. The title slot is not part of the conversation
-   * tree — writing it appends one audit entry and rewrites 256 fixed bytes —
-   * so a rename cannot disturb a running prompt.
+   * Naming an open conversation uses AgentSession's native path, including
+   * while a turn is active.
    */
   async renameConversation(
     ghostName: string,
@@ -5261,7 +5208,6 @@ export class SessionHost {
     );
     try {
       const stored = this.applySessionName(hosted?.session, manager, title);
-      this.legacyTitles.delete(sessionFile);
       (hosted?.logger ?? this.logger.child({ ghost: ghostName, conversation: id })).info("renamed ghost conversation", {
         session: id,
         title: stored,
@@ -5842,28 +5788,7 @@ export class SessionHost {
       SessionManager.listAll(paths.sessionDir),
       this.claudeCode.listSessions(ghost),
     ]);
-    const scannedOmpSessions = await Promise.all(sessions.map(async (info) => {
-      let title = info.name?.trim() ? info.name : null;
-      if (!title) {
-        const modifiedMs = info.modified.getTime();
-        const cached = this.legacyTitles.get(info.path);
-        if (cached?.modifiedMs === modifiedMs) {
-          title = cached.title;
-        } else {
-          try {
-            // pi already reported the `session_info` title; only an unconverted
-            // OMP transcript still keeps its title somewhere pi does not read.
-            title = (await hasOmpTitleSlot(info.path))
-              ? sessionTitle(await readSessionEntries(info.path))
-              : null;
-          } catch {
-            // A concurrent delete or malformed transcript should not make the
-            // entire conversation list fail.
-            title = null;
-          }
-          this.legacyTitles.set(info.path, { modifiedMs, title });
-        }
-      }
+    const scannedPiSessions = await Promise.all(sessions.map(async (info) => {
       let conversationId: string | null;
       try {
         conversationId = await conversationIdFromSessionFile(info.path);
@@ -5875,17 +5800,17 @@ export class SessionHost {
       if (conversationId === null) return null;
       return {
         ...conversationIdentity("pi", conversationId),
-        title,
+        title: info.name ?? null,
         createdAt: info.created.toISOString(),
         updatedAt: info.modified.toISOString(),
         messageCount: info.messageCount,
       };
     }));
-    const ompSessions = scannedOmpSessions.filter(
-      (row): row is Exclude<(typeof scannedOmpSessions)[number], null> => row !== null,
+    const piSessions = scannedPiSessions.filter(
+      (row): row is Exclude<(typeof scannedPiSessions)[number], null> => row !== null,
     );
     const rows: StoredSessionRow[] = [
-      ...ompSessions,
+      ...piSessions,
       ...claudeSessions.filter((info) => isValidConversationId(info.conversationId)).map((info) => ({
         ...conversationIdentity("claude-code", info.conversationId),
         title: "Claude Code",
@@ -5981,7 +5906,7 @@ export class SessionHost {
     const messages = all.slice(offset, offset + limit);
     return {
       ...conversationIdentity("pi", id),
-      title: manager.getSessionName() ?? sessionTitle(manager.getEntries()),
+      title: manager.getSessionName() ?? null,
       messages,
       total,
       truncated: offset > 0 || offset + messages.length < total,
@@ -6283,7 +6208,6 @@ export class SessionHost {
           ...(await piProjectSnapshotPaths(paths.sessionDir, forkId))
             .map((path) => unlink(path).catch(() => {})),
         ]);
-        this.legacyTitles.delete(sessionFile);
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       }
@@ -6706,11 +6630,6 @@ export class SessionHost {
       const projectSnapshots = runtime === "pi"
         ? await piProjectSnapshotPaths(paths.sessionDir, id)
         : [];
-      if ([deleteRecord.pending, ...deleteRecord.artifacts].some((entry) =>
-        entry?.source === piPath
-      )) {
-        this.legacyTitles.delete(piPath);
-      }
       if (runtime === "pi" && await this.transactionEntryExists(piPath)) {
         await requireSessionFileConversationId(piPath, id);
       }
@@ -6760,7 +6679,6 @@ export class SessionHost {
         if (!artifact) throw new Error("Deletion move completed without a durable receipt.");
         artifacts.push(artifact);
         recorded.add(candidateKey);
-        if (candidate.path === piPath) this.legacyTitles.delete(piPath);
       }
       if (artifacts.length === 0 && !resumingDeletion) {
         await this.retireDeleteMarker(paths.sessionDir, tombstone, deleteRecord);
@@ -6844,7 +6762,7 @@ export class SessionHost {
         logger: this.logger,
       });
       this.maintenance?.completeGhostDelete(ghost.name);
-      this.forgetGhost(ghost.name, ghost.dir);
+      this.forgetGhost(ghost.name);
       this.logger.info("trashed ghost", { ghost: ghost.name, trash: trashed.trash });
       return trashed;
     } finally {
@@ -6888,7 +6806,7 @@ export class SessionHost {
       await this.quiesceGhost(ghost.name);
       const renamed = this.registry.rename(ghost.name, nextName);
       await this.maintenance?.completeGhostRename(ghost.name, nextName);
-      this.forgetGhost(ghost.name, ghost.dir);
+      this.forgetGhost(ghost.name);
       // A rename leaves current-version units naming the old ghost in both
       // filename and ExecStart. They remain the owner's files; log them instead
       // of silently deleting or rewriting them. Pre-v1 names are deliberately
@@ -6951,17 +6869,12 @@ export class SessionHost {
   }
 
   /**
-   * Drop everything the daemon still holds under a name or a home that has
-   * moved. A ghost re-summoned (or renamed) into this name must not inherit
-   * the previous one's opening line, and a title cached against a path in the
-   * old home would answer for whatever ends up at that path next.
+   * Drop everything the daemon still holds under a name or a home that moved.
+   * A ghost re-summoned (or renamed) into this name must not inherit the
+   * previous one's opening line.
    */
-  private forgetGhost(ghostName: string, home: string): void {
+  private forgetGhost(ghostName: string): void {
     this.greetings.clear(ghostName);
-    const prefix = `${resolve(home)}${sep}`;
-    for (const path of [...this.legacyTitles.keys()]) {
-      if (path.startsWith(prefix)) this.legacyTitles.delete(path);
-    }
   }
 
   private ghostBusy(ghostName: string): boolean {

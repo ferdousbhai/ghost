@@ -19,7 +19,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   readDaemonControlFile,
   readDaemonControlLine,
-  readDaemonControlPrefix,
   writeDaemonControlFile,
 } from "../src/control-file.js";
 import {
@@ -102,9 +101,7 @@ describe("daemon control-file reader", () => {
       closeSync(descriptor);
     }
     await expect(readDaemonControlLine(path, 6)).resolves.toBe("title");
-    await expect(readDaemonControlPrefix(path, 13)).resolves.toBe("title\nheader\n");
     await expect(readDaemonControlLine(path, 5)).rejects.toThrow("no first-line terminator");
-    await expect(readDaemonControlPrefix(path, 12)).resolves.toBe("title\n");
   });
 
   it("rejects descriptor growth and final-path replacement after admission", async () => {
@@ -123,12 +120,12 @@ describe("daemon control-file reader", () => {
 
     rmSync(displaced);
     writeFileSync(path, "prefix\nremainder", { mode: 0o600 });
-    await expect(readDaemonControlPrefix(path, 16, (stage) => {
+    await expect(readDaemonControlLine(path, 16, (stage) => {
       if (stage === "read") appendFileSync(path, "growth");
     })).rejects.toThrow("changed");
 
     writeFileSync(path, "prefix\n", { mode: 0o600 });
-    await expect(readDaemonControlPrefix(path, 16, (stage) => {
+    await expect(readDaemonControlLine(path, 16, (stage) => {
       if (stage !== "opened") return;
       renameSync(path, displaced);
       writeFileSync(path, "replacement\n", { mode: 0o600 });

@@ -759,7 +759,7 @@ describe("SessionHost.open", () => {
       .toMatchObject({ root: null, cwd: dir, reason: "legacy" });
   });
 
-  it("bounds legacy Pi cwd inspection and rejects unsafe transcript shapes", async () => {
+  it("accepts only a line-one native Pi cwd header and rejects unsafe transcript shapes", async () => {
     const { dir } = await setup([{ kind: "text", text: "hello" }]);
     const paths = ghostPaths(dir);
     mkdirSync(paths.sessionDir, { recursive: true });
@@ -805,9 +805,12 @@ describe("SessionHost.open", () => {
       { type: "title", title: "Legacy title", source: "auto" },
       header("title-first-legacy"),
     ]);
-    truncateSync(titleFirst, 384 * 1024 * 1024);
+    const titleFirstBytes = readFileSync(titleFirst);
     await expect(host!.getProject("casper", "title-first-legacy", "pi"))
-      .resolves.toMatchObject({ cwd: dir, reason: "legacy" });
+      .resolves.toMatchObject({ cwd: temp!.ownerHome, reason: "default" });
+    await expect(host!.open("casper", "title-first-legacy"))
+      .rejects.toThrow("not a valid pi session");
+    expect(readFileSync(titleFirst)).toEqual(titleFirstBytes);
 
     const longLine = join(paths.sessionDir, sessionFileNameFor("long-header"));
     writeFileSync(longLine, `${"x".repeat(64 * 1024 + 1)}\n`, {
@@ -7938,6 +7941,26 @@ describe("runtime-qualified conversation identity", () => {
 });
 
 describe("conversation titles", () => {
+  it("reads native session_info names for listing and transcript restoration", async () => {
+    const { dir } = await setup([{ kind: "text", text: "ok" }]);
+    const paths = ghostPaths(dir);
+    mkdirSync(paths.sessionDir, { recursive: true });
+    const transcript = join(paths.sessionDir, sessionFileNameFor("native-title"));
+    writeFileSync(transcript, "", { mode: 0o600 });
+    const manager = SessionManager.open(transcript, paths.sessionDir, temp!.ownerHome);
+    manager.appendSessionInfo("Native Pi Title");
+
+    await expect(host!.listSessions("casper")).resolves.toContainEqual(
+      expect.objectContaining({
+        id: "pi:native-title",
+        title: "Native Pi Title",
+      }),
+    );
+    await expect(host!.readTranscript("casper", "native-title")).resolves.toMatchObject({
+      title: "Native Pi Title",
+    });
+  });
+
   it("generates a title once, after the first turn, and never before or again", async () => {
     temp = makeTempGhosts();
     provider = await startMockProvider({ script: [{ kind: "text", text: "ok" }] });
@@ -8202,11 +8225,16 @@ describe("renaming a conversation", () => {
     await host!.runTurn("casper", { sessionId: "conv-1", prompt: "hello", emit: () => {} });
     await host!.close("casper", "conv-1");
 
-    expect(await host!.renameConversation("casper", "conv-1", "  Press day  ")).toBe("Press day");
-    expect(await titleOf()).toBe("Press day");
+    const stored = await host!.renameConversation(
+      "casper",
+      "conv-1",
+      "  Press   day\tproof\r\n\r\nnotes  ",
+    );
+    expect(stored).toBe("Press   day\tproof notes");
+    expect(await titleOf()).toBe(stored);
     // The reopened conversation still resumes, with the new name on it.
     const handle = await host!.open("casper", "conv-1");
-    expect(handle.session.sessionName).toBe("Press day");
+    expect(handle.session.sessionName).toBe(stored);
   });
 
   it("renames a conversation that is mid-turn", async () => {
@@ -8230,8 +8258,8 @@ describe("renaming a conversation", () => {
       emit: () => {},
     });
     const pending = await waitFor(() => host!.pendingAsk("casper", "conv-live"));
-    // A title write touches the title slot, not the turn: the answer the owner
-    // is about to give still lands on a running conversation.
+    // The session name is independent of the active branch: the answer the
+    // owner is about to give still lands on the running conversation.
     expect(await host!.renameConversation("casper", "conv-live", "Watching it work"))
       .toBe("Watching it work");
     host!.answerAsk("casper", "conv-live", pending.id, {

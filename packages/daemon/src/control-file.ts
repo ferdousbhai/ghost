@@ -118,24 +118,6 @@ export async function readDaemonControlLine(
   return strictUtf8(path, bytes.subarray(0, newline));
 }
 
-/**
- * Return only complete newline-terminated records from one bounded prefix.
- * This supports an OMP-era title slot followed by the session header while
- * never allocating the append-only transcript remainder.
- */
-export async function readDaemonControlPrefix(
-  path: string,
-  maxBytes: number,
-  probe?: (stage: "opened" | "read", path: string) => void | Promise<void>,
-): Promise<string> {
-  const { bytes } = await readPinned(path, maxBytes, false, probe);
-  const newline = bytes.subarray(0, maxBytes).lastIndexOf(0x0a);
-  if (newline < 0) {
-    throw invalid(path, `has no complete record within ${maxBytes} bytes`);
-  }
-  return strictUtf8(path, bytes.subarray(0, newline + 1));
-}
-
 /** Atomically publish one bounded daemon-owned mode-0600 control file. */
 export async function writeDaemonControlFile(
   path: string,

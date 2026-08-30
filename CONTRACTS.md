@@ -227,18 +227,16 @@ content, follows no symbolic link, and never descends. At most 100 entries and
 4,000 characters enter the prompt; the index states the exact number of
 eligible root entries omitted. Names are fenced and treated as untrusted data.
 
-Already-released Pi transcript headers are history: a legacy conversation resumes at the absolute cwd in its header rather
+Already-released native Pi transcript headers are history: a legacy conversation resumes at the absolute cwd in its header rather
 than silently changing the meaning of its relative tool paths. Project-state
 inspection reads the runtime-qualified binding sidecar first and never opens the
 Pi transcript when that sidecar exists. Only when the binding is absent may it
 inspect a legacy header: it opens the mode-`0600`, single-link regular transcript
-with `O_NOFOLLOW|O_NONBLOCK`, admits at most a stable 64 KiB prefix, decodes only
-complete records as strict UTF-8 (reading one extra byte only as the overflow
-sentinel), and accepts a session header on line one or on
-line two after the title slot of an unconverted OMP-era transcript. The
-append-only remainder may be
+with `O_NOFOLLOW|O_NONBLOCK`, admits at most a stable 64 KiB first line, decodes
+that complete record as strict UTF-8 (reading one extra byte only as the overflow
+sentinel), and accepts only a native Pi session header on line one. The append-only remainder may be
 arbitrarily large and is not read. A missing, linked, special, incorrectly
-permissioned, mutated, malformed, or overlong-prefix transcript supplies no cwd;
+permissioned, mutated, malformed, or overlong first-line transcript supplies no cwd;
 the project response truthfully remains the owner-home `default` rather than
 granting legacy path authority.
 
@@ -1416,18 +1414,19 @@ shape and streams emit one complete event object per line.
   `404 not_found`; deletion drops its read entry, and stale ids are pruned on
   the next write.
 - `PUT  /api/ghosts/:name/sessions/:id/title` `{ title: string }` →
-  `{ ok: true, title }` — rename one conversation. The title is trimmed and
-  written through the same `session_info` entry the smol lane uses
-  (`SessionManager.setSessionName`); the background titler never writes over a
-  name that is already set, so a rename is never undone by it. `title` in the
-  response is the name as stored — pi collapses control characters and runs of
-  spaces. A
+  `{ ok: true, title }` — rename one conversation. The API trims the title, then
+  writes the same native `session_info` entry the smol lane uses through
+  `AgentSession.setSessionName` for an open conversation or
+  `SessionManager.appendSessionInfo` for an idle one. The background titler
+  never writes over a name that is already set, so a rename is never undone by
+  it. `title` in the response is the name as stored: pi replaces each interior
+  run of CR or LF characters with one space and trims again; repeated spaces,
+  tabs, and other interior characters are preserved. A
   non-string title, a title that is empty after trimming or contains nothing
   printable, or one over 120 characters is `400 invalid_request`; an unknown
   conversation id is `404 not_found`; a Claude Code conversation is
   `409 not_supported`, because that runtime owns its own conversation's name.
-  Renaming works while a turn is streaming — the title slot is not part of the
-  conversation tree.
+  Renaming works while a turn is streaming.
 - `GET  /api/ghosts/:name/sessions/:id/commands` → `{ commands }` — Ghost's
   slash-command catalog for that conversation, rebuilt from its pinned project
   snapshot so admitted Markdown commands/prompts and skills remain current
@@ -1719,14 +1718,12 @@ manager names a copy: `<source title> (n)` for the smallest free `n` from 2 up,
 with any trailing ` (k)` stripped from the base first, so a fork of a fork does
 not stack suffixes. An untitled source forks to an untitled conversation. The
 title is the latest **`session_info` entry** in the conversation's own
-`sessions/*.jsonl` transcript, written with `SessionManager.setSessionName` /
-`appendSessionInfo`. It never enters the model's context, needs no sidecar, and
-rides the same per-ghost storage backup and future encryption cover.
-`GET …/sessions` surfaces it as `title`. A transcript written by the previous
-OMP runtime carries its title in a fixed-width slot on line two plus
-`title_change` entries; it is converted once, in place, the first time the
-conversation is opened, and listing still reads that old slot for an
-unconverted file.
+`sessions/*.jsonl` transcript, written with `AgentSession.setSessionName` /
+`SessionManager.appendSessionInfo`. It never enters the model's context, needs
+no sidecar, and rides the same per-ghost storage backup and future encryption
+cover.
+`GET …/sessions` surfaces the native Pi session name as `title`; no other
+transcript entry or sidecar is a title source.
 
 The owner's own name for a conversation goes into the same entry
 (`PUT …/title`). The arbitration is that the background titler runs once,
