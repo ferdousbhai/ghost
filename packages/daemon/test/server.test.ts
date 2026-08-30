@@ -27,7 +27,11 @@ import {
   type ServerOptions,
 } from "../src/server.js";
 import { GHOST_SESSION_STOP_CONTINUATION_CAP } from "../src/hooks.js";
-import { SessionHost, sessionFileNameFor } from "../src/session-host.js";
+import {
+  SessionHost,
+  sessionFileNameFor,
+  type SessionHostOptions,
+} from "../src/session-host.js";
 import { toolCwdsPath } from "../src/tool-cwds.js";
 import { makeTempGhosts, parseSseStream, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
 import { startMockProvider, type MockProvider } from "./helpers/mock-provider.js";
@@ -57,6 +61,7 @@ async function serve(
     maxBodyBytes?: number;
     apiToken?: string | null;
     hooks?: ServerOptions["hooks"];
+    scheduleCommandRunner?: SessionHostOptions["scheduleCommandRunner"];
   } = {},
 ) {
   temp = makeTempGhosts();
@@ -73,7 +78,8 @@ async function serve(
     homeOperations,
     ownerHome: temp.ownerHome,
     offline: true,
-    scheduleCommandRunner: async () => ({ stdout: "", stderr: "", code: 0 }),
+    scheduleCommandRunner: serverOptions.scheduleCommandRunner
+      ?? (async () => ({ stdout: "", stderr: "", code: 0 })),
     extensionOptions: { documents: machineDocuments },
   });
   const mcp = new McpCatalog({ registry: temp.registry });
@@ -2148,6 +2154,24 @@ describe("PUT /api/ghosts/:name/name", () => {
       `${base}/api/ghosts/wisp/sessions/${piSegment("conv-1")}/transcript`,
     )).status).toBe(200);
     expect((await fetch(`${base}/api/ghosts/casper/sessions`)).status).toBe(404);
+  });
+
+  it("returns a retryable 503 without moving the home when schedule cleanup fails", async () => {
+    const base = await serve(undefined, {
+      scheduleCommandRunner: async () => ({
+        stdout: "",
+        stderr: "systemd manager unavailable",
+        code: 1,
+      }),
+    });
+
+    const response = await rename(base, "casper", { name: "wisp" });
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({
+      error: { code: "schedule_cleanup_failed" },
+    });
+    expect(existsSync(join(temp!.root, "casper"))).toBe(true);
+    expect(existsSync(join(temp!.root, "wisp"))).toBe(false);
   });
 
   it("refuses a bad name, an unknown ghost, and a taken name", async () => {

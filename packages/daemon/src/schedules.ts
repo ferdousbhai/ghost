@@ -12,8 +12,7 @@
  * So a ghost authors its own units through `bash`, and the daemon keeps exactly
  * one obligation the desktop-file precedent does not have: a stray `.desktop`
  * file is inert, but a stray `.timer` fires. Deletion removes the timers owned
- * by that ghost; rename leaves them visible under the old name for the owner to
- * repair.
+ * by that ghost before deletion or rename publishes a reusable name.
  *
  * The versioned, length-delimited prefix and slug grammar are the ownership
  * contract. Units are swept by exact name, never by pattern-matching content,
@@ -185,7 +184,7 @@ export function renderScheduledWorkPolicy(
     "## Scheduled work",
     "To do something on a clock, write a systemd **user timer** through Bash — Ghost has no scheduler of its own, and a timer is something the owner can see in `systemctl --user list-timers`, stop with `systemctl --user disable --now`, and edit in a text file.",
     `Write both unit files in this exact absolute directory: ${JSON.stringify(resolve(unitDir))}.`,
-    `Name both units \`${unit}\`. The \`<slug>\` must be 1–${MAX_SCHEDULE_SLUG_LENGTH} characters matching \`[a-z0-9]+(?:-[a-z0-9]+)*\`: lowercase ASCII letters or digits, separated only by single hyphens. That exact versioned prefix is how your timers are found and removed if your ghost is deleted; an older or differently named unit is left untouched.`,
+    `Name both units \`${unit}\`. The \`<slug>\` must be 1–${MAX_SCHEDULE_SLUG_LENGTH} characters matching \`[a-z0-9]+(?:-[a-z0-9]+)*\`: lowercase ASCII letters or digits, separated only by single hyphens. That exact versioned prefix is how your timers are found and removed if your ghost is deleted or renamed; an older or differently named unit is left untouched.`,
     "The service runs the `ghost` CLI, which authenticates itself:",
     "```ini",
     `# ${unit}.service`,

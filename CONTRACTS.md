@@ -202,18 +202,18 @@ disconnects, so a longer check-in would otherwise be killed mid-answer.
 That versioned, length-delimited prefix plus the slug grammar is the entire
 daemon-side ownership contract. Deleting a ghost disables and removes only
 matching current-version units, so the owner's own timers, another ghost's, and
-all legacy ambiguous units share the directory untouched. Renaming does not
-sweep: the ghost still exists, the units are the owner's files, and a timer
-naming a ghost that moved fails visibly in `systemctl --user --failed`; the
-daemon logs matching current-version units left under the old name rather than
-deleting, rewriting, or guessing about legacy names. A timer-activated service
+all legacy ambiguous units share the directory untouched. Renaming performs the
+same retirement under the old name before moving the home: otherwise later
+reuse of that name would attach its old automation to a new ghost. Schedules are
+not rewritten under the new name; the owner recreates the schedules they still
+want after a successful rename. A timer-activated service
 is a sibling of `ghostd.service`, never a child of it, which is what lets a
 schedule survive a daemon restart that would kill anything in ghostd's own
 cgroup. Timers fire only while the user manager runs and the daemon is up with
 the owner's graphical session, so scheduled work makes no promise about
 overnight or logged-out runs; #18 owns that.
 
-Whole-home deletion is fail-closed around those owned units. After the ghost is
+Whole-home moves are fail-closed around those owned units. After the ghost is
 quiescent but before its home moves, the daemon inventories the union of exact
 owned timer files, manager-loaded timers, and enabled timer unit files. It must
 successfully stop and disable that union, remove and verify every matching
@@ -222,8 +222,9 @@ active in the manager. A filesystem or manager scan, stop, verification, or
 removal failure returns
 `503 schedule_cleanup_failed` and leaves the home at its original name. Cleanup
 already completed is not rolled back: retrying the same `DELETE` idempotently
-finishes the remaining units, while abandoning the deletion means the owner
-must recreate or re-enable any schedule already removed. Once the timers are
+finishes the remaining units; rename has the same semantics with its `PUT`.
+Abandoning either move means the owner must recreate or re-enable any schedule
+already removed. Once the timers are
 stopped and their files are absent, `daemon-reload` itself is best-effort: a
 failure is logged, but the following strict manager verification still decides
 whether the stopped triggers are safely retired. Manager state determines the
@@ -233,9 +234,10 @@ source-less loaded-only timer is never sent through a disable operation that
 requires its missing unit file. Exact owned symbolic links are also inventoried
 and verified in both directories' `timers.target.wants/`, because a dangling
 enablement link can outlive its source and manager listing. A name enabled in
-both scopes is disabled once per scope in the same cleanup attempt. Rename's unit scan is
-diagnostic only and can never make an already moved home look like a failed
-rename.
+both scopes is disabled once per scope in the same cleanup attempt. Delete and
+rename share this commit barrier and error: partial retirement remains retry
+progress, while `503 schedule_cleanup_failed` guarantees the home and name have
+not moved.
 
 A file a ghost authors *for the owner* — a report, an export, a generated image —
 belongs in the owner's Documents tree or the requested working directory, never
@@ -1014,7 +1016,10 @@ shape and streams emit one complete event object per line.
   work awaited first, so nothing holds a path under the old name across the
   rename. A Claude Code conversation keeps its resume sidecar, but that runtime
   stores the transcript itself under its own `~/.claude/projects/<cwd>` path,
-  which does not move with the home.
+  which does not move with the home. Before the home moves, rename applies the
+  same scheduled-work retirement as delete. A failure is
+  `503 schedule_cleanup_failed`, leaves the old home/name intact, and is retried
+  with the same request; successful partial cleanup is not rolled back.
 - `GET  /api/ghosts/:name/memory` → `{ memory, skipped }` — the owner's
   memory list, read from the plain files on each request and never stored.
   `memory` holds `{ path: "memory/<slug>.md", slug, content, updated }` in the

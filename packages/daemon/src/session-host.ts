@@ -77,7 +77,6 @@ import {
 } from "./ghosts.js";
 import { silentLogger, type Logger } from "./log.js";
 import {
-  listGhostScheduleUnits,
   renderScheduledWorkPolicy,
   resolveScheduleUnitDirectory,
   sweepGhostSchedules,
@@ -6766,28 +6765,7 @@ export class SessionHost {
       this.projectBindings.revokeScope(ghost.name);
       await maintenanceReservation?.drained;
       await this.quiesceGhost(ghost.name);
-      // A deleted ghost's timers would keep firing at a name that is gone, so
-      // schedule teardown is the commit barrier before its home can move.
-      try {
-        await sweepGhostSchedules(ghost.name, {
-          unitDir: this.scheduleUnitDir,
-          runtimeUnitDir: this.scheduleRuntimeUnitDir,
-          ...(this.scheduleCommandRunner === undefined
-            ? {}
-            : { run: this.scheduleCommandRunner }),
-          logger: this.logger,
-        });
-      } catch (error) {
-        this.logger.error("could not clean up a ghost's schedules before deletion", {
-          ghost: ghost.name,
-          error: (error as Error).message,
-        });
-        throw new GhostError(
-          "schedule_cleanup_failed",
-          "Could not stop and remove this ghost's schedules. The ghost was not deleted; retry after checking its systemd user timers.",
-          503,
-        );
-      }
+      await this.retireGhostSchedules(ghost.name, "deleted");
       const trashed = this.registry.trash(ghost.name);
       this.maintenance?.completeGhostDelete(ghost.name);
       this.forgetGhost(ghost.name);
@@ -6832,39 +6810,43 @@ export class SessionHost {
       this.projectBindings.revokeScope(ghost.name);
       await maintenanceReservation?.drained;
       await this.quiesceGhost(ghost.name);
-      let staleUnits: string[] = [];
-      try {
-        staleUnits = await listGhostScheduleUnits(
-          ghost.name,
-          this.scheduleUnitDir,
-        );
-      } catch (error) {
-        this.logger.warn("could not inspect a renamed ghost's timers", {
-          ghost: ghost.name,
-          name: nextName,
-          error: (error as Error).message,
-        });
-      }
+      await this.retireGhostSchedules(ghost.name, "renamed");
       const renamed = this.registry.rename(ghost.name, nextName);
       await this.maintenance?.completeGhostRename(ghost.name, nextName);
       this.forgetGhost(ghost.name);
-      // A rename leaves current-version units naming the old ghost in both
-      // filename and ExecStart. They remain the owner's files; log them instead
-      // of silently deleting or rewriting them. Pre-v1 names are deliberately
-      // outside Ghost ownership and are not inferred here.
-      if (staleUnits.length > 0) {
-        this.logger.warn("renamed ghost still has timers under its old name", {
-          ghost: ghost.name,
-          name: renamed.name,
-          units: staleUnits,
-        });
-      }
       this.logger.info("renamed ghost", { ghost: ghost.name, name: renamed.name });
       return renamed;
     } finally {
       this.reservedGhosts.delete(ghost.name);
       this.reservedGhosts.delete(nextName);
       maintenanceReservation?.release();
+    }
+  }
+
+  /** Retire every trigger attached to a name before that name can be reused. */
+  private async retireGhostSchedules(
+    ghostName: string,
+    outcome: "deleted" | "renamed",
+  ): Promise<void> {
+    try {
+      await sweepGhostSchedules(ghostName, {
+        unitDir: this.scheduleUnitDir,
+        runtimeUnitDir: this.scheduleRuntimeUnitDir,
+        ...(this.scheduleCommandRunner === undefined
+          ? {}
+          : { run: this.scheduleCommandRunner }),
+        logger: this.logger,
+      });
+    } catch (error) {
+      this.logger.error(`could not clean up a ghost's schedules before it was ${outcome}`, {
+        ghost: ghostName,
+        error: (error as Error).message,
+      });
+      throw new GhostError(
+        "schedule_cleanup_failed",
+        `Could not stop and remove this ghost's schedules. The ghost was not ${outcome}; retry after checking its systemd user timers.`,
+        503,
+      );
     }
   }
 

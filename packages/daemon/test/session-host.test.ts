@@ -3326,6 +3326,7 @@ lines.on("line", (line) => {
       ownerHome: temp!.ownerHome,
       projectBindings: bindingStore,
       offline: true,
+      scheduleCommandRunner: async () => ({ stdout: "", stderr: "", code: 0 }),
     });
     const project = join(temp!.root, "ownership-project");
     mkdirSync(project);
@@ -7669,22 +7670,42 @@ describe("SessionHost.deleteGhost", () => {
 });
 
 describe("SessionHost.renameGhost", () => {
-  it("keeps an unreadable schedule scan diagnostic from becoming a post-move failure", async () => {
-    const logger = recordingLogger("warn");
-    const { temp } = await setup([{ kind: "text", text: "hello" }], { logger });
+  it("fails closed when schedule cleanup cannot be inspected and completes on retry", async () => {
+    const { temp } = await setup([{ kind: "text", text: "hello" }]);
     const systemdDir = join(temp.ownerHome, ".config", "systemd");
     mkdirSync(systemdDir, { recursive: true });
     writeFileSync(join(systemdDir, "user"), "not a directory");
 
+    await expect(host!.renameGhost("casper", "specter")).rejects.toMatchObject({
+      code: "schedule_cleanup_failed",
+      status: 503,
+    });
+    expect(temp.registry.list().map((ghost) => ghost.name)).toEqual(["casper"]);
+    expect(existsSync(join(temp.root, "specter"))).toBe(false);
+
+    unlinkSync(join(systemdDir, "user"));
+    mkdirSync(join(systemdDir, "user"));
     await expect(host!.renameGhost("casper", "specter")).resolves.toMatchObject({
       name: "specter",
     });
-    expect(temp.registry.list().map((ghost) => ghost.name)).toEqual(["specter"]);
-    expect(logger.records).toContainEqual(expect.objectContaining({
-      level: "warn",
-      message: "could not inspect a renamed ghost's timers",
-      fields: expect.objectContaining({ ghost: "casper", name: "specter" }),
-    }));
+  });
+
+  it("retires old-name schedules before rename so a new ghost can reuse the name", async () => {
+    const { temp } = await setup([{ kind: "text", text: "hello" }]);
+    const unitDir = join(temp.ownerHome, ".config", "systemd", "user");
+    const timer = "ghost-timer-v1-6-casper-standup.timer";
+    const service = "ghost-timer-v1-6-casper-standup.service";
+    mkdirSync(unitDir, { recursive: true });
+    writeFileSync(join(unitDir, timer), "[Timer]\n");
+    writeFileSync(join(unitDir, service), "[Service]\n");
+
+    await expect(host!.renameGhost("casper", "wisp")).resolves.toMatchObject({ name: "wisp" });
+    expect(readdirSync(unitDir)).toEqual([]);
+
+    const replacement = temp.registry.create("casper");
+    expect(replacement.name).toBe("casper");
+    expect(temp.registry.list().map((ghost) => ghost.name)).toEqual(["casper", "wisp"]);
+    expect(readdirSync(unitDir)).toEqual([]);
   });
 
   it("drains maintenance and transfers its identity after the home rename but before release", async () => {
