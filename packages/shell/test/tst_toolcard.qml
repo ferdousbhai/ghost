@@ -42,7 +42,7 @@ TestCase {
         compare(ToolTrace.text(activity, true, false, false), "Read projects/roadmap.md");
     }
 
-    function test_legacyNoteCallStaysInImportedGhostHome(): void {
+    function test_legacyNoteCallStaysInGhostHome(): void {
         const activity = {
             name: "ghost_notes_write",
             status: "complete",

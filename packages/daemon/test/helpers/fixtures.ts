@@ -77,14 +77,13 @@ export interface SeedGhostOptions {
   provider?: { baseUrl: string; modelId: string; providerId?: string };
 }
 
-/** A ghost home with a persona, optional legacy docs, memory, and a models.json. */
+/** A ghost home with a persona, optional retained docs, memory, and a models.json. */
 export function seedGhost(root: string, options: SeedGhostOptions = {}): string {
   const name = options.name ?? "casper";
   const dir = join(root, name);
   const paths = ghostPaths(dir);
   if (options.docs) mkdirSync(join(dir, "docs"), { recursive: true });
   mkdirSync(join(dir, "memory"), { recursive: true });
-  mkdirSync(join(dir, "conversations"), { recursive: true });
   writeFileSync(
     paths.characterFile,
     options.character

@@ -1,8 +1,9 @@
 import { pathToFileURL } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   isDirectInvocation,
+  main,
   parseArgs,
   runStagedShutdown,
 } from "../src/main.js";
@@ -48,6 +49,47 @@ describe("parseArgs", () => {
     expect(() => parseArgs(["--port", "70000"])).toThrowError(/Invalid port/);
     expect(() => parseArgs(["--log-level", "loud"])).toThrowError(/Invalid log level/);
     expect(() => parseArgs(["--wat"])).toThrowError(/Unknown option/);
+  });
+});
+
+describe("ghostd help", () => {
+  it("advertises every supported subcommand without the retired import path", async () => {
+    let output = "";
+    const write = vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
+      output += String(chunk);
+      return true;
+    });
+    try {
+      await expect(main(["--help"])).resolves.toBe(0);
+    } finally {
+      write.mockRestore();
+    }
+
+    expect(output).not.toContain("ghostd import");
+    for (const command of [
+      "place-legacy-documents",
+      "login",
+      "relay-token",
+      "api-token",
+      "remote",
+      "hook-smol-complete",
+    ]) {
+      expect(output).toContain(`ghostd ${command}`);
+    }
+  });
+
+  it("rejects the retired import verb as an unknown daemon option", async () => {
+    let errorOutput = "";
+    const write = vi.spyOn(process.stderr, "write").mockImplementation((chunk) => {
+      errorOutput += String(chunk);
+      return true;
+    });
+    try {
+      await expect(main(["import"])).resolves.toBe(2);
+    } finally {
+      write.mockRestore();
+    }
+    expect(errorOutput).toContain("Unknown option: import");
   });
 });
 

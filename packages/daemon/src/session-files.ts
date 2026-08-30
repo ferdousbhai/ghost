@@ -12,7 +12,6 @@ import { visitLeadingEntries } from "./session-transcript.js";
 const HASHED_SESSION_PREFIX = "ghost~";
 const HASHED_SESSION_PATTERN = /^ghost~[0-9a-f]{64}\.jsonl$/u;
 const CONVERSATION_ID_ENTRY = "ghost_conversation_identity";
-const HOSTED_IMPORT_ENTRY = "ghost_hosted_conversation_import";
 const CLAUDE_SESSION_PREFIX = "claude-";
 const CLAUDE_SESSION_SUFFIX = ".json";
 /** How many leading entries may separate the header from the identity marker. */
@@ -67,20 +66,12 @@ function conversationIdFromCustomEntry(entry: unknown): string | null {
   const data = record.data as {
     version?: unknown;
     conversationId?: unknown;
-    sourceConversationId?: unknown;
   };
   if (record.customType === CONVERSATION_ID_ENTRY
     && data.version === 1
     && typeof data.conversationId === "string"
     && isValidConversationId(data.conversationId)) {
     return data.conversationId;
-  }
-  // Hosted projections already carry their exact source id in this durable
-  // marker, including projections created before runtime-qualified identities.
-  if (record.customType === HOSTED_IMPORT_ENTRY
-    && typeof data.sourceConversationId === "string"
-    && isValidConversationId(data.sourceConversationId)) {
-    return data.sourceConversationId;
   }
   return null;
 }

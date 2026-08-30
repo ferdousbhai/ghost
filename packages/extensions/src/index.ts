@@ -6,29 +6,6 @@ export {
 } from "./errors.js";
 
 export {
-  parseDocument,
-  parseFrontmatterLines,
-  renderDocument,
-  sanitizePathSegment,
-  splitFrontmatter,
-  yamlFlowList,
-  yamlScalar,
-  type FrontmatterRecord,
-  type FrontmatterValue,
-  type ParsedDocument,
-  type SplitDocument,
-} from "./frontmatter.js";
-
-export {
-  migrateDoc,
-  parseDoc,
-  renderDoc,
-  slugifyDocTag,
-  type DocRenderInput,
-  type ParsedDoc,
-} from "./doc-format.js";
-
-export {
   assertWritableMemory,
   coerceMemorySlug,
   compareMemoryNewestFirst,
@@ -77,7 +54,6 @@ export {
   GhostHome,
   MEMORY_DIRNAME,
   MEMORY_TRASH_DIRNAME,
-  DOCS_DIRNAME,
   openGhostHome,
   type GhostHomeOptions,
   type MemoryReadStage,

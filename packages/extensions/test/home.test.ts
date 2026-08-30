@@ -3,6 +3,7 @@ import { once } from "node:events";
 import {
   appendFile,
   readFile,
+  readdir,
   rename,
   stat,
   symlink,
@@ -70,91 +71,48 @@ describe("layout", () => {
     await expect(readFile(join(fixture.dir, "MEMORY.md"), "utf8")).rejects.toThrow();
   });
 
-  it("migrates nested legacy docs to strict v2 and is idempotent", async () => {
-    const legacy = await createGhostFixture("legacy", {
-      "character.md": "# Legacy\n",
-      "notes/nested/h1-wins.md": `---
-title: Frontmatter loses
-tags: [Route Planning, route-planning, Café, "!!!"]
-archived: true
-path: Discard me
----
-
-An introduction.
-# Body Wins
-The details.
-#Existing #route-planning
-`,
-      "notes/nested/frontmatter-title.md": "---\ntitle: Frontmatter Wins\n---\n\nText.\n",
-      "notes/deeper/plain-name.md": "No heading here.\n",
-      "notes/.hidden.md": "hidden legacy bytes\n",
-      "notes/.private/ignored.md": "hidden directory bytes\n",
-    });
+  it.each([
+    ["notes/ only", {
+      "notes/project.md": "---\ntitle: Old note\n---\n\nOriginal bytes.\n",
+    }],
+    ["docs/ only", {
+      "docs/project.md": "---\ntitle: Old document\n---\n\nOther original bytes.\n",
+    }],
+    ["notes/ and docs/ together", {
+      "notes/project.md": "---\ntitle: Old note\n---\n\nOriginal bytes.\n",
+      "docs/project.md": "---\ntitle: Old document\n---\n\nOther original bytes.\n",
+    }],
+  ] as const)("leaves retained %s names, inodes, and bytes untouched", async (_label, files) => {
+    const retained = await createGhostFixture("retained", files);
     try {
-      const legacyHome = openGhostHome(legacy.dir);
-      await legacyHome.ensure();
-      expect(await readFile(join(legacyHome.docsDir, "nested/h1-wins.md"), "utf8"))
-        .toBe(
-          "# Body Wins\n\nAn introduction.\nThe details.\n\n"
-          + "#route-planning #cafe #existing #archived\n",
-        );
-      expect(await readFile(
-        join(legacyHome.docsDir, "nested/frontmatter-title.md"),
-        "utf8",
-      )).toBe("# Frontmatter Wins\n\nText.\n");
-      expect(await readFile(join(legacyHome.docsDir, "deeper/plain-name.md"), "utf8"))
-        .toBe("# plain-name\n\nNo heading here.\n");
-      expect(await readFile(join(legacyHome.docsDir, ".hidden.md"), "utf8"))
-        .toBe("hidden legacy bytes\n");
-      expect(await readFile(join(legacyHome.docsDir, ".private/ignored.md"), "utf8"))
-        .toBe("hidden directory bytes\n");
+      const directories = [...new Set(Object.keys(files).map((path) => path.split("/")[0]!))];
+      const directoryInodes = new Map<string, number>();
+      const directoryEntries = new Map<string, string[]>();
+      const fileInodes = new Map<string, number>();
+      for (const directory of directories) {
+        directoryInodes.set(directory, (await stat(join(retained.dir, directory))).ino);
+        directoryEntries.set(directory, await readdir(join(retained.dir, directory)));
+      }
+      for (const path of Object.keys(files)) {
+        fileInodes.set(path, (await stat(join(retained.dir, path))).ino);
+      }
 
-      const migrated = await readFile(join(legacyHome.docsDir, "nested/h1-wins.md"), "utf8");
-      await legacyHome.ensure();
-      expect(await readFile(join(legacyHome.docsDir, "nested/h1-wins.md"), "utf8"))
-        .toBe(migrated);
-      await expect(readFile(join(legacy.dir, "notes/nested/h1-wins.md"), "utf8"))
-        .rejects.toThrow();
-    } finally {
-      await legacy.cleanup();
-    }
-  });
+      await openGhostHome(retained.dir).ensure();
 
-  it("does not rewrite canonical docs during a partial migration rerun", async () => {
-    const partial = await createGhostFixture("partial", {
-      "docs/already.md": "# Already canonical\n\nBytes stay put.\n\n#kept\n",
-      "docs/legacy.md": "---\ntitle: Legacy\n---\n\nNeeds migration.\n",
-    });
-    try {
-      const partialHome = openGhostHome(partial.dir);
-      const canonicalPath = join(partialHome.docsDir, "already.md");
-      const inode = (await stat(canonicalPath)).ino;
-      await partialHome.ensure();
-      expect((await stat(canonicalPath)).ino).toBe(inode);
-      expect(await readFile(canonicalPath, "utf8"))
-        .toBe("# Already canonical\n\nBytes stay put.\n\n#kept\n");
-      expect(await readFile(join(partialHome.docsDir, "legacy.md"), "utf8"))
-        .toBe("# Legacy\n\nNeeds migration.\n");
+      for (const directory of directories) {
+        expect((await stat(join(retained.dir, directory))).ino).toBe(directoryInodes.get(directory));
+        expect(await readdir(join(retained.dir, directory))).toEqual(directoryEntries.get(directory));
+      }
+      for (const [path, bytes] of Object.entries(files)) {
+        expect((await stat(join(retained.dir, path))).ino).toBe(fileInodes.get(path));
+        expect(await readFile(join(retained.dir, path))).toEqual(Buffer.from(bytes));
+      }
+      expect((await readdir(retained.dir)).sort()).toEqual([
+        ...directories,
+        "memory",
+      ].sort());
     } finally {
-      await partial.cleanup();
-    }
-  });
-
-  it("refuses to guess when legacy notes and canonical docs both exist", async () => {
-    const ambiguous = await createGhostFixture("ambiguous", {
-      "character.md": "# Ambiguous\n",
-      "notes/project.md": "legacy\n",
-      "docs/project.md": "canonical\n",
-    });
-    try {
-      await expect(openGhostHome(ambiguous.dir).ensure())
-        .rejects.toMatchObject({ code: "conflict" });
-      expect(await readFile(join(ambiguous.dir, "notes", "project.md"), "utf8"))
-        .toBe("legacy\n");
-      expect(await readFile(join(ambiguous.dir, "docs", "project.md"), "utf8"))
-        .toBe("canonical\n");
-    } finally {
-      await ambiguous.cleanup();
+      await retained.cleanup();
     }
   });
 });

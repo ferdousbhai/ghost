@@ -86,8 +86,7 @@ ambient credential discovery, and no cloud custody.
 Install the Arch package → create a ghost (name + job → seeded `character.md`)
 → pick a model: OpenRouter free model (zero cost, just an account), an OpenAI
 Codex/ChatGPT subscription sign-in, an externally authenticated Claude Code
-plan, any API key, or a local model → Super+Ctrl+G, start talking. Existing
-summonghost.com users: sign in there, "Download my ghost", import.
+plan, any API key, or a local model → Super+Ctrl+G, start talking.
 
 ## Undesigned
 

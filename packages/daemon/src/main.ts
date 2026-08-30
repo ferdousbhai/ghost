@@ -33,7 +33,6 @@ const USAGE = `ghostd — your ghost, on your machine
 
 Usage:
   ghostd [options]
-  ghostd import <archive> [--name <name>] [--overwrite] [options]
   ghostd place-legacy-documents --source <legacy-docs> --documents-root <root> [--apply]
   ghostd login [<ghost>] [--provider <id>] [--api-key] [options]
   ghostd relay-token [--rotate] [--quiet]
@@ -42,7 +41,6 @@ Usage:
   ghostd hook-smol-complete
 
 Subcommands:
-                           (zip or directory) into ~/ghosts/<name>.
   place-legacy-documents   Dry-run or explicitly copy one retained legacy docs
                            tree into Documents without following or overwriting.
   login                    Sign a ghost into a model provider from the terminal
@@ -292,8 +290,8 @@ async function readVersion(): Promise<string> {
 
 export async function main(argv: string[] = process.argv.slice(2), runtime: MainRuntime = {}): Promise<number> {
   // Subcommands own their narrower persistence lifecycle. Token commands touch
-  // only XDG state, remote touches config and Tailscale Serve, and login/import
-  // take the home reservation themselves.
+  // only XDG state, remote touches config and Tailscale Serve, and login takes
+  // the home reservation itself.
   if (argv[0] === "relay-token") return relayTokenCommand(argv.slice(1));
   if (argv[0] === "api-token") return apiTokenCommand(argv.slice(1));
   if (argv[0] === "remote") return remoteCommand(argv.slice(1));
@@ -354,7 +352,7 @@ export async function main(argv: string[] = process.argv.slice(2), runtime: Main
   } catch (error) {
     const detail =
       error instanceof HomeReservationBusyError
-        ? "another ghostd is running or an import/login is in progress"
+        ? "another ghostd is running or a login is in progress"
         : (error as Error).message;
     logger.error("could not reserve the ghost home", {
       ghostsRoot: config.ghostsRoot,

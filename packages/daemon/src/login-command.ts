@@ -261,7 +261,7 @@ export async function loginCommand(
     } catch (error) {
       if (error instanceof HomeReservationBusyError) {
         throw new Error(
-          "ghostd is running or another login/import is active. "
+          "ghostd is running or another login is active. "
           + "Stop it with `systemctl --user stop ghostd.service`, retry the login, then restart ghostd.",
         );
       }

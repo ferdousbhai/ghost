@@ -27,11 +27,7 @@ export async function closeAllBrowserSessions(): Promise<void> {
   await closeAllExtensionBrowserSessions();
 }
 
-/**
- * Ensure one discovered home uses the canonical layout. The home reader
- * retains hosted archive compatibility, but does not move legacy documents
- * into the owner's live Documents tree.
- */
+/** Ensure one discovered home has the required Ghost-owned directories. */
 export async function ensureGhostHomeLayout(homeDir: string): Promise<void> {
   await openGhostHome(homeDir).ensure();
 }

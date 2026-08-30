@@ -1,7 +1,7 @@
 /**
  * A ghost home on disk, written as raw bytes rather than through this package's
- * writers. The fixture is the format's independent witness: if the reader and
- * writer drift together, these files still say what ghost-home/v2 is.
+ * writers. The fixture independently witnesses persisted character and memory
+ * behavior if the package's readers and writers drift together.
  */
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -16,45 +16,15 @@ You are Casper, the ghost of a working typographer and letterpress printer.
 `;
 
 export const FINANCE_DOC_PATH = "estate-finances.md";
-export const PAPER_DOC_PATH = "craft/paper-guide.md";
-export const ARCHIVED_DOC_PATH = "old-plan.md";
 
 const FILES: Record<string, string> = {
   "character.md": CHARACTER_MD,
-
-  [`docs/${PAPER_DOC_PATH}`]: `# Paper that takes a deep impression
-
-Damp the sheet the night before. Cotton rag at 240gsm holds the bite.
-
-#paper #press
-`,
-
-  "docs/press-restoration.md": `# Restoring the Vandercook 4
-
-The carriage was frozen. Kerosene, patience, and a week of turning it by hand.
-
-#press
-`,
-
-  [`docs/${FINANCE_DOC_PATH}`]: `# Estate and finances
-
-The studio lease is held under my sister's name until 2031.
-`,
-
-  [`docs/${ARCHIVED_DOC_PATH}`]: `# Old plan
-
-Superseded. Kept for the record.
-
-#archived
-`,
 
   "memory/apprentice-question.md": `I explained how to start as an apprentice. They wanted to know where to begin. I said: find a shop that still prints, and sweep its floor.
 `,
 
   "memory/working-habit.md": `I work in the morning, on paper, before anyone calls. The press is cold until ten. I set type while it warms.
 `,
-
-  "conversations/conv-1.json": `{"id":"conv-1","ownerId":"owner-1","catalog":null,"messages":[]}\n`,
 };
 
 export interface GhostFixture {

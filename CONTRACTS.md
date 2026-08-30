@@ -117,10 +117,11 @@ the exact source bytes and SHA-256 plus that collision-free relative trash
 name. This private lifecycle trash is distinct from the owner-facing memory
 route's freedesktop Trash result.
 
-Canonical ghost-home Documents already keep their title in the leading `#`
-heading and tags in a final hashtag line; legacy document frontmatter exists
-only at the import migration boundary. Skill `name`/`description` frontmatter
-fields remain pi's discovery contract.
+Documents carry no Ghost-specific frontmatter or Markdown format. Skill
+`name`/`description` frontmatter fields remain pi's discovery contract.
+Retained per-ghost `notes/` and `docs/` trees are inert: Ghost never indexes,
+renames, or rewrites them automatically. The owner's explicit legacy Documents
+placement command is the only Ghost-provided path out of those trees.
 
 What lives in a ghost home and what lives in the machine's own directories is
 decided by lifecycle, not by which reads more natural. Mutable per-ghost state
@@ -902,7 +903,7 @@ shape and streams emit one complete event object per line.
   (`400 confirmation_required`); an unknown ghost is `404 not_found`; a ghost
   with any conversation busy, opening, or mid-delete — pi or Claude Code — is
   `409 ghost_busy`, as is a second concurrent delete of the same ghost. Idle
-  hosted sessions are closed (disposed, not deleted) and pending
+  cached Pi sessions are closed (disposed, not deleted) and pending
   title work is awaited first. **Deletion is a move, never an `rm`**:
   the ghost home holds the only copy of a persona and its memory, so
   nothing on any path follows the rename with a recursive removal.
@@ -924,7 +925,7 @@ shape and streams emit one complete event object per line.
   already taken in the root — by a ghost or by anything else — is
   `409 already_exists`; a ghost with any conversation busy, opening, or
   mid-delete is `409 ghost_busy`, the same gate `DELETE` uses, as is a second
-  concurrent rename or delete. Idle hosted sessions are closed and pending title
+  concurrent rename or delete. Idle cached Pi sessions are closed and pending title
   work awaited first, so nothing holds a path under the old name across the
   rename. A Claude Code conversation keeps its resume sidecar, but that runtime
   stores the transcript itself under its own `~/.claude/projects/<cwd>` path,

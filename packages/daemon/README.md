@@ -68,7 +68,7 @@ environment override (`GHOSTD_ASK_TIMEOUT` here); see `loadConfig` for the
 compaction overrides as well.
 
 The systemd user unit is in `contrib/ghostd.service`. `SIGINT` and `SIGTERM`
-stop new requests, end live streams, dispose hosted sessions, and exit cleanly.
+stop new requests, end live streams, dispose cached sessions, and exit cleanly.
 Filter one ghost's journal records with
 `journalctl --user -u ghostd GHOST=<name>`; see the
 [daemon harness invariants](../../CONTRACTS.md#daemon-harness-invariants) for
@@ -118,16 +118,12 @@ can traverse further when the task calls for it.
 Ghost rename, delete, and future home export never move or copy the owner-wide
 Documents tree.
 
-The hosted importer retains its bounded archive safety and may leave legacy
-`notes/`/`docs/` Markdown under the imported ghost home for explicit manual
-placement. That compatibility tree is not indexed or exposed as live Documents;
-there is no automatic startup/import migration into the owner's XDG directory.
-
-To retain those files, stop Ghost and choose one legacy home. The source is
-normally `<ghost-home>/docs` after hosted import compatibility has run. Pass the
-absolute owner-wide Documents root (`XDG_DOCUMENTS_DIR`, the configured XDG
-user directory, or `~/Documents`). The operator command defaults to a read-only
-dry run:
+An older local install may still have a per-ghost `notes/` or `docs/` tree.
+Ghost leaves that tree byte-for-byte untouched: it is neither indexed as live
+Documents nor moved automatically. To retain it in the owner-wide tree, choose
+the exact source and the absolute Documents root (`XDG_DOCUMENTS_DIR`, the
+configured XDG user directory, or `~/Documents`). The standalone owner command
+defaults to a read-only dry run:
 
 ```bash
 ghostd place-legacy-documents \
@@ -152,20 +148,10 @@ ghostd place-legacy-documents \
 
 Never delete the legacy source until the resulting Documents files have been
 independently inspected and backed up. Repeat separately for another retained
-home; matching relative paths collide and require an owner-chosen name rather
-than an automatic namespace. This is an explicit operator tool, never an
-automatic startup/import migration.
-
-`ghostd import` requires the daemon to be stopped. The command and daemon take
-the same root-keyed filesystem reservation before accessing a ghost home. The
-daemon holds it until shutdown; the import holds it through archive publication
-and conversation activation. This refuses a live daemon, a daemon startup
-racing the import, and concurrent imports even when their host or port settings
-differ. Stop the packaged service with
-`systemctl --user stop ghostd.service`, run the import, then start it again.
-The import's `--host` and `--port` options retain a listener check for older
-daemon versions that do not take the root reservation; they must match that
-older daemon's effective loopback listener.
+tree; matching relative paths collide and require an owner-chosen name rather
+than an automatic namespace. The command does not open, rewrite, or reserve a
+ghost home. It is an explicit local-owner operation, never a daemon startup
+migration.
 
 Ghost-home context listings and the owner-wide Documents index are derived from
 disk and never persist a catalog.

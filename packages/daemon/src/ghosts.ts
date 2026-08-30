@@ -108,7 +108,7 @@ function isFile(path: string): boolean {
 /**
  * A directory is a ghost home when it exists and holds a `character.md`.
  * The persona file is the one thing a ghost cannot be without — memory and
- * conversations are optional and may be empty.
+ * runtime state are optional and may be empty.
  */
 export function isGhostHome(dir: string): boolean {
   return isDirectory(dir) && isFile(join(dir, GHOST_CHARACTER_FILENAME));
@@ -303,8 +303,8 @@ export class GhostRegistry {
   }
 
   /**
-   * Create `<root>/<name>/` with a seeded `character.md` and the empty
-   * `ghost-home/v2` directories. Refuses to overwrite an existing ghost.
+   * Create `<root>/<name>/` with a seeded `character.md` and empty memory
+   * directory. Refuses to overwrite an existing ghost.
    */
   create(name: string): Ghost {
     assertValidGhostName(name);
@@ -313,9 +313,7 @@ export class GhostRegistry {
       throw new GhostError("already_exists", `A ghost named ${JSON.stringify(name)} already exists.`, 409);
     }
     mkdirSync(dir, { recursive: true });
-    for (const sub of ["memory", "conversations"]) {
-      mkdirSync(join(dir, sub), { recursive: true });
-    }
+    mkdirSync(join(dir, "memory"), { recursive: true });
     writeFileSync(join(dir, GHOST_CHARACTER_FILENAME), SEEDED_CHARACTER(name), {
       encoding: "utf8",
       // Fail rather than clobber a character.md that appeared between the
@@ -328,7 +326,7 @@ export class GhostRegistry {
   /**
    * Rename `<root>/<name>/` to `<root>/<nextName>/` — which renames the ghost,
    * because the directory name is the name. One same-filesystem rename carries
-   * the persona, memory, conversations, and pins together, and leaves every
+   * the persona, memory, sessions, and owner state together, and leaves every
    * conversation id (a transcript filename inside the home) valid. Machine
    * credentials are service/account scoped and are not renamed.
    *

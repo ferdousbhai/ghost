@@ -18,7 +18,6 @@ import {
   GHOST_DESKTOP,
   READ_ONLY_BROWSER_ACTIONS,
   READ_ONLY_DESKTOP_ACTIONS,
-  slugifyDocTag,
 } from "@ghost/extensions";
 import { Type } from "typebox";
 import type { AskBroker } from "./ask-broker.js";
@@ -294,7 +293,14 @@ export function createTodoTool(book: PlanBook): ToolDefinition<typeof todoToolSc
 // Plan mode
 
 export function planFileName(title: string): string {
-  const stem = slugifyDocTag(title.replace(/\.md$/i, "")).slice(0, 80);
+  const stem = title
+    .replace(/\.md$/i, "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
   if (!stem) throw new Error("The plan needs a title with letters or digits in it.");
   return `${stem}.md`;
 }

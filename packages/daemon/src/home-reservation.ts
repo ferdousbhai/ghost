@@ -33,7 +33,7 @@ export class HomeReservationBusyError extends Error {
   readonly code = "home_reservation_busy";
 
   constructor(readonly ghostsRoot: string) {
-    super(`Another ghostd or overwrite import is using ${ghostsRoot}.`);
+    super(`Another ghostd or login is using ${ghostsRoot}.`);
     this.name = "HomeReservationBusyError";
   }
 }

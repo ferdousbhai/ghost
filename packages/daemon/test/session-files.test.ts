@@ -49,22 +49,6 @@ describe("Pi conversation transcript identity", () => {
     await expect(conversationIdFromSessionFile(path)).resolves.toBe(conversationId);
   });
 
-  it("recovers an unsafe hosted projection from its existing import marker", async () => {
-    root = mkdtempSync(join(tmpdir(), "ghost-session-files-"));
-    const sessionDir = join(root, "sessions");
-    mkdirSync(sessionDir);
-    const conversationId = "hosted/unsafe id";
-    const path = join(sessionDir, sessionFileNameFor(conversationId));
-    writeFileSync(path, "");
-    const manager = SessionManager.open(path, sessionDir, root);
-    manager.appendCustomEntry("ghost_hosted_conversation_import", {
-      version: 1,
-      sourceConversationId: conversationId,
-    });
-
-    await expect(conversationIdFromSessionFile(path)).resolves.toBe(conversationId);
-  });
-
   it("omits a transplanted hash identity and rejects direct actions with 409", async () => {
     root = mkdtempSync(join(tmpdir(), "ghost-session-files-"));
     const sessionDir = join(root, "sessions");

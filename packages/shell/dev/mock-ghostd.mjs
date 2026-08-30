@@ -467,38 +467,24 @@ const nextEntryId = () => `entry-${++entrySeq}`;
 const entry = (message) => ({ ...message, entryId: nextEntryId() });
 
 /**
- * The two questions the seeded transcript timed out on. They are the live ask
- * again when that card is re-answered, so they live where both readers reach
- * them. The first recommends an option; the second recommends nothing, which is
- * the other thing a restored card has to be able to say.
+ * The question the seeded transcript timed out on. It is the live ask again
+ * when that card is re-answered, so it lives where both readers reach it.
  */
-const SEEDED_QUESTIONS = {
-  notes: {
-    id: "q-notes",
-    header: "Launch notes",
-    question: "Three sections in shared Documents/Projects/roadmap.md are unfinished. Which do you want me to draft first?",
-    recommended: 1,
-    options: [
-      { label: "The roadmap section", description: "Six bullets, mostly written. I'd tidy and finish it." },
-      {
-        label: "The pricing page copy",
-        description: "Nothing written yet; I'd draft it from your docs and memory.",
-        preview: "Three tiers, no annual discount, one sentence each.",
-      },
-      { label: "The changelog", description: "Mechanical — I can generate it from the git log." },
-      { label: "None of them; just tell me what's left", description: "No writing. One paragraph back." },
-    ],
-  },
-  archive: {
-    id: "q-archive",
-    header: "Old exports",
-    question: "The archive holds 340 files from the hosted export. What should I do with them?",
-    options: [
-      { label: "Leave them exactly as they are" },
-      { label: "Index them into memory", description: "Slow, and it rewrites nothing on disk." },
-      { label: "Move them to the trash", description: "Recoverable from the file manager." },
-    ],
-  },
+const SEEDED_QUESTION = {
+  id: "q-notes",
+  header: "Launch notes",
+  question: "Three sections in shared Documents/Projects/roadmap.md are unfinished. Which do you want me to draft first?",
+  recommended: 1,
+  options: [
+    { label: "The roadmap section", description: "Six bullets, mostly written. I'd tidy and finish it." },
+    {
+      label: "The pricing page copy",
+      description: "Nothing written yet; I'd draft it from your docs and memory.",
+      preview: "Three tiers, no annual discount, one sentence each.",
+    },
+    { label: "The changelog", description: "Mechanical — I can generate it from the git log." },
+    { label: "None of them; just tell me what's left", description: "No writing. One paragraph back." },
+  ],
 };
 
 function ghostSessions(name) {
@@ -510,20 +496,12 @@ function ghostSessions(name) {
     // nothing to open. `content` as an ordered part list is the stored shape
     // that can carry them (TurnBlocks.partsOf); a plain string cannot.
     const notesResult = nextEntryId();
-    const archiveResult = nextEntryId();
     const notesAsk = {
       type: "toolCall",
       id: "call-seed-ask-notes",
       name: "ask",
-      arguments: { questions: [SEEDED_QUESTIONS.notes] },
+      arguments: { questions: [SEEDED_QUESTION] },
       ghostAsk: { resultEntryId: notesResult, settled: "timedOut" },
-    };
-    const archiveAsk = {
-      type: "toolCall",
-      id: "call-seed-ask-archive",
-      name: "ask",
-      arguments: { questions: [SEEDED_QUESTIONS.archive] },
-      ghostAsk: { resultEntryId: archiveResult, settled: "timedOut" },
     };
     const titled = {
       ...conversationIdentity("pi", `sess-${name}-1`),
@@ -555,16 +533,6 @@ function ghostSessions(name) {
           ],
         }),
         entry({ role: "assistant", content: "I never got an answer, so I stopped at the roadmap section and left the rest alone.", timestamp: now - 3_606_000 }),
-        entry({ role: "user", content: "and the old export archive?", timestamp: now - 3_605_000 }),
-        entry({
-          role: "assistant",
-          timestamp: now - 3_604_000,
-          content: [
-            { type: "text", text: "One thing before I touch the archive" },
-            archiveAsk,
-          ],
-        }),
-        entry({ role: "assistant", content: "Nothing was chosen for me either, so the archive is exactly where it was.", timestamp: now - 3_600_000 }),
       ],
       // The ask *results* are entries of this conversation that no renderable
       // message carries — the transcript route drops tool-result messages — so
@@ -572,7 +540,6 @@ function ghostSessions(name) {
       // re-answer entryId a 400 rather than a guess.
       askResults: new Map([
         [notesResult, { call: notesAsk }],
-        [archiveResult, { call: archiveAsk }],
       ]),
     };
     const untitled = {

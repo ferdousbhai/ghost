@@ -220,8 +220,8 @@ function fileTarget(activity) {
     case "edit":
         // OMP's native file tools take `path`; some providers emit `file_path`.
         return argument(activity, "path") || argument(activity, "file_path");
-    // Historical transcripts keep the old tool name and target import-only
-    // files in that ghost home. They are never shared Documents paths.
+    // Historical transcripts keep the old tool name and target retired
+    // per-ghost files. They are never shared Documents paths.
     case "ghost_notes_write": {
         // A doc path is relative to the docs directory, not to the home.
         const doc = argument(activity, "path");

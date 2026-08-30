@@ -1,7 +1,7 @@
 /**
  * Mutations pair the path-keyed in-process queue with descriptor locks and
- * atomic rename because `ghostd import` mutates a home from a separate process:
- * neither shared quotas nor file publication may rely on one event loop.
+ * atomic rename so independently opened home handles share one publication
+ * boundary for quotas and file contents.
  */
 import {
   lstat,
@@ -15,7 +15,6 @@ import {
 import { constants, type BigIntStats } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import { basename, dirname, join, resolve, sep } from "node:path";
-import { migrateDoc } from "./doc-format.js";
 import { GhostError, MemoryFileFormatError } from "./errors.js";
 import {
   assertWritableMemory,
@@ -41,8 +40,6 @@ import type {
   MemoryRecord,
 } from "./types.js";
 
-export const DOCS_DIRNAME = "docs";
-const LEGACY_NOTES_DIRNAME = "notes";
 export const MEMORY_DIRNAME = "memory";
 export const MEMORY_TRASH_DIRNAME = ".trash";
 export const CHARACTER_FILENAME = "character.md";
@@ -449,84 +446,6 @@ async function atomicWriteFile(
   }
 }
 
-async function migrateDocFile(
-  homeDir: string,
-  directory: FileHandle,
-  name: string,
-  fullPath: string,
-  docPath: string,
-): Promise<void> {
-  await withFileMutationQueue(fullPath, async () => {
-    await withDescriptorLock(directory, async () => {
-      const text = await readEntryText(directory, name, "Document path");
-      if (text === null) return;
-      const migrated = migrateDoc(text, docPath);
-      if (migrated === text) return;
-      await atomicWriteFile(homeDir, fullPath, migrated, directory);
-    });
-  });
-}
-
-async function migrateDocTree(
-  homeDir: string,
-  directory: FileHandle,
-  lexicalDir: string,
-  prefix = "",
-): Promise<void> {
-  for (const entry of await readdir(descriptorPath(directory), { withFileTypes: true })) {
-    if (entry.name.startsWith(".")) continue;
-    const docPath = prefix ? `${prefix}/${entry.name}` : entry.name;
-    const fullPath = join(lexicalDir, entry.name);
-    if (entry.isDirectory()) {
-      const child = await openDirectoryNoFollow(
-        descriptorPath(directory, entry.name),
-        "Document path",
-      );
-      try {
-        await migrateDocTree(homeDir, child, fullPath, docPath);
-      } finally {
-        await child.close();
-      }
-    } else if (entry.isFile() && entry.name.endsWith(".md")) {
-      await migrateDocFile(homeDir, directory, entry.name, fullPath, docPath);
-    }
-  }
-}
-
-async function readEntryText(
-  directory: FileHandle,
-  name: string,
-  label: string,
-): Promise<string | null> {
-  const source = await readEntryTextFile(directory, name, label);
-  return source?.text ?? null;
-}
-
-async function readEntryTextFile(
-  directory: FileHandle,
-  name: string,
-  label: string,
-): Promise<ReadTextFile | null> {
-  let file: FileHandle;
-  try {
-    file = await openRegularFileNoFollow(
-      descriptorPath(directory, name),
-      label,
-    );
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === "ENOENT") return null;
-    throw error;
-  }
-  try {
-    const text = await file.readFile("utf8");
-    const stats = await file.stat();
-    return { text, modified: stats.mtime };
-  } finally {
-    await file.close();
-  }
-}
-
 async function openOrCreateChildDirectory(
   parent: FileHandle,
   name: string,
@@ -539,19 +458,6 @@ async function openOrCreateChildDirectory(
     if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
   }
   return openDirectoryNoFollow(child, label);
-}
-
-async function openChildDirectoryIfPresent(
-  parent: FileHandle,
-  name: string,
-  label: string,
-): Promise<FileHandle | null> {
-  try {
-    return await openDirectoryNoFollow(descriptorPath(parent, name), label);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw error;
-  }
 }
 
 export class GhostHome {
@@ -567,10 +473,6 @@ export class GhostHome {
 
   get characterPath(): string {
     return join(this.dir, CHARACTER_FILENAME);
-  }
-
-  get docsDir(): string {
-    return join(this.dir, DOCS_DIRNAME);
   }
 
   get memoryDir(): string {
@@ -599,48 +501,6 @@ export class GhostHome {
       });
       try {
         await withDescriptorLock(directory, async () => {
-          const legacyNotesDir = join(this.dir, LEGACY_NOTES_DIRNAME);
-          let docs = await openChildDirectoryIfPresent(
-            directory,
-            DOCS_DIRNAME,
-            "Documents path",
-          );
-          let legacyNotes: FileHandle | null = null;
-          try {
-            legacyNotes = await openChildDirectoryIfPresent(
-              directory,
-              LEGACY_NOTES_DIRNAME,
-              "Legacy notes path",
-            );
-            if (docs && legacyNotes) {
-              throw new GhostError(
-                "conflict",
-                `Both ${DOCS_DIRNAME}/ and the legacy ${LEGACY_NOTES_DIRNAME}/ directory exist in `
-                + `${this.dir}. Merge them into ${DOCS_DIRNAME}/ before opening this ghost.`,
-                { docs: this.docsDir, legacyNotes: legacyNotesDir },
-              );
-            }
-            if (legacyNotes) {
-              await legacyNotes.close();
-              legacyNotes = null;
-              await rename(
-                descriptorPath(directory, LEGACY_NOTES_DIRNAME),
-                descriptorPath(directory, DOCS_DIRNAME),
-              );
-              docs = await openDirectoryNoFollow(
-                descriptorPath(directory, DOCS_DIRNAME),
-                "Documents path",
-              );
-            }
-            // `docs/` is a legacy/import input now. New homes use the shared
-            // XDG Documents directory and do not recreate an empty per-ghost
-            // directory after the owner's one-time move.
-            if (docs) await migrateDocTree(this.dir, docs, this.docsDir);
-          } finally {
-            await docs?.close().catch(() => undefined);
-            await legacyNotes?.close().catch(() => undefined);
-          }
-
           const memory = await openOrCreateChildDirectory(
             directory,
             MEMORY_DIRNAME,
