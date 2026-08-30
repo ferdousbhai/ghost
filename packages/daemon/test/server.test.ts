@@ -232,6 +232,21 @@ const noHooksFile = {
   replaceConfig: async (): Promise<never> => { throw new Error("This hook runner has no configuration file."); },
 };
 
+describe("listener shutdown", () => {
+  it("finishes cleanly after admission already stopped an idle server", async () => {
+    await serve();
+    const current = listening!;
+    const stopped = new Promise<void>((resolvePromise) => {
+      current.server.once("close", resolvePromise);
+    });
+    current.server.close();
+    await stopped;
+
+    await expect(current.close()).resolves.toBeUndefined();
+    listening = null;
+  });
+});
+
 describe("GET /api/ghosts", () => {
   it("lists ghosts with name, dir, and createdAt", async () => {
     const base = await serve();

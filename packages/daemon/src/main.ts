@@ -118,21 +118,26 @@ export async function runStagedShutdown(options: StagedShutdownOptions): Promise
   options.abortActive();
   const graceful = Promise.resolve().then(options.graceful);
   const settled = graceful.then(
-    () => true,
-    () => true,
+    () => ({ ok: true as const }),
+    (error: unknown) => ({ ok: false as const, error }),
   );
-  if (await Promise.race([
+  const result = await Promise.race([
     settled,
-    wait(options.graceMs ?? DEFAULT_SHUTDOWN_GRACE_MS).then(() => false),
-  ])) {
-    await graceful;
+    wait(options.graceMs ?? DEFAULT_SHUTDOWN_GRACE_MS).then(() => null),
+  ]);
+  if (result !== null) {
+    if (!result.ok) {
+      options.force();
+      throw result.error;
+    }
     return "graceful";
   }
   options.force();
-  await Promise.race([
+  const forcedResult = await Promise.race([
     settled,
-    wait(options.forceMs ?? DEFAULT_SHUTDOWN_FORCE_MS),
+    wait(options.forceMs ?? DEFAULT_SHUTDOWN_FORCE_MS).then(() => null),
   ]);
+  if (forcedResult !== null && !forcedResult.ok) throw forcedResult.error;
   return "forced";
 }
 

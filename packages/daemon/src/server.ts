@@ -2338,7 +2338,13 @@ export async function startDaemonServer(
         for (const stream of streams ?? []) {
           if (!stream.writableEnded) stream.end();
         }
-        server.close((error) => (error ? rejectPromise(error) : resolvePromise()));
+        server.close((error) => {
+          if (!error || (error as NodeJS.ErrnoException).code === "ERR_SERVER_NOT_RUNNING") {
+            resolvePromise();
+          } else {
+            rejectPromise(error);
+          }
+        });
         // Keep-alive sockets would otherwise hold the close open until they
         // time out; a local daemon should exit when it is told to.
         server.closeIdleConnections();

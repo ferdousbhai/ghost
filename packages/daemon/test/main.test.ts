@@ -141,6 +141,42 @@ describe("runStagedShutdown", () => {
     expect(waits).toEqual([11, 7]);
   });
 
+  it("force-closes before reporting a graceful teardown failure", async () => {
+    const events: string[] = [];
+    await expect(runStagedShutdown({
+      stopAdmission: () => events.push("stop"),
+      abortActive: () => events.push("abort"),
+      graceful: async () => {
+        events.push("graceful");
+        throw new Error("graceful teardown failed");
+      },
+      force: () => events.push("force"),
+      wait: () => new Promise(() => {}),
+    })).rejects.toThrow("graceful teardown failed");
+    expect(events).toEqual(["stop", "abort", "graceful", "force"]);
+  });
+
+  it("reports a graceful teardown failure that settles during the force window", async () => {
+    const events: string[] = [];
+    let rejectGraceful!: (error: Error) => void;
+    const graceful = new Promise<void>((_resolvePromise, rejectPromise) => {
+      rejectGraceful = rejectPromise;
+    });
+    await expect(runStagedShutdown({
+      stopAdmission: () => events.push("stop"),
+      abortActive: () => events.push("abort"),
+      graceful: () => graceful,
+      force: () => {
+        events.push("force");
+        rejectGraceful(new Error("late graceful teardown failure"));
+      },
+      graceMs: 11,
+      forceMs: 7,
+      wait: (delayMs) => delayMs === 11 ? Promise.resolve() : new Promise(() => {}),
+    })).rejects.toThrow("late graceful teardown failure");
+    expect(events).toEqual(["stop", "abort", "force"]);
+  });
+
   it("keeps the same signal handler installed so a repeated signal forces the process", async () => {
     const mainUrl = new URL("../src/main.ts", import.meta.url).href;
     const source = `

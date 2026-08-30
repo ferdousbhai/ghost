@@ -2311,9 +2311,12 @@ not coupled to that release identity.
   rename and delete retire that old-home entry before moving the directory;
   another ghost's browser session is untouched. Graceful daemon shutdown retires
   every browser session while the relay is live, then closes the relay/listener;
-  relay shutdown gives an upgraded peer one second for the WebSocket close
+  the final listener close treats an already-stopped admission socket as success.
+  Relay shutdown gives an upgraded peer one second for the WebSocket close
   handshake before force-terminating it, and bounds WebSocket-server closure too.
-  It attempts every cleanup stage and reports rather than masks any failure.
+  It attempts every cleanup stage and reports rather than masks any failure; a
+  graceful teardown rejection still triggers terminal force cleanup before it is
+  reported.
   The relay is the only browser: there is no second backend and no browser mode
   to choose. Browser calls fail with the disconnected message until an extension
   pairs. A ghost that needs Chromium running may start it from its shell, but
