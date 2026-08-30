@@ -1760,9 +1760,12 @@ Claude authentication comes from the existing short-lived
 `claude auth status --json` probe and counts only the owner's `claude.ai` plan
 login. A failed auth probe leaves Claude installation and authentication
 `unknown`; only the executable resolver's categorical missing error establishes
-`missing`. Codex authentication remains `unknown` until the native Codex
-adapter supplies its structured account probe; Omarchy's display record is
-deliberately not treated as authentication evidence. `pi-worker` is bundled,
+`missing`. Codex authentication comes from a short-lived structured
+`account/read` probe against the installed Codex app server. Any non-null native
+account counts as authenticated; a null account is unauthenticated only when the
+app server says OpenAI authentication is required. Probe or protocol failures
+leave the state unknown. Omarchy's display record is deliberately not treated
+as authentication evidence. `pi-worker` is bundled,
 reports installed with `ghost-model` authentication, and will resolve its model
 through Ghost's `task_model` role when task execution lands.
 
@@ -1859,6 +1862,16 @@ cwd and then perform their own native project-policy/configuration discovery
 there. An adapter that is not active returns `503 worker_unavailable` without
 changing this wire or persistence contract.
 
+At daemon boot Ghost takes one in-memory snapshot of the launcher environment
+before applying the principal provider scrub. Only installed vendor worker
+processes and their installation/authentication probes receive that snapshot;
+the Ghost principal and `pi-worker` retain the scrubbed environment. Values are
+never logged, persisted, or returned by an API. This is the deliberate native
+worker exception to provider isolation: it preserves CLI configuration selected
+through environment variables as well as the owner's home/XDG configuration,
+but cannot invent interactive-shell state that was absent from the service's
+launcher environment.
+
 `pi-worker` runs in an isolated child invocation of the installed `ghostd`
 program, never inside the daemon process and never through a separately
 installed Pi executable. The child uses the bundled locked Pi SDK and the
@@ -1902,6 +1915,49 @@ settle, the adapter terminates only that captured child, escalating to a forced
 kill after a bounded grace period. Every terminal result, worker error,
 protocol failure, and cancellation is confirmed only after that captured child
 has exited and can no longer work.
+
+The `codex` worker runs one captured process of the owner's resolved `codex`
+executable per task using the native app-server JSON-lines stdio protocol. Ghost
+does not bundle Codex, its SDK, generated protocol bindings, a model, or a
+parallel agent loop. It invokes only `codex app-server --listen stdio://`, with
+the captured native-worker environment and task cwd, initializes a narrow
+client connection, then creates a persistent thread with only `cwd` supplied.
+It does not override model, provider, service tier, personality, collaboration
+mode, instructions, permission profile, approval policy, sandbox, history,
+skills, plugins, MCP servers, hooks, rules, or user configuration. The complete
+task is the first ordinary user input. Codex therefore owns its identity,
+prompt/tool guidance, `$CODEX_HOME` configuration and authentication, project
+configuration, `AGENTS.md`, skills, plugins, rules, nested agents, transcripts,
+and model/provider fallback behavior exactly as the installed harness resolves
+them at that cwd. The app-server protocol is an explicit experimental native
+dependency; an incompatible installed version fails categorically rather than
+falling back to `codex exec` or Ghost emulation.
+
+Ghost validates the effective cwd returned by `thread/start` and normalizes
+completed Codex agent messages plus safe tool progress into the bounded task
+event tail; returned permission/instruction-source diagnostics remain native
+diagnostics rather than overrides. The Codex thread is the authoritative full
+transcript and its `thread.id` is the opaque native session id. Task messages
+use native `turn/steer` with the active turn-id precondition and are persisted
+only after Codex accepts them.
+
+The first Codex worker version has no owner-facing interactive approval or form
+broker. Task messages never double as approval answers. Native command, file,
+permission, and MCP elicitation requests are conservatively declined with their
+typed protocol responses and a bounded task notice. Unsupported blocking
+client-host requests receive a JSON-RPC error so the native turn fails visibly
+instead of hanging. In particular Ghost does not auto-approve work because a
+cwd is trusted, parse free-form yes/no text, impersonate an interactive login,
+supply external auth tokens or attestation, or expose Codex-only TUI/session
+navigation. A future interactive broker requires a distinct typed pending-
+request and response contract keyed by native request id.
+
+Cancellation sends native `turn/interrupt` when a turn id exists, closes the
+captured app server, then escalates `SIGTERM` to `SIGKILL` after bounded grace
+periods. Startup/protocol/terminal outcomes settle only after that exact process
+exits. Shutdown's force stage sends `SIGKILL` directly to the captured process,
+including during initialization; no PID discovery or name-based kill is
+permitted.
 
 The captured root/cwd remain pinned for the task's lifetime even if its parent
 conversation is later deleted; conversation deletion and fork neither cancel

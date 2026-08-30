@@ -613,11 +613,15 @@ describe("TaskManager lifecycle", () => {
 
   it("records a confirmed stopped-worker failure instead of masking it as cancellation", async () => {
     const failure = new WorkerStoppedError("native shutdown failed");
+    const result = Promise.withResolvers<{ text: string }>();
     const adapter: WorkerAdapter = {
       id: "pi-worker",
       start: async () => ({
-        result: Promise.reject(failure),
-        cancel: () => { throw failure; },
+        result: result.promise,
+        cancel: () => {
+          result.reject(failure);
+          throw failure;
+        },
       }),
     };
     const { manager } = setup(adapter);

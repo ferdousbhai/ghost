@@ -18,9 +18,11 @@ and LSP stay disabled inside a Ghost principal session; the bundled
 child after the owner binds the project, while model-callable custom tools stay
 outside its fixed bundled tool set. Trusted visible `hooks/pre` and `hooks/post`
 files in the ghost home remain the explicit in-process extension surface. The
-optional Claude Code runtime retains Claude's native subagents. Ghost replaces
-pi's coding-oriented system prompt with its
-character, bounded memory and shallow owner Documents indexes, and minimal
+native `codex` worker uses the owner's installed Codex app server and native
+user/project configuration; see [docs/native-workers.md](docs/native-workers.md).
+The optional Claude Code runtime retains Claude's native subagents. Ghost
+replaces pi's coding-oriented system prompt with its character, bounded memory,
+shallow owner Documents indexes, and minimal
 runtime guidance; Claude keeps its native preset and receives the same
 Ghost-owned context as an append. Browser and desktop capabilities remain
 available. The Quickshell client renders

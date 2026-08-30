@@ -30,7 +30,7 @@ import {
   writePrivateJsonAtomic,
 } from "./private-file.js";
 import { serializeByKey } from "./promise-chain.js";
-import { WORKER_IDS, type WorkerId } from "./worker-catalog.js";
+import { WORKER_IDS, type WorkerId } from "./worker-identity.js";
 
 export const TASKS_DIRNAME = GHOST_TASKS_DIRNAME;
 export const TASK_RECORD_VERSION = 1;

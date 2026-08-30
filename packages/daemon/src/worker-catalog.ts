@@ -6,11 +6,8 @@
  * routing remains a separate Ghost concern, and task execution remains owned
  * by the task manager and worker adapters.
  */
-import { constants } from "node:fs";
-import { access, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import {
-  delimiter,
   isAbsolute,
   join,
 } from "node:path";
@@ -19,13 +16,15 @@ import {
   ClaudeCodeProbe,
   isClaudePlanAuth,
 } from "./claude-code.js";
+import { CodexMissingError, CodexProbe } from "./codex-worker.js";
 import { GhostError } from "./ghosts.js";
 import { silentLogger, type Logger } from "./log.js";
 import { PrivateReadError, readPrivateFileText } from "./private-file.js";
+import { CODEX_BINARY_ENV } from "./worker-executable.js";
+import type { WorkerId } from "./worker-identity.js";
 
-export const CODEX_BINARY_ENV = "GHOST_CODEX_BINARY";
-export const WORKER_IDS = ["claude-code", "codex", "pi-worker"] as const;
-export type WorkerId = typeof WORKER_IDS[number];
+export { CODEX_BINARY_ENV, resolveWorkerExecutable } from "./worker-executable.js";
+export { WORKER_IDS, type WorkerId } from "./worker-identity.js";
 
 export type WorkerAuthentication =
   | "authenticated"
@@ -84,6 +83,7 @@ export interface WorkerCatalogOptions {
   now?: () => number;
   staleAfterMs?: number;
   claudeCodeProbe?: Pick<ClaudeCodeProbe, "read">;
+  codexProbe?: Pick<CodexProbe, "read">;
   resolveCodexExecutable?: (configured: string) => Promise<string>;
   logger?: Logger;
 }
@@ -98,6 +98,8 @@ const CLAUDE_PROBE_FAILED_REASON =
   "Could not verify Claude Code. Run `claude auth status --json` to diagnose it.";
 const CODEX_MISSING_REASON =
   "Codex is unavailable. Install it or check `GHOST_CODEX_BINARY`.";
+const CODEX_PROBE_FAILED_REASON =
+  "Could not verify Codex. Run `codex login status` to diagnose it.";
 
 function compactText(value: unknown, maxLength: number): string | null {
   if (typeof value !== "string") return null;
@@ -204,47 +206,13 @@ export function defaultOmarchyUsageDir(
   return join(stateHome, "omarchy", "agents", "usage");
 }
 
-async function executableFile(path: string): Promise<string | null> {
-  try {
-    await access(path, constants.X_OK);
-    const info = await stat(path);
-    if (!info.isFile()) return null;
-    return await realpath(path);
-  } catch {
-    return null;
-  }
-}
-
-/** Resolve one known executable without invoking a shell or accepting cwd-relative PATH entries. */
-export async function resolveWorkerExecutable(
-  configured: string,
-  env: NodeJS.ProcessEnv = process.env,
-): Promise<string> {
-  if (configured.includes("/")) {
-    if (!isAbsolute(configured)) throw new Error("Configured worker executable must be absolute.");
-    const resolved = await executableFile(configured);
-    if (resolved) return resolved;
-    throw new Error(`Worker executable ${JSON.stringify(configured)} is unavailable.`);
-  }
-
-  for (const directory of (env.PATH ?? "").split(delimiter)) {
-    if (!directory || !isAbsolute(directory)) continue;
-    const resolved = await executableFile(join(directory, configured));
-    if (resolved) return resolved;
-  }
-  throw new Error(`Worker executable ${JSON.stringify(configured)} was not found in PATH.`);
-}
-
 /** Read-only detection and usage status for the three code-owned worker ids. */
 export class WorkerCatalog {
   private readonly usageDir: string;
   private readonly now: () => number;
   private readonly staleAfterMs: number;
   private readonly claudeCodeProbe: Pick<ClaudeCodeProbe, "read">;
-  private readonly codexBinary: string;
-  private readonly resolveCodexExecutable: NonNullable<
-    WorkerCatalogOptions["resolveCodexExecutable"]
-  >;
+  private readonly codexProbe: Pick<CodexProbe, "read">;
   private readonly logger: Logger;
 
   constructor(options: WorkerCatalogOptions = {}) {
@@ -259,9 +227,13 @@ export class WorkerCatalog {
     this.claudeCodeProbe = options.claudeCodeProbe ?? new ClaudeCodeProbe({
       binaryPath: env[CLAUDE_CODE_BINARY_ENV] ?? "claude",
     });
-    this.codexBinary = env[CODEX_BINARY_ENV]?.trim() || "codex";
-    this.resolveCodexExecutable = options.resolveCodexExecutable
-      ?? ((configured) => resolveWorkerExecutable(configured, env));
+    this.codexProbe = options.codexProbe ?? new CodexProbe({
+      env,
+      binaryPath: env[CODEX_BINARY_ENV]?.trim() || "codex",
+      ...(options.resolveCodexExecutable
+        ? { resolveExecutable: options.resolveCodexExecutable }
+        : {}),
+    });
     this.logger = options.logger ?? silentLogger;
   }
 
@@ -323,27 +295,33 @@ export class WorkerCatalog {
 
   private async codexStatus(): Promise<Omit<WorkerStatus, "usage">> {
     try {
-      await this.resolveCodexExecutable(this.codexBinary);
+      const result = await this.codexProbe.read();
+      const authentication = result.account.accountPresent
+        ? "authenticated"
+        : result.account.requiresOpenaiAuth
+        ? "unauthenticated"
+        : "unknown";
       return {
         id: "codex",
         name: "Codex",
         kind: "native",
         nativeConfiguration: true,
         installation: "installed",
-        // The usage record is not an authentication contract. The native
-        // Codex adapter will replace this with its structured account probe.
-        authentication: "unknown",
-        reason: null,
+        authentication,
+        reason: authentication === "unauthenticated"
+          ? "Run `codex login` to use the owner's Codex account."
+          : null,
       };
-    } catch {
+    } catch (error) {
+      const installation = error instanceof CodexMissingError ? "missing" : "unknown";
       return {
         id: "codex",
         name: "Codex",
         kind: "native",
         nativeConfiguration: true,
-        installation: "missing",
+        installation,
         authentication: "unknown",
-        reason: CODEX_MISSING_REASON,
+        reason: installation === "missing" ? CODEX_MISSING_REASON : CODEX_PROBE_FAILED_REASON,
       };
     }
   }

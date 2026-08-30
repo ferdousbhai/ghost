@@ -6,6 +6,7 @@ import { apiTokenCommand } from "./api-token.js";
 import { RemoteAccess } from "./tailscale-identity.js";
 import { LoginManager } from "./auth.js";
 import { ClaudeCodeProbe } from "./claude-code.js";
+import { CodexProbe, CodexWorkerAdapter } from "./codex-worker.js";
 import { legacyDocumentsPlacementCommand } from "./legacy-documents-placement.js";
 import { loginCommand } from "./login-command.js";
 import { loadConfig, type DaemonConfig, type DaemonConfigOverrides } from "./config.js";
@@ -340,6 +341,9 @@ export async function main(argv: string[] = process.argv.slice(2), runtime: Main
     return 1;
   }
 
+  // Native vendor workers intentionally receive the launcher's environment;
+  // principals and pi-worker still inherit the scrubbed process environment.
+  const nativeWorkerEnv = { ...process.env };
   // Before pi, before any session. Idempotent, but this is the call that
   // matters: everything downstream inherits this environment.
   const { removed } = scrubProviderEnv(process.env, { offline: config.offline });
@@ -381,6 +385,7 @@ export async function main(argv: string[] = process.argv.slice(2), runtime: Main
       logger,
       hooks,
       hooksPath,
+      nativeWorkerEnv,
     );
   } finally {
     await homeReservation.close();
@@ -392,6 +397,7 @@ async function serveDaemon(
   logger: ReturnType<typeof createLogger>,
   hooks: GhostHookRunner,
   hooksPath: string,
+  nativeWorkerEnv: NodeJS.ProcessEnv,
 ): Promise<number> {
   const registry = new GhostRegistry(config.ghostsRoot);
   const ownerHome = homedir();
@@ -482,16 +488,29 @@ async function serveDaemon(
     // the next freshly built session: rebind the live cached sessions.
     onModelRoutingChanged: (name) => host.rebindModel(name),
   });
-  const workers = new WorkerCatalog({ ownerHome, claudeCodeProbe, logger });
+  const codexProbe = new CodexProbe({ env: nativeWorkerEnv });
+  const workers = new WorkerCatalog({
+    ownerHome,
+    env: nativeWorkerEnv,
+    claudeCodeProbe,
+    codexProbe,
+    logger,
+  });
   const tasks = new TaskManager({
     registry,
     homeOperations,
     logger,
-    adapters: [new PiWorkerAdapter({
-      registry,
-      offline: config.offline,
-      assertContext: ({ root, cwd }) => host.resolveTaskContextForStart(root, cwd),
-    })],
+    adapters: [
+      new CodexWorkerAdapter({
+        env: nativeWorkerEnv,
+        assertContext: ({ root, cwd }) => host.resolveTaskContextForStart(root, cwd),
+      }),
+      new PiWorkerAdapter({
+        registry,
+        offline: config.offline,
+        assertContext: ({ root, cwd }) => host.resolveTaskContextForStart(root, cwd),
+      }),
+    ],
     resolveContext: ({ ghostName, parent, requestedCwd }) =>
       host.resolveTaskContext(ghostName, parent, requestedCwd),
   });

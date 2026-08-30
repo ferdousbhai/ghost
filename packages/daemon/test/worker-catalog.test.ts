@@ -11,6 +11,7 @@ import {
   resolveWorkerExecutable,
   WorkerCatalog,
 } from "../src/worker-catalog.js";
+import { CodexMissingError } from "../src/codex-worker.js";
 import { GhostError } from "../src/ghosts.js";
 import { tempDir } from "./helpers/fixtures.js";
 
@@ -59,10 +60,10 @@ describe("WorkerCatalog", () => {
     writeUsage(usageDir, "codex", {
       usageStatusText: "Local stats are still available.\nRetry later.",
     });
-    const resolveCodexExecutable = vi.fn(async (configured: string) => {
-      expect(configured).toBe("owner-codex");
-      return "/resolved/codex";
-    });
+    const readCodex = vi.fn(async () => ({
+      binaryPath: "/resolved/codex",
+      account: { accountPresent: true, requiresOpenaiAuth: true },
+    }));
     const catalog = new WorkerCatalog({
       usageDir,
       now: () => Date.parse("2026-08-30T09:10:00Z"),
@@ -73,7 +74,7 @@ describe("WorkerCatalog", () => {
           authStatus: { loggedIn: true, authMethod: "claude.ai" },
         }),
       },
-      resolveCodexExecutable,
+      codexProbe: { read: readCodex },
     });
 
     const result = await catalog.list();
@@ -105,7 +106,7 @@ describe("WorkerCatalog", () => {
     });
     expect(result.workers[1]).toMatchObject({
       installation: "installed",
-      authentication: "unknown",
+      authentication: "authenticated",
       usage: {
         status: "Local stats are still available. Retry later.",
       },
@@ -120,7 +121,7 @@ describe("WorkerCatalog", () => {
       reason: null,
       usage: null,
     });
-    expect(resolveCodexExecutable).toHaveBeenCalledTimes(1);
+    expect(readCodex).toHaveBeenCalledTimes(1);
   });
 
   it("keeps stale, missing, and unsafe records categorical without failing discovery", async () => {
@@ -135,8 +136,10 @@ describe("WorkerCatalog", () => {
       claudeCodeProbe: {
         read: async () => ({ binaryPath: "/claude", authStatus: { loggedIn: false } }),
       },
-      resolveCodexExecutable: async () => {
-        throw new Error("codex is not installed\nwith extra detail");
+      codexProbe: {
+        read: async () => {
+          throw new CodexMissingError("codex is not installed\nwith extra detail");
+        },
       },
     });
 
@@ -164,7 +167,12 @@ describe("WorkerCatalog", () => {
           throw new Error("auth probe failed for /owner/private/claude");
         },
       },
-      resolveCodexExecutable: async () => "/codex",
+      codexProbe: {
+        read: async () => ({
+          binaryPath: "/codex",
+          account: { accountPresent: false, requiresOpenaiAuth: true },
+        }),
+      },
     });
 
     const result = await catalog.list();
@@ -176,6 +184,8 @@ describe("WorkerCatalog", () => {
     });
     expect(result.workers[1]).toMatchObject({
       installation: "installed",
+      authentication: "unauthenticated",
+      reason: "Run `codex login` to use the owner's Codex account.",
       usage: { state: "missing", updatedAt: null, stale: true },
     });
     expect(JSON.stringify(result)).not.toContain("/owner/private/claude");
@@ -193,7 +203,12 @@ describe("WorkerCatalog", () => {
           );
         },
       },
-      resolveCodexExecutable: async () => "/codex",
+      codexProbe: {
+        read: async () => ({
+          binaryPath: "/codex",
+          account: { accountPresent: true, requiresOpenaiAuth: true },
+        }),
+      },
     });
 
     const result = await catalog.list();

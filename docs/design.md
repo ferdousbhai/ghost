@@ -5,10 +5,11 @@ issue tracker (#17 is the beta gate); contracts live in `../CONTRACTS.md`.
 
 ## Vision
 
-A ghost is an AI persona — character, memory, tools, and access to the owner's
-Documents — that lives entirely on its owner's machine as an Omarchy-native
-desktop app: a pi engine over owner-readable files, summoned with a keystroke,
-and extended with bounded declarative skills and project context. It is an
+A ghost is the owner's digital counterpart — character, memory, tools, and
+access to the owner's Documents — that lives entirely on its owner's machine as
+an Omarchy-native desktop app. It uses the computer and browser directly, and
+orchestrates coding work through isolated native or bundled workers instead of
+pretending every delegated task is part of its own identity. It is an
 owner-local desktop application, not a network-facing agent service. No server
 holds a copy. "Your ghost, not our copy of it."
 
@@ -50,6 +51,10 @@ ambient credential discovery, and no cloud custody.
   same Ghost persona, memory, Documents, and declarative layers and emit the
   pi-messages wire, while each keeps its native tool harness. Deviations from
   pi are named in `CONTRACTS.md` with the invariant that licenses them (#3).
+- **Delegate through native coding harnesses** — `claude-code` and `codex`
+  workers invoke the owner's installed harness with its own configuration at a
+  trusted cwd; `pi-worker` is the bundled fallback. Ghost owns task lifecycle
+  and normalized progress, not a second implementation of those agent loops.
 - **Model-agnostic; bring any provider.** Named requirements: existing **OpenAI
   Codex/ChatGPT subscriptions usable as auth** through pi's Codex OAuth,
   **Claude plans through the Claude Code harness** (a separate runtime from
@@ -78,9 +83,11 @@ ambient credential discovery, and no cloud custody.
   the desktop. A chromium "deep workspace" view must earn its way in.
 - **Owner-local product boundary** — core does not expose ghosts to remote
   users, meter calls, or operate a money path.
-- **Env scrubbing** — a ghost only sees credentials deliberately referenced and
-  allowed by its `models.json`; stray shell API keys must never leak cloud
-  models into a sovereign ghost.
+- **Env scrubbing** — a Ghost principal only sees credentials deliberately
+  referenced and allowed by its `models.json`; stray shell API keys must never
+  leak cloud models into a sovereign ghost. Installed vendor workers are the
+  deliberate exception and receive the daemon launcher's preserved environment
+  so their native configuration keeps working.
 - **No Obsidian integration promises** — plain files make it unnecessary.
 - **Apache-2.0, fresh repo** — the predecessor repo's history carries private
   identifiers; the open contribution is this codebase.
