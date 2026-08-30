@@ -16,6 +16,7 @@ import { createDaemonServer, relayHubOf, startDaemonServer, type ListeningServer
 import { RelayHub } from "../src/relay.js";
 import {
   RELAY_PATH,
+  RELAY_PROTOCOL_VERSION,
   RELAY_SUBPROTOCOL,
   RELAY_TOKEN_SUBPROTOCOL_PREFIX,
 } from "../src/relay-protocol.js";
@@ -106,7 +107,13 @@ describe("the upgrade shares the port with the API", () => {
         socket.once("open", resolve);
         socket.once("error", reject);
       });
-      expect(relay.connected).toBe(true);
+      socket.send(JSON.stringify({
+        t: "hello",
+        protocol: RELAY_PROTOCOL_VERSION,
+        agent: "fake-extension/1",
+        browser: "Chromium/141",
+      }));
+      await expect.poll(() => relay.connected).toBe(true);
       const body = await (await fetch(
         `http://127.0.0.1:${listening?.port}/api/relay/status`,
       )).json() as Record<string, unknown>;

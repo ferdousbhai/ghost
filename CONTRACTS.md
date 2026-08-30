@@ -2188,7 +2188,10 @@ not coupled to that release identity.
   browser the user is already signed into. One extension serves every ghost and
   conversation over one socket, so the tab is the unit of isolation: relay
   protocol 3 requires every operation to carry its `session` id and every page
-  operation the `tab` id that session opened. The extension keeps each tab's
+  operation the `tab` id that session opened. An authenticated socket earns the
+  single relay slot only after a compatible `hello` within five seconds; until
+  then status stays disconnected, no work is dispatched to it, and a new
+  authenticated socket may replace it. The extension keeps each tab's
   debugger attachment, isolated world, and console/network buffers separate from
   every other tab's, and each session's tabs separate from every other session's:
   `open` answers with the tab id, the `tabs` op lists and switches within the

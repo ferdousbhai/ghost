@@ -33,7 +33,7 @@ let port: number;
 const openSockets: WebSocket[] = [];
 
 beforeEach(async () => {
-  hub = new RelayHub({ token: TOKEN, pingIntervalMs: 60_000 });
+  hub = new RelayHub({ token: TOKEN, pingIntervalMs: 60_000, helloTimeoutMs: 100 });
   server = createServer((_request, response) => response.writeHead(404).end());
   attachRelay(server, hub);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -179,6 +179,47 @@ describe("pairing", () => {
     expect(error.message).toMatch(/409/);
     // And the first one is untouched.
     expect(hub.connected).toBe(true);
+  });
+
+  it("does not admit or dispatch work to a socket before compatible hello", async () => {
+    let requests = 0;
+    await connectExtension({
+      skipHello: true,
+      onRequest: () => {
+        requests += 1;
+        return {};
+      },
+    });
+
+    expect(hub.connected).toBe(false);
+    expect(hub.status()).toMatchObject({ connected: false, peer: null, since: null });
+    expect(await hub.request("read", {}, { timeoutMs: 3_000 })).toMatchObject({
+      ok: false,
+      failure: "browser_unavailable",
+    });
+    expect(requests).toBe(0);
+  });
+
+  it("replaces a silent socket rather than letting it block the real extension", async () => {
+    const silent = await connectExtension({ skipHello: true });
+    const silentClosed = new Promise<number>((resolve) => silent.once("close", resolve));
+
+    await connectExtension();
+
+    expect(await silentClosed).toBe(1008);
+    expect(hub.connected).toBe(true);
+    expect(hub.peer).toBe("Chromium/141 via fake-extension/1");
+  });
+
+  it("closes a silent socket when its hello deadline expires", async () => {
+    const silent = await connectExtension({ skipHello: true });
+    const closed = new Promise<{ code: number; reason: string }>((resolve) => {
+      silent.once("close", (code, reason) => resolve({ code, reason: reason.toString() }));
+    });
+
+    expect(await closed).toEqual({ code: 1008, reason: "relay hello timed out" });
+    expect(hub.connected).toBe(false);
+    expect(hub.status()).toMatchObject({ peer: null, since: null });
   });
 
   it("takes a new connection once the first has gone", async () => {

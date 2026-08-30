@@ -50,6 +50,7 @@ import {
 import { defaultRelayTokenPath, readOrCreateRelayToken } from "./relay-token.js";
 
 export const RELAY_PING_INTERVAL_MS = 20_000;
+export const RELAY_HELLO_TIMEOUT_MS = 5_000;
 export const RELAY_TIMEOUT_GRACE_MS = 2_000;
 export const RELAY_CLOSE_GOING_AWAY = 1001;
 export const RELAY_CLOSE_SHUTDOWN = 4000;
@@ -66,6 +67,7 @@ export interface RelayHubOptions {
   token?: string;
   logger?: Logger;
   pingIntervalMs?: number;
+  helloTimeoutMs?: number;
   publicUrl?: string;
 }
 
@@ -114,14 +116,17 @@ export class RelayHub implements RelayTransport {
   #token: string | undefined;
   readonly #logger: Logger;
   readonly #pingIntervalMs: number;
+  readonly #helloTimeoutMs: number;
   readonly #wss: WebSocketServer;
   readonly #pending = new Map<number, Pending>();
 
   #socket: WebSocket | undefined;
+  #negotiatedSocket: WebSocket | undefined;
   #peer: string | undefined;
   #since: Date | undefined;
   #nextId = 1;
   #pingTimer: NodeJS.Timeout | undefined;
+  #helloTimer: NodeJS.Timeout | undefined;
   #alive = true;
   #publicUrl: string | undefined;
   #closed = false;
@@ -134,6 +139,7 @@ export class RelayHub implements RelayTransport {
     this.tokenPath = options.token ? null : defaultRelayTokenPath();
     this.#logger = options.logger ?? silentLogger;
     this.#pingIntervalMs = options.pingIntervalMs ?? RELAY_PING_INTERVAL_MS;
+    this.#helloTimeoutMs = options.helloTimeoutMs ?? RELAY_HELLO_TIMEOUT_MS;
     this.#publicUrl = options.publicUrl;
     // ws applies maxPayload while assembling fragmented messages, before the
     // complete string reaches #onFrame.
@@ -142,7 +148,9 @@ export class RelayHub implements RelayTransport {
 
 
   get connected(): boolean {
-    return this.#socket !== undefined && this.#socket.readyState === 1 /* OPEN */;
+    return this.#socket !== undefined
+      && this.#socket === this.#negotiatedSocket
+      && this.#socket.readyState === 1 /* OPEN */;
   }
 
   get peer(): string | undefined {
@@ -155,7 +163,7 @@ export class RelayHub implements RelayTransport {
     options: RelayRequestOptions,
   ): Promise<RelayReply> {
     if (options.signal?.aborted) return Promise.reject(options.signal.reason);
-    const socket = this.#socket;
+    const socket = this.#negotiatedSocket;
     if (socket?.readyState !== 1) return Promise.resolve(disconnectedReply(op));
 
     const id = this.#nextId;
@@ -284,6 +292,23 @@ export class RelayHub implements RelayTransport {
       return;
     }
 
+    // A TCP/WebSocket peer has not earned the one relay slot until it proves
+    // protocol compatibility. Replace a silent or pre-hello peer immediately;
+    // its bounded hello deadline is the backstop when no replacement arrives.
+    const unnegotiated = this.#socket;
+    if (unnegotiated) {
+      this.#socket = undefined;
+      this.#negotiatedSocket = undefined;
+      this.#peer = undefined;
+      this.#since = undefined;
+      this.#stopHelloDeadline();
+      try {
+        unnegotiated.close(1008, "relay hello was not completed");
+      } catch {
+        unnegotiated.terminate();
+      }
+    }
+
     this.#wss.handleUpgrade(request, socket, head, (ws) => {
       this.#adopt(ws);
     });
@@ -301,8 +326,9 @@ export class RelayHub implements RelayTransport {
 
   #adopt(ws: WebSocket): void {
     this.#socket = ws;
+    this.#negotiatedSocket = undefined;
     this.#peer = undefined;
-    this.#since = new Date();
+    this.#since = undefined;
     this.#alive = true;
 
     ws.on("message", (data, isBinary) => {
@@ -319,7 +345,7 @@ export class RelayHub implements RelayTransport {
         this.#logger.warn("relay sent a binary frame; dropping it");
         return;
       }
-      this.#onFrame(data.toString());
+      this.#onFrame(ws, data.toString());
     });
     ws.on("pong", () => {
       this.#alive = true;
@@ -330,8 +356,10 @@ export class RelayHub implements RelayTransport {
     ws.on("close", (code: number, reason: Buffer) => {
       if (this.#socket !== ws) return;
       this.#socket = undefined;
+      this.#negotiatedSocket = undefined;
       this.#peer = undefined;
       this.#since = undefined;
+      this.#stopHelloDeadline();
       this.#stopPinging();
       this.#failPending(
         "The browser relay disconnected before it answered. "
@@ -345,10 +373,11 @@ export class RelayHub implements RelayTransport {
       protocol: RELAY_PROTOCOL_VERSION,
       daemon: "ghostd",
     }));
-    this.#startPinging();
+    this.#startHelloDeadline(ws);
   }
 
-  #onFrame(raw: string): void {
+  #onFrame(ws: WebSocket, raw: string): void {
+    if (this.#socket !== ws) return;
     const parsed = parseClientFrame(raw);
     if (!parsed.ok) {
       this.#logger.warn("relay sent an unusable frame", { reason: parsed.reason });
@@ -362,18 +391,31 @@ export class RelayHub implements RelayTransport {
             theirs: frame.protocol,
             ours: RELAY_PROTOCOL_VERSION,
           });
-          this.#socket?.close(
+          ws.close(
             RELAY_CLOSE_SHUTDOWN,
             `This daemon speaks relay protocol ${RELAY_PROTOCOL_VERSION}, not ${frame.protocol}. `
               + "Update whichever of ghostd or the Chromium extension is older.",
           );
           return;
         }
+        if (this.#negotiatedSocket === ws) {
+          this.#logger.warn("relay sent a duplicate hello; dropping it");
+          return;
+        }
+        this.#negotiatedSocket = ws;
+        this.#since = new Date();
+        this.#stopHelloDeadline();
         this.#peer = [frame.browser, frame.agent].filter(Boolean).join(" via ") || "a browser";
         this.#logger.info("relay connected", { peer: this.#peer });
+        this.#startPinging();
         return;
       }
       case "res": {
+        if (this.#negotiatedSocket !== ws) {
+          this.#logger.warn("relay answered before completing hello; closing it");
+          ws.close(1008, "complete relay hello before sending frames");
+          return;
+        }
         const entry = this.#pending.get(frame.id);
         if (!entry) {
           // A reply to a request we already timed out or canceled locally.
@@ -396,10 +438,30 @@ export class RelayHub implements RelayTransport {
         return;
       }
       case "event": {
+        if (this.#negotiatedSocket !== ws) {
+          this.#logger.warn("relay sent an event before completing hello; closing it");
+          ws.close(1008, "complete relay hello before sending frames");
+          return;
+        }
         this.#logger.debug("relay event", { event: frame.event, ...(frame.data ?? {}) });
         return;
       }
     }
+  }
+
+  #startHelloDeadline(ws: WebSocket): void {
+    this.#stopHelloDeadline();
+    this.#helloTimer = setTimeout(() => {
+      if (this.#socket !== ws || this.#negotiatedSocket === ws) return;
+      this.#logger.warn("relay did not complete hello before its deadline");
+      ws.close(1008, "relay hello timed out");
+    }, this.#helloTimeoutMs);
+    this.#helloTimer.unref?.();
+  }
+
+  #stopHelloDeadline(): void {
+    if (this.#helloTimer) clearTimeout(this.#helloTimer);
+    this.#helloTimer = undefined;
   }
 
   #startPinging(): void {
@@ -439,10 +501,12 @@ export class RelayHub implements RelayTransport {
   /** Stop accepting, hang up on the extension, and fail anything in flight. */
   async close(): Promise<void> {
     this.#closed = true;
+    this.#stopHelloDeadline();
     this.#stopPinging();
     this.#failPending("The daemon is shutting down.");
     const socket = this.#socket;
     this.#socket = undefined;
+    this.#negotiatedSocket = undefined;
     this.#peer = undefined;
     this.#since = undefined;
     if (socket) {
