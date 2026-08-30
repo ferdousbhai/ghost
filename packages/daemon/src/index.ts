@@ -357,6 +357,23 @@ export {
   type TurnAdmission,
 } from "./session-host.js";
 export {
+  CODEX_BINARY_ENV,
+  defaultOmarchyUsageDir,
+  resolveWorkerExecutable,
+  WorkerCatalog,
+  WORKER_IDS,
+  type WorkerAuthentication,
+  type WorkerCatalogOptions,
+  type WorkerCatalogView,
+  type WorkerId,
+  type WorkerInstallation,
+  type WorkerStatus,
+  type WorkerUsageLimit,
+  type WorkerUsageState,
+  type WorkerUsageToday,
+  type WorkerUsageView,
+} from "./worker-catalog.js";
+export {
   assistantText,
   effectiveInputCost,
   rankSmolModels,

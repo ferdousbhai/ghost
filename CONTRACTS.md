@@ -333,6 +333,17 @@ are deliberate off-machine capabilities and never broaden another ghost or
 conversation. The collaboration route remains only as an unsupported legacy
 compatibility seam.
 
+A **principal harness** owns a Ghost conversation; today it is pi or Claude
+Code. A **worker** owns one coding task delegated by that Ghost; the code-owned
+worker ids are `claude-code`, `codex`, and `pi-worker`. Harness and worker are
+independent choices. `character.md`, memory, Documents, browser/desktop tools,
+and responsibility for the outcome belong to the Ghost principal. A vendor
+worker receives an ordinary task and a trusted cwd, then retains that vendor
+harness's own identity and native configuration. `pi-worker` is the bundled
+Ghost-defined fallback. The read-only worker catalogue below establishes these
+names but does not yet add a `task` tool or change the subagent prohibition in
+this section.
+
 A pi session uses pi's runtime (`@earendil-works/pi-coding-agent`,
 `pi-agent-core`, `pi-ai`) and native tools, but Ghost owns its roots and
 provider-facing system prompt. A new conversation's operational cwd is the OS
@@ -1721,6 +1732,48 @@ file IS the completion latch — there is no separate onboarding state — and t
 section stops being injected on the first session after the file deviates from
 the seed.
 
+### Worker status
+
+`GET /api/ghosts/:name/workers` is the authenticated, read-only worker
+catalogue. It returns `{ workers }` in the fixed order `claude-code`, `codex`,
+`pi-worker`. A row is
+`{ id, name, kind, nativeConfiguration, installation, authentication, reason,
+usage }`, where `kind` is `native | builtin`, `installation` is
+`installed | missing | unknown`, `authentication` is
+`authenticated | unauthenticated | unknown | ghost-model`, and `reason` is a
+bounded actionable string or null. `unknown` installation means the catalogue
+could not complete its probe, not that it proved the executable absent.
+`nativeConfiguration: true` means a future task launches the owner's installed
+vendor harness with its native user and project settings; it does not mean the
+task adapter is already active. The catalogue resolves only the two known
+vendor executable names, without a shell, and never returns their absolute
+paths or raw probe errors. `GHOST_CLAUDE_BINARY` and `GHOST_CODEX_BINARY` are
+their explicit executable overrides.
+
+Claude authentication comes from the existing short-lived
+`claude auth status --json` probe and counts only the owner's `claude.ai` plan
+login. A failed auth probe leaves Claude installation and authentication
+`unknown`; only the executable resolver's categorical missing error establishes
+`missing`. Codex authentication remains `unknown` until the native Codex
+adapter supplies its structured account probe; Omarchy's display record is
+deliberately not treated as authentication evidence. `pi-worker` is bundled,
+reports installed with `ghost-model` authentication, and will resolve its model
+through Ghost's `task_model` role when task execution lands.
+
+Vendor `usage` is a bounded projection of Omarchy's existing schema-version-1
+record in `$XDG_STATE_HOME/omarchy/agents/usage/<claude|codex>.json` (default
+`~/.local/state/...`), read descriptor-pinned and never refreshed through a
+provider API by Ghost. It is null for `pi-worker`; otherwise it is
+`{ source:"omarchy", state, updatedAt, stale, tier, status, help, limits,
+today }`. `state` is `ready | missing | invalid`. A ready record older than 30
+minutes, or more than five minutes in the future, is stale. Each bounded limit
+is `{ label, usedFraction, resetsAt }`; `usedFraction` is utilization in `[0,1]`,
+not a token balance. `today`, when the record has local counters, is
+`{ totalTokens, prompts, sessions }` and is historical usage, not an allowance.
+No per-model history, credential, provider response, executable pathname, or
+raw record is exposed. A missing or malformed record never makes installation
+discovery fail.
+
 ### Model indicator + switcher (which model a ghost uses, and switching it)
 
 Provider models come from pi's model catalogue (`@earendil-works/pi-ai`),
@@ -1912,8 +1965,10 @@ whole model before any non-local exposure.
   (`packages/daemon/src/pi-extension-bridge.ts` for pi).
   Exports the extension factories and typed readers/writers.
 - `packages/daemon` — per-ghost pi `AgentSession` and Claude Code query
-  lifecycles, env scrubbing, model/runtime selection, the HTTP API, systemd
-  unit. Depends on `extensions`. Both installed user services declare
+  lifecycles, env scrubbing, model/runtime selection, the HTTP API, the
+  read-only known-worker/Omarchy-usage catalogue, and the systemd unit. Vendor
+  CLIs are detected on the machine and are not package dependencies. Depends
+  on `extensions`. Both installed user services declare
   `WorkingDirectory=%h`; that sets process cwd only, while Ghost storage keeps
   its explicit roots. Daemon CLI operands still resolve relative to the caller's
   cwd when the CLI is launched directly. The Arch development package installs

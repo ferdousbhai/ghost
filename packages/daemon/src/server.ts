@@ -47,6 +47,7 @@ import {
 } from "./pi-messages.js";
 import { attachRelay, createRelayHub, type RelayHub } from "./relay.js";
 import type { SessionHost } from "./session-host.js";
+import type { WorkerCatalog } from "./worker-catalog.js";
 
 export interface ServerOptions {
   registry: GhostRegistry;
@@ -64,6 +65,8 @@ export interface ServerOptions {
    * needs no switcher surface.
    */
   catalog?: ModelCatalog;
+  /** Known task-worker installation, authentication, and read-only usage status. */
+  workers?: Pick<WorkerCatalog, "list">;
   mcp?: McpCatalog;
   hooks?: Pick<GhostHookRunner, "status" | "config" | "replaceConfig">;
   logger?: Logger;
@@ -1869,6 +1872,19 @@ export function createDaemonServer(options: ServerOptions): Server {
             return;
           }
           return await handleMessages(ghostName, request, response);
+        }
+        if (segments.length === 4 && segments[3] === "workers") {
+          if (!options.workers) {
+            errorResponse(response, 404, "not_found", "Worker status is not enabled on this daemon.");
+            return;
+          }
+          if (method !== "GET") {
+            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+            return;
+          }
+          options.registry.get(ghostName);
+          jsonResponse(response, 200, await options.workers.list());
+          return;
         }
         if (segments.length === 4 && segments[3] === "events") {
           if (method !== "GET") {

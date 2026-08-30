@@ -57,6 +57,7 @@ async function serve(
     maxBodyBytes?: number;
     apiToken?: string | null;
     hooks?: ServerOptions["hooks"];
+    workers?: ServerOptions["workers"];
   } = {},
 ) {
   temp = makeTempGhosts();
@@ -89,6 +90,7 @@ async function serve(
       : { maxBodyBytes: serverOptions.maxBodyBytes }),
     ...(serverOptions.apiToken === undefined ? {} : { apiToken: serverOptions.apiToken }),
     ...(serverOptions.hooks === undefined ? {} : { hooks: serverOptions.hooks }),
+    ...(serverOptions.workers === undefined ? {} : { workers: serverOptions.workers }),
   });
   return `http://127.0.0.1:${listening.port}`;
 }
@@ -203,6 +205,47 @@ describe("GET /api/ghosts", () => {
     expect(ghosts).toHaveLength(1);
     expect(ghosts[0]).toMatchObject({ name: "casper", dir: join(temp!.root, "casper") });
     expect(ghosts[0]?.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  });
+});
+
+describe("GET /api/ghosts/:name/workers", () => {
+  it("returns the injected worker projection only for an existing ghost", async () => {
+    const view = { workers: [] };
+    const list = vi.fn(async () => view);
+    const base = await serve(undefined, { workers: { list } });
+
+    const response = await fetch(`${base}/api/ghosts/casper/workers`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(view);
+    expect(list).toHaveBeenCalledTimes(1);
+
+    const missing = await fetch(`${base}/api/ghosts/missing/workers`);
+    expect(missing.status).toBe(404);
+    expect(await missing.json()).toEqual({
+      error: { code: "not_found", message: 'No ghost named "missing".' },
+    });
+    expect(list).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects mutations and is absent when no worker catalogue is composed", async () => {
+    const list = vi.fn(async () => ({ workers: [] }));
+    const base = await serve(undefined, { workers: { list } });
+    const mutation = await fetch(`${base}/api/ghosts/casper/workers`, { method: "POST" });
+    expect(mutation.status).toBe(405);
+    expect(list).not.toHaveBeenCalled();
+
+    await listening?.close();
+    listening = null;
+    await host?.disposeAll();
+    host = null;
+    await provider?.close();
+    provider = null;
+    temp?.cleanup();
+    temp = null;
+
+    const without = await serve();
+    const absent = await fetch(`${without}/api/ghosts/casper/workers`);
+    expect(absent.status).toBe(404);
   });
 });
 

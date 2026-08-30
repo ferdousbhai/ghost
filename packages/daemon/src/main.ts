@@ -28,6 +28,7 @@ import { RemoteServe } from "./remote-serve.js";
 import { startDaemonServer, type ListeningServer } from "./server.js";
 import { SessionHost } from "./session-host.js";
 import { resolveScheduleUnitDirectory } from "./schedules.js";
+import { WorkerCatalog } from "./worker-catalog.js";
 
 const USAGE = `ghostd — your ghost, on your machine
 
@@ -471,6 +472,7 @@ async function serveDaemon(
     // the next freshly built session: rebind the live cached sessions.
     onModelRoutingChanged: (name) => host.rebindModel(name),
   });
+  const workers = new WorkerCatalog({ ownerHome, claudeCodeProbe, logger });
   const mcp = new McpCatalog({ registry, homeOperations, logger });
   const remoteServe = new RemoteServe(config.port, { ...config.remote, configPath: config.configPath });
 
@@ -482,6 +484,7 @@ async function serveDaemon(
       homeOperations,
       login,
       catalog,
+      workers,
       mcp,
       hooks,
       logger,
