@@ -16,6 +16,15 @@ let temp: TempGhosts | null = null;
 let host: SessionHost | null = null;
 let listening: ListeningServer | null = null;
 
+function makeSessionHost(fixture: TempGhosts): SessionHost {
+  return new SessionHost({
+    registry: fixture.registry,
+    ownerHome: fixture.ownerHome,
+    offline: true,
+    scheduleCommandRunner: async () => ({ stdout: "", stderr: "", code: 0 }),
+  });
+}
+
 afterEach(async () => {
   await listening?.close();
   listening = null;
@@ -144,7 +153,7 @@ describe("path-bound mutations during whole-home moves", () => {
     temp = makeTempGhosts();
     temp.registry.ensureRoot();
     seedGhost(temp.root, { name: "casper" });
-    host = new SessionHost({ registry: temp.registry, offline: true });
+    host = makeSessionHost(temp);
     const coordinator = new HomeOperationCoordinator(temp.registry);
     const constructionStarted = deferred<void>();
     const finishConstruction = deferred<void>();
@@ -215,7 +224,7 @@ describe("path-bound mutations during whole-home moves", () => {
     temp = makeTempGhosts();
     temp.registry.ensureRoot();
     seedGhost(temp.root, { name: "casper" });
-    host = new SessionHost({ registry: temp.registry, offline: true });
+    host = makeSessionHost(temp);
     const coordinator = new HomeOperationCoordinator(temp.registry);
     const writerStarted = deferred<void>();
     const finishWriter = deferred<void>();
@@ -292,7 +301,7 @@ describe("path-bound mutations during whole-home moves", () => {
     temp.registry.ensureRoot();
     seedGhost(temp.root, { name: "casper" });
     seedGhost(temp.root, { name: "wisp" });
-    host = new SessionHost({ registry: temp.registry, offline: true });
+    host = makeSessionHost(temp);
     const coordinator = new HomeOperationCoordinator(temp.registry);
     const catalog = new ModelCatalog({
       registry: temp.registry,

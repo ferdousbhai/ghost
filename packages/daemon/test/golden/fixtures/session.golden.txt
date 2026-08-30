@@ -50,7 +50,7 @@ Memory is private context for this ghost; Documents are owner-wide files shared 
 ## Scheduled work
 To do something on a clock, write a systemd **user timer** through Bash — Ghost has no scheduler of its own, and a timer is something the owner can see in `systemctl --user list-timers`, stop with `systemctl --user disable --now`, and edit in a text file.
 Write both unit files in this exact absolute directory: "<owner-home>/.xdg-config/systemd/user".
-Name both units `ghost-timer-v1-6-casper-<slug>`. The `<slug>` must be 1–64 characters matching `[a-z0-9]+(?:-[a-z0-9]+)*`: lowercase ASCII letters or digits, separated only by single hyphens. That exact versioned prefix is how your timers are found and removed if your ghost is deleted; an older or differently named unit is left untouched.
+Name both units `ghost-timer-v1-6-casper-<slug>`. The `<slug>` must be 1–64 characters matching `[a-z0-9]+(?:-[a-z0-9]+)*`: lowercase ASCII letters or digits, separated only by single hyphens. That exact versioned prefix is how your timers are found and removed if your ghost is deleted or renamed; an older or differently named unit is left untouched.
 The service runs the `ghost` CLI, which authenticates itself:
 ```ini
 # ghost-timer-v1-6-casper-<slug>.service
@@ -154,7 +154,7 @@ Memory is private context for this ghost; Documents are owner-wide files shared 
 ## Scheduled work
 To do something on a clock, write a systemd **user timer** through Bash — Ghost has no scheduler of its own, and a timer is something the owner can see in `systemctl --user list-timers`, stop with `systemctl --user disable --now`, and edit in a text file.
 Write both unit files in this exact absolute directory: "<owner-home>/.xdg-config/systemd/user".
-Name both units `ghost-timer-v1-6-casper-<slug>`. The `<slug>` must be 1–64 characters matching `[a-z0-9]+(?:-[a-z0-9]+)*`: lowercase ASCII letters or digits, separated only by single hyphens. That exact versioned prefix is how your timers are found and removed if your ghost is deleted; an older or differently named unit is left untouched.
+Name both units `ghost-timer-v1-6-casper-<slug>`. The `<slug>` must be 1–64 characters matching `[a-z0-9]+(?:-[a-z0-9]+)*`: lowercase ASCII letters or digits, separated only by single hyphens. That exact versioned prefix is how your timers are found and removed if your ghost is deleted or renamed; an older or differently named unit is left untouched.
 The service runs the `ghost` CLI, which authenticates itself:
 ```ini
 # ghost-timer-v1-6-casper-<slug>.service

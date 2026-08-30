@@ -51,7 +51,12 @@ async function serveWithRuntime(
   temp = makeTempGhosts();
   temp.registry.ensureRoot();
   seedGhost(temp.root, { name: "casper" });
-  host = new SessionHost({ registry: temp.registry, offline: true });
+  host = new SessionHost({
+    registry: temp.registry,
+    ownerHome: temp.ownerHome,
+    offline: true,
+    scheduleCommandRunner: async () => ({ stdout: "", stderr: "", code: 0 }),
+  });
   login = new LoginManager({
     registry: temp.registry,
     createRuntime,
