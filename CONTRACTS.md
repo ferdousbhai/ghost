@@ -581,10 +581,13 @@ conversation-scoped. Ghost's own `bash` tool replaces pi's by name and runs
 every command as a job of the session over pi's local shell operations:
 `background: true` answers with the job id at once, and a foreground command
 waits up to the daemon's auto-background budget (`jobs.autoBackgroundMs`,
-default 60 s, `0` disables; never past the call's own `timeout`) and then
-keeps running as a job while the model gets the output so far and the id. A
-foreground command that settles in time answers like pi's tool: its output, or
-an error carrying the output plus `Command exited with code N` /
+default 60 s; never past the call's own `timeout`) and then keeps running as a
+job while the model gets the output so far and the id. A zero budget disables
+automatic backgrounding entirely: Ghost adds no foreground deadline, and the
+call stays foreground until the command settles, its own `timeout` fires, or
+the turn is aborted. A foreground command that settles in time answers like
+pi's tool: its output, or an error carrying the output plus
+`Command exited with code N` /
 `Command aborted`. The `jobs` tool lists, waits for (default 30 s, at most
 300 s), or cancels jobs; `/jobs` lists them without a model. Every job belongs
 to the session that started it: it survives the turn but not the session

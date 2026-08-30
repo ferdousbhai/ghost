@@ -176,9 +176,14 @@ export class GhostJobManager {
 
   /**
    * Resolve when every listed job (default: all) has settled, the timeout
-   * elapses, or the signal aborts; the jobs reflect whatever state was reached.
+   * elapses, or the signal aborts. An absent timeout has no deadline; the jobs
+   * reflect whatever state was reached.
    */
-  async wait(ids: readonly string[] | undefined, timeoutMs: number, signal?: AbortSignal): Promise<GhostJob[]> {
+  async wait(
+    ids: readonly string[] | undefined,
+    timeoutMs: number | undefined,
+    signal?: AbortSignal,
+  ): Promise<GhostJob[]> {
     const watched = ids === undefined
       ? [...this.jobs.values()]
       : ids.flatMap((id) => {
@@ -186,15 +191,19 @@ export class GhostJobManager {
           return job ? [job] : [];
         });
     const pending = watched.filter((job) => job.status === "running");
-    if (pending.length > 0 && timeoutMs > 0 && !signal?.aborted) {
-      const timer = Promise.withResolvers<void>();
-      const handle = setTimeout(timer.resolve, timeoutMs);
-      const onAbort = () => timer.resolve();
+    if (
+      pending.length > 0
+      && (timeoutMs === undefined || timeoutMs > 0)
+      && !signal?.aborted
+    ) {
+      const wake = Promise.withResolvers<void>();
+      const handle = timeoutMs === undefined ? undefined : setTimeout(wake.resolve, timeoutMs);
+      const onAbort = () => wake.resolve();
       signal?.addEventListener("abort", onAbort, { once: true });
       try {
-        await Promise.race([Promise.all(pending.map((job) => job.settled)), timer.promise]);
+        await Promise.race([Promise.all(pending.map((job) => job.settled)), wake.promise]);
       } finally {
-        clearTimeout(handle);
+        if (handle !== undefined) clearTimeout(handle);
         signal?.removeEventListener("abort", onAbort);
       }
     }
@@ -366,10 +375,13 @@ const UPDATE_THROTTLE_MS = 250;
  * while the model gets the output so far and the id.
  */
 export function createBashTool(options: BashToolOptions): ToolDefinition<typeof bashToolSchema, unknown> {
+  const foregroundDescription = options.autoBackgroundMs === 0
+    ? "Foreground commands remain foreground until they settle or reach their own timeout."
+    : `Foreground commands running longer than ${Math.round(options.autoBackgroundMs / 1_000)}s continue as background jobs.`;
   return {
     name: "bash",
     label: "Bash",
-    description: `Execute Bash in the conversation's working directory. Foreground commands running longer than ${Math.round(options.autoBackgroundMs / 1_000)}s continue as background jobs.`,
+    description: `Execute Bash in the conversation's working directory. ${foregroundDescription}`,
     parameters: bashToolSchema,
     async execute(_toolCallId, params, signal, onUpdate) {
       let lastUpdate = 0;
@@ -394,7 +406,7 @@ export function createBashTool(options: BashToolOptions): ToolDefinition<typeof 
       const waitMs = params.timeout === undefined
         ? options.autoBackgroundMs
         : Math.max(0, Math.min(options.autoBackgroundMs, params.timeout * 1_000 - TIMEOUT_BUFFER_MS));
-      await options.manager.wait([job.id], options.autoBackgroundMs > 0 ? waitMs : Number.MAX_SAFE_INTEGER, signal);
+      await options.manager.wait([job.id], options.autoBackgroundMs > 0 ? waitMs : undefined, signal);
       if (signal?.aborted && job.status === "running") {
         options.manager.cancel(job.id);
         await options.manager.wait([job.id], 5_000);

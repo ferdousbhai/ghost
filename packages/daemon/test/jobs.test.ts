@@ -84,6 +84,21 @@ describe("GhostJobManager", () => {
     processes[0]!.exit(0);
   });
 
+  it("waits without a deadline until the jobs settle", async () => {
+    const { jobs, processes } = manager();
+    jobs.start({ command: "sleep 100", cwd: "/tmp" });
+    let resolved = false;
+    const waiting = jobs.wait(["job-1"], undefined).then((result) => {
+      resolved = true;
+      return result;
+    });
+
+    await Promise.resolve();
+    expect(resolved).toBe(false);
+    processes[0]!.exit(0);
+    await expect(waiting).resolves.toMatchObject([{ status: "completed" }]);
+  });
+
   it("dispose cancels every running job without reporting them", async () => {
     const { jobs, settled } = manager();
     jobs.start({ command: "sleep 100", cwd: "/tmp" });
@@ -143,5 +158,46 @@ describe("createBashTool", () => {
     await jobs.wait(undefined, 5_000);
     expect(jobs.list().at(-1)).toMatchObject({ status: "completed", output: expect.stringContaining("late") });
     expect(jobs.hasRunning()).toBe(false);
+  });
+
+  it("keeps a foreground command inline when automatic backgrounding is disabled", async () => {
+    const { jobs, processes } = manager();
+    const tool = createBashTool({ cwd: process.cwd(), manager: jobs, autoBackgroundMs: 0 });
+    const execution = tool.execute(
+      "call-no-deadline",
+      { command: "sleep 100" },
+      undefined,
+      undefined,
+      {} as never,
+    );
+
+    expect(tool.description).toContain("remain foreground");
+    await expect(Promise.race([
+      execution.then(() => "resolved"),
+      new Promise<string>((resolve) => setTimeout(() => resolve("pending"), 20)),
+    ])).resolves.toBe("pending");
+
+    processes[0]!.exit(0);
+    await expect(execution).resolves.toMatchObject({
+      content: [{ type: "text", text: "(no output)" }],
+      details: undefined,
+    });
+  });
+
+  it("keeps a no-deadline foreground wait abortable", async () => {
+    const { jobs } = manager();
+    const tool = createBashTool({ cwd: process.cwd(), manager: jobs, autoBackgroundMs: 0 });
+    const controller = new AbortController();
+    const execution = tool.execute(
+      "call-abort",
+      { command: "sleep 100" },
+      controller.signal,
+      undefined,
+      {} as never,
+    );
+
+    controller.abort();
+    await expect(execution).rejects.toThrow("Command aborted");
+    expect(jobs.get("job-1")).toMatchObject({ status: "cancelled" });
   });
 });
