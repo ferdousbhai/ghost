@@ -83,14 +83,18 @@ const task: WorkerTaskRequest = {
 function configureStartup(child: FakeCodexChild): void {
   child.responders.set("initialize", () => ({ userAgent: "codex-test" }));
   child.responders.set("thread/start", (message) => {
-    expect(message.params).toEqual({ cwd: task.cwd });
+    expect(message.params).toEqual({
+      cwd: task.cwd,
+      approvalPolicy: "never",
+      sandbox: "danger-full-access",
+    });
     return {
       thread: { id: "thread-native-1", cwd: task.cwd },
       cwd: task.cwd,
       model: "owner-model",
       instructionSources: ["/project/AGENTS.md"],
-      approvalPolicy: "on-request",
-      sandbox: { type: "workspaceWrite" },
+      approvalPolicy: "never",
+      sandbox: { type: "dangerFullAccess" },
     };
   });
   child.responders.set("turn/start", (message) => {
@@ -148,7 +152,7 @@ function adapterHarness(child: FakeCodexChild) {
 }
 
 describe("Codex native worker", () => {
-  it("uses only native app-server settings, validates cwd, streams output, and settles after exit", async () => {
+  it("uses native app-server settings with maximum trust, validates cwd, and settles after exit", async () => {
     const child = new FakeCodexChild();
     configureStartup(child);
     const harness = adapterHarness(child);
@@ -173,7 +177,7 @@ describe("Codex native worker", () => {
     expect(harness.events).toContainEqual({ type: "output", text: "Implemented." });
     expect(harness.events).toContainEqual({
       type: "notice",
-      text: "Codex started with native configuration (owner-model; 1 instruction source).",
+      text: "Codex started with native configuration and maximum trust (owner-model; 1 instruction source).",
     });
   });
 
@@ -196,21 +200,37 @@ describe("Codex native worker", () => {
     await controller.result;
   });
 
-  it("declines typed native approvals without treating steering text as an answer", async () => {
+  it("fails if Codex requests an approval after accepting maximum-trust execution", async () => {
     const child = new FakeCodexChild();
     configureStartup(child);
     const harness = adapterHarness(child);
     const controller = await harness.adapter.start(task, harness.context);
 
     child.request("approval-1", "item/commandExecution/requestApproval", { command: "dangerous" });
-    await until(() => child.messages.some((message) => message.id === "approval-1"));
-    expect(child.messages.find((message) => message.id === "approval-1")).toEqual({
+    await expect(controller.result).rejects.toThrow(
+      "after accepting maximum-trust execution",
+    );
+    expect(child.messages.find((message) => message.id === "approval-1")).toMatchObject({
       id: "approval-1",
-      result: { decision: "decline" },
+      error: { code: -32601 },
+    });
+  });
+
+  it("declines MCP elicitation because maximum trust cannot invent requested input", async () => {
+    const child = new FakeCodexChild();
+    configureStartup(child);
+    const harness = adapterHarness(child);
+    const controller = await harness.adapter.start(task, harness.context);
+
+    child.request("elicitation-1", "mcpServer/elicitation/request", { mode: "form" });
+    await until(() => child.messages.some((message) => message.id === "elicitation-1"));
+    expect(child.messages.find((message) => message.id === "elicitation-1")).toEqual({
+      id: "elicitation-1",
+      result: { action: "decline", content: null, _meta: null },
     });
     expect(harness.events).toContainEqual({
       type: "notice",
-      text: "Codex requested item/commandExecution/requestApproval; the headless worker declined it.",
+      text: "Codex requested MCP input; the headless worker declined it.",
     });
     complete(child);
     await controller.result;
@@ -292,6 +312,47 @@ describe("Codex native worker", () => {
       registerForce: () => {},
     })).rejects.toThrow("project identity changed");
     expect(spawnWorker).not.toHaveBeenCalled();
+  });
+
+  it("revalidates the project identity again after executable resolution", async () => {
+    const child = new FakeCodexChild();
+    const spawnWorker = vi.fn(() => child.asChild());
+    let validations = 0;
+    const adapter = new CodexWorkerAdapter({
+      assertContext: async () => {
+        validations += 1;
+        return validations === 1
+          ? { root: task.root, cwd: task.cwd }
+          : { root: task.root, cwd: "/project/elsewhere" };
+      },
+      resolveExecutable: async () => "/owner/bin/codex",
+      spawnWorker,
+    });
+
+    await expect(adapter.start(task, {
+      signal: new AbortController().signal,
+      emit: async () => {},
+      registerForce: () => {},
+    })).rejects.toThrow("project identity changed");
+    expect(validations).toBe(2);
+    expect(spawnWorker).not.toHaveBeenCalled();
+  });
+
+  it("rejects a thread that does not confirm maximum-trust execution", async () => {
+    const child = new FakeCodexChild();
+    configureStartup(child);
+    child.responders.set("thread/start", () => ({
+      thread: { id: "thread-native-1", cwd: task.cwd },
+      cwd: task.cwd,
+      model: "owner-model",
+      instructionSources: [],
+      approvalPolicy: "on-request",
+      sandbox: { type: "workspaceWrite" },
+    }));
+    const harness = adapterHarness(child);
+
+    await expect(harness.adapter.start(task, harness.context))
+      .rejects.toThrow("maximum-trust execution state");
   });
 });
 

@@ -2,6 +2,12 @@
 
 Status: implemented for the owner-local runtime. Last policy review: 2026-08-22.
 
+This page describes Claude Code as the harness for the Ghost principal, where
+Ghost deliberately appends its persona and supplies its own tools. Delegated
+`claude-code` coding tasks are a separate native worker mode: they keep the
+owner's normal Claude Code identity and configuration and are documented in
+[native-workers.md](native-workers.md#claude-code).
+
 ## What this path buys us
 
 Selecting `claude-code/default` makes Ghost run the official Claude Agent SDK

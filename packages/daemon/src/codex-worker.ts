@@ -11,7 +11,8 @@ const PROBE_TTL_MS = 5_000;
 const TERMINAL_EXIT_GRACE_MS = 2_000;
 const INTERRUPT_GRACE_MS = 3_000;
 const TERM_GRACE_MS = 5_000;
-const DECLINE_REASON = "Ghost headless Codex workers do not broker interactive approvals.";
+const MAX_TRUST_APPROVAL_POLICY = "never";
+const MAX_TRUST_SANDBOX = "danger-full-access";
 
 type SpawnWorker = (
   command: string,
@@ -374,15 +375,20 @@ export class CodexProbe {
 function threadStartResult(value: unknown, expectedCwd: string): { threadId: string; notice: string } {
   const result = objectValue(value);
   const thread = objectValue(result?.thread);
+  const sandbox = objectValue(result?.sandbox);
   if (!result || !thread || typeof thread.id !== "string" || !thread.id
-    || result.cwd !== expectedCwd || thread.cwd !== expectedCwd) {
-    throw new CodexProcessError("Codex `thread/start` returned an incompatible project identity.");
+    || result.cwd !== expectedCwd || thread.cwd !== expectedCwd
+    || result.approvalPolicy !== MAX_TRUST_APPROVAL_POLICY
+    || sandbox?.type !== "dangerFullAccess") {
+    throw new CodexProcessError(
+      "Codex `thread/start` returned incompatible project or maximum-trust execution state.",
+    );
   }
   const sources = Array.isArray(result.instructionSources) ? result.instructionSources.length : 0;
   const model = typeof result.model === "string" ? result.model : "native default";
   return {
     threadId: thread.id,
-    notice: `Codex started with native configuration (${model}; ${sources} instruction source${sources === 1 ? "" : "s"}).`,
+    notice: `Codex started with native configuration and maximum trust (${model}; ${sources} instruction source${sources === 1 ? "" : "s"}).`,
   };
 }
 
@@ -451,11 +457,9 @@ export class CodexWorkerAdapter implements WorkerAdapter {
     request: WorkerTaskRequest,
     context: Parameters<WorkerAdapter["start"]>[1],
   ): Promise<WorkerTaskController> {
-    const validated = await this.assertContext({ root: request.root, cwd: request.cwd });
-    if (!sameContext(request, validated)) {
-      throw new CodexProcessError("The task project identity changed before Codex could start.");
-    }
+    await this.requireTaskContext(request);
     const executable = await this.resolveExecutable(this.binary);
+    await this.requireTaskContext(request);
     const child = this.spawnWorker(executable, APP_SERVER_ARGS, {
       cwd: request.cwd,
       env: this.env,
@@ -463,6 +467,13 @@ export class CodexWorkerAdapter implements WorkerAdapter {
       stdio: ["pipe", "pipe", "pipe"],
     });
     return this.control(child, request, context);
+  }
+
+  private async requireTaskContext(request: WorkerTaskRequest): Promise<void> {
+    const validated = await this.assertContext({ root: request.root, cwd: request.cwd });
+    if (!sameContext(request, validated)) {
+      throw new CodexProcessError("The task project identity changed before Codex could start.");
+    }
   }
 
   private async control(
@@ -512,19 +523,19 @@ export class CodexWorkerAdapter implements WorkerAdapter {
       child.stdin.end();
       void terminate(0);
     };
-    const decline = (method: string): unknown => {
-      emit({ type: "notice", text: `Codex requested ${method}; the headless worker declined it.` });
+    const handleServerRequest = (method: string): unknown => {
       switch (method) {
+        case "mcpServer/elicitation/request":
+          emit({ type: "notice", text: "Codex requested MCP input; the headless worker declined it." });
+          return { action: "decline", content: null, _meta: null };
         case "item/commandExecution/requestApproval":
         case "item/fileChange/requestApproval":
-          return { decision: "decline" };
         case "item/permissions/requestApproval":
-          return { permissions: {}, scope: "turn" };
-        case "mcpServer/elicitation/request":
-          return { action: "decline", content: null, _meta: null };
         case "applyPatchApproval":
         case "execCommandApproval":
-          return { decision: { denied: { rejection: DECLINE_REASON } } };
+          throw new UnsupportedCodexRequestError(
+            `Codex requested ${method} after accepting maximum-trust execution.`,
+          );
         default:
           throw new UnsupportedCodexRequestError(`Unsupported Codex client request: ${method}.`);
       }
@@ -534,7 +545,7 @@ export class CodexWorkerAdapter implements WorkerAdapter {
       onFatal: fail,
       onServerRequest: (method) => {
         if (method === "currentTime/read") return { currentTimeAt: Math.floor(Date.now() / 1_000) };
-        return decline(method);
+        return handleServerRequest(method);
       },
       onNotification: (method, params) => {
         if (method === "item/completed") {
@@ -617,7 +628,11 @@ export class CodexWorkerAdapter implements WorkerAdapter {
 
     try {
       await app.initialize();
-      const started = threadStartResult(await app.request("thread/start", { cwd: request.cwd }), request.cwd);
+      const started = threadStartResult(await app.request("thread/start", {
+        cwd: request.cwd,
+        approvalPolicy: MAX_TRUST_APPROVAL_POLICY,
+        sandbox: MAX_TRUST_SANDBOX,
+      }), request.cwd);
       threadId = started.threadId;
       emit({ type: "notice", text: started.notice });
       turnId = turnStartResult(await app.request("turn/start", {

@@ -191,11 +191,18 @@ export interface ClaudeCodeProbeResult {
 }
 
 export interface ClaudeCodeProbeOptions {
+  env?: NodeJS.ProcessEnv;
   binaryPath?: string;
   ttlMs?: number;
   now?: () => number;
-  resolveExecutable?: (binaryPath: string) => Promise<string>;
-  readAuthStatus?: (binaryPath: string) => Promise<ClaudeCodeAuthStatus>;
+  resolveExecutable?: (
+    binaryPath: string,
+    env: NodeJS.ProcessEnv,
+  ) => Promise<string>;
+  readAuthStatus?: (
+    binaryPath: string,
+    env: NodeJS.ProcessEnv,
+  ) => Promise<ClaudeCodeAuthStatus>;
 }
 
 export interface ClaudeCodeRuntimeOptions {
@@ -220,22 +227,25 @@ export class ClaudeCodeProcessError extends Error {
   }
 }
 
-function credentialFreeEnvironment(): NodeJS.ProcessEnv {
+function credentialFreeEnvironment(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   // main.ts / SessionHost already scrub provider credentials and routing
   // overrides process-wide.
   // Copy the result because the SDK replaces, rather than merges, `env`.
   const env = {
-    ...process.env,
+    ...base,
     CLAUDE_AGENT_SDK_CLIENT_APP: "ghostd/0.0.1",
   };
   scrubProviderEnv(env);
   return env;
 }
 
-async function executableCandidate(binaryPath: string): Promise<string | null> {
+async function executableCandidate(
+  binaryPath: string,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<string | null> {
   const candidates = isAbsolute(binaryPath) || binaryPath.includes("/")
     ? [resolve(binaryPath)]
-    : (process.env.PATH ?? "")
+    : (env.PATH ?? "")
       .split(delimiter)
       .filter(Boolean)
       .map((directory) => join(directory, binaryPath));
@@ -262,7 +272,10 @@ async function launcherPrefix(path: string): Promise<string> {
   }
 }
 
-async function unwrapMiseClaudeLauncher(path: string): Promise<string> {
+async function unwrapMiseClaudeLauncher(
+  path: string,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<string> {
   const prefix = await launcherPrefix(path);
   if (!prefix.startsWith("#!") || !/\bmise\b/.test(prefix) || !/\bclaude\b/.test(prefix)) {
     return path;
@@ -274,7 +287,7 @@ async function unwrapMiseClaudeLauncher(path: string): Promise<string> {
       encoding: "utf8",
       timeout: AUTH_STATUS_TIMEOUT_MS,
       maxBuffer: 128 * 1024,
-      env: credentialFreeEnvironment(),
+      env,
     }));
   } catch (cause) {
     throw new ClaudeCodeProcessError(
@@ -290,7 +303,7 @@ async function unwrapMiseClaudeLauncher(path: string): Promise<string> {
       `\`mise which claude\` returned ${lines.length} executable paths; expected exactly one.`,
     );
   }
-  const resolved = await executableCandidate(misePath);
+  const resolved = await executableCandidate(misePath, env);
   if (!resolved || resolved === path) {
     throw new ClaudeCodeProcessError(
       `mise did not resolve an executable behind Claude launcher ${JSON.stringify(path)}.`,
@@ -300,9 +313,12 @@ async function unwrapMiseClaudeLauncher(path: string): Promise<string> {
 }
 
 /** Linux/Omarchy subset of T3's executable-resolution seam. */
-export async function resolveClaudeCodeExecutable(binaryPath = "claude"): Promise<string> {
-  const resolved = await executableCandidate(binaryPath);
-  if (resolved) return unwrapMiseClaudeLauncher(resolved);
+export async function resolveClaudeCodeExecutable(
+  binaryPath = "claude",
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<string> {
+  const resolved = await executableCandidate(binaryPath, env);
+  if (resolved) return unwrapMiseClaudeLauncher(resolved, env);
   throw new GhostError(
     "claude_code_missing",
     `Claude Code is not installed at ${JSON.stringify(binaryPath)}. Install the official `
@@ -342,6 +358,7 @@ function authStatusFromJson(raw: string): ClaudeCodeAuthStatus {
 
 export async function readClaudeCodeAuthStatus(
   binaryPath: string,
+  env: NodeJS.ProcessEnv = credentialFreeEnvironment(),
 ): Promise<ClaudeCodeAuthStatus> {
   let stdout: string;
   try {
@@ -349,7 +366,7 @@ export async function readClaudeCodeAuthStatus(
       encoding: "utf8",
       timeout: AUTH_STATUS_TIMEOUT_MS,
       maxBuffer: 128 * 1024,
-      env: credentialFreeEnvironment(),
+      env,
     }));
   } catch (cause) {
     const error = cause as NodeJS.ErrnoException & { stdout?: string };
@@ -374,6 +391,7 @@ export function isClaudePlanAuth(status: ClaudeCodeAuthStatus): boolean {
  * up a failing process on every request.
  */
 export class ClaudeCodeProbe {
+  private readonly env: NodeJS.ProcessEnv;
   private readonly binaryPath: string;
   private readonly ttlMs: number;
   private readonly now: () => number;
@@ -389,8 +407,9 @@ export class ClaudeCodeProbe {
   private inFlight?: { generation: number; promise: Promise<ClaudeCodeProbeResult> };
 
   constructor(options: ClaudeCodeProbeOptions = {}) {
+    this.env = { ...(options.env ?? credentialFreeEnvironment()) };
     this.binaryPath = options.binaryPath
-      ?? process.env[CLAUDE_CODE_BINARY_ENV]
+      ?? this.env[CLAUDE_CODE_BINARY_ENV]
       ?? "claude";
     this.ttlMs = options.ttlMs ?? CLAUDE_CODE_PROBE_TTL_MS;
     if (!Number.isFinite(this.ttlMs)
@@ -401,8 +420,10 @@ export class ClaudeCodeProbe {
       );
     }
     this.now = options.now ?? Date.now;
-    this.resolveExecutable = options.resolveExecutable ?? resolveClaudeCodeExecutable;
-    this.readAuthStatus = options.readAuthStatus ?? readClaudeCodeAuthStatus;
+    this.resolveExecutable = options.resolveExecutable
+      ?? ((binaryPath) => resolveClaudeCodeExecutable(binaryPath, this.env));
+    this.readAuthStatus = options.readAuthStatus
+      ?? ((binaryPath) => readClaudeCodeAuthStatus(binaryPath, this.env));
   }
 
   async read(): Promise<ClaudeCodeProbeResult> {
@@ -436,8 +457,8 @@ export class ClaudeCodeProbe {
 
   private async readFresh(generation: number): Promise<ClaudeCodeProbeResult> {
     try {
-      const binaryPath = await this.resolveExecutable(this.binaryPath);
-      const authStatus = await this.readAuthStatus(binaryPath);
+      const binaryPath = await this.resolveExecutable(this.binaryPath, this.env);
+      const authStatus = await this.readAuthStatus(binaryPath, this.env);
       if (generation !== this.generation) return this.read();
       const value = { binaryPath, authStatus };
       this.cached = { outcome: { ok: true, value }, expiresAt: this.now() + this.ttlMs };

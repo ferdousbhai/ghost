@@ -1921,17 +1921,20 @@ executable per task using the native app-server JSON-lines stdio protocol. Ghost
 does not bundle Codex, its SDK, generated protocol bindings, a model, or a
 parallel agent loop. It invokes only `codex app-server --listen stdio://`, with
 the captured native-worker environment and task cwd, initializes a narrow
-client connection, then creates a persistent thread with only `cwd` supplied.
+client connection, then creates a persistent thread with `cwd` and the two
+maximum-trust fields described below.
 It does not override model, provider, service tier, personality, collaboration
-mode, instructions, permission profile, approval policy, sandbox, history,
-skills, plugins, MCP servers, hooks, rules, or user configuration. The complete
-task is the first ordinary user input. Codex therefore owns its identity,
-prompt/tool guidance, `$CODEX_HOME` configuration and authentication, project
-configuration, `AGENTS.md`, skills, plugins, rules, nested agents, transcripts,
-and model/provider fallback behavior exactly as the installed harness resolves
-them at that cwd. The app-server protocol is an explicit experimental native
-dependency; an incompatible installed version fails categorically rather than
-falling back to `codex exec` or Ghost emulation.
+mode, instructions, permission profile, history, skills, plugins, MCP servers,
+hooks, rules, or user configuration. The deliberate worker-only exceptions to
+that minimal thread start are `approvalPolicy:"never"` and
+`sandbox:"danger-full-access"`, the app-server equivalents of Codex YOLO mode.
+The complete task is the first ordinary user input. Codex therefore owns its
+identity, prompt/tool guidance, `$CODEX_HOME` configuration and authentication,
+project configuration, `AGENTS.md`, skills, plugins, rules, nested agents,
+transcripts, and model/provider fallback behavior exactly as the installed
+harness resolves them at that cwd. The app-server protocol is an explicit
+experimental native dependency; an incompatible installed version fails
+categorically rather than falling back to `codex exec` or Ghost emulation.
 
 Ghost validates the effective cwd returned by `thread/start` and normalizes
 completed Codex agent messages plus safe tool progress into the bounded task
@@ -1942,15 +1945,18 @@ use native `turn/steer` with the active turn-id precondition and are persisted
 only after Codex accepts them.
 
 The first Codex worker version has no owner-facing interactive approval or form
-broker. Task messages never double as approval answers. Native command, file,
-permission, and MCP elicitation requests are conservatively declined with their
-typed protocol responses and a bounded task notice. Unsupported blocking
-client-host requests receive a JSON-RPC error so the native turn fails visibly
-instead of hanging. In particular Ghost does not auto-approve work because a
-cwd is trusted, parse free-form yes/no text, impersonate an interactive login,
-supply external auth tokens or attestation, or expose Codex-only TUI/session
-navigation. A future interactive broker requires a distinct typed pending-
-request and response contract keyed by native request id.
+broker. Task messages never double as approval answers. Ordinary command, file,
+and sandbox approval requests are intentionally eliminated by the maximum-trust
+thread configuration; receiving one after Codex accepted that configuration is
+a protocol failure rather than a reason to weaken or reinterpret the task.
+MCP elicitation and any other request that needs information rather than
+authority are conservatively declined when a typed decline exists. Unsupported
+blocking client-host requests receive a JSON-RPC error so the native turn fails
+visibly instead of hanging. Ghost never parses free-form yes/no text,
+impersonates an interactive login, supplies external auth tokens or attestation,
+or exposes Codex-only TUI/session navigation. A future interactive broker
+requires a distinct typed pending-request and response contract keyed by native
+request id.
 
 Cancellation sends native `turn/interrupt` when a turn id exists, closes the
 captured app server, then escalates `SIGTERM` to `SIGKILL` after bounded grace
@@ -1958,6 +1964,68 @@ periods. Startup/protocol/terminal outcomes settle only after that exact process
 exits. Shutdown's force stage sends `SIGKILL` directly to the captured process,
 including during initialization; no PID discovery or name-based kill is
 permitted.
+
+The `claude-code` worker runs one official Claude Agent SDK query per task,
+always pointed at the owner's resolved, installed `claude` executable. The SDK
+is only the typed streaming client already required by Ghost's optional Claude
+principal runtime: the worker never selects the SDK package's bundled Claude
+binary and never implements a parallel Anthropic agent loop. Ghost supplies
+only the captured native-worker environment, canonical task cwd, installed
+executable path, and the task as the first ordinary streaming user message. It
+omits `settingSources` (thereby retaining Claude Code's native all-sources
+default) and every model, fallback, system-prompt, agent, tool, skill, plugin,
+MCP, hook, allow/deny, sandbox, output-style, and settings override. As the
+deliberate worker-only maximum-trust exception, Ghost supplies
+`permissionMode:"bypassPermissions"` plus the SDK's required explicit
+`allowDangerouslySkipPermissions:true`; any residual permission callback is
+answered allow. Claude Code therefore owns its coding identity, native prompt
+and tools, authentication, model and effort selection, user/project/local and
+managed settings, `CLAUDE.md`, auto-memory, skills, plugins, hooks, MCP servers,
+subagents, discovered permission rules, transcript, and fallback behavior as
+the installed headless harness resolves them at that cwd, except that its
+maximum-trust execution mode supersedes those rules where Claude permits. A
+protocol incompatibility between the installed executable and SDK fails
+visibly; Ghost does not fall back to a bundled executable or emulate Claude
+Code.
+
+The worker validates the cwd reported by Claude Code's native `system/init`
+message. That message's opaque session id identifies the task; Claude Code's
+normal transcript under its own configuration directory is authoritative.
+Root-assistant text and bounded native status are normalized into task events,
+while the terminal `result` supplies the normalized task result. A task message
+is written to the SDK's streaming input as another ordinary native user message
+and is persisted only when Claude replays that exact message before the first
+terminal result; it never changes settings or answers an approval. The first
+terminal result closes the captured query and rejects every message still
+awaiting replay, so a late acknowledgement cannot create or be recorded as a
+second turn.
+
+This is Claude Code's noninteractive/headless surface, not an emulation of its
+terminal UI. Claude runs with maximum tool authority: it does not stop for
+ordinary Bash, filesystem, web, MCP-tool, or subagent permission prompts. Native
+hooks still run as harness behavior. Ghost supplies a typed `canUseTool`
+fallback which allows any residual authority request. Requests that need
+information rather than trust remain different: unhandled MCP elicitation is
+declined and undeclared user dialogs fail closed. The replay-user-messages flag
+used to acknowledge accepted task messages is transport policy, not agent
+configuration. Ghost never parses free-form task messages as form or dialog
+answers. Print mode has no workspace-trust screen; Ghost's independently
+captured project binding and
+immediate root/cwd revalidation are the admission boundary before native
+project configuration can execute. Interactive login/onboarding, plan approval,
+forms, URL-auth handoffs, session navigation, model/permission switchers,
+IDE/TUI rendering, and other terminal-only flows must be completed in Claude
+Code itself or await a future typed pending-request API. The maximum-trust
+override intentionally supersedes a native default permission/plan mode for the
+worker; it does not change the owner's stored Claude Code settings.
+
+Cancellation closes streaming input, requests the SDK's native `interrupt`,
+then closes the exact captured query after a bounded grace period. Query close
+is also the registered forced-shutdown action and owns teardown of its spawned
+Claude process and transports. Native initialization is accepted only after the
+SDK has used Ghost's captured-process seam. Terminal success, worker error, and
+cancellation settle only after the SDK stream ends and that captured process
+has closed.
 
 The captured root/cwd remain pinned for the task's lifetime even if its parent
 conversation is later deleted; conversation deletion and fork neither cancel

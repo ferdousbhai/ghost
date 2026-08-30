@@ -225,6 +225,7 @@ export class WorkerCatalog {
       throw new RangeError("Worker usage staleAfterMs must be a positive finite number.");
     }
     this.claudeCodeProbe = options.claudeCodeProbe ?? new ClaudeCodeProbe({
+      env,
       binaryPath: env[CLAUDE_CODE_BINARY_ENV] ?? "claude",
     });
     this.codexProbe = options.codexProbe ?? new CodexProbe({

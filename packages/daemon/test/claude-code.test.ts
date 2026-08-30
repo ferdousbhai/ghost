@@ -362,6 +362,32 @@ function storedUnboundClaudeV3(conversationId: string): Record<string, unknown> 
 }
 
 describe("Claude Code executable/auth probe", () => {
+  it("uses the captured native-worker environment for executable and auth discovery", async () => {
+    const env = {
+      PATH: "/owner/bin",
+      OWNER_SETTING: "preserved",
+      GHOST_CLAUDE_BINARY: "owner-claude",
+    };
+    const probe = new ClaudeCodeProbe({
+      env,
+      resolveExecutable: async (configured, receivedEnv) => {
+        expect(configured).toBe("owner-claude");
+        expect(receivedEnv).toEqual(env);
+        return "/owner/bin/claude";
+      },
+      readAuthStatus: async (binary, receivedEnv) => {
+        expect(binary).toBe("/owner/bin/claude");
+        expect(receivedEnv).toEqual(env);
+        return { loggedIn: true, authMethod: "claude.ai" };
+      },
+    });
+
+    await expect(probe.read()).resolves.toMatchObject({
+      binaryPath: "/owner/bin/claude",
+      authStatus: { loggedIn: true, authMethod: "claude.ai" },
+    });
+  });
+
   it("single-flights concurrent work and retains one successful snapshot until TTL expiry", async () => {
     let now = 100;
     let resolutions = 0;

@@ -7,6 +7,7 @@ import { RemoteAccess } from "./tailscale-identity.js";
 import { LoginManager } from "./auth.js";
 import { ClaudeCodeProbe } from "./claude-code.js";
 import { CodexProbe, CodexWorkerAdapter } from "./codex-worker.js";
+import { ClaudeWorkerAdapter } from "./claude-worker.js";
 import { legacyDocumentsPlacementCommand } from "./legacy-documents-placement.js";
 import { loginCommand } from "./login-command.js";
 import { loadConfig, type DaemonConfig, type DaemonConfigOverrides } from "./config.js";
@@ -488,11 +489,12 @@ async function serveDaemon(
     // the next freshly built session: rebind the live cached sessions.
     onModelRoutingChanged: (name) => host.rebindModel(name),
   });
+  const nativeClaudeCodeProbe = new ClaudeCodeProbe({ env: nativeWorkerEnv });
   const codexProbe = new CodexProbe({ env: nativeWorkerEnv });
   const workers = new WorkerCatalog({
     ownerHome,
     env: nativeWorkerEnv,
-    claudeCodeProbe,
+    claudeCodeProbe: nativeClaudeCodeProbe,
     codexProbe,
     logger,
   });
@@ -501,6 +503,10 @@ async function serveDaemon(
     homeOperations,
     logger,
     adapters: [
+      new ClaudeWorkerAdapter({
+        env: nativeWorkerEnv,
+        assertContext: ({ root, cwd }) => host.resolveTaskContextForStart(root, cwd),
+      }),
       new CodexWorkerAdapter({
         env: nativeWorkerEnv,
         assertContext: ({ root, cwd }) => host.resolveTaskContextForStart(root, cwd),
