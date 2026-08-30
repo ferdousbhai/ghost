@@ -335,8 +335,12 @@ removes `auth.json` and empties and vacuums `agent.db` down to its schema and
 change-counter rows. Every other table goes, not only the credential ones:
 `usage_history` carries a provider email and account id per sample, `clients` a
 hostname, `client_usage` per-model spend, and `cache` usage payloads keyed by
-account, and none of it is read again. A credential the OMP-era runtime had
-disabled is not
+account, and none of it is read again. Migration admits `agent.db` only as an
+`O_NOFOLLOW` single-link regular file, moves that exact inode to a unique claim,
+holds its descriptor through SQLite read and cleanup, and reverifies the claim
+before and after destructive work before publishing the same inode back. A
+symlink, hardlink, or pathname replacement fails without scrubbing the
+replacement. A credential the OMP-era runtime had disabled is not
 migrated and is deleted with the rest — Ghost's keyring store has no disabled
 state to carry it into — so log in again to replace it. No source is removed or
 replaced before its keyring writes verify; plaintext sources remain for retry. A

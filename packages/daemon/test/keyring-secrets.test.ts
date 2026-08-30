@@ -1,4 +1,13 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  linkSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
@@ -84,6 +93,17 @@ function legacyAgentDb(agentDir: string): void {
   credential.run("openai", JSON.stringify({ key: "live-secret" }), null);
   credential.run("anthropic", JSON.stringify({ key: "disabled-secret" }), "revoked by provider");
   db.close();
+}
+
+function credentialRowCount(path: string): number {
+  const db = new Database(path, { readonly: true });
+  try {
+    return (db.query("SELECT COUNT(*) AS count FROM auth_credentials").get() as {
+      count: number;
+    }).count;
+  } finally {
+    db.close();
+  }
 }
 
 function listCredentials(context: GhostSecretContext, provider?: string) {
@@ -391,6 +411,75 @@ describe("plaintext migration", () => {
     ]) {
       expect(bytes.includes(Buffer.from(residue)), residue).toBe(false);
     }
+  });
+
+  it.each(["symlink", "hardlink"] as const)(
+    "refuses to scrub an agent.db %s",
+    (kind) => {
+      const home = root();
+      const agentDir = join(home, ".pi");
+      mkdirSync(agentDir, { recursive: true });
+      legacyAgentDb(agentDir);
+      const path = join(agentDir, "agent.db");
+      const target = join(agentDir, "target.db");
+      renameSync(path, target);
+      if (kind === "symlink") symlinkSync(target, path);
+      else linkSync(target, path);
+
+      expect(() => openContext(home, new MemorySecretServiceClient()))
+        .toThrow(SecretServiceError);
+      expect(credentialRowCount(target)).toBeGreaterThan(0);
+    },
+  );
+
+  it("rejects pathname replacement between agent.db admission and claim", () => {
+    const home = root();
+    const agentDir = join(home, ".pi");
+    mkdirSync(agentDir, { recursive: true });
+    legacyAgentDb(agentDir);
+    const path = join(agentDir, "agent.db");
+    const displaced = join(agentDir, "admitted.db");
+    let replaced = false;
+
+    expect(() => openGhostSecretContext({
+      home,
+      client: new MemorySecretServiceClient(),
+      metadataPath: join(home, "state.sqlite"),
+      agentDbProbe: (stage) => {
+        if (stage !== "admitted" || replaced) return;
+        replaced = true;
+        renameSync(path, displaced);
+        writeFileSync(path, readFileSync(displaced));
+      },
+    })).toThrow(SecretServiceError);
+
+    expect(credentialRowCount(path)).toBeGreaterThan(0);
+    expect(credentialRowCount(displaced)).toBeGreaterThan(0);
+  });
+
+  it("reverifies the claimed agent.db before destructive cleanup", () => {
+    const home = root();
+    const agentDir = join(home, ".pi");
+    mkdirSync(agentDir, { recursive: true });
+    legacyAgentDb(agentDir);
+    const displaced = join(agentDir, "claimed-original.db");
+    let replacement = "";
+
+    expect(() => openGhostSecretContext({
+      home,
+      client: new MemorySecretServiceClient(),
+      metadataPath: join(home, "state.sqlite"),
+      agentDbProbe: (stage, claimPath) => {
+        if (stage !== "scrubbing" || replacement) return;
+        replacement = claimPath;
+        renameSync(claimPath, displaced);
+        writeFileSync(claimPath, readFileSync(displaced));
+      },
+    })).toThrow(SecretServiceError);
+
+    expect(replacement).not.toBe("");
+    expect(credentialRowCount(replacement)).toBeGreaterThan(0);
+    expect(credentialRowCount(displaced)).toBeGreaterThan(0);
   });
 
   it("deletes a credential OMP had disabled instead of migrating it", () => {

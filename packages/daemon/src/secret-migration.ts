@@ -3,14 +3,18 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   chmodSync,
   closeSync,
+  constants,
   existsSync,
+  fstatSync,
   fsyncSync,
+  linkSync,
   lstatSync,
   openSync,
   renameSync,
   rmSync,
   unlinkSync,
   writeFileSync,
+  type BigIntStats,
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { Database } from "bun:sqlite";
@@ -65,6 +69,11 @@ export interface GhostSecretMigrationOptions {
   authPath?: string;
   client?: SecretServiceClient;
   metadataPath?: string;
+  /** Synchronous adversarial seam around the claimed legacy database. */
+  agentDbProbe?: (
+    stage: "admitted" | "claimed" | "scrubbing" | "scrubbed",
+    path: string,
+  ) => void;
 }
 
 function refusedSource(path: string, error: PrivateReadError): SecretServiceError {
@@ -156,19 +165,146 @@ function parseStoredCredential(type: unknown, data: unknown): AuthCredential {
   }
 }
 
+interface AgentDbClaim {
+  originalPath: string;
+  claimedPath: string;
+  descriptor: number;
+  device: bigint;
+  inode: bigint;
+  probe?: GhostSecretMigrationOptions["agentDbProbe"];
+}
+
+function isClaimedAgentDb(
+  stats: BigIntStats,
+  claim: AgentDbClaim,
+  links: bigint,
+): boolean {
+  return stats.isFile()
+    && !stats.isSymbolicLink()
+    && stats.nlink === links
+    && stats.dev === claim.device
+    && stats.ino === claim.inode;
+}
+
+function unsafeAgentDb(path: string): SecretServiceError {
+  return new SecretServiceError(
+    "secret_migration_failed",
+    `Ghost refused to migrate unsafe ${path}.`,
+  );
+}
+
+function claimAgentDb(
+  path: string,
+  probe?: GhostSecretMigrationOptions["agentDbProbe"],
+): AgentDbClaim | null {
+  let descriptor: number;
+  try {
+    descriptor = openSync(
+      path,
+      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+    );
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw unsafeAgentDb(path);
+  }
+  const claimedPath = `${path}.${process.pid}.${randomUUID()}.migration`;
+  try {
+    const admitted = fstatSync(descriptor, { bigint: true });
+    if (!admitted.isFile() || admitted.nlink !== 1n) throw unsafeAgentDb(path);
+    probe?.("admitted", path);
+    renameSync(path, claimedPath);
+    const claimed = lstatSync(claimedPath, { bigint: true });
+    if (!claimed.isFile()
+      || claimed.isSymbolicLink()
+      || claimed.nlink !== 1n
+      || claimed.dev !== admitted.dev
+      || claimed.ino !== admitted.ino) {
+      throw unsafeAgentDb(path);
+    }
+    return {
+      originalPath: path,
+      claimedPath,
+      descriptor,
+      device: admitted.dev,
+      inode: admitted.ino,
+      ...(probe ? { probe } : {}),
+    };
+  } catch (error) {
+    try {
+      if (!existsSync(path) && existsSync(claimedPath)) renameSync(claimedPath, path);
+    } catch {
+      // Preserve both paths for explicit recovery rather than overwriting one.
+    }
+    closeSync(descriptor);
+    throw error;
+  }
+}
+
+function verifyAgentDbClaim(claim: AgentDbClaim): void {
+  let descriptor: BigIntStats;
+  let claimed: BigIntStats;
+  try {
+    descriptor = fstatSync(claim.descriptor, { bigint: true });
+    claimed = lstatSync(claim.claimedPath, { bigint: true });
+  } catch {
+    throw unsafeAgentDb(claim.originalPath);
+  }
+  if (!isClaimedAgentDb(descriptor, claim, 1n)
+    || !isClaimedAgentDb(claimed, claim, 1n)) {
+    throw unsafeAgentDb(claim.originalPath);
+  }
+}
+
+function restoreAgentDbClaim(claim: AgentDbClaim): void {
+  try {
+    verifyAgentDbClaim(claim);
+    if (existsSync(claim.originalPath)) return;
+    renameSync(claim.claimedPath, claim.originalPath);
+  } catch {
+    // A replacement is not ours to move or overwrite. Leave the admitted inode
+    // at its unique claim path for explicit recovery.
+  }
+}
+
+function publishAgentDbClaim(claim: AgentDbClaim): void {
+  verifyAgentDbClaim(claim);
+  try {
+    // link(2) is the no-replace publication primitive: an adversarial final
+    // pathname makes it fail instead of being overwritten by rename(2).
+    linkSync(claim.claimedPath, claim.originalPath);
+  } catch {
+    throw unsafeAgentDb(claim.originalPath);
+  }
+  const descriptor = fstatSync(claim.descriptor, { bigint: true });
+  const claimed = lstatSync(claim.claimedPath, { bigint: true });
+  const published = lstatSync(claim.originalPath, { bigint: true });
+  if (!isClaimedAgentDb(descriptor, claim, 2n)
+    || !isClaimedAgentDb(claimed, claim, 2n)
+    || !isClaimedAgentDb(published, claim, 2n)) {
+    throw unsafeAgentDb(claim.originalPath);
+  }
+  unlinkSync(claim.claimedPath);
+  const finalDescriptor = fstatSync(claim.descriptor, { bigint: true });
+  const finalPath = lstatSync(claim.originalPath, { bigint: true });
+  if (!isClaimedAgentDb(finalDescriptor, claim, 1n)
+    || !isClaimedAgentDb(finalPath, claim, 1n)) {
+    throw unsafeAgentDb(claim.originalPath);
+  }
+  fsyncPath(dirname(claim.originalPath));
+}
+
 /**
  * A row OMP disabled is skipped rather than migrated: the keyring store has no
  * disabled state to carry it into, and the scrub below deletes it with the rest
  * of the file.
  */
-function readAgentDb(path: string): PlainCredentialRow[] {
-  if (!existsSync(path)) return [];
-  const stats = lstatSync(path);
-  if (!stats.isFile() || stats.isSymbolicLink() || stats.nlink !== 1) {
-    throw new SecretServiceError("secret_migration_failed", `Ghost refused to migrate unsafe ${path}.`);
-  }
-  const db = new Database(path, { readonly: true, strict: true });
+function readAgentDb(claim: AgentDbClaim | null): PlainCredentialRow[] {
+  if (!claim) return [];
+  verifyAgentDbClaim(claim);
+  const db = new Database(claim.claimedPath, { readonly: true, strict: true });
   try {
+    claim.probe?.("claimed", claim.claimedPath);
+    verifyAgentDbClaim(claim);
     const table = db.query(
       "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'auth_credentials'",
     ).get();
@@ -485,26 +621,35 @@ const AGENT_DB_SCHEMA_TABLES = new Set(["auth_schema_version", "auth_change_revi
  * bypasses it entirely — so deleting every table not named here covers whatever
  * OMP adds later by default.
  */
-function scrubAgentDb(path: string): void {
-  if (!existsSync(path)) return;
-  const db = new Database(path, { create: false, strict: true });
+function scrubAgentDb(claim: AgentDbClaim | null): void {
+  if (!claim) return;
+  verifyAgentDbClaim(claim);
+  const db = new Database(claim.claimedPath, { create: false, strict: true });
   try {
+    claim.probe?.("scrubbing", claim.claimedPath);
+    verifyAgentDbClaim(claim);
     const rows = db.query("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
       .all() as Array<{ name: string }>;
     const tables = rows
       .map((row) => row.name)
       .filter((name) => !name.startsWith("sqlite_") && !AGENT_DB_SCHEMA_TABLES.has(name));
-    if (tables.length === 0) return;
-    db.exec("PRAGMA journal_mode = DELETE");
-    db.transaction(() => {
-      for (const name of tables) db.exec(`DELETE FROM "${name.replaceAll('"', '""')}"`);
-    }).exclusive();
-    db.exec("VACUUM");
+    if (tables.length > 0) {
+      db.exec("PRAGMA journal_mode = DELETE");
+      db.transaction(() => {
+        for (const name of tables) db.exec(`DELETE FROM "${name.replaceAll('"', '""')}"`);
+      }).exclusive();
+      db.exec("VACUUM");
+    }
   } finally {
     db.close();
   }
-  for (const suffix of ["-journal", "-wal", "-shm"]) rmSync(`${path}${suffix}`, { force: true });
-  fsyncPath(path);
+  claim.probe?.("scrubbed", claim.claimedPath);
+  verifyAgentDbClaim(claim);
+  for (const suffix of ["-journal", "-wal", "-shm"]) {
+    rmSync(`${claim.claimedPath}${suffix}`, { force: true });
+  }
+  fsyncPath(claim.claimedPath);
+  verifyAgentDbClaim(claim);
 }
 
 function removePlainFile(path: string): void {
@@ -519,31 +664,46 @@ function migrateWithContext(
 ): void {
   const authPath = options.authPath ?? join(options.home, ".pi", "auth.json");
   const agentDb = join(dirname(authPath), "agent.db");
-  const models = readGhostModels(options.home) ?? { providers: {} };
-  const addedAccounts = new Set<string>();
-  const modelsChanged = migrateModels(models, context, addedAccounts);
-  const mcp = migrateMcpFile(options.home, context);
-  for (const account of mcp.addedAccounts) addedAccounts.add(account);
+  const agentDbClaim = claimAgentDb(agentDb, options.agentDbProbe);
+  let agentDbPublished = false;
+  try {
+    const models = readGhostModels(options.home) ?? { providers: {} };
+    const addedAccounts = new Set<string>();
+    const modelsChanged = migrateModels(models, context, addedAccounts);
+    const mcp = migrateMcpFile(options.home, context);
+    for (const account of mcp.addedAccounts) addedAccounts.add(account);
 
-  const database = readAgentDb(agentDb);
-  const legacy = legacyCredentials(authPath);
-  importCredentials([...database, ...legacy], context, addedAccounts);
+    const database = readAgentDb(agentDbClaim);
+    const legacy = legacyCredentials(authPath);
+    importCredentials([...database, ...legacy], context, addedAccounts);
 
-  const previousAccounts = models.accounts ?? [];
-  const mergedAccounts = [...new Set([...previousAccounts, ...addedAccounts])];
-  if (mergedAccounts.length > 0) models.accounts = mergedAccounts;
-  context.allowAccounts(mergedAccounts);
+    const previousAccounts = models.accounts ?? [];
+    const mergedAccounts = [...new Set([...previousAccounts, ...addedAccounts])];
+    if (mergedAccounts.length > 0) models.accounts = mergedAccounts;
+    context.allowAccounts(mergedAccounts);
 
-  if (modelsChanged || mergedAccounts.length !== previousAccounts.length) {
-    writeGhostModels(options.home, models);
+    if (modelsChanged || mergedAccounts.length !== previousAccounts.length) {
+      writeGhostModels(options.home, models);
+    }
+    if (mcp.changed && mcp.document) {
+      atomicPrivateJson(join(options.home, MCP_FILENAME), mcp.document);
+    }
+
+    // Plaintext is removed only after every keyring write was read back and
+    // both portable config replacements are durable. Every preceding step is
+    // idempotent, so a crash is resumed from the surviving source.
+    scrubAgentDb(agentDbClaim);
+    if (agentDbClaim) {
+      publishAgentDbClaim(agentDbClaim);
+      agentDbPublished = true;
+    }
+    removePlainFile(authPath);
+  } catch (error) {
+    if (agentDbClaim && !agentDbPublished) restoreAgentDbClaim(agentDbClaim);
+    throw error;
+  } finally {
+    if (agentDbClaim) closeSync(agentDbClaim.descriptor);
   }
-  if (mcp.changed && mcp.document) atomicPrivateJson(join(options.home, MCP_FILENAME), mcp.document);
-
-  // Plaintext is removed only after every keyring write was read back and both
-  // portable config replacements are durable. Every preceding step is
-  // idempotent, so a crash is resumed from the surviving source.
-  scrubAgentDb(agentDb);
-  removePlainFile(authPath);
 }
 
 export function openGhostSecretContext(options: GhostSecretMigrationOptions): GhostSecretContext {
