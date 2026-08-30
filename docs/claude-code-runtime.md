@@ -73,11 +73,11 @@ For each turn Ghost:
 3. reuses the conversation's persona — the character file, the memory index
    from the ghost home, and the shallow index from the owner's shared XDG
    Documents root — derived once when the daemon first ran a turn for that
-   conversation and held until `close`, then rebuilds the Omarchy CLI-first
-   computer-use policy, the owner-deliverable policy, the scheduled-work policy
-   rendered from ghostd's one resolved systemd user-unit directory, the
-   machine/ghost/project skill index, and the always-active declarative
-   instructions;
+   conversation and held until explicit close or idle expiry, then rebuilds the
+   Omarchy CLI-first computer-use policy, the owner-deliverable policy, the
+   scheduled-work policy rendered from ghostd's one resolved systemd user-unit
+   directory, the machine/ghost/project skill index, and the always-active
+   declarative instructions;
 4. applies the conversation's pre-turn project binding: owner home when
    unbound, or the trusted project cwd plus its approved declarative snapshot;
 5. captures the Ghost-specific `@ghost/extensions` tool definitions and
@@ -86,9 +86,9 @@ For each turn Ghost:
    is none, and pushes the prompt into that query's open input channel, mapping
    the SDK's async message stream onto Ghost's existing pi-messages SSE
    protocol until that turn's `result` frame;
-7. persists the opaque Claude session id, listing metadata, and actual cwd
-   before it emits the terminal `done`, then leaves the query warm and arms its
-   idle timer.
+7. persists the opaque Claude session id, listing metadata, and actual cwd,
+   completes post-result hooks and maintenance, then emits the terminal event.
+   Only a fully settled success leaves the query warm and arms its idle timer.
 
 The query is deliberately unrestricted for its local owner:
 
@@ -167,21 +167,27 @@ A warm query is retired — and the next turn starts cold from the sidecar's
 resume id — whenever reuse would be wrong or wasteful:
 
 - **Idle.** `CLAUDE_WARM_QUERY_IDLE_TTL_MS`, 30 minutes, deliberately the same
-  as a pi hosted session's idle TTL. This is what bounds how stale a session's
-  indexes can get: a conversation nobody is talking to loses its process, and
-  its next turn derives everything again.
+  as a pi hosted session's idle TTL. The timer drops both the process and the
+  cached character/index snapshot, so the next turn derives everything again.
 - **Changed startup options.** Everything the query was built from — cwd, model,
   the whole system prompt, the ghost tool names, and the project MCP
   configuration — is compared verbatim before reuse. The SDK has no
   `setSystemPrompt`, so a query that disagrees is retired rather than allowed to
   answer under a stale prompt. Anything added to `queryOptions` that the SDK
   fixes at startup belongs in that identity too.
-- **An aborted or failed turn.** Either leaves the message stream at an unknown
-  point, so the interrupt also closes the process.
+- **Cancellation, active close, or a terminal SDK error.** Cancellation and
+  active close use the SDK abort controller plus forceful `close`; Ghost does
+  not race an interrupt control request against teardown of that request's
+  transport. Every terminal non-success result is persisted for accounting and
+  resume, then retired.
+- **Post-result failure.** Validation, metadata persistence, hook
+  acknowledgement/session-stop handling, and maintenance must all settle
+  before reuse. Any failure retires the query so another prompt cannot advance
+  its in-memory transcript beyond Ghost's durable sidecar state.
 - **`close`, ghost close, conversation delete, and daemon shutdown.**
 
 Ghost keeps T3's important lifecycle — typed startup/stream failures,
-async-iterable streaming, interruption through the SDK query, and scoped
+async-iterable streaming, authoritative cancellation/close, and scoped
 finalization — without the `effect` dependency. A failed or malformed resume
 metadata file is still an explicit error; Ghost does not silently start a
 replacement conversation.

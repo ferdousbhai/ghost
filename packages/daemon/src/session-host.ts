@@ -3049,10 +3049,10 @@ export class SessionHost {
    * keeps the model it started on. It is flagged instead and rebound once that
    * owner releases the AgentSession.
    *
-   * Claude Code sessions need no rebinding: they are scoped per turn and read
-   * `roles.chat_model` fresh each time (see runTurn), so the next turn already
-   * picks up the switch — and a stale pi session for the same conversation is
-   * dropped by `closePi` on that next turn.
+   * Claude Code needs no eager rebinding: runTurn reads `roles.chat_model`
+   * fresh, compares it with the warm query's startup identity, and retires a
+   * mismatched query before the next prompt. A stale pi session for the same
+   * conversation is dropped by `closePi` on that next turn.
   */
   async rebindModel(ghostName: string): Promise<void> {
     this.registry.get(ghostName);
@@ -4572,8 +4572,8 @@ export class SessionHost {
         throw new GhostError("session_busy", "Wait for this conversation's project change to finish.", 409);
       }
       // A model switch must not leave a stale pi AgentSession owning this
-      // conversation. Claude itself is scoped per turn and keeps only its
-      // opaque resume id between turns.
+      // conversation. Claude owns a separate warm query whose startup identity
+      // is checked inside runTurn before it accepts the next prompt.
       const piSession = this.sessions.get(key);
       if (piSession && this.sessionOwned(piSession)) {
         throw new GhostError(

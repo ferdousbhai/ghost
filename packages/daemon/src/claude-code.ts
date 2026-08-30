@@ -7,11 +7,10 @@
  * credentials. The Effect lifecycle below is adapted from T3 Code's MIT-
  * licensed Claude adapter (`apps/server/src/provider/Layers/ClaudeAdapter.ts`).
  *
- * Ghost deliberately opens one scoped query per turn instead of keeping T3's
- * query process alive forever. Our persona, memory index, and Documents index
- * are rebuilt on every turn; a long-lived query would freeze those system
- * instructions at session creation. Claude's opaque session id supplies
- * continuity when the next scoped query resumes.
+ * One conversation keeps one streamed query warm across owner turns. Its
+ * character and memory/Documents indexes are session-start state; idle expiry
+ * or an explicit close drops both the query and that snapshot, and Claude's
+ * opaque session id supplies continuity when the next query resumes cold.
  */
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -1524,12 +1523,10 @@ export class ClaudeCodeRuntime {
     string,
     { controller: AbortController; promise: Promise<void> }
   >();
-  // The character file and the memory/Documents indexes are session-start
-  // state, not per-turn state. One scoped query per turn would otherwise derive
-  // them again for every owner turn; this keeps a conversation's persona fixed
-  // for as long as the daemon holds it, and `close` drops it so the next turn
-  // starts from disk. Live truth stays on disk, where the native file tools
-  // read it.
+  // The character file and memory/Documents indexes are session-start state,
+  // not per-turn state. Explicit close and idle expiry drop this snapshot so
+  // the next cold resume starts from disk. Live truth remains available there
+  // through the native file tools throughout the session.
   private readonly personas = new Map<string, string>();
   // One live Claude process per warm conversation. Turn one starts it; later
   // turns push into its open input channel, so the persona, the project MCP
@@ -1681,6 +1678,10 @@ export class ClaudeCodeRuntime {
     let settledTurn: SettledMaintenanceTurn | undefined;
     let pendingTerminalResult: SDKResultMessage | undefined;
     let pendingFailure: { cause: unknown; aborted: boolean } | undefined;
+    // A result has advanced Claude's transcript. Until all durable side effects
+    // for that result settle, any failure must prevent another prompt from
+    // entering this live process; the next turn resumes cold from its sidecar.
+    let postQueryWorkPending = false;
     try {
       const paths = ghostPaths(ghost.dir);
       let metadata = await readMetadata(paths.sessionDir, conversationId);
@@ -1876,14 +1877,11 @@ export class ClaudeCodeRuntime {
         }
         const live = warm;
         this.active.set(key, { query: live.query, abortController: live.abortController });
-        // An abort leaves the message stream at an unknown point, so the turn's
-        // interrupt also retires the process rather than handing the next turn
-        // a query mid-frame; that turn resumes cold from the sidecar.
+        // Cancellation is forceful: SDK close/abort owns transport teardown.
+        // `interrupt()` is a request over that same transport, so sending it and
+        // immediately closing can only race the request.
         const interrupt = () => {
-          void live.query.interrupt().catch(() => {
-            // The retire below closes the process on every path anyway.
-          });
-          this.retireWarm(key);
+          this.retireWarm(key, live);
         };
         const turnSignal = options.signal;
         if (turnSignal?.aborted) interrupt();
@@ -1895,8 +1893,9 @@ export class ClaudeCodeRuntime {
             ...(continuationCount === 0 && beforePromptContext ? [beforePromptContext] : []),
           );
           completed = await pumpClaudeTurn(live, onMessage);
+          postQueryWorkPending = true;
         } catch (cause) {
-          this.retireWarm(key);
+          this.retireWarm(key, live);
           throw cause;
         } finally {
           turnSignal?.removeEventListener("abort", interrupt);
@@ -1939,12 +1938,18 @@ export class ClaudeCodeRuntime {
           try {
             await acknowledge();
           } catch {
+            // The notice was durably delivered but not durably acknowledged.
+            // Keep the owner-visible result, but never feed another prompt to
+            // the process whose post-query bookkeeping was incomplete.
+            this.retireWarm(key, live);
             logger.warn("before_prompt hook acknowledgement failed", {
               runtime: "claude-code",
             });
           }
         }
         if (options.signal?.aborted) {
+          this.retireWarm(key, live);
+          postQueryWorkPending = false;
           settledTurn = undefined;
           pendingFailure = { cause: new Error("Turn aborted."), aborted: true };
           break;
@@ -1965,6 +1970,11 @@ export class ClaudeCodeRuntime {
           assistantText: resultText,
           outcome: completed.subtype === "success" ? "completed" : "failed",
         };
+        if (completed.subtype !== "success") {
+          // Terminal SDK errors have a valid resume id and accounting, but the
+          // stream itself is no longer a trustworthy place for another turn.
+          this.retireWarm(key, live);
+        }
         const lastAssistant = {
           role: "assistant",
           content: resultText ? [{ type: "text", text: resultText }] : [],
@@ -1997,6 +2007,7 @@ export class ClaudeCodeRuntime {
         this.assertTurnAdmitted();
         const additionalContext = ghostSessionStopContinuation(hookResult);
         if (!additionalContext) {
+          postQueryWorkPending = false;
           pendingTerminalResult = completed;
           break;
         }
@@ -2005,6 +2016,7 @@ export class ClaudeCodeRuntime {
             session: completed.session_id,
             cap: GHOST_SESSION_STOP_CONTINUATION_CAP,
           });
+          postQueryWorkPending = false;
           pendingTerminalResult = completed;
           break;
         }
@@ -2012,11 +2024,13 @@ export class ClaudeCodeRuntime {
         continuationCount += 1;
         stopHookActive = true;
         prompt = additionalContext;
+        postQueryWorkPending = false;
       }
       if (!adapter.isTerminal() && !pendingTerminalResult && !pendingFailure) {
         throw new ClaudeCodeProcessError("Claude Code result did not terminate the turn.");
       }
     } catch (cause) {
+      if (postQueryWorkPending) this.retireWarm(key);
       if (options.signal?.aborted) settledTurn = undefined;
       else if (settledTurn) settledTurn = { ...settledTurn, outcome: "failed" };
       logger.error("Claude Code turn failed", {
@@ -2030,6 +2044,7 @@ export class ClaudeCodeRuntime {
       try {
         await finishMaintenance?.(settledTurn);
       } catch {
+        this.retireWarm(key);
         logger.warn("conversation maintenance turn record failed", {
           runtime: "claude-code",
         });
@@ -2039,10 +2054,15 @@ export class ClaudeCodeRuntime {
           aborted: false,
         };
       }
-      if (pendingTerminalResult && !adapter.isTerminal()) {
-        adapter.handle(pendingTerminalResult);
-      } else if (pendingFailure && !adapter.isTerminal()) {
-        adapter.finishError(pendingFailure.cause, pendingFailure.aborted);
+      try {
+        if (pendingTerminalResult && !adapter.isTerminal()) {
+          adapter.handle(pendingTerminalResult);
+        } else if (pendingFailure && !adapter.isTerminal()) {
+          adapter.finishError(pendingFailure.cause, pendingFailure.aborted);
+        }
+      } catch (cause) {
+        this.retireWarm(key);
+        throw cause;
       }
       // Whatever survived the turn starts its idle countdown here, so a warm
       // process is never held by a conversation nobody is talking to.
@@ -2083,16 +2103,17 @@ export class ClaudeCodeRuntime {
   }
 
   async closeGhost(ghostName: string): Promise<void> {
+    // `close` forcefully retires active queries and their persona snapshots.
+    for (const key of [...this.active.keys()]) {
+      const [keyGhost, conversationId] = JSON.parse(key) as [string, string];
+      if (keyGhost !== ghostName) continue;
+      await this.close(ghostName, conversationId);
+    }
     for (const key of [...this.personas.keys()]) {
       if (runtimeKeyGhost(key) === ghostName) this.personas.delete(key);
     }
     for (const key of [...this.warm.keys()]) {
       if (runtimeKeyGhost(key) === ghostName) this.retireWarm(key);
-    }
-    for (const key of [...this.active.keys()]) {
-      const [keyGhost, conversationId] = JSON.parse(key) as [string, string];
-      if (keyGhost !== ghostName) continue;
-      await this.close(ghostName, conversationId);
     }
   }
 
@@ -2101,9 +2122,9 @@ export class ClaudeCodeRuntime {
    * reused: idle expiry, an aborted or failed turn that leaves the message
    * stream at an unknown point, a changed persona or project, or shutdown.
    */
-  private retireWarm(key: string): void {
+  private retireWarm(key: string, expected?: WarmClaudeQuery): void {
     const warm = this.warm.get(key);
-    if (!warm) return;
+    if (!warm || (expected && warm !== expected)) return;
     this.warm.delete(key);
     if (warm.idleTimer) clearTimeout(warm.idleTimer);
     warm.input.close();
@@ -2115,19 +2136,23 @@ export class ClaudeCodeRuntime {
     }
   }
 
-  /** Start the idle countdown; a conversation with no turns loses its process. */
+  /** Start the idle countdown for both the query and its persona snapshot. */
   private armWarmIdle(key: string): void {
     const warm = this.warm.get(key);
     if (!warm) return;
     if (warm.idleTimer) clearTimeout(warm.idleTimer);
     warm.idleTimer = setTimeout(() => {
       this.logger.debug?.("retiring idle Claude query", { key });
-      this.retireWarm(key);
+      // The callback may already be queued while a replacement is installed;
+      // only the query whose timer fired may expire the session snapshot.
+      if (this.warm.get(key) !== warm) return;
+      this.personas.delete(key);
+      this.retireWarm(key, warm);
     }, this.warmIdleTtlMs);
     warm.idleTimer.unref?.();
   }
 
-  /** A conversation's persona, derived once and held until `close` drops it. */
+  /** A conversation's persona, held until close or idle expiry drops it. */
   private async sessionPersona(
     key: string,
     home: string,
@@ -2150,15 +2175,18 @@ export class ClaudeCodeRuntime {
   async close(ghostName: string, conversationId: string): Promise<void> {
     const key = JSON.stringify([ghostName, conversationId]);
     this.personas.delete(key);
-    this.retireWarm(key);
     const active = this.active.get(key);
-    if (!active) return;
     this.active.delete(key);
-    active.abortController.abort();
-    try {
-      await active.query.interrupt();
-    } finally {
-      active.query.close();
+    this.retireWarm(key);
+    // Active and warm normally identify the same SDK query. Keep close
+    // authoritative if an injected implementation violates that invariant.
+    if (active && !active.abortController.signal.aborted) {
+      active.abortController.abort();
+      try {
+        active.query.close();
+      } catch {
+        // The query is already retired.
+      }
     }
   }
 

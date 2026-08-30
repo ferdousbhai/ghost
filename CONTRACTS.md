@@ -251,12 +251,13 @@ Documents may be regular files of any type and may nest to any depth or width;
 Ghost imposes no folder-depth or sibling-count policy on the live tree. It does
 not parse arbitrary Markdown or text as a Ghost canonical format. Native
 filesystem tools may read or mutate a path when a model or owner explicitly
-chooses it. Automatic context is narrower: before each pi or Claude Code
-turn, and for greeting input, Ghost lists only the root's immediate non-hidden
-regular files and directories, folders first and then by name. It reads no file
-content, follows no symbolic link, and never descends. At most 100 entries and
-4,000 characters enter the prompt; the index states the exact number of
-eligible root entries omitted. Names are fenced and treated as untrusted data.
+chooses it. Automatic context is narrower: at the start of each pi or Claude
+Code session, and for greeting input, Ghost lists only the root's immediate
+non-hidden regular files and directories, newest-modified first with name as
+the deterministic tie-break. It reads no file content, follows no symbolic
+link, and never descends. At most 50 entries and 4,000 characters enter the
+prompt; the index states the exact number of eligible root entries omitted.
+Names are fenced and treated as untrusted data.
 
 Already-released native Pi transcript headers are history: a legacy conversation resumes at the absolute cwd in its header rather
 than silently changing the meaning of its relative tool paths. Project-state
@@ -499,13 +500,16 @@ The query is retired — the next turn starting cold from the sidecar's resume i
 — after 30 idle minutes (the same idle TTL a pi hosted session uses), when any
 value the query was constructed from would differ (cwd, model, system prompt,
 ghost tool names, or project MCP configuration; the SDK fixes all of these at
-startup), when a turn is aborted or fails and leaves the stream at an unknown
-point, and on close, ghost close, conversation delete, or daemon shutdown.
+startup), on cancellation, after every terminal non-success SDK result, after
+any post-result validation, metadata, hook, or maintenance failure, and on
+close, ghost close, conversation delete, or daemon shutdown. Cancellation and
+active close use the SDK abort controller plus forceful `close`; Ghost never
+sends an interrupt request over a transport it is simultaneously retiring.
 Session-stop continuations are further passes through the same warm query. The
 SDK reports `num_turns` per result rather than cumulatively, so the sidecar's
-message accounting is unchanged. That idle TTL is also what bounds index
-staleness: an untouched conversation loses its process and derives everything
-again on its next turn.
+message accounting is unchanged. Idle expiry drops the session's character and
+index snapshot together with the query; that is what bounds snapshot staleness,
+and an untouched conversation derives everything again on its next turn.
 
 The memory index and the root-only Documents index are derived from disk once
 per session, never stored, and never re-derived mid-session — live truth is the
@@ -1971,8 +1975,9 @@ Unbound sessions enable no cwd-discovered skills. Existing Ghost extension
 tools are added through one in-process SDK MCP server, and output is normalized
 back to pi-messages. Ambient provider credentials remain scrubbed.
 
-Each turn is one scoped Agent SDK query. A new conversation uses its pre-turn project cwd,
-or owner home while unbound. That choice is fixed at the first owner turn:
+A conversation holds one streamed Agent SDK query across successful owner
+turns. A new conversation uses its pre-turn project cwd, or owner home while
+unbound. That choice is fixed at the first owner turn:
 later PUT/reload is rejected and the shell must start a new conversation.
 Every accepted metadata version stores exact canonical ISO `created` and
 `modified` timestamps. Version-3 mode-`0600` metadata stores the actual cwd and the exact first-turn
@@ -1980,10 +1985,14 @@ project snapshot beside the opaque Claude resume id. A version-1 sidecar
 predates cwd and resumes at ghost home for history safety; version 2 has cwd but
 no project snapshot. Either legacy version may promote while unbound, but a
 bound legacy resume fails closed rather than rereading mutable project inputs.
-The runtime rebuilds the Ghost persona/memory/Documents prompt and visible
-ghost declarative snapshot, reuses the stored project bytes and MCP rows,
-streams one turn,
-atomically writes metadata before the terminal event, and closes the query.
+The runtime derives the Ghost character and memory/Documents indexes once for
+the session, rebuilds the visible declarative additions per owner turn, reuses
+the stored project bytes and MCP rows, and pushes each prompt into the warm
+query only while its fixed startup identity still matches. It atomically writes
+metadata and completes post-result hooks and maintenance before the terminal
+event. A fully settled success remains warm; idle/session expiry, cancellation,
+terminal SDK errors, and post-result failures retire the query so the next turn
+resumes cold from durable metadata.
 Claude Code owns the actual transcript under its own
 `~/.claude/projects/` storage; the sidecar is not a transcript. Full rationale,
 T3 Code provenance, policy caveat, and legal boundary:

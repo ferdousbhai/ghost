@@ -105,6 +105,7 @@ function fakeQuery(
   prompts?: AsyncIterable<SDKUserMessage>,
   onPrompt?: (message: SDKUserMessage) => void,
 ): Query {
+  let transportClosed = false;
   const forTurn = (turn: number): SDKMessage[] =>
     typeof messages === "function" ? messages(turn) : messages;
   const stream = (async function* () {
@@ -124,9 +125,12 @@ function fakeQuery(
   })();
   return Object.assign(stream, {
     interrupt: async () => {
+      if (transportClosed) throw new Error("SDK control transport is closed");
       lifecycle.interrupted += 1;
     },
     close: () => {
+      if (transportClosed) return;
+      transportClosed = true;
       lifecycle.closed += 1;
     },
   }) as unknown as Query;
@@ -726,7 +730,7 @@ describe("Claude Code subscription runtime", () => {
     });
   });
 
-  it("retires an idle warm query, and the next turn resumes cold", async () => {
+  it("expires an idle Claude session and rebuilds its persona on cold resume", async () => {
     const { paths, seenOptions, lifecycle } = setupClaudeHost({ warmIdleTtlMs: 20 });
     const turn = (prompt: string) => host!.runTurn("casper", {
       sessionId: "conversation-idle",
@@ -738,6 +742,19 @@ describe("Claude Code subscription runtime", () => {
     expect(lifecycle.queries).toBe(1);
     expect(lifecycle.closed).toBe(0);
 
+    writeFileSync(
+      join(paths.home, "character.md"),
+      "# Casper\n\nYou are Casper, now a bookbinder.\n",
+      "utf8",
+    );
+    writeFileSync(
+      join(paths.home, "memory", "idle-session-memory.md"),
+      "The owner expects idle sessions to refresh.\n",
+      "utf8",
+    );
+    mkdirSync(temp!.documentsDir, { recursive: true });
+    writeFileSync(join(temp!.documentsDir, "idle-session-document.txt"), "owner bytes", "utf8");
+
     await new Promise((resolve) => setTimeout(resolve, 80));
     expect(lifecycle.closed).toBe(1);
 
@@ -748,6 +765,10 @@ describe("Claude Code subscription runtime", () => {
     expect(seenOptions[1]?.resume).toBe(
       (JSON.parse(readFileSync(sidecar, "utf8")) as { sessionId: string }).sessionId,
     );
+    const resumedPrompt = JSON.stringify(seenOptions[1]?.systemPrompt);
+    expect(resumedPrompt).toContain("bookbinder");
+    expect(resumedPrompt).toContain("idle-session-memory");
+    expect(resumedPrompt).toContain("idle-session-document.txt");
   });
 
   it("retires a warm query whose persona changed rather than answering under a stale one", async () => {
@@ -2649,7 +2670,7 @@ describe("Claude Code subscription runtime", () => {
       beginShutdown: async () => {},
       disposeAll: async () => {},
     };
-    const { paths } = setupClaudeHost({ maintenance, logger });
+    const { paths, lifecycle, seenOptions } = setupClaudeHost({ maintenance, logger });
     const failedEvents: PiMessagesEvent[] = [];
 
     await host!.runTurn("casper", {
@@ -2688,6 +2709,7 @@ describe("Claude Code subscription runtime", () => {
       claudeSessionMetadataPath(paths.sessionDir, "strict-claude-maintenance"),
       "utf8",
     ))).toMatchObject({ ownerTurnCount: 1, messageCount: 2 });
+    expect(lifecycle.closed).toBe(1);
 
     const retryEvents: PiMessagesEvent[] = [];
     await host!.runTurn("casper", {
@@ -2696,6 +2718,13 @@ describe("Claude Code subscription runtime", () => {
       emit: (event) => retryEvents.push(event),
     });
     expect(retryEvents.at(-1)?.type).toBe("done");
+    expect(lifecycle.queries).toBe(2);
+    expect(seenOptions[1]?.resume).toBe(
+      (JSON.parse(readFileSync(
+        claudeSessionMetadataPath(paths.sessionDir, "strict-claude-maintenance"),
+        "utf8",
+      )) as { sessionId: string }).sessionId,
+    );
     expect(releases).toBe(2);
     expect(JSON.parse(readFileSync(
       claudeSessionMetadataPath(paths.sessionDir, "strict-claude-maintenance"),
@@ -2748,7 +2777,7 @@ describe("Claude Code subscription runtime", () => {
         },
       }));
     });
-    const { paths } = setupClaudeHost({ hooks, logger });
+    const { paths, lifecycle, seenOptions } = setupClaudeHost({ hooks, logger });
     const events: PiMessagesEvent[] = [];
 
     await host!.runTurn("casper", {
@@ -2772,6 +2801,20 @@ describe("Claude Code subscription runtime", () => {
       },
     });
     expect(JSON.stringify(logger.records)).not.toContain("sensitive notice id");
+
+    await host!.runTurn("casper", {
+      sessionId: "conversation-ack-failure",
+      prompt: "continue after the acknowledgement failure",
+      emit: () => {},
+    });
+    expect(lifecycle.queries).toBe(2);
+    expect(lifecycle.closed).toBe(2);
+    expect(seenOptions[1]?.resume).toBe(
+      (JSON.parse(readFileSync(
+        claudeSessionMetadataPath(paths.sessionDir, "conversation-ack-failure"),
+        "utf8",
+      )) as { sessionId: string }).sessionId,
+    );
   });
 
   it("fails closed without Claude.ai plan auth and never starts a query", async () => {
@@ -2796,11 +2839,17 @@ describe("Claude Code subscription runtime", () => {
   });
 
   it("persists SDK turns and resume identity from a terminal max-turn error", async () => {
-    const { paths, lifecycle } = setupClaudeHost({
+    const { paths, lifecycle, seenOptions } = setupClaudeHost({
       createQuery: (input, state) => {
         const sessionId = input.options.sessionId ?? input.options.resume;
         if (!sessionId) throw new Error("test query received no session id");
-        return fakeQuery([errorResultMessage(sessionId, "error_max_turns", 3)], state);
+        return fakeQuery(
+          state.queries === 1
+            ? [errorResultMessage(sessionId, "error_max_turns", 3)]
+            : responseMessages(sessionId, "Recovered after the terminal error."),
+          state,
+          input.prompt,
+        );
       },
     });
     const events: PiMessagesEvent[] = [];
@@ -2827,14 +2876,37 @@ describe("Claude Code subscription runtime", () => {
       messageCount: 6,
       ownerTurnCount: 1,
     });
+    expect(lifecycle.closed).toBe(1);
+
+    const retryEvents: PiMessagesEvent[] = [];
+    await host!.runTurn("casper", {
+      sessionId: "conversation-max-turns",
+      prompt: "retry cold",
+      emit: (event) => retryEvents.push(event),
+    });
+    expect(retryEvents.at(-1)?.type).toBe("done");
+    expect(lifecycle.queries).toBe(2);
+    expect(seenOptions[1]?.resume).toBe(metadata.sessionId);
+    expect(JSON.parse(readFileSync(
+      claudeSessionMetadataPath(paths.sessionDir, "conversation-max-turns"),
+      "utf8",
+    ))).toMatchObject({ ownerTurnCount: 2, messageCount: 8 });
   });
 
   it("does not publish an invalid session id from a terminal SDK result", async () => {
     const invalidSessionId = "x".repeat(513);
-    const { paths, lifecycle } = setupClaudeHost({
-      createQuery: (_input, state) => fakeQuery([
-        errorResultMessage(invalidSessionId, "error_during_execution", 1),
-      ], state),
+    const { paths, lifecycle, seenOptions } = setupClaudeHost({
+      createQuery: (input, state) => {
+        const sessionId = input.options.sessionId ?? input.options.resume;
+        if (!sessionId) throw new Error("test query received no session id");
+        return fakeQuery(
+          state.queries === 1
+            ? [errorResultMessage(invalidSessionId, "error_during_execution", 1)]
+            : responseMessages(sessionId, "Recovered after invalid metadata."),
+          state,
+          input.prompt,
+        );
+      },
     });
     const events: PiMessagesEvent[] = [];
 
@@ -2853,6 +2925,49 @@ describe("Claude Code subscription runtime", () => {
       paths.sessionDir,
       "conversation-invalid-result-session",
     ))).toBe(false);
+    expect(lifecycle.closed).toBe(1);
+
+    await host!.runTurn("casper", {
+      sessionId: "conversation-invalid-result-session",
+      prompt: "start cleanly",
+      emit: () => {},
+    });
+    expect(lifecycle.queries).toBe(2);
+    expect(seenOptions[1]?.resume).toBeUndefined();
+    expect(seenOptions[1]?.sessionId).toEqual(expect.any(String));
+  });
+
+  it("retires a query when its result metadata cannot be written", async () => {
+    const { paths, lifecycle, seenOptions } = setupClaudeHost();
+    mkdirSync(paths.sessionDir, { recursive: true });
+    chmodSync(paths.sessionDir, 0o500);
+    const failedEvents: PiMessagesEvent[] = [];
+    try {
+      await host!.runTurn("casper", {
+        sessionId: "conversation-metadata-write-failure",
+        prompt: "this result cannot settle",
+        emit: (event) => failedEvents.push(event),
+      });
+    } finally {
+      chmodSync(paths.sessionDir, 0o700);
+    }
+
+    expect(failedEvents.at(-1)).toMatchObject({ type: "error" });
+    expect(lifecycle).toMatchObject({ queries: 1, closed: 1 });
+    expect(existsSync(claudeSessionMetadataPath(
+      paths.sessionDir,
+      "conversation-metadata-write-failure",
+    ))).toBe(false);
+
+    const retryEvents: PiMessagesEvent[] = [];
+    await host!.runTurn("casper", {
+      sessionId: "conversation-metadata-write-failure",
+      prompt: "retry from durable state",
+      emit: (event) => retryEvents.push(event),
+    });
+    expect(retryEvents.at(-1)?.type).toBe("done");
+    expect(lifecycle.queries).toBe(2);
+    expect(seenOptions[1]?.resume).toBeUndefined();
   });
 
   it("does not change persisted counts when the SDK process fails before a result", async () => {
@@ -2893,7 +3008,7 @@ describe("Claude Code subscription runtime", () => {
     expect(readFileSync(sidecar, "utf8")).toBe(original);
   });
 
-  it("interrupts and closes an already-aborted turn", async () => {
+  it("force-closes an already-aborted turn without racing an interrupt request", async () => {
     const { lifecycle, seenOptions } = setupClaudeHost();
     const controller = new AbortController();
     const events: PiMessagesEvent[] = [];
@@ -2906,13 +3021,13 @@ describe("Claude Code subscription runtime", () => {
       emit: (event) => events.push(event),
     });
 
-    expect(lifecycle.interrupted).toBe(1);
+    expect(lifecycle.interrupted).toBe(0);
     expect(lifecycle.closed).toBe(1);
     expect(seenOptions[0]?.abortController?.signal.aborted).toBe(true);
     expect(events.at(-1)).toMatchObject({ type: "error", reason: "aborted" });
   });
 
-  it("uses the SDK abort controller when interrupt rejects during cancellation", async () => {
+  it("uses authoritative SDK abort and close during cancellation", async () => {
     let markStarted!: () => void;
     const started = new Promise<void>((resolve) => {
       markStarted = resolve;
@@ -2930,7 +3045,7 @@ describe("Claude Code subscription runtime", () => {
         return Object.assign(stream, {
           interrupt: async () => {
             state.interrupted += 1;
-            throw new Error("simulated stuck interrupt");
+            throw new Error("cancellation must not send a control request");
           },
           close: () => {
             state.closed += 1;
@@ -2952,12 +3067,56 @@ describe("Claude Code subscription runtime", () => {
     await turn;
 
     expect(seenOptions[0]?.abortController?.signal.aborted).toBe(true);
-    expect(lifecycle.interrupted).toBe(1);
+    expect(lifecycle.interrupted).toBe(0);
     expect(lifecycle.closed).toBe(1);
     expect(events.at(-1)).toMatchObject({ type: "error", reason: "aborted" });
     expect(existsSync(
       claudeSessionMetadataPath(paths.sessionDir, "conversation-wedged"),
     )).toBe(false);
+  });
+
+  it("force-closes an active query without requesting over its closed transport", async () => {
+    const started = deferred();
+    const order: string[] = [];
+    let transportClosed = false;
+    const { lifecycle } = setupClaudeHost({
+      createQuery: (input, state) => {
+        const stream = (async function* () {
+          started.resolve();
+          await new Promise<void>((resolve) => {
+            input.options.abortController?.signal.addEventListener("abort", () => resolve(), {
+              once: true,
+            });
+          });
+        })();
+        return Object.assign(stream, {
+          interrupt: async () => {
+            if (transportClosed) throw new Error("SDK control transport is closed");
+            state.interrupted += 1;
+            order.push("interrupt");
+          },
+          close: () => {
+            if (transportClosed) return;
+            transportClosed = true;
+            state.closed += 1;
+            order.push("close");
+          },
+        }) as unknown as Query;
+      },
+    });
+    const events: PiMessagesEvent[] = [];
+    const turn = host!.runTurn("casper", {
+      sessionId: "conversation-active-close",
+      prompt: "keep running",
+      emit: (event) => events.push(event),
+    });
+    await started.promise;
+
+    await Promise.all([host!.close("casper", "conversation-active-close"), turn]);
+
+    expect(order).toEqual(["close"]);
+    expect(lifecycle).toMatchObject({ interrupted: 0, closed: 1 });
+    expect(events.at(-1)).toMatchObject({ type: "error" });
   });
 
   it("does not admit a query whose auth probe settles after daemon disposal", async () => {
@@ -3083,7 +3242,7 @@ describe("Claude Code subscription runtime", () => {
     await turn;
 
     expect(seenOptions[0]?.abortController?.signal.aborted).toBe(true);
-    expect(lifecycle.interrupted).toBe(1);
+    expect(lifecycle.interrupted).toBe(0);
     expect(lifecycle.closed).toBeGreaterThanOrEqual(1);
   });
 });
