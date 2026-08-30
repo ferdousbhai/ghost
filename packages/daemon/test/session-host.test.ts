@@ -15,6 +15,7 @@ import {
   readFileSync,
   renameSync,
   rmSync,
+  statSync,
   symlinkSync,
   truncateSync,
   unlinkSync,
@@ -5875,7 +5876,7 @@ describe("conversation branching", () => {
   async function seedBranchable(
     title: string | null = "Weekend trip",
     projectBindingsFactory?: (fixture: TempGhosts) => ProjectBindingStore,
-    options: Pick<SessionHostOptions, "transactionProbe"> = {},
+    options: Pick<SessionHostOptions, "conversationFileProbe" | "transactionProbe"> = {},
   ) {
     temp = makeTempGhosts();
     provider = await startMockProvider({ script: [{ kind: "text", text: "A branch-aware answer." }] });
@@ -5944,6 +5945,65 @@ describe("conversation branching", () => {
     // The source is still untouched after the copy has been written to.
     expect(await host!.readTranscript("casper", "conv-tree")).toEqual(after);
   });
+
+  it.each(["rename", "delete"] as const)(
+    "publishes a fork into the original home before %s and isolates old-name reuse",
+    async (move) => {
+      const readEntered = Promise.withResolvers<void>();
+      const releaseRead = Promise.withResolvers<void>();
+      const { firstUser } = await seedBranchable("Weekend trip", undefined, {
+        conversationFileProbe: async (operation) => {
+          if (operation !== "fork-read") return;
+          readEntered.resolve();
+          await releaseRead.promise;
+        },
+      });
+      const originalHome = join(temp!.root, "casper");
+      const originalInode = statSync(originalHome, { bigint: true }).ino;
+      const coordinator = homeOperationsFor(temp!.registry);
+
+      const forking = host!.forkConversation("casper", "conv-tree", firstUser.entryId);
+      await readEntered.promise;
+      let moveReady = false;
+      const reservingMove = coordinator.reserveMove("casper").then((release) => {
+        moveReady = true;
+        return release;
+      });
+      await Promise.resolve();
+      expect(moveReady).toBe(false);
+
+      releaseRead.resolve();
+      const forked = await forking;
+      const releaseMove = await reservingMove;
+      let movedHome = "";
+      try {
+        if (move === "rename") {
+          await host!.renameGhost("casper", "wisp");
+          movedHome = join(temp!.root, "wisp");
+        } else {
+          movedHome = (await host!.deleteGhost("casper")).trash;
+        }
+        expect(() => host!.createGhost("casper")).toThrowError(/finish moving/);
+      } finally {
+        releaseMove();
+      }
+      expect(statSync(movedHome, { bigint: true }).ino).toBe(originalInode);
+      expect(existsSync(join(
+        ghostPaths(movedHome).sessionDir,
+        sessionFileNameFor(forked.sessionId),
+      ))).toBe(true);
+
+      const replacement = host!.createGhost("casper");
+      expect(statSync(replacement.dir, { bigint: true }).ino).not.toBe(originalInode);
+      expect(existsSync(join(
+        ghostPaths(replacement.dir).sessionDir,
+        sessionFileNameFor(forked.sessionId),
+      ))).toBe(false);
+      if (move === "rename") {
+        expect((await host!.listSessions("wisp")).map((row) => row.id)).toContain(forked.id);
+      }
+    },
+  );
 
   it("transactionally forks the source's immutable project snapshot", async () => {
     const { firstUser } = await seedBranchable();
@@ -7610,7 +7670,12 @@ describe("passive session recovery during whole-home moves", () => {
       entered,
       resume,
       probe: async (
-        candidate: "plan-read" | "plan-write" | "title-write" | "transcript-read",
+        candidate:
+          | "plan-read"
+          | "plan-write"
+          | "title-write"
+          | "transcript-read"
+          | "fork-read",
       ) => {
         if (candidate !== operation) return;
         entered.resolve();

@@ -1109,7 +1109,9 @@ shape and streams emit one complete event object per line.
   `connected`, `connecting`, `disconnected`, `mixed`, `disabled`, or
   `not_loaded`; GET only inspects already-open pi conversations and never
   opens one. Malformed files/rows appear in `skipped` without hiding valid
-  siblings.
+  siblings. One ghost-home identity lease spans config path resolution, the
+  complete sanitized read, and connection-status projection, so a whole-home
+  move cannot redirect an admitted listing into a reused old name.
 - MCP mutations use Ghost's locked atomic `mcp.json` writer and return the
   refreshed sanitized snapshot: `POST /api/ghosts/:name/mcp`
   `{ name, config }` adds to `mcp.json`; `PUT|DELETE
@@ -1162,7 +1164,10 @@ shape and streams emit one complete event object per line.
   `degraded`, and either successful publication emits
   `conversation-updated` with `reason:"project"`. A stale-generation result is
   discarded without an event. Reconnecting a user-level ghost `mcp.json`
-  server never rewrites bound-project health.
+  server never rewrites bound-project health. Test and reconnect each hold one
+  home identity lease across server existence/config inspection, the isolated
+  or live-manager action, and the final sanitized response snapshot; rename or
+  delete cannot overtake that composite operation.
 - `POST /api/ghosts/:name/messages` — the **pi-messages wire protocol** over
   pi's `AgentSession` (request `{ model, context, options }` → SSE stream).
   The pinned client in the summon-ghost repo is the normative spec
@@ -1754,6 +1759,10 @@ shape and streams emit one complete event object per line.
   conversation is left untouched, leaf included. `entryId` must be a persisted
   user message (`400 invalid_branch`), the source must be idle
   (`409 session_busy`), and any other `action` is `400 invalid_request`.
+  One ghost-home identity lease is acquired before source path resolution and
+  identity validation and remains held through source claim, transactional fork
+  publication, and conversation invalidation. A concurrent rename/delete cannot
+  overtake it, and later reuse of the old name cannot receive any fork artifact.
   In-file sibling branches are not part of the API: there is no `navigate`.
   A fork clones the source's project binding, generation-qualified immutable
   Pi project snapshot when bound, and tool-cwd map before it is

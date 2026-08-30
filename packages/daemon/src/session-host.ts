@@ -594,7 +594,12 @@ export interface SessionHostOptions {
   readWriter?: typeof writeReads;
   /** Test seam at conversation-file path ownership boundaries. */
   conversationFileProbe?: (
-    operation: "plan-read" | "plan-write" | "title-write" | "transcript-read",
+    operation:
+      | "plan-read"
+      | "plan-write"
+      | "title-write"
+      | "transcript-read"
+      | "fork-read",
     path: string,
   ) => void | Promise<void>;
   /** Deterministic fault seam around durable fork/delete transaction boundaries. */
@@ -1901,10 +1906,26 @@ export class SessionHost {
     ghostName: string,
     sessionId?: string | null,
   ): Promise<GhostSessionHandle> {
+    return this.openInternal(ghostName, sessionId, false);
+  }
+
+  /** Continue an open admitted by a home lease that predates any waiting move. */
+  private openLeased(
+    ghostName: string,
+    sessionId?: string | null,
+  ): Promise<GhostSessionHandle> {
+    return this.openInternal(ghostName, sessionId, true);
+  }
+
+  private async openInternal(
+    ghostName: string,
+    sessionId: string | null | undefined,
+    homeLeaseHeld: boolean,
+  ): Promise<GhostSessionHandle> {
     if (this.disposed) {
       throw new GhostError("shutting_down", "The daemon is shutting down.", 503);
     }
-    if (this.ghostMoveReserved(ghostName)) {
+    if (!homeLeaseHeld && this.ghostMoveReserved(ghostName)) {
       throw new GhostError(
         "ghost_busy",
         "Wait for this ghost to finish moving before opening a conversation.",
@@ -1980,7 +2001,7 @@ export class SessionHost {
     const pending = this.opening.get(key);
     if (pending) return pending;
 
-    const promise = this.createSession(ghostName, conversationId, key)
+    const promise = this.createSession(ghostName, conversationId, key, homeLeaseHeld)
       .then(async (hosted) => {
         if (this.disposed) {
           this.cleanupRetries.set(key, hosted);
@@ -2654,11 +2675,14 @@ export class SessionHost {
     ghostName: string,
     sessionKey: string,
     key: string,
+    homeLeaseHeld = false,
   ): Promise<HostedSession> {
     const ghost = this.registry.get(ghostName);
     const logger = this.logger.child({ ghost: ghostName, conversation: sessionKey });
     const paths = ghostPaths(ghost.dir);
-    let project = await this.projectState(ghostName, "pi", sessionKey);
+    let project = await (homeLeaseHeld
+      ? this.projectStateLeased(ghostName, "pi", sessionKey)
+      : this.projectState(ghostName, "pi", sessionKey));
     const projectIdentity = project.root
       ? await this.projectBindings.assertTrusted(project.root)
       : null;
@@ -2759,7 +2783,9 @@ export class SessionHost {
         project,
         projectMcpRuntimeStatus(mcpResult.result),
       );
-      project = await this.projectState(ghostName, "pi", sessionKey);
+      project = await (homeLeaseHeld
+        ? this.projectStateLeased(ghostName, "pi", sessionKey)
+        : this.projectState(ghostName, "pi", sessionKey));
     }
 
     const sessionFile = join(paths.sessionDir, sessionFileNameFor(sessionKey));
@@ -3280,9 +3306,18 @@ export class SessionHost {
     ghostName: string,
     serverName: string,
   ): Promise<"connected" | "connecting" | "disconnected" | "mixed" | "not_loaded" | "deferred"> {
+    return this.homeOperations.withLease(ghostName, () =>
+      this.reconnectMcpLeased(ghostName, serverName)
+    );
+  }
+
+  /** The caller already owns this ghost home's identity lease. */
+  async reconnectMcpLeased(
+    ghostName: string,
+    serverName: string,
+  ): Promise<"connected" | "connecting" | "disconnected" | "mixed" | "not_loaded" | "deferred"> {
     this.registry.get(ghostName);
-    if (this.ghostMoveReserved(ghostName)
-      || this.mcpReloadGhosts.has(ghostName)
+    if (this.mcpReloadGhosts.has(ghostName)
       || this.ghostHasTurnAdmission(ghostName)
       || [...this.projectTransitions].some((key) => deletionKeyGhost(key) === ghostName)
       || [...this.deleting].some((key) => deletionKeyGhost(key) === ghostName)) {
@@ -6070,8 +6105,11 @@ export class SessionHost {
     conversationId: string | null | undefined,
     busyMessage: string,
     claim = false,
+    homeLeaseHeld = false,
   ): Promise<HostedSession> {
-    const hosted = (await this.open(ghostName, conversationId)) as HostedSession;
+    const hosted = (await (homeLeaseHeld
+      ? this.openLeased(ghostName, conversationId)
+      : this.open(ghostName, conversationId))) as HostedSession;
     if (this.sessionOwned(hosted)) {
       throw new GhostError(
         "session_busy",
@@ -6119,10 +6157,29 @@ export class SessionHost {
     transcript: Transcript;
   }> {
     assertPiConversation(runtime, "Conversation branching");
+    return this.homeOperations.withLease(ghostName, () =>
+      this.forkConversationLeased(ghostName, conversationId, entryId)
+    );
+  }
+
+  private async forkConversationLeased(
+    ghostName: string,
+    conversationId: string | null | undefined,
+    entryId: string,
+  ): Promise<{
+    id: string;
+    conversationId: string;
+    runtime: "pi";
+    sessionId: string;
+    title: string | null;
+    draft: string;
+    transcript: Transcript;
+  }> {
     const ghost = this.registry.get(ghostName);
     const paths = ghostPaths(ghost.dir);
     const sourceId = conversationId ?? DEFAULT_SESSION_KEY;
     const sourceFile = join(paths.sessionDir, sessionFileNameFor(sourceId));
+    await this.conversationFileProbe("fork-read", sourceFile);
     // `open` would happily create the conversation being branched from; an id
     // that names neither a live session nor a stored transcript is a 404, not a
     // brand-new empty conversation.
@@ -6153,6 +6210,7 @@ export class SessionHost {
       ghostName,
       conversationId,
       "Wait for this conversation to finish before changing branches.",
+      true,
       true,
     );
     const forkProjectSnapshot = source.project.root
@@ -6336,17 +6394,17 @@ export class SessionHost {
         ...stagedFork,
       };
     } catch (error) {
-      await this.discardFork(ghostName, forkId);
+      await this.discardFork(ghostName, forkId, true);
       throw error;
     }
   }
 
-  private async discardFork(ghostName: string, forkId: string): Promise<void> {
+  private async discardForkLeased(ghostName: string, forkId: string): Promise<void> {
     try {
       const ghost = this.registry.get(ghostName);
       const paths = ghostPaths(ghost.dir);
       await this.closePi(ghostName, forkId);
-      const rowsBefore = await this.collectSessions(ghost.name);
+      const rowsBefore = await this.collectSessionsLeased(ghost);
       const forkIdentity = conversationIdentity("pi", forkId);
       const sessionFile = join(paths.sessionDir, sessionFileNameFor(forkId));
       try {
@@ -6385,6 +6443,18 @@ export class SessionHost {
         error: error instanceof Error ? error.message : String(error),
       });
     }
+  }
+
+  private discardFork(
+    ghostName: string,
+    forkId: string,
+    homeLeaseHeld = false,
+  ): Promise<void> {
+    return homeLeaseHeld
+      ? this.discardForkLeased(ghostName, forkId)
+      : this.homeOperations.withLease(ghostName, () =>
+          this.discardForkLeased(ghostName, forkId)
+        );
   }
 
   /**

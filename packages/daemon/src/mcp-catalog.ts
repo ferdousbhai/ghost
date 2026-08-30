@@ -113,6 +113,8 @@ export interface McpCatalogOptions {
   registry: GhostRegistry;
   homeOperations?: HomeOperationCoordinator;
   logger?: Logger;
+  /** Test seam after home resolution and before catalog bytes are read. */
+  readProbe?: (home: string) => void | Promise<void>;
   /** Test seam around the locked atomic config writer. */
   writer?: Partial<McpCatalogWriter>;
 }
@@ -466,12 +468,14 @@ export class McpCatalog {
   private readonly homeOperations: HomeOperationCoordinator;
   private readonly writer: McpCatalogWriter;
   private readonly logger: Logger;
+  private readonly readProbe: NonNullable<McpCatalogOptions["readProbe"]>;
 
   constructor(options: McpCatalogOptions) {
     this.registry = options.registry;
     this.homeOperations = options.homeOperations ?? homeOperationsFor(options.registry);
     this.writer = { ...defaultWriter, ...options.writer };
     this.logger = options.logger ?? silentLogger;
+    this.readProbe = options.readProbe ?? (() => {});
   }
 
   private withHomeLease<T>(ghostName: string, operation: () => Promise<T>): Promise<T> {
@@ -484,11 +488,18 @@ export class McpCatalog {
     return [ghostMcpSource(this.registry.get(ghostName).dir)];
   }
 
-  private effective(ghostName: string): Promise<ParsedProjectMcpInputs> {
-    return readProjectMcp(this.registry.get(ghostName).dir);
+  private async effective(ghostName: string): Promise<ParsedProjectMcpInputs> {
+    const home = this.registry.get(ghostName).dir;
+    await this.readProbe(home);
+    return readProjectMcp(home);
   }
 
   async list(ghostName: string): Promise<McpCatalogSnapshot> {
+    return this.withHomeLease(ghostName, () => this.listLeased(ghostName));
+  }
+
+  /** The caller already owns this ghost home's identity lease. */
+  async listLeased(ghostName: string): Promise<McpCatalogSnapshot> {
     const { effective, configured } = await this.effective(ghostName);
     const servers: McpServerView[] = [];
     const skipped = [...effective.skipped];
@@ -540,68 +551,117 @@ export class McpCatalog {
 
   async add(ghostName: string, name: string, config: unknown): Promise<McpCatalogSnapshot> {
     validateMutation(name, config);
-    return this.withHomeLease(ghostName, async () => {
-      const { effective } = await this.effective(ghostName);
-      if (effective.claimedNames.includes(name)) {
-        throw new GhostError("mcp_server_exists", `MCP server ${JSON.stringify(name)} already exists.`, 409);
-      }
-      const [canonical] = this.sources(ghostName);
-      await this.writeMigratedServer("add", ghostName, canonical.absolutePath, name, config);
-      return this.list(ghostName);
-    });
+    return this.withHomeLease(ghostName, () => this.addValidatedLeased(ghostName, name, config));
+  }
+
+  /** The caller already owns this ghost home's identity lease. */
+  async addLeased(ghostName: string, name: string, config: unknown): Promise<McpCatalogSnapshot> {
+    validateMutation(name, config);
+    return this.addValidatedLeased(ghostName, name, config);
+  }
+
+  private async addValidatedLeased(
+    ghostName: string,
+    name: string,
+    config: unknown,
+  ): Promise<McpCatalogSnapshot> {
+    const { effective } = await this.effective(ghostName);
+    if (effective.claimedNames.includes(name)) {
+      throw new GhostError("mcp_server_exists", `MCP server ${JSON.stringify(name)} already exists.`, 409);
+    }
+    const [canonical] = this.sources(ghostName);
+    await this.writeMigratedServer("add", ghostName, canonical.absolutePath, name, config);
+    return this.listLeased(ghostName);
   }
 
   async update(ghostName: string, name: string, config: unknown): Promise<McpCatalogSnapshot> {
     validateMutation(name, config);
-    return this.withHomeLease(ghostName, async () => {
-      const server = (await this.effective(ghostName)).configured
-        .find((candidate) => candidate.name === name);
-      if (!server) {
-        throw new GhostError("mcp_server_not_found", `No MCP server named ${JSON.stringify(name)}.`, 404);
-      }
-      await this.writeMigratedServer("update", ghostName, server.source.absolutePath, name, config);
-      return this.list(ghostName);
-    });
+    return this.withHomeLease(ghostName, () =>
+      this.updateValidatedLeased(ghostName, name, config)
+    );
+  }
+
+  /** The caller already owns this ghost home's identity lease. */
+  async updateLeased(ghostName: string, name: string, config: unknown): Promise<McpCatalogSnapshot> {
+    validateMutation(name, config);
+    return this.updateValidatedLeased(ghostName, name, config);
+  }
+
+  private async updateValidatedLeased(
+    ghostName: string,
+    name: string,
+    config: unknown,
+  ): Promise<McpCatalogSnapshot> {
+    const server = (await this.effective(ghostName)).configured
+      .find((candidate) => candidate.name === name);
+    if (!server) {
+      throw new GhostError("mcp_server_not_found", `No MCP server named ${JSON.stringify(name)}.`, 404);
+    }
+    await this.writeMigratedServer("update", ghostName, server.source.absolutePath, name, config);
+    return this.listLeased(ghostName);
   }
 
   async setEnabled(ghostName: string, name: string, enabled: boolean): Promise<McpCatalogSnapshot> {
     if (typeof enabled !== "boolean") {
       throw new GhostError("invalid_request", '"enabled" must be a boolean.', 400);
     }
-    return this.withHomeLease(ghostName, async () => {
-      const server = (await this.effective(ghostName)).configured
-        .find((candidate) => candidate.name === name);
-      if (!server) {
-        throw new GhostError("mcp_server_not_found", `No MCP server named ${JSON.stringify(name)}.`, 404);
-      }
-      validateMutation(name, server.config);
-      try {
-        await this.writer.update(
-          server.source.absolutePath,
-          name,
-          { ...(server.config as MCPServerConfig), enabled },
-        );
-      } catch (error) {
-        translateWriterError(error, name);
-      }
-      return this.list(ghostName);
-    });
+    return this.withHomeLease(ghostName, () =>
+      this.setEnabledValidatedLeased(ghostName, name, enabled)
+    );
+  }
+
+  /** The caller already owns this ghost home's identity lease. */
+  async setEnabledLeased(
+    ghostName: string,
+    name: string,
+    enabled: boolean,
+  ): Promise<McpCatalogSnapshot> {
+    if (typeof enabled !== "boolean") {
+      throw new GhostError("invalid_request", '"enabled" must be a boolean.', 400);
+    }
+    return this.setEnabledValidatedLeased(ghostName, name, enabled);
+  }
+
+  private async setEnabledValidatedLeased(
+    ghostName: string,
+    name: string,
+    enabled: boolean,
+  ): Promise<McpCatalogSnapshot> {
+    const server = (await this.effective(ghostName)).configured
+      .find((candidate) => candidate.name === name);
+    if (!server) {
+      throw new GhostError("mcp_server_not_found", `No MCP server named ${JSON.stringify(name)}.`, 404);
+    }
+    validateMutation(name, server.config);
+    try {
+      await this.writer.update(
+        server.source.absolutePath,
+        name,
+        { ...(server.config as MCPServerConfig), enabled },
+      );
+    } catch (error) {
+      translateWriterError(error, name);
+    }
+    return this.listLeased(ghostName);
   }
 
   async remove(ghostName: string, name: string): Promise<McpCatalogSnapshot> {
-    return this.withHomeLease(ghostName, async () => {
-      const server = (await this.effective(ghostName)).configured
-        .find((candidate) => candidate.name === name);
-      if (!server) {
-        throw new GhostError("mcp_server_not_found", `No MCP server named ${JSON.stringify(name)}.`, 404);
-      }
-      try {
-        await this.writer.remove(server.source.absolutePath, name);
-      } catch (error) {
-        translateWriterError(error, name);
-      }
-      return this.list(ghostName);
-    });
+    return this.withHomeLease(ghostName, () => this.removeLeased(ghostName, name));
+  }
+
+  /** The caller already owns this ghost home's identity lease. */
+  async removeLeased(ghostName: string, name: string): Promise<McpCatalogSnapshot> {
+    const server = (await this.effective(ghostName)).configured
+      .find((candidate) => candidate.name === name);
+    if (!server) {
+      throw new GhostError("mcp_server_not_found", `No MCP server named ${JSON.stringify(name)}.`, 404);
+    }
+    try {
+      await this.writer.remove(server.source.absolutePath, name);
+    } catch (error) {
+      translateWriterError(error, name);
+    }
+    return this.listLeased(ghostName);
   }
 
   /**
@@ -609,47 +669,50 @@ export class McpCatalog {
    * this; it is an explicit POST action and never opens an AgentSession.
    */
   async test(ghostName: string, name: string): Promise<McpConnectionTest> {
-    return this.withHomeLease(ghostName, async () => {
-      const home = this.registry.get(ghostName).dir;
-      const context = openGhostSecretContext({ home });
-      try {
-        const server = (await this.effective(ghostName)).configured
-          .find((candidate) => candidate.name === name);
-        if (!server) {
-          throw new GhostError("mcp_server_not_found", `No MCP server named ${JSON.stringify(name)}.`, 404);
-        }
-        validateMutation(name, server.config);
-        const manager = new GhostMcpManager({
-          cwd: home,
-          logger: this.logger.child({ ghost: ghostName }),
-        });
-        try {
-          const resolved = resolveMcpServerSecrets(server.config as MCPServerConfig, context);
-          const expanded = expandMcpServerConfig(resolved);
-          const result = await manager.connectServers({ [name]: normalizeMcpStdioCwd(expanded, home) });
-          const connected = result.connectedServers.includes(name);
-          return {
-            name,
-            ok: connected,
-            status: connected ? "connected" : "failed",
-            toolCount: manager.getTools().filter((tool) => tool.mcpServerName === name).length,
-            message: connected ? "Connection succeeded." : "Connection failed; check the server configuration.",
-          };
-        } catch (error) {
-          if (error instanceof SecretServiceError) throw error;
-          return {
-            name,
-            ok: false,
-            status: "failed",
-            toolCount: 0,
-            message: "Connection failed; check the server configuration.",
-          };
-        } finally {
-          await manager.disconnectAll().catch(() => {});
-        }
-      } finally {
-        context.close();
+    return this.withHomeLease(ghostName, () => this.testLeased(ghostName, name));
+  }
+
+  /** The caller already owns this ghost home's identity lease. */
+  async testLeased(ghostName: string, name: string): Promise<McpConnectionTest> {
+    const home = this.registry.get(ghostName).dir;
+    const context = openGhostSecretContext({ home });
+    try {
+      const server = (await this.effective(ghostName)).configured
+        .find((candidate) => candidate.name === name);
+      if (!server) {
+        throw new GhostError("mcp_server_not_found", `No MCP server named ${JSON.stringify(name)}.`, 404);
       }
-    });
+      validateMutation(name, server.config);
+      const manager = new GhostMcpManager({
+        cwd: home,
+        logger: this.logger.child({ ghost: ghostName }),
+      });
+      try {
+        const resolved = resolveMcpServerSecrets(server.config as MCPServerConfig, context);
+        const expanded = expandMcpServerConfig(resolved);
+        const result = await manager.connectServers({ [name]: normalizeMcpStdioCwd(expanded, home) });
+        const connected = result.connectedServers.includes(name);
+        return {
+          name,
+          ok: connected,
+          status: connected ? "connected" : "failed",
+          toolCount: manager.getTools().filter((tool) => tool.mcpServerName === name).length,
+          message: connected ? "Connection succeeded." : "Connection failed; check the server configuration.",
+        };
+      } catch (error) {
+        if (error instanceof SecretServiceError) throw error;
+        return {
+          name,
+          ok: false,
+          status: "failed",
+          toolCount: 0,
+          message: "Connection failed; check the server configuration.",
+        };
+      } finally {
+        await manager.disconnectAll().catch(() => {});
+      }
+    } finally {
+      context.close();
+    }
   }
 }

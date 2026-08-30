@@ -18,7 +18,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { claudeSessionMetadataPath } from "../src/claude-code.js";
 import { ghostPaths } from "../src/ghosts.js";
 import { HomeOperationCoordinator } from "../src/home-operations.js";
-import { McpCatalog } from "../src/mcp-catalog.js";
+import { McpCatalog, type McpCatalogOptions } from "../src/mcp-catalog.js";
 import { listGhostMemory, writeGhostMemory } from "../src/memory-files.js";
 import { setChatModelRole } from "../src/models.js";
 import type { PiMessagesEvent } from "../src/pi-messages.js";
@@ -68,6 +68,7 @@ async function serve(
     memoryReader?: ServerOptions["memoryReader"];
     memoryWriter?: ServerOptions["memoryWriter"];
     conversationFileProbe?: SessionHostOptions["conversationFileProbe"];
+    mcpReadProbe?: McpCatalogOptions["readProbe"];
     scheduleCommandRunner?: SessionHostOptions["scheduleCommandRunner"];
   } = {},
 ) {
@@ -92,7 +93,13 @@ async function serve(
       : { conversationFileProbe: serverOptions.conversationFileProbe }),
     extensionOptions: { documents: machineDocuments },
   });
-  const mcp = new McpCatalog({ registry: temp.registry });
+  const mcp = new McpCatalog({
+    registry: temp.registry,
+    homeOperations,
+    ...(serverOptions.mcpReadProbe === undefined
+      ? {}
+      : { readProbe: serverOptions.mcpReadProbe }),
+  });
   listening = await startDaemonServer({
     registry: temp.registry,
     host,
@@ -1217,6 +1224,25 @@ describe("ghost MCP routes", () => {
     }),
   });
 
+  const requestHomeMove = (base: string, move: "rename" | "delete") => move === "rename"
+    ? jsonRequest(`${base}/api/ghosts/casper/name`, "PUT", { name: "wisp" })
+    : fetch(`${base}/api/ghosts/casper?confirm=casper`, { method: "DELETE" });
+
+  const movedHomeFrom = async (
+    response: Response,
+    move: "rename" | "delete",
+  ): Promise<string> => {
+    expect(response.status).toBe(200);
+    const body = await response.json() as { trash?: string };
+    return move === "rename" ? join(temp!.root, "wisp") : body.trash!;
+  };
+
+  const recreateOldName = async (base: string): Promise<string> => {
+    const response = await jsonRequest(`${base}/api/ghosts`, "POST", { name: "casper" });
+    expect(response.status).toBe(201);
+    return join(temp!.root, "casper");
+  };
+
   it("keeps malformed MCP values out of HTTP and rejects them on mutation", async () => {
     const base = await serve();
     const collection = `${base}/api/ghosts/casper/mcp`;
@@ -1318,6 +1344,109 @@ describe("ghost MCP routes", () => {
     expect((await jsonRequest(`${collection}/missing/test`, "POST", {})).status).toBe(404);
     expect((await jsonRequest(collection, "PUT", {})).status).toBe(405);
   });
+
+  it.each(["rename", "delete"] as const)(
+    "finishes an admitted catalog list before %s and isolates old-name reuse",
+    async (move) => {
+      const readEntered = Promise.withResolvers<void>();
+      const releaseRead = Promise.withResolvers<void>();
+      let readCount = 0;
+      let resolvedHome = "";
+      const base = await serve(undefined, {
+        mcpReadProbe: async (home) => {
+          readCount += 1;
+          if (readCount !== 1) return;
+          resolvedHome = home;
+          readEntered.resolve();
+          await releaseRead.promise;
+        },
+      });
+      const originalHome = join(temp!.root, "casper");
+      writeFileSync(join(originalHome, "mcp.json"), JSON.stringify({
+        mcpServers: { original: { type: "stdio", command: "/bin/true" } },
+      }));
+      const originalInode = statSync(originalHome, { bigint: true }).ino;
+
+      const listing = fetch(`${base}/api/ghosts/casper/mcp`);
+      await readEntered.promise;
+      expect(resolvedHome).toBe(originalHome);
+      const moving = requestHomeMove(base, move);
+      await waitForHomeMove();
+
+      releaseRead.resolve();
+      const listResponse = await listing;
+      expect(listResponse.status).toBe(200);
+      expect(await listResponse.json()).toMatchObject({
+        servers: [expect.objectContaining({ name: "original" })],
+      });
+      const movedHome = await movedHomeFrom(await moving, move);
+      expect(statSync(movedHome, { bigint: true }).ino).toBe(originalInode);
+
+      const replacementHome = await recreateOldName(base);
+      expect(statSync(replacementHome, { bigint: true }).ino).not.toBe(originalInode);
+      expect(await (await fetch(`${base}/api/ghosts/casper/mcp`)).json())
+        .toEqual({ servers: [], skipped: [] });
+      expect(JSON.parse(readFileSync(join(movedHome, "mcp.json"), "utf8")))
+        .toMatchObject({ mcpServers: { original: expect.any(Object) } });
+    },
+  );
+
+  it.each([
+    { action: "test", move: "rename" },
+    { action: "reconnect", move: "delete" },
+  ] as const)(
+    "keeps composite $action and its response snapshot on one home through $move",
+    async ({ action, move }) => {
+      const actionEntered = Promise.withResolvers<void>();
+      const releaseAction = Promise.withResolvers<void>();
+      let readCount = 0;
+      const base = await serve(undefined, {
+        mcpReadProbe: async () => {
+          readCount += 1;
+          if (readCount !== 1) return;
+          actionEntered.resolve();
+          await releaseAction.promise;
+        },
+      });
+      const originalHome = join(temp!.root, "casper");
+      writeFileSync(join(originalHome, "mcp.json"), JSON.stringify({
+        mcpServers: {
+          original: {
+            type: "stdio",
+            command: process.execPath,
+            args: ["-e", "process.exit(1)"],
+          },
+        },
+      }));
+      const originalInode = statSync(originalHome, { bigint: true }).ino;
+
+      const acting = jsonRequest(
+        `${base}/api/ghosts/casper/mcp/original/${action}`,
+        "POST",
+        {},
+      );
+      await actionEntered.promise;
+      const moving = requestHomeMove(base, move);
+      await waitForHomeMove();
+
+      releaseAction.resolve();
+      const actionResponse = await acting;
+      expect(actionResponse.status).toBe(200);
+      expect(await actionResponse.json()).toMatchObject({
+        servers: [expect.objectContaining({ name: "original" })],
+        result: expect.objectContaining({ name: "original" }),
+      });
+      const movedHome = await movedHomeFrom(await moving, move);
+      expect(statSync(movedHome, { bigint: true }).ino).toBe(originalInode);
+
+      const replacementHome = await recreateOldName(base);
+      expect(statSync(replacementHome, { bigint: true }).ino).not.toBe(originalInode);
+      expect(await (await fetch(`${base}/api/ghosts/casper/mcp`)).json())
+        .toEqual({ servers: [], skipped: [] });
+      expect(JSON.parse(readFileSync(join(movedHome, "mcp.json"), "utf8")))
+        .toMatchObject({ mcpServers: { original: expect.any(Object) } });
+    },
+  );
 
   it("keeps inherited-object MCP names as ordinary own entries over HTTP", async () => {
     const base = await serve();

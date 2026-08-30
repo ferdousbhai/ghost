@@ -855,15 +855,23 @@ export function createDaemonServer(options: ServerOptions): Server {
     ...extra,
   });
 
-  const mcpSnapshot = async (
+  const mcpSnapshotLeased = async (
     ghostName: string,
     extra: Record<string, unknown> = {},
   ): Promise<Record<string, unknown>> => {
     if (!options.mcp) {
       throw new GhostError("not_found", "MCP management is not enabled on this daemon.", 404);
     }
-    return decorateMcpSnapshot(ghostName, await options.mcp.list(ghostName), extra);
+    return decorateMcpSnapshot(ghostName, await options.mcp.listLeased(ghostName), extra);
   };
+
+  const mcpSnapshot = (
+    ghostName: string,
+    extra: Record<string, unknown> = {},
+  ): Promise<Record<string, unknown>> => homeOperations.withLease(
+    ghostName,
+    () => mcpSnapshotLeased(ghostName, extra),
+  );
 
   const mutateMcp = async (
     ghostName: string,
@@ -905,7 +913,10 @@ export function createDaemonServer(options: ServerOptions): Server {
       errorResponse(response, 400, "invalid_request", '"name" must be a string.');
       return;
     }
-    const snapshot = await mutateMcp(ghostName, () => mcp.add(ghostName, name, config));
+    const snapshot = await mutateMcp(
+      ghostName,
+      () => mcp.addLeased(ghostName, name, config),
+    );
     jsonResponse(response, 201, snapshot);
   };
 
@@ -924,7 +935,7 @@ export function createDaemonServer(options: ServerOptions): Server {
     if (method === "DELETE") {
       const snapshot = await mutateMcp(
         ghostName,
-        () => mcp.remove(ghostName, serverName),
+        () => mcp.removeLeased(ghostName, serverName),
       );
       jsonResponse(response, 200, snapshot);
       return;
@@ -940,7 +951,7 @@ export function createDaemonServer(options: ServerOptions): Server {
     }
     const snapshot = await mutateMcp(
       ghostName,
-      () => mcp.update(ghostName, serverName, (body as { config?: unknown }).config),
+      () => mcp.updateLeased(ghostName, serverName, (body as { config?: unknown }).config),
     );
     jsonResponse(response, 200, snapshot);
   };
@@ -968,7 +979,7 @@ export function createDaemonServer(options: ServerOptions): Server {
     }
     const snapshot = await mutateMcp(
       ghostName,
-      () => mcp.setEnabled(
+      () => mcp.setEnabledLeased(
         ghostName,
         serverName,
         (body as { enabled?: unknown }).enabled as boolean,
@@ -984,7 +995,8 @@ export function createDaemonServer(options: ServerOptions): Server {
     method: string,
     response: ServerResponse,
   ): Promise<void> => {
-    if (!options.mcp) {
+    const mcp = options.mcp;
+    if (!mcp) {
       errorResponse(response, 404, "not_found", "MCP management is not enabled on this daemon.");
       return;
     }
@@ -992,24 +1004,27 @@ export function createDaemonServer(options: ServerOptions): Server {
       errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
       return;
     }
-    let result: McpConnectionTest | { name: string; status: string; ok: boolean };
-    if (action === "test") {
-      result = await options.mcp.test(ghostName, serverName);
-    } else {
-      const exists = (await options.mcp.list(ghostName)).servers.some(
-        (server) => server.name === serverName,
-      );
-      if (!exists) {
-        throw new GhostError(
-          "mcp_server_not_found",
-          `No MCP server named ${JSON.stringify(serverName)}.`,
-          404,
+    const snapshot = await homeOperations.withLease(ghostName, async () => {
+      let result: McpConnectionTest | { name: string; status: string; ok: boolean };
+      if (action === "test") {
+        result = await mcp.testLeased(ghostName, serverName);
+      } else {
+        const exists = (await mcp.listLeased(ghostName)).servers.some(
+          (server) => server.name === serverName,
         );
+        if (!exists) {
+          throw new GhostError(
+            "mcp_server_not_found",
+            `No MCP server named ${JSON.stringify(serverName)}.`,
+            404,
+          );
+        }
+        const status = await options.host.reconnectMcpLeased(ghostName, serverName);
+        result = { name: serverName, status, ok: status === "connected" };
       }
-      const status = await options.host.reconnectMcp(ghostName, serverName);
-      result = { name: serverName, status, ok: status === "connected" };
-    }
-    jsonResponse(response, 200, await mcpSnapshot(ghostName, { result }));
+      return mcpSnapshotLeased(ghostName, { result });
+    });
+    jsonResponse(response, 200, snapshot);
   };
 
   /**
