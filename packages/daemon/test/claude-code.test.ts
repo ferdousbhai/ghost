@@ -771,6 +771,37 @@ describe("Claude Code subscription runtime", () => {
     expect(resumedPrompt).toContain("idle-session-document.txt");
   });
 
+  it("claims a warm query before async setup can cross its idle deadline", async () => {
+    const hooks = new GhostHookRunner();
+    const secondHookStarted = deferred();
+    const releaseSecondHook = deferred();
+    let hookCalls = 0;
+    await hooks.register((api) => {
+      api.on("before_prompt", async () => {
+        hookCalls += 1;
+        if (hookCalls !== 2) return;
+        secondHookStarted.resolve();
+        await releaseSecondHook.promise;
+      });
+    });
+    const { lifecycle } = setupClaudeHost({ hooks, warmIdleTtlMs: 40 });
+    const turn = (prompt: string) => host!.runTurn("casper", {
+      sessionId: "conversation-idle-boundary",
+      prompt,
+      emit: () => {},
+    });
+
+    await turn("first");
+    const second = turn("claim the warm query");
+    await secondHookStarted.promise;
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(lifecycle).toMatchObject({ queries: 1, closed: 0 });
+
+    releaseSecondHook.resolve();
+    await second;
+    expect(lifecycle).toMatchObject({ queries: 1, closed: 0 });
+  });
+
   it("retires a warm query whose persona changed rather than answering under a stale one", async () => {
     const { paths, seenOptions, lifecycle } = setupClaudeHost();
     const turn = (prompt: string) => host!.runTurn("casper", {
@@ -2970,6 +3001,33 @@ describe("Claude Code subscription runtime", () => {
     expect(seenOptions[1]?.resume).toBeUndefined();
   });
 
+  it("rejects the exact terminal emit failure and resumes cold afterward", async () => {
+    const failure = new Error("terminal stream consumer failed");
+    const { paths, lifecycle, seenOptions } = setupClaudeHost();
+    const first = host!.runTurn("casper", {
+      sessionId: "conversation-terminal-emit-failure",
+      prompt: "settle before terminal delivery",
+      emit: (event) => {
+        if (event.type === "done") throw failure;
+      },
+    });
+
+    await expect(first).rejects.toBe(failure);
+    expect(lifecycle).toMatchObject({ queries: 1, closed: 1 });
+    const metadata = JSON.parse(readFileSync(claudeSessionMetadataPath(
+      paths.sessionDir,
+      "conversation-terminal-emit-failure",
+    ), "utf8")) as { sessionId: string };
+
+    await host!.runTurn("casper", {
+      sessionId: "conversation-terminal-emit-failure",
+      prompt: "resume from the durable result",
+      emit: () => {},
+    });
+    expect(lifecycle.queries).toBe(2);
+    expect(seenOptions[1]?.resume).toBe(metadata.sessionId);
+  });
+
   it("does not change persisted counts when the SDK process fails before a result", async () => {
     const { paths, lifecycle } = setupClaudeHost({
       createQuery: (_input, state) => fakeQuery([], state, (async function* fail() {
@@ -3008,7 +3066,7 @@ describe("Claude Code subscription runtime", () => {
     expect(readFileSync(sidecar, "utf8")).toBe(original);
   });
 
-  it("force-closes an already-aborted turn without racing an interrupt request", async () => {
+  it("does not start a query for an already-aborted turn", async () => {
     const { lifecycle, seenOptions } = setupClaudeHost();
     const controller = new AbortController();
     const events: PiMessagesEvent[] = [];
@@ -3021,9 +3079,8 @@ describe("Claude Code subscription runtime", () => {
       emit: (event) => events.push(event),
     });
 
-    expect(lifecycle.interrupted).toBe(0);
-    expect(lifecycle.closed).toBe(1);
-    expect(seenOptions[0]?.abortController?.signal.aborted).toBe(true);
+    expect(lifecycle).toMatchObject({ queries: 0, interrupted: 0, closed: 0 });
+    expect(seenOptions).toEqual([]);
     expect(events.at(-1)).toMatchObject({ type: "error", reason: "aborted" });
   });
 
@@ -3117,6 +3174,63 @@ describe("Claude Code subscription runtime", () => {
     expect(order).toEqual(["close"]);
     expect(lifecycle).toMatchObject({ interrupted: 0, closed: 1 });
     expect(events.at(-1)).toMatchObject({ type: "error" });
+  });
+
+  it("aborts and drains a pre-query turn before close can return", async () => {
+    const probeStarted = deferred();
+    const releaseProbe = deferred();
+    const probe = new ClaudeCodeProbe({
+      binaryPath: "configured-claude",
+      resolveExecutable: async () => {
+        probeStarted.resolve();
+        await releaseProbe.promise;
+        return process.execPath;
+      },
+      readAuthStatus: async () => ({ loggedIn: true, authMethod: "claude.ai" }),
+    });
+    const { lifecycle, paths, seenOptions } = setupClaudeHost({ probe });
+    const events: PiMessagesEvent[] = [];
+    const turn = host!.runTurn("casper", {
+      sessionId: "conversation-close-during-probe",
+      prompt: "do not resurrect this turn",
+      emit: (event) => events.push(event),
+    });
+    await probeStarted.promise;
+    writeFileSync(
+      join(paths.home, "character.md"),
+      "# Casper\n\nYou are Casper, now a bookbinder.\n",
+      "utf8",
+    );
+
+    let closeSettled = false;
+    const closing = host!.close("casper", "conversation-close-during-probe").then(() => {
+      closeSettled = true;
+    });
+    await Promise.resolve();
+    expect(closeSettled).toBe(false);
+    releaseProbe.resolve();
+    await Promise.all([closing, turn]);
+
+    expect(closeSettled).toBe(true);
+    expect(lifecycle).toMatchObject({ queries: 0, closed: 0 });
+    expect(seenOptions).toEqual([]);
+    expect(events.some((event) => event.type === "done")).toBe(false);
+    expect(events.at(-1)).toMatchObject({ type: "error", reason: "aborted" });
+    expect(existsSync(claudeSessionMetadataPath(
+      paths.sessionDir,
+      "conversation-close-during-probe",
+    ))).toBe(false);
+    const settledEvents = [...events];
+    await Promise.resolve();
+    expect(events).toEqual(settledEvents);
+
+    await host!.runTurn("casper", {
+      sessionId: "conversation-close-during-probe",
+      prompt: "start after the closed turn",
+      emit: () => {},
+    });
+    expect(lifecycle.queries).toBe(1);
+    expect(JSON.stringify(seenOptions[0]?.systemPrompt)).toContain("bookbinder");
   });
 
   it("does not admit a query whose auth probe settles after daemon disposal", async () => {

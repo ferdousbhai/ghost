@@ -506,7 +506,11 @@ startup), on cancellation, after every terminal non-success SDK result, after
 any post-result validation, metadata, hook, or maintenance failure, and on
 close, ghost close, conversation delete, or daemon shutdown. Cancellation and
 active close use the SDK abort controller plus forceful `close`; Ghost never
-sends an interrupt request over a transport it is simultaneously retiring.
+sends an interrupt request over a transport it is simultaneously retiring. A
+turn synchronously claims the query's idle timer at admission, before any async
+setup. Close aborts and drains even a turn still in that setup, then retires the
+query and persona snapshot again before returning so drained work cannot
+resurrect session state.
 Session-stop continuations are further passes through the same warm query. The
 SDK reports `num_turns` per result rather than cumulatively, so the sidecar's
 message accounting is unchanged. Idle expiry drops the session's character and

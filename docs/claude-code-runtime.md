@@ -169,6 +169,8 @@ resume id — whenever reuse would be wrong or wasteful:
 - **Idle.** `CLAUDE_WARM_QUERY_IDLE_TTL_MS`, 30 minutes, deliberately the same
   as a pi hosted session's idle TTL. The timer drops both the process and the
   cached character/index snapshot, so the next turn derives everything again.
+  Turn admission clears that timer synchronously before auth, persona, hook, or
+  MCP setup can yield; an admitted turn cannot expire its own session.
 - **Changed startup options.** Everything the query was built from — cwd, model,
   the whole system prompt, the ghost tool names, and the project MCP
   configuration — is compared verbatim before reuse. The SDK has no
@@ -178,8 +180,10 @@ resume id — whenever reuse would be wrong or wasteful:
 - **Cancellation, active close, or a terminal SDK error.** Cancellation and
   active close use the SDK abort controller plus forceful `close`; Ghost does
   not race an interrupt control request against teardown of that request's
-  transport. Every terminal non-success result is persisted for accounting and
-  resume, then retired.
+  transport. Close also aborts and drains a turn that is still in pre-query
+  setup, then retires session state a second time before returning. Every
+  terminal non-success result is persisted for accounting and resume, then
+  retired.
 - **Post-result failure.** Validation, metadata persistence, hook
   acknowledgement/session-stop handling, and maintenance must all settle
   before reuse. Any failure retires the query so another prompt cannot advance

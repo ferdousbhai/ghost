@@ -1569,9 +1569,12 @@ export class ClaudeCodeRuntime {
     this.probe.invalidate();
   }
 
-  private assertTurnAdmitted(): void {
+  private assertTurnAdmitted(signal?: AbortSignal): void {
     if (this.disposed) {
       throw new GhostError("shutting_down", "The daemon is shutting down.", 503);
+    }
+    if (signal?.aborted) {
+      throw signal.reason ?? new Error("Turn aborted.");
     }
   }
 
@@ -1638,6 +1641,11 @@ export class ClaudeCodeRuntime {
         409,
       );
     }
+    // Claim a warm query synchronously with admission. Its idle deadline must
+    // not expire while this turn is awaiting auth, persona, hooks, or MCP setup.
+    const warm = this.warm.get(key);
+    if (warm?.idleTimer) clearTimeout(warm.idleTimer);
+    if (warm) warm.idleTimer = undefined;
     this.busy.add(key);
     const controller = new AbortController();
     const linked = linkedTurnSignal(options.signal, controller.signal);
@@ -1684,11 +1692,12 @@ export class ClaudeCodeRuntime {
     // entering this live process; the next turn resumes cold from its sidecar.
     let postQueryWorkPending = false;
     try {
+      this.assertTurnAdmitted(options.signal);
       const paths = ghostPaths(ghost.dir);
       let metadata = await readMetadata(paths.sessionDir, conversationId);
-      this.assertTurnAdmitted();
+      this.assertTurnAdmitted(options.signal);
       const { binaryPath, authStatus: auth } = await this.probe.read();
-      this.assertTurnAdmitted();
+      this.assertTurnAdmitted(options.signal);
       if (!isClaudePlanAuth(auth)) {
         throw new GhostError(
           "claude_code_subscription_required",
@@ -1700,7 +1709,7 @@ export class ClaudeCodeRuntime {
       }
 
       await mkdir(paths.sessionDir, { recursive: true });
-      this.assertTurnAdmitted();
+      this.assertTurnAdmitted(options.signal);
       const runtimeCwd = metadata
         ? (metadata.version === 2 || metadata.version === 3) && metadata.cwd
           ? resolve(metadata.cwd)
@@ -1730,8 +1739,10 @@ export class ClaudeCodeRuntime {
         loadMachineSkills(this.ownerHome, { paths: this.machineSkills }),
         loadProjectDeclarativeSnapshot(paths.home, { level: "user" }),
       ]);
+      this.assertTurnAdmitted(options.signal);
       const approvedProject = project.admittedSnapshot
         ?? await requireMatchingClaudeProjectSnapshot(metadata, project);
+      this.assertTurnAdmitted(options.signal);
       const effectiveDeclarative = mergeDeclarativePromptSnapshots([
         declarativePromptSnapshot(mergeProjectDeclarativeSnapshots([
           ...(machineSkills ? [machineSkills] : []),
@@ -1778,7 +1789,7 @@ export class ClaudeCodeRuntime {
         });
       };
       await publishProjectMcpStatus(approvedProject.mcpWarnings.length > 0);
-      this.assertTurnAdmitted();
+      this.assertTurnAdmitted(options.signal);
       let beforePromptContext: string | undefined;
       let beforePromptAcknowledge: (() => void | Promise<void>) | undefined;
       if (this.hooks.hasHandlers("before_prompt")) {
@@ -1800,14 +1811,14 @@ export class ClaudeCodeRuntime {
           beforePromptContext = result.additionalContext;
           beforePromptAcknowledge = result.acknowledge;
         }
-        this.assertTurnAdmitted();
+        this.assertTurnAdmitted(options.signal);
       }
       const bridge = await buildMcpTools(
         paths.home,
         ghost.name,
         this.extensionOptions,
       );
-      this.assertTurnAdmitted();
+      this.assertTurnAdmitted(options.signal);
 
       let prompt = options.prompt;
       let stopHookActive = false;
@@ -1839,12 +1850,9 @@ export class ClaudeCodeRuntime {
       };
 
       while (!adapter.isTerminal()) {
-        this.assertTurnAdmitted();
+        this.assertTurnAdmitted(options.signal);
         let warm = this.warm.get(key);
-        if (warm) {
-          if (warm.idleTimer) clearTimeout(warm.idleTimer);
-          warm.idleTimer = undefined;
-        } else {
+        if (!warm) {
           const abortController = new AbortController();
           const input = claudeInputChannel();
           const sdkOptions = queryOptions({
@@ -1905,7 +1913,7 @@ export class ClaudeCodeRuntime {
         await publishProjectMcpStatus(
           approvedProject.mcpWarnings.length > 0 || observedProjectMcpFailure,
         );
-        this.assertTurnAdmitted();
+        this.assertTurnAdmitted(options.signal);
 
         if (!Number.isSafeInteger(completed.num_turns) || completed.num_turns < 0) {
           throw new ClaudeCodeProcessError("Claude Code returned an invalid num_turns count.");
@@ -1930,9 +1938,9 @@ export class ClaudeCodeRuntime {
           cwd: runtimeCwd,
           projectSnapshot: approvedProject,
         };
-        this.assertTurnAdmitted();
+        this.assertTurnAdmitted(options.signal);
         await writeMetadata(paths.sessionDir, metadata);
-        this.assertTurnAdmitted();
+        this.assertTurnAdmitted(options.signal);
         if (beforePromptAcknowledge) {
           const acknowledge = beforePromptAcknowledge;
           beforePromptAcknowledge = undefined;
@@ -2005,7 +2013,7 @@ export class ClaudeCodeRuntime {
             conversation_id: conversationId,
           })
           : undefined;
-        this.assertTurnAdmitted();
+        this.assertTurnAdmitted(options.signal);
         const additionalContext = ghostSessionStopContinuation(hookResult);
         if (!additionalContext) {
           postQueryWorkPending = false;
@@ -2032,8 +2040,10 @@ export class ClaudeCodeRuntime {
       }
     } catch (cause) {
       if (postQueryWorkPending) this.retireWarm(key);
-      if (options.signal?.aborted) settledTurn = undefined;
-      else if (settledTurn) settledTurn = { ...settledTurn, outcome: "failed" };
+      if (options.signal?.aborted) {
+        this.retireWarm(key);
+        settledTurn = undefined;
+      } else if (settledTurn) settledTurn = { ...settledTurn, outcome: "failed" };
       logger.error("Claude Code turn failed", {
         error: cause instanceof Error ? cause.message : String(cause),
       });
@@ -2105,12 +2115,13 @@ export class ClaudeCodeRuntime {
   }
 
   async closeGhost(ghostName: string): Promise<void> {
-    // `close` forcefully retires active queries and their persona snapshots.
-    for (const key of [...this.active.keys()]) {
+    // Start every close together so all admitted turns are aborted before this
+    // method waits for any one of them to finish its current setup boundary.
+    const liveKeys = new Set([...this.turns.keys(), ...this.active.keys()]);
+    await Promise.all([...liveKeys].flatMap((key) => {
       const [keyGhost, conversationId] = JSON.parse(key) as [string, string];
-      if (keyGhost !== ghostName) continue;
-      await this.close(ghostName, conversationId);
-    }
+      return keyGhost === ghostName ? [this.close(ghostName, conversationId)] : [];
+    }));
     for (const key of [...this.personas.keys()]) {
       if (runtimeKeyGhost(key) === ghostName) this.personas.delete(key);
     }
@@ -2176,6 +2187,17 @@ export class ClaudeCodeRuntime {
 
   async close(ghostName: string, conversationId: string): Promise<void> {
     const key = JSON.stringify([ghostName, conversationId]);
+    const turn = this.turns.get(key);
+    turn?.controller.abort(new Error("Conversation closed."));
+    this.retireSessionState(key);
+    if (turn) await Promise.allSettled([turn.promise]);
+    // Async setup may have completed a persona derivation after the first
+    // retirement. Closing does not finish until that admitted turn drains, and
+    // the second pass makes resurrection impossible after the returned promise.
+    this.retireSessionState(key);
+  }
+
+  private retireSessionState(key: string): void {
     this.personas.delete(key);
     const active = this.active.get(key);
     this.active.delete(key);
