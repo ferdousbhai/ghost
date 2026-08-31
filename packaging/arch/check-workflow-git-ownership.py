@@ -14,7 +14,7 @@ from yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
 from yaml.tokens import AliasToken, AnchorToken
 
 
-PACKAGE_SHA256 = "78a359ffedd0fda8b6918c88ec6b846ee30d460b80e928f05a8963d0b795711d"
+PACKAGE_SHA256 = "3fcb74df91a99c44db69ea2445c778bfdbd4f62edb71ec47f188b0cc5fa76608"
 EXPECTED_STEP_NAMES = [
     "Update package database and install checkout dependency",
     None,
@@ -33,9 +33,9 @@ EXPECTED_STEP_NAMES = [
     "Remove trusted release outer",
 ]
 EXPECTED_USES = {
-    1: "actions/checkout@v4",
-    12: "actions/upload-artifact@v4",
-    13: "actions/upload-artifact@v4",
+    1: "actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683",
+    12: "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
+    13: "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
 }
 EXPECTED_WORKING_DIRECTORIES = {4: "packages/desktop-helper"}
 JOB_KEYS = {"runs-on", "container", "steps"}

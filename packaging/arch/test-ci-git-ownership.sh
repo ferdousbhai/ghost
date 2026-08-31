@@ -76,6 +76,7 @@ epoch="$("${builder_command[@]}" git -C "$fixture" \
 # raw block-scalar commands, and post-transfer UID boundaries exactly.
 ownership_checker="$script_dir/check-workflow-git-ownership.py"
 python "$ownership_checker" "$workflow"
+bash "$script_dir/test-workflow-action-pins.sh"
 python - "$workflow" "$work" <<'PY'
 from pathlib import Path
 import sys
@@ -188,7 +189,10 @@ fixtures = {
         "        if: always() && env.GHOST_CI_RELEASE_OUTER != ''",
         "        if: success()",
     ),
-    "uses-ref.yml": once("actions/checkout@v4", "actions/checkout@main"),
+    "uses-ref.yml": once(
+        "actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683",
+        "actions/checkout@main",
+    ),
     "with.yml": once("          fetch-depth: 0", "          fetch-depth: 1"),
     "job-env.yml": once(
         "    container: archlinux:base-devel",
