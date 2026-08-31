@@ -1,0 +1,128 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+repository="@@RELEASE_REPOSITORY@@"
+api="https://api.github.com/repos/$repository/releases?per_page=100"
+releases="$(curl -fsSL "$api")"
+if ! release_candidates="$(jq -ce '
+  if type != "array" then
+    error("release response is not an array")
+  else
+    map(
+      if type == "object"
+        and (.draft | type) == "boolean"
+        and (.prerelease | type) == "boolean"
+        and (.tag_name | type) == "string"
+        and (.assets | type) == "array"
+      then .
+      else error("release response contains a malformed row")
+      end
+    )
+    | map(
+        select(.draft == false and .prerelease == false)
+        | select(.tag_name | test("^v[0-9]+[.][0-9]+[.][0-9]+$"))
+      )
+  end
+' <<< "$releases")"; then
+  printf 'GitHub returned malformed release metadata\n' >&2
+  exit 1
+fi
+if ! release_rows="$(jq -c '.[]' <<< "$release_candidates")"; then
+  printf 'could not enumerate validated release metadata\n' >&2
+  exit 1
+fi
+
+valid_version() {
+  local value="$1" major minor patch
+  [[ "$value" =~ ^(0|[1-9][0-9]{0,4})[.](0|[1-9][0-9]{0,4})[.](0|[1-9][0-9]{0,4})$ ]] \
+    || return 1
+  major="${BASH_REMATCH[1]}"
+  minor="${BASH_REMATCH[2]}"
+  patch="${BASH_REMATCH[3]}"
+  (( 10#$major <= 65535 && 10#$minor <= 65535 && 10#$patch <= 65535 )) \
+    || return 1
+  (( 10#$major != 0 || 10#$minor != 0 || 10#$patch != 0 ))
+}
+
+release=""
+version=""
+if [[ -n "$release_rows" ]]; then
+  while IFS= read -r candidate; do
+    candidate_tag="$(jq -er '.tag_name' <<< "$candidate")" || {
+      printf 'validated release lost its tag\n' >&2
+      exit 1
+    }
+    candidate_version="${candidate_tag#v}"
+    valid_version "$candidate_version" || continue
+    if [[ -z "$version" ]] || \
+        [[ "$(vercmp "$candidate_version" "$version")" -gt 0 ]]; then
+      release="$candidate"
+      version="$candidate_version"
+    fi
+  done <<< "$release_rows"
+fi
+[[ -n "$release" ]] || {
+  printf 'no stable Ghost release found\n' >&2
+  exit 1
+}
+tag="$(jq -r '.tag_name' <<< "$release")"
+
+if ! assets="$(jq -ce '
+  .assets
+  | map(
+      if type == "object"
+        and (.name | type) == "string"
+        and (.browser_download_url | type) == "string"
+      then .
+      else error("release contains malformed asset metadata")
+      end
+    )
+' <<< "$release")"; then
+  printf 'release %s contains malformed asset metadata\n' "$tag" >&2
+  exit 1
+fi
+if ! checksum_url="$(jq -er '
+  [.[] | select(.name == "SHA256SUMS") | .browser_download_url]
+  | if length == 1 then .[0] else error("expected one SHA256SUMS") end
+' <<< "$assets")"; then
+  printf 'release %s must contain one SHA256SUMS asset\n' "$tag" >&2
+  exit 1
+fi
+if [[ "$checksum_url" != \
+    "https://github.com/$repository/releases/download/$tag/SHA256SUMS" ]]; then
+  printf 'release %s must contain one immutable SHA256SUMS asset\n' "$tag" >&2
+  exit 1
+fi
+checksums="$(curl -fsSL "$checksum_url")"
+
+checksum_for() {
+  local name="$1"
+  awk -v expected="$name" '
+    $2 == expected {
+      if (NF != 2 || $1 !~ /^[0-9a-f]{64}$/) exit 2
+      checksum = $1
+      count++
+    }
+    END {
+      if (count != 1) exit 1
+      print checksum
+    }
+  ' <<< "$checksums"
+}
+
+source_sha="$(checksum_for "ghost-$version.tar.gz")" || {
+  printf 'release %s has no unique source checksum\n' "$tag" >&2
+  exit 1
+}
+runtime_sha="$(checksum_for \
+  "ghost-runtime-$version-linux-x86_64.tar.zst")" || {
+  printf 'release %s has no unique runtime checksum\n' "$tag" >&2
+  exit 1
+}
+
+jq -n \
+  --arg pkgver "$version" \
+  --arg source_sha "$source_sha" \
+  --arg runtime_sha "$runtime_sha" \
+  '{pkgver: $pkgver, sha256sums: {any: [$source_sha, $runtime_sha]}}'

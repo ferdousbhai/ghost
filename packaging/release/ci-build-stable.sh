@@ -12,6 +12,7 @@ script_dir="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 # shellcheck source=ci-release-paths.sh
 source "$script_dir/ci-release-paths.sh"
 ghost_ci_validate_release_paths
+: "${GHOST_RELEASE_REPOSITORY:?GHOST_RELEASE_REPOSITORY=owner/repository is required}"
 
 source_tree="$workspace/packaging/arch/src/ghost"
 release_out="$GHOST_CI_RELEASE_OUT"
@@ -80,39 +81,37 @@ source_sha="$(sha256sum "$source_archive" | cut -d' ' -f1)"
 runtime_sha="$(sha256sum "$release_out/$runtime" | cut -d' ' -f1)"
 GHOST_RELEASE_WORK_ROOT="$release_work" \
   bash "$source_tree/packaging/release/smoke-rendered-package.sh" \
-    "$version" "$commit" "$epoch" "$source_sha" "$runtime_sha"
-aur_dir="$release_work/ghost-ai-$version-aur"
+    "$version" "$source_sha" "$runtime_sha"
+package_dir="$release_work/ghost-$version"
 bash "$source_tree/packaging/release/render-arch-package.sh" \
-  "$aur_dir" "$version" "$commit" "$epoch" "$source_sha" "$runtime_sha"
+  "$package_dir" "$version" "$source_sha" "$runtime_sha"
 
 install -d -m700 -- \
   "$release_work/makepkg-build" "$release_work/makepkg-sources"
+install -m600 -- "$source_archive" \
+  "$release_work/makepkg-sources/$(basename -- "$source_archive")"
+install -m600 -- "$release_out/$runtime" \
+  "$release_work/makepkg-sources/$runtime"
 (
   # shellcheck source=offline-env.sh
   source "$source_tree/packaging/release/offline-env.sh"
-  GHOST_RELEASE_SOURCE_URL="file://$source_archive" \
-    GHOST_RELEASE_RUNTIME_URL="file://$release_out/$runtime" \
-    GHOST_RELEASE_WORK_ROOT="$release_work" \
+  GHOST_RELEASE_WORK_ROOT="$release_work" \
     BUILDDIR="$release_work/makepkg-build" \
     SRCDEST="$release_work/makepkg-sources" \
     PKGDEST="$release_out" \
-    makepkg --dir "$aur_dir" --cleanbuild --noconfirm
+    makepkg --dir "$package_dir" --cleanbuild --noconfirm
 )
 
 (
-  cd -- "$aur_dir"
+  cd -- "$package_dir"
   makepkg --printsrcinfo > .SRCINFO.rendered
   cmp .SRCINFO .SRCINFO.rendered
   rm -- .SRCINFO.rendered
 )
 
-aur_bundle="$release_out/ghost-ai-$version-aur.tar.zst"
-bash "$source_tree/packaging/release/pack-aur-source.sh" \
-  "$aur_dir" "$aur_bundle" "$epoch"
-
 mapfile -t development_packages < <(
   find "$workspace/packaging/arch" -maxdepth 1 -type f \
-    -name 'ghost-ai-git-*.pkg.tar.zst' -print | LC_ALL=C sort
+    -name 'ghost-dev-*.pkg.tar.zst' -print | LC_ALL=C sort
 )
 [[ "${#development_packages[@]}" -eq 1 ]] || {
   printf 'expected one development package, found %s\n' \
@@ -122,3 +121,44 @@ mapfile -t development_packages < <(
 cp -- "${development_packages[0]}" "$release_out/"
 bash "$source_tree/packaging/release/write-sha256sums.sh" "$release_out"
 bash "$script_dir/ci-verify-package-archives.sh"
+
+mapfile -t stable_packages < <(
+  find "$release_out" -maxdepth 1 -type f \
+    -name "ghost-$version-*-x86_64.pkg.tar.zst" -print \
+    | LC_ALL=C sort
+)
+[[ "${#stable_packages[@]}" -eq 1 ]] || {
+  printf 'expected one stable package, found %s\n' \
+    "${#stable_packages[@]}" >&2
+  exit 1
+}
+
+candidate_arguments=(
+  create
+  --output "$release_out/public-candidate"
+  --source-archive "$source_archive"
+  --runtime-archive "$release_out/$runtime"
+  --runtime-checksum "$release_out/$runtime.sha256"
+  --version "$version"
+  --source-tag "$expected_tag"
+  --source-commit "$commit"
+  --source-date-epoch "$epoch"
+  --workflow-repository "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}"
+  --workflow-ref "${GITHUB_WORKFLOW_REF:?GITHUB_WORKFLOW_REF is required}"
+  --run-id "${GITHUB_RUN_ID:?GITHUB_RUN_ID is required}"
+  --run-attempt "${GITHUB_RUN_ATTEMPT:?GITHUB_RUN_ATTEMPT is required}"
+  --build-tool "bun=$(bun --version)"
+  --build-tool "git=$(git --version)"
+  --build-tool "makepkg=$(makepkg --version | sed -n '1p')"
+  --build-tool "pnpm=$(pnpm --version)"
+  --build-tool "python=$(python --version)"
+  --build-tool "zstd=$(zstd --version)"
+)
+while IFS= read -r row; do
+  [[ -z "$row" ]] || candidate_arguments+=(--action "$row")
+done <<< "${GHOST_RELEASE_ACTION_METADATA:-}"
+while IFS= read -r row; do
+  [[ -z "$row" ]] || candidate_arguments+=(--container "$row")
+done <<< "${GHOST_RELEASE_CONTAINER_METADATA:-}"
+python "$source_tree/packaging/release/public-candidate.py" \
+  "${candidate_arguments[@]}"

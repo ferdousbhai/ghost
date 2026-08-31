@@ -1,9 +1,9 @@
-pkgbase = ghost-ai-git
+pkgbase = ghost-dev
 	pkgdesc = Owner-local AI persona with memory, tools, and an Omarchy-native desktop shell
 	pkgver = 0.0.1.r100.g0c04ce7
 	pkgrel = 1
 	url = https://github.com/ferdousbhai/ghost
-	install = ghost-ai-git.install
+	install = ghost-dev.install
 	arch = x86_64
 	license = Apache-2.0
 	checkdepends = nodejs
@@ -32,16 +32,16 @@ pkgbase = ghost-ai-git
 	depends = ydotool>=1.0
 	optdepends = basecamp-cli: Basecamp CLI and embedded pi skill
 	optdepends = chromium: the browser the relay drives, and the browser-relay smoke test
-	optdepends = claude-code: private owner-local Claude Code plan runtime (pending Anthropic approval)
+	optdepends = claude-code: full owner-installed Claude Code harness
 	optdepends = gnome-keyring: Secret Service provider for provider and MCP credentials
 	optdepends = npm: Firecrawl, Google Workspace, and Agent Skills installers for optional pi integrations
 	optdepends = obsidian>=1.12.7: Obsidian CLI access for pi
 	optdepends = pnpm: install the optional private owner-local Claude Agent SDK boundary
-	provides = ghost-ai
-	conflicts = ghost-ai
+	provides = ghost
+	conflicts = ghost
 	options = !debug
 	options = !strip
 	source = ghost::git+https://github.com/ferdousbhai/ghost.git#branch=master
 	sha256sums = SKIP
 
-pkgname = ghost-ai-git
+pkgname = ghost-dev

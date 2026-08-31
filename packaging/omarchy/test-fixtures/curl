@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+url="${!#}"
+mode="${GHOST_OMARCHY_FIXTURE_MODE:-valid}"
+case "$url" in
+  'https://api.github.com/repos/@@REPOSITORY@@/releases?per_page=100')
+    checksum_url="https://github.com/@@REPOSITORY@@/releases/download/v@@VERSION@@/SHA256SUMS"
+    if [[ "$mode" == wrong-checksum-url ]]; then
+      checksum_url="https://example.invalid/SHA256SUMS"
+    fi
+    jq -n --arg checksum_url "$checksum_url" --arg mode "$mode" '
+      ([{
+        draft: false,
+        prerelease: false,
+        tag_name: "v1.2.2",
+        assets: []
+      }, {
+        draft: false,
+        prerelease: false,
+        tag_name: "v@@VERSION@@",
+        assets: (
+          [{
+            name: "SHA256SUMS",
+            browser_download_url: $checksum_url
+          }]
+          + if $mode == "malformed-asset-after-valid" then
+              [{name: 42, browser_download_url: null}]
+            else [] end
+        )
+      }]
+      + if $mode == "malformed-release-after-valid" then [42] else [] end)
+    '
+    ;;
+  'https://github.com/@@REPOSITORY@@/releases/download/v@@VERSION@@/SHA256SUMS')
+    printf '%s  ghost-@@VERSION@@.tar.gz\n' \
+      "${GHOST_OMARCHY_FIXTURE_SOURCE_SHA:?}"
+    printf '%s  ghost-runtime-@@VERSION@@-linux-x86_64.tar.zst\n' \
+      "${GHOST_OMARCHY_FIXTURE_RUNTIME_SHA:?}"
+    if [[ "$mode" == duplicate-checksum ]]; then
+      printf '%s  ghost-@@VERSION@@.tar.gz\n' \
+        "${GHOST_OMARCHY_FIXTURE_SOURCE_SHA:?}"
+    fi
+    ;;
+  *)
+    printf 'unexpected fixture URL: %s\n' "$url" >&2
+    exit 1
+    ;;
+esac

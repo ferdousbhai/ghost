@@ -21,14 +21,11 @@ EXPECTED = {
     "runtime_sha": re.compile(
         rf"ghost-runtime-{NAME}-linux-x86_64\.tar\.zst\.sha256"
     ),
-    "aur": re.compile(rf"ghost-ai-{NAME}-aur\.tar\.zst"),
-    "development_package": re.compile(
-        rf"ghost-ai-git-{NAME}-x86_64\.pkg\.tar\.zst"
-    ),
-    "stable_package": re.compile(rf"ghost-ai-{NAME}-x86_64\.pkg\.tar\.zst"),
+    "metadata": re.compile(r"RELEASE-METADATA\.json"),
 }
 MANIFEST_LINE = re.compile(r"([0-9a-f]{64})  ([A-Za-z0-9@._+:-]+)")
 OPEN_DIR = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+OPEN_REGULAR = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
 
 
 def die(message: str) -> NoReturn:
@@ -54,6 +51,32 @@ def directory_identity(
         die(f"{label} identity changed")
 
 
+def opened_child_identity(
+    parent_fd: int,
+    child_fd: int,
+    name: str,
+    *,
+    uid: int,
+    gid: int,
+    mode: int,
+    label: str,
+) -> tuple[int, int]:
+    opened = os.fstat(child_fd)
+    live = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+    expected = (opened.st_dev, opened.st_ino, uid, gid, mode)
+    for info in (opened, live):
+        actual = (
+            info.st_dev,
+            info.st_ino,
+            info.st_uid,
+            info.st_gid,
+            stat.S_IMODE(info.st_mode),
+        )
+        if not stat.S_ISDIR(info.st_mode) or actual != expected:
+            die(f"{label} identity changed")
+    return opened.st_dev, opened.st_ino
+
+
 def stable_regular(fd: int, before: os.stat_result, label: str) -> None:
     after = os.fstat(fd)
     fields = (
@@ -71,10 +94,25 @@ def stable_regular(fd: int, before: os.stat_result, label: str) -> None:
         die(f"{label} changed while being sealed")
 
 
-def read_regular(directory_fd: int, name: str) -> bytes:
-    fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory_fd)
+def open_regular(directory_fd: int, name: str) -> tuple[int, os.stat_result]:
+    fd = os.open(name, OPEN_REGULAR, dir_fd=directory_fd)
     try:
         before = os.fstat(fd)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_nlink != 1
+            or stat.S_IMODE(before.st_mode) != 0o644
+        ):
+            die(f"{name} is not a mode-0644 single-link regular file")
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd, before
+
+
+def read_regular(directory_fd: int, name: str) -> bytes:
+    fd, before = open_regular(directory_fd, name)
+    try:
         chunks: list[bytes] = []
         while chunk := os.read(fd, 1024 * 1024):
             chunks.append(chunk)
@@ -103,12 +141,9 @@ def test_pause(name: str) -> None:
 def copy_regular(
     source_fd: int, destination_fd: int, name: str, expected_sha: str
 ) -> None:
-    input_fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=source_fd)
+    input_fd, before = open_regular(source_fd, name)
     output_fd = -1
     try:
-        before = os.fstat(input_fd)
-        if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
-            die(f"{name} is not a single-link regular file")
         test_pause(name)
         output_fd = os.open(
             name,
@@ -192,7 +227,7 @@ def main() -> int:
         for value in (outer_dev, outer_ino, out_dev, out_ino, sealed_dev, sealed_ino)
     ]
     outer_fd = os.open(outer, OPEN_DIR)
-    out_fd = sealed_fd = -1
+    out_fd = candidate_fd = sealed_fd = -1
     created: list[str] = []
     try:
         directory_identity(
@@ -226,17 +261,39 @@ def main() -> int:
         )
         if os.listdir(sealed_fd):
             die("sealed upload directory is not empty")
-        source_names = set(os.listdir(out_fd))
+        candidate_fd = os.open("public-candidate", OPEN_DIR, dir_fd=out_fd)
+        candidate_identity = opened_child_identity(
+            out_fd,
+            candidate_fd,
+            "public-candidate",
+            uid=account.pw_uid,
+            gid=account.pw_gid,
+            mode=0o755,
+            label="public candidate",
+        )
+        source_names = set(os.listdir(candidate_fd))
         if "SHA256SUMS" not in source_names:
             die("release inventory has no SHA256SUMS")
-        manifest_data = read_regular(out_fd, "SHA256SUMS")
+        manifest_data = read_regular(candidate_fd, "SHA256SUMS")
         manifest = parse_manifest(manifest_data)
-        if source_names != set(manifest) | {"SHA256SUMS"}:
+        signature_names = source_names & {"SHA256SUMS.sig"}
+        if source_names != set(manifest) | {"SHA256SUMS"} | signature_names:
             die("SHA256SUMS does not cover the exact release inventory")
         validate_names(set(manifest))
         for name in sorted(manifest):
-            copy_regular(out_fd, sealed_fd, name, manifest[name])
+            copy_regular(candidate_fd, sealed_fd, name, manifest[name])
             created.append(name)
+        if signature_names:
+            signature_data = read_regular(candidate_fd, "SHA256SUMS.sig")
+            if not signature_data:
+                die("detached SHA256SUMS signature is empty")
+            copy_regular(
+                candidate_fd,
+                sealed_fd,
+                "SHA256SUMS.sig",
+                hashlib.sha256(signature_data).hexdigest(),
+            )
+            created.append("SHA256SUMS.sig")
         manifest_fd = os.open(
             "SHA256SUMS",
             os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
@@ -253,10 +310,20 @@ def main() -> int:
             os.fchmod(manifest_fd, 0o444)
         finally:
             os.close(manifest_fd)
-        if set(os.listdir(out_fd)) != source_names:
+        if set(os.listdir(candidate_fd)) != source_names:
             die("release inventory changed while being sealed")
-        if read_regular(out_fd, "SHA256SUMS") != manifest_data:
+        if read_regular(candidate_fd, "SHA256SUMS") != manifest_data:
             die("SHA256SUMS changed while being sealed")
+        if opened_child_identity(
+            out_fd,
+            candidate_fd,
+            "public-candidate",
+            uid=account.pw_uid,
+            gid=account.pw_gid,
+            mode=0o755,
+            label="public candidate",
+        ) != candidate_identity:
+            die("public candidate identity changed")
         directory_identity(
             out_fd,
             device=identities[2],
@@ -277,7 +344,7 @@ def main() -> int:
                 pass
         raise
     finally:
-        for fd in (sealed_fd, out_fd, outer_fd):
+        for fd in (sealed_fd, candidate_fd, out_fd, outer_fd):
             if fd >= 0:
                 os.close(fd)
     print("sealed release artifact inventory passed")

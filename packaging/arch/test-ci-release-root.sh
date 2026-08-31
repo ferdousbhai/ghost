@@ -208,23 +208,60 @@ artifact_names=(
   ghost-0.0.1.tar.gz
   ghost-runtime-0.0.1-linux-x86_64.tar.zst
   ghost-runtime-0.0.1-linux-x86_64.tar.zst.sha256
-  ghost-ai-0.0.1-aur.tar.zst
-  ghost-ai-0.0.1-1-x86_64.pkg.tar.zst
-  ghost-ai-git-0.0.1-1-x86_64.pkg.tar.zst
+  RELEASE-METADATA.json
 )
 "${builder_command[@]}" \
   /usr/bin/bash -c '
     set -euo pipefail
-    out="$1"; shift
-    for name in "$@"; do printf "%s\n" "$name" > "$out/$name"; done
+    candidate="$1/public-candidate"; shift
+    install -d -m755 "$candidate"
+    for name in "$@"; do printf "%s\n" "$name" > "$candidate/$name"; done
   ' _ "$out" "${artifact_names[@]}"
 "${builder_command[@]}" \
-  /usr/bin/bash "$checksum_writer" "$out"
+  /usr/bin/bash "$checksum_writer" "$out/public-candidate"
+
+# Legacy internal comparison artifacts can coexist in out but never enter the
+# sealed public candidate.
+"${builder_command[@]}" /usr/bin/bash -c \
+  'printf dev > "$1/ghost-dev-0.0.1-1-x86_64.pkg.tar.zst"' _ "$out"
 
 seal_args=(
   "$builder" "$outer" "$outer_device" "$outer_inode"
   "$out_device" "$out_inode" "$sealed_device" "$sealed_inode"
 )
+
+assert_fifo_rejected() {
+  local name="$1" saved="$out/fifo-saved" status=0 had_file=0
+  if [[ -e "$out/public-candidate/$name" ]]; then
+    had_file=1
+    "${builder_command[@]}" /usr/bin/mv -- \
+      "$out/public-candidate/$name" "$saved"
+  fi
+  "${builder_command[@]}" /usr/bin/mkfifo -- \
+    "$out/public-candidate/$name"
+  /usr/bin/timeout 3s /usr/bin/python "$sealer" "${seal_args[@]}" \
+    >/dev/null 2>&1 || status=$?
+  "${builder_command[@]}" /usr/bin/unlink -- \
+    "$out/public-candidate/$name"
+  if (( had_file )); then
+    "${builder_command[@]}" /usr/bin/mv -- \
+      "$saved" "$out/public-candidate/$name"
+  fi
+  if (( status == 0 )); then
+    printf 'sealer accepted FIFO entry: %s\n' "$name" >&2
+    exit 1
+  fi
+  if (( status == 124 )); then
+    printf 'sealer blocked opening FIFO entry: %s\n' "$name" >&2
+    exit 1
+  fi
+  [[ -z "$(find "$sealed" -mindepth 1 -print -quit)" ]]
+}
+
+assert_fifo_rejected SHA256SUMS
+assert_fifo_rejected SHA256SUMS.sig
+assert_fifo_rejected "${artifact_names[0]}"
+
 if /usr/bin/python "$sealer" "${seal_args[@]:0:5}" \
     "$(( out_inode + 1 ))" "${seal_args[@]:6}"; then
   printf 'sealer accepted a mismatched out inode\n' >&2
@@ -233,13 +270,13 @@ fi
 
 # A package-looking symlink is never accepted as an artifact.
 "${builder_command[@]}" ln -s -- "$outside/sentinel" \
-  "$out/ghost-ai-bad-x86_64.pkg.tar.zst"
+  "$out/public-candidate/ghost-bad-x86_64.pkg.tar.zst"
 if /usr/bin/python "$sealer" "${seal_args[@]}"; then
   printf 'sealer accepted a symlinked release artifact\n' >&2
   exit 1
 fi
 "${builder_command[@]}" unlink -- \
-  "$out/ghost-ai-bad-x86_64.pkg.tar.zst"
+  "$out/public-candidate/ghost-bad-x86_64.pkg.tar.zst"
 
 # Deterministically mutate an already-open source fd. Sealing must fail and
 # leave the root-only destination empty, never publish a torn snapshot.
@@ -252,7 +289,7 @@ proceed="$work/seal-continue"
   while [[ ! -e "$2" ]]; do /usr/bin/sleep 0.01; done
   printf mutation >&9
   : > "$3"
-' _ "$out/$target" "$ready" "$proceed" &
+' _ "$out/public-candidate/$target" "$ready" "$proceed" &
 mutator=$!
 if GHOST_CI_SEAL_TEST_TARGET="$target" \
     GHOST_CI_SEAL_TEST_READY="$ready" \
@@ -266,14 +303,19 @@ wait "$mutator"
 
 # Refresh the manifest for the now-stable source and seal exactly once.
 "${builder_command[@]}" \
-  /usr/bin/bash "$checksum_writer" "$out"
+  /usr/bin/bash "$checksum_writer" "$out/public-candidate"
+"${builder_command[@]}" /usr/bin/bash -c \
+  'printf detached > "$1/SHA256SUMS.sig"' _ "$out/public-candidate"
 /usr/bin/env -i HOME=/root PATH=/usr/bin TMPDIR=/var/tmp \
   /usr/bin/python "$sealer" "${seal_args[@]}"
 [[ "$(stat -Lc '%u:%g:%a:%d:%i' -- "$sealed")" == \
   "0:0:500:$sealed_device:$sealed_inode" ]]
 sealed_hash="$(sha256sum "$sealed/$target")"
+[[ -f "$sealed/SHA256SUMS.sig" ]]
+! grep -Fq SHA256SUMS.sig "$sealed/SHA256SUMS"
+[[ ! -e "$sealed/ghost-dev-0.0.1-1-x86_64.pkg.tar.zst" ]]
 "${builder_command[@]}" /usr/bin/bash -c \
-  'printf late-change >> "$1"' _ "$out/$target"
+  'printf late-change >> "$1"' _ "$out/public-candidate/$target"
 [[ "$(sha256sum "$sealed/$target")" == "$sealed_hash" ]]
 if "${builder_command[@]}" ls -- "$sealed" >/dev/null 2>&1; then
   printf 'builder accessed sealed upload after publication\n' >&2

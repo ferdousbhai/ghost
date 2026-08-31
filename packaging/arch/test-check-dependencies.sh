@@ -68,33 +68,32 @@ rg -q '"test"[[:space:]]*:[[:space:]]*"node --test' \
 (
   CDPATH= cd -- "$script_dir"
   env -u GHOST_SOURCE_REPO -u GHOST_SOURCE_REF makepkg --printsrcinfo
-) > "$work/ghost-ai-git.SRCINFO"
-cmp "$script_dir/.SRCINFO" "$work/ghost-ai-git.SRCINFO"
-require_srcinfo_entry checkdepends nodejs "$work/ghost-ai-git.SRCINFO"
-require_srcinfo_entry checkdepends python-yaml "$work/ghost-ai-git.SRCINFO"
-require_srcinfo_dependency bun "$work/ghost-ai-git.SRCINFO"
+) > "$work/ghost-dev.SRCINFO"
+cmp "$script_dir/.SRCINFO" "$work/ghost-dev.SRCINFO"
+require_srcinfo_entry checkdepends nodejs "$work/ghost-dev.SRCINFO"
+require_srcinfo_entry checkdepends python-yaml "$work/ghost-dev.SRCINFO"
+require_srcinfo_dependency bun "$work/ghost-dev.SRCINFO"
 # The keyring store shells out to libsecret's secret-tool at runtime.
-require_srcinfo_dependency libsecret "$work/ghost-ai-git.SRCINFO"
+require_srcinfo_dependency libsecret "$work/ghost-dev.SRCINFO"
 # pi otherwise downloads these into its cache on the first grep/find call.
-require_srcinfo_dependency fd "$work/ghost-ai-git.SRCINFO"
-require_srcinfo_dependency ripgrep "$work/ghost-ai-git.SRCINFO"
+require_srcinfo_dependency fd "$work/ghost-dev.SRCINFO"
+require_srcinfo_dependency ripgrep "$work/ghost-dev.SRCINFO"
 
-bash "$source_root/packaging/release/render-arch-package.sh" \
-  "$work/ghost-ai" \
+GHOST_RELEASE_REPOSITORY=example/ghost-releases \
+  bash "$source_root/packaging/release/render-arch-package.sh" \
+  "$work/ghost" \
   0.0.1 \
-  0000000000000000000000000000000000000000 \
-  1 \
   0000000000000000000000000000000000000000000000000000000000000000 \
   0000000000000000000000000000000000000000000000000000000000000000
-require_srcinfo_entry checkdepends nodejs "$work/ghost-ai/.SRCINFO"
-require_srcinfo_entry checkdepends python-yaml "$work/ghost-ai/.SRCINFO"
-require_srcinfo_dependency bun "$work/ghost-ai/.SRCINFO"
-require_srcinfo_dependency libsecret "$work/ghost-ai/.SRCINFO"
-require_srcinfo_dependency fd "$work/ghost-ai/.SRCINFO"
-require_srcinfo_dependency ripgrep "$work/ghost-ai/.SRCINFO"
-sed -n 's/^	depends = //p' "$work/ghost-ai-git.SRCINFO" \
+require_srcinfo_entry checkdepends nodejs "$work/ghost/.SRCINFO"
+require_srcinfo_entry checkdepends python-yaml "$work/ghost/.SRCINFO"
+require_srcinfo_dependency bun "$work/ghost/.SRCINFO"
+require_srcinfo_dependency libsecret "$work/ghost/.SRCINFO"
+require_srcinfo_dependency fd "$work/ghost/.SRCINFO"
+require_srcinfo_dependency ripgrep "$work/ghost/.SRCINFO"
+sed -n 's/^	depends = //p' "$work/ghost-dev.SRCINFO" \
   | LC_ALL=C sort > "$work/development-depends"
-sed -n 's/^	depends = //p' "$work/ghost-ai/.SRCINFO" \
+sed -n 's/^	depends = //p' "$work/ghost/.SRCINFO" \
   | LC_ALL=C sort > "$work/stable-depends"
 if ! cmp "$work/development-depends" "$work/stable-depends"; then
   printf 'stable and development runtime dependencies differ\n' >&2
