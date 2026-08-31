@@ -137,6 +137,13 @@ export {
   type OwnedCommandResult,
 } from "./owned-process.js";
 export {
+  NATIVE_TASK_JSONL_MAX_FRAME_BYTES,
+  NATIVE_TASK_JSONL_MAX_QUEUED_FRAMES,
+  NativeTaskJsonlProcess,
+  NativeTaskProcessError,
+  type NativeTaskJsonlOptions,
+} from "./native-task-jsonl.js";
+export {
   readGhostHomeDigest,
   resolveGhostExtensions,
   type GhostExtensionOptions,

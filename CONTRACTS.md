@@ -484,6 +484,16 @@ subagent behavior; this layer owns only durable lifecycle. It never creates Git
 worktrees or runs Git staging, commit, or branch commands, and it does not
 invent titles, recaps, presentation state, branch state, or queue state.
 
+Native delegated adapters register their force and quiescence boundary before
+their first catalogue or protocol await. JSONL harnesses run as one detached
+Linux process group in the exact admitted cwd. Their transport accepts only
+bounded object frames, has a bounded queue, discards stderr and unrecognized
+protocol/tool payloads, and maps malformed, oversized, or unexpected traffic to
+a generic task failure. Cancellation may send one best-effort harness-native
+interrupt, but the exact process group and confirmed descendant teardown are
+the authoritative boundary. No result is durable before that group is fully
+quiescent, and no process outside the captured group may be signalled.
+
 ### Session capabilities
 
 Ghost is owner-local by default: the owner is the only local caller, and every
