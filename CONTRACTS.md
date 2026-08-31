@@ -494,6 +494,15 @@ interrupt, but the exact process group and confirmed descendant teardown are
 the authoritative boundary. No result is durable before that group is fully
 quiescent, and no process outside the captured group may be signalled.
 
+The Pi delegated adapter runs the freshly admitted executable in its native RPC
+mode with the exact cwd and the positive `pi-native` environment. It does not
+disable Pi's project discovery, skills, extensions, tools, model fallback,
+session behavior, or other native defaults. The first task is `prompt`, a
+running follow-up is `steer`, and cancellation sends one best-effort `abort`.
+Only the correlated command acknowledgements, `agent_settled`, and the bounded
+last assistant text affect task state; all other RPC event and tool payloads
+are discarded.
+
 ### Session capabilities
 
 Ghost is owner-local by default: the owner is the only local caller, and every

@@ -144,6 +144,10 @@ export {
   type NativeTaskJsonlOptions,
 } from "./native-task-jsonl.js";
 export {
+  PiTaskAdapter,
+  type PiTaskAdapterOptions,
+} from "./pi-task-adapter.js";
+export {
   readGhostHomeDigest,
   resolveGhostExtensions,
   type GhostExtensionOptions,
