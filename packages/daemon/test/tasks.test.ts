@@ -1,126 +1,142 @@
-import { chmod, mkdtemp, readFile, stat } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { chmod, link, mkdir, mkdtemp, readFile, rename, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { conversationIdentity } from "../src/conversation-identity.js";
-import { TaskController, TaskStore, type TaskAdapter, type TaskAdapterHandle, type TaskRecord } from "../src/tasks.js";
+import { TaskController, TaskStore, type TaskAdapter, type TaskAdapterContext, type TaskBindingReceipt, type TaskRecord } from "../src/tasks.js";
 
 function deferred<T>() {
-  let resolve!: (value: T) => void;
-  let reject!: (reason?: unknown) => void;
-  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
-  return { promise, resolve, reject };
+  let resolve!: (value: T) => void; let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject };
 }
+const parent = conversationIdentity("pi", "parent");
+const binding: TaskBindingReceipt = { version: 1, root: "/project", rootIdentity: "1:2", cwd: "/project/exact", cwdIdentity: "1:3", generation: 4 };
+const authority = { async revalidate(receipt: TaskBindingReceipt) { return receipt; } };
+const stores: TaskStore[] = [];
+function trackedStore(home: string): TaskStore { const store = new TaskStore(home); stores.push(store); return store; }
+afterEach(async () => { await Promise.all(stores.splice(0).map((store) => store.dispose())); });
 
 async function eventually(store: TaskStore, id: string, state: TaskRecord["state"]): Promise<TaskRecord> {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    const record = await store.read(id);
-    if (record.state === state) return record;
-    await new Promise((resolve) => setTimeout(resolve, 2));
-  }
-  throw new Error(`task ${id} did not reach ${state}`);
+  for (let attempt = 0; attempt < 100; attempt += 1) { const row = await store.read(id); if (row.state === state) return row; await new Promise((done) => setTimeout(done, 2)); }
+  throw new Error(`${id} did not reach ${state}`);
 }
-
-async function fixture(adapter: TaskAdapter) {
-  const home = await mkdtemp(join(tmpdir(), "ghost-task-"));
-  await chmod(home, 0o700);
-  const store = new TaskStore(home);
-  const controller = new TaskController(store, new Map([["native", adapter]]));
-  await controller.initialize();
+async function fixture(adapter: TaskAdapter, bindingAuthority = authority) {
+  const home = await mkdtemp(join(tmpdir(), "ghost-task-")); await chmod(home, 0o700);
+  const store = trackedStore(home); const controller = new TaskController(store, new Map([["native", adapter]]), bindingAuthority); await controller.initialize();
   return { home, store, controller };
 }
+function runtime(options: { force?: () => Promise<void>; start?: (context: TaskAdapterContext) => void } = {}) {
+  const result = deferred<string>(); const quiet = deferred<void>(); let context!: TaskAdapterContext;
+  const adapter: TaskAdapter = { async start(_input, next) {
+    context = next; next.register({ force: options.force ?? (async () => { quiet.resolve(); result.resolve(""); }), quiescence: quiet.promise }); options.start?.(next);
+    return { result: result.promise, async followUp() {} };
+  } };
+  return { adapter, result, quiet, context: () => context };
+}
+async function start(controller: TaskController) { return controller.start({ parent, harness: "native", task: "inspect", binding }); }
+function record(state: TaskRecord["state"]): TaskRecord {
+  const at = new Date().toISOString();
+  return { version: 1, id: `task-${randomUUID()}`, generation: 1, parent, harness: "native", task: "work", binding, state,
+    createdAt: at, updatedAt: at, events: [], eventCursor: { nextSequence: 1, dropped: 0 }, result: state === "completed" ? "done" : null,
+    resultTruncated: false, error: state === "failed" || state === "interrupted" ? { code: "failed", message: "Safe failure." } : null };
+}
 
-const parent = conversationIdentity("pi", "parent");
-
-describe("durable tasks", () => {
-  it("persists exact cwd privately and completes without Git machinery", async () => {
-    const done = deferred<string>();
-    let received: unknown;
-    const { store, controller } = await fixture({
-      async start(input) { received = input; return { result: done.promise, async followUp() {}, async cancel() {} }; },
-    });
-    const task = await controller.start({ parent, harness: "native", task: "inspect", cwd: "/projects/exact" });
-    await eventually(store, task.id, "running");
-    expect(received).toMatchObject({ cwd: "/projects/exact", task: "inspect" });
-    done.resolve("finished");
-    const completed = await eventually(store, task.id, "completed");
-    expect(completed.result).toBe("finished");
-    expect((await stat(store.path(task.id))).mode & 0o777).toBe(0o600);
+describe("durable task foundation", () => {
+  it("requires initialization and revalidates the exact admitted binding before spawn", async () => {
+    const home = await mkdtemp(join(tmpdir(), "ghost-task-")); const store = trackedStore(home); let received: unknown; const native = runtime();
+    const controller = new TaskController(store, new Map([["native", { ...native.adapter, async start(input, context) { received = input; return native.adapter.start(input, context); } }]]), authority);
+    await expect(start(controller)).rejects.toMatchObject({ code: "tasks_uninitialized" }); await controller.initialize();
+    const task = await start(controller); await eventually(store, task.id, "running"); expect(received).toMatchObject({ cwd: "/project/exact", binding });
     expect(await readFile(new URL("../src/tasks.ts", import.meta.url), "utf8")).not.toMatch(/node:child_process|\bgit\b/iu);
   });
 
-  it("starts independent tasks concurrently without a controller queue", async () => {
-    const starts: string[] = [];
-    const results = new Map<string, ReturnType<typeof deferred<string>>>();
-    const { store, controller } = await fixture({ async start({ id }) {
-      starts.push(id); const result = deferred<string>(); results.set(id, result);
-      return { result: result.promise, async followUp() {}, async cancel() {} };
+  it("starts independent tasks concurrently without a global limit", async () => {
+    const executions: Array<{ result: ReturnType<typeof deferred<string>>; quiet: ReturnType<typeof deferred<void>> }> = [];
+    const { store, controller } = await fixture({ async start(_input, context) {
+      const result = deferred<string>(); const quiet = deferred<void>(); executions.push({ result, quiet });
+      context.register({ async force() { quiet.resolve(); result.resolve(""); }, quiescence: quiet.promise });
+      return { result: result.promise, async followUp() {} };
     } });
-    const first = await controller.start({ parent, harness: "native", task: "one", cwd: "/one" });
-    const second = await controller.start({ parent, harness: "native", task: "two", cwd: "/two" });
-    await eventually(store, first.id, "running"); await eventually(store, second.id, "running");
-    expect(starts).toHaveLength(2);
-    results.get(first.id)!.resolve("one"); results.get(second.id)!.resolve("two");
+    const first = await start(controller); const second = await start(controller);
+    await eventually(store, first.id, "running"); await eventually(store, second.id, "running"); expect(executions).toHaveLength(2);
+    for (const execution of executions) { execution.result.resolve("done"); execution.quiet.resolve(); }
   });
 
-  it("recovers every nonterminal state as interrupted", async () => {
-    const result = deferred<string>();
-    const { store, controller } = await fixture({ async start() { return { result: result.promise, async followUp() {}, async cancel() {} }; } });
-    const task = await controller.start({ parent, harness: "native", task: "work", cwd: "/project" });
-    await eventually(store, task.id, "running");
-    const recovered = await new TaskController(store, new Map()).initialize();
-    expect(recovered[0]?.state).toBe("interrupted");
-    result.resolve("late");
+  it("cancels while binding validation is blocked without spawning", async () => {
+    const admitted = deferred<TaskBindingReceipt>(); let spawned = false; const native = runtime();
+    const { store, controller } = await fixture({ ...native.adapter, async start(input, context) { spawned = true; return native.adapter.start(input, context); } }, { async revalidate() { return admitted.promise; } });
+    const task = await start(controller); await eventually(store, task.id, "starting"); const cancelled = controller.cancel(task.id); admitted.resolve(binding);
+    expect((await cancelled).state).toBe("cancelled"); await new Promise((done) => setTimeout(done, 2)); expect(spawned).toBe(false);
   });
 
-  it("rejects invalid identity, harness, cwd, and transitions", async () => {
-    const { controller } = await fixture({ async start() { throw new Error("unused"); } });
-    await expect(controller.start({ parent, harness: "native", task: "x", cwd: "relative" })).rejects.toMatchObject({ code: "invalid_task" });
-    await expect(controller.followUp("task-00000000-0000-4000-8000-000000000000", "x")).rejects.toMatchObject({ code: "task_not_found" });
+  it("does not publish completion until quiescence and fences late emissions", async () => {
+    const native = runtime(); const { store, controller } = await fixture(native.adapter); const task = await start(controller); await eventually(store, task.id, "running");
+    native.result.resolve("done"); await new Promise((done) => setTimeout(done, 3)); expect((await store.read(task.id)).state).toBe("running");
+    native.quiet.resolve(); expect((await eventually(store, task.id, "completed")).result).toBe("done");
+    await native.context().emit({ code: "late", message: "not recorded" }); expect((await store.read(task.id)).events).toEqual([]);
   });
 
-  it("serializes follow-up with cancellation and resolves cancel after quiescence", async () => {
-    const result = deferred<string>(); const follow = deferred<void>(); const quiet = deferred<void>();
-    const order: string[] = [];
-    const handle: TaskAdapterHandle = { result: result.promise,
-      async followUp() { order.push("follow-start"); await follow.promise; order.push("follow-end"); },
-      async cancel() { order.push("cancel-start"); await quiet.promise; order.push("quiet"); result.resolve(""); } };
-    const { store, controller } = await fixture({ async start() { return handle; } });
-    const task = await controller.start({ parent, harness: "native", task: "work", cwd: "/project" });
-    await eventually(store, task.id, "running");
-    const followed = controller.followUp(task.id, "more");
-    const cancelled = controller.cancel(task.id);
-    for (let attempt = 0; order.length === 0 && attempt < 20; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 1));
-    expect(order).toEqual(["follow-start"]);
-    follow.resolve(); await followed;
-    for (let attempt = 0; !order.includes("cancel-start") && attempt < 20; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 1));
-    expect(order).toContain("cancel-start");
-    let settled = false; void cancelled.then(() => { settled = true; }); await Promise.resolve(); expect(settled).toBe(false);
-    quiet.resolve(); expect((await cancelled).state).toBe("cancelled"); expect(order.at(-1)).toBe("quiet");
-    await new Promise((resolve) => setTimeout(resolve, 2));
-    expect((await store.read(task.id)).state).toBe("cancelled");
+  it("serializes follow-up and repeated cancellation until full quiescence", async () => {
+    const gate = deferred<void>(); const quiet = deferred<void>(); const result = deferred<string>(); const order: string[] = [];
+    const adapter: TaskAdapter = { async start(_input, context) { context.register({ async force() { order.push("force"); await gate.promise; }, quiescence: quiet.promise }); return { result: result.promise, async followUp() { order.push("follow"); } }; } };
+    const { store, controller } = await fixture(adapter); const task = await start(controller); await eventually(store, task.id, "running");
+    await controller.followUp(task.id, "more"); const first = controller.cancel(task.id); const second = controller.cancel(task.id);
+    await new Promise((done) => setTimeout(done, 2)); expect(order).toEqual(["follow", "force"]); gate.resolve(); quiet.resolve(); result.resolve("");
+    expect((await first).state).toBe("cancelled"); expect((await second).state).toBe("cancelled"); expect(order.filter((item) => item === "force")).toHaveLength(1);
   });
 
-  it("bounds records and redacts credentials and thrown adapter details", async () => {
-    const { store, controller } = await fixture({ async start(_input, emit) {
-      await emit({ code: "progress", message: `token=ghp_abcdefghijk ${"x".repeat(4_000)}` });
-      throw new Error("stderr Bearer secret-provider-wire");
+  it("recovers every nonterminal state with a generation fence and skips unrelated names", async () => {
+    const home = await mkdtemp(join(tmpdir(), "ghost-task-")); const store = trackedStore(home); await store.initialize();
+    const rows = [record("queued"), record("starting"), record("running"), record("cancelling"), record("completed")]; for (const row of rows) await store.write(row);
+    await writeFile(join(home, ".tasks", "task-not-a-record.json"), "foreign", { mode: 0o600 });
+    const controller = new TaskController(store, new Map(), authority); const recovered = await controller.initialize();
+    expect(recovered.filter((row) => row.state === "interrupted")).toHaveLength(4); expect(recovered.filter((row) => row.state === "interrupted").every((row) => row.generation === 2)).toBe(true);
+    expect(recovered.find((row) => row.id === rows[4]?.id)?.state).toBe("completed");
+  });
+
+  it("keeps monotonic event cursors when bounded history is truncated", async () => {
+    const native = runtime(); const { store, controller } = await fixture(native.adapter); const task = await start(controller); await eventually(store, task.id, "running");
+    for (let index = 1; index <= 70; index += 1) await native.context().emit({ code: "progress", message: String(index) });
+    const row = await store.read(task.id); expect(row.events).toHaveLength(64); expect(row.events[0]?.sequence).toBe(7); expect(row.events.at(-1)?.sequence).toBe(70);
+    expect(row.eventCursor).toEqual({ nextSequence: 71, dropped: 6 });
+  });
+
+  it("maps adapter errors and redacts bounded arbitrary harness text", async () => {
+    const quiet = Promise.resolve(); const { store, controller } = await fixture({ async start(_input, context) {
+      context.register({ async force() { throw new Error("Bearer force-secret"); }, quiescence: quiet }); await context.emit({ code: "progress", message: "token=ghp_abcdefghijk" });
+      throw new Error("stderr protocol Bearer provider-secret");
     } });
-    const task = await controller.start({ parent, harness: "native", task: "work", cwd: "/project" });
-    const failed = await eventually(store, task.id, "failed");
-    const bytes = await readFile(store.path(task.id), "utf8");
-    expect(bytes).not.toContain("ghp_abcdefghijk"); expect(bytes).not.toContain("secret-provider-wire");
-    expect(failed.events[0]?.message.length).toBeLessThanOrEqual(2_000);
-    expect(failed.error).toEqual({ code: "task_failed", message: "The native task failed." });
+    const task = await start(controller); const failed = await eventually(store, task.id, "failed");
+    expect(JSON.stringify(failed)).not.toContain("ghp_abcdefghijk"); expect(JSON.stringify(failed)).not.toContain("provider-secret");
+    expect(failed.error).toEqual({ code: "task_failed", message: "The native task failed safely." });
   });
 
-  it("never exposes a partial JSON record during concurrent atomic writes", async () => {
-    const result = deferred<string>();
-    const { store, controller } = await fixture({ async start() { return { result: result.promise, async followUp() {}, async cancel() {} }; } });
-    const task = await controller.start({ parent, harness: "native", task: "work", cwd: "/project" });
-    await eventually(store, task.id, "running");
-    const reads = Array.from({ length: 100 }, async () => JSON.parse(await readFile(store.path(task.id), "utf8")));
-    result.resolve("done");
-    await expect(Promise.all(reads)).resolves.toHaveLength(100);
+  it("rejects unsafe task directories and record links or modes", async () => {
+    const native = runtime(); const { home, store, controller } = await fixture(native.adapter); const task = await start(controller); await eventually(store, task.id, "running");
+    const file = join(home, ".tasks", `${task.id}.json`); await link(file, join(home, ".tasks", "extra-link")); await expect(store.read(task.id)).rejects.toMatchObject({ code: "unsafe_task_record" });
+    const secondHome = await mkdtemp(join(tmpdir(), "ghost-task-")); await symlink(tmpdir(), join(secondHome, ".tasks")); await expect(trackedStore(secondHome).initialize()).rejects.toBeTruthy();
+  });
+
+  it("rejects directory replacement and keeps durable files exactly private", async () => {
+    const native = runtime(); const { home, store, controller } = await fixture(native.adapter); const task = await start(controller); await eventually(store, task.id, "running");
+    const file = join(home, ".tasks", `${task.id}.json`); expect((await stat(file)).mode & 0o777).toBe(0o600); expect((await stat(join(home, ".tasks"))).mode & 0o777).toBe(0o700);
+    await rename(join(home, ".tasks"), join(home, ".tasks-old")); await mkdir(join(home, ".tasks"), { mode: 0o700 }); await expect(store.read(task.id)).rejects.toMatchObject({ code: "unsafe_task_store" });
+  });
+
+  it("recovers a durable CAS crash and rejects an inode replacement race", async () => {
+    const home = await mkdtemp(join(tmpdir(), "ghost-task-")); const store = trackedStore(home); await store.initialize(); const row = record("queued"); await store.write(row);
+    const path = join(home, ".tasks", `${row.id}.json`); await rename(path, `${path}.ghost-migration-cas`);
+    expect((await store.list())[0]?.id).toBe(row.id);
+    const admitted = await store.read(row.id); const replacement = `${path}.replacement`;
+    await writeFile(replacement, `${JSON.stringify(admitted, null, 2)}\n`, { mode: 0o600 }); await rename(replacement, path);
+    admitted.state = "starting"; await expect(store.write(admitted)).rejects.toMatchObject({ code: "private_write_conflict" });
+    expect((await store.read(row.id)).state).toBe("queued");
+  });
+
+  it("fails closed on exact schema, invariant, and timestamp violations", async () => {
+    const home = await mkdtemp(join(tmpdir(), "ghost-task-")); const store = trackedStore(home); await store.initialize(); const row = record("queued"); await store.write(row);
+    const path = join(home, ".tasks", `${row.id}.json`); await writeFile(path, JSON.stringify({ ...row, createdAt: "yesterday", unknown: true }), { mode: 0o600 });
+    await expect(store.read(row.id)).rejects.toMatchObject({ code: "invalid_task_record" });
   });
 });

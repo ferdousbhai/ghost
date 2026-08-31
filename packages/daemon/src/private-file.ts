@@ -353,7 +353,10 @@ export async function writePrivateJsonAtomic(path: string, value: unknown): Prom
   const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
   try {
     await writeFile(temporary, rendered, { encoding: "utf8", flag: "wx", mode: 0o600 });
+    chmodSync(temporary, 0o600);
+    fsyncPath(temporary);
     await rename(temporary, path);
+    fsyncPath(dirname(path));
   } catch (error) {
     await rm(temporary, { force: true }).catch(() => {});
     throw error;

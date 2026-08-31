@@ -414,27 +414,39 @@ credential exception: portable files contain references rather than values.
 
 The one owner may delegate an independent task from a conversation. Each task
 is one mode-0600 atomic JSON record under the ghost home's mode-0700 `.tasks/`
-directory. Its API-facing shape is `{ version: 1, id, parent, harness, task,
-cwd, state, createdAt, updatedAt, events, eventsTruncated, result,
-resultTruncated, error }`. `parent` is the runtime-qualified conversation
-identity. `cwd` is the exact canonical absolute project cwd already bound and
-authorized by the caller; the task layer neither discovers nor changes it.
+directory. Its API-facing shape is `{ version: 1, id, generation, parent,
+harness, task, binding, state, createdAt, updatedAt, events, eventCursor,
+result, resultTruncated, error }`. `parent` is the runtime-qualified
+conversation identity. `binding` is an exact `task-binding/v1` authority
+receipt: `{ version: 1, root, rootIdentity, cwd, cwdIdentity, generation }`.
+The project-binding authority revalidates that opaque receipt immediately
+before native spawn. A naked lexical cwd is never authority; the task layer
+neither discovers nor changes cwd.
 `harness` is an opaque bounded adapter id, not a place for Ghost to reproduce a
 runtime's policy.
 
 The only states are `queued`, `starting`, `running`, `cancelling`, `completed`,
 `failed`, `cancelled`, and `interrupted`. Startup recovery atomically changes
 every nonterminal record to `interrupted`; it never resumes work implicitly.
-Events and errors use bounded structured codes and owner-safe messages. Raw
-stderr, provider protocol, environment values, and credentials never enter a
-record. Results and event history are explicitly bounded and report
-truncation.
+Events and errors use an exact nested schema, canonical timestamps, bounded
+structured codes, and owner-safe messages. Adapter exceptions are mapped to
+fixed typed failures rather than persisting raw stderr, provider protocol, or
+environment values. Arbitrary owner and harness text receives bounded
+best-effort credential-pattern redaction; this is defense in depth, not a claim
+that arbitrary prose can be proven secret-free. Results are bounded. Event
+sequence numbers are monotonic and never renumbered; `eventCursor` reports the
+next sequence and the exact number dropped from the bounded history.
 
 There is no task concurrency limit or daemon-owned queue policy: every accepted
 task starts independently. A follow-up is accepted only while `running`, and
 follow-up and cancellation operations for one task are serialized. Cancellation
 does not become `cancelled` and its request does not resolve until the native
-adapter confirms the entire task is quiescent. Adapters own native session and
+adapter confirms the entire task is quiescent. Before its start handshake can
+complete, an adapter registers both an abort-aware force operation and a
+quiescence promise. One serialized lifecycle actor guards each task; its
+generation fences late events and results. Daemon shutdown aborts and forces
+all live tasks, waits for quiescence, and durably marks them `interrupted`.
+Startup never resumes an old generation. Adapters own native session and
 subagent behavior; this layer owns only durable lifecycle. It never creates Git
 worktrees or runs Git staging, commit, or branch commands, and it does not
 invent titles, recaps, presentation state, branch state, or queue state.
