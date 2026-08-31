@@ -1,25 +1,31 @@
-# Arch and Omarchy package
+# Omarchy package and checkout recipe
 
-`PKGBUILD` builds `ghost-ai-git`, the development package for the first
-owner-local beta. The `ghost-git` AUR name already belongs to an unrelated
-screenshot utility, hence the collision-free package name. `/usr/bin/ghostd`
-and `/usr/bin/ghost` are fixed launchers for ordinary Bun-target bundles under
-`/usr/lib/ghost/runtime`. The package therefore depends on system Bun 1.3.14 or
-newer, but installs no source or `node_modules` tree. Ghost, pi, provider, and
-MCP application code plus required static assets remain packaged for offline
-use. `fd` and `ripgrep` remain
-explicit runtime dependencies:
-pi's native `find` and `grep` tools invoke them, and providing the system
-binaries prevents a read-only planning turn from downloading either tool into
-pi's cache. The stable `ghost-ai` template and release-source machinery live
-under `packaging/release/`; its v3 runtime source carries the same bundles,
-launchers, and exact bundled-license closure.
+> **RELEASE HOLD:** this checkout recipe is for development and isolated
+> acceptance only. Do not create a release repository or tag, dispatch the
+> release workflow, publish a package, submit an Omarchy contribution, or install
+> it on the owner's live machine until the owner lifts the hold and #17 is
+> complete for the exact candidate.
 
-Build and install from this directory:
+`PKGBUILD` builds `ghost-dev`, the rolling checkout package. It provides and
+conflicts with stable `ghost`, so the variants cannot be installed together.
+`/usr/bin/ghostd` and `/usr/bin/ghost` are fixed launchers for ordinary
+Bun-target bundles under `/usr/lib/ghost/runtime`. The package depends on
+system Bun 1.3.14 or newer at runtime; building and checking the current
+toolchain requires Bun 1.4.0 or newer. It installs no source or `node_modules`
+tree. Ghost, pi, provider, and MCP application code plus required static assets
+remain packaged for offline use.
+
+`fd` and `ripgrep` are explicit runtime dependencies because pi's native
+`find` and `grep` tools invoke them. Providing the system binaries prevents a
+read-only planning turn from downloading either tool into pi's cache. The
+stable `ghost` release-source machinery lives under `packaging/release/`; its
+v3 runtime source carries the same bundles, launchers, and exact bundled-license
+closure.
+
+Build the checkout package without installing it:
 
 ```sh
-makepkg -si
-systemctl --user enable --now ghostd.service ghost-shell.service
+makepkg --cleanbuild
 ```
 
 ## Optional CLI integrations
@@ -85,10 +91,11 @@ snapshot every valid skill visible under `~/.agents/skills/` and
 `~/.pi/agent/skills/`, following symlinks in those standard machine roots.
 There is no hardcoded skill-name allowlist or integration-specific package path.
 
-The Claude Code plan path is different: it is a private, owner-local capability
-pending Anthropic approval, not a supported public third-party integration.
-The package does not ship the Claude Agent SDK. If this owner chooses to use
-that path, follow the exact versioned installation boundary in
+The Claude Code path uses the owner's complete, unmodified Claude Code harness
+(CLI 2.1.251 or newer) and any native authentication/provider path that its CLI
+reports logged in. The package does not ship the Claude Agent SDK. To use that
+path, follow the exact versioned installation and Option C environment boundary
+in
 [`docs/claude-code-runtime.md`](../../docs/claude-code-runtime.md#runtime-and-security-boundary).
 
 Before opening a session, install `libsecret` (for `secret-tool`) and run a
@@ -97,12 +104,13 @@ collection must be available to `ghostd`. See
 [keyring credentials](../../docs/keyring.md) for failure behavior and the
 blank-password/autologin caveat.
 
-This remains the rolling development package: `pnpm install` may populate its
-store during `build()`, so it is not the AUR release recipe. The stable package
-uses the [v3 runtime-source mechanism](../release/README.md#reproducibility-boundary)
-and also installs `/usr/bin/ghostd` and `/usr/bin/ghost`; publishing still
-requires a version tag, artifact inspection, and a human upload to the
-`ghost-ai` AUR package.
+This remains the rolling, checkout-only development package: `pnpm install`
+may populate its store during `build()`. The stable `ghost` package uses the
+[v3 runtime-source mechanism](../release/README.md#reproducibility-boundary)
+and also installs `/usr/bin/ghostd` and `/usr/bin/ghost`. Ghost creates only
+the source/runtime candidate and an Omarchy contribution template; Omarchy
+owns the stable package build, signing, repository, and promotion. Ghost has no
+generic Arch publication channel, pacman repository, or package-signing key.
 
 The shell is installed at `/usr/share/ghost/quickshell` and exposed as the
 system Quickshell config `ghost`, so the existing `qs -c ghost` integration and
@@ -113,14 +121,12 @@ is installed in a private Python import directory and exposed through
 `ghost-desktop-helper`, preventing its vendored `omaharness` modules from
 colliding with a system Python package.
 
-## Desktop-specific integration
+## Desktop boundary
 
-Ghost itself targets a Hyprland graphical session and depends on Hyprland and
-Quickshell. The systemd user services, desktop entry, tray item, notifications,
-and the plain Hyprland snippet work on an Arch/Hyprland desktop without
-Omarchy. The Omarchy-only pieces are its Lua keybinding form and the optional
-native bar module; both are installed below
-`/usr/share/doc/ghost/shell-contrib/` for an owner to opt into. Packaging never
+The supported release target is Omarchy. Ghost depends on Omarchy's Hyprland
+and Quickshell desktop shape, and carries its Lua keybinding and optional native
+bar integration under `/usr/share/doc/ghost/shell-contrib/` for the owner to
+enable. There is no generic Arch/Hyprland support promise. Packaging never
 edits `~/.config/hypr` or `~/.config/omarchy`.
 
 ## Upgrades, rollback, and uninstall
@@ -140,14 +146,14 @@ roll back or delete user data. Ghost-home format changes must remain
 forward/restart-safe under `CONTRACTS.md`; packaging does not invent a second
 migration path.
 
-Before uninstalling either package, stop and disable both user units:
+Before uninstalling `ghost-dev`, stop and disable both user units:
 
 ```sh
 systemctl --user disable --now ghost-shell.service ghostd.service
-sudo pacman -Rns ghost-ai-git
+sudo pacman -Rns ghost-dev
 ```
 
-For the stable package, the final command is `sudo pacman -Rns ghost-ai`.
+For stable `ghost`, the final command is `sudo pacman -Rns ghost`.
 
 That removes package-owned files only. It deliberately leaves `~/ghosts`,
 provider credentials, and API/relay tokens untouched.
