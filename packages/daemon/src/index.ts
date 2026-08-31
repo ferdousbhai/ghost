@@ -392,3 +392,19 @@ export {
   TITLE_PROMPT,
   type GenerateTitleInput,
 } from "./title.js";
+export {
+  MAX_TASK_EVENT_MESSAGE,
+  MAX_TASK_EVENTS,
+  MAX_TASK_RESULT,
+  MAX_TASK_TEXT,
+  TASK_RECORD_VERSION,
+  TASKS_DIRNAME,
+  TaskController,
+  TaskStore,
+  type TaskAdapter,
+  type TaskAdapterHandle,
+  type TaskEvent,
+  type TaskFailure,
+  type TaskRecord,
+  type TaskState,
+} from "./tasks.js";

@@ -70,6 +70,7 @@ previewed but inert. Claude Code retains its own native subagents.
                                mutations; never cloned by fork
   sessions/pins.json           v2 pinned state: { "version": 2, "pinned": ["<id>", …] }
   sessions/reads.json          v2 read state: { "version": 2, "reads": { "<id>": "<ISO timestamp>" } }
+  .tasks/task-<UUID>.json      task-record/v1 daemon-owned durable delegation
   .pi/                         derived pi machine runtime; never credentials
   .pi/models.pi.json           secret-free provider/models view synced from
                                models.json
@@ -408,6 +409,35 @@ entry is bound to this machine and never leaves it: `.pi/` (derived pi
 runtime), `.trash/` (recoverable per-home deletion state), and
 `.memory-maintenance.json` (the consolidation cooldown). Export needs no
 credential exception: portable files contain references rather than values.
+
+### Delegated tasks (`task-record/v1`)
+
+The one owner may delegate an independent task from a conversation. Each task
+is one mode-0600 atomic JSON record under the ghost home's mode-0700 `.tasks/`
+directory. Its API-facing shape is `{ version: 1, id, parent, harness, task,
+cwd, state, createdAt, updatedAt, events, eventsTruncated, result,
+resultTruncated, error }`. `parent` is the runtime-qualified conversation
+identity. `cwd` is the exact canonical absolute project cwd already bound and
+authorized by the caller; the task layer neither discovers nor changes it.
+`harness` is an opaque bounded adapter id, not a place for Ghost to reproduce a
+runtime's policy.
+
+The only states are `queued`, `starting`, `running`, `cancelling`, `completed`,
+`failed`, `cancelled`, and `interrupted`. Startup recovery atomically changes
+every nonterminal record to `interrupted`; it never resumes work implicitly.
+Events and errors use bounded structured codes and owner-safe messages. Raw
+stderr, provider protocol, environment values, and credentials never enter a
+record. Results and event history are explicitly bounded and report
+truncation.
+
+There is no task concurrency limit or daemon-owned queue policy: every accepted
+task starts independently. A follow-up is accepted only while `running`, and
+follow-up and cancellation operations for one task are serialized. Cancellation
+does not become `cancelled` and its request does not resolve until the native
+adapter confirms the entire task is quiescent. Adapters own native session and
+subagent behavior; this layer owns only durable lifecycle. It never creates Git
+worktrees or runs Git staging, commit, or branch commands, and it does not
+invent titles, recaps, presentation state, branch state, or queue state.
 
 ### Session capabilities
 
