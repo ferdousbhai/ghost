@@ -7,7 +7,7 @@
  * fatally. Callers translate a refusal into their own typed error rather than
  * restating the rule.
  */
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { rename, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import {
@@ -53,6 +53,13 @@ export interface PrivateFileRead {
   identity: PrivateFileIdentity;
 }
 
+export interface PinnedPrivateFileRead extends PrivateFileRead {
+  /** SHA-256 of the exact bytes admitted through this descriptor. */
+  sha256: string;
+  /** Release the descriptor that keeps this exact inode alive. Idempotent. */
+  release(): void;
+}
+
 export class PrivateWriteConflictError extends Error {
   readonly code = "private_write_conflict";
 
@@ -62,13 +69,13 @@ export class PrivateWriteConflictError extends Error {
   }
 }
 
-function validPrivateDescriptor(stats: BigIntStats): boolean {
-  return stats.isFile() && stats.nlink === 1n && stats.size >= 0n;
+function validPrivateDescriptor(stats: BigIntStats, links = 1n): boolean {
+  return stats.isFile() && stats.nlink === links && stats.size >= 0n;
 }
 
-function samePrivateFileState(left: BigIntStats, right: BigIntStats): boolean {
-  return validPrivateDescriptor(left)
-    && validPrivateDescriptor(right)
+function samePrivateFileState(left: BigIntStats, right: BigIntStats, links = 1n): boolean {
+  return validPrivateDescriptor(left, links)
+    && validPrivateDescriptor(right, links)
     && left.dev === right.dev
     && left.ino === right.ino
     && left.size === right.size
@@ -78,23 +85,26 @@ function samePrivateFileState(left: BigIntStats, right: BigIntStats): boolean {
     && left.mode === right.mode;
 }
 
-export function readPrivateFile(path: string, probe?: PrivateReadProbe): PrivateFileRead {
+/** Read one stable private pathname while retaining its admitted descriptor. */
+export function readPrivateFilePinned(
+  path: string,
+  options: { links?: bigint; probe?: PrivateReadProbe } = {},
+): PinnedPrivateFileRead {
+  const links = options.links ?? 1n;
   let fd: number;
   try {
     fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   } catch (error) {
     throw new PrivateReadError("open", error);
   }
-  let identity: PrivateFileIdentity;
-  let bytes: Buffer;
   try {
     const before = fstatSync(fd, { bigint: true });
-    if (!validPrivateDescriptor(before)) throw new PrivateReadError("unsafe");
+    if (!validPrivateDescriptor(before, links)) throw new PrivateReadError("unsafe");
     if (before.size > BigInt(MAX_PRIVATE_FILE_BYTES)) throw new PrivateReadError("too_large");
-    probe?.("opened", path);
+    options.probe?.("opened", path);
 
     const admittedSize = Number(before.size);
-    bytes = Buffer.allocUnsafe(admittedSize);
+    const bytes = Buffer.allocUnsafe(admittedSize);
     let offset = 0;
     while (offset < admittedSize) {
       const count = readSync(fd, bytes, offset, admittedSize - offset, offset);
@@ -103,7 +113,7 @@ export function readPrivateFile(path: string, probe?: PrivateReadProbe): Private
     }
     const overflow = Buffer.allocUnsafe(1);
     const grew = readSync(fd, overflow, 0, 1, offset) !== 0;
-    probe?.("read", path);
+    options.probe?.("read", path);
 
     const after = fstatSync(fd, { bigint: true });
     let current: BigIntStats;
@@ -114,21 +124,39 @@ export function readPrivateFile(path: string, probe?: PrivateReadProbe): Private
     }
     if (offset !== admittedSize
       || grew
-      || !samePrivateFileState(before, after)
-      || !samePrivateFileState(after, current)) {
+      || !samePrivateFileState(before, after, links)
+      || !samePrivateFileState(after, current, links)) {
       throw new PrivateReadError("changed");
     }
-    identity = { device: after.dev, inode: after.ino };
-  } finally {
-    closeSync(fd);
-  }
-  try {
+    let text: string;
+    try {
+      text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    } catch (error) {
+      throw new PrivateReadError("encoding", error);
+    }
+    let released = false;
     return {
-      text: new TextDecoder("utf-8", { fatal: true }).decode(bytes),
-      identity,
+      text,
+      identity: { device: after.dev, inode: after.ino },
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+      release: () => {
+        if (released) return;
+        released = true;
+        closeSync(fd);
+      },
     };
   } catch (error) {
-    throw new PrivateReadError("encoding", error);
+    closeSync(fd);
+    throw error;
+  }
+}
+
+export function readPrivateFile(path: string, probe?: PrivateReadProbe): PrivateFileRead {
+  const source = readPrivateFilePinned(path, { ...(probe ? { probe } : {}) });
+  try {
+    return { text: source.text, identity: source.identity };
+  } finally {
+    source.release();
   }
 }
 

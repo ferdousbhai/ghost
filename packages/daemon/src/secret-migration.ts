@@ -42,6 +42,7 @@ import {
   type PrivateFileIdentity,
   PrivateReadError,
   readPrivateFile,
+  readPrivateFilePinned,
   writePrivateJsonAtomicCas,
 } from "./private-file.js";
 import {
@@ -103,10 +104,13 @@ export type AgentDbFaultStage =
 
 export type PlainFileFaultStage =
   | "state-written"
+  | "anchor-linked"
+  | "phase-anchored"
   | "file-renamed"
   | "phase-claimed"
   | "claim-unlinked"
   | "replacement-linked"
+  | "anchor-unlinked"
   | "state-unlinked";
 
 function refusedSource(path: string, error: PrivateReadError): SecretServiceError {
@@ -831,30 +835,53 @@ function readAgentDb(claim: AgentDbClaim | null): PlainCredentialRow[] {
 interface LegacyCredentialRead {
   rows: PlainCredentialRow[];
   identity: PrivateFileIdentity;
+  sha256: string;
+  release(): void;
 }
 
 function legacyCredentials(path: string): LegacyCredentialRead | null {
   if (!plaintextSourceExists(path)) return null;
-  const source = privateJson(path);
-  const parsed = source.value;
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new SecretServiceError("secret_migration_failed", `${path} must contain a credential object.`);
+  let source: ReturnType<typeof readPrivateFilePinned>;
+  try {
+    source = readPrivateFilePinned(path);
+  } catch (error) {
+    if (!(error instanceof PrivateReadError)) throw error;
+    throw refusedSource(path, error);
   }
-  const rows: PlainCredentialRow[] = [];
-  for (const [provider, value] of Object.entries(parsed)) {
-    const entries = Array.isArray(value) ? value : [value];
-    for (const entry of entries) {
-      if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
-        throw new SecretServiceError("secret_migration_failed", `${path} contains an invalid credential.`);
-      }
-      try {
-        rows.push({ provider, credential: validateAuthCredential(entry) });
-      } catch {
-        throw new SecretServiceError("secret_migration_failed", `${path} contains an invalid credential.`);
+  try {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(source.text) as unknown;
+    } catch {
+      throw new SecretServiceError("secret_migration_failed", `${path} is not valid JSON.`);
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new SecretServiceError("secret_migration_failed", `${path} must contain a credential object.`);
+    }
+    const rows: PlainCredentialRow[] = [];
+    for (const [provider, value] of Object.entries(parsed)) {
+      const entries = Array.isArray(value) ? value : [value];
+      for (const entry of entries) {
+        if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+          throw new SecretServiceError("secret_migration_failed", `${path} contains an invalid credential.`);
+        }
+        try {
+          rows.push({ provider, credential: validateAuthCredential(entry) });
+        } catch {
+          throw new SecretServiceError("secret_migration_failed", `${path} contains an invalid credential.`);
+        }
       }
     }
+    return {
+      rows,
+      identity: source.identity,
+      sha256: source.sha256,
+      release: source.release,
+    };
+  } catch (error) {
+    source.release();
+    throw error;
   }
-  return { rows, identity: source.identity };
 }
 
 function fieldToken(value: string): string {
@@ -1177,20 +1204,23 @@ function changedPlaintextSource(path: string): SecretServiceError {
   );
 }
 
-type PlainRemovalPhase = "prepared" | "claimed";
+type PlainRemovalPhase = "prepared" | "anchored" | "claimed";
 
 interface PlainRemovalEvidence {
-  version: 1;
+  version: 2;
   phase: PlainRemovalPhase;
   originalName: string;
   claimName: string;
+  anchorName: string;
   device: string;
   inode: string;
+  sha256: string;
 }
 
 interface PlainRemovalClaim {
   path: string;
   claimedPath: string;
+  anchorPath: string;
   statePath: string;
   evidence: PlainRemovalEvidence;
   fault?: GhostSecretMigrationOptions["plainFileFault"];
@@ -1217,21 +1247,35 @@ function injectPlainFileFault(
   }
 }
 
+function pinPlainRemoval(
+  path: string,
+  evidence: PlainRemovalEvidence,
+  links: bigint,
+): ReturnType<typeof readPrivateFilePinned> | null {
+  let source: ReturnType<typeof readPrivateFilePinned>;
+  try {
+    source = readPrivateFilePinned(path, { links });
+  } catch {
+    return null;
+  }
+  if (source.identity.device !== BigInt(evidence.device)
+    || source.identity.inode !== BigInt(evidence.inode)
+    || source.sha256 !== evidence.sha256) {
+    source.release();
+    return null;
+  }
+  return source;
+}
+
 function plainRemovalMatches(
   path: string,
   evidence: PlainRemovalEvidence,
   links: bigint,
 ): boolean {
-  try {
-    const stats = lstatSync(path, { bigint: true });
-    return stats.isFile()
-      && !stats.isSymbolicLink()
-      && stats.nlink === links
-      && stats.dev === BigInt(evidence.device)
-      && stats.ino === BigInt(evidence.inode);
-  } catch {
-    return false;
-  }
+  const source = pinPlainRemoval(path, evidence, links);
+  if (!source) return false;
+  source.release();
+  return true;
 }
 
 function sameTwoLinkPlainRemoval(left: string, right: string): boolean {
@@ -1265,22 +1309,47 @@ function finishPlainRemovalEvidence(claim: PlainRemovalClaim): void {
 function parsePlainRemovalEvidence(path: string, statePath: string): PlainRemovalEvidence {
   const parsed = privateJson(statePath).value as Partial<PlainRemovalEvidence> | null;
   const originalName = basename(path);
-  if (parsed?.version !== 1
-    || (parsed.phase !== "prepared" && parsed.phase !== "claimed")
+  if (parsed?.version !== 2
+    || (parsed.phase !== "prepared" && parsed.phase !== "anchored" && parsed.phase !== "claimed")
     || parsed.originalName !== originalName
     || typeof parsed.claimName !== "string"
     || parsed.claimName.length > 255
     || !parsed.claimName.startsWith(`${originalName}.`)
     || !parsed.claimName.endsWith(PLAIN_REMOVAL_SUFFIX)
     || basename(parsed.claimName) !== parsed.claimName
+    || parsed.anchorName !== `${parsed.claimName}.anchor`
+    || basename(parsed.anchorName) !== parsed.anchorName
     || basename(statePath) !== `${parsed.claimName}${PLAIN_REMOVAL_STATE_SUFFIX}`
     || typeof parsed.device !== "string"
     || typeof parsed.inode !== "string"
     || !/^\d+$/.test(parsed.device)
-    || !/^\d+$/.test(parsed.inode)) {
+    || !/^\d+$/.test(parsed.inode)
+    || typeof parsed.sha256 !== "string"
+    || !/^[0-9a-f]{64}$/.test(parsed.sha256)) {
     throw changedPlaintextSource(path);
   }
   return parsed as PlainRemovalEvidence;
+}
+
+function unlinkAdmittedPlainPath(
+  claim: PlainRemovalClaim,
+  path: string,
+  links: bigint,
+): void {
+  const pinned = pinPlainRemoval(path, claim.evidence, links);
+  if (!pinned) throw changedPlaintextSource(claim.path);
+  try {
+    unlinkSync(path);
+    fsyncPath(dirname(claim.path));
+  } finally {
+    pinned.release();
+  }
+}
+
+function retirePlainRemovalAnchor(claim: PlainRemovalClaim): void {
+  unlinkAdmittedPlainPath(claim, claim.anchorPath, 1n);
+  injectPlainFileFault(claim, "anchor-unlinked");
+  finishPlainRemovalEvidence(claim);
 }
 
 function restoreUnadmittedPlainRemoval(claim: PlainRemovalClaim): void {
@@ -1289,27 +1358,73 @@ function restoreUnadmittedPlainRemoval(claim: PlainRemovalClaim): void {
     linkSync(claim.claimedPath, claim.path);
     fsyncPath(dirname(claim.path));
     injectPlainFileFault(claim, "replacement-linked");
+    if (!sameTwoLinkPlainRemoval(claim.claimedPath, claim.path)) {
+      throw changedPlaintextSource(claim.path);
+    }
     unlinkSync(claim.claimedPath);
     fsyncPath(dirname(claim.path));
-    finishPlainRemovalEvidence(claim);
+    injectPlainFileFault(claim, "claim-unlinked");
+    retirePlainRemovalAnchor(claim);
   } catch (error) {
     if (error instanceof PlainFileAbruptStop) throw error;
+    if (error instanceof SecretServiceError) throw error;
     throw changedPlaintextSource(claim.path);
   }
 }
 
 function reconcilePlainRemoval(claim: PlainRemovalClaim, recovering: boolean): void {
+  if (claim.evidence.phase === "prepared") {
+    if (missingPath(claim.anchorPath)) {
+      if (!missingPath(claim.claimedPath)) throw changedPlaintextSource(claim.path);
+      finishPlainRemovalEvidence(claim);
+      return;
+    }
+    if (!plainRemovalMatches(claim.anchorPath, claim.evidence, 1n)
+      && !plainRemovalMatches(claim.anchorPath, claim.evidence, 2n)) {
+      throw changedPlaintextSource(claim.path);
+    }
+    writePlainRemovalEvidence(claim, "anchored");
+    injectPlainFileFault(claim, "phase-anchored");
+  }
+
+  if (missingPath(claim.anchorPath)) {
+    if (claim.evidence.phase === "claimed" && missingPath(claim.claimedPath)) {
+      finishPlainRemovalEvidence(claim);
+      return;
+    }
+    throw changedPlaintextSource(claim.path);
+  }
+
   // Restoring an unadmitted replacement stopped between link and unlink. Its
-  // public name already owns that exact inode, so finish the no-replace move.
+  // public name already owns that exact inode; the separate anchor still pins
+  // the admitted source while the no-replace move is finished.
   if (sameTwoLinkPlainRemoval(claim.claimedPath, claim.path)) {
+    if (!plainRemovalMatches(claim.anchorPath, claim.evidence, 1n)) {
+      throw changedPlaintextSource(claim.path);
+    }
+    if (claim.evidence.phase !== "claimed") {
+      writePlainRemovalEvidence(claim, "claimed");
+      injectPlainFileFault(claim, "phase-claimed");
+    }
     unlinkSync(claim.claimedPath);
     fsyncPath(dirname(claim.path));
-    finishPlainRemovalEvidence(claim);
+    injectPlainFileFault(claim, "claim-unlinked");
+    retirePlainRemovalAnchor(claim);
+    if (!recovering) throw changedPlaintextSource(claim.path);
     return;
   }
 
   if (!missingPath(claim.claimedPath)) {
-    if (!plainRemovalMatches(claim.claimedPath, claim.evidence, 1n)) {
+    const admittedClaim = sameTwoLinkPlainRemoval(claim.anchorPath, claim.claimedPath)
+      && plainRemovalMatches(claim.claimedPath, claim.evidence, 2n);
+    if (!admittedClaim) {
+      if (!plainRemovalMatches(claim.anchorPath, claim.evidence, 1n)) {
+        throw changedPlaintextSource(claim.path);
+      }
+      if (claim.evidence.phase !== "claimed") {
+        writePlainRemovalEvidence(claim, "claimed");
+        injectPlainFileFault(claim, "phase-claimed");
+      }
       restoreUnadmittedPlainRemoval(claim);
       if (!recovering) throw changedPlaintextSource(claim.path);
       return;
@@ -1319,33 +1434,37 @@ function reconcilePlainRemoval(claim: PlainRemovalClaim, recovering: boolean): v
       injectPlainFileFault(claim, "phase-claimed");
     }
     const replacementWon = !missingPath(claim.path);
-    unlinkSync(claim.claimedPath);
-    fsyncPath(dirname(claim.path));
+    unlinkAdmittedPlainPath(claim, claim.claimedPath, 2n);
     injectPlainFileFault(claim, "claim-unlinked");
-    finishPlainRemovalEvidence(claim);
+    retirePlainRemovalAnchor(claim);
     if (replacementWon && !recovering) throw changedPlaintextSource(claim.path);
     return;
   }
 
-  if (claim.evidence.phase === "claimed") {
-    // The admitted claim was already unlinked. Any public path is a later
-    // winner and is deliberately left for the ordinary migration pass.
-    finishPlainRemovalEvidence(claim);
+  if (claim.evidence.phase === "anchored"
+    && sameTwoLinkPlainRemoval(claim.anchorPath, claim.path)
+    && plainRemovalMatches(claim.path, claim.evidence, 2n)) {
+    try {
+      renameSync(claim.path, claim.claimedPath);
+      fsyncPath(dirname(claim.path));
+    } catch {
+      throw changedPlaintextSource(claim.path);
+    }
+    injectPlainFileFault(claim, "file-renamed");
+    reconcilePlainRemoval(claim, recovering);
     return;
   }
-  if (!plainRemovalMatches(claim.path, claim.evidence, 1n)) {
-    finishPlainRemovalEvidence(claim);
-    if (!recovering) throw changedPlaintextSource(claim.path);
-    return;
-  }
-  try {
-    renameSync(claim.path, claim.claimedPath);
-    fsyncPath(dirname(claim.path));
-  } catch {
+
+  if (!plainRemovalMatches(claim.anchorPath, claim.evidence, 1n)) {
     throw changedPlaintextSource(claim.path);
   }
-  injectPlainFileFault(claim, "file-renamed");
-  reconcilePlainRemoval(claim, recovering);
+  const replacementWon = !missingPath(claim.path);
+  if (claim.evidence.phase !== "claimed") {
+    writePlainRemovalEvidence(claim, "claimed");
+    injectPlainFileFault(claim, "phase-claimed");
+  }
+  retirePlainRemovalAnchor(claim);
+  if (replacementWon && !recovering) throw changedPlaintextSource(claim.path);
 }
 
 function recoverPlainFileRemovals(
@@ -1372,6 +1491,7 @@ function recoverPlainFileRemovals(
   reconcilePlainRemoval({
     path,
     claimedPath: join(directory, evidence.claimName),
+    anchorPath: join(directory, evidence.anchorName),
     statePath,
     evidence,
     ...(fault ? { fault } : {}),
@@ -1381,27 +1501,52 @@ function recoverPlainFileRemovals(
 function removePlainFile(
   path: string,
   identity: PrivateFileIdentity,
+  sha256: string,
   fault?: GhostSecretMigrationOptions["plainFileFault"],
 ): void {
   const claimName = `${basename(path)}.${process.pid}-${randomUUID()}${PLAIN_REMOVAL_SUFFIX}`;
+  const anchorName = `${claimName}.anchor`;
   const claimedPath = join(dirname(path), claimName);
+  const anchorPath = join(dirname(path), anchorName);
   const statePath = `${claimedPath}${PLAIN_REMOVAL_STATE_SUFFIX}`;
   const claim: PlainRemovalClaim = {
     path,
     claimedPath,
+    anchorPath,
     statePath,
     evidence: {
-      version: 1,
+      version: 2,
       phase: "prepared",
       originalName: basename(path),
       claimName,
+      anchorName,
       device: identity.device.toString(),
       inode: identity.inode.toString(),
+      sha256,
     },
     ...(fault ? { fault } : {}),
   };
   writePlainRemovalEvidence(claim, "prepared");
   injectPlainFileFault(claim, "state-written");
+  try {
+    linkSync(path, anchorPath);
+  } catch {
+    finishPlainRemovalEvidence(claim);
+    throw changedPlaintextSource(path);
+  }
+  fsyncPath(dirname(path));
+  injectPlainFileFault(claim, "anchor-linked");
+  if (!sameTwoLinkPlainRemoval(anchorPath, path)) {
+    throw changedPlaintextSource(path);
+  }
+  if (!plainRemovalMatches(anchorPath, claim.evidence, 2n)) {
+    unlinkSync(anchorPath);
+    fsyncPath(dirname(path));
+    finishPlainRemovalEvidence(claim);
+    throw changedPlaintextSource(path);
+  }
+  writePlainRemovalEvidence(claim, "anchored");
+  injectPlainFileFault(claim, "phase-anchored");
   reconcilePlainRemoval(claim, false);
 }
 
@@ -1414,12 +1559,13 @@ function migrateWithContext(
   const agentDb = join(dirname(authPath), "agent.db");
   const agentDbClaim = recoverOrClaimAgentDb(agentDb, options);
   let agentDbPublished = false;
+  let legacy: LegacyCredentialRead | null = null;
   try {
     const addedAccounts = new Set<string>();
     const database = agentDbClaim?.evidence.phase === "claimed"
       ? readAgentDb(agentDbClaim)
       : [];
-    const legacy = legacyCredentials(authPath);
+    legacy = legacyCredentials(authPath);
     importCredentials([...database, ...(legacy?.rows ?? [])], context, addedAccounts);
 
     const mcpPath = join(options.home, MCP_FILENAME);
@@ -1473,7 +1619,7 @@ function migrateWithContext(
     }
     if (legacy) {
       options.plainFileProbe?.("removing", authPath);
-      removePlainFile(authPath, legacy.identity, options.plainFileFault);
+      removePlainFile(authPath, legacy.identity, legacy.sha256, options.plainFileFault);
     }
   } catch (error) {
     if (agentDbClaim && !agentDbPublished && !(error instanceof AgentDbAbruptStop)) {
@@ -1481,6 +1627,7 @@ function migrateWithContext(
     }
     throw error;
   } finally {
+    legacy?.release();
     if (agentDbClaim) closeAgentDbClaim(agentDbClaim);
   }
 }

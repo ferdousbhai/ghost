@@ -305,12 +305,24 @@ with a 1 MiB cap, fatal UTF-8 decoding, and unchanged descriptor and live-path
 identity. Their models/MCP JSON writers admit the complete pretty-printed UTF-8
 publication at the same 1 MiB cap before creating a temporary file. Unsafe,
 changing, dangling-linked, or oversized input is invalid, never absent or
-partially published. Removing a migrated `auth.json` first moves the public path
-to an unpredictable claim and unlinks it only when it is still the exact inode
-admitted by that read. A durable identity-and-phase marker precedes that move;
-the next open completes an interrupted admitted removal or restores an
-unadmitted replacement through a no-replace link. A replacement login at the
-public path wins and is handled by the next ordinary migration pass.
+partially published. Removing a migrated `auth.json` holds its admitted read
+descriptor until a same-directory hard-link anchor for that exact inode is
+durable. A prepared identity-and-content marker names the intended anchor; an
+anchored phase is durable before Ghost moves the public path to an unpredictable
+claim. The admitted claim is unlinked before the anchor, so recorded device and
+inode numbers are never trusted after their last live reference can disappear,
+and a SHA-256 of the admitted bytes also rejects an in-place rewrite. A stop
+before the anchored phase leaves either only the prepared marker or the
+anchored public file; the next open safely discards and rereads the former or
+resumes the latter. A later stop completes the admitted removal or restores an
+unadmitted claim replacement through a no-replace link. Once the anchored phase
+is durable, ordinary recovery fails closed on a missing, replaced, or
+content-changed anchor unless the claimed phase and absent claim already prove
+that Ghost finished removing it. A replacement login at the public path wins
+and is handled by the next ordinary migration pass. These unpredictable
+internal names and checks protect crash recovery and accidental pathname races;
+they are not isolation from a malicious process running as the same owner,
+because POSIX has no identity-conditional unlink.
 
 References resolve in memory only, immediately before provider or MCP
 connection. pi's `ModelRuntime` receives Ghost's `GhostPiCredentialStore` (pi's

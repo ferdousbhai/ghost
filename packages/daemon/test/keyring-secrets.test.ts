@@ -773,11 +773,83 @@ describe("plaintext migration", () => {
     expect(readFileSync(displaced, "utf8")).toContain("admitted-login");
   });
 
+  it("pins an unlinked admitted auth inode until its replacement is classified", () => {
+    const home = root();
+    const agentDir = join(home, ".pi");
+    mkdirSync(agentDir, { recursive: true });
+    const path = join(agentDir, "auth.json");
+    writeFileSync(path, JSON.stringify({
+      openai: { type: "api_key", key: "admitted-before-unlink" },
+    }));
+    const admitted = lstatSync(path, { bigint: true });
+    let replacement: ReturnType<typeof lstatSync> | undefined;
+
+    expect(() => openGhostSecretContext({
+      home,
+      client: new MemorySecretServiceClient(),
+      metadataPath: join(home, "state.sqlite"),
+      plainFileProbe: (stage, sourcePath) => {
+        if (stage !== "removing" || replacement) return;
+        unlinkSync(sourcePath);
+        writeFileSync(sourcePath, JSON.stringify({
+          anthropic: { type: "api_key", key: "replacement-after-unlink" },
+        }), { mode: 0o600 });
+        replacement = lstatSync(sourcePath, { bigint: true });
+      },
+    })).toThrow(/changed plaintext source/);
+
+    expect(replacement).toBeDefined();
+    expect({ device: replacement!.dev, inode: replacement!.ino }).not.toEqual({
+      device: admitted.dev,
+      inode: admitted.ino,
+    });
+    expect(readFileSync(path, "utf8")).toContain("replacement-after-unlink");
+    expect(readdirSync(agentDir).filter((name) => name.includes(".removal"))).toEqual([]);
+  });
+
+  it("retains recovery evidence when a newly linked anchor is replaced", () => {
+    const home = root();
+    const agentDir = join(home, ".pi");
+    mkdirSync(agentDir, { recursive: true });
+    const path = join(agentDir, "auth.json");
+    writeFileSync(path, JSON.stringify({
+      openai: { type: "api_key", key: "admitted-before-anchor-replacement" },
+    }));
+    const client = new MemorySecretServiceClient();
+    let anchorPath = "";
+
+    expect(() => openGhostSecretContext({
+      home,
+      client,
+      metadataPath: join(home, "state.sqlite"),
+      plainFileFault: (stage) => {
+        if (stage !== "anchor-linked" || anchorPath) return;
+        const anchorName = readdirSync(agentDir).find((name) => name.endsWith(".removal.anchor"));
+        expect(anchorName).toBeDefined();
+        anchorPath = join(agentDir, anchorName!);
+        unlinkSync(anchorPath);
+        writeFileSync(anchorPath, JSON.stringify({
+          anthropic: { type: "api_key", key: "unknown-anchor-replacement" },
+        }), { mode: 0o600 });
+      },
+    })).toThrow(/changed plaintext source/);
+
+    const statePath = `${anchorPath.slice(0, -".anchor".length)}.state.json`;
+    expect(readFileSync(path, "utf8")).toContain("admitted-before-anchor-replacement");
+    expect(readFileSync(anchorPath, "utf8")).toContain("unknown-anchor-replacement");
+    expect(existsSync(statePath)).toBe(true);
+    expect(() => openContext(home, client)).toThrow(/changed plaintext source/);
+    expect(existsSync(statePath)).toBe(true);
+  });
+
   it.each([
     "state-written",
+    "anchor-linked",
+    "phase-anchored",
     "file-renamed",
     "phase-claimed",
     "claim-unlinked",
+    "anchor-unlinked",
     "state-unlinked",
   ] as const)("reconciles an abrupt auth.json removal stop after %s", (targetStage) => {
     const home = root();
@@ -811,7 +883,12 @@ describe("plaintext migration", () => {
     expect(readdirSync(agentDir).filter((name) => name.includes(".removal"))).toEqual([]);
   });
 
-  it("restores and migrates an unadmitted auth replacement across its own link crash", () => {
+  it.each([
+    "replacement-linked",
+    "claim-unlinked",
+    "anchor-unlinked",
+    "state-unlinked",
+  ] as const)("restores and migrates an unadmitted auth replacement after %s", (targetStage) => {
     const home = root();
     const agentDir = join(home, ".pi");
     const path = join(agentDir, "auth.json");
@@ -832,6 +909,14 @@ describe("plaintext migration", () => {
         const claimName = readdirSync(agentDir).find((name) => name.endsWith(".removal"));
         expect(claimName).toBeDefined();
         const claimPath = join(agentDir, claimName!);
+        const anchorPath = `${claimPath}.anchor`;
+        const admitted = lstatSync(claimPath, { bigint: true });
+        const anchor = lstatSync(anchorPath, { bigint: true });
+        expect({ device: anchor.dev, inode: anchor.ino, links: anchor.nlink }).toEqual({
+          device: admitted.dev,
+          inode: admitted.ino,
+          links: 2n,
+        });
         unlinkSync(claimPath);
         writeFileSync(claimPath, JSON.stringify({
           anthropic: { type: "api_key", key: "replacement-after-rename" },
@@ -847,13 +932,13 @@ describe("plaintext migration", () => {
       client,
       metadataPath: join(home, "state.sqlite"),
       plainFileFault: (stage) => {
-        if (stage !== "replacement-linked" || stoppedDuringRestore) return;
+        if (stage !== targetStage || stoppedDuringRestore) return;
         stoppedDuringRestore = true;
         throw new Error("stop during replacement restore");
       },
     })).toThrow(/abrupt stop/);
     expect(stoppedDuringRestore).toBe(true);
-    expect(lstatSync(path).nlink).toBe(2);
+    expect(lstatSync(path).nlink).toBe(targetStage === "replacement-linked" ? 2 : 1);
 
     const context = openContext(home, client);
     expect(listCredentials(context).find((row) => row.provider === "anthropic")).toMatchObject({
@@ -862,6 +947,149 @@ describe("plaintext migration", () => {
     context.close();
     expect(existsSync(path)).toBe(false);
     expect(readdirSync(agentDir).filter((name) => name.includes(".removal"))).toEqual([]);
+  });
+
+  it("preserves an in-place auth rewrite after admission", () => {
+    const home = root();
+    const agentDir = join(home, ".pi");
+    const path = join(agentDir, "auth.json");
+    mkdirSync(agentDir, { recursive: true });
+    writeFileSync(path, JSON.stringify({
+      openai: { type: "api_key", key: "admitted-before-in-place-write" },
+    }));
+    const client = new MemorySecretServiceClient();
+    let rewritten = false;
+
+    expect(() => openGhostSecretContext({
+      home,
+      client,
+      metadataPath: join(home, "state.sqlite"),
+      plainFileProbe: (stage, sourcePath) => {
+        if (stage !== "removing" || rewritten) return;
+        rewritten = true;
+        writeFileSync(sourcePath, JSON.stringify({
+          anthropic: { type: "api_key", key: "winner-written-in-place" },
+        }));
+      },
+    })).toThrow(/changed plaintext source/);
+
+    expect(rewritten).toBe(true);
+    expect(readFileSync(path, "utf8")).toContain("winner-written-in-place");
+    expect(readdirSync(agentDir).filter((name) => name.includes(".removal"))).toEqual([]);
+
+    openContext(home, client).close();
+    expect(existsSync(path)).toBe(false);
+    const context = openContext(home, client);
+    expect(listCredentials(context).find((row) => row.provider === "anthropic"))
+      .toMatchObject({ credential: { key: "winner-written-in-place" } });
+    context.close();
+  });
+
+  it("fails closed when an admitted claim is rewritten in place", () => {
+    const home = root();
+    const agentDir = join(home, ".pi");
+    const path = join(agentDir, "auth.json");
+    mkdirSync(agentDir, { recursive: true });
+    writeFileSync(path, JSON.stringify({
+      openai: { type: "api_key", key: "admitted-before-claim-rewrite" },
+    }));
+    const client = new MemorySecretServiceClient();
+    let claimPath = "";
+
+    expect(() => openGhostSecretContext({
+      home,
+      client,
+      metadataPath: join(home, "state.sqlite"),
+      plainFileFault: (stage) => {
+        if (stage !== "file-renamed" || claimPath) return;
+        const claimName = readdirSync(agentDir).find((name) => name.endsWith(".removal"));
+        expect(claimName).toBeDefined();
+        claimPath = join(agentDir, claimName!);
+        writeFileSync(claimPath, JSON.stringify({
+          anthropic: { type: "api_key", key: "same-inode-replacement" },
+        }));
+        throw new Error("stop after rewriting the admitted inode");
+      },
+    })).toThrow(/abrupt stop/);
+
+    expect(() => openContext(home, client)).toThrow(/changed plaintext source/);
+    expect(readFileSync(claimPath, "utf8")).toContain("same-inode-replacement");
+    expect(existsSync(`${claimPath}.anchor`)).toBe(true);
+    expect(existsSync(`${claimPath}.state.json`)).toBe(true);
+  });
+
+  it("rejects replacement bytes even when durable evidence has their device and inode", () => {
+    const home = root();
+    const agentDir = join(home, ".pi");
+    const path = join(agentDir, "auth.json");
+    mkdirSync(agentDir, { recursive: true });
+    writeFileSync(path, JSON.stringify({
+      openai: { type: "api_key", key: "digest-admitted-source" },
+    }));
+    const client = new MemorySecretServiceClient();
+    let claimPath = "";
+
+    expect(() => openGhostSecretContext({
+      home,
+      client,
+      metadataPath: join(home, "state.sqlite"),
+      plainFileFault: (stage) => {
+        if (stage !== "file-renamed" || claimPath) return;
+        const claimName = readdirSync(agentDir).find((name) => name.endsWith(".removal"));
+        expect(claimName).toBeDefined();
+        claimPath = join(agentDir, claimName!);
+        throw new Error("stop with a durable admitted claim");
+      },
+    })).toThrow(/abrupt stop/);
+
+    const anchorPath = `${claimPath}.anchor`;
+    const statePath = `${claimPath}.state.json`;
+    unlinkSync(claimPath);
+    unlinkSync(anchorPath);
+    writeFileSync(claimPath, JSON.stringify({
+      anthropic: { type: "api_key", key: "same-identity-evidence-replacement" },
+    }), { mode: 0o600 });
+    linkSync(claimPath, anchorPath);
+    const replacement = lstatSync(claimPath, { bigint: true });
+    const evidence = JSON.parse(readFileSync(statePath, "utf8")) as Record<string, unknown>;
+    evidence.device = replacement.dev.toString();
+    evidence.inode = replacement.ino.toString();
+    writeFileSync(statePath, JSON.stringify(evidence), { mode: 0o600 });
+
+    expect(() => openContext(home, client)).toThrow(/changed plaintext source/);
+    expect(readFileSync(claimPath, "utf8")).toContain("same-identity-evidence-replacement");
+    expect(existsSync(anchorPath)).toBe(true);
+    expect(existsSync(statePath)).toBe(true);
+  });
+
+  it("fails closed on pre-anchor evidence without a content digest", () => {
+    const home = root();
+    const agentDir = join(home, ".pi");
+    const path = join(agentDir, "auth.json");
+    mkdirSync(agentDir, { recursive: true });
+    writeFileSync(path, JSON.stringify({
+      openai: { type: "api_key", key: "source-with-unverifiable-state" },
+    }));
+    const client = new MemorySecretServiceClient();
+
+    expect(() => openGhostSecretContext({
+      home,
+      client,
+      metadataPath: join(home, "state.sqlite"),
+      plainFileFault: (stage) => {
+        if (stage === "state-written") throw new Error("stop before anchor");
+      },
+    })).toThrow(/abrupt stop/);
+    const stateName = readdirSync(agentDir).find((name) => name.endsWith(".removal.state.json"));
+    expect(stateName).toBeDefined();
+    const statePath = join(agentDir, stateName!);
+    const evidence = JSON.parse(readFileSync(statePath, "utf8")) as Record<string, unknown>;
+    delete evidence.sha256;
+    writeFileSync(statePath, JSON.stringify(evidence), { mode: 0o600 });
+
+    expect(() => openContext(home, client)).toThrow(/changed plaintext source/);
+    expect(readFileSync(path, "utf8")).toContain("source-with-unverifiable-state");
+    expect(existsSync(statePath)).toBe(true);
   });
 
   it.each([
