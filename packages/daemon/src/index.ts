@@ -64,6 +64,14 @@ export {
   type ClaudeSessionMetadata,
 } from "./claude-code.js";
 export {
+  CLAUDE_AGENT_SDK_PACKAGE,
+  CLAUDE_AGENT_SDK_VERSION,
+  ClaudeAgentSdkLoader,
+  ClaudeAgentSdkLoadError,
+  type ClaudeAgentSdkLoaderOptions,
+  type ClaudeAgentSdkModule,
+} from "./claude-agent-sdk-loader.js";
+export {
   createClaudePiMessagesAdapter,
   type ClaudePiMessagesAdapter,
 } from "./claude-pi-messages.js";

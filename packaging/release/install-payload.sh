@@ -1,16 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-usage='install-payload.sh <source-root> <ghostd-binary> <ghost-binary> <pkgdir> <pkgname>'
+usage='install-payload.sh <source-root> <runtime-root> <pkgdir> <pkgname>'
 source_root="${1:?usage: $usage}"
-daemon_binary="${2:?usage: $usage}"
-client_binary="${3:?usage: $usage}"
-pkgdir="${4:?usage: $usage}"
-pkgname="${5:?usage: $usage}"
+runtime_root="${2:?usage: $usage}"
+pkgdir="${3:?usage: $usage}"
+pkgname="${4:?usage: $usage}"
 
 source_root="$(realpath "$source_root")"
-daemon_binary="$(realpath "$daemon_binary")"
-client_binary="$(realpath "$client_binary")"
+runtime_root="$(realpath "$runtime_root")"
 
 install_tree() {
   local source_dir="$1"
@@ -33,8 +31,14 @@ install_tree() {
 appdir="$pkgdir/usr/lib/ghost"
 sharedir="$pkgdir/usr/share/ghost"
 
-install -Dm755 "$daemon_binary" "$pkgdir/usr/bin/ghostd"
-install -Dm755 "$client_binary" "$pkgdir/usr/bin/ghost"
+install -Dm755 "$runtime_root/bin/ghostd" "$pkgdir/usr/bin/ghostd"
+install -Dm755 "$runtime_root/bin/ghost" "$pkgdir/usr/bin/ghost"
+install -Dm644 "$runtime_root/lib/ghostd.js" \
+  "$pkgdir/usr/lib/ghost/runtime/ghostd.js"
+install -Dm644 "$runtime_root/lib/ghost.js" \
+  "$pkgdir/usr/lib/ghost/runtime/ghost.js"
+install -Dm644 "$runtime_root/lib/photon_rs_bg.wasm" \
+  "$pkgdir/usr/lib/ghost/runtime/photon_rs_bg.wasm"
 install -Dm755 "$source_root/packaging/arch/ghost-desktop-helper" \
   "$pkgdir/usr/bin/ghost-desktop-helper"
 install -Dm755 "$source_root/packages/shell/contrib/bin/ghost-launch" \
@@ -76,6 +80,10 @@ done
 install -Dm644 "$source_root/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 install -Dm644 "$source_root/THIRD_PARTY_NOTICES.md" \
   "$pkgdir/usr/share/licenses/$pkgname/THIRD_PARTY_NOTICES.md"
+install -Dm644 "$runtime_root/BUNDLED-LICENSES" \
+  "$pkgdir/usr/share/licenses/$pkgname/runtime/BUNDLED-LICENSES"
+install_tree "$runtime_root/licenses" \
+  "$pkgdir/usr/share/licenses/$pkgname/runtime/licenses"
 # docs/claude-code-runtime.md links the notices next to the docs directory.
 ln -s "/usr/share/licenses/$pkgname/THIRD_PARTY_NOTICES.md" \
   "$pkgdir/usr/share/doc/ghost/THIRD_PARTY_NOTICES.md"

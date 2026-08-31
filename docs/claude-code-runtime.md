@@ -1,6 +1,7 @@
 # Claude Code plan runtime
 
-Status: implemented for the owner-local runtime. Last policy review: 2026-08-22.
+Status: private owner-local capability pending Anthropic approval; not a
+supported public third-party integration. Last policy review: 2026-08-22.
 
 ## What this path buys us
 
@@ -22,6 +23,9 @@ Policy and product behavior can change. Before making a pricing promise, check
 Anthropic's current [Agent SDK plan-usage help page](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan).
 
 ## Setup
+
+These instructions are only for the owner's private machine while approval is
+pending. They are not installation guidance for a public Ghost distribution.
 
 Install the official Claude Code CLI, then authenticate outside Ghost:
 
@@ -300,6 +304,44 @@ The dependency versions match the reviewed T3 implementation:
 `@anthropic-ai/sdk@0.93.0`, `@modelcontextprotocol/sdk@1.29.0`, and
 `zod@4.4.3`; Ghost does not take T3's `effect` dependency.
 
+Ghost's public runtime does not contain the Agent SDK. For this private,
+single-owner integration only, install the exact SDK and peers beneath Ghost's
+versioned owner-data boundary:
+
+```sh
+if [[ ${XDG_DATA_HOME:-} == /* ]]; then
+  sdk_data_root=$XDG_DATA_HOME
+else
+  sdk_data_root=$HOME/.local/share
+fi
+sdk_root="$sdk_data_root/ghost/claude-agent-sdk/0.3.170"
+install -d -m700 "$sdk_root"
+pnpm add --dir "$sdk_root" --save-exact \
+  @anthropic-ai/claude-agent-sdk@0.3.170 \
+  @anthropic-ai/sdk@0.93.0 \
+  @modelcontextprotocol/sdk@1.29.0 \
+  zod@4.4.3
+```
+
+When `XDG_DATA_HOME` is relative or unset, Ghost uses
+`~/.local/share/ghost/claude-agent-sdk/0.3.170`. It resolves no SDK from the
+conversation cwd, a project, global modules, or the checkout. A pnpm package
+link is accepted only when its target stays beneath that versioned directory,
+and Ghost validates the exact root, package, metadata, and entry identity on
+every use. It caches the imported module only while that identity remains
+stable. A missing or malformed install found before Ghost attempts a dynamic
+import can be repaired without restarting; the shared Claude availability probe
+may keep its failure for up to five seconds, after which the repaired install
+becomes available. Once an import is attempted, however, an import failure
+requires a `ghostd` restart after repair because Bun may cache the failed module
+graph. Removal or replacement after a successful load also disables Claude turns
+immediately and permanently marks that daemon's loader restart-required; it
+never returns the stale module or hot-loads the replacement. Repair the install
+if needed, then restart `ghostd` to create a fresh loader. The runtime error and
+model-catalog warning expose that required action. This is a stable location
+boundary, not isolation from code deliberately installed by the same OS owner.
+None of this affects Pi.
+
 ## Legal boundary
 
 Anthropic's current [legal and compliance guidance for Claude Code](https://code.claude.com/docs/en/legal-and-compliance)
@@ -313,3 +355,5 @@ owner-only execution, and no credential transport or storage in Ghost.
 The Agent SDK itself is governed by Anthropic's commercial terms. This note
 records the engineering interpretation, not legal advice; re-review the linked
 terms before distributing a materially different hosted or multi-user flow.
+Until Anthropic approves the integration, it remains an owner-local private
+capability and is not a supported public third-party Claude.ai plan offering.

@@ -6,6 +6,7 @@ import { apiTokenCommand } from "./api-token.js";
 import { RemoteAccess } from "./tailscale-identity.js";
 import { LoginManager } from "./auth.js";
 import { ClaudeCodeProbe } from "./claude-code.js";
+import { ClaudeAgentSdkLoader } from "./claude-agent-sdk-loader.js";
 import { legacyDocumentsPlacementCommand } from "./legacy-documents-placement.js";
 import { loginCommand } from "./login-command.js";
 import { loadConfig, type DaemonConfig, type DaemonConfigOverrides } from "./config.js";
@@ -302,7 +303,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
 }
 
 async function readVersion(): Promise<string> {
-  // A compiled binary carries its version; a source checkout reads package.json.
+  // A bundled runtime carries its version; a source checkout reads package.json.
   if (process.env.GHOSTD_VERSION) return process.env.GHOSTD_VERSION;
   const { readFile } = await import("node:fs/promises");
   const { fileURLToPath } = await import("node:url");
@@ -428,7 +429,9 @@ async function serveDaemon(
   const relay = createRelayHub({ logger });
   const machineDocuments = openMachineDocuments();
   const homeOperations = new HomeOperationCoordinator(registry);
-  const claudeCodeProbe = new ClaudeCodeProbe();
+  const claudeAgentSdk = new ClaudeAgentSdkLoader({ ownerHome });
+  const loadClaudeAgentSdk = () => claudeAgentSdk.load();
+  const claudeCodeProbe = new ClaudeCodeProbe({ loadSdk: loadClaudeAgentSdk });
   const host = new SessionHost({
     registry,
     homeOperations,
@@ -444,7 +447,7 @@ async function serveDaemon(
       documents: machineDocuments,
       ...(relay ? { relayTransport: relay } : {}),
     },
-    claudeCode: { probe: claudeCodeProbe },
+    claudeCode: { probe: claudeCodeProbe, loadSdk: loadClaudeAgentSdk },
   });
   const maintenance = new ConversationMaintenance({
     registry,

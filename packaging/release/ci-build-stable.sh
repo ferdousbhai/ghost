@@ -31,6 +31,8 @@ if [[ "$checkout_commit" != "$commit" ]]; then
   exit 1
 fi
 
+bash "$source_tree/packaging/release/test-release-source.sh"
+
 expected_tag="v$version"
 event_name="${EVENT_NAME:-}"
 event_tag="${REF_NAME:-}"

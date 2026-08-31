@@ -9,6 +9,7 @@ url="https://github.com/ferdousbhai/ghost"
 license=('Apache-2.0')
 depends=(
   'at-spi2-core>=2.58'
+  'bun>=1.3.14'
   'fd'
   'grim>=1.5'
   'hyprland>=0.56'
@@ -27,7 +28,6 @@ depends=(
   'ydotool>=1.0'
 )
 makedepends=(
-  'bun>=1.3.14'
   'desktop-file-utils'
 )
 checkdepends=(
@@ -37,10 +37,11 @@ checkdepends=(
 optdepends=(
   'basecamp-cli: Basecamp CLI and embedded pi skill'
   'chromium: the browser the relay drives, and the browser-relay smoke test'
-  'claude-code: Claude Code plan runtime'
+  'claude-code: private owner-local Claude Code plan runtime (pending Anthropic approval)'
   'gnome-keyring: Secret Service provider for provider and MCP credentials'
   'npm: Firecrawl, Google Workspace, and Agent Skills installers for optional pi integrations'
   'obsidian>=1.12.7: Obsidian CLI access for pi'
+  'pnpm: install the optional private owner-local Claude Agent SDK boundary'
 )
 conflicts=('ghost-ai-git')
 options=('!debug' '!strip')
@@ -77,8 +78,8 @@ prepare() {
 }
 
 build() {
-  # The architecture-specific runtime source is already compiled from the
-  # frozen lock and verified in prepare(); there is no network build step.
+  # The architecture-specific Bun bundles were built from the frozen lock and
+  # verified in prepare(); there is no network build step.
   :
 }
 
@@ -98,6 +99,5 @@ package() {
   local source_root="$srcdir/ghost-${pkgver}"
   local runtime_root="$srcdir/runtime/ghost-runtime-${pkgver}-linux-${CARCH}"
   bash "$source_root/packaging/release/install-payload.sh" \
-    "$source_root" "$runtime_root/bin/ghostd" "$runtime_root/bin/ghost" \
-      "$pkgdir" "$pkgname"
+    "$source_root" "$runtime_root" "$pkgdir" "$pkgname"
 }

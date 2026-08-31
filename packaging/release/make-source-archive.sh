@@ -40,13 +40,20 @@ touch -d "@$epoch" "$manifest_dir/RELEASE-SOURCE.MANIFEST"
 if [[ "$ref" == --worktree ]]; then
   (
     cd "$source_root"
-    git ls-files -co --exclude-standard -z \
+    git ls-files -co --exclude-standard -z -- . \
+      ':(exclude)AGENTS.md' ':(exclude,glob)**/AGENTS.md' \
+      ':(exclude)CLAUDE.md' ':(exclude,glob)**/CLAUDE.md' \
+      | while IFS= read -r -d '' path; do
+          [[ -e "$path" || -L "$path" ]] && printf '%s\0' "$path"
+        done \
       | tar --null --files-from=- --sort=name --format=gnu \
           --mtime="@$epoch" --owner=0 --group=0 --numeric-owner \
           --transform="s|^|ghost-${version}/|" -cf "$temporary_tar"
   )
 else
-  git -C "$source_root" archive --format=tar --prefix="ghost-${version}/" "$ref" \
+  git -C "$source_root" archive --format=tar --prefix="ghost-${version}/" \
+    "$ref" -- . ':(exclude)AGENTS.md' ':(exclude,glob)**/AGENTS.md' \
+      ':(exclude)CLAUDE.md' ':(exclude,glob)**/CLAUDE.md' \
     > "$temporary_tar"
 fi
 tar --append --file="$temporary_tar" --mtime="@$epoch" --owner=0 --group=0 \

@@ -2117,6 +2117,40 @@ The owner runs `claude auth login` outside Ghost. Ghost accepts no Claude
 credential, stores no Claude credential, and removes ambient API/OAuth-token
 variables from the subprocess environment.
 
+The SDK is an optional owner-installed capability, never part of Ghost's public
+runtime bytes. Ghost loads exactly
+`@anthropic-ai/claude-agent-sdk@0.3.170` from the canonical versioned package
+under `$XDG_DATA_HOME/ghost/claude-agent-sdk/0.3.170`, falling back to
+`~/.local/share/ghost/claude-agent-sdk/0.3.170` when `XDG_DATA_HOME` is not
+absolute. Its `node_modules/@anthropic-ai/claude-agent-sdk` link may use pnpm's
+in-root store, but the resolved package and fixed `sdk.mjs` entry must remain
+beneath that versioned root; Ghost validates the exact package name, version,
+and entry type before importing it, then validates the required exports before
+using it. There is no ambient
+package lookup, cwd/project fallback, or global-node-modules search. A missing,
+mismatched, escaping, or incompatible install is a loud unavailable-runtime
+error. Validation failures detected before any dynamic-import attempt are
+retryable after an in-place repair without restarting once the shared five-second
+Claude availability-probe cache expires. Once an import is attempted, a failed
+import is restart-required because Bun may retain its failed module graph. Every
+successful load revalidates the root, package, metadata, and entry filesystem
+identity; only the imported module is cached while that exact identity remains
+stable. Removal or replacement after a successful load fails immediately and
+permanently marks that loader restart-required, so it never returns the stale
+module or imports a replacement. Repair the install if needed and restart
+`ghostd` to create a fresh loader before retrying. The persistent error and
+model-catalog warning both say that restart is required. Concurrent loads share
+one validation/import attempt. Pi sessions never load this package. This
+confines where owner-installed code comes from; it is not a sandbox from code
+installed by the same OS owner.
+
+Production shares one successful loader with the Claude auth/catalog probe, so
+`claude-code/default` is usable only while both that exact SDK and the owner's
+authenticated `claude` executable are available. Authentication behavior is
+otherwise unchanged. This path remains a private, single-owner integration
+pending Anthropic approval; Ghost neither advertises nor supports it as a
+public third-party Claude.ai plan integration.
+
 The runtime uses the owner's local Claude Code authentication, native system
 prompt, built-in tools, and web search in bypass-permissions mode. Filesystem
 setting sources are pinned to `[]`: neither owner-home cwd nor a trusted project
@@ -2192,12 +2226,23 @@ not coupled to that release identity.
   unit. Depends on `extensions`. Both installed user services declare
   `WorkingDirectory=%h`; that sets process cwd only, while Ghost storage keeps
   its explicit roots. Daemon CLI operands still resolve relative to the caller's
-  cwd when the CLI is launched directly. The Arch development package installs
-  the daemon as the single self-contained `/usr/bin/ghostd` executable, with
-  its Bun runtime and version embedded and no daemon source or `node_modules`
-  tree. Both development and stable packages declare `fd` and `ripgrep` as
-  runtime dependencies for pi's native read-only search tools; the executable
-  must not populate pi's cache by downloading them during a plan-mode read.
+  cwd when the CLI is launched directly. The Arch packages install ordinary
+  Bun-target JavaScript bundles and their required static assets beneath
+  `/usr/lib/ghost/runtime` and fixed
+  `/usr/bin/ghostd` and `/usr/bin/ghost` launchers that execute them with the
+  system `/usr/bin/bun`. The bundles carry Ghost, pi, provider, and MCP
+  application code for offline use but exclude the optional Claude Agent SDK
+  above. No daemon source or `node_modules` tree is installed. The
+  runtime-source archive records the exact build Bun and the declared supported
+  minimum separately; its checksums cover the bundles, assets, launchers, and
+  exact bundled-package license closure. Before release artifacts are sealed,
+  CI downloads the official Linux x64 Bun 1.3.14 asset from its versioned URL,
+  verifies its pinned SHA-256 and exact reported version, then runs the real
+  runtime archive's full launcher and scratch daemon/client smoke through that
+  executable. Both development and stable packages declare Bun, `fd`, and
+  `ripgrep` as runtime dependencies for pi's native read-only search tools; the
+  executable must not populate pi's cache by downloading them during a
+  plan-mode read.
 - `packages/shell` — the Omarchy/Quickshell HUD, model routing, ask/queue and
   branching UI, live tool cards, and summoning indicator.
 - `packages/chromium-extension` — the browser relay, driving tabs of the

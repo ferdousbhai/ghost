@@ -1,0 +1,30 @@
+#!/bin/sh
+set -eu
+
+bun_executable=${GHOST_BUN_EXECUTABLE:-/usr/bin/bun}
+case $bun_executable in
+  /*) ;;
+  *)
+    printf '%s\n' 'ghostd: GHOST_BUN_EXECUTABLE must be an absolute path' >&2
+    exit 127
+    ;;
+esac
+if [ ! -x "$bun_executable" ]; then
+  printf 'ghostd: Bun is not executable at %s\n' "$bun_executable" >&2
+  exit 127
+fi
+
+case $0 in
+  */*) launcher=$0 ;;
+  *) launcher=$(command -v -- "$0") ;;
+esac
+bin_dir=${launcher%/*}
+if [ -f "$bin_dir/../lib/ghost/runtime/ghostd.js" ]; then
+  bundle=$bin_dir/../lib/ghost/runtime/ghostd.js
+elif [ -f "$bin_dir/../lib/ghostd.js" ]; then
+  bundle=$bin_dir/../lib/ghostd.js
+else
+  printf '%s\n' 'ghostd: installed runtime bundle is missing' >&2
+  exit 127
+fi
+exec "$bun_executable" "$bundle" "$@"

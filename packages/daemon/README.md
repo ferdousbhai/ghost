@@ -8,20 +8,22 @@ in [`docs/claude-code-runtime.md`](../../docs/claude-code-runtime.md).
 
 ## Run it
 
-Ghost runs on Bun 1.3.14 or newer (`bun --bun`). `pnpm --filter @ghost/daemon
-build:binary` compiles `ghostd` and its `ghost` terminal client into
-self-contained executables (`packages/daemon/dist/ghostd` and `dist/ghost`, Bun
-runtime included, version embedded); they need no `node_modules` at runtime.
-macOS `fsevents` is left external because Ghost never loads it. The Arch development package installs this
-artifact directly as `/usr/bin/ghostd`; it does not install the daemon source
-tree or JavaScript dependencies.
+Ghost runs on Bun 1.3.14 or newer. `pnpm --filter @ghost/daemon build:runtime`
+bundles `ghostd`, its `ghost` terminal client, and their Ghost/pi/provider
+application closure plus required static assets into
+`packages/daemon/dist/runtime`. The launchers use the
+system `/usr/bin/bun`; no `node_modules` or daemon source tree is installed.
+macOS `fsevents` and the optional owner-installed Claude Agent SDK are left
+external. The exact private Claude boundary is documented in
+[`docs/claude-code-runtime.md`](../../docs/claude-code-runtime.md).
 
 ```bash
 # development
 bun packages/daemon/src/main.ts --port 7788
 
-# built binary
-packages/daemon/dist/ghostd --port 7788
+# built bundle, using an explicit test/development Bun path
+GHOST_BUN_EXECUTABLE="$(command -v bun)" \
+  packages/daemon/dist/runtime/bin/ghostd --port 7788
 ```
 
 ```text

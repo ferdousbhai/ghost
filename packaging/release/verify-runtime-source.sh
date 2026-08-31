@@ -11,14 +11,11 @@ epoch="${6:?usage: verify-runtime-source.sh <runtime-root> <source-root> <versio
 runtime_root="$(realpath "$runtime_root")"
 source_root="$(realpath "$source_root")"
 manifest="$runtime_root/MANIFEST"
-daemon_binary="$runtime_root/bin/ghostd"
-client_binary="$runtime_root/bin/ghost"
-
 work_parent="${GHOST_RELEASE_WORK_ROOT:-$(dirname "$runtime_root")}"
 mkdir -p "$work_parent"
 temporary="$(mktemp -d "$work_parent/verify.XXXXXX")"
 cleanup() {
-  find "$temporary" -depth -delete
+  find -P "$temporary" -depth -delete
 }
 trap cleanup EXIT
 
@@ -26,14 +23,13 @@ require_identical() {
   local expected="$1"
   local actual="$2"
   local mismatch="$3"
-
   if ! cmp "$expected" "$actual"; then
     printf '%s\n' "$mismatch" >&2
     exit 1
   fi
 }
 
-if find "$runtime_root" ! \( -type f -o -type d \) \
+if find -P "$runtime_root" ! \( -type f -o -type d \) \
   -print -quit | grep -q .; then
   printf 'runtime source contains a special filesystem entry\n' >&2
   exit 1
@@ -41,81 +37,146 @@ fi
 
 (
   cd "$runtime_root"
-  find . -mindepth 1 -printf '%y\t%P\n' | LC_ALL=C sort
-) > "$temporary/layout.actual"
+  find . -maxdepth 1 -mindepth 1 -printf '%y\t%P\n' | LC_ALL=C sort
+) > "$temporary/top-level.actual"
 printf '%s\n' \
   $'d\tbin' \
+  $'d\tlib' \
+  $'d\tlicenses' \
+  $'f\tBUNDLED-LICENSES' \
   $'f\tMANIFEST' \
   $'f\tPAYLOAD.SHA256' \
-  $'f\tbin/ghost' \
-  $'f\tbin/ghostd' \
-  | LC_ALL=C sort > "$temporary/layout.expected"
-require_identical "$temporary/layout.expected" "$temporary/layout.actual" \
-  'runtime source does not have the v2 two-binary layout'
+  | LC_ALL=C sort > "$temporary/top-level.expected"
+require_identical "$temporary/top-level.expected" "$temporary/top-level.actual" \
+  'runtime source does not have the v3 top-level layout'
 
-bun_version="$(sed -n 's/^bun_version=//p' "$manifest")"
-[[ "$bun_version" =~ ^[^[:space:]=]+$ ]] || {
-  printf 'runtime manifest has an invalid bun_version\n' >&2
+(
+  cd "$runtime_root/bin"
+  find . -maxdepth 1 -mindepth 1 -printf '%y\t%P\n' | LC_ALL=C sort
+) > "$temporary/bin.actual"
+printf '%s\n' \
+  $'f\tghost' \
+  $'f\tghostd' \
+  | LC_ALL=C sort > "$temporary/bin.expected"
+require_identical "$temporary/bin.expected" "$temporary/bin.actual" \
+  'runtime source does not have the exact v3 binary closure'
+
+(
+  cd "$runtime_root/lib"
+  find . -maxdepth 1 -mindepth 1 -printf '%y\t%P\n' | LC_ALL=C sort
+) > "$temporary/lib.actual"
+printf '%s\n' \
+  $'f\tghost.js' \
+  $'f\tghostd.js' \
+  $'f\tphoton_rs_bg.wasm' \
+  | LC_ALL=C sort > "$temporary/lib.expected"
+require_identical "$temporary/lib.expected" "$temporary/lib.actual" \
+  'runtime source does not have the exact v3 library closure'
+
+if find -P "$runtime_root" -type d -empty -print -quit | grep -q .; then
+  printf 'runtime source contains an empty directory outside its file closure\n' >&2
+  exit 1
+fi
+
+if find -P "$runtime_root" -type d ! -perm 755 -print -quit | grep -q .; then
+  printf 'runtime source contains a directory with an unsafe mode\n' >&2
+  exit 1
+fi
+if find -P "$runtime_root" -type f ! -path "$runtime_root/bin/ghost" \
+  ! -path "$runtime_root/bin/ghostd" ! -perm 644 -print -quit | grep -q .; then
+  printf 'runtime source contains a data file with an unsafe mode\n' >&2
+  exit 1
+fi
+
+for path in bin/ghost bin/ghostd; do
+  [[ -f "$runtime_root/$path" && -x "$runtime_root/$path" \
+    && "$(stat -c '%a' "$runtime_root/$path")" == 755 ]] || {
+    printf 'runtime launcher is missing or unsafe: %s\n' "$path" >&2
+    exit 1
+  }
+  grep -Fq 'GHOST_BUN_EXECUTABLE:-/usr/bin/bun' "$runtime_root/$path"
+done
+for path in lib/ghost.js lib/ghostd.js lib/photon_rs_bg.wasm BUNDLED-LICENSES; do
+  [[ -f "$runtime_root/$path" && "$(stat -c '%a' "$runtime_root/$path")" == 644 ]] || {
+    printf 'runtime data file is missing or unsafe: %s\n' "$path" >&2
+    exit 1
+  }
+done
+wasm_size="$(stat -c '%s' "$runtime_root/lib/photon_rs_bg.wasm")"
+(( wasm_size > 0 && wasm_size <= 4 * 1024 * 1024 )) || {
+  printf 'runtime Photon WASM has an invalid size: %s\n' "$wasm_size" >&2
   exit 1
 }
-compile_target="$(sed -n 's/^compile_target=//p' "$manifest")"
-[[ "$compile_target" == bun-linux-x64 ]] || {
-  printf 'runtime manifest has an unsupported compile_target: %s\n' \
-    "$compile_target" >&2
+
+bun_build_version="$(sed -n 's/^bun_build_version=//p' "$manifest")"
+bun_runtime_min="$(sed -n 's/^bun_runtime_min=//p' "$manifest")"
+[[ "$bun_build_version" =~ ^[0-9]+[.][0-9]+[.][0-9]+$ \
+  && "$bun_runtime_min" =~ ^[0-9]+[.][0-9]+[.][0-9]+$ ]] || {
+  printf 'runtime manifest has an invalid Bun version\n' >&2
+  exit 1
+}
+declared_min="$(bun -e '
+  const p = await Bun.file(process.argv[1]).json();
+  const match = /^>=(\d+\.\d+\.\d+)$/.exec(p.engines?.bun ?? "");
+  if (!match) process.exit(1);
+  process.stdout.write(match[1]);
+' "$source_root/packages/daemon/package.json")"
+[[ "$bun_runtime_min" == "$declared_min" ]] || {
+  printf 'runtime Bun minimum %s does not match package engine %s\n' \
+    "$bun_runtime_min" "$declared_min" >&2
+  exit 1
+}
+version_at_least() {
+  [[ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n1)" == "$2" ]]
+}
+version_at_least "$bun_build_version" "$bun_runtime_min" || {
+  printf 'build Bun %s predates runtime minimum %s\n' \
+    "$bun_build_version" "$bun_runtime_min" >&2
+  exit 1
+}
+current_bun="$(bun --version)"
+[[ "$current_bun" =~ ^[0-9]+[.][0-9]+[.][0-9]+$ ]] \
+  && version_at_least "$current_bun" "$bun_runtime_min" || {
+  printf 'installed Bun %s does not satisfy runtime minimum %s\n' \
+    "$current_bun" "$bun_runtime_min" >&2
   exit 1
 }
 
 cat > "$temporary/MANIFEST.expected" <<EOF
-format=ghost-runtime-source/v2
+format=ghost-runtime-source/v3
 version=$version
 os=linux
 arch=$arch
 source_commit=$commit
 source_date_epoch=$epoch
-bun_version=$bun_version
-compile_target=$compile_target
+bun_build_version=$bun_build_version
+bun_runtime_min=$bun_runtime_min
+bundle_target=bun
+claude_agent_sdk=external@0.3.170
+bundled_license_manifest_sha256=$(sha256sum "$runtime_root/BUNDLED-LICENSES" | cut -d' ' -f1)
 payload_manifest_sha256=$(sha256sum "$runtime_root/PAYLOAD.SHA256" | cut -d' ' -f1)
 EOF
 require_identical "$temporary/MANIFEST.expected" "$manifest" \
-  'runtime manifest does not match the expected v2 identity'
-printf 'Runtime compiler: bun_version=%s compile_target=%s\n' \
-  "$bun_version" "$compile_target"
+  'runtime manifest does not match the expected v3 identity'
 
-[[ "$(wc -l < "$runtime_root/PAYLOAD.SHA256")" -eq 2 ]] \
-  && sed -n '1p' "$runtime_root/PAYLOAD.SHA256" \
-    | grep -Eq '^[0-9a-f]{64}  bin/ghost$' \
-  && sed -n '2p' "$runtime_root/PAYLOAD.SHA256" \
-    | grep -Eq '^[0-9a-f]{64}  bin/ghostd$' || {
-  printf 'runtime payload checksum manifest is invalid\n' >&2
-  exit 1
-}
-if ! (cd "$runtime_root" && sha256sum -c PAYLOAD.SHA256); then
-  printf 'runtime payload hashes do not match the staged binary\n' >&2
+(
+  cd "$runtime_root"
+  find . -type f ! -name MANIFEST ! -name PAYLOAD.SHA256 -printf '%P\0' \
+    | LC_ALL=C sort -z \
+    | xargs -0 sha256sum
+) > "$temporary/PAYLOAD.expected"
+require_identical "$temporary/PAYLOAD.expected" "$runtime_root/PAYLOAD.SHA256" \
+  'runtime payload hashes or file closure do not match'
+(cd "$runtime_root" && sha256sum -c PAYLOAD.SHA256)
+
+bun "$source_root/packages/daemon/scripts/verify-runtime-licenses.ts" "$runtime_root"
+if rg -l 'Use is subject to the Legal Agreements outlined here|Want to see the unminified source|// Version: 0[.]3[.]170' \
+  "$runtime_root/lib/ghostd.js" "$runtime_root/lib/ghost.js" | grep -q .; then
+  printf 'Claude Agent SDK source bytes entered the public runtime\n' >&2
   exit 1
 fi
 
-verify_binary() {
-  local binary="$1"
-  local label="$2"
-  local elf_header="$temporary/$label.elf-header"
-
-  [[ -x "$binary" ]] || {
-    printf 'runtime binary is not executable: %s\n' "$binary" >&2
-    return 1
-  }
-  LC_ALL=C readelf -h "$binary" > "$elf_header"
-  grep -Eq '^[[:space:]]*Class:[[:space:]]+ELF64$' "$elf_header"
-  grep -Eq '^[[:space:]]*Data:[[:space:]]+2.s complement, little endian$' \
-    "$elf_header"
-  grep -Eq '^[[:space:]]*Type:[[:space:]]+(EXEC|DYN)[[:space:]]' \
-    "$elf_header"
-  grep -Eq '^[[:space:]]*Machine:[[:space:]]+Advanced Micro Devices X86-64$' \
-    "$elf_header"
-}
-
-verify_binary "$daemon_binary" ghostd
-verify_binary "$client_binary" ghost
-
 bash "$source_root/packaging/release/smoke-binary-runtime.sh" \
-  "$daemon_binary" "$client_binary" "$version" "$temporary/smoke"
-printf 'Verified runtime source: %s\n' "$runtime_root"
+  "$runtime_root/bin/ghostd" "$runtime_root/bin/ghost" "$version" "$temporary/smoke"
+printf 'Verified runtime source: %s (build Bun %s, runtime >= %s)\n' \
+  "$runtime_root" "$bun_build_version" "$bun_runtime_min"

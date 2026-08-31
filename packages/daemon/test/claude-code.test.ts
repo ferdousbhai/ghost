@@ -21,6 +21,7 @@ import type {
   SDKMessage,
   SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
+import * as testClaudeAgentSdk from "@anthropic-ai/claude-agent-sdk";
 import {
   createBrowserExtension,
   createScreenExtension,
@@ -294,6 +295,7 @@ function setupClaudeHost(options: {
       ? { scheduleCommandRunner: options.scheduleCommandRunner }
       : {}),
     claudeCode: {
+      loadSdk: async () => testClaudeAgentSdk,
       ...(options.warmIdleTtlMs === undefined
         ? {}
         : { warmIdleTtlMs: options.warmIdleTtlMs }),
@@ -488,6 +490,54 @@ describe("Claude Code executable/auth probe", () => {
       authStatus: { loggedIn: true, authMethod: "claude.ai" },
     });
     expect(authReads).toBe(2);
+  });
+
+  it("requires the optional SDK before reporting Claude plan availability", async () => {
+    let executableReads = 0;
+    const sdkError = new Error("install exact private SDK boundary");
+    const probe = new ClaudeCodeProbe({
+      loadSdk: async () => {
+        throw sdkError;
+      },
+      resolveExecutable: async () => {
+        executableReads += 1;
+        return "/resolved/claude";
+      },
+      readAuthStatus: async () => ({ loggedIn: true, authMethod: "claude.ai" }),
+    });
+
+    await expect(probe.read()).rejects.toBe(sdkError);
+    expect(executableReads).toBe(0);
+  });
+
+  it("retries a repaired pre-import SDK failure after the shared probe cache expires", async () => {
+    let now = 0;
+    let installed = false;
+    let sdkLoads = 0;
+    const missing = new Error("SDK install is missing before import");
+    const probe = new ClaudeCodeProbe({
+      now: () => now,
+      loadSdk: async () => {
+        sdkLoads += 1;
+        if (!installed) throw missing;
+        return testClaudeAgentSdk;
+      },
+      resolveExecutable: async () => "/resolved/claude",
+      readAuthStatus: async () => ({ loggedIn: true, authMethod: "claude.ai" }),
+    });
+
+    await expect(probe.read()).rejects.toBe(missing);
+    installed = true;
+    now = 4_999;
+    await expect(probe.read()).rejects.toBe(missing);
+    expect(sdkLoads).toBe(1);
+
+    now = 5_000;
+    await expect(probe.read()).resolves.toMatchObject({
+      binaryPath: "/resolved/claude",
+      authStatus: { loggedIn: true, authMethod: "claude.ai" },
+    });
+    expect(sdkLoads).toBe(2);
   });
 
   it("never returns or retains a successful probe from before invalidation", async () => {
@@ -724,7 +774,7 @@ describe("Claude Code subscription runtime", () => {
         await browserExtension(api);
       },
       toolNames: [GHOST_SCREEN, GHOST_BROWSER],
-    }, paths.home);
+    }, paths.home, testClaudeAgentSdk);
     const call = async (name: string, args: Record<string, unknown>) => {
       const definition = tools.find((candidate) => candidate.name === name);
       if (!definition) throw new Error(`Missing bridged tool ${name}`);
@@ -1305,6 +1355,7 @@ describe("Claude Code subscription runtime", () => {
       machineSkillPaths: [],
       offline: true,
       claudeCode: {
+        loadSdk: async () => testClaudeAgentSdk,
         binaryPath: process.execPath,
         readAuthStatus: async () => ({ loggedIn: true, authMethod: "claude.ai" }),
         observeQueryExit: observeFakeQueryExit,
@@ -1418,6 +1469,7 @@ describe("Claude Code subscription runtime", () => {
       machineSkillPaths: [],
       offline: true,
       claudeCode: {
+        loadSdk: async () => testClaudeAgentSdk,
         binaryPath: process.execPath,
         readAuthStatus: async () => ({ loggedIn: true, authMethod: "claude.ai" }),
         observeQueryExit: observeFakeQueryExit,

@@ -14,7 +14,7 @@ from yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
 from yaml.tokens import AliasToken, AnchorToken
 
 
-PACKAGE_SHA256 = "3fcb74df91a99c44db69ea2445c778bfdbd4f62edb71ec47f188b0cc5fa76608"
+PACKAGE_SHA256 = "4d7c18a064c906572652c05bfb484439a93ddf4799290f9fdd4e1b096a814b2e"
 EXPECTED_STEP_NAMES = [
     "Update package database and install checkout dependency",
     None,
@@ -27,6 +27,7 @@ EXPECTED_STEP_NAMES = [
     "Verify package check dependency coverage",
     "Build and smoke-test the package",
     "Build and verify stable release sources offline",
+    "Verify runtime with minimum supported Bun",
     "Seal release artifacts for upload",
     "Upload package artifact",
     "Upload stable release-source artifacts",
@@ -34,8 +35,8 @@ EXPECTED_STEP_NAMES = [
 ]
 EXPECTED_USES = {
     1: "actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683",
-    12: "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
     13: "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
+    14: "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
 }
 EXPECTED_WORKING_DIRECTORIES = {4: "packages/desktop-helper"}
 JOB_KEYS = {"runs-on", "container", "steps"}

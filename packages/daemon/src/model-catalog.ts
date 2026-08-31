@@ -827,8 +827,10 @@ export class ModelCatalog {
         source: "role",
         ...(!usable
           ? {
-              warning: "Claude Code is not signed into a Claude.ai plan. Run `claude auth login` "
-                + "as this desktop user; Ghost never receives that credential.",
+              warning: "The private owner-local Claude Code runtime is unavailable. Verify the "
+                + "exact SDK install documented by Ghost and run `claude auth login` as this "
+                + "desktop user; Ghost never receives that credential. If an SDK import failed "
+                + "or its loaded files changed, repair the install and restart `ghostd`.",
             }
           : {}),
       };

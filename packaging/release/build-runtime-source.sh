@@ -59,8 +59,14 @@ epoch="${SOURCE_DATE_EPOCH:-$(git -C "$source_root" show -s --format=%ct "$commi
   exit 1
 }
 
-bun_version="$(bun --version)"
-compile_target=bun-linux-x64
+bun_build_version="$(bun --version)"
+bun_runtime_min="$(bun -e '
+  const p = await Bun.file(process.argv[1]).json();
+  const match = /^>=(\d+\.\d+\.\d+)$/.exec(p.engines?.bun ?? "");
+  if (!match) process.exit(1);
+  process.stdout.write(match[1]);
+' "$source_root/packages/daemon/package.json")"
+bundle_target=bun
 
 work_parent="${GHOST_RELEASE_WORK_ROOT:-$output_dir/work}"
 mkdir -p "$work_parent"
@@ -72,9 +78,7 @@ trap cleanup EXIT
 
 name="ghost-runtime-${version}-linux-${arch}"
 runtime_root="$work/$name"
-daemon_binary="$runtime_root/bin/ghostd"
-client_binary="$runtime_root/bin/ghost"
-mkdir -p "$runtime_root/bin"
+mkdir -p "$runtime_root"
 
 (
   cd "$source_root"
@@ -84,26 +88,32 @@ mkdir -p "$runtime_root/bin"
   export ONNXRUNTIME_NODE_INSTALL=skip
   pnpm install --ignore-scripts --offline --frozen-lockfile
   pnpm build
-  GHOSTD_COMPILE_TARGET="$compile_target" \
-    pnpm --filter @ghost/daemon build:binary
+  pnpm --filter @ghost/daemon build:runtime
 )
-install -m755 "$source_root/packages/daemon/dist/ghostd" "$daemon_binary"
-install -m755 "$source_root/packages/daemon/dist/ghost" "$client_binary"
+cp -a "$source_root/packages/daemon/dist/runtime/." "$runtime_root/"
+find -P "$runtime_root" -type d -exec chmod 755 {} +
+find -P "$runtime_root" -type f ! -path "$runtime_root/bin/*" -exec chmod 644 {} +
+chmod 755 "$runtime_root/bin/ghostd" "$runtime_root/bin/ghost"
 
 (
   cd "$runtime_root"
-  sha256sum bin/ghost bin/ghostd > PAYLOAD.SHA256
+  find . -type f ! -name MANIFEST ! -name PAYLOAD.SHA256 -printf '%P\0' \
+    | LC_ALL=C sort -z \
+    | xargs -0 sha256sum > PAYLOAD.SHA256
 )
 
 cat > "$runtime_root/MANIFEST" <<EOF
-format=ghost-runtime-source/v2
+format=ghost-runtime-source/v3
 version=$version
 os=linux
 arch=$arch
 source_commit=$commit
 source_date_epoch=$epoch
-bun_version=$bun_version
-compile_target=$compile_target
+bun_build_version=$bun_build_version
+bun_runtime_min=$bun_runtime_min
+bundle_target=$bundle_target
+claude_agent_sdk=external@0.3.170
+bundled_license_manifest_sha256=$(sha256sum "$runtime_root/BUNDLED-LICENSES" | cut -d' ' -f1)
 payload_manifest_sha256=$(sha256sum "$runtime_root/PAYLOAD.SHA256" | cut -d' ' -f1)
 EOF
 chmod 644 "$runtime_root"/{MANIFEST,PAYLOAD.SHA256}

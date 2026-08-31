@@ -22,4 +22,15 @@ source_version="$(bun -e \
   exit 1
 }
 
+if find "$source_root" \( -type f -o -type l \) -name AGENTS.md \
+  -print -quit | grep -q .; then
+  printf 'release source contains private AGENTS.md instructions\n' >&2
+  exit 1
+fi
+if find "$source_root" \( -type f -o -type l \) -name CLAUDE.md \
+  -print -quit | grep -q .; then
+  printf 'release source contains private CLAUDE.md instructions or aliases\n' >&2
+  exit 1
+fi
+
 printf 'Verified release source: %s\n' "$source_root"

@@ -27,20 +27,21 @@ import {
 import { delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { homedir } from "node:os";
 import { promisify } from "node:util";
-import {
-  createSdkMcpServer,
-  query,
-  tool,
-  type Options as ClaudeQueryOptions,
-  type Query,
-  type SDKMessage,
-  type SDKResultMessage,
-  type SDKUserMessage,
-  type SdkMcpToolDefinition,
-  type SpawnOptions as ClaudeSpawnOptions,
-  type SpawnedProcess as ClaudeSpawnedProcess,
-  type McpServerConfig as ClaudeMcpServerConfig,
+import type {
+  Options as ClaudeQueryOptions,
+  Query,
+  SDKMessage,
+  SDKResultMessage,
+  SDKUserMessage,
+  SdkMcpToolDefinition,
+  SpawnOptions as ClaudeSpawnOptions,
+  SpawnedProcess as ClaudeSpawnedProcess,
+  McpServerConfig as ClaudeMcpServerConfig,
 } from "@anthropic-ai/claude-agent-sdk";
+import {
+  ClaudeAgentSdkLoader,
+  type ClaudeAgentSdkModule,
+} from "./claude-agent-sdk-loader.js";
 import type {
   MCPHttpServerConfig as OmpMcpHttpServerConfig,
   MCPSseServerConfig as OmpMcpSseServerConfig,
@@ -231,6 +232,7 @@ export interface ClaudeCodeProbeOptions {
   now?: () => number;
   resolveExecutable?: (binaryPath: string) => Promise<string>;
   readAuthStatus?: (binaryPath: string) => Promise<ClaudeCodeAuthStatus>;
+  loadSdk?: () => Promise<ClaudeAgentSdkModule>;
 }
 
 export interface ClaudeCodeRuntimeOptions {
@@ -244,6 +246,7 @@ export interface ClaudeCodeRuntimeOptions {
   readAuthStatus?: (binaryPath: string) => Promise<ClaudeCodeAuthStatus>;
   resolveExecutable?: (binaryPath: string) => Promise<string>;
   probe?: ClaudeCodeProbe;
+  loadSdk?: () => Promise<ClaudeAgentSdkModule>;
   hooks?: GhostHookRunner;
   /** Idle lifetime of a query/persona session; tests drive it down. */
   warmIdleTtlMs?: number;
@@ -420,6 +423,7 @@ export class ClaudeCodeProbe {
   private readonly now: () => number;
   private readonly resolveExecutable: NonNullable<ClaudeCodeProbeOptions["resolveExecutable"]>;
   private readonly readAuthStatus: NonNullable<ClaudeCodeProbeOptions["readAuthStatus"]>;
+  private readonly loadSdk: ClaudeCodeProbeOptions["loadSdk"];
   private generation = 0;
   private cached?: {
     outcome:
@@ -444,6 +448,7 @@ export class ClaudeCodeProbe {
     this.now = options.now ?? Date.now;
     this.resolveExecutable = options.resolveExecutable ?? resolveClaudeCodeExecutable;
     this.readAuthStatus = options.readAuthStatus ?? readClaudeCodeAuthStatus;
+    this.loadSdk = options.loadSdk;
   }
 
   async read(): Promise<ClaudeCodeProbeResult> {
@@ -477,6 +482,7 @@ export class ClaudeCodeProbe {
 
   private async readFresh(generation: number): Promise<ClaudeCodeProbeResult> {
     try {
+      await this.loadSdk?.();
       const binaryPath = await this.resolveExecutable(this.binaryPath);
       const authStatus = await this.readAuthStatus(binaryPath);
       if (generation !== this.generation) return this.read();
@@ -1149,19 +1155,21 @@ async function buildMcpTools(
   homeDir: string,
   ghostName: string,
   extensionOptions: GhostExtensionOptions,
+  sdk: ClaudeAgentSdkModule,
 ): Promise<{ tools: SdkMcpToolDefinition[]; names: string[] }> {
   const resolved = resolveGhostExtensions(
     { ...extensionOptions, ghostName },
     homeDir,
     CLAUDE_CODE_TOOL_CAPABILITIES,
   );
-  const tools = await bridgeClaudeCodeTools(resolved, homeDir);
+  const tools = await bridgeClaudeCodeTools(resolved, homeDir, sdk);
   return { tools, names: resolved.toolNames };
 }
 
 export async function bridgeClaudeCodeTools(
   resolved: ReturnType<typeof resolveGhostExtensions>,
   homeDir: string,
+  sdk: ClaudeAgentSdkModule,
 ): Promise<SdkMcpToolDefinition[]> {
   // buildPersona adapts Ghost's prompt hook outside the session runtime; this
   // bridge needs the tools alone. Claude Code has no pi Model instance, so the
@@ -1175,7 +1183,7 @@ export async function bridgeClaudeCodeTools(
         `Ghost declared tool ${JSON.stringify(name)} but its extension did not register it.`,
       );
     }
-    return tool(
+    return sdk.tool(
       definition.name,
       definition.description,
       zodShapeFor(definition),
@@ -1205,6 +1213,7 @@ export async function bridgeClaudeCodeTools(
 }
 
 function queryOptions(input: {
+  sdk: ClaudeAgentSdkModule;
   binaryPath: string;
   cwd: string;
   ghostName: string;
@@ -1219,7 +1228,7 @@ function queryOptions(input: {
   projectMcpServers: Record<string, ClaudeMcpServerConfig>;
   spawnClaudeCodeProcess?: (options: ClaudeSpawnOptions) => ClaudeSpawnedProcess;
 }): ClaudeQueryOptions {
-  const mcp = createSdkMcpServer({
+  const mcp = input.sdk.createSdkMcpServer({
     name: input.internalMcpServerName,
     version: "1.0.0",
     tools: input.tools,
@@ -1670,8 +1679,9 @@ function linkedTurnSignal(
 export class ClaudeCodeRuntime {
   private readonly logger: Logger;
   private readonly extensionOptions: GhostExtensionOptions;
-  private readonly createQuery: ClaudeCodeQueryFactory;
+  private readonly createQuery: ClaudeCodeQueryFactory | undefined;
   private readonly probe: ClaudeCodeProbe;
+  private readonly loadSdk: () => Promise<ClaudeAgentSdkModule>;
   private readonly hooks: GhostHookRunner;
   private readonly ownerHome: string;
   private readonly scheduleUnitDir: string;
@@ -1729,8 +1739,13 @@ export class ClaudeCodeRuntime {
       : machineSkillPaths(this.ownerHome);
     this.logger = options.logger ?? silentLogger;
     this.extensionOptions = options.extensionOptions ?? {};
-    this.createQuery = options.createQuery
-      ?? ((input) => query({ prompt: input.prompt, options: input.options }));
+    if (options.loadSdk) {
+      this.loadSdk = options.loadSdk;
+    } else {
+      const sdkLoader = new ClaudeAgentSdkLoader({ ownerHome: this.ownerHome });
+      this.loadSdk = () => sdkLoader.load();
+    }
+    this.createQuery = options.createQuery;
     this.probe = options.probe ?? new ClaudeCodeProbe({
       ...(options.binaryPath ? { binaryPath: options.binaryPath } : {}),
       ...(options.resolveExecutable ? { resolveExecutable: options.resolveExecutable } : {}),
@@ -1990,10 +2005,13 @@ export class ClaudeCodeRuntime {
         }
         this.assertTurnAdmitted(options.signal);
       }
+      const sdk = await this.loadSdk();
+      this.assertTurnAdmitted(options.signal);
       const bridge = await buildMcpTools(
         paths.home,
         ghost.name,
         this.extensionOptions,
+        sdk,
       );
       this.assertTurnAdmitted(options.signal);
 
@@ -2028,6 +2046,7 @@ export class ClaudeCodeRuntime {
           const input = claudeInputChannel();
           const processExit = this.observeQueryExit ? undefined : claudeProcessExitBoundary();
           const sdkOptions = queryOptions({
+            sdk,
             binaryPath,
             cwd: runtimeCwd,
             ghostName: ghost.name,
@@ -2044,7 +2063,9 @@ export class ClaudeCodeRuntime {
           });
           let created: Query;
           try {
-            created = this.createQuery({ prompt: input.messages, options: sdkOptions });
+            created = this.createQuery
+              ? this.createQuery({ prompt: input.messages, options: sdkOptions })
+              : sdk.query({ prompt: input.messages, options: sdkOptions });
           } catch (cause) {
             input.close();
             throw new ClaudeCodeProcessError("Failed to start the Claude Code runtime.", { cause });

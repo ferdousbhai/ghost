@@ -51,6 +51,9 @@ require_file /usr/share/ghost/chromium-extension/manifest.json
 require_file /usr/lib/systemd/user/ghostd.service
 require_file /usr/lib/systemd/user/ghost-shell.service
 require_file /usr/share/applications/ghost.desktop
+require_file /usr/lib/ghost/runtime/ghostd.js
+require_file /usr/lib/ghost/runtime/ghost.js
+require_file /usr/lib/ghost/runtime/photon_rs_bg.wasm
 # Installed documentation links into docs/; those targets must ship with it.
 require_file /usr/share/doc/ghost/docs/keyring.md
 require_file /usr/share/doc/ghost/docs/hooks.md
@@ -73,6 +76,15 @@ for path in \
   /usr/share/applications/ghost.desktop; do
   if [[ "$(stat -c '%a' "$root$path")" != 644 ]]; then
     printf 'packaged data file has an unsafe mode: %s\n' "$path" >&2
+    exit 1
+  fi
+done
+for path in \
+  /usr/lib/ghost/runtime/ghostd.js \
+  /usr/lib/ghost/runtime/ghost.js \
+  /usr/lib/ghost/runtime/photon_rs_bg.wasm; do
+  if [[ "$(stat -c '%a' "$root$path")" != 644 ]]; then
+    printf 'packaged runtime bundle has an unsafe mode: %s\n' "$path" >&2
     exit 1
   fi
 done
@@ -108,7 +120,28 @@ if find "$root/usr/lib/ghost/desktop-helper" \
   printf 'package payload contains generated Python bytecode\n' >&2
   exit 1
 fi
-"$root/usr/bin/ghostd" --version | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'
+GHOST_BUN_EXECUTABLE="$(command -v bun)" \
+  "$root/usr/bin/ghostd" --version | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'
+
+mapfile -t runtime_license_manifests < <(
+  find "$root/usr/share/licenses" -path '*/runtime/BUNDLED-LICENSES' -type f -print
+)
+if (( ${#runtime_license_manifests[@]} != 1 )); then
+  printf 'package payload has %s bundled-license manifests, expected one\n' \
+    "${#runtime_license_manifests[@]}" >&2
+  exit 1
+fi
+runtime_license_root="$(dirname "${runtime_license_manifests[0]}")"
+require_runtime_license() {
+  local path="$runtime_license_root/$1"
+  [[ -f "$path" && "$(stat -c '%a' "$path")" == 644 ]] || {
+    printf 'packaged runtime license is missing or unsafe: %s\n' "$1" >&2
+    exit 1
+  }
+}
+require_runtime_license licenses/ghost/LICENSE
+require_runtime_license licenses/ghost/THIRD_PARTY_NOTICES.md
+require_runtime_license licenses/npm/@earendil-works/pi-ai/0.84.3/LICENSE
 
 require_unit_directive /usr/lib/systemd/user/ghostd.service Unit PartOf \
   graphical-session.target

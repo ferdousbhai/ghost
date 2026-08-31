@@ -8,12 +8,12 @@ pkgbase = ghost-ai-git
 	license = Apache-2.0
 	checkdepends = nodejs
 	checkdepends = python-yaml
-	makedepends = bun>=1.3.14
 	makedepends = desktop-file-utils
 	makedepends = git
 	makedepends = pnpm>=10.12.2
 	makedepends = uv
 	depends = at-spi2-core>=2.58
+	depends = bun>=1.3.14
 	depends = fd
 	depends = grim>=1.5
 	depends = hyprland>=0.56
@@ -32,10 +32,11 @@ pkgbase = ghost-ai-git
 	depends = ydotool>=1.0
 	optdepends = basecamp-cli: Basecamp CLI and embedded pi skill
 	optdepends = chromium: the browser the relay drives, and the browser-relay smoke test
-	optdepends = claude-code: Claude Code plan runtime
+	optdepends = claude-code: private owner-local Claude Code plan runtime (pending Anthropic approval)
 	optdepends = gnome-keyring: Secret Service provider for provider and MCP credentials
 	optdepends = npm: Firecrawl, Google Workspace, and Agent Skills installers for optional pi integrations
 	optdepends = obsidian>=1.12.7: Obsidian CLI access for pi
+	optdepends = pnpm: install the optional private owner-local Claude Agent SDK boundary
 	provides = ghost-ai
 	conflicts = ghost-ai
 	options = !debug

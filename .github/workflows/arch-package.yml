@@ -115,6 +115,24 @@ jobs:
             /usr/bin/bash \
               "$GITHUB_WORKSPACE/packaging/release/ci-build-stable.sh"
 
+      - name: Verify runtime with minimum supported Bun
+        shell: bash
+        run: |
+          exec /usr/bin/runuser -u builder -- /usr/bin/env -i \
+            HOME=/home/builder PATH=/usr/bin TMPDIR=/home/builder \
+            GITHUB_WORKSPACE="$GITHUB_WORKSPACE" \
+            GHOST_CI_RELEASE_OUTER="$GHOST_CI_RELEASE_OUTER" \
+            GHOST_CI_RELEASE_OUT="$GHOST_CI_RELEASE_OUT" \
+            GHOST_CI_RELEASE_WORK="$GHOST_CI_RELEASE_WORK" \
+            GHOST_CI_RELEASE_OUTER_DEVICE="$GHOST_CI_RELEASE_OUTER_DEVICE" \
+            GHOST_CI_RELEASE_OUTER_INODE="$GHOST_CI_RELEASE_OUTER_INODE" \
+            GHOST_CI_RELEASE_OUT_DEVICE="$GHOST_CI_RELEASE_OUT_DEVICE" \
+            GHOST_CI_RELEASE_OUT_INODE="$GHOST_CI_RELEASE_OUT_INODE" \
+            GHOST_CI_RELEASE_WORK_DEVICE="$GHOST_CI_RELEASE_WORK_DEVICE" \
+            GHOST_CI_RELEASE_WORK_INODE="$GHOST_CI_RELEASE_WORK_INODE" \
+            /usr/bin/bash \
+              "$GITHUB_WORKSPACE/packaging/release/ci-smoke-minimum-bun.sh"
+
       - name: Seal release artifacts for upload
         shell: bash
         run: |

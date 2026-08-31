@@ -384,7 +384,9 @@ describe("PUT /api/ghosts/:name/model", () => {
     const set = await put(base, { provider: "claude-code", id: "default" });
     expect(set.status).toBe(200);
     expect(set.body).toMatchObject({ ok: true, usable: false });
+    expect(set.body.warning).toContain("exact SDK install");
     expect(set.body.warning).toContain("claude auth login");
+    expect(set.body.warning).toContain("restart `ghostd`");
   });
 
   it("still writes an uncredentialed provider but returns usable=false + warning", async () => {

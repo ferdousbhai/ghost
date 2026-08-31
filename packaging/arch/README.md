@@ -2,16 +2,18 @@
 
 `PKGBUILD` builds `ghost-ai-git`, the development package for the first
 owner-local beta. The `ghost-git` AUR name already belongs to an unrelated
-screenshot utility, hence the collision-free package name. The daemon and
-terminal client are self-contained x86_64 executables at `/usr/bin/ghostd` and
-`/usr/bin/ghost`, with Bun embedded and no installed source or JavaScript
-dependency tree. Bun is a build dependency for both recipes, not an installed
-runtime dependency. `fd` and `ripgrep` remain explicit runtime dependencies:
+screenshot utility, hence the collision-free package name. `/usr/bin/ghostd`
+and `/usr/bin/ghost` are fixed launchers for ordinary Bun-target bundles under
+`/usr/lib/ghost/runtime`. The package therefore depends on system Bun 1.3.14 or
+newer, but installs no source or `node_modules` tree. Ghost, pi, provider, and
+MCP application code plus required static assets remain packaged for offline
+use. `fd` and `ripgrep` remain
+explicit runtime dependencies:
 pi's native `find` and `grep` tools invoke them, and providing the system
 binaries prevents a read-only planning turn from downloading either tool into
 pi's cache. The stable `ghost-ai` template and release-source machinery live
-under `packaging/release/`; its runtime source carries the same compiled
-executables.
+under `packaging/release/`; its v3 runtime source carries the same bundles,
+launchers, and exact bundled-license closure.
 
 Build and install from this directory:
 
@@ -83,6 +85,12 @@ snapshot every valid skill visible under `~/.agents/skills/` and
 `~/.pi/agent/skills/`, following symlinks in those standard machine roots.
 There is no hardcoded skill-name allowlist or integration-specific package path.
 
+The Claude Code plan path is different: it is a private, owner-local capability
+pending Anthropic approval, not a supported public third-party integration.
+The package does not ship the Claude Agent SDK. If this owner chooses to use
+that path, follow the exact versioned installation boundary in
+[`docs/claude-code-runtime.md`](../../docs/claude-code-runtime.md#runtime-and-security-boundary).
+
 Before opening a session, install `libsecret` (for `secret-tool`) and run a
 user-session Secret Service provider such as `gnome-keyring`; its default
 collection must be available to `ghostd`. See
@@ -91,7 +99,7 @@ blank-password/autologin caveat.
 
 This remains the rolling development package: `pnpm install` may populate its
 store during `build()`, so it is not the AUR release recipe. The stable package
-uses the [v2 runtime-source mechanism](../release/README.md#reproducibility-boundary)
+uses the [v3 runtime-source mechanism](../release/README.md#reproducibility-boundary)
 and also installs `/usr/bin/ghostd` and `/usr/bin/ghost`; publishing still
 requires a version tag, artifact inspection, and a human upload to the
 `ghost-ai` AUR package.

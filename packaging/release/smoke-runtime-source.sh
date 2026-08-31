@@ -34,6 +34,10 @@ tar -xf "$archive" -C "$work"
 runtime_root="$work/ghost-runtime-${version}-linux-${arch}"
 bash "$source_root/packaging/release/verify-runtime-source.sh" \
   "$runtime_root" "$source_root" "$version" "$arch" "$commit" "$epoch"
+GHOST_RUNTIME_FULL_SMOKE=1 \
+  bash "$source_root/packaging/release/smoke-binary-runtime.sh" \
+    "$runtime_root/bin/ghostd" "$runtime_root/bin/ghost" "$version" \
+      "$work/full-smoke"
 
 repacked="$work/repacked.tar.zst"
 bash "$source_root/packaging/release/pack-runtime-source.sh" "$runtime_root" "$repacked"
