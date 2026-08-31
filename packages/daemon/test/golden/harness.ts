@@ -33,8 +33,8 @@
  *   greeting's `localTime`. Normalised to placeholders (the greeting fixture
  *   pins a clock explicitly instead, so the prompt text stays real).
  * - **Entry ids** are content-addressed hashes over timestamped entries, so
- *   they are re-mapped to first-seen ordinals `#1`, `#2`, … which still pins
- *   the parent/child *shape* of the branch tree.
+ *   they are re-mapped to first-seen ordinals `#1`, `#2`, … while preserving
+ *   stable transcript identity.
  * - **Absolute paths**: the temp ghosts root is a fresh mkdtemp every run.
  * - **Tool presentation.** OMP can move non-core capabilities between the
  *   top-level surface and xd:// as load-mode policy evolves. The
@@ -85,7 +85,7 @@ const CLOCK_KEYS = new Set([
 
 const DURATION_KEYS = new Set(["durationMs", "elapsedMs", "tookMs", "latencyMs"]);
 
-const ENTRY_ID_KEYS = new Set(["entryId", "parentId", "resultEntryId", "previousTargetId", "nextTargetId"]);
+const ENTRY_ID_KEYS = new Set(["entryId"]);
 
 const ISO_TIMESTAMP = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})/g;
 

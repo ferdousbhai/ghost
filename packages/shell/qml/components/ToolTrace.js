@@ -170,17 +170,13 @@ function askPresentation(activity, completed) {
     const questions = askQuestions(activity);
     const settlement = askSettlement(activity);
     const autoAnswer = askAutoAnswerFromQuestions(questions);
-    let action = "Answer it";
-    if (settlement === "submitted") action = "Re-answer";
-    else if (settlement === "timedOut" && autoAnswer !== "") action = "Change it";
     return {
         settlement: settlement,
         autoAnswer: autoAnswer,
         prompt: askPromptFromQuestions(questions),
         detail: askDetailFromQuestions(questions),
         awaiting: isAsk(activity) && (settlement === "cancelled"
-            || settlement === "timedOut" || (settlement === "" && !completed)),
-        action: action
+            || settlement === "timedOut" || (settlement === "" && !completed))
     };
 }
 
@@ -194,17 +190,6 @@ function askPresentation(activity, completed) {
 function askAwaiting(activity, completed) {
     activity = fields(activity);
     return askPresentation(activity, completed).awaiting;
-}
-
-/**
- * The card's action. "Re-answer" is a lie on a question that was never
- * answered once, so anything but a submitted ask offers a first answer — and a
- * question the clock answered offers a correction, because there is already a
- * decision standing that the owner may not agree with.
- */
-function askAction(activity) {
-    activity = fields(activity);
-    return askPresentation(activity, false).action;
 }
 
 /**
@@ -460,7 +445,6 @@ function view(activity, completed, failed, expanded) {
         askAwaiting: ask.awaiting,
         askPrompt: ask.prompt,
         askDetail: ask.detail,
-        askAction: ask.action,
         fileTarget: target,
         fileBase: fileBase(activity),
         fileCwd: fileCwd(activity)

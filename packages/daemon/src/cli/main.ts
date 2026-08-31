@@ -121,14 +121,6 @@ export const COMMANDS: readonly Command[] = [
     run: (parsed, ctx) => sessionActionCommand("title", parsed, ctx),
   },
   {
-    verb: "fork",
-    usage: "fork <entryId> [-g <name>] [-s <id>] [--json] [-q]",
-    summary: "Fork a conversation before a user entry.",
-    example: "ghost fork entry-123 -s cli-abc",
-    positionals: [1, 1],
-    run: (parsed, ctx) => sessionActionCommand("fork", parsed, ctx),
-  },
-  {
     verb: "pin",
     usage: "pin [-g <name>] [-s <id>] [--json] [-q]",
     summary: "Pin a conversation.",

@@ -160,26 +160,6 @@ TestCase {
         }
     }
 
-    function test_reanswerBranchUsesTheSameTerminalCleanup(): void {
-        Ghostd.beginTurn();
-        Ghostd.handleEvent({
-            type: "branch_changed",
-            transcript: {
-                id: "pi:stream-test",
-                conversationId: "stream-test",
-                runtime: "pi",
-                messages: [{ role: "user", content: "Earlier question", entryId: "entry-1" }]
-            }
-        });
-        makeInteractionDirty();
-        Ghostd.currentSessionId = "";
-        Ghostd.handleEvent({ type: "done" });
-
-        verifyInteractionSettled();
-        compare(Ghostd.transcript.get(0).text, "Earlier question");
-        verify(!Ghostd.transcript.get(1).pending);
-    }
-
     function test_watchdogSettlesAndRetiresThePartialStream(): void {
         openTurn();
         makeInteractionDirty();

@@ -71,7 +71,7 @@ durable Ghost task boundary.
   sessions/<stem>.<runtime>.maintenance.json
                                v1 idle-memory journal for one runtime-qualified
                                conversation, including ordered consolidation
-                               mutations; never cloned by fork
+                               mutations; never copied to another conversation
   sessions/pins.json           v2 pinned state: { "version": 2, "pinned": ["<id>", …] }
   sessions/reads.json          v2 read state: { "version": 2, "reads": { "<id>": "<ISO timestamp>" } }
   .tasks/                      daemon-owned normalized worker-task lifecycle
@@ -249,8 +249,9 @@ the project response truthfully remains the owner-home `default` rather than
 granting legacy path authority.
 
 Whenever the daemon parses a conversation control artifact — a project
-binding, immutable Pi project snapshot, tool-cwd map, or draft/fork/delete
-transaction marker — it uses one bounded descriptor-pinned reader. The final
+binding, immutable Pi project snapshot, tool-cwd map, or draft/delete
+transaction marker, including an upgrade-only legacy fork marker — it uses one
+bounded descriptor-pinned reader. The final
 entry is opened with `O_NOFOLLOW|O_NONBLOCK` and must remain a single-link
 regular file with mode exactly `0600`; bytes are read positionally with a
 declared cap and fatal UTF-8 decoding, and device, inode, size, timestamps,
@@ -638,8 +639,7 @@ targets the built-in memory registration by its exact registration identity;
 another `conversation_idle` handler or machine command with the same numeric
 deadline is ordinary due work and is not dispatched again by that retry. Whole-home
 work takes the shared home lease before resolving a home path and keeps that
-lease through model use, memory access, and state publication. Fork copies no
-maintenance state.
+lease through model use, memory access, and state publication.
 
 Conversation deletion reserves maintenance before publishing its tombstone.
 Its release outcome is explicit: `rolled-back` re-arms pending work only while
@@ -1291,8 +1291,8 @@ streams emit one complete event object per line.
 - `DELETE …/sessions/:id/project/draft` abandons only an unpublished,
   runtime-qualified pre-turn draft and returns
   `{ ok:true, id, conversationId, runtime, abandoned }`. The daemon refuses a
-  transcript, cached/runtime session, Claude resume sidecar, fork marker, or
-  delete transaction with `409 project_draft_published|session_busy`; it never
+  transcript, cached/runtime session, Claude resume sidecar, legacy fork marker,
+  or delete transaction with `409 project_draft_published|session_busy`; it never
   treats a published conversation as disposable draft state. A durable pending
   marker hides a cleanup in progress while Ghost removes only that draft's
   project binding, generation-qualified Pi snapshot, Pi tool-cwd sidecar, and
@@ -1462,8 +1462,8 @@ streams emit one complete event object per line.
   Once the delete marker is present or indeterminate, the maintenance
   scheduler also retains a recovery-pending suppression after DELETE returns;
   only successful deletion or explicit durable marker retirement clears it.
-  Failed fork rollback is the sole permanent-unlink path: the fork was never
-  published to the owner and must not pollute Trash.
+  Upgrade recovery may permanently unlink an incomplete legacy fork: that
+  conversation was never published to the owner and must not pollute Trash.
 - `GET|POST /api/ghosts/:name/sessions/:id/live` owns realtime voice for one
   conversation through the `LiveVoiceManager` interface. GET returns
   `{ supported, active, phase, muted, inputLevel, outputLevel, transcript,
@@ -1513,11 +1513,10 @@ streams emit one complete event object per line.
   are dropped, exactly as the live stream omits them), the same shape a
   pi-messages client renders. Paged with `?limit` (default 1000, max 2000) and
   `?offset`; `total` is the full renderable count and `truncated` is true when a
-  page omits messages. Each message also carries its persisted `entryId` and
-  `parentId`. Sibling-branch metadata is gone with the navigation it described:
-  branching forks the conversation instead of walking a tree in place. Ask tool
-  calls carry `ghostAsk` with the `resultEntryId` a re-answer branches from,
-  plus `settled: "submitted" | "cancelled" | "timedOut" | "chat"`,
+  page omits messages. Each message carries its opaque persisted `entryId` so a
+  client can validate page assembly; Pi's parent graph is runtime-internal and
+  is not exposed on this presentation API. Ask tool calls carry
+  `ghostAsk` with `settled: "submitted" | "cancelled" | "timedOut" | "chat"`,
   always present and derived from the persisted tool result, so a restored ask
   card states how that question actually closed rather than assuming an answer.
   A tool call whose persisted result was an error also carries `failed: true`;
@@ -1539,9 +1538,9 @@ streams emit one complete event object per line.
   version-1 object map, but every new publication uses the ordered version-2
   form and the same bounded atomic control-file writer.
   The daemon subscribes once to the raw AgentSession, so HTTP, collaboration,
-  live-voice, hook, and re-answer turns all record the execution-start cwd. It
+  live-voice, and hook turns all record the execution-start cwd. It
   coalesces bursts into atomic fsynced replacements without clearing a dirty
-  revision on failure. Normal HTTP and ask re-answer adapters hold their one
+  revision on failure. Normal HTTP adapters hold their one
   terminal `done|error` frame until the sidecar write has durably succeeded or
   bounded retries produce an explicit terminal persistence error. Raw-session
   terminal observation drives the same flush before conversation invalidation,
@@ -1591,47 +1590,18 @@ streams emit one complete event object per line.
   `false` means the conversation was already idle. The HUD keeps the current
   draft while this acknowledgement is pending, so the next ordinary send
   cannot race the old turn's settlement.
-- `POST /api/ghosts/:name/sessions/:id/branch` with `{ action: "fork",
-  entryId }` → `{ id, conversationId, runtime, sessionId, title, draft,
-  transcript }` — branching off is a
-  **copy, not a rewind**. The conversation's transcript is forked into a new one
-  (pi's `SessionManager.forkFrom`, whose header records `parentSession`), the
-  copy is rewound to just before `entryId`, and that user message's text comes
-  back as `draft` for the composer. `id` is the new public action id;
-  `conversationId` and the compatibility alias `sessionId` are its raw resume id,
-  already in `GET …/sessions`; `transcript` is its rewound history. The source
-  conversation is left untouched, leaf included. `entryId` must be a persisted
-  user message (`400 invalid_branch`), the source must be idle
-  (`409 session_busy`), and any other `action` is `400 invalid_request`.
-  In-file sibling branches are not part of the API: there is no `navigate`.
-  A fork clones the source's project binding, generation-qualified immutable
-  Pi project snapshot when bound, and tool-cwd map before it is
-  published, so relative historical tool paths keep their meaning. A durable
-  pending marker hides the raw id while the transcript is written under a
-  temporary name and every applicable sidecar is fsynced; the transcript rename is the
-  publication barrier and the marker is removed last. Startup/list recovery
-  recognizes both v1 and v2 markers, publishes a complete set or removes an
-  incomplete set. A retained marker after an I/O failure keeps even a visible
-  transcript hidden from listing and makes open return `409 session_busy`; a
-  later recovery retries the same artifact set. Cleanup verifies every required
-  partial path absent (or every recovered publication path present) and fsyncs
-  the sessions directory before unlinking the marker. An unlink, verification,
-  or directory-fsync failure retains or restores the marker, so it is retired
-  only after the complete state is durable. Failed fork cleanup removes those
-  unpublished sidecars with the transcript. Before examining or removing any
-  artifact, recovery derives every final path from the marker's validated raw
-  conversation id and runtime. Every final and temporary path must be a
-  distinct, lexically exact direct child of that sessions directory; each
-  temporary basename must carry its own transcript, project-binding,
-  generation-qualified snapshot, or tool-cwd final basename plus the admitted
-  pending suffix. An invalid relationship keeps the marker pending, performs
-  zero cleanup, and cannot name a victim transcript or sidecar.
-- `POST /api/ghosts/:name/sessions/:id/reanswer` with `{ entryId }` reopens a
-  persisted `ask` result, commits the answer as a sibling, and resumes the model
-  on that branch. Its response is an SSE stream and includes `branch_changed`.
-  Re-answer and awaited Ghost hooks use the conversation's actual live cwd;
-  the pi runtime never discovers agents from that cwd, and `task` still resolves
-  its harness and cwd through the daemon's trusted task boundary.
+- Conversation branching and historical ask re-answer are not Ghost principal
+  actions. The daemon exposes no branch, navigate, or re-answer route and never
+  creates a fork transaction. Pi's native transcript graph remains private
+  runtime state used only to resume the conversation's current leaf.
+  For upgrade safety, startup, listing, and open still recognize pending v1/v2
+  fork markers written by older Ghost releases. Recovery publishes an already
+  complete artifact set or removes an incomplete unpublished set, then retires
+  the marker only after verification and a sessions-directory fsync. A retained
+  marker keeps the id hidden and busy. Recovery derives all final paths from the
+  validated raw conversation id, admits only distinct lexical direct children
+  with the expected pending suffixes, and performs no cleanup for an invalid
+  relationship. This compatibility reader cannot create or clone a conversation.
 - `POST /api/ghosts/:name/greeting` `{}` → `{ greeting: string | null,
   onboarding: boolean }` — one smol-lane completion (see below) writes a short
   in-persona opener for an empty chat from the character file, memory index,
@@ -1656,11 +1626,7 @@ like a chat turn. Three consumers today:
 daemon generates a 3-6 word title from the first user message with one smol
 completion, fire-and-forget: it never blocks the reply and a failure is logged,
 never fatal. A conversation is titled once
-and never re-titled. A fork is named at fork time instead, the way a file
-manager names a copy: `<source title> (n)` for the smallest free `n` from 2 up,
-with any trailing ` (k)` stripped from the base first, so a fork of a fork does
-not stack suffixes. An untitled source forks to an untitled conversation. The
-title is the latest **`session_info` entry** in the conversation's own
+and never re-titled. The title is the latest **`session_info` entry** in the conversation's own
 `sessions/*.jsonl` transcript, written with `SessionManager.setSessionName` /
 `appendSessionInfo`. It never enters the model's context, needs no sidecar, and
 rides the same per-ghost storage backup and future encryption cover.
@@ -2171,8 +2137,8 @@ cancellation settle only after the SDK stream ends and that captured process
 has closed.
 
 The captured root/cwd remain pinned for the task's lifetime even if its parent
-conversation is later deleted; conversation deletion and fork neither cancel
-nor copy tasks, and the runtime-qualified parent becomes historical
+conversation is later deleted; conversation deletion does not cancel tasks,
+and the runtime-qualified parent becomes historical
 attribution. A non-terminal task, or an accepted controller send/cancel still
 draining after terminal state, blocks whole-ghost rename or deletion with `409
 ghost_busy`. Once tasks and controller operations settle, their `.tasks/`
@@ -2392,8 +2358,8 @@ whole model before any non-local exposure.
   tree. Both development and stable packages declare `fd` and `ripgrep` as
   runtime dependencies for pi's native search tools; the executable must not
   populate pi's cache by downloading them on demand.
-- `packages/shell` — the Omarchy/Quickshell HUD, model routing, ask and
-  branching UI, live tool cards, and summoning indicator.
+- `packages/shell` — the Omarchy/Quickshell HUD, model routing, ask UI, live
+  tool cards, and summoning indicator.
 - `packages/chromium-extension` — the browser relay, driving tabs of the
   browser the user is already signed into. One extension serves every ghost and
   conversation over one socket, so the tab is the unit of isolation: relay

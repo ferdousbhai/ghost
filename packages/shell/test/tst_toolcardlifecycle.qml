@@ -45,8 +45,7 @@ TestCase {
             status: status,
             arguments: ({}),
             intent: "Checking " + id,
-            summary: "",
-            askBranch: { resultEntryId: "result-" + id }
+            summary: ""
         };
     }
 

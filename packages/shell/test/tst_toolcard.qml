@@ -205,20 +205,6 @@ TestCase {
         compare(ToolTrace.askAutoAnswer(activity), "");
     }
 
-    // The undo. A standing decision is corrected, not answered for the first
-    // time — but only when the clock actually took one.
-    function test_timedOutAskOffersTheChangeRatherThanAFirstAnswer(): void {
-        compare(ToolTrace.askAction(askActivity("timedOut")), "Change it");
-        compare(
-            ToolTrace.askAction({
-                name: "ask",
-                askSettled: "timedOut",
-                arguments: { questions: [{ id: "q", question: "Which?", options: [] }] }
-            }),
-            "Answer it"
-        );
-    }
-
     function test_submittedAskStillReadsAsAnswered(): void {
         compare(
             ToolTrace.text(askActivity("submitted"), true, false, false),
@@ -297,13 +283,6 @@ TestCase {
             ToolTrace.askDetail(activity),
             "Options · Yes\nAlso asked · Back it up first?\nOptions · No"
         );
-    }
-
-    // "Re-answer" presumes a first answer that a cancelled question never got.
-    function test_actionOffersAFirstAnswerWhenThereWasNone(): void {
-        compare(ToolTrace.askAction(askActivity("submitted")), "Re-answer");
-        compare(ToolTrace.askAction(askActivity("cancelled")), "Answer it");
-        compare(ToolTrace.askAction(askActivity("")), "Answer it");
     }
 
     // The clock's answer is not the owner's answer, so a timed-out card keeps
@@ -401,7 +380,6 @@ TestCase {
             ToolTrace.askDetail(activity),
             "Options · Delete it · Leave it alone (recommended)"
         );
-        compare(ToolTrace.askAction(activity), "Change it");
         compare(ToolTrace.input(activity), "");
     }
 

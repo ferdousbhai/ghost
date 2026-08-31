@@ -215,8 +215,8 @@ Whole ghosts and memory files move to freedesktop Trash, with a
 same-filesystem fallback when needed. Conversation deletion pre-journals every
 owned transcript/sidecar destination inside a private same-filesystem fallback
 Trash root so a crash after rename can recover the complete receipt. Only
-rollback of a fork or project draft that was never shown to the owner remains a
-permanent unlink.
+upgrade recovery of an incomplete legacy fork, or rollback of a project draft
+that was never shown to the owner, remains a permanent unlink.
 
 `SessionManager.open` receives the explicit transcript file, per-ghost session
 directory, and cwd, so nothing lands in `~/.pi`.
@@ -367,11 +367,9 @@ ad-hoc prompts:
   tool and `/jobs` list, wait for, and cancel them; a settled job reports back
   into the conversation as a follow-up turn. `GET …/sessions/:id/jobs` and
   `POST …/sessions/:id/jobs/:jobId/cancel` expose them to the shell.
-- Branching off a message forks the conversation: the transcript is copied to a
-  new conversation, rewound to just before that message, and its text handed
-  back as a draft, leaving the original untouched. Re-answering a historical
-  `ask` still commits the revised result as a sibling in place and resumes
-  generation there.
+- Ghost exposes no principal conversation-tree controls. Pi retains its native
+  entry graph privately for resume, while old pending fork markers are handled
+  only by the daemon's upgrade-recovery path.
 
 ## Reach it from your phone (Tailscale)
 
@@ -423,8 +421,6 @@ The authoritative route and payload contract is
 | GET/POST | `/api/ghosts/:name/sessions/:id/collab` | unsupported legacy collaboration compatibility seam |
 | GET/POST | `/api/ghosts/:name/sessions/:id/ask` | poll or resolve the active ask |
 | POST | `/api/ghosts/:name/sessions/:id/stop` | stop a principal turn and await release |
-| POST | `/api/ghosts/:name/sessions/:id/branch` | fork the conversation at a message |
-| POST | `/api/ghosts/:name/sessions/:id/reanswer` | branch an ask answer and resume via SSE |
 | GET | `/api/ghosts/:name/harnesses` | inspect native-harness availability, auth, and Omarchy usage |
 | POST | `/api/ghosts/:name/sessions/:id/tasks` | start a durable coding task attributed to one conversation |
 | GET | `/api/ghosts/:name/tasks` | list the ghost's durable coding tasks |

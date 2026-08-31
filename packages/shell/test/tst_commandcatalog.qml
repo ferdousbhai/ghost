@@ -57,11 +57,11 @@ TestCase {
         const unsupported = {
             name: "tree",
             availability: "unsupported",
-            unavailableReason: "Ghost forks instead of rewinding branches."
+            unavailableReason: "Conversation branching is not available in Ghost."
         };
         compare(Catalog.availability(unsupported), "unsupported");
         compare(Catalog.availabilityLabel(unsupported), "Unsupported here");
-        compare(Catalog.filtered([unsupported], "rewinding").length, 1);
+        compare(Catalog.filtered([unsupported], "branching").length, 1);
         compare(Catalog.invocation(unsupported), "/tree ");
         compare(Catalog.availability({ name: "help" }), "supported");
     }

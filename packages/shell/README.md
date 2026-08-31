@@ -91,8 +91,8 @@ question and no way to answer it. A settled ask keeps a card in the transcript
 carrying the question, the options offered, and how it actually ended — answered,
 never answered, timed out, or talked through instead, from the transcript's
 `ghostAsk.settled`. An unanswered one wears the rose that failure wears, and
-offers to answer it now on the branch the daemon kept. While a model is
-streaming, Esc requests a stop and keeps any composer draft. The composer
+does not pretend an answer was supplied. While a model is streaming, Esc
+requests a stop and keeps any composer draft. The composer
 accepts the next message only after ghostd acknowledges that the old runtime
 turn and its persistence boundary have released. Shift+Enter inserts a newline.
 
@@ -113,14 +113,12 @@ a shell process restart cannot rediscover one by scanning project paths.
 A reply is the answer, not an account of how it was reached. Which tools ran is
 narrated by the activity line while it happens and then leaves: a settled turn
 shows only the calls a reader still needs — the ones that failed, and `ask`,
-whose card carries the re-answer branch — behind a quiet "3 steps" toggle that
+whose card preserves the question and outcome — behind a quiet "3 steps" toggle that
 restores the full trail. Those traces are unchanged: purpose while active,
 outcome when one is available, implementation details only when expanded. User
-messages expose a hover-revealed edit action that forks a new conversation and
-returns that text to the composer; ghost replies keep their copy action beside
-the final text line. There is no sibling navigator: the fork is another thread
-in the sidebar. Historical ask cards can still be re-answered to create a
-sibling branch and resume generation from it.
+messages have no transcript-tree controls; ghost replies keep their copy action
+beside the final text line. Historical ask cards report only how the interaction
+settled.
 
 The activity line uses the recovered summon-ghost spectral orb and rotating,
 tool-aware summoning copy. The QML port traces to summon-ghost commit

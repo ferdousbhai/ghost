@@ -30,7 +30,6 @@ Rectangle {
         root.call(), root.completed, root.failed, root.expanded)
     readonly property string trace: root.presentation.trace
     readonly property string diagnosticInput: root.presentation.diagnosticInput
-    readonly property var askBranch: root.call().askBranch || null
     readonly property bool hasDiagnostics: root.presentation.hasDiagnostics
 
     // A question the ghost is still holding, or one that closed without an
@@ -67,7 +66,7 @@ Rectangle {
     readonly property color detailColor: Theme.light ? Theme.foreground : Theme.foregroundDim
     readonly property color glyphTint: root.cool ? Theme.ghostRose : Theme.ghostAmberBright
 
-    visible: root.trace !== "" || root.askBranch !== null
+    visible: root.trace !== ""
     implicitHeight: visible ? toolContent.implicitHeight + 12 : 0
     radius: 12
     color: cardHover.containsMouse ? Theme.amber(0.08) : Theme.amber(0.05)
@@ -293,55 +292,5 @@ Rectangle {
             wrapMode: Text.Wrap
         }
 
-        // A chip, not a word: this is the one thing on the card that acts, and
-        // as bare text it read as a stray label rather than something to press.
-        // It borrows the file chip's shape so the card has one affordance
-        // vocabulary, and stays amber even on an unanswered question — rose
-        // here would warn against the very thing it is offering.
-        Rectangle {
-            id: askRow
-
-            // Bindings evaluate even while invisible, so a null askBranch must
-            // read as an empty object rather than a TypeError per property.
-            readonly property var nav: root.askBranch || ({})
-
-            visible: root.call().name === "ask" && root.askBranch !== null
-            x: 16 + Theme.gap / 2
-            width: Math.min(parent.width - x, askLabel.implicitWidth + Theme.gap * 1.5)
-            height: visible ? askLabel.implicitHeight + 6 : 0
-            radius: Theme.radius / 2
-            color: askArea.containsMouse ? Theme.amber(0.16) : Theme.amber(0.08)
-            border.width: 1
-            border.color: askArea.containsMouse ? Theme.amber(0.35) : Theme.amber(0.18)
-
-            Behavior on color {
-                enabled: !Theme.reducedMotion
-                ColorAnimation { duration: Theme.durFast; easing.type: Easing.OutQuad }
-            }
-
-            Text {
-                id: askLabel
-                anchors.centerIn: parent
-                text: root.presentation.askAction
-                color: Theme.ghostAmber
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSizeSmall
-            }
-
-            // Smaller than cardHover and declared after it, so pressing this
-            // answers the question instead of toggling the diagnostics.
-            MouseArea {
-                id: askArea
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: Ghostd.reanswerHistoricalAsk(askRow.nav.resultEntryId || "")
-            }
-
-            // Re-answering still commits a sibling in this conversation — that
-            // is OMP's own two-phase Ask tree, not the branch route — but the
-            // shell no longer offers a way to step between those siblings,
-            // because the daemon no longer has one to offer.
-        }
     }
 }

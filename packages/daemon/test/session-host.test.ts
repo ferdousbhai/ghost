@@ -31,7 +31,6 @@ import type { AddressInfo } from "node:net";
 import { basename, join, sep } from "node:path";
 import type { AgentSession, AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { GhostMcpManager } from "../src/mcp-manager.js";
-import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { CURRENT_SESSION_VERSION } from "@earendil-works/pi-coding-agent";
 import type { LiveSessionControllerOptions } from "../src/live-voice.js";
 import { createMCPToolName } from "../src/mcp-tool-names.js";
@@ -65,7 +64,6 @@ import {
 import {
   PI_NATIVE_TOOL_NAMES,
   SessionHost,
-  forkConversationTitle,
   parseUserBashCommand,
   sessionFileNameFor,
   sessionKeyOf,
@@ -79,7 +77,7 @@ import type { TaskView } from "../src/tasks.js";
 import { readPins, writePins } from "../src/pins.js";
 import { ProjectBindingStore, projectBindingPath } from "../src/project-binding.js";
 import { PROJECT_SCAN_MAX_ENTRIES } from "../src/project-resources.js";
-import { piProjectSnapshotPath, piProjectSnapshotPaths } from "../src/project-snapshot.js";
+import { piProjectSnapshotPaths } from "../src/project-snapshot.js";
 import {
   readToolCwds,
   TOOL_CWDS_MAX_BYTES,
@@ -234,43 +232,6 @@ async function modelSystemPrompt(
   const request = provider?.requests[before];
   if (!request) throw new Error("Expected the turn to reach the mock provider.");
   return request.system;
-}
-
-class ReanswerPreparationHooks extends GhostHookRunner {
-  failPreparation = false;
-
-  override hasHandlers(event: Parameters<GhostHookRunner["hasHandlers"]>[0]): boolean {
-    return event === "before_prompt" || super.hasHandlers(event);
-  }
-
-  override async emitBeforePrompt(
-    event: Parameters<GhostHookRunner["emitBeforePrompt"]>[0],
-  ): ReturnType<GhostHookRunner["emitBeforePrompt"]> {
-    if (this.failPreparation) throw new Error("injected re-answer preparation failure");
-    return super.emitBeforePrompt(event);
-  }
-}
-
-async function establishHistoricalAsk(sessionId: string): Promise<string> {
-  const initial = host!.runTurn("casper", {
-    sessionId,
-    prompt: "Help choose a finish.",
-    emit: () => {},
-  });
-  const ask = await waitFor(() => host!.pendingAsk("casper", sessionId));
-  host!.answerAsk("casper", sessionId, ask.id, {
-    kind: "submit",
-    results: [{ id: "finish", selectedOptions: ["Matte"] }],
-  });
-  await initial;
-  const transcript = await host!.readTranscript("casper", sessionId);
-  const call = transcript.messages
-    .flatMap((message) => Array.isArray(message.content) ? message.content : [])
-    .find((part) => (part as { name?: unknown }).name === "ask") as {
-      ghostAsk?: { resultEntryId?: string };
-    };
-  if (!call.ghostAsk?.resultEntryId) throw new Error("fixture ask result was not persisted");
-  return call.ghostAsk.resultEntryId;
 }
 
 function testLiveVoice(startGate?: Promise<void>, startError?: Error): {
@@ -4040,374 +4001,6 @@ describe("SessionHost.runTurn", () => {
     expect(JSON.stringify(provider!.requests[1]?.messages)).toContain("Matte");
   });
 
-  it("re-opens a historical ask, commits a sibling answer, and resumes that branch", async () => {
-    const writerEntered = deferred();
-    const releaseWriter = deferred();
-    let blockWriter = false;
-    const recorded = recordMaintenanceTurns();
-    const hooks = new GhostHookRunner();
-    const beforeOwners: string[] = [];
-    const stoppedOwners: string[] = [];
-    let reanswerBlocked = false;
-    await hooks.register((api) => {
-      api.on("before_prompt", (event) => {
-        beforeOwners.push(event.prompt);
-      });
-      api.on("session_stop", (event) => {
-        stoppedOwners.push(event.owner_prompt);
-        if (stoppedOwners.length === 2 && !reanswerBlocked) {
-          reanswerBlocked = true;
-          return { decision: "block", reason: "Make the revised choice explicit." };
-        }
-      });
-    });
-    await setup(
-      [
-        {
-          kind: "tool",
-          name: "ask",
-          args: {
-            questions: [{
-              id: "finish",
-              header: "Finish",
-              question: "Which finish should I use?",
-              options: [{ label: "Matte" }, { label: "Gloss" }],
-              recommended: 0,
-            }],
-          },
-        },
-        { kind: "text", text: "I will use that finish." },
-        { kind: "text", text: "I will explicitly use gloss stock." },
-        { kind: "text", text: "The final choice is gloss stock." },
-      ],
-      {
-        hooks,
-        maintenance: recorded.maintenance,
-        title: { enabled: false },
-        toolCwdWriter: async (...args) => {
-          if (blockWriter) {
-            writerEntered.resolve();
-            await releaseWriter.promise;
-          }
-          return writeToolCwds(...args);
-        },
-      },
-      { sequential: true },
-    );
-    const firstTurn = host!.runTurn("casper", {
-      sessionId: "conv-reanswer",
-      prompt: "Help choose the finish.",
-      emit: () => {},
-    });
-    const firstAsk = await waitFor(() => host!.pendingAsk("casper", "conv-reanswer"));
-    host!.answerAsk("casper", "conv-reanswer", firstAsk.id, {
-      kind: "submit",
-      results: [{ id: "finish", selectedOptions: ["Matte"] }],
-    });
-    await firstTurn;
-
-    const before = await host!.readTranscript("casper", "conv-reanswer");
-    const askCall = before.messages
-      .flatMap((message) => Array.isArray(message.content) ? message.content : [])
-      .find((part) => (part as { name?: unknown }).name === "ask") as {
-        ghostAsk?: { resultEntryId?: string; settled?: string };
-      };
-    expect(askCall.ghostAsk?.settled).toBe("submitted");
-    const resultEntryId = askCall.ghostAsk?.resultEntryId;
-    expect(resultEntryId).toBeTruthy();
-
-    blockWriter = true;
-    const events: PiMessagesEvent[] = [];
-    const reanswer = host!.runAskReanswer("casper", {
-      sessionId: "conv-reanswer",
-      entryId: resultEntryId!,
-      emit: (event) => events.push(event),
-    });
-    const revisedAsk = await waitFor(() => host!.pendingAsk("casper", "conv-reanswer"));
-    host!.answerAsk("casper", "conv-reanswer", revisedAsk.id, {
-      kind: "submit",
-      results: [{ id: "finish", selectedOptions: ["Gloss"] }],
-    });
-    await writerEntered.promise;
-    await waitFor(() => events.some((event) => event.type === "branch_changed") ? true : null);
-    expect(events.some((event) => event.type === "done" || event.type === "error")).toBe(false);
-    releaseWriter.resolve();
-    await reanswer;
-
-    expect(events.some((event) => event.type === "branch_changed")).toBe(true);
-    expect(events.filter((event) => event.type === "done")).toHaveLength(1);
-    expect(stoppedOwners).toEqual([
-      beforeOwners[0],
-      beforeOwners[1],
-      beforeOwners[1],
-    ]);
-    expect(provider!.requests.length).toBeGreaterThanOrEqual(4);
-    const reanswerText = events
-      .filter((event): event is Extract<PiMessagesEvent, { type: "text_delta" }> =>
-        event.type === "text_delta"
-      )
-      .map((event) => event.delta)
-      .join("");
-    expect(reanswerText).toContain("I will explicitly use gloss stock.");
-    expect(reanswerText).toContain("The final choice is gloss stock.");
-    expect(events.at(-1)?.type).toBe("done");
-    expect(provider!.requests.length).toBeGreaterThanOrEqual(3);
-    expect(JSON.stringify(provider!.requests.at(-1)?.messages)).toContain("Gloss");
-    const after = await host!.readTranscript("casper", "conv-reanswer");
-    const revisedCall = after.messages
-      .flatMap((message) => Array.isArray(message.content) ? message.content : [])
-      .find((part) => (part as { name?: unknown }).name === "ask") as {
-        ghostAsk?: { resultEntryId?: string; settled?: string };
-      };
-    // The re-answer committed a sibling and the transcript follows it: the ask
-    // the card now points at is the new result, not the one just left behind.
-    expect(revisedCall.ghostAsk?.resultEntryId).toBeTruthy();
-    expect(revisedCall.ghostAsk?.resultEntryId).not.toBe(resultEntryId);
-    expect(revisedCall.ghostAsk?.settled).toBe("submitted");
-    expect(beforeOwners).toHaveLength(2);
-    expect(beforeOwners[0]).toBe("Help choose the finish.");
-    expect(beforeOwners[1]).toContain("Gloss");
-    expect(recorded.finished).toHaveLength(2);
-    expect(recorded.finished[1]).toMatchObject({
-      ownerPrompt: beforeOwners[1],
-      assistantText: expect.stringContaining("The final choice is gloss stock."),
-      sourceRevision: { kind: "pi-leaf", value: expect.any(String) },
-      outcome: "completed",
-    });
-    expect(recorded.activities).toEqual([]);
-    expect(recorded.released.count).toBe(2);
-  });
-
-  it.each(["preparation", "custom-message", "resume"] as const)(
-    "records committed re-answer activity when %s fails before an assistant result",
-    async (stage) => {
-      const hooks = new ReanswerPreparationHooks();
-      const logger = recordingLogger("warn");
-      const activityReleaseCounts: number[] = [];
-      let recorded!: ReturnType<typeof recordMaintenanceTurns>;
-      recorded = recordMaintenanceTurns(
-        undefined,
-        async () => {
-          activityReleaseCounts.push(recorded.released.count);
-          if (stage === "resume") {
-            throw new Error("sensitive owner activity write failure");
-          }
-        },
-      );
-      await setup([
-        {
-          kind: "tool",
-          name: "ask",
-          args: {
-            questions: [{
-              id: "finish",
-              question: "Which finish?",
-              options: [{ label: "Matte" }, { label: "Gloss" }],
-              recommended: 0,
-            }],
-          },
-        },
-        { kind: "text", text: "Initial matte answer." },
-        { kind: "text", text: "This model response must not run." },
-      ], {
-        hooks,
-        maintenance: recorded.maintenance,
-        title: { enabled: false },
-        logger,
-      }, { sequential: true });
-      const sessionId = `reanswer-${stage}-failure`;
-      const resultEntryId = await establishHistoricalAsk(sessionId);
-      const opened = await host!.open("casper", sessionId);
-      const createdAt = opened.session.sessionManager.getHeader()?.timestamp;
-      expect(createdAt).toBeTruthy();
-
-      if (stage === "preparation") {
-        hooks.failPreparation = true;
-      } else if (stage === "custom-message") {
-        const manager = opened.session.sessionManager;
-        const appendCustomMessageEntry = manager.appendCustomMessageEntry.bind(manager);
-        vi.spyOn(manager, "appendCustomMessageEntry").mockImplementation(
-          (customType, ...rest) => {
-            if (customType === "ghost-ask-reanswer-owner") {
-              throw new Error("injected re-answer custom-message failure");
-            }
-            return appendCustomMessageEntry(customType, ...rest);
-          },
-        );
-      } else {
-        vi.spyOn(opened.session.agent, "continue").mockImplementation(async () => {
-          throw new Error("injected re-answer resume failure");
-        });
-      }
-
-      const events: PiMessagesEvent[] = [];
-      const reanswer = host!.runAskReanswer("casper", {
-        sessionId,
-        entryId: resultEntryId,
-        emit: (event) => events.push(event),
-      });
-      const revisedAsk = await waitFor(() => host!.pendingAsk("casper", sessionId));
-      host!.answerAsk("casper", sessionId, revisedAsk.id, {
-        kind: "submit",
-        results: [{ id: "finish", selectedOptions: ["Gloss"] }],
-      });
-      await reanswer;
-
-      expect(events.some((event) => event.type === "branch_changed")).toBe(true);
-      expect(events.filter((event) => event.type === "done" || event.type === "error"))
-        .toEqual([expect.objectContaining({ type: "error" })]);
-      expect(provider!.requests).toHaveLength(2);
-      expect(recorded.activities).toEqual([{
-        identity: { ghostName: "casper", runtime: "pi", conversationId: sessionId },
-        activity: {
-          source: { runtime: "pi", createdAt },
-          cwd: temp!.ownerHome,
-        },
-      }]);
-      expect(recorded.finished).toHaveLength(2);
-      expect(recorded.finished[1]).toBeUndefined();
-      expect(activityReleaseCounts).toEqual([1]);
-      expect(recorded.released.count).toBe(2);
-
-      const after = await host!.readTranscript("casper", sessionId);
-      const revisedCall = after.messages
-        .flatMap((message) => Array.isArray(message.content) ? message.content : [])
-        .find((part) => (part as { name?: unknown }).name === "ask") as {
-          ghostAsk?: { resultEntryId?: string };
-        };
-      expect(revisedCall.ghostAsk?.resultEntryId).toBeTruthy();
-      expect(revisedCall.ghostAsk?.resultEntryId).not.toBe(resultEntryId);
-      if (stage === "resume") {
-        expect(events.at(-1)).toMatchObject({
-          type: "error",
-          errorMessage: "injected re-answer resume failure",
-        });
-        expect(logger.records).toContainEqual({
-          level: "warn",
-          message: "conversation maintenance owner activity was not recorded",
-          fields: { ghost: "casper", conversation: sessionId, runtime: "pi" },
-        });
-        expect(JSON.stringify(logger.records)).not.toContain("sensitive owner activity write failure");
-      }
-    },
-  );
-
-  it("records no owner activity when re-answering fails before branch commit", async () => {
-    const recorded = recordMaintenanceTurns();
-    await setup([
-      {
-        kind: "tool",
-        name: "ask",
-        args: {
-          questions: [{
-            id: "finish",
-            question: "Which finish?",
-            options: [{ label: "Matte" }, { label: "Gloss" }],
-            recommended: 0,
-          }],
-        },
-      },
-      { kind: "text", text: "Initial matte answer." },
-    ], {
-      maintenance: recorded.maintenance,
-      title: { enabled: false },
-    }, { sequential: true });
-    const sessionId = "reanswer-precommit-failure";
-    await establishHistoricalAsk(sessionId);
-    const events: PiMessagesEvent[] = [];
-
-    await host!.runAskReanswer("casper", {
-      sessionId,
-      entryId: "missing-result-entry",
-      emit: (event) => events.push(event),
-    });
-
-    expect(events.some((event) => event.type === "branch_changed")).toBe(false);
-    expect(events.filter((event) => event.type === "done" || event.type === "error"))
-      .toEqual([expect.objectContaining({ type: "error" })]);
-    expect(recorded.activities).toEqual([]);
-    expect(recorded.finished).toHaveLength(2);
-    expect(recorded.finished[1]).toBeUndefined();
-    expect(recorded.released.count).toBe(2);
-  });
-
-  it("keeps a re-answer branch durable but emits an error when maintenance persistence rejects", async () => {
-    const recorded = recordMaintenanceTurns(async (turn) => {
-      if (turn?.ownerPrompt.includes("Gloss")) {
-        throw new Error("sensitive re-answer persistence failure");
-      }
-    });
-    await setup([
-      {
-        kind: "tool",
-        name: "ask",
-        args: {
-          questions: [{
-            id: "finish",
-            question: "Which finish?",
-            options: [{ label: "Matte" }, { label: "Gloss" }],
-            recommended: 0,
-          }],
-        },
-      },
-      { kind: "text", text: "Initial matte answer." },
-      { kind: "text", text: "Persisted gloss re-answer." },
-    ], {
-      maintenance: recorded.maintenance,
-      title: { enabled: false },
-    }, { sequential: true });
-    const initial = host!.runTurn("casper", {
-      sessionId: "strict-reanswer-maintenance",
-      prompt: "Help choose a finish.",
-      emit: () => {},
-    });
-    const firstAsk = await waitFor(() =>
-      host!.pendingAsk("casper", "strict-reanswer-maintenance")
-    );
-    host!.answerAsk("casper", "strict-reanswer-maintenance", firstAsk.id, {
-      kind: "submit",
-      results: [{ id: "finish", selectedOptions: ["Matte"] }],
-    });
-    await initial;
-    const before = await host!.readTranscript("casper", "strict-reanswer-maintenance");
-    const askCall = before.messages
-      .flatMap((message) => Array.isArray(message.content) ? message.content : [])
-      .find((part) => (part as { name?: unknown }).name === "ask") as {
-        ghostAsk?: { resultEntryId?: string };
-      };
-    expect(askCall.ghostAsk?.resultEntryId).toBeTruthy();
-    const events: PiMessagesEvent[] = [];
-    const reanswer = host!.runAskReanswer("casper", {
-      sessionId: "strict-reanswer-maintenance",
-      entryId: askCall.ghostAsk!.resultEntryId!,
-      emit: (event) => events.push(event),
-    });
-    const revisedAsk = await waitFor(() =>
-      host!.pendingAsk("casper", "strict-reanswer-maintenance")
-    );
-    host!.answerAsk("casper", "strict-reanswer-maintenance", revisedAsk.id, {
-      kind: "submit",
-      results: [{ id: "finish", selectedOptions: ["Gloss"] }],
-    });
-    await reanswer;
-
-    expect(events.filter((event) => event.type === "done" || event.type === "error"))
-      .toEqual([expect.objectContaining({
-        type: "error",
-        errorMessage: "Could not durably settle this owner turn.",
-      })]);
-    expect(JSON.stringify(events)).not.toContain("sensitive re-answer persistence failure");
-    expect(recorded.finished).toHaveLength(2);
-    expect(recorded.finished[1]).toMatchObject({
-      ownerPrompt: expect.stringContaining("Gloss"),
-      assistantText: expect.stringContaining("Persisted gloss re-answer."),
-      sourceRevision: { kind: "pi-leaf", value: expect.any(String) },
-    });
-    expect(recorded.released.count).toBe(2);
-    expect(JSON.stringify(await host!.readTranscript("casper", "strict-reanswer-maintenance")))
-      .toContain("Persisted gloss re-answer.");
-  });
-
   describe("how a historical ask settled", () => {
     const ASK_STEP = {
       kind: "tool" as const,
@@ -4447,6 +4040,14 @@ describe("SessionHost.runTurn", () => {
       await turn;
 
       expect(await settledOf("conv-submitted")).toBe("submitted");
+      const transcript = await host!.readTranscript("casper", "conv-submitted");
+      const askCall = transcript.messages
+        .flatMap((message) => Array.isArray(message.content) ? message.content : [])
+        .find((part) => (part as { name?: unknown }).name === "ask") as {
+          ghostAsk?: unknown;
+        };
+      expect(askCall.ghostAsk).toEqual({ settled: "submitted" });
+      expect(transcript.messages.every((message) => !("parentId" in message))).toBe(true);
     });
 
     it("reports a cancelled ask as cancelled", async () => {
@@ -5666,711 +5267,194 @@ describe("SessionHost.runTurn", () => {
   });
 });
 
-describe("forkConversationTitle", () => {
-  it("names a copy the way a file manager does, from the first free counter", () => {
-    expect(forkConversationTitle("Weekend trip", [])).toBe("Weekend trip (2)");
-    expect(forkConversationTitle("Weekend trip", ["Weekend trip", "Weekend trip (2)"]))
-      .toBe("Weekend trip (3)");
-    // The counter is stripped before it is re-applied, never stacked.
-    expect(forkConversationTitle("Weekend trip (2)", ["Weekend trip", "Weekend trip (2)"]))
-      .toBe("Weekend trip (3)");
-    // Untitled stays untitled; nothing here invents a name.
-    expect(forkConversationTitle(null, ["Weekend trip"])).toBeNull();
-    expect(forkConversationTitle("   ", [])).toBeNull();
-  });
-});
-
-describe("conversation branching", () => {
-  async function seedBranchable(
-    title: string | null = "Weekend trip",
-    projectBindingsFactory?: (fixture: TempGhosts) => ProjectBindingStore,
-    options: Pick<SessionHostOptions, "transactionProbe"> = {},
-  ) {
+describe("legacy fork recovery", () => {
+  async function seedLegacyFork(options: {
+    version?: 1 | 2;
+    transactionProbe?: SessionHostOptions["transactionProbe"];
+  } = {}) {
     temp = makeTempGhosts();
-    provider = await startMockProvider({ script: [{ kind: "text", text: "A branch-aware answer." }] });
+    provider = await startMockProvider({ script: [
+      { kind: "text", text: "Legacy fork answer." },
+      { kind: "text", text: "Resumed normally." },
+    ] });
     seedGhost(temp.root, {
       name: "casper",
       provider: { baseUrl: provider.url, modelId: provider.modelId },
     });
+    const bindings = new ProjectBindingStore({
+      ownerHome: temp.ownerHome,
+      trustPath: join(temp.root, "state", "legacy-fork-trust.json"),
+    });
     host = new SessionHost({
       registry: temp.registry,
       ownerHome: temp.ownerHome,
+      projectBindings: bindings,
       offline: true,
-      ...(projectBindingsFactory ? { projectBindings: projectBindingsFactory(temp) } : {}),
-      ...options,
-      title: title === null
-        ? { enabled: false }
-        : { generate: async () => title },
+      title: { enabled: false },
+      ...(options.transactionProbe ? { transactionProbe: options.transactionProbe } : {}),
     });
+    const conversationId = "legacy-fork";
     await host.runTurn("casper", {
-      sessionId: "conv-tree",
-      prompt: "Original question",
+      sessionId: conversationId,
+      prompt: "Legacy fork question",
       emit: () => {},
     });
-    await host.runTurn("casper", {
-      sessionId: "conv-tree",
-      prompt: "Original follow-up",
-      emit: () => {},
-    });
-    const original = await host.readTranscript("casper", "conv-tree");
-    return { firstUser: original.messages.find((message) => message.role === "user")! };
-  }
+    await host.close("casper", conversationId);
 
-  it("copies the conversation, rewinds the copy, and leaves the source untouched", async () => {
-    const { firstUser } = await seedBranchable();
-    const before = await host!.readTranscript("casper", "conv-tree");
-    const sessionDir = ghostPaths(join(temp!.root, "casper")).sessionDir;
-    const sourceMaintenance = maintenanceStatePath(sessionDir, "pi", "conv-tree");
-    writeFileSync(sourceMaintenance, "source maintenance must not be cloned\n", { mode: 0o600 });
-
-    const forked = await host!.forkConversation("casper", "conv-tree", firstUser.entryId);
-    expect(forked.sessionId).not.toBe("conv-tree");
-    expect(forked.draft).toBe("Original question");
-    // The copy is rewound to just before the branched message.
-    expect(forked.transcript.messages).toEqual([]);
-    expect(forked.transcript.id).toBe(forked.id);
-    expect(forked.transcript.conversationId).toBe(forked.conversationId);
-    expect(readFileSync(sourceMaintenance, "utf8")).toBe("source maintenance must not be cloned\n");
-    expect(existsSync(maintenanceStatePath(sessionDir, "pi", forked.sessionId))).toBe(false);
-
-    // The source keeps every entry, its leaf, and its title.
-    const after = await host!.readTranscript("casper", "conv-tree");
-    expect(after.messages).toEqual(before.messages);
-    expect(JSON.stringify(after.messages)).toContain("Original follow-up");
-    expect(after.title).toBe("Weekend trip");
-
-    // The copy is a first-class conversation: listed, and resumable by its id.
-    const listed = await host!.listSessions("casper");
-    expect(listed.map((row) => row.id)).toContain(forked.id);
-    await host!.runTurn("casper", {
-      sessionId: forked.sessionId,
-      prompt: "Alternative question",
-      emit: () => {},
-    });
-    const alternative = await host!.readTranscript("casper", forked.sessionId);
-    expect(JSON.stringify(alternative.messages)).toContain("Alternative question");
-    expect(JSON.stringify(alternative.messages)).not.toContain("Original follow-up");
-    // The source is still untouched after the copy has been written to.
-    expect(await host!.readTranscript("casper", "conv-tree")).toEqual(after);
-  });
-
-  it("transactionally forks the source's immutable project snapshot", async () => {
-    const { firstUser } = await seedBranchable();
-    const project = join(temp!.root, "fork-project");
-    mkdirSync(project);
-    writeFileSync(join(project, "AGENTS.md"), "PINNED-FORK-INSTRUCTION");
-    const preview = await host!.previewProject("casper", "conv-tree", "pi", project);
-    await host!.bindProject("casper", "conv-tree", "pi", {
-      root: project,
-      trustToken: preview.trustToken,
-      expectedGeneration: 0,
-    });
-    writeFileSync(join(project, "AGENTS.md"), "HOSTILE-LIVE-FORK-INSTRUCTION");
-
-    const forked = await host!.forkConversation("casper", "conv-tree", firstUser.entryId);
-    const forkProject = await host!.getProject("casper", forked.sessionId, "pi");
-    const sessionDir = ghostPaths(join(temp!.root, "casper")).sessionDir;
-    expect(existsSync(piProjectSnapshotPath(
-      sessionDir,
-      forked.sessionId,
-      forkProject.generation,
-    ))).toBe(true);
-    await host!.open("casper", forked.sessionId);
-    const childSystem = await modelSystemPrompt(forked.sessionId);
-    expect(childSystem).toContain("PINNED-FORK-INSTRUCTION");
-    expect(childSystem).not.toContain("HOSTILE-LIVE-FORK-INSTRUCTION");
-  });
-
-  it("names each copy with the next free counter and never stacks counters", async () => {
-    const { firstUser } = await seedBranchable();
-
-    const first = await host!.forkConversation("casper", "conv-tree", firstUser.entryId);
-    expect(first.title).toBe("Weekend trip (2)");
-    const second = await host!.forkConversation("casper", "conv-tree", firstUser.entryId);
-    expect(second.title).toBe("Weekend trip (3)");
-
-    // A rewound fork is durably empty. After it gets its own first turn,
-    // branching that conversation strips the counter before re-applying it.
-    await host!.runTurn("casper", {
-      sessionId: first.sessionId,
-      prompt: "Alternative question",
-      emit: () => {},
-    });
-    const copied = await host!.readTranscript("casper", first.sessionId);
-    const copiedUser = copied.messages.find((message) => message.role === "user")!;
-    const third = await host!.forkConversation("casper", first.sessionId, copiedUser.entryId);
-    expect(third.title).toBe("Weekend trip (4)");
-
-    const titles = (await host!.listSessions("casper")).map((row) => row.title);
-    expect(titles).toEqual(expect.arrayContaining([
-      "Weekend trip",
-      "Weekend trip (2)",
-      "Weekend trip (3)",
-      "Weekend trip (4)",
-    ]));
-  });
-
-  it("leaves a copy of an untitled conversation untitled", async () => {
-    const { firstUser } = await seedBranchable(null);
-    const forked = await host!.forkConversation("casper", "conv-tree", firstUser.entryId);
-    expect(forked.title).toBeNull();
-    const listed = await host!.listSessions("casper");
-    expect(listed.find((row) => row.id === forked.id)?.title).toBeNull();
-  });
-
-  it("rejects a branch off anything but a persisted user message", async () => {
-    const { firstUser } = await seedBranchable();
-    const transcript = await host!.readTranscript("casper", "conv-tree");
-    const assistant = transcript.messages.find((message) => message.role === "assistant")!;
-    await expect(host!.forkConversation("casper", "conv-tree", assistant.entryId))
-      .rejects.toMatchObject({ code: "invalid_branch", status: 400 });
-    await expect(host!.forkConversation("casper", "conv-tree", "no-such-entry"))
-      .rejects.toMatchObject({ code: "invalid_branch", status: 400 });
-    // An unknown conversation is a 404, not a new empty one to branch from.
-    await expect(host!.forkConversation("casper", "no-such-conversation", firstUser.entryId))
-      .rejects.toMatchObject({ code: "not_found", status: 404 });
-    // The rejected branches created nothing.
-    const listed = await host!.listSessions("casper");
-    expect(listed.map((row) => row.id)).toEqual(["pi:conv-tree"]);
-  });
-
-  it("refuses to branch a conversation that is still answering", async () => {
-    const { firstUser } = await seedBranchable();
-    const hosted = await host!.open("casper", "conv-tree") as unknown as { busy: boolean };
-    hosted.busy = true;
-    try {
-      await expect(host!.forkConversation("casper", "conv-tree", firstUser.entryId))
-        .rejects.toMatchObject({ code: "session_busy", status: 409 });
-    } finally {
-      hosted.busy = false;
-    }
-  });
-
-  it("keeps an in-flight fork unpublished and removes every staged artifact on failure", async () => {
-    let bindingStore!: ProjectBindingStore;
-    const cloneEntered = Promise.withResolvers<void>();
-    const releaseClone = Promise.withResolvers<void>();
-    const { firstUser } = await seedBranchable("Weekend trip", (fixture) => {
-      bindingStore = new ProjectBindingStore({
-        ownerHome: fixture.ownerHome,
-        trustPath: join(fixture.root, "state", "project-trust.json"),
-      });
-      const originalClone = bindingStore.clone.bind(bindingStore);
-      vi.spyOn(bindingStore, "clone").mockImplementation(async (...args) => {
-        cloneEntered.resolve();
-        await releaseClone.promise;
-        return originalClone(...args);
-      });
-      return bindingStore;
-    });
-
-    const fork = host!.forkConversation("casper", "conv-tree", firstUser.entryId);
-    await cloneEntered.promise;
-    expect((await host!.listSessions("casper")).map((row) => row.id))
-      .toEqual(["pi:conv-tree"]);
-    const sessionDir = ghostPaths(join(temp!.root, "casper")).sessionDir;
-    const pendingTranscript = readdirSync(sessionDir).find((name) =>
-      name.startsWith(".") && name.includes(".jsonl.") && name.endsWith(".pending"));
-    expect(pendingTranscript).toBeDefined();
-    const stagedManager = SessionManager.open(
-      join(sessionDir, pendingTranscript!),
-      sessionDir,
-      temp!.ownerHome,
-    );
-    expect(stagedManager.getBranch().some((entry) =>
-      entry.type === "message" && entry.message.role === "user")).toBe(false);
-    expect(readdirSync(sessionDir).filter((name) =>
-      name.startsWith(".ghost-fork-") && name.endsWith(".pending.json"))).toHaveLength(1);
-    releaseClone.resolve();
-    const published = await fork;
-    expect((await host!.listSessions("casper")).map((row) => row.id))
-      .toContain(published.id);
-    expect(readdirSync(sessionDir).some((name) => name.includes(".pending"))).toBe(false);
-
-    vi.restoreAllMocks();
-    vi.spyOn(bindingStore, "clone").mockRejectedValueOnce(new Error("injected sidecar failure"));
-    await expect(host!.forkConversation("casper", "conv-tree", firstUser.entryId))
-      .rejects.toThrow("injected sidecar failure");
-    expect((await host!.listSessions("casper")).map((row) => row.id).sort())
-      .toEqual([published.id, "pi:conv-tree"].sort());
-    expect(readdirSync(sessionDir).some((name) =>
-      name.includes(".pending") || name.startsWith(".ghost-fork-"))).toBe(false);
-  });
-
-  it("recovers only an already-rewound hidden fork after a publication crash", async () => {
-    const { firstUser } = await seedBranchable();
-    const project = join(temp!.root, "recover-fork-project");
-    mkdirSync(project);
-    writeFileSync(join(project, "AGENTS.md"), "PINNED-RECOVERED-FORK");
-    const preview = await host!.previewProject("casper", "conv-tree", "pi", project);
-    await host!.bindProject("casper", "conv-tree", "pi", {
-      root: project,
-      trustToken: preview.trustToken,
-      expectedGeneration: 0,
-    });
-    const forked = await host!.forkConversation("casper", "conv-tree", firstUser.entryId);
-    const sessionDir = ghostPaths(join(temp!.root, "casper")).sessionDir;
-    const transcript = join(sessionDir, sessionFileNameFor(forked.sessionId));
-    const binding = projectBindingPath(sessionDir, "pi", forked.sessionId);
-    const snapshot = piProjectSnapshotPath(sessionDir, forked.sessionId, 1);
-    const toolCwds = toolCwdsPath(sessionDir, forked.sessionId);
-    const temporaryTranscript = `${transcript}.crash.pending`;
-    const temporaryBinding = `${binding}.crash.pending`;
-    const temporarySnapshot = `${snapshot}.crash.pending`;
-    const temporaryToolCwds = `${toolCwds}.crash.pending`;
-    renameSync(transcript, temporaryTranscript);
-    renameSync(binding, temporaryBinding);
-    renameSync(snapshot, temporarySnapshot);
-    renameSync(toolCwds, temporaryToolCwds);
-    const stem = sessionFileNameFor(forked.sessionId).slice(0, -".jsonl".length);
-    writeFileSync(join(sessionDir, `.ghost-fork-${stem}.pending.json`), JSON.stringify({
-      version: 2,
-      kind: "fork",
-      conversationId: forked.sessionId,
-      tempTranscript: temporaryTranscript,
-      tempProjectBinding: temporaryBinding,
-      tempProjectSnapshot: temporarySnapshot,
-      projectSnapshotGeneration: 1,
-      tempToolCwds: temporaryToolCwds,
-    }), { mode: 0o600 });
-
-    expect((await host!.listSessions("casper")).map((row) => row.id)).toContain(forked.id);
-    expect((await host!.readTranscript("casper", forked.sessionId)).messages).toEqual([]);
-    expect(existsSync(snapshot)).toBe(true);
-    await host!.open("casper", forked.sessionId);
-    expect(await modelSystemPrompt(forked.sessionId)).toContain("PINNED-RECOVERED-FORK");
-    expect(readdirSync(sessionDir).some((name) => name.includes(".pending"))).toBe(false);
-  });
-
-  it("rejects victim, aliased, and duplicate fork paths before any cleanup", async () => {
-    const recoveryStages: Array<{ stage: string; path: string }> = [];
-    await seedBranchable("Weekend trip", undefined, {
-      transactionProbe: (stage, path) => {
-        recoveryStages.push({ stage, path });
-      },
-    });
-    const project = join(temp!.root, "fork-path-validation-project");
-    mkdirSync(project);
-    writeFileSync(join(project, "AGENTS.md"), "VICTIM-SIDECAR-MUST-SURVIVE");
-    const preview = await host!.previewProject("casper", "conv-tree", "pi", project);
-    await host!.bindProject("casper", "conv-tree", "pi", {
-      root: project,
-      trustToken: preview.trustToken,
-      expectedGeneration: 0,
-    });
-
-    const sessionDir = ghostPaths(join(temp!.root, "casper")).sessionDir;
-    const victimTranscript = join(sessionDir, sessionFileNameFor("conv-tree"));
-    const victimBinding = projectBindingPath(sessionDir, "pi", "conv-tree");
-    await writeToolCwds(
-      sessionDir,
-      "conv-tree",
-      new Map([["victim-call", temp!.ownerHome]]),
-    );
-    const victimToolCwds = toolCwdsPath(sessionDir, "conv-tree");
-    const victimBytes = new Map([
-      [victimTranscript, readFileSync(victimTranscript, "utf8")],
-      [victimBinding, readFileSync(victimBinding, "utf8")],
-      [victimToolCwds, readFileSync(victimToolCwds, "utf8")],
-    ]);
-
-    const conversationId = "fork-path-attack";
+    const sessionDir = ghostPaths(join(temp.root, "casper")).sessionDir;
     const transcript = join(sessionDir, sessionFileNameFor(conversationId));
     const binding = projectBindingPath(sessionDir, "pi", conversationId);
     const toolCwds = toolCwdsPath(sessionDir, conversationId);
-    const valid = {
-      tempTranscript: `${transcript}.safe.pending`,
-      tempProjectBinding: `${binding}.safe.pending`,
-      tempToolCwds: `${toolCwds}.safe.pending`,
-    };
+    const token = "legacy-recovery";
+    const temporaryTranscript = join(sessionDir, `.${basename(transcript)}.${token}.pending`);
+    const temporaryBinding = `${binding}.${token}.pending`;
+    const temporaryToolCwds = `${toolCwds}.${token}.pending`;
+    const project = await host.getProject("casper", conversationId, "pi");
+    await bindings.clone(sessionDir, "pi", conversationId, project, temporaryBinding);
+    await writeToolCwds(
+      sessionDir,
+      conversationId,
+      new Map([["legacy-tool", temp.ownerHome]]),
+      temporaryToolCwds,
+    );
+    renameSync(transcript, temporaryTranscript);
     const stem = sessionFileNameFor(conversationId).slice(0, -".jsonl".length);
     const marker = join(sessionDir, `.ghost-fork-${stem}.pending.json`);
-    const cases: Array<[string, Partial<typeof valid>]> = [
-      ["victim transcript", { tempTranscript: victimTranscript }],
-      ["victim sidecar", { tempProjectBinding: victimBinding }],
-      ["aliased child", {
-        tempTranscript: `${sessionDir}${sep}nested${sep}..${sep}${basename(valid.tempTranscript)}`,
-      }],
-      ["duplicate artifact", { tempToolCwds: valid.tempProjectBinding }],
-    ];
+    const version = options.version ?? 2;
+    writeFileSync(marker, JSON.stringify({
+      version,
+      kind: "fork",
+      conversationId,
+      tempTranscript: temporaryTranscript,
+      tempProjectBinding: temporaryBinding,
+      ...(version === 2
+        ? { tempProjectSnapshot: null, projectSnapshotGeneration: null }
+        : {}),
+      tempToolCwds: temporaryToolCwds,
+    }), { mode: 0o600 });
+    return {
+      conversationId,
+      sessionDir,
+      transcript,
+      binding,
+      toolCwds,
+      temporaryTranscript,
+      temporaryBinding,
+      temporaryToolCwds,
+      marker,
+    };
+  }
 
-    for (const [name, override] of cases) {
-      recoveryStages.length = 0;
-      writeFileSync(marker, `${JSON.stringify({
-        version: 2,
-        kind: "fork",
-        conversationId,
-        ...valid,
-        ...override,
-        tempProjectSnapshot: null,
-        projectSnapshotGeneration: null,
-      })}\n`, { mode: 0o600 });
+  it.each([1, 2] as const)(
+    "finishes a complete v%s publication and treats it as an ordinary conversation",
+    async (version) => {
+      const legacy = await seedLegacyFork({ version });
 
       expect((await host!.listSessions("casper")).map((row) => row.id))
-        .toContain("pi:conv-tree");
-      await expect(host!.open("casper", conversationId))
-        .rejects.toMatchObject({ code: "session_busy", status: 409 });
-      expect(existsSync(marker), name).toBe(true);
-      expect(recoveryStages, name).toEqual([]);
-      for (const [path, bytes] of victimBytes) {
-        expect(readFileSync(path, "utf8"), `${name}: ${path}`).toBe(bytes);
-      }
-      rmSync(marker);
-    }
+        .toContain(`pi:${legacy.conversationId}`);
+      expect(existsSync(legacy.marker)).toBe(false);
+      expect(existsSync(legacy.transcript)).toBe(true);
+      expect(existsSync(legacy.binding)).toBe(true);
+      expect(existsSync(legacy.toolCwds)).toBe(true);
+      expect(JSON.stringify(await host!.readTranscript("casper", legacy.conversationId)))
+        .toContain("Legacy fork question");
 
-    expect((await host!.getProject("casper", "conv-tree", "pi")).root).toBe(project);
+      await host!.runTurn("casper", {
+        sessionId: legacy.conversationId,
+        prompt: "Continue this recovered conversation",
+        emit: () => {},
+      });
+      expect(JSON.stringify(await host!.readTranscript("casper", legacy.conversationId)))
+        .toContain("Resumed normally.");
+      await expect(host!.deleteSession("casper", legacy.conversationId, "pi"))
+        .resolves.toMatchObject({ artifacts: expect.any(Array) });
+    },
+  );
+
+  it("rolls back an incomplete unpublished legacy fork", async () => {
+    const legacy = await seedLegacyFork();
+    unlinkSync(legacy.temporaryTranscript);
+
+    expect((await host!.listSessions("casper")).map((row) => row.id))
+      .not.toContain(`pi:${legacy.conversationId}`);
+    for (const path of [
+      legacy.marker,
+      legacy.transcript,
+      legacy.binding,
+      legacy.toolCwds,
+      legacy.temporaryBinding,
+      legacy.temporaryToolCwds,
+    ]) expect(existsSync(path)).toBe(false);
   });
 
-  it("keeps an active failed publication hidden until its retained marker can clean up", async () => {
-    let rejectTranscriptCleanup = true;
-    let bindingStore: ProjectBindingStore | undefined;
-    const { firstUser } = await seedBranchable(
-      "Weekend trip",
-      (fixture) => {
-        bindingStore = new ProjectBindingStore({
-          ownerHome: fixture.ownerHome,
-          trustPath: join(fixture.root, "state", "active-fork-cleanup-trust.json"),
-        });
-        return bindingStore;
-      },
-      {
-        transactionProbe: (stage, path) => {
-          if (rejectTranscriptCleanup && stage === "fork-cleanup-unlink"
-            && path.includes(".jsonl.") && path.endsWith(".pending")) {
-            throw new Error("injected active transcript cleanup failure");
-          }
-        },
-      },
-    );
-    vi.spyOn(bindingStore!, "clone").mockRejectedValueOnce(
-      new Error("injected active sidecar publication failure"),
-    );
-
-    await expect(host!.forkConversation("casper", "conv-tree", firstUser.entryId))
-      .rejects.toThrow("transaction remains pending recovery");
-    const sessionDir = ghostPaths(join(temp!.root, "casper")).sessionDir;
-    const markerName = readdirSync(sessionDir).find((name) =>
-      name.startsWith(".ghost-fork-") && name.endsWith(".pending.json")
-    );
-    expect(markerName).toBeDefined();
-    const marker = join(sessionDir, markerName!);
-    const record = JSON.parse(readFileSync(marker, "utf8")) as { conversationId: string };
-    expect((await host!.listSessions("casper")).map((row) => row.id))
-      .not.toContain(`pi:${record.conversationId}`);
-    await expect(host!.open("casper", record.conversationId))
-      .rejects.toMatchObject({ code: "session_busy", status: 409 });
-    expect(existsSync(marker)).toBe(true);
-
-    rejectTranscriptCleanup = false;
-    expect((await host!.listSessions("casper")).map((row) => row.id))
-      .not.toContain(`pi:${record.conversationId}`);
-    expect(existsSync(marker)).toBe(false);
-    expect(readdirSync(sessionDir).some((name) => name.includes(record.conversationId)))
-      .toBe(false);
-  });
-
-  it.each([
-    "fork-cleanup-verify",
-    "fork-cleanup-fsync",
-    "fork-marker-unlink",
-    "fork-marker-fsync",
-  ] as const)("retains the fork marker when %s fails", async (blockedStage) => {
-    let rejectStage = true;
-    const { firstUser } = await seedBranchable("Weekend trip", undefined, {
+  it("keeps a failed recovery hidden and retries the same publication", async () => {
+    let rejectFsync = true;
+    const legacy = await seedLegacyFork({
       transactionProbe: (stage) => {
-        if (rejectStage && stage === blockedStage) {
-          throw new Error(`injected ${blockedStage} failure`);
+        if (rejectFsync && stage === "fork-cleanup-fsync") {
+          throw new Error("injected legacy recovery fsync failure");
         }
       },
     });
 
-    await expect(host!.forkConversation("casper", "conv-tree", firstUser.entryId))
-      .rejects.toThrow();
-    const sessionDir = ghostPaths(join(temp!.root, "casper")).sessionDir;
-    const markerName = readdirSync(sessionDir).find((name) =>
-      name.startsWith(".ghost-fork-") && name.endsWith(".pending.json")
+    expect((await host!.listSessions("casper")).map((row) => row.id))
+      .not.toContain(`pi:${legacy.conversationId}`);
+    expect(existsSync(legacy.marker)).toBe(true);
+    rejectFsync = false;
+    expect((await host!.listSessions("casper")).map((row) => row.id))
+      .toContain(`pi:${legacy.conversationId}`);
+    expect(existsSync(legacy.marker)).toBe(false);
+  });
+
+  it("blocks conversation and whole-home moves while an invalid marker remains", async () => {
+    const legacy = await seedLegacyFork();
+    renameSync(legacy.temporaryTranscript, legacy.transcript);
+    writeFileSync(legacy.marker, JSON.stringify({
+      version: 2,
+      kind: "fork",
+      conversationId: legacy.conversationId,
+    }), { mode: 0o600 });
+
+    expect((await host!.listSessions("casper")).map((row) => row.id))
+      .not.toContain(`pi:${legacy.conversationId}`);
+    await expect(host!.open("casper", legacy.conversationId))
+      .rejects.toMatchObject({ code: "session_busy", status: 409 });
+    await expect(host!.deleteSession("casper", legacy.conversationId, "pi"))
+      .rejects.toMatchObject({ code: "session_busy", status: 409 });
+    const deleteMarker = join(
+      legacy.sessionDir,
+      `.ghost-delete-${sessionFileNameFor(legacy.conversationId).slice(0, -".jsonl".length)}.pi.pending.json`,
     );
-    expect(markerName).toBeDefined();
-    const marker = join(sessionDir, markerName!);
-    const record = JSON.parse(readFileSync(marker, "utf8")) as { conversationId: string };
-    expect((await host!.listSessions("casper")).map((row) => row.id))
-      .not.toContain(`pi:${record.conversationId}`);
-    await expect(host!.open("casper", record.conversationId))
-      .rejects.toMatchObject({ code: "session_busy", status: 409 });
+    expect(existsSync(deleteMarker)).toBe(false);
+    await expect(host!.renameGhost("casper", "renamed"))
+      .rejects.toMatchObject({ code: "ghost_busy", status: 409 });
+    await expect(host!.deleteGhost("casper"))
+      .rejects.toMatchObject({ code: "ghost_busy", status: 409 });
+    expect(existsSync(join(temp!.root, "casper"))).toBe(true);
 
-    rejectStage = false;
-    expect((await host!.listSessions("casper")).map((row) => row.id))
-      .not.toContain(`pi:${record.conversationId}`);
-    expect(existsSync(marker)).toBe(false);
-    expect(readdirSync(sessionDir).some((name) => name.includes(record.conversationId)))
-      .toBe(false);
+    unlinkSync(legacy.marker);
+    await expect(host!.renameGhost("casper", "renamed")).resolves.toMatchObject({ name: "renamed" });
   });
 
-  it.each([
-    "transcript",
-    "project-binding",
-    "project-snapshot",
-    "tool-cwds",
-  ] as const)(
-    "retains a failed rollback marker until the partial %s artifact is verified absent",
-    async (blockedArtifact) => {
-      let blockedPath: string | null = null;
-      let rejectCleanup = true;
-      const { firstUser } = await seedBranchable("Weekend trip", undefined, {
-        transactionProbe: (stage, path) => {
-          if (rejectCleanup && stage === "fork-cleanup-unlink" && path === blockedPath) {
-            throw new Error(`injected ${blockedArtifact} cleanup failure`);
-          }
-        },
-      });
-      const project = join(temp!.root, `fork-cleanup-${blockedArtifact}`);
-      mkdirSync(project);
-      writeFileSync(join(project, "AGENTS.md"), "PINNED-CLEANUP-SNAPSHOT");
-      const preview = await host!.previewProject("casper", "conv-tree", "pi", project);
-      await host!.bindProject("casper", "conv-tree", "pi", {
-        root: project,
-        trustToken: preview.trustToken,
-        expectedGeneration: 0,
-      });
-      const forked = await host!.forkConversation("casper", "conv-tree", firstUser.entryId);
-      const sessionDir = ghostPaths(join(temp!.root, "casper")).sessionDir;
-      const paths = {
-        transcript: join(sessionDir, sessionFileNameFor(forked.sessionId)),
-        "project-binding": projectBindingPath(sessionDir, "pi", forked.sessionId),
-        "project-snapshot": piProjectSnapshotPath(sessionDir, forked.sessionId, 1),
-        "tool-cwds": toolCwdsPath(sessionDir, forked.sessionId),
-      };
-      blockedPath = paths[blockedArtifact];
-      const missingPath = blockedArtifact === "project-binding"
-        ? paths["tool-cwds"]
-        : paths["project-binding"];
-      unlinkSync(missingPath);
-      const pending = Object.fromEntries(Object.entries(paths).map(([key, path]) =>
-        [key, `${path}.rollback.pending`]
-      )) as Record<keyof typeof paths, string>;
-      const stem = sessionFileNameFor(forked.sessionId).slice(0, -".jsonl".length);
-      const marker = join(sessionDir, `.ghost-fork-${stem}.pending.json`);
-      writeFileSync(marker, `${JSON.stringify({
-        version: 2,
-        kind: "fork",
-        conversationId: forked.sessionId,
-        tempTranscript: pending.transcript,
-        tempProjectBinding: pending["project-binding"],
-        tempProjectSnapshot: pending["project-snapshot"],
-        projectSnapshotGeneration: 1,
-        tempToolCwds: pending["tool-cwds"],
-      })}\n`, { mode: 0o600 });
-
-      expect((await host!.listSessions("casper")).map((row) => row.id))
-        .not.toContain(forked.id);
-      expect(existsSync(marker)).toBe(true);
-      expect(existsSync(blockedPath)).toBe(true);
-      await expect(host!.open("casper", forked.sessionId))
-        .rejects.toMatchObject({ code: "session_busy", status: 409 });
-
-      rejectCleanup = false;
-      expect((await host!.listSessions("casper")).map((row) => row.id))
-        .not.toContain(forked.id);
-      expect(existsSync(marker)).toBe(false);
-      for (const path of [...Object.values(paths), ...Object.values(pending)]) {
-        expect(existsSync(path)).toBe(false);
-      }
-    },
-  );
-
-  it("recovers a legacy v1 fork marker and its original three-artifact set", async () => {
-    const { firstUser } = await seedBranchable();
-    const forked = await host!.forkConversation("casper", "conv-tree", firstUser.entryId);
-    const sessionDir = ghostPaths(join(temp!.root, "casper")).sessionDir;
-    const transcript = join(sessionDir, sessionFileNameFor(forked.sessionId));
-    const binding = projectBindingPath(sessionDir, "pi", forked.sessionId);
-    const toolCwds = toolCwdsPath(sessionDir, forked.sessionId);
-    const temporaryTranscript = `${transcript}.v1.pending`;
-    const temporaryBinding = `${binding}.v1.pending`;
-    const temporaryToolCwds = `${toolCwds}.v1.pending`;
-    renameSync(transcript, temporaryTranscript);
-    renameSync(binding, temporaryBinding);
-    renameSync(toolCwds, temporaryToolCwds);
-    const stem = sessionFileNameFor(forked.sessionId).slice(0, -".jsonl".length);
-    const marker = join(sessionDir, `.ghost-fork-${stem}.pending.json`);
-    writeFileSync(marker, JSON.stringify({
-      version: 1,
-      kind: "fork",
-      conversationId: forked.sessionId,
-      tempTranscript: temporaryTranscript,
-      tempProjectBinding: temporaryBinding,
-      tempToolCwds: temporaryToolCwds,
-    }), { mode: 0o600 });
-
-    expect((await host!.listSessions("casper")).map((row) => row.id)).toContain(forked.id);
-    expect(existsSync(marker)).toBe(false);
-    expect(existsSync(transcript)).toBe(true);
-    expect(existsSync(binding)).toBe(true);
-    expect(existsSync(toolCwds)).toBe(true);
-    expect(readdirSync(sessionDir).some((name) => name.includes(".v1.pending"))).toBe(false);
-  });
-
-  it.each([1, 2] as const)(
-    "keeps a retained v%s fork marker hidden from listing and open",
-    async (version) => {
-      await seedBranchable();
-      const conversationId = "conv-tree";
-      const sessionDir = ghostPaths(join(temp!.root, "casper")).sessionDir;
-      const stem = sessionFileNameFor(conversationId).slice(0, -".jsonl".length);
-      const marker = join(sessionDir, `.ghost-fork-${stem}.pending.json`);
-      writeFileSync(marker, JSON.stringify({ version, kind: "fork", conversationId }));
-
-      expect((await host!.listSessions("casper")).map((row) => row.id))
-        .not.toContain(`pi:${conversationId}`);
-      await expect(host!.open("casper", conversationId))
-        .rejects.toMatchObject({ code: "session_busy", status: 409 });
-
-      rmSync(marker);
-      expect((await host!.listSessions("casper")).map((row) => row.id))
-        .toContain(`pi:${conversationId}`);
-    },
-  );
-
-  it("fails closed on malformed, unreadable, and dangling exact fork markers without leaking bytes", async () => {
-    const logger = recordingLogger();
-    await setup([{ kind: "text", text: "hello" }], {
-      logger,
+  it("marks in-flight legacy recovery as ghost-busy", async () => {
+    const entered = deferred();
+    const release = deferred();
+    const legacy = await seedLegacyFork({
+      transactionProbe: async (stage) => {
+        if (stage !== "fork-cleanup-fsync") return;
+        entered.resolve();
+        await release.promise;
+      },
     });
-    await host!.runTurn("casper", {
-      sessionId: "fork-marker-target",
-      prompt: "persist me",
-      emit: () => {},
-    });
-    const sessionDir = ghostPaths(temp!.registry.get("casper").dir).sessionDir;
-    const stem = sessionFileNameFor("fork-marker-target").slice(0, -".jsonl".length);
-    const marker = join(sessionDir, `.ghost-fork-${stem}.pending.json`);
-    const sentinel = "R5-FORK-MARKER-BYTES-MUST-NOT-LEAK";
-    const unrelatedStem = sessionFileNameFor("unrelated-fork-marker")
-      .slice(0, -".jsonl".length);
-    const unrelated = join(sessionDir, `.ghost-fork-${unrelatedStem}.pending.json`);
-    writeFileSync(unrelated, JSON.stringify({
-      version: 2,
-      kind: "fork",
-      conversationId: "fork-marker-target",
-      ignored: sentinel,
-    }), { mode: 0o600 });
-    expect((await host!.listSessions("casper")).map((row) => row.id))
-      .toContain("pi:fork-marker-target");
-    expect(logger.records).toContainEqual({
-      level: "error",
-      message: "fork recovery marker is invalid",
-      fields: { ghost: "casper", path: unrelated, code: "fork_marker_invalid" },
-    });
-    expect(JSON.stringify(logger.records)).not.toContain(sentinel);
-    rmSync(unrelated);
+    const recovery = host!.listSessions("casper");
+    await entered.promise;
 
-    writeFileSync(marker, `{ malformed ${sentinel}\n`, { mode: 0o600 });
-
-    expect((await host!.listSessions("casper")).map((row) => row.id))
-      .not.toContain("pi:fork-marker-target");
-    await expect(host!.open("casper", "fork-marker-target"))
-      .rejects.toMatchObject({ code: "session_busy", status: 409 });
-    await expect(host!.getProject("casper", "fork-marker-target", "pi"))
-      .rejects.toMatchObject({ code: "session_busy", status: 409 });
-    expect(JSON.stringify(logger.records)).not.toContain(sentinel);
-
-    chmodSync(marker, 0o000);
-    try {
-      expect((await host!.listSessions("casper")).map((row) => row.id))
-        .not.toContain("pi:fork-marker-target");
-      await expect(host!.open("casper", "fork-marker-target"))
-        .rejects.toMatchObject({ code: "session_busy", status: 409 });
-    } finally {
-      chmodSync(marker, 0o600);
-      rmSync(marker);
-    }
-
-    const missingTarget = join(temp!.root, sentinel);
-    symlinkSync(missingTarget, marker);
-    try {
-      expect((await host!.listSessions("casper")).map((row) => row.id))
-        .not.toContain("pi:fork-marker-target");
-      await expect(host!.getProject("casper", "fork-marker-target", "pi"))
-        .rejects.toMatchObject({ code: "session_busy", status: 409 });
-      expect(JSON.stringify(logger.records)).not.toContain(sentinel);
-    } finally {
-      rmSync(marker);
-    }
-
-    execFileSync("mkfifo", [marker]);
-    const timeout = Symbol("timeout");
-    const fifo = await Promise.race([
-      host!.listSessions("casper").then((rows) => rows.map((row) => row.id)),
-      new Promise<symbol>((resolve) => setTimeout(() => resolve(timeout), 500)),
-    ]);
-    expect(fifo).not.toBe(timeout);
-    expect(fifo).not.toContain("pi:fork-marker-target");
-    await expect(host!.open("casper", "fork-marker-target"))
-      .rejects.toMatchObject({ code: "session_busy", status: 409 });
-    rmSync(marker);
-
-    writeFileSync(marker, "x".repeat(1_048_577), { mode: 0o600 });
-    expect((await host!.listSessions("casper")).map((row) => row.id))
-      .not.toContain("pi:fork-marker-target");
-    await expect(host!.getProject("casper", "fork-marker-target", "pi"))
-      .rejects.toMatchObject({ code: "session_busy", status: 409 });
-    rmSync(marker);
-
-    expect((await host!.listSessions("casper")).map((row) => row.id))
-      .toContain("pi:fork-marker-target");
-  });
-
-  it("retains and hides a v2 fork after recovery I/O failure, then retries atomically", async () => {
-    const { firstUser } = await seedBranchable();
-    const forked = await host!.forkConversation("casper", "conv-tree", firstUser.entryId);
-    const sessionDir = ghostPaths(join(temp!.root, "casper")).sessionDir;
-    const transcript = join(sessionDir, sessionFileNameFor(forked.sessionId));
-    const binding = projectBindingPath(sessionDir, "pi", forked.sessionId);
-    const toolCwds = toolCwdsPath(sessionDir, forked.sessionId);
-    const temporaryBinding = `${binding}.io-failure.pending`;
-    const temporaryToolCwds = `${toolCwds}.io-failure.pending`;
-    const temporaryTranscript = `${transcript}.io-failure.pending`;
-    const bindingBytes = readFileSync(binding, "utf8");
-    const toolCwdBytes = readFileSync(toolCwds, "utf8");
-    renameSync(binding, temporaryBinding);
-    renameSync(toolCwds, temporaryToolCwds);
-    const stem = sessionFileNameFor(forked.sessionId).slice(0, -".jsonl".length);
-    const marker = join(sessionDir, `.ghost-fork-${stem}.pending.json`);
-    writeFileSync(marker, JSON.stringify({
-      version: 2,
-      kind: "fork",
-      conversationId: forked.sessionId,
-      tempTranscript: temporaryTranscript,
-      tempProjectBinding: temporaryBinding,
-      tempProjectSnapshot: null,
-      projectSnapshotGeneration: null,
-      tempToolCwds: temporaryToolCwds,
-    }), { mode: 0o600 });
-
-    chmodSync(sessionDir, 0o500);
-    try {
-      expect((await host!.listSessions("casper")).map((row) => row.id))
-        .not.toContain(forked.id);
-      expect(existsSync(marker)).toBe(true);
-      expect(existsSync(temporaryBinding)).toBe(true);
-      expect(existsSync(temporaryToolCwds)).toBe(true);
-      await expect(host!.open("casper", forked.sessionId))
-        .rejects.toMatchObject({ code: "session_busy", status: 409 });
-      expect(existsSync(marker)).toBe(true);
-    } finally {
-      chmodSync(sessionDir, 0o700);
-    }
-
-    expect((await host!.listSessions("casper")).map((row) => row.id))
-      .toContain(forked.id);
-    expect(existsSync(marker)).toBe(false);
-    expect(existsSync(temporaryBinding)).toBe(false);
-    expect(existsSync(temporaryToolCwds)).toBe(false);
-    expect(readFileSync(binding, "utf8")).toBe(bindingBytes);
-    expect(readFileSync(toolCwds, "utf8")).toBe(toolCwdBytes);
-    await expect(host!.open("casper", forked.sessionId)).resolves.toMatchObject({
-      sessionKey: expect.any(String),
-    });
+    await expect(host!.renameGhost("casper", "renamed"))
+      .rejects.toMatchObject({ code: "ghost_busy", status: 409 });
+    release.resolve();
+    await expect(recovery).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: `pi:${legacy.conversationId}` }),
+    ]));
   });
 });
 
@@ -6521,14 +5605,14 @@ describe("session listing", () => {
     const internals = host as unknown as {
       lifecycleAdmissions: Map<string, number>;
       opening: Map<string, Promise<unknown>>;
-      recoverForkTransactions(path: string, ghostName: string): Promise<void>;
+      recoverLegacyForkTransactions(path: string, ghostName: string): Promise<void>;
       sessions: Map<string, typeof original>;
     };
-    const recoverForkTransactions = internals.recoverForkTransactions.bind(internals);
-    vi.spyOn(internals, "recoverForkTransactions").mockImplementation(async (path, ghostName) => {
+    const recoverLegacyForkTransactions = internals.recoverLegacyForkTransactions.bind(internals);
+    vi.spyOn(internals, "recoverLegacyForkTransactions").mockImplementation(async (path, ghostName) => {
       entered.resolve();
       await release.promise;
-      await recoverForkTransactions(path, ghostName);
+      await recoverLegacyForkTransactions(path, ghostName);
     });
 
     const reopening = host!.open("casper", id);
@@ -7694,48 +6778,6 @@ describe("runtime-qualified conversation identity", () => {
     });
   });
 
-  it("migrates legacy owner state when an unpublished Pi fork is discarded", async () => {
-    const { dir } = await setup([{ kind: "text", text: "hello" }]);
-    const forkId = "branch-collision";
-    await host!.runTurn("casper", {
-      sessionId: forkId,
-      prompt: "Unpublished fork",
-      emit: () => {},
-    });
-    const sessionDir = ghostPaths(dir).sessionDir;
-    const now = new Date().toISOString();
-    const claudePath = claudeSessionMetadataPath(sessionDir, forkId);
-    writeFileSync(claudePath, JSON.stringify({
-      version: 1,
-      runtime: "claude-code",
-      conversationId: forkId,
-      sessionId: "8f0a1c1e-0000-4000-8000-000000000000",
-      created: now,
-      modified: now,
-      messageCount: 2,
-    }), { encoding: "utf8", mode: 0o600 });
-    writeFileSync(join(sessionDir, "pins.json"), JSON.stringify({ pinned: [forkId] }), "utf8");
-    writeFileSync(
-      join(sessionDir, "reads.json"),
-      JSON.stringify({ reads: { [forkId]: "2099-01-01T00:00:00.000Z" } }),
-      "utf8",
-    );
-
-    await (host as unknown as {
-      discardFork(ghostName: string, conversationId: string): Promise<void>;
-    }).discardFork("casper", forkId);
-
-    expect(existsSync(join(sessionDir, sessionFileNameFor(forkId)))).toBe(false);
-    expect(existsSync(claudePath)).toBe(true);
-    expect(JSON.parse(readFileSync(join(sessionDir, "pins.json"), "utf8"))).toEqual({
-      version: 2,
-      pinned: [`claude-code:${forkId}`],
-    });
-    expect(JSON.parse(readFileSync(join(sessionDir, "reads.json"), "utf8"))).toEqual({
-      version: 2,
-      reads: { [`claude-code:${forkId}`]: "2099-01-01T00:00:00.000Z" },
-    });
-  });
 });
 
 describe("conversation titles", () => {

@@ -1423,76 +1423,6 @@ export function createDaemonServer(options: ServerOptions): Server {
     }
   };
 
-  const handleBranch = async (
-    ghostName: string,
-    conversation: ConversationIdentity,
-    method: string,
-    request: IncomingMessage,
-    response: ServerResponse,
-  ): Promise<void> => {
-    if (method !== "POST") {
-      errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-      return;
-    }
-    const body = await readJsonBody(request, maxBodyBytes);
-    if (body === null || typeof body !== "object" || Array.isArray(body)) {
-      errorResponse(response, 400, "invalid_request", "Request body must be a JSON object.");
-      return;
-    }
-    const { action, entryId } = body as { action?: unknown; entryId?: unknown };
-    if (typeof entryId !== "string" || entryId === "") {
-      errorResponse(response, 400, "invalid_request", '"entryId" must be a non-empty string.');
-      return;
-    }
-    if (action === "fork") {
-      jsonResponse(
-        response,
-        200,
-        await options.host.forkConversation(
-          ghostName,
-          conversation.conversationId,
-          entryId,
-          conversation.runtime,
-        ),
-      );
-      return;
-    }
-    errorResponse(response, 400, "invalid_request", '"action" must be "fork".');
-  };
-
-  const handleAskReanswer = async (
-    ghostName: string,
-    conversation: ConversationIdentity,
-    method: string,
-    request: IncomingMessage,
-    response: ServerResponse,
-  ): Promise<void> => {
-    if (method !== "POST") {
-      errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-      return;
-    }
-    const body = await readJsonBody(request, maxBodyBytes);
-    if (body === null || typeof body !== "object" || Array.isArray(body)) {
-      errorResponse(response, 400, "invalid_request", "Request body must be a JSON object.");
-      return;
-    }
-    const { entryId } = body as { entryId?: unknown };
-    if (typeof entryId !== "string" || entryId === "") {
-      errorResponse(response, 400, "invalid_request", '"entryId" must be a non-empty string.');
-      return;
-    }
-    options.registry.get(ghostName);
-    await streamSessionEvents(request, response, (emit, signal) =>
-      options.host.runAskReanswer(ghostName, {
-        sessionId: conversation.conversationId,
-        runtime: conversation.runtime,
-        entryId,
-        emit,
-        signal,
-        includeThinking: options.includeThinking,
-      }));
-  };
-
   const handleAsk = async (
     ghostName: string,
     conversation: ConversationIdentity,
@@ -2120,24 +2050,6 @@ export function createDaemonServer(options: ServerOptions): Server {
             ghostName,
             decodeConversationIdentity(segments[4] ?? ""),
             method,
-            response,
-          );
-        }
-        if (segments.length === 6 && segments[3] === "sessions" && segments[5] === "branch") {
-          return await handleBranch(
-            ghostName,
-            decodeConversationIdentity(segments[4] ?? ""),
-            method,
-            request,
-            response,
-          );
-        }
-        if (segments.length === 6 && segments[3] === "sessions" && segments[5] === "reanswer") {
-          return await handleAskReanswer(
-            ghostName,
-            decodeConversationIdentity(segments[4] ?? ""),
-            method,
-            request,
             response,
           );
         }

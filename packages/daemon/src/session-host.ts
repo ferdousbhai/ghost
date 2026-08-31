@@ -23,7 +23,6 @@ import {
   type SessionEntry,
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import {
   CLAUDE_CODE_PROVIDER_ID,
   ClaudeCodeRuntime,
@@ -141,7 +140,7 @@ import { createGhostPiRuntime, type GhostPiRuntime } from "./pi-runtime.js";
 import { loadGhostSettings, type GhostSettings } from "./ghost-settings.js";
 import { loadGhostHookExtensions } from "./artifact-root.js";
 import { AskBroker, AskBrokerError, type PendingAsk } from "./ask-broker.js";
-import { AskCancelledError, createAskTool, type AskToolDetails } from "./ask-tool.js";
+import { createAskTool, type AskToolDetails } from "./ask-tool.js";
 import type { AskResultItem } from "./ask-broker.js";
 import {
   type CancelJobOutcome,
@@ -373,9 +372,7 @@ function persistedPiOwnerTurnCount(entries: readonly SessionEntry[]): number {
   return count;
 }
 
-type PiOwnerPassKind = "direct" | "collaboration" | "voice" | "reanswer";
-
-const ASK_REANSWER_OWNER_MESSAGE_TYPE = "ghost-ask-reanswer-owner";
+type PiOwnerPassKind = "direct" | "collaboration" | "voice";
 const DEFAULT_AUTO_BACKGROUND_MS = 60_000;
 const MODEL_TURN_PERSISTENCE_ERROR = "Could not durably settle this owner turn.";
 
@@ -432,9 +429,6 @@ function piOwnerEntry(entry: SessionEntry): { kind: PiOwnerPassKind; prompt: str
     };
   }
   if (entry.type !== "custom_message") return null;
-  if (entry.customType === ASK_REANSWER_OWNER_MESSAGE_TYPE) {
-    return { kind: "reanswer", prompt: entryText(entry.content) };
-  }
   if (entry.customType === LIVE_DELEGATION_MESSAGE_TYPE) {
     return { kind: "voice", prompt: entryText(entry.content) };
   }
@@ -578,7 +572,7 @@ export interface SessionHostOptions {
   ) => void | Promise<void>;
   /** Test seam for fault-injecting durable per-tool cwd publication. */
   toolCwdWriter?: typeof writeToolCwds;
-  /** Deterministic fault seam around durable fork/delete transaction boundaries. */
+  /** Fault seam around legacy fork recovery and durable delete boundaries. */
   transactionProbe?: (
     stage: SessionTransactionProbeStage,
     path: string,
@@ -675,15 +669,6 @@ type SelectedTurnRuntime =
       readonly modelId: string;
       readonly project: ClaudeProjectSnapshot;
     };
-
-export interface RunAskReanswerOptions {
-  sessionId?: string | null;
-  runtime?: ConversationRuntime;
-  entryId: string;
-  emit: (event: PiMessagesEvent) => void;
-  signal?: AbortSignal;
-  includeThinking?: boolean;
-}
 
 export interface GhostSessionHandle {
   ghost: Ghost;
@@ -847,6 +832,19 @@ function conversationTransactionStem(conversationId: string): string {
 
 function forkTransactionPath(sessionDir: string, conversationId: string): string {
   return join(sessionDir, `.ghost-fork-${conversationTransactionStem(conversationId)}.pending.json`);
+}
+
+function isLegacyForkMarkerName(name: string): boolean {
+  return name.startsWith(".ghost-fork-") && name.endsWith(".pending.json");
+}
+
+async function legacyForkMarkerNames(sessionDir: string): Promise<string[]> {
+  try {
+    return (await readdir(sessionDir)).filter(isLegacyForkMarkerName);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
 }
 
 function deleteTransactionPath(
@@ -1183,18 +1181,12 @@ export interface TranscriptMessage {
   content: unknown;
   timestamp?: number;
   entryId: string;
-  parentId: string | null;
 }
 
 export type AskSettlement = "submitted" | "cancelled" | "timedOut" | "chat";
 
-/**
- * What a persisted `ask` still offers a reader. Branching off a message forks
- * the conversation rather than walking siblings in place, so the only sibling
- * left to describe is the ask's own: re-answering commits a new one here.
- */
-export interface AskBranchNavigation {
-  resultEntryId: string;
+/** How a persisted `ask` closed, reconstructed from its tool result. */
+export interface RestoredAskStatus {
   settled: AskSettlement;
 }
 
@@ -1254,7 +1246,7 @@ function clampTranscriptOffset(offset: number | undefined): number {
  */
 function projectTranscriptMessage(
   entry: Extract<SessionEntry, { type: "message" }>,
-  askBranches: ReadonlyMap<string, AskBranchNavigation>,
+  askStatuses: ReadonlyMap<string, RestoredAskStatus>,
   failedToolCalls: ReadonlySet<string>,
   toolCwds: ReadonlyMap<string, string>,
 ): TranscriptMessage | null {
@@ -1266,7 +1258,6 @@ function projectTranscriptMessage(
       role: "assistant",
       content: [{ type: "text", text: bashExecutionToText(bashMessage) }],
       entryId: entry.id,
-      parentId: entry.parentId,
       ...(typeof bashMessage.timestamp === "number" ? { timestamp: bashMessage.timestamp } : {}),
     };
   }
@@ -1278,12 +1269,12 @@ function projectTranscriptMessage(
     ).map((part) => {
       const toolCall = part as { type?: unknown; id?: unknown } | null;
       if (toolCall?.type !== "toolCall" || typeof toolCall.id !== "string") return part;
-      const askBranch = askBranches.get(toolCall.id);
+      const askStatus = askStatuses.get(toolCall.id);
       const failed = failedToolCalls.has(toolCall.id);
       return {
         ...(part as object),
         cwd: toolCwds.get(toolCall.id) ?? null,
-        ...(askBranch ? { ghostAsk: askBranch } : {}),
+        ...(askStatus ? { ghostAsk: askStatus } : {}),
         ...(failed ? { failed: true } : {}),
       };
     });
@@ -1292,52 +1283,10 @@ function projectTranscriptMessage(
     role,
     content,
     entryId: entry.id,
-    parentId: entry.parentId,
   };
   const timestamp = (message as { timestamp?: unknown }).timestamp;
   if (typeof timestamp === "number") projected.timestamp = timestamp;
   return projected;
-}
-
-function editableUserText(content: unknown): string {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  return content
-    .filter((part): part is { type: "text"; text: string } =>
-      typeof part === "object" && part !== null
-      && (part as { type?: unknown }).type === "text"
-      && typeof (part as { text?: unknown }).text === "string")
-    .map((part) => part.text)
-    .join("");
-}
-
-const COPY_COUNTER_TITLE = /^(.*\S)\s+\((\d+)\)$/;
-
-/**
- * Name a branched-off conversation the way a file manager names a copy:
- * `<title> (2)`, then `(3)`, `(4)` as more branches come off the same base.
- *
- * The counter is stripped before it is re-applied, so branching "Weekend trip
- * (2)" gives "Weekend trip (3)" rather than "Weekend trip (2) (2)", and the
- * first free counter is chosen against the ghost's existing conversation
- * titles. An untitled source stays untitled: nothing here invents a name, and
- * a copy carries history, so the background titler will never name it either.
- */
-export function forkConversationTitle(
-  sourceTitle: string | null,
-  existingTitles: Iterable<string | null>,
-): string | null {
-  const title = sourceTitle?.trim();
-  if (!title) return null;
-  const base = COPY_COUNTER_TITLE.exec(title)?.[1] ?? title;
-  const taken = new Set<string>();
-  for (const existing of existingTitles) {
-    const normalized = existing?.trim();
-    if (normalized) taken.add(normalized);
-  }
-  let counter = 2;
-  while (taken.has(`${base} (${counter})`)) counter += 1;
-  return `${base} (${counter})`;
 }
 
 /** Carry an OMP-era title (header or `title_change`) into pi's `session_info`. */
@@ -1530,9 +1479,8 @@ export class SessionHost {
   private readonly activeTurnStops = new Map<string, ActiveTurnStop>();
   /** External open/close calls hold a conversation reservation across awaits. */
   private readonly lifecycleAdmissions = new Map<string, number>();
-  /** Fork markers owned by this process are not crash-recovered mid-publication. */
-  private readonly activeForks = new Set<string>();
-  private readonly forkRecoveries = new Map<string, Promise<void>>();
+  /** Upgrade-only recovery for pending fork markers from older Ghost releases. */
+  private readonly legacyForkRecoveries = new Map<string, Promise<void>>();
   private readonly projectTransitions = new Set<string>();
   private readonly mcpReloadGhosts = new Set<string>();
   /** Whole-home delete and rename reserve a ghost name across every await. */
@@ -1905,7 +1853,7 @@ export class SessionHost {
     }
     const ghost = this.registry.get(ghostName);
     const paths = ghostPaths(ghost.dir);
-    await this.recoverForkTransactions(paths.sessionDir, ghostName);
+    await this.recoverLegacyForkTransactions(paths.sessionDir, ghostName);
     if (await transactionMarkerEntryExists(
       forkTransactionPath(paths.sessionDir, conversationId),
     )) {
@@ -2145,7 +2093,7 @@ export class SessionHost {
   ): Promise<ProjectBindingState> {
     const ghost = this.registry.get(ghostName);
     const paths = ghostPaths(ghost.dir);
-    await this.recoverForkTransactions(paths.sessionDir, ghostName);
+    await this.recoverLegacyForkTransactions(paths.sessionDir, ghostName);
     if (runtime === "pi" && await transactionMarkerEntryExists(
       forkTransactionPath(paths.sessionDir, conversationId),
     )) {
@@ -2439,7 +2387,7 @@ export class SessionHost {
       const ghost = this.registry.get(ghostName);
       const sessionDir = ghostPaths(ghost.dir).sessionDir;
       mkdirSync(sessionDir, { recursive: true });
-      await this.recoverForkTransactions(sessionDir, ghostName);
+      await this.recoverLegacyForkTransactions(sessionDir, ghostName);
       const key = this.keyOf(ghostName, conversationId);
       const transcript = join(sessionDir, sessionFileNameFor(conversationId));
       const claudeSidecar = claudeSessionMetadataPath(sessionDir, conversationId);
@@ -5482,29 +5430,24 @@ export class SessionHost {
     await this.finishForkArtifactState(sessionDir, marker, record, artifacts, []);
   }
 
-  private recoverForkTransactions(sessionDir: string, ghostName: string): Promise<void> {
-    const existing = this.forkRecoveries.get(sessionDir);
+  private recoverLegacyForkTransactions(sessionDir: string, ghostName: string): Promise<void> {
+    const existing = this.legacyForkRecoveries.get(ghostName);
     if (existing) return existing;
-    const recovery = this.recoverForkTransactionsOnce(sessionDir, ghostName).finally(() => {
-      if (this.forkRecoveries.get(sessionDir) === recovery) {
-        this.forkRecoveries.delete(sessionDir);
+    const recovery = this.recoverLegacyForkTransactionsOnce(sessionDir, ghostName).finally(() => {
+      if (this.legacyForkRecoveries.get(ghostName) === recovery) {
+        this.legacyForkRecoveries.delete(ghostName);
       }
     });
-    this.forkRecoveries.set(sessionDir, recovery);
+    this.legacyForkRecoveries.set(ghostName, recovery);
     return recovery;
   }
 
-  private async recoverForkTransactionsOnce(sessionDir: string, ghostName: string): Promise<void> {
-    let names: string[];
-    try {
-      names = await readdir(sessionDir);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
-      throw error;
-    }
-    for (const name of names.filter((entry) => entry.startsWith(".ghost-fork-") && entry.endsWith(".pending.json"))) {
+  private async recoverLegacyForkTransactionsOnce(
+    sessionDir: string,
+    ghostName: string,
+  ): Promise<void> {
+    for (const name of await legacyForkMarkerNames(sessionDir)) {
       const marker = join(sessionDir, name);
-      if (this.activeForks.has(marker)) continue;
       let markerValidated = false;
       let conversationId: string | undefined;
       try {
@@ -5646,7 +5589,7 @@ export class SessionHost {
   ): Promise<StoredSessionRow[]> {
     const paths = ghostPaths(ghost.dir);
     mkdirSync(paths.sessionDir, { recursive: true });
-    await this.recoverForkTransactions(paths.sessionDir, ghost.name);
+    await this.recoverLegacyForkTransactions(paths.sessionDir, ghost.name);
     const [sessions, claudeSessions] = await Promise.all([
       SessionManager.listAll(paths.sessionDir),
       this.claudeCode.listSessions(ghost),
@@ -5763,17 +5706,13 @@ export class SessionHost {
   ): Transcript {
     const active = manager.getBranch();
 
-    // Which persisted `ask` a re-answer would branch from, and how that ask
-    // ended. Branching a message forks the conversation now, so the tree walk
-    // that described every sibling went with the navigator it fed.
-    const askBranches = new Map<string, AskBranchNavigation>();
+    const askStatuses = new Map<string, RestoredAskStatus>();
     const failedToolCalls = new Set<string>();
     for (const entry of active) {
       if (entry.type !== "message" || entry.message.role !== "toolResult") continue;
       if (entry.message.isError === true) failedToolCalls.add(entry.message.toolCallId);
       if (entry.message.toolName !== "ask") continue;
-      askBranches.set(entry.message.toolCallId, {
-        resultEntryId: entry.id,
+      askStatuses.set(entry.message.toolCallId, {
         settled: askSettlement(entry.message.details as AskToolDetails | undefined),
       });
     }
@@ -5781,7 +5720,7 @@ export class SessionHost {
     const all: TranscriptMessage[] = [];
     for (const entry of active) {
       if (entry.type !== "message") continue;
-      const message = projectTranscriptMessage(entry, askBranches, failedToolCalls, toolCwds);
+      const message = projectTranscriptMessage(entry, askStatuses, failedToolCalls, toolCwds);
       if (message) all.push(message);
     }
     const total = all.length;
@@ -5824,588 +5763,6 @@ export class SessionHost {
     if (claim) hosted.busy = true;
     return hosted;
   }
-
-  /**
-   * Branch off one user message into a NEW conversation, rewound to just
-   * before it, and leave the source conversation exactly as it was.
-   *
-   * A branch is a copy, not an in-file sibling: `SessionManager.forkFrom`
-   * writes every non-header entry of the source verbatim into a fresh
-   * transcript (entry ids and all), so the caller's `entryId` still resolves
-   * inside the copy and the rewind — pi's `navigateTree`, which returns the
-   * message text as `editorText` — runs on the copy alone. The source keeps
-   * its leaf, its entries, and its title.
-   */
-  async forkConversation(
-    ghostName: string,
-    conversationId: string | null | undefined,
-    entryId: string,
-    runtime: ConversationRuntime = "pi",
-  ): Promise<{
-    id: string;
-    conversationId: string;
-    runtime: "pi";
-    sessionId: string;
-    title: string | null;
-    draft: string;
-    transcript: Transcript;
-  }> {
-    assertPiConversation(runtime, "Conversation branching");
-    const ghost = this.registry.get(ghostName);
-    const paths = ghostPaths(ghost.dir);
-    const sourceId = conversationId ?? DEFAULT_SESSION_KEY;
-    const sourceFile = join(paths.sessionDir, sessionFileNameFor(sourceId));
-    // `open` would happily create the conversation being branched from; an id
-    // that names neither a live session nor a stored transcript is a 404, not a
-    // brand-new empty conversation.
-    if (!this.sessions.has(this.keyOf(ghostName, conversationId))
-      && !existsSync(sourceFile)) {
-      throw new GhostError(
-        "not_found",
-        `This ghost has no conversation ${JSON.stringify(sourceId)}.`,
-        404,
-      );
-    }
-    if (existsSync(sourceFile)) await requireSessionFileConversationId(sourceFile, sourceId);
-    const forkId = `branch-${randomUUID()}`;
-    const forkFile = join(paths.sessionDir, sessionFileNameFor(forkId));
-    const forkMarker = forkTransactionPath(paths.sessionDir, forkId);
-    const temporaryForkFile = join(
-      paths.sessionDir,
-      `.${sessionFileNameFor(forkId)}.${randomUUID()}.pending`,
-    );
-    const temporaryProjectBinding = `${projectBindingPath(paths.sessionDir, "pi", forkId)}.${randomUUID()}.pending`;
-    const temporaryToolCwds = `${toolCwdsPath(paths.sessionDir, forkId)}.${randomUUID()}.pending`;
-    let stagedFork: {
-      title: string | null;
-      draft: string;
-      transcript: Transcript;
-    } | undefined;
-    const source = await this.idleHostedSession(
-      ghostName,
-      conversationId,
-      "Wait for this conversation to finish before changing branches.",
-      true,
-    );
-    const forkProjectSnapshot = source.project.root
-      ? piProjectSnapshotPath(paths.sessionDir, forkId, source.project.generation)
-      : null;
-    const temporaryProjectSnapshot = forkProjectSnapshot
-      ? `${forkProjectSnapshot}.${randomUUID()}.pending`
-      : null;
-    const forkRecord: ForkTransactionRecord = {
-      version: 2,
-      kind: "fork",
-      conversationId: forkId,
-      tempTranscript: temporaryForkFile,
-      tempProjectBinding: temporaryProjectBinding,
-      tempProjectSnapshot: temporaryProjectSnapshot,
-      projectSnapshotGeneration: source.project.root ? source.project.generation : null,
-      tempToolCwds: temporaryToolCwds,
-    };
-    const forkArtifacts = [
-      temporaryForkFile,
-      temporaryProjectBinding,
-      ...(temporaryProjectSnapshot ? [temporaryProjectSnapshot] : []),
-      temporaryToolCwds,
-      forkFile,
-      projectBindingPath(paths.sessionDir, "pi", forkId),
-      ...(forkProjectSnapshot ? [forkProjectSnapshot] : []),
-      toolCwdsPath(paths.sessionDir, forkId),
-    ];
-    this.activeForks.add(forkMarker);
-    try {
-      await writeTransaction(forkMarker, forkRecord);
-      const sourceManager = source.session.sessionManager;
-      const entry = sourceManager.getEntry(entryId);
-      if (entry?.type !== "message" || entry.message.role !== "user") {
-        throw new GhostError("invalid_branch", "Only a persisted user message can start an editable branch.", 400);
-      }
-      // Hold the source for the copy only. It is never written to: the claim
-      // keeps a turn from appending to the transcript being copied.
-      // A title generated by the turn that just finished may still be in
-      // flight; the copy is named after it.
-      if (source.title) await source.title.catch(() => {});
-      const sourceHeader = sourceManager.getHeader();
-      if (!sourceHeader) {
-        throw new GhostError("invalid_branch", "This conversation has no transcript to branch from.", 400);
-      }
-      // Names to avoid colliding with, straight from the session listing. The
-      // full `listSessions` would also read every Claude Code sidecar and the
-      // pins, and wait on unrelated titles, for one `(n)`.
-      const title = forkConversationTitle(
-        sourceManager.getSessionName() ?? null,
-        (await SessionManager.listAll(paths.sessionDir)).map((info) => info.name ?? null),
-      );
-      // A branch is a copy rewound to just before the chosen message: the
-      // source's entries up to that message's parent, under a new header, and
-      // the copy's own title. Entry ids are kept so the caller's id resolves.
-      const kept: SessionEntry[] = entry.parentId ? sourceManager.getBranch(entry.parentId) : [];
-      const lastId = kept.at(-1)?.id ?? null;
-      const forkHeader = {
-        type: "session" as const,
-        version: sourceHeader.version,
-        id: forkId,
-        timestamp: new Date().toISOString(),
-        cwd: sourceManager.getCwd(),
-        parentSession: sourceHeader.id,
-      };
-      const forkEntries: unknown[] = [forkHeader, ...kept];
-      if (title) {
-        forkEntries.push({
-          type: "session_info",
-          id: `ghost-fork-title-${randomUUID().slice(0, 8)}`,
-          parentId: lastId,
-          timestamp: forkHeader.timestamp,
-          name: title,
-        });
-      }
-      const staged = await openFile(temporaryForkFile, "wx", 0o600);
-      try {
-        await staged.writeFile(`${forkEntries.map((item) => JSON.stringify(item)).join("\n")}\n`, "utf8");
-        await staged.sync();
-      } finally {
-        await staged.close();
-      }
-      const forked = SessionManager.open(temporaryForkFile, paths.sessionDir, sourceManager.getCwd());
-      const draft = editableUserText(entry.message.content);
-      stagedFork = {
-        title: forked.getSessionName() ?? null,
-        draft,
-        transcript: this.transcriptFromManager(forkId, forked, {}, source.toolCwds),
-      };
-      const sidecars = await Promise.allSettled([
-        this.projectBindings.clone(
-          paths.sessionDir,
-          "pi",
-          forkId,
-          source.project,
-          temporaryProjectBinding,
-          temporaryProjectSnapshot ?? undefined,
-        ),
-        writeToolCwds(paths.sessionDir, forkId, source.toolCwds, temporaryToolCwds),
-      ]);
-      const sidecarFailures = sidecars.filter(
-        (result): result is PromiseRejectedResult => result.status === "rejected",
-      );
-      const singleSidecarFailure = sidecarFailures.length === 1 ? sidecarFailures[0] : undefined;
-      if (singleSidecarFailure) throw singleSidecarFailure.reason;
-      if (sidecarFailures.length > 1) {
-        throw new AggregateError(
-          sidecarFailures.map((result) => result.reason),
-          "Fork sidecars could not be staged.",
-        );
-      }
-      const transcript = await openFile(temporaryForkFile, "r");
-      try {
-        await transcript.sync();
-      } finally {
-        await transcript.close();
-      }
-      if (temporaryProjectSnapshot && forkProjectSnapshot) {
-        await rename(temporaryProjectSnapshot, forkProjectSnapshot);
-      }
-      await rename(
-        temporaryProjectBinding,
-        projectBindingPath(paths.sessionDir, "pi", forkId),
-      );
-      await rename(temporaryToolCwds, toolCwdsPath(paths.sessionDir, forkId));
-      // The transcript is the publication barrier: list/open cannot see the
-      // fork until both required sidecars already have their final names.
-      await rename(temporaryForkFile, forkFile);
-      await this.finishForkArtifactState(
-        paths.sessionDir,
-        forkMarker,
-        forkRecord,
-        [
-          temporaryForkFile,
-          temporaryProjectBinding,
-          ...(temporaryProjectSnapshot ? [temporaryProjectSnapshot] : []),
-          temporaryToolCwds,
-        ],
-        [
-          forkFile,
-          projectBindingPath(paths.sessionDir, "pi", forkId),
-          ...(forkProjectSnapshot ? [forkProjectSnapshot] : []),
-          toolCwdsPath(paths.sessionDir, forkId),
-        ],
-      );
-    } catch (error) {
-      let cleanupError: unknown;
-      try {
-        if (await this.transactionEntryExists(forkMarker)) {
-          await this.rollbackForkTransaction(
-            paths.sessionDir,
-            forkMarker,
-            forkRecord,
-            forkArtifacts,
-          );
-        }
-      } catch (cleanupFailure) {
-        cleanupError = cleanupFailure;
-      }
-      if (cleanupError) {
-        throw new AggregateError(
-          [error, cleanupError],
-          "Fork publication failed and its transaction remains pending recovery.",
-        );
-      }
-      throw error;
-    } finally {
-      this.activeForks.delete(forkMarker);
-      await this.releaseSessionClaim(source, ghostName);
-    }
-
-    if (!stagedFork) throw new Error("Fork publication completed without a rewound snapshot.");
-    // Navigation and its durable flush happened while the transcript still
-    // had a hidden pending name. From here readers can see only that rewound
-    // snapshot; an announcement failure still retracts the publication.
-    try {
-      await this.announceConversationUpdated(ghostName, "pi", forkId);
-      return {
-        ...conversationIdentity("pi", forkId),
-        sessionId: forkId,
-        ...stagedFork,
-      };
-    } catch (error) {
-      await this.discardFork(ghostName, forkId);
-      throw error;
-    }
-  }
-
-  private async discardFork(ghostName: string, forkId: string): Promise<void> {
-    try {
-      const ghost = this.registry.get(ghostName);
-      const paths = ghostPaths(ghost.dir);
-      await this.closePi(ghostName, forkId);
-      const rowsBefore = await this.collectSessions(ghost);
-      const forkIdentity = conversationIdentity("pi", forkId);
-      const sessionFile = join(paths.sessionDir, sessionFileNameFor(forkId));
-      try {
-        if (existsSync(sessionFile)) {
-          await requireSessionFileConversationId(sessionFile, forkId);
-        }
-        await unlink(sessionFile);
-        await Promise.all([
-          unlink(projectBindingPath(paths.sessionDir, "pi", forkId)).catch(() => {}),
-          unlink(toolCwdsPath(paths.sessionDir, forkId)).catch(() => {}),
-          ...(await piProjectSnapshotPaths(paths.sessionDir, forkId))
-            .map((path) => unlink(path).catch(() => {})),
-        ]);
-        this.legacyTitles.delete(sessionFile);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      }
-      const remainingIds = new Set(rowsBefore
-        .filter((row) => row.id !== forkIdentity.id)
-        .map((row) => row.id));
-      const pinState = await readPinState(paths.sessionDir);
-      const pins = pinState.version === 1
-        ? expandLegacyPins(pinState.pinned, rowsBefore)
-        : new Set(pinState.pinned);
-      pins.delete(forkIdentity.id);
-      await writePins(paths.sessionDir, [...pins].filter((pin) => remainingIds.has(pin)));
-      const readState = await readReadState(paths.sessionDir);
-      const reads = readState.version === 1
-        ? expandLegacyReads(readState.reads, rowsBefore)
-        : { ...readState.reads };
-      delete reads[forkIdentity.id];
-      await writeReads(paths.sessionDir, Object.fromEntries(
-        Object.entries(reads).filter(([id]) => remainingIds.has(id)),
-      ));
-    } catch (error) {
-      this.logger.child({ ghost: ghostName, conversation: forkId }).warn("could not discard an abandoned branch copy", {
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
-
-  /**
-   * The persisted ask a re-answer would revise: the `ask` tool result at
-   * `entryId`, the assistant call it answered, and that call's questions.
-   */
-  private reopenableAsk(
-    hosted: HostedSession,
-    entryId: string,
-  ): {
-    questions: Parameters<ReturnType<typeof createAskTool>["execute"]>[1]["questions"];
-    assistantEntryId: string;
-    resultMessage: Extract<AgentMessage, { role: "toolResult" }>;
-  } | null {
-    const manager = hosted.session.sessionManager;
-    const entry = manager.getEntry(entryId);
-    if (entry?.type !== "message" || entry.message.role !== "toolResult" || entry.message.toolName !== "ask") {
-      return null;
-    }
-    const resultMessage = entry.message;
-    let assistantId = entry.parentId;
-    while (assistantId) {
-      const candidate = manager.getEntry(assistantId);
-      if (!candidate) return null;
-      if (candidate.type === "message" && candidate.message.role === "assistant") {
-        const call = candidate.message.content.find((part) =>
-          part.type === "toolCall" && part.id === resultMessage.toolCallId);
-        if (call?.type !== "toolCall") return null;
-        const questions = (call.arguments as { questions?: unknown } | undefined)?.questions;
-        if (!Array.isArray(questions) || questions.length === 0) return null;
-        return {
-          questions: questions as Parameters<ReturnType<typeof createAskTool>["execute"]>[1]["questions"],
-          assistantEntryId: candidate.id,
-          resultMessage,
-        };
-      }
-      assistantId = candidate.parentId;
-    }
-    return null;
-  }
-
-  /**
-   * Re-open a historical `ask`, commit the new answer as a sibling
-   * toolResult, rebuild the active branch, then resume the model on that branch.
-   */
-  async runAskReanswer(
-    ghostName: string,
-    options: RunAskReanswerOptions,
-  ): Promise<void> {
-    assertPiConversation(options.runtime ?? "pi", "Ask re-answering");
-    this.assertPiRuntime(ghostName, "Ask re-answering");
-    const conversationId = requireRawConversationId(options.sessionId ?? DEFAULT_SESSION_KEY);
-    const admissionKey = this.keyOf(ghostName, conversationId);
-    if (this.ghostMoveReserved(ghostName)) {
-      throw new GhostError("ghost_busy", "Wait for this ghost's move to finish.", 409);
-    }
-    if (this.turnAdmissions.has(admissionKey)) {
-      throw new GhostError("session_busy", "This conversation already has an owner action.", 409);
-    }
-    this.turnAdmissions.add(admissionKey);
-    const stopSettled = Promise.withResolvers<void>();
-    const activeStop: ActiveTurnStop = {
-      controller: new AbortController(),
-      runtime: "pi",
-      settled: stopSettled.promise,
-      resolveSettled: stopSettled.resolve,
-    };
-    this.activeTurnStops.set(admissionKey, activeStop);
-    const abortFromCaller = () => activeStop.controller.abort(options.signal?.reason);
-    if (options.signal?.aborted) abortFromCaller();
-    else options.signal?.addEventListener("abort", abortFromCaller, { once: true });
-    let admissionReleased = false;
-    const releaseAdmission = () => {
-      if (admissionReleased) return;
-      admissionReleased = true;
-      options.signal?.removeEventListener("abort", abortFromCaller);
-      this.turnAdmissions.delete(admissionKey);
-      if (this.activeTurnStops.get(admissionKey) === activeStop) {
-        this.activeTurnStops.delete(admissionKey);
-      }
-      activeStop.resolveSettled();
-    };
-    const maintenanceIdentity: MaintenanceIdentity = {
-      ghostName,
-      runtime: "pi",
-      conversationId,
-    };
-    const maintenanceAdmission = this.maintenance?.admitOwnerAction(maintenanceIdentity);
-    const finishMaintenance = this.maintenanceFinisher(
-      maintenanceIdentity,
-      maintenanceAdmission,
-    );
-    try {
-      await maintenanceAdmission?.ready;
-    } catch (error) {
-      await finishMaintenance();
-      releaseAdmission();
-      throw error;
-    }
-    let pendingTerminal: Extract<PiMessagesEvent, { type: "done" | "error" }> | undefined;
-    const emitAfterToolCwdDurability = (event: PiMessagesEvent) => {
-      if (event.type === "done" || event.type === "error") pendingTerminal = event;
-      else options.emit(event);
-    };
-    const adapter = createPiMessagesAdapter(emitAfterToolCwdDurability, {
-      includeThinking: options.includeThinking,
-      deferAgentEnd: true,
-      // The callback is rebound below after the session is claimed.
-      getCwd: () => this.sessions.get(this.keyOf(ghostName, options.sessionId))
-        ?.session.sessionManager.getCwd() ?? this.ownerHome,
-    });
-    let hosted: HostedSession;
-    try {
-      hosted = await this.idleHostedSession(
-        ghostName,
-        conversationId,
-        "Wait for this conversation to finish before changing this answer.",
-        true,
-      );
-    } catch (error) {
-      await finishMaintenance();
-      releaseAdmission();
-      throw error;
-    }
-    let unsubscribe: (() => void) | undefined;
-    const onAbort = () => {
-      hosted.ask.close();
-      void hosted.session.abort();
-    };
-    const syntheticId = `ask-reanswer-${options.entryId}`;
-    let settlementBarrier: PiSettlementBarrier | undefined;
-    let reanswerPass: PendingPiOwnerPass | undefined;
-    let committedActivity: MaintenanceOwnerActivity | null | undefined;
-    let turnFailure: { error: unknown; aborted: boolean } | undefined;
-    try {
-      unsubscribe = hosted.session.subscribe((event: AgentSessionEvent) => adapter.handle(asRuntimeSessionEvent(event)));
-      if (activeStop.controller.signal.aborted) onAbort();
-      else activeStop.controller.signal.addEventListener("abort", onAbort, { once: true });
-      const reopen = this.reopenableAsk(hosted, options.entryId);
-      if (!reopen) {
-        throw new GhostError(
-          "ask_not_reanswerable",
-          "That branch point is not a recoverable ask result.",
-          400,
-        );
-      }
-      adapter.handle({
-        type: "tool_execution_start",
-        toolCallId: syntheticId,
-        toolName: "ask",
-        args: { questions: reopen.questions },
-        intent: "Re-answer an earlier question",
-      });
-      this.recordToolCwd(hosted, syntheticId, hosted.session.sessionManager.getCwd());
-
-      const askTool = createAskTool({ broker: hosted.ask, timeoutMs: () => this.askTimeoutSeconds * 1000 });
-      let result: Awaited<ReturnType<typeof askTool.execute>>;
-      try {
-        result = await askTool.execute(
-          syntheticId,
-          { questions: reopen.questions },
-          activeStop.controller.signal,
-          undefined,
-          {} as never,
-        );
-      } catch (error) {
-        adapter.handle({ type: "tool_execution_end", toolCallId: syntheticId, toolName: "ask", result: undefined, isError: true });
-        throw error;
-      }
-      if (result.details.chatRedirect) {
-        throw new GhostError(
-          "ask_chat_unavailable",
-          "Chat about this is not available while re-answering a branch; submit an answer instead.",
-          409,
-        );
-      }
-      adapter.handle({
-        type: "tool_execution_end",
-        toolCallId: syntheticId,
-        toolName: "ask",
-        result,
-        isError: false,
-      });
-
-      // Commit the revised answer as a sibling tool result under the same
-      // assistant call, then rebuild the model's context on that branch.
-      const manager = hosted.session.sessionManager;
-      manager.branch(reopen.assistantEntryId);
-      const previous = reopen.resultMessage;
-      manager.appendMessage({
-        ...previous,
-        content: result.content,
-        details: result.details,
-        isError: false,
-        timestamp: Date.now(),
-      });
-      hosted.session.agent.state.messages = manager.buildSessionContext().messages;
-      committedActivity = this.piOwnerActivity(hosted);
-      options.emit({
-        type: "branch_changed",
-        transcript: this.transcriptFromManager(
-          options.sessionId ?? DEFAULT_SESSION_KEY,
-          hosted.session.sessionManager,
-          {},
-          hosted.toolCwds,
-        ),
-      });
-
-      const ownerPrompt = entryText(result.content).trim();
-      if (!ownerPrompt) {
-        throw new GhostError("ask_reanswer_failed", "The revised answer was empty.", 409);
-      }
-      reanswerPass = await this.preparePiOwnerPass(hosted, {
-        kind: "reanswer",
-        ownerPrompt,
-        signal: activeStop.controller.signal,
-        finish: finishMaintenance,
-        callerOwnsFinishOnFailure: true,
-      });
-      manager.appendCustomMessageEntry(
-        ASK_REANSWER_OWNER_MESSAGE_TYPE,
-        ownerPrompt,
-        false,
-        { attribution: "user", askResultEntryId: options.entryId },
-      );
-      settlementBarrier = this.deferPiSettlement(hosted, finishMaintenance);
-      await hosted.session.agent.continue();
-      await hosted.session.waitForIdle();
-    } catch (error) {
-      turnFailure = {
-        error: error instanceof AskCancelledError ? new Error("Ask re-answer cancelled.") : error,
-        aborted: activeStop.controller.signal.aborted,
-      };
-    } finally {
-      activeStop.controller.signal.removeEventListener("abort", onAbort);
-      try {
-        const persistedBoundary = reanswerPass
-          ? this.persistedPiPassBoundary(hosted, reanswerPass, new Set())
-          : null;
-        if (committedActivity !== undefined
-          && (!persistedBoundary || persistedBoundary === "superseded")) {
-          await this.recordPiOwnerActivity(
-            ghostName,
-            conversationId,
-            hosted,
-            committedActivity,
-          );
-        }
-        const settlement = settlementBarrier
-          ? settlementBarrier.cancel()
-            ? await this.settlePiNow(hosted, finishMaintenance)
-            : await settlementBarrier.settled
-          : await this.settlePiNow(hosted, finishMaintenance);
-        if (settlement.toolCwdError !== undefined) {
-          pendingTerminal = {
-            type: "error",
-            reason: "error",
-            usage: adapter.totalUsage(),
-            errorMessage: `Could not durably save tool working directories: ${
-              settlement.toolCwdError instanceof Error
-                ? settlement.toolCwdError.message
-                : String(settlement.toolCwdError)
-            }`,
-          };
-        } else if (settlement.settlementError !== undefined) {
-          pendingTerminal = {
-            type: "error",
-            reason: "error",
-            usage: adapter.totalUsage(),
-            errorMessage: MODEL_TURN_PERSISTENCE_ERROR,
-          };
-        } else if (turnFailure) {
-          adapter.finishError(turnFailure.error, turnFailure.aborted);
-        } else {
-          adapter.finishDone();
-        }
-        unsubscribe?.();
-        await finishMaintenance();
-        if (pendingTerminal) options.emit(pendingTerminal);
-        await this.releaseSessionClaim(hosted, ghostName);
-        await this.announceConversationUpdated(ghostName, "pi", conversationId);
-      } finally {
-        unsubscribe?.();
-        releaseAdmission();
-      }
-    }
-  }
-
   /** Drop one hosted session (aborting an in-flight turn). */
   async close(ghostName: string, sessionId?: string | null): Promise<void> {
     const conversationId = requireRawConversationId(sessionId ?? DEFAULT_SESSION_KEY);
@@ -6472,6 +5829,16 @@ export class SessionHost {
     this.deleting.add(deleteKey);
     try {
       await maintenanceReservation?.drained;
+      await this.recoverLegacyForkTransactions(paths.sessionDir, ghostName);
+      if (runtime === "pi" && await transactionMarkerEntryExists(
+        forkTransactionPath(paths.sessionDir, id),
+      )) {
+        throw new GhostError(
+          "session_busy",
+          "This legacy conversation publication still needs recovery.",
+          409,
+        );
+      }
       const draftMarker = draftAbandonTransactionPath(paths.sessionDir, runtime, id);
       const draftState = await transactionMarkerState(
         draftMarker,
@@ -6763,6 +6130,17 @@ export class SessionHost {
    * dispose every session holding a path inside it.
    */
   private async quiesceGhost(ghostName: string): Promise<void> {
+    const ghost = this.registry.get(ghostName);
+    const sessionDir = ghostPaths(ghost.dir).sessionDir;
+    await this.recoverLegacyForkTransactions(sessionDir, ghostName);
+    const legacyForkMarkers = await legacyForkMarkerNames(sessionDir);
+    if (legacyForkMarkers.length > 0) {
+      throw new GhostError(
+        "ghost_busy",
+        "Finish recovering legacy conversation publications before moving this ghost.",
+        409,
+      );
+    }
     const alreadyClosing = [...this.closing.entries()]
       .filter(([key]) => sessionKeyParts(key)[0] === ghostName)
       .map(([, closing]) => closing.promise);
@@ -6794,6 +6172,7 @@ export class SessionHost {
   }
 
   private ghostBusy(ghostName: string): boolean {
+    if (this.legacyForkRecoveries.has(ghostName)) return true;
     for (const key of this.turnAdmissions) {
       if (sessionKeyParts(key)[0] === ghostName) return true;
     }

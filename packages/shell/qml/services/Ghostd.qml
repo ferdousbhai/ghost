@@ -884,10 +884,6 @@ Singleton {
     /** Non-empty when a sessions/transcript fetch failed. */
     property string sessionsError: ""
     property string deletingSessionId: ""
-    /** Why the last branch refused, or "". Kept apart from `sessionsError`:
-        that one renders in the conversation list, and a branch is asked for
-        from a message, half a window away from it. */
-    property string branchError: ""
     property bool hudVisible: false
 
     // The ghost's opening line for an empty chat. Pure upside: the HUD paints
@@ -923,7 +919,6 @@ Singleton {
 
     signal turnFinished(string ghost, string text)
     signal turnFailed(string ghost, string message)
-    signal branchDraftReady(string text)
     signal mcpMutationFinished(string action, string server, bool ok)
     signal liveActionFinished(string action, bool ok)
     signal collabActionFinished(string action, bool writable, bool ok)
@@ -1047,8 +1042,6 @@ Singleton {
     property var askSubmitRequest: null
     /** Test seam; production constructs a native QML XHR. */
     property var stopRequestFactory: null
-    property var branchRequest: null
-    property var branchRequestFactory: null
 
     property var sessionIds: ({})     // ghost name -> runtime-qualified active id
     property var turnStates: ({})
@@ -1951,7 +1944,6 @@ Singleton {
             root.resetInteractionStateFor(state);
         }
         root.clearTurnProjection();
-        root.branchError = "";
     }
 
     function flushLiveTurns(): void {
@@ -3426,12 +3418,7 @@ Singleton {
         });
     }
 
-    /**
-     * Make one conversation the ghost's active one, clearing everything the
-     * last one owned. Shared with branching, which lands the user in the copy
-     * it just made: without this the source's pending ask and errors would
-     * follow them into a conversation that never had them.
-     */
+    /** Make one conversation active and clear state owned by the previous one. */
     function adoptConversation(ghost: string, id: string): void {
         const previous = root.activeTurnState(false);
         if (previous) {
@@ -3531,11 +3518,6 @@ Singleton {
     function newTranscriptRequest(): var {
         return root.transcriptRequestFactory
             ? root.transcriptRequestFactory() : new XMLHttpRequest();
-    }
-
-    function newBranchRequest(): var {
-        return root.branchRequestFactory
-            ? root.branchRequestFactory() : new XMLHttpRequest();
     }
 
     function transcriptLoadIsCurrent(state: var, load: var, xhr: var): bool {
@@ -3678,10 +3660,8 @@ Singleton {
      * across five rows and a preamble is severed from the tool call that made
      * it one.
      *
-     * A text-less row survives when it still carries tool activity. That is the
-     * only thing standing between an unanswered `ask` and a dead conversation:
-     * its message is a lone `toolCall` part, so dropping the row takes the
-     * card's re-answer branch with it and the question can never be answered.
+     * A text-less row survives when it still carries tool activity, including
+     * an `ask` card whose question and settlement remain useful after reload.
      */
     function rehydrate(messages: var): void {
         const state = root.activeTurnState(true);
@@ -3803,7 +3783,6 @@ Singleton {
                 cwd: typeof part.cwd === "string" ? part.cwd : "",
                 summary: "",
                 intent: "",
-                askBranch: part.ghostAsk || null,
                 // How the question actually settled, so a restored card can stop
                 // reporting an answer for one that was cancelled or timed out.
                 // "" for a runtime that does not say, which the card reads as
@@ -3812,106 +3791,6 @@ Singleton {
                     ? part.ghostAsk.settled : ""
             }));
     }
-
-    /**
-     * Branch off a user message into a conversation of its own.
-     *
-     * The daemon copies the thread up to (not including) that message into a
-     * brand-new conversation and hands back its id, title, transcript, and the
-     * branched text as a draft. The source thread is left exactly as it was —
-     * a second answer to the same question is a second thread, not an
-     * overwrite of the first, so nothing the ghost already said is spent to
-     * ask again.
-     *
-     * So the shell moves the user *into* the copy the way opening a
-     * conversation from the sidebar would: same active-session bookkeeping,
-     * same rehydrate, plus a re-list because the new row does not exist in the
-     * listing the sidebar is showing.
-     */
-    function branchFrom(entryId: string): void {
-        const ghost = root.activeGhost;
-        const sessionId = root.currentSessionId;
-        if (ghost === "" || sessionId === "" || entryId === "") return;
-        // A running turn owns the tree. Say so rather than swallowing the click.
-        if (root.streaming) {
-            root.branchError = "Wait for this answer to finish before branching.";
-            return;
-        }
-        root.branchError = "";
-        const xhr = root.newBranchRequest();
-        root.branchRequest = xhr;
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.branchRequest) return;
-            // A branch of a conversation the user has since left is not theirs.
-            if (ghost !== root.activeGhost || sessionId !== root.currentSessionId) return;
-            if (xhr.status === 200) {
-                try {
-                    const body = JSON.parse(xhr.responseText);
-                    const branched = typeof body.id === "string" ? body.id : "";
-                    if (branched === "" || body.runtime !== "pi"
-                            || typeof body.conversationId !== "string"
-                            || body.conversationId === ""
-                            || branched !== root.conversationActionId(
-                                body.runtime, body.conversationId)
-                            || body.sessionId !== body.conversationId
-                            || !body.transcript
-                            || body.transcript.id !== branched
-                            || body.transcript.conversationId !== body.conversationId
-                            || body.transcript.runtime !== body.runtime
-                            || !Array.isArray(body.transcript.messages)) {
-                        root.branchError = "ghostd branched into no conversation";
-                        return;
-                    }
-                    const state = root.ensureTurnState(
-                        ghost, branched, body.conversationId, body.runtime);
-                    if (!state) {
-                        root.branchError = "ghostd branched into no conversation";
-                        return;
-                    }
-                    root.adoptConversation(ghost, branched);
-                    // POST carries the daemon's default transcript page, which may
-                    // omit a deep branch's tail. Publish only the bounded pager's
-                    // fully validated assembly so branching and reopening have the
-                    // same complete-history semantics.
-                    root.loadConversationTranscript(state, false);
-                    root.branchError = "";
-                    root.sessionsError = "";
-                    root.fetchSessions(ghost);
-                    root.branchDraftReady(typeof body.draft === "string" ? body.draft : "");
-                } catch (error) {
-                    root.branchError = "ghostd sent malformed branch state";
-                }
-            } else {
-                root.branchError = root.describeError(xhr, "branch conversation");
-            }
-        };
-        root.dispatch(xhr, "POST", "/api/ghosts/" + encodeURIComponent(ghost)
-            + "/sessions/" + encodeURIComponent(sessionId) + "/branch",
-            ({ "Content-Type": "application/json" }),
-            JSON.stringify({ action: "fork", entryId: entryId }));
-    }
-
-    function reanswerHistoricalAsk(entryId: string): void {
-        const ghost = root.activeGhost;
-        const sessionId = root.currentSessionId;
-        if (root.streaming || ghost === "" || sessionId === "" || entryId === "") return;
-        const state = root.ensureTurnState(ghost, sessionId);
-        root.captureActiveTurn(state);
-        root.beginTurnFor(state);
-
-        const xhr = new XMLHttpRequest();
-        state.request = xhr;
-        root.projectTurnFields(state);
-        xhr.onreadystatechange = function () {
-            root.readTurnStream(xhr, state.key,
-                "re-answer ask", "the re-answer stream ended mid-turn");
-        };
-        root.dispatch(xhr, "POST", "/api/ghosts/" + encodeURIComponent(ghost)
-            + "/sessions/" + encodeURIComponent(sessionId) + "/reanswer",
-            ({ "Content-Type": "application/json", "Accept": "text/event-stream" }),
-            JSON.stringify({ entryId: entryId }));
-    }
-
 
     function send(text: string): void {
         const prompt = text.trim();
@@ -4352,21 +4231,6 @@ Singleton {
             state.activity = event.phase === "applied"
                 ? "switching model · " + event.to
                 : "using fallback · " + event.model;
-            break;
-        case "branch_changed":
-            if (!root.transcriptMatchesIdentity(event.transcript, state)) {
-                root.endTurnState(state, "ghostd sent mismatched branch state");
-                break;
-            }
-            root.rehydrateTurn(state, event.transcript.messages);
-            root.appendTurnRow(state, {
-                role: "assistant", text: "", tools: "", toolActivity: [], error: "", pending: true,
-                entryId: ""
-            });
-            state.assistantRow = state.rows.length - 1;
-            root.resetAssistantSegmentFor(state);
-            state.activity = "";
-            state.statusText = "";
             break;
         case "done":
             root.endTurnState(state, "");

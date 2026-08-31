@@ -267,7 +267,7 @@ data. It cannot access Documents, character, deletion, network/MCP, shell, or
 general session tools. A new owner action, conversation delete, whole-home move,
 or shutdown aborts and drains background work before proceeding. Its exact
 mode-0600 v1 state is stored per runtime-qualified conversation beside the
-transcript and is never cloned during fork. Recovery replays only the exact
+transcript and is never copied to another conversation. Recovery replays only the exact
 journaled bytes when the current memory still matches the stored `before`
 digest; it never asks a model to reconstruct an interrupted write. A transient,
 aborted, or model failure which leaves pending turns arms one fixed 60-second

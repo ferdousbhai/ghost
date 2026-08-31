@@ -31,10 +31,7 @@ Item {
     required property var activities
     required property string failure
     required property bool busy
-    required property string sourceEntryId
     required property int rowIndex
-
-    signal branchRequested(string entryId)
 
     readonly property bool mine: root.speaker === "user"
     readonly property bool commandOutput: root.speaker === "command"
@@ -45,8 +42,8 @@ Item {
      * about — the orb narrated that while it happened, and then it stopped
      * being interesting — so a settled turn keeps only the calls a reader still
      * needs: the ones that failed, because a silent failure is how you get a
-     * confidently wrong answer, and `ask`, whose card carries the re-answer
-     * branch. Everything else is one click away, never in the reading column.
+     * confidently wrong answer, and `ask`, whose card preserves the question
+     * and outcome. Everything else is one click away, never in the reading column.
      */
     property bool toolsOpen: false
     // A JS array handed to a ListModel role comes back out as a nested
@@ -258,9 +255,8 @@ Item {
                     // A ghost's row earns actions for its reply or for the
                     // trail it is holding back. A turn spent entirely on tool
                     // calls has only the latter.
-                    visible: !root.busy && (root.mine
-                        ? (root.body !== "" && root.sourceEntryId !== "")
-                        : (root.body !== "" || root.quietToolCount > 0))
+                    visible: !root.busy && !root.mine
+                        && (root.body !== "" || root.quietToolCount > 0)
                     spacing: Theme.gap
                     x: messageActions.fitsInline ? messageActions.inlineX : 0
                     y: messageActions.fitsInline
@@ -294,47 +290,6 @@ Item {
                             onClicked: Quickshell.clipboardText = root.body
                         }
                     }
-
-                    Item {
-                        id: editAction
-
-                        visible: root.mine && root.sourceEntryId !== ""
-                        // A running turn owns the conversation. On hover it
-                        // stays dimmed, so the click can answer above the
-                        // composer instead of vanishing under the pointer.
-                        opacity: messageHover.hovered
-                            ? (Ghostd.streaming ? 0.4 : 1) : 0
-                        width: 16
-                        height: 16
-                        Accessible.role: Accessible.Button
-                        Accessible.name: "Edit message"
-
-                        PencilGlyph {
-                            width: parent.width
-                            height: parent.height
-                            y: -1
-                            size: editAction.width
-                            tint: editArea.containsMouse
-                                ? Theme.ghostAmberBright : Theme.foregroundFaint
-                        }
-
-                        MouseArea {
-                            id: editArea
-                            anchors.fill: parent
-                            anchors.margins: -Theme.gap / 2
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            // The HUD owns what happens next: editing copies
-                            // the thread into a new conversation and hands
-                            // this message's text to the composer, which may
-                            // already hold something worth asking about first.
-                            onClicked: root.branchRequested(root.sourceEntryId)
-                        }
-                    }
-
-                    // No sibling navigator lives here any more. An edit starts
-                    // its own conversation, so the way back to the other answer
-                    // is the sidebar — where every other thread is reached.
 
                     // The trail, for when something did need checking after
                     // all. A count rather than a glyph: it is the only thing

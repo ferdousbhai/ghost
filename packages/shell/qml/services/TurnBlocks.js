@@ -107,10 +107,9 @@ function partsOf(message) {
  * otherwise scatter across five rows, with each preamble severed from the tool
  * call that made it one.
  *
- * A row with no text survives when it still holds a tool call. That is the only
- * thing standing between an unanswered `ask` and a dead conversation: its
- * message is a lone `toolCall` part, so dropping the row takes the card's
- * re-answer branch with it and the question can never be answered.
+ * A row with no text survives when it still holds a tool call. A restored
+ * `ask`, for example, may be a lone tool-call part whose question and outcome
+ * still belong in the transcript.
  *
  * Returns `[{ role, text, parts, entryId }]`; `parts` is the row's ordered
  * content, for a caller that recovers tool cards from it.

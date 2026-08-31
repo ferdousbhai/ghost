@@ -21,7 +21,6 @@ McpBrowser 1.0 McpBrowser.qml
 MemoryList 1.0 MemoryList.qml
 ModelLogin 1.0 ModelLogin.qml
 ModelSwitcher 1.0 ModelSwitcher.qml
-PencilGlyph 1.0 PencilGlyph.qml
 ProjectChip 1.0 ProjectChip.qml
 RemoteAccess 1.0 RemoteAccess.qml
 Roster 1.0 Roster.qml

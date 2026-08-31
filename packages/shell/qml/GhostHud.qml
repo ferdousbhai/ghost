@@ -65,36 +65,10 @@ FloatingWindow {
     property string pendingDeleteSessionId: ""
     property string pendingDeleteTitle: ""
     property string pendingDeleteGhost: ""
-    /** The message a branch would fork from, held while the composer's own
-        draft is being asked about, or "". */
-    property string pendingBranchEntryId: ""
-
     function dismissDelete(): void {
         hud.pendingDeleteSessionId = "";
         hud.pendingDeleteTitle = "";
         Ghostd.sessionsError = "";
-        composer.take();
-    }
-
-    /**
-     * Branch from a message. The copy the daemon makes is a new conversation,
-     * so nothing already said is at risk — but the branched text lands in the
-     * composer, overwriting whatever is in it, so an unsent draft gets a
-     * question first. It is the one thing here nothing else can recover.
-     */
-    function requestBranch(entryId: string): void {
-        if (entryId === "") return;
-        if (!composer.hasDraft) {
-            Ghostd.branchFrom(entryId);
-            return;
-        }
-        hud.pendingDeleteSessionId = "";
-        hud.pendingDeleteGhost = "";
-        hud.pendingBranchEntryId = entryId;
-    }
-
-    function dismissBranch(): void {
-        hud.pendingBranchEntryId = "";
         composer.take();
     }
 
@@ -279,9 +253,6 @@ FloatingWindow {
                 event.accepted = true;
             } else if (hud.pendingDeleteGhost !== "") {
                 hud.dismissBanish();
-                event.accepted = true;
-            } else if (hud.pendingBranchEntryId !== "") {
-                hud.dismissBranch();
                 event.accepted = true;
             } else if (projectChip.panelOpen) {
                 projectChip.hide();
@@ -689,7 +660,6 @@ FloatingWindow {
                             required property var toolActivity
                             required property string error
                             required property bool pending
-                            required property string entryId
                             required property int index
 
                             width: transcriptView.width
@@ -700,8 +670,6 @@ FloatingWindow {
                             activities: toolActivity
                             failure: error
                             busy: pending
-                            sourceEntryId: entryId
-                            onBranchRequested: id => hud.requestBranch(id)
                         }
 
                         onContentYChanged: pinned = contentY >= contentHeight - height - 40
@@ -973,25 +941,6 @@ FloatingWindow {
                         wrapMode: Text.Wrap
                     }
 
-                    // A branch that refused. It belongs here, under the
-                    // transcript it would have forked, and clears itself on
-                    // the next attempt or on a click.
-                    Text {
-                        visible: Ghostd.branchError !== ""
-                        Layout.fillWidth: true
-                        text: Ghostd.branchError
-                        color: Theme.ghostRose
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSizeSmall
-                        wrapMode: Text.Wrap
-
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: Ghostd.branchError = ""
-                        }
-                    }
-
                     AskDialog {
                         visible: Ghostd.pendingAsk !== null
                         Layout.fillWidth: true
@@ -1198,27 +1147,6 @@ FloatingWindow {
             onDismissed: hud.dismissDelete()
         }
 
-        // Branching overwrites the composer with the branched message's text.
-        // Only asked when that would cost something the user typed.
-        ConfirmDialog {
-            id: branchDialog
-
-            anchors.fill: parent
-            open: hud.pendingBranchEntryId !== ""
-            title: "Replace what you're typing?"
-            body: "Branching opens a copy of this conversation and puts that "
-                + "message's text in the composer. What you have typed there "
-                + "now is not saved anywhere."
-            confirmText: "Replace"
-            destructive: false
-            onConfirmed: {
-                const entryId = hud.pendingBranchEntryId;
-                hud.pendingBranchEntryId = "";
-                Ghostd.branchFrom(entryId);
-            }
-            onDismissed: hud.dismissBranch()
-        }
-
         // Banishing a ghost is the same question one notch louder: the daemon
         // wants the name echoed back byte for byte, so the dialog collects it.
         ConfirmDialog {
@@ -1278,10 +1206,6 @@ FloatingWindow {
             }
             function onModelSwitchNeedsLogin(provider: string): void {
                 hud.openLoginForSelectedModel();
-            }
-            function onBranchDraftReady(text: string): void {
-                composer.text = text;
-                composer.take();
             }
         }
     }

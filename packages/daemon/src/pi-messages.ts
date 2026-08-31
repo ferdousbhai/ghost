@@ -106,10 +106,6 @@ export type PiMessagesEvent =
       role: string;
     }
   | {
-      type: "branch_changed";
-      transcript: TranscriptWireView;
-    }
-  | {
       type: "model_fallback";
       phase: "succeeded";
       model: string;
@@ -128,14 +124,6 @@ export type PiMessagesEvent =
       errorMessage?: string;
       responseId?: string;
     };
-
-export interface TranscriptWireView {
-  id: string;
-  title: string | null;
-  messages: unknown[];
-  total: number;
-  truncated: boolean;
-}
 
 export function encodeSseEvent(event: unknown): string {
   return `data: ${JSON.stringify(event)}\n\n`;

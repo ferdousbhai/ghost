@@ -8,7 +8,6 @@ TestCase {
     property var requests: []
     property var availableRequests: []
     property var deleteRequests: []
-    property var branchRequests: []
 
     function fakeRequest(bucket: var): var {
         const xhr = {
@@ -51,8 +50,7 @@ TestCase {
             result.push({
                 role: "user",
                 content: "message-" + index,
-                entryId: "entry-" + index,
-                parentId: index === 0 ? null : "entry-" + (index - 1)
+                entryId: "entry-" + index
             });
         }
         return result;
@@ -96,7 +94,6 @@ TestCase {
         requests = [];
         availableRequests = [];
         deleteRequests = [];
-        branchRequests = [];
         Ghostd.transcriptRequestFactory = function () {
             return fakeRequest(requests);
         };
@@ -106,9 +103,6 @@ TestCase {
         Ghostd.deleteSessionRequestFactory = function () {
             return fakeRequest(deleteRequests);
         };
-        Ghostd.branchRequestFactory = function () {
-            return fakeRequest(branchRequests);
-        };
     }
 
     function cleanup(): void {
@@ -116,7 +110,6 @@ TestCase {
         Ghostd.transcriptRequestFactory = null;
         Ghostd.availableModelsRequestFactory = null;
         Ghostd.deleteSessionRequestFactory = null;
-        Ghostd.branchRequestFactory = null;
         Ghostd.turnStates = ({});
         Ghostd.currentSessionId = "";
         Ghostd.clearTurnProjection();
@@ -151,54 +144,6 @@ TestCase {
         const ids = new Set(state.rows.map(function (row) { return row.entryId; }));
         compare(ids.size, 1005);
         compare(Ghostd.sessionsError, "");
-    }
-
-    function test_deepBranchLoadsCompleteHistoryInsteadOfAdoptingInlinePage(): void {
-        activeState("source");
-
-        Ghostd.branchFrom("entry-1005");
-        compare(branchRequests.length, 1);
-        compare(branchRequests[0].method, "POST");
-        verify(branchRequests[0].url.indexOf("/sessions/pi%3Asource/branch") >= 0);
-
-        const branched = {
-            sessionId: "pi:branched",
-            conversationId: "branched",
-            runtime: "pi"
-        };
-        branchRequests[0].complete(200, {
-            id: branched.sessionId,
-            conversationId: branched.conversationId,
-            runtime: branched.runtime,
-            sessionId: branched.conversationId,
-            title: null,
-            draft: "message-1005",
-            // The branch POST uses the daemon's default limit and is therefore
-            // not authoritative for a deep history.
-            transcript: page(branched, messages(0, 1000), 1005, true)
-        });
-
-        compare(Ghostd.currentSessionId, branched.sessionId);
-        compare(Ghostd.transcript.count, 0);
-        compare(requests.length, 1);
-        verify(requests[0].url.indexOf("/sessions/pi%3Abranched/transcript") >= 0);
-        verify(requests[0].url.endsWith("?limit=1000&offset=0"));
-
-        requests[0].complete(200,
-            page(branched, messages(0, 1000), 1005, true));
-        compare(requests.length, 2);
-        compare(Ghostd.transcript.count, 0);
-        verify(requests[1].url.endsWith("?limit=1000&offset=1000"));
-        requests[1].complete(200,
-            page(branched, messages(1000, 5), 1005, true));
-
-        compare(Ghostd.transcript.count, 1005);
-        compare(Ghostd.transcript.get(0).text, "message-0");
-        compare(Ghostd.transcript.get(999).text, "message-999");
-        compare(Ghostd.transcript.get(1000).text, "message-1000");
-        compare(Ghostd.transcript.get(1004).text, "message-1004");
-        compare(Ghostd.sessionsError, "");
-        compare(Ghostd.branchError, "");
     }
 
     function test_emptyPageCompletesAndClearsOldRows(): void {

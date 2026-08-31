@@ -120,8 +120,7 @@ TestCase {
     function test_unansweredAskSurvivesWithNoTextBesideIt(): void {
         // The shape that broke a real conversation: the app closed on an open
         // question, so the turn's last message is a lone `ask` call. Drop that
-        // row and the card's re-answer branch goes with it, leaving a question
-        // nobody can ever answer.
+        // row and the card's question and outcome disappear from history.
         const rows = TurnBlocks.rows([
             { role: "user", content: [{ type: "text", text: "let's delete it" }], entryId: "u1" },
             {
@@ -131,7 +130,7 @@ TestCase {
                     type: "toolCall",
                     id: "call_1",
                     name: "ask",
-                    ghostAsk: { index: 0, count: 1, resultEntryId: "c8495d57" }
+                    ghostAsk: { settled: "timedOut" }
                 }]
             },
             { role: "assistant", content: [], entryId: "a2" }
@@ -141,7 +140,7 @@ TestCase {
         compare(rows[1].text, "");
         compare(rows[1].parts.length, 1);
         compare(rows[1].parts[0].name, "ask");
-        compare(rows[1].parts[0].ghostAsk.resultEntryId, "c8495d57");
+        compare(rows[1].parts[0].ghostAsk.settled, "timedOut");
     }
 
     function test_oneTurnSplitAcrossMessagesBecomesOneRow(): void {

@@ -341,7 +341,7 @@ const MOCK_COMMANDS = [
     subcommands: [{ name: "show" }, { name: "list" }],
     source: "built-in",
     availability: "unsupported",
-    unavailableReason: "Ghost forks conversations instead of rewinding an in-place tree.",
+    unavailableReason: "Conversation branching is not available in Ghost.",
   },
   {
     name: "settings",
@@ -604,19 +604,16 @@ if (OWNS_GHOSTS_ROOT) {
 /** @type {Map<string, Map<string, { id, title, createdAt, updatedAt, messages }>>} */
 const sessionStore = new Map();
 
-// Persisted messages carry an `entryId`; the branch glyph is bound to it, so a
-// transcript without one has nothing to branch from and the surface cannot be
-// demoed at all. Opaque and monotonic here, as it is in a real transcript.
+// Persisted messages carry an opaque `entryId`, as the real paged transcript
+// does, so the HUD can reject repeated or inconsistent pages.
 let entrySeq = 0;
-let forkSeq = 0;
 const nextEntryId = () => `entry-${++entrySeq}`;
 const entry = (message) => ({ ...message, entryId: nextEntryId() });
 
 /**
- * The two questions the seeded transcript timed out on. They are the live ask
- * again when that card is re-answered, so they live where both readers reach
- * them. The first recommends an option; the second recommends nothing, which is
- * the other thing a restored card has to be able to say.
+ * The two questions the seeded transcript timed out on. The first recommends
+ * an option; the second recommends nothing, which is the other thing a
+ * restored card has to be able to say honestly.
  */
 const SEEDED_QUESTIONS = {
   notes: {
@@ -655,21 +652,19 @@ function ghostSessions(name) {
     // turn produces them on demand, so unless they are in the seed there is
     // nothing to open. `content` as an ordered part list is the stored shape
     // that can carry them (TurnBlocks.partsOf); a plain string cannot.
-    const notesResult = nextEntryId();
-    const archiveResult = nextEntryId();
     const notesAsk = {
       type: "toolCall",
       id: "call-seed-ask-notes",
       name: "ask",
       arguments: { questions: [SEEDED_QUESTIONS.notes] },
-      ghostAsk: { resultEntryId: notesResult, settled: "timedOut" },
+      ghostAsk: { settled: "timedOut" },
     };
     const archiveAsk = {
       type: "toolCall",
       id: "call-seed-ask-archive",
       name: "ask",
       arguments: { questions: [SEEDED_QUESTIONS.archive] },
-      ghostAsk: { resultEntryId: archiveResult, settled: "timedOut" },
+      ghostAsk: { settled: "timedOut" },
     };
     const titled = {
       ...conversationIdentity("pi", `sess-${name}-1`),
@@ -680,7 +675,7 @@ function ghostSessions(name) {
         entry({ role: "user", content: "hello, who lives here?", timestamp: now - 7_200_000 }),
         entry({ role: "assistant", content: `I'm **${name}**. This thread was seeded by the mock so resume has history to show.`, timestamp: now - 7_195_000 }),
         entry({ role: "user", content: "and what do you remember about me?", timestamp: now - 3_610_000 }),
-        entry({ role: "assistant", content: "Nothing yet — but branch that question and you get a second thread to ask it differently.", timestamp: now - 3_609_000 }),
+        entry({ role: "assistant", content: "Nothing yet — ask me again whenever you want to take it differently.", timestamp: now - 3_609_000 }),
         entry({ role: "user", content: "open the current HUD plan and tell me what's left", timestamp: now - 3_608_000 }),
         entry({
           role: "assistant",
@@ -712,14 +707,6 @@ function ghostSessions(name) {
         }),
         entry({ role: "assistant", content: "Nothing was chosen for me either, so the archive is exactly where it was.", timestamp: now - 3_600_000 }),
       ],
-      // The ask *results* are entries of this conversation that no renderable
-      // message carries — the transcript route drops tool-result messages — so
-      // the mock keeps them here, which is also what makes an unknown
-      // re-answer entryId a 400 rather than a guess.
-      askResults: new Map([
-        [notesResult, { call: notesAsk }],
-        [archiveResult, { call: archiveAsk }],
-      ]),
     };
     const untitled = {
       ...conversationIdentity("pi", `sess-${name}-2`),
@@ -775,54 +762,6 @@ const transcriptOf = (s, params) => {
     truncated: offset > 0 || offset + messages.length < s.messages.length,
   };
 };
-
-/**
- * The fork's name, on the file-copy convention the daemon uses: the source
- * title with any trailing " (k)" dropped, then the smallest free n >= 2. A
- * source nobody has titled yet forks into one nobody has titled either —
- * inventing "(2)" for a null title would name the copy better than the thing
- * it was copied from.
- */
-function forkTitle(store, sourceTitle) {
-  if (!sourceTitle) return null;
-  // Same shape the daemon strips (session-host.ts forkConversationTitle), so a
-  // demo names a copy the way the real thing would.
-  const base = sourceTitle.replace(/^(.*\S)\s+\(\d+\)$/u, "$1");
-  const taken = new Set([...store.values()].map((s) => s.title).filter(Boolean));
-  for (let n = 2; ; n++) {
-    const candidate = `${base} (${n})`;
-    if (!taken.has(candidate)) return candidate;
-  }
-}
-
-/**
- * Branch: copy the thread up to (not including) `entryId` into a conversation
- * of its own and hand back the branched text as a draft. The source is not
- * touched — that is the whole point of the action, so the mock must not cheat
- * it by rewinding in place.
- */
-function forkSession(name, source, entryId) {
-  const store = ghostSessions(name);
-  const at = source.messages.findIndex((m) => m.entryId === entryId);
-  if (at < 0 || source.messages[at].role !== "user") return null;
-  const now = Date.now();
-  const fork = {
-    ...conversationIdentity("pi", `sess-${name}-fork-${++forkSeq}`),
-    title: forkTitle(store, source.title),
-    createdAt: new Date(now).toISOString(),
-    updatedAt: new Date(now).toISOString(),
-    // A copy is a new conversation, so its entries are new entries.
-    messages: source.messages.slice(0, at).map(entry),
-  };
-  store.set(fork.id, fork);
-  return {
-    ...conversationIdentity("pi", fork.conversationId),
-    sessionId: fork.conversationId,
-    title: fork.title,
-    draft: source.messages[at].content,
-    transcript: transcriptOf(fork),
-  };
-}
 
 const sessionSummary = (s) => ({
   id: s.id,
@@ -1284,12 +1223,6 @@ function askSummary(answer) {
   return answer.timedOut ? `Timed out — answered with ${picked}` : `Answered with ${picked}`;
 }
 
-const settledFrom = (answer) => {
-  if (answer.kind === "chat") return "chat";
-  if (answer.kind !== "submit") return "cancelled";
-  return answer.timedOut ? "timedOut" : "submitted";
-};
-
 const LIVE_QUESTION = {
   id: "q-live",
   header: "Before I write anything",
@@ -1539,68 +1472,6 @@ async function streamTurn(req, res, name, body) {
   if (!flag("--fail")) {
     recordTurn(name, sessionId, prompt, assistantText);
   }
-}
-
-const askCallIndex = (session, call) =>
-  session.messages.findIndex((m) => Array.isArray(m.content) && m.content.includes(call));
-
-/**
- * Re-answering a persisted ask: rewind to the message that carried it, put the
- * same question back on screen, then answer from there. The real daemon reopens
- * the ask first and commits the branch after; the mock commits first so the
- * dialog opens over history that already reads as rewound.
- */
-function* reanswerScript(name, sessionId, session, entryId, record) {
-  const call = record.call;
-  const questions = call.arguments.questions;
-  const rewound = session.messages.slice(0, askCallIndex(session, call) + 1);
-  yield { type: "branch_changed", transcript: transcriptOf({ ...session, messages: rewound }) };
-  const id = `ask-reanswer-${entryId}`;
-  const wait = openAsk(name, sessionId, questions);
-  yield {
-    type: "tool_execution_start",
-    id,
-    toolName: "ask",
-    arguments: { questions },
-    cwd: SESSION_CWD,
-    intent: "Re-answer an earlier question",
-  };
-  const answered = yield { sentinel: ASK_WAIT, wait };
-  const settled = askSummary(answered);
-  yield { type: "tool_execution_end", id, toolName: "ask", isError: false, summary: settled };
-  // The branch is a commit, not a preview: the old result is overwritten and
-  // everything after it is gone, so a second re-answer starts from what this
-  // one decided rather than from the seed.
-  call.ghostAsk.settled = settledFrom(answered);
-  const reply = `**${settled}** — and everything that came after the question went with the branch.`;
-  yield { type: "text_start", contentIndex: 0 };
-  for (const chunk of reply.match(/\s*\S+/gu) ?? []) {
-    yield { type: "text_delta", contentIndex: 0, delta: chunk };
-  }
-  yield { type: "text_end", contentIndex: 0, content: reply };
-  session.messages = [...rewound, entry({ role: "assistant", content: reply, timestamp: Date.now() })];
-  session.updatedAt = new Date().toISOString();
-  const usage = {
-    input: 640,
-    output: reply.length >> 2,
-    cacheRead: 0,
-    cacheWrite: 0,
-    totalTokens: 640 + (reply.length >> 2),
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-  };
-  yield { type: "done", reason: "stop", usage };
-}
-
-async function streamReanswer(req, res, name, sessionId, session, entryId, record) {
-  const stream = openStream(req, res, name, sessionId);
-  const key = turnKey(name, sessionId);
-  answering.add(key);
-  try {
-    await pump(res, reanswerScript(name, sessionId, session, entryId, record), stream);
-  } finally {
-    answering.delete(key);
-  }
-  res.end();
 }
 
 function extractPrompt(body) {
@@ -2574,29 +2445,6 @@ const mockServer = createServer(async (req, res) => {
     publishConversationUpdated(name, s.runtime, s.conversationId, s.updatedAt);
     return json(res, 200, { ok: true, title: s.title });
   }
-  if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "branch" && req.method === "POST") {
-    const conversation = routeConversation(parts);
-    if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
-    if (conversation.runtime !== "pi") {
-      return json(res, 409, { error: { code: "not_supported", message: "Claude Code cannot branch here" } });
-    }
-    const s = ghostSessions(name).get(conversation.id);
-    if (!s) return json(res, 404, { error: { message: "no such session", code: "not_found" } });
-    if (answering.has(turnKey(name, conversation.conversationId))) {
-      return json(res, 409, {
-        error: { message: `${name} is still answering — stop the turn first`, code: "session_busy" },
-      });
-    }
-    const body = await readBody(req).catch(() => ({}));
-    if (body?.action !== "fork") {
-      return json(res, 400, { error: { message: "action must be \"fork\"", code: "invalid_branch" } });
-    }
-    const forked = forkSession(name, s, typeof body?.entryId === "string" ? body.entryId : "");
-    return forked
-      ? json(res, 200, forked)
-      : json(res, 400, { error: { message: "no user message with that entryId", code: "invalid_branch" } });
-  }
-
   if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "ask" && req.method === "GET") {
     const conversation = routeConversation(parts);
     if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
@@ -2629,32 +2477,6 @@ const mockServer = createServer(async (req, res) => {
     pending.settle({ kind: body.kind, results: Array.isArray(body.results) ? body.results : [] });
     return json(res, 200, { ok: true });
   }
-  if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "reanswer" && req.method === "POST") {
-    const conversation = routeConversation(parts);
-    if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
-    if (conversation.runtime !== "pi") {
-      return json(res, 409, { error: { code: "not_supported", message: "Claude Code has no OMP ask" } });
-    }
-    const s = ghostSessions(name).get(conversation.id);
-    if (!s) return json(res, 404, { error: { message: "no such session", code: "not_found" } });
-    if (answering.has(turnKey(name, conversation.conversationId))) {
-      return json(res, 409, {
-        error: { message: `${name} is still answering — stop the turn first`, code: "session_busy" },
-      });
-    }
-    const body = await readBody(req).catch(() => ({}));
-    const entryId = typeof body?.entryId === "string" ? body.entryId : "";
-    const record = s.askResults?.get(entryId);
-    // An ask an earlier branch discarded is no longer re-answerable: the
-    // message that carried it went with everything after that branch point.
-    if (!record || askCallIndex(s, record.call) < 0) {
-      return json(res, 400, {
-        error: { message: "no ask result with that entryId", code: "ask_not_reanswerable" },
-      });
-    }
-    return streamReanswer(req, res, name, conversation.conversationId, s, entryId, record);
-  }
-
   if (parts[3] === "model" && parts.length === 4 && req.method === "GET") {
     return json(res, 200, resolveCurrent(name));
   }
