@@ -1,5 +1,5 @@
 /**
- * Provider isolation for hosted ghost sessions.
+ * Provider isolation for ghost sessions.
  *
  * pi's provider layer can resolve credentials from the ambient
  * environment as a fallback when a provider has no stored auth. The spike
@@ -48,8 +48,8 @@ export const PROVIDER_CREDENTIAL_ENV_VARS: readonly string[] = [
   "ANTHROPIC_SERVICE_ACCOUNT_ID",
   "ANTHROPIC_WORKSPACE_ID",
   // The pinned Claude CLI reads these mTLS values and alternate credential
-  // selectors/channels. CLAUDE_CONFIG_DIR is intentionally retained because
-  // it locates the OS owner's existing Claude plan login.
+  // selectors/channels. The global scrub also removes CLAUDE_CONFIG_DIR after
+  // the dedicated Claude environment has captured the owner's native login.
   "CLAUDE_CODE_CLIENT_CERT",
   "CLAUDE_CODE_CLIENT_KEY",
   "CLAUDE_CODE_CLIENT_KEY_PASSPHRASE",
@@ -114,7 +114,7 @@ export const PROVIDER_CREDENTIAL_ENV_VARS: readonly string[] = [
  * Claude Code endpoint, backend, header, region, and model overrides.
  *
  * These are as security-sensitive as credentials: inheriting one can route a
- * ghost's own-plan request through a third party or silently select a backend
+ * Claude request through a third party or silently select a backend
  * or model other than the one chosen for that ghost. Keep this list aligned
  * with the bundled Claude Agent SDK/CLI environment surface.
  */
@@ -136,6 +136,7 @@ export const PROVIDER_ROUTING_ENV_VARS: readonly string[] = [
   "ANTHROPIC_UNIX_SOCKET",
   "ANTHROPIC_VERTEX_BASE_URL",
   "ANTHROPIC_VERTEX_PROJECT_ID",
+  "AWS_CA_BUNDLE",
   "AWS_DEFAULT_REGION",
   "AWS_EC2_METADATA_SERVICE_ENDPOINT",
   "AWS_ENDPOINT",
@@ -159,7 +160,7 @@ export const PROVIDER_ROUTING_ENV_VARS: readonly string[] = [
   "CLAUDE_LOCAL_OAUTH_CONSOLE_BASE",
   // Retained for older Claude Code releases that used the unprefixed name.
   "USE_VERTEX",
-  // pi settings and shell wrapping must remain session-scoped in the hosted
+  // pi settings and shell wrapping must remain session-scoped in the pi
   // runtime rather than inheriting overlays from ghostd's launcher.
   "PI_CONFIG_FILES",
   "PI_SHELL_PREFIX",
@@ -178,6 +179,250 @@ export const PROVIDER_CREDENTIAL_ENV_PATTERNS: readonly RegExp[] = [
   /_ACCESS_TOKEN$/,
   /_SECRET_ACCESS_KEY$/,
 ];
+
+/**
+ * Non-secret selectors accepted by the external, owner-installed Claude Code
+ * harness. Keep this inventory aligned with
+ * Anthropic's current authentication, environment-variable, Bedrock, Vertex,
+ * Foundry, Claude Platform on AWS, gateway, and corporate-proxy references.
+ * Primary inventory: https://code.claude.com/docs/en/env-vars,
+ * /authentication, /amazon-bedrock, /google-vertex-ai, /microsoft-foundry,
+ * /claude-platform-on-aws, /llm-gateway, and /network-config.
+ *
+ * Credential values never cross this boundary. A wrapper chosen with
+ * GHOST_CLAUDE_BINARY is the owner-controlled place for an environment-only
+ * native credential: Ghost starts the literal wrapper with this non-secret
+ * environment, and the wrapper injects the credential before execing Claude.
+ */
+export const CLAUDE_CODE_VERTEX_REGION_ENV_VARS = [
+  "VERTEX_REGION_CLAUDE_3_5_HAIKU",
+  "VERTEX_REGION_CLAUDE_3_5_SONNET",
+  "VERTEX_REGION_CLAUDE_3_7_SONNET",
+  "VERTEX_REGION_CLAUDE_4_0_OPUS",
+  "VERTEX_REGION_CLAUDE_4_0_SONNET",
+  "VERTEX_REGION_CLAUDE_4_1_OPUS",
+  "VERTEX_REGION_CLAUDE_4_5_OPUS",
+  "VERTEX_REGION_CLAUDE_4_5_SONNET",
+  "VERTEX_REGION_CLAUDE_4_6_OPUS",
+  "VERTEX_REGION_CLAUDE_4_6_SONNET",
+  "VERTEX_REGION_CLAUDE_4_7_OPUS",
+  "VERTEX_REGION_CLAUDE_4_8_OPUS",
+  "VERTEX_REGION_CLAUDE_5_OPUS",
+  "VERTEX_REGION_CLAUDE_5_SONNET",
+  "VERTEX_REGION_CLAUDE_FABLE_5",
+  "VERTEX_REGION_CLAUDE_HAIKU_4_5",
+] as const;
+
+export const CLAUDE_CODE_SAFE_ENV_VARS: readonly string[] = [
+  "ANTHROPIC_AWS_BASE_URL",
+  "ANTHROPIC_AWS_WORKSPACE_ID",
+  "ANTHROPIC_BASE_URL",
+  "ANTHROPIC_BEDROCK_BASE_URL",
+  "ANTHROPIC_BEDROCK_MANTLE_BASE_URL",
+  "ANTHROPIC_BEDROCK_REGION_PREFIX",
+  "ANTHROPIC_BEDROCK_SERVICE_TIER",
+  "ANTHROPIC_BETAS",
+  "ANTHROPIC_CUSTOM_MODEL_OPTION",
+  "ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION",
+  "ANTHROPIC_CUSTOM_MODEL_OPTION_NAME",
+  "ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES",
+  "ANTHROPIC_CONFIG_DIR",
+  "ANTHROPIC_DEFAULT_FABLE_MODEL",
+  "ANTHROPIC_DEFAULT_FABLE_MODEL_DESCRIPTION",
+  "ANTHROPIC_DEFAULT_FABLE_MODEL_NAME",
+  "ANTHROPIC_DEFAULT_FABLE_MODEL_SUPPORTED_CAPABILITIES",
+  "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+  "ANTHROPIC_DEFAULT_HAIKU_MODEL_DESCRIPTION",
+  "ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME",
+  "ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES",
+  "ANTHROPIC_DEFAULT_MODEL",
+  "ANTHROPIC_DEFAULT_OPUS_MODEL",
+  "ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION",
+  "ANTHROPIC_DEFAULT_OPUS_MODEL_NAME",
+  "ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES",
+  "ANTHROPIC_DEFAULT_SONNET_MODEL",
+  "ANTHROPIC_DEFAULT_SONNET_MODEL_DESCRIPTION",
+  "ANTHROPIC_DEFAULT_SONNET_MODEL_NAME",
+  "ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES",
+  "ANTHROPIC_FEDERATION_RULE_ID",
+  "ANTHROPIC_FOUNDRY_BASE_URL",
+  "ANTHROPIC_FOUNDRY_RESOURCE",
+  "ANTHROPIC_IDENTITY_TOKEN_FILE",
+  "ANTHROPIC_MODEL",
+  "ANTHROPIC_ORGANIZATION_ID",
+  "ANTHROPIC_PROFILE",
+  "ANTHROPIC_SCOPE",
+  "ANTHROPIC_SERVICE_ACCOUNT_ID",
+  "ANTHROPIC_SMALL_FAST_MODEL",
+  "ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION",
+  "ANTHROPIC_UNIX_SOCKET",
+  "ANTHROPIC_VERTEX_BASE_URL",
+  "ANTHROPIC_VERTEX_PROJECT_ID",
+  "ANTHROPIC_WORKSPACE_ID",
+  "AWS_CA_BUNDLE",
+  "AWS_CONFIG_FILE",
+  "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE",
+  "AWS_DEFAULT_REGION",
+  "AWS_EC2_METADATA_DISABLED",
+  "AWS_EC2_METADATA_SERVICE_ENDPOINT",
+  "AWS_ENDPOINT",
+  "AWS_ENDPOINT_URL",
+  "AWS_PROFILE",
+  "AWS_REGION",
+  "AWS_ROLE_ARN",
+  "AWS_ROLE_SESSION_NAME",
+  "AWS_SDK_LOAD_CONFIG",
+  "AWS_SHARED_CREDENTIALS_FILE",
+  "AWS_WEB_IDENTITY_TOKEN_FILE",
+  "AZURE_AUTHORITY_HOST",
+  "AZURE_CLIENT_CERTIFICATE_PATH",
+  "AZURE_CLIENT_ID",
+  "AZURE_CLIENT_SEND_CERTIFICATE_CHAIN",
+  "AZURE_FEDERATED_TOKEN_FILE",
+  "AZURE_TENANT_ID",
+  "AZURE_TOKEN_CREDENTIALS",
+  "AZURE_USERNAME",
+  "CLAUDE_CODE_API_KEY_HELPER_TTL_MS",
+  "CLAUDE_CODE_AWS_CHAIN_RESOLVE_TIMEOUT_MS",
+  "CLAUDE_CODE_CERT_STORE",
+  "CLAUDE_CODE_CLIENT_CERT",
+  "CLAUDE_CODE_CLIENT_KEY",
+  "CLAUDE_CODE_API_BASE_URL",
+  "CLAUDE_CODE_AUTO_MODE_MODEL",
+  "CLAUDE_CODE_BG_CLASSIFIER_MODEL",
+  "CLAUDE_CODE_CUSTOM_OAUTH_URL",
+  "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY",
+  "CLAUDE_CODE_GB_BASE_URL",
+  "CLAUDE_CODE_OAUTH_CLIENT_ID",
+  "CLAUDE_CODE_OAUTH_SCOPES",
+  "CLAUDE_CODE_ORGANIZATION_UUID",
+  "CLAUDE_CODE_PROXY_RESOLVES_HOSTS",
+  "CLAUDE_CODE_REMOTE",
+  "CLAUDE_CODE_SKIP_ANTHROPIC_AWS_AUTH",
+  "CLAUDE_CODE_SKIP_AWS_CRED_CACHE",
+  "CLAUDE_CODE_SKIP_BEDROCK_AUTH",
+  "CLAUDE_CODE_SKIP_FOUNDRY_AUTH",
+  "CLAUDE_CODE_SKIP_MANTLE_AUTH",
+  "CLAUDE_CODE_SKIP_VERTEX_AUTH",
+  "CLAUDE_CODE_SUBAGENT_MODEL",
+  "CLAUDE_CODE_USE_ANTHROPIC_AWS",
+  "CLAUDE_CODE_USE_BEDROCK",
+  "CLAUDE_CODE_USE_FOUNDRY",
+  "CLAUDE_CODE_USE_MANTLE",
+  "CLAUDE_CODE_USE_VERTEX",
+  "CLAUDE_CONFIG_DIR",
+  "CLAUDE_LOCAL_OAUTH_API_BASE",
+  "CLAUDE_LOCAL_OAUTH_APPS_BASE",
+  "CLAUDE_LOCAL_OAUTH_CONSOLE_BASE",
+  "CLAUDE_SECURESTORAGE_CONFIG_DIR",
+  "CLOUD_ML_REGION",
+  "GCLOUD_PROJECT",
+  "GOOGLE_APPLICATION_CREDENTIALS",
+  "GOOGLE_CLOUD_LOCATION",
+  "GOOGLE_CLOUD_PROJECT",
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "NODE_EXTRA_CA_CERTS",
+  "NO_PROXY",
+  "USE_VERTEX",
+  ...CLAUDE_CODE_VERTEX_REGION_ENV_VARS,
+  "http_proxy",
+  "https_proxy",
+  "no_proxy",
+] as const;
+
+/** Credential-bearing names that must never enter Ghost's Claude launch env. */
+export const CLAUDE_CODE_CREDENTIAL_VALUE_ENV_PATTERN =
+  /(?:^|_)(?:API_KEY|AUTH_TOKEN|OAUTH_TOKEN|ACCESS_TOKEN|REFRESH_TOKEN|SESSION_TOKEN|SESSION_ACCESS_TOKEN|BEARER_TOKEN|TOKEN|ACCESS_KEY_ID|SECRET_ACCESS_KEY|CLIENT_SECRET|PASSWORD|PASSPHRASE|SECRET|AUTHORIZATION|CUSTOM_HEADERS|EXTRA_BODY)$/u;
+
+const CLAUDE_ENV_FAMILY_PREFIXES = [
+  "ANTHROPIC_",
+  "AWS_",
+  "AZURE_",
+  "CLAUDE_",
+  "GCLOUD_",
+  "GOOGLE_",
+] as const;
+const CLAUDE_CODE_OPERATIONAL_ENV_VARS = [
+  "COLORTERM",
+  "DBUS_SESSION_BUS_ADDRESS",
+  "DESKTOP_SESSION",
+  "DISPLAY",
+  "HOME",
+  "HYPRLAND_INSTANCE_SIGNATURE",
+  "LANG",
+  "LANGUAGE",
+  "LC_ALL",
+  "LC_COLLATE",
+  "LC_CTYPE",
+  "LC_MESSAGES",
+  "LC_MONETARY",
+  "LC_NUMERIC",
+  "LC_TIME",
+  "LOGNAME",
+  "NO_COLOR",
+  "PATH",
+  "SHELL",
+  "SSH_AGENT_PID",
+  "SSH_AUTH_SOCK",
+  "TEMP",
+  "TERM",
+  "TERM_PROGRAM",
+  "TERM_PROGRAM_VERSION",
+  "TMP",
+  "TMPDIR",
+  "TZ",
+  "USER",
+  "WAYLAND_DISPLAY",
+  "XAUTHORITY",
+  "XDG_CACHE_HOME",
+  "XDG_CONFIG_HOME",
+  "XDG_CURRENT_DESKTOP",
+  "XDG_DATA_HOME",
+  "XDG_RUNTIME_DIR",
+  "XDG_SESSION_CLASS",
+  "XDG_SESSION_DESKTOP",
+  "XDG_SESSION_TYPE",
+  "XDG_STATE_HOME",
+] as const;
+const CLAUDE_CODE_ENVIRONMENT_SNAPSHOT = Symbol("ClaudeCodeEnvironmentSnapshot");
+
+function isClaudeEnvironmentFamily(name: string): boolean {
+  return name === "CLAUDECODE"
+    || name === "CLOUD_ML_REGION"
+    || name === "USE_VERTEX"
+    || name.startsWith("VERTEX_REGION_CLAUDE_")
+    || CLAUDE_ENV_FAMILY_PREFIXES.some((prefix) => name.startsWith(prefix));
+}
+
+/**
+ * Derive the one launch-time environment shared by Claude executable
+ * resolution, auth probing, and SDK queries. Values remain opaque: this
+ * boundary copies them but never inspects, logs, serializes, or returns them.
+ */
+export function captureClaudeCodeEnvironment(
+  source: Readonly<NodeJS.ProcessEnv> = process.env,
+): Readonly<NodeJS.ProcessEnv> {
+  if ((source as NodeJS.ProcessEnv & {
+    [CLAUDE_CODE_ENVIRONMENT_SNAPSHOT]?: true;
+  })[CLAUDE_CODE_ENVIRONMENT_SNAPSHOT]) return source;
+
+  const environment: NodeJS.ProcessEnv = {};
+  for (const name of CLAUDE_CODE_OPERATIONAL_ENV_VARS) {
+    if (source[name] !== undefined) environment[name] = source[name];
+  }
+
+  for (const name of CLAUDE_CODE_SAFE_ENV_VARS) {
+    if (CLAUDE_CODE_CREDENTIAL_VALUE_ENV_PATTERN.test(name)) {
+      throw new Error(`Claude launch environment misclassified credential-bearing ${name}.`);
+    }
+    if (source[name] !== undefined) environment[name] = source[name];
+  }
+  environment.CLAUDE_CODE_DISABLE_AUTO_MEMORY = "1";
+  environment.CLAUDE_AGENT_SDK_CLIENT_APP = "ghostd/0.0.1";
+  Object.defineProperty(environment, CLAUDE_CODE_ENVIRONMENT_SNAPSHOT, { value: true });
+  return Object.freeze(environment);
+}
 
 /**
  * `PI_OFFLINE` disables pi's own network traffic (update checks, provider
@@ -201,7 +446,10 @@ export interface ScrubResult {
 function isProviderEnvOverride(name: string): boolean {
   if (PROVIDER_CREDENTIAL_ENV_VARS.includes(name)) return true;
   if (PROVIDER_ROUTING_ENV_VARS.includes(name)) return true;
-  if (name.startsWith("VERTEX_REGION_CLAUDE_")) return true;
+  // The Claude snapshot is captured first. Pi and every ordinary daemon child
+  // then lose the complete Claude/cloud family, including variables added by
+  // a future CLI release before Ghost's direct pass-through list is updated.
+  if (isClaudeEnvironmentFamily(name)) return true;
   return PROVIDER_CREDENTIAL_ENV_PATTERNS.some((pattern) => pattern.test(name));
 }
 

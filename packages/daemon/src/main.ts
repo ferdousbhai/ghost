@@ -10,7 +10,7 @@ import { ClaudeAgentSdkLoader } from "./claude-agent-sdk-loader.js";
 import { legacyDocumentsPlacementCommand } from "./legacy-documents-placement.js";
 import { loginCommand } from "./login-command.js";
 import { loadConfig, type DaemonConfig, type DaemonConfigOverrides } from "./config.js";
-import { scrubProviderEnv } from "./env-scrub.js";
+import { captureClaudeCodeEnvironment, scrubProviderEnv } from "./env-scrub.js";
 import { ConversationMaintenance, MEMORY_UPKEEP_SETTINGS_KEY } from "./conversation-maintenance.js";
 import { closeAllBrowserSessions, ensureGhostHomeLayout } from "./extensions.js";
 import { GhostRegistry } from "./ghosts.js";
@@ -352,6 +352,10 @@ export async function main(argv: string[] = process.argv.slice(2), runtime: Main
     return 1;
   }
 
+  // Claude Code owns its native external authentication. Capture only that
+  // reviewed child environment before the process-global Pi scrub removes it.
+  const claudeCodeEnvironment = captureClaudeCodeEnvironment(process.env);
+
   // Before pi, before any session. Idempotent, but this is the call that
   // matters: everything downstream inherits this environment.
   const { removed } = scrubProviderEnv(process.env, { offline: config.offline });
@@ -393,6 +397,7 @@ export async function main(argv: string[] = process.argv.slice(2), runtime: Main
       logger,
       hooks,
       hooksPath,
+      claudeCodeEnvironment,
     );
   } finally {
     await homeReservation.close();
@@ -404,6 +409,7 @@ async function serveDaemon(
   logger: ReturnType<typeof createLogger>,
   hooks: GhostHookRunner,
   hooksPath: string,
+  claudeCodeEnvironment: Readonly<NodeJS.ProcessEnv>,
 ): Promise<number> {
   const registry = new GhostRegistry(config.ghostsRoot);
   const ownerHome = homedir();
@@ -431,7 +437,10 @@ async function serveDaemon(
   const homeOperations = new HomeOperationCoordinator(registry);
   const claudeAgentSdk = new ClaudeAgentSdkLoader({ ownerHome });
   const loadClaudeAgentSdk = () => claudeAgentSdk.load();
-  const claudeCodeProbe = new ClaudeCodeProbe({ loadSdk: loadClaudeAgentSdk });
+  const claudeCodeProbe = new ClaudeCodeProbe({
+    environment: claudeCodeEnvironment,
+    loadSdk: loadClaudeAgentSdk,
+  });
   const host = new SessionHost({
     registry,
     homeOperations,
@@ -447,7 +456,11 @@ async function serveDaemon(
       documents: machineDocuments,
       ...(relay ? { relayTransport: relay } : {}),
     },
-    claudeCode: { probe: claudeCodeProbe, loadSdk: loadClaudeAgentSdk },
+    claudeCode: {
+      environment: claudeCodeEnvironment,
+      probe: claudeCodeProbe,
+      loadSdk: loadClaudeAgentSdk,
+    },
   });
   const maintenance = new ConversationMaintenance({
     registry,

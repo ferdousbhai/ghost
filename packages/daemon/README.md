@@ -14,7 +14,7 @@ application closure plus required static assets into
 `packages/daemon/dist/runtime`. The launchers use the
 system `/usr/bin/bun`; no `node_modules` or daemon source tree is installed.
 macOS `fsevents` and the optional owner-installed Claude Agent SDK are left
-external. The exact private Claude boundary is documented in
+external. The exact owner-installed Claude harness boundary is documented in
 [`docs/claude-code-runtime.md`](../../docs/claude-code-runtime.md).
 
 ```bash

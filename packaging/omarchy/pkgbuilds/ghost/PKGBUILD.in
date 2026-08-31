@@ -28,6 +28,7 @@ depends=(
   'ydotool>=1.0'
 )
 makedepends=(
+  'bun>=1.4.0'
   'desktop-file-utils'
 )
 checkdepends=(
@@ -37,11 +38,11 @@ checkdepends=(
 optdepends=(
   'basecamp-cli: Basecamp CLI and embedded pi skill'
   'chromium: the browser the relay drives, and the browser-relay smoke test'
-  'claude-code: full owner-installed Claude Code harness'
+  'claude-code>=2.1.251: owner-installed Claude Code harness runtime'
   'gnome-keyring: Secret Service provider for provider and MCP credentials'
   'npm: Firecrawl, Google Workspace, and Agent Skills installers for optional pi integrations'
   'obsidian>=1.12.7: Obsidian CLI access for pi'
-  'pnpm: install the optional private owner-local Claude Agent SDK boundary'
+  'pnpm: install the optional owner-local Claude Agent SDK boundary'
 )
 conflicts=('ghost-dev')
 options=('!debug' '!strip')

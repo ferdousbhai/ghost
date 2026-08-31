@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CLAUDE_AGENT_SDK_PACKAGE,
+  CLAUDE_AGENT_SDK_PEERS,
   CLAUDE_AGENT_SDK_VERSION,
   ClaudeAgentSdkLoader,
   type ClaudeAgentSdkModule,
@@ -65,6 +66,16 @@ function writeSdkPackage(
     version,
   }));
   writeFileSync(join(packageRoot, "sdk.mjs"), "export const fixture = true;\n");
+  for (const [name, peerVersion] of Object.entries(CLAUDE_AGENT_SDK_PEERS)) {
+    const peerRoot = join(installRoot, "node_modules", ...name.split("/"));
+    mkdirSync(peerRoot, { recursive: true });
+    writeFileSync(join(peerRoot, "package.json"), JSON.stringify({
+      name,
+      version: peerVersion,
+      main: "index.js",
+    }));
+    writeFileSync(join(peerRoot, "index.js"), "module.exports = {};\n");
+  }
   return packageRoot;
 }
 
@@ -233,6 +244,28 @@ describe("ClaudeAgentSdkLoader", () => {
     expect(imported).toHaveBeenCalledTimes(1);
   });
 
+  it("rejects a mismatched peer before importing the SDK graph", async () => {
+    const fixture = fixtureRoot();
+    writeSdkPackage(fixture.installRoot);
+    const peerRoot = join(fixture.installRoot, "node_modules", "zod");
+    writeFileSync(join(peerRoot, "package.json"), JSON.stringify({
+      name: "zod",
+      version: "4.4.4",
+      main: "index.js",
+    }));
+    const imported = vi.fn(async (_specifier: string) => fakeSdk());
+    const loader = new ClaudeAgentSdkLoader({
+      ownerHome: fixture.ownerHome,
+      xdgDataHome: fixture.dataHome,
+      importModule: imported,
+    });
+
+    await expect(loader.load()).rejects.toThrow(
+      /peer version mismatch.*zod@4\.4\.3.*zod@4\.4\.4/s,
+    );
+    expect(imported).not.toHaveBeenCalled();
+  });
+
   it("accepts a pnpm-style in-root link but rejects one outside the install", async () => {
     const fixture = fixtureRoot();
     mkdirSync(fixture.installRoot, { recursive: true });
@@ -250,6 +283,16 @@ describe("ClaudeAgentSdkLoader", () => {
       version: CLAUDE_AGENT_SDK_VERSION,
     }));
     writeFileSync(join(inRoot, "sdk.mjs"), "export const fixture = true;\n");
+    for (const [name, version] of Object.entries(CLAUDE_AGENT_SDK_PEERS)) {
+      const peerRoot = join(fixture.installRoot, "node_modules", ...name.split("/"));
+      mkdirSync(peerRoot, { recursive: true });
+      writeFileSync(join(peerRoot, "package.json"), JSON.stringify({
+        name,
+        version,
+        main: "index.js",
+      }));
+      writeFileSync(join(peerRoot, "index.js"), "module.exports = {};\n");
+    }
     symlinkSync(inRoot, linkedPath, "dir");
     const imported = vi.fn(async (_specifier: string) => fakeSdk());
     await expect(new ClaudeAgentSdkLoader({

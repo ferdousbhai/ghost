@@ -1,6 +1,7 @@
 import { lstat, readFile, realpath } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { homedir } from "node:os";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import type {
   createSdkMcpServer,
@@ -10,6 +11,11 @@ import type {
 
 export const CLAUDE_AGENT_SDK_VERSION = "0.3.170";
 export const CLAUDE_AGENT_SDK_PACKAGE = "@anthropic-ai/claude-agent-sdk";
+export const CLAUDE_AGENT_SDK_PEERS = {
+  "@anthropic-ai/sdk": "0.93.0",
+  "@modelcontextprotocol/sdk": "1.29.0",
+  zod: "4.4.3",
+} as const;
 
 const PACKAGE_JSON_MAX_BYTES = 64 * 1024;
 
@@ -28,6 +34,12 @@ export interface ClaudeAgentSdkLoaderOptions {
 interface ClaudeAgentSdkInstall {
   entryPath: string;
   fingerprint: string;
+}
+
+type FileState = Awaited<ReturnType<typeof lstat>>;
+
+function statIdentity(state: FileState): readonly string[] {
+  return [state.dev, state.ino, state.size, state.mtimeMs, state.ctimeMs].map(String);
 }
 
 export class ClaudeAgentSdkLoadError extends Error {
@@ -52,10 +64,12 @@ function sdkInstallRoot(ownerHome: string, xdgDataHome: string | undefined): str
 }
 
 function installCommand(root: string): string {
+  const packages = [
+    `${CLAUDE_AGENT_SDK_PACKAGE}@${CLAUDE_AGENT_SDK_VERSION}`,
+    ...Object.entries(CLAUDE_AGENT_SDK_PEERS).map(([name, version]) => `${name}@${version}`),
+  ];
   return "pnpm add --dir "
-    + `${JSON.stringify(root)} --save-exact `
-    + `${CLAUDE_AGENT_SDK_PACKAGE}@${CLAUDE_AGENT_SDK_VERSION} `
-    + "@anthropic-ai/sdk@0.93.0 @modelcontextprotocol/sdk@1.29.0 zod@4.4.3";
+    + `${JSON.stringify(root)} --save-exact ${packages.join(" ")}`;
 }
 
 /**
@@ -96,7 +110,7 @@ export class ClaudeAgentSdkLoader {
     if (!this.restartRequired) {
       this.restartRequired = new ClaudeAgentSdkLoadError(
         `Claude Agent SDK ${CLAUDE_AGENT_SDK_VERSION} is restart-required: ${detail}. `
-          + `Repair the exact private owner-local install if needed with: `
+          + `Repair the exact owner-installed runtime boundary if needed with: `
           + `${installCommand(this.installRoot)}. Then restart ghostd before retrying.`,
         cause === undefined ? undefined : { cause },
       );
@@ -108,7 +122,7 @@ export class ClaudeAgentSdkLoader {
     const rootState = await lstat(this.installRoot).catch((cause) => {
       throw new ClaudeAgentSdkLoadError(
         `Claude Agent SDK ${CLAUDE_AGENT_SDK_VERSION} is not installed at `
-          + `${this.installRoot}. Install this private owner-local capability with: `
+          + `${this.installRoot}. Install this optional owner runtime with: `
           + installCommand(this.installRoot),
         { cause },
       );
@@ -191,14 +205,82 @@ export class ClaudeAgentSdkLoader {
       );
     }
 
-    const statIdentity = (state: typeof rootState) => [
-      state.dev,
-      state.ino,
-      state.size,
-      state.mtimeMs,
-      state.ctimeMs,
-    ];
     const entryIdentity = statIdentity(entryState);
+    const requireFromSdk = createRequire(entryPath);
+    const peerIdentities: unknown[] = [];
+    for (const [peerName, peerVersion] of Object.entries(CLAUDE_AGENT_SDK_PEERS)) {
+      let peerEntry: string;
+      try {
+        peerEntry = await realpath(requireFromSdk.resolve(peerName));
+      } catch (cause) {
+        throw new ClaudeAgentSdkLoadError(
+          `Claude Agent SDK peer ${peerName}@${peerVersion} is not resolvable from ${entryPath}.`,
+          { cause },
+        );
+      }
+      if (!pathWithin(canonicalRoot, peerEntry)) {
+        throw new ClaudeAgentSdkLoadError(
+          `Claude Agent SDK peer resolves outside its versioned install root: ${peerName}`,
+        );
+      }
+      let peerRoot: string | undefined;
+      let peerManifestPath: string | undefined;
+      let peerManifestState: FileState | undefined;
+      let cursor = dirname(peerEntry);
+      while (pathWithin(canonicalRoot, cursor) && cursor !== canonicalRoot) {
+        const candidate = join(cursor, "package.json");
+        const candidateState = await lstat(candidate).catch(() => undefined);
+        if (candidateState?.isFile() && !candidateState.isSymbolicLink()
+          && candidateState.size <= PACKAGE_JSON_MAX_BYTES) {
+          try {
+            const candidateManifest = JSON.parse(await readFile(candidate, "utf8")) as {
+              name?: unknown;
+              version?: unknown;
+            };
+            if (candidateManifest.name === peerName) {
+              if (candidateManifest.version !== peerVersion) {
+                throw new ClaudeAgentSdkLoadError(
+                  `Claude Agent SDK peer version mismatch: expected ${peerName}@${peerVersion}, `
+                    + `found ${String(candidateManifest.name)}@${String(candidateManifest.version)}.`,
+                );
+              }
+              peerRoot = cursor;
+              peerManifestPath = candidate;
+              peerManifestState = candidateState;
+              break;
+            }
+          } catch (cause) {
+            if (cause instanceof ClaudeAgentSdkLoadError) throw cause;
+          }
+        }
+        cursor = dirname(cursor);
+      }
+      if (!peerRoot || !peerManifestPath || !peerManifestState) {
+        throw new ClaudeAgentSdkLoadError(
+          `Claude Agent SDK peer ${peerName}@${peerVersion} has no matching bounded metadata.`,
+        );
+      }
+      const [peerRootState, peerEntryState] = await Promise.all([
+        lstat(peerRoot),
+        lstat(peerEntry),
+      ]);
+      if (!peerRootState.isDirectory() || peerRootState.isSymbolicLink()
+        || !peerEntryState.isFile() || peerEntryState.isSymbolicLink()) {
+        throw new ClaudeAgentSdkLoadError(
+          `Claude Agent SDK peer ${peerName}@${peerVersion} is not a regular package boundary.`,
+        );
+      }
+      peerIdentities.push([
+        peerName,
+        peerVersion,
+        peerRoot,
+        peerManifestPath,
+        peerEntry,
+        statIdentity(peerRootState),
+        statIdentity(peerManifestState),
+        statIdentity(peerEntryState),
+      ]);
+    }
     const fingerprint = JSON.stringify([
       canonicalRoot,
       packageRoot,
@@ -206,6 +288,7 @@ export class ClaudeAgentSdkLoader {
       statIdentity(packageRootState),
       statIdentity(packageState),
       entryIdentity,
+      peerIdentities,
     ]);
     return { entryPath, fingerprint };
   }

@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import {
   CLAUDE_AGENT_SDK_PACKAGE,
+  CLAUDE_AGENT_SDK_PEERS,
   CLAUDE_AGENT_SDK_VERSION,
 } from "../src/claude-agent-sdk-loader.js";
 
@@ -48,6 +49,16 @@ export function query() { return revision; }
 export function tool() { return revision; }
 export function createSdkMcpServer() { return revision; }
 `);
+  for (const [name, version] of Object.entries(CLAUDE_AGENT_SDK_PEERS)) {
+    const peerRoot = join(installRoot, "node_modules", ...name.split("/"));
+    mkdirSync(peerRoot, { recursive: true });
+    writeFileSync(join(peerRoot, "package.json"), JSON.stringify({
+      name,
+      version,
+      main: "index.js",
+    }));
+    writeFileSync(join(peerRoot, "index.js"), "module.exports = {};\n");
+  }
 }
 
 function runWorker(bun: string, scenario: string, input: Fixture): string {

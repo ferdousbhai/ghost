@@ -12,21 +12,24 @@
  * or an explicit close drops both the query and that snapshot, and Claude's
  * opaque session id supplies continuity when the next query resumes cold.
  */
-import { execFile, spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { spawn } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
 import { constants as fsConstants, existsSync, readdirSync } from "node:fs";
 import {
   access,
   lstat,
+  mkdtemp,
   mkdir,
   open as openFile,
   readdir,
+  realpath as realpathFile,
   rename,
+  rm,
+  stat,
   unlink,
 } from "node:fs/promises";
 import { delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { homedir } from "node:os";
-import { promisify } from "node:util";
+import { homedir, tmpdir } from "node:os";
 import type {
   Options as ClaudeQueryOptions,
   Query,
@@ -70,7 +73,7 @@ import {
   isValidConversationId,
   requireRawConversationId,
 } from "./conversation-identity.js";
-import { scrubProviderEnv } from "./env-scrub.js";
+import { captureClaudeCodeEnvironment } from "./env-scrub.js";
 import {
   GHOST_SESSION_STOP_CONTINUATION_CAP,
   GhostHookRunner,
@@ -117,6 +120,7 @@ import {
 export const CLAUDE_CODE_PROVIDER_ID = "claude-code";
 export const CLAUDE_CODE_DEFAULT_MODEL_ID = "default";
 export const CLAUDE_CODE_BINARY_ENV = "GHOST_CLAUDE_BINARY";
+export const CLAUDE_CODE_MINIMUM_VERSION = "2.1.251";
 export const CLAUDE_CODE_PROBE_TTL_MS = 5_000;
 export const MAX_CLAUDE_CODE_PROBE_TTL_MS = 30_000;
 export const CLAUDE_CODE_EXIT_WAIT_TIMEOUT_MS = 10_000;
@@ -128,6 +132,22 @@ const MAX_CLAUDE_CODE_SESSION_ID_SCALARS = 512;
 const MODEL_TURN_PERSISTENCE_ERROR = "Could not durably settle this owner turn.";
 export const CLAUDE_SESSION_METADATA_MAX_BYTES = 16 * 1_048_576;
 const AUTH_STATUS_TIMEOUT_MS = 10_000;
+const AUTH_STATUS_METADATA_MAX_SCALARS = 128;
+const AUTH_STATUS_IDENTITY_MAX_SCALARS = 512;
+const OWNED_CHILD_MAX_STDOUT_BYTES = 128 * 1024;
+const OWNED_CHILD_TERM_GRACE_MS = 100;
+const OWNED_CHILD_KILL_CONFIRM_MS = 1_000;
+const CLAUDE_QUERY_TERM_GRACE_MS = 500;
+const CLAUDE_QUERY_KILL_CONFIRM_MS = 2_000;
+const CLAUDE_CODE_AUTH_STATUS_ARGS = [
+  "--setting-sources",
+  "",
+  "--safe-mode",
+  "--strict-mcp-config",
+  "auth",
+  "status",
+  "--json",
+] as const;
 export const CLAUDE_CODE_TOOL_CAPABILITIES: GhostToolCapabilities = { vision: true };
 
 /**
@@ -159,13 +179,13 @@ export const CLAUDE_CODE_DISALLOWED_TOOLS = [
   "RemoteTrigger",
   "ScheduleWakeup",
 ] as const;
-const execFileAsync = promisify(execFile);
-
 export interface ClaudeCodeAuthStatus {
   loggedIn: boolean;
   authMethod?: string;
   apiProvider?: string;
   subscriptionType?: string;
+  /** Private fixed-size hash used only to decide whether a warm query is reusable. */
+  accountFingerprint?: string;
 }
 
 export interface ClaudeSessionMetadata {
@@ -223,15 +243,29 @@ export type ClaudeCodeQueryExitObserver = (query: Query) => Promise<void>;
 
 export interface ClaudeCodeProbeResult {
   binaryPath: string;
+  executableIdentity: string;
+  cliVersion: string;
   authStatus: ClaudeCodeAuthStatus;
 }
 
 export interface ClaudeCodeProbeOptions {
   binaryPath?: string;
+  environment?: Readonly<NodeJS.ProcessEnv>;
   ttlMs?: number;
   now?: () => number;
-  resolveExecutable?: (binaryPath: string) => Promise<string>;
-  readAuthStatus?: (binaryPath: string) => Promise<ClaudeCodeAuthStatus>;
+  resolveExecutable?: (
+    binaryPath: string | undefined,
+    environment: Readonly<NodeJS.ProcessEnv>,
+  ) => Promise<string>;
+  inspectExecutable?: (binaryPath: string, literalBoundary: boolean) => Promise<string>;
+  readVersion?: (
+    binaryPath: string,
+    environment: Readonly<NodeJS.ProcessEnv>,
+  ) => Promise<string>;
+  readAuthStatus?: (
+    binaryPath: string,
+    environment: Readonly<NodeJS.ProcessEnv>,
+  ) => Promise<ClaudeCodeAuthStatus>;
   loadSdk?: () => Promise<ClaudeAgentSdkModule>;
 }
 
@@ -242,9 +276,11 @@ export interface ClaudeCodeRuntimeOptions {
   logger?: Logger;
   extensionOptions?: GhostExtensionOptions;
   binaryPath?: string;
+  environment?: Readonly<NodeJS.ProcessEnv>;
   createQuery?: ClaudeCodeQueryFactory;
-  readAuthStatus?: (binaryPath: string) => Promise<ClaudeCodeAuthStatus>;
-  resolveExecutable?: (binaryPath: string) => Promise<string>;
+  readVersion?: ClaudeCodeProbeOptions["readVersion"];
+  readAuthStatus?: ClaudeCodeProbeOptions["readAuthStatus"];
+  resolveExecutable?: ClaudeCodeProbeOptions["resolveExecutable"];
   probe?: ClaudeCodeProbe;
   loadSdk?: () => Promise<ClaudeAgentSdkModule>;
   hooks?: GhostHookRunner;
@@ -264,25 +300,194 @@ export class ClaudeCodeProcessError extends Error {
   }
 }
 
-function credentialFreeEnvironment(): NodeJS.ProcessEnv {
-  // main.ts / SessionHost already scrub provider credentials and routing
-  // overrides process-wide.
-  // Copy the result because the SDK replaces, rather than merges, `env`.
-  const env = {
-    ...process.env,
-    CLAUDE_AGENT_SDK_CLIENT_APP: "ghostd/0.0.1",
-  };
-  scrubProviderEnv(env);
-  return env;
+interface OwnedCommandResult {
+  stdout: string;
+  exitCode: number | null;
+  signal: NodeJS.Signals | null;
 }
 
-async function executableCandidate(binaryPath: string): Promise<string | null> {
+function processGroupExists(pid: number): boolean {
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ESRCH") return false;
+    if ((error as NodeJS.ErrnoException).code === "EPERM") return true;
+    throw error;
+  }
+}
+
+function signalOwnedProcessGroup(pid: number, signal: NodeJS.Signals): void {
+  try {
+    process.kill(-pid, signal);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+  }
+}
+
+async function waitForProcessGroupExit(pid: number, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (processGroupExists(pid)) {
+    if (Date.now() >= deadline) return false;
+    await new Promise<void>((resolveDelay) => setTimeout(resolveDelay, 10));
+  }
+  return true;
+}
+
+async function terminateOwnedProcessGroup(
+  pid: number,
+  termGraceMs = OWNED_CHILD_TERM_GRACE_MS,
+  killConfirmMs = OWNED_CHILD_KILL_CONFIRM_MS,
+): Promise<void> {
+  if (!processGroupExists(pid)) return;
+  signalOwnedProcessGroup(pid, "SIGTERM");
+  if (await waitForProcessGroupExit(pid, termGraceMs)) return;
+  signalOwnedProcessGroup(pid, "SIGKILL");
+  if (await waitForProcessGroupExit(pid, killConfirmMs)) return;
+  throw new ClaudeCodeProcessError("Claude Code probe process teardown was not confirmed.");
+}
+
+async function runOwnedCommand(
+  executable: string,
+  args: readonly string[],
+  options: {
+    environment: Readonly<NodeJS.ProcessEnv>;
+    timeoutMs: number;
+  },
+): Promise<OwnedCommandResult> {
+  const scratch = await mkdtemp(join(tmpdir(), "ghost-claude-probe-"));
+  try {
+    return await runOwnedCommandInDirectory(executable, args, options, scratch);
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function runOwnedCommandInDirectory(
+  executable: string,
+  args: readonly string[],
+  options: {
+    environment: Readonly<NodeJS.ProcessEnv>;
+    timeoutMs: number;
+  },
+  cwd: string,
+): Promise<OwnedCommandResult> {
+  const child = spawn(executable, [...args], {
+    cwd,
+    detached: true,
+    env: options.environment,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const pid = child.pid;
+  const chunks: Buffer[] = [];
+  let stdoutBytes = 0;
+  child.stderr?.resume();
+
+  type Completion =
+    | { kind: "close"; exitCode: number | null; signal: NodeJS.Signals | null }
+    | { kind: "error" }
+    | { kind: "overflow" }
+    | { kind: "timeout" };
+  let settleCompletion!: (completion: Completion) => void;
+  let completionRequested = false;
+  const completion = new Promise<Completion>((resolveCompletion) => {
+    settleCompletion = resolveCompletion;
+  });
+  const complete = (value: Completion) => {
+    if (completionRequested) return;
+    completionRequested = true;
+    settleCompletion(value);
+  };
+  child.stdout?.on("data", (chunk: Buffer | string) => {
+    if (completionRequested) return;
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    stdoutBytes += bytes.length;
+    if (stdoutBytes > OWNED_CHILD_MAX_STDOUT_BYTES) {
+      complete({ kind: "overflow" });
+      return;
+    }
+    chunks.push(bytes);
+  });
+  child.once("error", () => complete({ kind: "error" }));
+  child.once("close", (exitCode, signal) => {
+    complete({ kind: "close", exitCode, signal });
+  });
+  const deadline = setTimeout(
+    () => complete({ kind: "timeout" }),
+    options.timeoutMs,
+  );
+
+  const outcome = await completion;
+  clearTimeout(deadline);
+  try {
+    if (pid !== undefined) await terminateOwnedProcessGroup(pid);
+  } finally {
+    child.stdout?.destroy();
+    child.stderr?.destroy();
+  }
+
+  if (outcome.kind !== "close") {
+    const reason = outcome.kind === "overflow"
+      ? "produced too much output"
+      : outcome.kind === "timeout" ? "exceeded its hard deadline" : "could not start";
+    throw new ClaudeCodeProcessError(`Claude Code probe ${reason}.`);
+  }
+  return {
+    stdout: Buffer.concat(chunks, stdoutBytes).toString("utf8"),
+    exitCode: outcome.exitCode,
+    signal: outcome.signal,
+  };
+}
+
+function authStatusMetadata(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  const scalars = [...trimmed];
+  if (!trimmed || scalars.length > AUTH_STATUS_METADATA_MAX_SCALARS) return undefined;
+  if (scalars.some((scalar) => {
+    const codePoint = scalar.charCodeAt(0);
+    return codePoint <= 0x1f || codePoint === 0x7f;
+  })) return undefined;
+  return trimmed;
+}
+
+function authIdentityScalar(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  const scalars = [...trimmed];
+  if (!trimmed || scalars.length > AUTH_STATUS_IDENTITY_MAX_SCALARS) return undefined;
+  if (scalars.some((scalar) => {
+    const codePoint = scalar.charCodeAt(0);
+    return codePoint <= 0x1f || codePoint === 0x7f;
+  })) return undefined;
+  return trimmed;
+}
+
+function accountFingerprint(status: Record<string, unknown>): string | undefined {
+  const primaryFields = ["accountUuid", "accountId", "userId", "email"] as const;
+  const primary = primaryFields.flatMap((name) => {
+    const value = authIdentityScalar(status[name]);
+    return value ? [[name, value] as const] : [];
+  });
+  if (primary.length === 0) return undefined;
+  const contextFields = ["orgId", "organizationUuid"] as const;
+  const context = contextFields.flatMap((name) => {
+    const value = authIdentityScalar(status[name]);
+    return value ? [[name, value] as const] : [];
+  });
+  return createHash("sha256").update(JSON.stringify([primary, context])).digest("hex");
+}
+
+async function executableCandidate(
+  binaryPath: string,
+  environment: Readonly<NodeJS.ProcessEnv>,
+): Promise<string | null> {
   const candidates = isAbsolute(binaryPath) || binaryPath.includes("/")
     ? [resolve(binaryPath)]
-    : (process.env.PATH ?? "")
+    : (environment.PATH ?? "")
       .split(delimiter)
       .filter(Boolean)
-      .map((directory) => join(directory, binaryPath));
+      .map((directory) => resolve(directory, binaryPath));
   for (const candidate of candidates) {
     try {
       await access(candidate, fsConstants.X_OK);
@@ -306,50 +511,120 @@ async function launcherPrefix(path: string): Promise<string> {
   }
 }
 
-async function unwrapMiseClaudeLauncher(path: string): Promise<string> {
+async function unwrapMiseClaudeLauncher(
+  path: string,
+  environment: Readonly<NodeJS.ProcessEnv>,
+  timeoutMs: number,
+): Promise<string> {
   const prefix = await launcherPrefix(path);
   if (!prefix.startsWith("#!") || !/\bmise\b/.test(prefix) || !/\bclaude\b/.test(prefix)) {
     return path;
   }
 
-  let stdout: string;
+  let result: OwnedCommandResult;
   try {
-    ({ stdout } = await execFileAsync("mise", ["which", "claude"], {
-      encoding: "utf8",
-      timeout: AUTH_STATUS_TIMEOUT_MS,
-      maxBuffer: 128 * 1024,
-      env: credentialFreeEnvironment(),
-    }));
-  } catch (cause) {
+    const miseCandidate = await executableCandidate("mise", environment);
+    if (!miseCandidate) throw new Error("mise is not on PATH");
+    const miseExecutable = await realpathFile(miseCandidate);
+    result = await runOwnedCommand(miseExecutable, ["which", "claude"], {
+      environment,
+      timeoutMs,
+    });
+  } catch {
     throw new ClaudeCodeProcessError(
       `Claude Code launcher ${JSON.stringify(path)} delegates to mise, but Ghost could not resolve `
         + "mise's underlying Claude executable.",
-      { cause },
     );
   }
-  const lines = stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (result.exitCode !== 0 || result.signal) {
+    throw new ClaudeCodeProcessError("`mise which claude` did not exit successfully.");
+  }
+  const lines = result.stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   const [misePath] = lines;
   if (lines.length !== 1 || !misePath) {
     throw new ClaudeCodeProcessError(
       `\`mise which claude\` returned ${lines.length} executable paths; expected exactly one.`,
     );
   }
-  const resolved = await executableCandidate(misePath);
+  const resolved = await executableCandidate(misePath, environment);
   if (!resolved || resolved === path) {
     throw new ClaudeCodeProcessError(
       `mise did not resolve an executable behind Claude launcher ${JSON.stringify(path)}.`,
     );
   }
-  return resolved;
+  return await realpathFile(resolved);
+}
+
+interface BigintExecutableStat {
+  dev: bigint;
+  ino: bigint;
+  mode: bigint;
+  size: bigint;
+  mtimeNs: bigint;
+  ctimeNs: bigint;
+  isFile(): boolean;
+  isSymbolicLink(): boolean;
+}
+
+function executableStatIdentity(value: BigintExecutableStat): readonly string[] {
+  return [
+    value.dev.toString(),
+    value.ino.toString(),
+    value.mode.toString(),
+    value.size.toString(),
+    value.mtimeNs.toString(),
+    value.ctimeNs.toString(),
+  ];
+}
+
+async function inspectClaudeCodeExecutable(
+  binaryPath: string,
+  literalBoundary: boolean,
+): Promise<string> {
+  if (!isAbsolute(binaryPath)) {
+    throw new ClaudeCodeProcessError("Claude Code executable resolution was not absolute.");
+  }
+  const boundary = await lstat(binaryPath, { bigint: true });
+  if (!boundary.isFile() && !boundary.isSymbolicLink()) {
+    throw new ClaudeCodeProcessError("Claude Code executable boundary is not a file or link.");
+  }
+  const targetPath = await realpathFile(binaryPath);
+  const target = await stat(targetPath, { bigint: true });
+  if (!target.isFile()) {
+    throw new ClaudeCodeProcessError("Claude Code executable target is not a regular file.");
+  }
+  await access(binaryPath, fsConstants.X_OK);
+  const identity = JSON.stringify([
+    literalBoundary,
+    binaryPath,
+    executableStatIdentity(boundary),
+    targetPath,
+    executableStatIdentity(target),
+  ]);
+  return createHash("sha256").update(identity).digest("hex");
 }
 
 /** Linux/Omarchy subset of T3's executable-resolution seam. */
-export async function resolveClaudeCodeExecutable(binaryPath = "claude"): Promise<string> {
-  const resolved = await executableCandidate(binaryPath);
-  if (resolved) return unwrapMiseClaudeLauncher(resolved);
+export async function resolveClaudeCodeExecutable(
+  binaryPath: string | undefined = undefined,
+  environment: Readonly<NodeJS.ProcessEnv> = captureClaudeCodeEnvironment(),
+  options: { timeoutMs?: number } = {},
+): Promise<string> {
+  const timeoutMs = options.timeoutMs ?? AUTH_STATUS_TIMEOUT_MS;
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    throw new RangeError("Claude Code executable timeout must be a finite positive number.");
+  }
+  const configuredBinary = binaryPath !== undefined;
+  const selectedBinary = binaryPath ?? "claude";
+  const resolved = await executableCandidate(selectedBinary, environment);
+  if (resolved) {
+    if (configuredBinary) return resolved;
+    const unwrapped = await unwrapMiseClaudeLauncher(resolved, environment, timeoutMs);
+    return await realpathFile(unwrapped);
+  }
   throw new GhostError(
     "claude_code_missing",
-    `Claude Code is not installed at ${JSON.stringify(binaryPath)}. Install the official `
+    `Claude Code is not installed at ${JSON.stringify(selectedBinary)}. Install the official `
       + `Claude Code CLI, then run \`claude auth login\`. Override the executable with `
       + `${CLAUDE_CODE_BINARY_ENV} when needed.`,
     503,
@@ -360,10 +635,8 @@ function authStatusFromJson(raw: string): ClaudeCodeAuthStatus {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
-  } catch (cause) {
-    throw new ClaudeCodeProcessError("`claude auth status --json` returned invalid JSON.", {
-      cause,
-    });
+  } catch {
+    throw new ClaudeCodeProcessError("`claude auth status --json` returned invalid JSON.");
   }
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new ClaudeCodeProcessError("`claude auth status --json` returned no status object.");
@@ -374,41 +647,133 @@ function authStatusFromJson(raw: string): ClaudeCodeAuthStatus {
       "`claude auth status --json` omitted its boolean `loggedIn` field.",
     );
   }
-  return {
+  const authMethod = authStatusMetadata(status.authMethod);
+  const apiProvider = authStatusMetadata(status.apiProvider);
+  const subscriptionType = authStatusMetadata(status.subscriptionType);
+  const result: ClaudeCodeAuthStatus = {
     loggedIn: status.loggedIn,
-    ...(typeof status.authMethod === "string" ? { authMethod: status.authMethod } : {}),
-    ...(typeof status.apiProvider === "string" ? { apiProvider: status.apiProvider } : {}),
-    ...(typeof status.subscriptionType === "string"
-      ? { subscriptionType: status.subscriptionType }
-      : {}),
+    ...(authMethod ? { authMethod } : {}),
+    ...(apiProvider ? { apiProvider } : {}),
+    ...(subscriptionType ? { subscriptionType } : {}),
   };
+  const fingerprint = accountFingerprint(status);
+  if (fingerprint) {
+    Object.defineProperty(result, "accountFingerprint", { value: fingerprint });
+  }
+  return result;
 }
 
 export async function readClaudeCodeAuthStatus(
   binaryPath: string,
+  environment: Readonly<NodeJS.ProcessEnv> = captureClaudeCodeEnvironment(),
+  options: { timeoutMs?: number } = {},
 ): Promise<ClaudeCodeAuthStatus> {
-  let stdout: string;
-  try {
-    ({ stdout } = await execFileAsync(binaryPath, ["auth", "status", "--json"], {
-      encoding: "utf8",
-      timeout: AUTH_STATUS_TIMEOUT_MS,
-      maxBuffer: 128 * 1024,
-      env: credentialFreeEnvironment(),
-    }));
-  } catch (cause) {
-    const error = cause as NodeJS.ErrnoException & { stdout?: string };
-    if (typeof error.stdout === "string" && error.stdout.trim()) {
-      return authStatusFromJson(error.stdout);
-    }
-    throw new ClaudeCodeProcessError("Failed to read Claude Code authentication status.", {
-      cause,
-    });
+  const timeoutMs = options.timeoutMs ?? AUTH_STATUS_TIMEOUT_MS;
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    throw new RangeError("Claude Code auth status timeout must be a finite positive number.");
   }
-  return authStatusFromJson(stdout);
+
+  let result: OwnedCommandResult;
+  try {
+    result = await runOwnedCommand(binaryPath, CLAUDE_CODE_AUTH_STATUS_ARGS, {
+      environment,
+      timeoutMs,
+    });
+  } catch {
+    throw new ClaudeCodeProcessError("Failed to read Claude Code authentication status.");
+  }
+
+  if (result.signal || (result.exitCode !== 0 && result.exitCode !== 1)) {
+    throw new ClaudeCodeProcessError("Failed to read Claude Code authentication status.");
+  }
+  const exitCode = result.exitCode;
+  const status = authStatusFromJson(result.stdout);
+  if (status.loggedIn !== (exitCode === 0)) {
+    throw new ClaudeCodeProcessError(
+      `Claude Code authentication status disagreed with exit ${exitCode}.`,
+    );
+  }
+  return status;
 }
 
-export function isClaudePlanAuth(status: ClaudeCodeAuthStatus): boolean {
-  return status.loggedIn && status.authMethod === "claude.ai";
+function versionAtLeast(version: readonly number[], minimum: readonly number[]): boolean {
+  for (let index = 0; index < minimum.length; index += 1) {
+    const actual = version[index] ?? 0;
+    const required = minimum[index] ?? 0;
+    if (actual !== required) return actual > required;
+  }
+  return true;
+}
+
+export async function readClaudeCodeVersion(
+  binaryPath: string,
+  environment: Readonly<NodeJS.ProcessEnv> = captureClaudeCodeEnvironment(),
+  options: { timeoutMs?: number } = {},
+): Promise<string> {
+  const timeoutMs = options.timeoutMs ?? AUTH_STATUS_TIMEOUT_MS;
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    throw new RangeError("Claude Code version timeout must be a finite positive number.");
+  }
+  let result: OwnedCommandResult;
+  try {
+    result = await runOwnedCommand(binaryPath, ["--version"], { environment, timeoutMs });
+  } catch {
+    throw new ClaudeCodeProcessError("Failed to read Claude Code version.");
+  }
+  if (result.exitCode !== 0 || result.signal) {
+    throw new ClaudeCodeProcessError("Failed to read Claude Code version.");
+  }
+  const match = /^(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8}) \(Claude Code\)\n?$/u
+    .exec(result.stdout);
+  if (!match) {
+    throw new ClaudeCodeProcessError("`claude --version` returned an invalid stable version.");
+  }
+  const version = match.slice(1, 4).map(Number);
+  const minimum = CLAUDE_CODE_MINIMUM_VERSION.split(".").map(Number);
+  if (!versionAtLeast(version, minimum)) {
+    throw new ClaudeCodeProcessError(
+      `Claude Code ${match[1]}.${match[2]}.${match[3]} is older than required `
+        + `${CLAUDE_CODE_MINIMUM_VERSION}.`,
+    );
+  }
+  return `${match[1]}.${match[2]}.${match[3]}`;
+}
+
+export function isClaudeCodeAuthenticated(status: ClaudeCodeAuthStatus): boolean {
+  return status.loggedIn;
+}
+
+/** Non-secret CLI metadata for the catalogue; never an authorization list. */
+export function claudeCodeConnectionMethod(status: ClaudeCodeAuthStatus): string {
+  return authStatusMetadata(status.apiProvider)
+    ?? authStatusMetadata(status.authMethod)
+    ?? "external";
+}
+
+function claudeCodeAuthenticationIdentity(status: ClaudeCodeAuthStatus): string {
+  return JSON.stringify([
+    status.loggedIn,
+    authStatusMetadata(status.authMethod) ?? null,
+    authStatusMetadata(status.apiProvider) ?? null,
+    authStatusMetadata(status.subscriptionType) ?? null,
+    /^[0-9a-f]{64}$/u.test(status.accountFingerprint ?? "")
+      ? status.accountFingerprint
+      : null,
+  ]);
+}
+
+function claudeCodeRuntimeIdentity(
+  binaryPath: string,
+  executableIdentity: string,
+  cliVersion: string,
+  status: ClaudeCodeAuthStatus,
+): string {
+  return JSON.stringify([
+    binaryPath,
+    executableIdentity,
+    cliVersion,
+    claudeCodeAuthenticationIdentity(status),
+  ]);
 }
 
 /**
@@ -418,10 +783,13 @@ export function isClaudePlanAuth(status: ClaudeCodeAuthStatus): boolean {
  * up a failing process on every request.
  */
 export class ClaudeCodeProbe {
-  private readonly binaryPath: string;
+  private readonly binaryPath: string | undefined;
+  private readonly environment: Readonly<NodeJS.ProcessEnv>;
   private readonly ttlMs: number;
   private readonly now: () => number;
   private readonly resolveExecutable: NonNullable<ClaudeCodeProbeOptions["resolveExecutable"]>;
+  private readonly inspectExecutable: NonNullable<ClaudeCodeProbeOptions["inspectExecutable"]>;
+  private readonly readVersion: NonNullable<ClaudeCodeProbeOptions["readVersion"]>;
   private readonly readAuthStatus: NonNullable<ClaudeCodeProbeOptions["readAuthStatus"]>;
   private readonly loadSdk: ClaudeCodeProbeOptions["loadSdk"];
   private generation = 0;
@@ -432,11 +800,12 @@ export class ClaudeCodeProbe {
     expiresAt: number;
   };
   private inFlight?: { generation: number; promise: Promise<ClaudeCodeProbeResult> };
+  private turnInFlight?: Promise<ClaudeCodeProbeResult>;
 
   constructor(options: ClaudeCodeProbeOptions = {}) {
-    this.binaryPath = options.binaryPath
-      ?? process.env[CLAUDE_CODE_BINARY_ENV]
-      ?? "claude";
+    const configuredBinary = options.binaryPath ?? process.env[CLAUDE_CODE_BINARY_ENV];
+    this.binaryPath = configuredBinary;
+    this.environment = captureClaudeCodeEnvironment(options.environment ?? process.env);
     this.ttlMs = options.ttlMs ?? CLAUDE_CODE_PROBE_TTL_MS;
     if (!Number.isFinite(this.ttlMs)
       || this.ttlMs <= 0
@@ -447,6 +816,8 @@ export class ClaudeCodeProbe {
     }
     this.now = options.now ?? Date.now;
     this.resolveExecutable = options.resolveExecutable ?? resolveClaudeCodeExecutable;
+    this.inspectExecutable = options.inspectExecutable ?? inspectClaudeCodeExecutable;
+    this.readVersion = options.readVersion ?? readClaudeCodeVersion;
     this.readAuthStatus = options.readAuthStatus ?? readClaudeCodeAuthStatus;
     this.loadSdk = options.loadSdk;
   }
@@ -470,8 +841,32 @@ export class ClaudeCodeProbe {
     return promise;
   }
 
-  async isPlanAuthenticated(): Promise<boolean> {
-    return isClaudePlanAuth((await this.read()).authStatus);
+  async isAuthenticated(): Promise<boolean> {
+    return isClaudeCodeAuthenticated((await this.read()).authStatus);
+  }
+
+  /** Turn admission bypasses the catalogue TTL but may share simultaneous fresh work. */
+  readForTurn(): Promise<ClaudeCodeProbeResult> {
+    if (this.turnInFlight) return this.turnInFlight;
+    this.invalidate();
+    const promise = this.read();
+    this.turnInFlight = promise;
+    void promise.then(
+      () => {
+        if (this.turnInFlight === promise) this.turnInFlight = undefined;
+      },
+      () => {
+        if (this.turnInFlight === promise) this.turnInFlight = undefined;
+      },
+    );
+    return promise;
+  }
+
+  async assertExecutable(result: ClaudeCodeProbeResult): Promise<void> {
+    const current = await this.inspectExecutable(result.binaryPath, this.binaryPath !== undefined);
+    if (current !== result.executableIdentity) {
+      throw new ClaudeCodeProcessError("Claude Code executable changed after authentication.");
+    }
   }
 
   invalidate(): void {
@@ -483,10 +878,22 @@ export class ClaudeCodeProbe {
   private async readFresh(generation: number): Promise<ClaudeCodeProbeResult> {
     try {
       await this.loadSdk?.();
-      const binaryPath = await this.resolveExecutable(this.binaryPath);
-      const authStatus = await this.readAuthStatus(binaryPath);
+      const binaryPath = await this.resolveExecutable(this.binaryPath, this.environment);
+      const executableIdentity = await this.inspectExecutable(
+        binaryPath,
+        this.binaryPath !== undefined,
+      );
+      const cliVersion = await this.readVersion(binaryPath, this.environment);
+      const authStatus = await this.readAuthStatus(binaryPath, this.environment);
+      const confirmedIdentity = await this.inspectExecutable(
+        binaryPath,
+        this.binaryPath !== undefined,
+      );
+      if (confirmedIdentity !== executableIdentity) {
+        throw new ClaudeCodeProcessError("Claude Code executable changed during authentication.");
+      }
       if (generation !== this.generation) return this.read();
-      const value = { binaryPath, authStatus };
+      const value = { binaryPath, executableIdentity, cliVersion, authStatus };
       this.cached = { outcome: { ok: true, value }, expiresAt: this.now() + this.ttlMs };
       return value;
     } catch (error) {
@@ -525,10 +932,13 @@ export function claudeSessionResumeMarkerPaths(
  */
 export function claudeSdkTranscriptPath(
   sessionId: string,
-  env: NodeJS.ProcessEnv = process.env,
+  env: Readonly<NodeJS.ProcessEnv> = process.env,
 ): string | undefined {
   if (!/^[A-Za-z0-9-]{1,128}$/u.test(sessionId)) return undefined;
-  const projects = join(env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude"), "projects");
+  const projects = join(
+    env.CLAUDE_CONFIG_DIR || join(env.HOME || homedir(), ".claude"),
+    "projects",
+  );
   let directories: string[];
   try {
     directories = readdirSync(projects);
@@ -1226,6 +1636,7 @@ function queryOptions(input: {
   abortController: AbortController;
   internalMcpServerName: string;
   projectMcpServers: Record<string, ClaudeMcpServerConfig>;
+  environment: Readonly<NodeJS.ProcessEnv>;
   spawnClaudeCodeProcess?: (options: ClaudeSpawnOptions) => ClaudeSpawnedProcess;
 }): ClaudeQueryOptions {
   const mcp = input.sdk.createSdkMcpServer({
@@ -1249,12 +1660,18 @@ function queryOptions(input: {
     // and project MCP explicitly at the session boundary.
     settingSources: [],
     skills: [],
+    plugins: [],
+    strictMcpConfig: true,
     tools: { type: "preset", preset: "claude_code" },
     allowedTools: input.toolNames.map((name) =>
       `mcp__${input.internalMcpServerName}__${name}`),
     disallowedTools: [...CLAUDE_CODE_DISALLOWED_TOOLS],
     permissionMode: "bypassPermissions",
     allowDangerouslySkipPermissions: true,
+    // Ghost has no approval surface. Keep the SDK's native headless fallback
+    // aligned with bypass mode for every request that survived disallowedTools;
+    // Claude still owns safety checks it applies before invoking this callback.
+    canUseTool: async () => ({ behavior: "allow" }),
     mcpServers: mcpServerRecord([
       ...Object.entries(input.projectMcpServers),
       [input.internalMcpServerName, mcp],
@@ -1269,7 +1686,7 @@ function queryOptions(input: {
     ...(input.metadata && input.metadata.resumeBlocked !== true
       ? { resume: input.metadata.sessionId }
       : { sessionId: input.newSessionId }),
-    env: credentialFreeEnvironment(),
+    env: input.environment,
   };
 }
 
@@ -1496,45 +1913,80 @@ interface ClaudeInputChannel {
 interface ClaudeProcessExitBoundary {
   readonly exited: Promise<void>;
   readonly spawn: (options: ClaudeSpawnOptions) => ClaudeSpawnedProcess;
+  terminate: () => void;
 }
 
-/** Capture the public SDK spawn seam's real child `exit` event. */
+/** Own the SDK CLI and every descendant as one isolated Linux process group. */
 function claudeProcessExitBoundary(): ClaudeProcessExitBoundary {
   let settled = false;
+  let spawned = false;
+  let terminationRequested = false;
+  let pid: number | undefined;
+  let quiescing: Promise<void> | undefined;
   let resolveExit!: () => void;
-  const exited = new Promise<void>((resolve) => {
+  let rejectExit!: (cause: unknown) => void;
+  const exited = new Promise<void>((resolve, reject) => {
     resolveExit = resolve;
+    rejectExit = reject;
   });
+  const resolveOnce = () => {
+    if (settled) return;
+    settled = true;
+    resolveExit();
+  };
+  const rejectOnce = (cause: unknown) => {
+    if (settled) return;
+    settled = true;
+    rejectExit(cause);
+  };
+  const quiesce = () => {
+    if (settled || quiescing || pid === undefined) return;
+    quiescing = terminateOwnedProcessGroup(
+      pid,
+      CLAUDE_QUERY_TERM_GRACE_MS,
+      CLAUDE_QUERY_KILL_CONFIRM_MS,
+    );
+    void quiescing.then(resolveOnce, rejectOnce);
+  };
   return {
     exited,
     spawn: (options) => {
+      if (spawned) {
+        throw new ClaudeCodeProcessError("Claude Code tried to spawn more than one CLI process.");
+      }
+      spawned = true;
       let child: ReturnType<typeof spawn>;
       try {
         child = spawn(options.command, options.args, {
           cwd: options.cwd,
+          detached: process.platform === "linux",
           env: options.env,
           signal: options.signal,
           windowsHide: true,
           stdio: ["pipe", "pipe", "ignore"],
         });
       } catch (cause) {
-        settled = true;
-        resolveExit();
+        resolveOnce();
         throw cause;
       }
+      // A negative PID is safe only when this child was made the leader of a
+      // new Linux process group. Never risk signaling ghostd's own group on a
+      // platform where `detached` has different semantics.
+      pid = process.platform === "linux" ? child.pid : undefined;
+      if (terminationRequested) quiesce();
       child.once("exit", () => {
-        if (settled) return;
-        settled = true;
-        resolveExit();
+        if (pid !== undefined && processGroupExists(pid)) quiesce();
+        else resolveOnce();
       });
       child.once("error", () => {
-        // A spawn failure has no child left to await. Later process errors do
-        // not acknowledge exit; the exit event or close timeout owns them.
-        if (settled || child.pid !== undefined) return;
-        settled = true;
-        resolveExit();
+        if (pid === undefined) resolveOnce();
+        else quiesce();
       });
       return child as unknown as ClaudeSpawnedProcess;
+    },
+    terminate: () => {
+      terminationRequested = true;
+      quiesce();
     },
   };
 }
@@ -1592,8 +2044,10 @@ interface WarmClaudeQuery {
   readonly messages: AsyncIterator<SDKMessage>;
   readonly input: ClaudeInputChannel;
   readonly abortController: AbortController;
+  readonly runtimeIdentity: string;
   readonly identity: string;
   readonly exited: Promise<void>;
+  readonly terminateProcessGroup: () => void;
   projectMcpFailed: boolean;
 }
 
@@ -1608,6 +2062,7 @@ interface ClaudeSessionPersona {
  * here too, or a stale query would silently answer under the old value.
  */
 function warmQueryIdentity(input: {
+  runtimeIdentity: string;
   cwd: string;
   modelId: string;
   systemPrompt: string;
@@ -1615,6 +2070,7 @@ function warmQueryIdentity(input: {
   projectMcpServers: Record<string, ClaudeMcpServerConfig>;
 }): string {
   return JSON.stringify([
+    input.runtimeIdentity,
     input.cwd,
     input.modelId,
     input.systemPrompt,
@@ -1683,6 +2139,7 @@ export class ClaudeCodeRuntime {
   private readonly probe: ClaudeCodeProbe;
   private readonly loadSdk: () => Promise<ClaudeAgentSdkModule>;
   private readonly hooks: GhostHookRunner;
+  private readonly environment: Readonly<NodeJS.ProcessEnv>;
   private readonly ownerHome: string;
   private readonly scheduleUnitDir: string;
   private readonly warmIdleTtlMs: number;
@@ -1723,6 +2180,7 @@ export class ClaudeCodeRuntime {
       throw new TypeError("scheduleUnitDir must be absolute");
     }
     this.scheduleUnitDir = resolve(scheduleUnitDir);
+    this.environment = captureClaudeCodeEnvironment(options.environment ?? process.env);
     const warmIdleTtlMs = options.warmIdleTtlMs ?? CLAUDE_WARM_QUERY_IDLE_TTL_MS;
     if (!Number.isFinite(warmIdleTtlMs) || warmIdleTtlMs <= 0) {
       throw new RangeError("warmIdleTtlMs must be a finite positive number");
@@ -1748,7 +2206,9 @@ export class ClaudeCodeRuntime {
     this.createQuery = options.createQuery;
     this.probe = options.probe ?? new ClaudeCodeProbe({
       ...(options.binaryPath ? { binaryPath: options.binaryPath } : {}),
+      environment: this.environment,
       ...(options.resolveExecutable ? { resolveExecutable: options.resolveExecutable } : {}),
+      ...(options.readVersion ? { readVersion: options.readVersion } : {}),
       ...(options.readAuthStatus ? { readAuthStatus: options.readAuthStatus } : {}),
     });
     this.hooks = options.hooks ?? new GhostHookRunner({ logger: this.logger });
@@ -1885,16 +2345,38 @@ export class ClaudeCodeRuntime {
       const paths = ghostPaths(ghost.dir);
       let metadata = await readMetadata(paths.sessionDir, conversationId);
       this.assertTurnAdmitted(options.signal);
-      const { binaryPath, authStatus: auth } = await this.probe.read();
+      let probed: ClaudeCodeProbeResult;
+      try {
+        probed = await this.probe.readForTurn();
+      } catch (cause) {
+        this.retireWarm(key);
+        throw cause;
+      }
+      const { binaryPath, executableIdentity, cliVersion, authStatus: auth } = probed;
       this.assertTurnAdmitted(options.signal);
-      if (!isClaudePlanAuth(auth)) {
+      if (!isClaudeCodeAuthenticated(auth)) {
+        this.retireWarm(key);
         throw new GhostError(
-          "claude_code_subscription_required",
-          "Claude Code is not signed into a Claude.ai plan. Run `claude auth login` in a "
-            + "terminal as this desktop user, choose the Claude.ai account, then retry. "
-            + "Ghost does not accept or store that login.",
+          "claude_code_auth_required",
+          "Claude Code did not report a usable native authentication method. Configure or "
+            + "sign into the installed `claude` executable as this desktop user, then retry. "
+            + "Ghost does not accept or store that credential.",
           503,
         );
+      }
+      const runtimeIdentity = claudeCodeRuntimeIdentity(
+        binaryPath,
+        executableIdentity,
+        cliVersion,
+        auth,
+      );
+      const authenticatedWarm = this.warm.get(key);
+      const stableAccount = /^[0-9a-f]{64}$/u.test(auth.accountFingerprint ?? "");
+      if (authenticatedWarm && (
+        !stableAccount || authenticatedWarm.runtimeIdentity !== runtimeIdentity
+      )) {
+        logger.debug?.("retiring Claude query whose executable or authentication changed");
+        this.retireWarm(key, authenticatedWarm);
       }
 
       await mkdir(paths.sessionDir, { recursive: true });
@@ -2014,11 +2496,19 @@ export class ClaudeCodeRuntime {
         sdk,
       );
       this.assertTurnAdmitted(options.signal);
+      try {
+        await this.probe.assertExecutable(probed);
+      } catch (cause) {
+        this.retireWarm(key);
+        throw cause;
+      }
+      this.assertTurnAdmitted(options.signal);
 
       let prompt = options.prompt;
       let stopHookActive = false;
       let continuationCount = 0;
       const identity = warmQueryIdentity({
+        runtimeIdentity,
         cwd: runtimeCwd,
         modelId,
         systemPrompt,
@@ -2059,6 +2549,7 @@ export class ClaudeCodeRuntime {
             abortController,
             internalMcpServerName: sdkMcpServerName,
             projectMcpServers: approvedProject.mcpServers,
+            environment: this.environment,
             ...(processExit ? { spawnClaudeCodeProcess: processExit.spawn } : {}),
           });
           let created: Query;
@@ -2088,8 +2579,10 @@ export class ClaudeCodeRuntime {
             messages: created[Symbol.asyncIterator]() as AsyncIterator<SDKMessage>,
             input,
             abortController,
+            runtimeIdentity,
             identity,
             exited,
+            terminateProcessGroup: processExit?.terminate ?? (() => {}),
             projectMcpFailed: false,
           };
           this.warm.set(key, warm);
@@ -2213,7 +2706,7 @@ export class ClaudeCodeRuntime {
         const emitsSessionStop = completed.subtype === "success"
           && this.hooks.hasHandlers("session_stop");
         const sdkTranscript = emitsSessionStop
-          ? claudeSdkTranscriptPath(completed.session_id)
+          ? claudeSdkTranscriptPath(completed.session_id, this.environment)
           : undefined;
         const hookResult = emitsSessionStop
           ? await this.hooks.emitSessionStop({
@@ -2395,12 +2888,13 @@ export class ClaudeCodeRuntime {
       // and a later retry can observe the same boundary again.
     });
     warm.input.close();
-    warm.abortController.abort();
     try {
       warm.query.close();
     } catch {
       // A query whose process is already gone is exactly what we wanted.
     }
+    warm.terminateProcessGroup();
+    warm.abortController.abort();
   }
 
   /** Start one session-idle countdown, even when its query already failed. */

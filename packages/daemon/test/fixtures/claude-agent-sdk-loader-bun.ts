@@ -2,6 +2,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   CLAUDE_AGENT_SDK_PACKAGE,
+  CLAUDE_AGENT_SDK_PEERS,
   CLAUDE_AGENT_SDK_VERSION,
   ClaudeAgentSdkLoader,
   type ClaudeAgentSdkModule,
@@ -40,6 +41,16 @@ export function query() { return revision; }
 export function tool() { return revision; }
 export function createSdkMcpServer() { return revision; }
 `);
+  for (const [name, version] of Object.entries(CLAUDE_AGENT_SDK_PEERS)) {
+    const peerRoot = join(installRoot, "node_modules", ...name.split("/"));
+    mkdirSync(peerRoot, { recursive: true });
+    writeFileSync(join(peerRoot, "package.json"), JSON.stringify({
+      name,
+      version,
+      main: "index.js",
+    }));
+    writeFileSync(join(peerRoot, "index.js"), "module.exports = {};\n");
+  }
 }
 
 function revisionOf(sdk: ClaudeAgentSdkModule): string {

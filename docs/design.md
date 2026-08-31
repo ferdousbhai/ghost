@@ -42,15 +42,16 @@ ambient credential discovery, and no cloud custody.
 - **Build on upstream pi at explicit runtime boundaries** — `createAgentSession`
   plus explicit Ghost snapshots express the normal path. `claude-code/default`
   is the narrow exception: the official Claude Agent SDK invokes an installed,
-  unmodified Claude Code so the owner can use their own plan. Both receive the
+  unmodified Claude Code so the owner can use its native authentication and
+  provider routes. Both receive the
   same Ghost persona, memory, Documents, and declarative layers and emit the
   pi-messages wire, while each keeps its native tool harness. Deviations from
   pi are named in `CONTRACTS.md` with the invariant that licenses them (#3).
 - **Model-agnostic; bring any provider.** Named requirements: existing **OpenAI
   Codex/ChatGPT subscriptions usable as auth** through pi's Codex OAuth,
-  **Claude plans through the Claude Code harness** (a separate runtime from
-  pi's Anthropic provider; recheck Anthropic policy before every release that
-  advertises plan accounting), and **OpenRouter first-class** with its free
+  **Claude Code's native authentication through the Claude Code harness** (a
+  separate runtime from pi's Anthropic provider; never promise plan accounting
+  for API, cloud, or router auth), and **OpenRouter first-class** with its free
   models as a zero-cost onboarding option.
 - **Owner-readable files, not an application database** — Markdown content and
   inspectable JSON/YAML policy remain greppable and backup-friendly. Derived
@@ -86,7 +87,7 @@ ambient credential discovery, and no cloud custody.
 Install the Arch package → create a ghost (name + job → seeded `character.md`)
 → pick a model: OpenRouter free model (zero cost, just an account), an OpenAI
 Codex/ChatGPT subscription sign-in, an externally authenticated Claude Code
-plan, any API key, or a local model → Super+Ctrl+G, start talking.
+harness, any API key, or a local model → Super+Ctrl+G, start talking.
 
 ## Undesigned
 

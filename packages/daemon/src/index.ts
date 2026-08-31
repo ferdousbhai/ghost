@@ -46,15 +46,18 @@ export {
 export {
   CLAUDE_CODE_BINARY_ENV,
   CLAUDE_CODE_DEFAULT_MODEL_ID,
+  CLAUDE_CODE_MINIMUM_VERSION,
   CLAUDE_CODE_PROBE_TTL_MS,
   CLAUDE_CODE_PROVIDER_ID,
   MAX_CLAUDE_CODE_PROBE_TTL_MS,
   ClaudeCodeProcessError,
   ClaudeCodeProbe,
   ClaudeCodeRuntime,
+  claudeCodeConnectionMethod,
   claudeSessionMetadataPath,
-  isClaudePlanAuth,
+  isClaudeCodeAuthenticated,
   readClaudeCodeAuthStatus,
+  readClaudeCodeVersion,
   resolveClaudeCodeExecutable,
   type ClaudeCodeAuthStatus,
   type ClaudeCodeQueryFactory,
@@ -65,6 +68,7 @@ export {
 } from "./claude-code.js";
 export {
   CLAUDE_AGENT_SDK_PACKAGE,
+  CLAUDE_AGENT_SDK_PEERS,
   CLAUDE_AGENT_SDK_VERSION,
   ClaudeAgentSdkLoader,
   ClaudeAgentSdkLoadError,
@@ -76,6 +80,10 @@ export {
   type ClaudePiMessagesAdapter,
 } from "./claude-pi-messages.js";
 export {
+  captureClaudeCodeEnvironment,
+  CLAUDE_CODE_CREDENTIAL_VALUE_ENV_PATTERN,
+  CLAUDE_CODE_SAFE_ENV_VARS,
+  CLAUDE_CODE_VERTEX_REGION_ENV_VARS,
   findProviderCredentialEnv,
   PI_OFFLINE_ENV_VAR,
   PROVIDER_CREDENTIAL_ENV_PATTERNS,

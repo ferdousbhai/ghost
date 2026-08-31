@@ -8,6 +8,7 @@ pkgbase = ghost-dev
 	license = Apache-2.0
 	checkdepends = nodejs
 	checkdepends = python-yaml
+	makedepends = bun>=1.4.0
 	makedepends = desktop-file-utils
 	makedepends = git
 	makedepends = pnpm>=10.12.2
@@ -32,11 +33,11 @@ pkgbase = ghost-dev
 	depends = ydotool>=1.0
 	optdepends = basecamp-cli: Basecamp CLI and embedded pi skill
 	optdepends = chromium: the browser the relay drives, and the browser-relay smoke test
-	optdepends = claude-code: full owner-installed Claude Code harness
+	optdepends = claude-code>=2.1.251: owner-installed Claude Code harness runtime
 	optdepends = gnome-keyring: Secret Service provider for provider and MCP credentials
 	optdepends = npm: Firecrawl, Google Workspace, and Agent Skills installers for optional pi integrations
 	optdepends = obsidian>=1.12.7: Obsidian CLI access for pi
-	optdepends = pnpm: install the optional private owner-local Claude Agent SDK boundary
+	optdepends = pnpm: install the optional owner-local Claude Agent SDK boundary
 	provides = ghost
 	conflicts = ghost
 	options = !debug

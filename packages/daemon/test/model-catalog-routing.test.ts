@@ -65,7 +65,7 @@ function setup(): { catalog: ModelCatalog; agentDir: string; notified: string[] 
       registry: temp.registry,
       offline: true,
       createRuntime: async () => runtime,
-      claudeCodePlanStatus: async () => false,
+      claudeCodeStatus: async () => null,
       onModelRoutingChanged: (ghostName) => {
         notified.push(ghostName);
       },
@@ -275,7 +275,7 @@ describe("ModelCatalog runtime lifecycle", () => {
         registry: temp.registry,
         offline: true,
         createRuntime,
-        claudeCodePlanStatus: async () => false,
+        claudeCodeStatus: async () => null,
       }),
     };
   }
@@ -340,7 +340,7 @@ describe("ModelCatalog runtime lifecycle", () => {
         writeFileSync(join(dirname(input.authPath), probeName), "leased\n");
         return runtime;
       },
-      claudeCodePlanStatus: async () => false,
+      claudeCodeStatus: async () => null,
     });
 
     const reading = use(catalog);

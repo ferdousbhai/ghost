@@ -26,6 +26,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import {
+  CLAUDE_CODE_DEFAULT_MODEL_ID,
   CLAUDE_CODE_PROVIDER_ID,
   ClaudeCodeRuntime,
   claudeSessionMetadataPath,
@@ -4422,16 +4423,25 @@ export class SessionHost {
    */
   private selectedTurnRuntime(ghostName: string): ConfiguredTurnRuntime {
     const ghost = this.registry.get(ghostName);
+    let configured: ReturnType<typeof resolveChatModelRef>;
     try {
-      const configured = resolveChatModelRef(readGhostModels(ghostPaths(ghost.dir).home));
-      if (configured?.provider === CLAUDE_CODE_PROVIDER_ID) {
-        return { runtime: "claude-code", modelId: configured.modelId };
-      }
+      configured = resolveChatModelRef(readGhostModels(ghostPaths(ghost.dir).home));
     } catch (error) {
       this.logger.error("models.json is unusable", {
         ghost: ghostName,
         error: error instanceof Error ? error.message : String(error),
       });
+      return { runtime: "pi" };
+    }
+    if (configured?.provider === CLAUDE_CODE_PROVIDER_ID) {
+      if (configured.modelId !== CLAUDE_CODE_DEFAULT_MODEL_ID) {
+        throw new GhostError(
+          "unknown_model",
+          `Claude Code has no runtime entry ${JSON.stringify(configured.modelId)}.`,
+          409,
+        );
+      }
+      return { runtime: "claude-code", modelId: configured.modelId };
     }
     return { runtime: "pi" };
   }

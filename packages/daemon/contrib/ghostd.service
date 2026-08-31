@@ -20,10 +20,11 @@ TimeoutStopSec=10s
 KillMode=mixed
 SendSIGKILL=yes
 
-# The daemon scrubs inherited provider credentials itself (see env-scrub.ts),
-# but a service that never had them is better than one that drops them.
-# Do NOT add an EnvironmentFile with API keys here: a ghost's credentials
-# belong in its explicit home (%h/ghosts/<name> by default).
+# The daemon first captures its reviewed native Claude Code environment, then
+# scrubs every provider/cloud credential before constructing pi (env-scrub.ts).
+# Do NOT put credential values in this unit or an EnvironmentFile. pi provider
+# credentials belong in Secret Service; Claude can use an owner-installed
+# GHOST_CLAUDE_BINARY wrapper backed by the owner's credential mechanism.
 Environment=GHOSTD_HOST=127.0.0.1
 
 # Local-only service; nothing here should reach outside the user's own files.

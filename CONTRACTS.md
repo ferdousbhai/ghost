@@ -562,9 +562,10 @@ async setup. The persona snapshot owns that timer independently, so
 cancellation, terminal failure, or query startup failure cannot retain it
 forever after the query is gone. Close aborts and drains even a turn still in
 setup, retires the query and persona snapshot again, and waits for the SDK
-subprocess's real exit event before returning. An unconfirmed exit fails with
+subprocess's entire isolated process group to disappear before returning. An
+unconfirmed group exit fails with
 retryable `503 claude_code_exit_unconfirmed`; a whole-home delete or rename has
-not moved the home and a later retry waits on the same exit boundary.
+not moved the home and a later retry waits on the same quiescence boundary.
 Session-stop continuations are further passes through the same warm query. The
 SDK reports `num_turns` per result rather than cumulatively, so the sidecar's
 message accounting is unchanged. Idle expiry drops the session's character and
@@ -1943,7 +1944,7 @@ resolved daemon-side:
    uncredentialed model there is a loud (logged) error, not a silent fallback.
 2. otherwise the **cheapest USABLE model, subscription-aware** (issue #484): a
    capable model on an already-authenticated subscription — `isSubscription`, or
-   `connectedVia` `oauth`/`claude_plan` — has zero marginal cost and is preferred
+   `connectedVia: oauth` — has zero marginal cost and is preferred
    over a cheaper metered model; only then cheapest by `cost.input`. "Cheapest
    effective cost, subscription = free."
 3. otherwise a loud error — only when there is genuinely no usable model.
@@ -1969,9 +1970,11 @@ after the file deviates from the seed.
 Provider models come from pi's model catalogue (`@earendil-works/pi-ai`),
 cached in `.pi/models-store.json`. One runtime entry is code-owned:
 `claude-code/default`, representing the installed Claude Code harness rather
-than an API model. Its usability comes from the boolean result of external
-`claude auth status --json`; no credential is read into or emitted from a
-response.
+than an API model. Its usability comes from the `loggedIn` boolean reported by
+external `claude auth status --json`, without restricting the CLI's
+`authMethod` or `apiProvider` vocabulary. The catalogue may publish that
+reported method/provider name as non-secret connection metadata; no credential
+value is read into or emitted from a response.
 
 Current-model, catalogue, and routing reads hold the ghost-home identity lease
 from before runtime construction until the pi runtime closes. This covers pi's
@@ -1981,13 +1984,19 @@ the captured old path. Model mutations use the same boundary through their
 durable write and live-session notification.
 
 - `GET  /api/ghosts/:name/model` → the current selection:
-  `{ current: { provider, id, name?, contextWindow?, hasVision } | null,
+  `{ current: { provider, id, name?, contextWindow?, hasVision, resolved?,
+  usable? } | null,
   source: "role" | "default" | "none" }`. `role` — `roles.chat_model` is set
   and resolves among usable models; `default` — the catalogue default: the
   first catalogue provider's best-ranked model, taking providers in the order
   the catalogue declares them, then provider priority, newest version first,
   `-latest` before dated snapshots, then name; `none` — nothing usable,
-  `current` is null. The same default is bound as `chat_model` after a provider
+  `current` is null. A stored `claude-code` role remains the explicit current
+  runtime even while unavailable: its current row carries `resolved` (the id is
+  exactly `default`) and `usable` (resolved plus a successful authenticated
+  probe). Ghost never reports a pi fallback that the next turn will not use; an
+  unavailable Claude selection fails as Claude, and an invalid Claude id is
+  rejected before runtime admission. The same default is bound as `chat_model` after a provider
   login when chat is unset.
 - `GET  /api/ghosts/:name/models?scope=available|catalog&provider=<id>&q=<search>&limit=<n>&offset=<n>`
   → `{ scope, models: [...], total, limit, offset, provider?, q? }`.
@@ -1995,7 +2004,11 @@ durable write and live-session notification.
     credentialed providers). Each row is
     `{ provider, id, name?, contextWindow?, cost?, hasVision, connectedVia?,
     current }`, tagged by `provider`, with `current: true` on the selected one.
-    `connectedVia` is `oauth | api_key | claude_plan`.
+    For pi providers, `connectedVia` is `oauth | api_key`. For the external
+    Claude Code harness it is the non-empty `apiProvider` or `authMethod` string
+    reported by the installed CLI, falling back to `external` when the CLI
+    reports only `loggedIn: true`. The value is descriptive metadata rather
+    than a finite authorization allowlist.
   - `scope=catalog`: the full pi catalogue (every provider, logged in or
     not), same row shape plus `usable: boolean` (is the provider
     credentialed; `connectedVia` present only when usable). Supports the
@@ -2109,17 +2122,61 @@ because it is a different home.
 The same flow runs in the terminal as `ghostd login [<ghost>] [--provider <id>]
 [--account <name>] [--api-key]`.
 
-### Claude Code plan runtime (external auth)
+### Claude Code runtime (native external auth)
 
 `roles.chat_model = { provider: "claude-code", modelId: "default" }` selects
 the official Claude Agent SDK + an installed, unmodified `claude` executable.
 The owner runs `claude auth login` outside Ghost. Ghost accepts no Claude
-credential, stores no Claude credential, and removes ambient API/OAuth-token
-variables from the subprocess environment.
+credential through its API or files and stores no Claude credential. The
+unmodified CLI owns authentication and Ghost accepts every method for which
+`claude auth status --json` reports `loggedIn: true`, including a future method
+name it does not recognize. `authMethod`, `apiProvider`, and
+`subscriptionType` are status metadata only; they are never interpreted as a
+credential value. A logged-out or unusable CLI is the reverse state and fails
+before a query is created.
+
+Pi and Claude Code deliberately receive different environments. Before
+ghostd's process-global provider scrub, Ghost derives one private, in-memory
+Claude child environment from the daemon launch environment. It starts empty,
+copies only a fixed operational allowlist (home/path, `LANG`, `LANGUAGE`, the
+seven POSIX `LC_*` category/control names, temporary/XDG, desktop-session, and
+SSH-agent coordinates), then the reviewed non-secret Claude selectors in
+`CLAUDE_CODE_SAFE_ENV_VARS`: credential/config/certificate file paths,
+profiles, regions/projects/workspace identifiers, provider toggles, base URLs,
+model names, proxies, and CA/certificate paths, plus the finite reviewed set of
+exact `VERTEX_REGION_CLAUDE_…` selector names. API keys; access, bearer, auth,
+OAuth, refresh, and session token values; passwords/passphrases; secret keys;
+authorization/custom headers; custom request bodies; arbitrary daemon
+variables and generic secret-name patterns; package/registry credentials;
+database/Docker configuration; Ghost/pi/Codex variables; and runtime injection
+do not enter the snapshot. The
+same immutable snapshot goes only to default mise executable resolution,
+`claude --version`, `claude auth status --json`, and the Agent SDK query;
+no other child or pi runtime receives it. Ghost does not enable Claude Code's
+subprocess sandbox/scrub; the complete native Bash/tool environment and
+bypass-permissions behavior remain available, while there is no credential
+value in Ghost's launch environment for those children to inherit. Ghost
+disables Claude auto-memory. Values are never logged, persisted, returned, or
+copied into session/config state. The snapshot
+lives only for the daemon process because a cold query or later auth probe must
+receive the same launch-time environment. A newly introduced native variable
+can be supplied immediately by an owner-installed executable wrapper selected
+with `GHOST_CLAUDE_BINARY`; an explicitly selected wrapper is never unwrapped
+as mise discovery. That literal owner boundary may inject an environment-only
+API/cloud credential after Ghost launches it and then exec the official CLI.
+The credential and any inheritance by native Claude children remain the
+owner-wrapper's responsibility; Ghost never receives or intermediates the
+value. Adding a variable to Ghost's direct pass-through list is a separate
+non-secret review, not an auth-method allowlist. After the snapshot is
+captured, the ordinary global scrub still removes Claude/cloud-specific
+credential and route variables and every other provider credential override
+from `process.env` before any pi runtime is constructed.
 
 The SDK is an optional owner-installed capability, never part of Ghost's public
 runtime bytes. Ghost loads exactly
-`@anthropic-ai/claude-agent-sdk@0.3.170` from the canonical versioned package
+`@anthropic-ai/claude-agent-sdk@0.3.170` with exact peers
+`@anthropic-ai/sdk@0.93.0`, `@modelcontextprotocol/sdk@1.29.0`, and `zod@4.4.3`
+from the canonical versioned package
 under `$XDG_DATA_HOME/ghost/claude-agent-sdk/0.3.170`, falling back to
 `~/.local/share/ghost/claude-agent-sdk/0.3.170` when `XDG_DATA_HOME` is not
 absolute. Its `node_modules/@anthropic-ai/claude-agent-sdk` link may use pnpm's
@@ -2147,14 +2204,61 @@ installed by the same OS owner.
 Production shares one successful loader with the Claude auth/catalog probe, so
 `claude-code/default` is usable only while both that exact SDK and the owner's
 authenticated `claude` executable are available. Authentication behavior is
-otherwise unchanged. This path remains a private, single-owner integration
-pending Anthropic approval; Ghost neither advertises nor supports it as a
-public third-party Claude.ai plan integration.
+otherwise owned by that external executable. The probe invokes the global CLI
+isolation flags before `auth status`: empty filesystem setting sources, safe
+mode, and strict MCP. It accepts only the CLI's documented matching outcomes:
+exit 0 plus `loggedIn:true`, or exit 1 plus `loggedIn:false`. A timeout, signal,
+exit 2 or greater, malformed status, or disagreement between exit status and
+JSON is an unavailable probe even when stdout claims `loggedIn:true`, and
+immediately retires a warm query. The isolated probe therefore cannot claim
+usability from an API-key or cloud helper found only in owner/project/local
+settings that the SDK query is forbidden to load. Ghost treats this as driving
+the owner-installed, unmodified Claude Code harness, analogous to T3 Code,
+rather than offering a Ghost login flow or intermediating credentials. That is
+the project's interpretation of the integration boundary, not Anthropic
+endorsement or legal advice.
+
+The installed CLI must report stable canonical version `2.1.251` or newer.
+Before auth, the same owned hard-deadline runner invokes exact `--version` and
+accepts one line in the official `<version> (Claude Code)` format: three
+canonical decimal components, no prerelease/build suffix, and no trailing
+content. Timeout, signal, nonzero exit, malformed/multiline output, or an older
+version makes Claude unavailable. The validated version is private probe state,
+part of warm-runtime identity, and is never published through the model API.
+
+Default executable discovery resolves every relative `PATH` entry against
+ghostd's startup cwd, follows links, and gives both the auth probe and SDK one
+absolute canonical real path. An explicit `GHOST_CLAUDE_BINARY` instead remains
+the absolute literal owner-wrapper boundary and is never replaced by its link
+target. In both cases the probe binds a private fingerprint of the boundary and
+resolved target's device, inode, type, size, and nanosecond change/modify times,
+checks it again after authentication, and the runtime rechecks it immediately
+before starting a query. Link retargeting or in-place replacement therefore
+invalidates the probe and retires warm state without bypassing an explicit
+wrapper.
+
+The mise resolver and auth-status probe run as owned detached Linux process
+groups in a fresh mode-`0700` scratch cwd under one hard deadline. The scratch
+directory is removed after success or failure, so CLI isolation scaffolding
+cannot mutate the daemon's startup/project cwd. Ghost captures only that
+child/group id, sends TERM and then KILL to that exact group, drains or destroys
+its pipes, and does not settle until teardown is confirmed. A signal-ignoring
+wrapper or descendant holding stdout cannot outlive or pin the probe; Ghost
+never kills by name or pattern.
 
 The runtime uses the owner's local Claude Code authentication, native system
-prompt, built-in tools, and web search in bypass-permissions mode. Filesystem
-setting sources are pinned to `[]`: neither owner-home cwd nor a trusted project
-may inject executable settings, hooks, or plugins. Every query appends the
+prompt, built-in tools, and web search in explicit bypass-permissions mode.
+Ghost also supplies the Agent SDK's native `canUseTool` fallback; it allows
+every permission request for a tool that remains after
+`disallowedTools`, without inspecting, rewriting, logging, or persisting tool
+input. Ghost adds no approval or deny path; the unmodified Claude runtime still
+owns any safety rule it enforces before that callback. Filesystem setting
+sources are pinned to `[]`: neither owner-home cwd nor a trusted project
+may inject executable settings, hooks, or plugins. SDK `plugins:[]`,
+`skills:[]`, and `strictMcpConfig:true` ensure its initialization surface
+contains only the explicitly translated project MCP plus Ghost's in-process
+MCP, with no ambient MCP, plugin, skill, hook, or auto-memory contribution.
+Every query appends the
 Ghost character, derived indexes, shared Omarchy CLI-first, owner-deliverable,
 and rendered scheduled-work policies, compact machine/ghost/project skill index,
 accepted instruction files, and rules marked `alwaysApply`, while keeping SDK
@@ -2167,7 +2271,9 @@ tools are added through one in-process SDK MCP server, and output is normalized
 back to pi-messages. Project MCP names remain opaque, including `ghost`; the
 internal server deterministically takes the first free name in `ghost`,
 `ghost-1`, `ghost-2`, … and that exact name owns its allowed-tool prefix and is
-excluded from project health. Ambient provider credentials remain scrubbed.
+excluded from project health. The dedicated native Claude environment above is
+available to the probe and query; unrelated ambient provider credentials remain
+scrubbed.
 
 A conversation holds one streamed Agent SDK query across successful owner
 turns. A new conversation uses its pre-turn project cwd, or owner home while
@@ -2186,14 +2292,28 @@ query only while its fixed startup identity still matches. Before each SDK
 pass it durably fences resume without replacing the last ready metadata, then
 atomically publishes a validated result through an exact settling candidate.
 It completes post-result hooks and maintenance before the terminal
-event. A fully settled success remains warm; idle/session expiry, cancellation,
-terminal SDK errors, and post-result failures retire the query so the next turn
-resumes cold from durable metadata.
+event. Before every owner turn, including warm reuse, Ghost bypasses the
+catalogue's five-second cache and performs a fresh isolated auth/executable
+probe. A fully settled success remains warm only while the executable identity,
+bounded authentication metadata (`authMethod`, `apiProvider`, and
+`subscriptionType`), and a private SHA-256 account fingerprint still match.
+The fingerprint is derived only when auth status supplies a bounded stable
+user/account id or email, may incorporate its organization context, and is
+never logged, persisted, returned, or exposed through the catalogue. When the
+CLI supplies no stable account identity, the turn remains usable but every
+subsequent turn retires the prior query and resumes cold. An observed logout, auth-probe failure,
+binary/mise target change, account/provider metadata change, idle/session
+expiry, cancellation, terminal SDK error, or post-result failure retires the
+query immediately so the next usable turn resumes cold from durable metadata.
 Because the SDK's public `Query.close()` returns before its delayed process kill
 completes, Ghost deliberately supplies the public `spawnClaudeCodeProcess` seam
-and records the child `exit` event. This is the quiescence boundary for
-conversation deletion, whole-home moves, and shutdown; `killed` or an abort
-signal alone is not acknowledgement.
+and starts each CLI in its own Linux process group. Retirement first closes the
+SDK query, then signals TERM to only that captured group, waits a bounded grace,
+and sends KILL to the same group if anything survives. This group-disappearance
+boundary includes Bash, hook, MCP, and subagent descendants and governs
+conversation deletion, whole-home moves, and shutdown; root-child `exit`,
+`killed`, or an abort signal alone is not acknowledgement. Ghost never signals
+its own group or a PID discovered by name or pattern.
 Claude Code owns the actual transcript under its own
 `~/.claude/projects/` storage; the sidecar is not a transcript. Full rationale,
 T3 Code provenance, policy caveat, and legal boundary:
@@ -2239,7 +2359,10 @@ not coupled to that release identity.
   CI downloads the official Linux x64 Bun 1.3.14 asset from its versioned URL,
   verifies its pinned SHA-256 and exact reported version, then runs the real
   runtime archive's full launcher and scratch daemon/client smoke through that
-  executable. Both development and stable packages declare Bun, `fd`, and
+  executable. Bun 1.3.14 remains the installed runtime minimum, while package
+  build/check dependencies require Bun 1.4.0 or newer because the current
+  Vitest toolchain no longer runs on 1.3.14. Both development and stable
+  packages declare Bun, `fd`, and
   `ripgrep` as runtime dependencies for pi's native read-only search tools; the
   executable must not populate pi's cache by downloading them during a
   plan-mode read.

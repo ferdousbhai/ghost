@@ -72,6 +72,10 @@ rg -q '"test"[[:space:]]*:[[:space:]]*"node --test' \
 cmp "$script_dir/.SRCINFO" "$work/ghost-dev.SRCINFO"
 require_srcinfo_entry checkdepends nodejs "$work/ghost-dev.SRCINFO"
 require_srcinfo_entry checkdepends python-yaml "$work/ghost-dev.SRCINFO"
+require_srcinfo_entry makedepends 'bun>=1.4.0' "$work/ghost-dev.SRCINFO"
+require_srcinfo_entry optdepends \
+  'claude-code>=2.1.251: owner-installed Claude Code harness runtime' \
+  "$work/ghost-dev.SRCINFO"
 require_srcinfo_dependency bun "$work/ghost-dev.SRCINFO"
 # The keyring store shells out to libsecret's secret-tool at runtime.
 require_srcinfo_dependency libsecret "$work/ghost-dev.SRCINFO"
@@ -87,6 +91,10 @@ GHOST_RELEASE_REPOSITORY=example/ghost-releases \
   0000000000000000000000000000000000000000000000000000000000000000
 require_srcinfo_entry checkdepends nodejs "$work/ghost/.SRCINFO"
 require_srcinfo_entry checkdepends python-yaml "$work/ghost/.SRCINFO"
+require_srcinfo_entry makedepends 'bun>=1.4.0' "$work/ghost/.SRCINFO"
+require_srcinfo_entry optdepends \
+  'claude-code>=2.1.251: owner-installed Claude Code harness runtime' \
+  "$work/ghost/.SRCINFO"
 require_srcinfo_dependency bun "$work/ghost/.SRCINFO"
 require_srcinfo_dependency libsecret "$work/ghost/.SRCINFO"
 require_srcinfo_dependency fd "$work/ghost/.SRCINFO"

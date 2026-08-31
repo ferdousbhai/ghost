@@ -14,7 +14,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative, resolve } from "node:path";
 import type {
   Options as ClaudeQueryOptions,
   Query,
@@ -31,14 +31,23 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   bridgeClaudeCodeTools,
+  claudeCodeConnectionMethod,
   claudeSdkTranscriptPath,
   claudeSessionMetadataPath,
   CLAUDE_SESSION_METADATA_MAX_BYTES,
+  CLAUDE_CODE_BINARY_ENV,
+  CLAUDE_CODE_MINIMUM_VERSION,
   CLAUDE_CODE_TOOL_CAPABILITIES,
   ClaudeCodeProbe,
+  ClaudeCodeProcessError,
+  readClaudeCodeAuthStatus,
+  readClaudeCodeVersion,
   readClaudeSessionMetadataFile,
+  resolveClaudeCodeExecutable,
+  type ClaudeCodeAuthStatus,
   type ClaudeCodeQueryInput,
 } from "../src/claude-code.js";
+import { captureClaudeCodeEnvironment } from "../src/env-scrub.js";
 import type {
   MaintenanceIdentity,
   SettledMaintenanceTurn,
@@ -68,6 +77,8 @@ import { recordingLogger } from "./helpers/recording-logger.js";
 let temp: TempGhosts | null = null;
 let host: SessionHost | null = null;
 const FAKE_QUERY_EXIT = Symbol("fake-query-exit");
+const STABLE_TEST_ACCOUNT = "a".repeat(64);
+const readSupportedClaudeVersion = async () => CLAUDE_CODE_MINIMUM_VERSION;
 
 afterEach(async () => {
   await host?.disposeAll();
@@ -234,12 +245,17 @@ const TINY_PNG_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
 
 function setupClaudeHost(options: {
-  authStatus?: { loggedIn: boolean; authMethod?: string; subscriptionType?: string };
-  readAuthStatus?: (binaryPath: string) => Promise<{
-    loggedIn: boolean;
-    authMethod?: string;
-    subscriptionType?: string;
-  }>;
+  authStatus?: ClaudeCodeAuthStatus;
+  readAuthStatus?: (
+    binaryPath: string,
+    environment: Readonly<NodeJS.ProcessEnv>,
+  ) => Promise<ClaudeCodeAuthStatus>;
+  readVersion?: (
+    binaryPath: string,
+    environment: Readonly<NodeJS.ProcessEnv>,
+  ) => Promise<string>;
+  environment?: Readonly<NodeJS.ProcessEnv>;
+  binaryPath?: string;
   probe?: ClaudeCodeProbe;
   createQuery?: (
     input: ClaudeCodeQueryInput,
@@ -296,6 +312,7 @@ function setupClaudeHost(options: {
       : {}),
     claudeCode: {
       loadSdk: async () => testClaudeAgentSdk,
+      ...(options.environment ? { environment: options.environment } : {}),
       ...(options.warmIdleTtlMs === undefined
         ? {}
         : { warmIdleTtlMs: options.warmIdleTtlMs }),
@@ -305,12 +322,18 @@ function setupClaudeHost(options: {
       ...(options.probe
         ? { probe: options.probe }
         : {
-          binaryPath: process.execPath,
-          readAuthStatus: options.readAuthStatus ?? (async () => options.authStatus ?? ({
-            loggedIn: true,
-            authMethod: "claude.ai",
-            subscriptionType: "max",
-          })),
+          binaryPath: options.binaryPath ?? process.execPath,
+          readVersion: options.readVersion ?? readSupportedClaudeVersion,
+          readAuthStatus: options.readAuthStatus ?? (async () => {
+            const status = options.authStatus ?? {
+              loggedIn: true,
+              authMethod: "claude.ai",
+              subscriptionType: "max",
+            };
+            return status.loggedIn
+              ? { accountFingerprint: STABLE_TEST_ACCOUNT, ...status }
+              : status;
+          }),
         }),
       createQuery: (input) => {
         lifecycle.queries += 1;
@@ -340,6 +363,26 @@ function deferred<T = void>(): {
     resolve = resolvePromise;
   });
   return { promise, resolve };
+}
+
+function pidExists(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ESRCH") return false;
+    throw error;
+  }
+}
+
+async function expectPidsGone(path: string): Promise<void> {
+  const pids = readFileSync(path, "utf8").trim().split(/\s+/u).map(Number);
+  const deadline = Date.now() + 2_000;
+  while (pids.some(pidExists) && Date.now() < deadline) {
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 10));
+  }
+  expect(pids).not.toEqual([]);
+  expect(pids.filter(pidExists)).toEqual([]);
 }
 
 function storedClaudeV3(input: {
@@ -422,12 +465,478 @@ function storedUnboundClaudeV3(conversationId: string): Record<string, unknown> 
 }
 
 describe("Claude Code executable/auth probe", () => {
+  it("canonicalizes a discovered executable from a relative PATH before project cwd changes", async () => {
+    temp = makeTempGhosts();
+    const bin = join(temp.root, "relative-bin");
+    mkdirSync(bin);
+    const executable = join(bin, "claude");
+    writeFileSync(executable, "#!/bin/sh\nexit 0\n", { mode: 0o700 });
+    const relativePath = relative(process.cwd(), bin);
+    // Keep enough directory depth that resolving the startup-relative PATH
+    // against this later cwd cannot clamp the `..` segments at `/` and land
+    // on the same absolute path by accident.
+    const ascentCount = relativePath.split("/").filter((part) => part === "..").length;
+    const projectCwd = join(temp.root, "owner-project", ...Array(ascentCount + 1).fill("nested"));
+    mkdirSync(projectCwd, { recursive: true });
+
+    const resolved = await resolveClaudeCodeExecutable(undefined, {
+      HOME: temp.ownerHome,
+      PATH: relativePath,
+    });
+
+    expect(resolved).toBe(executable);
+    expect(resolved.startsWith("/")).toBe(true);
+    expect(resolve(projectCwd, relativePath, "claude")).not.toBe(resolved);
+  });
+
+  it("detects discovered symlink retargets and literal-wrapper replacement in place", async () => {
+    temp = makeTempGhosts();
+    const bin = join(temp.root, "bin");
+    mkdirSync(bin);
+    const firstTarget = join(temp.root, "claude-one");
+    const secondTarget = join(temp.root, "claude-two");
+    const discovered = join(bin, "claude");
+    for (const path of [firstTarget, secondTarget]) {
+      writeFileSync(path, "#!/bin/sh\nexit 0\n", { mode: 0o700 });
+    }
+    symlinkSync(firstTarget, discovered);
+    const authenticated = async (): Promise<ClaudeCodeAuthStatus> => ({
+      loggedIn: true,
+      authMethod: "claude.ai",
+      accountFingerprint: STABLE_TEST_ACCOUNT,
+    });
+    const discoveredProbe = new ClaudeCodeProbe({
+      environment: { HOME: temp.ownerHome, PATH: bin },
+      readVersion: readSupportedClaudeVersion,
+      readAuthStatus: authenticated,
+    });
+    const first = await discoveredProbe.readForTurn();
+    rmSync(discovered);
+    symlinkSync(secondTarget, discovered);
+    const second = await discoveredProbe.readForTurn();
+    expect(first.binaryPath).toBe(firstTarget);
+    expect(second.binaryPath).toBe(secondTarget);
+    expect(second.executableIdentity).not.toBe(first.executableIdentity);
+
+    const wrapper = join(temp.root, "owner-wrapper");
+    symlinkSync(firstTarget, wrapper);
+    const wrapperProbe = new ClaudeCodeProbe({
+      binaryPath: wrapper,
+      environment: { HOME: temp.ownerHome, PATH: "/usr/bin" },
+      readVersion: readSupportedClaudeVersion,
+      readAuthStatus: authenticated,
+    });
+    const wrapperFirst = await wrapperProbe.readForTurn();
+    rmSync(wrapper);
+    symlinkSync(secondTarget, wrapper);
+    const wrapperRetargeted = await wrapperProbe.readForTurn();
+    expect(wrapperFirst.binaryPath).toBe(wrapper);
+    expect(wrapperRetargeted.binaryPath).toBe(wrapper);
+    expect(wrapperRetargeted.executableIdentity).not.toBe(wrapperFirst.executableIdentity);
+
+    writeFileSync(secondTarget, "#!/bin/sh\n# replaced in place\nexit 0\n", { mode: 0o700 });
+    const wrapperReplaced = await wrapperProbe.readForTurn();
+    expect(wrapperReplaced.binaryPath).toBe(wrapper);
+    expect(wrapperReplaced.executableIdentity).not.toBe(
+      wrapperRetargeted.executableIdentity,
+    );
+  });
+
+  it("passes the dedicated environment through mise executable resolution", async () => {
+    temp = makeTempGhosts();
+    const bin = join(temp.root, "bin");
+    mkdirSync(bin);
+    const launcher = join(bin, "claude");
+    const native = join(temp.ownerHome, "native-claude");
+    const observed = join(temp.ownerHome, "mise-observed");
+    writeFileSync(launcher, "#!/usr/bin/env -S mise x claude --\n", { mode: 0o700 });
+    writeFileSync(native, "#!/bin/sh\nexit 0\n", { mode: 0o700 });
+    writeFileSync(
+      join(bin, "mise"),
+      `#!/bin/sh
+printf '%s' "$ANTHROPIC_BASE_URL" > "$HOME/mise-observed"
+printf '%s' "$PWD" > "$HOME/mise-cwd"
+/usr/bin/stat -c '%a' "$PWD" > "$HOME/mise-cwd-mode"
+printf '%s\\n' "$HOME/native-claude"
+`,
+      { mode: 0o700 },
+    );
+    const environment = captureClaudeCodeEnvironment({
+      HOME: temp.ownerHome,
+      PATH: `${bin}:/usr/bin`,
+      ANTHROPIC_BASE_URL: "https://mise-router.invalid",
+      ANTHROPIC_API_KEY: "mise-secret-must-not-cross",
+      OPENAI_API_KEY: "unrelated-secret",
+    });
+
+    await expect(resolveClaudeCodeExecutable(undefined, environment)).resolves.toBe(native);
+    expect(readFileSync(observed, "utf8")).toBe("https://mise-router.invalid");
+    const miseCwd = readFileSync(join(temp.ownerHome, "mise-cwd"), "utf8");
+    expect(readFileSync(join(temp.ownerHome, "mise-cwd-mode"), "utf8").trim()).toBe("700");
+    expect(existsSync(miseCwd)).toBe(false);
+  });
+
+  it("hard-kills a TERM-ignoring mise resolver and its pipe-holding descendant", async () => {
+    temp = makeTempGhosts();
+    const bin = join(temp.root, "bin");
+    mkdirSync(bin);
+    const pids = join(temp.ownerHome, "mise-pids");
+    writeFileSync(
+      join(bin, "claude"),
+      "#!/usr/bin/env -S mise x claude --\n",
+      { mode: 0o700 },
+    );
+    writeFileSync(
+      join(bin, "mise"),
+      "#!/bin/sh\ntrap '' TERM\n"
+        + "/bin/sh -c 'trap \"\" TERM; while :; do /bin/sleep 10; done' &\n"
+        + "descendant=$!\nprintf '%s %s' \"$$\" \"$descendant\" > \"$HOME/mise-pids\"\n"
+        + "wait\n",
+      { mode: 0o700 },
+    );
+    const started = Date.now();
+
+    await expect(resolveClaudeCodeExecutable(undefined, {
+      HOME: temp.ownerHome,
+      PATH: `${bin}:/usr/bin`,
+    }, { timeoutMs: 250 })).rejects.toThrow("could not resolve mise's underlying");
+
+    expect(Date.now() - started).toBeLessThan(1_750);
+    await expectPidsGone(pids);
+  });
+
+  it("never unwraps an explicit export-and-mise owner wrapper", async () => {
+    temp = makeTempGhosts();
+    const bin = join(temp.root, "bin");
+    mkdirSync(bin);
+    const wrapper = join(temp.ownerHome, "claude-owner-wrapper");
+    const native = join(temp.ownerHome, "native-claude");
+    writeFileSync(
+      wrapper,
+      "#!/bin/sh\nexport CLAUDE_FUTURE_AUTH=from-owner-store\nexec mise x -- claude \"$@\"\n",
+      { mode: 0o700 },
+    );
+    writeFileSync(
+      join(bin, "mise"),
+      "#!/bin/sh\nshift 3\nexec \"$HOME/native-claude\" \"$@\"\n",
+      { mode: 0o700 },
+    );
+    writeFileSync(
+      native,
+      "#!/bin/sh\ntest \"$CLAUDE_FUTURE_AUTH\" = from-owner-store || exit 17\n"
+        + "if [ \"$1\" = --version ]; then\n"
+        + "  printf '%s' \"$*\" > \"$HOME/wrapper-version-args\"\n"
+        + "  printf '%s\\n' '2.1.251 (Claude Code)'\n"
+        + "else\n"
+        + "  printf '%s' \"$*\" > \"$HOME/wrapper-auth-status-args\"\n"
+        + "  printf '%s\\n' '{\"loggedIn\":true,\"authMethod\":\"future_native_sso\"}'\n"
+        + "fi\n",
+      { mode: 0o700 },
+    );
+    vi.stubEnv(CLAUDE_CODE_BINARY_ENV, wrapper);
+    const probe = new ClaudeCodeProbe({
+      environment: { HOME: temp.ownerHome, PATH: `${bin}:/usr/bin` },
+    });
+
+    await expect(probe.read()).resolves.toMatchObject({
+      binaryPath: wrapper,
+      cliVersion: CLAUDE_CODE_MINIMUM_VERSION,
+      authStatus: { loggedIn: true, authMethod: "future_native_sso" },
+    });
+    expect(readFileSync(join(temp.ownerHome, "wrapper-version-args"), "utf8")).toBe(
+      "--version",
+    );
+    expect(readFileSync(join(temp.ownerHome, "wrapper-auth-status-args"), "utf8")).toBe(
+      "--setting-sources  --safe-mode --strict-mcp-config auth status --json",
+    );
+  });
+
+  it.each([
+    CLAUDE_CODE_MINIMUM_VERSION,
+    "2.1.252",
+    "2.2.0",
+    "3.0.0",
+  ])("accepts canonical stable Claude Code version %s", async (version) => {
+    temp = makeTempGhosts();
+    const executable = join(temp.root, `claude-version-${version}`);
+    writeFileSync(
+      executable,
+      `#!/bin/sh\nprintf '%s\\n' '${version} (Claude Code)'\n`,
+      { mode: 0o700 },
+    );
+
+    await expect(readClaudeCodeVersion(executable, {
+      HOME: temp.ownerHome,
+      PATH: "/usr/bin",
+    })).resolves.toBe(version);
+  });
+
+  it.each([
+    ["older", "printf '%s\\n' '2.1.250 (Claude Code)'\n", "older than required"],
+    ["prerelease", "printf '%s\\n' '2.1.251-beta.1 (Claude Code)'\n", "invalid stable version"],
+    ["malformed", "printf '%s\\n' 'Claude Code 2.1.251'\n", "invalid stable version"],
+    ["multiline", "printf '%s\\n' '2.1.251 (Claude Code)' 'unexpected'\n", "invalid stable version"],
+    ["exit-two", "printf '%s\\n' '2.1.251 (Claude Code)'\nexit 2\n", "Failed to read Claude Code version"],
+    ["signal", "printf '%s\\n' '2.1.251 (Claude Code)'\nkill -TERM $$\n", "Failed to read Claude Code version"],
+    ["timeout", "printf '%s\\n' '2.1.251 (Claude Code)'\nexec sleep 5\n", "Failed to read Claude Code version"],
+  ] as const)("rejects %s Claude Code version output", async (slug, script, message) => {
+    temp = makeTempGhosts();
+    const executable = join(temp.root, `claude-version-${slug}`);
+    writeFileSync(executable, `#!/bin/sh\n${script}`, { mode: 0o700 });
+
+    await expect(readClaudeCodeVersion(
+      executable,
+      { HOME: temp.ownerHome, PATH: "/usr/bin" },
+      slug === "timeout" ? { timeoutMs: 25 } : {},
+    )).rejects.toThrow(message);
+  });
+
+  it("hard-kills a TERM-ignoring version probe and its pipe-holding descendant", async () => {
+    temp = makeTempGhosts();
+    const executable = join(temp.root, "claude-version-hangs");
+    const pids = join(temp.ownerHome, "version-pids");
+    writeFileSync(
+      executable,
+      "#!/bin/sh\ntrap '' TERM\n"
+        + "/bin/sh -c 'trap \"\" TERM; while :; do /bin/sleep 10; done' &\n"
+        + "descendant=$!\nprintf '%s %s' \"$$\" \"$descendant\" > \"$HOME/version-pids\"\n"
+        + "printf '%s\\n' '2.1.251 (Claude Code)'\nwait\n",
+      { mode: 0o700 },
+    );
+    const started = Date.now();
+
+    await expect(readClaudeCodeVersion(executable, {
+      HOME: temp.ownerHome,
+      PATH: "/usr/bin",
+    }, { timeoutMs: 250 })).rejects.toThrow("Failed to read Claude Code version");
+
+    expect(Date.now() - started).toBeLessThan(1_750);
+    await expectPidsGone(pids);
+  });
+
+  it("fails closed before auth when the executable version is unsupported", async () => {
+    let authReads = 0;
+    const probe = new ClaudeCodeProbe({
+      binaryPath: "/resolved/claude",
+      resolveExecutable: async (binary) => binary!,
+      inspectExecutable: async (path) => `test:${path}`,
+      readVersion: async () => {
+        throw new ClaudeCodeProcessError("unsupported Claude Code version");
+      },
+      readAuthStatus: async () => {
+        authReads += 1;
+        return { loggedIn: true };
+      },
+    });
+
+    await expect(probe.read()).rejects.toThrow("unsupported Claude Code version");
+    expect(authReads).toBe(0);
+  });
+
+  it("keeps only bounded non-secret metadata from the CLI auth status", async () => {
+    temp = makeTempGhosts();
+    const executable = join(temp.root, "claude-auth-status");
+    const sentinel = "must-not-leave-cli-status";
+    const accountSentinel = "owner-account@example.invalid";
+    writeFileSync(
+      executable,
+      `#!/bin/sh
+printf '%s' "$*" > "$HOME/auth-status-args"
+printf '%s' "$PWD" > "$HOME/auth-status-cwd"
+/usr/bin/stat -c '%a' "$PWD" > "$HOME/auth-status-cwd-mode"
+: > .npmrc
+printf '%s\\n' '${JSON.stringify({
+        loggedIn: true,
+        authMethod: " future_native_sso ",
+        apiProvider: "owner-router",
+        subscriptionType: "enterprise",
+        email: accountSentinel,
+        apiKey: sentinel,
+        credentials: { token: sentinel },
+      })}'\n`,
+      { mode: 0o700 },
+    );
+
+    const status = await readClaudeCodeAuthStatus(executable, {
+      HOME: temp.ownerHome,
+      PATH: "/usr/bin",
+    });
+
+    expect(status).toEqual({
+      loggedIn: true,
+      authMethod: "future_native_sso",
+      apiProvider: "owner-router",
+      subscriptionType: "enterprise",
+    });
+    expect(JSON.stringify(status)).not.toContain(sentinel);
+    expect(JSON.stringify(status)).not.toContain(accountSentinel);
+    expect(status.accountFingerprint).toMatch(/^[0-9a-f]{64}$/u);
+    expect(Object.keys(status)).not.toContain("accountFingerprint");
+    expect(readFileSync(join(temp.ownerHome, "auth-status-args"), "utf8")).toBe(
+      "--setting-sources  --safe-mode --strict-mcp-config auth status --json",
+    );
+    const authCwd = readFileSync(join(temp.ownerHome, "auth-status-cwd"), "utf8");
+    expect(readFileSync(join(temp.ownerHome, "auth-status-cwd-mode"), "utf8").trim()).toBe("700");
+    expect(existsSync(authCwd)).toBe(false);
+    expect(claudeCodeConnectionMethod(status)).toBe("owner-router");
+    expect(claudeCodeConnectionMethod({
+      loggedIn: true,
+      authMethod: `unsafe\n${sentinel}`,
+    })).toBe("external");
+  });
+
+  it("accepts the CLI's documented exit-one logged-out result", async () => {
+    temp = makeTempGhosts();
+    const executable = join(temp.root, "claude-auth-logged-out");
+    writeFileSync(
+      executable,
+      "#!/bin/sh\nprintf '%s\\n' '{\"loggedIn\":false,\"authMethod\":\"none\"}'\nexit 1\n",
+      { mode: 0o700 },
+    );
+
+    await expect(readClaudeCodeAuthStatus(executable, {
+      HOME: temp.ownerHome,
+      PATH: "/usr/bin",
+    })).resolves.toEqual({ loggedIn: false, authMethod: "none" });
+  });
+
+  it("hard-kills a TERM-ignoring auth probe and its pipe-holding descendant", async () => {
+    temp = makeTempGhosts();
+    const executable = join(temp.root, "claude-auth-hangs");
+    const pids = join(temp.ownerHome, "auth-pids");
+    writeFileSync(
+      executable,
+      "#!/bin/sh\ntrap '' TERM\n"
+        + "/bin/sh -c 'trap \"\" TERM; while :; do /bin/sleep 10; done' &\n"
+        + "descendant=$!\nprintf '%s %s' \"$$\" \"$descendant\" > \"$HOME/auth-pids\"\n"
+        + "printf '%s' \"$PWD\" > \"$HOME/auth-cwd\"\n"
+        + "printf '%s\\n' '{\"loggedIn\":true}'\nwait\n",
+      { mode: 0o700 },
+    );
+    const started = Date.now();
+
+    await expect(readClaudeCodeAuthStatus(executable, {
+      HOME: temp.ownerHome,
+      PATH: "/usr/bin",
+    }, { timeoutMs: 250 })).rejects.toThrow(
+      "Failed to read Claude Code authentication status",
+    );
+
+    expect(Date.now() - started).toBeLessThan(1_750);
+    await expectPidsGone(pids);
+    expect(existsSync(readFileSync(join(temp.ownerHome, "auth-cwd"), "utf8"))).toBe(false);
+  });
+
+  it.each([
+    [
+      "exit zero with loggedIn false",
+      "zero-false",
+      "printf '%s\\n' '{\"loggedIn\":false}'\n",
+      undefined,
+      "disagreed with exit 0",
+    ],
+    [
+      "exit one with loggedIn true",
+      "one-true",
+      "printf '%s\\n' '{\"loggedIn\":true}'\nexit 1\n",
+      undefined,
+      "disagreed with exit 1",
+    ],
+    [
+      "exit two even when stdout says loggedIn true",
+      "two-true",
+      "printf '%s\\n' '{\"loggedIn\":true}'\nexit 2\n",
+      undefined,
+      "Failed to read Claude Code authentication status",
+    ],
+    [
+      "a signal even when stdout says loggedIn true",
+      "signal-true",
+      "printf '%s\\n' '{\"loggedIn\":true}'\nkill -TERM $$\n",
+      undefined,
+      "Failed to read Claude Code authentication status",
+    ],
+    [
+      "a timeout even when stdout says loggedIn true",
+      "timeout-true",
+      "printf '%s\\n' '{\"loggedIn\":true}'\nexec sleep 5\n",
+      25,
+      "Failed to read Claude Code authentication status",
+    ],
+    [
+      "malformed JSON on exit zero",
+      "malformed",
+      "printf '%s\\n' 'not-json'\n",
+      undefined,
+      "returned invalid JSON",
+    ],
+  ] as const)("rejects %s", async (_label, slug, script, timeoutMs, message) => {
+    temp = makeTempGhosts();
+    const executable = join(temp.root, `claude-auth-${slug}`);
+    writeFileSync(executable, `#!/bin/sh\n${script}`, { mode: 0o700 });
+
+    await expect(readClaudeCodeAuthStatus(
+      executable,
+      { HOME: temp.ownerHome, PATH: "/usr/bin" },
+      timeoutMs === undefined ? {} : { timeoutMs },
+    )).rejects.toThrow(message);
+  });
+
+  it("uses the same credential-free environment for resolution, version, and auth", async () => {
+    const source = {
+      HOME: "/home/owner",
+      PATH: "/usr/bin",
+      ANTHROPIC_AUTH_TOKEN: "router-secret",
+      CLAUDE_CODE_USE_VERTEX: "1",
+      GOOGLE_APPLICATION_CREDENTIALS: "/home/owner/vertex.json",
+      OPENROUTER_API_KEY: "unrelated-secret",
+      GHOST_TEST_MODE: "private-test-flag",
+      LD_PRELOAD: "/tmp/inject.so",
+    } satisfies NodeJS.ProcessEnv;
+    const seen: Readonly<NodeJS.ProcessEnv>[] = [];
+    const probe = new ClaudeCodeProbe({
+      binaryPath: "claude",
+      environment: source,
+      resolveExecutable: async (_binary, environment) => {
+        seen.push(environment);
+        return "/resolved/claude";
+      },
+      inspectExecutable: async (path) => `test:${path}`,
+      readVersion: async (_binary, environment) => {
+        seen.push(environment);
+        return CLAUDE_CODE_MINIMUM_VERSION;
+      },
+      readAuthStatus: async (_binary, environment) => {
+        seen.push(environment);
+        return { loggedIn: true, authMethod: "api_key", apiProvider: "vertex" };
+      },
+    });
+
+    await expect(probe.read()).resolves.toMatchObject({
+      authStatus: { loggedIn: true, authMethod: "api_key", apiProvider: "vertex" },
+    });
+    expect(seen).toHaveLength(3);
+    expect(seen[0]).toEqual(seen[1]);
+    expect(seen[1]).toEqual(seen[2]);
+    expect(seen[0]).toMatchObject({
+      CLAUDE_CODE_USE_VERTEX: "1",
+      GOOGLE_APPLICATION_CREDENTIALS: "/home/owner/vertex.json",
+      CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1",
+    });
+    expect(seen[0]?.ANTHROPIC_AUTH_TOKEN).toBeUndefined();
+    expect(seen[0]?.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBeUndefined();
+    expect(seen[0]?.OPENROUTER_API_KEY).toBeUndefined();
+    expect(seen[0]?.GHOST_TEST_MODE).toBeUndefined();
+    expect(seen[0]?.LD_PRELOAD).toBeUndefined();
+  });
+
   it("single-flights concurrent work and retains one successful snapshot until TTL expiry", async () => {
     let now = 100;
     let resolutions = 0;
     let authReads = 0;
     const probe = new ClaudeCodeProbe({
       binaryPath: "configured-claude",
+      readVersion: readSupportedClaudeVersion,
       ttlMs: 5_000,
       now: () => now,
       resolveExecutable: async (configured) => {
@@ -435,6 +944,7 @@ describe("Claude Code executable/auth probe", () => {
         expect(configured).toBe("configured-claude");
         return "/resolved/claude";
       },
+      inspectExecutable: async (path) => `test:${path}`,
       readAuthStatus: async (binary) => {
         authReads += 1;
         expect(binary).toBe("/resolved/claude");
@@ -462,9 +972,11 @@ describe("Claude Code executable/auth probe", () => {
     let fail = true;
     const probe = new ClaudeCodeProbe({
       binaryPath: "claude",
+      readVersion: readSupportedClaudeVersion,
       ttlMs: 1_000,
       now: () => now,
       resolveExecutable: async () => "/resolved/claude",
+      inspectExecutable: async (path) => `test:${path}`,
       readAuthStatus: async () => {
         authReads += 1;
         await gate.promise;
@@ -492,17 +1004,19 @@ describe("Claude Code executable/auth probe", () => {
     expect(authReads).toBe(2);
   });
 
-  it("requires the optional SDK before reporting Claude plan availability", async () => {
+  it("requires the optional SDK before reporting Claude harness availability", async () => {
     let executableReads = 0;
-    const sdkError = new Error("install exact private SDK boundary");
+    const sdkError = new Error("install exact owner SDK boundary");
     const probe = new ClaudeCodeProbe({
       loadSdk: async () => {
         throw sdkError;
       },
+      readVersion: readSupportedClaudeVersion,
       resolveExecutable: async () => {
         executableReads += 1;
         return "/resolved/claude";
       },
+      inspectExecutable: async (path) => `test:${path}`,
       readAuthStatus: async () => ({ loggedIn: true, authMethod: "claude.ai" }),
     });
 
@@ -517,12 +1031,14 @@ describe("Claude Code executable/auth probe", () => {
     const missing = new Error("SDK install is missing before import");
     const probe = new ClaudeCodeProbe({
       now: () => now,
+      readVersion: readSupportedClaudeVersion,
       loadSdk: async () => {
         sdkLoads += 1;
         if (!installed) throw missing;
         return testClaudeAgentSdk;
       },
       resolveExecutable: async () => "/resolved/claude",
+      inspectExecutable: async (path) => `test:${path}`,
       readAuthStatus: async () => ({ loggedIn: true, authMethod: "claude.ai" }),
     });
 
@@ -546,7 +1062,9 @@ describe("Claude Code executable/auth probe", () => {
     let authReads = 0;
     const probe = new ClaudeCodeProbe({
       binaryPath: "claude",
+      readVersion: readSupportedClaudeVersion,
       resolveExecutable: async () => "/resolved/claude",
+      inspectExecutable: async (path) => `test:${path}`,
       readAuthStatus: async () => {
         authReads += 1;
         if (authReads === 1) {
@@ -648,77 +1166,208 @@ describe("Claude session sidecar confinement", () => {
   });
 });
 
-describe("Claude Code subscription runtime", () => {
-  it("removes the pinned SDK credential surface from query env without mutating parent env", async () => {
-    const { seenOptions } = setupClaudeHost();
-    const hostileNames = [
-      "ANTHROPIC_API_KEY",
-      "ANTHROPIC_AUTH_TOKEN",
-      "ANTHROPIC_BASE_URL",
-      "ANTHROPIC_CONFIG_DIR",
-      "ANTHROPIC_CUSTOM_HEADERS",
-      "ANTHROPIC_FEDERATION_RULE_ID",
-      "ANTHROPIC_IDENTITY_TOKEN",
-      "ANTHROPIC_IDENTITY_TOKEN_FILE",
-      "ANTHROPIC_OAUTH_TOKEN",
-      "ANTHROPIC_ORGANIZATION_ID",
-      "ANTHROPIC_PROFILE",
-      "ANTHROPIC_SCOPE",
-      "ANTHROPIC_SERVICE_ACCOUNT_ID",
-      "ANTHROPIC_UNIX_SOCKET",
-      "ANTHROPIC_WORKSPACE_ID",
-      "CLAUDE_CODE_CLIENT_CERT",
-      "CLAUDE_CODE_CLIENT_KEY",
-      "CLAUDE_CODE_CLIENT_KEY_PASSPHRASE",
-      "CLAUDE_CODE_CUSTOM_OAUTH_URL",
-      "CLAUDE_CODE_OAUTH_CLIENT_ID",
-      "CLAUDE_CODE_OAUTH_TOKEN",
-      "CLAUDE_CODE_ORGANIZATION_UUID",
-      "CLAUDE_CODE_REMOTE",
-      "CLAUDE_CODE_SESSION_ACCESS_TOKEN",
-      "CLAUDE_CODE_WEBSOCKET_AUTH_FILE_DESCRIPTOR",
-      "CLAUDE_LOCAL_OAUTH_API_BASE",
-      "CLAUDE_LOCAL_OAUTH_APPS_BASE",
-      "CLAUDE_LOCAL_OAUTH_CONSOLE_BASE",
-      "CLAUDE_SECURESTORAGE_CONFIG_DIR",
-      "CLAUDE_SESSION_INGRESS_TOKEN_FILE",
-      "GITLAB_TOKEN",
-      "HF_TOKEN",
-      "HUGGINGFACE_HUB_TOKEN",
-    ] as const;
-    const hostile = Object.fromEntries(
-      hostileNames.map((name) => [name, `hostile-${name}`]),
-    ) as Record<(typeof hostileNames)[number], string>;
-    const inherited = {
-      ...hostile,
-      CLAUDE_CONFIG_DIR: "/home/owner/.claude-owner-plan",
-    };
-    const previous = new Map(
-      Object.keys(inherited).map((name) => [name, process.env[name]]),
-    );
-    Object.assign(process.env, inherited);
-
+describe("Claude Code native harness runtime", () => {
+  it("keeps wrapper-injected credentials beyond Ghost while using it for every CLI path", async () => {
+    const wrapperRoot = mkdtempSync(join(tmpdir(), "ghost-owner-claude-wrapper-"));
+    const wrapper = join(wrapperRoot, "claude-wrapper");
+    const native = join(wrapperRoot, "claude-native");
+    const invocationLog = join(wrapperRoot, "invocations");
+    const childObservation = join(wrapperRoot, "native-child-observation");
+    const sentinel = "wrapper-post-launch-secret-sentinel";
+    const logger = recordingLogger();
     try {
-      await host!.runTurn("casper", {
-        sessionId: "credential-free-query",
-        prompt: "Use only the owner's Claude plan.",
-        emit: () => {},
+      writeFileSync(
+        wrapper,
+        `#!/bin/sh
+printf '%s\\n' "$*" >> '${invocationLog}'
+export CLAUDE_WRAPPER_SENTINEL='${sentinel}'
+exec '${native}' "$@"
+`,
+        { mode: 0o700 },
+      );
+      writeFileSync(
+        native,
+        `#!/bin/sh
+test "$CLAUDE_WRAPPER_SENTINEL" = '${sentinel}' || exit 19
+if [ "$1" = --version ]; then
+  printf '%s\\n' '${CLAUDE_CODE_MINIMUM_VERSION} (Claude Code)'
+elif [ "$1" = --fake-native-child ]; then
+  printf '%s' "$CLAUDE_WRAPPER_SENTINEL" > '${childObservation}'
+else
+  printf '%s\\n' '{"loggedIn":true,"authMethod":"future_native_sso","email":"owner@example.invalid"}'
+fi
+`,
+        { mode: 0o700 },
+      );
+      const environment = {
+        HOME: wrapperRoot,
+        PATH: "/usr/bin",
+        CLAUDE_WRAPPER_SENTINEL: "ambient-value-must-not-cross",
+        ANTHROPIC_API_KEY: "ambient-api-key-must-not-cross",
+      } satisfies NodeJS.ProcessEnv;
+      const probe = new ClaudeCodeProbe({ binaryPath: wrapper, environment });
+      const { paths, seenOptions } = setupClaudeHost({
+        environment,
+        probe,
+        logger,
+        createQuery: (input, lifecycle) => {
+          execFileSync(
+            input.options.pathToClaudeCodeExecutable!,
+            ["--fake-native-child"],
+            { env: input.options.env },
+          );
+          const sessionId = input.options.sessionId ?? input.options.resume;
+          if (!sessionId) throw new Error("test query received no session id");
+          return fakeQuery(
+            responseMessages(sessionId, "wrapper child completed"),
+            lifecycle,
+            input.prompt,
+          );
+        },
+      });
+      const events: PiMessagesEvent[] = [];
+      const turn = (prompt: string) => host!.runTurn("casper", {
+        sessionId: "owner-wrapper-boundary",
+        prompt,
+        emit: (event) => events.push(event),
       });
 
-      const queryEnv = seenOptions[0]?.env;
-      expect(queryEnv).toBeDefined();
-      for (const [name, value] of Object.entries(hostile)) {
-        expect(queryEnv?.[name]).toBeUndefined();
-        expect(process.env[name]).toBe(value);
+      await turn("first cold turn");
+      await turn("warm turn");
+      await host!.close("casper", "owner-wrapper-boundary");
+      await turn("second cold turn");
+
+      expect(readFileSync(childObservation, "utf8")).toBe(sentinel);
+      const invocations = readFileSync(invocationLog, "utf8").trim().split("\n");
+      expect(invocations.filter((args) => args === "--version")).toHaveLength(3);
+      expect(invocations.filter((args) => args.endsWith("auth status --json"))).toHaveLength(3);
+      expect(invocations.filter((args) => args === "--fake-native-child")).toHaveLength(2);
+      expect(seenOptions).toHaveLength(2);
+      for (const options of seenOptions) {
+        expect(options.pathToClaudeCodeExecutable).toBe(wrapper);
+        expect(options.env?.CLAUDE_WRAPPER_SENTINEL).toBeUndefined();
+        expect(options.env?.ANTHROPIC_API_KEY).toBeUndefined();
       }
-      expect(queryEnv?.CLAUDE_CONFIG_DIR).toBe(inherited.CLAUDE_CONFIG_DIR);
-      expect(process.env.CLAUDE_CONFIG_DIR).toBe(inherited.CLAUDE_CONFIG_DIR);
+      const publicProbeMetadata = await probe.read();
+      const modelApiPayload = await new ModelCatalog({
+        registry: temp!.registry,
+        offline: true,
+        createRuntime: async () => makeFakeCatalogRuntime({ models: [], credentialed: [] }),
+        claudeCodeProbe: probe,
+      }).listModels("casper", { provider: "claude-code" });
+      for (const observable of [
+        JSON.stringify(events),
+        JSON.stringify(logger.records),
+        JSON.stringify(publicProbeMetadata),
+        JSON.stringify(modelApiPayload),
+        readFileSync(claudeSessionMetadataPath(
+          paths.sessionDir,
+          "owner-wrapper-boundary",
+        ), "utf8"),
+      ]) {
+        expect(observable).not.toContain(sentinel);
+      }
+      expect(filesystemTreeContains(paths.home, sentinel)).toBe(false);
     } finally {
-      for (const [name, value] of previous) {
-        if (value === undefined) delete process.env[name];
-        else process.env[name] = value;
-      }
+      rmSync(wrapperRoot, { recursive: true, force: true });
     }
+  });
+
+  it("passes only reviewed non-secret Claude selectors into SDK queries", async () => {
+    const secret = "native-claude-secret-sentinel";
+    const logger = recordingLogger();
+    let probeEnvironment: Readonly<NodeJS.ProcessEnv> | undefined;
+    const environment = {
+      HOME: "/home/owner",
+      PATH: process.env.PATH,
+      ANTHROPIC_API_KEY: secret,
+      ANTHROPIC_BASE_URL: "https://router.invalid",
+      CLAUDE_CODE_USE_BEDROCK: "1",
+      AWS_ACCESS_KEY_ID: "native-aws-id",
+      AWS_SECRET_ACCESS_KEY: "native-aws-secret",
+      AWS_SESSION_TOKEN: "native-aws-session",
+      AWS_PROFILE: "owner-bedrock",
+      AWS_SHARED_CREDENTIALS_FILE: "/home/owner/.aws/credentials",
+      OPENAI_API_KEY: "unrelated-openai-secret",
+      GHOSTD_API_TOKEN: "ghost-private-token",
+      PI_CONFIG_FILES: "/tmp/pi-injection",
+      NODE_OPTIONS: "--require=/tmp/runtime-injection.cjs",
+      CLAUDE_CODE_PROCESS_WRAPPER: "/tmp/claude-injection",
+      CLAUDE_CODE_DISABLE_AUTO_MEMORY: "0",
+    } satisfies NodeJS.ProcessEnv;
+    const { paths, seenOptions } = setupClaudeHost({
+      environment,
+      logger,
+      readAuthStatus: async (_binaryPath, captured) => {
+        probeEnvironment = captured;
+        return {
+          loggedIn: true,
+          authMethod: "api_key",
+          accountFingerprint: STABLE_TEST_ACCOUNT,
+        };
+      },
+    });
+
+    await host!.runTurn("casper", {
+      sessionId: "native-auth-query",
+      prompt: "Use the installed Claude harness.",
+      emit: () => {},
+    });
+
+    const queryEnv = seenOptions[0]?.env;
+    expect(queryEnv).toBe(probeEnvironment);
+    expect(queryEnv).toMatchObject({
+      ANTHROPIC_BASE_URL: "https://router.invalid",
+      CLAUDE_CODE_USE_BEDROCK: "1",
+      AWS_PROFILE: "owner-bedrock",
+      AWS_SHARED_CREDENTIALS_FILE: "/home/owner/.aws/credentials",
+      CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1",
+      CLAUDE_AGENT_SDK_CLIENT_APP: "ghostd/0.0.1",
+    });
+    for (const name of [
+      "ANTHROPIC_API_KEY",
+      "AWS_ACCESS_KEY_ID",
+      "AWS_SECRET_ACCESS_KEY",
+      "AWS_SESSION_TOKEN",
+      "OPENAI_API_KEY",
+      "GHOSTD_API_TOKEN",
+      "PI_CONFIG_FILES",
+      "NODE_OPTIONS",
+      "CLAUDE_CODE_PROCESS_WRAPPER",
+      "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB",
+    ]) {
+      expect(queryEnv?.[name]).toBeUndefined();
+    }
+    expect(readFileSync(
+      claudeSessionMetadataPath(paths.sessionDir, "native-auth-query"),
+      "utf8",
+    )).not.toContain(secret);
+    expect(seenOptions[0]).toMatchObject({
+      settingSources: [],
+      skills: [],
+      plugins: [],
+      strictMcpConfig: true,
+    });
+    expect(Object.keys(seenOptions[0]?.mcpServers ?? {})).toEqual(["ghost"]);
+
+    // A warm turn reuses the same query. Explicit close then makes the next
+    // turn cold, but both launches retain the one daemon-start snapshot.
+    await host!.runTurn("casper", {
+      sessionId: "native-auth-query",
+      prompt: "Continue warm.",
+      emit: () => {},
+    });
+    expect(seenOptions).toHaveLength(1);
+    await host!.close("casper", "native-auth-query");
+    await host!.runTurn("casper", {
+      sessionId: "native-auth-query",
+      prompt: "Resume cold.",
+      emit: () => {},
+    });
+    expect(seenOptions).toHaveLength(2);
+    expect(seenOptions[1]?.env).toBe(seenOptions[0]?.env);
+    expect(JSON.stringify(logger.records)).not.toContain(secret);
+    expect(JSON.stringify(logger.records)).not.toContain("native-aws-secret");
   });
 
   it("returns image blocks from screen and browser screenshots across the tool bridge", async () => {
@@ -1058,11 +1707,15 @@ describe("Claude Code subscription runtime", () => {
       cwd: temp!.ownerHome,
       tools: { type: "preset", preset: "claude_code" },
       skills: [],
+      plugins: [],
       settingSources: [],
+      strictMcpConfig: true,
       permissionMode: "bypassPermissions",
       allowDangerouslySkipPermissions: true,
       persistSession: true,
     });
+    expect(seenOptions[0]?.env?.CLAUDE_CODE_DISABLE_AUTO_MEMORY).toBe("1");
+    expect(seenOptions[0]?.env?.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBeUndefined();
     // Scheduling, plan mode, and asking the owner are Ghost-owned; Claude's own
     // versions would keep state or reach the owner outside Ghost's surfaces.
     for (const tool of [
@@ -1080,8 +1733,12 @@ describe("Claude Code subscription runtime", () => {
     for (const tool of ["Agent", "Task", "Bash", "Read", "Write", "TodoWrite", "WebSearch"]) {
       expect(seenOptions[0]?.disallowedTools, tool).not.toContain(tool);
     }
-    expect(seenOptions[0]).not.toHaveProperty("plugins");
-    expect(seenOptions[0]).not.toHaveProperty("strictMcpConfig");
+    const permissionInput = { command: "printf owner-approved" };
+    await expect(seenOptions[0]?.canUseTool?.("Bash", permissionInput, {
+      signal: new AbortController().signal,
+      toolUseID: "permission-test",
+    })).resolves.toEqual({ behavior: "allow" });
+    expect(permissionInput).toEqual({ command: "printf owner-approved" });
     const systemPrompt = seenOptions[0]?.systemPrompt;
     expect(systemPrompt).toMatchObject({
       type: "preset",
@@ -1357,6 +2014,7 @@ describe("Claude Code subscription runtime", () => {
       claudeCode: {
         loadSdk: async () => testClaudeAgentSdk,
         binaryPath: process.execPath,
+        readVersion: readSupportedClaudeVersion,
         readAuthStatus: async () => ({ loggedIn: true, authMethod: "claude.ai" }),
         observeQueryExit: observeFakeQueryExit,
         createQuery: (input) => {
@@ -1471,6 +2129,7 @@ describe("Claude Code subscription runtime", () => {
       claudeCode: {
         loadSdk: async () => testClaudeAgentSdk,
         binaryPath: process.execPath,
+        readVersion: readSupportedClaudeVersion,
         readAuthStatus: async () => ({ loggedIn: true, authMethod: "claude.ai" }),
         observeQueryExit: observeFakeQueryExit,
         createQuery: (input) => {
@@ -2594,7 +3253,7 @@ describe("Claude Code subscription runtime", () => {
     expect(readFileSync(sidecar, "utf8")).toBe(invalid);
   });
 
-  it("invalidates the cached external auth snapshot during auth refresh", async () => {
+  it("re-probes auth for every turn and again after an explicit auth refresh", async () => {
     let authReads = 0;
     setupClaudeHost({
       readAuthStatus: async () => {
@@ -2606,7 +3265,7 @@ describe("Claude Code subscription runtime", () => {
     for (const sessionId of ["conversation-cache-a", "conversation-cache-b"]) {
       await host!.runTurn("casper", { sessionId, prompt: "hello", emit: () => {} });
     }
-    expect(authReads).toBe(1);
+    expect(authReads).toBe(2);
 
     await host!.refreshAuth("casper");
     await host!.runTurn("casper", {
@@ -2614,14 +3273,15 @@ describe("Claude Code subscription runtime", () => {
       prompt: "hello again",
       emit: () => {},
     });
-    expect(authReads).toBe(2);
+    expect(authReads).toBe(3);
   });
 
-  it("shares one executable/auth probe between catalogue listing and a turn", async () => {
+  it("does not reuse the catalogue auth cache for turn admission", async () => {
     let resolutions = 0;
     let authReads = 0;
     const probe = new ClaudeCodeProbe({
       binaryPath: "configured-claude",
+      readVersion: readSupportedClaudeVersion,
       resolveExecutable: async () => {
         resolutions += 1;
         return process.execPath;
@@ -2653,7 +3313,7 @@ describe("Claude Code subscription runtime", () => {
       emit: () => {},
     });
 
-    expect({ resolutions, authReads }).toEqual({ resolutions: 1, authReads: 1 });
+    expect({ resolutions, authReads }).toEqual({ resolutions: 2, authReads: 2 });
   });
 
   it("deletes a Claude Code resume sidecar", async () => {
@@ -3229,9 +3889,9 @@ describe("Claude Code subscription runtime", () => {
     );
   });
 
-  it("fails closed without Claude.ai plan auth and never starts a query", async () => {
+  it("fails closed when the external CLI reports logged out and never starts a query", async () => {
     const { lifecycle } = setupClaudeHost({
-      authStatus: { loggedIn: true, authMethod: "api_key" },
+      authStatus: { loggedIn: false, authMethod: "api_key" },
     });
     const events: PiMessagesEvent[] = [];
 
@@ -3245,9 +3905,229 @@ describe("Claude Code subscription runtime", () => {
     expect(events.at(-1)).toMatchObject({
       type: "error",
       reason: "error",
-      errorMessage: expect.stringContaining("claude auth login"),
+      errorMessage: expect.stringContaining("did not report a usable native authentication method"),
     });
     expect(await host!.listSessions("casper")).toEqual([]);
+  });
+
+  it("cold-restarts across probe failure, provider/binary change, logout, and relogin", async () => {
+    let failProbe = false;
+    let binaryPath = "/mise/installs/claude/2.1.250/claude";
+    let authStatus = {
+      loggedIn: true,
+      authMethod: "cloud",
+      apiProvider: "bedrock",
+      subscriptionType: "enterprise",
+      accountFingerprint: STABLE_TEST_ACCOUNT,
+    };
+    const probe = new ClaudeCodeProbe({
+      binaryPath: "claude",
+      readVersion: readSupportedClaudeVersion,
+      resolveExecutable: async () => binaryPath,
+      inspectExecutable: async (path) => `test:${path}`,
+      readAuthStatus: async () => {
+        if (failProbe) {
+          throw new ClaudeCodeProcessError(
+            "Claude Code authentication status disagreed with exit 2.",
+          );
+        }
+        return authStatus;
+      },
+    });
+    const { lifecycle, seenOptions } = setupClaudeHost({ probe });
+    const turn = (prompt: string, events: PiMessagesEvent[] = []) => host!.runTurn("casper", {
+      sessionId: "auth-runtime-identity",
+      prompt,
+      emit: (event) => events.push(event),
+    });
+
+    await turn("first");
+    expect(lifecycle.queries).toBe(1);
+
+    failProbe = true;
+    const failed: PiMessagesEvent[] = [];
+    await turn("probe fails", failed);
+    expect(failed.at(-1)).toMatchObject({
+      type: "error",
+      errorMessage: expect.stringContaining("disagreed with exit 2"),
+    });
+    expect(lifecycle).toMatchObject({ queries: 1, closed: 1 });
+
+    failProbe = false;
+    await turn("probe recovers");
+    expect(lifecycle.queries).toBe(2);
+
+    binaryPath = "/mise/installs/claude/2.1.251/claude";
+    authStatus = { ...authStatus, apiProvider: "vertex" };
+    await turn("mise and provider changed");
+    expect(lifecycle).toMatchObject({ queries: 3, closed: 2 });
+    expect(seenOptions[2]?.pathToClaudeCodeExecutable).toBe(binaryPath);
+
+    authStatus = { ...authStatus, loggedIn: false };
+    const loggedOut: PiMessagesEvent[] = [];
+    await turn("logged out", loggedOut);
+    expect(loggedOut.at(-1)).toMatchObject({ type: "error" });
+    expect(lifecycle).toMatchObject({ queries: 3, closed: 3 });
+
+    authStatus = { loggedIn: true, authMethod: "claude.ai", apiProvider: "firstParty",
+      subscriptionType: "max", accountFingerprint: STABLE_TEST_ACCOUNT };
+    await turn("logged in again");
+    expect(lifecycle.queries).toBe(4);
+  });
+
+  it("retires warm state when the executable changes without changing its path", async () => {
+    let executableIdentity = "executable-v1";
+    const probe = new ClaudeCodeProbe({
+      binaryPath: process.execPath,
+      readVersion: readSupportedClaudeVersion,
+      resolveExecutable: async () => process.execPath,
+      inspectExecutable: async () => executableIdentity,
+      readAuthStatus: async () => ({
+        loggedIn: true,
+        authMethod: "claude.ai",
+        accountFingerprint: STABLE_TEST_ACCOUNT,
+      }),
+    });
+    const { lifecycle } = setupClaudeHost({ probe });
+    const turn = (prompt: string) => host!.runTurn("casper", {
+      sessionId: "executable-replaced-in-place",
+      prompt,
+      emit: () => {},
+    });
+
+    await turn("first");
+    executableIdentity = "executable-v2";
+    await turn("after replacement");
+
+    expect(lifecycle).toMatchObject({ queries: 2, closed: 1 });
+  });
+
+  it("retires warm state when the validated CLI version changes", async () => {
+    let cliVersion = CLAUDE_CODE_MINIMUM_VERSION;
+    const probe = new ClaudeCodeProbe({
+      binaryPath: process.execPath,
+      readVersion: async () => cliVersion,
+      readAuthStatus: async () => ({
+        loggedIn: true,
+        authMethod: "claude.ai",
+        accountFingerprint: STABLE_TEST_ACCOUNT,
+      }),
+    });
+    const { lifecycle } = setupClaudeHost({ probe });
+    const turn = (prompt: string) => host!.runTurn("casper", {
+      sessionId: "cli-version-changed",
+      prompt,
+      emit: () => {},
+    });
+
+    await turn("first");
+    cliVersion = "2.1.252";
+    await turn("after upgrade");
+
+    expect(lifecycle).toMatchObject({ queries: 2, closed: 1 });
+  });
+
+  it("fails closed when the executable changes between auth and query startup", async () => {
+    let inspections = 0;
+    const probe = new ClaudeCodeProbe({
+      binaryPath: process.execPath,
+      readVersion: readSupportedClaudeVersion,
+      resolveExecutable: async () => process.execPath,
+      inspectExecutable: async () => {
+        inspections += 1;
+        return inspections <= 2 ? "authenticated-executable" : "replaced-executable";
+      },
+      readAuthStatus: async () => ({
+        loggedIn: true,
+        authMethod: "claude.ai",
+        accountFingerprint: STABLE_TEST_ACCOUNT,
+      }),
+    });
+    const { lifecycle } = setupClaudeHost({ probe });
+    const events: PiMessagesEvent[] = [];
+
+    await host!.runTurn("casper", {
+      sessionId: "executable-auth-query-race",
+      prompt: "must not start",
+      emit: (event) => events.push(event),
+    });
+
+    expect(lifecycle.queries).toBe(0);
+    expect(events.at(-1)).toMatchObject({
+      type: "error",
+      errorMessage: expect.stringContaining("changed after authentication"),
+    });
+  });
+
+  it("retires warm state when a same-label account fingerprint changes", async () => {
+    let accountFingerprint = "1".repeat(64);
+    const probe = new ClaudeCodeProbe({
+      binaryPath: process.execPath,
+      readVersion: readSupportedClaudeVersion,
+      readAuthStatus: async () => ({
+        loggedIn: true,
+        authMethod: "claude.ai",
+        apiProvider: "firstParty",
+        subscriptionType: "max",
+        accountFingerprint,
+      }),
+    });
+    const { lifecycle } = setupClaudeHost({ probe });
+    const turn = (prompt: string) => host!.runTurn("casper", {
+      sessionId: "same-label-account-change",
+      prompt,
+      emit: () => {},
+    });
+
+    await turn("first account");
+    accountFingerprint = "2".repeat(64);
+    await turn("replacement account");
+
+    expect(lifecycle).toMatchObject({ queries: 2, closed: 1 });
+  });
+
+  it("uses a fresh cold query each turn when the CLI reports no stable account identity", async () => {
+    const probe = new ClaudeCodeProbe({
+      binaryPath: process.execPath,
+      readVersion: readSupportedClaudeVersion,
+      readAuthStatus: async () => ({
+        loggedIn: true,
+        authMethod: "future_native_sso",
+      }),
+    });
+    const { lifecycle } = setupClaudeHost({ probe });
+    const turn = (prompt: string) => host!.runTurn("casper", {
+      sessionId: "no-stable-account-identity",
+      prompt,
+      emit: () => {},
+    });
+
+    await turn("first");
+    await turn("second");
+
+    expect(lifecycle).toMatchObject({ queries: 2, closed: 1 });
+  });
+
+  it.each([
+    ["Claude.ai", { loggedIn: true, authMethod: "claude.ai" }],
+    ["API key", { loggedIn: true, authMethod: "api_key" }],
+    ["Bedrock", { loggedIn: true, authMethod: "cloud", apiProvider: "bedrock" }],
+    ["Vertex", { loggedIn: true, authMethod: "cloud", apiProvider: "vertex" }],
+    ["Foundry", { loggedIn: true, authMethod: "cloud", apiProvider: "foundry" }],
+    ["router", { loggedIn: true, authMethod: "api_key", apiProvider: "openrouter" }],
+    ["future method", { loggedIn: true, authMethod: "future_native_sso" }],
+  ] as const)("runs with %s when the CLI reports it usable", async (_label, authStatus) => {
+    const { lifecycle } = setupClaudeHost({ authStatus });
+    const events: PiMessagesEvent[] = [];
+
+    await host!.runTurn("casper", {
+      sessionId: "native-auth-method",
+      prompt: "hello",
+      emit: (event) => events.push(event),
+    });
+
+    expect(lifecycle.queries).toBe(1);
+    expect(events.at(-1)).toMatchObject({ type: "done" });
   });
 
   it("persists SDK turns and resume identity from a terminal max-turn error", async () => {
@@ -3737,16 +4617,11 @@ describe("Claude Code subscription runtime", () => {
       emit: () => {},
     });
 
-    let renamed = false;
     const renaming = host!.renameGhost("casper", "wisp").then(() => {
-      renamed = true;
       cleanupOrder.push("move");
     });
     await vi.waitFor(() => expect(lifecycle.closed).toBe(1));
-    expect(renamed).toBe(false);
-    expectHomeUnmoved();
     await processExit.promise;
-    expectHomeUnmoved();
     await renaming;
     expect(cleanupOrder.slice(0, 2)).toEqual(["claude-exit", "browser"]);
     expect(cleanupOrder.slice(2, -1).every((entry) => entry.startsWith("schedule:")))
@@ -3754,6 +4629,66 @@ describe("Claude Code subscription runtime", () => {
     expect(cleanupOrder).toContain("schedule:list-units");
     expect(cleanupOrder.at(-1)).toBe("move");
     expect(temp!.registry.list().map((ghost) => ghost.name)).toContain("wisp");
+  });
+
+  it("TERM-cleans the native CLI and KILLs an orphan-resistant Bash descendant", async () => {
+    let wrapper = "";
+    let native = "";
+    let pids = "";
+    let cleanup = "";
+    const { lifecycle } = setupClaudeHost({
+      useSdkSpawnExitBoundary: true,
+      createQuery: (input, state) => {
+        const sessionId = input.options.sessionId ?? input.options.resume;
+        if (!sessionId) throw new Error("test query received no session id");
+        const spawnProcess = input.options.spawnClaudeCodeProcess;
+        if (!spawnProcess) throw new Error("SDK process-group boundary was not installed");
+        spawnProcess({
+          command: wrapper,
+          args: [],
+          cwd: temp!.ownerHome,
+          env: { HOME: temp!.ownerHome, PATH: "/usr/bin:/bin" },
+          signal: input.options.abortController!.signal,
+        });
+        return fakeQuery(
+          responseMessages(sessionId, "owned group is running"),
+          state,
+          input.prompt,
+        );
+      },
+    });
+    wrapper = join(temp!.ownerHome, "claude-owned-wrapper");
+    native = join(temp!.ownerHome, "claude-owned-native");
+    pids = join(temp!.ownerHome, "claude-owned-pids");
+    cleanup = join(temp!.ownerHome, "claude-owned-cleanup");
+    writeFileSync(wrapper, `#!/bin/sh\nexec '${native}' "$@"\n`, { mode: 0o700 });
+    writeFileSync(
+      native,
+      `#!/bin/sh
+trap 'printf normal-cleanup > "${cleanup}"; exit 0' TERM
+/bin/sh -c 'trap "" TERM; while :; do /bin/sleep 10; done' &
+descendant=$!
+printf '%s %s' "$$" "$descendant" > "${pids}"
+while :; do /bin/sleep 10; done
+`,
+      { mode: 0o700 },
+    );
+    await host!.runTurn("casper", {
+      sessionId: "owned-process-group",
+      prompt: "start native work",
+      emit: () => {},
+    });
+    await vi.waitFor(() => expect(existsSync(pids)).toBe(true));
+    const ghostdPid = process.pid;
+    const started = Date.now();
+
+    await host!.close("casper", "owned-process-group");
+
+    expect(Date.now() - started).toBeLessThan(3_000);
+    expect(readFileSync(cleanup, "utf8")).toBe("normal-cleanup");
+    await expectPidsGone(pids);
+    expect(pidExists(ghostdPid)).toBe(true);
+    expect(lifecycle.closed).toBe(1);
   });
 
   it("fails a home move with a retryable type when SDK exit remains unconfirmed", async () => {
@@ -3795,6 +4730,7 @@ describe("Claude Code subscription runtime", () => {
     const releaseProbe = deferred();
     const probe = new ClaudeCodeProbe({
       binaryPath: "configured-claude",
+      readVersion: readSupportedClaudeVersion,
       resolveExecutable: async () => {
         probeStarted.resolve();
         await releaseProbe.promise;
@@ -3853,6 +4789,7 @@ describe("Claude Code subscription runtime", () => {
     let authReads = 0;
     const probe = new ClaudeCodeProbe({
       binaryPath: "configured-claude",
+      readVersion: readSupportedClaudeVersion,
       resolveExecutable: async () => {
         probeStarted.resolve();
         await releaseProbe.promise;
@@ -3983,8 +4920,13 @@ describe("claudeSdkTranscriptPath", () => {
       mkdirSync(projectDir, { recursive: true });
       const transcript = join(projectDir, "0123abcd-session.jsonl");
       writeFileSync(transcript, "");
+      const homeProjectDir = join(root, ".claude", "projects", "-home-me-project");
+      mkdirSync(homeProjectDir, { recursive: true });
+      const homeTranscript = join(homeProjectDir, "home-session.jsonl");
+      writeFileSync(homeTranscript, "");
       const env = { CLAUDE_CONFIG_DIR: root };
       expect(claudeSdkTranscriptPath("0123abcd-session", env)).toBe(transcript);
+      expect(claudeSdkTranscriptPath("home-session", { HOME: root })).toBe(homeTranscript);
       expect(claudeSdkTranscriptPath("missing-session", env)).toBeUndefined();
       expect(claudeSdkTranscriptPath("../escape", env)).toBeUndefined();
       expect(claudeSdkTranscriptPath("0123abcd-session", {

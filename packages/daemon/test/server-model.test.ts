@@ -10,6 +10,11 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { ghostPaths } from "../src/ghosts.js";
 import {
+  CLAUDE_CODE_MINIMUM_VERSION,
+  ClaudeCodeProbe,
+  ClaudeCodeProcessError,
+} from "../src/claude-code.js";
+import {
   DEFAULT_MODELS_LIMIT,
   MAX_MODELS_LIMIT,
   ModelCatalog,
@@ -43,14 +48,31 @@ interface ServeOptions {
   models?: FakeCatalogModel[];
   credentialed?: string[];
   oauth?: string[];
-  claudePlan?: boolean;
+  claudeStatus?: {
+    loggedIn: boolean;
+    authMethod?: string;
+    apiProvider?: string;
+    subscriptionType?: string;
+  };
+  claudeProbe?: ClaudeCodeProbe;
 }
 
 async function serve(options: ServeOptions = {}): Promise<string> {
   temp = makeTempGhosts();
   temp.registry.ensureRoot();
   seedGhost(temp.root, { name: "casper" });
-  host = new SessionHost({ registry: temp.registry, offline: true });
+  const claudeStatus = options.claudeStatus ?? null;
+  host = new SessionHost({
+    registry: temp.registry,
+    offline: true,
+    claudeCode: {
+      binaryPath: process.execPath,
+      readVersion: async () => CLAUDE_CODE_MINIMUM_VERSION,
+      readAuthStatus: async () => claudeStatus?.loggedIn
+        ? { ...claudeStatus, accountFingerprint: "a".repeat(64) }
+        : claudeStatus ?? { loggedIn: false },
+    },
+  });
   const runtime: ModelCatalogRuntime = makeFakeCatalogRuntime({
     models: options.models ?? sampleCatalog(),
     ...(options.credentialed ? { credentialed: options.credentialed } : {}),
@@ -60,7 +82,9 @@ async function serve(options: ServeOptions = {}): Promise<string> {
     registry: temp.registry,
     offline: true,
     createRuntime: async () => runtime,
-    claudeCodePlanStatus: async () => options.claudePlan ?? false,
+    ...(options.claudeProbe
+      ? { claudeCodeProbe: options.claudeProbe }
+      : { claudeCodeStatus: async () => options.claudeStatus ?? null }),
   });
   listening = await startDaemonServer({
     registry: temp.registry, host, catalog, port: 0, relay: null, apiToken: null,
@@ -79,9 +103,23 @@ async function getJson(url: string): Promise<{ status: number; body: Record<stri
   return { status: response.status, body: JSON.parse(raw) as Record<string, unknown>, raw };
 }
 
+async function postMessage(base: string, sessionId: string): Promise<Response> {
+  return fetch(`${base}/api/ghosts/casper/messages`, {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "text/event-stream" },
+    body: JSON.stringify({
+      model: "ghost/casper",
+      context: {
+        messages: [{ role: "user", content: [{ type: "text", text: "hello" }] }],
+      },
+      options: { sessionId },
+    }),
+  });
+}
+
 describe("GET /api/ghosts/:name/model", () => {
   it("reports the external Claude Code runtime without asking Pi to resolve it", async () => {
-    const base = await serve({ claudePlan: true });
+    const base = await serve({ claudeStatus: { loggedIn: true, authMethod: "claude.ai" } });
     setChatModelRole(agentDir(), "claude-code", "default");
     const { status, body } = await getJson(`${base}/api/ghosts/casper/model`);
     expect(status).toBe(200);
@@ -89,11 +127,92 @@ describe("GET /api/ghosts/:name/model", () => {
       current: {
         provider: "claude-code",
         id: "default",
-        name: "Claude Code (your Claude plan)",
+        name: "Claude Code (external harness)",
         hasVision: true,
+        resolved: true,
+        usable: true,
       },
       source: "role",
     });
+  });
+
+  it("keeps an unavailable explicit Claude runtime current instead of claiming a Pi fallback", async () => {
+    const base = await serve({
+      claudeStatus: { loggedIn: false },
+      credentialed: ["openai-codex"],
+    });
+    setChatModelRole(agentDir(), "claude-code", "default");
+
+    const { body } = await getJson(`${base}/api/ghosts/casper/model`);
+
+    expect(body).toEqual({
+      current: {
+        provider: "claude-code",
+        id: "default",
+        name: "Claude Code (external harness)",
+        hasVision: true,
+        resolved: true,
+        usable: false,
+      },
+      source: "role",
+    });
+  });
+
+  it("reports an invalid explicit Claude role as selected but unresolved", async () => {
+    const base = await serve({
+      claudeStatus: { loggedIn: true, authMethod: "claude.ai" },
+      credentialed: [],
+    });
+    setChatModelRole(agentDir(), "claude-code", "not-a-runtime");
+
+    expect((await getJson(`${base}/api/ghosts/casper/model`)).body).toEqual({
+      current: {
+        provider: "claude-code",
+        id: "not-a-runtime",
+        name: "Claude Code (not-a-runtime)",
+        hasVision: true,
+        resolved: false,
+        usable: false,
+      },
+      source: "role",
+    });
+  });
+
+  it("keeps GET and POST on unavailable Claude instead of silently running Pi", async () => {
+    const base = await serve({
+      claudeStatus: { loggedIn: false },
+      credentialed: ["openai-codex"],
+    });
+    setChatModelRole(agentDir(), "claude-code", "default");
+
+    const current = await getJson(`${base}/api/ghosts/casper/model`);
+    expect(current.body).toMatchObject({
+      current: { provider: "claude-code", resolved: true, usable: false },
+      source: "role",
+    });
+    const response = await postMessage(base, "logged-out-claude-selection");
+    const raw = await response.text();
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("text/event-stream");
+    expect(raw).toContain("did not report a usable native authentication method");
+  });
+
+  it("keeps GET and POST aligned for an invalid Claude role", async () => {
+    const base = await serve({
+      claudeStatus: { loggedIn: true, authMethod: "claude.ai" },
+      credentialed: ["openai-codex"],
+    });
+    setChatModelRole(agentDir(), "claude-code", "not-a-runtime");
+
+    expect((await getJson(`${base}/api/ghosts/casper/model`)).body).toMatchObject({
+      current: { provider: "claude-code", resolved: false, usable: false },
+      source: "role",
+    });
+    const response = await postMessage(base, "invalid-claude-selection");
+    const raw = await response.text();
+    expect(response.status).toBe(409);
+    expect(response.headers.get("content-type")).toContain("application/json");
+    expect(JSON.parse(raw)).toMatchObject({ error: { code: "unknown_model" } });
   });
 
   it("reports source=role when roles.chat_model is set and resolves", async () => {
@@ -152,14 +271,78 @@ describe("GET /api/ghosts/:name/model", () => {
 });
 
 describe("GET /api/ghosts/:name/models?scope=available", () => {
-  it("includes Claude Code only when the external CLI has plan auth", async () => {
-    const base = await serve({ claudePlan: true });
+  it("uses the version-gated probe for availability without publishing its version", async () => {
+    let authReads = 0;
+    const probe = new ClaudeCodeProbe({
+      binaryPath: process.execPath,
+      readVersion: async () => "2.9.9",
+      readAuthStatus: async () => {
+        authReads += 1;
+        return { loggedIn: true, authMethod: "future_native_sso" };
+      },
+    });
+    const base = await serve({ claudeProbe: probe });
+
+    const available = await getJson(`${base}/api/ghosts/casper/models?provider=claude-code`);
+
+    expect(available.body.models).toEqual([expect.objectContaining({
+      provider: "claude-code",
+      connectedVia: "future_native_sso",
+    })]);
+    expect(available.raw).not.toContain("2.9.9");
+    expect(authReads).toBe(1);
+  });
+
+  it("fails Claude availability closed before auth when version validation fails", async () => {
+    let authReads = 0;
+    const probe = new ClaudeCodeProbe({
+      binaryPath: process.execPath,
+      readVersion: async () => {
+        throw new ClaudeCodeProcessError("private unsupported version 2.1.250");
+      },
+      readAuthStatus: async () => {
+        authReads += 1;
+        return { loggedIn: true };
+      },
+    });
+    const base = await serve({ claudeProbe: probe });
+
+    const available = await getJson(`${base}/api/ghosts/casper/models?provider=claude-code`);
+
+    expect(available.body.models).toEqual([]);
+    expect(available.raw).not.toContain("2.1.250");
+    expect(authReads).toBe(0);
+  });
+
+  it("includes Claude Code with the external CLI's reported authentication method", async () => {
+    const base = await serve({
+      claudeStatus: { loggedIn: true, authMethod: "api_key", apiProvider: "bedrock" },
+    });
     const { body } = await getJson(`${base}/api/ghosts/casper/models?provider=claude-code`);
     expect(body.models).toEqual([expect.objectContaining({
       provider: "claude-code",
       id: "default",
-      connectedVia: "claude_plan",
+      connectedVia: "bedrock",
       hasVision: true,
+    })]);
+  });
+
+  it.each([
+    ["Claude.ai", { loggedIn: true, authMethod: "claude.ai" }, "claude.ai"],
+    ["API key", { loggedIn: true, authMethod: "api_key" }, "api_key"],
+    ["Bedrock", { loggedIn: true, authMethod: "cloud", apiProvider: "bedrock" }, "bedrock"],
+    ["Vertex", { loggedIn: true, authMethod: "cloud", apiProvider: "vertex" }, "vertex"],
+    ["Foundry", { loggedIn: true, authMethod: "cloud", apiProvider: "foundry" }, "foundry"],
+    ["router", { loggedIn: true, authMethod: "api_key", apiProvider: "openrouter" }, "openrouter"],
+    ["future native method", { loggedIn: true, authMethod: "future_native_sso" }, "future_native_sso"],
+    ["method omitted", { loggedIn: true }, "external"],
+  ] as const)("accepts %s when the CLI reports it usable", async (_label, claudeStatus, expected) => {
+    const base = await serve({ claudeStatus });
+    const { body } = await getJson(`${base}/api/ghosts/casper/models?provider=claude-code`);
+    expect(body.models).toEqual([expect.objectContaining({
+      provider: "claude-code",
+      id: "default",
+      connectedVia: expected,
     })]);
   });
 
@@ -177,6 +360,20 @@ describe("GET /api/ghosts/:name/models?scope=available", () => {
     // available rows carry cost and connectedVia but no `usable` flag.
     expect(current).toHaveProperty("cost");
     expect(current).not.toHaveProperty("usable");
+  });
+
+  it("does not mark a filtered Pi row current while the selected Claude runtime is usable", async () => {
+    const base = await serve({
+      claudeStatus: { loggedIn: true, apiProvider: "bedrock" },
+      credentialed: ["openai-codex"],
+    });
+    setChatModelRole(agentDir(), "claude-code", "default");
+
+    const { body } = await getJson(
+      `${base}/api/ghosts/casper/models?provider=openai-codex`,
+    );
+
+    expect((body.models as Array<{ current: boolean }>).every((model) => !model.current)).toBe(true);
   });
 
   it("returns an empty list when no provider is credentialed", async () => {
@@ -254,7 +451,7 @@ describe("GET /api/ghosts/:name/models?scope=available", () => {
 
 describe("GET /api/ghosts/:name/models?scope=catalog", () => {
   it("shows an unauthenticated Claude Code choice with usable=false", async () => {
-    const base = await serve({ claudePlan: false });
+    const base = await serve({ claudeStatus: { loggedIn: false } });
     const { body } = await getJson(
       `${base}/api/ghosts/casper/models?scope=catalog&provider=claude-code`,
     );
@@ -364,8 +561,10 @@ describe("PUT /api/ghosts/:name/model", () => {
     expect(after.body.current).toMatchObject({ provider: "openai-codex", id: "gpt-5-codex" });
   });
 
-  it("selects the externally authenticated Claude Code plan runtime", async () => {
-    const base = await serve({ claudePlan: true });
+  it("selects the externally authenticated Claude Code runtime", async () => {
+    const base = await serve({
+      claudeStatus: { loggedIn: true, authMethod: "future_owner_sso" },
+    });
     const set = await put(base, { provider: "claude-code", id: "default" });
     expect(set.status).toBe(200);
     expect(set.body).toMatchObject({
@@ -380,12 +579,12 @@ describe("PUT /api/ghosts/:name/model", () => {
   });
 
   it("writes Claude Code selection but explains external login when unavailable", async () => {
-    const base = await serve({ claudePlan: false });
+    const base = await serve({ claudeStatus: { loggedIn: false } });
     const set = await put(base, { provider: "claude-code", id: "default" });
     expect(set.status).toBe(200);
     expect(set.body).toMatchObject({ ok: true, usable: false });
     expect(set.body.warning).toContain("exact SDK install");
-    expect(set.body.warning).toContain("claude auth login");
+    expect(set.body.warning).toContain("configure or sign into `claude`");
     expect(set.body.warning).toContain("restart `ghostd`");
   });
 
@@ -484,7 +683,9 @@ describe("Ghost model roles and fallback chains", () => {
   });
 
   it("enforces vision capability and excludes Claude Code from Ghost fallbacks", async () => {
-    const base = await serve({ claudePlan: true });
+    const base = await serve({
+      claudeStatus: { loggedIn: true, authMethod: "claude.ai" },
+    });
     const noVision = await putRouting(base, {
       role: "vision_model",
       target: "primary",

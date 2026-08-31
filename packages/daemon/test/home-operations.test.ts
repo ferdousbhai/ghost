@@ -173,7 +173,7 @@ describe("path-bound mutations during whole-home moves", () => {
           credentialed: ["openai-codex"],
         });
       },
-      claudeCodePlanStatus: async () => false,
+      claudeCodeStatus: async () => null,
     });
     listening = await startDaemonServer({
       registry: temp.registry,
@@ -311,7 +311,7 @@ describe("path-bound mutations during whole-home moves", () => {
         models: sampleCatalog(),
         credentialed: ["openai-codex"],
       }),
-      claudeCodePlanStatus: async () => false,
+      claudeCodeStatus: async () => null,
     });
     listening = await startDaemonServer({
       registry: temp.registry,
