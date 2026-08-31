@@ -72,15 +72,20 @@ describe("durable task foundation", () => {
   });
 
   it("registers admission before a blocked durable write and lets shutdown fence it", async () => {
-    const home = await mkdtemp(join(tmpdir(), "ghost-task-")); const gate = deferred<void>(); let firstWrite = true; let spawned = false;
+    const home = await mkdtemp(join(tmpdir(), "ghost-task-")); const gate = deferred<void>(); const listEntered = deferred<void>(); const listRelease = deferred<void>();
+    let firstWrite = true; let staleList = false; let spawned = false;
     class DelayedStore extends TaskStore {
       override async write(row: TaskRecord): Promise<void> { if (firstWrite) { firstWrite = false; await gate.promise; } await super.write(row); }
+      override async list(): Promise<TaskRecord[]> {
+        if (!staleList) return super.list();
+        const snapshot: TaskRecord[] = []; listEntered.resolve(); await listRelease.promise; return snapshot;
+      }
     }
     const store = new DelayedStore(home); stores.push(store); const native = runtime();
     const controller = new TaskController(store, new Map([["native", { ...native.adapter, async start(input, context) { spawned = true; return native.adapter.start(input, context); } }]]), authority); await controller.initialize();
-    const admission = start(controller); const shutdown = controller.beginShutdown(); gate.resolve();
+    staleList = true; const admission = start(controller); const shutdown = controller.beginShutdown(); gate.resolve(); await listEntered.promise; listRelease.resolve();
     await expect(admission).rejects.toMatchObject({ code: "tasks_shutting_down" }); await shutdown;
-    expect(spawned).toBe(false); expect((await store.list())[0]?.state).toBe("interrupted");
+    staleList = false; expect(spawned).toBe(false); expect((await store.list())[0]?.state).toBe("interrupted");
   });
 
   it("cancels while binding validation is blocked without spawning", async () => {
@@ -229,6 +234,21 @@ describe("durable task foundation", () => {
       const second = shutdownFirst ? current.controller.cancel(task.id) : current.controller.beginShutdown();
       gate.resolve(); await Promise.all([first, second]); expect((await current.store.read(task.id)).state).toBe("interrupted");
     }
+  });
+
+  it("keeps an upgraded shutdown target authoritative across a blocked cancelled write", async () => {
+    const home = await mkdtemp(join(tmpdir(), "ghost-task-")); const blocked = deferred<void>(); const release = deferred<void>(); let blockCancelled = false;
+    class BlockingStore extends TaskStore {
+      override async write(row: TaskRecord): Promise<void> {
+        if (blockCancelled && row.state === "cancelled") { blockCancelled = false; blocked.resolve(); await release.promise; }
+        await super.write(row);
+      }
+    }
+    const store = new BlockingStore(home); stores.push(store); const native = runtime();
+    const controller = new TaskController(store, new Map([["native", native.adapter]]), authority); await controller.initialize();
+    const task = await start(controller); await eventually(store, task.id, "running"); blockCancelled = true;
+    const cancelled = controller.cancel(task.id); await blocked.promise; const shutdown = controller.beginShutdown(); release.resolve();
+    expect((await cancelled).state).toBe("interrupted"); await shutdown; expect((await store.read(task.id)).state).toBe("interrupted");
   });
 
   it("clamps task, event, and recovery timestamps to a monotonic high-water mark", async () => {

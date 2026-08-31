@@ -372,7 +372,7 @@ export class TaskController {
       if (!live || running.state !== "running") return;
       const native = await abortable(live.handle, abort.signal);
       const result = await abortable(native.result, abort.signal);
-      await live.control.quiescence;
+      await abortable(live.control.quiescence, abort.signal);
       await this.#actor(id, () => this.#update(id, (row) => {
         if (row.generation !== generation || TERMINAL.has(row.state)) return false;
         if (row.state === "cancelling") { row.state = "cancelled"; return true; }
@@ -381,11 +381,11 @@ export class TaskController {
       this.#live.delete(id);
     } catch (error) {
       if (!(error instanceof TaskAborted)) abort.abort();
+      if (error instanceof TaskAborted) return;
       const live = this.#live.get(id);
       if (live?.generation === generation) {
         try {
-          if (error instanceof TaskAborted) await live.control.quiescence;
-          else await this.#quiesce(live);
+          await this.#quiesce(live);
         }
         catch {
           await this.#actor(id, () => this.#update(id, (row) => {
@@ -395,7 +395,6 @@ export class TaskController {
           return;
         }
       }
-      if (error instanceof TaskAborted) return;
       await this.#actor(id, async () => {
         const row = await this.store.read(id); if (row.generation !== generation || TERMINAL.has(row.state)) return;
         await this.#update(id, (current) => {
@@ -487,20 +486,35 @@ export class TaskController {
       if (prepared.live && this.#live.get(id)?.generation === prepared.live.generation) this.#live.delete(id);
       return this.store.read(id);
     }
-    const settled = await this.#actor(id, () => this.#update(id, (row) => {
+    let settled = await this.#actor(id, () => this.#update(id, (row) => {
       if (row.generation !== prepared.row.generation || TERMINAL.has(row.state)) return false;
       const destination = this.#stopTargets.get(id) ?? "cancelled";
       row.state = destination;
       if (destination === "interrupted") row.error = { code: "daemon_shutdown", message: "The daemon stopped the task after native quiescence." };
       return true;
     }));
+    if (this.#stopTargets.get(id) === "interrupted" && settled.state === "cancelled") {
+      settled = await this.#actor(id, () => this.#update(id, (row) => {
+        if (row.generation !== prepared.row.generation || row.state !== "cancelled") return false;
+        row.state = "interrupted";
+        row.error = { code: "daemon_shutdown", message: "The daemon stopped the task after native quiescence." };
+        return true;
+      }));
+    }
     if (this.#live.get(id)?.generation === prepared.row.generation) this.#live.delete(id);
     return settled;
   }
   async beginShutdown(): Promise<void> {
     this.#ready(); this.#shuttingDown = true;
-    const rows = await this.store.list(); const ids = new Set(rows.filter((row) => !TERMINAL.has(row.state)).map((row) => row.id));
-    for (const id of this.#launches.keys()) ids.add(id);
+    const admitted = [...this.#launches.entries()];
+    for (const [, launch] of admitted) launch.abort.abort();
+    for (const id of this.#stops.keys()) this.#stopTargets.set(id, "interrupted");
+    await Promise.all(admitted.map(([, launch]) => launch.persisted));
+    await Promise.all(admitted.map(([, launch]) => launch.promise));
+    const rows = await this.store.list();
+    const ids = new Set(rows.filter((row) => !TERMINAL.has(row.state)).map((row) => row.id));
+    for (const [id] of admitted) ids.add(id);
+    for (const id of this.#live.keys()) ids.add(id);
     await Promise.all([...ids].map((id) => this.#sharedStop(id, "interrupted")));
     await Promise.all([...this.#launches.values()].map((launch) => launch.promise));
     await Promise.all([...this.#followUps.values()]);

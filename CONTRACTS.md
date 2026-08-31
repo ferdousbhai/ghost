@@ -466,7 +466,12 @@ is tracked and abort-raced. A registered control survives a synchronous start
 throw or rejected handle/result; any non-cancellation failure aborts, forces,
 and waits for quiescence before becoming `failed`. Daemon shutdown has
 destination precedence over an in-flight owner cancellation: either ordering
-settles as `interrupted`. It aborts and forces
+settles as `interrupted`. The destination remains authoritative through record
+publication; an upgrade that arrives while a `cancelled` write is blocked is
+rechecked and durably advances that record to `interrupted` before either
+caller resolves. Shutdown synchronously snapshots and aborts every admitted
+launch before its first await, retains those ids after transient trackers
+settle, then lists and settles every durable row. It aborts and forces
 all live tasks, waits for quiescence, and durably marks them `interrupted`.
 Cancellation of an already-terminal record is a pure read and never touches a
 retained native control.
