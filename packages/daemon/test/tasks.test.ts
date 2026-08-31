@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { conversationIdentity } from "../src/conversation-identity.js";
-import { TaskController, TaskStore, type TaskAdapter, type TaskAdapterContext, type TaskBindingReceipt, type TaskRecord } from "../src/tasks.js";
+import { MAX_TASK_RESULT, TaskController, TaskStore, type TaskAdapter, type TaskAdapterContext, type TaskAdapterHandle, type TaskBindingReceipt, type TaskRecord } from "../src/tasks.js";
 
 function deferred<T>() {
   let resolve!: (value: T) => void; let reject!: (reason?: unknown) => void;
@@ -63,6 +63,13 @@ describe("durable task foundation", () => {
     for (const execution of executions) { execution.result.resolve("done"); execution.quiet.resolve(); }
   });
 
+  it("shares initialization and never recovers a live task twice", async () => {
+    const native = runtime(); const { store, controller } = await fixture(native.adapter);
+    const first = controller.initialize(); const second = controller.initialize(); expect(first).toBe(second); await first;
+    const task = await start(controller); await eventually(store, task.id, "running"); await controller.initialize();
+    expect((await store.read(task.id)).state).toBe("running");
+  });
+
   it("cancels while binding validation is blocked without spawning", async () => {
     const admitted = deferred<TaskBindingReceipt>(); let spawned = false; const native = runtime();
     const { store, controller } = await fixture({ ...native.adapter, async start(input, context) { spawned = true; return native.adapter.start(input, context); } }, { async revalidate() { return admitted.promise; } });
@@ -70,11 +77,56 @@ describe("durable task foundation", () => {
     expect((await cancelled).state).toBe("cancelled"); await new Promise((done) => setTimeout(done, 2)); expect(spawned).toBe(false);
   });
 
+  it("accepts reordered exact receipts and rejects outside or rebound cwd", async () => {
+    const reordered = { generation: 4, cwdIdentity: "1:3", cwd: "/project/exact", rootIdentity: "1:2", root: "/project", version: 1 } as TaskBindingReceipt;
+    const native = runtime(); const { store, controller } = await fixture(native.adapter, { async revalidate() { return reordered; } });
+    const accepted = await start(controller); await eventually(store, accepted.id, "running");
+    await expect(controller.start({ parent, harness: "native", task: "outside", binding: { ...binding, cwd: "/elsewhere" } })).rejects.toMatchObject({ code: "invalid_task" });
+    let spawned = false; const changed = await fixture({ ...native.adapter, async start(input, context) { spawned = true; return native.adapter.start(input, context); } }, { async revalidate(receipt) { return { ...receipt, generation: receipt.generation + 1 }; } });
+    const rejected = await start(changed.controller); await eventually(changed.store, rejected.id, "failed"); expect(spawned).toBe(false);
+  });
+
+  it("aborts a blocked handle and tracks it through shutdown", async () => {
+    const never = deferred<TaskAdapterHandle>(); const quiet = deferred<void>();
+    const { store, controller } = await fixture({ start(_input, context) {
+      context.register({ async force() { quiet.resolve(); }, quiescence: quiet.promise }); return never.promise;
+    } });
+    const task = await start(controller); await eventually(store, task.id, "running"); await controller.beginShutdown();
+    expect((await store.read(task.id)).state).toBe("interrupted");
+    await controller.dispose(); await expect(store.list()).rejects.toMatchObject({ code: "task_store_uninitialized" });
+  });
+
   it("does not publish completion until quiescence and fences late emissions", async () => {
     const native = runtime(); const { store, controller } = await fixture(native.adapter); const task = await start(controller); await eventually(store, task.id, "running");
     native.result.resolve("done"); await new Promise((done) => setTimeout(done, 3)); expect((await store.read(task.id)).state).toBe("running");
     native.quiet.resolve(); expect((await eventually(store, task.id, "completed")).result).toBe("done");
     await native.context().emit({ code: "late", message: "not recorded" }); expect((await store.read(task.id)).events).toEqual([]);
+  });
+
+  it("bounds completed results and records truncation", async () => {
+    const native = runtime(); const { store, controller } = await fixture(native.adapter); const task = await start(controller); await eventually(store, task.id, "running");
+    native.result.resolve("x".repeat(MAX_TASK_RESULT + 10)); native.quiet.resolve(); const completed = await eventually(store, task.id, "completed");
+    expect(completed.result).toHaveLength(MAX_TASK_RESULT); expect(completed.resultTruncated).toBe(true);
+  });
+
+  it("keeps terminal cancellation byte- and mtime-stable", async () => {
+    const native = runtime(); const { home, store, controller } = await fixture(native.adapter); const task = await start(controller); await eventually(store, task.id, "running");
+    native.result.resolve("done"); native.quiet.resolve(); await eventually(store, task.id, "completed");
+    const path = join(home, ".tasks", `${task.id}.json`); const before = await readFile(path); const beforeStat = await stat(path, { bigint: true });
+    expect((await controller.cancel(task.id)).state).toBe("completed"); expect(await readFile(path)).toEqual(before); expect((await stat(path, { bigint: true })).mtimeNs).toBe(beforeStat.mtimeNs);
+  });
+
+  it("makes old-generation launch and result publication durable no-ops", async () => {
+    const validation = deferred<TaskBindingReceipt>(); let spawned = false; const native = runtime();
+    const { home, store, controller } = await fixture({ ...native.adapter, async start(input, context) { spawned = true; return native.adapter.start(input, context); } }, { async revalidate() { return validation.promise; } });
+    const task = await start(controller); await eventually(store, task.id, "starting"); const recovery = new TaskController(store, new Map(), authority); await recovery.initialize();
+    const path = join(home, ".tasks", `${task.id}.json`); const before = await readFile(path); const beforeStat = await stat(path, { bigint: true }); validation.resolve(binding); await controller.beginShutdown();
+    expect(spawned).toBe(false); expect(await readFile(path)).toEqual(before); expect((await stat(path, { bigint: true })).mtimeNs).toBe(beforeStat.mtimeNs);
+
+    const runningNative = runtime(); const second = await fixture(runningNative.adapter); const active = await start(second.controller); await eventually(second.store, active.id, "running");
+    const secondRecovery = new TaskController(second.store, new Map(), authority); await secondRecovery.initialize(); const activePath = join(second.home, ".tasks", `${active.id}.json`);
+    const activeBefore = await readFile(activePath); const activeStat = await stat(activePath, { bigint: true }); runningNative.result.resolve("late"); runningNative.quiet.resolve(); await second.controller.beginShutdown();
+    expect(await readFile(activePath)).toEqual(activeBefore); expect((await stat(activePath, { bigint: true })).mtimeNs).toBe(activeStat.mtimeNs);
   });
 
   it("serializes follow-up and repeated cancellation until full quiescence", async () => {
@@ -138,5 +190,10 @@ describe("durable task foundation", () => {
     const home = await mkdtemp(join(tmpdir(), "ghost-task-")); const store = trackedStore(home); await store.initialize(); const row = record("queued"); await store.write(row);
     const path = join(home, ".tasks", `${row.id}.json`); await writeFile(path, JSON.stringify({ ...row, createdAt: "yesterday", unknown: true }), { mode: 0o600 });
     await expect(store.read(row.id)).rejects.toMatchObject({ code: "invalid_task_record" });
+    const at = row.createdAt; const badCursor = { ...row, events: [{ sequence: 2, at, code: "progress", message: "gap" }], eventCursor: { nextSequence: 3, dropped: 0 } };
+    await writeFile(path, JSON.stringify(badCursor), { mode: 0o600 }); await expect(store.read(row.id)).rejects.toMatchObject({ code: "invalid_task_record" });
+    const firstAt = new Date(Date.parse(at) + 2_000).toISOString(); const secondAt = new Date(Date.parse(at) + 1_000).toISOString();
+    const reversed = { ...row, updatedAt: firstAt, events: [{ sequence: 1, at: firstAt, code: "progress", message: "first" }, { sequence: 2, at: secondAt, code: "progress", message: "second" }], eventCursor: { nextSequence: 3, dropped: 0 } };
+    await writeFile(path, JSON.stringify(reversed), { mode: 0o600 }); await expect(store.read(row.id)).rejects.toMatchObject({ code: "invalid_task_record" });
   });
 });

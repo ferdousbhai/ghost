@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { lstat, mkdir, readdir, type FileHandle } from "node:fs/promises";
-import { isAbsolute, resolve } from "node:path";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import { descriptorPath, openDirectoryNoFollow, redactMemorySecrets } from "@ghost/extensions";
 import type { ConversationIdentity } from "./conversation-identity.js";
 import { parseConversationIdentity } from "./conversation-identity.js";
@@ -45,7 +45,7 @@ export interface TaskRecord {
   error: TaskFailure | null;
 }
 export interface TaskBindingAuthority {
-  revalidate(receipt: TaskBindingReceipt): Promise<TaskBindingReceipt>;
+  revalidate(receipt: TaskBindingReceipt, signal: AbortSignal): Promise<TaskBindingReceipt>;
 }
 export interface TaskAdapterControl { force(): Promise<void>; quiescence: Promise<void> }
 export interface TaskAdapterContext {
@@ -73,12 +73,13 @@ function canonicalTimestamp(value: unknown): value is string {
   return typeof value === "string" && Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value;
 }
 function safeText(value: string, maximum: number): { text: string; truncated: boolean } {
-  const clean = [...value].map((character) => {
+  const source = value.slice(0, maximum);
+  const clean = [...source].map((character) => {
     const point = character.codePointAt(0) ?? 0;
     return (point < 32 && !"\t\n\r".includes(character)) || point === 127 ? "�" : character;
   }).join("");
   const redacted = redactMemorySecrets(clean);
-  return redacted.length <= maximum ? { text: redacted, truncated: false } : { text: redacted.slice(0, maximum), truncated: true };
+  return { text: redacted.slice(0, maximum), truncated: value.length > maximum || redacted.length > maximum };
 }
 function exactKeys(value: Record<string, unknown>, keys: string[]): boolean {
   return Object.keys(value).sort().join("\0") === [...keys].sort().join("\0");
@@ -86,17 +87,26 @@ function exactKeys(value: Record<string, unknown>, keys: string[]): boolean {
 function validBinding(value: unknown): value is TaskBindingReceipt {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const row = value as Record<string, unknown>;
-  return exactKeys(row, ["version", "root", "rootIdentity", "cwd", "cwdIdentity", "generation"])
+  const valid = exactKeys(row, ["version", "root", "rootIdentity", "cwd", "cwdIdentity", "generation"])
     && row.version === 1 && (row.root === null || typeof row.root === "string")
     && (row.rootIdentity === null || typeof row.rootIdentity === "string")
-    && typeof row.cwd === "string" && isAbsolute(row.cwd) && resolve(row.cwd) === row.cwd && row.cwd.length <= 4096
+    && typeof row.cwd === "string" && row.cwd.length <= 4096 && Buffer.byteLength(row.cwd, "utf8") <= 4096 && isAbsolute(row.cwd) && resolve(row.cwd) === row.cwd
     && typeof row.cwdIdentity === "string" && row.cwdIdentity.length > 0 && row.cwdIdentity.length <= 256
     && Number.isSafeInteger(row.generation) && Number(row.generation) >= 0 && Number(row.generation) <= MAX_COUNTER
     && ((row.root === null && row.rootIdentity === null)
-      || (typeof row.root === "string" && row.root.length <= 4096 && isAbsolute(row.root) && resolve(row.root) === row.root
+      || (typeof row.root === "string" && row.root.length <= 4096 && Buffer.byteLength(row.root, "utf8") <= 4096 && isAbsolute(row.root) && resolve(row.root) === row.root
         && typeof row.rootIdentity === "string" && row.rootIdentity.length > 0 && row.rootIdentity.length <= 256));
+  return valid && cwdWithinRoot(row as unknown as TaskBindingReceipt);
 }
-function sameBinding(left: TaskBindingReceipt, right: TaskBindingReceipt): boolean { return JSON.stringify(left) === JSON.stringify(right); }
+function sameBinding(left: TaskBindingReceipt, right: TaskBindingReceipt): boolean {
+  return left.version === right.version && left.root === right.root && left.rootIdentity === right.rootIdentity
+    && left.cwd === right.cwd && left.cwdIdentity === right.cwdIdentity && left.generation === right.generation;
+}
+function cwdWithinRoot(binding: TaskBindingReceipt): boolean {
+  if (binding.root === null) return true;
+  const child = relative(binding.root, binding.cwd);
+  return child === "" || (child !== ".." && !child.startsWith(`..${sep}`) && !isAbsolute(child));
+}
 function validParent(value: unknown): value is ConversationIdentity {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const row = value as Record<string, unknown>;
@@ -123,17 +133,19 @@ function parseRecord(value: unknown): TaskRecord {
     || !Number.isSafeInteger((cursor as { dropped?: unknown }).dropped)
     || Number((cursor as { nextSequence: number }).nextSequence) < 1 || Number((cursor as { nextSequence: number }).nextSequence) > MAX_COUNTER
     || Number((cursor as { dropped: number }).dropped) < 0 || Number((cursor as { dropped: number }).dropped) > MAX_COUNTER) fail("invalid_task_record", "The task event cursor is invalid.");
-  let prior = 0;
-  for (const raw of row.events) {
+  let priorTime = Date.parse(row.createdAt as string);
+  const dropped = Number((cursor as { dropped: number }).dropped);
+  for (const [index, raw] of row.events.entries()) {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) fail("invalid_task_record", "The task event is invalid.");
     const event = raw as Record<string, unknown>;
     if (!exactKeys(event, ["sequence", "at", "code", "message"]) || !Number.isSafeInteger(event.sequence)
-      || Number(event.sequence) <= prior || !canonicalTimestamp(event.at) || typeof event.code !== "string" || !CODE.test(event.code)
+      || Number(event.sequence) !== dropped + index + 1 || !canonicalTimestamp(event.at) || Date.parse(event.at as string) < priorTime
+      || typeof event.code !== "string" || !CODE.test(event.code)
       || typeof event.message !== "string" || event.message.length > MAX_TASK_EVENT_MESSAGE) fail("invalid_task_record", "The task event is invalid.");
-    prior = Number(event.sequence);
+    priorTime = Date.parse(event.at as string);
   }
   const next = Number((cursor as { nextSequence: number }).nextSequence);
-  if (next <= prior || Number((cursor as { dropped: number }).dropped) + row.events.length !== next - 1) fail("invalid_task_record", "The task event cursor is inconsistent.");
+  if (dropped + row.events.length !== next - 1) fail("invalid_task_record", "The task event cursor is inconsistent.");
   const error = row.error;
   if (!(error === null || (typeof error === "object" && !Array.isArray(error)
     && exactKeys(error as Record<string, unknown>, ["code", "message"])
@@ -227,24 +239,48 @@ export class TaskStore {
   }
 }
 
+class TaskAborted extends Error {}
+function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(new TaskAborted());
+  return new Promise<T>((resolveValue, rejectValue) => {
+    const abort = () => rejectValue(new TaskAborted());
+    signal.addEventListener("abort", abort, { once: true });
+    promise.then(
+      (value) => { signal.removeEventListener("abort", abort); resolveValue(value); },
+      (error: unknown) => { signal.removeEventListener("abort", abort); rejectValue(error); },
+    );
+  });
+}
 interface LiveTask { generation: number; abort: AbortController; control: TaskAdapterControl; handle: Promise<TaskAdapterHandle> }
+interface TrackedLaunch { generation: number; abort: AbortController; promise: Promise<void> }
 
 export class TaskController {
   readonly #actors = new Map<string, Promise<void>>();
   readonly #live = new Map<string, LiveTask>();
+  readonly #launches = new Map<string, TrackedLaunch>();
   readonly #stops = new Map<string, Promise<TaskRecord>>();
+  #initialization?: Promise<TaskRecord[]>;
   #initialized = false;
   #shuttingDown = false;
   constructor(readonly store: TaskStore, readonly adapters: ReadonlyMap<string, TaskAdapter>, readonly authority: TaskBindingAuthority, readonly now = () => new Date()) {}
-  async initialize(): Promise<TaskRecord[]> { await this.store.initialize(); const rows = await this.store.recover(this.now().toISOString()); this.#initialized = true; return rows; }
+  initialize(): Promise<TaskRecord[]> {
+    if (this.#initialization) return this.#initialization;
+    this.#initialization = (async () => {
+      await this.store.initialize(); const rows = await this.store.recover(this.now().toISOString()); this.#initialized = true; return rows;
+    })();
+    void this.#initialization.catch(() => { this.#initialization = undefined; });
+    return this.#initialization;
+  }
   #ready(): void { if (!this.#initialized) fail("tasks_uninitialized", "Tasks are not initialized.", 503); }
   #actor<T>(id: string, action: () => Promise<T>): Promise<T> {
     const prior = this.#actors.get(id) ?? Promise.resolve(); const result = prior.catch(() => {}).then(action);
     const tail = result.then(() => undefined, () => undefined); this.#actors.set(id, tail);
     void tail.finally(() => { if (this.#actors.get(id) === tail) this.#actors.delete(id); }); return result;
   }
-  async #update(id: string, change: (record: TaskRecord) => void): Promise<TaskRecord> {
-    const record = await this.store.read(id); change(record); record.updatedAt = this.now().toISOString(); await this.store.write(record); return record;
+  async #update(id: string, change: (record: TaskRecord) => boolean): Promise<TaskRecord> {
+    const record = await this.store.read(id);
+    if (!change(record)) return record;
+    record.updatedAt = this.now().toISOString(); await this.store.write(record); return record;
   }
   #appendEvent(record: TaskRecord, code: string, message: string): void {
     const sequence = record.eventCursor.nextSequence++;
@@ -259,19 +295,30 @@ export class TaskController {
     const record: TaskRecord = { version: 1, id, generation: 1, parent: input.parent, harness: input.harness,
       task: safeText(input.task, MAX_TASK_TEXT).text, binding: input.binding, state: "queued", createdAt: at, updatedAt: at,
       events: [], eventCursor: { nextSequence: 1, dropped: 0 }, result: null, resultTruncated: false, error: null };
-    await this.store.write(record); void this.#launch(id, record.generation); return record;
+    await this.store.write(record);
+    const abort = new AbortController();
+    const tracked: TrackedLaunch = { generation: record.generation, abort, promise: Promise.resolve() };
+    tracked.promise = this.#launch(id, record.generation, abort).finally(() => {
+      if (this.#launches.get(id) === tracked) this.#launches.delete(id);
+    });
+    this.#launches.set(id, tracked); void tracked.promise.catch(() => {});
+    return record;
   }
-  async #launch(id: string, generation: number): Promise<void> {
+  async #launch(id: string, generation: number, abort: AbortController): Promise<void> {
     try {
-      const record = await this.#actor(id, () => this.#update(id, (row) => { if (row.generation === generation && row.state === "queued") row.state = "starting"; }));
+      const record = await this.#actor(id, () => this.#update(id, (row) => {
+        if (row.generation !== generation || row.state !== "queued") return false;
+        row.state = "starting"; return true;
+      }));
       if (record.generation !== generation || record.state !== "starting") return;
-      const binding = await this.authority.revalidate(record.binding); if (!sameBinding(binding, record.binding)) throw new Error("binding changed");
+      const binding = await abortable(this.authority.revalidate(record.binding, abort.signal), abort.signal);
+      if (!sameBinding(binding, record.binding) || !validBinding(binding)) throw new Error("binding changed");
       let live: LiveTask | undefined;
       const running = await this.#actor(id, async () => {
         const current = await this.store.read(id);
         if (current.generation !== generation || current.state !== "starting") return current;
         const adapter = this.adapters.get(current.harness); if (!adapter) throw new Error("adapter disappeared");
-        const abort = new AbortController(); let control: TaskAdapterControl | undefined;
+        let control: TaskAdapterControl | undefined;
         const handle = adapter.start({ id, task: current.task, cwd: binding.cwd, binding }, {
           signal: abort.signal,
           register(value) { if (control) throw new Error("control registered twice"); control = value; },
@@ -279,30 +326,40 @@ export class TaskController {
         });
         if (!control || typeof control.force !== "function" || !(control.quiescence instanceof Promise)) { abort.abort(); void handle.catch(() => {}); throw new Error("missing control registration"); }
         live = { generation, abort, control, handle }; this.#live.set(id, live);
-        return this.#update(id, (row) => { if (row.generation === generation && row.state === "starting") row.state = "running"; });
+        return this.#update(id, (row) => {
+          if (row.generation !== generation || row.state !== "starting") return false;
+          row.state = "running"; return true;
+        });
       });
       if (!live || running.state !== "running") return;
-      const native = await live.handle; const result = await native.result; await live.control.quiescence;
+      const native = await abortable(live.handle, abort.signal);
+      const result = await abortable(native.result, abort.signal);
+      await live.control.quiescence;
       await this.#actor(id, () => this.#update(id, (row) => {
-        if (row.generation !== generation || TERMINAL.has(row.state)) return;
-        if (row.state === "cancelling") { row.state = "cancelled"; return; }
-        const safe = safeText(result, MAX_TASK_RESULT); row.state = "completed"; row.result = safe.text; row.resultTruncated = safe.truncated;
+        if (row.generation !== generation || TERMINAL.has(row.state)) return false;
+        if (row.state === "cancelling") { row.state = "cancelled"; return true; }
+        const safe = safeText(result, MAX_TASK_RESULT); row.state = "completed"; row.result = safe.text; row.resultTruncated = safe.truncated; return true;
       }));
       this.#live.delete(id);
-    } catch {
+    } catch (error) {
       const live = this.#live.get(id);
       if (live?.generation === generation) {
         try { await live.control.quiescence; }
         catch {
           await this.#actor(id, () => this.#update(id, (row) => {
-            if (row.generation === generation && !TERMINAL.has(row.state)) { row.state = "cancelling"; this.#appendEvent(row, "quiescence_failed", "The native task has not confirmed quiescence."); }
+            if (row.generation !== generation || TERMINAL.has(row.state)) return false;
+            row.state = "cancelling"; this.#appendEvent(row, "quiescence_failed", "The native task has not confirmed quiescence."); return true;
           })).catch(() => {});
           return;
         }
       }
+      if (error instanceof TaskAborted) return;
       await this.#actor(id, async () => {
         const row = await this.store.read(id); if (row.generation !== generation || TERMINAL.has(row.state)) return;
-        await this.#update(id, (current) => { current.state = "failed"; current.error = { code: "task_failed", message: "The native task failed safely." }; });
+        await this.#update(id, (current) => {
+          if (current.generation !== generation || TERMINAL.has(current.state)) return false;
+          current.state = "failed"; current.error = { code: "task_failed", message: "The native task failed safely." }; return true;
+        });
       }).catch(() => {});
       if (this.#live.get(id)?.generation === generation) this.#live.delete(id);
     }
@@ -312,7 +369,10 @@ export class TaskController {
     if (!CODE.test(event.code)) return;
     await this.#actor(id, async () => {
       const current = await this.store.read(id); if (current.generation !== generation || TERMINAL.has(current.state)) return;
-      await this.#update(id, (row) => { this.#appendEvent(row, event.code, event.message); });
+      await this.#update(id, (row) => {
+        if (row.generation !== generation || TERMINAL.has(row.state)) return false;
+        this.#appendEvent(row, event.code, event.message); return true;
+      });
     });
   }
   followUp(id: string, message: string): Promise<TaskRecord> {
@@ -321,7 +381,7 @@ export class TaskController {
       const live = this.#live.get(id); if (!live || live.generation !== row.generation) fail("task_not_running", "The native task is not running.", 409);
       try { const native = await live.handle; await native.followUp(safeText(message, MAX_TASK_TEXT).text); }
       catch {
-        await this.#update(id, (current) => { this.#appendEvent(current, "follow_up_failed", "The native task rejected a follow-up."); });
+        await this.#update(id, (current) => { this.#appendEvent(current, "follow_up_failed", "The native task rejected a follow-up."); return true; });
         fail("task_follow_up_failed", "The native task rejected the follow-up.", 502);
       }
       return this.store.read(id);
@@ -336,20 +396,49 @@ export class TaskController {
   }
   async #stop(id: string, final: "cancelled" | "interrupted"): Promise<TaskRecord> {
     const prepared = await this.#actor(id, async () => {
-      const row = await this.store.read(id); if (TERMINAL.has(row.state)) return { row };
-      const next = await this.#update(id, (current) => { current.state = "cancelling"; }); return { row: next, live: this.#live.get(id) };
+      const row = await this.store.read(id);
+      const launch = this.#launches.get(id); const live = this.#live.get(id);
+      if (TERMINAL.has(row.state)) return { row, launch, live, alreadyTerminal: true };
+      const next = await this.#update(id, (current) => {
+        if (TERMINAL.has(current.state) || current.state === "cancelling") return false;
+        current.state = "cancelling"; return true;
+      });
+      return { row: next, live, launch, alreadyTerminal: false };
     });
-    if (!prepared.live) return this.#actor(id, () => this.#update(id, (row) => { if (!TERMINAL.has(row.state)) row.state = final; }));
-    try { await this.#quiesce(prepared.live); }
+    prepared.launch?.abort.abort();
+    try { if (prepared.live) await this.#quiesce(prepared.live); await prepared.launch?.promise; }
     catch {
-      await this.#actor(id, () => this.#update(id, (row) => { if (!TERMINAL.has(row.state)) this.#appendEvent(row, "cancel_failed", "The native task did not confirm quiescence."); }));
+      await this.#actor(id, () => this.#update(id, (row) => {
+        if (TERMINAL.has(row.state)) return false;
+        this.#appendEvent(row, "cancel_failed", "The native task did not confirm quiescence."); return true;
+      }));
       throw new GhostError("task_cancel_failed", "The native task did not confirm quiescence.", 502);
     }
-    const settled = await this.#actor(id, () => this.#update(id, (row) => { if (row.generation === prepared.row.generation && !TERMINAL.has(row.state)) row.state = final; }));
+    if (prepared.alreadyTerminal) {
+      if (prepared.live && this.#live.get(id)?.generation === prepared.live.generation) this.#live.delete(id);
+      return this.store.read(id);
+    }
+    const settled = await this.#actor(id, () => this.#update(id, (row) => {
+      if (row.generation !== prepared.row.generation || TERMINAL.has(row.state)) return false;
+      row.state = final;
+      if (final === "interrupted") row.error = { code: "daemon_shutdown", message: "The daemon stopped the task after native quiescence." };
+      return true;
+    }));
     if (this.#live.get(id)?.generation === prepared.row.generation) this.#live.delete(id);
     return settled;
   }
-  async beginShutdown(): Promise<void> { this.#ready(); this.#shuttingDown = true; const rows = await this.store.list(); await Promise.all(rows.filter((row) => !TERMINAL.has(row.state)).map((row) => this.#sharedStop(row.id, "interrupted"))); }
-  async forceAll(): Promise<void> { this.#ready(); await Promise.all([...this.#live.keys()].map((id) => this.#sharedStop(id, "interrupted"))); }
-  async dispose(): Promise<void> { await this.beginShutdown(); await this.forceAll(); await this.store.dispose(); this.#initialized = false; }
+  async beginShutdown(): Promise<void> {
+    this.#ready(); this.#shuttingDown = true;
+    const rows = await this.store.list(); const ids = new Set(rows.filter((row) => !TERMINAL.has(row.state)).map((row) => row.id));
+    for (const id of this.#launches.keys()) ids.add(id);
+    await Promise.all([...ids].map((id) => this.#sharedStop(id, "interrupted")));
+    await Promise.all([...this.#launches.values()].map((launch) => launch.promise));
+  }
+  async forceAll(): Promise<void> {
+    this.#ready(); const ids = new Set([...this.#live.keys(), ...this.#launches.keys()]);
+    await Promise.all([...ids].map((id) => this.#sharedStop(id, "interrupted")));
+  }
+  async dispose(): Promise<void> {
+    await this.beginShutdown(); await this.forceAll(); await this.store.dispose(); this.#initialized = false; this.#initialization = undefined;
+  }
 }

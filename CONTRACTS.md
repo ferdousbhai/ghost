@@ -406,7 +406,8 @@ One naming convention makes the boundary readable rather than remembered. A
 plain-named entry in a ghost home is part of that ghost's identity and travels
 with it, including `settings.yml`, `models.json`, and `mcp.json`. A dot-prefixed
 entry is bound to this machine and never leaves it: `.pi/` (derived pi
-runtime), `.trash/` (recoverable per-home deletion state), and
+runtime), `.tasks/` (daemon-owned machine task lifecycle), `.trash/`
+(recoverable per-home deletion state), and
 `.memory-maintenance.json` (the consolidation cooldown). Export needs no
 credential exception: portable files contain references rather than values.
 
@@ -419,8 +420,11 @@ harness, task, binding, state, createdAt, updatedAt, events, eventCursor,
 result, resultTruncated, error }`. `parent` is the runtime-qualified
 conversation identity. `binding` is an exact `task-binding/v1` authority
 receipt: `{ version: 1, root, rootIdentity, cwd, cwdIdentity, generation }`.
-The project-binding authority revalidates that opaque receipt immediately
-before native spawn. A naked lexical cwd is never authority; the task layer
+The project-binding authority revalidates that opaque receipt with the task's
+abort signal immediately before native spawn. Root and cwd are canonical,
+byte-bounded, and cwd is lexically within a non-null root; receipt comparison
+binds every path, identity, and generation field independent of JSON key order.
+A naked lexical cwd is never authority; the task layer
 neither discovers nor changes cwd.
 `harness` is an opaque bounded adapter id, not a place for Ghost to reproduce a
 runtime's policy.
@@ -434,8 +438,9 @@ fixed typed failures rather than persisting raw stderr, provider protocol, or
 environment values. Arbitrary owner and harness text receives bounded
 best-effort credential-pattern redaction; this is defense in depth, not a claim
 that arbitrary prose can be proven secret-free. Results are bounded. Event
-sequence numbers are monotonic and never renumbered; `eventCursor` reports the
-next sequence and the exact number dropped from the bounded history.
+sequence numbers are monotonic and never renumbered: retained event index `i`
+has sequence `eventCursor.dropped + i + 1`. `eventCursor` reports the next
+sequence and the exact number dropped from the bounded history.
 
 There is no task concurrency limit or daemon-owned queue policy: every accepted
 task starts independently. A follow-up is accepted only while `running`, and
@@ -444,7 +449,10 @@ does not become `cancelled` and its request does not resolve until the native
 adapter confirms the entire task is quiescent. Before its start handshake can
 complete, an adapter registers both an abort-aware force operation and a
 quiescence promise. One serialized lifecycle actor guards each task; its
-generation fences late events and results. Daemon shutdown aborts and forces
+generation fences late events and results. Initialization is one shared
+recovery operation; repeated or concurrent callers never recover a live task a
+second time. Every revalidation, adapter handshake, and result wait is tracked
+and abort-raced. Daemon shutdown aborts and forces
 all live tasks, waits for quiescence, and durably marks them `interrupted`.
 Startup never resumes an old generation. Adapters own native session and
 subagent behavior; this layer owns only durable lifecycle. It never creates Git
