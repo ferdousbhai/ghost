@@ -110,6 +110,33 @@ describe("ClaudeAgentSdkLoader", () => {
     expect(specifier.search).toBe("");
   });
 
+  it("aborts one SDK waiter without cancelling or poisoning the shared load", async () => {
+    const fixture = fixtureRoot();
+    writeSdkPackage(fixture.installRoot);
+    const importStarted = deferred<void>();
+    const releaseImport = deferred<void>();
+    const sdk = fakeSdk();
+    const loader = new ClaudeAgentSdkLoader({
+      ownerHome: fixture.ownerHome,
+      xdgDataHome: fixture.dataHome,
+      importModule: async () => {
+        importStarted.resolve();
+        await releaseImport.promise;
+        return sdk;
+      },
+    });
+    const controller = new AbortController();
+    const cancelled = loader.load(controller.signal);
+    await importStarted.promise;
+    controller.abort();
+
+    await expect(cancelled).rejects.toThrow("SDK load was aborted");
+    const surviving = loader.load();
+    releaseImport.resolve();
+    await expect(surviving).resolves.toBe(sdk);
+    await expect(loader.load()).resolves.toBe(sdk);
+  });
+
   it("rejects a relative owner home and ignores a relative XDG data home", async () => {
     expect(() => new ClaudeAgentSdkLoader({ ownerHome: "relative" })).toThrow(
       /ownerHome must be absolute/,

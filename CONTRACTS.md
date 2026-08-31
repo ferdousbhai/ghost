@@ -2077,7 +2077,12 @@ harness id, `available | unavailable`, and `authenticated | logged_out |
 unknown`; they never contain an executable path, version, account identifier,
 probe output, or raw error. A bounded catalogue cache is display state only.
 It can never authorize a start: a future worker/controller must run the
-harness's fresh private probe immediately before process admission.
+harness's fresh private probe immediately before process admission. That
+admission supplies one required `AbortSignal`; the catalogue threads it through
+SDK loading, executable and mise resolution, filesystem identity checks,
+version discovery, and authentication or account discovery. An aborted SDK
+waiter does not cancel or poison the principal loader's shared immutable module
+load, but the cancelled admission stops before any later CLI phase.
 
 Discovery and runtime launch share native-harness primitives. An explicit
 `GHOST_CLAUDE_BINARY`, `GHOST_CODEX_BINARY`, or `GHOST_PI_BINARY` is the

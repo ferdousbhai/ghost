@@ -29,6 +29,7 @@ export interface ResolveNativeHarnessExecutableOptions {
   explicitBinary?: string;
   environment: Readonly<NodeJS.ProcessEnv>;
   timeoutMs: number;
+  signal?: AbortSignal;
 }
 
 export class NativeHarnessIdentityError extends Error {
@@ -57,6 +58,12 @@ interface BigintExecutableStat {
   isSymbolicLink(): boolean;
 }
 
+function assertProbeActive(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) {
+    throw new NativeHarnessIdentityError("Native harness probe was aborted.");
+  }
+}
+
 function executableStatIdentity(value: BigintExecutableStat): readonly string[] {
   return [
     value.dev.toString(),
@@ -71,7 +78,9 @@ function executableStatIdentity(value: BigintExecutableStat): readonly string[] 
 async function executableCandidate(
   binaryPath: string,
   environment: Readonly<NodeJS.ProcessEnv>,
+  signal: AbortSignal | undefined,
 ): Promise<string | null> {
+  assertProbeActive(signal);
   const candidates = isAbsolute(binaryPath) || binaryPath.includes("/")
     ? [resolve(binaryPath)]
     : (environment.PATH ?? "")
@@ -79,21 +88,26 @@ async function executableCandidate(
       .filter(Boolean)
       .map((directory) => resolve(directory, binaryPath));
   for (const candidate of candidates) {
+    let accessible = false;
     try {
       await access(candidate, fsConstants.X_OK);
-      return candidate;
+      accessible = true;
     } catch {
       // Report one bounded harness error after every candidate is exhausted.
     }
+    assertProbeActive(signal);
+    if (accessible) return candidate;
   }
   return null;
 }
 
-async function launcherPrefix(path: string): Promise<string> {
+async function launcherPrefix(path: string, signal: AbortSignal | undefined): Promise<string> {
+  assertProbeActive(signal);
   const handle = await open(path, "r");
   try {
     const buffer = Buffer.alloc(4096);
     const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    assertProbeActive(signal);
     return buffer.toString("utf8", 0, bytesRead);
   } finally {
     await handle.close();
@@ -105,14 +119,15 @@ async function unwrapMiseLauncher(
   binaryName: NativeHarnessBinaryName,
   environment: Readonly<NodeJS.ProcessEnv>,
   timeoutMs: number,
+  signal: AbortSignal | undefined,
 ): Promise<string> {
-  const prefix = await launcherPrefix(path);
+  const prefix = await launcherPrefix(path, signal);
   const word = new RegExp(`\\b${binaryName.replaceAll("-", "\\-")}\\b`, "u");
   if (!prefix.startsWith("#!") || !/\bmise\b/u.test(prefix) || !word.test(prefix)) {
     return path;
   }
 
-  const miseCandidate = await executableCandidate("mise", environment);
+  const miseCandidate = await executableCandidate("mise", environment, signal);
   if (!miseCandidate) {
     throw new NativeHarnessIdentityError("Default mise launcher could not be resolved.", "mise");
   }
@@ -121,6 +136,7 @@ async function unwrapMiseLauncher(
     result = await runOwnedCommand(await realpath(miseCandidate), ["which", binaryName], {
       environment,
       timeoutMs,
+      ...(signal ? { signal } : {}),
     });
   } catch {
     throw new NativeHarnessIdentityError("Default mise launcher could not be resolved.", "mise");
@@ -139,7 +155,7 @@ async function unwrapMiseLauncher(
       "mise",
     );
   }
-  const resolved = await executableCandidate(selected, environment);
+  const resolved = await executableCandidate(selected, environment, signal);
   if (!resolved || resolved === path) {
     throw new NativeHarnessIdentityError("Default mise launcher did not resolve a target.", "mise");
   }
@@ -149,20 +165,25 @@ async function unwrapMiseLauncher(
 export async function inspectNativeHarnessExecutable(
   binaryPath: string,
   literalBoundary: boolean,
+  signal?: AbortSignal,
 ): Promise<string> {
+  assertProbeActive(signal);
   if (!isAbsolute(binaryPath)) {
     throw new NativeHarnessIdentityError("Native harness executable is not absolute.");
   }
   const boundary = await lstat(binaryPath, { bigint: true });
+  assertProbeActive(signal);
   if (!boundary.isFile() && !boundary.isSymbolicLink()) {
     throw new NativeHarnessIdentityError("Native harness boundary is not a file or link.");
   }
   const targetPath = await realpath(binaryPath);
   const target = await stat(targetPath, { bigint: true });
+  assertProbeActive(signal);
   if (!target.isFile()) {
     throw new NativeHarnessIdentityError("Native harness target is not a regular file.");
   }
   await access(binaryPath, fsConstants.X_OK);
+  assertProbeActive(signal);
   return createHash("sha256").update(JSON.stringify([
     literalBoundary,
     binaryPath,
@@ -182,6 +203,7 @@ export async function resolveNativeHarnessExecutable(
   const candidate = await executableCandidate(
     options.explicitBinary ?? NATIVE_HARNESS_BINARY_NAMES[options.harness],
     options.environment,
+    options.signal,
   );
   if (!candidate) {
     throw new NativeHarnessIdentityError(
@@ -189,7 +211,11 @@ export async function resolveNativeHarnessExecutable(
       "unavailable",
     );
   }
-  const boundaryIdentity = await inspectNativeHarnessExecutable(candidate, literalBoundary);
+  const boundaryIdentity = await inspectNativeHarnessExecutable(
+    candidate,
+    literalBoundary,
+    options.signal,
+  );
   if (literalBoundary) {
     return Object.freeze({
       path: candidate,
@@ -202,10 +228,11 @@ export async function resolveNativeHarnessExecutable(
     NATIVE_HARNESS_BINARY_NAMES[options.harness],
     options.environment,
     options.timeoutMs,
+    options.signal,
   ));
   return Object.freeze({
     path,
-    identity: await inspectNativeHarnessExecutable(path, literalBoundary),
+    identity: await inspectNativeHarnessExecutable(path, literalBoundary, options.signal),
     literalBoundary,
   });
 }

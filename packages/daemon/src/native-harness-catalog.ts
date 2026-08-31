@@ -41,7 +41,7 @@ export interface NativeHarnessProbeResult {
 
 export interface NativeHarnessFreshProbe {
   readonly id: NativeHarnessId;
-  readFresh(): Promise<NativeHarnessProbeResult>;
+  readFresh(signal?: AbortSignal): Promise<NativeHarnessProbeResult>;
 }
 
 interface NativeHarnessProbeOptions {
@@ -94,10 +94,18 @@ function frozenProbeResult(
   });
 }
 
-async function revalidateExecutable(executable: NativeHarnessExecutable): Promise<void> {
+function assertProbeActive(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) throw new Error("Native harness probe was aborted.");
+}
+
+async function revalidateExecutable(
+  executable: NativeHarnessExecutable,
+  signal?: AbortSignal,
+): Promise<void> {
   const current = await inspectNativeHarnessExecutable(
     executable.path,
     executable.literalBoundary,
+    signal,
   );
   if (current !== executable.identity) {
     throw new Error("Native harness executable changed during its probe.");
@@ -135,12 +143,13 @@ export class ClaudeNativeHarnessProbe implements NativeHarnessFreshProbe {
       ...probeOptions,
       ...(binaryPath === undefined ? {} : { binaryPath }),
       environmentProfile: "native",
-      loadSdk: () => sdkLoader.load(),
+      loadSdk: (signal) => sdkLoader.load(signal),
     });
   }
 
-  async readFresh(): Promise<NativeHarnessProbeResult> {
-    const result = await this.probe.readForTurn();
+  async readFresh(signal?: AbortSignal): Promise<NativeHarnessProbeResult> {
+    const result = await this.probe.readForTurn(signal);
+    assertProbeActive(signal);
     const executable = Object.freeze({
       path: result.binaryPath,
       identity: result.executableIdentity,
@@ -172,16 +181,19 @@ export class CodexNativeHarnessProbe implements NativeHarnessFreshProbe {
     this.timeoutMs = probeTimeout(options.timeoutMs);
   }
 
-  async readFresh(): Promise<NativeHarnessProbeResult> {
+  async readFresh(signal?: AbortSignal): Promise<NativeHarnessProbeResult> {
+    assertProbeActive(signal);
     const executable = await resolveNativeHarnessExecutable({
       harness: this.id,
       ...(this.binaryPath === undefined ? {} : { explicitBinary: this.binaryPath }),
       environment: this.environment,
       timeoutMs: this.timeoutMs,
+      ...(signal ? { signal } : {}),
     });
     const versionResult = await runOwnedCommand(executable.path, ["--version"], {
       environment: this.environment,
       timeoutMs: this.timeoutMs,
+      ...(signal ? { signal } : {}),
     });
     if (versionResult.exitCode !== 0 || versionResult.signal) {
       throw new Error("Codex version probe failed.");
@@ -191,9 +203,15 @@ export class CodexNativeHarnessProbe implements NativeHarnessFreshProbe {
       /^codex-cli (0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\n?$/u,
       "Codex version probe",
     );
-    await revalidateExecutable(executable);
-    const account = await readCodexAccount(executable, this.environment, this.timeoutMs);
-    await revalidateExecutable(executable);
+    await revalidateExecutable(executable, signal);
+    const account = await readCodexAccount(
+      executable,
+      this.environment,
+      this.timeoutMs,
+      signal,
+    );
+    await revalidateExecutable(executable, signal);
+    assertProbeActive(signal);
     return frozenProbeResult(
       this.id,
       executable,
@@ -216,6 +234,7 @@ async function readCodexAccount(
   executable: NativeHarnessExecutable,
   environment: Readonly<NodeJS.ProcessEnv>,
   timeoutMs: number,
+  signal?: AbortSignal,
 ): Promise<CodexAccountState> {
   const initializeRequest = JSON.stringify({
     id: CODEX_INITIALIZE_ID,
@@ -235,6 +254,7 @@ async function readCodexAccount(
   const result = await runOwnedCommand(executable.path, ["app-server"], {
     environment,
     timeoutMs,
+    ...(signal ? { signal } : {}),
     start: (input) => input.write(initializeRequest),
     onStdout: (stdout, input) => {
       for (const line of stdout.split(/\r?\n/u).slice(0, -1)) {
@@ -363,16 +383,19 @@ export class PiNativeHarnessProbe implements NativeHarnessFreshProbe {
     this.timeoutMs = probeTimeout(options.timeoutMs);
   }
 
-  async readFresh(): Promise<NativeHarnessProbeResult> {
+  async readFresh(signal?: AbortSignal): Promise<NativeHarnessProbeResult> {
+    assertProbeActive(signal);
     const executable = await resolveNativeHarnessExecutable({
       harness: this.id,
       ...(this.binaryPath === undefined ? {} : { explicitBinary: this.binaryPath }),
       environment: this.environment,
       timeoutMs: this.timeoutMs,
+      ...(signal ? { signal } : {}),
     });
     const result = await runOwnedCommand(executable.path, ["--version"], {
       environment: this.environment,
       timeoutMs: this.timeoutMs,
+      ...(signal ? { signal } : {}),
     });
     if (result.exitCode !== 0 || result.signal) throw new Error("Pi version probe failed.");
     const version = stableVersion(
@@ -380,7 +403,8 @@ export class PiNativeHarnessProbe implements NativeHarnessFreshProbe {
       /^(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\n?$/u,
       "Pi version probe",
     );
-    await revalidateExecutable(executable);
+    await revalidateExecutable(executable, signal);
+    assertProbeActive(signal);
     return frozenProbeResult(this.id, executable, version, "unknown");
   }
 }
@@ -451,8 +475,16 @@ export class NativeHarnessCatalog {
   }
 
   /** Admission path: deliberately bypasses the display cache. */
-  async readForStart(id: NativeHarnessId): Promise<NativeHarnessProbeResult> {
-    const result = await this.probes[id].readFresh();
+  async readForStart(
+    id: NativeHarnessId,
+    signal: AbortSignal,
+  ): Promise<NativeHarnessProbeResult> {
+    if (!(signal instanceof AbortSignal)) {
+      throw new TypeError("Native harness start probe requires an AbortSignal.");
+    }
+    assertProbeActive(signal);
+    const result = await this.probes[id].readFresh(signal);
+    assertProbeActive(signal);
     if (result.id !== id) throw new Error("Native harness probe identity did not match its slot.");
     return result;
   }

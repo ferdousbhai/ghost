@@ -259,17 +259,24 @@ export interface ClaudeCodeProbeOptions {
   resolveExecutable?: (
     binaryPath: string | undefined,
     environment: Readonly<NodeJS.ProcessEnv>,
+    signal?: AbortSignal,
   ) => Promise<string>;
-  inspectExecutable?: (binaryPath: string, literalBoundary: boolean) => Promise<string>;
+  inspectExecutable?: (
+    binaryPath: string,
+    literalBoundary: boolean,
+    signal?: AbortSignal,
+  ) => Promise<string>;
   readVersion?: (
     binaryPath: string,
     environment: Readonly<NodeJS.ProcessEnv>,
+    signal?: AbortSignal,
   ) => Promise<string>;
   readAuthStatus?: (
     binaryPath: string,
     environment: Readonly<NodeJS.ProcessEnv>,
+    signal?: AbortSignal,
   ) => Promise<ClaudeCodeAuthStatus>;
-  loadSdk?: () => Promise<ClaudeAgentSdkModule>;
+  loadSdk?: (signal?: AbortSignal) => Promise<ClaudeAgentSdkModule>;
 }
 
 export interface ClaudeCodeRuntimeOptions {
@@ -345,9 +352,10 @@ function accountFingerprint(status: Record<string, unknown>): string | undefined
 async function inspectClaudeCodeExecutable(
   binaryPath: string,
   literalBoundary: boolean,
+  signal?: AbortSignal,
 ): Promise<string> {
   try {
-    return await inspectNativeHarnessExecutable(binaryPath, literalBoundary);
+    return await inspectNativeHarnessExecutable(binaryPath, literalBoundary, signal);
   } catch (error) {
     throw new ClaudeCodeProcessError("Claude Code executable identity is invalid.", { cause: error });
   }
@@ -357,7 +365,7 @@ async function inspectClaudeCodeExecutable(
 export async function resolveClaudeCodeExecutable(
   binaryPath: string | undefined = undefined,
   environment: Readonly<NodeJS.ProcessEnv> = captureClaudeCodeEnvironment(),
-  options: { timeoutMs?: number } = {},
+  options: { timeoutMs?: number; signal?: AbortSignal } = {},
 ): Promise<string> {
   const timeoutMs = options.timeoutMs ?? AUTH_STATUS_TIMEOUT_MS;
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
@@ -369,6 +377,7 @@ export async function resolveClaudeCodeExecutable(
       ...(binaryPath === undefined ? {} : { explicitBinary: binaryPath }),
       environment,
       timeoutMs,
+      ...(options.signal ? { signal: options.signal } : {}),
     })).path;
   } catch (error) {
     if (error instanceof NativeHarnessIdentityError && error.reason === "unavailable") {
@@ -429,7 +438,7 @@ function authStatusFromJson(raw: string): ClaudeCodeAuthStatus {
 export async function readClaudeCodeAuthStatus(
   binaryPath: string,
   environment: Readonly<NodeJS.ProcessEnv> = captureClaudeCodeEnvironment(),
-  options: { timeoutMs?: number } = {},
+  options: { timeoutMs?: number; signal?: AbortSignal } = {},
 ): Promise<ClaudeCodeAuthStatus> {
   const timeoutMs = options.timeoutMs ?? AUTH_STATUS_TIMEOUT_MS;
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
@@ -441,6 +450,7 @@ export async function readClaudeCodeAuthStatus(
     result = await runOwnedCommand(binaryPath, CLAUDE_CODE_AUTH_STATUS_ARGS, {
       environment,
       timeoutMs,
+      ...(options.signal ? { signal: options.signal } : {}),
     });
   } catch {
     throw new ClaudeCodeProcessError("Failed to read Claude Code authentication status.");
@@ -471,7 +481,7 @@ function versionAtLeast(version: readonly number[], minimum: readonly number[]):
 export async function readClaudeCodeVersion(
   binaryPath: string,
   environment: Readonly<NodeJS.ProcessEnv> = captureClaudeCodeEnvironment(),
-  options: { timeoutMs?: number } = {},
+  options: { timeoutMs?: number; signal?: AbortSignal } = {},
 ): Promise<string> {
   const timeoutMs = options.timeoutMs ?? AUTH_STATUS_TIMEOUT_MS;
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
@@ -479,7 +489,11 @@ export async function readClaudeCodeVersion(
   }
   let result: OwnedCommandResult;
   try {
-    result = await runOwnedCommand(binaryPath, ["--version"], { environment, timeoutMs });
+    result = await runOwnedCommand(binaryPath, ["--version"], {
+      environment,
+      timeoutMs,
+      ...(options.signal ? { signal: options.signal } : {}),
+    });
   } catch {
     throw new ClaudeCodeProcessError("Failed to read Claude Code version.");
   }
@@ -580,10 +594,13 @@ export class ClaudeCodeProbe {
       );
     }
     this.now = options.now ?? Date.now;
-    this.resolveExecutable = options.resolveExecutable ?? resolveClaudeCodeExecutable;
+    this.resolveExecutable = options.resolveExecutable ?? ((binaryPath, environment, signal) =>
+      resolveClaudeCodeExecutable(binaryPath, environment, signal ? { signal } : {}));
     this.inspectExecutable = options.inspectExecutable ?? inspectClaudeCodeExecutable;
-    this.readVersion = options.readVersion ?? readClaudeCodeVersion;
-    this.readAuthStatus = options.readAuthStatus ?? readClaudeCodeAuthStatus;
+    this.readVersion = options.readVersion ?? ((binaryPath, environment, signal) =>
+      readClaudeCodeVersion(binaryPath, environment, signal ? { signal } : {}));
+    this.readAuthStatus = options.readAuthStatus ?? ((binaryPath, environment, signal) =>
+      readClaudeCodeAuthStatus(binaryPath, environment, signal ? { signal } : {}));
     this.loadSdk = options.loadSdk;
   }
 
@@ -610,8 +627,9 @@ export class ClaudeCodeProbe {
     return isClaudeCodeAuthenticated((await this.read()).authStatus);
   }
 
-  /** Turn admission bypasses the catalogue TTL but may share simultaneous fresh work. */
-  readForTurn(): Promise<ClaudeCodeProbeResult> {
+  /** Turn admission bypasses the catalogue TTL; unsignalled principal reads may coalesce. */
+  readForTurn(signal?: AbortSignal): Promise<ClaudeCodeProbeResult> {
+    if (signal) return this.probe(signal);
     if (this.turnInFlight) return this.turnInFlight;
     this.invalidate();
     const promise = this.read();
@@ -627,8 +645,12 @@ export class ClaudeCodeProbe {
     return promise;
   }
 
-  async assertExecutable(result: ClaudeCodeProbeResult): Promise<void> {
-    const current = await this.inspectExecutable(result.binaryPath, this.binaryPath !== undefined);
+  async assertExecutable(result: ClaudeCodeProbeResult, signal?: AbortSignal): Promise<void> {
+    const current = await this.inspectExecutable(
+      result.binaryPath,
+      this.binaryPath !== undefined,
+      signal,
+    );
     if (current !== result.executableIdentity) {
       throw new ClaudeCodeProcessError("Claude Code executable changed after authentication.");
     }
@@ -642,23 +664,8 @@ export class ClaudeCodeProbe {
 
   private async readFresh(generation: number): Promise<ClaudeCodeProbeResult> {
     try {
-      await this.loadSdk?.();
-      const binaryPath = await this.resolveExecutable(this.binaryPath, this.environment);
-      const executableIdentity = await this.inspectExecutable(
-        binaryPath,
-        this.binaryPath !== undefined,
-      );
-      const cliVersion = await this.readVersion(binaryPath, this.environment);
-      const authStatus = await this.readAuthStatus(binaryPath, this.environment);
-      const confirmedIdentity = await this.inspectExecutable(
-        binaryPath,
-        this.binaryPath !== undefined,
-      );
-      if (confirmedIdentity !== executableIdentity) {
-        throw new ClaudeCodeProcessError("Claude Code executable changed during authentication.");
-      }
+      const value = await this.probe();
       if (generation !== this.generation) return this.read();
-      const value = { binaryPath, executableIdentity, cliVersion, authStatus };
       this.cached = { outcome: { ok: true, value }, expiresAt: this.now() + this.ttlMs };
       return value;
     } catch (error) {
@@ -668,6 +675,38 @@ export class ClaudeCodeProbe {
       this.cached = { outcome: { ok: false, error }, expiresAt: this.now() + this.ttlMs };
       throw error;
     }
+  }
+
+  private async probe(signal?: AbortSignal): Promise<ClaudeCodeProbeResult> {
+    this.assertProbeActive(signal);
+    await this.loadSdk?.(signal);
+    this.assertProbeActive(signal);
+    const binaryPath = await this.resolveExecutable(this.binaryPath, this.environment, signal);
+    this.assertProbeActive(signal);
+    const executableIdentity = await this.inspectExecutable(
+      binaryPath,
+      this.binaryPath !== undefined,
+      signal,
+    );
+    this.assertProbeActive(signal);
+    const cliVersion = await this.readVersion(binaryPath, this.environment, signal);
+    this.assertProbeActive(signal);
+    const authStatus = await this.readAuthStatus(binaryPath, this.environment, signal);
+    this.assertProbeActive(signal);
+    const confirmedIdentity = await this.inspectExecutable(
+      binaryPath,
+      this.binaryPath !== undefined,
+      signal,
+    );
+    this.assertProbeActive(signal);
+    if (confirmedIdentity !== executableIdentity) {
+      throw new ClaudeCodeProcessError("Claude Code executable changed during authentication.");
+    }
+    return { binaryPath, executableIdentity, cliVersion, authStatus };
+  }
+
+  private assertProbeActive(signal: AbortSignal | undefined): void {
+    if (signal?.aborted) throw new ClaudeCodeProcessError("Claude Code probe was aborted.");
   }
 
   private clearInFlight(promise: Promise<ClaudeCodeProbeResult>): void {

@@ -1,6 +1,7 @@
 import {
   chmodSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -29,13 +30,21 @@ import type {
 
 const roots: string[] = [];
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((settle) => { resolve = settle; });
+  return { promise, resolve };
+}
+
 class StubClaudeAgentSdkLoader extends ClaudeAgentSdkLoader {
-  constructor(private readonly implementation: () => Promise<ClaudeAgentSdkModule>) {
+  constructor(
+    private readonly implementation: (signal?: AbortSignal) => Promise<ClaudeAgentSdkModule>,
+  ) {
     super({ ownerHome: "/tmp" });
   }
 
-  override load(): Promise<ClaudeAgentSdkModule> {
-    return this.implementation();
+  override load(signal?: AbortSignal): Promise<ClaudeAgentSdkModule> {
+    return this.implementation(signal);
   }
 }
 
@@ -56,6 +65,51 @@ function root(): string {
 function writeExecutable(path: string, source: string): void {
   writeFileSync(path, `#!${process.execPath}\n${source}`);
   chmodSync(path, 0o700);
+}
+
+function writeShellExecutable(path: string, source: string): void {
+  writeFileSync(path, `#!/bin/sh\nset -eu\n${source}\n`);
+  chmodSync(path, 0o700);
+}
+
+function resistantBlock(pidFile: string): string {
+  return `
+block() {
+  trap '' TERM
+  (trap '' TERM; while :; do sleep 1; done) &
+  child=$!
+  printf '%s %s\\n' "$$" "$child" > ${JSON.stringify(pidFile)}
+  while :; do sleep 1; done
+}
+`;
+}
+
+function pidExists(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ESRCH") return false;
+    throw error;
+  }
+  if (process.platform !== "linux") return true;
+  try {
+    const statLine = readFileSync(`/proc/${pid}/stat`, "utf8");
+    const commandEnd = statLine.lastIndexOf(")");
+    const state = commandEnd < 0 ? "" : statLine.slice(commandEnd + 2, commandEnd + 3);
+    return state !== "Z" && state !== "X";
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
+}
+
+async function waitForPidFile(path: string): Promise<number[]> {
+  const deadline = Date.now() + 2_000;
+  while (!existsSync(path)) {
+    if (Date.now() >= deadline) throw new Error("probe did not publish its process group");
+    await new Promise<void>((resolveDelay) => setTimeout(resolveDelay, 10));
+  }
+  return readFileSync(path, "utf8").trim().split(/\s+/u).map(Number);
 }
 
 function fakeCodex(input: {
@@ -142,6 +196,77 @@ function logRows(path: string): Array<Record<string, unknown>> {
   return readFileSync(path, "utf8").trim().split("\n").map((line) => JSON.parse(line));
 }
 
+type ResistantProbePhase =
+  | "mise"
+  | "claude-version"
+  | "claude-auth"
+  | "codex-version"
+  | "codex-account"
+  | "pi-version";
+
+function resistantProbe(
+  phase: ResistantProbePhase,
+  base: string,
+  pidFile: string,
+): NativeHarnessFreshProbe {
+  const block = resistantBlock(pidFile);
+  if (phase === "mise") {
+    const bin = join(base, "bin"); mkdirSync(bin);
+    const wrapper = join(bin, "pi"); const mise = join(bin, "mise");
+    writeShellExecutable(wrapper, 'exec mise x pi "$@"');
+    writeShellExecutable(mise, `${block}\nblock`);
+    return new PiNativeHarnessProbe({ environment: { PATH: bin }, timeoutMs: 10_000 });
+  }
+  if (phase.startsWith("claude-")) {
+    const binary = join(base, "claude");
+    writeShellExecutable(binary, `${block}
+if [ "$1" = "--version" ]; then
+  ${phase === "claude-version" ? "block" : "printf '%s\\n' '2.1.251 (Claude Code)'"}
+else
+  ${phase === "claude-auth" ? "block" : "printf '%s\\n' '{\"loggedIn\":true,\"authMethod\":\"native\"}'"}
+fi`);
+    return new ClaudeNativeHarnessProbe({
+      sdkLoader: validClaudeAgentSdkLoader(),
+      binaryPath: binary,
+      environment: { PATH: "/usr/bin:/bin" },
+    });
+  }
+  if (phase.startsWith("codex-")) {
+    const binary = join(base, "codex");
+    writeShellExecutable(binary, `${block}
+if [ "$1" = "--version" ]; then
+  ${phase === "codex-version" ? "block" : "printf '%s\\n' 'codex-cli 0.151.0'"}
+elif [ "$1" = "app-server" ]; then
+  ${phase === "codex-account" ? "block" : `printf '%s\\n' '{"id":"ghost-initialize","result":{}}' '{"id":"ghost-account","result":{"account":{"type":"chatgpt"},"requiresOpenaiAuth":true}}'; cat >/dev/null`}
+fi`);
+    return new CodexNativeHarnessProbe({
+      binaryPath: binary,
+      environment: { PATH: "/usr/bin:/bin" },
+      timeoutMs: 10_000,
+    });
+  }
+  const binary = join(base, "pi");
+  writeShellExecutable(binary, `${block}\nblock`);
+  return new PiNativeHarnessProbe({
+    binaryPath: binary,
+    environment: { PATH: "/usr/bin:/bin" },
+    timeoutMs: 10_000,
+  });
+}
+
+function catalogWith(probe: NativeHarnessFreshProbe): NativeHarnessCatalog {
+  const probes: Record<NativeHarnessId, NativeHarnessFreshProbe> = {
+    "claude-code": new MutableProbe("claude-code", "authenticated"),
+    codex: new MutableProbe("codex", "authenticated"),
+    pi: new MutableProbe("pi", "unknown"),
+  };
+  probes[probe.id] = probe;
+  return new NativeHarnessCatalog({
+    claudeAgentSdkLoader: validClaudeAgentSdkLoader(),
+    probes,
+  });
+}
+
 describe("native harness probes", () => {
   it("uses the Claude native environment without principal auto-memory policy", async () => {
     const base = root();
@@ -202,7 +327,10 @@ describe("native harness probes", () => {
         authentication: "unknown",
       });
       expect(existsSync(log)).toBe(false);
-      await expect(catalog.readForStart("claude-code")).rejects.toBeInstanceOf(Error);
+      await expect(catalog.readForStart(
+        "claude-code",
+        new AbortController().signal,
+      )).rejects.toBeInstanceOf(Error);
       expect(existsSync(log)).toBe(false);
     },
   );
@@ -219,7 +347,10 @@ describe("native harness probes", () => {
       },
     });
 
-    await expect(catalog.readForStart("claude-code")).resolves.toMatchObject({
+    await expect(catalog.readForStart(
+      "claude-code",
+      new AbortController().signal,
+    )).resolves.toMatchObject({
       id: "claude-code",
       authentication: "authenticated",
     });
@@ -303,6 +434,59 @@ describe("native harness probes", () => {
     });
     expect((row!.env as NodeJS.ProcessEnv).PI_CONFIG_FILES).toBeUndefined();
     expect((row!.env as NodeJS.ProcessEnv).ANTHROPIC_API_KEY).toBeUndefined();
+  });
+
+  it("rejects a pre-aborted start before invoking its probe", async () => {
+    const base = root(); const marker = join(base, "spawned"); const binary = join(base, "pi");
+    writeShellExecutable(binary, `printf spawned > ${JSON.stringify(marker)}\nprintf '%s\\n' '0.84.2'`);
+    const catalog = catalogWith(new PiNativeHarnessProbe({
+      binaryPath: binary,
+      environment: { PATH: "/usr/bin:/bin" },
+    }));
+    const controller = new AbortController(); controller.abort();
+
+    await expect(catalog.readForStart("pi", undefined as never)).rejects.toThrow(
+      "requires an AbortSignal",
+    );
+    await expect(catalog.readForStart("pi", controller.signal)).rejects.toThrow("aborted");
+    expect(existsSync(marker)).toBe(false);
+  });
+
+  it("passes admission abort into the Claude SDK phase before any CLI probe", async () => {
+    const base = root(); const { binary, log } = fakeClaude(base); const started = deferred<void>(); let seenSignal: AbortSignal | undefined;
+    const loader = new StubClaudeAgentSdkLoader((signal) => {
+      seenSignal = signal; started.resolve();
+      return new Promise((_resolveSdk, rejectSdk) => {
+        const abort = () => rejectSdk(new Error("SDK phase aborted"));
+        if (signal?.aborted) abort(); else signal?.addEventListener("abort", abort, { once: true });
+      });
+    });
+    const catalog = catalogWith(new ClaudeNativeHarnessProbe({
+      sdkLoader: loader,
+      binaryPath: binary,
+      environment: { PATH: "/usr/bin:/bin" },
+    }));
+    const controller = new AbortController(); const pending = catalog.readForStart("claude-code", controller.signal);
+    await started.promise; controller.abort();
+
+    await expect(pending).rejects.toThrow("SDK phase aborted");
+    expect(seenSignal).toBe(controller.signal); expect(existsSync(log)).toBe(false);
+  });
+
+  it.each<ResistantProbePhase>([
+    "mise",
+    "claude-version",
+    "claude-auth",
+    "codex-version",
+    "codex-account",
+    "pi-version",
+  ])("quiesces a TERM-resistant process group when %s is aborted", async (phase) => {
+    const base = root(); const pidFile = join(base, `${phase}.pids`); const probe = resistantProbe(phase, base, pidFile); const catalog = catalogWith(probe);
+    const controller = new AbortController(); const pending = catalog.readForStart(probe.id, controller.signal); const rejected = expect(pending).rejects.toBeInstanceOf(Error);
+    const pids = await waitForPidFile(pidFile); controller.abort();
+
+    await rejected;
+    expect(pids).toHaveLength(2); expect(new Set(pids).size).toBe(2); expect(pids.filter(pidExists)).toEqual([]);
   });
 
   it("keeps Codex external/no-account auth descriptive instead of calling it logged out", async () => {
@@ -446,7 +630,10 @@ describe("native harness catalogue", () => {
 
     expect((await catalog.list())[1]).toMatchObject({ availability: "available" });
     expect(codex.calls).toBe(1);
-    await expect(catalog.readForStart("codex")).rejects.toThrow("logged out");
+    await expect(catalog.readForStart(
+      "codex",
+      new AbortController().signal,
+    )).rejects.toThrow("logged out");
     expect(codex.calls).toBe(2);
     catalog.invalidate();
     expect((await catalog.list())[1]).toEqual({

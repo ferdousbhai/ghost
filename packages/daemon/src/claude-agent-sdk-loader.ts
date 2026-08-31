@@ -72,6 +72,33 @@ function installCommand(root: string): string {
     + `${JSON.stringify(root)} --save-exact ${packages.join(" ")}`;
 }
 
+function sdkLoadAborted(): ClaudeAgentSdkLoadError {
+  return new ClaudeAgentSdkLoadError("Claude Agent SDK load was aborted.");
+}
+
+function awaitSdkLoad(
+  pending: Promise<ClaudeAgentSdkModule>,
+  signal: AbortSignal | undefined,
+): Promise<ClaudeAgentSdkModule> {
+  if (!signal) return pending;
+  if (signal.aborted) return Promise.reject(sdkLoadAborted());
+  return new Promise((resolveLoad, rejectLoad) => {
+    const aborted = () => {
+      signal.removeEventListener("abort", aborted);
+      rejectLoad(sdkLoadAborted());
+    };
+    signal.addEventListener("abort", aborted, { once: true });
+    if (signal.aborted) {
+      aborted();
+      return;
+    }
+    pending.then(
+      (sdk) => { signal.removeEventListener("abort", aborted); resolveLoad(sdk); },
+      (error: unknown) => { signal.removeEventListener("abort", aborted); rejectLoad(error); },
+    );
+  });
+}
+
 /**
  * Loads the optional Claude Agent SDK from Ghost's one versioned owner-data
  * directory. This is location confinement, not a sandbox from code the same
@@ -94,16 +121,18 @@ export class ClaudeAgentSdkLoader {
     this.importModule = options.importModule ?? ((specifier) => import(specifier));
   }
 
-  async load(): Promise<ClaudeAgentSdkModule> {
-    if (this.restartRequired) throw this.restartRequired;
-    if (this.inFlight) return this.inFlight;
-    const pending = this.loadChecked();
-    this.inFlight = pending;
-    try {
-      return await pending;
-    } finally {
-      if (this.inFlight === pending) this.inFlight = undefined;
+  load(signal?: AbortSignal): Promise<ClaudeAgentSdkModule> {
+    if (signal?.aborted) return Promise.reject(sdkLoadAborted());
+    if (this.restartRequired) return Promise.reject(this.restartRequired);
+    if (!this.inFlight) {
+      const pending = this.loadChecked();
+      this.inFlight = pending;
+      void pending.then(
+        () => { if (this.inFlight === pending) this.inFlight = undefined; },
+        () => { if (this.inFlight === pending) this.inFlight = undefined; },
+      );
     }
+    return awaitSdkLoad(this.inFlight, signal);
   }
 
   private requireRestart(detail: string, cause?: unknown): ClaudeAgentSdkLoadError {
