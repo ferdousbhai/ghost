@@ -40,7 +40,6 @@ import {
   ConversationMaintenance,
   maintenanceStatePath,
   type MaintenanceIdentity,
-  type MaintenanceOwnerActivity,
   type SettledMaintenanceTurn,
 } from "../src/conversation-maintenance.js";
 import { ghostPaths } from "../src/ghosts.js";
@@ -64,7 +63,6 @@ import {
 import {
   PI_NATIVE_TOOL_NAMES,
   SessionHost,
-  parseUserBashCommand,
   sessionFileNameFor,
   sessionKeyOf,
   type ConversationUpdatedEvent,
@@ -394,29 +392,19 @@ function deferred(): {
 
 function recordMaintenanceTurns(
   finishTurn?: (turn: SettledMaintenanceTurn | undefined) => Promise<void>,
-  recordActivity?: (
-    identity: MaintenanceIdentity,
-    activity: MaintenanceOwnerActivity,
-  ) => Promise<void>,
 ): {
   maintenance: NonNullable<SessionHostOptions["maintenance"]>;
   admitted: MaintenanceIdentity[];
   finished: Array<SettledMaintenanceTurn | undefined>;
-  activities: Array<{ identity: MaintenanceIdentity; activity: MaintenanceOwnerActivity }>;
   released: { count: number };
 } {
   const admitted: MaintenanceIdentity[] = [];
   const finished: Array<SettledMaintenanceTurn | undefined> = [];
-  const activities: Array<{
-    identity: MaintenanceIdentity;
-    activity: MaintenanceOwnerActivity;
-  }> = [];
   const released = { count: 0 };
   const reservation = () => ({ drained: Promise.resolve(), release: () => {} });
   return {
     admitted,
     finished,
-    activities,
     released,
     maintenance: {
       admitOwnerAction: (identity) => {
@@ -431,10 +419,6 @@ function recordMaintenanceTurns(
             released.count += 1;
           },
         };
-      },
-      recordOwnerActivity: async (identity, activity) => {
-        activities.push({ identity, activity });
-        await recordActivity?.(identity, activity);
       },
       reserveConversationDelete: reservation,
       completeConversationDelete: () => {},
@@ -470,20 +454,6 @@ describe("sessionKeyOf", () => {
       status: 400,
     }));
     expect(sessionKeyOf("casper", "default")).toBe(sessionKeyOf("casper", undefined));
-  });
-});
-
-describe("parseUserBashCommand", () => {
-  it("recognizes OMP's contextual and context-free command sigils", () => {
-    expect(parseUserBashCommand("!pwd")).toEqual({
-      command: "pwd",
-      excludeFromContext: false,
-    });
-    expect(parseUserBashCommand("  !! printenv TOKEN ")).toEqual({
-      command: "printenv TOKEN",
-      excludeFromContext: true,
-    });
-    expect(parseUserBashCommand("ordinary message!")).toBeNull();
   });
 });
 
@@ -610,9 +580,7 @@ describe("SessionHost.open", () => {
   });
 
   it("loads one trusted project snapshot while keeping executable project code disabled", async () => {
-    await setup([{ kind: "text", text: "hello" }], {
-      retention: { idleTtlMs: 0, maxSessions: 1 },
-    });
+    await setup([{ kind: "text", text: "hello" }]);
     const project = join(temp!.root, "trusted-project");
     const child = join(project, "packages", "app");
     mkdirSync(join(project, ".omp", "skills", "trusted-skill"), { recursive: true });
@@ -704,45 +672,42 @@ describe("SessionHost.open", () => {
     expect(JSON.stringify(provider!.requests.at(-1)?.messages)).toContain("/project-proof");
     expect(JSON.stringify(provider!.requests.at(-1)?.messages)).toContain("plate one");
 
-    const outside = join(temp!.root, "outside-project");
-    mkdirSync(outside);
-    symlinkSync(outside, join(project, "escape"));
-    const rejectedCd: PiMessagesEvent[] = [];
+    const shellLikeText: PiMessagesEvent[] = [];
     await host!.runTurn("casper", {
       sessionId: "conv-project",
       prompt: "!cd escape",
-      emit: (event) => rejectedCd.push(event),
+      emit: (event) => shellLikeText.push(event),
     });
-    expect(rejectedCd.at(-1)).toMatchObject({ type: "error" });
+    expect(shellLikeText.at(-1)).toMatchObject({ type: "done" });
+    expect(JSON.stringify(provider!.requests.at(-1)?.messages)).toContain("!cd escape");
     expect(await host!.getProject("casper", "conv-project", "pi"))
       .toMatchObject({ cwd: project, generation: 1 });
 
-    const pwd: PiMessagesEvent[] = [];
     await host!.runTurn("casper", {
       sessionId: "conv-project",
       prompt: "!pwd",
-      emit: (event) => pwd.push(event),
+      emit: () => {},
     });
-    expect(JSON.stringify(pwd)).toContain(project);
-    expect(JSON.stringify(pwd)).not.toContain(outside);
+    expect(JSON.stringify(provider!.requests.at(-1)?.messages)).toContain("!pwd");
 
     await host!.runTurn("casper", {
       sessionId: "conv-project",
       prompt: "!cd packages/app",
       emit: () => {},
     });
+    expect(JSON.stringify(provider!.requests.at(-1)?.messages)).toContain("!cd packages/app");
     expect(await host!.getProject("casper", "conv-project", "pi"))
-      .toMatchObject({ root: project, cwd: child, relativeCwd: "packages/app", generation: 2 });
+      .toMatchObject({ root: project, cwd: project, relativeCwd: ".", generation: 1 });
 
-    writeFileSync(join(project, "AGENTS.md"), "HOSTILE-AFTER-CACHE-EVICTION");
-    await host!.open("casper", "cache-evictor");
+    writeFileSync(join(project, "AGENTS.md"), "HOSTILE-AFTER-CACHE-CLOSE");
+    await host!.close("casper", "conv-project");
     expect(((handle as { sessionDisposed?: boolean }).sessionDisposed === true)).toBe(true);
     const reopened = await host!.open("casper", "conv-project");
-    expect(reopened.session.sessionManager.getCwd()).toBe(child);
+    expect(reopened.session.sessionManager.getCwd()).toBe(project);
     const reopenedSystem = await modelSystemPrompt("conv-project");
     expect(reopenedSystem).toContain("TRUSTED-PROJECT-INSTRUCTION");
-    expect(reopenedSystem).toContain(`Current working directory: ${child}`);
-    expect(reopenedSystem).not.toContain("HOSTILE-AFTER-CACHE-EVICTION");
+    expect(reopenedSystem).toContain(`Current working directory: ${project}`);
+    expect(reopenedSystem).not.toContain("HOSTILE-AFTER-CACHE-CLOSE");
 
     await host!.disposeAll();
     host = new SessionHost({
@@ -751,10 +716,10 @@ describe("SessionHost.open", () => {
       offline: true,
     });
     const afterRestart = await host.open("casper", "conv-project");
-    expect(afterRestart.session.sessionManager.getCwd()).toBe(child);
+    expect(afterRestart.session.sessionManager.getCwd()).toBe(project);
     const restartedSystem = await modelSystemPrompt("conv-project");
     expect(restartedSystem).toContain("TRUSTED-PROJECT-INSTRUCTION");
-    expect(restartedSystem).not.toContain("HOSTILE-AFTER-CACHE-EVICTION");
+    expect(restartedSystem).not.toContain("HOSTILE-AFTER-CACHE-CLOSE");
   });
 
   it("keeps invalid UTF-8 project instructions, skills, and MCP out of Pi", async () => {
@@ -2244,7 +2209,6 @@ describe("SessionHost shutdown", () => {
         finish: async () => {},
         release: () => {},
       }),
-      recordOwnerActivity: async () => {},
       reserveConversationDelete: reservation,
       completeConversationDelete: () => {},
       reserveGhostMove: reservation,
@@ -4581,7 +4545,6 @@ describe("SessionHost.runTurn", () => {
           },
         };
       },
-      recordOwnerActivity: async () => {},
       reserveConversationDelete: drainedReservation,
       completeConversationDelete: () => {},
       reserveGhostMove: drainedReservation,
@@ -4730,43 +4693,7 @@ describe("SessionHost.runTurn", () => {
     expect(handle.session.getToolDefinition("ghost_memory_write")).toBeDefined();
   });
 
-  it("rejects direct Bash under Claude before creating Pi session or cwd state", async () => {
-    let claudeQueries = 0;
-    const { dir } = await setup([{ kind: "text", text: "must not run" }], {
-      title: { enabled: false },
-      claudeCode: {
-        binaryPath: process.execPath,
-        readAuthStatus: async () => ({ loggedIn: true, authMethod: "claude.ai" }),
-        createQuery: () => {
-          claudeQueries += 1;
-          throw new Error("Claude query must not start for direct Bash");
-        },
-      },
-    });
-    setChatModelRole(ghostPaths(dir).home, "claude-code", "default");
-    const id = "claude-direct-command";
-    const sessionDir = ghostPaths(dir).sessionDir;
-    const events: PiMessagesEvent[] = [];
-
-    for (const prompt of ["!cd /", "!!cd /"]) {
-      await expect(host!.runTurn("casper", {
-        sessionId: id,
-        prompt,
-        emit: (event) => events.push(event),
-      })).rejects.toMatchObject({ code: "not_supported", status: 409 });
-    }
-
-    expect(events).toEqual([]);
-    expect(provider!.requests).toHaveLength(0);
-    expect(claudeQueries).toBe(0);
-    expect(host!.cachedSessionCount).toBe(0);
-    expect(existsSync(join(sessionDir, sessionFileNameFor(id)))).toBe(false);
-    expect(existsSync(toolCwdsPath(sessionDir, id))).toBe(false);
-    expect(existsSync(projectBindingPath(sessionDir, "pi", id))).toBe(false);
-    expect(existsSync(claudeSessionMetadataPath(sessionDir, id))).toBe(false);
-  });
-
-  it("rejects opposite-runtime project bindings before normal or direct draft and duplicate admission", async () => {
+  it("rejects opposite-runtime project bindings before draft and duplicate admission", async () => {
     let claudeQueries = 0;
     const { dir } = await setup([{ kind: "text", text: "must not run" }], {
       title: { enabled: false },
@@ -4786,9 +4713,8 @@ describe("SessionHost.runTurn", () => {
 
     for (const selectedRuntime of ["pi", "claude-code"] as const) {
       const oppositeRuntime = selectedRuntime === "pi" ? "claude-code" : "pi";
-      for (const promptKind of ["normal", "direct"] as const) {
-        for (const identityKind of ["draft", "duplicate"] as const) {
-          const id = `${selectedRuntime}-${promptKind}-${identityKind}`;
+      for (const identityKind of ["draft", "duplicate"] as const) {
+          const id = `${selectedRuntime}-${identityKind}`;
           if (selectedRuntime === "claude-code") {
             setChatModelRole(home, "claude-code", "default");
           } else {
@@ -4837,7 +4763,7 @@ describe("SessionHost.runTurn", () => {
 
           await expect(host!.runTurn("casper", {
             sessionId: id,
-            prompt: promptKind === "direct" ? "!pwd" : "ordinary owner message",
+            prompt: "ordinary owner message",
             emit: (event) => events.push(event),
           })).rejects.toMatchObject({ code: "project_runtime_mismatch", status: 409 });
 
@@ -4850,192 +4776,27 @@ describe("SessionHost.runTurn", () => {
           expect(readFileSync(oppositeBinding, "utf8")).toBe(oppositeBytes);
           if (selectedBytes === null) expect(existsSync(selectedArtifact)).toBe(false);
           else expect(readFileSync(selectedArtifact, "utf8")).toBe(selectedBytes);
-        }
       }
     }
   });
 
-  it("runs !command through OMP without asking the model", async () => {
-    await setup([{ kind: "text", text: "the model must not run" }]);
-    const events: PiMessagesEvent[] = [];
-    await host!.runTurn("casper", {
-      sessionId: "conv-bash",
-      prompt: "!printf ghost-bash",
-      emit: (event) => events.push(event),
-    });
-
-    expect(provider!.requests).toHaveLength(0);
-    expect(events.at(-1)?.type).toBe("done");
-    expect(events.some((event) => event.type === "text_delta"
-      && event.delta.includes("ghost-bash"))).toBe(true);
-    const transcript = await host!.readTranscript("casper", "conv-bash");
-    expect(JSON.stringify(transcript.messages)).toContain("ghost-bash");
-  });
-
-  it("keeps !!command out of model context", async () => {
-    await setup([{ kind: "text", text: "ok" }]);
-    await host!.runTurn("casper", {
-      sessionId: "conv-secret-bash",
-      prompt: "!!printf secret",
-      emit: () => {},
-    });
-    const handle = await host!.open("casper", "conv-secret-bash");
-    expect(handle.session.messages.at(-1)).toMatchObject({
-      role: "bashExecution",
-      excludeFromContext: true,
-    });
-  });
-
-  it("lets !cd move OMP's cwd without moving or forgetting the ghost home", async () => {
-    const { dir } = await setup([{ kind: "text", text: "still Casper" }]);
-    const ownerDocs = join(temp!.ownerHome, "docs");
-    mkdirSync(ownerDocs, { recursive: true });
-    writeFileSync(join(ownerDocs, "AGENTS.md"), "MUST-NOT-REDISCOVER-AFTER-CD");
-    await host!.runTurn("casper", {
-      sessionId: "conv-cd",
-      prompt: "!cd docs",
-      emit: () => {},
-    });
-    const handle = await host!.open("casper", "conv-cd");
-    expect(handle.session.sessionManager.getCwd()).toBe(ownerDocs);
-    expect(handle.session.systemPrompt).not.toContain("MUST-NOT-REDISCOVER-AFTER-CD");
-    expect(handle.sessionFile?.startsWith(ghostPaths(dir).sessionDir + sep)).toBe(true);
-
-    await host!.runTurn("casper", {
-      sessionId: "conv-cd",
-      prompt: "Do you still know who you are?",
-      emit: () => {},
-    });
-    expect(provider!.requests.at(-1)?.system).toContain("letterpress printer");
-  });
-
-  it("records a direct Bash activity with its durable post-cd cwd before terminal publication", async () => {
-    const activityEntered = deferred();
-    const allowActivity = deferred();
-    let recordedIdentity: MaintenanceIdentity | undefined;
-    let recordedActivity: Parameters<
-      NonNullable<SessionHostOptions["maintenance"]>["recordOwnerActivity"]
-    >[1] | undefined;
-    let released = 0;
-    const reservation = () => ({ drained: Promise.resolve(), release: () => {} });
-    const maintenance: NonNullable<SessionHostOptions["maintenance"]> = {
-      admitOwnerAction: () => ({
-        ready: Promise.resolve(),
-        finish: async () => {},
-        release: () => {
-          released += 1;
-        },
-      }),
-      recordOwnerActivity: async (identity, activity) => {
-        recordedIdentity = identity;
-        recordedActivity = activity;
-        activityEntered.resolve();
-        await allowActivity.promise;
-      },
-      reserveConversationDelete: reservation,
-      completeConversationDelete: () => {},
-      reserveGhostMove: reservation,
-      completeGhostRename: async () => {},
-      completeGhostDelete: () => {},
-      beginShutdown: async () => {},
-      disposeAll: async () => {},
-    };
-    await setup([{ kind: "text", text: "the model must not run" }], { maintenance });
-    const ownerDocs = join(temp!.ownerHome, "activity-docs");
-    mkdirSync(ownerDocs);
-    const events: PiMessagesEvent[] = [];
-
-    const turn = host!.runTurn("casper", {
-      sessionId: "activity-cd",
-      prompt: "!cd activity-docs",
-      emit: (event) => events.push(event),
-    });
-    await activityEntered.promise;
-    expect(events.some((event) => event.type === "done" || event.type === "error")).toBe(false);
-    expect(released).toBe(0);
-    expect(recordedIdentity).toEqual({
-      ghostName: "casper",
-      runtime: "pi",
-      conversationId: "activity-cd",
-    });
-    expect(recordedActivity).toEqual({
-      source: { runtime: "pi", createdAt: expect.any(String) },
-      cwd: ownerDocs,
-    });
-    allowActivity.resolve();
-    await turn;
-    expect(events.at(-1)?.type).toBe("done");
-    expect(released).toBe(1);
-    expect((await host!.open("casper", "activity-cd")).session.sessionManager.getCwd())
-      .toBe(ownerDocs);
-    expect(provider!.requests).toHaveLength(0);
-  });
-
-  it("fails open after no-model activity bookkeeping errors without inventing a turn", async () => {
-    const logger = recordingLogger("warn");
-    const finished: Array<SettledMaintenanceTurn | undefined> = [];
-    const recordedCwds: string[] = [];
-    const reservation = () => ({ drained: Promise.resolve(), release: () => {} });
-    const maintenance: NonNullable<SessionHostOptions["maintenance"]> = {
-      admitOwnerAction: () => ({
-        ready: Promise.resolve(),
-        finish: async (turn) => {
-          finished.push(turn);
-          throw new Error("sensitive cleanup persistence bytes");
-        },
-        release: () => {},
-      }),
-      recordOwnerActivity: async (_identity, activity) => {
-        recordedCwds.push(activity.cwd);
-        throw new Error("sensitive maintenance bytes");
-      },
-      reserveConversationDelete: reservation,
-      completeConversationDelete: () => {},
-      reserveGhostMove: reservation,
-      completeGhostRename: async () => {},
-      completeGhostDelete: () => {},
-      beginShutdown: async () => {},
-      disposeAll: async () => {},
-    };
-    await setup([{ kind: "text", text: "the model must not run" }], {
-      maintenance,
-      logger,
-    });
-    const ownerDocs = join(temp!.ownerHome, "failed-activity-docs");
-    mkdirSync(ownerDocs);
-
-    for (const [sessionId, prompt] of [
-      ["failed-activity-cd", "!cd failed-activity-docs"],
-    ] as const) {
+  it.each(["!printf ghost-bash", "!!printf secret", "!cd docs"])(
+    "treats shell-like owner text as an ordinary Pi prompt: %s",
+    async (prompt) => {
+      await setup([{ kind: "text", text: "ordinary model answer" }]);
       const events: PiMessagesEvent[] = [];
       await host!.runTurn("casper", {
-        sessionId,
+        sessionId: "literal-shell-like-prompt",
         prompt,
         emit: (event) => events.push(event),
       });
-      expect(events.at(-1)?.type).toBe("done");
-    }
 
-    expect(recordedCwds).toEqual([ownerDocs]);
-    expect((await host!.open("casper", "failed-activity-cd")).session.sessionManager.getCwd())
-      .toBe(ownerDocs);
-    expect(finished).toEqual([undefined]);
-    expect(logger.records).toEqual([
-      {
-        level: "warn",
-        message: "conversation maintenance owner activity was not recorded",
-        fields: { ghost: "casper", conversation: "failed-activity-cd", runtime: "pi" },
-      },
-      {
-        level: "warn",
-        message: "conversation maintenance cleanup was not recorded",
-        fields: { ghost: "casper", conversation: "failed-activity-cd", runtime: "pi" },
-      },
-    ]);
-    expect(JSON.stringify(logger.records)).not.toContain("sensitive maintenance bytes");
-    expect(JSON.stringify(logger.records)).not.toContain("sensitive cleanup persistence bytes");
-    expect(provider!.requests).toHaveLength(0);
-  });
+      expect(provider!.requests).toHaveLength(1);
+      expect(JSON.stringify(provider!.requests[0]?.messages)).toContain(prompt);
+      expect(events.at(-1)?.type).toBe("done");
+      expect(JSON.stringify(events)).toContain("ordinary model answer");
+    },
+  );
 
   it("persists a memory file the ghost writes", async () => {
     const { dir } = await setup([
@@ -5546,7 +5307,6 @@ describe("session listing", () => {
         finish: async () => {},
         release: () => {},
       }),
-      recordOwnerActivity: async () => {},
       reserveConversationDelete: (identity) => {
         reservedIdentity = identity;
         return {
@@ -6409,7 +6169,6 @@ describe("SessionHost.renameGhost", () => {
         finish: async () => {},
         release: () => {},
       }),
-      recordOwnerActivity: async () => {},
       reserveConversationDelete: () => ({ drained: Promise.resolve(), release: () => {} }),
       completeConversationDelete: () => {},
       reserveGhostMove: (ghostName) => {
@@ -7171,6 +6930,33 @@ describe("model switch reaches a live cached session", () => {
 });
 
 describe("transcript resume", () => {
+  it("projects a legacy Pi bash execution as readable assistant text", async () => {
+    await setup([{ kind: "text", text: "unused" }]);
+    const timestamp = Date.parse("2026-08-31T12:00:00.000Z");
+    const handle = await host!.open("casper", "legacy-bash");
+    handle.session.sessionManager.appendMessage({
+      role: "bashExecution",
+      command: "printf legacy",
+      output: "legacy output\n",
+      exitCode: 7,
+      cancelled: false,
+      truncated: true,
+      excludeFromContext: true,
+      timestamp,
+    });
+
+    expect((await host!.readTranscript("casper", "legacy-bash")).messages).toEqual([
+      expect.objectContaining({
+        role: "assistant",
+        timestamp,
+        content: [{
+          type: "text",
+          text: "$ printf legacy\nlegacy output\n[output truncated]\n[exit 7]",
+        }],
+      }),
+    ]);
+  });
+
   it("returns renderable user/assistant history for a past conversation", async () => {
     await setup([{ kind: "text", text: "I restore letterpresses." }]);
     await host!.runTurn("casper", {

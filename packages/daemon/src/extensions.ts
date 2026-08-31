@@ -83,9 +83,9 @@ export const piToolCapabilities: GhostToolCapabilitiesResolver = (context) => ({
 
 /**
  * Build the extension set for one session. `homeDir` pins Ghost-owned files to
- * the ghost home even when a direct `!cd` changes the conversation cwd.
- * It is still per-session data, never a process-global value, so concurrent
- * ghosts cannot race or share a home.
+ * the ghost home even when the conversation is bound elsewhere. It is still
+ * per-session data, never a process-global value, so concurrent ghosts cannot
+ * race or share a home.
  */
 export function resolveGhostExtensions(
   options: GhostExtensionOptions,

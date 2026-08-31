@@ -1006,21 +1006,6 @@ export class ProjectBindingStore {
     return resolvedCwd;
   }
 
-  async resolveOperationalCwd(current: ProjectBindingState, cwd: string): Promise<string> {
-    const resolvedCwd = await this.resolveCwdDirectory(cwd);
-    if (current.root) {
-      const identity = await this.assertTrusted(current.root);
-      if (!isWithin(identity.root, resolvedCwd)) {
-        throw new GhostError(
-          "cwd_outside_project",
-          "Leaving a bound project requires an explicit project rebind.",
-          409,
-        );
-      }
-    }
-    return resolvedCwd;
-  }
-
   /** Revalidate a task's pinned project identity and cwd immediately before a worker starts. */
   async resolveTrustedTaskCwd(root: string, cwd: string): Promise<{ root: string; cwd: string }> {
     const identity = await this.assertTrusted(root);
@@ -1035,61 +1020,4 @@ export class ProjectBindingStore {
     return { root: identity.root, cwd: resolvedCwd };
   }
 
-  async writeOperationalCwd(
-    sessionDir: string,
-    runtime: ConversationRuntime,
-    conversationId: string,
-    current: ProjectBindingState,
-    cwd: string,
-  ): Promise<void> {
-    const resolvedCwd = await this.resolveOperationalCwd(current, cwd);
-    const identity = current.root ? await this.assertTrusted(current.root) : null;
-    const generation = current.generation + 1;
-    let snapshotPath: string | undefined;
-    if (runtime === "pi" && current.root && identity) {
-      const snapshot = await readPiProjectSnapshot({
-        sessionDir,
-        conversationId,
-        generation: current.generation,
-        root: current.root,
-        identity,
-      });
-      snapshotPath = await writePiProjectSnapshot({
-        sessionDir,
-        conversationId,
-        generation,
-        root: current.root,
-        identity,
-        snapshot,
-      });
-    }
-    const stored: StoredProjectBinding = {
-      version: PROJECT_BINDING_VERSION,
-      runtime,
-      conversationId,
-      root: current.root,
-      cwd: resolvedCwd,
-      generation,
-      status: current.status,
-      error: current.error,
-      mcpStatus: current.mcpStatus,
-      resources: completeResources(current.resources),
-      lastRefreshAt: current.lastRefreshAt,
-      reason: "resumed",
-      identity: identity ? { dev: identity.dev, ino: identity.ino } : null,
-    };
-    const bindingPath = projectBindingPath(sessionDir, runtime, conversationId);
-    try {
-      await atomicJson(
-        bindingPath,
-        parseStoredBinding(stored, runtime, conversationId, bindingPath),
-      );
-    } catch (error) {
-      if (snapshotPath) await rm(snapshotPath, { force: true }).catch(() => {});
-      throw error;
-    }
-    if (runtime === "pi") {
-      await removePiProjectSnapshotsExcept(sessionDir, conversationId, snapshotPath).catch(() => {});
-    }
-  }
 }

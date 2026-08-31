@@ -1101,8 +1101,8 @@ describe("ProjectBindingStore", () => {
     },
   );
 
-  it("persists a canonical contained cwd, one-time trust, and rejects symlink escape", async () => {
-    const { root, sessionDir, project, store } = fixture();
+  it("persists a canonical contained cwd and one-time trust", async () => {
+    const { sessionDir, project, store } = fixture();
     const child = join(project, "packages", "app");
     mkdirSync(child, { recursive: true });
     const current = await store.read(sessionDir, "pi:draft", "pi", "draft");
@@ -1148,17 +1148,6 @@ describe("ProjectBindingStore", () => {
       trustToken: preview.trustToken,
       reason: "bound",
     })).rejects.toMatchObject({ code: "trust_token_invalid" });
-
-    const outside = join(root, "outside");
-    mkdirSync(outside);
-    symlinkSync(outside, join(project, "escape"));
-    await expect(store.writeOperationalCwd(
-      sessionDir,
-      "pi",
-      "draft",
-      bound,
-      join(project, "escape"),
-    )).rejects.toMatchObject({ code: "cwd_outside_project" });
 
     await store.write({
       sessionDir,

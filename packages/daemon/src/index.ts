@@ -165,7 +165,6 @@ export {
   type MaintenanceDrainReservation,
   type MaintenanceIdentity,
   type MaintenanceMode,
-  type MaintenanceOwnerActivity,
   type MaintenanceOwnerAdmission,
   type MaintenanceRuntime,
   type MaintenanceSourceIdentity,

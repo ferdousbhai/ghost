@@ -570,18 +570,21 @@ describe("Claude session sidecar confinement", () => {
 });
 
 describe("Claude Code subscription runtime", () => {
-  it("keeps slash-prefixed owner text as an ordinary Claude prompt", async () => {
-    const { seenPrompts } = setupClaudeHost();
+  it.each(["/tools", "!pwd", "!!cd /"])(
+    "keeps sigil-prefixed owner text as an ordinary Claude prompt: %s",
+    async (prompt) => {
+      const { seenPrompts } = setupClaudeHost();
 
-    await host!.runTurn("casper", {
-      sessionId: "literal-slash-prompt",
-      prompt: "/tools",
-      emit: () => {},
-    });
+      await host!.runTurn("casper", {
+        sessionId: "literal-sigil-prompt",
+        prompt,
+        emit: () => {},
+      });
 
-    expect(seenPrompts).toHaveLength(1);
-    expect(JSON.stringify(seenPrompts[0]?.message.content)).toContain("/tools");
-  });
+      expect(seenPrompts).toHaveLength(1);
+      expect(JSON.stringify(seenPrompts[0]?.message.content)).toContain(prompt);
+    },
+  );
 
   it("removes the pinned SDK credential surface from query env without mutating parent env", async () => {
     const { seenOptions } = setupClaudeHost();
@@ -2082,7 +2085,6 @@ describe("Claude Code subscription runtime", () => {
             },
           };
         },
-        recordOwnerActivity: async () => {},
         reserveConversationDelete: reservation,
         completeConversationDelete: () => {},
         reserveGhostMove: reservation,
@@ -2495,7 +2497,6 @@ describe("Claude Code subscription runtime", () => {
           },
         };
       },
-      recordOwnerActivity: async () => {},
       reserveConversationDelete: reservation,
       completeConversationDelete: () => {},
       reserveGhostMove: reservation,
@@ -2568,7 +2569,6 @@ describe("Claude Code subscription runtime", () => {
           releases += 1;
         },
       }),
-      recordOwnerActivity: async () => {},
       reserveConversationDelete: reservation,
       completeConversationDelete: () => {},
       reserveGhostMove: reservation,
@@ -2852,7 +2852,6 @@ describe("Claude Code subscription runtime", () => {
         },
         release: () => {},
       }),
-      recordOwnerActivity: async () => {},
       reserveConversationDelete: reservation,
       completeConversationDelete: () => {},
       reserveGhostMove: reservation,

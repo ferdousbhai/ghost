@@ -81,11 +81,6 @@ export type MaintenanceSourceIdentity =
   | { runtime: "pi"; createdAt: string }
   | { runtime: "claude-code"; createdAt: string; resumeId: string };
 
-export interface MaintenanceOwnerActivity {
-  source: MaintenanceSourceIdentity;
-  cwd: string;
-}
-
 export interface SettledMaintenanceTurn {
   source: MaintenanceSourceIdentity;
   sourceRevision: MaintenanceSourceRevision;
@@ -1100,53 +1095,6 @@ export class ConversationMaintenance {
         this.arm(slot);
       },
     };
-  }
-
-  /**
-   * Settle an admitted owner action which reached no model (for example a
-   * native command). It advances only inactivity metadata: no synthetic turn,
-   * source revision, prompt, assistant text, or memory work is created.
-   */
-  async recordOwnerActivity(
-    identity: MaintenanceIdentity,
-    activity: MaintenanceOwnerActivity,
-  ): Promise<void> {
-    if (this.shuttingDown) {
-      throw new GhostError("daemon_shutting_down", "The daemon is shutting down.", 503);
-    }
-    const slot = this.slots.get(this.key(identity));
-    if (!slot || slot.deleteSuppressed || slot.owners < 1 || slot.reservations > 0
-      || (this.ghostReservations.get(identity.ghostName) ?? 0) > 0) {
-      throw new GhostError(
-        "session_busy",
-        "No-model owner activity must settle inside its maintenance admission.",
-        409,
-      );
-    }
-    if (!validSourceIdentity(identity.runtime, activity.source)) {
-      throw new GhostError(
-        "maintenance_source_invalid",
-        "Maintenance owner activity source identity does not match its runtime.",
-        400,
-      );
-    }
-    if (!isAbsolute(activity.cwd) || activity.cwd.includes("\0")
-      || activity.cwd.length > 4_096 || resolve(activity.cwd) !== activity.cwd) {
-      throw new GhostError("invalid_cwd", "Maintenance owner activity metadata is invalid.", 400);
-    }
-    await (slot.running ?? Promise.resolve()).catch(() => undefined);
-    await this.homeOperations.withLease(identity.ghostName, async () => {
-      const state = await this.mutate(identity, activity.source, activity.cwd, (current) => {
-        current.operationalCwd = activity.cwd;
-        current.lastActivityAt = this.now().toISOString();
-        current.activityGeneration += 1;
-        current.deliveredIdleRegistrations = [];
-        current.maintenanceRetry = null;
-        return current;
-      });
-      const last = state.pendingTurns.at(-1);
-      this.queueIdle(slot, state, state.lastSequence, last?.outcome ?? "completed");
-    });
   }
 
   private queueIdle(

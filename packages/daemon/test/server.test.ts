@@ -19,7 +19,7 @@ import { ghostPaths } from "../src/ghosts.js";
 import { HomeOperationCoordinator } from "../src/home-operations.js";
 import { McpCatalog } from "../src/mcp-catalog.js";
 import { setChatModelRole } from "../src/models.js";
-import type { PiMessagesEvent } from "../src/pi-messages.js";
+import { zeroUsage, type PiMessagesEvent } from "../src/pi-messages.js";
 import { projectBindingPath } from "../src/project-binding.js";
 import {
   startDaemonServer,
@@ -886,20 +886,27 @@ describe("POST /api/ghosts/:name/messages runtime admission", () => {
     options: { sessionId },
   });
 
-  it("returns typed 409 for direct Bash under Claude without creating Pi state", async () => {
-    const base = await serve([{ kind: "text", text: "must not run" }]);
+  it("passes shell-like owner text to Claude without creating Pi state", async () => {
+    const base = await serve([{ kind: "text", text: "Pi must not run" }]);
     const home = ghostPaths(join(temp!.root, "casper")).home;
     const sessionDir = ghostPaths(home).sessionDir;
     setChatModelRole(home, "claude-code", "default");
     const id = "http-claude-direct";
+    const claude = (host as unknown as {
+      claudeCode: { runTurn(...args: unknown[]): Promise<void> };
+    }).claudeCode;
+    const run = vi.spyOn(claude, "runTurn").mockImplementation(async (...args) => {
+      const options = args[3] as { emit(event: PiMessagesEvent): void };
+      options.emit({ type: "start" });
+      options.emit({ type: "done", reason: "stop", usage: zeroUsage() });
+    });
 
     const result = await postTurn(base, body(id, "!!cd /"));
 
-    expect(result.status).toBe(409);
-    expect(JSON.parse(result.raw)).toMatchObject({
-      error: { code: "not_supported", message: expect.stringContaining("Claude Code") },
-    });
-    expect(result.headers.get("content-type")).toContain("application/json");
+    expect(result.status).toBe(200);
+    expect(result.events.at(-1)).toMatchObject({ type: "done", reason: "stop" });
+    expect(run).toHaveBeenCalledOnce();
+    expect((run.mock.calls[0]![3] as { prompt?: string }).prompt).toBe("!!cd /");
     expect(provider!.requests).toHaveLength(0);
     expect(host!.cachedSessionCount).toBe(0);
     expect(existsSync(join(sessionDir, sessionFileNameFor(id)))).toBe(false);

@@ -286,15 +286,6 @@ journal makes replay safe: Ghost persists its identity and retry deadline
 before invocation and retries it at least once until the pending turn settles.
 A new owner action resets both delivery progress and retry state.
 
-A successfully admitted owner action which reaches no model (for example a
-native command) records only its operational cwd and last-activity time. It
-creates no synthetic transcript turn or pending memory input, but restarts idle
-deadlines so hooks observe inactivity from the real owner action. Admission and
-its pre-action drain are strict; after the native action succeeds, this record
-is fail-open bookkeeping. A write failure is logged and leaves prior pending
-maintenance untouched without hiding the successful result or undoing a
-durable cwd change.
-
 ## Status
 
 Authenticated `GET /api/hooks` returns only `{ active, total, events, hooks,

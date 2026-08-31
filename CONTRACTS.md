@@ -558,28 +558,14 @@ receives it at the release boundary. A job cancelled before delivery still
 reports (`was cancelled`); jobs cancelled by session teardown do not.
 
 Ghost has no principal slash-command catalog, command browser, completion menu,
-or command-output transcript row. A leading `/` has no privileged meaning at
-the principal boundary: it is ordinary owner text under both pi and Claude
-Code. Ghost operations live in the HUD, daemon API, CLI, or registered tools.
-Pi is constructed with prompt-template and skill-command expansion disabled,
-so it cannot reinterpret that text after admission.
-
-Runtime selection is resolved before Ghost dispatches a leading `!` or `!!`.
-Under pi, `!command` executes immediately through the session's bash runner
-without a model turn; `!!command` does the same but excludes the result
-from future model context. Under Claude Code both forms are a typed
-`409 not_supported` before stream headers, and do not create, duplicate, or open
-a pi session or persist pi cwd state. Admitted pi commands appear in the live
-event stream and are persisted in the pi transcript before any model pass,
-because Ghost hands pi an empty transcript file at open so every entry is
-written immediately. A successful standalone `cd` changes and
-durably records the conversation working directory without relocating that
-transcript; pi binds cwd at open, so the conversation is reopened at the new
-cwd on the next turn. In a bound project it may move only within the canonical
-project root. Leaving requires a new preview/trust/rebind. In an unbound
-conversation it may move anywhere the owner can access, but that operational
-movement discovers no project resources; binding is the only discovery
-transition.
+command-output transcript row, or direct shell sigil. Leading `/`, `!`, and
+`!!` have no privileged meaning at the principal boundary: they are ordinary
+owner text under both pi and Claude Code. Ghost operations live in the HUD,
+daemon API, CLI, or registered tools, and the ghost itself uses its `bash` tool
+for computer work. Pi is constructed with prompt-template and skill-command
+expansion disabled, so it cannot reinterpret slash text after admission.
+Legacy `bashExecution` entries in existing Pi transcripts remain readable
+as assistant text; Ghost creates no new entries of that role.
 
 Long-context maintenance is pi's native compaction. The daemon projects its
 owner-facing `compaction.enabled`, `thresholdTokens`, and `thresholdFraction`
@@ -608,15 +594,6 @@ registrations not durably delivered for the current activity generation, from
 durable `lastActivityAt`, never a fresh 60-second window. At most one generation
 runs per conversation and one newest pending trigger is coalesced; a new owner
 action, conversation delete, whole-home move, or shutdown aborts and drains it.
-An admitted owner action which reaches no model records only its exact source
-identity, actual operational cwd, and new `lastActivityAt`; it appends no
-synthetic prompt/assistant turn and advances no source revision or sequence,
-but resets every idle deadline from that owner activity. Admission and the
-pre-action maintenance drain remain strict. Once the native action has
-succeeded, however, this activity record is fail-open bookkeeping: a state
-write failure is generically logged, preserves the prior pending maintenance
-state, and cannot suppress the successful terminal result or undo an already
-durable cwd change.
 If a transient/aborted/model failure leaves pending turns without an active
 receipt, exactly one fixed 60-second retry is armed; repeated failures re-arm
 that bounded delay rather than hot-looping. Its exact kind, stable registration
@@ -717,8 +694,8 @@ side-effecting hook, but a process crash after the claim and before execution
 may skip it. The receipt-journaled built-in memory registration instead stores
 its exact retry before invocation and is at-least-once until its pending turns
 settle; exact memory intent/receipt reconciliation makes a repeated attempt
-safe. A new model turn or no-model owner activity atomically increments the
-activity generation and clears prior delivery/retry progress.
+safe. A new model turn atomically increments the activity generation and clears
+prior delivery/retry progress.
 
 ## Daemon HTTP API (localhost only)
 
@@ -1248,8 +1225,7 @@ streams emit one complete event object per line.
   an invalid byte inside an otherwise valid JSON string also fails as
   `project_snapshot_invalid` rather than entering a resumed Pi snapshot as a
   replacement character.
-  A successful persistent `!cd` clones the same bytes into the next binding
-  generation rather than changing discovery. Binding/reload closes an idle cached Pi session
+  Binding/reload closes an idle cached Pi session
   only after validation, the bounded scan, trust/state persistence, and atomic
   sidecar publication succeed, so a failed transition leaves the existing Pi
   session, MCP manager, and background jobs untouched. Publication is the
@@ -1309,9 +1285,9 @@ streams emit one complete event object per line.
   Every message admission resolves the selected runtime once, before opening a
   runtime or publishing stream headers. If that selected runtime has no project
   binding while the opposite runtime's same raw conversation id is bound, the
-  request is `409 project_runtime_mismatch`. This applies equally to ordinary
-  owner messages and direct Bash, to unpublished draft ids and to raw ids with
-  rows in both runtimes; the refusal creates no selected-runtime transcript,
+  request is `409 project_runtime_mismatch`. This applies to every owner
+  message, to unpublished draft ids, and to raw ids with rows in both runtimes;
+  the refusal creates no selected-runtime transcript,
   sidecar, or cwd state. A binding is never inferred or transferred across the
   `pi:`/`claude-code:` qualification boundary.
   Whole-ghost rename/delete, conversation delete, and MCP reload/reconnect are
@@ -1440,7 +1416,7 @@ streams emit one complete event object per line.
   error? }` without opening a session. POST accepts
   `{ action: "start"|"mute"|"unmute"|"stop" }`. The default implementation
   answers `501 not_supported` until the Ghost-owned port lands (issue #3).
-  When active, a separate chat or direct Bash turn is refused from the moment
+  When active, a separate chat turn is refused from the moment
   voice startup claims the conversation until voice has fully stopped, and
   model rebinds and MCP reloads/reconnects defer across that same boundary and
   apply after voice releases the session. Claude Code returns
@@ -2377,8 +2353,7 @@ stderr format. Filter one ghost with
 - Open every transcript with an explicit `SessionManager.open(file, sessionDir,
   cwd)` so nothing lands in `~/.pi`. Hand pi an empty transcript file at open so
   it persists every entry immediately; pi alone defers the file until the first
-  assistant message, which would lose direct `!command` turns and hook context
-  that precede one.
+  assistant message, which would lose hook context that precedes one.
 - Construct pi's `ModelRuntime` with Ghost's `GhostPiCredentialStore`. Secret
   Service items use Ghost's schema and exact configured service/account
   references only; cross-process refresh leases and revision-keyed caching live

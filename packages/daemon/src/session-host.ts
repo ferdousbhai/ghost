@@ -92,7 +92,6 @@ import {
   type MaintenanceConversationDeleteOutcome,
   type MaintenanceDrainReservation,
   type MaintenanceIdentity,
-  type MaintenanceOwnerActivity,
   type MaintenanceOwnerAdmission,
   type SettledMaintenanceTurn,
 } from "./conversation-maintenance.js";
@@ -112,7 +111,6 @@ import {
   asRuntimeSessionEvent,
   createPiMessagesAdapter,
   type PiMessagesEvent,
-  zeroUsage,
 } from "./pi-messages.js";
 import { readPinState, writePins } from "./pins.js";
 import { readReadState, writeReads } from "./reads.js";
@@ -207,7 +205,6 @@ import {
 
 type SessionConversationMaintenance = Pick<ConversationMaintenance,
   | "admitOwnerAction"
-  | "recordOwnerActivity"
   | "reserveConversationDelete"
   | "completeConversationDelete"
   | "reserveGhostMove"
@@ -230,13 +227,6 @@ export const PI_NATIVE_TOOL_NAMES: readonly string[] = [
 
 const LIVE_DELEGATION_MESSAGE_TYPE = "live-delegation";
 
-/** `cd ...` typed at the `!` prompt moves the conversation's working directory. */
-function isPersistentShellCdCommand(command: string): boolean {
-  return /^cd(?:\s|$)/.test(command.trim());
-}
-
-type BashResult = Awaited<ReturnType<AgentSession["executeBash"]>>;
-
 interface BashExecutionMessage {
   role: "bashExecution";
   command: string;
@@ -254,44 +244,11 @@ function bashExecutionToText(message: BashExecutionMessage): string {
     : message.exitCode === undefined || message.exitCode === 0
       ? ""
       : `[exit ${message.exitCode}]`;
-  const output = message.truncated ? `${message.output}\n[output truncated]` : message.output;
-  return [`$ ${message.command}`, output.trimEnd(), status].filter(Boolean).join("\n");
-}
-
-export interface UserBashCommand {
-  command: string;
-  excludeFromContext: boolean;
-}
-
-export function parseUserBashCommand(text: string): UserBashCommand | null {
-  const trimmed = text.trimStart();
-  if (!trimmed.startsWith("!")) return null;
-  const excludeFromContext = trimmed.startsWith("!!");
-  const command = trimmed.slice(excludeFromContext ? 2 : 1).trim();
-  return { command, excludeFromContext };
-}
-
-function bashExecutionText(
-  command: UserBashCommand,
-  result: BashResult,
-): string {
-  const message: BashExecutionMessage = {
-    role: "bashExecution",
-    command: command.command,
-    output: result.output,
-    exitCode: result.exitCode,
-    cancelled: result.cancelled,
-    truncated: result.truncated,
-    timestamp: Date.now(),
-    ...(command.excludeFromContext ? { excludeFromContext: true } : {}),
-  };
-  return bashExecutionToText(message);
-}
-
-function tailSummary(text: string, maxLength = 800): string | undefined {
-  const clean = text.trimEnd();
-  if (!clean) return undefined;
-  return clean.length <= maxLength ? clean : `…${clean.slice(-maxLength)}`;
+  const output = message.output.trimEnd();
+  const renderedOutput = message.truncated
+    ? [output, "[output truncated]"].filter(Boolean).join("\n")
+    : output;
+  return [`$ ${message.command}`, renderedOutput, status].filter(Boolean).join("\n");
 }
 
 /** Ghost's summary briefing replaces pi's default compaction instructions. */
@@ -697,7 +654,6 @@ interface HostedSession extends GhostSessionHandle {
   modelRuntime: GhostPiRuntime;
   /** The ghost's own settings.yml, read when the session opened. */
   settings: GhostSettings;
-  /** A `!cd` moved the working directory; the session reopens on release. */
   /**
    * Set when a model switch arrived during a turn or live voice. The model is
    * rebound after that exclusive owner releases the AgentSession.
@@ -1024,20 +980,6 @@ function exactDeleteStaticSource(
       return name.startsWith(prefix) && /^\d+\.json$/u.test(name.slice(prefix.length));
     }
   }
-}
-
-function persistentCdTarget(command: string, cwd: string, ownerHome: string): string | null {
-  if (!isPersistentShellCdCommand(command)) return null;
-  let rest = command.trim().slice(2).trim();
-  if (rest === "" || rest === "--") return ownerHome;
-  if (rest.startsWith("-- ")) rest = rest.slice(3).trimStart();
-  const quote = rest[0];
-  if ((quote === '"' || quote === "'") && rest.endsWith(quote)) rest = rest.slice(1, -1);
-  if (rest === "~") return ownerHome;
-  if (rest.startsWith("~/")) return resolve(ownerHome, rest.slice(2));
-  // `cd -` depends on mutable shell history and cannot be authorized before it mutates.
-  if (rest === "-") return null;
-  return isAbsolute(rest) ? resolve(rest) : resolve(cwd, rest);
 }
 
 const LEGACY_PI_SESSION_PREFIX_MAX_BYTES = 64 * 1024;
@@ -2523,9 +2465,9 @@ export class SessionHost {
       // A transcript the Oh My Pi runtime wrote is converted once, in place.
       if (await hasOmpTitleSlot(sessionFile)) await convertOmpTranscript(sessionFile);
     }
-    // pi defers a new transcript until its first assistant message; Ghost
-    // persists direct bash turns and hook context before any model pass, so
-    // it hands pi an empty file, which pi initializes and appends to from then on.
+    // pi defers a new transcript until its first assistant message. Ghost may
+    // persist hook context before that pass, so it hands pi an empty file to
+    // initialize and append to immediately.
     if (!sessionFileExists) {
       mkdirSync(paths.sessionDir, { recursive: true });
       writeFileSync(sessionFile, "", { flag: "wx", mode: 0o600 });
@@ -3427,40 +3369,6 @@ export class SessionHost {
     };
   }
 
-  private piOwnerActivity(hosted: HostedSession): MaintenanceOwnerActivity | null {
-    const createdAt = hosted.session.sessionManager.getHeader()?.timestamp;
-    if (!createdAt) return null;
-    return {
-      source: { runtime: "pi", createdAt },
-      cwd: hosted.project.cwd,
-    };
-  }
-
-  private async recordPiOwnerActivity(
-    ghostName: string,
-    conversationId: string,
-    hosted: HostedSession,
-    activity: MaintenanceOwnerActivity | null = this.piOwnerActivity(hosted),
-  ): Promise<void> {
-    if (!this.maintenance) return;
-    if (!activity) {
-      hosted.logger.warn("conversation maintenance owner activity was not recorded", {
-        runtime: "pi",
-      });
-      return;
-    }
-    try {
-      await this.maintenance.recordOwnerActivity(
-        { ghostName, runtime: "pi", conversationId },
-        activity,
-      );
-    } catch {
-      hosted.logger.warn("conversation maintenance owner activity was not recorded", {
-        runtime: "pi",
-      });
-    }
-  }
-
   private async runCollaborationPrompt(hosted: HostedSession, text: string): Promise<void> {
     while (hosted.mcpPublication) await hosted.mcpPublication;
     const ownerPrompt = text.trim();
@@ -3880,158 +3788,9 @@ export class SessionHost {
     return current ? { provider: current.provider, id: current.id } : null;
   }
 
-  private async runUserBash(
-    ghostName: string,
-    command: UserBashCommand,
-    options: RunTurnOptions,
-    settleBeforeRelease?: (hosted: HostedSession) => Promise<void>,
-  ): Promise<void> {
-    const conversationId = options.sessionId ?? DEFAULT_SESSION_KEY;
-    if (this.claudeCode.isBusy(ghostName, conversationId)) {
-      throw new GhostError(
-        "session_busy",
-        "This ghost is already answering in this conversation.",
-        409,
-      );
-    }
-
-    const hosted = await this.idleHostedSession(
-      ghostName,
-      options.sessionId,
-      "This ghost is already working in this conversation.",
-      true,
-    );
-    const id = `bash-${randomUUID()}`;
-    const executionCwd = resolve(hosted.session.sessionManager.getCwd());
-    let prevalidatedCd: string | null = null;
-    let streamedTail = "";
-    let lastUpdate = 0;
-    let toolFinished = false;
-    let pendingTerminal: Extract<PiMessagesEvent, { type: "done" | "error" }> | undefined;
-    const onAbort = () => hosted.session.abortBash();
-    try {
-      options.emit({ type: "start" });
-      options.emit({
-        type: "tool_execution_start",
-        id,
-        toolName: "bash",
-        arguments: {
-          command: command.command,
-          excludeFromContext: command.excludeFromContext,
-        },
-        cwd: executionCwd,
-        intent: "Run a local command",
-      });
-      if (hosted.project.root && isPersistentShellCdCommand(command.command)) {
-        const target = persistentCdTarget(command.command, executionCwd, this.ownerHome);
-        if (!target) {
-          throw new GhostError(
-            "cwd_outside_project",
-            "This cd form cannot be authorized inside a bound project; choose an explicit path.",
-            409,
-          );
-        }
-        prevalidatedCd = await this.projectBindings.resolveOperationalCwd(hosted.project, target);
-      }
-      options.signal?.addEventListener("abort", onAbort, { once: true });
-      const result = await hosted.session.executeBash(
-        command.command,
-        (chunk) => {
-          streamedTail = `${streamedTail}${chunk}`.slice(-4_000);
-          const now = Date.now();
-          if (now - lastUpdate < 75) return;
-          lastUpdate = now;
-          options.emit({
-            type: "tool_execution_update",
-            id,
-            toolName: "bash",
-            summary: tailSummary(streamedTail),
-          });
-        },
-        { excludeFromContext: command.excludeFromContext },
-      );
-
-      if (
-        isPersistentShellCdCommand(command.command)
-        && !result.cancelled
-        && result.exitCode === 0
-      ) {
-        const target = prevalidatedCd
-          ?? persistentCdTarget(command.command, executionCwd, this.ownerHome);
-        const nextCwd = target ? resolve(target) : null;
-        if (nextCwd && nextCwd !== resolve(hosted.session.sessionManager.getCwd())) {
-          const sessionDir = ghostPaths(hosted.ghost.dir).sessionDir;
-          await this.projectBindings.writeOperationalCwd(
-            sessionDir,
-            "pi",
-            conversationId,
-            hosted.project,
-            nextCwd,
-          );
-          hosted.project = await this.projectState(ghostName, "pi", conversationId);
-          await this.announceConversationUpdated(ghostName, "pi", conversationId, "project");
-        }
-      }
-
-      const isError = result.cancelled
-        || (result.exitCode !== undefined && result.exitCode !== 0);
-      options.emit({
-        type: "tool_execution_end",
-        id,
-        toolName: "bash",
-        isError,
-        summary: tailSummary(result.output)
-          ?? (result.cancelled ? "Command cancelled" : `Exit ${result.exitCode ?? 0}`),
-      });
-      toolFinished = true;
-
-      const text = bashExecutionText(command, result);
-      options.emit({ type: "text_start", contentIndex: 0 });
-      options.emit({ type: "text_delta", contentIndex: 0, delta: text });
-      options.emit({ type: "text_end", contentIndex: 0, content: text });
-      if (options.signal?.aborted) {
-        pendingTerminal = {
-          type: "error",
-          reason: "aborted",
-          usage: zeroUsage(),
-          errorMessage: "Command aborted.",
-        };
-      } else {
-        pendingTerminal = { type: "done", reason: "stop", usage: zeroUsage() };
-      }
-    } catch (error) {
-      hosted.logger.error("direct bash command failed", {
-        error: error instanceof Error ? error.message : String(error),
-      });
-      if (!toolFinished) {
-        options.emit({
-          type: "tool_execution_end",
-          id,
-          toolName: "bash",
-          isError: true,
-          summary: error instanceof Error ? error.message : String(error),
-        });
-      }
-      pendingTerminal = {
-        type: "error",
-        reason: options.signal?.aborted ? "aborted" : "error",
-        usage: zeroUsage(),
-        errorMessage: error instanceof Error ? error.message : String(error),
-      };
-    } finally {
-      options.signal?.removeEventListener("abort", onAbort);
-      try {
-        await settleBeforeRelease?.(hosted);
-        if (pendingTerminal) options.emit(pendingTerminal);
-      } finally {
-        await this.releaseSessionClaim(hosted, ghostName);
-      }
-    }
-  }
-
   /**
-   * Resolve the selected chat runtime once, before any command dispatch or
-   * runtime state is opened. Malformed routing retains the default fallback.
+   * Resolve the selected chat runtime once, before runtime state is opened.
+   * Malformed routing retains the default fallback.
    */
   private selectedTurnRuntime(ghostName: string): ConfiguredTurnRuntime {
     const ghost = this.registry.get(ghostName);
@@ -4198,17 +3957,6 @@ export class SessionHost {
     };
     try {
       await this.assertProjectRuntimeMatches(ghostName, conversationId, configured.runtime);
-      const bashCommand = parseUserBashCommand(options.prompt);
-      if (bashCommand && configured.runtime === "claude-code") {
-        throw new GhostError(
-          "not_supported",
-          "Direct ! and !! commands are unavailable while this ghost uses Claude Code.",
-          409,
-        );
-      }
-      if (bashCommand && !bashCommand.command) {
-        throw new GhostError("invalid_request", "Write a command after ! or !!.", 400);
-      }
       const selected: SelectedTurnRuntime = configured.runtime === "claude-code"
         ? {
             ...configured,
@@ -4311,28 +4059,6 @@ export class SessionHost {
         "Stop live voice before sending a separate turn in this conversation.",
         409,
       );
-    }
-    const bashCommand = parseUserBashCommand(options.prompt);
-    if (bashCommand) {
-      if (this.projectTransitions.has(deletionKeyOf(ghostName, "pi", conversationId))) {
-        throw new GhostError("session_busy", "Wait for this conversation's project change to finish.", 409);
-      }
-      await this.runUserBash(ghostName, bashCommand, options, async (hosted) => {
-        await this.recordPiOwnerActivity(ghostName, conversationId, hosted);
-        await finishMaintenance();
-      });
-      // pi binds a session's cwd when it opens; a `!cd` takes effect by
-      // reopening the conversation at its new operational cwd.
-      const moved = this.sessions.get(key);
-      if (moved && resolve(moved.project.cwd) !== resolve(moved.session.sessionManager.getCwd())) {
-        await this.closePi(ghostName, conversationId);
-      }
-      await this.announceConversationUpdated(
-        ghostName,
-        "pi",
-        options.sessionId ?? DEFAULT_SESSION_KEY,
-      );
-      return;
     }
     if (selected.runtime === "claude-code") {
       if (this.projectTransitions.has(deletionKeyOf(ghostName, "claude-code", conversationId))) {
