@@ -31,7 +31,10 @@ if [[ "$checkout_commit" != "$commit" ]]; then
   exit 1
 fi
 
-bash "$source_tree/packaging/release/test-release-source.sh"
+# The worktree source check must derive identity from the commit, not a caller's
+# reproducibility environment.
+SOURCE_DATE_EPOCH=1 \
+  bash "$source_tree/packaging/release/test-release-source.sh"
 
 expected_tag="v$version"
 event_name="${EVENT_NAME:-}"

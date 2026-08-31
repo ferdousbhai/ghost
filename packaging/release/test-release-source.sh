@@ -15,8 +15,9 @@ version="$(bun -e 'process.stdout.write((await Bun.file(process.argv[1]).json())
 commit="$(git -C "$source_root" rev-parse 'HEAD^{commit}')"
 epoch="$(git -C "$source_root" show -s --format=%ct "$commit")"
 archive="$work/ghost-$version.tar.gz"
-bash "$script_dir/make-source-archive.sh" \
-  "$source_root" "$archive" "$version" --worktree
+SOURCE_DATE_EPOCH="$epoch" \
+  bash "$script_dir/make-source-archive.sh" \
+    "$source_root" "$archive" "$version" --worktree
 tar -xf "$archive" -C "$work"
 extracted="$work/ghost-$version"
 
