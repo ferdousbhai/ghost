@@ -469,12 +469,16 @@ destination precedence over an in-flight owner cancellation: either ordering
 settles as `interrupted`. The destination remains authoritative through record
 publication; an upgrade that arrives while a `cancelled` write is blocked is
 rechecked and durably advances that record to `interrupted` before either
-caller resolves. Shutdown synchronously snapshots and aborts every admitted
-launch before its first await, retains those ids after transient trackers
-settle, then lists and settles every durable row. It aborts and forces
-all live tasks, waits for quiescence, and durably marks them `interrupted`.
-Cancellation of an already-terminal record is a pure read and never touches a
-retained native control.
+caller resolves. Shutdown synchronously snapshots every admitted launch and
+live native control before its first await, retains those ids after transient
+trackers settle, and starts one shared idempotent abort, force, and quiescence
+operation per control before awaiting admission persistence or reading task
+storage. It then lists and settles every durable row as `interrupted`.
+Cancellation follows the same ordering for a retained control, so a later
+durable read failure is reported only after native quiescence; a task without
+a retained control remains a pure durable read. Shutdown settles every
+snapshot independently so one storage failure cannot skip another native
+cleanup, and reports storage failure only after all cleanup attempts finish.
 Startup never resumes an old generation. Adapters own native session and
 subagent behavior; this layer owns only durable lifecycle. It never creates Git
 worktrees or runs Git staging, commit, or branch commands, and it does not

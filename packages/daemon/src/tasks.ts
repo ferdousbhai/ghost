@@ -278,6 +278,7 @@ export class TaskController {
   readonly #stops = new Map<string, Promise<TaskRecord>>();
   readonly #stopTargets = new Map<string, "cancelled" | "interrupted">();
   readonly #followUps = new Map<string, Promise<void>>();
+  readonly #controlCleanups = new WeakMap<TaskAdapterControl, Promise<void>>();
   #initialization?: Promise<TaskRecord[]>;
   #initialized = false;
   #shuttingDown = false;
@@ -385,7 +386,7 @@ export class TaskController {
       const live = this.#live.get(id);
       if (live?.generation === generation) {
         try {
-          await this.#quiesce(live);
+          await this.#cleanup(live);
         }
         catch {
           await this.#actor(id, () => this.#update(id, (row) => {
@@ -405,7 +406,12 @@ export class TaskController {
       if (this.#live.get(id)?.generation === generation) this.#live.delete(id);
     }
   }
-  async #quiesce(live: LiveTask): Promise<void> { live.abort.abort(); await live.control.force().catch(() => {}); await live.control.quiescence; }
+  #cleanup(live: LiveTask): Promise<void> {
+    const existing = this.#controlCleanups.get(live.control); if (existing) return existing;
+    live.abort.abort();
+    const cleanup = (async () => { try { await live.control.force(); } catch {} await live.control.quiescence; })();
+    this.#controlCleanups.set(live.control, cleanup); return cleanup;
+  }
   async #emit(id: string, generation: number, event: { code: string; message: string }): Promise<void> {
     if (!CODE.test(event.code)) return;
     await this.#actor(id, async () => {
@@ -449,16 +455,23 @@ export class TaskController {
   cancel(id: string): Promise<TaskRecord> { this.#ready(); return this.#sharedStop(id, "cancelled"); }
   #sharedStop(id: string, final: "cancelled" | "interrupted"): Promise<TaskRecord> {
     if (final === "interrupted" || !this.#stopTargets.has(id)) this.#stopTargets.set(id, final);
+    const launch = this.#launches.get(id); launch?.abort.abort();
+    const live = this.#live.get(id); const cleanup = live ? this.#cleanup(live) : undefined;
     const existing = this.#stops.get(id); if (existing) return existing;
-    const stop = this.#stop(id); this.#stops.set(id, stop);
+    const stop = this.#stop(id, cleanup).catch((error: unknown) => {
+      if (error instanceof GhostError) throw error;
+      throw new GhostError("task_storage_failed", "Task state could not be settled after native quiescence.", 500);
+    });
+    this.#stops.set(id, stop);
     void stop.finally(() => {
       if (this.#stops.get(id) === stop) { this.#stops.delete(id); this.#stopTargets.delete(id); }
     }).catch(() => {});
     return stop;
   }
-  async #stop(id: string): Promise<TaskRecord> {
+  async #stop(id: string, cleanup: Promise<void> | undefined): Promise<TaskRecord> {
     const admittedLaunch = this.#launches.get(id);
-    if (this.#stopTargets.get(id) === "interrupted") admittedLaunch?.abort.abort();
+    try { await cleanup; }
+    catch { throw new GhostError("task_cancel_failed", "The native task did not confirm quiescence.", 502); }
     await admittedLaunch?.persisted;
     const prepared = await this.#actor(id, async () => {
       const row = await this.store.read(id);
@@ -474,7 +487,7 @@ export class TaskController {
     });
     if (!("launch" in prepared)) return prepared.row;
     prepared.launch?.abort.abort();
-    try { if (prepared.live) await this.#quiesce(prepared.live); await prepared.launch?.promise; await prepared.followUp; }
+    try { await prepared.launch?.promise; await prepared.followUp; }
     catch {
       await this.#actor(id, () => this.#update(id, (row) => {
         if (TERMINAL.has(row.state)) return false;
@@ -507,17 +520,30 @@ export class TaskController {
   async beginShutdown(): Promise<void> {
     this.#ready(); this.#shuttingDown = true;
     const admitted = [...this.#launches.entries()];
+    const live = [...this.#live.entries()];
+    const activeStops = [...this.#stops.keys()];
     for (const [, launch] of admitted) launch.abort.abort();
-    for (const id of this.#stops.keys()) this.#stopTargets.set(id, "interrupted");
-    await Promise.all(admitted.map(([, launch]) => launch.persisted));
-    await Promise.all(admitted.map(([, launch]) => launch.promise));
-    const rows = await this.store.list();
+    const cleanups = live.map(([, task]) => this.#cleanup(task));
+    for (const id of activeStops) this.#stopTargets.set(id, "interrupted");
+    const failures: unknown[] = [];
+    const collect = (results: PromiseSettledResult<unknown>[]) => {
+      for (const result of results) if (result.status === "rejected") failures.push(result.reason);
+    };
+    collect(await Promise.allSettled([
+      ...admitted.map(([, launch]) => launch.persisted),
+      ...admitted.map(([, launch]) => launch.promise),
+      ...cleanups,
+    ]));
+    let rows: TaskRecord[] = [];
+    try { rows = await this.store.list(); } catch (error) { failures.push(error); }
     const ids = new Set(rows.filter((row) => !TERMINAL.has(row.state)).map((row) => row.id));
     for (const [id] of admitted) ids.add(id);
-    for (const id of this.#live.keys()) ids.add(id);
-    await Promise.all([...ids].map((id) => this.#sharedStop(id, "interrupted")));
-    await Promise.all([...this.#launches.values()].map((launch) => launch.promise));
-    await Promise.all([...this.#followUps.values()]);
+    for (const [id] of live) ids.add(id);
+    for (const id of activeStops) ids.add(id);
+    collect(await Promise.allSettled([...ids].map((id) => this.#sharedStop(id, "interrupted"))));
+    collect(await Promise.allSettled([...this.#launches.values()].map((launch) => launch.promise)));
+    collect(await Promise.allSettled([...this.#followUps.values()]));
+    if (failures.length > 0) throw new GhostError("task_shutdown_failed", "Task shutdown finished with durable-state failures.", 500);
   }
   async forceAll(): Promise<void> {
     this.#ready(); const ids = new Set([...this.#live.keys(), ...this.#launches.keys()]);

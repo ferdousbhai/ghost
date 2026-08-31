@@ -201,7 +201,7 @@ describe("durable task foundation", () => {
     expect(await readFile(activePath)).toEqual(activeBefore); expect((await stat(activePath, { bigint: true })).mtimeNs).toBe(activeStat.mtimeNs);
   });
 
-  it("returns a terminal cancellation without touching retained native control", async () => {
+  it("quiesces a retained native control before reading a terminal record", async () => {
     const result = deferred<string>(); const quiet = deferred<void>(); let forces = 0;
     const current = await fixture({ async start(_input, context) {
       context.register({ async force() { forces += 1; quiet.resolve(); result.resolve(""); }, quiescence: quiet.promise });
@@ -209,8 +209,69 @@ describe("durable task foundation", () => {
     } });
     const task = await start(current.controller); await eventually(current.store, task.id, "running");
     const recovery = new TaskController(current.store, new Map(), authority); await recovery.initialize();
-    expect((await current.controller.cancel(task.id)).state).toBe("interrupted"); expect(forces).toBe(0);
+    expect((await current.controller.cancel(task.id)).state).toBe("interrupted"); expect(forces).toBe(1);
     result.resolve("late"); quiet.resolve(); await current.controller.beginShutdown();
+  });
+
+  it("quiesces an active control exactly once before reporting a read failure", async () => {
+    const home = await mkdtemp(join(tmpdir(), "ghost-task-")); let failReads = false;
+    class FailingReadStore extends TaskStore {
+      override async read(id: string): Promise<TaskRecord> {
+        if (failReads) throw new Error("store read failed");
+        return super.read(id);
+      }
+    }
+    const store = new FailingReadStore(home); stores.push(store);
+    const forceEntered = deferred<void>(); const releaseForce = deferred<void>(); const quiet = deferred<void>(); const result = deferred<string>(); let forces = 0;
+    const controller = new TaskController(store, new Map([["native", { async start(_input, context) {
+      context.register({ async force() { forces += 1; forceEntered.resolve(); await releaseForce.promise; quiet.resolve(); result.resolve(""); }, quiescence: quiet.promise });
+      return { result: result.promise, async followUp() {} };
+    } }]]), authority); await controller.initialize();
+    const task = await start(controller); await eventually(store, task.id, "running"); failReads = true;
+    let settled = false; const cancellation = controller.cancel(task.id); void cancellation.finally(() => { settled = true; }).catch(() => {});
+    await forceEntered.promise; expect(forces).toBe(1); expect(settled).toBe(false); releaseForce.resolve();
+    await expect(cancellation).rejects.toMatchObject({ code: "task_storage_failed" }); expect(forces).toBe(1); expect(settled).toBe(true);
+  });
+
+  it("quiesces every live control even when shutdown cannot list storage", async () => {
+    const home = await mkdtemp(join(tmpdir(), "ghost-task-")); let failList = false;
+    class FailingListStore extends TaskStore {
+      override async list(): Promise<TaskRecord[]> {
+        if (failList) throw new Error("store list failed");
+        return super.list();
+      }
+    }
+    const store = new FailingListStore(home); stores.push(store); const executions: Array<{ forces: number; quiet: boolean }> = [];
+    const controller = new TaskController(store, new Map([["native", { async start(_input, context) {
+      const execution = { forces: 0, quiet: false }; executions.push(execution); const quiet = deferred<void>(); const result = deferred<string>();
+      context.register({ async force() { execution.forces += 1; execution.quiet = true; quiet.resolve(); result.resolve(""); }, quiescence: quiet.promise });
+      return { result: result.promise, async followUp() {} };
+    } }]]), authority); await controller.initialize();
+    const first = await start(controller); const second = await start(controller);
+    await eventually(store, first.id, "running"); await eventually(store, second.id, "running"); failList = true;
+    await expect(controller.beginShutdown()).rejects.toMatchObject({ code: "task_shutdown_failed" });
+    expect(executions).toEqual([{ forces: 1, quiet: true }, { forces: 1, quiet: true }]);
+    expect((await store.read(first.id)).state).toBe("interrupted"); expect((await store.read(second.id)).state).toBe("interrupted");
+  });
+
+  it("quiesces other live work when one admission write fails during shutdown", async () => {
+    const home = await mkdtemp(join(tmpdir(), "ghost-task-")); const writeEntered = deferred<void>(); const releaseWrite = deferred<void>(); let rejectAdmission = false;
+    class FailingAdmissionStore extends TaskStore {
+      override async write(row: TaskRecord): Promise<void> {
+        if (rejectAdmission && row.state === "queued") { rejectAdmission = false; writeEntered.resolve(); await releaseWrite.promise; throw new Error("admission write failed"); }
+        await super.write(row);
+      }
+    }
+    const store = new FailingAdmissionStore(home); stores.push(store); const quiet = deferred<void>(); const result = deferred<string>(); let forces = 0;
+    const controller = new TaskController(store, new Map([["native", { async start(_input, context) {
+      context.register({ async force() { forces += 1; quiet.resolve(); result.resolve(""); }, quiescence: quiet.promise });
+      return { result: result.promise, async followUp() {} };
+    } }]]), authority); await controller.initialize();
+    const live = await start(controller); await eventually(store, live.id, "running"); rejectAdmission = true;
+    const admission = start(controller).then(() => undefined, (error: unknown) => error); await writeEntered.promise;
+    const shutdown = controller.beginShutdown(); expect(forces).toBe(1); releaseWrite.resolve();
+    expect(await admission).toBeInstanceOf(Error); await expect(shutdown).rejects.toMatchObject({ code: "task_shutdown_failed" });
+    expect(forces).toBe(1); expect((await store.read(live.id)).state).toBe("interrupted");
   });
 
   it("serializes follow-up and repeated cancellation until full quiescence", async () => {
