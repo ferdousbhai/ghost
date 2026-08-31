@@ -355,18 +355,12 @@ ad-hoc prompts:
   but never appends its prompt or reply to the transcript. The request is
   abortable and presentation-only; Claude Code has no equivalent non-mutating
   conversation context.
-- Pi plan mode (`POST …/sessions/:id/plan {action: start}`) exposes only native
-  file reads/search, structured observation, and `propose_plan`; model Bash,
-  generic writes, screenshots, and state-changing tool actions are blocked.
-  Starting is refused until the owner settles any running background jobs; it
-  never cancels them. Approval through `ask` ends planning and pins the plan into
-  every later turn. The `todo` tool is view-only while planning; `/todo` keeps a
-  phased task list the shell can show (`GET …/sessions/:id/todo`). Claude Code
-  conversations do not support this Ghost-owned mode.
+- Ghost has no principal plan mode or model-owned todo list. Planning happens
+  in ordinary conversation or as a read-only native harness assignment;
+  durable implementation work uses the task lifecycle below.
 - Coding delegation is asynchronous and durable. `task_list` and `task_get`
-  remain observational in Pi plan mode; starting, steering, or cancelling a
-  harness task remains blocked until the plan is approved. `ghost delegation`
-  runs through Bash, so the Pi principal cannot invoke it while planning.
+  remain observational, while `task`, `task_send`, and `task_cancel` mutate one
+  durable harness task.
 - Pi can use Firecrawl, HEY, Basecamp, Obsidian, Google Workspace, and other
   CLI skills through `bash` when the owner installs them. At session
   construction, Ghost uses pi's native parser to snapshot every valid skill

@@ -76,8 +76,8 @@ export function piExtensionFromGhost(
       && !options.dynamicSections
       && !options.includeRuntimeGuidance
     ) return;
-    // Sections that change between turns (plan mode, the todo list) follow
-    // the persona's re-render, so one hook owns the whole prompt.
+    // Sections that change between turns follow the persona's re-render, so
+    // one hook owns the whole prompt.
     pi.on("before_agent_start", async (event, ctx) => ({
       systemPrompt: [
         ...(await renderPersonaPrompt(extension, ghostToolContextFromPi(ctx), event.prompt, [event.systemPrompt])),

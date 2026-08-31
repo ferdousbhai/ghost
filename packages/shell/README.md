@@ -102,10 +102,9 @@ adding a message to history. Typing, starting another turn, or changing
 ghost/conversation clears it and aborts any request still running; recap
 failures stay silent because the transcript is already the durable fallback.
 
-The chat column also carries a conversation-scoped work strip above that queue:
-plan mode or the approved plan, read-only todo phases, and background jobs with
-cancellation and bounded output disclosure. It disappears when all three are
-empty and polls running jobs only while the HUD is visible.
+The chat column also carries a conversation-scoped background-job strip above
+that queue, with cancellation and bounded output disclosure. It disappears
+when no jobs exist and polls running jobs only while the HUD is visible.
 
 A project bound before the first owner turn is still an unpublished draft. The
 shell keeps that runtime-qualified identity selected while it asks ghostd to

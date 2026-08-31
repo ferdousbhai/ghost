@@ -127,7 +127,7 @@ export interface AskToolOptions {
   broker: AskBroker;
   /**
    * Milliseconds until an unanswered ask settles on its recommendations, read
-   * per ask because plan mode may suspend it; 0 waits forever.
+   * per ask; 0 waits forever.
    */
   timeoutMs: () => number;
 }

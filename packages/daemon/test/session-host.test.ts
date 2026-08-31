@@ -556,7 +556,7 @@ describe("OMP slash commands", () => {
       availability: "unsupported",
       unavailableReason: expect.stringContaining("interactive terminal UI"),
     }));
-    expect(commands).toContainEqual(expect.objectContaining({ name: "plan", availability: "available" }));
+    expect(commands.some((command) => command.name === "plan" || command.name === "todo")).toBe(false);
   });
 
   it("reports that an active Claude Code runtime has no OMP command catalog", async () => {
@@ -8150,84 +8150,6 @@ describe("background jobs", () => {
 
     await host!.close("casper", "conv-cancel-jobs");
     expect(host!.listJobs("casper", "conv-cancel-jobs")).toEqual([]);
-  });
-});
-
-describe("plan mode", () => {
-  it("keeps the world read-only while planning, pins the approved plan, and lists the todo", async () => {
-    const { dir } = await setup([
-      { kind: "tool", name: "bash", args: { command: "touch plan-mode-must-not-run" } },
-      { kind: "tool", name: "propose_plan", args: { title: "Fix the leak", content: "# Plan\n1. patch\n2. test" } },
-      { kind: "text", text: "Plan approved, starting." },
-      { kind: "tool", name: "todo", args: { op: "init", items: ["patch", "test"] } },
-      { kind: "text", text: "Tracking it." },
-    ]);
-    await host!.setPlanMode("casper", "conv-plan", "start");
-    expect(await host!.planState("casper", "conv-plan")).toEqual({ planning: true, plan: null, todo: [] });
-
-    const directEvents: PiMessagesEvent[] = [];
-    await host!.runTurn("casper", {
-      sessionId: "conv-plan",
-      prompt: "!printf direct-owner-command",
-      emit: (event) => directEvents.push(event),
-    });
-    expect(provider!.requests).toHaveLength(0);
-    expect(directEvents.some((event) => event.type === "text_delta"
-      && event.delta.includes("direct-owner-command"))).toBe(true);
-    expect((await host!.planState("casper", "conv-plan")).planning).toBe(true);
-
-    const events: PiMessagesEvent[] = [];
-    const turn = host!.runTurn("casper", { sessionId: "conv-plan", prompt: "Plan the fix.", emit: (event) => events.push(event) });
-    const pending = await waitFor(() => host!.pendingAsk("casper", "conv-plan"), 10_000);
-    expect(pending.questions[0]?.question).toContain("Fix the leak");
-    host!.answerAsk("casper", "conv-plan", pending.id, { kind: "submit", results: [{ id: "plan", selectedOptions: ["Approve"] }] });
-    await turn;
-
-    expect(existsSync(join(temp!.ownerHome, "plan-mode-must-not-run"))).toBe(false);
-    expect(events).toContainEqual(expect.objectContaining({ type: "tool_execution_end", toolName: "bash", isError: true, summary: expect.stringContaining("Plan mode") }));
-    expect(provider!.requests[0]?.system).toContain("# Plan mode");
-    const state = await host!.planState("casper", "conv-plan");
-    expect(state.planning).toBe(false);
-    expect(state.plan).toMatchObject({ title: "Fix the leak", content: "# Plan\n1. patch\n2. test\n", path: expect.stringContaining(join(dir, "plans")) });
-
-    const listed: PiMessagesEvent[] = [];
-    await host!.runTurn("casper", { sessionId: "conv-plan", prompt: "Start on it.", emit: (event) => listed.push(event) });
-    expect(provider!.requests.at(-1)?.system).toContain("# Current plan: Fix the leak");
-    expect(provider!.requests.at(-1)?.system).toContain("2. test");
-    expect((await host!.planState("casper", "conv-plan")).todo).toEqual([
-      { name: "Tasks", tasks: [{ content: "patch", status: "in_progress" }, { content: "test", status: "pending" }] },
-    ]);
-
-    const shown: PiMessagesEvent[] = [];
-    await host!.runTurn("casper", { sessionId: "conv-plan", prompt: "/todo", emit: (event) => shown.push(event) });
-    expect(shown).toContainEqual(expect.objectContaining({ type: "command_output", command: "/todo", output: "## Tasks\n[>] patch\n[ ] test" }));
-    expect(await host!.setPlanMode("casper", "conv-plan", "clear")).toMatchObject({ planning: false, plan: null });
-  });
-
-  it("refuses to start while a background job runs and succeeds after the owner settles it", async () => {
-    await setup([
-      { kind: "tool", name: "bash", args: { command: "sleep 30", background: true, label: "blocking plan" } },
-      { kind: "text", text: "The job is running." },
-      { kind: "text", text: "The job was cancelled." },
-    ]);
-    await host!.runTurn("casper", { sessionId: "conv-plan-job", prompt: "Start the job.", emit: () => {} });
-    const [job] = host!.listJobs("casper", "conv-plan-job");
-    expect(job).toMatchObject({ status: "running", label: "blocking plan" });
-
-    await expect(host!.setPlanMode("casper", "conv-plan-job", "start")).rejects.toMatchObject({
-      code: "session_busy",
-      status: 409,
-    });
-    expect(host!.listJobs("casper", "conv-plan-job")[0]).toMatchObject({ status: "running" });
-    expect((await host!.planState("casper", "conv-plan-job")).planning).toBe(false);
-
-    expect(host!.cancelJob("casper", "conv-plan-job", job!.id)).toMatchObject({ outcome: "cancelled" });
-    await waitFor(() => host!.listJobs("casper", "conv-plan-job")[0]?.status === "cancelled"
-      ? true
-      : null, 10_000);
-    await waitForTranscript("conv-plan-job", "The job was cancelled.");
-    await host!.setPlanMode("casper", "conv-plan-job", "start");
-    expect((await host!.planState("casper", "conv-plan-job")).planning).toBe(true);
   });
 });
 

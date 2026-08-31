@@ -39,7 +39,6 @@ const SESSION_CWD = homedir();
 const DELTA_MS = flag("--slow") ? 30 : 12;
 const TOOL_STEPS = Math.max(1, Math.min(100, Number(opt("--tool-steps", "1")) || 1));
 const ASK_TIMEOUT_S = Math.max(0, Number(opt("--ask-timeout", "120")) || 0);
-const START_IN_PLAN_MODE = flag("--plan");
 const NO_JOBS = flag("--no-jobs");
 const MOCK_STARTED_AT = Date.now();
 const OWNS_GHOSTS_ROOT = !process.env.GHOSTS_ROOT;
@@ -840,97 +839,26 @@ const sessionSummary = (s) => ({
 });
 
 
-// Plan/todo and jobs are keyed by the full runtime-qualified conversation id,
-// just like their routes. Every conversation gets an independent fixture the
-// first time the HUD asks for it, including unpublished client-side drafts.
-const planStore = new Map();
+// Jobs are keyed by the full runtime-qualified conversation id, just like
+// their route. Every conversation gets an independent fixture on first read.
 const jobStore = new Map();
 const workKey = (name, conversationId) => JSON.stringify([name, conversationId]);
 
 function dropWork(name, conversationId = null) {
-  for (const store of [planStore, jobStore]) {
-    for (const key of [...store.keys()]) {
-      const [storedName, storedConversation] = JSON.parse(key);
-      if (storedName === name && (conversationId === null || storedConversation === conversationId))
-        store.delete(key);
-    }
+  for (const key of [...jobStore.keys()]) {
+    const [storedName, storedConversation] = JSON.parse(key);
+    if (storedName === name && (conversationId === null || storedConversation === conversationId))
+      jobStore.delete(key);
   }
 }
 
 function moveWorkGhost(from, to) {
-  for (const store of [planStore, jobStore]) {
-    for (const [key, value] of [...store.entries()]) {
-      const [storedName, conversationId] = JSON.parse(key);
-      if (storedName !== from) continue;
-      store.delete(key);
-      if (store === planStore && value.plan) {
-        value.plan.path = join(GHOSTS_ROOT, to, "plans", basename(value.plan.path));
-      }
-      store.set(workKey(to, conversationId), value);
-    }
+  for (const [key, value] of [...jobStore.entries()]) {
+    const [storedName, conversationId] = JSON.parse(key);
+    if (storedName !== from) continue;
+    jobStore.delete(key);
+    jobStore.set(workKey(to, conversationId), value);
   }
-}
-
-const MOCK_TODO = [
-  {
-    name: "Build",
-    tasks: [
-      { content: "Read the shell contract", status: "completed" },
-      { content: "Wire the daemon state", status: "completed" },
-      { content: "Build the HUD work strip", status: "in_progress" },
-    ],
-  },
-  {
-    name: "Verify",
-    tasks: [
-      { content: "Add focused QML coverage", status: "completed" },
-      { content: "Capture an isolated preview", status: "blocked", blocker: "Waiting for the nested compositor" },
-      { content: "Run shell checks", status: "pending" },
-      { content: "Review the final diff", status: "pending" },
-    ],
-  },
-];
-
-const MOCK_PLAN_CONTENT = [
-  "# HUD work strip",
-  "",
-  "Show the current conversation's plan, todo phases, and background jobs directly above the queue.",
-  "",
-  "1. Fetch plan and job state with the active conversation identity.",
-  "2. Keep the strip keyboard-accessible and quiet when empty.",
-  "3. Poll only while a visible HUD has a running job.",
-].join("\n");
-
-function planFor(name, conversationId) {
-  const key = workKey(name, conversationId);
-  if (!planStore.has(key)) {
-    planStore.set(key, {
-      planning: START_IN_PLAN_MODE,
-      plan: {
-        path: join(GHOSTS_ROOT, name, "plans", "hud-work-strip.md"),
-        title: "HUD work strip",
-        approvedAt: new Date(MOCK_STARTED_AT - 10 * 60_000).toISOString(),
-        content: MOCK_PLAN_CONTENT,
-      },
-      todo: structuredClone(MOCK_TODO),
-    });
-  }
-  return planStore.get(key);
-}
-
-function planSnapshot(name, conversationId) {
-  return structuredClone(planFor(name, conversationId));
-}
-
-function setPlanAction(name, conversationId, action) {
-  const current = planFor(name, conversationId);
-  const next = {
-    planning: action === "start",
-    plan: action === "clear" ? null : current.plan,
-    todo: current.todo,
-  };
-  planStore.set(workKey(name, conversationId), next);
-  return planSnapshot(name, conversationId);
 }
 
 function initialJobs() {
@@ -2428,39 +2356,6 @@ const mockServer = createServer(async (req, res) => {
         reason: "reloaded",
       }));
     }
-  }
-  if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "plan") {
-    const conversation = routeConversation(parts);
-    if (!conversation) return json(res, 400, {
-      error: { code: "invalid_conversation_id", message: "invalid conversation id" },
-    });
-    if (req.method === "GET") return json(res, 200, planSnapshot(name, conversation.id));
-    if (req.method !== "POST") return json(res, 405, {
-      error: { code: "method_not_allowed", message: `${req.method} is not allowed here.` },
-    });
-    if (answering.has(turnKey(name, conversation.conversationId))) {
-      return json(res, 409, {
-        error: { code: "session_busy", message: "Wait for this answer to finish." },
-      });
-    }
-    const body = await readBody(req).catch(() => null);
-    if (!body || !["start", "stop", "clear"].includes(body.action)) {
-      return json(res, 400, {
-        error: { code: "invalid_request", message: '"action" must be "start", "stop", or "clear".' },
-      });
-    }
-    const state = setPlanAction(name, conversation.id, body.action);
-    publishConversationUpdated(name, conversation.runtime, conversation.conversationId,
-      new Date().toISOString(), "plan");
-    return json(res, 200, state);
-  }
-  if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "todo"
-      && req.method === "GET") {
-    const conversation = routeConversation(parts);
-    if (!conversation) return json(res, 400, {
-      error: { code: "invalid_conversation_id", message: "invalid conversation id" },
-    });
-    return json(res, 200, { todo: planSnapshot(name, conversation.id).todo });
   }
   if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "jobs"
       && req.method === "GET") {

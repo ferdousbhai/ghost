@@ -90,8 +90,7 @@ describe("AskBroker", () => {
   it("waits forever when no deadline was resolved for the question", async () => {
     vi.useFakeTimers();
     try {
-      // Unset, `ask.timeout: 0`, and plan mode all reach the broker as one
-      // absent timeout, so this is the only honest reading of all three.
+      // Unset and `ask.timeout: 0` reach the broker as one absent timeout.
       const broker = new AskBroker();
       const result = broker.open(QUESTIONS);
       expect(broker.pending?.timeoutAt).toBeUndefined();

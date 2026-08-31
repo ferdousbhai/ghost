@@ -490,40 +490,13 @@ discovery path.
 API; live Documents are exclusively the machine-wide `MachineDocuments`
 boundary.
 
-Plan mode and the todo list are Ghost-owned (`packages/daemon/src/plan-mode.ts`)
-and conversation-scoped; both persist as custom transcript entries
-(`ghost-plan`, `ghost-todo`), so they follow branches and survive restarts.
-The `todo` tool keeps phases of tasks (`init`/`view`/`start`/`done`/`rm`/
-`drop`/`block`/`unblock`/`append`; exactly one task is in progress) and
-`/todo` prints them. Plan mode is a Pi-only model boundary started by the owner
-(`POST …/plan {action:"start"}`); Claude Code returns `409 not_supported`.
-Starting is `409 session_busy` while any conversation job is running, leaves
-those jobs untouched, and succeeds after each job finishes or the owner cancels
-it. Every later turn's system prompt carries a plan-mode section, and a
-fail-closed `tool_call` hook admits only pi's native `read`, `grep`, `find`, and
-`ls`; `ask`, `inspect_image`, and `propose_plan`; `ghost_character` action
-`read`; `jobs` operations `list` and `wait`; `todo` operation `view`;
-`ghost_desktop` actions `state`, `see`, `layers`, `ax_query`, `ax_roles`, and
-`hit_test`; and non-persisting `ghost_browser` observation/navigation actions
-`open`, `read`, `find`, `back`, `forward`, `scroll`, `console`, `network`,
-`tabs`, and `tab_switch`. A missing, malformed, or unknown action/operation is
-blocked. Bash, generic `edit`/`write`, `ghost_screen`, browser screenshots,
-memory and character writes, MCP, todo/job mutations, and every unknown tool
-are blocked with a reason the model sees. Direct owner `!`/`!!` commands and
-owner HTTP APIs do not pass through this model-tool guard. The system packages
-`ripgrep` and `fd` are runtime dependencies, so native `grep`/`find` never turn
-a planning read into pi's on-demand cache download. `propose_plan` with
-`{title, content}` writes
-`<ghost-home>/plans/<conversation>/<slug>.md` and asks the owner through
-`ask` (Approve / Revise, the note or free text carried back to the model);
-approval persists `{planning:false, plan}` and every later turn's system
-prompt carries the plan's text as the current plan until the owner clears it
-(`POST …/plan {action:"clear"}`); `stop` leaves plan mode keeping the plan.
-`/plan` prints the state without a model. A session keeps this state in
-memory (`PlanBook`), written through to the transcript and re-read when the
-branch moves, so the per-turn section and the per-call guard never rescan the
-tree; the plan and todo routes read the open session's book or open the
-transcript file directly, never a full session.
+Ghost has no principal plan mode, plan approval state, or model-owned todo
+list. Planning is ordinary owner conversation or a read-only assignment to a
+native coding harness; implementation begins only when the owner asks for it.
+Durable coding work is represented by harness tasks rather than a second
+principal workflow. Historical `ghost-plan` and `ghost-todo` custom transcript
+entries and files under a legacy `plans/` directory remain owner data but are
+inert: Ghost neither renders, mutates, nor deletes them implicitly.
 
 `inspect_image` is Ghost-owned (`packages/daemon/src/inspect-image.ts`) and
 exists for a chat model that cannot see images: it reads one
@@ -559,11 +532,9 @@ their upstream source as the desktop user:
 Firecrawl's main skill routes web work through its CLI over `bash` and links
 its other installed skills progressively. Other admitted machine skills
 similarly teach the runtimes to invoke their CLIs through `bash`; Ghost adds no
-product-specific tool. Plan mode blocks model Bash entirely, including Omarchy
-catalog inspection and optional service CLIs; perform that discovery before
-planning or after the owner approves/stops the plan. Claude Code receives the
-same immutable machine-skill index in its prompt but does not enable the SDK's
-unscoped ambient skill discovery.
+product-specific tool. Claude Code receives the same immutable machine-skill
+index in its prompt but does not enable the SDK's unscoped ambient skill
+discovery.
 
 Background jobs are Ghost-owned (`packages/daemon/src/jobs.ts`) and
 conversation-scoped. Ghost's own `bash` tool replaces pi's by name and runs
@@ -590,8 +561,8 @@ reports (`was cancelled`); jobs cancelled by session teardown do not.
 Slash commands are a Ghost-owned catalog
 (`packages/daemon/src/slash-commands.ts`), session-scoped and built from the
 conversation's pinned declarative snapshot. It holds the headless builtins Ghost
-answers without a model — `/context`, `/tools`, `/dirs`, `/jobs`, `/todo`,
-`/plan`, and `/compact [instructions]` (`available`), plus the informational
+answers without a model — `/context`, `/tools`, `/dirs`, `/jobs`, and
+`/compact [instructions]` (`available`), plus the informational
 forms of
 `/model`, `/session [info]`, and `/usage [show]` (`partial`) — the
 conversation's admitted Markdown commands and prompt templates, expanded into
@@ -1443,20 +1414,6 @@ streams emit one complete event object per line.
   `200 { recap: null }`. An unknown conversation is `404`; a running turn or
   second in-flight recap is `409 session_busy`; Claude Code is `409 not_supported`
   because that runtime exposes no equivalent non-mutating conversation context.
-- `GET|POST /api/ghosts/:name/sessions/:id/plan` → `{ planning, plan, todo }`
-  — `plan` is `{ path, title, approvedAt, content }` (`content` null when the
-  file is gone) or null; `todo` is the phase list. GET never opens a session
-  and reports an unknown conversation as empty. POST takes
-  `{ action: "start"|"stop"|"clear" }` (anything else is `400
-  invalid_request`), appends the change to the transcript (creating one for a
-  new conversation), and answers the new state; an open session with a turn
-  running is `409 session_busy`. `start` is also `409 session_busy` while a
-  background job remains running; it never cancels that job, and the owner may
-  retry after the job finishes or is cancelled. `stop` and `clear` remain
-  available in that reverse state. Claude Code conversations return `409` with
-  `not_supported`.
-- `GET  /api/ghosts/:name/sessions/:id/todo` → `{ todo }` — the phase list
-  alone, same rules as GET plan.
 - `GET  /api/ghosts/:name/sessions/:id/jobs` → `{ jobs }` — the background
   jobs of that conversation as `{ id, label, command, status, startedAt,
   endedAt?, durationMs, exitCode?, output, outputTruncated }` rows, where
@@ -1635,7 +1592,7 @@ streams emit one complete event object per line.
   ghost home holds only what makes that ghost that ghost. Ghost's own `ask`
   tool (`packages/daemon/src/ask-tool.ts`) hands the `AskBroker` that deadline
   per question, beneath the two things only the question knows: one that names
-  its own `timeout` keeps it, and plan mode suspends auto-answering entirely.
+  its own `timeout` keeps it.
 - `GET|POST /api/ghosts/:name/sessions/:id/queue` reads or enqueues pi's
   native mid-turn queues. POST is `{ mode: "steer"|"followUp", text }`:
   steering enters the active run, while follow-up runs after it.
@@ -1988,8 +1945,8 @@ Both principal harnesses expose the same daemon-owned logical tools:
 
 Ghost name and runtime-qualified parent identity are closure-bound by the
 session and never model input. Task-control calls cannot reach a sibling
-conversation's task. `task`, `task_send`, and `task_cancel` are mutating tools
-and stay blocked by Pi plan mode; catalogue/list/get remain observational.
+conversation's task. `task`, `task_send`, and `task_cancel` are mutating tools;
+catalogue/list/get remain observational.
 Tool-facing task projections retain at most 20 summaries, ten newest events
 with 2,000 characters of text each, and a 32,000-character result preview; the
 durable record and owner HTTP API remain authoritative for the full bounded
@@ -2438,8 +2395,8 @@ whole model before any non-local exposure.
   the daemon as the single self-contained `/usr/bin/ghostd` executable, with
   its Bun runtime and version embedded and no daemon source or `node_modules`
   tree. Both development and stable packages declare `fd` and `ripgrep` as
-  runtime dependencies for pi's native read-only search tools; the executable
-  must not populate pi's cache by downloading them during a plan-mode read.
+  runtime dependencies for pi's native search tools; the executable must not
+  populate pi's cache by downloading them on demand.
 - `packages/shell` — the Omarchy/Quickshell HUD, model routing, ask/queue and
   branching UI, live tool cards, and summoning indicator.
 - `packages/chromium-extension` — the browser relay, driving tabs of the
@@ -2499,9 +2456,8 @@ stderr format. Filter one ghost with
   `models.omp.json` under `.pi/`.
 - Render the persona/system prompt in Ghost and pass it as the loader's
   `systemPrompt`; the persona extension replaces it wholesale before every
-  turn. Append only Ghost's dynamic plan/todo section and a runtime section
-  derived from pi's structured current cwd, selected tool names, and registered
-  one-line tool snippets. Never reintroduce inherited prompt prose,
+  turn. Append only a runtime section derived from pi's structured current cwd,
+  selected tool names, and registered one-line tool snippets. Never reintroduce inherited prompt prose,
   `APPEND_SYSTEM.md`, native context/skill rendering, prompt guidelines, or
   marker-based subtraction.
 - Give `DefaultResourceLoader` `noExtensions`, `noPromptTemplates`, `noThemes`,

@@ -68,7 +68,7 @@ The Heidelberg cost more than it should have.
 /**
  * Additional OMP tools worth auditing beside Ghost's contracted surface.
  */
-const OTHER_AUDITED_OMP_TOOLS = ["ask", "eval", "inspect_image", "todo"] as const;
+const OTHER_AUDITED_OMP_TOOLS = ["ask", "eval", "inspect_image"] as const;
 
 describe("golden: session", () => {
   it("writes a memory mid-conversation and carries it into the next system prompt", async () => {

@@ -1,8 +1,7 @@
 pragma ComponentBehavior: Bound
 
-// Conversation-scoped work that lives beyond one model turn: the plan, todo
-// phases, and background jobs. Mutations stay in Ghostd; this component owns
-// only disclosure state and the visible-HUD polling cadence.
+// Conversation-scoped background jobs that live beyond one model turn.
+// Mutations stay in Ghostd; this component owns disclosure state and polling.
 import QtQuick
 import QtQuick.Layouts
 import qs.services
@@ -77,16 +76,11 @@ Rectangle {
         }
     }
 
-    property bool todoExpanded: false
     property bool jobsExpanded: false
     property var expandedOutputs: ({})
 
-    readonly property var todo: root.todoDigest()
     readonly property int runningJobCount: root.countJobs("running")
     readonly property int settledJobCount: Ghostd.workJobs.length - root.runningJobCount
-    readonly property string todoSummary: "Todo · " + root.todo.done
-        + "/" + root.todo.total + " done"
-        + (root.todo.now === "" ? "" : " · Now: " + root.todo.now)
     readonly property string jobsSummary: "Jobs · " + root.runningJobCount
         + " running · " + root.settledJobCount + " done"
 
@@ -98,46 +92,11 @@ Rectangle {
     border.color: Theme.border
     clip: true
 
-    function todoDigest(): var {
-        const digest = { total: 0, done: 0, now: "" };
-        for (const phase of (Ghostd.workTodo || [])) {
-            for (const task of (phase && Array.isArray(phase.tasks) ? phase.tasks : [])) {
-                digest.total += 1;
-                if (task.status === "completed") digest.done += 1;
-                if (digest.now === "" && task.status === "in_progress")
-                    digest.now = String(task.content || "");
-            }
-        }
-        return digest;
-    }
-
     function countJobs(status: string): int {
         if (status === "running") return Ghostd.workRunningJobCount;
         return (Ghostd.workJobs || []).filter(function (job) {
             return job && job.status === status;
         }).length;
-    }
-
-    function taskGlyph(status: string): string {
-        if (status === "completed") return "✓";
-        if (status === "in_progress") return "▸";
-        if (status === "blocked") return "⊘";
-        if (status === "abandoned") return "−";
-        return "·";
-    }
-
-    function taskStatusName(status: string): string {
-        if (status === "completed") return "Done";
-        if (status === "in_progress") return "In progress";
-        if (status === "blocked") return "Blocked";
-        if (status === "abandoned") return "Abandoned";
-        return "Pending";
-    }
-
-    function taskColor(status: string): var {
-        if (status === "in_progress") return Theme.ghostAmber;
-        if (status === "completed") return Theme.ok;
-        return status === "pending" ? Theme.foregroundDim : Theme.foregroundFaint;
     }
 
     function jobStatusName(job: var): string {
@@ -175,7 +134,6 @@ Rectangle {
     }
 
     function resetDisclosure(): void {
-        root.todoExpanded = false;
         root.jobsExpanded = false;
         root.expandedOutputs = ({});
     }
@@ -230,179 +188,6 @@ Rectangle {
         anchors.top: parent.top
         anchors.topMargin: Theme.gap
         spacing: Theme.gap / 2
-
-        RowLayout {
-            id: planRow
-            visible: Ghostd.workPlanning || Ghostd.workPlan !== null || !Ghostd.streaming
-            Layout.fillWidth: true
-            spacing: Theme.gap / 2
-
-            Rectangle {
-                id: planChip
-                objectName: "workPlanChip"
-                visible: Ghostd.workPlanning || Ghostd.workPlan !== null
-                Layout.fillWidth: true
-                implicitHeight: Theme.compactControlHeight
-                radius: Theme.radius
-                color: Ghostd.workPlanning ? Theme.amber(0.13) : Theme.film(0.05)
-                border.width: 1
-                border.color: Ghostd.workPlanning ? Theme.amber(0.28) : Theme.border
-
-                Text {
-                    id: planChipText
-                    objectName: "workPlanChipText"
-                    anchors.left: parent.left
-                    anchors.leftMargin: Theme.gap
-                    anchors.right: parent.right
-                    anchors.rightMargin: Theme.gap
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: Ghostd.workPlanning ? "Planning"
-                        : (Ghostd.workPlan ? String(Ghostd.workPlan.title || "Plan") : "")
-                    color: Ghostd.workPlanning ? Theme.ghostAmberBright : Theme.foreground
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeSmall
-                    font.weight: Ghostd.workPlanning ? Font.DemiBold : Font.Normal
-                    elide: Text.ElideRight
-                }
-            }
-
-            Item {
-                visible: !planChip.visible
-                Layout.fillWidth: true
-                implicitHeight: 1
-            }
-
-            ActionButton {
-                objectName: "workPlanStopButton"
-                visible: Ghostd.workPlanning
-                label: "Stop planning"
-                enabled: !Ghostd.streaming && !Ghostd.workMutating
-                Accessible.description: "Leave plan mode and keep any approved plan."
-                onClicked: Ghostd.planAction("stop")
-            }
-
-            ActionButton {
-                objectName: "workPlanOpenButton"
-                visible: !Ghostd.workPlanning && Ghostd.workPlan !== null
-                label: "Open"
-                enabled: !Ghostd.streaming && !Ghostd.workMutating
-                Accessible.description: "Open the approved plan beside this conversation."
-                onClicked: if (Ghostd.workPlan) Workbench.open(Ghostd.workPlan.path)
-            }
-
-            ActionButton {
-                objectName: "workPlanClearButton"
-                visible: !Ghostd.workPlanning && Ghostd.workPlan !== null
-                label: "Clear"
-                danger: true
-                enabled: !Ghostd.streaming && !Ghostd.workMutating
-                Accessible.description: "Remove the approved plan from this conversation."
-                onClicked: Ghostd.planAction("clear")
-            }
-
-            ActionButton {
-                objectName: "workPlanStartButton"
-                visible: !Ghostd.workPlanning && Ghostd.workPlan === null
-                    && !Ghostd.streaming
-                label: "Plan first"
-                primary: true
-                enabled: !Ghostd.workMutating
-                Accessible.description: "Ask the ghost to plan without changing files."
-                onClicked: Ghostd.planAction("start")
-            }
-        }
-
-        DisclosureRow {
-            id: todoToggle
-            objectName: "workTodoToggle"
-            visible: Ghostd.workTodo.length > 0
-            Layout.fillWidth: true
-            summary: root.todoSummary
-            summaryObjectName: "workTodoSummary"
-            expanded: root.todoExpanded
-            accent: Theme.foreground
-            description: root.todoExpanded
-                ? "Collapse todo phases and tasks." : "Expand todo phases and tasks."
-            onToggled: root.todoExpanded = !root.todoExpanded
-        }
-
-        ColumnLayout {
-            id: todoList
-            objectName: "workTodoList"
-            visible: todoToggle.visible && root.todoExpanded
-            Layout.fillWidth: true
-            Layout.leftMargin: Theme.gap
-            Layout.rightMargin: Theme.gap
-            spacing: Theme.gap / 2
-
-            Repeater {
-                model: Ghostd.workTodo
-
-                delegate: ColumnLayout {
-                    id: phaseDelegate
-                    required property var modelData
-                    required property int index
-                    readonly property int phaseIndex: index
-                    Layout.fillWidth: true
-                    spacing: 2
-
-                    Text {
-                        Layout.fillWidth: true
-                        text: String(phaseDelegate.modelData.name || "Tasks")
-                        color: Theme.foregroundDim
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSizeSmall
-                        font.weight: Font.DemiBold
-                        elide: Text.ElideRight
-                    }
-
-                    Repeater {
-                        model: phaseDelegate.modelData.tasks || []
-
-                        delegate: RowLayout {
-                            id: taskDelegate
-                            required property var modelData
-                            required property int index
-                            objectName: "workTodoTask-" + phaseDelegate.phaseIndex + "-" + index
-                            readonly property string status: String(modelData.status || "pending")
-                            readonly property string glyph: root.taskGlyph(status)
-                            Layout.fillWidth: true
-                            spacing: Theme.gap / 2
-
-                            Text {
-                                Layout.alignment: Qt.AlignTop
-                                text: taskDelegate.glyph
-                                color: root.taskColor(taskDelegate.status)
-                                font.family: Theme.fontFamily
-                                font.pixelSize: Theme.fontSizeSmall
-                                font.weight: taskDelegate.status === "in_progress"
-                                    ? Font.DemiBold : Font.Normal
-                            }
-
-                            Text {
-                                Layout.fillWidth: true
-                                text: String(taskDelegate.modelData.content || "")
-                                    + (taskDelegate.status === "blocked"
-                                        && String(taskDelegate.modelData.blocker || "") !== ""
-                                        ? " — " + taskDelegate.modelData.blocker : "")
-                                color: root.taskColor(taskDelegate.status)
-                                font.family: Theme.fontFamily
-                                font.pixelSize: Theme.fontSizeSmall
-                                wrapMode: Text.WordWrap
-                            }
-
-                            Text {
-                                Layout.alignment: Qt.AlignTop
-                                text: root.taskStatusName(taskDelegate.status)
-                                color: root.taskColor(taskDelegate.status)
-                                font.family: Theme.fontFamily
-                                font.pixelSize: Theme.fontSizeSmall - 1
-                            }
-                        }
-                    }
-                }
-            }
-        }
 
         DisclosureRow {
             id: jobsToggle

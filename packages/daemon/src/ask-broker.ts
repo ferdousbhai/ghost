@@ -96,7 +96,7 @@ function stringField(
  *
  * The deadline is the caller's to decide. `open` is handed a `timeout` only
  * when one applies — the daemon's `askTimeoutSeconds`, unless the owner
- * disabled auto-answering or plan mode suspended it — and no timeout at all
+ * disabled auto-answering — and no timeout at all
  * otherwise. Those states arrive here as one `undefined`, so a default of the
  * broker's own could only override decisions it cannot see.
  */

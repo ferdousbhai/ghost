@@ -27,7 +27,7 @@ import {
   type CommandDocumentation,
 } from "./usage.js";
 import { watchCommand } from "./watch.js";
-import { jobsCommand, planCommand, todoCommand } from "./work.js";
+import { jobsCommand } from "./work.js";
 
 interface Command extends CommandDocumentation {
   positionals: readonly [minimum: number, maximum: number];
@@ -161,22 +161,6 @@ export const COMMANDS: readonly Command[] = [
     example: "ghost jobs show job-1 -s cli-abc",
     positionals: [0, 2],
     run: jobsCommand,
-  },
-  {
-    verb: "plan",
-    usage: "plan [start|stop|clear] [-g <name>] [-s <id>] [--json] [-q]",
-    summary: "Inspect or change planning mode.",
-    example: "ghost plan start -s cli-abc",
-    positionals: [0, 1],
-    run: planCommand,
-  },
-  {
-    verb: "todo",
-    usage: "todo [-g <name>] [-s <id>] [--json] [-q]",
-    summary: "Show the conversation todo.",
-    example: "ghost todo -s cli-abc",
-    positionals: [0, 0],
-    run: todoCommand,
   },
   {
     verb: "model",
