@@ -152,6 +152,10 @@ export {
   type CodexTaskAdapterOptions,
 } from "./codex-task-adapter.js";
 export {
+  ClaudeTaskAdapter,
+  type ClaudeTaskAdapterOptions,
+} from "./claude-task-adapter.js";
+export {
   readGhostHomeDigest,
   resolveGhostExtensions,
   type GhostExtensionOptions,

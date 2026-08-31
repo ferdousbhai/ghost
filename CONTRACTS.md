@@ -514,6 +514,18 @@ agent-message text, and the exact active `turn/completed` notification affect
 task state. Server-initiated requests fail closed because delegated work has no
 approval or elicitation UI; all other progress and tool payloads are discarded.
 
+The Claude delegated adapter loads the pinned owner-installed Agent SDK through
+the principal SDK loader and runs the freshly admitted Claude executable in the
+exact cwd. It leaves native filesystem settings, CLAUDE.md, skills, agents,
+hooks, plugins, MCP servers, model selection, tools, persistence, and subagent
+behavior intact. Its only execution-policy override is
+`permissionMode: "bypassPermissions"` with the SDK's required explicit
+dangerous-skip acknowledgement. An optional configured native agent name is an
+opaque SDK value and is neither parsed nor reimplemented by Ghost. Follow-ups
+are priority-now streaming user input. SDK stderr, assistant/tool/protocol
+frames, error detail, and usage remain native-only; only the verified native
+initialization and successful bounded terminal result affect task state.
+
 ### Session capabilities
 
 Ghost is owner-local by default: the owner is the only local caller, and every
