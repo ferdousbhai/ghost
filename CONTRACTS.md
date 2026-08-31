@@ -1026,6 +1026,11 @@ most recently updated conversation. The stable process exit codes are:
 
 With `--json`, API-backed non-streaming commands preserve the exact response
 shape and streams emit one complete event object per line.
+An admitted turn sends an immediate SSE keepalive comment before runtime work
+begins, then repeats it every 15 seconds while idle. The CLI bounds only
+admission and stream opening to one keepalive interval; it clears that timer
+when the opening response arrives, so a working turn has no wall-clock cap. Its
+one token-refresh retry preserves the same opening budget.
 
 ### Routes
 

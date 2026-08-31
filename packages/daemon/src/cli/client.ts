@@ -1,5 +1,6 @@
 import { defaultApiTokenPath, readApiToken } from "../api-token.js";
 import { loadConfig } from "../config.js";
+import { SSE_KEEPALIVE_INTERVAL_MS } from "../pi-messages.js";
 import { describeErrorBody } from "./output.js";
 import type { CliRuntime } from "./types.js";
 
@@ -9,13 +10,11 @@ import type { CliRuntime } from "./types.js";
  */
 const CONTROL_REQUEST_TIMEOUT_MS = 5_000;
 /**
- * A turn's event stream is a different thing. The daemon does not reach the
- * first frame until the model does, and a real turn — thinking, reading files,
- * running a tool — can sit well past any control-request budget. This bounds
- * only how long the CLI waits to be answered at all; once the stream is open it
- * runs until the turn ends or the owner interrupts.
+ * An accepted event stream flushes its headers immediately. Allow one
+ * keepalive interval for admission and that opening response; the timer is
+ * cleared before the turn runs and therefore never caps working time.
  */
-const STREAM_REQUEST_TIMEOUT_MS = 15 * 60_000;
+const STREAM_OPEN_TIMEOUT_MS = SSE_KEEPALIVE_INTERVAL_MS;
 
 export class CliError extends Error {
   constructor(readonly exitCode: number, message: string) {
@@ -130,7 +129,7 @@ export class DaemonClient {
     if (response.status === 401 && retry) {
       await response.body?.cancel().catch(() => undefined);
       this.#tokenValue = readApiToken({ env: this.#runtime.env, home: this.#runtime.home });
-      return this.#fetch(path, init, false);
+      return this.#fetch(path, init, false, timeoutMs);
     }
     return response;
   }
@@ -172,7 +171,7 @@ export class DaemonClient {
         ...(body === undefined ? {} : { "content-type": "application/json" }),
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    }, true, STREAM_REQUEST_TIMEOUT_MS);
+    }, true, STREAM_OPEN_TIMEOUT_MS);
     if (!response.ok) {
       const parsed = await responseBody(response);
       throw statusError(response.status, parsed, this.tokenPath);

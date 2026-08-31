@@ -1795,8 +1795,9 @@ describe("POST /api/ghosts/:name/messages", () => {
     expect(status).toBe(200);
     expect(headers.get("content-type")).toContain("text/event-stream");
     expect(headers.get("cache-control")).toBe("no-store");
-    // Frames are `data: <json>\n\n`, the canonical shape Ghost's client reads.
-    expect(raw.startsWith("data: ")).toBe(true);
+    // The opening comment makes the accepted stream visible before runtime
+    // work; event frames retain the canonical `data: <json>\n\n` shape.
+    expect(raw.startsWith(": keepalive\n\ndata: ")).toBe(true);
 
     const types = events.map((event) => event.type);
     expect(types[0]).toBe("start");
