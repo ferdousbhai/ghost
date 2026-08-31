@@ -173,6 +173,24 @@ export {
   type MaintenanceWithRuntime,
   type SettledMaintenanceTurn,
 } from "./conversation-maintenance.js";
+export {
+  PRESENTATION_HISTORY_MAX_BYTES,
+  PRESENTATION_HISTORY_MAX_TEXT_CHARS,
+  PRESENTATION_HISTORY_MAX_TURNS,
+  PresentationHistoryStore,
+  presentationHistoryPath,
+  type PresentationHistoryIdentity,
+  type PresentationHistoryInitialization,
+  type PresentationHistoryMode,
+  type PresentationHistoryV1,
+  type PresentationTitle,
+  type PresentationTurn,
+} from "./presentation-history.js";
+export type {
+  ConversationSourceIdentity,
+  ConversationSourceRevision,
+  SettledConversationTurn,
+} from "./settled-conversation-turn.js";
 export { createLogger, silentLogger, type Logger, type LogLevel } from "./log.js";
 export {
   HomeOperationCoordinator,

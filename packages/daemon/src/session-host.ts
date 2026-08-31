@@ -95,9 +95,10 @@ import {
   type MaintenanceOwnerAdmission,
   type SettledMaintenanceTurn,
 } from "./conversation-maintenance.js";
-import type {
-  HomeMoveParticipantReservation,
-  HomeOperationCoordinator,
+import {
+  homeOperationsFor,
+  type HomeOperationCoordinator,
+  type HomeMoveParticipantReservation,
 } from "./home-operations.js";
 import {
   ghostAuthPath,
@@ -114,6 +115,11 @@ import {
 } from "./pi-messages.js";
 import { readPinState, writePins } from "./pins.js";
 import { readReadState, writeReads } from "./reads.js";
+import {
+  PresentationHistoryStore,
+  presentationHistoryPath,
+  type PresentationHistoryInitialization,
+} from "./presentation-history.js";
 import {
   conversationIdentity,
   isValidConversationId,
@@ -539,6 +545,8 @@ export interface SessionHostOptions {
   hooks?: GhostHookRunner;
   maintenance?: SessionConversationMaintenance;
   homeOperations?: HomeOperationCoordinator;
+  /** Test seam for the Ghost-owned cross-runtime presentation journal. */
+  presentationHistory?: PresentationHistoryStore;
   retention?: SessionRetentionConfig;
 }
 
@@ -594,7 +602,8 @@ export interface GhostSessionHandle {
 
 export interface TrashedConversationArtifact extends TrashPathResult {
   artifact: "omp-transcript" | "claude-sidecar"
-    | "project-binding" | "project-snapshot" | "tool-cwds" | "maintenance-state";
+    | "project-binding" | "project-snapshot" | "tool-cwds" | "maintenance-state"
+    | "presentation-history";
   source: string;
 }
 
@@ -805,6 +814,7 @@ const DELETE_ARTIFACT_KINDS = new Set<TrashedConversationArtifact["artifact"]>([
   "project-snapshot",
   "tool-cwds",
   "maintenance-state",
+  "presentation-history",
 ]);
 
 interface DeleteMoveIntent extends TrashedConversationArtifact {}
@@ -971,6 +981,8 @@ function exactDeleteStaticSource(
         && artifact.source === toolCwdsPath(sessionDir, conversationId);
     case "maintenance-state":
       return artifact.source === maintenanceStatePath(sessionDir, runtime, conversationId);
+    case "presentation-history":
+      return artifact.source === presentationHistoryPath(sessionDir, runtime, conversationId);
     case "project-snapshot": {
       if (runtime !== "pi" || artifact.source !== join(sessionDir, basename(artifact.source))) {
         return false;
@@ -1351,6 +1363,8 @@ export class SessionHost {
   private readonly greetingInputReaders: GhostHomeDigestReaders | undefined;
   private readonly claudeCode: ClaudeCodeRuntime;
   private readonly hooks: GhostHookRunner;
+  private readonly homeOperations: HomeOperationCoordinator;
+  private readonly presentationHistory: PresentationHistoryStore;
   private maintenance: SessionConversationMaintenance | undefined;
   private taskServices: PrincipalTaskServices | undefined;
   private readonly liveVoice: LiveVoiceManager;
@@ -1380,7 +1394,7 @@ export class SessionHost {
   private readonly reservedGhosts = new Set<string>();
   /** Route-level claims bridge preclaim and host mutation admission. */
   private readonly homeMoveClaims = new Set<string>();
-  private readonly unregisterHomeMoveParticipant: (() => void) | undefined;
+  private readonly unregisterHomeMoveParticipant: () => void;
   /** Read-through cache for legacy titles that have not had a writable open yet. */
   private readonly legacyTitles = new Map<string, { modifiedMs: number; title: string | null }>();
   private readonly retentionIdleTtlMs: number;
@@ -1435,8 +1449,10 @@ export class SessionHost {
     this.greetingReadRawCharacter = options.greeting?.readRawCharacter ?? readCharacterFile;
     this.greetingInputReaders = options.greeting?.inputReaders;
     this.hooks = options.hooks ?? new GhostHookRunner({ logger: this.logger });
+    this.homeOperations = options.homeOperations ?? homeOperationsFor(this.registry);
+    this.presentationHistory = options.presentationHistory ?? new PresentationHistoryStore();
     this.maintenance = options.maintenance;
-    this.unregisterHomeMoveParticipant = options.homeOperations?.registerMoveParticipant({
+    this.unregisterHomeMoveParticipant = this.homeOperations.registerMoveParticipant({
       preclaim: (ghostName) => {
         if (this.ghostBusy(ghostName)) {
           throw new GhostError(
@@ -3018,9 +3034,10 @@ export class SessionHost {
       || this.liveVoiceOwnsSession(hosted);
   }
 
-  private maintenanceFinisher(
+  private settledTurnFinisher(
     identity: MaintenanceIdentity,
     admission: MaintenanceOwnerAdmission | undefined,
+    initialization: PresentationHistoryInitialization,
     release: () => void = () => admission?.release(),
   ): (turn?: SettledMaintenanceTurn) => Promise<void> {
     let finished = false;
@@ -3028,6 +3045,17 @@ export class SessionHost {
       if (finished) return;
       finished = true;
       try {
+        if (turn) {
+          const ghost = this.registry.get(identity.ghostName);
+          const sessionDir = ghostPaths(ghost.dir).sessionDir;
+          await this.homeOperations.withLease(identity.ghostName, () =>
+            this.presentationHistory.recordSettledTurn(
+              sessionDir,
+              { runtime: identity.runtime, conversationId: identity.conversationId },
+              turn,
+              initialization,
+            ));
+        }
         await admission?.finish(turn);
       } catch {
         if (turn) {
@@ -3039,12 +3067,34 @@ export class SessionHost {
         }
         this.logger
           .child({ ghost: identity.ghostName, conversation: identity.conversationId })
-          .warn("conversation maintenance cleanup was not recorded", {
+          .warn("conversation settlement cleanup was not recorded", {
             runtime: identity.runtime,
           });
       } finally {
         release();
       }
+    };
+  }
+
+  private presentationHistoryInitialization(
+    ghostName: string,
+    runtime: ConversationRuntime,
+    conversationId: string,
+    piOwnerTurns?: number,
+  ): PresentationHistoryInitialization {
+    const sessionDir = ghostPaths(this.registry.get(ghostName).dir).sessionDir;
+    if (runtime === "pi") {
+      const nativeHistoryExists = piOwnerTurns === undefined
+        ? existsSync(join(sessionDir, sessionFileNameFor(conversationId)))
+        : piOwnerTurns > 0;
+      return {
+        historyMode: nativeHistoryExists ? "legacy-pi-native" : "journal",
+        historyPrefixOmitted: false,
+      };
+    }
+    return {
+      historyMode: "journal",
+      historyPrefixOmitted: existsSync(claudeSessionMetadataPath(sessionDir, conversationId)),
     };
   }
 
@@ -3067,7 +3117,16 @@ export class SessionHost {
     let finish = input.finish;
     if (!finish) {
       const admission = this.maintenance?.admitOwnerAction(identity);
-      finish = this.maintenanceFinisher(identity, admission);
+      finish = this.settledTurnFinisher(
+        identity,
+        admission,
+        this.presentationHistoryInitialization(
+          ghostName,
+          "pi",
+          conversationId,
+          hosted.nextOwnerTurnId,
+        ),
+      );
       try {
         await admission?.ready;
       } catch (error) {
@@ -3235,6 +3294,7 @@ export class SessionHost {
     await pass.finish({
       source: { runtime: "pi", createdAt },
       sourceRevision: { kind: "pi-leaf", value: assistantEntry.id },
+      sourceOrdinal: pass.turnId,
       cwd: hosted.session.sessionManager.getCwd(),
       ownerPrompt: pass.ownerPrompt,
       assistantText: entryText(assistant.content),
@@ -3975,9 +4035,10 @@ export class SessionHost {
             throw new GhostError("session_busy", "This turn admission is no longer available.", 409);
           }
           started = true;
-          const finishMaintenance = this.maintenanceFinisher(
+          const finishMaintenance = this.settledTurnFinisher(
             { ghostName, runtime: selected.runtime, conversationId },
             maintenanceAdmission,
+            this.presentationHistoryInitialization(ghostName, selected.runtime, conversationId),
             releaseMaintenance,
           );
           const abortFromCaller = () => activeStop.controller.abort(streamOptions.signal?.reason);
@@ -5475,6 +5536,7 @@ export class SessionHost {
       const bindingPath = projectBindingPath(paths.sessionDir, runtime, id);
       const cwdPath = toolCwdsPath(paths.sessionDir, id);
       const maintenancePath = maintenanceStatePath(paths.sessionDir, runtime, id);
+      const presentationPath = presentationHistoryPath(paths.sessionDir, runtime, id);
       const projectSnapshots = runtime === "pi"
         ? await piProjectSnapshotPaths(paths.sessionDir, id)
         : [];
@@ -5500,11 +5562,13 @@ export class SessionHost {
               artifact: "project-snapshot" as const,
               path,
             })),
+            { artifact: "presentation-history", path: presentationPath },
           ]
         : [
             { artifact: "claude-sidecar", path: claudePath },
             { artifact: "project-binding", path: bindingPath },
             { artifact: "maintenance-state", path: maintenancePath },
+            { artifact: "presentation-history", path: presentationPath },
           ];
       const artifacts = [...deleteRecord.artifacts];
       const recorded = new Set(artifacts.map((entry) =>
@@ -6077,7 +6141,7 @@ export class SessionHost {
       } catch (error) {
         this.reportCleanupFailure(undefined, "conversation maintenance", error);
       }
-      this.unregisterHomeMoveParticipant?.();
+      this.unregisterHomeMoveParticipant();
       this.sessions.clear();
     })().finally(() => {
       if (this.disposePromise === dispose && this.cleanupRetries.size > 0) {

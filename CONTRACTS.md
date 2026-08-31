@@ -73,6 +73,9 @@ durable Ghost task boundary.
                                v1 idle-memory journal for one runtime-qualified
                                conversation, including ordered consolidation
                                mutations; never copied to another conversation
+  sessions/<stem>.<runtime>.presentation.json
+                               v1 bounded owner/assistant presentation history
+                               for one runtime-qualified conversation
   sessions/pins.json           v2 pinned state: { "version": 2, "pinned": ["<id>", …] }
   sessions/reads.json          v2 read state: { "version": 2, "reads": { "<id>": "<ISO timestamp>" } }
   .tasks/                      daemon-owned normalized worker-task lifecycle
@@ -84,6 +87,33 @@ durable Ghost task boundary.
   .pi/models-store.json        pi's catalogue cache
   .memory-maintenance.json     v1 machine-bound last consolidation-run time
 ```
+
+The presentation file is Ghost-owned display state, never runtime resume state.
+Pi's native transcript and Claude Code's native transcript plus Ghost resume
+sidecar remain authoritative for model context and continuation. The mode-`0600`
+file embeds its exact runtime and raw conversation id and is named from the
+same collision-safe conversation stem as the other runtime sidecars; the stem
+is never accepted as an alternate id. Version 1 is one atomically replaced JSON
+object with monotonically sequenced settled owner turns, the native source
+revision, a positive native owner-turn ordinal, final outcome and timestamp,
+optional title state, and explicit truncation/migration metadata. The ordinal
+detects a native-commit/presentation-commit crash gap even when Pi's leaf ids
+are opaque: a jump marks the unavailable journal prefix, while an equal ordinal
+with a different revision or a lower ordinal is rejected. Owner and assistant
+text are each bounded to 32,000 UTF-16 code units, at most 1,000 newest turns
+are retained, and the full file is at most 16 MiB. Old turns are evicted
+deterministically and the state records the greatest dropped sequence. An exact
+repeat of the newest owner ordinal and native source revision is idempotent;
+an older ordinal is rejected. Every read validates the complete shape, bounds,
+contiguous sequence, source-revision/runtime match, embedded identity,
+regular-file identity, one link, and mode before use.
+Mutations serialize per file and publish through temporary-file fsync, rename,
+and parent-directory fsync, so a crash exposes the complete old or new version.
+An interrupted owner action with no natively persisted final assistant turn is
+not added. Existing Pi and Claude conversations are not imported or rewritten:
+the first later record identifies whether presentation history before that
+point is omitted. A presentation file alone never publishes a conversation in
+the session list.
 
 `character.md` has no frontmatter. Its leading Markdown heading
 (`#` through `######`) is the derived display title, while the complete
@@ -1365,7 +1395,7 @@ streams emit one complete event object per line.
   Ghost-owned artifact for the conversation to recoverable Trash. `artifact` is
   `omp-transcript` (the pi transcript; the label is kept for compatibility),
   `claude-sidecar`, `project-binding`, `project-snapshot`, `tool-cwds`, or
-  `maintenance-state`.
+  `maintenance-state`, or `presentation-history`.
   Every generation-qualified Pi project snapshot is included. Claude Code's actual
   transcript remains in that runtime's
   external `~/.claude` storage; Ghost does not claim to delete it. An active
@@ -1382,8 +1412,9 @@ streams emit one complete event object per line.
   so far.
   Before any reconciliation or cleanup, every v2/v3 row's artifact label and
   source must match the exact runtime/conversation-derived allow-list: the one
-  Pi transcript or Claude sidecar, that runtime's binding, and the Pi tool-cwd
-  sidecar and generation-qualified snapshot names. Sources and destinations are globally
+  Pi transcript or Claude sidecar, that runtime's binding and presentation
+  history, and the Pi tool-cwd sidecar and generation-qualified snapshot names.
+  Sources and destinations are globally
   distinct and completed receipts require source absent plus Trash destination
   present. A v3 pending move additionally requires the exact private
   `.trash/.conversation-<uuid>` root and its next sequential, collision-reserved

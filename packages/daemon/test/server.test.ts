@@ -2287,7 +2287,10 @@ describe("DELETE /api/ghosts/:name/sessions/:id", () => {
     };
     expect(body).toMatchObject({
       ok: true,
-      trash: [{ artifact: "omp-transcript", kind: "fallback" }],
+      trash: [
+        { artifact: "omp-transcript", kind: "fallback" },
+        { artifact: "presentation-history", kind: "fallback" },
+      ],
     });
     expect(existsSync(body.trash[0]!.source)).toBe(false);
     expect(existsSync(body.trash[0]!.trash)).toBe(true);

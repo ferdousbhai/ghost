@@ -374,7 +374,7 @@ write               registry=yes  wire=yes  invokable=yes
 --- .pi/ (contents not compared) ---
 models-store.json, models.pi.json
 --- sessions/ (contents not compared) ---
-conv-golden.jsonl, conv-golden.pi.tool-cwds.json
+conv-golden.jsonl, conv-golden.pi.presentation.json, conv-golden.pi.tool-cwds.json
 --- character.md ---
 # casper
 

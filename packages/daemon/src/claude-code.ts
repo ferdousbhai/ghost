@@ -1902,6 +1902,7 @@ export class ClaudeCodeRuntime {
             resumeId: completed.session_id,
           },
           sourceRevision: { kind: "claude-owner-turn", value: ownerTurnId },
+          sourceOrdinal: ownerTurnId,
           cwd: runtimeCwd,
           ownerPrompt: options.prompt,
           assistantText: resultText,

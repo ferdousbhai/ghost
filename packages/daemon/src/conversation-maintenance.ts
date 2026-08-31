@@ -43,6 +43,11 @@ import {
   smolModelLabel,
   SmolModelUnavailableError,
 } from "./smol.js";
+import type {
+  ConversationSourceIdentity,
+  ConversationSourceRevision,
+  SettledConversationTurn,
+} from "./settled-conversation-turn.js";
 
 export const CONVERSATION_MAINTENANCE_IDLE_SECONDS = 60;
 /** The `builtin.<key>` entry of `hooks.json` that tunes memory upkeep. */
@@ -73,22 +78,9 @@ export interface MaintenanceIdentity {
   conversationId: string;
 }
 
-export type MaintenanceSourceRevision =
-  | { kind: "pi-leaf"; value: string }
-  | { kind: "claude-owner-turn"; value: number };
-
-export type MaintenanceSourceIdentity =
-  | { runtime: "pi"; createdAt: string }
-  | { runtime: "claude-code"; createdAt: string; resumeId: string };
-
-export interface SettledMaintenanceTurn {
-  source: MaintenanceSourceIdentity;
-  sourceRevision: MaintenanceSourceRevision;
-  cwd: string;
-  ownerPrompt: string;
-  assistantText: string;
-  outcome: "completed" | "failed";
-}
+export type MaintenanceSourceRevision = ConversationSourceRevision;
+export type MaintenanceSourceIdentity = ConversationSourceIdentity;
+export type SettledMaintenanceTurn = SettledConversationTurn;
 
 export interface MaintenanceOwnerAdmission {
   ready: Promise<void>;

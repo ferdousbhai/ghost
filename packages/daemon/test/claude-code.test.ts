@@ -43,6 +43,7 @@ import type {
   SettledMaintenanceTurn,
 } from "../src/conversation-maintenance.js";
 import { ghostPaths } from "../src/ghosts.js";
+import { presentationHistoryPath } from "../src/presentation-history.js";
 import {
   GHOST_SESSION_STOP_CONTINUATION_CAP,
   GhostHookRunner,
@@ -2530,10 +2531,21 @@ describe("Claude Code subscription runtime", () => {
         resumeId: metadata.sessionId,
       },
       sourceRevision: { kind: "claude-owner-turn", value: 1 },
+      sourceOrdinal: 1,
       cwd: temp!.ownerHome,
       ownerPrompt: "Keep the source exact.",
       assistantText: "Hello from the plan.",
       outcome: "completed",
+    });
+    expect(JSON.parse(readFileSync(presentationHistoryPath(
+      paths.sessionDir,
+      "claude-code",
+      "conversation-maintenance-source",
+    ), "utf8"))).toMatchObject({
+      historyMode: "journal",
+      historyPrefixOmitted: false,
+      lastSourceOrdinal: 1,
+      turns: [{ ownerText: "Keep the source exact.", assistantText: "Hello from the plan." }],
     });
     expect(releases).toBe(0);
     expect(events.at(-1)?.type).not.toBe("done");

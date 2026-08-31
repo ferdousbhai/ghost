@@ -51,6 +51,7 @@ function turn(position = 1): SettledMaintenanceTurn {
   return {
     source,
     sourceRevision: { kind: "pi-leaf", value: `leaf-${position}` },
+    sourceOrdinal: position,
     cwd: fixture.ownerHome,
     ownerPrompt: `Remember fact ${position}.`,
     assistantText: `I will remember fact ${position}.`,

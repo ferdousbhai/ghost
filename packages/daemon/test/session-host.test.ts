@@ -73,6 +73,7 @@ import type { PiMessagesEvent } from "../src/pi-messages.js";
 import type { PrincipalTaskServices } from "../src/principal-task-tools.js";
 import type { TaskView } from "../src/tasks.js";
 import { readPins, writePins } from "../src/pins.js";
+import { presentationHistoryPath } from "../src/presentation-history.js";
 import { ProjectBindingStore, projectBindingPath } from "../src/project-binding.js";
 import { PROJECT_SCAN_MAX_ENTRIES } from "../src/project-resources.js";
 import { piProjectSnapshotPaths } from "../src/project-snapshot.js";
@@ -3979,7 +3980,7 @@ describe("SessionHost.runTurn", () => {
       finishEntered.resolve();
       await allowFinish.promise;
     });
-    await setup([
+    const { dir } = await setup([
       { kind: "text", text: "held", barrier },
       { kind: "text", text: "fresh answer" },
     ], { maintenance: recorded.maintenance });
@@ -4007,6 +4008,11 @@ describe("SessionHost.runTurn", () => {
     await turn;
     expect(events.at(-1)).toMatchObject({ type: "error", reason: "aborted" });
     await expect(host!.stopTurn("casper", "stop-then-send", "pi")).resolves.toBe(false);
+    expect(existsSync(presentationHistoryPath(
+      ghostPaths(dir).sessionDir,
+      "pi",
+      "stop-then-send",
+    ))).toBe(false);
     barrier.release();
 
     const retryEvents: PiMessagesEvent[] = [];
@@ -4553,7 +4559,7 @@ describe("SessionHost.runTurn", () => {
       beginShutdown: async () => {},
       disposeAll: async () => {},
     };
-    await setup([{ kind: "text", text: "Durable answer." }], { maintenance });
+    const { dir } = await setup([{ kind: "text", text: "Durable answer." }], { maintenance });
     const events: PiMessagesEvent[] = [];
     const running = host!.runTurn("casper", {
       sessionId: "maintenance-pi",
@@ -4574,14 +4580,28 @@ describe("SessionHost.runTurn", () => {
     expect(released).toBe(0);
     expect(turn).toMatchObject({
       sourceRevision: { kind: "pi-leaf", value: expect.any(String) },
+      sourceOrdinal: 1,
       cwd: temp!.ownerHome,
       ownerPrompt: "Remember this.",
       assistantText: expect.stringContaining("Durable answer."),
       outcome: "completed",
       source: { runtime: "pi", createdAt: expect.any(String) },
     });
+    const presentation = JSON.parse(readFileSync(presentationHistoryPath(
+      ghostPaths(dir).sessionDir,
+      "pi",
+      "maintenance-pi",
+    ), "utf8"));
     allowFinish.resolve();
     await running;
+    expect(presentation).toMatchObject({
+      historyMode: "journal",
+      lastSourceOrdinal: 1,
+      turns: [{
+        ownerText: "Remember this.",
+        assistantText: expect.stringContaining("Durable answer."),
+      }],
+    });
     expect(events.at(-1)?.type).toBe("done");
     expect(released).toBe(1);
   });
@@ -4654,6 +4674,45 @@ describe("SessionHost.runTurn", () => {
     expect(retriedEvents.filter((event) => event.type === "done" || event.type === "error"))
       .toEqual([expect.objectContaining({ type: "done" })]);
     expect(recorded.released.count).toBe(2);
+  });
+
+  it("reports presentation persistence failure and marks the native crash gap on retry", async () => {
+    const { dir } = await setup([{ kind: "text", text: "Durable model answer." }]);
+    const path = presentationHistoryPath(
+      ghostPaths(dir).sessionDir,
+      "pi",
+      "strict-pi-presentation",
+    );
+    mkdirSync(ghostPaths(dir).sessionDir, { recursive: true });
+    writeFileSync(path, "not presentation state\n", { mode: 0o600 });
+    const failedEvents: PiMessagesEvent[] = [];
+    await host!.runTurn("casper", {
+      sessionId: "strict-pi-presentation",
+      prompt: "Persist the presentation.",
+      emit: (event) => failedEvents.push(event),
+    });
+    expect(failedEvents.filter((event) => event.type === "done" || event.type === "error"))
+      .toEqual([expect.objectContaining({
+        type: "error",
+        errorMessage: "Could not durably settle this owner turn.",
+      })]);
+    expect(JSON.stringify(await host!.readTranscript("casper", "strict-pi-presentation")))
+      .toContain("Durable model answer.");
+
+    unlinkSync(path);
+    const retryEvents: PiMessagesEvent[] = [];
+    await host!.runTurn("casper", {
+      sessionId: "strict-pi-presentation",
+      prompt: "Continue after the persistence fault.",
+      emit: (event) => retryEvents.push(event),
+    });
+    expect(retryEvents.at(-1)?.type).toBe("done");
+    expect(JSON.parse(readFileSync(path, "utf8"))).toMatchObject({
+      historyMode: "legacy-pi-native",
+      historyPrefixOmitted: true,
+      lastSourceOrdinal: 2,
+      turns: [{ sourceOrdinal: 2, ownerText: "Continue after the persistence fault." }],
+    });
   });
 
   it("reconstructs Pi owner turn ids from the persisted branch after cache close", async () => {
@@ -4848,7 +4907,10 @@ describe("SessionHost.runTurn", () => {
     });
     await turn;
     await expect(host!.deleteSession("casper", "conv-busy-delete")).resolves.toMatchObject({
-      artifacts: [{ artifact: "omp-transcript", kind: "fallback" }],
+      artifacts: [
+        { artifact: "omp-transcript", kind: "fallback" },
+        { artifact: "presentation-history", kind: "fallback" },
+      ],
     });
   });
 
@@ -5216,6 +5278,11 @@ describe("session listing", () => {
       "pi",
       "conv-delete",
     );
+    const presentationPath = presentationHistoryPath(
+      ghostPaths(dir).sessionDir,
+      "pi",
+      "conv-delete",
+    );
     writeFileSync(maintenancePath, "maintenance state\n", { mode: 0o600 });
     expect(existsSync(path)).toBe(true);
 
@@ -5224,6 +5291,7 @@ describe("session listing", () => {
     expect(trashed.artifacts).toMatchObject([
       { artifact: "omp-transcript", source: path, kind: "fallback" },
       { artifact: "maintenance-state", source: maintenancePath, kind: "fallback" },
+      { artifact: "presentation-history", source: presentationPath, kind: "fallback" },
     ]);
     expect(existsSync(maintenancePath)).toBe(false);
     expect(existsSync(trashed.artifacts[0]!.trash)).toBe(true);
@@ -5508,6 +5576,7 @@ describe("session listing", () => {
       "project-binding",
       "maintenance-state",
       "project-snapshot",
+      "presentation-history",
     ];
 
     for (let moved = 1; moved <= expectedKinds.length; moved += 1) {
@@ -5596,6 +5665,10 @@ describe("session listing", () => {
         trash: pending.pending.trash,
         kind: "fallback",
       }),
+      expect.objectContaining({
+        artifact: "presentation-history",
+        kind: "fallback",
+      }),
     ]);
     expect(existsSync(tombstone)).toBe(false);
     expect(existsSync(pending.pending.trash)).toBe(true);
@@ -5634,7 +5707,10 @@ describe("session listing", () => {
     unlinkSync(record.pending.trash);
     await expect(host!.deleteSession("casper", id, "pi"))
       .resolves.toMatchObject({
-        artifacts: [expect.objectContaining({ trash: record.pending.trash })],
+        artifacts: [
+          expect.objectContaining({ trash: record.pending.trash }),
+          expect.objectContaining({ artifact: "presentation-history" }),
+        ],
       });
   });
 
