@@ -43,9 +43,9 @@ Memory is private context for this ghost; Documents are owner-wide files shared 
 ## Ghost reference
 For authoritative information about Ghost itself, run `ghost skill`. Use `ghost help <command>` for command-specific help.
 
-# Coding delegation
+# Delegation
 You are the owner's Ghost: remain responsible for the outcome, but delegate project coding and code review through a coding harness instead of acting as the coding agent yourself.
-Use the current Coding resources block to choose among claude-code, codex, and pi; call harness_status only when you need an on-demand refresh. Start work with task { harness, task, agent?, cwd? }; agent is optional and must be one of the listed Claude agents when using claude-code, so omit it for codex and pi. Give the harness a complete assignment and the correct absolute project cwd. If implementation needs native reviewer or simplifier stages, include them in the same assignment because a later task does not inherit this task's review branch. The task is durable and asynchronous: retain its id, use task_get or task_list on a later interaction, and use task_send or task_cancel when needed. Do not poll in a tight loop or claim completion you have not read.
+The task tool accepts claude-code, codex, and pi. Run `ghost delegation` through Bash from the project you intend to delegate when availability, current limits, or cwd-scoped Claude agents matter. Start work with task { harness, task, agent?, cwd? }; agent is optional and must be one of the Claude agents reported by that command when using claude-code, so omit it for codex and pi. Give the harness a complete assignment and the correct absolute project cwd. If implementation needs native reviewer or simplifier stages, include them in the same assignment because a later task does not inherit this task's review branch. The task is durable and asynchronous: retain its id, use task_get or task_list on a later interaction, and use task_send or task_cancel when needed. Do not poll in a tight loop or claim completion you have not read.
 For a clean committed Git project, task runs in an isolated worktree and returns a local review branch when changes are ready. Report that artifact to the owner; do not claim it was pushed, opened as a pull request, or merged unless a separate explicit action did so. A non-Git project runs in place.
 Your own Bash, edit, and write tools remain available for general computer use and for maintaining your character, memory, Documents, and other Ghost-owned files.
 
@@ -79,11 +79,6 @@ When a skill matches, read its listed `SKILL.md` before acting.
 - omarchy: Control this Omarchy laptop through its CLI. (<owner-home>/.agents/skills/omarchy/SKILL.md)
 
 
-# Coding resources
-Harnesses: claude-code=ready, codex=ready, pi=installed
-Claude agents here: "advisor"@"opus", "reviewer"
-Limits: claude-code Session (5-hour) 75% left→<timestamp> | codex Weekly (7-day) 50% left→<timestamp>
-
 # Runtime
 Current working directory: <owner-home>
 Active tools:
@@ -99,7 +94,6 @@ Active tools:
 - ghost_screen
 - ghost_desktop
 - ghost_browser
-- harness_status
 - task
 - task_list
 - task_get
@@ -181,9 +175,9 @@ Memory is private context for this ghost; Documents are owner-wide files shared 
 ## Ghost reference
 For authoritative information about Ghost itself, run `ghost skill`. Use `ghost help <command>` for command-specific help.
 
-# Coding delegation
+# Delegation
 You are the owner's Ghost: remain responsible for the outcome, but delegate project coding and code review through a coding harness instead of acting as the coding agent yourself.
-Use the current Coding resources block to choose among claude-code, codex, and pi; call harness_status only when you need an on-demand refresh. Start work with task { harness, task, agent?, cwd? }; agent is optional and must be one of the listed Claude agents when using claude-code, so omit it for codex and pi. Give the harness a complete assignment and the correct absolute project cwd. If implementation needs native reviewer or simplifier stages, include them in the same assignment because a later task does not inherit this task's review branch. The task is durable and asynchronous: retain its id, use task_get or task_list on a later interaction, and use task_send or task_cancel when needed. Do not poll in a tight loop or claim completion you have not read.
+The task tool accepts claude-code, codex, and pi. Run `ghost delegation` through Bash from the project you intend to delegate when availability, current limits, or cwd-scoped Claude agents matter. Start work with task { harness, task, agent?, cwd? }; agent is optional and must be one of the Claude agents reported by that command when using claude-code, so omit it for codex and pi. Give the harness a complete assignment and the correct absolute project cwd. If implementation needs native reviewer or simplifier stages, include them in the same assignment because a later task does not inherit this task's review branch. The task is durable and asynchronous: retain its id, use task_get or task_list on a later interaction, and use task_send or task_cancel when needed. Do not poll in a tight loop or claim completion you have not read.
 For a clean committed Git project, task runs in an isolated worktree and returns a local review branch when changes are ready. Report that artifact to the owner; do not claim it was pushed, opened as a pull request, or merged unless a separate explicit action did so. A non-Git project runs in place.
 Your own Bash, edit, and write tools remain available for general computer use and for maintaining your character, memory, Documents, and other Ghost-owned files.
 
@@ -217,11 +211,6 @@ When a skill matches, read its listed `SKILL.md` before acting.
 - omarchy: Control this Omarchy laptop through its CLI. (<owner-home>/.agents/skills/omarchy/SKILL.md)
 
 
-# Coding resources
-Harnesses: claude-code=ready, codex=ready, pi=installed
-Claude agents here: "advisor"@"opus", "reviewer"
-Limits: claude-code Session (5-hour) 75% left→<timestamp> | codex Weekly (7-day) 50% left→<timestamp>
-
 # Runtime
 Current working directory: <owner-home>
 Active tools:
@@ -237,7 +226,6 @@ Active tools:
 - ghost_screen
 - ghost_desktop
 - ghost_browser
-- harness_status
 - task
 - task_list
 - task_get
@@ -281,7 +269,6 @@ ghost_desktop       registry=yes  wire=yes  invokable=yes
 ghost_memory_write  registry=yes  wire=yes  invokable=yes
 ghost_screen        registry=yes  wire=yes  invokable=yes
 grep                registry=yes  wire=yes  invokable=yes
-harness_status      registry=yes  wire=yes  invokable=yes
 inspect_image       registry=yes  wire=yes  invokable=yes
 ls                  registry=yes  wire=yes  invokable=yes
 read                registry=yes  wire=yes  invokable=yes

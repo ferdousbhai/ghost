@@ -1,11 +1,10 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
-  CodingResources,
-  renderCodingResources,
-  type CodingResourcesView,
-} from "../src/coding-resources.js";
+  renderDelegationStatus,
+  type DelegationStatusView,
+} from "../src/delegation-status.js";
 
-function view(): CodingResourcesView {
+function view(): DelegationStatusView {
   return {
     claudeAgents: {
       state: "ready",
@@ -85,13 +84,13 @@ function view(): CodingResourcesView {
   };
 }
 
-describe("coding resources", () => {
+describe("delegation status rendering", () => {
   it("renders the native inventory and Omarchy reset windows compactly", () => {
-    expect(renderCodingResources(view())).toBe([
-      "# Coding resources",
-      "Harnesses: claude-code=ready, codex=ready, pi=installed",
-      'Claude agents here: "advisor"@"opus", "reviewer"',
-      "Limits: claude-code Session (5-hour) 95% left→2026-08-31T09:20:00Z; Weekly (7-day) 37% left→2026-09-03T17:00:00Z | codex Weekly (7-day) 96% left→2026-09-07T02:25:33Z [stale]",
+    expect(renderDelegationStatus(view(), Date.parse("2026-08-31T06:41:30.000Z"))).toBe([
+      "# Delegation",
+      "harnesses claude-code=ready codex=ready pi=installed",
+      "limits claude session=95%→2h38m weekly=37%→3d10h | codex weekly=96%→6d19h !stale",
+      'claude-agents "advisor"@"opus", "reviewer"',
     ].join("\n"));
   });
 
@@ -104,32 +103,9 @@ describe("coding resources", () => {
     claude.usage = { ...claude.usage, state: "missing", limits: [] };
     codex.usage = { ...codex.usage, state: "invalid", limits: [] };
 
-    expect(renderCodingResources(resources)).toContain(
-      "Limits: claude-code=missing | codex=invalid",
+    expect(renderDelegationStatus(resources)).toContain(
+      "limits claude=missing | codex=invalid",
     );
   });
 
-  it("caches per cwd and lets harness_status force a refresh", async () => {
-    let now = 0;
-    const harnesses = { list: vi.fn(async () => ({ harnesses: view().harnesses })) };
-    const claudeAgents = { list: vi.fn(async () => view().claudeAgents) };
-    const resources = new CodingResources({
-      harnesses,
-      claudeAgents,
-      now: () => now,
-      ttlMs: 100,
-    });
-
-    await resources.view("/repo");
-    await resources.view("/repo");
-    expect(harnesses.list).toHaveBeenCalledOnce();
-    expect(claudeAgents.list).toHaveBeenCalledOnce();
-    await resources.view("/repo", true);
-    expect(harnesses.list).toHaveBeenCalledTimes(2);
-    expect(claudeAgents.list).toHaveBeenLastCalledWith("/repo", true);
-    now = 101;
-    await resources.view("/repo");
-    expect(harnesses.list).toHaveBeenCalledTimes(3);
-    expect(() => resources.view("relative")).toThrow(/absolute/);
-  });
 });

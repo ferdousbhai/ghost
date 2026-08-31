@@ -238,15 +238,16 @@ conversation may explicitly trust and bind one project, after which Ghost pins
 its data-only instructions, skills, rules, Markdown commands/prompts, and scoped
 MCP configuration. Project executable extensions, hooks, custom code tools,
 LSP, and custom agent definitions stay disabled. Both principal runtimes expose
-daemon-owned `harness_status`, `task`, `task_list`, `task_get`, `task_send`, and
-`task_cancel` controls for the native `claude-code`, `codex`, and `pi`
+daemon-owned `task`, `task_list`, `task_get`, `task_send`, and `task_cancel`
+controls for the native `claude-code`, `codex`, and `pi`
 harnesses; project, ghost-file, and ambient agent definitions remain inert in
-the principal. A compact per-turn Coding resources block reports harness
-availability, Claude/Codex Omarchy limits and reset times, and the exact native
-Claude agent names/models available at the current cwd. Agent descriptions and
-definitions stay inside Claude Code. A task may select one of those native
-agents only for Claude Code; Codex and Pi receive the assignment unchanged
-through their default agents.
+the principal. The stable `# Delegation` prompt section explains that surface;
+the Ghost runs the local `ghost delegation` command through Bash only when it
+needs current harness availability, a compact projection of Claude/Codex
+Omarchy limits, or native Claude agent names/models for the current cwd. Agent
+descriptions and definitions stay inside Claude Code. A task may select one of
+those native agents only for Claude Code; Codex and Pi receive the assignment
+unchanged through their default agents.
 Clean committed Git projects use one daemon-managed linked worktree and local
 review branch per task. Task views distinguish the trusted source `root`/`cwd`
 from the execution `workspace`; Ghost preserves uncertain work and never
@@ -362,9 +363,10 @@ ad-hoc prompts:
   every later turn. The `todo` tool is view-only while planning; `/todo` keeps a
   phased task list the shell can show (`GET …/sessions/:id/todo`). Claude Code
   conversations do not support this Ghost-owned mode.
-- Coding delegation is asynchronous and durable. `harness_status`, `task_list`,
-  and `task_get` remain observational in Pi plan mode; starting, steering, or
-  cancelling a harness task remains blocked until the plan is approved.
+- Coding delegation is asynchronous and durable. `task_list` and `task_get`
+  remain observational in Pi plan mode; starting, steering, or cancelling a
+  harness task remains blocked until the plan is approved. `ghost delegation`
+  runs through Bash, so the Pi principal cannot invoke it while planning.
 - Pi can use Firecrawl, HEY, Basecamp, Obsidian, Google Workspace, and other
   CLI skills through `bash` when the owner installs them. At session
   construction, Ghost uses pi's native parser to snapshot every valid skill

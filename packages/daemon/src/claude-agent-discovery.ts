@@ -10,11 +10,9 @@ import { ClaudeCodeProbe } from "./claude-code.js";
 import { silentLogger, type Logger } from "./log.js";
 import { MAX_NATIVE_AGENT_NAME_LENGTH } from "./tasks.js";
 
-export const CLAUDE_AGENT_DISCOVERY_TTL_MS = 5 * 60 * 1_000;
 export const CLAUDE_AGENT_DISCOVERY_TIMEOUT_MS = 10_000;
 const MAX_DISCOVERED_AGENTS = 64;
 const MAX_AGENT_MODEL_LENGTH = 160;
-const MAX_CACHED_CWDS = 32;
 
 export interface ClaudeAgentSelection {
   name: string;
@@ -41,8 +39,6 @@ export interface ClaudeAgentDiscoveryOptions {
   env?: NodeJS.ProcessEnv;
   probe?: Pick<ClaudeCodeProbe, "read">;
   createQuery?: ClaudeAgentDiscoveryQueryFactory;
-  now?: () => number;
-  ttlMs?: number;
   timeoutMs?: number;
   logger?: Logger;
 }
@@ -114,48 +110,25 @@ export class ClaudeAgentDiscovery {
   private readonly env: NodeJS.ProcessEnv;
   private readonly probe: Pick<ClaudeCodeProbe, "read">;
   private readonly createQuery: ClaudeAgentDiscoveryQueryFactory;
-  private readonly now: () => number;
-  private readonly ttlMs: number;
   private readonly timeoutMs: number;
   private readonly logger: Logger;
-  private readonly cache = new Map<string, {
-    expiresAt: number;
-    value: Promise<ClaudeAgentInventory>;
-  }>();
 
   constructor(options: ClaudeAgentDiscoveryOptions = {}) {
     this.env = { ...(options.env ?? process.env) };
     this.probe = options.probe ?? new ClaudeCodeProbe({ env: this.env });
     this.createQuery = options.createQuery ?? ((input) => query(input));
-    this.now = options.now ?? Date.now;
-    this.ttlMs = options.ttlMs ?? CLAUDE_AGENT_DISCOVERY_TTL_MS;
     this.timeoutMs = options.timeoutMs ?? CLAUDE_AGENT_DISCOVERY_TIMEOUT_MS;
-    if (!Number.isFinite(this.ttlMs) || this.ttlMs <= 0) {
-      throw new RangeError("Claude agent discovery ttlMs must be a positive finite number.");
-    }
     if (!Number.isFinite(this.timeoutMs) || this.timeoutMs <= 0) {
       throw new RangeError("Claude agent discovery timeoutMs must be a positive finite number.");
     }
     this.logger = options.logger ?? silentLogger;
   }
 
-  list(cwd: string, fresh = false): Promise<ClaudeAgentInventory> {
+  list(cwd: string): Promise<ClaudeAgentInventory> {
     if (!isAbsolute(cwd)) {
       return Promise.resolve({ state: "unavailable", agents: [], truncated: false });
     }
-    const now = this.now();
-    const cached = this.cache.get(cwd);
-    if (!fresh && cached && now < cached.expiresAt) return cached.value;
-
-    const value = this.discover(cwd);
-    this.cache.delete(cwd);
-    this.cache.set(cwd, { expiresAt: now + this.ttlMs, value });
-    while (this.cache.size > MAX_CACHED_CWDS) {
-      const oldest = this.cache.keys().next().value as string | undefined;
-      if (oldest === undefined) break;
-      this.cache.delete(oldest);
-    }
-    return value;
+    return this.discover(cwd);
   }
 
   private async discover(cwd: string): Promise<ClaudeAgentInventory> {

@@ -79,10 +79,9 @@ For each turn Ghost:
 3. rebuilds the persona and memory index from the ghost home, the shallow index
    from the owner's shared XDG Documents root, the Omarchy CLI-first
    computer-use policy, the owner-deliverable, Ghost self-reference, coding
-   delegation, and current-runtime/cwd policies, the scheduled-work policy
+   delegation under the stable `# Delegation` heading, and current-runtime/cwd policies, the scheduled-work policy
    rendered from ghostd's one resolved systemd user-unit directory, the
-   machine/ghost/project skill index, compact coding-harness/usage/Claude-agent
-   resources, and the always-active declarative instructions;
+   machine/ghost/project skill index, and the always-active declarative instructions;
 4. applies the conversation's pre-turn project binding: owner home when
    unbound, or the trusted project cwd plus its approved declarative snapshot;
 5. captures the Ghost-specific `@ghost/extensions` tools and daemon-owned
@@ -219,11 +218,12 @@ are:
 The full T3 provider graph, approvals UI, and long-lived queue were not copied.
 Claude Code's own computer and coding tools remain native in the principal;
 native subagents remain available only inside delegated `claude-code` tasks.
-The Ghost principal sees their native `supportedAgents()` names/models in its
-compact Coding resources block, alongside installed harnesses and the existing
-Omarchy Claude/Codex utilization windows and UTC reset times. The discovery
-query has empty streaming input, uses the installed executable and normal
-settings sources, persists no session, and is cached briefly per cwd.
+When it needs to delegate, the Ghost principal runs `ghost delegation` through
+native Bash to get their native `supportedAgents()` names/models, installed
+harnesses, and a compact projection of the existing Omarchy Claude/Codex usage
+records. None of that dynamic state is added to every turn's system prompt. The
+discovery query has empty streaming input, uses the installed executable and
+normal settings sources, and persists no session.
 Ghost passes
 `settingSources: []` and `skills: []`; declarative skills are not enabled
 through Claude's live discovery mechanism because the SDK's `skills: "all"`

@@ -396,13 +396,14 @@ identity blocks.
 
 pi's native tools in a Ghost session are `bash`, `edit`, `find`, `grep`, `ls`,
 `read`, and `write`. Ghost's own tools — `ghost_memory_write`, `ghost_browser`,
-`ghost_desktop`, `ghost_screen`, `ghost_character`, `ask`, `harness_status`,
-`task`, `task_list`, `task_get`, `task_send`, `task_cancel`, and MCP tools named
+`ghost_desktop`, `ghost_screen`, `ghost_character`, `ask`, `task`, `task_list`,
+`task_get`, `task_send`, `task_cancel`, and MCP tools named
 `mcp__<server>_<tool>` — are registered directly as pi custom tools and appear
 in `getActiveToolNames()`; there is no separate mount. The task tools reach
-only the three coding-harness adapters. The principal receives only the bounded
-native Claude agent inventory described under "Harness status"; it never reads,
-parses, or executes an agent definition. A Claude principal exposes the same
+only the three coding-harness adapters. Through ordinary Bash, the principal
+may run `ghost delegation` for the bounded native status described under
+"Harness status"; it never reads, parses, or executes an agent definition. A
+Claude principal exposes the same
 logical task surface through its in-process Ghost MCP server and disables native
 `Agent` and `Task`; a native Claude worker retains native subagent behavior. Live voice
 (issue #44) is deferred; goals with budgets belong with
@@ -862,8 +863,10 @@ one must not be a leak of both.
 
 ### `ghost` CLI
 
-`ghost` is a consumer of this HTTP contract only; it does not open sessions or
-read a ghost home. Ghost selection resolves in this order: `--ghost`, `$GHOST`,
+`ghost` is a consumer of this HTTP contract except for `ghost delegation`, the
+daemon-independent, read-only native harness/Omarchy query described under
+"Harness status". It does not open sessions or read a ghost home. Ghost
+selection resolves in this order: `--ghost`, `$GHOST`,
 the private mode-`0600`
 `$XDG_CONFIG_HOME/ghost/cli.json` (default `~/.config/ghost/cli.json`) field
 `{ "ghost": "<name>" }`, then the sole ghost when exactly one exists. Session
@@ -881,7 +884,8 @@ most recently updated conversation. The stable process exit codes are:
 | 6 | busy or conflict |
 
 With `--json`, API-backed non-streaming commands preserve the exact response
-shape and streams emit one complete event object per line.
+shape, `ghost delegation` returns its bounded local projection plus cwd, and
+streams emit one complete event object per line.
 
 ### Routes
 
@@ -1807,26 +1811,32 @@ No per-model history, credential, provider response, executable pathname, or
 raw record is exposed. A missing or malformed record never makes installation
 discovery fail.
 
-When task services are attached, both principal runtimes receive a compact
-`# Coding resources` system-prompt block rebuilt at the start of each model
-turn. It lists the three harnesses with categorical availability/authentication,
-then each ready Claude/Codex Omarchy window as integer percent remaining plus
-its UTC reset timestamp. Missing, invalid, or stale usage remains explicit.
-The block is a short-lived snapshot, not a reservation; `harness_status {}`
-refreshes the same projection on demand.
+When task services are attached, both principal runtimes receive one stable
+`# Delegation` system-prompt section. It names the three accepted harness ids,
+the Claude-only optional agent selection, the durable task lifecycle, and the
+requirement to pass the correct cwd. It contains no machine-status snapshot, so
+its bytes remain cacheable across turns that do not change the Ghost persona.
+Availability, authentication, current usage windows, and cwd-scoped native
+agents are dynamic and enter model context only when the principal runs `ghost
+delegation` through Bash. This local, daemon-independent command reads the two
+Omarchy schema-version-1 JSON files described above, performs the native
+installation/authentication probes, and queries the exact Claude Code agent
+names selectable at its current cwd. Its default output is the compact
+`# Delegation` projection: categorical harness states; each Claude/Codex limit
+as integer percent remaining plus a short relative reset duration; and Claude
+agent names with optional model aliases. `--json` returns the bounded structured
+projection for scripts. The command does not refresh Omarchy; when a fresh
+provider snapshot is actually needed the principal may first run `omarchy agent
+usage update --limits-only claude codex`.
 
-The block also lists the exact Claude Code agent names selectable at the
-conversation's current trusted cwd. Ghost obtains them through the installed
-Claude executable and the Agent SDK's native `supportedAgents()` control
-request with normal user/project/local/plugin discovery, an empty streaming
-input, no model turn, no transcript persistence, and a bounded timeout. Results
-are cached briefly per canonical cwd to avoid starting a discovery process on
-every turn. At most 64 JSON-encoded names and optional bounded model aliases
-cross into the principal, with truncation explicit; native descriptions,
-prompts, tools, and definition paths remain out of its context. Discovery
-failure is a bounded unavailable marker
-and never prevents the owner from conversing or using the default Claude agent.
-Codex and Pi have no selectable-agent inventory in this block.
+Claude inventory uses the installed executable and the Agent SDK's native
+`supportedAgents()` control request with normal user/project/local/plugin
+discovery, an empty streaming input, no model turn, no transcript persistence,
+and a bounded timeout. At most 64 JSON-encoded names and optional bounded model
+aliases cross the CLI boundary, with truncation explicit; native descriptions,
+prompts, tools, and definition paths remain out. Discovery failure prints a
+bounded unavailable marker and does not prevent use of the default Claude
+agent. Codex and Pi have no selectable-agent inventory.
 
 ### Harness tasks
 
@@ -1878,9 +1888,10 @@ guesses how to reconnect an opaque vendor process. Malformed sidecars are
 skipped by listings and rejected by direct reads. Tasks run concurrently
 without a Ghost-level cap.
 
-The harness is required. The Ghost principal chooses it using task fit plus the
-read-only installation, authentication, and Omarchy usage context returned by
-`harness_status`; the daemon does not hide that policy behind another router.
+The harness is required. The Ghost principal chooses it using task fit plus any
+installation, authentication, Omarchy usage, or Claude-agent context it reads
+on demand through the native commands above; the daemon does not hide that
+policy behind another router.
 `agent` is optional and effective only with `harness:"claude-code"`, whose SDK
 provides a direct selector. When omitted, the harness's default coding agent
 owns the task and may delegate internally. If a caller supplies `agent` with
@@ -1961,9 +1972,6 @@ or remove a preserved artifact.
 
 Both principal harnesses expose the same daemon-owned logical tools:
 
-- `harness_status {}` refreshes the bounded coding-resources projection for the
-  principal's current cwd: the three-harness catalogue, read-only Omarchy
-  utilization windows, and sanitized native Claude agent names/models.
 - `task { harness, task, agent?, cwd? }` creates one durable task and returns
   its queued task handle after context admission and workspace provisioning.
   Harness execution is asynchronous. `harness` selects
@@ -2029,8 +2037,7 @@ complete bounded view, and exposes the existing send/cancel reverse controls.
 It does not present a second editable agent registry; native harnesses own that
 configuration. Its machine-global catalogue route has no conversation cwd and
 therefore does not guess or display the project-scoped Claude agent inventory;
-the principal's Coding resources block and `harness_status` tool own that
-trusted-cwd view. It polls
+the local `ghost delegation` command owns that cwd-scoped view. It polls
 only while the destination is visible (three seconds for unsettled tasks,
 thirty seconds for worker usage), retires every request on ghost change, and
 renders task/result/event/workspace text literally. It does not provide a

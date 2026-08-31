@@ -8,7 +8,6 @@ import {
   type PrincipalTaskServices,
 } from "../src/principal-task-tools.js";
 import type { TaskSummary, TaskView } from "../src/tasks.js";
-import type { CodingResourcesView } from "../src/coding-resources.js";
 
 const parent = conversationIdentity("pi", "conversation-1");
 const sibling = conversationIdentity("pi", "conversation-2");
@@ -72,36 +71,6 @@ function taskSummary(task: TaskView): TaskSummary {
   };
 }
 
-function resourcesView(): CodingResourcesView {
-  return {
-    claudeAgents: {
-      state: "ready",
-      agents: [{ name: "reviewer", model: "sonnet" }],
-      truncated: false,
-    },
-    harnesses: [{
-      id: "codex",
-      name: "Codex",
-      kind: "native",
-      nativeConfiguration: true,
-      installation: "installed",
-      authentication: "authenticated",
-      reason: null,
-      usage: {
-        source: "omarchy",
-        state: "ready",
-        updatedAt: "2026-08-30T09:00:00.000Z",
-        stale: false,
-        tier: "Plus",
-        status: null,
-        help: null,
-        limits: [{ label: "Session", usedFraction: 0.25, resetsAt: null }],
-        today: { totalTokens: 42, prompts: 2, sessions: 1 },
-      },
-    }],
-  };
-}
-
 function fakeServices(tasks: TaskView[] = [taskView()]): {
   services: PrincipalTaskServices;
   create: ReturnType<typeof vi.fn>;
@@ -130,7 +99,6 @@ function fakeServices(tasks: TaskView[] = [taskView()]): {
         send,
         cancel,
       },
-      resources: { view: vi.fn(async () => resourcesView()) },
     },
   };
 }
@@ -228,22 +196,4 @@ describe("principal task tools", () => {
     expect(fixture.cancel).toHaveBeenCalledWith("casper", own.id);
   });
 
-  it("projects Omarchy windows as remaining capacity", async () => {
-    const fixture = fakeServices();
-    const status = await call(fixture.services, "harness_status", {});
-    expect(status.details).toMatchObject({
-      context: expect.stringContaining('Claude agents here: "reviewer"@"sonnet"'),
-      claudeAgents: {
-        state: "ready",
-        agents: [{ name: "reviewer", model: "sonnet" }],
-        truncated: false,
-      },
-      harnesses: [{
-        id: "codex",
-        usage: { limits: [{ label: "Session", remainingFraction: 0.75 }] },
-      }],
-    });
-    expect(status.details).not.toHaveProperty("harnesses.0.usage.source");
-    expect(fixture.services.resources.view).toHaveBeenCalledWith("/repo", true);
-  });
 });

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { formatDuration } from "../src/jobs.js";
 import type { SessionSummary } from "../src/session-host.js";
 import { ArgsError, parseArgs } from "../src/cli/args.js";
@@ -139,6 +139,63 @@ describe("ghost skill", () => {
     const skill = renderSkillText(COMMANDS, EXIT_CODES);
     for (const command of COMMANDS) expect(skill).toContain(`ghost ${command.verb}`);
     expect(skill.split("\n").length).toBeLessThan(120);
+  });
+});
+
+describe("ghost delegation", () => {
+  it("prints a compact local projection without contacting ghostd", async () => {
+    const loadDelegationStatus = vi.fn(async () => ({
+      harnesses: [{
+        id: "claude-code" as const,
+        name: "Claude Code",
+        kind: "native" as const,
+        nativeConfiguration: true,
+        installation: "installed" as const,
+        authentication: "authenticated" as const,
+        reason: null,
+        usage: {
+          source: "omarchy" as const,
+          state: "missing" as const,
+          updatedAt: null,
+          stale: true,
+          tier: null,
+          status: null,
+          help: null,
+          limits: [],
+          today: null,
+        },
+      }],
+      claudeAgents: {
+        state: "ready" as const,
+        agents: [{ name: "reviewer", model: "sonnet" }],
+        truncated: false,
+      },
+    }));
+
+    const result = await runCli(["delegation"], {
+      home: "/owner",
+      cwd: "/repo",
+      env: { PATH: "/usr/bin" },
+      loadDelegationStatus,
+      fetch: async () => { throw new Error("must not contact ghostd"); },
+    });
+
+    expect(result).toEqual({
+      code: 0,
+      stderr: "",
+      stdout: [
+        "# Delegation",
+        "harnesses claude-code=ready",
+        "limits claude=missing",
+        'claude-agents "reviewer"@"sonnet"',
+        "",
+      ].join("\n"),
+    });
+    expect(loadDelegationStatus).toHaveBeenCalledWith({
+      cwd: "/repo",
+      env: { PATH: "/usr/bin" },
+      ownerHome: "/owner",
+    });
   });
 });
 

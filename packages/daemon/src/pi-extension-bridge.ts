@@ -56,7 +56,7 @@ export function renderPiRuntimeGuidance(options: BuildSystemPromptOptions): stri
 export function piExtensionFromGhost(
   extension: CollectedGhostExtension,
   options: {
-    dynamicSections?: (context: GhostToolContext) => string[] | Promise<string[]>;
+    dynamicSections?: () => string[];
     includeRuntimeGuidance?: boolean;
   } = {},
 ): ExtensionFactory {
@@ -78,17 +78,14 @@ export function piExtensionFromGhost(
     ) return;
     // Sections that change between turns (plan mode, the todo list) follow
     // the persona's re-render, so one hook owns the whole prompt.
-    pi.on("before_agent_start", async (event, ctx) => {
-      const context = ghostToolContextFromPi(ctx);
-      return {
-        systemPrompt: [
-          ...(await renderPersonaPrompt(extension, context, event.prompt, [event.systemPrompt])),
-          ...(await options.dynamicSections?.(context) ?? []),
-          ...(options.includeRuntimeGuidance
-            ? [renderPiRuntimeGuidance(event.systemPromptOptions)]
-            : []),
-        ].join("\n\n"),
-      };
-    });
+    pi.on("before_agent_start", async (event, ctx) => ({
+      systemPrompt: [
+        ...(await renderPersonaPrompt(extension, ghostToolContextFromPi(ctx), event.prompt, [event.systemPrompt])),
+        ...(options.dynamicSections?.() ?? []),
+        ...(options.includeRuntimeGuidance
+          ? [renderPiRuntimeGuidance(event.systemPromptOptions)]
+          : []),
+      ].join("\n\n"),
+    }));
   };
 }

@@ -1793,41 +1793,20 @@ describe("SessionHost.open", () => {
         send: unavailable,
         cancel: unavailable,
       },
-      resources: {
-        view: vi.fn(async () => ({
-          harnesses: [{
-            id: "claude-code" as const,
-            name: "Claude Code",
-            kind: "native" as const,
-            nativeConfiguration: true,
-            installation: "installed" as const,
-            authentication: "authenticated" as const,
-            reason: null,
-            usage: null,
-          }],
-          claudeAgents: {
-            state: "ready" as const,
-            agents: [{ name: "reviewer", model: "sonnet" }],
-            truncated: false,
-          },
-        })),
-      },
     } as unknown as PrincipalTaskServices;
     host!.attachTaskServices(services);
 
     const prompt = await modelSystemPrompt("durable-task-tools");
     const handle = await host!.open("casper", "durable-task-tools");
     expect(handle.session.getActiveToolNames()).toEqual(expect.arrayContaining([
-      "harness_status",
       "task",
       "task_list",
       "task_get",
       "task_send",
       "task_cancel",
     ]));
-    expect(prompt).toContain("# Coding delegation");
-    expect(prompt).toContain("# Coding resources");
-    expect(prompt).toContain('Claude agents here: "reviewer"@"sonnet"');
+    expect(prompt).toContain("# Delegation");
+    expect(prompt).not.toContain("Claude agents here:");
     expect(prompt).toContain("Current working directory:");
     expect(prompt).toContain("- task");
     const taskTool = handle.session.getToolDefinition("task");
@@ -1849,15 +1828,9 @@ describe("SessionHost.open", () => {
       harness: "codex",
       task: "Implement it.",
     }));
-    expect(services.resources.view).toHaveBeenCalledWith(temp!.ownerHome);
     expect(() => host!.attachTaskServices({
       ...services,
-      resources: {
-        view: async () => ({
-          harnesses: [],
-          claudeAgents: { state: "ready" as const, agents: [], truncated: false },
-        }),
-      },
+      tasks: { ...services.tasks },
     }))
       .toThrow(/already attached/);
   });

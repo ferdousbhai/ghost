@@ -833,25 +833,6 @@ describe("Claude Code subscription runtime", () => {
         send: unavailable,
         cancel: unavailable,
       },
-      resources: {
-        view: async () => ({
-          harnesses: [{
-            id: "claude-code" as const,
-            name: "Claude Code",
-            kind: "native" as const,
-            nativeConfiguration: true,
-            installation: "installed" as const,
-            authentication: "authenticated" as const,
-            reason: null,
-            usage: null,
-          }],
-          claudeAgents: {
-            state: "ready" as const,
-            agents: [{ name: "reviewer", model: "sonnet" }],
-            truncated: false,
-          },
-        }),
-      },
     } as unknown as PrincipalTaskServices;
     const { seenOptions } = setupClaudeHost({ taskServices });
 
@@ -862,7 +843,6 @@ describe("Claude Code subscription runtime", () => {
     });
 
     expect(seenOptions[0]?.allowedTools).toEqual(expect.arrayContaining([
-      "mcp__ghost__harness_status",
       "mcp__ghost__task",
       "mcp__ghost__task_list",
       "mcp__ghost__task_get",
@@ -871,11 +851,8 @@ describe("Claude Code subscription runtime", () => {
     ]));
     expect(seenOptions[0]?.disallowedTools).toEqual(["Agent", "Task"]);
     expect(seenOptions[0]?.tools).toEqual({ type: "preset", preset: "claude_code" });
-    expect(seenOptions[0]?.systemPrompt).toEqual(expect.stringContaining("# Coding delegation"));
-    expect(seenOptions[0]?.systemPrompt).toEqual(expect.stringContaining("# Coding resources"));
-    expect(seenOptions[0]?.systemPrompt).toEqual(expect.stringContaining(
-      'Claude agents here: "reviewer"@"sonnet"',
-    ));
+    expect(seenOptions[0]?.systemPrompt).toEqual(expect.stringContaining("# Delegation"));
+    expect(seenOptions[0]?.systemPrompt).not.toEqual(expect.stringContaining("Claude agents here:"));
   });
 
   it("injects only always-active Ghost instructions while unbound", async () => {

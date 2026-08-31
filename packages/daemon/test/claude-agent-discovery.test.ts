@@ -48,30 +48,7 @@ describe("ClaudeAgentDiscovery", () => {
     expect(close).toHaveBeenCalledOnce();
   });
 
-  it("caches each cwd, refreshes explicitly, and degrades native failures", async () => {
-    let now = 0;
-    const supportedAgents = vi.fn(async () => [
-      { name: "advisor", description: "Advise" },
-    ]);
-    const createQuery = vi.fn(() => ({ supportedAgents, close: vi.fn() }));
-    const discovery = new ClaudeAgentDiscovery({
-      now: () => now,
-      ttlMs: 100,
-      probe: {
-        read: async () => ({ binaryPath: "/claude", authStatus: { loggedIn: true } }),
-      },
-      createQuery,
-    });
-
-    await discovery.list("/repo");
-    await discovery.list("/repo");
-    expect(createQuery).toHaveBeenCalledOnce();
-    await discovery.list("/repo", true);
-    expect(createQuery).toHaveBeenCalledTimes(2);
-    now = 101;
-    await discovery.list("/repo");
-    expect(createQuery).toHaveBeenCalledTimes(3);
-
+  it("degrades native failures and relative working directories", async () => {
     const failed = new ClaudeAgentDiscovery({
       probe: { read: async () => { throw new Error("private path and token"); } },
     });

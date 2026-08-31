@@ -95,7 +95,6 @@ describe("plan mode", () => {
       "ls",
       "ask",
       "inspect_image",
-      "harness_status",
       "task_list",
       "task_get",
       "propose_plan",

@@ -107,7 +107,6 @@ import {
   PRINCIPAL_TASK_TOOL_NAMES,
   type PrincipalTaskServices,
 } from "./principal-task-tools.js";
-import { renderCodingResources } from "./coding-resources.js";
 import type { RunTurnOptions } from "./session-host.js";
 import { claudeSessionMetadataPath as nativeClaudeSessionMetadataPath } from "./session-files.js";
 import {
@@ -974,20 +973,17 @@ async function buildPersona(
   ghostName: string,
   scheduleUnitDir: string,
   cwd: string,
-  taskServices: PrincipalTaskServices | undefined,
+  includeTaskDelegation: boolean,
   configuredDocuments?: MachineDocuments | string,
 ): Promise<string> {
   const home = openGhostHome(homeDir);
   const documents = configuredDocuments instanceof MachineDocuments
     ? configuredDocuments
     : openMachineDocuments(configuredDocuments);
-  const [character, memory, documentPage, codingResources] = await Promise.all([
+  const [character, memory, documentPage] = await Promise.all([
     home.readCharacter(),
     home.listMemory(),
     documents.listDirectory("", { limit: DOCUMENT_INDEX_MAX_ENTRIES }),
-    taskServices
-      ? taskServices.resources.view(cwd).then(renderCodingResources)
-      : Promise.resolve(null),
   ]);
   return buildGhostSystemPrompt({
     ghostName,
@@ -999,9 +995,7 @@ async function buildPersona(
       OMARCHY_COMPUTER_USE_POLICY,
       OWNER_DELIVERABLE_POLICY,
       GHOST_SELF_DOCUMENTATION_POLICY,
-      ...(codingResources !== null
-        ? [GHOST_CODING_ORCHESTRATION_POLICY, codingResources]
-        : []),
+      ...(includeTaskDelegation ? [GHOST_CODING_ORCHESTRATION_POLICY] : []),
       renderScheduledWorkPolicy(ghostName, scheduleUnitDir),
       // A seeded character.md means this ghost has not met its owner yet.
       ...(isSeededCharacter(ghostName, character?.body ?? null)
@@ -1535,12 +1529,7 @@ export class ClaudeCodeRuntime {
   /** Attach task services before a Claude principal turn can begin. */
   attachTaskServices(services: PrincipalTaskServices): void {
     if (this.taskServices) {
-      if (
-        this.taskServices.tasks === services.tasks
-        && this.taskServices.resources === services.resources
-      ) {
-        return;
-      }
+      if (this.taskServices.tasks === services.tasks) return;
       throw new Error("Principal task services are already attached to Claude Code.");
     }
     if (this.disposed || this.busy.size > 0 || this.active.size > 0 || this.turns.size > 0) {
@@ -1710,7 +1699,7 @@ export class ClaudeCodeRuntime {
           ghost.name,
           this.scheduleUnitDir,
           runtimeCwd,
-          this.taskServices,
+          this.taskServices !== undefined,
           this.extensionOptions.documents,
         ),
         loadMachineSkills(this.ownerHome, { paths: this.machineSkills }),

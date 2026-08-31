@@ -9,6 +9,7 @@ import {
   type ParsedCliArgs,
 } from "./args.js";
 import { askCommand } from "./ask.js";
+import { delegationCommand } from "./delegation.js";
 import { CliError, DaemonClient, EXIT_CODE, EXIT_CODES } from "./client.js";
 import { ghostsCommand } from "./ghosts.js";
 import { memoryCommand } from "./memory.js";
@@ -49,6 +50,14 @@ const CLI_ARGS: ArgsSpec = {
 };
 
 export const COMMANDS: readonly Command[] = [
+  {
+    verb: "delegation",
+    usage: "delegation [--json] [-q]",
+    summary: "Show coding harnesses, limits, and native Claude agents.",
+    example: "ghost delegation",
+    positionals: [0, 0],
+    run: delegationCommand,
+  },
   {
     verb: "say",
     usage: "say [text] [-m <text>] [--new|--steer|--follow-up] [-g <name>] [-s <id>] [--json] [-q]",
@@ -250,10 +259,12 @@ function runtimeOptions(options: GhostCliOptions): CliRuntime {
   return {
     env: options.env ?? process.env,
     home: options.home ?? homedir(),
+    cwd: options.cwd ?? process.cwd(),
     stdout: options.stdout ?? process.stdout,
     stderr: options.stderr ?? process.stderr,
     fetch: options.fetch ?? globalThis.fetch,
     stdin: options.stdin ?? process.stdin,
+    loadDelegationStatus: options.loadDelegationStatus,
   };
 }
 
