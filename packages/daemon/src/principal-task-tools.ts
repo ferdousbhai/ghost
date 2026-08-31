@@ -15,7 +15,11 @@ import {
   type TaskSummary,
   type TaskView,
 } from "./tasks.js";
-import type { HarnessCatalog, HarnessCatalogView } from "./harness-catalog.js";
+import {
+  renderCodingResources,
+  type CodingResources,
+  type CodingResourcesView,
+} from "./coding-resources.js";
 
 const MAX_LISTED_TASKS = 20;
 const DEFAULT_LISTED_TASKS = 10;
@@ -36,7 +40,7 @@ export const PRINCIPAL_TASK_TOOL_NAMES = [
 export const GHOST_CODING_ORCHESTRATION_POLICY = [
   "# Coding delegation",
   "You are the owner's Ghost: remain responsible for the outcome, but delegate project coding and code review through a coding harness instead of acting as the coding agent yourself.",
-  "Use harness_status before choosing among claude-code, codex, and pi when availability or current limits matter. Start work with task { harness, task, agent?, cwd? }; agent is optional and selects a native agent only for claude-code, so omit it for codex and pi. Give the harness a complete assignment and the correct absolute project cwd. If implementation needs native reviewer or simplifier stages, include them in the same assignment because a later task does not inherit this task's review branch. The task is durable and asynchronous: retain its id, use task_get or task_list on a later interaction, and use task_send or task_cancel when needed. Do not poll in a tight loop or claim completion you have not read.",
+  "Use the current Coding resources block to choose among claude-code, codex, and pi; call harness_status only when you need an on-demand refresh. Start work with task { harness, task, agent?, cwd? }; agent is optional and must be one of the listed Claude agents when using claude-code, so omit it for codex and pi. Give the harness a complete assignment and the correct absolute project cwd. If implementation needs native reviewer or simplifier stages, include them in the same assignment because a later task does not inherit this task's review branch. The task is durable and asynchronous: retain its id, use task_get or task_list on a later interaction, and use task_send or task_cancel when needed. Do not poll in a tight loop or claim completion you have not read.",
   "For a clean committed Git project, task runs in an isolated worktree and returns a local review branch when changes are ready. Report that artifact to the owner; do not claim it was pushed, opened as a pull request, or merged unless a separate explicit action did so. A non-Git project runs in place.",
   "Your own Bash, edit, and write tools remain available for general computer use and for maintaining your character, memory, Documents, and other Ghost-owned files.",
 ].join("\n");
@@ -46,7 +50,7 @@ export interface PrincipalTaskServices {
     TaskManager,
     "create" | "list" | "get" | "send" | "cancel"
   >;
-  harnesses: Pick<HarnessCatalog, "list">;
+  resources: Pick<CodingResources, "view">;
 }
 
 export interface PrincipalTaskToolsOptions {
@@ -180,8 +184,10 @@ function result<T>(value: T): GhostToolResult<T> {
   return textResult(JSON.stringify(value, null, 2), value);
 }
 
-function harnessProjection(view: HarnessCatalogView): object {
+function harnessProjection(view: CodingResourcesView): object {
   return {
+    context: renderCodingResources(view),
+    claudeAgents: view.claudeAgents,
     harnesses: view.harnesses.map((harness) => ({
       id: harness.id,
       name: harness.name,
@@ -234,15 +240,17 @@ export function createPrincipalTaskTools(options: PrincipalTaskToolsOptions): Gh
     api.registerTool({
       name: "harness_status",
       label: "Harness status",
-      description: "Check installed coding harnesses, authentication, and Omarchy usage windows before delegating.",
+      description: "Refresh installed coding harnesses, native Claude agent selections for this cwd, and Omarchy usage windows.",
       parameters: Type.Object({}, { additionalProperties: false }),
-      execute: async () => result(harnessProjection(await options.services.harnesses.list())),
+      execute: async (_toolCallId, _params, _signal, _onUpdate, context) => result(
+        harnessProjection(await options.services.resources.view(context.cwd, true)),
+      ),
     });
 
     api.registerTool({
       name: "task",
       label: "Delegate task",
-      description: "Start one durable asynchronous coding task. Use harness_status first when harness availability or limits matter; retain the returned task id for later task_get, task_send, or task_cancel calls.",
+      description: "Start one durable asynchronous coding task using the current Coding resources context; retain the returned task id for later task_get, task_send, or task_cancel calls.",
       parameters: Type.Object({
         harness: Type.Union([
           Type.Literal("claude-code"),

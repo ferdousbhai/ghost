@@ -81,7 +81,8 @@ For each turn Ghost:
    computer-use policy, the owner-deliverable, Ghost self-reference, coding
    delegation, and current-runtime/cwd policies, the scheduled-work policy
    rendered from ghostd's one resolved systemd user-unit directory, the
-   machine/ghost/project skill index, and the always-active declarative instructions;
+   machine/ghost/project skill index, compact coding-harness/usage/Claude-agent
+   resources, and the always-active declarative instructions;
 4. applies the conversation's pre-turn project binding: owner home when
    unbound, or the trusted project cwd plus its approved declarative snapshot;
 5. captures the Ghost-specific `@ghost/extensions` tools and daemon-owned
@@ -123,8 +124,10 @@ The query runs in maximum-trust mode for its local owner:
   with an MCP-specific degraded-state warning because the SDK cannot preserve
   them; values at least 1000 are passed through exactly, including on resume;
 - project executable extensions, hooks, custom code tools, LSP, and ghost or
-  project agent definitions remain disabled. Agent-definition content never
-  enters Claude's prompt;
+  project agent definitions remain disabled in the principal query. A separate
+  non-persistent native discovery query resolves Claude agents at the trusted
+  cwd; only JSON-encoded names and optional model aliases enter the Ghost prompt,
+  never descriptions, prompts, tools, or definition paths;
 - Ghost's own browser, desktop, character, structured memory writer, harness
   status, and durable task lifecycle are added through an in-process MCP server;
 - `bypassPermissions` is explicit because the HUD has no Claude approval UI;
@@ -216,6 +219,11 @@ are:
 The full T3 provider graph, approvals UI, and long-lived queue were not copied.
 Claude Code's own computer and coding tools remain native in the principal;
 native subagents remain available only inside delegated `claude-code` tasks.
+The Ghost principal sees their native `supportedAgents()` names/models in its
+compact Coding resources block, alongside installed harnesses and the existing
+Omarchy Claude/Codex utilization windows and UTC reset times. The discovery
+query has empty streaming input, uses the installed executable and normal
+settings sources, persists no session, and is cached briefly per cwd.
 Ghost passes
 `settingSources: []` and `skills: []`; declarative skills are not enabled
 through Claude's live discovery mechanism because the SDK's `skills: "all"`

@@ -107,6 +107,7 @@ import {
   PRINCIPAL_TASK_TOOL_NAMES,
   type PrincipalTaskServices,
 } from "./principal-task-tools.js";
+import { renderCodingResources } from "./coding-resources.js";
 import type { RunTurnOptions } from "./session-host.js";
 import { claudeSessionMetadataPath as nativeClaudeSessionMetadataPath } from "./session-files.js";
 import {
@@ -973,17 +974,20 @@ async function buildPersona(
   ghostName: string,
   scheduleUnitDir: string,
   cwd: string,
-  includeTaskDelegation: boolean,
+  taskServices: PrincipalTaskServices | undefined,
   configuredDocuments?: MachineDocuments | string,
 ): Promise<string> {
   const home = openGhostHome(homeDir);
   const documents = configuredDocuments instanceof MachineDocuments
     ? configuredDocuments
     : openMachineDocuments(configuredDocuments);
-  const [character, memory, documentPage] = await Promise.all([
+  const [character, memory, documentPage, codingResources] = await Promise.all([
     home.readCharacter(),
     home.listMemory(),
     documents.listDirectory("", { limit: DOCUMENT_INDEX_MAX_ENTRIES }),
+    taskServices
+      ? taskServices.resources.view(cwd).then(renderCodingResources)
+      : Promise.resolve(null),
   ]);
   return buildGhostSystemPrompt({
     ghostName,
@@ -995,7 +999,9 @@ async function buildPersona(
       OMARCHY_COMPUTER_USE_POLICY,
       OWNER_DELIVERABLE_POLICY,
       GHOST_SELF_DOCUMENTATION_POLICY,
-      ...(includeTaskDelegation ? [GHOST_CODING_ORCHESTRATION_POLICY] : []),
+      ...(codingResources !== null
+        ? [GHOST_CODING_ORCHESTRATION_POLICY, codingResources]
+        : []),
       renderScheduledWorkPolicy(ghostName, scheduleUnitDir),
       // A seeded character.md means this ghost has not met its owner yet.
       ...(isSeededCharacter(ghostName, character?.body ?? null)
@@ -1062,6 +1068,7 @@ async function buildMcpTools(
   principalTasks?: {
     services: PrincipalTaskServices;
     conversationId: string;
+    cwd: string;
   },
 ): Promise<{ tools: SdkMcpToolDefinition[]; names: string[] }> {
   const resolved = resolveGhostExtensions(
@@ -1082,7 +1089,7 @@ async function buildMcpTools(
       ...bridgeCollectedClaudeCodeTools(
         taskExtension,
         PRINCIPAL_TASK_TOOL_NAMES,
-        { cwd: homeDir },
+        { cwd: principalTasks.cwd },
       ),
     ],
     names: [...resolved.toolNames, ...PRINCIPAL_TASK_TOOL_NAMES],
@@ -1530,7 +1537,7 @@ export class ClaudeCodeRuntime {
     if (this.taskServices) {
       if (
         this.taskServices.tasks === services.tasks
-        && this.taskServices.harnesses === services.harnesses
+        && this.taskServices.resources === services.resources
       ) {
         return;
       }
@@ -1703,7 +1710,7 @@ export class ClaudeCodeRuntime {
           ghost.name,
           this.scheduleUnitDir,
           runtimeCwd,
-          this.taskServices !== undefined,
+          this.taskServices,
           this.extensionOptions.documents,
         ),
         loadMachineSkills(this.ownerHome, { paths: this.machineSkills }),
@@ -1786,7 +1793,7 @@ export class ClaudeCodeRuntime {
         ghost.name,
         this.extensionOptions,
         this.taskServices
-          ? { services: this.taskServices, conversationId }
+          ? { services: this.taskServices, conversationId, cwd: runtimeCwd }
           : undefined,
       );
       this.assertTurnAdmitted();

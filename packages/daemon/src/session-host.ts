@@ -225,6 +225,7 @@ import {
   GHOST_CODING_ORCHESTRATION_POLICY,
   type PrincipalTaskServices,
 } from "./principal-task-tools.js";
+import { renderCodingResources } from "./coding-resources.js";
 
 type SessionConversationMaintenance = Pick<ConversationMaintenance,
   | "admitOwnerAction"
@@ -1732,7 +1733,7 @@ export class SessionHost {
     if (this.taskServices) {
       if (
         this.taskServices.tasks === services.tasks
-        && this.taskServices.harnesses === services.harnesses
+        && this.taskServices.resources === services.resources
       ) {
         return;
       }
@@ -2716,7 +2717,12 @@ export class SessionHost {
     const planBookRef: { book: PlanBook } = { book: undefined as unknown as PlanBook };
     const extensionFactories: ExtensionFactory[] = [
       piExtensionFromGhost(ghostExtension, {
-        dynamicSections: () => planSections(planBookRef.book),
+        dynamicSections: async (context) => [
+          ...planSections(planBookRef.book),
+          ...(this.taskServices
+            ? [renderCodingResources(await this.taskServices.resources.view(context.cwd))]
+            : []),
+        ],
         includeRuntimeGuidance: true,
       }),
       ...(principalTaskExtension ? [piExtensionFromGhost(principalTaskExtension)] : []),

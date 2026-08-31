@@ -33,9 +33,11 @@ name validation apply. Machine skills enter at session construction with lowest
 name precedence, before ghost-home and then project resources; no hardcoded
 skill-name allowlist exists. This owner-trusted machine discovery is deliberately
 outside the descriptor-confined project scanner. A Ghost principal delegates
-through the daemon-owned `task` tools described below. Ghost does not discover,
-parse, merge, or execute agent definitions: the selected native coding harness
-owns its user, plugin, and project agent registry at the task cwd. Ghost-home
+through the daemon-owned `task` tools described below. Ghost does not parse,
+merge, or execute agent definitions: the selected native coding harness owns
+its user, plugin, and project agent registry at the task cwd. The narrow Claude
+inventory described below asks that harness for selectable names/models without
+reading definitions. Ghost-home
 and project agent files remain previewable principal resources only where an
 existing scanner already reports them; they do not form a Ghost registry. A
 native Claude task retains Claude Code's own subagents; the Claude principal
@@ -398,10 +400,11 @@ pi's native tools in a Ghost session are `bash`, `edit`, `find`, `grep`, `ls`,
 `task`, `task_list`, `task_get`, `task_send`, `task_cancel`, and MCP tools named
 `mcp__<server>_<tool>` — are registered directly as pi custom tools and appear
 in `getActiveToolNames()`; there is no separate mount. The task tools reach
-only the three coding-harness adapters; agent discovery occurs inside the
-selected native task harness, never the principal. A Claude principal exposes the same logical task
-surface through its in-process Ghost MCP server and disables native `Agent`
-and `Task`; a native Claude worker retains native subagent behavior. Live voice
+only the three coding-harness adapters. The principal receives only the bounded
+native Claude agent inventory described under "Harness status"; it never reads,
+parses, or executes an agent definition. A Claude principal exposes the same
+logical task surface through its in-process Ghost MCP server and disables native
+`Agent` and `Task`; a native Claude worker retains native subagent behavior. Live voice
 (issue #44) is deferred; goals with budgets belong with
 always-on check-ins (issue #18).
 Ghost's `settings.yml`,
@@ -1804,6 +1807,27 @@ No per-model history, credential, provider response, executable pathname, or
 raw record is exposed. A missing or malformed record never makes installation
 discovery fail.
 
+When task services are attached, both principal runtimes receive a compact
+`# Coding resources` system-prompt block rebuilt at the start of each model
+turn. It lists the three harnesses with categorical availability/authentication,
+then each ready Claude/Codex Omarchy window as integer percent remaining plus
+its UTC reset timestamp. Missing, invalid, or stale usage remains explicit.
+The block is a short-lived snapshot, not a reservation; `harness_status {}`
+refreshes the same projection on demand.
+
+The block also lists the exact Claude Code agent names selectable at the
+conversation's current trusted cwd. Ghost obtains them through the installed
+Claude executable and the Agent SDK's native `supportedAgents()` control
+request with normal user/project/local/plugin discovery, an empty streaming
+input, no model turn, no transcript persistence, and a bounded timeout. Results
+are cached briefly per canonical cwd to avoid starting a discovery process on
+every turn. At most 64 JSON-encoded names and optional bounded model aliases
+cross into the principal, with truncation explicit; native descriptions,
+prompts, tools, and definition paths remain out of its context. Discovery
+failure is a bounded unavailable marker
+and never prevents the owner from conversing or using the default Claude agent.
+Codex and Pi have no selectable-agent inventory in this block.
+
 ### Harness tasks
 
 The daemon owns one persistent task lifecycle shared by all coding harnesses.
@@ -1937,8 +1961,9 @@ or remove a preserved artifact.
 
 Both principal harnesses expose the same daemon-owned logical tools:
 
-- `harness_status {}` returns the bounded three-harness catalogue, including
-  the read-only Omarchy utilization windows used to choose a harness.
+- `harness_status {}` refreshes the bounded coding-resources projection for the
+  principal's current cwd: the three-harness catalogue, read-only Omarchy
+  utilization windows, and sanitized native Claude agent names/models.
 - `task { harness, task, agent?, cwd? }` creates one durable task and returns
   its queued task handle after context admission and workspace provisioning.
   Harness execution is asynchronous. `harness` selects
@@ -2002,7 +2027,10 @@ The HUD has one ghost-scoped **Harnesses** destination. It reads the sanitized
 machine harness catalogue and durable task list, fetches a selected task's
 complete bounded view, and exposes the existing send/cancel reverse controls.
 It does not present a second editable agent registry; native harnesses own that
-configuration. It polls
+configuration. Its machine-global catalogue route has no conversation cwd and
+therefore does not guess or display the project-scoped Claude agent inventory;
+the principal's Coding resources block and `harness_status` tool own that
+trusted-cwd view. It polls
 only while the destination is visible (three seconds for unsettled tasks,
 thirty seconds for worker usage), retires every request on ghost change, and
 renders task/result/event/workspace text literally. It does not provide a
@@ -2135,6 +2163,14 @@ visibly; Ghost does not fall back to a bundled executable or emulate Claude
 Code. When `agent` is present, Ghost passes only that name through the SDK's
 native `agent` option; Claude Code resolves the definition and applies its own
 prompt, model, tools, and configuration. An unresolved name fails natively.
+
+The separate principal-context discovery query uses the same resolved installed
+executable, captured native-harness environment, cwd, and omitted
+`settingSources`; it calls `supportedAgents()` before any user input and closes
+the query immediately. It sets `persistSession:false` and cannot perform a
+coding assignment. Native SessionStart/configuration discovery may still run,
+because that behavior is part of the owner's Claude Code configuration rather
+than a Ghost-owned scanner.
 
 The worker validates the cwd reported by Claude Code's native `system/init`
 message. That message's opaque session id identifies the task; Claude Code's

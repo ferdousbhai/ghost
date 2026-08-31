@@ -431,6 +431,21 @@ export {
   type HarnessUsageView,
 } from "./harness-catalog.js";
 export {
+  CLAUDE_AGENT_DISCOVERY_TIMEOUT_MS,
+  CLAUDE_AGENT_DISCOVERY_TTL_MS,
+  ClaudeAgentDiscovery,
+  type ClaudeAgentDiscoveryOptions,
+  type ClaudeAgentInventory,
+  type ClaudeAgentSelection,
+} from "./claude-agent-discovery.js";
+export {
+  CODING_RESOURCES_CACHE_TTL_MS,
+  CodingResources,
+  renderCodingResources,
+  type CodingResourcesOptions,
+  type CodingResourcesView,
+} from "./coding-resources.js";
+export {
   assistantText,
   effectiveInputCost,
   rankSmolModels,

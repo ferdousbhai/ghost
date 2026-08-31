@@ -1793,7 +1793,25 @@ describe("SessionHost.open", () => {
         send: unavailable,
         cancel: unavailable,
       },
-      harnesses: { list: async () => ({ harnesses: [] }) },
+      resources: {
+        view: vi.fn(async () => ({
+          harnesses: [{
+            id: "claude-code" as const,
+            name: "Claude Code",
+            kind: "native" as const,
+            nativeConfiguration: true,
+            installation: "installed" as const,
+            authentication: "authenticated" as const,
+            reason: null,
+            usage: null,
+          }],
+          claudeAgents: {
+            state: "ready" as const,
+            agents: [{ name: "reviewer", model: "sonnet" }],
+            truncated: false,
+          },
+        })),
+      },
     } as unknown as PrincipalTaskServices;
     host!.attachTaskServices(services);
 
@@ -1808,6 +1826,8 @@ describe("SessionHost.open", () => {
       "task_cancel",
     ]));
     expect(prompt).toContain("# Coding delegation");
+    expect(prompt).toContain("# Coding resources");
+    expect(prompt).toContain('Claude agents here: "reviewer"@"sonnet"');
     expect(prompt).toContain("Current working directory:");
     expect(prompt).toContain("- task");
     const taskTool = handle.session.getToolDefinition("task");
@@ -1829,7 +1849,16 @@ describe("SessionHost.open", () => {
       harness: "codex",
       task: "Implement it.",
     }));
-    expect(() => host!.attachTaskServices({ ...services, harnesses: { list: async () => ({ harnesses: [] }) } }))
+    expect(services.resources.view).toHaveBeenCalledWith(temp!.ownerHome);
+    expect(() => host!.attachTaskServices({
+      ...services,
+      resources: {
+        view: async () => ({
+          harnesses: [],
+          claudeAgents: { state: "ready" as const, agents: [], truncated: false },
+        }),
+      },
+    }))
       .toThrow(/already attached/);
   });
 
@@ -8063,17 +8092,18 @@ describe("conversation titles", () => {
   });
 });
 
+const transcriptText = async (sessionId: string) =>
+  JSON.stringify((await host!.readTranscript("casper", sessionId)).messages);
+const waitForTranscript = async (sessionId: string, text: string) => {
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    if ((await transcriptText(sessionId)).includes(text)) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`transcript never contained ${JSON.stringify(text)}`);
+};
+
 describe("background jobs", () => {
-  const transcriptText = async (sessionId: string) =>
-    JSON.stringify((await host!.readTranscript("casper", sessionId)).messages);
-  const waitForTranscript = async (sessionId: string, text: string) => {
-    const deadline = Date.now() + 10_000;
-    while (Date.now() < deadline) {
-      if ((await transcriptText(sessionId)).includes(text)) return;
-      await new Promise((resolve) => setTimeout(resolve, 25));
-    }
-    throw new Error(`transcript never contained ${JSON.stringify(text)}`);
-  };
 
   it("starts a background bash job and delivers its result as a follow-up turn", async () => {
     await setup([
@@ -8222,6 +8252,7 @@ describe("plan mode", () => {
     await waitFor(() => host!.listJobs("casper", "conv-plan-job")[0]?.status === "cancelled"
       ? true
       : null, 10_000);
+    await waitForTranscript("conv-plan-job", "The job was cancelled.");
     await host!.setPlanMode("casper", "conv-plan-job", "start");
     expect((await host!.planState("casper", "conv-plan-job")).planning).toBe(true);
   });

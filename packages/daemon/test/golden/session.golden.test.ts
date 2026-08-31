@@ -132,7 +132,78 @@ describe("golden: session", () => {
         send: unavailable,
         cancel: unavailable,
       },
-      harnesses: { list: async () => ({ harnesses: [] }) },
+      resources: {
+        view: async () => ({
+          harnesses: [
+            {
+              id: "claude-code",
+              name: "Claude Code",
+              kind: "native",
+              nativeConfiguration: true,
+              installation: "installed",
+              authentication: "authenticated",
+              reason: null,
+              usage: {
+                source: "omarchy",
+                state: "ready",
+                updatedAt: "2026-08-30T09:00:00.000Z",
+                stale: false,
+                tier: "Max",
+                status: null,
+                help: null,
+                limits: [{
+                  label: "Session (5-hour)",
+                  usedFraction: 0.25,
+                  resetsAt: "2026-08-30T12:00:00.000Z",
+                }],
+                today: null,
+              },
+            },
+            {
+              id: "codex",
+              name: "Codex",
+              kind: "native",
+              nativeConfiguration: true,
+              installation: "installed",
+              authentication: "authenticated",
+              reason: null,
+              usage: {
+                source: "omarchy",
+                state: "ready",
+                updatedAt: "2026-08-30T09:00:00.000Z",
+                stale: false,
+                tier: "Plus",
+                status: null,
+                help: null,
+                limits: [{
+                  label: "Weekly (7-day)",
+                  usedFraction: 0.5,
+                  resetsAt: "2026-09-03T17:00:00.000Z",
+                }],
+                today: null,
+              },
+            },
+            {
+              id: "pi",
+              name: "Pi",
+              kind: "native",
+              nativeConfiguration: true,
+              installation: "installed",
+              authentication: "unknown",
+              reason: null,
+              usage: null,
+            },
+          ],
+          claudeAgents: {
+            state: "ready",
+            agents: [
+              { name: "advisor", model: "opus" },
+              { name: "reviewer", model: null },
+            ],
+            truncated: false,
+          },
+        }),
+      },
     } as unknown as PrincipalTaskServices);
 
     const normalizer = new Normalizer()

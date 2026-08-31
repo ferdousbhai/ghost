@@ -833,7 +833,25 @@ describe("Claude Code subscription runtime", () => {
         send: unavailable,
         cancel: unavailable,
       },
-      harnesses: { list: async () => ({ harnesses: [] }) },
+      resources: {
+        view: async () => ({
+          harnesses: [{
+            id: "claude-code" as const,
+            name: "Claude Code",
+            kind: "native" as const,
+            nativeConfiguration: true,
+            installation: "installed" as const,
+            authentication: "authenticated" as const,
+            reason: null,
+            usage: null,
+          }],
+          claudeAgents: {
+            state: "ready" as const,
+            agents: [{ name: "reviewer", model: "sonnet" }],
+            truncated: false,
+          },
+        }),
+      },
     } as unknown as PrincipalTaskServices;
     const { seenOptions } = setupClaudeHost({ taskServices });
 
@@ -854,6 +872,10 @@ describe("Claude Code subscription runtime", () => {
     expect(seenOptions[0]?.disallowedTools).toEqual(["Agent", "Task"]);
     expect(seenOptions[0]?.tools).toEqual({ type: "preset", preset: "claude_code" });
     expect(seenOptions[0]?.systemPrompt).toEqual(expect.stringContaining("# Coding delegation"));
+    expect(seenOptions[0]?.systemPrompt).toEqual(expect.stringContaining("# Coding resources"));
+    expect(seenOptions[0]?.systemPrompt).toEqual(expect.stringContaining(
+      'Claude agents here: "reviewer"@"sonnet"',
+    ));
   });
 
   it("injects only always-active Ghost instructions while unbound", async () => {

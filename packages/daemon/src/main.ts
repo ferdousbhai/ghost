@@ -6,8 +6,10 @@ import { apiTokenCommand } from "./api-token.js";
 import { RemoteAccess } from "./tailscale-identity.js";
 import { LoginManager } from "./auth.js";
 import { ClaudeCodeProbe } from "./claude-code.js";
+import { ClaudeAgentDiscovery } from "./claude-agent-discovery.js";
 import { CodexProbe, CodexWorkerAdapter } from "./codex-worker.js";
 import { ClaudeWorkerAdapter } from "./claude-worker.js";
+import { CodingResources } from "./coding-resources.js";
 import { legacyDocumentsPlacementCommand } from "./legacy-documents-placement.js";
 import { loginCommand } from "./login-command.js";
 import { loadConfig, type DaemonConfig, type DaemonConfigOverrides } from "./config.js";
@@ -497,6 +499,14 @@ async function serveDaemon(
     codexProbe,
     logger,
   });
+  const resources = new CodingResources({
+    harnesses,
+    claudeAgents: new ClaudeAgentDiscovery({
+      env: nativeHarnessEnv,
+      probe: nativeClaudeCodeProbe,
+      logger,
+    }),
+  });
   const tasks = new TaskManager({
     registry,
     homeOperations,
@@ -519,7 +529,7 @@ async function serveDaemon(
     resolveContext: ({ ghostName, parent, requestedCwd }) =>
       host.resolveTaskContext(ghostName, parent, requestedCwd),
   });
-  host.attachTaskServices({ tasks, harnesses });
+  host.attachTaskServices({ tasks, resources });
   for (const ghost of registry.list()) {
     const restored = await tasks.restoreGhost(ghost.name);
     if (restored.interrupted > 0) {

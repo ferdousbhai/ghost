@@ -93,6 +93,13 @@ all-sources default: managed, user, project, and local settings plus the native
 `CLAUDE.md`, auto-memory, skills, plugins, hooks, MCP, subagent, and permission
 discovery for that cwd.
 
+Before a Ghost principal chooses that optional name, a separate ephemeral SDK
+query asks the installed Claude Code session for `supportedAgents()` at the
+current trusted cwd. It sends no user prompt and persists no transcript. Ghost
+puts only the exact JSON-encoded names and optional model aliases in its compact
+Coding resources block; native descriptions, prompts, tools, and file paths stay
+inside Claude Code.
+
 `GHOST_CLAUDE_BINARY` may select the executable. It receives the same captured
 daemon-launch environment described above for Codex. Its full transcript stays
 in Claude Code's native store; Ghost persists the opaque Claude session id and
@@ -150,3 +157,10 @@ snapshots. Ghost does not refresh provider limits or treat the Omarchy display
 record as proof of authentication. Pi reports configuration-owned authentication
 as unknown because its providers may use several native mechanisms. Absolute executable paths, account details,
 credentials, and raw provider records are not returned by the daemon API.
+
+At the start of each principal turn, Ghost renders a compact Coding resources
+block from this catalogue: categorical harness status, cwd-scoped Claude agent
+names, and each Claude/Codex Omarchy window as percent remaining plus its UTC
+reset time. The expensive native inventory is cached for five minutes per cwd;
+`harness_status` forces an on-demand refresh. Stale or unavailable data is
+labelled instead of guessed.
