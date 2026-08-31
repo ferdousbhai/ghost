@@ -1,5 +1,6 @@
 import {
   chmodSync,
+  existsSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -8,6 +9,11 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import * as testClaudeAgentSdk from "@anthropic-ai/claude-agent-sdk";
+import {
+  ClaudeAgentSdkLoader,
+  type ClaudeAgentSdkModule,
+} from "../src/claude-agent-sdk-loader.js";
 import {
   ClaudeNativeHarnessProbe,
   CodexNativeHarnessProbe,
@@ -22,6 +28,20 @@ import type {
 } from "../src/native-harness-identity.js";
 
 const roots: string[] = [];
+
+class StubClaudeAgentSdkLoader extends ClaudeAgentSdkLoader {
+  constructor(private readonly implementation: () => Promise<ClaudeAgentSdkModule>) {
+    super({ ownerHome: "/tmp" });
+  }
+
+  override load(): Promise<ClaudeAgentSdkModule> {
+    return this.implementation();
+  }
+}
+
+function validClaudeAgentSdkLoader(): ClaudeAgentSdkLoader {
+  return new StubClaudeAgentSdkLoader(async () => testClaudeAgentSdk);
+}
 
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
@@ -127,6 +147,7 @@ describe("native harness probes", () => {
     const base = root();
     const { binary, log } = fakeClaude(base);
     const result = await new ClaudeNativeHarnessProbe({
+      sdkLoader: validClaudeAgentSdkLoader(),
       binaryPath: binary,
       environment: {
         HOME: "/home/owner",
@@ -153,6 +174,68 @@ describe("native harness probes", () => {
       expect(row.entries).toEqual([]);
       expect(row.cwd).toMatch(/\/ghost-native-probe-/u);
     }
+  });
+
+  it.each(["missing", "rejecting"] as const)(
+    "fails Claude catalogue closed before the CLI when its SDK loader is %s",
+    async (kind) => {
+      const base = root();
+      const { binary, log } = fakeClaude(base);
+      const sdkLoader = kind === "missing"
+        ? new ClaudeAgentSdkLoader({ ownerHome: base, xdgDataHome: join(base, "data") })
+        : new StubClaudeAgentSdkLoader(async () => {
+          throw new Error("SDK load rejected");
+        });
+      const claude = new ClaudeNativeHarnessProbe({ sdkLoader, binaryPath: binary });
+      const catalog = new NativeHarnessCatalog({
+        claudeAgentSdkLoader: sdkLoader,
+        probes: {
+          "claude-code": claude,
+          codex: new MutableProbe("codex", "authenticated"),
+          pi: new MutableProbe("pi", "unknown"),
+        },
+      });
+
+      expect((await catalog.list())[0]).toEqual({
+        id: "claude-code",
+        availability: "unavailable",
+        authentication: "unknown",
+      });
+      expect(existsSync(log)).toBe(false);
+      await expect(catalog.readForStart("claude-code")).rejects.toBeInstanceOf(Error);
+      expect(existsSync(log)).toBe(false);
+    },
+  );
+
+  it("uses the injected production SDK loader before a valid Claude CLI", async () => {
+    const base = root();
+    const { binary, log } = fakeClaude(base);
+    const sdkLoader = validClaudeAgentSdkLoader();
+    const catalog = new NativeHarnessCatalog({
+      claudeAgentSdkLoader: sdkLoader,
+      claudeCode: {
+        binaryPath: binary,
+        environment: { HOME: "/home/owner", PATH: process.env.PATH },
+      },
+    });
+
+    await expect(catalog.readForStart("claude-code")).resolves.toMatchObject({
+      id: "claude-code",
+      authentication: "authenticated",
+    });
+    expect(logRows(log).map((row) => row.args)).toEqual([
+      ["--version"],
+      ["--setting-sources", "", "--safe-mode", "--strict-mcp-config", "auth", "status", "--json"],
+    ]);
+  });
+
+  it("makes the principal SDK loader mandatory for production construction", () => {
+    expect(() => new ClaudeNativeHarnessProbe({} as never)).toThrow(
+      "requires the principal SDK loader",
+    );
+    expect(() => new NativeHarnessCatalog({} as never)).toThrow(
+      "requires the principal SDK loader",
+    );
   });
 
   it("runs only Codex initialize, initialized, and account/read without project cwd", async () => {
@@ -331,6 +414,7 @@ describe("native harness catalogue", () => {
     const pi = new MutableProbe("pi", "unknown");
     pi.failure = new Error("private path /owner and token SECRET-SENTINEL");
     const catalog = new NativeHarnessCatalog({
+      claudeAgentSdkLoader: validClaudeAgentSdkLoader(),
       probes: { "claude-code": claude, codex, pi },
     });
 
@@ -353,6 +437,7 @@ describe("native harness catalogue", () => {
     const codex = new MutableProbe("codex", "authenticated");
     const pi = new MutableProbe("pi", "unknown");
     const catalog = new NativeHarnessCatalog({
+      claudeAgentSdkLoader: validClaudeAgentSdkLoader(),
       probes: { "claude-code": claude, codex, pi },
       ttlMs: 5_000,
     });

@@ -2093,7 +2093,9 @@ probe.
 Every probe runs in a fresh mode-0700 scratch directory and an owned Linux
 process group. Completion, timeout, abort, and malformed output terminate the
 captured group with bounded TERM then KILL and wait for quiescence; Ghost never
-kills by executable name or pattern. Probes receive immutable, per-harness
+kills by executable name or pattern. A pre-aborted probe starts no child, and
+an in-flight abort removes its listener before group teardown and scratch
+cleanup. Probes receive immutable, per-harness
 environment snapshots derived from positive allowlists, not the ambient daemon
 environment. The shared Claude snapshot copies the existing reviewed
 operational and non-secret selector inventory. The principal conversation
@@ -2105,8 +2107,12 @@ secret names, loader/shell/package injection, and Ghost-private variables are
 absent from all snapshots. The process-global pi/provider scrub remains a
 separate later boundary.
 
-Claude discovery preserves the existing exact Agent SDK and CLI version/auth
-probe. Codex discovery reads stable `codex --version`, then starts `codex
+Claude discovery requires the same injected `ClaudeAgentSdkLoader` instance as
+the principal runtime, and loads that exact SDK boundary before starting any
+CLI probe; a missing or rejected SDK is unavailable even when a valid CLI is
+installed. Construction without that loader is invalid. It otherwise preserves
+the existing CLI version/auth probe. Codex discovery reads stable
+`codex --version`, then starts `codex
 app-server` and performs only `initialize`, the `initialized` notification,
 and `account/read` with `refreshToken:false`; it never requests projects,
 supported agents, settings, or any other method. Pi discovery reads stable

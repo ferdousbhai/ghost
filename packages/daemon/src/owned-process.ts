@@ -17,6 +17,7 @@ export interface OwnedCommandResult {
 export interface OwnedCommandOptions {
   environment: Readonly<NodeJS.ProcessEnv>;
   timeoutMs: number;
+  signal?: AbortSignal;
   stdin?: string;
   start?: (input: OwnedCommandInput) => void;
   onStdout?: (stdout: string, input: OwnedCommandInput) => void;
@@ -128,6 +129,7 @@ export async function runOwnedCommand(
   if (!/^ghost-[a-z0-9-]+-$/u.test(scratchPrefix)) {
     throw new RangeError("Owned command scratch prefix is invalid.");
   }
+  if (options.signal?.aborted) throw new OwnedProcessError("Owned probe was aborted.");
   const scratch = await mkdtemp(join(tmpdir(), scratchPrefix));
   await chmod(scratch, 0o700);
   try {
@@ -147,6 +149,7 @@ async function runOwnedCommandInDirectory(
   if (options.stdin !== undefined && options.start) {
     throw new TypeError("Owned command accepts either fixed or interactive stdin, not both.");
   }
+  if (options.signal?.aborted) throw new OwnedProcessError("Owned probe was aborted.");
   const hasInput = options.stdin !== undefined || options.start !== undefined;
   const child = spawn(executable, [...args], {
     cwd,
@@ -161,7 +164,7 @@ async function runOwnedCommandInDirectory(
 
   type Completion =
     | { kind: "close"; exitCode: number | null; signal: NodeJS.Signals | null }
-    | { kind: "error" | "overflow" | "timeout" };
+    | { kind: "abort" | "error" | "overflow" | "timeout" };
   let settleCompletion!: (completion: Completion) => void;
   let completionRequested = false;
   const completion = new Promise<Completion>((resolveCompletion) => {
@@ -203,6 +206,9 @@ async function runOwnedCommandInDirectory(
   child.once("close", (exitCode, signal) => {
     complete({ kind: "close", exitCode, signal });
   });
+  const onAbort = () => complete({ kind: "abort" });
+  options.signal?.addEventListener("abort", onAbort, { once: true });
+  if (options.signal?.aborted) complete({ kind: "abort" });
   if (options.stdin !== undefined) {
     child.stdin?.on("error", () => undefined);
     child.stdin?.end(options.stdin);
@@ -218,6 +224,7 @@ async function runOwnedCommandInDirectory(
 
   const outcome = await completion;
   clearTimeout(deadline);
+  options.signal?.removeEventListener("abort", onAbort);
   try {
     if (pid !== undefined) {
       if (process.platform === "linux") await terminateOwnedProcessGroup(pid);
@@ -230,9 +237,11 @@ async function runOwnedCommandInDirectory(
   }
 
   if (outcome.kind !== "close") {
-    const reason = outcome.kind === "overflow"
-      ? "produced too much output"
-      : outcome.kind === "timeout" ? "exceeded its hard deadline" : "could not start";
+    const reason = outcome.kind === "abort"
+      ? "was aborted"
+      : outcome.kind === "overflow"
+        ? "produced too much output"
+        : outcome.kind === "timeout" ? "exceeded its hard deadline" : "could not start";
     throw new OwnedProcessError(`Owned probe ${reason}.`);
   }
   return {

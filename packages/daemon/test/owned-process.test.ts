@@ -8,7 +8,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   OwnedProcessError,
   runOwnedCommand,
@@ -45,6 +45,15 @@ function pidExists(pid: number): boolean {
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
     throw error;
+  }
+}
+
+async function waitForPidFile(path: string, count = 1): Promise<void> {
+  const deadline = Date.now() + 2_000;
+  while (!existsSync(path)
+    || readFileSync(path, "utf8").trim().split(/\s+/u).filter(Boolean).length < count) {
+    if (Date.now() >= deadline) throw new Error("owned process did not publish its pid file");
+    await new Promise<void>((resolveDelay) => setTimeout(resolveDelay, 10));
   }
 }
 
@@ -118,5 +127,89 @@ while :; do printf '%s' '${sentinel}'; done
       name: "OwnedProcessError",
       message: "Owned probe produced too much output.",
     });
+  });
+
+  it("does not spawn or allocate child state for a pre-aborted probe", async () => {
+    const { root, path } = executable("#!/bin/sh\nexit 99\n");
+    const marker = join(root, "spawned");
+    writeFileSync(path, `#!/bin/sh\nprintf spawned > ${JSON.stringify(marker)}\n`);
+    chmodSync(path, 0o700);
+    const controller = new AbortController();
+    const addListener = vi.spyOn(controller.signal, "addEventListener");
+    controller.abort();
+
+    let thrown: unknown;
+    try {
+      await runOwnedCommand(path, [], {
+        environment: { PATH: "/usr/bin:/bin", SECRET_SENTINEL: "never-return" },
+        timeoutMs: 1_000,
+        signal: controller.signal,
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toMatchObject({
+      name: "OwnedProcessError",
+      message: "Owned probe was aborted.",
+    });
+    expect(String((thrown as Error).message)).not.toContain(path);
+    expect(String((thrown as Error).message)).not.toContain("never-return");
+    expect(existsSync(marker)).toBe(false);
+    expect(addListener).not.toHaveBeenCalled();
+  });
+
+  it("aborts once, removes its listener, and quiesces an exact resistant group", async () => {
+    const { root, path } = executable(`#!/bin/sh
+trap '' TERM
+printf '%s\\n' "$$" > "$PID_FILE"
+printf '%s\\n' "$PWD" > "$SCRATCH_FILE"
+(
+  trap '' TERM
+  while :; do sleep 1; done
+) &
+printf '%s\\n' "$!" >> "$PID_FILE"
+while :; do sleep 1; done
+`);
+    const pidFile = join(root, "abort-pids");
+    const scratchFile = join(root, "scratch-path");
+    const controller = new AbortController();
+    const addListener = vi.spyOn(controller.signal, "addEventListener");
+    const removeListener = vi.spyOn(controller.signal, "removeEventListener");
+    const pending = runOwnedCommand(path, [], {
+      environment: {
+        PATH: "/usr/bin:/bin",
+        PID_FILE: pidFile,
+        SCRATCH_FILE: scratchFile,
+        SECRET_SENTINEL: "abort-secret-sentinel",
+      },
+      timeoutMs: 10_000,
+      signal: controller.signal,
+    });
+    await waitForPidFile(pidFile, 2);
+    controller.abort();
+
+    let thrown: unknown;
+    try {
+      await pending;
+    } catch (error) {
+      thrown = error;
+    }
+    const scratch = readFileSync(scratchFile, "utf8").trim();
+    const pids = readFileSync(pidFile, "utf8").trim().split(/\s+/u).map(Number);
+
+    expect(thrown).toMatchObject({
+      name: "OwnedProcessError",
+      message: "Owned probe was aborted.",
+    });
+    expect(String((thrown as Error).message)).not.toContain(path);
+    expect(String((thrown as Error).message)).not.toContain(scratch);
+    expect(String((thrown as Error).message)).not.toContain("abort-secret-sentinel");
+    expect(pids).toHaveLength(2);
+    expect(new Set(pids).size).toBe(2);
+    expect(pids.filter(pidExists)).toEqual([]);
+    expect(existsSync(scratch)).toBe(false);
+    expect(addListener).toHaveBeenCalledTimes(1);
+    expect(removeListener).toHaveBeenCalledWith("abort", expect.any(Function));
   });
 });

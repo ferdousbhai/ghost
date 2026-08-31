@@ -3,6 +3,7 @@ import {
   ClaudeCodeProbe,
   type ClaudeCodeProbeOptions,
 } from "./claude-code.js";
+import { ClaudeAgentSdkLoader } from "./claude-agent-sdk-loader.js";
 import { captureNativeHarnessEnvironment } from "./env-scrub.js";
 import {
   inspectNativeHarnessExecutable,
@@ -113,18 +114,28 @@ function stableVersion(
   return `${match[1]}.${match[2]}.${match[3]}`;
 }
 
+export interface ClaudeNativeHarnessProbeOptions
+  extends Omit<ClaudeCodeProbeOptions, "loadSdk"> {
+  sdkLoader: ClaudeAgentSdkLoader;
+}
+
 export class ClaudeNativeHarnessProbe implements NativeHarnessFreshProbe {
   readonly id = "claude-code" as const;
   private readonly probe: ClaudeCodeProbe;
   private readonly literalBoundary: boolean;
 
-  constructor(options: ClaudeCodeProbeOptions = {}) {
+  constructor(options: ClaudeNativeHarnessProbeOptions) {
+    if (!(options?.sdkLoader instanceof ClaudeAgentSdkLoader)) {
+      throw new TypeError("Claude native harness probe requires the principal SDK loader.");
+    }
+    const { sdkLoader, ...probeOptions } = options;
     const binaryPath = options.binaryPath ?? process.env.GHOST_CLAUDE_BINARY;
     this.literalBoundary = binaryPath !== undefined;
     this.probe = new ClaudeCodeProbe({
-      ...options,
+      ...probeOptions,
       ...(binaryPath === undefined ? {} : { binaryPath }),
       environmentProfile: "native",
+      loadSdk: () => sdkLoader.load(),
     });
   }
 
@@ -374,10 +385,16 @@ export class PiNativeHarnessProbe implements NativeHarnessFreshProbe {
   }
 }
 
-export interface NativeHarnessCatalogOptions {
-  probes?: Readonly<Record<NativeHarnessId, NativeHarnessFreshProbe>>;
+interface NativeHarnessCatalogBaseOptions {
   ttlMs?: number;
   now?: () => number;
+}
+
+export interface NativeHarnessCatalogOptions extends NativeHarnessCatalogBaseOptions {
+  claudeAgentSdkLoader: ClaudeAgentSdkLoader;
+  claudeCode?: Omit<ClaudeNativeHarnessProbeOptions, "sdkLoader">;
+  /** Dependency seam for deterministic catalogue tests. */
+  probes?: Readonly<Record<NativeHarnessId, NativeHarnessFreshProbe>>;
 }
 
 export class NativeHarnessCatalog {
@@ -391,9 +408,15 @@ export class NativeHarnessCatalog {
     promise: Promise<readonly NativeHarnessStatus[]>;
   };
 
-  constructor(options: NativeHarnessCatalogOptions = {}) {
+  constructor(options: NativeHarnessCatalogOptions) {
+    if (!(options?.claudeAgentSdkLoader instanceof ClaudeAgentSdkLoader)) {
+      throw new TypeError("Native harness catalogue requires the principal SDK loader.");
+    }
     this.probes = options.probes ?? {
-      "claude-code": new ClaudeNativeHarnessProbe(),
+      "claude-code": new ClaudeNativeHarnessProbe({
+        ...options.claudeCode,
+        sdkLoader: options.claudeAgentSdkLoader,
+      }),
       codex: new CodexNativeHarnessProbe(),
       pi: new PiNativeHarnessProbe(),
     };

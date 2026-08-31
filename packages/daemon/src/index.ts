@@ -110,6 +110,7 @@ export {
   PiNativeHarnessProbe,
   type NativeHarnessAuthentication,
   type NativeHarnessAvailability,
+  type ClaudeNativeHarnessProbeOptions,
   type NativeHarnessCatalogOptions,
   type NativeHarnessFreshProbe,
   type NativeHarnessProbeResult,
