@@ -12,14 +12,8 @@ TestCase {
                 { name: "Wendy", dir: "/tmp/ghosts/Wendy", createdAt: "new" }
             ],
             sessionIds: { Casper: "casper-chat", Wendy: "wendy-chat" },
-            commandExchanges: {
-                "Casper\ncasper-chat": [{ output: "casper" }],
-                "Wendy\nwendy-chat": [{ output: "wendy" }]
-            },
-            commandTurnKey: "Casper\ncasper-chat",
             greetingGhost: "Casper",
             loginGhost: "Casper",
-            commandsGhost: "Casper",
             projectGhost: "Casper",
             mcpGhost: "Casper",
             liveGhost: "Casper",
@@ -47,7 +41,6 @@ TestCase {
         const original = fixtureState();
         original.ghosts.pop();
         delete original.sessionIds.Wendy;
-        delete original.commandExchanges["Wendy\nwendy-chat"];
         const expected = JSON.stringify(original);
         const transaction = GhostRename.prepare(original, "Casper", "Spooky");
 
@@ -62,16 +55,13 @@ TestCase {
         const original = fixtureState();
         original.ghosts.pop();
         delete original.sessionIds.Wendy;
-        delete original.commandExchanges["Wendy\nwendy-chat"];
         const transaction = GhostRename.prepare(original, "Casper", "Spooky");
         const renamed = transaction.after;
 
         compare(Object.keys(renamed.sessionIds).join(","), "Spooky");
-        compare(Object.keys(renamed.commandExchanges).join(","), "Spooky\ncasper-chat");
-        compare(renamed.commandTurnKey, "Spooky\ncasper-chat");
         compare(renamed.ghosts[0].dir, "/tmp/ghosts/Spooky");
         for (const owner of [
-            "greetingGhost", "loginGhost", "commandsGhost", "mcpGhost",
+            "greetingGhost", "loginGhost", "mcpGhost",
             "projectGhost", "liveGhost", "collabGhost", "activeGhost", "memoryGhost"
         ]) compare(renamed[owner], "Spooky");
     }

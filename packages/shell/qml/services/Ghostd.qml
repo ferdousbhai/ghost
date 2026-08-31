@@ -17,7 +17,6 @@ pragma Singleton
 import Quickshell
 import Quickshell.Io
 import QtQuick
-import "CommandTranscript.js" as CommandTranscript
 import "GhostRename.js" as GhostRename
 import "HookStatus.js" as HookStatus
 import "HookConfig.js" as HookConfig
@@ -802,15 +801,6 @@ Singleton {
     property string projectGhost: ""
     property string projectSessionId: ""
 
-    // Effective commands are conversation-scoped: an extension can register
-    // them while a session is built, so a ghost-level cache would quietly show
-    // the wrong palette after switching conversations.
-    property var commands: []
-    property bool commandsLoading: false
-    property string commandsError: ""
-    property string commandsGhost: ""
-    property string commandsSessionId: ""
-
     // Only the active ghost's visible `<ghost-home>/mcp.json` is represented
     // here. Explicitly bound external-project MCP remains session-owned. GET
     // is sanitized; secret-bearing values are write-only through mutations.
@@ -897,11 +887,7 @@ Singleton {
     property bool composerHasDraft: false
 
     property alias transcript: transcriptModel
-    property var commandExchanges: ({})
     property int hydratedRowCount: 0
-    property string commandTurnKey: ""
-    property int commandTurnIndex: -1
-    property int commandTurnAnchor: 0
     property bool streaming: false
     property string activity: ""
     /**
@@ -1014,7 +1000,6 @@ Singleton {
     property var projectMutationRequest: null
     property var projectAbandonRequest: null
     property var pendingProjectReplacement: null
-    property var commandsRequest: null
     property var mcpRequest: null
     property var mcpMutationRequest: null
     property var codingHarnessesRequest: null
@@ -1323,7 +1308,6 @@ Singleton {
         root.sessions = [];
         root.clearTranscript();
         root.clearGreeting();
-        root.clearCommands();
         root.clearProject();
         root.clearMcp();
         root.clearCoding();
@@ -1473,11 +1457,8 @@ Singleton {
         return {
             ghosts: root.ghosts,
             sessionIds: root.sessionIds,
-            commandExchanges: root.commandExchanges,
-            commandTurnKey: root.commandTurnKey,
             greetingGhost: root.greetingGhost,
             loginGhost: root.loginGhost,
-            commandsGhost: root.commandsGhost,
             projectGhost: root.projectGhost,
             mcpGhost: root.mcpGhost,
             liveGhost: root.liveGhost,
@@ -1490,11 +1471,8 @@ Singleton {
     function installGhostRenameState(state: var): void {
         root.ghosts = state.ghosts;
         root.sessionIds = state.sessionIds;
-        root.commandExchanges = state.commandExchanges;
-        root.commandTurnKey = state.commandTurnKey;
         root.greetingGhost = state.greetingGhost;
         root.loginGhost = state.loginGhost;
-        root.commandsGhost = state.commandsGhost;
         root.projectGhost = state.projectGhost;
         root.mcpGhost = state.mcpGhost;
         root.liveGhost = state.liveGhost;
@@ -1528,7 +1506,6 @@ Singleton {
     /** Drop every trace of a ghost that is no longer there. */
     function forgetGhost(name: string): void {
         delete root.sessionIds[name];
-        root.dropCommandTranscripts(name, "");
         const kept = ({});
         for (const key of Object.keys(root.turnStates)) {
             const state = root.turnStates[key];
@@ -1546,7 +1523,6 @@ Singleton {
         root.clearModelState();
         root.clearGreeting();
         root.clearMemory();
-        root.clearCommands();
         root.clearProject();
         root.clearMcp();
         root.clearCoding();
@@ -1578,7 +1554,6 @@ Singleton {
         // The greeting is this ghost's own voice, so it never carries over.
         root.clearGreeting();
         root.clearMemory();
-        root.clearCommands();
         root.clearProject();
         root.clearMcp();
         root.clearCoding();
@@ -1685,7 +1660,6 @@ Singleton {
         root.currentSessionId = id;
         const target = root.ensureTurnState(ghost, id, state.conversationId, runtime);
         root.showTurnState(ghost, id);
-        root.clearCommands();
         root.clearConnect();
         root.fetchProject(false, false);
         return target;
@@ -1726,9 +1700,6 @@ Singleton {
             published: false,
             rows: [],
             hydratedRowCount: 0,
-            commandTurnKey: "",
-            commandTurnIndex: -1,
-            commandTurnAnchor: 0,
             streaming: false,
             request: null,
             lastStreamActivity: 0,
@@ -1793,9 +1764,6 @@ Singleton {
     function captureTurnProjection(state: var): void {
         state.rows = root.visibleTranscriptRows();
         state.hydratedRowCount = root.hydratedRowCount;
-        state.commandTurnKey = root.commandTurnKey;
-        state.commandTurnIndex = root.commandTurnIndex;
-        state.commandTurnAnchor = root.commandTurnAnchor;
         state.streaming = root.streaming;
         state.request = root.request;
         state.activity = root.activity;
@@ -1831,9 +1799,6 @@ Singleton {
 
     function projectTurnProjection(state: var): void {
         root.hydratedRowCount = state.hydratedRowCount;
-        root.commandTurnKey = state.commandTurnKey;
-        root.commandTurnIndex = state.commandTurnIndex;
-        root.commandTurnAnchor = state.commandTurnAnchor;
         root.streaming = state.streaming;
         root.request = state.request;
         root.activity = state.activity;
@@ -1858,9 +1823,6 @@ Singleton {
     function clearTurnProjection(): void {
         transcriptModel.clear();
         root.hydratedRowCount = 0;
-        root.commandTurnKey = "";
-        root.commandTurnIndex = -1;
-        root.commandTurnAnchor = 0;
         root.streaming = false;
         root.request = null;
         root.activity = "";
@@ -1936,9 +1898,6 @@ Singleton {
         if (state) {
             state.rows = [];
             state.hydratedRowCount = 0;
-            state.commandTurnKey = "";
-            state.commandTurnIndex = -1;
-            state.commandTurnAnchor = 0;
             state.assistantRow = -1;
             root.resetAssistantSegmentFor(state);
             root.resetInteractionStateFor(state);
@@ -2100,73 +2059,6 @@ Singleton {
         if (path === "") return;
         root.mutateMemory("DELETE", path, ({ path: path, confirm: path }), null);
     }
-
-
-    function clearCommands(): void {
-        if (root.commandsRequest && root.commandsRequest.readyState !== 4)
-            root.commandsRequest.abort();
-        root.commandsRequest = null;
-        root.commands = [];
-        root.commandsLoading = false;
-        root.commandsError = "";
-        root.commandsGhost = "";
-        root.commandsSessionId = "";
-    }
-
-    /**
-     * Discover the effective OMP slash commands for the active conversation.
-     * `ensureSession` may mint the id for a blank chat, but the daemon still
-     * creates its transcript lazily: browsing commands does not add a row to
-     * the conversation list.
-     */
-    function fetchCommands(force: bool): void {
-        const ghost = root.activeGhost;
-        if (ghost === "") {
-            root.clearCommands();
-            return;
-        }
-        const sessionId = root.ensureSession(ghost);
-        if (!force && root.commandsGhost === ghost
-                && root.commandsSessionId === sessionId) return;
-        if (root.commandsRequest && root.commandsRequest.readyState !== 4)
-            root.commandsRequest.abort();
-
-        const xhr = new XMLHttpRequest();
-        root.commandsRequest = xhr;
-        root.commands = [];
-        root.commandsLoading = true;
-        root.commandsError = "";
-        root.commandsGhost = ghost;
-        root.commandsSessionId = sessionId;
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.commandsRequest) return;
-            if (ghost !== root.activeGhost || sessionId !== root.currentSessionId) return;
-            root.commandsLoading = false;
-            if (xhr.status === 200) {
-                try {
-                    const body = JSON.parse(xhr.responseText);
-                    const list = body && Array.isArray(body.commands) ? body.commands : null;
-                    if (list === null) throw new Error("missing commands");
-                    root.commands = list.filter(function (command) {
-                        return command && typeof command === "object"
-                            && typeof command.name === "string"
-                            && command.name.trim() !== "";
-                    });
-                    root.commandsError = "";
-                    root.reachable = true;
-                } catch (error) {
-                    root.commands = [];
-                    root.commandsError = "ghostd sent a malformed command catalog";
-                }
-            } else {
-                root.commands = [];
-                root.commandsError = root.describeError(xhr, "GET commands");
-            }
-        };
-        root.dispatch(xhr, "GET", "/api/ghosts/" + encodeURIComponent(ghost)
-            + "/sessions/" + encodeURIComponent(sessionId) + "/commands", ({}), null);
-    }
-
 
     function clearMcp(): void {
         if (root.mcpRequest && root.mcpRequest.readyState !== 4)
@@ -3233,7 +3125,6 @@ Singleton {
         root.currentSessionId = id;
         root.ensureTurnState(ghost, id, conversationId, runtime);
         root.showTurnState(ghost, id);
-        root.clearCommands();
         root.clearProject();
         root.clearConnect();
         // A blank chat is back on screen, so it earns a fresh opening line.
@@ -3281,7 +3172,6 @@ Singleton {
             if (xhr.readyState !== 4 || xhr !== root.deleteSessionRequest) return;
             root.deletingSessionId = "";
             if (xhr.status === 200) {
-                root.dropCommandTranscripts(ghost, id);
                 const key = root.conversationKey(ghost, id);
                 const kept = Object.assign({}, root.turnStates);
                 root.cancelTranscriptLoad(kept[key]);
@@ -3296,7 +3186,6 @@ Singleton {
                         root.sessionIds[ghost] = "";
                         root.currentSessionId = "";
                         root.clearTurnProjection();
-                        root.clearCommands();
                         root.clearProject();
                         root.clearConnect();
                         root.clearGreeting();
@@ -3429,7 +3318,6 @@ Singleton {
         root.sessionIds[ghost] = id;
         root.currentSessionId = id;
         root.showTurnState(ghost, id);
-        root.clearCommands();
         // Opening the selected title reaches here without changing its identity.
         root.clearWork();
         root.clearConnect();
@@ -3673,9 +3561,8 @@ Singleton {
         state.statusText = "";
         const storedRows = TurnBlocks.rows(messages);
         state.hydratedRowCount = storedRows.length;
-        const rows = CommandTranscript.merge(storedRows, root.commandExchangesFor(state));
         const hydrated = [];
-        for (const row of rows) {
+        for (const row of storedRows) {
             hydrated.push({
                 role: row.role,
                 text: row.text,
@@ -3688,69 +3575,6 @@ Singleton {
             });
         }
         root.replaceTurnRows(state, hydrated);
-        root.projectTurnFields(state);
-    }
-
-    function commandTranscriptKey(ghost: string, sessionId: string): string {
-        return ghost + "\n" + sessionId;
-    }
-
-    function dropCommandTranscripts(ghost: string, sessionId: string): void {
-        const prefix = ghost + "\n";
-        const exact = root.commandTranscriptKey(ghost, sessionId);
-        const next = ({});
-        for (const key of Object.keys(root.commandExchanges)) {
-            if (sessionId !== "" ? key === exact : key.startsWith(prefix)) continue;
-            next[key] = root.commandExchanges[key];
-        }
-        root.commandExchanges = next;
-    }
-
-    function currentCommandExchanges(): var {
-        const state = root.activeTurnState(false);
-        return state ? root.commandExchangesFor(state) : [];
-    }
-
-    function commandExchangesFor(state: var): var {
-        const key = root.commandTranscriptKey(state.ghost, state.sessionId);
-        return Array.isArray(root.commandExchanges[key]) ? root.commandExchanges[key] : [];
-    }
-
-    function receiveCommandOutput(event: var): void {
-        const state = root.activeTurnState(false);
-        if (!state) return;
-        root.captureActiveTurn(state);
-        root.receiveCommandOutputFor(state, event);
-    }
-
-    function receiveCommandOutputFor(state: var, event: var): void {
-        if (state.assistantRow < 0 || state.assistantRow >= state.rows.length) return;
-        const key = root.commandTranscriptKey(state.ghost, state.sessionId);
-        if (key === "\n") return;
-        let exchanges = Array.isArray(root.commandExchanges[key])
-            ? root.commandExchanges[key].slice() : [];
-        let previous = null;
-        if (state.commandTurnKey === key && state.commandTurnIndex >= 0
-                && state.commandTurnIndex < exchanges.length)
-            previous = exchanges[state.commandTurnIndex];
-        else {
-            state.commandTurnKey = key;
-            state.commandTurnIndex = exchanges.length;
-        }
-        const promptRow = state.assistantRow > 0
-            ? state.rows[state.assistantRow - 1] : null;
-        const prompt = promptRow && promptRow.role === "user" ? promptRow.text : event.command;
-        const exchange = CommandTranscript.append(
-            previous, event, prompt, state.commandTurnAnchor);
-        if (state.commandTurnIndex === exchanges.length) exchanges.push(exchange);
-        else exchanges[state.commandTurnIndex] = exchange;
-        const next = Object.assign({}, root.commandExchanges);
-        next[key] = exchanges;
-        root.commandExchanges = next;
-
-        root.setTurnRow(state, state.assistantRow, "role", "command");
-        root.setTurnRow(state, state.assistantRow, "text", exchange.output);
-        root.setTurnRow(state, state.assistantRow, "error", CommandTranscript.failure(exchange));
         root.projectTurnFields(state);
     }
 
@@ -3817,12 +3641,6 @@ Singleton {
         if (!state || sessionId === "") return;
         root.ensureOptimisticSessionRow(ghost, sessionId);
         root.captureActiveTurn(state);
-        // A completed model turn can be visible a tick before its transcript
-        // refresh lands. Count that live pair too, while excluding the
-        // presentation-only command pairs already in the model.
-        const commandAnchor = Math.max(state.hydratedRowCount,
-            state.rows.length - root.commandExchangesFor(state).length * 2);
-
         root.beginTurnFor(state);
         root.appendTurnRow(state, {
             role: "user", text: prompt, tools: "", toolActivity: [], error: "", pending: false,
@@ -3833,9 +3651,6 @@ Singleton {
             entryId: ""
         });
         state.assistantRow = state.rows.length - 1;
-        state.commandTurnKey = "";
-        state.commandTurnIndex = -1;
-        state.commandTurnAnchor = commandAnchor;
         root.projectTurnFields(state);
         // The conversation has messages now; the opening line has been answered.
         root.clearGreeting();
@@ -4052,12 +3867,6 @@ Singleton {
         if (Quickshell.env("GHOST_HUD_REPLAY")) {
             for (let i = 0; i < state.rows.length - 1; i++) {
                 const row = state.rows[i];
-                const next = i + 1 < state.rows.length ? state.rows[i + 1] : null;
-                // Presentation-only builtins must not come back as ordinary
-                // user/assistant context when the diagnostic replay mode is on.
-                if (row.role === "command"
-                        || (row.role === "user" && next && next.role === "command"))
-                    continue;
                 if (row.text === "") continue;
                 messages.push({ role: row.role, content: row.text, timestamp: Date.now() });
             }
@@ -4134,9 +3943,6 @@ Singleton {
         switch (event.type) {
         case "start":
             state.activity = "";
-            break;
-        case "command_output":
-            root.receiveCommandOutputFor(state, event);
             break;
         case "text_start":
             state.blocks[event.contentIndex] = { kind: "text", text: "" };
@@ -4320,9 +4126,6 @@ Singleton {
 
     function flushTurn(state: var, force: bool, segmentClosed: bool): void {
         if (state.assistantRow < 0 || state.assistantRow >= state.rows.length) return;
-        // A builtin has no model blocks. Re-splitting an empty block buffer at
-        // `done` must not erase the command_output row we just rendered.
-        if (state.rows[state.assistantRow].role === "command") return;
         if (!force && !state.presentationDirty) return;
         const turn = TurnBlocks.split(
             state.blocks, Object.keys(state.toolIdsByContent),

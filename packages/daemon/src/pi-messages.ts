@@ -57,13 +57,6 @@ export type PiMessagesEvent =
       type: "owner_message";
       text: string;
     }
-  | {
-      type: "command_output";
-      command: string;
-      output: string;
-      isError?: boolean;
-      code?: "unsupported_command" | "command_failed";
-    }
   | { type: "text_start"; contentIndex: number }
   | { type: "text_delta"; contentIndex: number; delta: string }
   | { type: "text_end"; contentIndex: number; content: string }
@@ -442,10 +435,9 @@ export function createPiMessagesAdapter(
           return;
         case "message_start": {
           const message = event.message;
-          // Forced /skill prompts are persisted as displayable custom messages
-          // attributed to the owner. Count that as the POST's already-rendered
-          // input too, or the first later owner-attributed pass would consume
-          // the skip instead.
+          // A visible owner-attributed custom message may arrive after the POST's
+          // ordinary user message. Count that input first, or the later pass would
+          // consume the skip instead.
           const ownerAuthored = message.role === "user"
             || (message.role === "custom"
               && message.attribution === "user"

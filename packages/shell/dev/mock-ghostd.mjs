@@ -321,56 +321,6 @@ const MOCK_MEMORY = [
   },
 ];
 
-// Effective command discovery is session-scoped in the real daemon. These
-// exercise built-ins, aliases, input hints, subcommands, skills, and a project
-// command so both the full browser and slash completion have meaningful data.
-const MOCK_COMMANDS = [
-  {
-    name: "help",
-    aliases: ["?"],
-    description: "Show OMP's command help and keyboard shortcuts.",
-    input: null,
-    subcommands: [],
-    source: "built-in",
-  },
-  {
-    name: "tree",
-    aliases: ["branch", "branches"],
-    description: "Inspect and move through the current conversation tree.",
-    input: "[entry]",
-    subcommands: [{ name: "show" }, { name: "list" }],
-    source: "built-in",
-    availability: "unsupported",
-    unavailableReason: "Conversation branching is not available in Ghost.",
-  },
-  {
-    name: "settings",
-    aliases: ["config"],
-    description: "Open OMP settings for this ghost.",
-    input: null,
-    subcommands: [],
-    source: "built-in",
-    availability: "partial",
-    unavailableReason: "Model routing is available in Ghost's model switcher; other OMP settings remain file-backed.",
-  },
-  {
-    name: "skill:research",
-    aliases: [],
-    description: "Force-invoke the research skill with optional arguments.",
-    input: "[topic]",
-    subcommands: [],
-    source: "skill",
-  },
-  {
-    name: "release-notes",
-    aliases: ["release"],
-    description: "Draft release notes from the current project history.",
-    input: { usage: "<version>" },
-    subcommands: [],
-    source: "project",
-  },
-];
-
 // Raw values stay only in the mock's in-memory store. `mcpSnapshot` mirrors the
 // real daemon's sanitized GET response, including names/counts but never the
 // argument, environment, header, OAuth, or URL-query values themselves.
@@ -2370,14 +2320,6 @@ const mockServer = createServer(async (req, res) => {
     s.readAt = new Date().toISOString();
     publishConversationUpdated(name, s.runtime, s.conversationId, s.updatedAt);
     return json(res, 200, { ok: true, readAt: s.readAt });
-  }
-  if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "commands" && req.method === "GET") {
-    const conversation = routeConversation(parts);
-    if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
-    if (conversation.runtime !== "pi") {
-      return json(res, 409, { error: { code: "not_supported", message: "Claude Code has no OMP commands" } });
-    }
-    return json(res, 200, { commands: MOCK_COMMANDS });
   }
   if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "transcript" && req.method === "GET") {
     for (const field of ["limit", "offset"]) {

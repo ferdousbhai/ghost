@@ -1,9 +1,10 @@
 /**
  * The declarative capabilities a ghost home or trusted project contributes to
- * a session: skills, rules, prompt templates, and Markdown slash commands,
+ * a session: skills, rules, prompt templates, and Markdown command files,
  * plus the frontmatter parsing they share. The shapes follow the Markdown
  * conventions Oh My Pi and Claude Code established so existing homes keep
- * loading; Ghost renders them into its own prompt.
+ * loading. Principal harnesses render only instructions, rules, and skill
+ * indexes; delegated native harnesses discover their own cwd-scoped files.
  */
 import { parseFrontmatter as piParseFrontmatter } from "@earendil-works/pi-coding-agent";
 

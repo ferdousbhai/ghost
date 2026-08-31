@@ -487,77 +487,6 @@ describe("parseUserBashCommand", () => {
   });
 });
 
-describe("OMP slash commands", () => {
-  it("discovers the live OMP catalog and annotates Ghost's execution policy", async () => {
-    await setup([{ kind: "text", text: "unused" }]);
-    const commands = await host!.availableCommands("casper", "conv-commands");
-
-    expect(commands).toContainEqual(expect.objectContaining({
-      name: "tools",
-      source: "builtin",
-      availability: "available",
-    }));
-    expect(commands).toContainEqual(expect.objectContaining({
-      name: "memory",
-      source: "builtin",
-      availability: "unsupported",
-    }));
-    // Ghost augments OMP's headless builder result with the unified registry so
-    // an OMP user's familiar TUI-only commands remain discoverable but honest.
-    expect(commands).toContainEqual(expect.objectContaining({
-      name: "help",
-      source: "builtin",
-      availability: "unsupported",
-      unavailableReason: expect.stringContaining("interactive terminal UI"),
-    }));
-    expect(commands.some((command) => command.name === "plan" || command.name === "todo")).toBe(false);
-  });
-
-  it("reports that an active Claude Code runtime has no OMP command catalog", async () => {
-    const { dir } = await setup([{ kind: "text", text: "unused" }]);
-    setChatModelRole(ghostPaths(dir).home, "claude-code", "default");
-
-    await expect(host!.availableCommands("casper", "conv-claude"))
-      .rejects.toMatchObject({ code: "not_supported", status: 409 });
-  });
-
-  it("runs admitted builtins without a model and rejects unsafe or TUI-only ones", async () => {
-    await setup([{ kind: "text", text: "must not be requested" }]);
-
-    const run = async (sessionId: string, prompt: string) => {
-      const events: PiMessagesEvent[] = [];
-      await host!.runTurn("casper", { sessionId, prompt, emit: (event) => events.push(event) });
-      return events;
-    };
-
-    const tools = await run("conv-tools", "/tools");
-    expect(tools[0]).toEqual({ type: "start" });
-    expect(tools).toContainEqual(expect.objectContaining({
-      type: "command_output",
-      command: "/tools",
-      output: expect.stringContaining("read"),
-    }));
-    expect(tools.at(-1)).toMatchObject({ type: "done", usage: { totalTokens: 0 } });
-
-    for (const [sessionId, prompt, command] of [
-      ["conv-memory", "/memory stats", "/memory"],
-      ["conv-help", "/help", "/help"],
-      ["conv-delete", "/session delete", "/session"],
-    ] as const) {
-      const events = await run(sessionId, prompt);
-      expect(events).toContainEqual(expect.objectContaining({
-        type: "command_output",
-        command,
-        isError: true,
-        code: "unsupported_command",
-      }));
-      expect(events.at(-1)).toMatchObject({ type: "done", usage: { totalTokens: 0 } });
-    }
-
-    expect(provider!.requests).toHaveLength(0);
-  });
-});
-
 describe("SessionHost.open", () => {
   it("resumes a legacy Pi transcript at its historical cwd", async () => {
     const { dir } = await setup([{ kind: "text", text: "hello" }]);
@@ -740,26 +669,7 @@ describe("SessionHost.open", () => {
 
     const handle = await host!.open("casper", "conv-project");
     expect(handle.session.sessionManager.getCwd()).toBe(project);
-    expect(handle.skills.map((skill) => skill.name)).toContain("trusted-skill");
-    expect(handle.skills.map((skill) => skill.name)).not.toContain("invalid-skill");
     expect(handle.session.getToolDefinition("blocked_project_tool")).toBeUndefined();
-    const expectProjectRules = (_session: typeof handle.session) => {
-      const rules = new Map(handle.rules.map((rule) => [rule.name, rule]));
-      expect(rules.get("rule-never")).toMatchObject({
-        globs: ["**/*.ts"],
-        interruptMode: "never",
-      });
-      expect(rules.get("rule-prose")).toMatchObject({
-        globs: ["**/*.tsx", "**/*.jsx"],
-        interruptMode: "prose-only",
-      });
-      expect(rules.get("rule-tool")?.interruptMode).toBe("tool-only");
-      expect(rules.get("rule-always")?.interruptMode).toBe("always");
-    };
-    expectProjectRules(handle.session);
-    const commands = await host!.availableCommands("casper", "conv-project");
-    expect(commands.map((command) => command.name)).toContain("project-brief");
-    expect(commands.map((command) => command.name)).toContain("project-proof");
 
     writeFileSync(
       join(project, ".omp", "skills", "trusted-skill", "SKILL.md"),
@@ -780,7 +690,8 @@ describe("SessionHost.open", () => {
     expect(projectSystem).not.toContain("Trusted skill body");
     expect(projectSystem).not.toContain("Use the trusted project brief");
     expect(projectSystem).not.toContain("Use the trusted proof command");
-    expect(JSON.stringify(provider!.requests.at(-1)?.messages)).toContain("Trusted skill body");
+    expect(JSON.stringify(provider!.requests.at(-1)?.messages)).toContain("/skill:trusted-skill plate one");
+    expect(JSON.stringify(provider!.requests.at(-1)?.messages)).not.toContain("Trusted skill body");
     expect(JSON.stringify(provider!.requests.at(-1)?.messages)).not.toContain("HOSTILE-LIVE-SKILL");
 
     await host!.runTurn("casper", {
@@ -789,7 +700,8 @@ describe("SessionHost.open", () => {
       emit: () => {},
     });
     expect(JSON.stringify(provider!.requests.at(-1)?.messages))
-      .toContain("Use the trusted proof command");
+      .not.toContain("Use the trusted proof command");
+    expect(JSON.stringify(provider!.requests.at(-1)?.messages)).toContain("/project-proof");
     expect(JSON.stringify(provider!.requests.at(-1)?.messages)).toContain("plate one");
 
     const outside = join(temp!.root, "outside-project");
@@ -826,7 +738,7 @@ describe("SessionHost.open", () => {
     await host!.open("casper", "cache-evictor");
     expect(((handle as { sessionDisposed?: boolean }).sessionDisposed === true)).toBe(true);
     const reopened = await host!.open("casper", "conv-project");
-    expectProjectRules(reopened.session);
+    expect(reopened.session.sessionManager.getCwd()).toBe(child);
     const reopenedSystem = await modelSystemPrompt("conv-project");
     expect(reopenedSystem).toContain("TRUSTED-PROJECT-INSTRUCTION");
     expect(reopenedSystem).toContain(`Current working directory: ${child}`);
@@ -839,7 +751,7 @@ describe("SessionHost.open", () => {
       offline: true,
     });
     const afterRestart = await host.open("casper", "conv-project");
-    expectProjectRules(afterRestart.session);
+    expect(afterRestart.session.sessionManager.getCwd()).toBe(child);
     const restartedSystem = await modelSystemPrompt("conv-project");
     expect(restartedSystem).toContain("TRUSTED-PROJECT-INSTRUCTION");
     expect(restartedSystem).not.toContain("HOSTILE-AFTER-CACHE-EVICTION");
@@ -1954,11 +1866,10 @@ lines.on("line", (line) => {
     }
   });
 
-  it("discovers visible skills and commands without enabling ghost agents", async () => {
+  it("discovers visible skills without enabling ghost agents", async () => {
     const { dir } = await setup([{ kind: "text", text: "hello" }]);
     mkdirSync(join(dir, "skills", "inking"), { recursive: true });
     mkdirSync(join(dir, "agents"), { recursive: true });
-    mkdirSync(join(dir, "commands"), { recursive: true });
     writeFileSync(
       join(dir, "skills", "inking", "SKILL.md"),
       "---\nname: inking\ndescription: Ink a forme evenly.\n---\n\nInk it.\n",
@@ -1969,17 +1880,9 @@ lines.on("line", (line) => {
       "---\nname: pressman\ndescription: Runs the press.\n---\n\nRun it.\n",
       "utf8",
     );
-    writeFileSync(
-      join(dir, "commands", "proofsheet.md"),
-      "---\ndescription: Proof a sheet.\n---\n\nProof it.\n",
-      "utf8",
-    );
-
     const handle = await host!.open("casper", "conv-visible-artifacts");
 
     expect(handle.skills.map((skill) => skill.name)).toContain("inking");
-    expect(handle.commands.map((command) => command.name))
-      .toContain("proofsheet");
     // Custom definitions can still appear in artifact previews, but neither
     // they nor an ambient OMP definition can activate Pi subagents in phase 1.
     expect(handle.session.getToolDefinition("task")).toBeUndefined();
@@ -2049,7 +1952,7 @@ lines.on("line", (line) => {
     expect(handle.session.systemPrompt).not.toContain("HOSTILE-PI-APPEND-SYSTEM");
   });
 
-  it("discovers visible Ghost context and supports /skill:name invocation", async () => {
+  it("discovers visible Ghost context without a principal-only skill command", async () => {
     const { dir } = await setup([{ kind: "text", text: "skill applied" }]);
     const { mkdirSync, writeFileSync } = await import("node:fs");
     writeFileSync(
@@ -2085,9 +1988,10 @@ lines.on("line", (line) => {
       "press-review: Review a printing press repair plan.",
     );
     expect(provider!.requests[0]?.system).not.toContain("Check the tympan and packing");
-    expect(JSON.stringify(provider!.requests[0]?.messages)).toContain(
+    expect(JSON.stringify(provider!.requests[0]?.messages)).not.toContain(
       "Check the tympan and packing",
     );
+    expect(JSON.stringify(provider!.requests[0]?.messages)).toContain("/skill:press-review");
     expect(JSON.stringify(provider!.requests[0]?.messages)).toContain("focus on the rollers");
   });
 });
@@ -5102,7 +5006,6 @@ describe("SessionHost.runTurn", () => {
 
     for (const [sessionId, prompt] of [
       ["failed-activity-cd", "!cd failed-activity-docs"],
-      ["failed-activity-builtin", "/tools"],
     ] as const) {
       const events: PiMessagesEvent[] = [];
       await host!.runTurn("casper", {
@@ -5113,10 +5016,10 @@ describe("SessionHost.runTurn", () => {
       expect(events.at(-1)?.type).toBe("done");
     }
 
-    expect(recordedCwds).toEqual([ownerDocs, temp!.ownerHome]);
+    expect(recordedCwds).toEqual([ownerDocs]);
     expect((await host!.open("casper", "failed-activity-cd")).session.sessionManager.getCwd())
       .toBe(ownerDocs);
-    expect(finished).toEqual([undefined, undefined]);
+    expect(finished).toEqual([undefined]);
     expect(logger.records).toEqual([
       {
         level: "warn",
@@ -5127,16 +5030,6 @@ describe("SessionHost.runTurn", () => {
         level: "warn",
         message: "conversation maintenance cleanup was not recorded",
         fields: { ghost: "casper", conversation: "failed-activity-cd", runtime: "pi" },
-      },
-      {
-        level: "warn",
-        message: "conversation maintenance owner activity was not recorded",
-        fields: { ghost: "casper", conversation: "failed-activity-builtin", runtime: "pi" },
-      },
-      {
-        level: "warn",
-        message: "conversation maintenance cleanup was not recorded",
-        fields: { ghost: "casper", conversation: "failed-activity-builtin", runtime: "pi" },
       },
     ]);
     expect(JSON.stringify(logger.records)).not.toContain("sensitive maintenance bytes");
@@ -6882,13 +6775,6 @@ describe("background jobs", () => {
     await waitForTranscript("conv-jobs", "The job finished.");
     expect(host!.listJobs("casper", "conv-jobs")).toMatchObject([{ status: "completed", exitCode: 0, output: expect.stringContaining("finished-job") }]);
 
-    const listed: PiMessagesEvent[] = [];
-    await host!.runTurn("casper", { sessionId: "conv-jobs", prompt: "/jobs", emit: (event) => listed.push(event) });
-    expect(listed).toContainEqual(expect.objectContaining({
-      type: "command_output",
-      command: "/jobs",
-      output: expect.stringContaining("[completed] slow echo"),
-    }));
   });
 
   it("moves a long foreground command to the background after the wait budget", async () => {

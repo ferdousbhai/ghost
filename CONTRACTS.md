@@ -12,8 +12,8 @@ The root is `~/ghosts` unless `ghostsRoot` says otherwise.
 
 A ghost home is the primary user-level resource root a session sees, named
 explicitly by Ghost whenever it builds a declarative snapshot. Its plain `skills/`, `agents/`,
-`commands/`, `rules/`, `prompts/`, `tools/`, and `hooks/` remain the ghost-owned
-sources. Its declarative snapshot admits only those visible directories plus
+`commands/`, `rules/`, `prompts/`, `tools/`, and `hooks/` remain ghost-owned
+files. Its declarative snapshot admits only those visible directories plus
 visible `AGENTS.md`/`CLAUDE.md`; hidden `.agents`, `.claude`, `.pi`, and `.omp`
 compatibility providers are project-only and are never user-level aliases
 inside a ghost home. The daemon resolves the declarative categories into an
@@ -21,9 +21,11 @@ immutable session snapshot and passes the ghost's absolute extension roots
 explicitly. It never lets the operational cwd become an implicit package root.
 Owner-home or project executable extensions, hooks,
 TypeScript commands, and custom code tools are disabled in a Ghost principal
-session. A deliberately bound project's data-only
-instructions, skills, rules, Markdown prompts/commands, and MCP join the
-snapshot. Machine skills are the one ambient declarative exception: Ghost uses
+session. A deliberately bound project's data-only instructions, skills, rules,
+and MCP join the principal context. Markdown prompts and commands remain pinned,
+previewable owner data but are not interpreted by a principal harness; native
+coding harnesses discover their own project resources at the delegated cwd.
+Machine skills are the one ambient declarative exception: Ghost uses
 pi's native skill parser to snapshot every valid skill visible under the owner's
 `~/.agents/skills/` and `~/.pi/agent/skills/`, following the symlinks those
 standard machine roots commonly contain. Omarchy owns its package paths and
@@ -50,9 +52,8 @@ durable Ghost task boundary.
   memory/*.md                  one concise fact per plain Markdown file
   skills/<name>/SKILL.md       the ghost's own skills
   agents/<name>.md             reserved custom agents (preview-only to the principal)
-  commands/<name>.md           the ghost's own slash commands
-  rules/, prompts/, tools/, hooks/
-                               the remaining ghost-owned artifact directories
+  commands/, prompts/         retained owner data; preview-only to the principal
+  rules/, tools/, hooks/      the remaining ghost-owned artifact directories
   settings.yml                 the ghost's own plain YAML mapping; Ghost reads
                                `ttsr.disabledRules`; the unsupported legacy
                                collaboration seam still parses
@@ -386,10 +387,8 @@ tool names plus only their registered one-line snippets. Ghost does not carry
 pi's coding identity, generic guidelines, documentation pointers,
 `APPEND_SYSTEM.md`, or a second native skill/context rendering across the
 replacement boundary.
-Skill bodies, conditional-rule bodies,
-Markdown prompts, and Markdown commands enter model context only through their
-explicit invocation paths (`/skill:<name>`, an admitted Markdown command or
-prompt template, or native `read`). The golden session fixture records the
+Skill bodies and conditional-rule bodies enter model context only when the
+principal uses native `read`. The golden session fixture records the
 complete provider-facing prompt and rejects known upstream prompt markers. A
 provider adapter may add protocol-required blocks after this boundary; in
 particular Anthropic OAuth adds its billing/fingerprint and Claude Agent SDK
@@ -483,9 +482,8 @@ writer accepts only the fact content and an optional slug; the memory index and
 root-only Documents index are derived from disk before each model turn and are
 never stored. A foreground session rewrites a changed fact through that writer;
 it has no deletion tool. Idle consolidation alone retires obsolete memory.
-`/skill:<name> [args]` is explicit
-force-invocation of a discovered skill; native `read` remains the model-driven
-discovery path.
+Skill invocation remains model-driven through native `read`; Ghost does not
+add a principal-only command syntax around it.
 
 `GhostHome` exposes no live legacy document list, read, find, write, or search
 API; live Documents are exclusively the machine-wide `MachineDocuments`
@@ -547,7 +545,7 @@ keeps running as a job while the model gets the output so far and the id. A
 foreground command that settles in time answers like pi's tool: its output, or
 an error carrying the output plus `Command exited with code N` /
 `Command aborted`. The `jobs` tool lists, waits for (default 30 s, at most
-300 s), or cancels jobs; `/jobs` lists them without a model. Every job belongs
+300 s), or cancels jobs. Every job belongs
 to the session that started it: it survives the turn but not the session
 (`close`, retention eviction — which a running job prevents — and daemon
 shutdown cancel it), it keeps a bounded output tail (the newest 64,000 bytes
@@ -559,23 +557,12 @@ as a follow-up turn of its own; a session an owner holds without streaming
 receives it at the release boundary. A job cancelled before delivery still
 reports (`was cancelled`); jobs cancelled by session teardown do not.
 
-Slash commands are a Ghost-owned catalog
-(`packages/daemon/src/slash-commands.ts`), session-scoped and built from the
-conversation's pinned declarative snapshot. It holds the headless builtins Ghost
-answers without a model — `/context`, `/tools`, `/dirs`, `/jobs`, and
-`/compact [instructions]` (`available`), plus the informational
-forms of
-`/model`, `/session [info]`, and `/usage [show]` (`partial`) — the
-conversation's admitted Markdown commands and prompt templates, expanded into
-the user turn with pi's `$ARGUMENTS`/`$1`/`${@:2}` placeholders, and
-`/skill:<name> [args]` force-invocation. Every known command from another
-harness (`/browser`, `/computer`, `/memory`, `/mcp`, `/move`,
-`/add-dir`, `/remove-dir`, `/pin`, `/rename`, `/share`, `/export`, `/dump`,
-`/stats`, and TUI-only ones such as `/help`, `/clear`, `/new`,
-`/resume`, `/exit`, `/quit`, `/settings`, `/theme`, `/keybindings`, `/login`,
-`/logout`) is `unsupported`: it is consumed before the prompt reaches pi's
-`AgentSession` and reported as `command_output` with `unsupported_command`. It
-is never sent to a model as ordinary slash-prefixed text.
+Ghost has no principal slash-command catalog, command browser, completion menu,
+or command-output transcript row. A leading `/` has no privileged meaning at
+the principal boundary: it is ordinary owner text under both pi and Claude
+Code. Ghost operations live in the HUD, daemon API, CLI, or registered tools.
+Pi is constructed with prompt-template and skill-command expansion disabled,
+so it cannot reinterpret that text after admission.
 
 Runtime selection is resolved before Ghost dispatches a leading `!` or `!!`.
 Under pi, `!command` executes immediately through the session's bash runner
@@ -1177,8 +1164,8 @@ streams emit one complete event object per line.
   following links. At the bound project root, instruction providers shadow in
   Ghost's fixed order: `.omp/AGENTS.md`, `.claude/CLAUDE.md`, `.agents/AGENTS.md`,
   `AGENTS.md`, then `CLAUDE.md`; Ghost injects the first admitted regular file
-  only. Pi receives the resulting context/skills/rules/prompts/commands as exact
-  arrays and null/empty active-repository, watchdog, and passive-advisor inputs;
+  only. Pi receives the resulting context/skills/rules as exact arrays and
+  null/empty active-repository, watchdog, and passive-advisor inputs;
   its baseline system prompt includes only instruction bodies, unconditional
   `alwaysApply` rule bodies, and compact skill/discoverable-rule indexes. No
   lexical post-load filter is an authority boundary.
@@ -1389,18 +1376,6 @@ streams emit one complete event object per line.
   `409 not_supported`, because that runtime owns its own conversation's name.
   Renaming works while a turn is streaming — the title slot is not part of the
   conversation tree.
-- `GET  /api/ghosts/:name/sessions/:id/commands` → `{ commands }` — Ghost's
-  slash-command catalog for that conversation, rebuilt from its pinned project
-  snapshot so admitted Markdown commands/prompts and skills remain current
-  without rediscovering from a changed cwd, with the headless builtins and the
-  known commands from other harnesses marked as described under "Session
-  capabilities". Each row is `{ name, aliases?, description, input?,
-  subcommands?, source, availability, unavailableReason? }`, where `source` is
-  `builtin`, `file`, or `extension`. A busy
-  conversation returns `409 session_busy`; a ghost currently routed through
-  Claude Code returns `409 not_supported`, because opening an unrelated pi
-  session just to discover commands would lie about the active runtime;
-  non-GET methods return `405`.
 - `GET  /api/ghosts/:name/sessions/:id/jobs` → `{ jobs }` — the background
   jobs of that conversation as `{ id, label, command, status, startedAt,
   endedAt?, durationMs, exitCode?, output, outputTruncated }` rows, where
@@ -1409,11 +1384,6 @@ streams emit one complete event object per line.
 - `POST /api/ghosts/:name/sessions/:id/jobs/:jobId/cancel` → `{ outcome, job }`
   — `outcome` is `cancelled` or `already_settled` with the job's current row;
   an unknown job or a conversation that is not open is `404 not_found`.
-- A standalone builtin sent through `POST …/messages` produces exactly
-  `start`, one or more `command_output` events, then `done` with zero usage.
-  Unsupported and failed commands set `isError` and `code` on their output but
-  still use `done`: the command completed without a transport or model error.
-  Command output is not an assistant message and is not persisted as one.
 - `DELETE /api/ghosts/:name/sessions/:id` →
   `{ ok: true, trash: [{ artifact, source, trash, kind }, …] }` — moves every
   Ghost-owned artifact for the conversation to recoverable Trash. `artifact` is
@@ -2425,10 +2395,9 @@ stderr format. Filter one ghost with
   and `noContextFiles`, set `projectTrusted` false, and enable native skills
   only for the explicitly supplied machine roots. Ghost supplies every other
   declarative category itself, as an explicit immutable snapshot from the
-  visible ghost home plus one trusted project root; the admitted Markdown
-  commands and prompt templates reach pi only through the loader's
-  `promptsOverride`, so pi's own
-  `/name args` expansion runs against snapshot bytes and never the disk; hidden compatibility providers are admitted only
+  visible ghost home plus one trusted project root. It supplies no
+  `promptsOverride`, and every principal prompt disables prompt-template
+  expansion; hidden compatibility providers are admitted only
   for a trusted project, and project and visible Ghost `tools/` code stay
   disabled. Ghost separately preloads only direct, non-hidden regular
   JavaScript/TypeScript entries from its visible `hooks/pre` and `hooks/post`

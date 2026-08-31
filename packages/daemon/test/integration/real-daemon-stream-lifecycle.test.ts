@@ -1,4 +1,3 @@
-import { setImmediate } from "node:timers/promises";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   SSE_KEEPALIVE_INTERVAL_MS,
@@ -40,21 +39,15 @@ function expectOneTerminalAtWireEnd(stream: RealSseClient): void {
   expect(stream.frames.slice(terminalFrame + 1)).toEqual([]);
 }
 
-async function waitUntilCommandsAreAccepted(
+async function waitForTurnRelease(
   harness: RealDaemonHarness,
   sessionId: string,
 ): Promise<JsonResponse> {
-  return within((async () => {
-    for (;;) {
-      const response = await harness.request(
-        "GET",
-        `/api/ghosts/${harness.ghostName}/sessions/${encodeURIComponent(`pi:${sessionId}`)}/commands`,
-      );
-      if (response.status === 200) return response;
-      expect(response.status).toBe(409);
-      await setImmediate();
-    }
-  })(), "the disconnected conversation to release its busy gate");
+  return within(harness.request(
+    "POST",
+    `/api/ghosts/${harness.ghostName}/sessions/${encodeURIComponent(`pi:${sessionId}`)}/stop`,
+    {},
+  ), "the disconnected conversation to release its busy gate");
 }
 
 function memoryStep(index: number, barrier?: ReturnType<typeof createMockProviderBarrier>): MockStep {
@@ -164,7 +157,7 @@ describe("real ghostd streaming lifecycle", () => {
       .resolves.toEqual({ naturalEnd: false });
     heldRequest.release();
 
-    expect((await waitUntilCommandsAreAccepted(daemon, "conv-disconnect")).status).toBe(200);
+    expect((await waitForTurnRelease(daemon, "conv-disconnect")).status).toBe(200);
     const subsequent = await daemon.startTurn("conv-disconnect", "Try the conversation again.");
     await within(subsequent.completion, "the subsequent turn to reach EOF");
     expect(terminalEvents(subsequent.events)).toEqual([

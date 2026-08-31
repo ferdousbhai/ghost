@@ -37,11 +37,6 @@ FocusScope {
             icon: "M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"
         },
         {
-            id: "commands",
-            label: "Commands",
-            icon: "M4 3h16a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zM6 9l4 3-4 3M12 15h4"
-        },
-        {
             id: "hooks",
             label: root.activeHookCount > 0
                 ? "Hooks · " + root.activeHookCount + " loaded" : "Hooks",

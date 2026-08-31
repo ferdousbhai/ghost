@@ -89,8 +89,6 @@ export async function sayCommand(
         human = delta;
       } else if (event.type === "owner_message" && typeof event.text === "string") {
         human = `${event.text}\n`;
-      } else if (event.type === "command_output" && typeof event.output === "string") {
-        human = `${event.output}${event.output.endsWith("\n") ? "" : "\n"}`;
       } else if (event.type === "done") {
         human = finalText && !finalText.endsWith("\n") ? "\n" : "";
         quiet = finalText ? `${finalText}${finalText.endsWith("\n") ? "" : "\n"}` : "";

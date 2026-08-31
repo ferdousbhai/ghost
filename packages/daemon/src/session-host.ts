@@ -13,7 +13,6 @@ import { collectGhostExtension, openGhostHome } from "@ghost/extensions";
 import {
   createAgentSession,
   createLocalBashOperations,
-  createSyntheticSourceInfo,
   DefaultResourceLoader,
   SessionManager,
   SettingsManager,
@@ -166,13 +165,6 @@ import {
 } from "./session-transcript.js";
 import type { Rule, Skill } from "./declarative-types.js";
 import {
-  buildGhostAvailableSlashCommands,
-  classifyGhostBuiltin,
-  executeGhostBuiltin,
-  type GhostAvailableSlashCommand,
-  type GhostFileCommand,
-} from "./slash-commands.js";
-import {
   LiveVoiceManager,
   type LiveVoiceStatus,
 } from "./live-voice.js";
@@ -236,7 +228,6 @@ export const PI_NATIVE_TOOL_NAMES: readonly string[] = [
   "write",
 ];
 
-const SKILL_PROMPT_MESSAGE_TYPE = "skill-prompt";
 const LIVE_DELEGATION_MESSAGE_TYPE = "live-delegation";
 
 /** `cd ...` typed at the `!` prompt moves the conversation's working directory. */
@@ -301,43 +292,6 @@ function tailSummary(text: string, maxLength = 800): string | undefined {
   const clean = text.trimEnd();
   if (!clean) return undefined;
   return clean.length <= maxLength ? clean : `…${clean.slice(-maxLength)}`;
-}
-
-function parseSkillInvocation(prompt: string): { name: string; args: string } | null {
-  const match = /^\/skill:([A-Za-z0-9_.-]+)(?:\s+([\s\S]*))?$/.exec(prompt.trim());
-  return match ? { name: match[1] ?? "", args: (match[2] ?? "").trim() } : null;
-}
-
-/**
- * Preserve the explicit `/skill:name args` command surface. The prompt lets
- * the model discover skills; this path is the owner's force-invocation, which
- * sends the admitted skill bytes as an owner-attributed message.
- */
-async function promptPiSession(
-  session: AgentSession,
-  prompt: string,
-  skills: readonly Skill[],
-): Promise<void> {
-  const invocation = parseSkillInvocation(prompt);
-  const skill = invocation ? skills.find((candidate) => candidate.name === invocation.name) : undefined;
-  if (invocation && skill && skill.snapshotContent !== undefined) {
-    const content = [
-      `<skill name=${JSON.stringify(skill.name)} path=${JSON.stringify(skill.filePath)}>`,
-      skill.snapshotContent,
-      "</skill>",
-      ...(invocation.args ? [`Arguments: ${invocation.args}`] : []),
-    ].join("\n");
-    await session.sendCustomMessage({
-      customType: SKILL_PROMPT_MESSAGE_TYPE,
-      content,
-      display: true,
-      details: { attribution: "user", skill: skill.name },
-    }, { triggerTurn: true, deliverAs: "steer" });
-    return;
-  }
-  // pi expands `/name args` against the admitted Markdown commands the loader
-  // was given (`promptsOverride`); everything else is the owner's message.
-  await session.prompt(prompt);
 }
 
 /** Ghost's summary briefing replaces pi's default compaction instructions. */
@@ -676,12 +630,9 @@ export interface GhostSessionHandle {
   session: AgentSession;
   sessionFile: string | undefined;
   model: { provider: string; id: string } | null;
-  /** The admitted skills, for `/skill:` force-invocation. */
+  /** Declarative resources admitted into this immutable principal session. */
   skills: readonly Skill[];
-  /** The admitted rules, rendered into the persona prompt. */
   rules: readonly Rule[];
-  /** The admitted Markdown commands and prompt templates, for `/` discovery. */
-  commands: readonly GhostFileCommand[];
 }
 
 export interface TrashedConversationArtifact extends TrashPathResult {
@@ -1904,26 +1855,6 @@ export class SessionHost {
     }
   }
 
-  async availableCommands(
-    ghostName: string,
-    sessionId?: string | null,
-    runtime: ConversationRuntime = "pi",
-  ): Promise<GhostAvailableSlashCommand[]> {
-    assertPiConversation(runtime, "Slash commands");
-    this.assertPiRuntime(ghostName, "Slash commands");
-    const hosted = await this.idleHostedSession(
-      ghostName,
-      sessionId,
-      "Wait for this conversation to finish before refreshing its commands.",
-      true,
-    );
-    try {
-      return buildGhostAvailableSlashCommands(hosted.commands);
-    } finally {
-      await this.releaseSessionClaim(hosted, ghostName);
-    }
-  }
-
   private assertPiRuntime(ghostName: string, feature: string): Ghost {
     const ghost = this.registry.get(ghostName);
     try {
@@ -2503,10 +2434,6 @@ export class SessionHost {
       ...(projectSnapshot ? [projectSnapshot] : []),
     ];
     const effectiveDeclarative = mergeProjectDeclarativeSnapshots(rootSnapshots);
-    const fileCommands: GhostFileCommand[] = [
-      ...effectiveDeclarative.slashCommands,
-      ...effectiveDeclarative.promptTemplates,
-    ];
     const declarativeSection = renderPiDeclarativePrompt(effectiveDeclarative, {
       disabledRules: settings.getStringList("ttsr.disabledRules"),
     });
@@ -2650,16 +2577,6 @@ export class SessionHost {
       noSkills: false,
       additionalSkillPaths: this.machineSkills,
       noPromptTemplates: true,
-      promptsOverride: () => ({
-        prompts: fileCommands.map((command) => ({
-          name: command.name,
-          description: command.description,
-          content: command.content,
-          filePath: command.source,
-          sourceInfo: createSyntheticSourceInfo(command.source, { source: "ghost" }),
-        })),
-        diagnostics: [],
-      }),
       noThemes: true,
       noContextFiles: true,
       // The persona extension supplies the complete provider-facing prompt
@@ -2737,7 +2654,6 @@ export class SessionHost {
       settings,
       skills: effectiveDeclarative.skills,
       rules: effectiveDeclarative.rules,
-      commands: fileCommands,
       ...(mcp ? { mcp } : {}),
     };
     // A tool catalog change on a live server re-registers the MCP extension.
@@ -4113,46 +4029,6 @@ export class SessionHost {
     }
   }
 
-  private async runBuiltinCommand(
-    hosted: HostedSession,
-    dispatch: Exclude<ReturnType<typeof classifyGhostBuiltin>, { kind: "not_builtin" }>,
-    options: RunTurnOptions,
-  ): Promise<void> {
-    options.emit({ type: "start" });
-    if (dispatch.kind === "unsupported") {
-      options.emit({
-        type: "command_output",
-        command: dispatch.command,
-        output: dispatch.reason,
-        isError: true,
-        code: "unsupported_command",
-      });
-      options.emit({ type: "done", reason: "stop", usage: zeroUsage() });
-      return;
-    }
-
-    try {
-      const output = await executeGhostBuiltin(dispatch, {
-        session: hosted.session,
-        jobs: hosted.jobs,
-        cwd: hosted.session.sessionManager.getCwd(),
-        projectRoot: hosted.project.root,
-        ghostHome: hosted.ghost.dir,
-      });
-      options.emit({ type: "command_output", command: dispatch.command, output });
-      options.emit({ type: "done", reason: "stop", usage: zeroUsage() });
-    } catch (error) {
-      options.emit({
-        type: "command_output",
-        command: dispatch.command,
-        output: error instanceof Error ? error.message : String(error),
-        isError: true,
-        code: "command_failed",
-      });
-      options.emit({ type: "done", reason: "stop", usage: zeroUsage() });
-    }
-  }
-
   /**
    * Resolve the selected chat runtime once, before any command dispatch or
    * runtime state is opened. Malformed routing retains the default fallback.
@@ -4518,33 +4394,6 @@ export class SessionHost {
       true,
     );
 
-    // Known builtins are commands even when Ghost cannot safely run them.
-    // Consume them before hooks, title generation, and especially
-    // before AgentSession.prompt(), where unknown slash text becomes a model
-    // message.
-    const builtin = classifyGhostBuiltin(options.prompt);
-    if (builtin.kind !== "not_builtin") {
-      let pendingTerminal: Extract<PiMessagesEvent, { type: "done" | "error" }> | undefined;
-      const emitAfterActivityDurability = (event: PiMessagesEvent) => {
-        if (event.type === "done" || event.type === "error") pendingTerminal = event;
-        else options.emit(event);
-      };
-      try {
-        await this.runBuiltinCommand(hosted, builtin, {
-          ...options,
-          emit: emitAfterActivityDurability,
-        });
-        await this.recordPiOwnerActivity(ghostName, conversationId, hosted);
-        await finishMaintenance();
-        if (pendingTerminal) options.emit(pendingTerminal);
-      } finally {
-        await finishMaintenance();
-        await this.releaseSessionClaim(hosted, ghostName);
-      }
-      await this.announceConversationUpdated(ghostName, "pi", conversationId);
-      return;
-    }
-
     // Decide, BEFORE prompting, whether this turn should name the conversation:
     // titling is on, the conversation has no title yet, and this is its first
     // turn (no assistant message so far — a resumed transcript already has one).
@@ -4588,7 +4437,7 @@ export class SessionHost {
         finish: finishMaintenance,
       });
       settlementBarrier = this.deferPiSettlement(hosted, finishMaintenance);
-      await promptPiSession(hosted.session, options.prompt, hosted.skills);
+      await hosted.session.prompt(options.prompt, { expandPromptTemplates: false });
     } catch (error) {
       hosted.logger.error("turn failed", {
         error: (error as Error).message,

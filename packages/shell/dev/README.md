@@ -92,8 +92,8 @@ stop the mock separately.
   layout like any app. The HUD uses a neutral reading canvas with the current
   Omarchy accent and semantic status colours. Roster on the left (`casper`,
   `moaning-myrtle`, `+ new ghost`), transcript in the middle, composer at the
-  bottom, and the permanent Chat / Harnesses / Character / Memory / Commands /
-  Hooks / MCP / Remote / Phone access rail at the right edge. `SUPER+CTRL+G` is
+  bottom, and the permanent Chat / Harnesses / Character / Memory / Hooks /
+  MCP / Remote / Phone access rail at the right edge. `SUPER+CTRL+G` is
   launch-or-focus: reveal+focus when
   hidden/unfocused, hide only when already focused.
   Harnesses shows Claude Code, Codex, and Pi capacity plus the active
@@ -101,10 +101,7 @@ stop the mock separately.
   progress, result, worktree/branch review state, follow-up input, and cancel
   control; task creation remains in chat. Character edits `character.md`.
   Memory is read-only and its rows offer confirmed, recoverable deletion.
-  Commands shows the session's searchable OMP catalog and stages a chosen slash
-  command in chat; typing `/` opens its compact
-  autocomplete, including clear partial/unsupported labels. Hooks shows the
-  daemon-global redacted catalog: bounded labels, lifecycle triggers, idle
+  Hooks shows the daemon-global redacted catalog: bounded labels, lifecycle triggers, idle
   timing, and the loaded count. It never returns hook commands, paths, prompts,
   or injected context, and opening it does not create a conversation. MCP lists
   sanitized stdio, HTTP, and SSE fixtures and exercises add, full replacement,

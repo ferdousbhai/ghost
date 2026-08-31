@@ -108,7 +108,7 @@ FloatingWindow {
     minimumSize: Qt.size(568, 360)
 
     function showSection(section: string): void {
-        if (["chat", "harnesses", "memory", "commands", "hooks", "mcp", "connect", "remote", "character"]
+        if (["chat", "harnesses", "memory", "hooks", "mcp", "connect", "remote", "character"]
                 .indexOf(section) < 0)
             return;
         hud.loginOpen = false;
@@ -117,8 +117,6 @@ FloatingWindow {
         hud.currentSection = section;
         if (section === "chat") {
             composer.take();
-        } else if (section === "commands") {
-            Ghostd.fetchCommands(false);
         } else if (section === "hooks") {
             Ghostd.fetchHooks(false);
         } else if (section === "mcp") {
@@ -1035,20 +1033,6 @@ FloatingWindow {
                 sourceComponent: FilePane {
                     filePath: characterPane.path
                     onClosed: hud.showSection("chat")
-                }
-            }
-
-            // The effective command palette is conversation-scoped. A pick
-            // returns to chat with the command staged, never already running.
-            CommandsBrowser {
-                id: commandsBrowser
-                visible: hud.currentSection === "commands"
-                    && !hud.loginOpen && !hud.switcherOpen
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                onCommandPicked: invocation => {
-                    hud.currentSection = "chat";
-                    composer.stageCommand(invocation);
                 }
             }
 

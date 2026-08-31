@@ -1088,46 +1088,13 @@ describe("POST /api/ghosts/:name/messages runtime admission", () => {
   });
 });
 
-describe("GET /api/ghosts/:name/sessions/:id/commands", () => {
-  it("serves OMP's session command catalog and enforces GET", async () => {
+describe("principal slash text", () => {
+  it("has no command-catalog route and sends slash-prefixed text to the model", async () => {
     const base = await serve();
     const url = `${base}/api/ghosts/casper/sessions/${piSegment("conv-commands")}/commands`;
 
     const response = await fetch(url);
-    expect(response.status).toBe(200);
-    const body = await response.json() as {
-      commands: Array<{ name: string; source: string; availability: string }>;
-    };
-    expect(body.commands).toContainEqual(expect.objectContaining({
-      name: "tools",
-      source: "builtin",
-      availability: "available",
-    }));
-    expect(body.commands).toContainEqual(expect.objectContaining({
-      name: "mcp",
-      source: "builtin",
-      availability: "unsupported",
-    }));
-
-    expect((await fetch(url, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: "{}",
-    })).status).toBe(405);
-    expect((await fetch(
-      `${base}/api/ghosts/missing/sessions/${piSegment("conv-commands")}/commands`,
-    )).status).toBe(404);
-
-    setChatModelRole(ghostPaths(join(temp!.root, "casper")).home, "claude-code", "default");
-    const claude = await fetch(url);
-    expect(claude.status).toBe(409);
-    expect(await claude.json()).toMatchObject({
-      error: { code: "not_supported", message: expect.stringContaining("Claude Code") },
-    });
-  });
-
-  it("streams standalone command output instead of an assistant message", async () => {
-    const base = await serve();
+    expect(response.status).toBe(404);
     const result = await postTurn(base, {
       ...TURN_BODY,
       context: { messages: [{ role: "user", content: "/tools" }] },
@@ -1135,13 +1102,8 @@ describe("GET /api/ghosts/:name/sessions/:id/commands", () => {
     });
 
     expect(result.status).toBe(200);
-    expect(result.events).toContainEqual(expect.objectContaining({
-      type: "command_output",
-      command: "/tools",
-      output: expect.stringContaining("read"),
-    }));
-    expect(result.events.some((event) => event.type === "text_start")).toBe(false);
-    expect(provider!.requests).toHaveLength(0);
+    expect(result.events.some((event) => event.type === "text_start")).toBe(true);
+    expect(JSON.stringify(provider!.requests.at(-1)?.messages)).toContain("/tools");
   });
 });
 

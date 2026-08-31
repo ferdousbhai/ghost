@@ -271,7 +271,7 @@ function describeOutcome(job: GhostJob): string {
   }
 }
 
-/** One line per job, for `/jobs` and the `jobs` tool. */
+/** One line per job for the `jobs` tool. */
 export function formatJobList(jobs: readonly GhostJob[], now: number = Date.now()): string {
   if (jobs.length === 0) return "No background jobs in this conversation.";
   return jobs

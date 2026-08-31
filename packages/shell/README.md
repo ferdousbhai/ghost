@@ -157,16 +157,6 @@ daemon-owned native session. New tasks still begin through conversation so the
 Ghost chooses the harness and trusted cwd; the pane never pushes, opens a pull
 request, merges, or deletes a review branch.
 
-Commands is the effective, conversation-scoped Ghost slash-command catalog:
-headless builtins, admitted Markdown commands and prompt templates, and
-explicit `/skill:<name>` entries, exactly as the daemon reports them.
-It is searchable by name, alias, description, input, and source. Choosing a row
-returns to chat with `/name ` staged in the composer; it never runs on selection.
-Typing `/` in the composer opens the same catalog as a compact autocomplete.
-Commands known from other harnesses that Ghost supports only partially (or not at all)
-remain discoverable with an availability badge and reason; selecting one still
-only stages text, so the palette never suggests that staging proved support.
-
 MCP manages only the selected ghost's visible `<ghost-home>/mcp.json`: list,
 add, replace, enable/disable, and delete. An explicitly bound external project
 may separately contribute native `.omp/mcp.json` or legacy `.omp/.mcp.json` to
@@ -245,7 +235,7 @@ qs -c ghost ipc call ghost ask "<prompt>"     # reply arrives as a notification
 qs -c ghost ipc call ghost login              # open "Connect a model"
 qs -c ghost ipc call ghost loginTo <id> <oauth|api_key>   # and start one
 qs -c ghost ipc call ghost switcher           # open the model switcher
-qs -c ghost ipc call ghost section memory     # chat|character|memory|commands|hooks|mcp|connect|remote
+qs -c ghost ipc call ghost section memory     # chat|character|memory|harnesses|hooks|mcp|connect|remote
 qs -c ghost ipc call ghost status             # JSON
 qs -c ghost ipc call ghost refresh            # re-read roster and theme
 ```

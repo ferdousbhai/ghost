@@ -364,7 +364,7 @@ ad-hoc prompts:
 - Background jobs: `bash` with `background: true` starts a command as a job of
   the conversation, and a foreground command that runs longer than the
   auto-background budget (60 s by default) continues as one. The model's `jobs`
-  tool and `/jobs` list, wait for, and cancel them; a settled job reports back
+  tool lists, waits for, and cancels them; a settled job reports back
   into the conversation as a follow-up turn. `GET …/sessions/:id/jobs` and
   `POST …/sessions/:id/jobs/:jobId/cancel` expose them to the shell.
 - Ghost exposes no principal conversation-tree controls. Pi retains its native

@@ -72,8 +72,8 @@ ambient credential discovery, and no cloud custody.
   persisted catalog.
 - **Documents and skills coexist without sharing lifecycle** — Documents are
   live owner-wide files, while skills are bounded declarative instructions from
-  a ghost or trusted project. pi supports explicit `/skill:<name>` invocation
-  without treating Documents as a package root.
+  a ghost or trusted project. Both principal harnesses discover indexed skills
+  through native file reads without treating Documents as a package root.
 - **One browser** — the owner's real signed-in Chromium, reached by an MV3
   extension over `chrome.debugger`, behind a backend-agnostic tool surface. A
   second, ghost-owned profile was tried and removed: it doubled the code for a

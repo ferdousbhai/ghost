@@ -570,6 +570,19 @@ describe("Claude session sidecar confinement", () => {
 });
 
 describe("Claude Code subscription runtime", () => {
+  it("keeps slash-prefixed owner text as an ordinary Claude prompt", async () => {
+    const { seenPrompts } = setupClaudeHost();
+
+    await host!.runTurn("casper", {
+      sessionId: "literal-slash-prompt",
+      prompt: "/tools",
+      emit: () => {},
+    });
+
+    expect(seenPrompts).toHaveLength(1);
+    expect(JSON.stringify(seenPrompts[0]?.message.content)).toContain("/tools");
+  });
+
   it("removes the pinned SDK credential surface from query env without mutating parent env", async () => {
     const { seenOptions } = setupClaudeHost();
     const hostileNames = [

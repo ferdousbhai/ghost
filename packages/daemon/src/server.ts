@@ -784,20 +784,6 @@ export function createDaemonServer(options: ServerOptions): Server {
     jsonResponse(response, 200, { ok: true, title: stored });
   };
 
-  const handleSessionCommands = async (
-    ghostName: string,
-    conversation: ConversationIdentity,
-    response: ServerResponse,
-  ): Promise<void> => {
-    jsonResponse(response, 200, {
-      commands: await options.host.availableCommands(
-        ghostName,
-        conversation.conversationId,
-        conversation.runtime,
-      ),
-    });
-  };
-
   const decorateMcpSnapshot = (
     ghostName: string,
     snapshot: McpCatalogSnapshot,
@@ -1965,17 +1951,6 @@ export function createDaemonServer(options: ServerOptions): Server {
           }
           jsonResponse(response, 200, result);
           return;
-        }
-        if (segments.length === 6 && segments[3] === "sessions" && segments[5] === "commands") {
-          if (method !== "GET") {
-            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-            return;
-          }
-          return await handleSessionCommands(
-            ghostName,
-            decodeConversationIdentity(segments[4] ?? ""),
-            response,
-          );
         }
         if (segments.length === 6 && segments[3] === "sessions" && segments[5] === "live") {
           return await handleLiveVoice(
