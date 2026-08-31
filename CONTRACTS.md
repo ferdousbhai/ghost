@@ -2068,6 +2068,54 @@ external `claude auth status --json`, without restricting the CLI's
 reported method/provider name as non-secret connection metadata; no credential
 value is read into or emitted from a response.
 
+### Native harness discovery foundation
+
+Ghost has one source-level discovery catalogue for the owner-installed native
+harnesses `claude-code`, `codex`, and `pi`. This catalogue is not yet exposed on
+the daemon wire and does not start work. Its public rows contain only the
+harness id, `available | unavailable`, and `authenticated | logged_out |
+unknown`; they never contain an executable path, version, account identifier,
+probe output, or raw error. A bounded catalogue cache is display state only.
+It can never authorize a start: a future worker/controller must run the
+harness's fresh private probe immediately before process admission.
+
+Discovery and runtime launch share native-harness primitives. An explicit
+`GHOST_CLAUDE_BINARY`, `GHOST_CODEX_BINARY`, or `GHOST_PI_BINARY` is the
+owner-selected literal executable boundary and is never bypassed by default
+discovery. Without an override, Ghost resolves the named executable from its
+captured `PATH`; an Omarchy mise launcher is resolved through `mise which`,
+then the real executable is pinned. Both literal-boundary and resolved-target
+filesystem identity include device, inode, mode, size, and nanosecond change
+times, so symlink retargeting and in-place replacement invalidate a probe.
+Version is part of the private identity and is re-read by a fresh admission
+probe.
+
+Every probe runs in a fresh mode-0700 scratch directory and an owned Linux
+process group. Completion, timeout, abort, and malformed output terminate the
+captured group with bounded TERM then KILL and wait for quiescence; Ghost never
+kills by executable name or pattern. Probes receive immutable, per-harness
+environment snapshots derived from positive allowlists, not the ambient daemon
+environment. The shared Claude snapshot copies the existing reviewed
+operational and non-secret selector inventory. The principal conversation
+profile additionally forces `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`; the native
+worker/discovery profile does not. Codex receives only the operational
+inventory plus `CODEX_HOME`; pi receives only the operational inventory plus
+`PI_CODING_AGENT_DIR` and `PI_PACKAGE_DIR`. Provider credentials, generic
+secret names, loader/shell/package injection, and Ghost-private variables are
+absent from all snapshots. The process-global pi/provider scrub remains a
+separate later boundary.
+
+Claude discovery preserves the existing exact Agent SDK and CLI version/auth
+probe. Codex discovery reads stable `codex --version`, then starts `codex
+app-server` and performs only `initialize`, the `initialized` notification,
+and `account/read` with `refreshToken:false`; it never requests projects,
+supported agents, settings, or any other method. Pi discovery reads stable
+`pi --version` and deliberately reports authentication `unknown`. These probes
+are side-effect-free at the harness API: they create no thread, turn, tool,
+project, resource, or model request, run from the private scratch cwd, and do
+not execute project hooks or files. The unmodified harness still owns any
+internal account/state maintenance intrinsic to its initialization.
+
 Current-model, catalogue, and routing reads hold the ghost-home identity lease
 from before runtime construction until the pi runtime closes. This covers pi's
 local catalogue synchronization, credential locks, and any runtime-owned cache

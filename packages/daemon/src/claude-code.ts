@@ -14,22 +14,17 @@
  */
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { constants as fsConstants, existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import {
-  access,
   lstat,
-  mkdtemp,
   mkdir,
   open as openFile,
   readdir,
-  realpath as realpathFile,
   rename,
-  rm,
-  stat,
   unlink,
 } from "node:fs/promises";
-import { delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { homedir, tmpdir } from "node:os";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { homedir } from "node:os";
 import type {
   Options as ClaudeQueryOptions,
   Query,
@@ -73,7 +68,21 @@ import {
   isValidConversationId,
   requireRawConversationId,
 } from "./conversation-identity.js";
-import { captureClaudeCodeEnvironment } from "./env-scrub.js";
+import {
+  captureClaudeCodeEnvironment,
+  captureNativeHarnessEnvironment,
+} from "./env-scrub.js";
+import {
+  inspectNativeHarnessExecutable,
+  NativeHarnessIdentityError,
+  resolveNativeHarnessExecutable,
+} from "./native-harness-identity.js";
+import {
+  ownedProcessGroupExists,
+  runOwnedCommand,
+  terminateOwnedProcessGroup,
+  type OwnedCommandResult,
+} from "./owned-process.js";
 import { GhostHookRunner, ghostSessionStopContinuation } from "./hooks.js";
 import {
   resolveGhostExtensions,
@@ -130,9 +139,6 @@ export const CLAUDE_SESSION_METADATA_MAX_BYTES = 16 * 1_048_576;
 const AUTH_STATUS_TIMEOUT_MS = 10_000;
 const AUTH_STATUS_METADATA_MAX_SCALARS = 128;
 const AUTH_STATUS_IDENTITY_MAX_SCALARS = 512;
-const OWNED_CHILD_MAX_STDOUT_BYTES = 128 * 1024;
-const OWNED_CHILD_TERM_GRACE_MS = 100;
-const OWNED_CHILD_KILL_CONFIRM_MS = 1_000;
 const CLAUDE_QUERY_TERM_GRACE_MS = 500;
 const CLAUDE_QUERY_KILL_CONFIRM_MS = 2_000;
 const CLAUDE_CODE_AUTH_STATUS_ARGS = [
@@ -247,6 +253,7 @@ export interface ClaudeCodeProbeResult {
 export interface ClaudeCodeProbeOptions {
   binaryPath?: string;
   environment?: Readonly<NodeJS.ProcessEnv>;
+  environmentProfile?: "principal" | "native";
   ttlMs?: number;
   now?: () => number;
   resolveExecutable?: (
@@ -296,172 +303,6 @@ export class ClaudeCodeProcessError extends Error {
   }
 }
 
-interface OwnedCommandResult {
-  stdout: string;
-  exitCode: number | null;
-  signal: NodeJS.Signals | null;
-}
-
-function linuxProcessGroupHasLiveMembers(pid: number): boolean {
-  for (const entry of readdirSync("/proc", { withFileTypes: true })) {
-    if (!entry.isDirectory() || !/^\d+$/u.test(entry.name)) continue;
-    let statLine: string;
-    try {
-      statLine = readFileSync(`/proc/${entry.name}/stat`, "utf8");
-    } catch (error) {
-      // A process can disappear between the directory and stat reads.
-      const code = (error as NodeJS.ErrnoException).code;
-      if (code === "ENOENT" || code === "EACCES" || code === "EPERM") continue;
-      throw error;
-    }
-    const commandEnd = statLine.lastIndexOf(")");
-    const fields = commandEnd < 0
-      ? []
-      : statLine.slice(commandEnd + 2).split(" ");
-    const state = fields[0];
-    const processGroup = Number(fields[2]);
-    if (processGroup === pid && state !== "Z" && state !== "X") return true;
-  }
-  return false;
-}
-
-function processGroupExists(pid: number): boolean {
-  try {
-    process.kill(-pid, 0);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ESRCH") return false;
-    if ((error as NodeJS.ErrnoException).code === "EPERM") return true;
-    throw error;
-  }
-  // Container PID 1 implementations commonly leave killed orphan descendants
-  // as zombies. A zombie keeps kill(2)'s process-group existence check true,
-  // but it cannot execute and teardown is complete. Inspect Linux process
-  // state so confirmation does not wait forever for an unrelated reaper.
-  return process.platform === "linux" ? linuxProcessGroupHasLiveMembers(pid) : true;
-}
-
-function signalOwnedProcessGroup(pid: number, signal: NodeJS.Signals): void {
-  try {
-    process.kill(-pid, signal);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
-  }
-}
-
-async function waitForProcessGroupExit(pid: number, timeoutMs: number): Promise<boolean> {
-  const deadline = Date.now() + timeoutMs;
-  while (processGroupExists(pid)) {
-    if (Date.now() >= deadline) return false;
-    await new Promise<void>((resolveDelay) => setTimeout(resolveDelay, 10));
-  }
-  return true;
-}
-
-async function terminateOwnedProcessGroup(
-  pid: number,
-  termGraceMs = OWNED_CHILD_TERM_GRACE_MS,
-  killConfirmMs = OWNED_CHILD_KILL_CONFIRM_MS,
-): Promise<void> {
-  if (!processGroupExists(pid)) return;
-  signalOwnedProcessGroup(pid, "SIGTERM");
-  if (await waitForProcessGroupExit(pid, termGraceMs)) return;
-  signalOwnedProcessGroup(pid, "SIGKILL");
-  if (await waitForProcessGroupExit(pid, killConfirmMs)) return;
-  throw new ClaudeCodeProcessError("Claude Code probe process teardown was not confirmed.");
-}
-
-async function runOwnedCommand(
-  executable: string,
-  args: readonly string[],
-  options: {
-    environment: Readonly<NodeJS.ProcessEnv>;
-    timeoutMs: number;
-  },
-): Promise<OwnedCommandResult> {
-  const scratch = await mkdtemp(join(tmpdir(), "ghost-claude-probe-"));
-  try {
-    return await runOwnedCommandInDirectory(executable, args, options, scratch);
-  } finally {
-    await rm(scratch, { recursive: true, force: true });
-  }
-}
-
-async function runOwnedCommandInDirectory(
-  executable: string,
-  args: readonly string[],
-  options: {
-    environment: Readonly<NodeJS.ProcessEnv>;
-    timeoutMs: number;
-  },
-  cwd: string,
-): Promise<OwnedCommandResult> {
-  const child = spawn(executable, [...args], {
-    cwd,
-    detached: true,
-    env: options.environment,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  const pid = child.pid;
-  const chunks: Buffer[] = [];
-  let stdoutBytes = 0;
-  child.stderr?.resume();
-
-  type Completion =
-    | { kind: "close"; exitCode: number | null; signal: NodeJS.Signals | null }
-    | { kind: "error" }
-    | { kind: "overflow" }
-    | { kind: "timeout" };
-  let settleCompletion!: (completion: Completion) => void;
-  let completionRequested = false;
-  const completion = new Promise<Completion>((resolveCompletion) => {
-    settleCompletion = resolveCompletion;
-  });
-  const complete = (value: Completion) => {
-    if (completionRequested) return;
-    completionRequested = true;
-    settleCompletion(value);
-  };
-  child.stdout?.on("data", (chunk: Buffer | string) => {
-    if (completionRequested) return;
-    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    stdoutBytes += bytes.length;
-    if (stdoutBytes > OWNED_CHILD_MAX_STDOUT_BYTES) {
-      complete({ kind: "overflow" });
-      return;
-    }
-    chunks.push(bytes);
-  });
-  child.once("error", () => complete({ kind: "error" }));
-  child.once("close", (exitCode, signal) => {
-    complete({ kind: "close", exitCode, signal });
-  });
-  const deadline = setTimeout(
-    () => complete({ kind: "timeout" }),
-    options.timeoutMs,
-  );
-
-  const outcome = await completion;
-  clearTimeout(deadline);
-  try {
-    if (pid !== undefined) await terminateOwnedProcessGroup(pid);
-  } finally {
-    child.stdout?.destroy();
-    child.stderr?.destroy();
-  }
-
-  if (outcome.kind !== "close") {
-    const reason = outcome.kind === "overflow"
-      ? "produced too much output"
-      : outcome.kind === "timeout" ? "exceeded its hard deadline" : "could not start";
-    throw new ClaudeCodeProcessError(`Claude Code probe ${reason}.`);
-  }
-  return {
-    stdout: Buffer.concat(chunks, stdoutBytes).toString("utf8"),
-    exitCode: outcome.exitCode,
-    signal: outcome.signal,
-  };
-}
-
 function authStatusMetadata(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
@@ -501,130 +342,15 @@ function accountFingerprint(status: Record<string, unknown>): string | undefined
   return createHash("sha256").update(JSON.stringify([primary, context])).digest("hex");
 }
 
-async function executableCandidate(
-  binaryPath: string,
-  environment: Readonly<NodeJS.ProcessEnv>,
-): Promise<string | null> {
-  const candidates = isAbsolute(binaryPath) || binaryPath.includes("/")
-    ? [resolve(binaryPath)]
-    : (environment.PATH ?? "")
-      .split(delimiter)
-      .filter(Boolean)
-      .map((directory) => resolve(directory, binaryPath));
-  for (const candidate of candidates) {
-    try {
-      await access(candidate, fsConstants.X_OK);
-      return candidate;
-    } catch {
-      // Continue through PATH. Failure is reported once with the configured
-      // binary name, not as a cascade of candidate errors.
-    }
-  }
-  return null;
-}
-
-async function launcherPrefix(path: string): Promise<string> {
-  const handle = await openFile(path, "r");
-  try {
-    const buffer = Buffer.alloc(4096);
-    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
-    return buffer.toString("utf8", 0, bytesRead);
-  } finally {
-    await handle.close();
-  }
-}
-
-async function unwrapMiseClaudeLauncher(
-  path: string,
-  environment: Readonly<NodeJS.ProcessEnv>,
-  timeoutMs: number,
-): Promise<string> {
-  const prefix = await launcherPrefix(path);
-  if (!prefix.startsWith("#!") || !/\bmise\b/.test(prefix) || !/\bclaude\b/.test(prefix)) {
-    return path;
-  }
-
-  let result: OwnedCommandResult;
-  try {
-    const miseCandidate = await executableCandidate("mise", environment);
-    if (!miseCandidate) throw new Error("mise is not on PATH");
-    const miseExecutable = await realpathFile(miseCandidate);
-    result = await runOwnedCommand(miseExecutable, ["which", "claude"], {
-      environment,
-      timeoutMs,
-    });
-  } catch {
-    throw new ClaudeCodeProcessError(
-      `Claude Code launcher ${JSON.stringify(path)} delegates to mise, but Ghost could not resolve `
-        + "mise's underlying Claude executable.",
-    );
-  }
-  if (result.exitCode !== 0 || result.signal) {
-    throw new ClaudeCodeProcessError("`mise which claude` did not exit successfully.");
-  }
-  const lines = result.stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  const [misePath] = lines;
-  if (lines.length !== 1 || !misePath) {
-    throw new ClaudeCodeProcessError(
-      `\`mise which claude\` returned ${lines.length} executable paths; expected exactly one.`,
-    );
-  }
-  const resolved = await executableCandidate(misePath, environment);
-  if (!resolved || resolved === path) {
-    throw new ClaudeCodeProcessError(
-      `mise did not resolve an executable behind Claude launcher ${JSON.stringify(path)}.`,
-    );
-  }
-  return await realpathFile(resolved);
-}
-
-interface BigintExecutableStat {
-  dev: bigint;
-  ino: bigint;
-  mode: bigint;
-  size: bigint;
-  mtimeNs: bigint;
-  ctimeNs: bigint;
-  isFile(): boolean;
-  isSymbolicLink(): boolean;
-}
-
-function executableStatIdentity(value: BigintExecutableStat): readonly string[] {
-  return [
-    value.dev.toString(),
-    value.ino.toString(),
-    value.mode.toString(),
-    value.size.toString(),
-    value.mtimeNs.toString(),
-    value.ctimeNs.toString(),
-  ];
-}
-
 async function inspectClaudeCodeExecutable(
   binaryPath: string,
   literalBoundary: boolean,
 ): Promise<string> {
-  if (!isAbsolute(binaryPath)) {
-    throw new ClaudeCodeProcessError("Claude Code executable resolution was not absolute.");
+  try {
+    return await inspectNativeHarnessExecutable(binaryPath, literalBoundary);
+  } catch (error) {
+    throw new ClaudeCodeProcessError("Claude Code executable identity is invalid.", { cause: error });
   }
-  const boundary = await lstat(binaryPath, { bigint: true });
-  if (!boundary.isFile() && !boundary.isSymbolicLink()) {
-    throw new ClaudeCodeProcessError("Claude Code executable boundary is not a file or link.");
-  }
-  const targetPath = await realpathFile(binaryPath);
-  const target = await stat(targetPath, { bigint: true });
-  if (!target.isFile()) {
-    throw new ClaudeCodeProcessError("Claude Code executable target is not a regular file.");
-  }
-  await access(binaryPath, fsConstants.X_OK);
-  const identity = JSON.stringify([
-    literalBoundary,
-    binaryPath,
-    executableStatIdentity(boundary),
-    targetPath,
-    executableStatIdentity(target),
-  ]);
-  return createHash("sha256").update(identity).digest("hex");
 }
 
 /** Linux/Omarchy subset of T3's executable-resolution seam. */
@@ -637,21 +363,35 @@ export async function resolveClaudeCodeExecutable(
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
     throw new RangeError("Claude Code executable timeout must be a finite positive number.");
   }
-  const configuredBinary = binaryPath !== undefined;
-  const selectedBinary = binaryPath ?? "claude";
-  const resolved = await executableCandidate(selectedBinary, environment);
-  if (resolved) {
-    if (configuredBinary) return resolved;
-    const unwrapped = await unwrapMiseClaudeLauncher(resolved, environment, timeoutMs);
-    return await realpathFile(unwrapped);
+  try {
+    return (await resolveNativeHarnessExecutable({
+      harness: "claude-code",
+      ...(binaryPath === undefined ? {} : { explicitBinary: binaryPath }),
+      environment,
+      timeoutMs,
+    })).path;
+  } catch (error) {
+    if (error instanceof NativeHarnessIdentityError && error.reason === "unavailable") {
+      const selectedBinary = binaryPath ?? "claude";
+      throw new GhostError(
+        "claude_code_missing",
+        `Claude Code is not installed at ${JSON.stringify(selectedBinary)}. Install the official `
+          + `Claude Code CLI, then run \`claude auth login\`. Override the executable with `
+          + `${CLAUDE_CODE_BINARY_ENV} when needed.`,
+        503,
+      );
+    }
+    if (error instanceof NativeHarnessIdentityError && error.reason === "mise") {
+      throw new ClaudeCodeProcessError(
+        "Claude Code launcher delegates to mise, but Ghost could not resolve mise's underlying "
+          + "Claude executable.",
+        { cause: error },
+      );
+    }
+    throw new ClaudeCodeProcessError("Failed to resolve the Claude Code executable.", {
+      cause: error,
+    });
   }
-  throw new GhostError(
-    "claude_code_missing",
-    `Claude Code is not installed at ${JSON.stringify(selectedBinary)}. Install the official `
-      + `Claude Code CLI, then run \`claude auth login\`. Override the executable with `
-      + `${CLAUDE_CODE_BINARY_ENV} when needed.`,
-    503,
-  );
 }
 
 function authStatusFromJson(raw: string): ClaudeCodeAuthStatus {
@@ -828,7 +568,9 @@ export class ClaudeCodeProbe {
   constructor(options: ClaudeCodeProbeOptions = {}) {
     const configuredBinary = options.binaryPath ?? process.env[CLAUDE_CODE_BINARY_ENV];
     this.binaryPath = configuredBinary;
-    this.environment = captureClaudeCodeEnvironment(options.environment ?? process.env);
+    this.environment = options.environmentProfile === "native"
+      ? captureNativeHarnessEnvironment("claude-native", options.environment ?? process.env)
+      : captureClaudeCodeEnvironment(options.environment ?? process.env);
     this.ttlMs = options.ttlMs ?? CLAUDE_CODE_PROBE_TTL_MS;
     if (!Number.isFinite(this.ttlMs)
       || this.ttlMs <= 0
@@ -2005,7 +1747,7 @@ function claudeProcessExitBoundary(): ClaudeProcessExitBoundary {
       if (terminationRequested) quiesce();
       child.once("exit", () => {
         leaderExited = true;
-        if (pid !== undefined && processGroupExists(pid)) quiesce();
+        if (pid !== undefined && ownedProcessGroupExists(pid)) quiesce();
         else resolveOnce();
       });
       child.once("error", () => {
