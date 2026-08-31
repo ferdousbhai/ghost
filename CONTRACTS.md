@@ -72,7 +72,7 @@ subagents.
                                mutations; never cloned by fork
   sessions/pins.json           v2 pinned state: { "version": 2, "pinned": ["<id>", …] }
   sessions/reads.json          v2 read state: { "version": 2, "reads": { "<id>": "<ISO timestamp>" } }
-  .tasks/task-<UUID>.json      task-record/v1 daemon-owned durable delegation
+  .tasks/task-<UUID>.json      task-record/v2 daemon-owned durable delegation
   .pi/                         derived pi machine runtime; never credentials
   .pi/models.pi.json           secret-free provider/models view synced from
                                models.json
@@ -413,13 +413,13 @@ runtime), `.tasks/` (daemon-owned machine task lifecycle), `.trash/`
 `.memory-maintenance.json` (the consolidation cooldown). Export needs no
 credential exception: portable files contain references rather than values.
 
-### Delegated tasks (`task-record/v1`)
+### Delegated tasks (`task-record/v2`)
 
 The one owner may delegate an independent task from a conversation. Each task
 is one mode-0600 atomic JSON record under the ghost home's mode-0700 `.tasks/`
-directory. Its API-facing shape is `{ version: 1, id, generation, parent,
-harness, agent, task, binding, state, createdAt, updatedAt, events, eventCursor,
-result, resultTruncated, error }`. `parent` is the runtime-qualified
+directory. Its exact durable shape is `{ version: 2, id, generation, parent,
+harness, agent, task, binding, ownership, state, createdAt, updatedAt, events,
+eventCursor, result, resultTruncated, error }`. `parent` is the runtime-qualified
 conversation identity. `agent` is null except for an optional, bounded opaque
 Claude Code agent name; Ghost passes it through without interpreting it.
 The assignment and every follow-up are bounded strings containing at least one
@@ -440,13 +440,22 @@ A naked lexical cwd is never authority; the task layer
 neither discovers nor changes cwd.
 `harness` is an opaque bounded adapter id, not a place for Ghost to reproduce a
 runtime's policy.
+`ownership` is the exact `native-task-ownership/v1` receipt
+`{ version: 1, kind: "systemd-scope", nonce }`, where `nonce` is 16 random
+bytes encoded as exactly 32 lowercase hexadecimal characters. It is generated
+and durably published with the queued record before any native reservation or
+launch, never inferred from process state, and remains unchanged for the
+record's lifetime. The public task projection does not expose it.
 
 The only states are `queued`, `starting`, `running`, `cancelling`, `completed`,
-`failed`, `cancelled`, and `interrupted`. Startup recovery first stops and
-confirms the derived transient scope for each nonterminal record, then
-atomically changes that record to `interrupted`; it never resumes work
-implicitly. Unknown scope state or a user-manager/control-bus failure leaves
-the record nonterminal and fails recovery rather than fabricating quiescence.
+`failed`, `cancelled`, and `interrupted`. Startup recovery independently
+attempts to stop and confirm the receipt-bound transient scope for every
+nonterminal record. It atomically changes only each confirmed record to
+`interrupted`, attempts all rows even after a failure, then reports the
+aggregate recovery failure; it never resumes work implicitly. Unknown scope
+state or a user-manager/control-bus failure leaves only that record nonterminal
+rather than fabricating quiescence or preventing later rows from being
+quiesced.
 Events and errors use an exact nested schema, canonical timestamps, bounded
 structured codes, and owner-safe messages. Adapter exceptions are mapped to
 fixed typed failures rather than persisting raw stderr, provider protocol, or
@@ -506,10 +515,13 @@ their first catalogue or protocol await. Every durable task id derives exactly
 one collected transient user-scope name,
 `ghost-task-<durable UUID>.scope`. Before launch Ghost requires that unit to be
 not found; an existing loaded unit is a collision and is never adopted. The
-literal launch, with no shell or environment expansion, is:
+receipt binds its exact systemd Description as
+`ghost-task-receipt:v1:<task-id>:<nonce>`. The literal launch, with no shell or
+environment expansion, is:
 
 ```
 /usr/bin/systemd-run --user --scope --unit=ghost-task-<durable UUID>.scope \
+  --description=ghost-task-receipt:v1:<task-id>:<nonce> \
   --slice-inherit --collect --quiet --pipe --expand-environment=no \
   --working-directory=<exact trusted cwd> \
   --property=KillMode=control-group --property=SendSIGKILL=yes \
@@ -525,20 +537,33 @@ only bounded object frames, has a bounded queue, discards unrecognized
 protocol/tool payloads, and maps malformed, oversized, or unexpected traffic
 to a generic task failure.
 
-Cancellation first requests the harness-native interrupt, then issues literal
-`/usr/bin/systemctl --user stop --no-block <unit>` and polls the same unit until
-it is authoritatively `inactive` or `not-found`. Protocol completion, owner
+Cancellation first requests the harness-native interrupt, then strictly and
+boundedly reads exactly `LoadState`, `ActiveState`, and `Description`. Only an
+exact matching description authorizes literal
+`/usr/bin/systemctl --user stop --no-block <unit>`. A mismatch is a collision
+and no signal is sent. A missing unit is quiescent before spawn; after
+`systemd-run` is spawned, Ghost first waits for the shared launcher-settlement
+promise and performs one final missing-unit query. Task cancellation never
+kills the launcher during registration. Restart recovery uses the persisted
+receipt after the prior daemon and launcher have exited. Ghost polls the same
+receipt-bound unit until it is authoritatively `inactive` or `not-found` under
+those rules. Protocol completion, owner
 cancellation, daemon shutdown, and crash recovery become terminal only after
 that confirmation. An unknown state, timeout, or bus/control failure leaves an
 admitted active stop `cancelling` with bounded `ownership_unconfirmed`
 progress; startup recovery leaves the prior nonterminal state unchanged. Both
 can be retried and never become `completed`, `cancelled`, `failed`, or
 `interrupted` by assumption. Stop and confirmation are idempotent and recovery derives the unit
-only from the durable id. The scope contains ordinary forked, detached, and
+from the durable id plus receipt. Confirmed teardown and failed launch clear
+their in-memory reservation and launcher state; unconfirmed ownership remains
+retryable. The scope contains ordinary forked, detached, and
 `setsid` descendants and no unrelated process is signalled. It is an ownership
 boundary, not a sandbox: a trusted harness that deliberately asks systemd to
 create another unit can escape this scope and therefore violates the native
-harness contract.
+harness contract. Deliberate same-owner tampering with Ghost's reserved
+`ghost-task-*.scope` names or receipt descriptions likewise violates this
+boundary; this is lifecycle ownership, not a hostile-owner sandbox. The native
+Arch package therefore depends directly on `systemd>=254`.
 
 The Pi delegated adapter runs the freshly admitted executable in its native RPC
 mode with one-run `--approve`, the exact cwd, and the positive `pi-native`
@@ -1986,7 +2011,10 @@ daemon. Failure to discover Claude does not prevent a pi or `--no-turn` smoke.
   turn or live-voice session must finish or be stopped first
   (`409 session_busy`). Any child in `queued`, `starting`, `running`, or
   `cancelling` returns bounded `409 tasks_active` before project revocation,
-  tombstone publication, or any move; the owner may cancel or wait and retry.
+  maintenance deletion reservation, tombstone publication, or any move. The
+  exclusive parent-task gate first drains admitted task operations and performs
+  this active-child check; only a terminal/empty result may reserve and drain
+  conversation maintenance. The owner may cancel or wait and retry.
   An unknown conversation returns `404 not_found`.
   Deletion writes and fsyncs a v4 tombstone before moving the first artifact.
   Each move first creates a private same-filesystem fallback Trash root, then
@@ -2004,7 +2032,7 @@ daemon. Failure to discover Claude does not prevent a pi or `--no-turn` smoke.
   repetitions of `task-id`, NUL, the exact record-byte SHA-256, and newline.
   It does not grow with task history. Every source and destination record must
   be a mode-0600, single-link private regular file with a valid terminal
-  `task-record/v1`, unique id, and the exact runtime-qualified parent. Source
+  `task-record/v2`, unique id, and the exact runtime-qualified parent. Source
   and Trash directories must be private real directories on the same device.
   Recovery validates the combined source/Trash inventory against count and
   digest before every rename: source-only resumes, destination-only is already

@@ -29,7 +29,7 @@ afterEach(async () => {
 function record(parent = PARENT): TaskRecord {
   const at = "2026-08-31T00:00:00.000Z";
   return {
-    version: 1,
+    version: 2,
     id: TASK_ID,
     generation: 1,
     parent,
@@ -43,6 +43,11 @@ function record(parent = PARENT): TaskRecord {
       cwd: "/private/project/src",
       cwdIdentity: "secret-cwd-identity",
       generation: 4,
+    },
+    ownership: {
+      version: 1,
+      kind: "systemd-scope",
+      nonce: "11111111111111111111111111111111",
     },
     state: "running",
     createdAt: at,

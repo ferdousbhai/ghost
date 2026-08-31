@@ -14,6 +14,11 @@ function deferred<T>() {
 }
 const parent = conversationIdentity("pi", "parent");
 const binding: TaskBindingReceipt = { version: 1, root: "/project", rootIdentity: "1:2", cwd: "/project/exact", cwdIdentity: "1:3", generation: 4 };
+const ownership = {
+  version: 1,
+  kind: "systemd-scope",
+  nonce: "11111111111111111111111111111111",
+} as const;
 const authority = { async revalidate(receipt: TaskBindingReceipt) { return receipt; } };
 const stores: TaskStore[] = [];
 function trackedStore(home: string): TaskStore { const store = new TaskStore(home); stores.push(store); return store; }
@@ -46,7 +51,7 @@ async function start(controller: TaskController) {
 }
 function record(state: TaskRecord["state"]): TaskRecord {
   const at = new Date().toISOString();
-  return { version: 1, id: `task-${randomUUID()}`, generation: 1, parent, harness: "native", agent: null, task: "work", binding, state,
+  return { version: 2, id: `task-${randomUUID()}`, generation: 1, parent, harness: "native", agent: null, task: "work", binding, ownership, state,
     createdAt: at, updatedAt: at, events: [], eventCursor: { nextSequence: 1, dropped: 0 }, result: state === "completed" ? "done" : null,
     resultTruncated: false, error: state === "failed" || state === "interrupted" ? { code: "failed", message: "Safe failure." } : null };
 }
@@ -59,7 +64,15 @@ describe("durable task foundation", () => {
     await expect(start(controller)).rejects.toMatchObject({ code: "tasks_uninitialized" }); await controller.initialize();
     const task = await controller.start({ parent, harness: "claude-code", agent: "owner-agent", task: "inspect", binding }); await eventually(store, task.id, "running");
     expect(received).toMatchObject({ cwd: "/project/exact", binding, agent: "owner-agent" });
-    expect((await store.read(task.id)).agent).toBe("owner-agent");
+    expect(await store.read(task.id)).toMatchObject({
+      version: 2,
+      agent: "owner-agent",
+      ownership: {
+        version: 1,
+        kind: "systemd-scope",
+        nonce: expect.stringMatching(/^[0-9a-f]{32}$/u),
+      },
+    });
     expect(await readFile(new URL("../src/tasks.ts", import.meta.url), "utf8")).not.toMatch(/node:child_process|\bgit\b/iu);
   });
 
@@ -431,6 +444,35 @@ describe("durable task foundation", () => {
     expect([...ownership.stops].sort()).toEqual(rows.slice(0, 4).map((row) => row.id).sort());
   });
 
+  it("attempts every recovery independently and interrupts only confirmed scopes", async () => {
+    const home = await mkdtemp(join(tmpdir(), "ghost-task-"));
+    const store = trackedStore(home);
+    await store.initialize();
+    const rows = [record("running"), record("starting"), record("cancelling")];
+    for (const row of rows) await store.write(row);
+    const ownership = fakeTaskScopeManager();
+    ownership.unconfirmed.add(rows[1]!.id);
+
+    const controller = new TaskController(store, new Map(), authority, ownership);
+    await expect(controller.initialize()).rejects.toMatchObject({
+      code: "task_recovery_failed",
+    });
+
+    expect([...ownership.stops].sort()).toEqual(rows.map((row) => row.id).sort());
+    expect(await store.read(rows[0]!.id)).toMatchObject({
+      state: "interrupted",
+      generation: 2,
+    });
+    expect(await store.read(rows[1]!.id)).toMatchObject({
+      state: "starting",
+      generation: 1,
+    });
+    expect(await store.read(rows[2]!.id)).toMatchObject({
+      state: "interrupted",
+      generation: 2,
+    });
+  });
+
   it("retries scope confirmation after a crash window before recovery publication", async () => {
     const home = await mkdtemp(join(tmpdir(), "ghost-task-"));
     let failInterruptedWrite = false;
@@ -531,5 +573,17 @@ describe("durable task foundation", () => {
     await writeFile(path, JSON.stringify(reversed), { mode: 0o600 }); await expect(store.read(row.id)).rejects.toMatchObject({ code: "invalid_task_record" });
     await writeFile(path, JSON.stringify({ ...row, task: " \n\t " }), { mode: 0o600 }); await expect(store.read(row.id)).rejects.toMatchObject({ code: "invalid_task_record" });
     await writeFile(path, JSON.stringify({ ...row, agent: "claude-only" }), { mode: 0o600 }); await expect(store.read(row.id)).rejects.toMatchObject({ code: "invalid_task_record" });
+    for (const invalidOwnership of [
+      undefined,
+      { ...row.ownership, nonce: "A".repeat(32) },
+      { ...row.ownership, nonce: "0".repeat(31) },
+      { ...row.ownership, extra: true },
+    ]) {
+      const malformed = { ...row, ownership: invalidOwnership };
+      await writeFile(path, JSON.stringify(malformed), { mode: 0o600 });
+      await expect(store.read(row.id)).rejects.toMatchObject({
+        code: "invalid_task_record",
+      });
+    }
   });
 });

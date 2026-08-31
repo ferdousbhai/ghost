@@ -14,7 +14,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { conversationIdentity } from "../src/conversation-identity.js";
 import { ghostPaths } from "../src/ghosts.js";
 import { ProjectBindingStore } from "../src/project-binding.js";
-import { SessionHost, sessionFileNameFor } from "../src/session-host.js";
+import {
+  SessionHost,
+  sessionFileNameFor,
+  type SessionHostOptions,
+} from "../src/session-host.js";
 import {
   TaskStore,
   type TaskAdapter,
@@ -37,7 +41,10 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-function setup(options: { projectBindings?: ProjectBindingStore } = {}): {
+function setup(options: {
+  projectBindings?: ProjectBindingStore;
+  maintenance?: SessionHostOptions["maintenance"];
+} = {}): {
   home: string;
   ownerHome: string;
 } {
@@ -53,6 +60,27 @@ function setup(options: { projectBindings?: ProjectBindingStore } = {}): {
   return { home, ownerHome: temp.ownerHome };
 }
 
+function taskMaintenance(
+  reserveConversationDelete: NonNullable<SessionHostOptions["maintenance"]>["reserveConversationDelete"],
+): NonNullable<SessionHostOptions["maintenance"]> {
+  const idleReservation = () => ({ drained: Promise.resolve(), release() {} });
+  return {
+    admitOwnerAction: () => ({
+      ready: Promise.resolve(),
+      async finish() {},
+      release() {},
+    }),
+    async recordOwnerActivity() {},
+    reserveConversationDelete,
+    completeConversationDelete() {},
+    reserveGhostMove: idleReservation,
+    async completeGhostRename() {},
+    completeGhostDelete() {},
+    async beginShutdown() {},
+    async disposeAll() {},
+  };
+}
+
 async function waitFor<T>(read: () => Promise<T>, accept: (value: T) => boolean): Promise<T> {
   const deadline = Date.now() + 3_000;
   for (;;) {
@@ -66,7 +94,7 @@ async function waitFor<T>(read: () => Promise<T>, accept: (value: T) => boolean)
 function recoveredRecord(home: string): TaskRecord {
   const at = "2026-08-30T00:00:00.000Z";
   return {
-    version: 1,
+    version: 2,
     id: "task-11111111-1111-4111-8111-111111111111",
     generation: 2,
     parent: conversationIdentity("pi", "recovered"),
@@ -80,6 +108,11 @@ function recoveredRecord(home: string): TaskRecord {
       cwd: home,
       cwdIdentity: "1:1",
       generation: 1,
+    },
+    ownership: {
+      version: 1,
+      kind: "systemd-scope",
+      nonce: "11111111111111111111111111111111",
     },
     state: "running",
     createdAt: at,
@@ -213,7 +246,13 @@ describe("SessionHost delegated task composition", () => {
   });
 
   it("refuses every active task state before publishing deletion state", async () => {
-    const { home } = setup();
+    const reserveConversationDelete = vi.fn(() => ({
+      drained: Promise.resolve(),
+      release() {},
+    }));
+    const { home } = setup({
+      maintenance: taskMaintenance(reserveConversationDelete),
+    });
     await attachTasks();
     for (const state of ["queued", "starting", "running", "cancelling"] as const) {
       const conversationId = `active-${state}`;
@@ -229,6 +268,39 @@ describe("SessionHost delegated task composition", () => {
       expect(readdirSync(ghostPaths(home).sessionDir).some((name) =>
         name.includes(`ghost-delete-${conversationId}`))).toBe(false);
     }
+    expect(reserveConversationDelete).not.toHaveBeenCalled();
+  });
+
+  it("reserves and drains maintenance only after terminal task inspection", async () => {
+    const drained = Promise.withResolvers<void>();
+    const reserveConversationDelete = vi.fn(() => ({
+      drained: drained.promise,
+      release: vi.fn(),
+    }));
+    const { home } = setup({
+      maintenance: taskMaintenance(reserveConversationDelete),
+    });
+    await attachTasks();
+    const conversationId = "terminal-maintenance-drain";
+    const parent = conversationIdentity("pi", conversationId);
+    const transcript = writeConversation(home, conversationId);
+    await writeTask(home, taskRecord(home, parent, "completed"));
+
+    let settled = false;
+    const deletion = host!.deleteSession("casper", conversationId, "pi")
+      .then((result) => {
+        settled = true;
+        return result;
+      });
+    await vi.waitFor(() => expect(reserveConversationDelete).toHaveBeenCalledOnce());
+    expect(settled).toBe(false);
+    expect(existsSync(transcript)).toBe(true);
+    drained.resolve();
+    await expect(deletion).resolves.toMatchObject({
+      artifacts: expect.arrayContaining([
+        expect.objectContaining({ artifact: "delegated-tasks", count: 1 }),
+      ]),
+    });
   });
 
   it("moves terminal task history as one bounded qualified-parent bundle", async () => {

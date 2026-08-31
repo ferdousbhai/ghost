@@ -146,11 +146,15 @@ export {
 } from "./native-task-jsonl.js";
 export {
   captureNativeTaskControlEnvironment,
+  createNativeTaskOwnershipReceipt,
+  isNativeTaskOwnershipReceipt,
+  nativeTaskScopeDescription,
   nativeTaskScopeUnit,
   NativeTaskOwnershipError,
   SystemdNativeTaskScopeManager,
   type NativeTaskControlResult,
   type NativeTaskControlRunner,
+  type NativeTaskOwnershipReceipt,
   type NativeTaskScope,
   type NativeTaskScopeLaunch,
   type NativeTaskScopeManager,

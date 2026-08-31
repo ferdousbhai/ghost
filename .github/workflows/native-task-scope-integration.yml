@@ -1,0 +1,95 @@
+name: Native task systemd integration
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  systemd-scope:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.14
+
+      - name: Install and build the tested tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack prepare pnpm@10.12.2 --activate
+          pnpm install --frozen-lockfile
+          pnpm --filter @ghost/extensions build
+
+      - name: Start a dedicated ephemeral user manager
+        id: manager
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(cat /proc/1/comm)" == systemd ]]
+          systemd_version="$(systemctl --version | sed -n '1s/^systemd \([0-9][0-9]*\).*/\1/p')"
+          [[ "$systemd_version" =~ ^[0-9]+$ && "$systemd_version" -ge 254 ]]
+          test_user=ghost-scope-ci
+          test_uid=23456
+          printf 'test_user=%s\n' "$test_user" >> "$GITHUB_OUTPUT"
+          printf 'test_uid=%s\n' "$test_uid" >> "$GITHUB_OUTPUT"
+          printf 'owner_uid=%s\n' "$(id -u)" >> "$GITHUB_OUTPUT"
+          printf 'bun=%s\n' "$(command -v bun)" >> "$GITHUB_OUTPUT"
+          ! getent passwd "$test_user" >/dev/null
+          ! getent passwd "$test_uid" >/dev/null
+          sudo useradd --uid "$test_uid" --create-home --shell /usr/sbin/nologin "$test_user"
+          sudo install -d -m700 -o "$test_uid" -g "$test_uid" "/home/$test_user/tmp"
+          sudo loginctl enable-linger "$test_user"
+          sudo systemctl start "user@$test_uid.service"
+          for _ in $(seq 1 200); do
+            [[ -S "/run/user/$test_uid/bus" ]] && break
+            sleep 0.05
+          done
+          [[ -S "/run/user/$test_uid/bus" ]]
+          [[ "$(stat -c %u "/run/user/$test_uid")" == "$test_uid" ]]
+
+      - name: Exercise real receipt-bound scopes
+        shell: bash
+        env:
+          TEST_USER: ${{ steps.manager.outputs.test_user }}
+          TEST_UID: ${{ steps.manager.outputs.test_uid }}
+          OWNER_UID: ${{ steps.manager.outputs.owner_uid }}
+          BUN_BIN: ${{ steps.manager.outputs.bun }}
+        run: |
+          set -euo pipefail
+          [[ "$TEST_USER" == ghost-scope-ci && "$TEST_UID" == 23456 ]]
+          exec sudo /usr/sbin/runuser -u "$TEST_USER" -- /usr/bin/env -i \
+            HOME="/home/$TEST_USER" \
+            PATH=/usr/bin:/bin \
+            TMPDIR="/home/$TEST_USER/tmp" \
+            XDG_RUNTIME_DIR="/run/user/$TEST_UID" \
+            DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$TEST_UID/bus" \
+            CI=true \
+            GITHUB_ACTIONS=true \
+            GHOST_NATIVE_TASK_SCOPE_INTEGRATION=1 \
+            GHOST_NATIVE_TASK_SCOPE_INTEGRATION_UID="$TEST_UID" \
+            GHOST_NATIVE_TASK_SCOPE_OWNER_UID="$OWNER_UID" \
+            "$BUN_BIN" --bun \
+              packages/daemon/test/native-task-scope.real-integration.ts
+
+      - name: Remove the dedicated user manager
+        if: always() && steps.manager.outputs.test_user != ''
+        shell: bash
+        env:
+          TEST_USER: ${{ steps.manager.outputs.test_user }}
+          TEST_UID: ${{ steps.manager.outputs.test_uid }}
+        run: |
+          set -euo pipefail
+          [[ "$TEST_USER" == ghost-scope-ci && "$TEST_UID" == 23456 ]]
+          if getent passwd "$TEST_USER" >/dev/null; then
+            sudo systemctl stop "user@$TEST_UID.service" || true
+            sudo loginctl disable-linger "$TEST_USER" || true
+            sudo userdel --remove "$TEST_USER"
+          fi

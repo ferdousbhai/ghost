@@ -7014,12 +7014,11 @@ describe("session listing", () => {
     const tombstone = join(sessionDir, `.ghost-delete-${stem}.pi.pending.json`);
 
     const deleting = host!.deleteSession("casper", id, "pi");
-    expect(reservedIdentity).toEqual({
+    await vi.waitFor(() => expect(reservedIdentity).toEqual({
       ghostName: "casper",
       runtime: "pi",
       conversationId: id,
-    });
-    await Promise.resolve();
+    }));
     expect(existsSync(tombstone)).toBe(false);
     expect(released).toBeUndefined();
     deleteDrain.resolve();

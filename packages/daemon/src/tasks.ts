@@ -6,13 +6,16 @@ import type { ConversationIdentity } from "./conversation-identity.js";
 import { parseConversationIdentity } from "./conversation-identity.js";
 import { GhostError } from "./ghosts.js";
 import {
+  createNativeTaskOwnershipReceipt,
+  isNativeTaskOwnershipReceipt,
   NativeTaskOwnershipError,
   type NativeTaskScope,
   type NativeTaskScopeManager,
+  type NativeTaskOwnershipReceipt,
 } from "./native-task-scope.js";
 import { readPrivateFile, readPrivateFilePinned, recoverPrivateJsonAtomicCas, writePrivateJsonAtomicCas, type PrivateFileIdentity } from "./private-file.js";
 
-export const TASK_RECORD_VERSION = 1;
+export const TASK_RECORD_VERSION = 2;
 export const TASK_BINDING_VERSION = 1;
 export const TASKS_DIRNAME = ".tasks";
 export const MAX_TASK_TEXT = 32_768;
@@ -34,7 +37,7 @@ export interface TaskBindingReceipt {
 export interface TaskEvent { sequence: number; at: string; code: string; message: string }
 export interface TaskFailure { code: string; message: string }
 export interface TaskRecord {
-  version: 1;
+  version: 2;
   id: string;
   generation: number;
   parent: ConversationIdentity;
@@ -42,6 +45,7 @@ export interface TaskRecord {
   agent: string | null;
   task: string;
   binding: TaskBindingReceipt;
+  ownership: NativeTaskOwnershipReceipt;
   state: TaskState;
   createdAt: string;
   updatedAt: string;
@@ -107,6 +111,19 @@ function bindingCopy(value: TaskBindingReceipt): Readonly<TaskBindingReceipt> {
     generation: value.generation,
   });
 }
+function ownershipCopy(
+  value: NativeTaskOwnershipReceipt,
+): Readonly<NativeTaskOwnershipReceipt> {
+  return Object.freeze({ version: value.version, kind: value.kind, nonce: value.nonce });
+}
+function sameOwnership(
+  left: NativeTaskOwnershipReceipt,
+  right: NativeTaskOwnershipReceipt,
+): boolean {
+  return left.version === right.version
+    && left.kind === right.kind
+    && left.nonce === right.nonce;
+}
 function highWaterTimestamp(record: Pick<TaskRecord, "createdAt" | "updatedAt" | "events">, proposed: string): string {
   const latestEvent = record.events.at(-1)?.at ?? record.createdAt;
   return new Date(Math.max(Date.parse(record.createdAt), Date.parse(record.updatedAt), Date.parse(latestEvent), Date.parse(proposed))).toISOString();
@@ -150,15 +167,17 @@ function sameParent(left: ConversationIdentity, right: ConversationIdentity): bo
 function parseRecord(value: unknown): TaskRecord {
   if (!value || typeof value !== "object" || Array.isArray(value)) fail("invalid_task_record", "The task record is invalid.");
   const row = value as Record<string, unknown>;
-  const keys = ["version", "id", "generation", "parent", "harness", "agent", "task", "binding", "state", "createdAt", "updatedAt", "events", "eventCursor", "result", "resultTruncated", "error"];
-  if (!exactKeys(row, keys) || row.version !== 1 || typeof row.id !== "string" || !ID.test(row.id)
+  const keys = ["version", "id", "generation", "parent", "harness", "agent", "task", "binding", "ownership", "state", "createdAt", "updatedAt", "events", "eventCursor", "result", "resultTruncated", "error"];
+  if (!exactKeys(row, keys) || row.version !== TASK_RECORD_VERSION
+    || typeof row.id !== "string" || !ID.test(row.id)
     || !Number.isSafeInteger(row.generation) || Number(row.generation) < 1 || Number(row.generation) > MAX_COUNTER || !validParent(row.parent)
     || typeof row.harness !== "string" || !HARNESS.test(row.harness)
     || !(row.agent === null || (typeof row.agent === "string" && row.agent.length > 0
       && row.agent.length <= MAX_TASK_AGENT && Buffer.byteLength(row.agent, "utf8") <= MAX_TASK_AGENT * 4))
     || (row.agent !== null && row.harness !== "claude-code")
     || typeof row.task !== "string" || row.task.trim() === "" || row.task.length > MAX_TASK_TEXT
-    || !validBinding(row.binding) || typeof row.state !== "string" || !STATES.has(row.state as TaskState)
+    || !validBinding(row.binding) || !isNativeTaskOwnershipReceipt(row.ownership)
+    || typeof row.state !== "string" || !STATES.has(row.state as TaskState)
     || !canonicalTimestamp(row.createdAt) || !canonicalTimestamp(row.updatedAt)
     || !Array.isArray(row.events) || row.events.length > MAX_TASK_EVENTS
     || typeof row.resultTruncated !== "boolean" || !(row.result === null || (typeof row.result === "string" && row.result.length <= MAX_TASK_RESULT))) fail("invalid_task_record", "The task record is invalid.");
@@ -296,13 +315,32 @@ export class TaskStore {
   }
   async recover(
     at: string,
-    quiesce: (taskId: string) => Promise<void>,
+    quiesce: (
+      taskId: string,
+      receipt: NativeTaskOwnershipReceipt,
+    ) => Promise<void>,
   ): Promise<TaskRecord[]> {
     const records = await this.list();
-    for (const record of records) if (!TERMINAL.has(record.state)) {
-      await quiesce(record.id);
-      record.generation += 1; record.state = "interrupted"; record.updatedAt = highWaterTimestamp(record, at); record.result = null; record.resultTruncated = false;
-      record.error = { code: "daemon_restarted", message: "The daemon restarted before the task became quiescent." }; await this.write(record);
+    const outcomes = await Promise.allSettled(records.map(async (record) => {
+      if (TERMINAL.has(record.state)) return;
+      await quiesce(record.id, ownershipCopy(record.ownership));
+      record.generation += 1;
+      record.state = "interrupted";
+      record.updatedAt = highWaterTimestamp(record, at);
+      record.result = null;
+      record.resultTruncated = false;
+      record.error = {
+        code: "daemon_restarted",
+        message: "The daemon restarted before the task became quiescent.",
+      };
+      await this.write(record);
+    }));
+    if (outcomes.some((outcome) => outcome.status === "rejected")) {
+      fail(
+        "task_recovery_failed",
+        "One or more native tasks could not be recovered safely.",
+        500,
+      );
     }
     return records;
   }
@@ -326,6 +364,7 @@ interface LiveTask {
   abort: AbortController;
   control: TaskAdapterControl;
   handle: Promise<TaskAdapterHandle>;
+  ownership: NativeTaskOwnershipReceipt;
 }
 interface TrackedLaunch {
   generation: number;
@@ -333,6 +372,7 @@ interface TrackedLaunch {
   abort: AbortController;
   persisted: Promise<void>;
   promise: Promise<void>;
+  ownership: NativeTaskOwnershipReceipt;
 }
 
 export class TaskController {
@@ -359,7 +399,7 @@ export class TaskController {
       await this.store.initialize();
       const rows = await this.store.recover(
         this.now().toISOString(),
-        (taskId) => this.ownership.recoverAndConfirm(taskId),
+        (taskId, receipt) => this.ownership.recoverAndConfirm(taskId, receipt),
       );
       this.#initialized = true;
       return rows;
@@ -398,8 +438,9 @@ export class TaskController {
     if (!this.adapters.has(input.harness)) fail("task_harness_unavailable", "That task harness is unavailable.", 409);
     const at = this.now().toISOString(); const id = `task-${randomUUID()}`;
     const expectedBinding = bindingCopy(input.binding);
-    const record: TaskRecord = { version: 1, id, generation: 1, parent: { ...input.parent }, harness: input.harness, agent: input.agent ?? null,
-      task: safeText(input.task, MAX_TASK_TEXT).text, binding: expectedBinding, state: "queued", createdAt: at, updatedAt: at,
+    const ownership = createNativeTaskOwnershipReceipt();
+    const record: TaskRecord = { version: TASK_RECORD_VERSION, id, generation: 1, parent: { ...input.parent }, harness: input.harness, agent: input.agent ?? null,
+      task: safeText(input.task, MAX_TASK_TEXT).text, binding: expectedBinding, ownership, state: "queued", createdAt: at, updatedAt: at,
       events: [], eventCursor: { nextSequence: 1, dropped: 0 }, result: null, resultTruncated: false, error: null };
     const abort = new AbortController();
     const persisted = this.store.write(record);
@@ -409,11 +450,14 @@ export class TaskController {
       abort,
       persisted,
       promise: Promise.resolve(),
+      ownership,
     };
     tracked.promise = (async () => {
       await persisted;
       if (this.#shuttingDown) abort.abort();
-      if (!abort.signal.aborted) await this.#launch(id, record.generation, abort);
+      if (!abort.signal.aborted) {
+        await this.#launch(id, record.generation, ownership, abort);
+      }
     })().finally(() => {
       if (this.#launches.get(id) === tracked) this.#launches.delete(id);
     });
@@ -423,7 +467,12 @@ export class TaskController {
     if (abort.signal.aborted) fail("tasks_shutting_down", "Task admission was interrupted by shutdown.", 503);
     return record;
   }
-  async #launch(id: string, generation: number, abort: AbortController): Promise<void> {
+  async #launch(
+    id: string,
+    generation: number,
+    ownership: NativeTaskOwnershipReceipt,
+    abort: AbortController,
+  ): Promise<void> {
     let scopeReserved = false;
     try {
       const record = await this.#actor(id, () => this.#update(id, (row) => {
@@ -431,13 +480,22 @@ export class TaskController {
         row.state = "starting"; return true;
       }));
       if (record.generation !== generation || record.state !== "starting") return;
+      if (!sameOwnership(record.ownership, ownership)) {
+        throw new NativeTaskOwnershipError(
+          "Native task ownership receipt changed.",
+          "collision",
+        );
+      }
       const expected = bindingCopy(record.binding);
       const authorityInput = bindingCopy(expected);
       const authorityResult = await abortable(this.authority.revalidate(authorityInput, abort.signal, { ...record.parent }), abort.signal);
       if (!validBinding(authorityResult)) throw new Error("binding changed");
       const binding = bindingCopy(authorityResult);
       if (!sameBinding(binding, expected)) throw new Error("binding changed");
-      const scope = await abortable(this.ownership.reserve(id, abort.signal), abort.signal);
+      const scope = await abortable(
+        this.ownership.reserve(id, ownershipCopy(ownership), abort.signal),
+        abort.signal,
+      );
       scopeReserved = true;
       let live: LiveTask | undefined;
       const running = await this.#actor(id, async () => {
@@ -459,7 +517,14 @@ export class TaskController {
         void handle.catch(() => {});
         void handle.then((native) => native.result.catch(() => {}), () => {});
         if (!control || typeof control.force !== "function" || !(control.quiescence instanceof Promise)) { abort.abort(); void handle.catch(() => {}); throw new Error("missing control registration"); }
-        live = { generation, parent: { ...current.parent }, abort, control, handle };
+        live = {
+          generation,
+          parent: { ...current.parent },
+          abort,
+          control,
+          handle,
+          ownership,
+        };
         this.#live.set(id, live);
         return this.#update(id, (row) => {
           if (row.generation !== generation || row.state !== "starting") return false;
@@ -467,13 +532,13 @@ export class TaskController {
         });
       });
       if (!live || running.state !== "running") {
-        await this.ownership.stopAndConfirm(id);
+        await this.ownership.stopAndConfirm(id, ownership);
         return;
       }
       const native = await abortable(live.handle, abort.signal);
       const result = await abortable(native.result, abort.signal);
       await abortable(live.control.quiescence, abort.signal);
-      await this.ownership.stopAndConfirm(id);
+      await this.ownership.stopAndConfirm(id, ownership);
       await this.#actor(id, () => this.#update(id, (row) => {
         if (row.generation !== generation || TERMINAL.has(row.state)) return false;
         if (row.state === "cancelling") { row.state = "cancelled"; return true; }
@@ -503,7 +568,7 @@ export class TaskController {
         }
       } else if (scopeReserved) {
         try {
-          await this.ownership.stopAndConfirm(id);
+          await this.ownership.stopAndConfirm(id, ownership);
         } catch {
           await this.#actor(id, () => this.#update(id, (row) => {
             if (row.generation !== generation || TERMINAL.has(row.state)) return false;
@@ -601,28 +666,32 @@ export class TaskController {
       if (parent && !sameParent(active.parent, parent)) {
         fail("task_not_found", "Task not found.", 404);
       }
-      return this.#sharedStop(id, "cancelled");
+      return this.#sharedStop(id, active.ownership, "cancelled");
     }
     const current = await this.store.read(id);
     if (parent && !sameParent(current.parent, parent)) {
       fail("task_not_found", "Task not found.", 404);
     }
     if (TERMINAL.has(current.state)) return current;
-    return this.#sharedStop(id, "cancelled");
+    return this.#sharedStop(id, current.ownership, "cancelled");
   }
-  #sharedStop(id: string, final: "cancelled" | "interrupted"): Promise<TaskRecord> {
+  #sharedStop(
+    id: string,
+    ownership: NativeTaskOwnershipReceipt,
+    final: "cancelled" | "interrupted",
+  ): Promise<TaskRecord> {
     if (final === "interrupted" || !this.#stopTargets.has(id)) this.#stopTargets.set(id, final);
     const launch = this.#launches.get(id); launch?.abort.abort();
     const existing = this.#stops.get(id); if (existing) return existing;
     const live = this.#live.get(id);
     const nativeCleanup = live ? this.#cleanup(live) : undefined;
-    const ownershipCleanup = this.ownership.stopAndConfirm(id);
+    const ownershipCleanup = this.ownership.stopAndConfirm(id, ownershipCopy(ownership));
     const cleanup = Promise.all([
       ...(nativeCleanup ? [nativeCleanup.catch(() => undefined)] : []),
       ownershipCleanup,
     ]).then(() => undefined);
     void cleanup.catch(() => undefined);
-    const stop = this.#stop(id, cleanup).catch((error: unknown) => {
+    const stop = this.#stop(id, ownership, cleanup).catch((error: unknown) => {
       if (error instanceof GhostError) throw error;
       throw new GhostError("task_storage_failed", "Task state could not be settled after native quiescence.", 500);
     });
@@ -632,7 +701,11 @@ export class TaskController {
     }).catch(() => {});
     return stop;
   }
-  async #stop(id: string, cleanup: Promise<void>): Promise<TaskRecord> {
+  async #stop(
+    id: string,
+    ownership: NativeTaskOwnershipReceipt,
+    cleanup: Promise<void>,
+  ): Promise<TaskRecord> {
     const admittedLaunch = this.#launches.get(id);
     let prepared: {
       row: TaskRecord;
@@ -645,6 +718,9 @@ export class TaskController {
       await admittedLaunch?.persisted;
       prepared = await this.#actor(id, async () => {
         const row = await this.store.read(id);
+        if (!sameOwnership(row.ownership, ownership)) {
+          fail("task_storage_failed", "Task ownership changed unexpectedly.", 500);
+        }
         const launch = this.#launches.get(id); const live = this.#live.get(id); const followUp = this.#followUps.get(id);
         const destination = this.#stopTargets.get(id) ?? "cancelled";
         if (TERMINAL.has(row.state) && destination === "cancelled" && !launch && !live) {
@@ -702,10 +778,10 @@ export class TaskController {
     this.#ready(); this.#shuttingDown = true;
     const admitted = [...this.#launches.entries()];
     const live = [...this.#live.entries()];
-    const activeStops = [...this.#stops.keys()];
+    const activeStops = [...this.#stops.entries()];
     for (const [, launch] of admitted) launch.abort.abort();
     const cleanups = live.map(([, task]) => this.#cleanup(task));
-    for (const id of activeStops) this.#stopTargets.set(id, "interrupted");
+    for (const [id] of activeStops) this.#stopTargets.set(id, "interrupted");
     const failures: unknown[] = [];
     const collect = (results: PromiseSettledResult<unknown>[]) => {
       for (const result of results) if (result.status === "rejected") failures.push(result.reason);
@@ -717,18 +793,26 @@ export class TaskController {
     ]));
     let rows: TaskRecord[] = [];
     try { rows = await this.store.list(); } catch (error) { failures.push(error); }
-    const ids = new Set(rows.filter((row) => !TERMINAL.has(row.state)).map((row) => row.id));
-    for (const [id] of admitted) ids.add(id);
-    for (const [id] of live) ids.add(id);
-    for (const id of activeStops) ids.add(id);
-    collect(await Promise.allSettled([...ids].map((id) => this.#sharedStop(id, "interrupted"))));
+    const ownershipById = new Map(
+      rows.filter((row) => !TERMINAL.has(row.state))
+        .map((row) => [row.id, row.ownership] as const),
+    );
+    for (const [id, launch] of admitted) ownershipById.set(id, launch.ownership);
+    for (const [id, task] of live) ownershipById.set(id, task.ownership);
+    collect(await Promise.allSettled([...ownershipById].map(([id, ownership]) =>
+      this.#sharedStop(id, ownership, "interrupted"))));
+    collect(await Promise.allSettled(activeStops.map(([, stop]) => stop)));
     collect(await Promise.allSettled([...this.#launches.values()].map((launch) => launch.promise)));
     collect(await Promise.allSettled([...this.#followUps.values()]));
     if (failures.length > 0) throw new GhostError("task_shutdown_failed", "Task shutdown finished with durable-state failures.", 500);
   }
   async forceAll(): Promise<void> {
-    this.#ready(); const ids = new Set([...this.#live.keys(), ...this.#launches.keys()]);
-    await Promise.all([...ids].map((id) => this.#sharedStop(id, "interrupted")));
+    this.#ready();
+    const ownershipById = new Map<string, NativeTaskOwnershipReceipt>();
+    for (const [id, task] of this.#live) ownershipById.set(id, task.ownership);
+    for (const [id, launch] of this.#launches) ownershipById.set(id, launch.ownership);
+    await Promise.all([...ownershipById].map(([id, ownership]) =>
+      this.#sharedStop(id, ownership, "interrupted")));
   }
   async dispose(): Promise<void> {
     await this.beginShutdown(); await this.forceAll(); await this.store.dispose(); this.#initialized = false; this.#initialization = undefined;

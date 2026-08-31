@@ -26,7 +26,7 @@ const binding: TaskBindingReceipt = {
 function record(overrides: Partial<TaskRecord> = {}): TaskRecord {
   const at = "2026-08-31T12:00:00.000Z";
   return {
-    version: 1,
+    version: 2,
     id: "task-11111111-1111-4111-8111-111111111111",
     generation: 1,
     parent,
@@ -34,6 +34,11 @@ function record(overrides: Partial<TaskRecord> = {}): TaskRecord {
     agent: null,
     task: "Implement the parser without exposing PRIVATE_ASSIGNMENT_TAIL.",
     binding,
+    ownership: {
+      version: 1,
+      kind: "systemd-scope",
+      nonce: "11111111111111111111111111111111",
+    },
     state: "running",
     createdAt: at,
     updatedAt: at,

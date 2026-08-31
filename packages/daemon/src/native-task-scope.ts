@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { randomBytes } from "node:crypto";
 
 const TASK_ID = /^task-([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/u;
 const CONTROL_ENV_NAMES = ["DBUS_SESSION_BUS_ADDRESS", "XDG_RUNTIME_DIR"] as const;
@@ -9,6 +10,17 @@ const MAX_ENVIRONMENT_BYTES = 256 * 1024;
 const MAX_CONTROL_OUTPUT_BYTES = 4 * 1024;
 const CONTROL_TIMEOUT_MS = 2_000;
 const CONFIRM_TIMEOUT_MS = 3_000;
+const RECEIPT_NONCE = /^[0-9a-f]{32}$/u;
+const ACTIVE_STATES = new Set([
+  "active",
+  "activating",
+  "deactivating",
+  "failed",
+  "inactive",
+  "maintenance",
+  "refreshing",
+  "reloading",
+]);
 
 type SpawnChild = typeof spawn;
 
@@ -21,6 +33,12 @@ export interface NativeTaskScopeLaunch {
   stderr?: "pipe" | "ignore";
 }
 
+export interface NativeTaskOwnershipReceipt {
+  version: 1;
+  kind: "systemd-scope";
+  nonce: string;
+}
+
 export interface NativeTaskScope {
   readonly unit: string;
   spawn(input: NativeTaskScopeLaunch): ChildProcess;
@@ -28,9 +46,13 @@ export interface NativeTaskScope {
 }
 
 export interface NativeTaskScopeManager {
-  reserve(taskId: string, signal: AbortSignal): Promise<NativeTaskScope>;
-  stopAndConfirm(taskId: string): Promise<void>;
-  recoverAndConfirm(taskId: string): Promise<void>;
+  reserve(
+    taskId: string,
+    receipt: NativeTaskOwnershipReceipt,
+    signal: AbortSignal,
+  ): Promise<NativeTaskScope>;
+  stopAndConfirm(taskId: string, receipt: NativeTaskOwnershipReceipt): Promise<void>;
+  recoverAndConfirm(taskId: string, receipt: NativeTaskOwnershipReceipt): Promise<void>;
 }
 
 export interface NativeTaskControlResult {
@@ -62,6 +84,37 @@ export function nativeTaskScopeUnit(taskId: string): string {
   const match = TASK_ID.exec(taskId);
   if (!match) throw new NativeTaskOwnershipError("Native task identity is invalid.", "invalid");
   return `ghost-task-${match[1]}.scope`;
+}
+
+export function createNativeTaskOwnershipReceipt(): NativeTaskOwnershipReceipt {
+  return Object.freeze({
+    version: 1,
+    kind: "systemd-scope",
+    nonce: randomBytes(16).toString("hex"),
+  });
+}
+
+export function isNativeTaskOwnershipReceipt(
+  value: unknown,
+): value is NativeTaskOwnershipReceipt {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const row = value as Record<string, unknown>;
+  return Object.keys(row).sort().join("\0") === "kind\0nonce\0version"
+    && row.version === 1
+    && row.kind === "systemd-scope"
+    && typeof row.nonce === "string"
+    && RECEIPT_NONCE.test(row.nonce);
+}
+
+export function nativeTaskScopeDescription(
+  taskId: string,
+  receipt: NativeTaskOwnershipReceipt,
+): string {
+  nativeTaskScopeUnit(taskId);
+  if (!isNativeTaskOwnershipReceipt(receipt)) {
+    throw new NativeTaskOwnershipError("Native task ownership receipt is invalid.", "invalid");
+  }
+  return `ghost-task-receipt:v1:${taskId}:${receipt.nonce}`;
 }
 
 /** Capture only the two owner-session bus selectors required by systemctl. */
@@ -143,35 +196,73 @@ function runSystemctl(
   });
 }
 
-type ScopeStatus = "absent" | "inactive" | "active";
+type ScopeStatus = Readonly<{
+  loadState: "not-found";
+  activeState: "inactive";
+  description: "";
+}> | Readonly<{
+  loadState: "loaded";
+  activeState: string;
+  description: string;
+}>;
 
 function parseScopeStatus(result: NativeTaskControlResult): ScopeStatus {
+  if (Buffer.byteLength(result.stdout, "utf8") > MAX_CONTROL_OUTPUT_BYTES
+    || result.stdout.includes("\0") || result.stdout.includes("\r")) {
+    throw new NativeTaskOwnershipError();
+  }
   const properties = new Map<string, string>();
-  for (const line of result.stdout.trim().split("\n")) {
+  const lines = result.stdout.endsWith("\n")
+    ? result.stdout.slice(0, -1).split("\n")
+    : result.stdout.split("\n");
+  for (const line of lines) {
     const separator = line.indexOf("=");
     if (separator < 1) throw new NativeTaskOwnershipError();
     const key = line.slice(0, separator);
     if (properties.has(key)) throw new NativeTaskOwnershipError();
     properties.set(key, line.slice(separator + 1));
   }
-  if (properties.size !== 2
+  if (properties.size !== 3
     || !properties.has("LoadState")
-    || !properties.has("ActiveState")) {
+    || !properties.has("ActiveState")
+    || !properties.has("Description")) {
     throw new NativeTaskOwnershipError();
   }
-  if (properties.get("LoadState") === "not-found") return "absent";
-  if (result.exitCode !== 0) throw new NativeTaskOwnershipError();
-  return properties.get("ActiveState") === "inactive" ? "inactive" : "active";
+  const loadState = properties.get("LoadState");
+  const activeState = properties.get("ActiveState");
+  const description = properties.get("Description");
+  if (loadState === "not-found") {
+    if (activeState !== "inactive" || description !== "") {
+      throw new NativeTaskOwnershipError();
+    }
+    return { loadState, activeState, description };
+  }
+  if (result.exitCode !== 0 || loadState !== "loaded"
+    || typeof activeState !== "string" || !ACTIVE_STATES.has(activeState)
+    || typeof description !== "string"
+    || Buffer.byteLength(description, "utf8") > 512) {
+    throw new NativeTaskOwnershipError();
+  }
+  return { loadState, activeState, description };
 }
 
 class SystemdNativeTaskScope implements NativeTaskScope {
   readonly unit: string;
   readonly #manager: SystemdNativeTaskScopeManager;
+  readonly #taskId: string;
+  readonly #receipt: NativeTaskOwnershipReceipt;
   #spawned = false;
   #stopping?: Promise<void>;
 
-  constructor(manager: SystemdNativeTaskScopeManager, unit: string) {
+  constructor(
+    manager: SystemdNativeTaskScopeManager,
+    taskId: string,
+    receipt: NativeTaskOwnershipReceipt,
+    unit: string,
+  ) {
     this.#manager = manager;
+    this.#taskId = taskId;
+    this.#receipt = receipt;
     this.unit = unit;
   }
 
@@ -180,11 +271,11 @@ class SystemdNativeTaskScope implements NativeTaskScope {
       throw new NativeTaskOwnershipError();
     }
     this.#spawned = true;
-    return this.#manager.spawn(this.unit, input);
+    return this.#manager.spawn(this.#taskId, this.#receipt, input);
   }
 
   stopAndConfirm(): Promise<void> {
-    this.#stopping ??= this.#manager.stopUnitAndConfirm(this.unit);
+    this.#stopping ??= this.#manager.stopAndConfirm(this.#taskId, this.#receipt);
     return this.#stopping;
   }
 }
@@ -197,6 +288,17 @@ export interface SystemdNativeTaskScopeManagerOptions {
   confirmationTimeoutMs?: number;
 }
 
+interface ScopeReservation {
+  readonly description: string;
+  spawned: boolean;
+  launchSettled?: Promise<void>;
+}
+
+interface ScopeStop {
+  readonly description: string;
+  readonly promise: Promise<void>;
+}
+
 /** Own each delegated native worker in one collected transient user scope. */
 export class SystemdNativeTaskScopeManager implements NativeTaskScopeManager {
   readonly #controlEnvironment: Readonly<NodeJS.ProcessEnv>;
@@ -204,8 +306,8 @@ export class SystemdNativeTaskScopeManager implements NativeTaskScopeManager {
   readonly #runControl: NativeTaskControlRunner;
   readonly #wait: (milliseconds: number) => Promise<void>;
   readonly #confirmationTimeoutMs: number;
-  readonly #stops = new Map<string, Promise<void>>();
-  readonly #reservedUnits = new Set<string>();
+  readonly #stops = new Map<string, ScopeStop>();
+  readonly #reservations = new Map<string, ScopeReservation>();
 
   constructor(options: SystemdNativeTaskScopeManagerOptions) {
     this.#controlEnvironment = captureNativeTaskControlEnvironment(options.controlEnvironment);
@@ -219,39 +321,86 @@ export class SystemdNativeTaskScopeManager implements NativeTaskScopeManager {
     }
   }
 
-  async reserve(taskId: string, signal: AbortSignal): Promise<NativeTaskScope> {
+  async reserve(
+    taskId: string,
+    receipt: NativeTaskOwnershipReceipt,
+    signal: AbortSignal,
+  ): Promise<NativeTaskScope> {
     const unit = nativeTaskScopeUnit(taskId);
+    const description = nativeTaskScopeDescription(taskId, receipt);
     if (signal.aborted) throw new NativeTaskOwnershipError();
-    if (await this.#status(unit, signal) !== "absent") {
+    if (this.#reservations.has(unit)) {
+      throw new NativeTaskOwnershipError("Native task scope is already reserved.", "collision");
+    }
+    if ((await this.#status(unit, signal)).loadState !== "not-found") {
       throw new NativeTaskOwnershipError("Native task scope already exists.", "collision");
     }
     if (signal.aborted) throw new NativeTaskOwnershipError();
-    this.#reservedUnits.add(unit);
-    return new SystemdNativeTaskScope(this, unit);
-  }
-
-  async stopAndConfirm(taskId: string): Promise<void> {
-    const unit = nativeTaskScopeUnit(taskId);
-    if (!this.#reservedUnits.has(unit)) {
-      const status = await this.#status(unit);
-      if (status === "absent" || status === "inactive") return;
-      throw new NativeTaskOwnershipError("Unreserved native task scope exists.", "collision");
+    if (this.#reservations.has(unit)) {
+      throw new NativeTaskOwnershipError("Native task scope is already reserved.", "collision");
     }
-    await this.stopUnitAndConfirm(unit);
-    this.#reservedUnits.delete(unit);
+    const durableReceipt = Object.freeze({ ...receipt });
+    this.#reservations.set(unit, {
+      description,
+      spawned: false,
+    });
+    return new SystemdNativeTaskScope(this, taskId, durableReceipt, unit);
   }
 
-  recoverAndConfirm(taskId: string): Promise<void> {
-    return this.stopUnitAndConfirm(nativeTaskScopeUnit(taskId));
+  async stopAndConfirm(
+    taskId: string,
+    receipt: NativeTaskOwnershipReceipt,
+  ): Promise<void> {
+    const unit = nativeTaskScopeUnit(taskId);
+    const description = nativeTaskScopeDescription(taskId, receipt);
+    const reservation = this.#reservations.get(unit);
+    if (reservation && reservation.description !== description) {
+      throw new NativeTaskOwnershipError("Native task scope receipt does not match.", "collision");
+    }
+    await this.#stopUnitAndConfirmShared(unit, description, reservation);
   }
 
-  spawn(unit: string, input: NativeTaskScopeLaunch): ChildProcess {
-    const environment = boundedEnvironment(input.environment);
+  recoverAndConfirm(
+    taskId: string,
+    receipt: NativeTaskOwnershipReceipt,
+  ): Promise<void> {
+    const unit = nativeTaskScopeUnit(taskId);
+    const description = nativeTaskScopeDescription(taskId, receipt);
+    const reservation = this.#reservations.get(unit);
+    if (reservation && reservation.description !== description) {
+      return Promise.reject(new NativeTaskOwnershipError(
+        "Native task scope receipt does not match.",
+        "collision",
+      ));
+    }
+    return this.#stopUnitAndConfirmShared(unit, description, reservation);
+  }
+
+  spawn(
+    taskId: string,
+    receipt: NativeTaskOwnershipReceipt,
+    input: NativeTaskScopeLaunch,
+  ): ChildProcess {
+    const unit = nativeTaskScopeUnit(taskId);
+    const description = nativeTaskScopeDescription(taskId, receipt);
+    const reservation = this.#reservations.get(unit);
+    if (!reservation || reservation.spawned || reservation.description !== description) {
+      throw new NativeTaskOwnershipError();
+    }
+    let environment: NodeJS.ProcessEnv;
     try {
-      return this.#spawnChild(SYSTEMD_RUN, [
+      environment = boundedEnvironment(input.environment);
+    } catch (error) {
+      this.#reservations.delete(unit);
+      throw error;
+    }
+    let child: ChildProcess;
+    try {
+      child = this.#spawnChild(SYSTEMD_RUN, [
         "--user",
         "--scope",
         `--unit=${unit}`,
+        `--description=${description}`,
         "--slice-inherit",
         "--collect",
         "--quiet",
@@ -267,44 +416,147 @@ export class SystemdNativeTaskScopeManager implements NativeTaskScopeManager {
       ], {
         cwd: input.cwd,
         env: environment,
-        signal: input.signal,
         stdio: ["pipe", "pipe", input.stderr ?? "pipe"],
         windowsHide: true,
       });
     } catch {
+      this.#reservations.delete(unit);
       throw new NativeTaskOwnershipError();
     }
+    reservation.spawned = true;
+    reservation.launchSettled = new Promise<void>((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        child.removeListener("error", finish);
+        child.removeListener("close", finish);
+        resolve();
+      };
+      child.once("error", finish);
+      child.once("close", finish);
+      if (child.exitCode !== null || child.signalCode !== null) finish();
+    });
+    return child;
   }
 
-  stopUnitAndConfirm(unit: string): Promise<void> {
+  #stopUnitAndConfirmShared(
+    unit: string,
+    description: string,
+    reservation: ScopeReservation | undefined,
+  ): Promise<void> {
     const existing = this.#stops.get(unit);
-    if (existing) return existing;
-    const stopping = this.#stopUnitAndConfirm(unit);
-    this.#stops.set(unit, stopping);
+    if (existing) {
+      return existing.description === description
+        ? existing.promise
+        : Promise.reject(new NativeTaskOwnershipError(
+            "Native task scope receipt does not match.",
+            "collision",
+          ));
+    }
+    const stopping = this.#stopUnitAndConfirm(
+      unit,
+      description,
+      reservation,
+    );
+    const entry = { description, promise: stopping };
+    this.#stops.set(unit, entry);
     void stopping.finally(() => {
-      if (this.#stops.get(unit) === stopping) this.#stops.delete(unit);
+      if (this.#stops.get(unit) === entry) this.#stops.delete(unit);
     }).catch(() => undefined);
     return stopping;
   }
 
-  async #stopUnitAndConfirm(unit: string): Promise<void> {
-    const initial = await this.#status(unit);
-    if (initial === "absent" || initial === "inactive") return;
+  async #stopUnitAndConfirm(
+    unit: string,
+    description: string,
+    reservation: ScopeReservation | undefined,
+  ): Promise<void> {
+    let confirmed = false;
     try {
-      await this.#runControl(
-        ["--user", "stop", "--no-block", unit],
-        this.#controlEnvironment,
-      );
-    } catch {
-      // A failed request is safe only when the following authoritative read
-      // independently confirms that the scope is already quiescent.
+      let status = await this.#status(unit);
+      if (status.loadState === "not-found") {
+        status = await this.#confirmMissingAfterLaunch(unit, reservation);
+        if (status.loadState === "not-found") {
+          confirmed = true;
+          return;
+        }
+      }
+      this.#assertOwnedStatus(status, description);
+      if (status.activeState === "inactive") {
+        confirmed = true;
+        return;
+      }
+      try {
+        await this.#runControl(
+          ["--user", "stop", "--no-block", unit],
+          this.#controlEnvironment,
+        );
+      } catch {
+        // A failed request is safe only when later authoritative reads prove
+        // exact receipt ownership and quiescence.
+      }
+      const deadline = Date.now() + this.#confirmationTimeoutMs;
+      for (;;) {
+        status = await this.#status(unit);
+        if (status.loadState === "not-found") {
+          status = await this.#confirmMissingAfterLaunch(unit, reservation);
+          if (status.loadState === "not-found") {
+            confirmed = true;
+            return;
+          }
+        }
+        this.#assertOwnedStatus(status, description);
+        if (status.activeState === "inactive") {
+          confirmed = true;
+          return;
+        }
+        if (Date.now() >= deadline) throw new NativeTaskOwnershipError();
+        await this.#wait(25);
+      }
+    } catch (error) {
+      if (error instanceof NativeTaskOwnershipError
+        && error.code === "collision"
+        && reservation?.launchSettled) {
+        await reservation.launchSettled;
+        if (this.#reservations.get(unit) === reservation) {
+          this.#reservations.delete(unit);
+        }
+      }
+      throw error;
+    } finally {
+      if (confirmed && this.#reservations.get(unit) === reservation) {
+        this.#reservations.delete(unit);
+      }
     }
+  }
+
+  async #confirmMissingAfterLaunch(
+    unit: string,
+    reservation: ScopeReservation | undefined,
+  ): Promise<ScopeStatus> {
+    if (!reservation?.spawned) {
+      return { loadState: "not-found", activeState: "inactive", description: "" };
+    }
+    const launchSettled = reservation.launchSettled;
+    if (!launchSettled) throw new NativeTaskOwnershipError();
+    let settled = false;
+    void launchSettled.then(() => { settled = true; });
     const deadline = Date.now() + this.#confirmationTimeoutMs;
     for (;;) {
+      await Promise.race([launchSettled, this.#wait(25)]);
       const status = await this.#status(unit);
-      if (status === "absent" || status === "inactive") return;
+      if (status.loadState !== "not-found" || settled) return status;
       if (Date.now() >= deadline) throw new NativeTaskOwnershipError();
-      await this.#wait(25);
+    }
+  }
+
+  #assertOwnedStatus(status: ScopeStatus, description: string): void {
+    if (status.loadState !== "loaded" || status.description !== description) {
+      throw new NativeTaskOwnershipError(
+        "Native task scope belongs to a different receipt.",
+        "collision",
+      );
     }
   }
 
@@ -315,6 +567,7 @@ export class SystemdNativeTaskScopeManager implements NativeTaskScopeManager {
       unit,
       "--property=LoadState",
       "--property=ActiveState",
+      "--property=Description",
       "--no-pager",
     ], this.#controlEnvironment, signal);
     return parseScopeStatus(result);

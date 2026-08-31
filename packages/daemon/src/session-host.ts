@@ -7436,11 +7436,6 @@ export class SessionHost {
     let maintenanceDeleteOutcome: MaintenanceConversationDeleteOutcome = "rolled-back";
     this.deleting.add(deleteKey);
     try {
-      maintenanceReservation = this.maintenance?.reserveConversationDelete({
-        ghostName,
-        runtime,
-        conversationId: id,
-      });
       await taskDeletion.drained;
       const initialTasks = await this.liveParentTaskEntries(ghostName, identity);
       if (initialTasks.some((entry) => !isTerminalTaskState(entry.record.state))) {
@@ -7450,6 +7445,11 @@ export class SessionHost {
           409,
         );
       }
+      maintenanceReservation = this.maintenance?.reserveConversationDelete({
+        ghostName,
+        runtime,
+        conversationId: id,
+      });
       if (runtime === "pi") await this.cancelRecap(piKey);
       await maintenanceReservation?.drained;
       const draftMarker = draftAbandonTransactionPath(paths.sessionDir, runtime, id);

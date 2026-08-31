@@ -241,11 +241,15 @@ Ghost's five durable task tools for native Pi, Codex, and Claude Code coding
 workers; those workers revalidate the conversation's exact trusted project and
 do not activate bundled, project, ghost-file, or ambient subagent definitions.
 Each worker and its ordinary descendants are owned by one collected transient
-systemd user scope derived from the durable task id. Completion, cancellation,
-restart recovery, and daemon shutdown remain nonterminal until that exact scope
-is confirmed inactive or absent; user-manager failures never become synthetic
-success. The scope is lifecycle ownership, not a sandbox: a trusted harness
-that deliberately creates another systemd unit can escape it.
+systemd user scope derived from the durable task id. A random receipt is stored
+with the task before launch and must match the scope's exact Description before
+Ghost may stop it. Completion, cancellation, restart recovery, and daemon
+shutdown remain nonterminal until that receipt-bound scope is confirmed
+inactive or safely absent after registration settles; user-manager failures
+never become synthetic success. The scope is lifecycle ownership, not a
+sandbox: a trusted harness that deliberately creates another systemd unit, or
+the same owner deliberately tampering with Ghost's reserved scope names, can
+escape this boundary. Native packages require systemd 254 or newer.
 pi's native `bash`, `edit`, `find`, `grep`, `ls`, `read`, and `write` plus
 Ghost's own tools (registered directly as pi custom tools) remain available;
 Ghost's own `bash`/`jobs` (background jobs) and `inspect_image` (the
