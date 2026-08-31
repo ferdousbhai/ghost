@@ -14,7 +14,7 @@ from yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
 from yaml.tokens import AliasToken, AnchorToken
 
 
-JOB_SHA256 = "f212f10e83b3d4c35454c94fd67ade08557b5dbe8f1eb3481bf6ef899dd5dd7a"
+JOB_SHA256 = "c16f2d850a4d6f6a95c76c0c5e0971c86a043e6b778749b470521b4930f6d7ac"
 CHECKOUT = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
 SETUP_BUN = "oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6"
 STEP_NAMES = [
@@ -132,8 +132,17 @@ def errors(text: str) -> list[str]:
                 failures.append(f"step {index} name or order changed")
         first = mapping(steps[0], "checkout step")
         second = mapping(steps[1], "setup-bun step")
-        if set(first) != {"uses"} or scalar(first.get("uses"), "checkout ref") != CHECKOUT:
+        if set(first) != {"uses", "with"} or scalar(
+            first.get("uses"), "checkout ref"
+        ) != CHECKOUT:
             failures.append("checkout action changed")
+        else:
+            checkout_inputs = mapping(first.get("with"), "checkout inputs")
+            if set(checkout_inputs) != {"persist-credentials"} or scalar(
+                checkout_inputs.get("persist-credentials"),
+                "checkout persist-credentials",
+            ) != "false":
+                failures.append("checkout must disable credential persistence")
         if set(second) != {"uses", "with"} or scalar(second.get("uses"), "setup-bun ref") != SETUP_BUN:
             failures.append("setup-bun action changed")
         else:

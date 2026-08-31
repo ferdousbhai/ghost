@@ -12,8 +12,10 @@ Markdown commands/prompts, and MCP from the visible ghost home plus one
 explicitly trusted project. Live voice remains deferred; remote sharing uses
 the built-in tailnet viewer over Tailscale Serve, and no separate collaboration
 relay is planned. The principal Ghost can delegate coding through five durable
-task tools to native Pi, Codex, or Claude Code workers. Project and ghost-file
-subagent definitions remain inert; project
+task tools to native Pi, Codex, or Claude Code workers. The principal does not
+execute project or ghost-file subagent definitions; delegated workers retain
+their harness's native project discovery, and Claude may receive one optional
+opaque native agent name. Principal project
 plugins, hooks, custom code tools, and LSP are also disabled pending a
 separate isolation boundary. Trusted visible `hooks/pre` and `hooks/post`
 files in the ghost home remain the explicit in-process extension surface. The

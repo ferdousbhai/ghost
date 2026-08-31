@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { conversationIdentity } from "../src/conversation-identity.js";
 import { ghostPaths } from "../src/ghosts.js";
+import { createLogger, type LogRecord } from "../src/log.js";
 import { ProjectBindingStore } from "../src/project-binding.js";
 import {
   SessionHost,
@@ -44,6 +45,7 @@ afterEach(async () => {
 function setup(options: {
   projectBindings?: ProjectBindingStore;
   maintenance?: SessionHostOptions["maintenance"];
+  logger?: SessionHostOptions["logger"];
 } = {}): {
   home: string;
   ownerHome: string;
@@ -243,6 +245,103 @@ describe("SessionHost delegated task composition", () => {
       code: "daemon_restarted",
       message: "The daemon restarted before the task became quiescent.",
     });
+  });
+
+  it("isolates boot recovery failures, starts the principal, and retries that ghost", async () => {
+    temp = makeTempGhosts();
+    const firstHome = seedGhost(temp.root, { name: "alpha" });
+    const secondHome = seedGhost(temp.root, { name: "beta" });
+    const records: LogRecord[] = [];
+    host = new SessionHost({
+      registry: temp.registry,
+      ownerHome: temp.ownerHome,
+      offline: true,
+      logger: createLogger("debug", (record) => records.push(record)),
+      scheduleCommandRunner: async () => ({ stdout: "", stderr: "", code: 0 }),
+    });
+    const first = {
+      ...recoveredRecord(firstHome),
+      id: "task-11111111-1111-4111-8111-111111111111",
+      parent: conversationIdentity("pi", "alpha-recovery"),
+      ownership: {
+        version: 1,
+        kind: "systemd-scope",
+        nonce: "11111111111111111111111111111111",
+      },
+    } as const satisfies TaskRecord;
+    const second = {
+      ...recoveredRecord(secondHome),
+      id: "task-22222222-2222-4222-8222-222222222222",
+      parent: conversationIdentity("pi", "beta-recovery"),
+      ownership: {
+        version: 1,
+        kind: "systemd-scope",
+        nonce: "22222222222222222222222222222222",
+      },
+    } as const satisfies TaskRecord;
+    await writeTask(firstHome, first);
+    await writeTask(secondHome, second);
+    const ownership = fakeTaskScopeManager();
+    ownership.unconfirmed.add(first.id);
+    const adapter = controlledAdapter().adapter;
+    host.attachTaskServices({
+      adapters: new Map([["pi", adapter]]),
+      ownership,
+    });
+
+    await expect(host.restoreTaskServices()).resolves.toBeUndefined();
+    expect([...ownership.stops].sort()).toEqual([first.id, second.id].sort());
+    await expect(host.task("beta", second.parent, second.id)).resolves.toMatchObject({
+      state: "interrupted",
+      generation: 3,
+    });
+    await expect(host.task("alpha", first.parent, first.id)).rejects.toMatchObject({
+      code: "tasks_unavailable",
+      status: 503,
+      message: "Delegated coding tasks are unavailable.",
+    });
+    const principal = await host.open("alpha", "principal-still-starts");
+    expect(principal.ghost.name).toBe("alpha");
+    const taskList = principal.session.getToolDefinition("task_list");
+    expect(taskList).toBeDefined();
+    await expect(taskList!.execute(
+      "failed-recovery",
+      {},
+      undefined,
+      undefined,
+      {} as never,
+    )).rejects.toMatchObject({
+      code: "tasks_unavailable",
+      message: "Delegated coding tasks are unavailable.",
+    });
+
+    ownership.unconfirmed.delete(first.id);
+    await expect(taskList!.execute(
+      "retry-recovery",
+      {},
+      undefined,
+      undefined,
+      {} as never,
+    )).resolves.toMatchObject({
+      details: expect.objectContaining({ tasks: expect.any(Array) }),
+    });
+    await expect(host.task("alpha", first.parent, first.id)).resolves.toMatchObject({
+      state: "interrupted",
+      generation: 3,
+    });
+    expect(records).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        level: "warn",
+        message: "delegated task recovery is unavailable",
+        fields: { ghost: "alpha" },
+      }),
+      expect.objectContaining({
+        level: "info",
+        message: "delegated task recovery completed",
+        fields: { ghost: "beta" },
+      }),
+    ]));
+    expect(JSON.stringify(records)).not.toMatch(/ownership|receipt|scope|task-/u);
   });
 
   it("refuses every active task state before publishing deletion state", async () => {

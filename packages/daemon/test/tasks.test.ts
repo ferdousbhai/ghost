@@ -28,6 +28,11 @@ async function eventually(store: TaskStore, id: string, state: TaskRecord["state
   for (let attempt = 0; attempt < 100; attempt += 1) { const row = await store.read(id); if (row.state === state) return row; await new Promise((done) => setTimeout(done, 2)); }
   throw new Error(`${id} did not reach ${state}`);
 }
+async function readPersistedTask(home: string, id: string): Promise<TaskRecord> {
+  const reader = new TaskStore(home);
+  await reader.initialize();
+  try { return await reader.read(id); } finally { await reader.dispose(); }
+}
 async function fixture(adapter: TaskAdapter, bindingAuthority = authority) {
   const home = await mkdtemp(join(tmpdir(), "ghost-task-")); await chmod(home, 0o700);
   const store = trackedStore(home); const controller = new TaskController(store, new Map([["native", adapter]]), bindingAuthority, fakeTaskScopeManager()); await controller.initialize();
@@ -459,18 +464,93 @@ describe("durable task foundation", () => {
     });
 
     expect([...ownership.stops].sort()).toEqual(rows.map((row) => row.id).sort());
-    expect(await store.read(rows[0]!.id)).toMatchObject({
+    expect(await readPersistedTask(home, rows[0]!.id)).toMatchObject({
       state: "interrupted",
       generation: 2,
     });
-    expect(await store.read(rows[1]!.id)).toMatchObject({
+    expect(await readPersistedTask(home, rows[1]!.id)).toMatchObject({
       state: "starting",
       generation: 1,
     });
-    expect(await store.read(rows[2]!.id)).toMatchObject({
+    expect(await readPersistedTask(home, rows[2]!.id)).toMatchObject({
       state: "interrupted",
       generation: 2,
     });
+  });
+
+  it("disposes every failed initialization before clearing it for a clean retry", async () => {
+    const home = await mkdtemp(join(tmpdir(), "ghost-task-"));
+    const seed = trackedStore(home);
+    await seed.initialize();
+    const pending = record("running");
+    await seed.write(pending);
+    await seed.dispose();
+
+    const disposeEntered = deferred<void>();
+    const allowDispose = deferred<void>();
+    class ObservedTaskStore extends TaskStore {
+      disposals = 0;
+
+      override async dispose(): Promise<void> {
+        this.disposals += 1;
+        disposeEntered.resolve();
+        await allowDispose.promise;
+        await super.dispose();
+      }
+    }
+    const store = new ObservedTaskStore(home);
+    stores.push(store);
+    const ownership = fakeTaskScopeManager();
+    ownership.unconfirmed.add(pending.id);
+    const controller = new TaskController(store, new Map(), authority, ownership);
+
+    const first = controller.initialize();
+    const rejected = expect(first).rejects.toMatchObject({ code: "task_recovery_failed" });
+    await disposeEntered.promise;
+    expect(controller.initialize()).toBe(first);
+    allowDispose.resolve();
+    await rejected;
+    expect(store.disposals).toBe(1);
+    await expect(store.list()).rejects.toMatchObject({ code: "task_store_uninitialized" });
+
+    await expect(controller.initialize()).rejects.toMatchObject({
+      code: "task_recovery_failed",
+    });
+    expect(store.disposals).toBe(2);
+    await expect(store.list()).rejects.toMatchObject({ code: "task_store_uninitialized" });
+
+    ownership.unconfirmed.delete(pending.id);
+    await expect(controller.initialize()).resolves.toEqual([
+      expect.objectContaining({ id: pending.id, state: "interrupted" }),
+    ]);
+  });
+
+  it("does not admit a retry when task-store disposal is unconfirmed", async () => {
+    const home = await mkdtemp(join(tmpdir(), "ghost-task-"));
+    const seed = trackedStore(home);
+    await seed.initialize();
+    const pending = record("running");
+    await seed.write(pending);
+    await seed.dispose();
+
+    class RefusingTaskStore extends TaskStore {
+      attempts = 0;
+      override async dispose(): Promise<void> {
+        this.attempts += 1;
+        if (this.attempts === 1) throw new Error("injected close failure");
+        await super.dispose();
+      }
+    }
+    const store = new RefusingTaskStore(home);
+    stores.push(store);
+    const nativeOwnership = fakeTaskScopeManager();
+    nativeOwnership.unconfirmed.add(pending.id);
+    const controller = new TaskController(store, new Map(), authority, nativeOwnership);
+
+    const first = controller.initialize();
+    await expect(first).rejects.toBeInstanceOf(AggregateError);
+    expect(controller.initialize()).toBe(first);
+    expect(store.attempts).toBe(1);
   });
 
   it("retries scope confirmation after a crash window before recovery publication", async () => {
@@ -494,7 +574,7 @@ describe("durable task foundation", () => {
     const firstOwnership = fakeTaskScopeManager();
     const first = new TaskController(store, new Map(), authority, firstOwnership);
     await expect(first.initialize()).rejects.toThrow();
-    expect((await store.read(pending.id)).state).toBe("running");
+    expect((await readPersistedTask(home, pending.id)).state).toBe("running");
     expect(firstOwnership.stops).toEqual([pending.id]);
 
     const secondOwnership = fakeTaskScopeManager();
@@ -515,7 +595,7 @@ describe("durable task foundation", () => {
     ownership.unconfirmed.add(pending.id);
     const controller = new TaskController(store, new Map(), authority, ownership);
     await expect(controller.initialize()).rejects.toThrow();
-    expect(await store.read(pending.id)).toMatchObject({
+    expect(await readPersistedTask(home, pending.id)).toMatchObject({
       state: "running",
       generation: 1,
       error: null,

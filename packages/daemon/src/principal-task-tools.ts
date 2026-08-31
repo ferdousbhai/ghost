@@ -38,7 +38,7 @@ export const PRINCIPAL_TASK_POLICY = [
 ].join("\n");
 
 export interface PrincipalTaskContext {
-  controller: Promise<TaskController>;
+  controller(): Promise<TaskController>;
   parent: ConversationIdentity;
   cwd: string;
   operation<T>(action: () => Promise<T>): Promise<T>;
@@ -101,7 +101,7 @@ export function taskProjection(
 
 async function ownTask(context: PrincipalTaskContext, id: string): Promise<TaskRecord> {
   try {
-    const record = await (await context.controller).get(id);
+    const record = await (await context.controller()).get(id);
     if (!sameParent(record.parent, context.parent)) throw notFound();
     return record;
   } catch (error) {
@@ -163,7 +163,7 @@ export function createPrincipalTaskTools(context: PrincipalTaskContext): GhostEx
         return toolAction(() => context.operation(async () => {
           const binding = await context.mintBinding(params.cwd, admittedSignal);
           admittedSignal.throwIfAborted();
-          return result(taskProjection(await (await context.controller).start({
+          return result(taskProjection(await (await context.controller()).start({
             parent: context.parent,
             harness: params.harness,
             ...(params.agent === undefined ? {} : { agent: params.agent }),
@@ -187,7 +187,7 @@ export function createPrincipalTaskTools(context: PrincipalTaskContext): GhostEx
       }, { additionalProperties: false }),
       async execute(_id, params) {
         return toolAction(() => context.operation(async () => {
-          const owned = (await (await context.controller).list())
+          const owned = (await (await context.controller()).list())
             .filter((record) => sameParent(record.parent, context.parent))
             .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
           const visible = owned.slice(0, params.limit ?? DEFAULT_LISTED_TASKS);
@@ -229,7 +229,7 @@ export function createPrincipalTaskTools(context: PrincipalTaskContext): GhostEx
         return toolAction(() => context.operation(async () => {
           await ownTask(context, params.task_id);
           return result(taskProjection(
-            await (await context.controller).followUp(
+            await (await context.controller()).followUp(
               params.task_id,
               params.message,
               context.parent,
@@ -251,7 +251,7 @@ export function createPrincipalTaskTools(context: PrincipalTaskContext): GhostEx
         return toolAction(() => context.operation(async () => {
           await ownTask(context, params.task_id);
           return result(taskProjection(
-            await (await context.controller).cancel(params.task_id, context.parent),
+            await (await context.controller()).cancel(params.task_id, context.parent),
             true,
           ));
         }));

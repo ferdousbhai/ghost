@@ -255,7 +255,10 @@ export class TaskStore {
     this.#ghostHome = ghostHome;
   }
   async initialize(): Promise<void> {
-    if (this.#directory) return;
+    if (this.#directory && this.#home) return;
+    if (this.#directory || this.#home) {
+      fail("task_store_disposal_unconfirmed", "The prior task store did not close.", 500);
+    }
     try {
       this.#home = await openDirectoryNoFollow(this.#ghostHome, "Ghost home");
       const child = descriptorPath(this.#home, TASKS_DIRNAME);
@@ -269,7 +272,23 @@ export class TaskStore {
       throw error;
     }
   }
-  async dispose(): Promise<void> { await this.#directory?.close(); await this.#home?.close(); this.#directory = undefined; this.#home = undefined; }
+  async dispose(): Promise<void> {
+    const directory = this.#directory;
+    const home = this.#home;
+    const [directoryResult, homeResult] = await Promise.allSettled([
+      directory?.close(),
+      home?.close(),
+    ]);
+    if (directoryResult.status === "fulfilled" && this.#directory === directory) {
+      this.#directory = undefined;
+    }
+    if (homeResult.status === "fulfilled" && this.#home === home) this.#home = undefined;
+    const failures = [directoryResult, homeResult].flatMap((result) =>
+      result.status === "rejected" ? [result.reason] : []);
+    if (failures.length > 0) {
+      throw new AggregateError(failures, "Task store disposal failed.");
+    }
+  }
   #require(): { home: FileHandle; directory: FileHandle } {
     if (!this.#directory || !this.#home) fail("task_store_uninitialized", "The task store is not initialized.", 500);
     return { home: this.#home, directory: this.#directory };
@@ -395,17 +414,41 @@ export class TaskController {
   ) {}
   initialize(): Promise<TaskRecord[]> {
     if (this.#initialization) return this.#initialization;
-    this.#initialization = (async () => {
-      await this.store.initialize();
-      const rows = await this.store.recover(
-        this.now().toISOString(),
-        (taskId, receipt) => this.ownership.recoverAndConfirm(taskId, receipt),
-      );
-      this.#initialized = true;
-      return rows;
+    let retryable = false;
+    const initialization = (async () => {
+      try {
+        await this.store.initialize();
+        const rows = await this.store.recover(
+          this.now().toISOString(),
+          (taskId, receipt) => this.ownership.recoverAndConfirm(taskId, receipt),
+        );
+        this.#initialized = true;
+        return rows;
+      } catch (error) {
+        this.#initialized = false;
+        let failure = error;
+        try {
+          await this.store.dispose();
+          retryable = true;
+        } catch (disposeError) {
+          failure = new AggregateError(
+            [error, disposeError],
+            "Task initialization and store disposal both failed.",
+          );
+        }
+        throw failure;
+      }
     })();
-    void this.#initialization.catch(() => { this.#initialization = undefined; });
-    return this.#initialization;
+    this.#initialization = initialization;
+    void initialization.catch(() => {
+      // The recovery promise does not reject until its store has closed. A
+      // later caller can therefore create one clean controller retry without
+      // racing descriptors from the failed attempt.
+      if (retryable && this.#initialization === initialization) {
+        this.#initialization = undefined;
+      }
+    });
+    return initialization;
   }
   #ready(): void { if (!this.#initialized) fail("tasks_uninitialized", "Tasks are not initialized.", 503); }
   get(id: string): Promise<TaskRecord> { this.#ready(); return this.store.read(id); }

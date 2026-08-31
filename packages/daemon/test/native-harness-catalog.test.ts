@@ -4,6 +4,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -171,14 +172,15 @@ process.stdout.write(${JSON.stringify(version)});
   return { binary, log };
 }
 
-function fakeClaude(base: string): { binary: string; log: string } {
-  const binary = join(base, "claude");
+function fakeClaude(base: string, suffix = ""): { binary: string; log: string } {
+  const binary = join(base, `claude${suffix}`);
   const log = join(base, "claude.log");
   writeExecutable(binary, `
 import { appendFileSync, readdirSync } from "node:fs";
 const args = process.argv.slice(2);
 appendFileSync(${JSON.stringify(log)}, JSON.stringify({
   args, cwd: process.cwd(), entries: readdirSync("."), env: process.env,
+  runtime: process.execPath,
 }) + "\\n");
 if (args[0] === "--version") process.stdout.write("2.1.251 (Claude Code)\\n");
 else {
@@ -396,6 +398,68 @@ describe("native harness probes", () => {
       ["--version"],
       ["--setting-sources", "", "--safe-mode", "--strict-mcp-config", "auth", "status", "--json"],
     ]);
+  });
+
+  it.each([".js", ".mjs", ".tsx", ".ts", ".jsx"])(
+    "probes and binds an admitted Claude %s wrapper through exact Bun",
+    async (suffix) => {
+      const base = root();
+      const { binary, log } = fakeClaude(base, suffix);
+      const sdkLoader = validClaudeAgentSdkLoader();
+      const catalog = new NativeHarnessCatalog({
+        claudeAgentSdkLoader: sdkLoader,
+        probes: {
+          "claude-code": new ClaudeNativeHarnessProbe({
+            sdkLoader,
+            binaryPath: binary,
+            environment: { HOME: base, PATH: process.env.PATH },
+          }),
+          codex: new MutableProbe("codex", "authenticated"),
+          pi: new MutableProbe("pi", "unknown"),
+        },
+      });
+      const signal = new AbortController().signal;
+      const admitted = await catalog.readForStart("claude-code", signal);
+
+      expect(admitted.interpreter).toMatchObject({
+        path: process.execPath,
+        literalBoundary: true,
+      });
+      expect(logRows(log).map((row) => ({ args: row.args, runtime: row.runtime }))).toEqual([
+        { args: ["--version"], runtime: process.execPath },
+        {
+          args: [
+            "--setting-sources", "", "--safe-mode", "--strict-mcp-config",
+            "auth", "status", "--json",
+          ],
+          runtime: process.execPath,
+        },
+      ]);
+      await expect(catalog.assertExecutable(admitted, signal)).resolves.toBeUndefined();
+    },
+  );
+
+  it("rejects an atomic Claude script replacement at final admission", async () => {
+    const base = root();
+    const { binary } = fakeClaude(base, ".mjs");
+    const replacement = join(base, "replacement.mjs");
+    writeExecutable(replacement, "setInterval(() => {}, 1000);");
+    const sdkLoader = validClaudeAgentSdkLoader();
+    const catalog = new NativeHarnessCatalog({
+      claudeAgentSdkLoader: sdkLoader,
+      probes: {
+        "claude-code": new ClaudeNativeHarnessProbe({ sdkLoader, binaryPath: binary }),
+        codex: new MutableProbe("codex", "authenticated"),
+        pi: new MutableProbe("pi", "unknown"),
+      },
+    });
+    const signal = new AbortController().signal;
+    const admitted = await catalog.readForStart("claude-code", signal);
+    renameSync(replacement, binary);
+
+    await expect(catalog.assertExecutable(admitted, signal)).rejects.toThrow(
+      "changed during its probe",
+    );
   });
 
   it("makes the principal SDK loader mandatory for production construction", () => {

@@ -89,6 +89,22 @@ the wrapper script, or a systemd unit.
 The implementation is in `packages/daemon/src/claude-code.ts`; its wire
 adapter is `packages/daemon/src/claude-pi-messages.ts`.
 
+Ghost has two deliberately different Claude boundaries. The principal remains
+the owner-facing Ghost; delegated Claude is a subordinate native coding worker:
+
+| boundary | principal Claude conversation | delegated native Claude task |
+|---|---|---|
+| trust and cwd | owner home or one Ghost-trusted project plus its immutable declarative snapshot | one exact project cwd from a freshly revalidated task-binding receipt |
+| environment and credentials | finite `claude-principal` profile; a literal owner wrapper may inject its own credentials after Ghost launches it | finite `claude-native` profile; the same wrapper rule applies, and Ghost does not copy credentials into the task |
+| tools and execution policy | native preset plus Ghost tools; the explicit exclusions and permission callback below apply | native defaults; only bypass permission mode and its required acknowledgement are set |
+| settings, hooks, MCP, plugins, and skills | filesystem setting sources and native plugin/skill discovery are disabled; Ghost supplies its accepted snapshot, translated MCP, and in-process tools | native project/user discovery remains enabled; Ghost supplies none of these fields and may pass only an optional opaque native agent name |
+| auto-memory and persistence | auto-memory disabled; Ghost keeps its Claude sidecar, transcript continuity, and one warm query | native defaults remain enabled, including native persistence; Ghost retains only the bounded durable task record and does not resume the worker |
+| process ownership | warm SDK child and descendants use the principal process-group retirement boundary | one receipt-bound transient systemd user scope derived from the durable task id; task completion waits for confirmed scope inactivity |
+
+Both paths load the same pinned SDK and admit the same installed executable,
+but restrictions documented for the principal must not be projected onto a
+delegated worker, and native worker defaults must not expand the principal.
+
 For each turn Ghost:
 
 1. loads the exact owner-installed SDK, resolves and fingerprints the executable

@@ -88,7 +88,7 @@ function fixture(records: TaskRecord[] = [record()]) {
       cwd: binding.cwd,
       mintBinding,
       operation,
-      controller: Promise.resolve(
+      controller: () => Promise.resolve(
         { start, get, list, followUp, cancel } as unknown as TaskController,
       ),
     } satisfies PrincipalTaskContext,

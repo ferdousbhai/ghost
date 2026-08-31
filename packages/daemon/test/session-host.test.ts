@@ -1888,7 +1888,11 @@ describe("SessionHost.open", () => {
       undefined,
       undefined,
       {} as never,
-    )).rejects.toMatchObject({ code: "unsafe_task_store" });
+    )).rejects.toMatchObject({
+      code: "tasks_unavailable",
+      message: "Delegated coding tasks are unavailable.",
+      status: 503,
+    });
   });
 
   it("reuses one session per conversation id and separates different ids", async () => {

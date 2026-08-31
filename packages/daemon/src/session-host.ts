@@ -1931,12 +1931,22 @@ export class SessionHost {
     this.claudeCode.attachPrincipalTaskTools((ghostName, conversationId, cwd) =>
       this.principalTaskContext(ghostName, "claude-code", conversationId, cwd));
     this.taskServices = { adapters, ownership: services.ownership };
-    const recoveries = this.registry.list().map((ghost) => this.taskController(ghost.name));
+    const recoveries = this.registry.list().map(async (ghost) => {
+      try {
+        await this.taskController(ghost.name);
+        this.logger.child({ ghost: ghost.name }).info(
+          "delegated task recovery completed",
+        );
+      } catch {
+        this.logger.child({ ghost: ghost.name }).warn(
+          "delegated task recovery is unavailable",
+        );
+      }
+    });
     this.taskRecovery = Promise.all(recoveries).then(() => undefined);
-    void this.taskRecovery.catch(() => {});
   }
 
-  /** Wait for every boot-time task recovery attempt before opening HTTP admission. */
+  /** Wait for every boot-time attempt; a failed ghost remains retryable. */
   restoreTaskServices(): Promise<void> {
     if (!this.taskRecovery) {
       throw new GhostError("tasks_unavailable", "Delegated coding tasks are unavailable.", 503);
@@ -1962,10 +1972,19 @@ export class SessionHost {
       this.projectBindings.taskBindingAuthority(paths.sessionDir),
       services.ownership,
     );
-    const initialized = controller.initialize().then(() => {
-      this.taskControllerInstances.set(ghostName, controller);
-      return controller;
-    });
+    const initialized = controller.initialize().then(
+      () => {
+        this.taskControllerInstances.set(ghostName, controller);
+        return controller;
+      },
+      () => {
+        throw new GhostError(
+          "tasks_unavailable",
+          "Delegated coding tasks are unavailable.",
+          503,
+        );
+      },
+    );
     this.taskControllers.set(ghostName, initialized);
     void initialized.catch(() => {
       if (this.taskControllers.get(ghostName) === initialized) {
@@ -1986,7 +2005,7 @@ export class SessionHost {
     const paths = ghostPaths(this.registry.get(ghostName).dir);
     this.assertTaskAdmissionOpen();
     return Promise.resolve({
-      controller: this.taskController(ghostName),
+      controller: () => this.taskController(ghostName),
       parent,
       cwd,
       operation: <T>(action: () => Promise<T>) =>

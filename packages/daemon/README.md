@@ -239,7 +239,9 @@ MCP configuration. Project executable extensions, hooks, custom code tools,
 LSP, and custom agent definitions stay disabled. Both principal runtimes expose
 Ghost's five durable task tools for native Pi, Codex, and Claude Code coding
 workers; those workers revalidate the conversation's exact trusted project and
-do not activate bundled, project, ghost-file, or ambient subagent definitions.
+receive no Ghost-injected bundled or ghost-file subagent definitions. Their
+native project discovery remains intact; delegated Claude may additionally
+receive one optional opaque native agent name.
 Each worker and its ordinary descendants are owned by one collected transient
 systemd user scope derived from the durable task id. A random receipt is stored
 with the task before launch and must match the scope's exact Description before

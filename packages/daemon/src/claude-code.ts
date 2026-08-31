@@ -318,6 +318,27 @@ export class ClaudeCodeProcessError extends Error {
   }
 }
 
+export interface ClaudeCodeCommandLaunch {
+  executable: string;
+  prefixArguments: readonly string[];
+}
+
+export interface ClaudeCodeCommandOptions {
+  timeoutMs?: number;
+  signal?: AbortSignal;
+  launch?: ClaudeCodeCommandLaunch;
+}
+
+function claudeCodeCommand(
+  binaryPath: string,
+  args: readonly string[],
+  launch: ClaudeCodeCommandLaunch | undefined,
+): { executable: string; args: string[] } {
+  return launch
+    ? { executable: launch.executable, args: [...launch.prefixArguments, ...args] }
+    : { executable: binaryPath, args: [...args] };
+}
+
 function authStatusMetadata(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
@@ -446,7 +467,7 @@ function authStatusFromJson(raw: string): ClaudeCodeAuthStatus {
 export async function readClaudeCodeAuthStatus(
   binaryPath: string,
   environment: Readonly<NodeJS.ProcessEnv> = captureClaudeCodeEnvironment(),
-  options: { timeoutMs?: number; signal?: AbortSignal } = {},
+  options: ClaudeCodeCommandOptions = {},
 ): Promise<ClaudeCodeAuthStatus> {
   const timeoutMs = options.timeoutMs ?? AUTH_STATUS_TIMEOUT_MS;
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
@@ -455,7 +476,12 @@ export async function readClaudeCodeAuthStatus(
 
   let result: OwnedCommandResult;
   try {
-    result = await runOwnedCommand(binaryPath, CLAUDE_CODE_AUTH_STATUS_ARGS, {
+    const command = claudeCodeCommand(
+      binaryPath,
+      CLAUDE_CODE_AUTH_STATUS_ARGS,
+      options.launch,
+    );
+    result = await runOwnedCommand(command.executable, command.args, {
       environment,
       timeoutMs,
       ...(options.signal ? { signal: options.signal } : {}),
@@ -489,7 +515,7 @@ function versionAtLeast(version: readonly number[], minimum: readonly number[]):
 export async function readClaudeCodeVersion(
   binaryPath: string,
   environment: Readonly<NodeJS.ProcessEnv> = captureClaudeCodeEnvironment(),
-  options: { timeoutMs?: number; signal?: AbortSignal } = {},
+  options: ClaudeCodeCommandOptions = {},
 ): Promise<string> {
   const timeoutMs = options.timeoutMs ?? AUTH_STATUS_TIMEOUT_MS;
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
@@ -497,7 +523,8 @@ export async function readClaudeCodeVersion(
   }
   let result: OwnedCommandResult;
   try {
-    result = await runOwnedCommand(binaryPath, ["--version"], {
+    const command = claudeCodeCommand(binaryPath, ["--version"], options.launch);
+    result = await runOwnedCommand(command.executable, command.args, {
       environment,
       timeoutMs,
       ...(options.signal ? { signal: options.signal } : {}),

@@ -12,7 +12,10 @@ import {
   type ClaudeAgentSdkModule,
 } from "./claude-agent-sdk-loader.js";
 import { captureNativeHarnessEnvironment } from "./env-scrub.js";
-import type { NativeHarnessProbeResult } from "./native-harness-catalog.js";
+import {
+  claudeNativeSdkScriptLaunch,
+  type NativeHarnessProbeResult,
+} from "./native-harness-catalog.js";
 import { NativeTaskProcessError } from "./native-task-jsonl.js";
 import type {
   TaskAdapter,
@@ -26,6 +29,7 @@ const MAX_CLAUDE_SESSION_ID_BYTES = 2_048;
 
 interface ClaudeStartCatalog {
   readForStart(id: "claude-code", signal: AbortSignal): Promise<NativeHarnessProbeResult>;
+  assertExecutable(result: NativeHarnessProbeResult, signal: AbortSignal): Promise<void>;
 }
 
 export interface ClaudeTaskAdapterOptions {
@@ -135,7 +139,7 @@ class ClaudeTaskLifecycle {
   private readonly cwd: string;
   private readonly input: ClaudeTaskInput;
   private readonly scope: TaskAdapterContext["scope"];
-  private executable: string | undefined;
+  private admission: NativeHarnessProbeResult | undefined;
   private query: Query | undefined;
   private child: ChildProcess | undefined;
   private teardown: Promise<void> | undefined;
@@ -163,9 +167,9 @@ class ClaudeTaskLifecycle {
     );
   }
 
-  bindExecutable(executable: string): void {
-    if (this.executable || this.signal.aborted) throw failure();
-    this.executable = executable;
+  bindExecutable(admission: NativeHarnessProbeResult): void {
+    if (this.admission || this.signal.aborted) throw failure();
+    this.admission = admission;
   }
 
   assertActive(): void {
@@ -203,17 +207,25 @@ class ClaudeTaskLifecycle {
   private spawn(options: ClaudeSpawnOptions): SpawnedProcess {
     if (this.spawned
       || this.signal.aborted
-      || this.executable === undefined
-      || options.command !== this.executable
+      || this.admission === undefined
       || options.cwd !== this.cwd
       || process.platform !== "linux") {
       throw failure();
     }
+    const script = claudeNativeSdkScriptLaunch(this.admission.executable.path);
+    const validDirect = script === undefined
+      && options.command === this.admission.executable.path
+      && this.admission.interpreter === undefined;
+    const validScript = script !== undefined
+      && options.command === script.command
+      && options.args[0] === this.admission.executable.path
+      && this.admission.interpreter?.path === script.executable;
+    if (!validDirect && !validScript) throw failure();
     this.spawned = true;
     let child: ChildProcess;
     try {
       child = this.scope.spawn({
-        executable: options.command,
+        executable: script?.executable ?? options.command,
         args: options.args,
         cwd: options.cwd,
         environment: options.env,
@@ -291,10 +303,12 @@ export class ClaudeTaskAdapter implements TaskAdapter {
     channel: ClaudeTaskInput,
   ): Promise<TaskAdapterHandle> {
     try {
+      const sdk = await this.sdkLoader.load(lifecycle.signal);
+      lifecycle.assertActive();
       const admitted = await this.catalog.readForStart("claude-code", lifecycle.signal);
       if (admitted.id !== "claude-code") throw failure();
-      lifecycle.bindExecutable(admitted.executable.path);
-      const sdk = await this.sdkLoader.load(lifecycle.signal);
+      lifecycle.bindExecutable(admitted);
+      await this.catalog.assertExecutable(admitted, lifecycle.signal);
       lifecycle.assertActive();
       return await this.openQuery(input, admitted, sdk, lifecycle, channel);
     } catch {

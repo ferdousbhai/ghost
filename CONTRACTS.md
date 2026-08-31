@@ -595,7 +595,18 @@ approval or elicitation UI; all other progress and tool payloads are discarded.
 
 The Claude delegated adapter loads the pinned owner-installed Agent SDK through
 the principal SDK loader and runs the freshly admitted Claude executable in the
-exact cwd. It leaves native filesystem settings, CLAUDE.md, skills, agents,
+exact cwd. SDK loading precedes fresh executable admission. For an admitted
+path ending in the pinned SDK's lowercase `.js`, `.mjs`, `.tsx`, `.ts`, or
+`.jsx` script suffix, the only accepted SDK spawn transform is literal command
+`bun` with that exact path as argument zero and no Ghost-supplied executable
+arguments; Ghost substitutes the canonical absolute `process.execPath` for the
+literal command at the scope boundary. Version and authentication probes use
+that same absolute Bun-plus-script launch plan. The script and Bun filesystem
+identities are bound into private admission evidence and both are revalidated
+immediately before the synchronous SDK query/spawn boundary. Other paths must
+remain the exact admitted command with no interpreter; `node`, `deno`, PATH
+lookup, a different script, or any other transform fails before launch. It
+leaves native filesystem settings, CLAUDE.md, skills, agents,
 hooks, plugins, MCP servers, model selection, tools, persistence, and subagent
 behavior intact. Its only execution-policy override is
 `permissionMode: "bypassPermissions"` with the SDK's required explicit
@@ -626,11 +637,16 @@ activity. Double or late attachment is rejected. A task controller is scoped
 to one ghost home and receives that ghost's project-binding authority before
 initialization; the principal tool mints the exact parent receipt at creation,
 and the controller revalidates it immediately before adapter spawn. Task-store
-attachment begins restart recovery for every existing ghost, and ghostd waits
-for every initial recovery attempt to settle before it starts listening.
-Initialization is mandatory for every task operation but its failure cannot
-prevent the principal conversation from starting; a task boundary failure is
-surfaced by the task tool. The task
+attachment begins restart recovery for every existing ghost. The attempts run
+independently and ghostd waits for all of them to settle before it starts
+listening; one ghost's failure cannot skip another ghost's cleanup and is not a
+daemon- or principal-startup failure. Each outcome is logged only as bounded
+per-ghost availability, without task, receipt, scope, or storage detail.
+Initialization is mandatory for every task operation. A failed controller
+closes its task-store descriptors before it becomes retryable; a later task
+operation retries initialization, and an operation whose retry still fails
+receives only generic `503 tasks_unavailable`. Principal conversation activity
+remains available throughout. The task
 layer and all native adapters remain forbidden from running Git worktree,
 staging, commit, or branch commands.
 

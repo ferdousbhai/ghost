@@ -56,5 +56,11 @@ expect_rejected cleanup-condition \
 expect_rejected action-ref \
   'oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6' \
   'oven-sh/setup-bun@v2'
+expect_rejected checkout-credentials-true \
+  'persist-credentials: false' \
+  'persist-credentials: true'
+expect_rejected checkout-credentials-missing \
+  $'        with:\n          persist-credentials: false\n' \
+  ''
 
 printf 'Native task systemd workflow hostile fixtures passed\n'
