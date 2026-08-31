@@ -798,34 +798,6 @@ export function createDaemonServer(options: ServerOptions): Server {
     });
   };
 
-  const handleRecap = async (
-    ghostName: string,
-    conversation: ConversationIdentity,
-    request: IncomingMessage,
-    response: ServerResponse,
-  ): Promise<void> => {
-    const body = await readJsonBody(request, maxBodyBytes);
-    if (body === null || typeof body !== "object" || Array.isArray(body)) {
-      errorResponse(response, 400, "invalid_request", "Request body must be a JSON object.");
-      return;
-    }
-
-    const connection = abortOnClose(request, response);
-    try {
-      const recap = await options.host.recap(
-        ghostName,
-        conversation.conversationId,
-        conversation.runtime,
-        connection.signal,
-      );
-      if (!response.writableEnded && !connection.signal.aborted) {
-        jsonResponse(response, 200, { recap });
-      }
-    } finally {
-      connection.release();
-    }
-  };
-
   const decorateMcpSnapshot = (
     ghostName: string,
     snapshot: McpCatalogSnapshot,
@@ -2099,18 +2071,6 @@ export function createDaemonServer(options: ServerOptions): Server {
           return await handleSessionCommands(
             ghostName,
             decodeConversationIdentity(segments[4] ?? ""),
-            response,
-          );
-        }
-        if (segments.length === 6 && segments[3] === "sessions" && segments[5] === "recap") {
-          if (method !== "POST") {
-            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-            return;
-          }
-          return await handleRecap(
-            ghostName,
-            decodeConversationIdentity(segments[4] ?? ""),
-            request,
             response,
           );
         }

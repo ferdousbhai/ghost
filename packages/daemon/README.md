@@ -350,11 +350,6 @@ ad-hoc prompts:
 - Tool lifecycle events include start, update, completion, error, bounded
   result summaries, and model-fallback state so the shell can render durable
   activity cards rather than a transient name.
-- Recap runs one non-persisted completion over an existing Pi conversation's
-  effective system prompt and current branch. It uses the current chat model
-  but never appends its prompt or reply to the transcript. The request is
-  abortable and presentation-only; Claude Code has no equivalent non-mutating
-  conversation context.
 - Ghost has no principal plan mode or model-owned todo list. Planning happens
   in ordinary conversation or as a read-only native harness assignment;
   durable implementation work uses the task lifecycle below.
@@ -423,7 +418,6 @@ The authoritative route and payload contract is
 | POST | `/api/ghosts/:name/mcp/:server/test` | isolated sanitized connection probe |
 | POST | `/api/ghosts/:name/mcp/:server/reconnect` | retry already-loaded live managers |
 | PUT | `/api/ghosts/:name/sessions/:id/title` | rename one conversation |
-| POST | `/api/ghosts/:name/sessions/:id/recap` | generate a transient Pi recap |
 | DELETE | `/api/ghosts/:name/sessions/:id` | move every owned conversation artifact to Trash |
 | GET/POST | `/api/ghosts/:name/sessions/:id/live` | inspect or control realtime voice |
 | GET/POST | `/api/ghosts/:name/sessions/:id/collab` | unsupported legacy collaboration compatibility seam |

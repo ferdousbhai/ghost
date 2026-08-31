@@ -1401,19 +1401,6 @@ streams emit one complete event object per line.
   Claude Code returns `409 not_supported`, because opening an unrelated pi
   session just to discover commands would lie about the active runtime;
   non-GET methods return `405`.
-- `POST /api/ghosts/:name/sessions/:id/recap` with `{}` →
-  `{ recap: string | null }` — one non-persisted completion over the
-  conversation's current effective system prompt and compaction-aware branch,
-  followed by a recap request, using the conversation's current chat model.
-  Ghost collapses the result to one line and bounds it at 280 Unicode scalar
-  values. The prompt and reply are never appended to the transcript or stored
-  anywhere. Typing, navigation, a new owner turn, client disconnect,
-  conversation teardown, or daemon shutdown aborts it; a new owner turn waits
-  for that cancellation and then wins session admission. A generation,
-  provider, or output failure is logged at warning level and returns
-  `200 { recap: null }`. An unknown conversation is `404`; a running turn or
-  second in-flight recap is `409 session_busy`; Claude Code is `409 not_supported`
-  because that runtime exposes no equivalent non-mutating conversation context.
 - `GET  /api/ghosts/:name/sessions/:id/jobs` → `{ jobs }` — the background
   jobs of that conversation as `{ id, label, command, status, startedAt,
   endedAt?, durationMs, exitCode?, output, outputTruncated }` rows, where

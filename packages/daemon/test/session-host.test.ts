@@ -87,7 +87,6 @@ import {
   writeToolCwds,
 } from "../src/tool-cwds.js";
 import { homeOperationsFor } from "../src/home-operations.js";
-import type { GhostPiRuntime } from "../src/pi-runtime.js";
 import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
 import {
   createMockProviderBarrier,
@@ -493,12 +492,6 @@ function authRuntimeForTest(handle: Awaited<ReturnType<SessionHost["open"]>>): {
   return (handle as typeof handle & { modelRuntime: { close(): void } }).modelRuntime;
 }
 
-function completionRuntimeForTest(
-  handle: Awaited<ReturnType<SessionHost["open"]>>,
-): GhostPiRuntime {
-  return (handle as typeof handle & { modelRuntime: GhostPiRuntime }).modelRuntime;
-}
-
 describe("sessionKeyOf", () => {
   it("encodes (ghost, session) unambiguously — no delimiter collision", () => {
     // A plain delimiter would map ("ghost a", "b") and ("ghost", "a b") onto
@@ -601,140 +594,6 @@ describe("OMP slash commands", () => {
     }
 
     expect(provider!.requests).toHaveLength(0);
-  });
-});
-
-describe("SessionHost recap", () => {
-  it("completes over the effective Pi context, normalizes text, and leaves no transcript trace", async () => {
-    await setup([{ kind: "text", text: "We are shaping the launch notes." }], {
-      title: { enabled: false },
-    });
-    await host!.runTurn("casper", {
-      sessionId: "conv-recap",
-      prompt: "Help me finish the launch notes.",
-      emit: () => {},
-    });
-    const handle = await host!.open("casper", "conv-recap");
-    const before = readFileSync(handle.sessionFile!, "utf8");
-    let recapContext: Parameters<GhostPiRuntime["complete"]>[1] | undefined;
-    const complete = vi.spyOn(completionRuntimeForTest(handle), "complete")
-      .mockImplementation(async (_model, context) => {
-        recapContext = context;
-        return {
-          role: "assistant",
-          content: [{ type: "text", text: "  Return to the launch plan. -- Next: finish the opening.  " }],
-          stopReason: "stop",
-        } as never;
-      });
-
-    await expect(host!.recap("casper", "conv-recap")).resolves.toBe(
-      "Return to the launch plan. Next: finish the opening.",
-    );
-
-    expect(complete).toHaveBeenCalledOnce();
-    expect(complete.mock.calls[0]?.[0].id).toBe(provider!.modelId);
-    expect(recapContext?.systemPrompt).toBe(handle.session.systemPrompt);
-    expect(JSON.stringify(recapContext?.messages)).toContain("Help me finish the launch notes.");
-    expect(JSON.stringify(recapContext?.messages)).toContain("<recap>");
-    expect(readFileSync(handle.sessionFile!, "utf8")).toBe(before);
-    expect(before).not.toContain("<recap>");
-  });
-
-  it("logs generation failure as pure upside and refuses unknown or Claude conversations", async () => {
-    const logger = recordingLogger("warn");
-    await setup([{ kind: "text", text: "Conversation established." }], {
-      title: { enabled: false },
-      logger,
-    });
-    await host!.runTurn("casper", {
-      sessionId: "conv-recap-failure",
-      prompt: "Start here.",
-      emit: () => {},
-    });
-    const handle = await host!.open("casper", "conv-recap-failure");
-    vi.spyOn(completionRuntimeForTest(handle), "complete")
-      .mockRejectedValueOnce(new Error("provider unavailable"));
-
-    await expect(host!.recap("casper", "conv-recap-failure")).resolves.toBeNull();
-    expect(logger.records).toContainEqual(expect.objectContaining({
-      message: "conversation recap generation failed",
-      fields: expect.objectContaining({ session: "conv-recap-failure" }),
-    }));
-    await expect(host!.recap("casper", "missing"))
-      .rejects.toMatchObject({ code: "not_found", status: 404 });
-    await expect(host!.recap("casper", "conv-recap-failure", "claude-code"))
-      .rejects.toMatchObject({ code: "not_supported", status: 409 });
-  });
-
-  it("returns session_busy while an owner turn is running", async () => {
-    const barrier = createMockProviderBarrier();
-    await setup([{ kind: "text", text: "Held owner turn.", barrier }], {
-      title: { enabled: false },
-    });
-    const turn = host!.runTurn("casper", {
-      sessionId: "conv-recap-busy",
-      prompt: "Keep this turn running.",
-      emit: () => {},
-    });
-    await barrier.waitForArrivals();
-
-    await expect(host!.recap("casper", "conv-recap-busy"))
-      .rejects.toMatchObject({ code: "session_busy", status: 409 });
-
-    barrier.release();
-    await turn;
-  });
-
-  it("rejects a second recap, then aborts and drains the first before the owner turn", async () => {
-    await setup([
-      { kind: "text", text: "First turn complete." },
-      { kind: "text", text: "The owner turn won." },
-    ], {
-      title: { enabled: false },
-    }, {
-      sequential: true,
-    });
-    await host!.runTurn("casper", {
-      sessionId: "conv-recap-preempt",
-      prompt: "First turn.",
-      emit: () => {},
-    });
-    const handle = await host!.open("casper", "conv-recap-preempt");
-    const completionStarted = Promise.withResolvers<AbortSignal>();
-    vi.spyOn(completionRuntimeForTest(handle), "complete")
-      .mockImplementation(async (_model, _context, options) => {
-        const signal = options?.signal;
-        if (!signal) throw new Error("recap completion did not receive an abort signal");
-        completionStarted.resolve(signal);
-        if (!signal.aborted) {
-          await new Promise<void>((resolve) => {
-            signal.addEventListener("abort", () => resolve(), { once: true });
-          });
-        }
-        return {
-          role: "assistant",
-          content: [{ type: "text", text: "Stale recap." }],
-          stopReason: "aborted",
-        } as never;
-      });
-
-    const recap = host!.recap("casper", "conv-recap-preempt");
-    const recapSignal = await completionStarted.promise;
-    await expect(host!.recap("casper", "conv-recap-preempt"))
-      .rejects.toMatchObject({ code: "session_busy", status: 409 });
-
-    const events: PiMessagesEvent[] = [];
-    const ownerTurn = host!.runTurn("casper", {
-      sessionId: "conv-recap-preempt",
-      prompt: "I am back.",
-      emit: (event) => events.push(event),
-    });
-
-    await expect(recap).resolves.toBeNull();
-    await ownerTurn;
-    expect(recapSignal.aborted).toBe(true);
-    expect(events.at(-1)?.type).toBe("done");
-    expect(provider!.requests).toHaveLength(2);
   });
 });
 

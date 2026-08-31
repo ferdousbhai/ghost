@@ -95,13 +95,6 @@ offers to answer it now on the branch the daemon kept. While a model
 is streaming, Enter steers the active run, Ctrl+Enter queues a follow-up, and
 Shift+Enter inserts a newline. The queued state is visible below the composer.
 
-After a successful Pi turn, four minutes with an empty composer arms a
-transient completion over the conversation's current context. Its one-line
-`※ recap:` status restores the goal, current task, and one next action without
-adding a message to history. Typing, starting another turn, or changing
-ghost/conversation clears it and aborts any request still running; recap
-failures stay silent because the transcript is already the durable fallback.
-
 The chat column also carries a conversation-scoped background-job strip above
 that queue, with cancellation and bounded output disclosure. It disappears
 when no jobs exist and polls running jobs only while the HUD is visible.

@@ -898,13 +898,7 @@ Singleton {
     property bool greetingOnboarding: false
     property string greetingGhost: ""
 
-    // A recap is presentation-only: one completed Pi turn and an empty
-    // composer arm four idle minutes. Owner activity retires every stale part.
-    property string recapText: ""
-    property var recapTarget: null
     property bool composerHasDraft: false
-    /** Mutable for deterministic QML tests; production keeps four minutes. */
-    property int recapIdleMs: 240000
 
     property alias transcript: transcriptModel
     property var commandExchanges: ({})
@@ -1044,9 +1038,6 @@ Singleton {
     property var liveRequest: null
     property var collabRequest: null
     property var greetingRequest: null
-    property var recapRequest: null
-    /** Test seam; production constructs the native recap XHR. */
-    property var recapRequestFactory: null
     property var transcriptRequest: null
     property var transcriptRequestFactory: null
     readonly property int transcriptPageLimit: 1000
@@ -1158,13 +1149,6 @@ Singleton {
         onTriggered: root.pollQueues()
     }
 
-    Timer {
-        id: recapIdleTimer
-        interval: Math.max(1, root.recapIdleMs)
-        repeat: false
-        onTriggered: root.requestRecap()
-    }
-
     Component.onCompleted: root.refresh()
     Component.onDestruction: root.retireClientRequests()
 
@@ -1185,7 +1169,6 @@ Singleton {
     function retireClientRequests(): void {
         root.cancelLogin();
         root.cancelAllTranscriptLoads();
-        root.clearRecap();
         root.retireRemoteRequests();
         root.retireHooksRequest();
         root.clearWork();
@@ -1199,7 +1182,6 @@ Singleton {
         root.projectMutationRequest = null;
     }
     onActiveGhostChanged: {
-        root.clearRecap();
         root.modelGeneration += 1;
         root.modelRequest = null;
         if (root.workGhost !== "" && root.workGhost !== root.activeGhost)
@@ -1215,12 +1197,8 @@ Singleton {
         root.connectConversationEvents(root.activeGhost);
     }
     onCurrentSessionIdChanged: {
-        root.clearRecap();
         if (root.workSessionId !== "" && root.workSessionId !== root.currentSessionId)
             root.clearWork();
-    }
-    onComposerHasDraftChanged: {
-        if (root.composerHasDraft) root.clearRecap();
     }
 
 
@@ -2043,61 +2021,6 @@ Singleton {
         root.greeting = "";
         root.greetingOnboarding = false;
         root.greetingGhost = "";
-    }
-
-    function clearRecap(): void {
-        recapIdleTimer.stop();
-        const xhr = root.recapRequest;
-        root.recapRequest = null;
-        root.recapText = "";
-        root.recapTarget = null;
-        if (xhr && xhr.readyState !== 4) xhr.abort();
-    }
-
-    function scheduleRecapFor(state: var): void {
-        root.clearRecap();
-        if (!root.isActiveTurn(state) || state.streaming || state.runtime !== "pi"
-                || root.composerHasDraft) return;
-        root.recapTarget = { ghost: state.ghost, sessionId: state.sessionId };
-        recapIdleTimer.restart();
-    }
-
-    function requestRecap(): void {
-        recapIdleTimer.stop();
-        const target = root.recapTarget;
-        const ghost = target ? target.ghost : "";
-        const sessionId = target ? target.sessionId : "";
-        const state = root.turnStates[root.conversationKey(ghost, sessionId)];
-        if (ghost === "" || sessionId === "" || root.composerHasDraft
-                || !root.isActiveTurn(state) || state.streaming || state.runtime !== "pi") {
-            root.clearRecap();
-            return;
-        }
-
-        const xhr = root.recapRequestFactory
-            ? root.recapRequestFactory() : new XMLHttpRequest();
-        root.recapRequest = xhr;
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.recapRequest) return;
-            root.recapRequest = null;
-            const current = root.turnStates[root.conversationKey(ghost, sessionId)];
-            if (root.composerHasDraft || !root.isActiveTurn(current) || current.streaming) {
-                root.clearRecap();
-                return;
-            }
-            if (xhr.status !== 200) return;
-            try {
-                const body = JSON.parse(xhr.responseText);
-                root.recapText = typeof body.recap === "string" ? body.recap.trim() : "";
-            } catch (error) {
-                root.recapText = "";
-            }
-        };
-        root.dispatch(xhr, "POST", "/api/ghosts/" + encodeURIComponent(ghost)
-            + "/sessions/" + encodeURIComponent(sessionId) + "/recap",
-            ({ "Content-Type": "application/json" }), JSON.stringify({}), function () {
-                return xhr === root.recapRequest;
-            });
     }
 
 
@@ -4116,7 +4039,6 @@ Singleton {
     }
 
     function beginTurnFor(state: var): void {
-        root.clearRecap();
         root.cancelTranscriptLoad(state);
         root.resetAssistantSegmentFor(state);
         state.assistantRow = -1;
@@ -4566,9 +4488,7 @@ Singleton {
         root.flushTurn(state, true, false);
         root.resetInteractionStateFor(state);
         let text = "";
-        let recapEligible = false;
         if (state.assistantRow >= 0 && state.assistantRow < state.rows.length) {
-            recapEligible = state.rows[state.assistantRow].role === "assistant";
             root.setTurnRow(state, state.assistantRow, "pending", false);
             if (errorMessage !== "")
                 root.setTurnRow(state, state.assistantRow, "error", errorMessage);
@@ -4587,7 +4507,6 @@ Singleton {
             // error banner so it does not linger under a good reply.
             state.lastError = "";
             root.turnFinished(state.ghost, text);
-            if (recapEligible && root.isActiveTurn(state)) root.scheduleRecapFor(state);
         }
         root.projectTurnFields(state);
         Qt.callLater(function () {
