@@ -122,6 +122,7 @@ import {
   conversationIdentity,
   isValidConversationId,
   requireRawConversationId,
+  type ConversationIdentity,
   type ConversationRuntime,
 } from "./conversation-identity.js";
 import { generateTitle } from "./title.js";
@@ -170,7 +171,13 @@ import {
   type PrincipalTaskContext,
   type PrincipalTaskServices,
 } from "./principal-task-tools.js";
-import { TaskController, TaskStore } from "./tasks.js";
+import {
+  MAX_TASK_AGENT,
+  MAX_TASK_TEXT,
+  TaskController,
+  TaskStore,
+  type TaskRecord,
+} from "./tasks.js";
 import { GhostMcpManager } from "./mcp-manager.js";
 import { validateServerName, type MCPServerConfig } from "./mcp-config.js";
 import { resolveChatModel } from "./model-routing.js";
@@ -1569,6 +1576,8 @@ export class SessionHost {
   private taskServices: PrincipalTaskServices | undefined;
   private readonly taskControllers = new Map<string, Promise<TaskController>>();
   private readonly taskControllerInstances = new Map<string, TaskController>();
+  private taskRecovery: Promise<void> | undefined;
+  private nativeTaskShutdown: Promise<void> | undefined;
   private sessionActivityStarted = false;
   private readonly liveVoice: LiveVoiceManager;
   private readonly collaboration: CollaborationManager;
@@ -1793,11 +1802,16 @@ export class SessionHost {
     this.claudeCode.attachPrincipalTaskTools((ghostName, conversationId, cwd) =>
       this.principalTaskContext(ghostName, "claude-code", conversationId, cwd));
     this.taskServices = { adapters };
-    for (const ghost of this.registry.list()) {
-      void this.taskController(ghost.name).catch(() => {
-        // Task tools surface the typed store failure; principal startup remains available.
-      });
+    const recoveries = this.registry.list().map((ghost) => this.taskController(ghost.name));
+    this.taskRecovery = Promise.allSettled(recoveries).then(() => undefined);
+  }
+
+  /** Wait for every boot-time task recovery attempt before opening HTTP admission. */
+  restoreTaskServices(): Promise<void> {
+    if (!this.taskRecovery) {
+      throw new GhostError("tasks_unavailable", "Delegated coding tasks are unavailable.", 503);
     }
+    return this.taskRecovery;
   }
 
   private taskController(ghostName: string): Promise<TaskController> {
@@ -1848,6 +1862,126 @@ export class SessionHost {
         cwd,
         signal,
       ),
+    });
+  }
+
+  private async taskOperation<T>(action: () => Promise<T>): Promise<T> {
+    try {
+      return await action();
+    } catch (error) {
+      if (error instanceof GhostError) throw error;
+      throw new GhostError(
+        "task_operation_failed",
+        "The delegated task operation failed safely.",
+        500,
+      );
+    }
+  }
+
+  private async ownedTask(
+    ghostName: string,
+    parent: ConversationIdentity,
+    taskId: string,
+  ): Promise<TaskRecord> {
+    return this.taskOperation(async () => {
+      const record = await (await this.taskController(ghostName)).get(taskId);
+      if (record.parent.id !== parent.id
+        || record.parent.runtime !== parent.runtime
+        || record.parent.conversationId !== parent.conversationId) {
+        throw new GhostError(
+          "task_not_found",
+          "No such task belongs to this conversation.",
+          404,
+        );
+      }
+      return record;
+    });
+  }
+
+  /** Owner API: list durable workers visible to one exact qualified parent. */
+  async listTasks(
+    ghostName: string,
+    parent: ConversationIdentity,
+  ): Promise<TaskRecord[]> {
+    return this.taskOperation(async () => (await (await this.taskController(ghostName)).list())
+      .filter((record) => record.parent.id === parent.id
+        && record.parent.runtime === parent.runtime
+        && record.parent.conversationId === parent.conversationId)
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)));
+  }
+
+  /** Owner API: create one worker from the parent's current trusted project. */
+  async createTask(
+    ghostName: string,
+    parent: ConversationIdentity,
+    input: Readonly<{
+      harness: string;
+      assignment: string;
+      cwd?: string;
+      agent?: string;
+    }>,
+    signal: AbortSignal,
+  ): Promise<TaskRecord> {
+    return this.taskOperation(async () => {
+      if (input.assignment.length < 1 || input.assignment.length > MAX_TASK_TEXT) {
+        throw new GhostError("invalid_task", "The task assignment is invalid.", 400);
+      }
+      if (input.agent !== undefined
+        && (input.harness !== "claude-code"
+          || input.agent.length < 1
+          || input.agent.length > MAX_TASK_AGENT
+          || Buffer.byteLength(input.agent, "utf8") > MAX_TASK_AGENT * 4)) {
+        throw new GhostError(
+          "invalid_task_agent",
+          "An agent may be selected only for a Claude Code task.",
+          400,
+        );
+      }
+      const paths = ghostPaths(this.registry.get(ghostName).dir);
+      const binding = await this.projectBindings.mintTaskBinding(
+        paths.sessionDir,
+        parent,
+        input.cwd,
+        signal,
+      );
+      signal.throwIfAborted();
+      return (await this.taskController(ghostName)).start({
+        parent,
+        harness: input.harness,
+        ...(input.agent === undefined ? {} : { agent: input.agent }),
+        task: input.assignment,
+        binding,
+      });
+    });
+  }
+
+  /** Owner API: read one worker without revealing another parent's existence. */
+  task(ghostName: string, parent: ConversationIdentity, taskId: string): Promise<TaskRecord> {
+    return this.ownedTask(ghostName, parent, taskId);
+  }
+
+  /** Owner API: serialize one native follow-up for a running worker. */
+  async sendTask(
+    ghostName: string,
+    parent: ConversationIdentity,
+    taskId: string,
+    message: string,
+  ): Promise<TaskRecord> {
+    return this.taskOperation(async () => {
+      await this.ownedTask(ghostName, parent, taskId);
+      return (await this.taskController(ghostName)).followUp(taskId, message, parent);
+    });
+  }
+
+  /** Owner API: wait for native quiescence before returning cancellation. */
+  async cancelTask(
+    ghostName: string,
+    parent: ConversationIdentity,
+    taskId: string,
+  ): Promise<TaskRecord> {
+    return this.taskOperation(async () => {
+      await this.ownedTask(ghostName, parent, taskId);
+      return (await this.taskController(ghostName)).cancel(taskId, parent);
     });
   }
 
@@ -7539,15 +7673,23 @@ export class SessionHost {
     // owner gets a chance to capture another home path.
     const maintenanceDrain = this.maintenance?.beginShutdown();
     this.launchCleanupStep(undefined, "retention timer", () => this.retentionTimer.dispose());
+    const taskShutdowns = [...this.taskControllers.entries()].map(([ghostName, pending]) => {
+      const ready = this.taskControllerInstances.get(ghostName);
+      return ready ? ready.dispose() : pending.then((controller) => controller.dispose());
+    });
+    this.nativeTaskShutdown = Promise.allSettled(taskShutdowns).then((results) => {
+      const failures = results.flatMap((result) =>
+        result.status === "rejected" ? [result.reason] : []);
+      if (failures.length > 0) {
+        throw new AggregateError(failures, "Native task shutdown did not settle cleanly.");
+      }
+    });
     this.shutdownTasks = [
       ...(maintenanceDrain ? [maintenanceDrain] : []),
       Promise.resolve().then(() => this.liveVoice.disposeAll()),
       Promise.resolve().then(() => this.collaboration.disposeAll()),
       Promise.resolve().then(() => this.claudeCode.disposeAll()),
-      ...[...this.taskControllers.entries()].map(([ghostName, pending]) => {
-        const ready = this.taskControllerInstances.get(ghostName);
-        return ready ? ready.dispose() : pending.then((controller) => controller.dispose());
-      }),
+      this.nativeTaskShutdown,
     ];
     for (const hosted of this.sessions.values()) {
       this.launchCleanupStep(hosted, "abort bash", () => this.abortHostedBash(hosted));
@@ -7593,6 +7735,7 @@ export class SessionHost {
       }
       this.unregisterHomeMoveParticipant?.();
       this.sessions.clear();
+      await this.nativeTaskShutdown;
     })().finally(() => {
       if (this.disposePromise === dispose && this.cleanupRetries.size > 0) {
         this.disposePromise = undefined;
@@ -7606,11 +7749,9 @@ export class SessionHost {
    * Best-effort terminal stage after the graceful deadline. The caller still
    * owns a hard process deadline because third-party providers can ignore abort.
    */
-  forceDisposeAll(): void {
+  forceDisposeAll(): Promise<void> {
     this.beginShutdown();
-    for (const controller of this.taskControllerInstances.values()) {
-      this.launchCleanupStep(undefined, "force native tasks", () => controller.forceAll());
-    }
+    const nativeTaskShutdown = this.nativeTaskShutdown ?? Promise.resolve();
     const hosted = [...new Set([
       ...this.sessions.values(),
       ...[...this.closing.values()].map(({ hosted: entry }) => entry),
@@ -7646,5 +7787,6 @@ export class SessionHost {
         });
       }
     }
+    return nativeTaskShutdown;
   }
 }

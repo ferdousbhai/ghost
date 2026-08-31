@@ -258,7 +258,8 @@ export interface ClaudeCodeProbeResult {
 }
 
 export interface ClaudeCodeProbeOptions {
-  binaryPath?: string;
+  /** `null` deliberately disables the ambient selector fallback. */
+  binaryPath?: string | null;
   environment?: Readonly<NodeJS.ProcessEnv>;
   environmentProfile?: "principal" | "native";
   ttlMs?: number;
@@ -587,7 +588,9 @@ export class ClaudeCodeProbe {
   private turnInFlight?: Promise<ClaudeCodeProbeResult>;
 
   constructor(options: ClaudeCodeProbeOptions = {}) {
-    const configuredBinary = options.binaryPath ?? process.env[CLAUDE_CODE_BINARY_ENV];
+    const configuredBinary = options.binaryPath === null
+      ? undefined
+      : options.binaryPath ?? process.env[CLAUDE_CODE_BINARY_ENV];
     this.binaryPath = configuredBinary;
     this.environment = options.environmentProfile === "native"
       ? captureNativeHarnessEnvironment("claude-native", options.environment ?? process.env)

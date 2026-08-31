@@ -15,8 +15,8 @@ import {
   type TaskRecord,
 } from "./tasks.js";
 
-const MAX_LISTED_TASKS = 20;
-const DEFAULT_LISTED_TASKS = 10;
+export const MAX_LISTED_TASKS = 20;
+export const DEFAULT_LISTED_TASKS = 10;
 const MAX_PROJECTED_EVENTS = 10;
 const MAX_RESULT_PREVIEW = 32_768;
 const MAX_TASK_PREVIEW = 240;
@@ -64,7 +64,10 @@ function compact(value: string, maximum: number): { text: string; truncated: boo
     : { text: `${normalized.slice(0, maximum - 1)}…`, truncated: true };
 }
 
-function projection(record: TaskRecord, detailed: boolean): Record<string, unknown> {
+export function taskProjection(
+  record: TaskRecord,
+  detailed: boolean,
+): Record<string, unknown> {
   const task = compact(record.task, MAX_TASK_PREVIEW);
   const result = record.result === null
     ? null
@@ -154,7 +157,7 @@ export function createPrincipalTaskTools(context: PrincipalTaskContext): GhostEx
         return toolAction(async () => {
           const binding = await context.mintBinding(params.cwd, admittedSignal);
           admittedSignal.throwIfAborted();
-          return result(projection(await (await context.controller).start({
+          return result(taskProjection(await (await context.controller).start({
             parent: context.parent,
             harness: params.harness,
             ...(params.agent === undefined ? {} : { agent: params.agent }),
@@ -183,7 +186,7 @@ export function createPrincipalTaskTools(context: PrincipalTaskContext): GhostEx
             .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
           const visible = owned.slice(0, params.limit ?? DEFAULT_LISTED_TASKS);
           return result({
-            tasks: visible.map((record) => projection(record, false)),
+            tasks: visible.map((record) => taskProjection(record, false)),
             shown: visible.length,
             total: owned.length,
           });
@@ -199,7 +202,7 @@ export function createPrincipalTaskTools(context: PrincipalTaskContext): GhostEx
         task_id: Type.String({ minLength: 1, maxLength: 64 }),
       }, { additionalProperties: false }),
       async execute(_id, params) {
-        return toolAction(async () => result(projection(
+        return toolAction(async () => result(taskProjection(
           await ownTask(context, params.task_id),
           true,
         )));
@@ -217,7 +220,7 @@ export function createPrincipalTaskTools(context: PrincipalTaskContext): GhostEx
       async execute(_id, params) {
         return toolAction(async () => {
           await ownTask(context, params.task_id);
-          return result(projection(
+          return result(taskProjection(
             await (await context.controller).followUp(
               params.task_id,
               params.message,
@@ -239,7 +242,7 @@ export function createPrincipalTaskTools(context: PrincipalTaskContext): GhostEx
       async execute(_id, params) {
         return toolAction(async () => {
           await ownTask(context, params.task_id);
-          return result(projection(
+          return result(taskProjection(
             await (await context.controller).cancel(params.task_id, context.parent),
             true,
           ));

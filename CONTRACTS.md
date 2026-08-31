@@ -551,12 +551,53 @@ activity. Double or late attachment is rejected. A task controller is scoped
 to one ghost home and receives that ghost's project-binding authority before
 initialization; the principal tool mints the exact parent receipt at creation,
 and the controller revalidates it immediately before adapter spawn. Task-store
-attachment begins restart recovery for every existing ghost. Initialization is
-mandatory for every task operation but its failure cannot prevent the
-principal conversation from starting; a task boundary failure is surfaced by
-the task tool. The task
+attachment begins restart recovery for every existing ghost, and ghostd waits
+for every initial recovery attempt to settle before it starts listening.
+Initialization is mandatory for every task operation but its failure cannot
+prevent the principal conversation from starting; a task boundary failure is
+surfaced by the task tool. The task
 layer and all native adapters remain forbidden from running Git worktree,
 staging, commit, or branch commands.
+
+At boot ghostd captures one positive, reviewed launch environment and explicit
+binary selector for each of the `pi-native`, `codex-native`, and
+`claude-native` worker profiles before the process-global provider scrub. The
+snapshots contain only operational process variables; selectors are separate
+non-secret paths. Neither is logged, serialized, returned by the API, or copied
+into task records.
+The native catalogue probes and the corresponding adapter share that profile's
+snapshot. No task or catalogue read may fall back to the scrubbed daemon
+environment or to arbitrary ambient credential variables.
+
+The authenticated daemon API exposes the read-only native catalogue at
+`GET /api/harnesses`, returning only `{ harnesses: [{ id, availability,
+authentication }] }`. It never exposes executable, version, account,
+environment, or runtime-identity evidence and has no refresh, install, login,
+or mutation form. Authenticated task routes are scoped beneath one exact
+runtime-qualified parent:
+
+- `GET|POST /api/ghosts/:ghost/sessions/:parent/tasks`
+- `GET /api/ghosts/:ghost/sessions/:parent/tasks/:taskId`
+- `POST /api/ghosts/:ghost/sessions/:parent/tasks/:taskId/send`
+- `POST /api/ghosts/:ghost/sessions/:parent/tasks/:taskId/cancel`
+
+Creation accepts the same bounded `{ harness, assignment, cwd?, agent? }`
+shape as the principal `task` tool. Send accepts exactly `{ message }`; cancel
+accepts an empty object. List accepts an optional decimal `limit` from 1 to 20.
+Responses use the same bounded task list/detail projections as principal tools:
+they omit the project binding identities, durable assignment body, and native
+protocol and include at most the retained bounded event preview. A task id
+owned by any other runtime-qualified parent is indistinguishable from a
+missing id (404) for read, follow-up, and cancellation. Unexpected task,
+adapter, storage, and catalogue failures use the daemon's generic error
+envelope; raw stderr, protocol, environment, credentials, and provider error
+text never cross the wire.
+
+Graceful daemon shutdown closes admission and synchronously begins task
+shutdown before session/store teardown. Forced shutdown reuses the same
+idempotent native control cleanup and does not return from its terminal stage
+until every admitted native process group has confirmed quiescence, even when
+ordinary session/provider teardown exceeds its bounded grace period.
 
 ### Session capabilities
 

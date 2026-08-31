@@ -268,6 +268,44 @@ function catalogWith(probe: NativeHarnessFreshProbe): NativeHarnessCatalog {
 }
 
 describe("native harness probes", () => {
+  it("can explicitly disable every ambient binary selector", async () => {
+    const base = root();
+    fakeClaude(base);
+    fakeCodex({ base });
+    fakePi(base);
+    const prior = {
+      claude: process.env.GHOST_CLAUDE_BINARY,
+      codex: process.env.GHOST_CODEX_BINARY,
+      pi: process.env.GHOST_PI_BINARY,
+    };
+    process.env.GHOST_CLAUDE_BINARY = "/ambient/missing-claude";
+    process.env.GHOST_CODEX_BINARY = "/ambient/missing-codex";
+    process.env.GHOST_PI_BINARY = "/ambient/missing-pi";
+    try {
+      const environment = { HOME: base, PATH: base };
+      const [claude, codex, pi] = await Promise.all([
+        new ClaudeNativeHarnessProbe({
+          sdkLoader: validClaudeAgentSdkLoader(),
+          binaryPath: null,
+          environment,
+        }).readFresh(),
+        new CodexNativeHarnessProbe({ binaryPath: null, environment }).readFresh(),
+        new PiNativeHarnessProbe({ binaryPath: null, environment }).readFresh(),
+      ]);
+      expect([claude.executable.path, codex.executable.path, pi.executable.path])
+        .toEqual([join(base, "claude"), join(base, "codex"), join(base, "pi")]);
+    } finally {
+      for (const [name, value] of [
+        ["GHOST_CLAUDE_BINARY", prior.claude],
+        ["GHOST_CODEX_BINARY", prior.codex],
+        ["GHOST_PI_BINARY", prior.pi],
+      ] as const) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
+  });
+
   it("uses the Claude native environment without principal auto-memory policy", async () => {
     const base = root();
     const { binary, log } = fakeClaude(base);

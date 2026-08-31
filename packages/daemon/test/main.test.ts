@@ -2,12 +2,41 @@ import { pathToFileURL } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
 import { describe, expect, it, vi } from "vitest";
 import {
+  captureDaemonNativeHarnessEnvironments,
   closeDaemonResources,
   isDirectInvocation,
   main,
   parseArgs,
   runStagedShutdown,
 } from "../src/main.js";
+
+describe("daemon native harness environment capture", () => {
+  it("captures explicit selectors separately without retaining provider secrets", () => {
+    const captured = captureDaemonNativeHarnessEnvironments({
+      HOME: "/home/owner",
+      PATH: "/usr/bin",
+      GHOST_CLAUDE_BINARY: "/opt/wrappers/claude",
+      GHOST_CODEX_BINARY: "/opt/wrappers/codex",
+      GHOST_PI_BINARY: "/opt/wrappers/pi",
+      ANTHROPIC_API_KEY: "must-not-cross",
+      OPENAI_API_KEY: "must-not-cross",
+    });
+
+    expect(captured).toMatchObject({
+      claudeBinary: "/opt/wrappers/claude",
+      codexBinary: "/opt/wrappers/codex",
+      piBinary: "/opt/wrappers/pi",
+    });
+    for (const environment of [captured.claude, captured.codex, captured.pi]) {
+      expect(environment).toMatchObject({ HOME: "/home/owner", PATH: "/usr/bin" });
+      expect(environment.ANTHROPIC_API_KEY).toBeUndefined();
+      expect(environment.OPENAI_API_KEY).toBeUndefined();
+      expect(environment.GHOST_CLAUDE_BINARY).toBeUndefined();
+      expect(environment.GHOST_CODEX_BINARY).toBeUndefined();
+      expect(environment.GHOST_PI_BINARY).toBeUndefined();
+    }
+  });
+});
 
 describe("parseArgs", () => {
   it("defaults to no overrides", () => {
@@ -117,7 +146,7 @@ describe("runStagedShutdown", () => {
       graceful: async () => {
         events.push("graceful");
       },
-      force: () => events.push("force"),
+      force: () => { events.push("force"); },
       wait: () => new Promise(() => {}),
     })).resolves.toBe("graceful");
     expect(events).toEqual(["stop", "abort", "graceful"]);
@@ -130,7 +159,7 @@ describe("runStagedShutdown", () => {
       stopAdmission: () => events.push("stop"),
       abortActive: () => events.push("abort"),
       graceful: () => new Promise(() => {}),
-      force: () => events.push("force"),
+      force: () => { events.push("force"); },
       graceMs: 11,
       forceMs: 7,
       wait: async (delayMs) => {
@@ -139,6 +168,26 @@ describe("runStagedShutdown", () => {
     })).resolves.toBe("forced");
     expect(events).toEqual(["stop", "abort", "force"]);
     expect(waits).toEqual([11, 7]);
+  });
+
+  it("does not return from the forced stage before native cleanup settles", async () => {
+    const cleanup = Promise.withResolvers<void>();
+    let settled = false;
+    const shutdown = runStagedShutdown({
+      stopAdmission() {},
+      abortActive() {},
+      graceful: () => new Promise(() => {}),
+      force: () => cleanup.promise,
+      graceMs: 1,
+      forceMs: 1,
+      wait: async () => {},
+    }).then(() => { settled = true; });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(settled).toBe(false);
+    cleanup.resolve();
+    await shutdown;
+    expect(settled).toBe(true);
   });
 
   it("force-closes before reporting a graceful teardown failure", async () => {
@@ -150,7 +199,7 @@ describe("runStagedShutdown", () => {
         events.push("graceful");
         throw new Error("graceful teardown failed");
       },
-      force: () => events.push("force"),
+      force: () => { events.push("force"); },
       wait: () => new Promise(() => {}),
     })).rejects.toThrow("graceful teardown failed");
     expect(events).toEqual(["stop", "abort", "graceful", "force"]);

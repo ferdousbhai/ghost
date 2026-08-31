@@ -45,7 +45,8 @@ export interface NativeHarnessFreshProbe {
 }
 
 interface NativeHarnessProbeOptions {
-  binaryPath?: string;
+  /** `null` deliberately disables the ambient selector fallback. */
+  binaryPath?: string | null;
   environment?: Readonly<NodeJS.ProcessEnv>;
   timeoutMs?: number;
 }
@@ -137,11 +138,13 @@ export class ClaudeNativeHarnessProbe implements NativeHarnessFreshProbe {
       throw new TypeError("Claude native harness probe requires the principal SDK loader.");
     }
     const { sdkLoader, ...probeOptions } = options;
-    const binaryPath = options.binaryPath ?? process.env.GHOST_CLAUDE_BINARY;
+    const binaryPath = options.binaryPath === null
+      ? undefined
+      : options.binaryPath ?? process.env.GHOST_CLAUDE_BINARY;
     this.literalBoundary = binaryPath !== undefined;
     this.probe = new ClaudeCodeProbe({
       ...probeOptions,
-      ...(binaryPath === undefined ? {} : { binaryPath }),
+      binaryPath: binaryPath ?? null,
       environmentProfile: "native",
       loadSdk: (signal) => sdkLoader.load(signal),
     });
@@ -173,7 +176,9 @@ export class CodexNativeHarnessProbe implements NativeHarnessFreshProbe {
   private readonly timeoutMs: number;
 
   constructor(options: NativeHarnessProbeOptions = {}) {
-    this.binaryPath = options.binaryPath ?? process.env[CODEX_BINARY_ENV];
+    this.binaryPath = options.binaryPath === null
+      ? undefined
+      : options.binaryPath ?? process.env[CODEX_BINARY_ENV];
     this.environment = captureNativeHarnessEnvironment(
       "codex-native",
       options.environment ?? process.env,
@@ -375,7 +380,9 @@ export class PiNativeHarnessProbe implements NativeHarnessFreshProbe {
   private readonly timeoutMs: number;
 
   constructor(options: NativeHarnessProbeOptions = {}) {
-    this.binaryPath = options.binaryPath ?? process.env[PI_BINARY_ENV];
+    this.binaryPath = options.binaryPath === null
+      ? undefined
+      : options.binaryPath ?? process.env[PI_BINARY_ENV];
     this.environment = captureNativeHarnessEnvironment(
       "pi-native",
       options.environment ?? process.env,
