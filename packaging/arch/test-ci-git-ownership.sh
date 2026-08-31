@@ -100,6 +100,11 @@ def once(old: str, new: str) -> str:
         raise SystemExit(f"workflow fixture cannot locate {old!r}")
     return base.replace(old, new)
 
+def first(old: str, new: str) -> str:
+    if old not in base:
+        raise SystemExit(f"workflow fixture cannot locate {old!r}")
+    return base.replace(old, new, 1)
+
 def in_stable(old: str, new: str) -> str:
     before, after = base.split(stable_name, 1)
     if after.count(old) < 1:
@@ -192,6 +197,28 @@ fixtures = {
         "        if: always() && env.GHOST_CI_RELEASE_OUTER != ''",
         "        if: success()",
     ),
+    "candidate-seal-disabled.yml": first(
+        "        if: vars.GHOST_RELEASE_REPOSITORY != ''",
+        "        if: false",
+    ),
+    "candidate-upload-disabled.yml": once(
+        (
+            "      - name: Upload sealed public candidate\n"
+            "        if: vars.GHOST_RELEASE_REPOSITORY != ''"
+        ),
+        (
+            "      - name: Upload sealed public candidate\n"
+            "        if: false"
+        ),
+    ),
+    "candidate-input-authority.yml": first(
+        "        if: vars.GHOST_RELEASE_REPOSITORY != ''",
+        "        if: inputs.destination_repository != ''",
+    ),
+    "stable-optional.yml": once(
+        stable_name,
+        stable_name + "\n        if: vars.GHOST_RELEASE_REPOSITORY != ''",
+    ),
     "uses-ref.yml": once(
         "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
         "actions/checkout@main",
@@ -268,6 +295,8 @@ for invalid in \
   env-leak.yml working-directory.yml continue.yml uses-ref.yml with.yml job-env.yml \
   artifact-attempt.yml \
   job-defaults.yml duplicate-key.yml anchor.yml unknown-key.yml condition.yml \
+  candidate-seal-disabled.yml candidate-upload-disabled.yml \
+  candidate-input-authority.yml stable-optional.yml \
   order.yml release-trigger.yml branch-trigger.yml tag-trigger.yml \
   write-permission.yml release-job.yml literal-decoy.yml; do
   if python "$ownership_checker" "$work/$invalid" > /dev/null 2>&1; then

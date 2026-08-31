@@ -12,7 +12,6 @@ script_dir="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 # shellcheck source=ci-release-paths.sh
 source "$script_dir/ci-release-paths.sh"
 ghost_ci_validate_release_paths
-: "${GHOST_RELEASE_REPOSITORY:?GHOST_RELEASE_REPOSITORY=owner/repository is required}"
 
 source_tree="$workspace/packaging/arch/src/ghost"
 release_out="$GHOST_CI_RELEASE_OUT"
@@ -57,6 +56,14 @@ GHOST_RELEASE_WORK_ROOT="$release_work" \
   bash "$source_tree/packaging/release/smoke-runtime-source.sh" \
     "$release_out/$runtime" "$source_tree" "$version" x86_64 \
       "$commit" "$epoch"
+
+# Ordinary push/PR CI proves the destination-independent source and runtime
+# even while the prospective public repository is deliberately unconfigured.
+# A configured destination makes the complete render/candidate path mandatory.
+if [[ -z "${GHOST_RELEASE_REPOSITORY:-}" ]]; then
+  printf 'Public release repository is unconfigured; verified source and runtime only.\n'
+  exit 0
+fi
 
 source_sha="$(sha256sum "$source_archive" | cut -d' ' -f1)"
 runtime_sha="$(sha256sum "$release_out/$runtime" | cut -d' ' -f1)"

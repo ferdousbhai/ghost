@@ -90,8 +90,11 @@ services at a time.
 
 ## Public candidate
 
-The Arch workflow places the publishable subset in
-`$GHOST_CI_RELEASE_OUT/public-candidate`. The canonical interface is
+When the repository-level `GHOST_RELEASE_REPOSITORY` variable is configured,
+the Arch workflow places the publishable subset in
+`$GHOST_CI_RELEASE_OUT/public-candidate`. Without that variable, ordinary CI
+still verifies the deterministic source and runtime but creates and uploads no
+destination-bound candidate. The canonical interface is
 `public-candidate-interface.json`; creation and verification are handled by
 `public-candidate.py`. Its exact inventory is:
 

@@ -71,6 +71,19 @@ fixtures = {
         "          CONFIGURED_REPOSITORY: ${{ needs.candidate.outputs.destination }}",
         "          CONFIGURED_REPOSITORY: ${{ vars.GHOST_RELEASE_REPOSITORY }}",
     ),
+    "input-only-destination.yml": once(
+        source,
+        "          CONFIGURED_REPOSITORY: ${{ vars.GHOST_RELEASE_REPOSITORY }}",
+        "          CONFIGURED_REPOSITORY: ${{ inputs.destination_repository }}",
+    ),
+    "optional-destination.yml": once(
+        source,
+        "          CONFIGURED_REPOSITORY: ${{ vars.GHOST_RELEASE_REPOSITORY }}",
+        (
+            "          CONFIGURED_REPOSITORY: "
+            "${{ vars.GHOST_RELEASE_REPOSITORY || inputs.destination_repository }}"
+        ),
+    ),
     "unprotected.yml": once(
         source,
         "    environment: public-release",

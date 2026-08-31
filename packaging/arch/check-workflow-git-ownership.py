@@ -13,7 +13,7 @@ import yaml
 from yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
 from yaml.tokens import AliasToken, AnchorToken
 
-PACKAGE_SHA256 = "c2d7c0a8d84288b917a9ab155900245253892c519c7fca130c8f4614a2db55de"
+PACKAGE_SHA256 = "da503753065996cd8e29062894dc2fe85188bcfa81879641fdc60dc6d5be7703"
 EXPECTED_STEP_NAMES = [
     "Update package database and install checkout dependency",
     None,
@@ -36,6 +36,12 @@ EXPECTED_USES = {
     13: "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
 }
 EXPECTED_WORKING_DIRECTORIES = {4: "packages/desktop-helper"}
+CANDIDATE_CONDITION = "vars.GHOST_RELEASE_REPOSITORY != ''"
+EXPECTED_CONDITIONS = {
+    12: CANDIDATE_CONDITION,
+    13: CANDIDATE_CONDITION,
+    14: "always() && env.GHOST_CI_RELEASE_OUTER != ''",
+}
 JOB_KEYS = {"runs-on", "container", "steps"}
 STEP_KEYS = {
     "name",
@@ -200,7 +206,12 @@ def structural_errors(text: str) -> list[str]:
         if name != EXPECTED_STEP_NAMES[index]:
             errors.append(f"package step {index} name/order changed")
         if index in EXPECTED_USES:
-            if set(step) - {"name", "uses", "with"}:
+            expected_keys = {"uses", "with"}
+            if EXPECTED_STEP_NAMES[index] is not None:
+                expected_keys.add("name")
+            if index in EXPECTED_CONDITIONS:
+                expected_keys.add("if")
+            if set(step) != expected_keys:
                 errors.append(f"uses step {index} has shell-only or control keys")
             if scalar(step.get("uses"), f"uses step {index}") != EXPECTED_USES[index]:
                 errors.append(f"uses ref changed at package step {index}")
@@ -246,6 +257,16 @@ def structural_errors(text: str) -> list[str]:
             errors.append(f"package step {index} working-directory changed")
         if "continue-on-error" in step:
             errors.append(f"package step {index} sets forbidden continue-on-error")
+        expected_condition = EXPECTED_CONDITIONS.get(index)
+        condition = step.get("if")
+        if expected_condition is None:
+            if condition is not None:
+                errors.append(f"package step {index} gained an unexpected condition")
+        elif (
+            not isinstance(condition, ScalarNode)
+            or condition.value != expected_condition
+        ):
+            errors.append(f"package step {index} condition changed")
 
     digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
     if digest != PACKAGE_SHA256:

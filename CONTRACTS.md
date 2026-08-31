@@ -2538,8 +2538,9 @@ not coupled to that release identity.
 
 ### Public release publication
 
-The successful `arch-package.yml` master-push run uploads one private workflow
-artifact named
+When the repository-level release destination is configured, a successful
+`arch-package.yml` master-push run must upload one private workflow artifact
+named
 `ghost-public-candidate-<source commit>-<validated run attempt>`. Both the
 validation and publication jobs download that exact run ID, source commit, and
 run-attempt-qualified artifact; another attempt of the same run is a different
@@ -2548,6 +2549,15 @@ archive and its checksum, `RELEASE-METADATA.json`, `SHA256SUMS`, and an optional
 `SHA256SUMS.sig`, as defined by `ghost-release-candidate/v1`. Omarchy package
 submission is a separate owner/maintainer action and is never performed by this
 workflow.
+
+While `GHOST_RELEASE_REPOSITORY` is absent, ordinary push and pull-request CI
+still build and verify the deterministic sanitized source and v3 runtime, but
+must not render a destination-bound package, create a public candidate, seal
+one, or upload one. Once the variable is nonempty, that complete candidate path
+is mandatory and any invalid destination or candidate failure fails the job;
+the condition cannot be supplied by a dispatch input. The manual release
+workflow never has an unconfigured mode: it requires the repository-level
+value and exact source-run artifact before validation, staging, or publication.
 
 `GHOST_RELEASE_REPOSITORY` is a required repository-level, non-secret
 `owner/name` variable with no built-in destination. The optional dispatch
