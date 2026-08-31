@@ -5955,6 +5955,7 @@ describe("conversation branching", () => {
   ) {
     temp = makeTempGhosts();
     provider = await startMockProvider({ script: [{ kind: "text", text: "A branch-aware answer." }] });
+    const scheduleCommands: string[][] = [];
     seedGhost(temp.root, {
       name: "casper",
       provider: { baseUrl: provider.url, modelId: provider.modelId },
@@ -5963,6 +5964,10 @@ describe("conversation branching", () => {
       registry: temp.registry,
       ownerHome: temp.ownerHome,
       offline: true,
+      scheduleCommandRunner: async (args) => {
+        scheduleCommands.push([...args]);
+        return { stdout: "", stderr: "", code: 0 };
+      },
       ...(projectBindingsFactory ? { projectBindings: projectBindingsFactory(temp) } : {}),
       ...options,
       title: title === null
@@ -5980,7 +5985,10 @@ describe("conversation branching", () => {
       emit: () => {},
     });
     const original = await host.readTranscript("casper", "conv-tree");
-    return { firstUser: original.messages.find((message) => message.role === "user")! };
+    return {
+      firstUser: original.messages.find((message) => message.role === "user")!,
+      scheduleCommands,
+    };
   }
 
   it("copies the conversation, rewinds the copy, and leaves the source untouched", async () => {
@@ -6026,7 +6034,7 @@ describe("conversation branching", () => {
     async (move) => {
       const readEntered = Promise.withResolvers<void>();
       const releaseRead = Promise.withResolvers<void>();
-      const { firstUser } = await seedBranchable("Weekend trip", undefined, {
+      const { firstUser, scheduleCommands } = await seedBranchable("Weekend trip", undefined, {
         conversationFileProbe: async (operation) => {
           if (operation !== "fork-read") return;
           readEntered.resolve();
@@ -6077,6 +6085,10 @@ describe("conversation branching", () => {
       if (move === "rename") {
         expect((await host!.listSessions("wisp")).map((row) => row.id)).toContain(forked.id);
       }
+      expect(scheduleCommands.map((args) => args[1])).toEqual([
+        "list-units",
+        "list-unit-files",
+      ]);
     },
   );
 
