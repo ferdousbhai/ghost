@@ -134,7 +134,7 @@ FloatingWindow {
     minimumSize: Qt.size(568, 360)
 
     function showSection(section: string): void {
-        if (["chat", "memory", "commands", "hooks", "mcp", "connect", "remote", "character"]
+        if (["chat", "memory", "commands", "delegation", "hooks", "mcp", "connect", "remote", "character"]
                 .indexOf(section) < 0)
             return;
         hud.loginOpen = false;
@@ -145,6 +145,9 @@ FloatingWindow {
             composer.take();
         } else if (section === "commands") {
             Ghostd.fetchCommands(false);
+        } else if (section === "delegation") {
+            Ghostd.fetchNativeHarnesses(false);
+            Ghostd.fetchDelegatedTasks(false);
         } else if (section === "hooks") {
             Ghostd.fetchHooks(false);
         } else if (section === "mcp") {
@@ -1104,6 +1107,15 @@ FloatingWindow {
                     hud.currentSection = "chat";
                     composer.stageCommand(invocation);
                 }
+            }
+
+            DelegationBrowser {
+                id: delegationBrowser
+                visible: hud.currentSection === "delegation"
+                    && !hud.loginOpen && !hud.switcherOpen
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                onChatRequested: hud.showSection("chat")
             }
 
             // Machine-level hook configuration is global: built-in hooks are

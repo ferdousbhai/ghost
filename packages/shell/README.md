@@ -107,6 +107,14 @@ plan mode or the approved plan, read-only todo phases, and background jobs with
 cancellation and bounded output disclosure. It disappears when all three are
 empty and polls running jobs only while the HUD is visible.
 
+The `Delegation` destination supervises conversation-scoped native Pi, Codex,
+and Claude Code coding workers without replacing Ghost's owner-agent surfaces.
+It shows public availability plus bounded task progress and terminal results,
+and permits a new assignment only from the current trusted project. Running
+work can receive a follow-up or be cancelled. There is no HUD-side provider
+policy, arbitrary cwd, raw protocol/error view, wait/resume state, or synthetic
+Git workspace lifecycle.
+
 A project bound before the first owner turn is still an unpublished draft. The
 shell keeps that runtime-qualified identity selected while it asks ghostd to
 abandon the draft before New conversation, another ghost, or another stored
@@ -149,8 +157,8 @@ so a reload does not resurrect what streaming set aside.
 
 The restored 64px rail at the right edge is the successor to summon-ghost's
 final `AppSideNav` (`4852804cf4e09ca50c16e08e6106c06df82e2a94`): Chat,
-Character, Memory, Commands, Hooks, MCP, Remote, and Phone access stay reachable
-without covering the content.
+Character, Memory, Commands, Delegation, Hooks, MCP, Remote, and Phone access
+stay reachable without covering the content.
 
 The ghost-scoped context response remains derived rather than persisted. It
 contains character and read-only atomic memory; phase one exposes no runnable

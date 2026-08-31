@@ -593,6 +593,24 @@ adapter, storage, and catalogue failures use the daemon's generic error
 envelope; raw stderr, protocol, environment, credentials, and provider error
 text never cross the wire.
 
+The HUD exposes this boundary as one additive `Delegation` destination; it does
+not replace chat, planning/todo, queue, recap, titles, branches, or any other
+principal Ghost surface. The machine-wide catalogue renders only harness,
+availability, and signed-in/logged-out/unknown state. Task state is stamped to
+the exact active ghost and runtime-qualified conversation: selection changes
+retire stale list, detail, and mutation requests before their response can be
+adopted. Creation is enabled only when that same conversation has a current
+non-null trusted project binding, and it sends the binding's exact cwd; the HUD
+cannot create from unbound Home context or type an arbitrary cwd. It shows the
+bounded assignment preview, cwd, state, recent structured events, and result
+preview. It never renders task error messages, daemon/native error detail,
+stderr, protocol/tool payloads, environment, executable/version/account data,
+or project-binding identities. Follow-up exists only for `running`; cancel
+exists only for nonterminal work and resolves to the daemon's confirmed state.
+All terminal states remain inspectable. There is no wait, resume, install,
+login, Git workspace, or task-mutation concept beyond the authenticated routes
+above.
+
 Graceful daemon shutdown closes admission and synchronously begins task
 shutdown before session/store teardown. Forced shutdown reuses the same
 idempotent native control cleanup and does not return from its terminal stage

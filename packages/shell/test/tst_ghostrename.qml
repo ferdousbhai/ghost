@@ -20,6 +20,7 @@ TestCase {
             greetingGhost: "Casper",
             loginGhost: "Casper",
             commandsGhost: "Casper",
+            delegatedTasksGhost: "Casper",
             projectGhost: "Casper",
             mcpGhost: "Casper",
             liveGhost: "Casper",
@@ -71,7 +72,7 @@ TestCase {
         compare(renamed.commandTurnKey, "Spooky\ncasper-chat");
         compare(renamed.ghosts[0].dir, "/tmp/ghosts/Spooky");
         for (const owner of [
-            "greetingGhost", "loginGhost", "commandsGhost", "mcpGhost",
+            "greetingGhost", "loginGhost", "commandsGhost", "delegatedTasksGhost", "mcpGhost",
             "projectGhost", "liveGhost", "collabGhost", "activeGhost", "memoryGhost"
         ]) compare(renamed[owner], "Spooky");
     }
