@@ -15,6 +15,59 @@ afterEach(async () => {
 });
 
 describe("SSE turn lifecycle", () => {
+  it("flushes accepted stream headers before a silent turn produces an event", async () => {
+    temp = makeTempGhosts();
+    temp.registry.ensureRoot();
+    seedGhost(temp.root, { name: "casper" });
+    let finishTurn = () => {};
+    const turnFinished = new Promise<void>((resolve) => {
+      finishTurn = resolve;
+    });
+    const host = {
+      async admitTurn() {
+        return {
+          async run() {
+            await turnFinished;
+          },
+          release() {},
+        };
+      },
+    } as unknown as SessionHost;
+    listening = await startDaemonServer({
+      registry: temp.registry,
+      host,
+      port: 0,
+      apiToken: null,
+    });
+
+    const opening = new AbortController();
+    const timer = setTimeout(() => opening.abort(), 1_000);
+    let response: Response;
+    try {
+      response = await globalThis.fetch(
+        `http://127.0.0.1:${listening.port}/api/ghosts/casper/messages`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json", accept: "text/event-stream" },
+          body: JSON.stringify({
+            context: { messages: [{ role: "user", content: "hello" }] },
+            options: { sessionId: "silent-turn" },
+          }),
+          signal: opening.signal,
+        },
+      );
+    } finally {
+      clearTimeout(timer);
+      finishTurn();
+    }
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("text/event-stream");
+    expect(parseSseStream(await response.text())).toEqual([
+      expect.objectContaining({ type: "error", reason: "error" }),
+    ]);
+  });
+
   it("adds an error terminal when a runtime ends without done or error", async () => {
     temp = makeTempGhosts();
     temp.registry.ensureRoot();

@@ -1405,6 +1405,7 @@ export function createDaemonServer(options: ServerOptions): Server {
 
     const connection = abortOnClose(request, response);
     response.writeHead(200, { ...SSE_HEADERS, "x-ghost-turn-id": turnId });
+    response.write(SSE_KEEPALIVE_COMMENT);
     // A turn can idle behind a slow model; keep the connection warm. Ghost's
     // in-repo SSE parsers skip frames without a `data:` line, so a comment costs
     // nothing on the far end.
