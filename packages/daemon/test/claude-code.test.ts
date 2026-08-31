@@ -36,6 +36,7 @@ import {
   CLAUDE_SESSION_METADATA_MAX_BYTES,
   CLAUDE_CODE_TOOL_CAPABILITIES,
   ClaudeCodeProbe,
+  CLAUDE_CODE_PROBE_TTL_MS,
   readClaudeSessionMetadataFile,
   type ClaudeCodeQueryInput,
 } from "../src/claude-code.js";
@@ -981,6 +982,66 @@ describe("Claude Code subscription runtime", () => {
     });
     expect(lifecycle.queries).toBe(2);
     expect(JSON.stringify(seenOptions[1]?.systemPrompt)).toContain("bookbinder");
+  });
+
+  it("keeps one warm query per conversation and retires only the one closed", async () => {
+    const { seenOptions, lifecycle } = setupClaudeHost();
+    const turn = (sessionId: string) => host!.runTurn("casper", {
+      sessionId,
+      prompt: "hello",
+      emit: () => {},
+    });
+
+    await turn("conversation-a");
+    await turn("conversation-b");
+    // Two conversations, two live processes; neither rides the other's.
+    expect(lifecycle.queries).toBe(2);
+    expect(seenOptions[0]?.sessionId).not.toBe(seenOptions[1]?.sessionId);
+
+    await turn("conversation-a");
+    await turn("conversation-b");
+    expect(lifecycle.queries).toBe(2);
+
+    await host!.close("casper", "conversation-a");
+
+    // The untouched conversation keeps its process; the closed one starts a
+    // new query and resumes from its sidecar.
+    await turn("conversation-b");
+    expect(lifecycle.queries).toBe(2);
+    await turn("conversation-a");
+    expect(lifecycle.queries).toBe(3);
+    expect(seenOptions[2]?.resume).toBeDefined();
+  });
+
+  it("retires a warm query when the Claude executable underneath it changes", async () => {
+    let binaryPath = "/usr/bin/claude-old";
+    let clock = 0;
+    const { seenOptions, lifecycle } = setupClaudeHost({
+      probe: new ClaudeCodeProbe({
+        // The probe caches its resolution; step the clock past that window so
+        // the second turn observes the machine as it now is.
+        now: () => clock,
+        resolveExecutable: async () => binaryPath,
+        readAuthStatus: async () => ({ loggedIn: true, authMethod: "claude.ai" }),
+      }),
+    });
+    const turn = (prompt: string) => host!.runTurn("casper", {
+      sessionId: "conversation-binary",
+      prompt,
+      emit: () => {},
+    });
+
+    await turn("first");
+    expect(lifecycle.queries).toBe(1);
+    expect(seenOptions[0]?.pathToClaudeCodeExecutable).toBe("/usr/bin/claude-old");
+
+    // The executable is fixed at query construction like everything else in the
+    // identity, so an update must not keep being served by the old process.
+    binaryPath = "/usr/bin/claude-new";
+    clock += CLAUDE_CODE_PROBE_TTL_MS + 1;
+    await turn("second");
+    expect(lifecycle.queries).toBe(2);
+    expect(seenOptions[1]?.pathToClaudeCodeExecutable).toBe("/usr/bin/claude-new");
   });
 
   it("retires a warm query whose persona changed rather than answering under a stale one", async () => {

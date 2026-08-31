@@ -1608,6 +1608,7 @@ interface ClaudeSessionPersona {
  * here too, or a stale query would silently answer under the old value.
  */
 function warmQueryIdentity(input: {
+  binaryPath: string;
   cwd: string;
   modelId: string;
   systemPrompt: string;
@@ -1615,6 +1616,7 @@ function warmQueryIdentity(input: {
   projectMcpServers: Record<string, ClaudeMcpServerConfig>;
 }): string {
   return JSON.stringify([
+    input.binaryPath,
     input.cwd,
     input.modelId,
     input.systemPrompt,
@@ -2019,6 +2021,7 @@ export class ClaudeCodeRuntime {
       let stopHookActive = false;
       let continuationCount = 0;
       const identity = warmQueryIdentity({
+        binaryPath,
         cwd: runtimeCwd,
         modelId,
         systemPrompt,
