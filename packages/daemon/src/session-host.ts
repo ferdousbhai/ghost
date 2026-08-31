@@ -119,6 +119,7 @@ import {
   PresentationHistoryStore,
   presentationHistoryPath,
   type PresentationHistoryInitialization,
+  type PresentationHistoryV1,
 } from "./presentation-history.js";
 import {
   conversationIdentity,
@@ -1086,6 +1087,7 @@ export interface TranscriptMessage {
   content: unknown;
   timestamp?: number;
   entryId: string;
+  contentTruncated?: true;
 }
 
 export type AskSettlement = "submitted" | "cancelled" | "timedOut" | "chat";
@@ -1118,11 +1120,12 @@ function askSettlement(details: AskToolDetails | null | undefined): AskSettlemen
 export interface Transcript {
   id: string;
   conversationId: string;
-  runtime: "pi";
+  runtime: ConversationRuntime;
   title: string | null;
   messages: TranscriptMessage[];
   total: number;
   truncated: boolean;
+  historyTruncated: boolean;
 }
 
 export const DEFAULT_TRANSCRIPT_LIMIT = 1_000;
@@ -5310,10 +5313,35 @@ export class SessionHost {
     options: { limit?: number; offset?: number } = {},
     runtime: ConversationRuntime = "pi",
   ): Promise<Transcript> {
-    assertPiConversation(runtime, "Transcript reading");
     const ghost = this.registry.get(ghostName);
     const paths = ghostPaths(ghost.dir);
     const id = conversationId ?? DEFAULT_SESSION_KEY;
+    if (await transactionMarkerEntryExists(
+      deleteTransactionPath(paths.sessionDir, runtime, id),
+    )) {
+      throw new GhostError(
+        "session_deleting",
+        "Wait for this conversation to finish deleting before reading it.",
+        409,
+      );
+    }
+    if (runtime === "claude-code") {
+      const native = (await this.claudeCode.listSessions(ghost)).find((session) =>
+        session.conversationId === id
+      );
+      if (!native) {
+        throw new GhostError(
+          "not_found",
+          `This ghost has no conversation ${JSON.stringify(id)}.`,
+          404,
+        );
+      }
+      const presentation = await this.presentationHistory.read(
+        paths.sessionDir,
+        { runtime, conversationId: id },
+      );
+      return this.transcriptFromPresentation(id, presentation, options);
+    }
     const path = join(paths.sessionDir, sessionFileNameFor(id));
     if (!existsSync(path)) {
       throw new GhostError(
@@ -5332,6 +5360,44 @@ export class SessionHost {
     const manager = SessionManager.open(path, paths.sessionDir, project.cwd);
     const toolCwds = await readToolCwds(paths.sessionDir, id);
     return this.transcriptFromManager(id, manager, options, toolCwds);
+  }
+
+  private transcriptFromPresentation(
+    id: string,
+    presentation: PresentationHistoryV1 | null,
+    options: { limit?: number; offset?: number } = {},
+  ): Transcript {
+    const all = presentation?.turns.flatMap((turn): TranscriptMessage[] => {
+      const timestamp = Date.parse(turn.settledAt);
+      return [
+        {
+          role: "user",
+          content: [{ type: "text", text: turn.ownerText }],
+          timestamp,
+          entryId: `presentation:${turn.sequence}:owner`,
+          ...(turn.ownerTextTruncated ? { contentTruncated: true } : {}),
+        },
+        {
+          role: "assistant",
+          content: [{ type: "text", text: turn.assistantText }],
+          timestamp,
+          entryId: `presentation:${turn.sequence}:assistant`,
+          ...(turn.assistantTextTruncated ? { contentTruncated: true } : {}),
+        },
+      ];
+    }) ?? [];
+    const total = all.length;
+    const limit = clampTranscriptLimit(options.limit);
+    const offset = Math.min(clampTranscriptOffset(options.offset), total);
+    const messages = all.slice(offset, offset + limit);
+    return {
+      ...conversationIdentity("claude-code", id),
+      title: presentation?.title?.value ?? "Claude Code",
+      messages,
+      total,
+      truncated: offset > 0 || offset + messages.length < total,
+      historyTruncated: presentation?.historyPrefixOmitted ?? true,
+    };
   }
 
   private transcriptFromManager(
@@ -5369,6 +5435,7 @@ export class SessionHost {
       messages,
       total,
       truncated: offset > 0 || offset + messages.length < total,
+      historyTruncated: false,
     };
   }
 

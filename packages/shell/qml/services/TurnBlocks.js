@@ -102,22 +102,22 @@ function partsOf(message) {
 /**
  * Regroup a stored conversation into the rows the live stream would have made.
  *
- * Storage gives a turn one message per content block — the Claude Code runtime
- * puts every tool call in a message of its own — so a restored answer would
- * otherwise scatter across five rows, with each preamble severed from the tool
- * call that made it one.
+ * Older storage projections may give one turn several consecutive assistant
+ * messages. Regrouping keeps a restored answer in one row and keeps each
+ * preamble beside the tool call that made it one.
  *
  * A row with no text survives when it still holds a tool call. A restored
  * `ask`, for example, may be a lone tool-call part whose question and outcome
  * still belong in the transcript.
  *
- * Returns `[{ role, text, parts, entryId }]`; `parts` is the row's ordered
- * content, for a caller that recovers tool cards from it.
+ * Returns `[{ role, text, parts, entryId, contentTruncated }]`; `parts` is the
+ * row's ordered content, for a caller that recovers tool cards from it.
  */
 function rows(messages) {
     var out = [];
     var parts = [];
     var head = null;
+    var contentTruncated = false;
 
     function commit() {
         if (head === null) return;
@@ -130,11 +130,13 @@ function rows(messages) {
                 role: "assistant",
                 text: text,
                 parts: parts,
-                entryId: typeof head.entryId === "string" ? head.entryId : ""
+                entryId: typeof head.entryId === "string" ? head.entryId : "",
+                contentTruncated: contentTruncated
             });
         }
         parts = [];
         head = null;
+        contentTruncated = false;
     }
 
     for (var i = 0; i < (messages || []).length; i++) {
@@ -142,6 +144,7 @@ function rows(messages) {
         if (!message) continue;
         if (message.role === "assistant") {
             if (head === null) head = message;
+            if (message.contentTruncated === true) contentTruncated = true;
             // push.apply, not concat: a restored turn is one message per tool
             // call, and concat copies the whole accumulator each time.
             Array.prototype.push.apply(parts, partsOf(message));
@@ -156,7 +159,8 @@ function rows(messages) {
             role: "user",
             text: prompt,
             parts: userParts,
-            entryId: typeof message.entryId === "string" ? message.entryId : ""
+            entryId: typeof message.entryId === "string" ? message.entryId : "",
+            contentTruncated: message.contentTruncated === true
         });
     }
     commit();

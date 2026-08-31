@@ -1483,16 +1483,29 @@ streams emit one complete event object per line.
   until that prompt settles. The host is conversation-scoped and is stopped
   when that session closes. Claude Code returns `409 not_supported`.
 - `GET  /api/ghosts/:name/sessions/:id/transcript` → `{ id, conversationId,
-  runtime, title, messages, total, truncated }` — a past conversation's history
-  so the shell can rehydrate
-  it (issue #26). `messages` are pi's `{ role, content }` messages (user and
-  assistant only; private `thinking` reasoning and internal tool-result messages
-  are dropped, exactly as the live stream omits them), the same shape a
-  pi-messages client renders. Paged with `?limit` (default 1000, max 2000) and
-  `?offset`; `total` is the full renderable count and `truncated` is true when a
-  page omits messages. Each message carries its opaque persisted `entryId` so a
-  client can validate page assembly; Pi's parent graph is runtime-internal and
-  is not exposed on this presentation API. Ask tool calls carry
+  runtime, title, messages, total, truncated, historyTruncated }` — a past
+  conversation's history so the shell can rehydrate
+  it (issue #26). Both principal runtimes use the same response and pagination.
+  `truncated` means only that the requested page omitted messages;
+  `historyTruncated` separately means older presentation history is unavailable
+  because bounded retention dropped it or a pre-journal Claude Code prefix was
+  never imported. A legacy Claude sidecar with no presentation records is
+  therefore a successful empty transcript with `historyTruncated:true`, not a
+  fabricated import from `~/.claude` and not an unsupported route.
+
+  Pi continues to project its richer native transcript, preserving user and
+  assistant messages while dropping private `thinking` reasoning and internal
+  tool-result messages exactly as the live stream does. Each Pi message carries
+  its opaque persisted `entryId`; Pi's parent graph is runtime-internal and is
+  not exposed. Claude Code projects each retained journal turn as one owner and
+  one final-assistant message with deterministic Ghost presentation ids. It
+  does not reconstruct tool activity or intermediate harness turns from native
+  storage. A journal message whose bounded text was shortened carries
+  `contentTruncated:true`. The HUD makes both per-message truncation and an
+  unavailable history prefix visible. Paged with `?limit` (default 1000, max
+  2000) and `?offset`; `total` is the full renderable count.
+
+  Pi ask tool calls carry
   `ghostAsk` with `settled: "submitted" | "cancelled" | "timedOut" | "chat"`,
   always present and derived from the persisted tool result, so a restored ask
   card states how that question actually closed rather than assuming an answer.
@@ -1523,9 +1536,9 @@ streams emit one complete event object per line.
   terminal observation drives the same flush before conversation invalidation,
   and every session close retries any remaining dirty revision; per-HTTP
   adapters do not record a duplicate cwd.
-  `404 not_found` for an unknown conversation id. Only pi
-  conversations are readable here; a Claude Code conversation's transcript lives
-  in that runtime's own storage.
+  `404 not_found` for an unknown runtime-qualified conversation id. A
+  presentation file by itself does not make a missing native Pi transcript or
+  Claude resume sidecar readable.
 - `GET /api/ghosts/:name/sessions/:id/ask` → `{ ask }`, where `ask` is the
   currently pending `ask` interaction or `null`. A pending ask carries `timeoutAt`
   when one is armed.

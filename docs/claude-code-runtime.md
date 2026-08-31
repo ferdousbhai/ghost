@@ -163,7 +163,13 @@ the HUD cannot race a replacement owner message into a still-busy Claude turn.
 Claude owns the actual transcript under its normal `~/.claude/projects/`
 storage. Ghost stores a `0600` metadata sidecar in `<ghost>/sessions/` so a
 conversation can resume after daemon restart and can appear in the existing
-session list. Every version requires exact canonical ISO `created` and
+session list. Separately, Ghost records a bounded `0600` presentation journal
+of the owner's prompt and the final settled assistant response. That journal is
+only for the shared HUD transcript: it never resumes Claude and never imports
+Claude's tool activity or intermediate turns. A sidecar that predates the
+journal reads as an empty presentation history with an explicit unavailable
+prefix rather than a fabricated native-history import. Every metadata sidecar
+version requires exact canonical ISO `created` and
 `modified` timestamps and rejects invalid or noncanonical values before
 maintenance reservation or probing Claude. Version 3 records the actual runtime cwd and the exact bounded
 first-turn project declarative/MCP snapshot beside the opaque resume id. Every
@@ -175,8 +181,8 @@ may promote after a successful unbound turn, while a bound legacy sidecar fails
 closed and requires a new conversation. This is an explicit
 exception to “the ghost directory is the whole backup”: backing up only the
 ghost home does not back up Claude's own transcript. We do not copy that
-transcript because doing so would couple Ghost to Claude Code's private storage
-format.
+full transcript because doing so would couple Ghost to Claude Code's private
+storage format; the presentation journal is deliberately not runtime state.
 
 A new conversation must choose its trusted project before its first owner
 turn. The daemon scans and validates that project's declarative/MCP snapshot

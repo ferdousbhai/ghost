@@ -56,7 +56,8 @@ TestCase {
         return result;
     }
 
-    function page(state: var, rows: var, total: int, truncated: bool): var {
+    function page(state: var, rows: var, total: int, truncated: bool,
+            historyTruncated: bool): var {
         return {
             id: state.sessionId,
             conversationId: state.conversationId,
@@ -64,7 +65,8 @@ TestCase {
             title: null,
             messages: rows,
             total: total,
-            truncated: truncated
+            truncated: truncated,
+            historyTruncated: historyTruncated === true
         };
     }
 
@@ -159,6 +161,38 @@ TestCase {
         compare(requests.length, 1);
         compare(state.rows.length, 0);
         compare(Ghostd.transcript.count, 0);
+        verify(!Ghostd.transcriptHistoryTruncated);
+    }
+
+    function test_historyMarkerIsRequiredAndProjected(): void {
+        const state = activeState("legacy-claude");
+        Ghostd.loadConversationTranscript(state, false);
+        const missingMarker = page(state, [], 0, false, false);
+        delete missingMarker.historyTruncated;
+        requests[0].complete(200, missingMarker);
+        compare(Ghostd.sessionsError, "ghostd sent an inconsistent transcript page");
+
+        requests = [];
+        Ghostd.sessionsError = "";
+        Ghostd.loadConversationTranscript(state, false);
+        requests[0].complete(200, page(state, [], 0, false, true));
+        verify(state.historyTruncated);
+        verify(Ghostd.transcriptHistoryTruncated);
+    }
+
+    function test_savedTextTruncationIsVisibleAfterRehydration(): void {
+        const state = activeState("bounded");
+        Ghostd.loadConversationTranscript(state, false);
+        requests[0].complete(200, page(state, [{
+            role: "user",
+            content: "bounded text",
+            contentTruncated: true,
+            entryId: "bounded-owner"
+        }], 1, false, false));
+
+        compare(state.rows.length, 1);
+        compare(state.rows[0].text,
+            "bounded text\n\n*[Saved message truncated]*");
     }
 
     function test_open404IsAnHonestEmptyTranscript(): void {

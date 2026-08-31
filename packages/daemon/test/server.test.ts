@@ -1827,8 +1827,14 @@ describe("GET /api/ghosts/:name/sessions", () => {
     const claudeTranscript = await fetch(
       `${base}/api/ghosts/casper/sessions/${encodeURIComponent("claude-code:default")}/transcript`,
     );
-    expect(claudeTranscript.status).toBe(409);
-    expect(await claudeTranscript.json()).toMatchObject({ error: { code: "not_supported" } });
+    expect(claudeTranscript.status).toBe(200);
+    expect(await claudeTranscript.json()).toMatchObject({
+      id: "claude-code:default",
+      runtime: "claude-code",
+      messages: [],
+      total: 0,
+      historyTruncated: true,
+    });
 
     expect((await fetch(
       `${base}/api/ghosts/casper/sessions/${encodeURIComponent("claude-code:default")}/pin`,

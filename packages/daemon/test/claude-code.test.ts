@@ -2547,6 +2547,29 @@ describe("Claude Code subscription runtime", () => {
       lastSourceOrdinal: 1,
       turns: [{ ownerText: "Keep the source exact.", assistantText: "Hello from the plan." }],
     });
+    await expect(host!.readTranscript(
+      "casper",
+      "conversation-maintenance-source",
+      {},
+      "claude-code",
+    )).resolves.toMatchObject({
+      id: "claude-code:conversation-maintenance-source",
+      runtime: "claude-code",
+      historyTruncated: false,
+      total: 2,
+      messages: [
+        {
+          role: "user",
+          content: [{ type: "text", text: "Keep the source exact." }],
+          entryId: "presentation:1:owner",
+        },
+        {
+          role: "assistant",
+          content: [{ type: "text", text: "Hello from the plan." }],
+          entryId: "presentation:1:assistant",
+        },
+      ],
+    });
     expect(releases).toBe(0);
     expect(events.at(-1)?.type).not.toBe("done");
     await expect(host!.runTurn("casper", {

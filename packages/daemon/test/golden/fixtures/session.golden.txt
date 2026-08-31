@@ -298,6 +298,7 @@ write               registry=yes  wire=yes  invokable=yes
 ------------------------------------------------------------------------------
 {
   "conversationId": "conv-golden",
+  "historyTruncated": false,
   "id": "pi:conv-golden",
   "messages": [
     {
