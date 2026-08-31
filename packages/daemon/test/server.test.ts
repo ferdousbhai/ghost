@@ -306,7 +306,7 @@ describe("task lifecycle routes", () => {
     const response = await fetch(`${base}/api/ghosts/casper/sessions/${piSegment("conv-1")}/tasks`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ harness: "pi", agent: "reviewer", task: "Implement it.", cwd: "/project/packages/app" }),
+      body: JSON.stringify({ harness: "pi", task: "Implement it.", cwd: "/project/packages/app" }),
     });
 
     expect(response.status).toBe(202);
@@ -315,7 +315,6 @@ describe("task lifecycle routes", () => {
       ghostName: "casper",
       parent: { id: "pi:conv-1", conversationId: "conv-1", runtime: "pi" },
       harness: "pi",
-      agent: "reviewer",
       task: "Implement it.",
       cwd: "/project/packages/app",
     });

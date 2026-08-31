@@ -151,7 +151,7 @@ async function call(
 
 describe("principal task tools", () => {
   it("registers the fixed Pi-compatible task surface and returns an asynchronous handle", async () => {
-    const fixture = fakeServices();
+    const fixture = fakeServices([taskView({ harness: "claude-code", agent: "reviewer" })]);
     const extension = await toolsFor(fixture.services);
     expect([...extension.tools]).toEqual(PRINCIPAL_TASK_TOOL_NAMES.map((name) => [
       name,
@@ -170,7 +170,7 @@ describe("principal task tools", () => {
     });
 
     const result = await call(fixture.services, "task", {
-      harness: "codex",
+      harness: "claude-code",
       agent: "reviewer",
       task: "Implement the parser.",
       cwd: "/repo/packages/parser",
@@ -179,7 +179,7 @@ describe("principal task tools", () => {
     expect(fixture.create).toHaveBeenCalledWith({
       ghostName: "casper",
       parent,
-      harness: "codex",
+      harness: "claude-code",
       agent: "reviewer",
       task: "Implement the parser.",
       cwd: "/repo/packages/parser",

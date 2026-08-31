@@ -51,12 +51,12 @@ the same user config, authentication store, project
 `AGENTS.md`, skills, plugins, hooks, rules, MCP servers, and fallback behavior
 that its installed version normally discovers at that cwd.
 
-When `task.agent` is present, Codex app-server has no direct agent selector, so
-Ghost asks the native root Codex agent to delegate to that exact configured
-agent and to fail rather than silently doing the work itself. Codex owns agent
-discovery and execution; Ghost never reads or mirrors the owner's agent files.
-App-server provides no delegation receipt, so the task records this as a
-requested, unverified handoff and accepts the native root thread's outcome.
+Codex app-server has no direct agent selector, so Ghost always sends the
+complete assignment unchanged to Codex's default native agent. If a caller
+supplies `task.agent`, Ghost normalizes it to null and records a visible notice
+instead of converting it into prompt instructions. Codex may still delegate
+internally under its native configuration; Ghost never reads or mirrors the
+owner's agent files.
 
 `GHOST_CODEX_BINARY` may select an absolute executable or a name on the daemon's
 launch-time `PATH`. Ghost preserves the daemon launcher's environment for
@@ -125,14 +125,13 @@ authentication, `~/.pi/agent` settings, project instructions, skills,
 extensions, tools, hooks, sessions, and fallback behavior. `--approve` is Pi's
 native maximum-trust project flag.
 
-Pi core has no direct named-agent selector. When `task.agent` is present,
-Ghost asks the native root Pi agent to use its installed task/subagent
-capability with that exact name and to fail rather than silently doing the work
-itself. The configured extension owns discovery and dispatch; Ghost does not
-ship a replacement registry or bundled Pi task runtime. RPC provides no
-delegation receipt, so Ghost labels the handoff requested and unverified. Full transcripts stay
-in Pi's native store while Ghost retains only bounded task state and the opaque
-native session id.
+Pi core has no direct named-agent selector, so Ghost always sends the complete
+assignment unchanged to Pi's default native agent. If a caller supplies
+`task.agent`, Ghost normalizes it to null and records a visible notice instead
+of converting it into prompt instructions. Pi may still delegate internally
+through its installed configuration; Ghost does not ship a replacement
+registry or bundled Pi task runtime. Full transcripts stay in Pi's native store
+while Ghost retains only bounded task state and the opaque native session id.
 
 Headless RPC cannot complete login, forms, or other TUI-only interactions.
 Follow-ups use native steering, cancellation sends Pi's native abort request,

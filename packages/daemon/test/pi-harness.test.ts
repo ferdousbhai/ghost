@@ -3,10 +3,7 @@ import { PassThrough } from "node:stream";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { describe, expect, it, vi } from "vitest";
 import { conversationIdentity } from "../src/conversation-identity.js";
-import {
-  PiHarnessAdapter,
-  piTaskPrompt,
-} from "../src/pi-harness.js";
+import { PiHarnessAdapter } from "../src/pi-harness.js";
 import type { WorkerTaskRequest } from "../src/tasks.js";
 
 class FakePiChild extends EventEmitter {
@@ -148,20 +145,15 @@ describe("PiHarnessAdapter", () => {
     expect(events.notices).toContainEqual({ type: "output", text: "Implemented." });
   });
 
-  it("asks Pi itself to resolve and invoke an optional native agent", async () => {
+  it("sends the regular task unchanged even if an upstream caller supplies an agent", async () => {
     const child = new FakePiChild();
     const { adapter } = harness(child);
     const events = context();
     const controller = await adapter.start({ ...task, agent: "reviewer" }, events.value);
     const prompt = child.commands.find((command) => command.type === "prompt")?.message;
 
-    expect(prompt).toBe(piTaskPrompt(task.task, "reviewer"));
-    expect(String(prompt)).toContain('"reviewer"');
-    expect(String(prompt)).toContain("Do not perform the assignment in this parent agent");
-    expect(events.notices).toContainEqual({
-      type: "notice",
-      text: 'Pi\'s root agent was asked to delegate to requested native agent "reviewer"; Ghost cannot verify that native delegation occurred.',
-    });
+    expect(prompt).toBe(task.task);
+    expect(events.notices.some((event) => event.text?.includes("reviewer"))).toBe(false);
 
     child.push({
       type: "message_end",

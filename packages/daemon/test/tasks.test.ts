@@ -205,20 +205,20 @@ describe("TaskManager lifecycle", () => {
   });
 
   it("runs tasks without a concurrency cap and persists bounded normalized results", async () => {
-    const controlled = controlledAdapter();
+    const controlled = controlledAdapter("claude-code");
     const { manager, root, cwd } = setup(controlled.adapter);
 
     const first = await manager.create({
       ghostName: "casper",
       parent,
-      harness: "pi",
+      harness: "claude-code",
       agent: "reviewer",
       task: "Implement the parser.",
     });
     const second = await manager.create({
       ghostName: "casper",
       parent,
-      harness: "pi",
+      harness: "claude-code",
       task: "Review the tests.",
     });
     await until(() => controlled.runs.length === 2);
@@ -232,15 +232,15 @@ describe("TaskManager lifecycle", () => {
     });
 
     await controlled.runs[0]!.emit({ type: "output", text: "working\n" });
-    controlled.runs[0]!.resolve("Implemented.", "pi-native-1");
+    controlled.runs[0]!.resolve("Implemented.", "claude-native-1");
     controlled.runs[1]!.resolve("Reviewed.");
 
     await expect(manager.wait("casper", first.id)).resolves.toMatchObject({
       state: "completed",
-      harness: "pi",
+      harness: "claude-code",
       agent: "reviewer",
       result: "Implemented.",
-      nativeSessionId: "pi-native-1",
+      nativeSessionId: "claude-native-1",
       events: expect.arrayContaining([expect.objectContaining({ type: "output", text: "working\n" })]),
     });
     await expect(manager.wait("casper", second.id)).resolves.toMatchObject({
@@ -259,11 +259,43 @@ describe("TaskManager lifecycle", () => {
     const reopened = new TaskManager({ registry: temp!.registry });
     await expect(reopened.get("casper", first.id)).resolves.toMatchObject({
       state: "completed",
-      harness: "pi",
+      harness: "claude-code",
       agent: "reviewer",
       result: "Implemented.",
     });
   });
+
+  it.each(["codex", "pi"] as const)(
+    "normalizes an unsupported %s agent request and runs the default agent",
+    async (harness) => {
+      const controlled = controlledAdapter(harness);
+      const { manager } = setup(controlled.adapter);
+      const task = await manager.create({
+        ghostName: "casper",
+        parent,
+        harness,
+        agent: "reviewer",
+        task: "Review the change.",
+      });
+      const name = harness === "codex" ? "Codex" : "Pi";
+
+      expect(task).toMatchObject({
+        harness,
+        agent: null,
+        events: expect.arrayContaining([expect.objectContaining({
+          type: "notice",
+          text: `Requested native agent "reviewer" was ignored because ${name} has no direct agent selector; its default agent will receive this task.`,
+        })]),
+      });
+      await until(() => controlled.runs.length === 1);
+      expect(controlled.runs[0]!.request.agent).toBeNull();
+      controlled.runs[0]!.resolve("Reviewed.");
+      await manager.wait("casper", task.id);
+
+      const path = join(ghostPaths(temp!.registry.get("casper").dir).taskDir, `${task.id}.json`);
+      expect(JSON.parse(readFileSync(path, "utf8"))).toMatchObject({ harness, agent: null });
+    },
+  );
 
   it("bridges waiting, steering, and cancellation without affecting sibling tasks", async () => {
     const controlled = controlledAdapter();

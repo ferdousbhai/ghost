@@ -106,19 +106,6 @@ function assistantFailure(value: unknown): string | null {
     : `Pi request ${String(message.stopReason)}.`;
 }
 
-export function piTaskPrompt(task: string, agent: string | null): string {
-  if (agent === null) return task;
-  return [
-    "Delegate the assignment below to the exact configured native agent named here:",
-    JSON.stringify(agent),
-    "Use this Pi installation's native task or subagent capability and include project agents from the trusted cwd. Do not perform the assignment in this parent agent. If named delegation is unavailable or the agent cannot be resolved, report that failure clearly instead of falling back.",
-    "",
-    "<assignment>",
-    task,
-    "</assignment>",
-  ].join("\n");
-}
-
 /** One owner-installed Pi RPC process per durable delegated task. */
 export class PiHarnessAdapter implements WorkerAdapter {
   readonly id = "pi" as const;
@@ -394,15 +381,9 @@ export class PiHarnessAdapter implements WorkerAdapter {
       }
       nativeSessionId = data.sessionId;
       emit({ type: "notice", text: "Pi started with native configuration and maximum project trust." });
-      if (request.agent !== null) {
-        emit({
-          type: "notice",
-          text: `Pi's root agent was asked to delegate to requested native agent ${JSON.stringify(request.agent)}; Ghost cannot verify that native delegation occurred.`,
-        });
-      }
       await accept({
         type: "prompt",
-        message: piTaskPrompt(request.task, request.agent),
+        message: request.task,
       });
     } catch (error) {
       fail(error instanceof Error ? error : new Error(String(error)));

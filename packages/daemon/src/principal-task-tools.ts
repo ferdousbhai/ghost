@@ -36,7 +36,7 @@ export const PRINCIPAL_TASK_TOOL_NAMES = [
 export const GHOST_CODING_ORCHESTRATION_POLICY = [
   "# Coding delegation",
   "You are the owner's Ghost: remain responsible for the outcome, but delegate project coding and code review through a coding harness instead of acting as the coding agent yourself.",
-  "Use harness_status before choosing among claude-code, codex, and pi when availability or current limits matter. Start work with task { harness, task, agent?, cwd? }; agent is an optional requested native name owned by that harness. Give the harness a complete assignment and the correct absolute project cwd. If implementation needs native reviewer or simplifier stages, include them in the same assignment because a later task does not inherit this task's review branch. The task is durable and asynchronous: retain its id, use task_get or task_list on a later interaction, and use task_send or task_cancel when needed. Do not poll in a tight loop or claim completion you have not read.",
+  "Use harness_status before choosing among claude-code, codex, and pi when availability or current limits matter. Start work with task { harness, task, agent?, cwd? }; agent is optional and selects a native agent only for claude-code, so omit it for codex and pi. Give the harness a complete assignment and the correct absolute project cwd. If implementation needs native reviewer or simplifier stages, include them in the same assignment because a later task does not inherit this task's review branch. The task is durable and asynchronous: retain its id, use task_get or task_list on a later interaction, and use task_send or task_cancel when needed. Do not poll in a tight loop or claim completion you have not read.",
   "For a clean committed Git project, task runs in an isolated worktree and returns a local review branch when changes are ready. Report that artifact to the owner; do not claim it was pushed, opened as a pull request, or merged unless a separate explicit action did so. A non-Git project runs in place.",
   "Your own Bash, edit, and write tools remain available for general computer use and for maintaining your character, memory, Documents, and other Ghost-owned files.",
 ].join("\n");
@@ -252,7 +252,7 @@ export function createPrincipalTaskTools(options: PrincipalTaskToolsOptions): Gh
         agent: Type.Optional(Type.String({
           minLength: 1,
           maxLength: MAX_NATIVE_AGENT_NAME_LENGTH,
-          description: "Optional native agent name requested from the selected harness",
+          description: "Optional native Claude Code agent name; omit for Codex and Pi",
         })),
         task: Type.String({
           minLength: 1,

@@ -416,19 +416,6 @@ function completedAgentMessage(params: unknown): string | null {
   return item?.type === "agentMessage" && typeof item.text === "string" ? item.text : null;
 }
 
-export function codexTaskPrompt(task: string, agent: string | null): string {
-  if (agent === null) return task;
-  return [
-    "Delegate the assignment below to your configured native sub-agent whose exact name is given here:",
-    JSON.stringify(agent),
-    "Use Codex's native multi-agent delegation. Do not perform the assignment in this root thread. If that agent is unavailable or delegation cannot start, report that failure clearly instead of falling back.",
-    "",
-    "<assignment>",
-    task,
-    "</assignment>",
-  ].join("\n");
-}
-
 function turnTerminal(params: unknown): { threadId: string; turnId: string; status: string; error: string | null } | null {
   const record = objectValue(params);
   const turn = objectValue(record?.turn);
@@ -649,15 +636,9 @@ export class CodexWorkerAdapter implements WorkerAdapter {
       }), request.cwd);
       threadId = started.threadId;
       emit({ type: "notice", text: started.notice });
-      if (request.agent !== null) {
-        emit({
-          type: "notice",
-          text: `Codex's root agent was asked to delegate to requested native agent ${JSON.stringify(request.agent)}; Ghost cannot verify that native delegation occurred.`,
-        });
-      }
       turnId = turnStartResult(await app.request("turn/start", {
         threadId,
-        input: [{ type: "text", text: codexTaskPrompt(request.task, request.agent), text_elements: [] }],
+        input: [{ type: "text", text: request.task, text_elements: [] }],
       }));
     } catch (error) {
       fail(asError(error));

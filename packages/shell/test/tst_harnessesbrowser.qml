@@ -75,7 +75,7 @@ TestCase {
             version: 3,
             id: "task-11111111-1111-4111-8111-111111111111",
             parent: { id: "pi:conversation-1", runtime: "pi", conversationId: "conversation-1" },
-            harness: "codex",
+            harness: "claude-code",
             agent: "reviewer",
             task: "Implement the parser and verify the boundary tests.",
             root: "/project",
@@ -90,7 +90,7 @@ TestCase {
             error: null,
             events: [
                 { sequence: 1, at: "2026-08-30T09:00:00.000Z", type: "state", state: "queued" },
-                { sequence: 2, at: "2026-08-30T09:01:00.000Z", type: "notice", text: "Codex started.", textTruncated: false }
+                { sequence: 2, at: "2026-08-30T09:01:00.000Z", type: "notice", text: "Claude Code started.", textTruncated: false }
             ],
             eventsTruncated: false
         }, overrides || {});
@@ -196,7 +196,7 @@ TestCase {
         wait(0);
 
         compare(findChild(browser, "codingTaskState").text,
-            "codex · requested reviewer · Running");
+            "claude-code · reviewer · Running");
         compare(findChild(browser, "codingTaskAssignment").text,
             "Implement the parser and verify the boundary tests.");
         compare(findChild(browser, "codingTaskWorkspaceSummary").text, "Isolated worktree");

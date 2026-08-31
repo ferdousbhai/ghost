@@ -345,10 +345,12 @@ A **principal harness** owns a Ghost conversation; today it is pi or Claude
 Code. A **coding harness** owns one task delegated by that Ghost. The public
 harness ids are `claude-code`, `codex`, and `pi`, and each means the owner's
 installed native executable and configuration. An **agent** is an optional,
-opaque native name requested inside the selected harness. A **task worker** is the native
+opaque native Claude Code agent name; Codex and Pi tasks always use their
+default native agent. A **task worker** is the native
 child process/session created for one task; it is an implementation detail, not
-a selectable product or profile. Principal harness, coding harness, and native
-agent are independent choices. `character.md`, memory, Documents,
+a selectable product or profile. Principal harness and coding harness are
+independent choices; explicit native-agent selection is a Claude Code-only
+capability. `character.md`, memory, Documents,
 browser/desktop tools, and responsibility for the outcome belong to the Ghost
 principal. A coding harness receives an ordinary task and trusted cwd, then
 retains its own identity, configuration, agent discovery, models, tools,
@@ -1204,9 +1206,9 @@ shape and streams emit one complete event object per line.
   lexical post-load filter is an authority boundary.
   Project and ghost-file agent definitions are counted but inactive for the
   principal. A principal pi session performs no live/ambient agent discovery;
-  its daemon-owned `task` tool selects a native coding harness and may pass that
-  harness an opaque requested agent name. Machine-skill discovery is the
-  explicit exception described above. Claude
+  its daemon-owned `task` tool selects a native coding harness and may pass an
+  opaque requested agent name only to Claude Code. Machine-skill discovery is
+  the explicit exception described above. Claude
   keeps native `skills:[]` and `settingSources:[]`; the SDK's `skills: "all"`
   option is not usable here because it is a context filter, not a path sandbox.
   Its custom Ghost system prompt includes the shared computer-use policy, the compact
@@ -1812,8 +1814,9 @@ but is excluded from export: records contain local project paths and opaque
 native session ids that are meaningless or unsafe to resume on another
 machine. A record contains the daemon-issued `task-<uuid>` id,
 runtime-qualified parent conversation identity, coding harness id, optional
-opaque native agent name, complete bounded task prompt, resolved canonical
-**source** project root and cwd, workspace view, state and timestamps, optional
+effective Claude Code agent name or null, complete bounded task prompt,
+resolved canonical **source** project root and cwd, workspace view, state and
+timestamps, optional
 native session id, bounded terminal result or error, and a bounded normalized
 event tail. V1 and v2 records retain their old `agent` worker id on disk;
 reading maps `claude-code` and `codex` directly and maps `pi-worker` to the
@@ -1854,17 +1857,16 @@ without a Ghost-level cap.
 The harness is required. The Ghost principal chooses it using task fit plus the
 read-only installation, authentication, and Omarchy usage context returned by
 `harness_status`; the daemon does not hide that policy behind another router.
-`agent` is optional. When omitted, the native harness's default coding agent
-owns the task and may delegate internally. When supplied, it is a bounded,
-non-empty opaque requested name that only the selected harness interprets.
-Claude Code provides a direct SDK selector. Current Codex app-server and Pi RPC
-do not, so their root agent receives an explicit native-delegation request and
-Ghost records that the handoff is unverified. Ghost does not list configuration
-directories, validate existence, snapshot the definition, translate model
-aliases, or restrict the agent's tools. Native agent definitions own model,
-effort, instructions, tools, skills, plugins, MCP, and nested delegation.
-Harness retry, delegation, and fallback behavior remains native and can only be
-reported—not proven—from those headless protocols.
+`agent` is optional and effective only with `harness:"claude-code"`, whose SDK
+provides a direct selector. When omitted, the harness's default coding agent
+owns the task and may delegate internally. If a caller supplies `agent` with
+`codex` or `pi`, Ghost normalizes the durable field to null, records a notice
+that the default agent will receive the task, and sends the complete assignment
+unchanged. It never turns an unsupported selector into prompt instructions.
+Ghost does not list configuration directories, validate agent existence,
+snapshot definitions, translate model aliases, or restrict native tools. Native
+agent definitions own model, effort, instructions, tools, skills, plugins, MCP,
+and nested delegation; harness retry and fallback behavior remains native.
 
 Every task has a workspace view
 `{ strategy, state, root, cwd, branch, baseCommit, headCommit, review, notice }`.
@@ -1940,8 +1942,9 @@ Both principal harnesses expose the same daemon-owned logical tools:
 - `task { harness, task, agent?, cwd? }` creates one durable task and returns
   its queued task handle after context admission and workspace provisioning.
   Harness execution is asynchronous. `harness` selects
-  `claude-code | codex | pi`; optional `agent` is an opaque name for that native
-  harness to interpret. The shape retains Pi's `{ agent, task }` vocabulary while
+  `claude-code | codex | pi`; optional `agent` is an opaque native Claude Code
+  name and should be omitted for Codex and Pi. If present there, it is ignored
+  as described above. The shape retains Pi's `{ agent, task }` vocabulary while
   making the responsible harness explicit and adding no mode or parent field.
 - `task_list { limit? }` lists only tasks attributed to the current principal
   conversation, newest first. `limit` defaults to 10 and is bounded to 1–20.
@@ -1973,8 +1976,8 @@ The authenticated HTTP boundary is:
 
 - `POST /api/ghosts/:name/sessions/:id/tasks` with exactly
   `{ harness, task, agent?, cwd? }` → the v3 task view with `202`. `harness`
-  names the responsible native coding harness, `agent` optionally requests one
-  of that harness's own agents, `task` is the complete assignment, and optional
+  names the responsible native coding harness, `agent` optionally selects one
+  of Claude Code's own agents, `task` is the complete assignment, and optional
   `cwd` refines the conversation's trusted project context. The
   qualified session id in the route supplies the durable parent identity;
   clients cannot override it. Rejecting every extra field is Ghost's stricter
@@ -2034,19 +2037,17 @@ prompt, tools, or resource filters. The process receives the captured native
 harness environment and task cwd, so Pi owns `~/.pi/agent`, authentication,
 models, settings, packages, extensions, user/project agents, `AGENTS.md`,
 skills, prompts, tools, project trust, transcripts, and fallback behavior.
-Ghost supplies only RPC mode, the task, optional native-agent request, and a
-session name. Native startup is authoritative for model and authentication
+Ghost supplies only RPC mode, the unchanged task, and a session name. Native
+startup is authoritative for model and authentication
 availability.
 
-When `agent` is omitted, the task is the first ordinary Pi prompt. When it is
-present, Ghost asks Pi to delegate the complete task to that exact native agent
-through Pi's installed task/subagent capability. Pi—not Ghost—discovers and
-resolves the name. The prompt requires a visible failure instead of parent-agent
-fallback, but RPC exposes no delegation receipt: Ghost records the request as
-unverified and treats Pi's terminal outcome as authoritative. Project-local
-agent confirmation is not an interactive trust boundary because Ghost already
-admitted and revalidated the project before launch, and tasks run with maximum
-owner trust.
+The complete task is always Pi's first ordinary prompt. Pi may use any native
+internal delegation its installed configuration chooses, but Ghost never
+requests a named agent through prompt text. An incoming `agent` field is
+normalized to null before launch with the visible default-agent notice described
+above. Project-local configuration is not an interactive trust boundary because
+Ghost already admitted and revalidated the project before launch, and tasks run
+with maximum owner trust.
 
 RPC `prompt`/`steer` acknowledgements gate durable owner/principal messages;
 `agent_settled` and the final root assistant message settle the task. Blocking
@@ -2069,16 +2070,11 @@ mode, instructions, permission profile, history, skills, plugins, MCP servers,
 hooks, rules, or user configuration. The deliberate worker-only exceptions to
 that minimal thread start are `approvalPolicy:"never"` and
 `sandbox:"danger-full-access"`, the app-server equivalents of Codex YOLO mode.
-When `agent` is omitted, the complete task is the first ordinary user input.
-The current app-server protocol has no top-level custom-agent selector. When
-`agent` is present, the first ordinary input explicitly requires the root Codex
-agent to delegate the complete assignment to that exact native agent and to
-report failure if it cannot; Ghost does not parse Codex TOML or reproduce the
-agent's model, tools, skills, or instructions. App-server exposes no delegation
-receipt, so Ghost records this requested handoff as unverified and accepts the
-root thread's terminal outcome without claiming that the child ran. The thin
-root thread is therefore a native Codex delegation request, not a Ghost agent
-implementation. Codex owns its
+The complete task is always the first ordinary user input. The current
+app-server protocol has no top-level custom-agent selector, so Ghost never
+synthesizes a delegation instruction from `agent`; an incoming value is
+normalized to null before launch with the visible default-agent notice described
+above. Codex owns its
 identity, prompt/tool guidance, `$CODEX_HOME` configuration and authentication,
 project configuration, `AGENTS.md`, skills, plugins, rules, nested agents,
 transcripts, and model/provider fallback behavior exactly as the installed

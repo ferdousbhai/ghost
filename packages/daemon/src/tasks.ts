@@ -294,6 +294,16 @@ function validNativeAgentName(value: unknown): value is string | null {
       && !value.includes("\0"));
 }
 
+function effectiveNativeAgent(harness: HarnessId, requested: string | null): string | null {
+  return harness === "claude-code" ? requested : null;
+}
+
+function ignoredNativeAgentNotice(harness: HarnessId, requested: string | null): string | null {
+  if (requested === null || harness === "claude-code") return null;
+  const name = harness === "codex" ? "Codex" : "Pi";
+  return `Requested native agent ${JSON.stringify(requested)} was ignored because ${name} has no direct agent selector; its default agent will receive this task.`;
+}
+
 export function isTaskId(value: string): boolean {
   return TASK_ID_PATTERN.test(value);
 }
@@ -399,11 +409,14 @@ function parseStoredTask(value: unknown, expectedGhost: string, expectedId: stri
     : legacyVersion && isLegacyWorkerId(raw.agent)
     ? harnessFromLegacyWorker(raw.agent)
     : null;
-  const agent = currentVersion && validNativeAgentName(raw.agent)
+  const storedAgent = currentVersion && validNativeAgentName(raw.agent)
     ? raw.agent
     : legacyVersion
     ? null
     : undefined;
+  const agent = storedAgent === undefined || harness === null
+    ? storedAgent
+    : effectiveNativeAgent(harness, storedAgent);
   if ((!currentVersion && !legacyVersion)
     || record.id !== expectedId
     || !isTaskId(record.id)
@@ -735,6 +748,9 @@ export class TaskManager {
     }
     this.assertAdmission(input.ghostName);
 
+    const requestedAgent = input.agent ?? null;
+    const agent = effectiveNativeAgent(input.harness, requestedAgent);
+    const agentNotice = ignoredNativeAgentNotice(input.harness, requestedAgent);
     const now = this.timestamp();
     const id = `task-${randomUUID()}`;
     let workspace: TaskWorkspaceView;
@@ -754,7 +770,7 @@ export class TaskManager {
       ghostName: input.ghostName,
       parent,
       harness: input.harness,
-      agent: input.agent ?? null,
+      agent,
       task: input.task,
       root: context.root,
       cwd: context.cwd,
@@ -768,15 +784,15 @@ export class TaskManager {
       error: null,
       events: [
         { sequence: 1, at: now, type: "state", state: "queued" },
-        ...(workspace.notice === null
-          ? []
-          : [{
-              sequence: 2,
-              at: now,
-              type: "notice" as const,
-              text: workspace.notice,
-              textTruncated: false,
-            }]),
+        ...[workspace.notice, agentNotice]
+          .filter((notice): notice is string => notice !== null)
+          .map((notice, index) => ({
+            sequence: index + 2,
+            at: now,
+            type: "notice" as const,
+            text: notice,
+            textTruncated: false,
+          })),
       ],
       eventsTruncated: false,
     };

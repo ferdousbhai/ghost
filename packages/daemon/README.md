@@ -241,8 +241,8 @@ LSP, and custom agent definitions stay disabled. Both principal runtimes expose
 daemon-owned `harness_status`, `task`, `task_list`, `task_get`, `task_send`, and
 `task_cancel` controls for the native `claude-code`, `codex`, and `pi`
 harnesses; project, ghost-file, and ambient agent definitions remain inert in
-the principal. A task may pass an opaque native agent name through to its
-selected harness.
+the principal. A task may select an opaque native agent only for Claude Code;
+Codex and Pi receive the assignment unchanged through their default agents.
 Clean committed Git projects use one daemon-managed linked worktree and local
 review branch per task. Task views distinguish the trusted source `root`/`cwd`
 from the execution `workspace`; Ghost preserves uncertain work and never

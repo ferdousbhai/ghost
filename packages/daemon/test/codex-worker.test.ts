@@ -6,7 +6,6 @@ import { describe, expect, it, vi } from "vitest";
 import {
   CodexProbe,
   CodexWorkerAdapter,
-  codexTaskPrompt,
   readCodexAccount,
 } from "../src/codex-worker.js";
 import { conversationIdentity } from "../src/conversation-identity.js";
@@ -104,7 +103,7 @@ function configureStartup(child: FakeCodexChild, request: WorkerTaskRequest = ta
   child.responders.set("turn/start", (message) => {
     expect(message.params).toEqual({
       threadId: "thread-native-1",
-      input: [{ type: "text", text: codexTaskPrompt(request.task, request.agent), text_elements: [] }],
+      input: [{ type: "text", text: request.task, text_elements: [] }],
     });
     return { turn: { id: "turn-1", status: "inProgress" } };
   });
@@ -156,24 +155,16 @@ function adapterHarness(child: FakeCodexChild) {
 }
 
 describe("Codex native worker", () => {
-  it("asks native Codex to delegate an exact optional agent and exposes that routing is unverified", async () => {
-    expect(codexTaskPrompt(task.task, null)).toBe(task.task);
-    const prompt = codexTaskPrompt(task.task, "reviewer");
-    expect(prompt).toContain('"reviewer"');
-    expect(prompt).toContain("Codex's native multi-agent delegation");
-    expect(prompt).toContain("Do not perform the assignment in this root thread");
-    expect(prompt).toContain(task.task);
-
+  it("sends the regular task unchanged even if an upstream caller supplies an agent", async () => {
     const request = { ...task, agent: "reviewer" };
     const child = new FakeCodexChild();
     configureStartup(child, request);
     const harness = adapterHarness(child);
     const controller = await harness.adapter.start(request, harness.context);
-    await until(() => harness.events.some((event) => event.type === "notice"
-      && event.text.includes("requested native agent")));
-    expect(harness.events).toContainEqual({
-      type: "notice",
-      text: 'Codex\'s root agent was asked to delegate to requested native agent "reviewer"; Ghost cannot verify that native delegation occurred.',
+    const turn = child.messages.find((message) => message.method === "turn/start");
+    expect(turn?.params).toEqual({
+      threadId: "thread-native-1",
+      input: [{ type: "text", text: task.task, text_elements: [] }],
     });
     complete(child, "Reviewed.");
     child.close(0, null);

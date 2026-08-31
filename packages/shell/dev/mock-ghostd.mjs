@@ -232,7 +232,7 @@ const codingTasks = new Map(ghosts.map((ghost) => [ghost.name, [
   makeMockTask(
     ghost.name,
     "task-11111111-1111-4111-8111-111111111111",
-    "codex",
+    "claude-code",
     "Simplify the durable task parser and verify its boundary tests.",
     "running",
     null,
@@ -241,7 +241,7 @@ const codingTasks = new Map(ghosts.map((ghost) => [ghost.name, [
   makeMockTask(
     ghost.name,
     "task-22222222-2222-4222-8222-222222222222",
-    "claude-code",
+    "codex",
     "Review the native harness integration for configuration drift.",
     "completed",
     "Review complete; no configuration drift found.",

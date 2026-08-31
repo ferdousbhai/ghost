@@ -84,7 +84,7 @@ Rectangle {
     function taskHarness(task: var): string {
         if (!task) return "Harness";
         const harness = String(task.harness || "Harness");
-        return task.agent ? harness + " · requested " + String(task.agent) : harness;
+        return task.agent ? harness + " · " + String(task.agent) : harness;
     }
 
     function workspaceSummary(workspace: var): string {
