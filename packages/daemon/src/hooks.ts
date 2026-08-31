@@ -10,7 +10,6 @@ import { writePrivateJsonAtomic } from "./private-file.js";
 import { serializeByKey } from "./promise-chain.js";
 
 export const GHOST_HOOK_HANDLER_TIMEOUT_MS = 30_000;
-export const GHOST_SESSION_STOP_CONTINUATION_CAP = 10;
 export const GHOST_CONVERSATION_IDLE_DELAY_MS = 60_000;
 const MAX_HOOK_OUTPUT_BYTES = 1024 * 1024;
 
@@ -114,7 +113,6 @@ export interface GhostHookStatus {
   total: number;
   events: GhostHookEventStatus[];
   hooks: GhostHookStatusItem[];
-  sessionStopContinuationCap: number;
 }
 
 export interface GhostHookContext {
@@ -883,7 +881,6 @@ export class GhostHookRunner {
       total,
       events,
       hooks,
-      sessionStopContinuationCap: GHOST_SESSION_STOP_CONTINUATION_CAP,
     };
   }
 

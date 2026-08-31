@@ -61,8 +61,7 @@ TestCase {
                     description: "Runs after inactivity.",
                     idleSeconds: 60
                 }
-            ],
-            sessionStopContinuationCap: 10
+            ]
         };
     }
 
@@ -117,8 +116,7 @@ TestCase {
             active: false,
             total: 0,
             events: [],
-            hooks: [],
-            sessionStopContinuationCap: 10
+            hooks: []
         });
         verify(Ghostd.hooksLoaded);
         compare(Ghostd.activeHookCount, 0);

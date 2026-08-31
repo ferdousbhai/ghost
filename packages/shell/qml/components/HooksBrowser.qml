@@ -385,8 +385,7 @@ Rectangle {
             Accessible.role: hookCard.tunable ? Accessible.ListItem : Accessible.StaticText
             Accessible.name: hookCard.draft ? "New command hook" : hookCard.modelData.name
             Accessible.description: hookCard.modelData.description + ". "
-                + HookStatus.trigger(hookCard.event,
-                    Ghostd.hookContinuationCap, hookCard.modelData.idleSeconds || 0)
+                + HookStatus.trigger(hookCard.event, hookCard.modelData.idleSeconds || 0)
 
             Behavior on color {
                 enabled: !Theme.reducedMotion
@@ -506,8 +505,7 @@ Rectangle {
                 Text {
                     objectName: "hookTrigger"
                     width: parent.width
-                    text: HookStatus.trigger(hookCard.event,
-                        Ghostd.hookContinuationCap, hookCard.modelData.idleSeconds || 0)
+                    text: HookStatus.trigger(hookCard.event, hookCard.modelData.idleSeconds || 0)
                         + (hookCard.modelData.pendingIdleSeconds > 0
                             ? " · " + HookStatus.duration(hookCard.modelData.pendingIdleSeconds)
                                 + " once ghostd restarts"

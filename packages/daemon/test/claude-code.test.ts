@@ -44,10 +44,7 @@ import type {
   SettledMaintenanceTurn,
 } from "../src/conversation-maintenance.js";
 import { ghostPaths } from "../src/ghosts.js";
-import {
-  GHOST_SESSION_STOP_CONTINUATION_CAP,
-  GhostHookRunner,
-} from "../src/hooks.js";
+import { GhostHookRunner } from "../src/hooks.js";
 import type { Logger } from "../src/log.js";
 import { ModelCatalog } from "../src/model-catalog.js";
 import { setChatModelRole } from "../src/models.js";
@@ -2884,6 +2881,7 @@ describe("Claude Code subscription runtime", () => {
   });
 
   it("applies session_stop continuations before the Claude turn settles", async () => {
+    const hookContinuationPasses = 12;
     const hooks = new GhostHookRunner();
     const active: boolean[] = [];
     const beforeTurnIds: number[] = [];
@@ -2904,7 +2902,7 @@ describe("Claude Code subscription runtime", () => {
         hookHomes.push(event.ghost_home);
         hookCwds.push(event.cwd);
         hookIdentities.push(`${event.runtime}:${event.conversation_runtime}:${event.conversation_id}`);
-        if (priorPasses < GHOST_SESSION_STOP_CONTINUATION_CAP) {
+        if (priorPasses < hookContinuationPasses) {
           return { continue: true, additionalContext: "Revise it again." };
         }
       });
@@ -2932,10 +2930,10 @@ describe("Claude Code subscription runtime", () => {
       emit: (event) => events.push(event),
     });
 
-    // The hook always continues, so the cap ends each owner turn: one initial
-    // pass plus GHOST_SESSION_STOP_CONTINUATION_CAP continuations. Every pass
-    // is another prompt into the one warm query, not another query.
-    const passCount = GHOST_SESSION_STOP_CONTINUATION_CAP + 1;
+    // The hook owns its stopping policy and may continue beyond Ghost's former
+    // host cap. Every pass is another prompt into the one warm query, not
+    // another query.
+    const passCount = hookContinuationPasses + 1;
     const activePerTurn = [false, ...Array(passCount - 1).fill(true)];
     expect(lifecycle.queries).toBe(1);
     expect(seenOptions).toHaveLength(1);

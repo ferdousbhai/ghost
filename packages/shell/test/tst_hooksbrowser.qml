@@ -94,7 +94,6 @@ TestCase {
         }];
         Ghostd.hookEvents = [{ event: "conversation_idle", count: 1 }];
         Ghostd.activeHookCount = 1;
-        Ghostd.hookContinuationCap = 2;
         Ghostd.hooksLoaded = true;
         Ghostd.hooksLoading = false;
         Ghostd.hooksStale = false;

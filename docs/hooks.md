@@ -211,11 +211,12 @@ using stderr as the reason. Other exit codes, malformed output, thrown handlers,
 and timeouts are logged and fail open.
 Handlers are cancelled when the client aborts the turn.
 
-Ghost sets `stop_hook_active: true` on continuation passes and permits at most
-ten consecutive hidden continuations per owner turn
-(`GHOST_SESSION_STOP_CONTINUATION_CAP`). Hook authors should normally stop after
-one revision. A continuation reason is in model context; an informational
-notification alone is not.
+Ghost sets `stop_hook_active: true` on continuation passes. As with Codex and
+Claude Code, the hook owns its continuation policy: Ghost keeps honoring a
+blocking result until the hook accepts the stop. Hook authors must use
+`stop_hook_active` or their own bounded counter to avoid an unbounded loop and
+should normally stop after one revision. A continuation reason is in model
+context; an informational notification alone is not.
 
 Trusted command hooks that need a fast classifier can invoke
 `ghostd hook-smol-complete`. It reads `{ "ghost_home": "/absolute/home",
@@ -297,13 +298,12 @@ durable cwd change.
 
 ## Status
 
-Authenticated `GET /api/hooks` returns only `{ active, total, events, hooks,
-sessionStopContinuationCap }`. Event rows contain `{ event, count }`; hook rows
+Authenticated `GET /api/hooks` returns only `{ active, total, events, hooks }`.
+Event rows contain `{ event, count }`; hook rows
 contain `{ event, source, name, description }` plus `idleSeconds` only for an
 idle hook, where `source` is `builtin` for an in-process registration and
-`config` for a `hooks.json` command. The continuation cap is an integer in
-`1..100` (default 10). Commands, source paths, arguments, prompts, injected
-context, errors, receipts, and scheduler state never cross that route.
+`config` for a `hooks.json` command. Commands, source paths, arguments, prompts,
+injected context, errors, receipts, and scheduler state never cross that route.
 
 ## Editing
 

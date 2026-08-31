@@ -212,8 +212,8 @@ metadata file is still an explicit error; Ghost does not silently start a
 replacement conversation.
 
 Session-stop continuations are ordinary extra passes through the same warm
-query rather than new queries, capped by
-`GHOST_SESSION_STOP_CONTINUATION_CAP` as before.
+query rather than new queries. The hook owns its continuation policy and ends
+the loop by accepting a stop.
 
 Claude owns the actual transcript under its normal `~/.claude/projects/`
 storage. Ghost stores a `0600` metadata sidecar in `<ghost>/sessions/` so a

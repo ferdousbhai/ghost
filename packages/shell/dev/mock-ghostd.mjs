@@ -1091,7 +1091,7 @@ function hooksStatus() {
   const events = HOOK_EVENTS
     .map((event) => ({ event, count: rows.filter((row) => row.event === event).length }))
     .filter(({ count }) => count > 0);
-  return { active: rows.length > 0, total: rows.length, events, hooks: rows, sessionStopContinuationCap: 10 };
+  return { active: rows.length > 0, total: rows.length, events, hooks: rows };
 }
 
 const svg = (res, body) => {

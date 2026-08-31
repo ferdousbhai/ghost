@@ -22,7 +22,6 @@ import {
   readOrCreateApiToken,
   rotateApiToken,
 } from "../src/api-token.js";
-import { GHOST_SESSION_STOP_CONTINUATION_CAP } from "../src/hooks.js";
 import { startDaemonServer, type ListeningServer } from "../src/server.js";
 import { SessionHost } from "../src/session-host.js";
 import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
@@ -103,7 +102,6 @@ describe("the bearer token", () => {
       total: 0,
       events: [],
       hooks: [],
-      sessionStopContinuationCap: GHOST_SESSION_STOP_CONTINUATION_CAP,
     });
   });
 

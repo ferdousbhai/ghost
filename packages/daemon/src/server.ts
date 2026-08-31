@@ -27,11 +27,10 @@ import {
   type HomeOperationCoordinator,
 } from "./home-operations.js";
 import { assertValidGhostName, GhostError, type GhostRegistry } from "./ghosts.js";
-import {
-  GHOST_SESSION_STOP_CONTINUATION_CAP,
-  type GhostHookCommandConfig,
-  type GhostHookStatus,
-  type GhostHookRunner,
+import type {
+  GhostHookCommandConfig,
+  GhostHookStatus,
+  GhostHookRunner,
 } from "./hooks.js";
 import { GHOST_MODEL_ROLES, type GhostModelRole } from "./models.js";
 import { silentLogger, type Logger } from "./log.js";
@@ -162,7 +161,6 @@ function publicHookStatus(status: GhostHookStatus): GhostHookStatus {
       ...(event === "conversation_idle" && idleSeconds !== undefined ? { idleSeconds } : {}),
       ...(source === "builtin" && settingsKey !== undefined ? { settingsKey } : {}),
     })),
-    sessionStopContinuationCap: status.sessionStopContinuationCap,
   };
 }
 
@@ -1872,7 +1870,6 @@ export function createDaemonServer(options: ServerOptions): Server {
             total: 0,
             events: [],
             hooks: [],
-            sessionStopContinuationCap: GHOST_SESSION_STOP_CONTINUATION_CAP,
           }));
           return;
         }
