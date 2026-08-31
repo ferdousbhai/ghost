@@ -114,6 +114,10 @@ and permits a new assignment only from the current trusted project. Running
 work can receive a follow-up or be cancelled. There is no HUD-side provider
 policy, arbitrary cwd, raw protocol/error view, wait/resume state, or synthetic
 Git workspace lifecycle.
+Deleting a conversation with active workers keeps the dialog and Delegation
+state intact and asks the owner to review or cancel them. Finished worker
+history moves to private Trash with the transcript; successful deletion then
+retires the matching task requests and projection.
 
 A project bound before the first owner turn is still an unpublished draft. The
 shell keeps that runtime-qualified identity selected while it asks ghostd to

@@ -41,6 +41,7 @@ export interface PrincipalTaskContext {
   controller: Promise<TaskController>;
   parent: ConversationIdentity;
   cwd: string;
+  operation<T>(action: () => Promise<T>): Promise<T>;
   mintBinding(cwd: string | undefined, signal: AbortSignal): Promise<TaskBindingReceipt>;
 }
 
@@ -159,7 +160,7 @@ export function createPrincipalTaskTools(context: PrincipalTaskContext): GhostEx
           );
         }
         const admittedSignal = signal ?? new AbortController().signal;
-        return toolAction(async () => {
+        return toolAction(() => context.operation(async () => {
           const binding = await context.mintBinding(params.cwd, admittedSignal);
           admittedSignal.throwIfAborted();
           return result(taskProjection(await (await context.controller).start({
@@ -169,7 +170,7 @@ export function createPrincipalTaskTools(context: PrincipalTaskContext): GhostEx
             task: params.assignment,
             binding,
           }), true));
-        }, admittedSignal);
+        }), admittedSignal);
       },
     });
 
@@ -185,7 +186,7 @@ export function createPrincipalTaskTools(context: PrincipalTaskContext): GhostEx
         })),
       }, { additionalProperties: false }),
       async execute(_id, params) {
-        return toolAction(async () => {
+        return toolAction(() => context.operation(async () => {
           const owned = (await (await context.controller).list())
             .filter((record) => sameParent(record.parent, context.parent))
             .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
@@ -195,7 +196,7 @@ export function createPrincipalTaskTools(context: PrincipalTaskContext): GhostEx
             shown: visible.length,
             total: owned.length,
           });
-        });
+        }));
       },
     });
 
@@ -207,10 +208,9 @@ export function createPrincipalTaskTools(context: PrincipalTaskContext): GhostEx
         task_id: Type.String({ minLength: 1, maxLength: 64 }),
       }, { additionalProperties: false }),
       async execute(_id, params) {
-        return toolAction(async () => result(taskProjection(
-          await ownTask(context, params.task_id),
-          true,
-        )));
+        return toolAction(() => context.operation(async () => result(taskProjection(
+          await ownTask(context, params.task_id), true,
+        ))));
       },
     });
 
@@ -226,7 +226,7 @@ export function createPrincipalTaskTools(context: PrincipalTaskContext): GhostEx
         if (params.message.trim() === "") {
           throw new GhostError("invalid_task", "The task follow-up is invalid.", 400);
         }
-        return toolAction(async () => {
+        return toolAction(() => context.operation(async () => {
           await ownTask(context, params.task_id);
           return result(taskProjection(
             await (await context.controller).followUp(
@@ -236,7 +236,7 @@ export function createPrincipalTaskTools(context: PrincipalTaskContext): GhostEx
             ),
             true,
           ));
-        });
+        }));
       },
     });
 
@@ -248,13 +248,13 @@ export function createPrincipalTaskTools(context: PrincipalTaskContext): GhostEx
         task_id: Type.String({ minLength: 1, maxLength: 64 }),
       }, { additionalProperties: false }),
       async execute(_id, params) {
-        return toolAction(async () => {
+        return toolAction(() => context.operation(async () => {
           await ownTask(context, params.task_id);
           return result(taskProjection(
             await (await context.controller).cancel(params.task_id, context.parent),
             true,
           ));
-        });
+        }));
       },
     });
   };

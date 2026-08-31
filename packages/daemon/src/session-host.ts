@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import {
   lstat,
+  mkdir,
   open as openFile,
   readdir,
   rename,
@@ -91,6 +92,7 @@ import {
   maintenanceStatePath,
   type ConversationMaintenance,
   type MaintenanceConversationDeleteOutcome,
+  type MaintenanceConversationDeleteReservation,
   type MaintenanceDrainReservation,
   type MaintenanceIdentity,
   type MaintenanceOwnerActivity,
@@ -172,8 +174,11 @@ import {
   type PrincipalTaskServices,
 } from "./principal-task-tools.js";
 import {
+  inspectTaskRecordFile,
+  isTerminalTaskState,
   MAX_TASK_AGENT,
   MAX_TASK_TEXT,
+  TASKS_DIRNAME,
   TaskController,
   TaskStore,
   type TaskRecord,
@@ -579,6 +584,9 @@ export type SessionTransactionProbeStage =
   | "delete-artifact-renamed"
   | "delete-receipt-write"
   | "delete-artifact-recorded"
+  | "delete-task-group-create"
+  | "delete-task-group-recorded"
+  | "delete-task-record-rename"
   | "draft-abandon-unlink"
   | "draft-abandon-fsync"
   | "draft-abandon-complete";
@@ -752,11 +760,21 @@ export interface QueuedMessages {
   followUp: readonly string[];
 }
 
-export interface TrashedConversationArtifact extends TrashPathResult {
+export interface TrashedConversationFileArtifact extends TrashPathResult {
   artifact: "omp-transcript" | "claude-sidecar"
     | "project-binding" | "project-snapshot" | "tool-cwds" | "maintenance-state";
   source: string;
 }
+
+export interface TrashedConversationTaskArtifact extends TrashPathResult {
+  artifact: "delegated-tasks";
+  source: string;
+  count: number;
+  digest: string;
+}
+
+export type TrashedConversationArtifact = TrashedConversationFileArtifact
+  | TrashedConversationTaskArtifact;
 
 export interface TrashedConversation {
   artifacts: TrashedConversationArtifact[];
@@ -904,6 +922,66 @@ function deletionKeyGhost(key: string): string {
   return (JSON.parse(key) as [string, ConversationRuntime, string])[0];
 }
 
+interface ParentTaskOperationLane {
+  readers: number;
+  exclusive: boolean;
+  drained: Promise<void>;
+  resolveDrained(): void;
+}
+
+class ParentTaskOperationGate {
+  readonly #lanes = new Map<string, ParentTaskOperationLane>();
+
+  enter(key: string): (() => void) | null {
+    let lane = this.#lanes.get(key);
+    if (!lane) {
+      const settled = Promise.resolve();
+      lane = { readers: 0, exclusive: false, drained: settled, resolveDrained() {} };
+      this.#lanes.set(key, lane);
+    }
+    if (lane.exclusive) return null;
+    if (lane.readers === 0) {
+      const pending = Promise.withResolvers<void>();
+      lane.drained = pending.promise;
+      lane.resolveDrained = pending.resolve;
+    }
+    lane.readers += 1;
+    const admittedLane = lane;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      admittedLane.readers -= 1;
+      if (admittedLane.readers === 0) {
+        admittedLane.resolveDrained();
+        if (!admittedLane.exclusive) this.#lanes.delete(key);
+      }
+    };
+  }
+
+  claim(key: string): { drained: Promise<void>; release(): void } | null {
+    let lane = this.#lanes.get(key);
+    if (!lane) {
+      const settled = Promise.resolve();
+      lane = { readers: 0, exclusive: false, drained: settled, resolveDrained() {} };
+      this.#lanes.set(key, lane);
+    }
+    if (lane.exclusive) return null;
+    lane.exclusive = true;
+    const claimedLane = lane;
+    let released = false;
+    return {
+      drained: lane.drained,
+      release: () => {
+        if (released) return;
+        released = true;
+        claimedLane.exclusive = false;
+        if (claimedLane.readers === 0) this.#lanes.delete(key);
+      },
+    };
+  }
+}
+
 function conversationTransactionStem(conversationId: string): string {
   return sessionFileNameFor(conversationId).slice(0, -".jsonl".length);
 }
@@ -956,7 +1034,7 @@ interface ForkTransactionRecord {
   tempToolCwds: string;
 }
 
-const DELETE_ARTIFACT_KINDS = new Set<TrashedConversationArtifact["artifact"]>([
+const DELETE_ARTIFACT_KINDS = new Set<TrashedConversationFileArtifact["artifact"]>([
   "omp-transcript",
   "claude-sidecar",
   "project-binding",
@@ -965,16 +1043,19 @@ const DELETE_ARTIFACT_KINDS = new Set<TrashedConversationArtifact["artifact"]>([
   "maintenance-state",
 ]);
 
-interface DeleteMoveIntent extends TrashedConversationArtifact {}
+interface DeleteMoveIntent extends TrashedConversationFileArtifact {}
+
+interface DeleteTaskGroup extends TrashedConversationTaskArtifact {}
 
 interface DeleteTransactionRecord {
-  version: 1 | 2 | 3;
+  version: 1 | 2 | 3 | 4;
   kind: "delete";
   runtime: ConversationRuntime;
   conversationId: string;
-  artifacts: TrashedConversationArtifact[];
+  artifacts: TrashedConversationFileArtifact[];
   trashRoot: string | null;
   pending: DeleteMoveIntent | null;
+  delegatedTasks: DeleteTaskGroup | null;
 }
 
 interface DraftAbandonTransactionRecord {
@@ -992,13 +1073,14 @@ function emptyDeleteTransaction(
   conversationId: string,
 ): DeleteTransactionRecord {
   return {
-    version: 3,
+    version: 4,
     kind: "delete",
     runtime,
     conversationId,
     artifacts: [],
     trashRoot: null,
     pending: null,
+    delegatedTasks: null,
   };
 }
 
@@ -1108,11 +1190,53 @@ function exactDeleteTrashChild(
   return TRANSACTION_UUID.test(name.slice(prefix.length, -suffix.length));
 }
 
+const TASK_GROUP_DIGEST = /^[0-9a-f]{64}$/u;
+const MAX_TASK_GROUP_COUNT = 1_000_000;
+
+function exactDeleteTaskGroup(
+  ghostDir: string,
+  trashRoot: string,
+  group: DeleteTaskGroup,
+): number | null {
+  if (group.source !== join(ghostPaths(ghostDir).home, TASKS_DIRNAME)
+    || group.kind !== "fallback"
+    || !Number.isSafeInteger(group.count) || group.count < 1
+    || group.count > MAX_TASK_GROUP_COUNT
+    || !TASK_GROUP_DIGEST.test(group.digest)) return null;
+  const name = basename(group.trash);
+  if (group.trash !== join(trashRoot, name) || !name.endsWith("-delegated-tasks")) {
+    return null;
+  }
+  const prefix = name.slice(0, -"-delegated-tasks".length);
+  const separator = prefix.indexOf("-");
+  if (separator < 1 || !/^\d+$/u.test(prefix.slice(0, separator))
+    || !TRANSACTION_UUID.test(prefix.slice(separator + 1))) return null;
+  const index = Number(prefix.slice(0, separator));
+  return Number.isSafeInteger(index) && index > 0
+      && prefix.slice(0, separator) === String(index).padStart(3, "0")
+    ? index
+    : null;
+}
+
+function delegatedTaskDigest(
+  entries: readonly Readonly<{ id: string; sha256: string }>[],
+): string {
+  const digest = createHash("sha256");
+  for (const entry of [...entries].sort((left, right) =>
+    left.id < right.id ? -1 : left.id > right.id ? 1 : 0)) {
+    digest.update(entry.id, "utf8");
+    digest.update("\0", "utf8");
+    digest.update(entry.sha256, "ascii");
+    digest.update("\n", "utf8");
+  }
+  return digest.digest("hex");
+}
+
 function exactDeleteStaticSource(
   ghostDir: string,
   runtime: ConversationRuntime,
   conversationId: string,
-  artifact: TrashedConversationArtifact,
+  artifact: TrashedConversationFileArtifact,
 ): boolean {
   const sessionDir = ghostPaths(ghostDir).sessionDir;
   switch (artifact.artifact) {
@@ -1577,6 +1701,7 @@ export class SessionHost {
   private readonly taskControllers = new Map<string, Promise<TaskController>>();
   private readonly taskControllerInstances = new Map<string, TaskController>();
   private readonly taskAdmissions = new Set<Promise<unknown>>();
+  private readonly taskParentOperations = new ParentTaskOperationGate();
   private taskRecovery: Promise<void> | undefined;
   private nativeTaskShutdown: Promise<void> | undefined;
   private sessionActivityStarted = false;
@@ -1864,6 +1989,8 @@ export class SessionHost {
       controller: this.taskController(ghostName),
       parent,
       cwd,
+      operation: <T>(action: () => Promise<T>) =>
+        this.withParentTaskOperation(ghostName, parent, action),
       mintBinding: async (cwd, signal) => {
         this.assertTaskAdmissionOpen();
         const binding = await this.projectBindings.mintTaskBinding(
@@ -1908,6 +2035,39 @@ export class SessionHost {
     }
   }
 
+  private async withParentTaskOperation<T>(
+    ghostName: string,
+    parent: ConversationIdentity,
+    action: () => Promise<T>,
+  ): Promise<T> {
+    this.assertTaskAdmissionOpen();
+    const key = deletionKeyOf(ghostName, parent.runtime, parent.conversationId);
+    const release = this.taskParentOperations.enter(key);
+    if (!release) {
+      throw new GhostError(
+        "session_busy",
+        "This conversation is being deleted.",
+        409,
+      );
+    }
+    try {
+      const sessionDir = ghostPaths(this.registry.get(ghostName).dir).sessionDir;
+      if (await transactionMarkerState(
+        deleteTransactionPath(sessionDir, parent.runtime, parent.conversationId),
+        this.transactionMarkerLstat,
+      ) !== "absent") {
+        throw new GhostError(
+          "session_busy",
+          "This conversation is being deleted.",
+          409,
+        );
+      }
+      return await this.taskOperation(action);
+    } finally {
+      release();
+    }
+  }
+
   private async ownedTask(
     ghostName: string,
     parent: ConversationIdentity,
@@ -1933,7 +2093,8 @@ export class SessionHost {
     ghostName: string,
     parent: ConversationIdentity,
   ): Promise<TaskRecord[]> {
-    return this.taskOperation(async () => (await (await this.taskController(ghostName)).list())
+    return this.withParentTaskOperation(ghostName, parent, async () =>
+      (await (await this.taskController(ghostName)).list())
       .filter((record) => record.parent.id === parent.id
         && record.parent.runtime === parent.runtime
         && record.parent.conversationId === parent.conversationId)
@@ -1952,43 +2113,45 @@ export class SessionHost {
     }>,
     signal: AbortSignal,
   ): Promise<TaskRecord> {
-    return this.admitTaskCreation(async () => {
-      if (input.assignment.trim() === "" || input.assignment.length > MAX_TASK_TEXT) {
-        throw new GhostError("invalid_task", "The task assignment is invalid.", 400);
-      }
-      if (input.agent !== undefined
-        && (input.harness !== "claude-code"
-          || input.agent.length < 1
-          || input.agent.length > MAX_TASK_AGENT
-          || Buffer.byteLength(input.agent, "utf8") > MAX_TASK_AGENT * 4)) {
-        throw new GhostError(
-          "invalid_task_agent",
-          "An agent may be selected only for a Claude Code task.",
-          400,
+    return this.withParentTaskOperation(ghostName, parent, () =>
+      this.admitTaskCreation(async () => {
+        if (input.assignment.trim() === "" || input.assignment.length > MAX_TASK_TEXT) {
+          throw new GhostError("invalid_task", "The task assignment is invalid.", 400);
+        }
+        if (input.agent !== undefined
+          && (input.harness !== "claude-code"
+            || input.agent.length < 1
+            || input.agent.length > MAX_TASK_AGENT
+            || Buffer.byteLength(input.agent, "utf8") > MAX_TASK_AGENT * 4)) {
+          throw new GhostError(
+            "invalid_task_agent",
+            "An agent may be selected only for a Claude Code task.",
+            400,
+          );
+        }
+        const paths = ghostPaths(this.registry.get(ghostName).dir);
+        const binding = await this.projectBindings.mintTaskBinding(
+          paths.sessionDir,
+          parent,
+          input.cwd,
+          signal,
         );
-      }
-      const paths = ghostPaths(this.registry.get(ghostName).dir);
-      const binding = await this.projectBindings.mintTaskBinding(
-        paths.sessionDir,
-        parent,
-        input.cwd,
-        signal,
-      );
-      signal.throwIfAborted();
-      this.assertTaskAdmissionOpen();
-      return (await this.taskController(ghostName)).start({
-        parent,
-        harness: input.harness,
-        ...(input.agent === undefined ? {} : { agent: input.agent }),
-        task: input.assignment,
-        binding,
-      });
-    });
+        signal.throwIfAborted();
+        this.assertTaskAdmissionOpen();
+        return (await this.taskController(ghostName)).start({
+          parent,
+          harness: input.harness,
+          ...(input.agent === undefined ? {} : { agent: input.agent }),
+          task: input.assignment,
+          binding,
+        });
+      }));
   }
 
   /** Owner API: read one worker without revealing another parent's existence. */
   task(ghostName: string, parent: ConversationIdentity, taskId: string): Promise<TaskRecord> {
-    return this.ownedTask(ghostName, parent, taskId);
+    return this.withParentTaskOperation(ghostName, parent, () =>
+      this.ownedTask(ghostName, parent, taskId));
   }
 
   /** Owner API: serialize one native follow-up for a running worker. */
@@ -1998,7 +2161,7 @@ export class SessionHost {
     taskId: string,
     message: string,
   ): Promise<TaskRecord> {
-    return this.taskOperation(async () => {
+    return this.withParentTaskOperation(ghostName, parent, async () => {
       if (message.trim() === "" || message.length > MAX_TASK_TEXT) {
         throw new GhostError("invalid_task", "The task follow-up is invalid.", 400);
       }
@@ -2013,7 +2176,7 @@ export class SessionHost {
     parent: ConversationIdentity,
     taskId: string,
   ): Promise<TaskRecord> {
-    return this.taskOperation(async () => {
+    return this.withParentTaskOperation(ghostName, parent, async () => {
       await this.ownedTask(ghostName, parent, taskId);
       return (await this.taskController(ghostName)).cancel(taskId, parent);
     });
@@ -5727,15 +5890,16 @@ export class SessionHost {
       )) as Record<string, unknown>;
       if (value.kind !== "delete" || value.runtime !== runtime
         || value.conversationId !== conversationId
-        || (value.version !== 1 && value.version !== 2 && value.version !== 3)) {
+        || (value.version !== 1 && value.version !== 2
+          && value.version !== 3 && value.version !== 4)) {
         throw invalidMarker();
       }
       if (value.version === 1) return emptyDeleteTransaction(runtime, conversationId);
       if (!Array.isArray(value.artifacts)) {
         throw invalidMarker();
       }
-      const artifacts: TrashedConversationArtifact[] = [];
-      const parseArtifact = (row: unknown): TrashedConversationArtifact | null => {
+      const artifacts: TrashedConversationFileArtifact[] = [];
+      const parseArtifact = (row: unknown): TrashedConversationFileArtifact | null => {
         if (!row || typeof row !== "object") {
           return null;
         }
@@ -5744,14 +5908,14 @@ export class SessionHost {
         const trash = (row as Record<string, unknown>).trash;
         const kind = (row as Record<string, unknown>).kind;
         if (typeof artifact !== "string"
-          || !DELETE_ARTIFACT_KINDS.has(artifact as TrashedConversationArtifact["artifact"])
+          || !DELETE_ARTIFACT_KINDS.has(artifact as TrashedConversationFileArtifact["artifact"])
           || typeof source !== "string" || !isAbsolute(source)
           || typeof trash !== "string" || !isAbsolute(trash)
           || (kind !== "freedesktop" && kind !== "fallback")) {
           return null;
         }
         return {
-          artifact: artifact as TrashedConversationArtifact["artifact"],
+          artifact: artifact as TrashedConversationFileArtifact["artifact"],
           source,
           trash,
           kind,
@@ -5762,17 +5926,44 @@ export class SessionHost {
         if (!artifact) throw invalidMarker();
         artifacts.push(artifact);
       }
-      const current = value.version === 3;
+      const current = value.version === 3 || value.version === 4;
       const trashRoot = current ? value.trashRoot : null;
       const pending = current && value.pending !== null
         ? parseArtifact(value.pending)
         : null;
-      if ((current && value.pending !== null && !pending)
+      const rawTaskGroup = value.version === 4 ? value.delegatedTasks : null;
+      let delegatedTasks: DeleteTaskGroup | null = null;
+      if (rawTaskGroup !== null) {
+        if (!rawTaskGroup || typeof rawTaskGroup !== "object" || Array.isArray(rawTaskGroup)) {
+          throw invalidMarker();
+        }
+        const row = rawTaskGroup as Record<string, unknown>;
+        if (Object.keys(row).sort().join("\0")
+            !== ["artifact", "count", "digest", "kind", "source", "trash"].sort().join("\0")
+          || row.artifact !== "delegated-tasks"
+          || typeof row.source !== "string" || !isAbsolute(row.source)
+          || typeof row.trash !== "string" || !isAbsolute(row.trash)
+          || row.kind !== "fallback"
+          || !Number.isSafeInteger(row.count)
+          || typeof row.digest !== "string") throw invalidMarker();
+        delegatedTasks = row as unknown as DeleteTaskGroup;
+      }
+      const taskGroupIndex = delegatedTasks && typeof trashRoot === "string"
+        ? exactDeleteTaskGroup(ghostDir, trashRoot, delegatedTasks)
+        : null;
+      if ((value.version === 4 && value.delegatedTasks === undefined)
+        || (current && value.pending !== null && !pending)
         || (current && trashRoot !== null
           && (typeof trashRoot !== "string" || !exactDeleteTrashRoot(ghostDir, trashRoot)))
+        || (delegatedTasks && taskGroupIndex === null)
+        || (taskGroupIndex !== null && taskGroupIndex > artifacts.length + 1)
         || (current && pending && typeof trashRoot !== "string")
         || (current && pending && (pending.kind !== "fallback"
-          || !exactDeleteTrashChild(trashRoot as string, pending, artifacts.length + 1)))) {
+          || !exactDeleteTrashChild(
+            trashRoot as string,
+            pending,
+            artifacts.length + (delegatedTasks ? 2 : 1),
+          )))) {
         throw invalidMarker();
       }
       const allArtifacts = [...artifacts, ...(pending ? [pending] : [])];
@@ -5794,25 +5985,15 @@ export class SessionHost {
           throw invalidMarker();
         }
       }
-      if (value.version === 2) {
-        return {
-          version: 3,
-          kind: "delete",
-          runtime,
-          conversationId,
-          artifacts,
-          trashRoot: null,
-          pending: null,
-        };
-      }
       return {
-        version: 3,
+        version: 4,
         kind: "delete",
         runtime,
         conversationId,
         artifacts,
         trashRoot: trashRoot as string | null,
         pending,
+        delegatedTasks,
       };
     } catch (error) {
       // A malformed marker continues to own the id. Never erase it or start a
@@ -6006,6 +6187,192 @@ export class SessionHost {
     await this.transactionProbe("delete-receipt-write", pending.source);
     await writeTransaction(marker, record);
     await this.transactionProbe("delete-artifact-recorded", pending.source);
+  }
+
+  private taskDeleteFailure(message: string): GhostError {
+    return new GhostError("delete_recovery_pending", message, 500);
+  }
+
+  private async liveParentTaskEntries(
+    ghostName: string,
+    parent: ConversationIdentity,
+  ): Promise<Array<{ id: string; path: string; sha256: string; record: TaskRecord }>> {
+    if (!this.taskServices) return [];
+    const home = ghostPaths(this.registry.get(ghostName).dir).home;
+    const records = (await (await this.taskController(ghostName)).list())
+      .filter((record) => record.parent.id === parent.id
+        && record.parent.runtime === parent.runtime
+        && record.parent.conversationId === parent.conversationId)
+      .sort((left, right) => left.id.localeCompare(right.id));
+    if (records.length > MAX_TASK_GROUP_COUNT) {
+      throw this.taskDeleteFailure("Delegated task history exceeds its deletion bound.");
+    }
+    return Promise.all(records.map(async (record) => {
+      const path = join(home, TASKS_DIRNAME, `${record.id}.json`);
+      const inspected = await inspectTaskRecordFile(path);
+      if (inspected.record.id !== record.id
+        || inspected.record.parent.id !== parent.id
+        || inspected.record.parent.runtime !== parent.runtime
+        || inspected.record.parent.conversationId !== parent.conversationId) {
+        throw this.taskDeleteFailure("Delegated task history changed during deletion.");
+      }
+      return { id: record.id, path, sha256: inspected.sha256, record: inspected.record };
+    }));
+  }
+
+  private async trashedParentTaskEntries(
+    directory: string,
+    parent: ConversationIdentity,
+  ): Promise<Array<{ id: string; path: string; sha256: string; record: TaskRecord }>> {
+    const stats = await lstat(directory, { bigint: true }).catch((error: unknown) => {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
+    });
+    if (!stats) return [];
+    if (!stats.isDirectory() || stats.isSymbolicLink() || (stats.mode & 0o777n) !== 0o700n) {
+      throw this.taskDeleteFailure("Delegated task Trash is not a private directory.");
+    }
+    const names = (await readdir(directory)).sort();
+    if (names.length > MAX_TASK_GROUP_COUNT) {
+      throw this.taskDeleteFailure("Delegated task Trash exceeds its deletion bound.");
+    }
+    const entries = [];
+    for (const name of names) {
+      if (!/^task-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.json$/u.test(name)) {
+        throw this.taskDeleteFailure("Delegated task Trash contains an unexpected entry.");
+      }
+      const path = join(directory, name);
+      const inspected = await inspectTaskRecordFile(path);
+      const record = inspected.record;
+      if (`${record.id}.json` !== name
+        || record.parent.id !== parent.id
+        || record.parent.runtime !== parent.runtime
+        || record.parent.conversationId !== parent.conversationId
+        || !isTerminalTaskState(record.state)) {
+        throw this.taskDeleteFailure("Delegated task Trash does not match its conversation.");
+      }
+      entries.push({ id: record.id, path, sha256: inspected.sha256, record });
+    }
+    return entries;
+  }
+
+  private validateDeleteTaskBundle(
+    group: DeleteTaskGroup,
+    source: readonly Readonly<{ id: string; sha256: string }>[],
+    trashed: readonly Readonly<{ id: string; sha256: string }>[],
+  ): void {
+    const ids = [...source, ...trashed].map((entry) => entry.id);
+    const entries = [...source, ...trashed];
+    if (new Set(ids).size !== ids.length
+      || entries.length !== group.count
+      || delegatedTaskDigest(entries) !== group.digest) {
+      throw this.taskDeleteFailure("Delegated task history does not match its deletion receipt.");
+    }
+  }
+
+  private async reconcileDeleteTaskGroup(
+    ghostName: string,
+    parent: ConversationIdentity,
+    group: DeleteTaskGroup,
+  ): Promise<void> {
+    const source = await this.liveParentTaskEntries(ghostName, parent);
+    if (source.some((entry) => !isTerminalTaskState(entry.record.state))) {
+      throw this.taskDeleteFailure("A nonterminal delegated task entered deletion recovery.");
+    }
+    let trashed = await this.trashedParentTaskEntries(group.trash, parent);
+    this.validateDeleteTaskBundle(group, source, trashed);
+
+    const sourceRoot = resolve(group.source);
+    const trashRoot = resolve(group.trash);
+    const transactionRoot = resolve(trashRoot, "..");
+    const fallbackRoot = resolve(transactionRoot, "..");
+    const [sourceStats, transactionStats, fallbackStats] = await Promise.all([
+      lstat(sourceRoot, { bigint: true }),
+      lstat(transactionRoot, { bigint: true }),
+      lstat(fallbackRoot, { bigint: true }),
+    ]);
+    if (!sourceStats.isDirectory() || sourceStats.isSymbolicLink()
+      || (sourceStats.mode & 0o777n) !== 0o700n
+      || !transactionStats.isDirectory() || transactionStats.isSymbolicLink()
+      || (transactionStats.mode & 0o777n) !== 0o700n
+      || !fallbackStats.isDirectory() || fallbackStats.isSymbolicLink()
+      || (fallbackStats.mode & 0o777n) !== 0o700n
+      || sourceStats.dev !== transactionStats.dev
+      || sourceStats.dev !== fallbackStats.dev) {
+      throw this.taskDeleteFailure("Delegated task history cannot be moved safely.");
+    }
+    if (trashed.length === 0 && !(await this.transactionEntryExists(group.trash))) {
+      await this.transactionProbe("delete-task-group-create", group.trash);
+      await mkdir(group.trash, { mode: 0o700 });
+      await fsyncDirectory(transactionRoot);
+    }
+    const trashStats = await lstat(trashRoot, { bigint: true });
+    if (!trashStats.isDirectory() || trashStats.isSymbolicLink()
+      || (trashStats.mode & 0o777n) !== 0o700n
+      || sourceStats.dev !== trashStats.dev) {
+      throw this.taskDeleteFailure("Delegated task history cannot be moved safely.");
+    }
+    for (const entry of source) {
+      const current = await inspectTaskRecordFile(entry.path);
+      if (current.record.id !== entry.id || current.sha256 !== entry.sha256
+        || !isTerminalTaskState(current.record.state)) {
+        throw this.taskDeleteFailure("Delegated task history changed before its move.");
+      }
+      const destination = join(group.trash, `${entry.id}.json`);
+      if (await this.transactionEntryExists(destination)) {
+        throw this.taskDeleteFailure("Delegated task history exists in both live and Trash state.");
+      }
+      await rename(entry.path, destination);
+      await this.transactionProbe("delete-task-record-rename", entry.path);
+      await fsyncDirectory(trashRoot);
+      await fsyncDirectory(sourceRoot);
+    }
+    const remaining = await this.liveParentTaskEntries(ghostName, parent);
+    trashed = await this.trashedParentTaskEntries(group.trash, parent);
+    this.validateDeleteTaskBundle(group, remaining, trashed);
+    if (remaining.length !== 0 || trashed.length !== group.count) {
+      throw this.taskDeleteFailure("Delegated task history did not finish moving to Trash.");
+    }
+  }
+
+  private async prepareDeleteTaskGroup(
+    ghostName: string,
+    parent: ConversationIdentity,
+    marker: string,
+    ghostDir: string,
+    record: DeleteTransactionRecord,
+  ): Promise<DeleteTaskGroup | null> {
+    if (record.delegatedTasks) {
+      await this.reconcileDeleteTaskGroup(ghostName, parent, record.delegatedTasks);
+      return record.delegatedTasks;
+    }
+    const entries = await this.liveParentTaskEntries(ghostName, parent);
+    if (entries.length === 0) return null;
+    if (entries.some((entry) => !isTerminalTaskState(entry.record.state))) {
+      throw new GhostError(
+        "tasks_active",
+        "Cancel or wait for this conversation's delegated tasks before deleting it.",
+        409,
+      );
+    }
+    const trashRoot = await this.ensureDeleteTrashRoot(ghostDir, marker, record);
+    const index = record.artifacts.length + 1;
+    const group: DeleteTaskGroup = {
+      artifact: "delegated-tasks",
+      source: join(ghostPaths(ghostDir).home, TASKS_DIRNAME),
+      trash: join(
+        trashRoot,
+        `${String(index).padStart(3, "0")}-${randomUUID()}-delegated-tasks`,
+      ),
+      kind: "fallback",
+      count: entries.length,
+      digest: delegatedTaskDigest(entries),
+    };
+    record.delegatedTasks = group;
+    await writeTransaction(marker, record);
+    await this.transactionProbe("delete-task-group-recorded", group.trash);
+    await this.reconcileDeleteTaskGroup(ghostName, parent, group);
+    return group;
   }
 
   private async unlinkForkArtifact(path: string): Promise<void> {
@@ -7059,17 +7426,30 @@ export class SessionHost {
       );
     }
 
-    // Claim synchronously before the first awaited filesystem operation. MCP
-    // reconnect/reload and project transitions perform the inverse check, so
-    // either admission order has one winner rather than a microtask race.
-    const maintenanceReservation = this.maintenance?.reserveConversationDelete({
-      ghostName,
-      runtime,
-      conversationId: id,
-    });
+    // Claim both conversation deletion and its delegated-task parent before
+    // the first await. Existing task operations drain; later ones cannot enter.
+    const taskDeletion = this.taskParentOperations.claim(deleteKey);
+    if (!taskDeletion) {
+      throw new GhostError("session_busy", "This conversation is already being deleted.", 409);
+    }
+    let maintenanceReservation: MaintenanceConversationDeleteReservation | undefined;
     let maintenanceDeleteOutcome: MaintenanceConversationDeleteOutcome = "rolled-back";
     this.deleting.add(deleteKey);
     try {
+      maintenanceReservation = this.maintenance?.reserveConversationDelete({
+        ghostName,
+        runtime,
+        conversationId: id,
+      });
+      await taskDeletion.drained;
+      const initialTasks = await this.liveParentTaskEntries(ghostName, identity);
+      if (initialTasks.some((entry) => !isTerminalTaskState(entry.record.state))) {
+        throw new GhostError(
+          "tasks_active",
+          "Cancel or wait for this conversation's delegated tasks before deleting it.",
+          409,
+        );
+      }
       if (runtime === "pi") await this.cancelRecap(piKey);
       await maintenanceReservation?.drained;
       const draftMarker = draftAbandonTransactionPath(paths.sessionDir, runtime, id);
@@ -7120,6 +7500,13 @@ export class SessionHost {
         ghost.dir,
       );
       await this.reconcileDeleteMove(tombstone, deleteRecord);
+      const taskGroup = await this.prepareDeleteTaskGroup(
+        ghostName,
+        identity,
+        tombstone,
+        ghost.dir,
+        deleteRecord,
+      );
       // Title generation can still append to an otherwise-idle transcript.
       // Let it settle before disposal so deletion cannot race a late write.
       const background = [hosted?.title]
@@ -7144,7 +7531,7 @@ export class SessionHost {
       }
       const rowsBefore = await this.collectSessions(ghost.name);
       const candidates: Array<{
-        artifact: TrashedConversationArtifact["artifact"];
+        artifact: TrashedConversationFileArtifact["artifact"];
         path: string;
       }> = runtime === "pi"
         ? [
@@ -7177,7 +7564,7 @@ export class SessionHost {
         const trashRoot = await this.ensureDeleteTrashRoot(ghost.dir, tombstone, deleteRecord);
         const trash = join(
           trashRoot,
-          `${String(artifacts.length + 1).padStart(3, "0")}-${randomUUID()}-${basename(candidate.path)}`,
+          `${String(artifacts.length + (taskGroup ? 2 : 1)).padStart(3, "0")}-${randomUUID()}-${basename(candidate.path)}`,
         );
         deleteRecord.pending = {
           artifact: candidate.artifact,
@@ -7193,7 +7580,7 @@ export class SessionHost {
         artifacts.push(artifact);
         recorded.add(candidateKey);
       }
-      if (artifacts.length === 0 && !resumingDeletion) {
+      if (artifacts.length === 0 && !taskGroup && !resumingDeletion) {
         await this.retireDeleteMarker(paths.sessionDir, tombstone, deleteRecord);
         maintenanceDeleteOutcome = "rolled-back";
         throw new GhostError(
@@ -7234,12 +7621,24 @@ export class SessionHost {
       maintenanceDeleteOutcome = "completed";
       this.logger.child({ ghost: ghostName, conversation: id }).info("trashed ghost conversation", {
         session: identity.id,
-        artifacts: artifacts.map((entry) => entry.artifact),
+        artifacts: [
+          ...artifacts.map((entry) => entry.artifact),
+          ...(taskGroup ? [taskGroup.artifact] : []),
+        ],
       });
       await this.announceConversationUpdated(ghostName, runtime, id);
-      return { artifacts };
+      if (!taskGroup) return { artifacts };
+      const taskIndex = exactDeleteTaskGroup(
+        ghost.dir,
+        resolve(taskGroup.trash, ".."),
+        taskGroup,
+      ) ?? 1;
+      const receipts: TrashedConversationArtifact[] = [...artifacts];
+      receipts.splice(taskIndex - 1, 0, taskGroup);
+      return { artifacts: receipts };
     } finally {
       this.deleting.delete(deleteKey);
+      taskDeletion.release();
       if (maintenanceDeleteOutcome === "rolled-back"
         && await transactionMarkerState(tombstone, this.transactionMarkerLstat) !== "absent") {
         maintenanceDeleteOutcome = "recovery-pending";

@@ -2567,6 +2567,16 @@ const mockServer = createServer(async (req, res) => {
   if (parts[3] === "sessions" && parts.length === 5 && req.method === "DELETE") {
     const conversation = routeConversation(parts);
     if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
+    const storedTasks = delegatedTaskStore.get(delegatedTaskKey(name, conversation.id)) ?? [];
+    if (storedTasks.some((task) =>
+      ["queued", "starting", "running", "cancelling"].includes(task.state))) {
+      return json(res, 409, {
+        error: {
+          code: "tasks_active",
+          message: "Cancel or wait for this conversation's delegated tasks before deleting it.",
+        },
+      });
+    }
     const deleted = ghostSessions(name).delete(conversation.id);
     if (deleted) {
       ghostProjects(name).delete(conversation.id);

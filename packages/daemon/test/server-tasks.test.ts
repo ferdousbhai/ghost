@@ -118,6 +118,29 @@ describe("native harness API", () => {
 });
 
 describe("delegated task API", () => {
+  it("returns the bounded active-task deletion conflict unchanged", async () => {
+    const deleteSession = vi.fn(async () => {
+      throw new GhostError(
+        "tasks_active",
+        "Cancel or wait for this conversation's delegated tasks before deleting it.",
+        409,
+      );
+    });
+    const base = await serve({ host: { deleteSession } });
+    const response = await request(
+      `${base}/api/ghosts/casper/sessions/${encodeURIComponent(PARENT.id)}`,
+      { method: "DELETE" },
+    );
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: {
+        code: "tasks_active",
+        message: "Cancel or wait for this conversation's delegated tasks before deleting it.",
+      },
+    });
+    expect(deleteSession).toHaveBeenCalledWith("casper", "conversation", "pi");
+  });
+
   it("uses exact parent-scoped methods and bounded projections for every action", async () => {
     const task = record();
     const host = {

@@ -10,7 +10,7 @@ import {
   type NativeTaskScope,
   type NativeTaskScopeManager,
 } from "./native-task-scope.js";
-import { readPrivateFile, recoverPrivateJsonAtomicCas, writePrivateJsonAtomicCas, type PrivateFileIdentity } from "./private-file.js";
+import { readPrivateFile, readPrivateFilePinned, recoverPrivateJsonAtomicCas, writePrivateJsonAtomicCas, type PrivateFileIdentity } from "./private-file.js";
 
 export const TASK_RECORD_VERSION = 1;
 export const TASK_BINDING_VERSION = 1;
@@ -75,6 +75,11 @@ const CAS_SIDECAR = new RegExp(`^(${ID_SOURCE}\\.json)\\.ghost-migration-(?:cas|
 const CODE = /^[a-z][a-z0-9_-]{0,63}$/u;
 const HARNESS = /^[a-z0-9][a-z0-9-]{0,63}$/u;
 const MAX_COUNTER = 2_147_483_647;
+
+export interface InspectedTaskRecordFile {
+  record: TaskRecord;
+  sha256: string;
+}
 
 function fail(code: string, message: string, status = 400): never { throw new GhostError(code, message, status); }
 function canonicalTimestamp(value: unknown): value is string {
@@ -190,6 +195,35 @@ function parseRecord(value: unknown): TaskRecord {
     || (state !== "completed" && row.resultTruncated === true)
     || ((state !== "completed" && state !== "failed" && state !== "interrupted") && (hasResult || hasError))) fail("invalid_task_record", "The task terminal fields do not match its state.");
   return row as unknown as TaskRecord;
+}
+
+export function isTerminalTaskState(state: TaskState): boolean {
+  return TERMINAL.has(state);
+}
+
+/** Read one exact private task record for a deletion bundle. */
+export async function inspectTaskRecordFile(path: string): Promise<InspectedTaskRecordFile> {
+  if (!isAbsolute(path) || resolve(path) !== path) {
+    fail("unsafe_task_record", "The task record path is invalid.");
+  }
+  const source = readPrivateFilePinned(path);
+  try {
+    const live = await lstat(path, { bigint: true });
+    if (!live.isFile() || live.isSymbolicLink()
+      || live.dev !== source.identity.device || live.ino !== source.identity.inode
+      || live.nlink !== 1n || (live.mode & 0o777n) !== 0o600n) {
+      fail("unsafe_task_record", "The task record changed.");
+    }
+    return {
+      record: parseRecord(JSON.parse(source.text)),
+      sha256: source.sha256,
+    };
+  } catch (error) {
+    if (error instanceof GhostError) throw error;
+    fail("invalid_task_record", "The task record is invalid.");
+  } finally {
+    source.release();
+  }
 }
 
 export class TaskStore {

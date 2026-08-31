@@ -210,7 +210,10 @@ encrypted relay is planned. Remote sharing uses the built-in Tailscale viewer.
 Whole ghosts and memory files move to freedesktop Trash, with a
 same-filesystem fallback when needed. Conversation deletion pre-journals every
 owned transcript/sidecar destination inside a private same-filesystem fallback
-Trash root so a crash after rename can recover the complete receipt. Only
+Trash root so a crash after rename can recover the complete receipt. Terminal
+delegated-task records move with that conversation as one count/digest-bound
+private group; active workers return `409 tasks_active` before deletion changes
+anything, so the owner can cancel or wait and retry. Only
 rollback of a fork or project draft that was never shown to the owner remains a
 permanent unlink.
 

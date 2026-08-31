@@ -3483,8 +3483,10 @@ Singleton {
         root.deleteSessionRequest = xhr;
         xhr.onreadystatechange = function () {
             if (xhr.readyState !== 4 || xhr !== root.deleteSessionRequest) return;
-            root.deletingSessionId = "";
             if (xhr.status === 200) {
+                if (root.delegatedTasksGhost === ghost
+                        && root.delegatedTasksSessionId === id)
+                    root.clearDelegatedTasks();
                 root.dropCommandTranscripts(ghost, id);
                 const key = root.conversationKey(ghost, id);
                 const kept = Object.assign({}, root.turnStates);
@@ -3509,9 +3511,17 @@ Singleton {
                     root.sessionsError = "";
                     root.fetchSessions(ghost);
                 }
-            } else if (ghost === root.activeGhost) {
-                root.sessionsError = root.describeError(xhr, "DELETE conversation");
+            } else {
+                if (ghost === root.activeGhost) {
+                    root.sessionsError = xhr.status === 409
+                            && root.errorCode(xhr) === "tasks_active"
+                        ? "Review or cancel active workers in Delegation, then try again."
+                        : root.describeError(xhr, "DELETE conversation");
+                }
             }
+            // The dialog observes this field to settle. Publish the outcome
+            // first so a failure cannot look like a successful dismissal.
+            root.deletingSessionId = "";
         };
         root.dispatch(xhr, "DELETE", "/api/ghosts/" + encodeURIComponent(ghost)
             + "/sessions/" + encodeURIComponent(id), ({}), null);

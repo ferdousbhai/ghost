@@ -62,6 +62,13 @@ function fixture(records: TaskRecord[] = [record()]) {
   const followUp = vi.fn(async (id: string) => get(id));
   const cancel = vi.fn(async (id: string) => get(id));
   const mintBinding = vi.fn(async () => binding);
+  let operationCalls = 0;
+  const operation: PrincipalTaskContext["operation"] = async <T>(
+    action: () => Promise<T>,
+  ) => {
+    operationCalls += 1;
+    return action();
+  };
   return {
     start,
     get,
@@ -69,10 +76,13 @@ function fixture(records: TaskRecord[] = [record()]) {
     followUp,
     cancel,
     mintBinding,
+    operation,
+    operationCalls: () => operationCalls,
     context: {
       parent,
       cwd: binding.cwd,
       mintBinding,
+      operation,
       controller: Promise.resolve(
         { start, get, list, followUp, cancel } as unknown as TaskController,
       ),
@@ -97,6 +107,17 @@ async function call(
 }
 
 describe("principal task tools", () => {
+  it("holds the parent operation gate around every delegated task action", async () => {
+    const current = fixture();
+    const id = record().id;
+    await call(current.context, "task", { harness: "codex", assignment: "Work." });
+    await call(current.context, "task_list", {});
+    await call(current.context, "task_get", { task_id: id });
+    await call(current.context, "task_send", { task_id: id, message: "Continue." });
+    await call(current.context, "task_cancel", { task_id: id });
+    expect(current.operationCalls()).toBe(5);
+  });
+
   it("registers the exact surface and delegates with the minted trusted receipt", async () => {
     const current = fixture();
     const extension = await tools(current.context);

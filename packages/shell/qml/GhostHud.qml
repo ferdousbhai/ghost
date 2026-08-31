@@ -1204,7 +1204,9 @@ FloatingWindow {
             open: hud.pendingDeleteSessionId !== ""
             title: "Move conversation to Trash?"
             body: "“" + hud.pendingDeleteTitle + "” and its transcript will be "
-                + "moved to the trash. This cannot be undone from the HUD."
+                + "moved to the trash. Finished worker history moves with it. "
+                + "Review or cancel active workers in Delegation first. This "
+                + "cannot be undone from the HUD."
             confirmText: "Move to Trash"
             busy: Ghostd.deletingSessionId === hud.pendingDeleteSessionId
                 && hud.pendingDeleteSessionId !== ""

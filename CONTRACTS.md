@@ -634,6 +634,14 @@ runtime-qualified parent:
 Creation accepts the same bounded `{ harness, assignment, cwd?, agent? }`
 shape as the principal `task` tool. Send accepts exactly `{ message }`; cancel
 accepts an empty object. List accepts an optional decimal `limit` from 1 to 20.
+The HTTP routes and both principal-runtime tool bridges share one
+runtime-qualified parent operation gate. A start owns the gate from project
+binding mint through the durable `queued` record write, send owns it through
+the native acknowledgement, cancel owns it through confirmed scope
+quiescence, and reads own it through their complete durable read. Conversation
+deletion takes the exclusive side of that same gate synchronously before its
+first await, drains admitted operations, and prevents later operations from
+entering until deletion either fails or settles.
 Responses use the same bounded task list/detail projections as principal tools:
 they omit the project binding identities, durable assignment body, and native
 protocol and include at most the retained bounded event preview. A task id
@@ -663,6 +671,11 @@ exists only for nonterminal work and resolves to the daemon's confirmed state.
 All terminal states remain inspectable. There is no wait, resume, install,
 login, Git workspace, or task-mutation concept beyond the authenticated routes
 above.
+If conversation deletion reports `409 tasks_active`, the delete dialog and
+conversation remain in place and the Delegation state and requests remain
+available so the owner can inspect or cancel workers before retrying. A
+successful delete retires those task requests and state. Finished task history
+moves with the transcript; the HUD has no task-history restore or purge API.
 
 Graceful daemon shutdown closes admission and synchronously begins task
 shutdown before session/store teardown. Forced shutdown reuses the same
@@ -1960,17 +1973,22 @@ daemon. Failure to discover Claude does not prevent a pi or `--no-turn` smoke.
   still use `done`: the command completed without a transport or model error.
   Command output is not an assistant message and is not persisted as one.
 - `DELETE /api/ghosts/:name/sessions/:id` →
-  `{ ok: true, trash: [{ artifact, source, trash, kind }, …] }` — moves every
+  `{ ok: true, trash: [{ artifact, source, trash, kind, count?, digest? }, …] }`
+  — moves every
   Ghost-owned artifact for the conversation to recoverable Trash. `artifact` is
   `omp-transcript` (the pi transcript; the label is kept for compatibility),
   `claude-sidecar`, `project-binding`, `project-snapshot`, `tool-cwds`, or
-  `maintenance-state`.
+  `maintenance-state`; one optional `delegated-tasks` group adds required
+  `count` and `digest` fields.
   Every generation-qualified Pi project snapshot is included. Claude Code's actual
   transcript remains in that runtime's
   external `~/.claude` storage; Ghost does not claim to delete it. An active
   turn or live-voice session must finish or be stopped first
-  (`409 session_busy`); an unknown conversation returns `404 not_found`.
-  Deletion writes and fsyncs a v3 tombstone before moving the first artifact.
+  (`409 session_busy`). Any child in `queued`, `starting`, `running`, or
+  `cancelling` returns bounded `409 tasks_active` before project revocation,
+  tombstone publication, or any move; the owner may cancel or wait and retry.
+  An unknown conversation returns `404 not_found`.
+  Deletion writes and fsyncs a v4 tombstone before moving the first artifact.
   Each move first creates a private same-filesystem fallback Trash root, then
   journals its exact collision-free `{ artifact, source, trash, kind }` intent
   before rename. Resume reconciles the two authoritative locations: source-only
@@ -1979,12 +1997,30 @@ daemon. Failure to discover Claude does not prevent a pi or `--no-turn` smoke.
   cannot lose the destination. After every successful reconciliation Ghost
   atomically rewrites and fsyncs the tombstone with the complete ordered receipt
   so far.
-  Before any reconciliation or cleanup, every v2/v3 row's artifact label and
-  source must match the exact runtime/conversation-derived allow-list: the one
-  Pi transcript or Claude sidecar, that runtime's binding, and the Pi tool-cwd
-  sidecar and generation-qualified snapshot names. Sources and destinations are globally
-  distinct and completed receipts require source absent plus Trash destination
-  present. A v3 pending move additionally requires the exact private
+  Terminal child records move out of the live `.tasks/` directory into exactly
+  one private mode-0700 direct child of that same transaction's fallback Trash
+  root. The v4 tombstone keeps only `{ artifact: "delegated-tasks", source,
+  trash, kind: "fallback", count, digest }`: `digest` is SHA-256 over sorted
+  repetitions of `task-id`, NUL, the exact record-byte SHA-256, and newline.
+  It does not grow with task history. Every source and destination record must
+  be a mode-0600, single-link private regular file with a valid terminal
+  `task-record/v1`, unique id, and the exact runtime-qualified parent. Source
+  and Trash directories must be private real directories on the same device.
+  Recovery validates the combined source/Trash inventory against count and
+  digest before every rename: source-only resumes, destination-only is already
+  complete, and both, neither, wrong parent, unexpected entry, link, mode,
+  record, or digest mismatch fails closed. Each record rename fsyncs both
+  directories. Removing the live records prevents a later conversation that
+  reuses the raw id from adopting old workers; an equal raw id on the other
+  runtime is never part of the group. There is no public restore or purge
+  operation for this private transaction history.
+  Before any reconciliation or cleanup, every v2/v3/v4 static row's artifact
+  label and source must match the exact runtime/conversation-derived allow-list:
+  the one Pi transcript or Claude sidecar, that runtime's binding, and the Pi
+  tool-cwd sidecar and generation-qualified snapshot names. Sources and
+  destinations are globally distinct and completed receipts require source
+  absent plus Trash destination present. A v3/v4 pending move additionally
+  requires the exact private
   `.trash/.conversation-<uuid>` root and its next sequential, collision-reserved
   direct child; aliases and another conversation's artifacts are invalid.
   Listings and every open/project route hide or refuse that runtime-qualified

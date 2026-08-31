@@ -7198,7 +7198,7 @@ describe("session listing", () => {
         version: number;
         artifacts: TrashedConversation["artifacts"];
       };
-      expect(record.version).toBe(3);
+      expect(record.version).toBe(4);
       expect(record.artifacts.map((entry) => entry.artifact)).toEqual(
         expectedKinds.slice(0, moved),
       );
@@ -7249,7 +7249,7 @@ describe("session listing", () => {
       pending: TrashedConversation["artifacts"][number];
       artifacts: TrashedConversation["artifacts"];
     };
-    expect(pending.version).toBe(3);
+    expect(pending.version).toBe(4);
     expect(pending.pending).toMatchObject({
       artifact: "omp-transcript",
       source: transcript,
@@ -7356,7 +7356,10 @@ describe("session listing", () => {
         + basename(source),
     );
     const pending = (
-      artifact: TrashedConversation["artifacts"][number]["artifact"],
+      artifact: Exclude<
+        TrashedConversation["artifacts"][number]["artifact"],
+        "delegated-tasks"
+      >,
       source: string,
       trash = trashFor(source),
     ) => ({ artifact, source, trash, kind: "fallback" as const });
