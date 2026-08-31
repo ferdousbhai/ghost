@@ -3,6 +3,20 @@ import { loadConfig } from "../config.js";
 import { describeErrorBody } from "./output.js";
 import type { CliRuntime } from "./types.js";
 
+/**
+ * A control request is a small JSON round-trip the daemon answers immediately,
+ * so a short cap catches a daemon that is gone rather than one that is busy.
+ */
+const CONTROL_REQUEST_TIMEOUT_MS = 5_000;
+/**
+ * A turn's event stream is a different thing. The daemon does not reach the
+ * first frame until the model does, and a real turn — thinking, reading files,
+ * running a tool — can sit well past any control-request budget. This bounds
+ * only how long the CLI waits to be answered at all; once the stream is open it
+ * runs until the turn ends or the owner interrupts.
+ */
+const STREAM_REQUEST_TIMEOUT_MS = 15 * 60_000;
+
 export class CliError extends Error {
   constructor(readonly exitCode: number, message: string) {
     super(message);
@@ -87,12 +101,17 @@ export class DaemonClient {
     this.#tokenValue = readApiToken({ env: runtime.env, home: runtime.home });
   }
 
-  async #fetch(path: string, init: RequestInit, retry = true): Promise<Response> {
+  async #fetch(
+    path: string,
+    init: RequestInit,
+    retry = true,
+    timeoutMs = CONTROL_REQUEST_TIMEOUT_MS,
+  ): Promise<Response> {
     const headers = new Headers(init.headers);
     headers.set("accept", headers.get("accept") ?? "application/json");
     if (this.#tokenValue) headers.set("authorization", `Bearer ${this.#tokenValue}`);
     const timeout = new AbortController();
-    const timer = setTimeout(() => timeout.abort(), 5_000);
+    const timer = setTimeout(() => timeout.abort(), timeoutMs);
     const signal = init.signal
       ? AbortSignal.any([init.signal, timeout.signal])
       : timeout.signal;
@@ -153,7 +172,7 @@ export class DaemonClient {
         ...(body === undefined ? {} : { "content-type": "application/json" }),
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    });
+    }, true, STREAM_REQUEST_TIMEOUT_MS);
     if (!response.ok) {
       const parsed = await responseBody(response);
       throw statusError(response.status, parsed, this.tokenPath);
