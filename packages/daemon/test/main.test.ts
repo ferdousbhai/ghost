@@ -2,17 +2,17 @@ import { pathToFileURL } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
 import { describe, expect, it, vi } from "vitest";
 import {
-  captureDaemonNativeHarnessEnvironments,
   closeDaemonResources,
   isDirectInvocation,
   main,
   parseArgs,
   runStagedShutdown,
 } from "../src/main.js";
+import { captureNativeHarnessEnvironments } from "../src/native-harness-runtime.js";
 
 describe("daemon native harness environment capture", () => {
   it("captures explicit selectors separately without retaining provider secrets", () => {
-    const captured = captureDaemonNativeHarnessEnvironments({
+    const captured = captureNativeHarnessEnvironments({
       HOME: "/home/owner",
       PATH: "/usr/bin",
       GHOST_CLAUDE_BINARY: "/opt/wrappers/claude",

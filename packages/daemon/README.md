@@ -47,9 +47,15 @@ ghost sessions
 ghost show -s cli-abc
 ghost ask -s cli-abc
 ghost watch
+ghost delegation
 ghost smoke --no-turn
 ghost smoke --model claude-code/default
 ```
+
+`ghost delegation` is the one local read-only client command: it inspects the
+installed Pi, Codex, and Claude Code harnesses without contacting ghostd or
+opening a ghost home. It reports availability/authentication only; delegated
+task mutation remains inside an authenticated Ghost conversation/API.
 
 `ghost smoke` starts a scratch daemon and a scratch ghost. `--no-turn` is the
 package/CI startup proof. A real smoke can select a runtime with `--model`; it

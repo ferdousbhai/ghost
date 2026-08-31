@@ -5,18 +5,14 @@ import { openMachineDocuments } from "@ghost/extensions";
 import { apiTokenCommand } from "./api-token.js";
 import { RemoteAccess } from "./tailscale-identity.js";
 import { LoginManager } from "./auth.js";
-import { CLAUDE_CODE_BINARY_ENV, ClaudeCodeProbe } from "./claude-code.js";
+import { ClaudeCodeProbe } from "./claude-code.js";
 import { ClaudeAgentSdkLoader } from "./claude-agent-sdk-loader.js";
 import { ClaudeTaskAdapter } from "./claude-task-adapter.js";
 import { CodexTaskAdapter } from "./codex-task-adapter.js";
 import { legacyDocumentsPlacementCommand } from "./legacy-documents-placement.js";
 import { loginCommand } from "./login-command.js";
 import { loadConfig, type DaemonConfig, type DaemonConfigOverrides } from "./config.js";
-import {
-  captureClaudeCodeEnvironment,
-  captureNativeHarnessEnvironment,
-  scrubProviderEnv,
-} from "./env-scrub.js";
+import { captureClaudeCodeEnvironment, scrubProviderEnv } from "./env-scrub.js";
 import { ConversationMaintenance, MEMORY_UPKEEP_SETTINGS_KEY } from "./conversation-maintenance.js";
 import { closeAllBrowserSessions, ensureGhostHomeLayout } from "./extensions.js";
 import { GhostRegistry } from "./ghosts.js";
@@ -29,13 +25,10 @@ import { createLogger, stderrSink, type Logger, type LogLevel } from "./log.js";
 import { McpCatalog } from "./mcp-catalog.js";
 import { ModelCatalog } from "./model-catalog.js";
 import {
-  ClaudeNativeHarnessProbe,
-  CODEX_BINARY_ENV,
-  CodexNativeHarnessProbe,
-  NativeHarnessCatalog,
-  PI_BINARY_ENV,
-  PiNativeHarnessProbe,
-} from "./native-harness-catalog.js";
+  captureNativeHarnessEnvironments,
+  createNativeHarnessCatalog,
+  type NativeHarnessEnvironments,
+} from "./native-harness-runtime.js";
 import { PiTaskAdapter } from "./pi-task-adapter.js";
 import type { TaskAdapter } from "./tasks.js";
 import { createRelayHub } from "./relay.js";
@@ -104,35 +97,6 @@ export interface ParsedArgs {
 
 export interface MainRuntime {
   afterHomeReservationAcquired?: () => Promise<void>;
-}
-
-export interface DaemonNativeHarnessEnvironments {
-  readonly claude: Readonly<NodeJS.ProcessEnv>;
-  readonly codex: Readonly<NodeJS.ProcessEnv>;
-  readonly pi: Readonly<NodeJS.ProcessEnv>;
-  readonly claudeBinary?: string;
-  readonly codexBinary?: string;
-  readonly piBinary?: string;
-}
-
-/** Capture only reviewed worker launch inputs before the global provider scrub. */
-export function captureDaemonNativeHarnessEnvironments(
-  source: Readonly<NodeJS.ProcessEnv> = process.env,
-): DaemonNativeHarnessEnvironments {
-  return Object.freeze({
-    claude: captureNativeHarnessEnvironment("claude-native", source),
-    codex: captureNativeHarnessEnvironment("codex-native", source),
-    pi: captureNativeHarnessEnvironment("pi-native", source),
-    ...(source[CLAUDE_CODE_BINARY_ENV] === undefined
-      ? {}
-      : { claudeBinary: source[CLAUDE_CODE_BINARY_ENV] }),
-    ...(source[CODEX_BINARY_ENV] === undefined
-      ? {}
-      : { codexBinary: source[CODEX_BINARY_ENV] }),
-    ...(source[PI_BINARY_ENV] === undefined
-      ? {}
-      : { piBinary: source[PI_BINARY_ENV] }),
-  });
 }
 
 export const DEFAULT_SHUTDOWN_GRACE_MS = 5_000;
@@ -405,7 +369,7 @@ export async function main(argv: string[] = process.argv.slice(2), runtime: Main
   // Claude Code owns its native external authentication. Capture only that
   // reviewed child environment before the process-global Pi scrub removes it.
   const claudeCodeEnvironment = captureClaudeCodeEnvironment(process.env);
-  const nativeHarnessEnvironments = captureDaemonNativeHarnessEnvironments(process.env);
+  const nativeHarnessEnvironments = captureNativeHarnessEnvironments(process.env);
 
   // Before pi, before any session. Idempotent, but this is the call that
   // matters: everything downstream inherits this environment.
@@ -462,7 +426,7 @@ async function serveDaemon(
   hooks: GhostHookRunner,
   hooksPath: string,
   claudeCodeEnvironment: Readonly<NodeJS.ProcessEnv>,
-  nativeHarnessEnvironments: DaemonNativeHarnessEnvironments,
+  nativeHarnessEnvironments: NativeHarnessEnvironments,
 ): Promise<number> {
   const registry = new GhostRegistry(config.ghostsRoot);
   const ownerHome = homedir();
@@ -495,24 +459,10 @@ async function serveDaemon(
     binaryPath: nativeHarnessEnvironments.claudeBinary ?? null,
     loadSdk: loadClaudeAgentSdk,
   });
-  const nativeHarnesses = new NativeHarnessCatalog({
-    claudeAgentSdkLoader: claudeAgentSdk,
-    probes: {
-      "claude-code": new ClaudeNativeHarnessProbe({
-        sdkLoader: claudeAgentSdk,
-        environment: nativeHarnessEnvironments.claude,
-        binaryPath: nativeHarnessEnvironments.claudeBinary ?? null,
-      }),
-      codex: new CodexNativeHarnessProbe({
-        environment: nativeHarnessEnvironments.codex,
-        binaryPath: nativeHarnessEnvironments.codexBinary ?? null,
-      }),
-      pi: new PiNativeHarnessProbe({
-        environment: nativeHarnessEnvironments.pi,
-        binaryPath: nativeHarnessEnvironments.piBinary ?? null,
-      }),
-    },
-  });
+  const nativeHarnesses = createNativeHarnessCatalog(
+    claudeAgentSdk,
+    nativeHarnessEnvironments,
+  );
   const host = new SessionHost({
     registry,
     homeOperations,

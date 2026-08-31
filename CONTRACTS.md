@@ -1200,8 +1200,9 @@ one must not be a leak of both.
 
 ### `ghost` CLI
 
-`ghost` is a consumer of this HTTP contract only; it does not open sessions or
-read a ghost home. Ghost selection resolves in this order: `--ghost`, `$GHOST`,
+`ghost` is a consumer of this HTTP contract except for one deliberately local,
+read-only command: `ghost delegation`. No CLI command opens sessions or reads a
+ghost home. Ghost selection resolves in this order: `--ghost`, `$GHOST`,
 the private mode-`0600`
 `$XDG_CONFIG_HOME/ghost/cli.json` (default `~/.config/ghost/cli.json`) field
 `{ "ghost": "<name>" }`, then the sole ghost when exactly one exists. Session
@@ -1225,6 +1226,19 @@ begins, then repeats it every 15 seconds while idle. The CLI bounds only
 admission and stream opening to one keepalive interval; it clears that timer
 when the opening response arrives, so a working turn has no wall-clock cap. Its
 one token-refresh retry preserves the same opening budget.
+
+`ghost delegation [--json] [-q]` reads the public native-harness catalogue
+without contacting ghostd. It uses the same positive `claude-native`,
+`codex-native`, and `pi-native` environment snapshots and separately captured
+binary selectors as daemon composition. It may run only the catalogue's local
+executable, version, authentication, account, and SDK availability probes. It
+does not open or create a ghost home, start a provider turn, mutate native
+authentication or Ghost config, load project policy or hooks, change the
+caller's cwd, or expose executable/version/account/environment/runtime-identity
+evidence. Human output is one concise availability/authentication table;
+`--json` is exactly `{ "harnesses": [{ "id", "availability",
+"authentication" }] }`. This status command has no task creation, follow-up,
+or cancellation form; those remain principal/API capabilities.
 
 `ghost smoke` owns a throwaway daemon, ghost root, and XDG state tree. With
 `--no-turn` it proves only daemon startup and ghost creation. Otherwise it may
