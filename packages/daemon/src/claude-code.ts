@@ -14,7 +14,7 @@
  */
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { constants as fsConstants, existsSync, readdirSync } from "node:fs";
+import { constants as fsConstants, existsSync, readFileSync, readdirSync } from "node:fs";
 import {
   access,
   lstat,
@@ -302,15 +302,42 @@ interface OwnedCommandResult {
   signal: NodeJS.Signals | null;
 }
 
+function linuxProcessGroupHasLiveMembers(pid: number): boolean {
+  for (const entry of readdirSync("/proc", { withFileTypes: true })) {
+    if (!entry.isDirectory() || !/^\d+$/u.test(entry.name)) continue;
+    let statLine: string;
+    try {
+      statLine = readFileSync(`/proc/${entry.name}/stat`, "utf8");
+    } catch (error) {
+      // A process can disappear between the directory and stat reads.
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "ENOENT" || code === "EACCES" || code === "EPERM") continue;
+      throw error;
+    }
+    const commandEnd = statLine.lastIndexOf(")");
+    const fields = commandEnd < 0
+      ? []
+      : statLine.slice(commandEnd + 2).split(" ");
+    const state = fields[0];
+    const processGroup = Number(fields[2]);
+    if (processGroup === pid && state !== "Z" && state !== "X") return true;
+  }
+  return false;
+}
+
 function processGroupExists(pid: number): boolean {
   try {
     process.kill(-pid, 0);
-    return true;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ESRCH") return false;
     if ((error as NodeJS.ErrnoException).code === "EPERM") return true;
     throw error;
   }
+  // Container PID 1 implementations commonly leave killed orphan descendants
+  // as zombies. A zombie keeps kill(2)'s process-group existence check true,
+  // but it cannot execute and teardown is complete. Inspect Linux process
+  // state so confirmation does not wait forever for an unrelated reaper.
+  return process.platform === "linux" ? linuxProcessGroupHasLiveMembers(pid) : true;
 }
 
 function signalOwnedProcessGroup(pid: number, signal: NodeJS.Signals): void {
@@ -1916,6 +1943,7 @@ interface ClaudeProcessExitBoundary {
 function claudeProcessExitBoundary(): ClaudeProcessExitBoundary {
   let settled = false;
   let spawned = false;
+  let leaderExited = false;
   let terminationRequested = false;
   let pid: number | undefined;
   let quiescing: Promise<void> | undefined;
@@ -1942,7 +1970,12 @@ function claudeProcessExitBoundary(): ClaudeProcessExitBoundary {
       CLAUDE_QUERY_TERM_GRACE_MS,
       CLAUDE_QUERY_KILL_CONFIRM_MS,
     );
-    void quiescing.then(resolveOnce, rejectOnce);
+    void quiescing.then(() => {
+      // Process-group termination can observe the direct child as a zombie
+      // before Node delivers its exit event. Keep the SDK boundary ordered
+      // behind that event while treating orphan zombies as fully stopped.
+      if (leaderExited) resolveOnce();
+    }, rejectOnce);
   };
   return {
     exited,
@@ -1971,6 +2004,7 @@ function claudeProcessExitBoundary(): ClaudeProcessExitBoundary {
       pid = process.platform === "linux" ? child.pid : undefined;
       if (terminationRequested) quiesce();
       child.once("exit", () => {
+        leaderExited = true;
         if (pid !== undefined && processGroupExists(pid)) quiesce();
         else resolveOnce();
       });

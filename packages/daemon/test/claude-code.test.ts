@@ -365,9 +365,18 @@ function deferred<T = void>(): {
 function pidExists(pid: number): boolean {
   try {
     process.kill(pid, 0);
-    return true;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ESRCH") return false;
+    throw error;
+  }
+  if (process.platform !== "linux") return true;
+  try {
+    const statLine = readFileSync(`/proc/${pid}/stat`, "utf8");
+    const commandEnd = statLine.lastIndexOf(")");
+    const state = commandEnd < 0 ? "" : statLine.slice(commandEnd + 2, commandEnd + 3);
+    return state !== "Z" && state !== "X";
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
     throw error;
   }
 }
