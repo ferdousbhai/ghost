@@ -827,6 +827,13 @@ export class ModelCatalog {
    * shell can prompt a login rather than the switch silently failing.
    */
   async setChatModel(ghostName: string, provider: string, id: string): Promise<SetModelResult> {
+    if (provider === CLAUDE_CODE_PROVIDER_ID && id !== CLAUDE_CODE_DEFAULT_MODEL_ID) {
+      throw new GhostError(
+        "unknown_model",
+        `No model ${JSON.stringify(id)} from provider ${JSON.stringify(provider)} in the catalogue.`,
+        400,
+      );
+    }
     return this.withRuntime(ghostName, ({ runtime, configDir }) =>
       this.setChatModelWithRuntime(ghostName, runtime, configDir, provider, id));
   }
@@ -839,13 +846,6 @@ export class ModelCatalog {
     id: string,
   ): Promise<SetModelResult> {
     if (provider === CLAUDE_CODE_PROVIDER_ID) {
-      if (id !== CLAUDE_CODE_DEFAULT_MODEL_ID) {
-        throw new GhostError(
-          "unknown_model",
-          `No model ${JSON.stringify(id)} from provider ${JSON.stringify(provider)} in the catalogue.`,
-          400,
-        );
-      }
       setChatModelRole(configDir, provider, id);
       await this.notifyModelRoutingChanged(ghostName);
       const usable = claudeCodeAvailability(await this.claudeCodeStatus()).usable;

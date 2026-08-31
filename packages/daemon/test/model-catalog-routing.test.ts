@@ -312,6 +312,8 @@ describe("ModelCatalog runtime lifecycle", () => {
   it("rejects an invalid Claude harness route before opening the credential runtime", async () => {
     const { catalog, close, createRuntime } = setupLifecycle();
 
+    await expect(catalog.setChatModel("casper", "claude-code", "not-default"))
+      .rejects.toMatchObject({ code: "unknown_model", status: 400 });
     await expect(catalog.setModelRoute(
       "casper",
       "chat_model",
