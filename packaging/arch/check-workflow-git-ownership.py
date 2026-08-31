@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-"""Bind the Arch package job and its post-transfer UID boundary exactly."""
+"""Bind the Arch workflow and its post-transfer UID boundary exactly."""
 
 from __future__ import annotations
 
@@ -13,8 +13,7 @@ import yaml
 from yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
 from yaml.tokens import AliasToken, AnchorToken
 
-
-PACKAGE_SHA256 = "4d7c18a064c906572652c05bfb484439a93ddf4799290f9fdd4e1b096a814b2e"
+PACKAGE_SHA256 = "c2d7c0a8d84288b917a9ab155900245253892c519c7fca130c8f4614a2db55de"
 EXPECTED_STEP_NAMES = [
     "Update package database and install checkout dependency",
     None,
@@ -29,14 +28,12 @@ EXPECTED_STEP_NAMES = [
     "Build and verify stable release sources offline",
     "Verify runtime with minimum supported Bun",
     "Seal release artifacts for upload",
-    "Upload package artifact",
-    "Upload stable release-source artifacts",
+    "Upload sealed public candidate",
     "Remove trusted release outer",
 ]
 EXPECTED_USES = {
-    1: "actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683",
-    13: "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
-    14: "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
+    1: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+    13: "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
 }
 EXPECTED_WORKING_DIRECTORIES = {4: "packages/desktop-helper"}
 JOB_KEYS = {"runs-on", "container", "steps"}
@@ -83,11 +80,11 @@ UniqueKeyLoader.add_constructor(
 
 def mapping(node: Node | None, context: str) -> dict[str, Node]:
     if not isinstance(node, MappingNode):
-        raise ValueError(f"{context} is not a mapping")
+        raise TypeError(f"{context} is not a mapping")
     result: dict[str, Node] = {}
     for key_node, value_node in node.value:
         if not isinstance(key_node, ScalarNode):
-            raise ValueError(f"{context} has a non-scalar key")
+            raise TypeError(f"{context} has a non-scalar key")
         if key_node.value in result:
             raise ValueError(f"{context} has duplicate key {key_node.value!r}")
         result[key_node.value] = value_node
@@ -96,8 +93,14 @@ def mapping(node: Node | None, context: str) -> dict[str, Node]:
 
 def scalar(node: Node | None, context: str) -> str:
     if not isinstance(node, ScalarNode):
-        raise ValueError(f"{context} is not a scalar")
+        raise TypeError(f"{context} is not a scalar")
     return node.value
+
+
+def scalar_sequence(node: Node | None, context: str) -> list[str]:
+    if not isinstance(node, SequenceNode):
+        raise TypeError(f"{context} is not a sequence")
+    return [scalar(value, f"{context} item") for value in node.value]
 
 
 def package_node(document: Node) -> MappingNode:
@@ -105,7 +108,7 @@ def package_node(document: Node) -> MappingNode:
     jobs = mapping(root.get("jobs"), "jobs")
     package = jobs.get("package")
     if not isinstance(package, MappingNode):
-        raise ValueError("workflow package job is missing or not a mapping")
+        raise TypeError("workflow package job is missing or not a mapping")
     return package
 
 
@@ -121,27 +124,58 @@ def one_exec_command(script: str) -> bool:
 def structural_errors(text: str) -> list[str]:
     errors: list[str] = []
     try:
-        if any(isinstance(token, (AliasToken, AnchorToken)) for token in yaml.scan(text)):
+        if any(
+            isinstance(token, (AliasToken, AnchorToken)) for token in yaml.scan(text)
+        ):
             errors.append("workflow must not contain YAML anchors or aliases")
         loaded = yaml.load(text, Loader=UniqueKeyLoader)
         if not isinstance(loaded, dict):
-            raise ValueError("workflow document is not a mapping")
+            raise TypeError("workflow document is not a mapping")
         loaded_jobs = loaded.get("jobs")
         if not isinstance(loaded_jobs, dict) or not isinstance(
             loaded_jobs.get("package"), dict
         ):
-            raise ValueError("loaded workflow has no package job mapping")
+            raise TypeError("loaded workflow has no package job mapping")
         document = yaml.compose(text, Loader=UniqueKeyLoader)
         if document is None:
             raise ValueError("workflow document is empty")
+        root = mapping(document, "workflow")
+        trigger = mapping(root.get("on"), "workflow trigger")
+        push = mapping(trigger.get("push"), "push trigger")
+        permissions = mapping(root.get("permissions"), "workflow permissions")
+        jobs = mapping(root.get("jobs"), "workflow jobs")
         job = package_node(document)
         source = text[job.start_mark.index : job.end_mark.index]
-    except (ValueError, yaml.YAMLError) as error:
+    except (TypeError, ValueError, yaml.YAMLError) as error:
         return [f"workflow YAML cannot be validated safely: {error}"]
+
+    if set(root) != {"name", "on", "permissions", "jobs"}:
+        errors.append("workflow top-level keys changed")
+    if set(trigger) != {"pull_request", "push"}:
+        errors.append("workflow triggers changed or publication trigger was added")
+    pull_request = trigger.get("pull_request")
+    if (
+        not isinstance(pull_request, ScalarNode)
+        or pull_request.tag != "tag:yaml.org,2002:null"
+    ):
+        errors.append("pull_request trigger configuration changed")
+    if set(push) != {"branches"}:
+        errors.append("push trigger configuration changed")
+    if scalar_sequence(push.get("branches"), "push branches") != ["master"]:
+        errors.append("push branch trigger changed")
+    if (
+        set(permissions) != {"contents"}
+        or scalar(permissions.get("contents"), "contents permission") != "read"
+    ):
+        errors.append("workflow permissions are not exactly contents: read")
+    if set(jobs) != {"package"}:
+        errors.append("workflow must retain package as its sole job")
 
     job_map = mapping(job, "package job")
     if set(job_map) != JOB_KEYS:
-        errors.append("package job keys changed (env/defaults/extra keys are forbidden)")
+        errors.append(
+            "package job keys changed (env/defaults/extra keys are forbidden)"
+        )
     if scalar(job_map.get("runs-on"), "package runs-on") != "ubuntu-latest":
         errors.append("package runner changed")
     if scalar(job_map.get("container"), "package container") != "archlinux:base-devel":
@@ -172,6 +206,27 @@ def structural_errors(text: str) -> list[str]:
                 errors.append(f"uses ref changed at package step {index}")
             if not isinstance(step.get("with"), MappingNode):
                 errors.append(f"uses step {index} has invalid with mapping")
+            else:
+                with_values = {
+                    key: scalar(value, f"uses step {index} with {key}")
+                    for key, value in mapping(
+                        step.get("with"), f"uses step {index} with"
+                    ).items()
+                }
+                expected_with = (
+                    {"fetch-depth": "0"}
+                    if index == 1
+                    else {
+                        "name": (
+                            "ghost-public-candidate-${{ github.sha }}-"
+                            "${{ github.run_attempt }}"
+                        ),
+                        "path": "${{ env.GHOST_CI_RELEASE_SEALED }}/*",
+                        "if-no-files-found": "error",
+                    }
+                )
+                if with_values != expected_with:
+                    errors.append(f"uses inputs changed at package step {index}")
         if name == TRANSFER_STEP:
             transfer_seen = True
         run_node = step.get("run")

@@ -2396,6 +2396,119 @@ not coupled to that release identity.
   JSON on stdin/stdout. Managed with `uv`; the root `pnpm -r` scripts do not
   reach it.
 
+### Public release publication
+
+The successful `arch-package.yml` master-push run uploads one private workflow
+artifact named
+`ghost-public-candidate-<source commit>-<validated run attempt>`. Both the
+validation and publication jobs download that exact run ID, source commit, and
+run-attempt-qualified artifact; another attempt of the same run is a different
+candidate. The candidate contains only the public source archive, runtime
+archive and its checksum, `RELEASE-METADATA.json`, `SHA256SUMS`, and an optional
+`SHA256SUMS.sig`, as defined by `ghost-release-candidate/v1`. Omarchy package
+submission is a separate owner/maintainer action and is never performed by this
+workflow.
+
+`GHOST_RELEASE_REPOSITORY` is a required repository-level, non-secret
+`owner/name` variable with no built-in destination. The optional dispatch
+destination can only confirm that exact value; it is never independent
+authority. The `public-release`
+environment contains only the GitHub App client ID and private key and is the
+human admission boundary where the repository plan supports required reviewers.
+The built-in token remains read-only. After candidate validation and, following
+environment admission, a second exact protected-master/workflow-SHA validation,
+the pinned App-token action alone receives the private key and mints a token for
+the one destination repository with only `contents:write` and
+`administration:read`. The latter is used solely to read immutable-release and
+ruleset state and to fail closed unless GitHub's official endpoints confirm it
+before any destination mutation.
+
+Release tags have exactly two active repository-level tag rulesets, both with
+target `tag`, source equal to the destination repository, and exact ref scope
+`include=["refs/tags/v*"]`, `exclude=[]`. One contains only the creation
+restriction. The other contains exactly update, deletion, and non-fast-forward
+restrictions, with fetch-and-merge updates disabled. The publication App is
+manually configured as the sole `always` bypass actor for creation; the
+immutable ruleset has no bypass actor. `administration:read` cannot inspect
+`bypass_actors`, so that configuration is an explicit trusted-admin manual
+attestation, not a property the workflow proves. Ghost has one owner/admin, and
+that administrator plus configured bypass integrations are outside the
+adversarial concurrency boundary. Changing either ruleset or any bypass actor
+during publication invalidates the safety argument; the workflow does not claim
+protection from a malicious repository administrator.
+
+Every managed release body contains exactly one machine binding delimited by
+`<!-- ghost-release-binding/v1\n` and `\n-->`. Between them is one-line UTF-8
+JSON in canonical sorted-key, no-whitespace representation, with no duplicate
+keys. The JSON is at most 4096 UTF-8 bytes, is one flat object with no arrays or
+nested objects, and bounds an integer token before converting it. Its exact keys are `format`,
+`candidate_metadata_sha256`, `candidate_sha256sums_sha256`,
+`release_repository`, `source_repository`, `source_run_id`,
+`source_run_attempt`, `source_sha`, `tag`, `version`, `candidate_ref`, and
+`candidate_commit`. `format` is `ghost-release-binding/v1`; both digest fields
+are lowercase 64-hex strings; repository, source SHA, tag, and version fields
+are canonical strings; `source_run_id` is an integer from 1 through
+9223372036854775807; `source_run_attempt` is an integer from 1 through 65535;
+and both candidate identities use lowercase 40-hex commits. The candidate ref
+is exactly
+`refs/heads/release-candidates/v<version>/<validated parent commit>`. Text
+outside the binding is operator prose and is preserved byte-for-byte when a
+binding is updated.
+
+A candidate record commit has exactly one validated parent: the then-current
+public `main`. Relative to that parent it adds only
+`releases/v<version>.json`, whose content is the same private-source base
+binding serialized as sorted-key JSON with two-space indentation and one final
+line feed, and changes no other tree entry. Its version-and-parent-qualified ref
+must be covered by active deletion, update-restriction with fetch-and-merge
+disabled, and non-fast-forward repository rules before the ref is created and
+whenever it is consumed. The unattached blob, tree, commit, record content, and
+lineage are validated before ref creation; the new ref is then read back and
+the complete validation is repeated. A correction creates or resumes
+a new single-parent record on current `main` and rebinds the draft; it never
+imports an unvalidated second parent, rewrites a candidate ref, or force-pushes.
+
+Staging validates repository identity, visibility, fork state, immutable-release
+configuration, protected `main`, the candidate namespace, unique tag/release
+state, any existing binding and exact release ID, candidate lineage, and every
+existing asset byte before creating a ref or release. It repeats the state and
+lineage checks after a candidate-ref mutation, uploads only missing assets by
+the validated release ID and `upload_url`, and never deletes or overwrites an
+asset. A final complete binding, uniqueness, lineage, and asset check catches a
+race during release creation or upload and requires protected `main` still at
+the candidate parent and the version tag still absent. An existing published
+release, ambiguous API result, rebound ref, unexpected asset, or mismatched
+byte fails closed and cannot be reported as successfully staged.
+
+Publication is a separate dispatch requiring both the exact staged release ID
+and the full `candidate_commit` the owner accepted. Before mutation it
+redownloads and verifies every asset, requires the unique current release to
+carry that commit and source binding, and revalidates the protected ref,
+single-parent record-only lineage, current `main`, namespace rules, and unique
+tag state. Publication advances only through three durable checkpoints:
+
+- S0 has protected `main` at parent P, protected candidate C with sole parent P,
+  the exact complete draft R targeting C, no version tag, and both attested tag
+  rulesets revalidated through their repository source, active enforcement,
+  target, scope, and exact rule types.
+- The workflow fast-forwards `main` from P to C without force, or accepts it
+  already at C. S1 then fully revalidates `main=C`, candidate ref and lineage,
+  exact draft R and inventory, and a tag that is either absent or already C.
+- The workflow patches only release ID R from draft to published without
+  changing its target or body, but only after re-reading both rulesets and
+  proving their validated snapshot and the observed tag state did not change
+  after the main update. GitHub creates the missing lightweight tag as part of
+  that publication. S2 requires immutable published R, `main=C`, the unique tag
+  at C, and the unchanged binding, ref, lineage, and asset bytes.
+
+No workflow call pre-creates or reassigns the release tag. A failed or ambiguous
+publication call immediately rereads the exact release ID and all S1/S2 state:
+an unchanged S1 is safe to retry, while an already-complete S2 continues to
+anonymous release-page and asset-hash verification. A race before the main
+fast-forward leaves no tag, so a corrective single-parent candidate can be
+staged on the new `main`. Restaging changes `candidate_commit` and invalidates
+any earlier approval.
+
 ## Daemon harness invariants
 
 When `JOURNAL_STREAM` identifies the daemon's stderr device and inode, log

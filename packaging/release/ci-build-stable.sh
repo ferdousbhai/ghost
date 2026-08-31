@@ -38,25 +38,6 @@ SOURCE_DATE_EPOCH=1 \
   bash "$source_tree/packaging/release/test-release-source.sh"
 
 expected_tag="v$version"
-event_name="${EVENT_NAME:-}"
-event_tag="${REF_NAME:-}"
-if [[ "$event_name" == release ]]; then
-  event_tag="${RELEASE_TAG:-}"
-fi
-if [[ "${REF_TYPE:-}" == tag || "$event_name" == release ]]; then
-  if [[ "$event_tag" != "$expected_tag" ]]; then
-    printf 'release ref %s does not match package.json version %s\n' \
-      "$event_tag" "$version" >&2
-    exit 1
-  fi
-  tag_commit="$(git -C "$workspace" rev-parse --verify \
-    "$expected_tag^{commit}")"
-  if [[ "$tag_commit" != "$commit" ]]; then
-    printf 'tag %s resolves to %s, not checked-out commit %s\n' \
-      "$expected_tag" "$tag_commit" "$commit" >&2
-    exit 1
-  fi
-fi
 
 SOURCE_DATE_EPOCH="$epoch" \
   bash "$source_tree/packaging/release/make-source-archive.sh" \

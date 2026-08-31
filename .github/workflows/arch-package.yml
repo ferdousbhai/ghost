@@ -4,9 +4,6 @@ on:
   pull_request:
   push:
     branches: [master]
-    tags: ['v*']
-  release:
-    types: [published]
 
 permissions:
   contents: read
@@ -19,7 +16,7 @@ jobs:
       - name: Update package database and install checkout dependency
         run: pacman -Syu --needed --noconfirm git
 
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
@@ -90,10 +87,9 @@ jobs:
 
       - name: Build and verify stable release sources offline
         env:
-          EVENT_NAME: ${{ github.event_name }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-          REF_NAME: ${{ github.ref_name }}
-          REF_TYPE: ${{ github.ref_type }}
+          GHOST_RELEASE_ACTION_METADATA: actions/checkout=3d3c42e5aac5ba805825da76410c181273ba90b1
+          GHOST_RELEASE_CONTAINER_METADATA: package=archlinux:base-devel
+          GHOST_RELEASE_REPOSITORY: ${{ vars.GHOST_RELEASE_REPOSITORY }}
         shell: bash
         run: |
           exec /usr/bin/runuser -u builder -- /usr/bin/env -i \
@@ -108,10 +104,13 @@ jobs:
             GHOST_CI_RELEASE_OUT_INODE="$GHOST_CI_RELEASE_OUT_INODE" \
             GHOST_CI_RELEASE_WORK_DEVICE="$GHOST_CI_RELEASE_WORK_DEVICE" \
             GHOST_CI_RELEASE_WORK_INODE="$GHOST_CI_RELEASE_WORK_INODE" \
-            EVENT_NAME="$EVENT_NAME" \
-            RELEASE_TAG="$RELEASE_TAG" \
-            REF_NAME="$REF_NAME" \
-            REF_TYPE="$REF_TYPE" \
+            GHOST_RELEASE_ACTION_METADATA="$GHOST_RELEASE_ACTION_METADATA" \
+            GHOST_RELEASE_CONTAINER_METADATA="$GHOST_RELEASE_CONTAINER_METADATA" \
+            GHOST_RELEASE_REPOSITORY="$GHOST_RELEASE_REPOSITORY" \
+            GITHUB_REPOSITORY="$GITHUB_REPOSITORY" \
+            GITHUB_WORKFLOW_REF="$GITHUB_WORKFLOW_REF" \
+            GITHUB_RUN_ID="$GITHUB_RUN_ID" \
+            GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" \
             /usr/bin/bash \
               "$GITHUB_WORKSPACE/packaging/release/ci-build-stable.sh"
 
@@ -147,24 +146,11 @@ jobs:
               "$GHOST_CI_RELEASE_SEALED_DEVICE" \
               "$GHOST_CI_RELEASE_SEALED_INODE"
 
-      - name: Upload package artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - name: Upload sealed public candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ghost-ai-arch-${{ github.sha }}
-          path: |
-            ${{ env.GHOST_CI_RELEASE_SEALED }}/ghost-ai-*.pkg.tar.zst
-          if-no-files-found: error
-
-      - name: Upload stable release-source artifacts
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: ghost-ai-release-source-${{ github.sha }}
-          path: |
-            ${{ env.GHOST_CI_RELEASE_SEALED }}/SHA256SUMS
-            ${{ env.GHOST_CI_RELEASE_SEALED }}/ghost-*.tar.gz
-            ${{ env.GHOST_CI_RELEASE_SEALED }}/ghost-ai-*-aur.tar.zst
-            ${{ env.GHOST_CI_RELEASE_SEALED }}/ghost-runtime-*.tar.zst
-            ${{ env.GHOST_CI_RELEASE_SEALED }}/ghost-runtime-*.tar.zst.sha256
+          name: ghost-public-candidate-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ env.GHOST_CI_RELEASE_SEALED }}/*
           if-no-files-found: error
 
       - name: Remove trusted release outer
@@ -183,26 +169,3 @@ jobs:
               "$GHOST_CI_RELEASE_WORK_INODE" \
               "$GHOST_CI_RELEASE_SEALED_DEVICE" \
               "$GHOST_CI_RELEASE_SEALED_INODE"
-
-  release:
-    if: github.event_name == 'release'
-    needs: package
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: ghost-ai-arch-${{ github.sha }}
-          path: release-artifacts
-
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: ghost-ai-release-source-${{ github.sha }}
-          path: release-artifacts
-
-      - name: Attach package to published release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: gh release upload "${{ github.event.release.tag_name }}" release-artifacts/* --clobber

@@ -77,6 +77,9 @@ epoch="$("${builder_command[@]}" git -C "$fixture" \
 ownership_checker="$script_dir/check-workflow-git-ownership.py"
 python "$ownership_checker" "$workflow"
 bash "$script_dir/test-workflow-action-pins.sh"
+bash "$script_dir/test-release-workflow-security.sh"
+python "$repo_root/.github/scripts/test-release-draft.py"
+python "$repo_root/.github/scripts/test-validate-release-workflow.py"
 python - "$workflow" "$work" <<'PY'
 from pathlib import Path
 import sys
@@ -148,11 +151,11 @@ fixtures = {
         stable_exec + '\n          command_name=git; "$command_name" -C . status',
     ),
     "extra-step.yml": once(
-        "      - name: Upload package artifact",
+        "      - name: Upload sealed public candidate",
         (
             "      - name: Unapproved root shell\n"
             "        run: git -C . status\n\n"
-            "      - name: Upload package artifact"
+            "      - name: Upload sealed public candidate"
         ),
     ),
     "comment-evasion.yml": in_stable(
@@ -190,10 +193,14 @@ fixtures = {
         "        if: success()",
     ),
     "uses-ref.yml": once(
-        "actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683",
+        "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
         "actions/checkout@main",
     ),
     "with.yml": once("          fetch-depth: 0", "          fetch-depth: 1"),
+    "artifact-attempt.yml": once(
+        "          name: ghost-public-candidate-${{ github.sha }}-${{ github.run_attempt }}",
+        "          name: ghost-public-candidate-${{ github.sha }}-1",
+    ),
     "job-env.yml": once(
         "    container: archlinux:base-devel",
         "    container: archlinux:base-devel\n    env:\n      GITHUB_ENV: /outside",
@@ -214,18 +221,29 @@ fixtures = {
         "        shell: &unsafe bash",
     ),
     "order.yml": base.replace(
-        "      - name: Upload package artifact",
+        "      - name: Upload sealed public candidate",
         "      - name: __SECOND__",
     ).replace(
-        "      - name: Upload stable release-source artifacts",
-        "      - name: Upload package artifact",
+        "      - name: Remove trusted release outer",
+        "      - name: Upload sealed public candidate",
     ).replace(
         "      - name: __SECOND__",
-        "      - name: Upload stable release-source artifacts",
+        "      - name: Remove trusted release outer",
     ),
+    "release-trigger.yml": once(
+        "on:\n  pull_request:",
+        "on:\n  release:\n    types: [published]\n  pull_request:",
+    ),
+    "branch-trigger.yml": once("    branches: [master]", "    branches: [topic]"),
+    "tag-trigger.yml": once(
+        "    branches: [master]",
+        "    branches: [master]\n    tags: ['v*']",
+    ),
+    "write-permission.yml": once("  contents: read", "  contents: write"),
+    "release-job.yml": base + "\n  release:\n    runs-on: ubuntu-latest\n    steps: []\n",
 }
 package_start = base.index("  package:")
-package_end = base.index("  release:", package_start)
+package_end = len(base)
 approved_decoy = base[package_start:package_end]
 real_direct = in_stable(
     stable_exec,
@@ -248,8 +266,10 @@ for invalid in \
   alias.yml eval.yml dynamic.yml extra-step.yml comment-evasion.yml \
   comment-only.yml folded-style.yml shell.yml step-env.yml \
   env-leak.yml working-directory.yml continue.yml uses-ref.yml with.yml job-env.yml \
+  artifact-attempt.yml \
   job-defaults.yml duplicate-key.yml anchor.yml unknown-key.yml condition.yml \
-  order.yml literal-decoy.yml; do
+  order.yml release-trigger.yml branch-trigger.yml tag-trigger.yml \
+  write-permission.yml release-job.yml literal-decoy.yml; do
   if python "$ownership_checker" "$work/$invalid" > /dev/null 2>&1; then
     printf 'workflow ownership parser accepted adversarial fixture: %s\n' \
       "$invalid" >&2
