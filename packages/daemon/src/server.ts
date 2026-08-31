@@ -1835,7 +1835,7 @@ export function createDaemonServer(options: ServerOptions): Server {
       errorResponse(response, 400, "invalid_request", '"harness" must be "pi", "codex", or "claude-code".');
       return;
     }
-    if (typeof assignment !== "string" || assignment.length < 1
+    if (typeof assignment !== "string" || assignment.trim() === ""
       || assignment.length > MAX_TASK_TEXT) {
       errorResponse(response, 400, "invalid_request", '"assignment" is not a bounded non-empty string.');
       return;
@@ -1908,7 +1908,8 @@ export function createDaemonServer(options: ServerOptions): Server {
         return;
       }
       const message = (body as { message?: unknown }).message;
-      if (typeof message !== "string" || message.length < 1 || message.length > MAX_TASK_TEXT) {
+      if (typeof message !== "string" || message.trim() === ""
+        || message.length > MAX_TASK_TEXT) {
         errorResponse(response, 400, "invalid_request", '"message" is not a bounded non-empty string.');
         return;
       }

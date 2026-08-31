@@ -141,11 +141,14 @@ export function createPrincipalTaskTools(context: PrincipalTaskContext): GhostEx
           Type.Literal("codex"),
           Type.Literal("claude-code"),
         ]),
-        assignment: Type.String({ minLength: 1, maxLength: MAX_TASK_TEXT }),
+        assignment: Type.String({ minLength: 1, maxLength: MAX_TASK_TEXT, pattern: "\\S" }),
         cwd: Type.Optional(Type.String({ minLength: 1, maxLength: 4096 })),
         agent: Type.Optional(Type.String({ minLength: 1, maxLength: MAX_TASK_AGENT })),
       }, { additionalProperties: false }),
       async execute(_id, params, signal) {
+        if (params.assignment.trim() === "") {
+          throw new GhostError("invalid_task", "The task assignment is invalid.", 400);
+        }
         if (params.agent !== undefined && params.harness !== "claude-code") {
           throw new GhostError(
             "invalid_task_agent",
@@ -215,9 +218,12 @@ export function createPrincipalTaskTools(context: PrincipalTaskContext): GhostEx
       description: "Send additional guidance to one running task owned by this conversation.",
       parameters: Type.Object({
         task_id: Type.String({ minLength: 1, maxLength: 64 }),
-        message: Type.String({ minLength: 1, maxLength: MAX_TASK_TEXT }),
+        message: Type.String({ minLength: 1, maxLength: MAX_TASK_TEXT, pattern: "\\S" }),
       }, { additionalProperties: false }),
       async execute(_id, params) {
+        if (params.message.trim() === "") {
+          throw new GhostError("invalid_task", "The task follow-up is invalid.", 400);
+        }
         return toolAction(async () => {
           await ownTask(context, params.task_id);
           return result(taskProjection(

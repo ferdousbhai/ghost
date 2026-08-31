@@ -1,6 +1,7 @@
 import {
   chmodSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -8,6 +9,11 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import {
+  DefaultResourceLoader,
+  parseArgs as parsePiArgs,
+  SettingsManager,
+} from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
 import type { NativeHarnessProbeResult } from "../src/native-harness-catalog.js";
 import { PiTaskAdapter } from "../src/pi-task-adapter.js";
@@ -139,6 +145,51 @@ async function waitForFile(path: string): Promise<void> {
 }
 
 describe("Pi delegated task adapter", () => {
+  it("uses Pi's one-run approval to load a disposable project's resources", async () => {
+    const root = mkdtempSync(join(tmpdir(), "ghost-pi-trust-proof-"));
+    roots.push(root);
+    const project = join(root, "project");
+    const agentDir = join(root, "empty-pi-home");
+    const promptDir = join(project, ".pi", "prompts");
+    mkdirSync(promptDir, { recursive: true });
+    writeFileSync(join(promptDir, "ghost-trust-proof.md"), [
+      "---",
+      "description: Project trust proof",
+      "---",
+      "Loaded only from this disposable project.",
+      "",
+    ].join("\n"));
+
+    const parsed = parsePiArgs(["--mode", "rpc", "--approve"]);
+    expect(parsed.projectTrustOverride).toBe(true);
+    expect(existsSync(agentDir)).toBe(false);
+    const untrustedSettings = SettingsManager.create(project, agentDir, {
+      projectTrusted: false,
+    });
+    const untrustedLoader = new DefaultResourceLoader({
+      cwd: project,
+      agentDir,
+      settingsManager: untrustedSettings,
+    });
+    await untrustedLoader.reload();
+    expect(untrustedLoader.getPrompts().prompts).toEqual([]);
+
+    const settings = SettingsManager.create(project, agentDir, {
+      projectTrusted: parsed.projectTrustOverride,
+    });
+    const loader = new DefaultResourceLoader({ cwd: project, agentDir, settingsManager: settings });
+    await loader.reload();
+    expect(loader.getPrompts().diagnostics).toEqual([]);
+    expect(loader.getPrompts().prompts).toEqual([
+      expect.objectContaining({
+        name: "ghost-trust-proof",
+        description: "Project trust proof",
+        filePath: join(promptDir, "ghost-trust-proof.md"),
+      }),
+    ]);
+    expect(existsSync(agentDir)).toBe(false);
+  });
+
   it("uses native RPC defaults in the exact cwd and discards raw frames and credentials", async () => {
     const fake = fakePi("complete");
     const context = taskContext();
@@ -161,7 +212,7 @@ describe("Pi delegated task adapter", () => {
 
     await expect(handle.result).resolves.toBe("safe answer");
     const start = rows(fake.log)[0] as { args: string[]; cwd: string; env: NodeJS.ProcessEnv };
-    expect(start.args).toEqual(["--mode", "rpc"]);
+    expect(start.args).toEqual(["--mode", "rpc", "--approve"]);
     expect(start.cwd).toBe(fake.root);
     expect(start.env.PI_CODING_AGENT_DIR).toBe(join(fake.root, "pi-home"));
     expect(start.env.ANTHROPIC_API_KEY).toBeUndefined();

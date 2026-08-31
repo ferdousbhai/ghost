@@ -233,9 +233,10 @@ items. The cwd alone grants no discovery authority. A
 conversation may explicitly trust and bind one project, after which Ghost pins
 its data-only instructions, skills, rules, Markdown commands/prompts, and scoped
 MCP configuration. Project executable extensions, hooks, custom code tools,
-LSP, and custom agent definitions stay disabled until they can run through an
-isolated per-session boundary. A pi session has no `task` tool, so no
-bundled, project, ghost-file, or ambient subagent is invokable in phase 1.
+LSP, and custom agent definitions stay disabled. Both principal runtimes expose
+Ghost's five durable task tools for native Pi, Codex, and Claude Code coding
+workers; those workers revalidate the conversation's exact trusted project and
+do not activate bundled, project, ghost-file, or ambient subagent definitions.
 pi's native `bash`, `edit`, `find`, `grep`, `ls`, `read`, and `write` plus
 Ghost's own tools (registered directly as pi custom tools) remain available;
 Ghost's own `bash`/`jobs` (background jobs) and `inspect_image` (the
@@ -289,8 +290,10 @@ the routing API) is:
 provider's best-ranked model). `task_model`, `smol_model`, `slow_model`, and
 `designer_model` inherit the chat default when unbound; `tiny_model` and
 `advisor_model` follow Ghost's preference lists; `vision_model`, `plan_model`,
-and `commit_model` stay unset until bound. `task_model` and `advisor_model` do
-not make any subagent available while spawning is disabled in phase 1.
+and `commit_model` stay unset until bound. `task_model` and `advisor_model`
+remain model-routing roles: they do not select a native harness or activate a
+project/ghost agent definition. Native task creation chooses Pi, Codex, or
+Claude Code explicitly at the durable delegation boundary.
 
 Fallback arrays are ordered Ghost policy stored in `models.json`. The switcher
 orders a provider's models using provider priority and then descending

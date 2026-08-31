@@ -145,7 +145,8 @@ function parseRecord(value: unknown): TaskRecord {
     || typeof row.harness !== "string" || !HARNESS.test(row.harness)
     || !(row.agent === null || (typeof row.agent === "string" && row.agent.length > 0
       && row.agent.length <= MAX_TASK_AGENT && Buffer.byteLength(row.agent, "utf8") <= MAX_TASK_AGENT * 4))
-    || typeof row.task !== "string" || row.task.length < 1 || row.task.length > MAX_TASK_TEXT
+    || (row.agent !== null && row.harness !== "claude-code")
+    || typeof row.task !== "string" || row.task.trim() === "" || row.task.length > MAX_TASK_TEXT
     || !validBinding(row.binding) || typeof row.state !== "string" || !STATES.has(row.state as TaskState)
     || !canonicalTimestamp(row.createdAt) || !canonicalTimestamp(row.updatedAt)
     || !Array.isArray(row.events) || row.events.length > MAX_TASK_EVENTS
@@ -318,8 +319,12 @@ export class TaskController {
   }
   async start(input: { parent: ConversationIdentity; harness: string; agent?: string; task: string; binding: TaskBindingReceipt }): Promise<TaskRecord> {
     this.#ready(); if (this.#shuttingDown) fail("tasks_shutting_down", "Tasks are shutting down.", 503);
-    if (!validParent(input.parent) || !HARNESS.test(input.harness) || !input.task || input.task.length > MAX_TASK_TEXT
-      || (input.agent !== undefined && (!input.agent || input.agent.length > MAX_TASK_AGENT
+    if (!validParent(input.parent) || typeof input.harness !== "string"
+      || !HARNESS.test(input.harness) || typeof input.task !== "string"
+      || input.task.trim() === "" || input.task.length > MAX_TASK_TEXT
+      || (input.agent !== undefined && (input.harness !== "claude-code"
+        || typeof input.agent !== "string" || input.agent.length < 1
+        || input.agent.length > MAX_TASK_AGENT
         || Buffer.byteLength(input.agent, "utf8") > MAX_TASK_AGENT * 4))
       || !validBinding(input.binding)) fail("invalid_task", "The task request is invalid.");
     if (!this.adapters.has(input.harness)) fail("task_harness_unavailable", "That task harness is unavailable.", 409);
@@ -448,7 +453,11 @@ export class TaskController {
         if (parent && !sameParent(row.parent, parent)) {
           fail("task_not_found", "Task not found.", 404);
         }
-        if (row.state !== "running" || !message || message.length > MAX_TASK_TEXT) fail("task_not_running", "Follow-up requires a running task.", 409);
+        if (typeof message !== "string" || message.trim() === ""
+          || message.length > MAX_TASK_TEXT) {
+          fail("invalid_task", "The task follow-up is invalid.");
+        }
+        if (row.state !== "running") fail("task_not_running", "Follow-up requires a running task.", 409);
         const live = this.#live.get(id);
         if (!live || live.generation !== row.generation) fail("task_not_running", "The native task is not running.", 409);
         return { generation: row.generation, live };

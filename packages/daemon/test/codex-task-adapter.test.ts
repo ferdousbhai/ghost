@@ -32,7 +32,7 @@ afterEach(() => {
 });
 
 function fakeCodex(
-  mode: "complete" | "followup" | "wrong-cwd" | "server-request" | "resistant",
+  mode: "complete" | "followup" | "wrong-cwd" | "server-request" | "early-flood" | "resistant",
 ) {
   const root = mkdtempSync(join(tmpdir(), "ghost-codex-task-"));
   roots.push(root);
@@ -77,6 +77,13 @@ for await (const line of createInterface({ input: process.stdin, crlfDelay: Infi
     } }) + "\\n");
   } else if (frame.method === "turn/start") {
     if (mode === "complete") complete();
+    if (mode === "early-flood") {
+      for (let index = 0; index < 64; index += 1) {
+        process.stdout.write(JSON.stringify({ method: "turn/completed", params: {
+          threadId, turn: { id: "turn-" + index, status: "completed", items: [] },
+        } }) + "\\n");
+      }
+    }
     process.stdout.write(JSON.stringify({ id: frame.id, result: {
       turn: { id: turnId, status: "inProgress", items: [] },
     } }) + "\\n");
@@ -232,6 +239,21 @@ describe("Codex delegated task adapter", () => {
       expect(String((thrown as Error).message)).not.toContain("protocol-secret");
       await context.control().quiescence;
     }
+  });
+
+  it("fails and quiesces on multiple early turn completions without retaining a flood", async () => {
+    const fake = fakeCodex("early-flood");
+    const context = taskContext();
+    const adapter = new CodexTaskAdapter({
+      catalog: { async readForStart() { return probe(fake.path); } },
+      environment: { PATH: process.env.PATH, HOME: fake.root },
+    });
+    await expect(adapter.start({
+      id: "task-early", task: "start", cwd: fake.root, binding,
+    }, context.context)).rejects.toMatchObject({
+      message: "Codex delegated task failed.",
+    });
+    await context.control().quiescence;
   });
 
   it("aborts a blocked fresh admission before spawn", async () => {

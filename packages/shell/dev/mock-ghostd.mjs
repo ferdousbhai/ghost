@@ -2335,6 +2335,11 @@ const mockServer = createServer(async (req, res) => {
         const project = projectState(name, conversation);
         if (!body || !["pi", "codex", "claude-code"].includes(body.harness)
             || typeof body.assignment !== "string" || body.assignment.trim() === ""
+            || body.assignment.length > 32_768
+            || Object.keys(body).some((key) => !["harness", "assignment", "cwd", "agent"].includes(key))
+            || (body.agent !== undefined && (body.harness !== "claude-code"
+              || typeof body.agent !== "string" || body.agent.length < 1
+              || body.agent.length > 256))
             || project.root === null || body.cwd !== project.cwd) {
           return json(res, 400, {
             error: { code: "invalid_request", message: "A trusted current project is required." },
@@ -2344,7 +2349,7 @@ const mockServer = createServer(async (req, res) => {
         const task = {
           id: mockTaskId(++delegatedTaskSeq),
           harness: body.harness,
-          agent: null,
+          agent: body.agent ?? null,
           cwd: project.cwd,
           state: "running",
           createdAt: now,
@@ -2371,8 +2376,13 @@ const mockServer = createServer(async (req, res) => {
     }
     if (parts.length === 8 && parts[7] === "send" && req.method === "POST") {
       const body = await readBody(req).catch(() => null);
-      if (task.state !== "running" || typeof body?.message !== "string"
-          || body.message.trim() === "") {
+      if (!body || typeof body.message !== "string" || body.message.trim() === ""
+          || body.message.length > 32_768 || Object.keys(body).some((key) => key !== "message")) {
+        return json(res, 400, {
+          error: { code: "invalid_request", message: "A bounded follow-up is required." },
+        });
+      }
+      if (task.state !== "running") {
         return json(res, 409, {
           error: { code: "task_not_running", message: "Follow-up requires a running task." },
         });
@@ -2381,6 +2391,10 @@ const mockServer = createServer(async (req, res) => {
       return json(res, 200, taskView(task, true));
     }
     if (parts.length === 8 && parts[7] === "cancel" && req.method === "POST") {
+      const body = await readBody(req).catch(() => null);
+      if (!body || Object.keys(body).length !== 0) return json(res, 400, {
+        error: { code: "invalid_request", message: "Cancel accepts an empty object." },
+      });
       if (["queued", "starting", "running", "cancelling"].includes(task.state)) {
         task.state = "cancelled";
         appendTaskEvent(task, "cancelled", "Native worker stopped completely.");

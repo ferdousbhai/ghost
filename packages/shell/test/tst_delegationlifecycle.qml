@@ -179,7 +179,30 @@ TestCase {
         Ghostd.selectedDelegatedTask = task();
         Ghostd.sendDelegatedTask(task().id, "x".repeat(32769));
         Ghostd.createDelegatedTask("codex", "x".repeat(32769));
+        Ghostd.sendDelegatedTask(task().id, " \n\t ");
+        Ghostd.createDelegatedTask("codex", " \n\t ");
         compare(requests.length, 4);
+    }
+
+    function test_mutationFencesOlderListAndDetailResponses(): void {
+        loadTasks();
+        Ghostd.selectedDelegatedTask = task();
+        Ghostd.fetchDelegatedTask(task().id, true);
+        const detail = requests[1];
+        Ghostd.fetchDelegatedTasks(true);
+        const listing = requests[2];
+
+        Ghostd.cancelDelegatedTask(task().id);
+        compare(requests.length, 4);
+        verify(detail.aborted);
+        verify(listing.aborted);
+        requests[3].complete(200, task({ state: "cancelled" }, true));
+        compare(Ghostd.selectedDelegatedTask.state, "cancelled");
+
+        detail.complete(200, task({}, true));
+        listing.complete(200, { tasks: [task()], shown: 1, total: 1 });
+        compare(Ghostd.selectedDelegatedTask.state, "cancelled");
+        compare(Ghostd.delegatedTasks[0].state, "cancelled");
     }
 
     function test_taskMutationResponseMustMatchRequestedTask(): void {

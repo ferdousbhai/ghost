@@ -22,7 +22,7 @@ export const NATIVE_HARNESS_PROBE_TIMEOUT_MS = 10_000;
 export type NativeHarnessAuthentication = "authenticated" | "logged_out" | "unknown";
 export type NativeHarnessAvailability = "available" | "unavailable";
 
-/** Safe to expose in a future daemon response. */
+/** The complete public row exposed by the daemon, HUD, and local status CLI. */
 export interface NativeHarnessStatus {
   readonly id: NativeHarnessId;
   readonly availability: NativeHarnessAvailability;

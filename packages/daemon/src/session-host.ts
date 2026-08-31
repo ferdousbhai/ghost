@@ -1923,7 +1923,7 @@ export class SessionHost {
     signal: AbortSignal,
   ): Promise<TaskRecord> {
     return this.taskOperation(async () => {
-      if (input.assignment.length < 1 || input.assignment.length > MAX_TASK_TEXT) {
+      if (input.assignment.trim() === "" || input.assignment.length > MAX_TASK_TEXT) {
         throw new GhostError("invalid_task", "The task assignment is invalid.", 400);
       }
       if (input.agent !== undefined
@@ -1968,6 +1968,9 @@ export class SessionHost {
     message: string,
   ): Promise<TaskRecord> {
     return this.taskOperation(async () => {
+      if (message.trim() === "" || message.length > MAX_TASK_TEXT) {
+        throw new GhostError("invalid_task", "The task follow-up is invalid.", 400);
+      }
       await this.ownedTask(ghostName, parent, taskId);
       return (await this.taskController(ghostName)).followUp(taskId, message, parent);
     });

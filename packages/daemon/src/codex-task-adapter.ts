@@ -12,6 +12,7 @@ import type {
 } from "./tasks.js";
 
 const MAX_PENDING_CODEX_REQUESTS = 32;
+const MAX_CODEX_NATIVE_ID = 256;
 
 interface CodexStartCatalog {
   readForStart(id: "codex", signal: AbortSignal): Promise<NativeHarnessProbeResult>;
@@ -62,7 +63,10 @@ function completedTurn(
 ): { id: string; status: string; text?: string } {
   if (params.threadId !== expectedThread) throw failure();
   const turn = record(params.turn);
-  if (!turn || typeof turn.id !== "string" || typeof turn.status !== "string") throw failure();
+  if (!turn || typeof turn.id !== "string" || turn.id.length < 1
+    || turn.id.length > MAX_CODEX_NATIVE_ID
+    || typeof turn.status !== "string" || turn.status.length < 1
+    || turn.status.length > 64) throw failure();
   let text: string | undefined;
   if (Array.isArray(turn.items)) {
     for (const value of turn.items) {
@@ -98,7 +102,8 @@ export class CodexTaskAdapter implements TaskAdapter {
     const pending = new Map<string, PendingRequest>();
     const settled = deferred<void>();
     void settled.promise.catch(() => undefined);
-    const earlyCompletions = new Map<string, { status: string; text?: string }>();
+    let earlyCompletion: { id: string; status: string; text?: string } | undefined;
+    let acceptingEarlyCompletion = false;
     let sequence = 0;
     let threadId: string | undefined;
     let turnId: string | undefined;
@@ -137,7 +142,8 @@ export class CodexTaskAdapter implements TaskAdapter {
     };
     const settleTurn = (completion: { id: string; status: string; text?: string }) => {
       if (!turnId) {
-        earlyCompletions.set(completion.id, completion);
+        if (!acceptingEarlyCompletion || earlyCompletion) throw failure();
+        earlyCompletion = completion;
         return;
       }
       if (completion.id !== turnId || didSettle) throw failure();
@@ -213,7 +219,8 @@ export class CodexTaskAdapter implements TaskAdapter {
         const sandbox = record(started?.sandbox);
         if (!started
           || !thread
-          || typeof thread.id !== "string"
+          || typeof thread.id !== "string" || thread.id.length < 1
+          || thread.id.length > MAX_CODEX_NATIVE_ID
           || thread.cwd !== input.cwd
           || started.cwd !== input.cwd
           || started.approvalPolicy !== "never"
@@ -221,21 +228,27 @@ export class CodexTaskAdapter implements TaskAdapter {
           throw failure();
         }
         threadId = thread.id;
-        const turnStarted = record(await request("turn/start", {
-          threadId,
-          input: textInput(input.task),
-        }));
+        acceptingEarlyCompletion = true;
+        let turnStarted: Record<string, unknown> | undefined;
+        try {
+          turnStarted = record(await request("turn/start", {
+            threadId,
+            input: textInput(input.task),
+          }));
+        } finally {
+          acceptingEarlyCompletion = false;
+        }
         const turn = record(turnStarted?.turn);
-        if (!turn || typeof turn.id !== "string" || turn.status !== "inProgress") {
+        if (!turn || typeof turn.id !== "string" || turn.id.length < 1
+          || turn.id.length > MAX_CODEX_NATIVE_ID || turn.status !== "inProgress") {
           throw failure();
         }
         turnId = turn.id;
-        const early = earlyCompletions.get(turnId);
-        if (early) {
-          earlyCompletions.delete(turnId);
-          settleTurn({ id: turnId, ...early });
+        if (earlyCompletion) {
+          if (earlyCompletion.id !== turnId) throw failure();
+          settleTurn(earlyCompletion);
+          earlyCompletion = undefined;
         }
-        if (earlyCompletions.size !== 0) throw failure();
 
         const result = (async () => {
           try {

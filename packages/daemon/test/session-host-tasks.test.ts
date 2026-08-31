@@ -154,6 +154,17 @@ describe("SessionHost delegated task composition", () => {
     host!.attachTaskServices({ adapters: new Map([["pi", controlled.adapter]]) });
     await host!.restoreTaskServices();
 
+    await expect(host!.createTask("casper", parent, {
+      harness: "pi",
+      assignment: " \n\t ",
+    }, new AbortController().signal)).rejects.toMatchObject({ code: "invalid_task" });
+    await expect(host!.createTask("casper", parent, {
+      harness: "pi",
+      assignment: "work",
+      agent: "claude-only",
+    }, new AbortController().signal)).rejects.toMatchObject({ code: "invalid_task_agent" });
+    expect(await host!.listTasks("casper", parent)).toEqual([]);
+
     const admitted = await host!.createTask("casper", parent, {
       harness: "pi",
       assignment: "Implement the bounded change.",
@@ -174,6 +185,10 @@ describe("SessionHost delegated task composition", () => {
       .rejects.toMatchObject({ code: "task_not_found", status: 404 });
     expect(controlled.followUps).toEqual([]);
     expect(controlled.force).not.toHaveBeenCalled();
+
+    await expect(host!.sendTask("casper", parent, admitted.id, " \n\t "))
+      .rejects.toMatchObject({ code: "invalid_task" });
+    expect(controlled.followUps).toEqual([]);
 
     await expect(host!.sendTask("casper", parent, admitted.id, "Run the focused test."))
       .resolves.toMatchObject({ state: "running" });

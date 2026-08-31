@@ -826,6 +826,7 @@ Singleton {
     property string delegatedTaskNotice: ""
     property string delegatedTasksGhost: ""
     property string delegatedTasksSessionId: ""
+    property int delegatedTaskReadGeneration: 0
 
     // Only the active ghost's visible `<ghost-home>/mcp.json` is represented
     // here. Explicitly bound external-project MCP remains session-owned. GET
@@ -2353,6 +2354,7 @@ Singleton {
     }
 
     function clearDelegatedTasks(): void {
+        root.delegatedTaskReadGeneration += 1;
         root.retireDelegationRequest("list");
         root.retireDelegationRequest("detail");
         root.retireDelegationRequest("mutation");
@@ -2418,15 +2420,18 @@ Singleton {
             return;
         }
         root.prepareDelegatedTasks(ghost, sessionId);
+        if (root.delegatedTaskMutating) return;
         if (!force && (root.delegatedTasksLoaded || root.delegatedTasksLoading)) return;
         if (root.delegatedTasksRequest) root.retireDelegationRequest("list");
         const xhr = root.makeDelegationRequest();
+        const generation = root.delegatedTaskReadGeneration;
         root.delegatedTasksRequest = xhr;
         root.delegatedTasksError = "";
         xhr.onreadystatechange = function () {
             if (xhr.readyState !== 4 || xhr !== root.delegatedTasksRequest) return;
             root.delegatedTasksRequest = null;
-            if (!root.delegationIdentityCurrent(ghost, sessionId)) return;
+            if (!root.delegationIdentityCurrent(ghost, sessionId)
+                    || generation !== root.delegatedTaskReadGeneration) return;
             if (xhr.status === 200) {
                 try {
                     const listing = DelegationModel.listing(JSON.parse(xhr.responseText));
@@ -2456,9 +2461,11 @@ Singleton {
                 && !root.delegatedTaskLoading)) return;
         const ghost = root.activeGhost;
         const sessionId = root.currentSessionId;
-        if (!root.delegationIdentityCurrent(ghost, sessionId)) return;
+        if (!root.delegationIdentityCurrent(ghost, sessionId)
+                || root.delegatedTaskMutating) return;
         root.retireDelegationRequest("detail");
         const xhr = root.makeDelegationRequest();
+        const generation = root.delegatedTaskReadGeneration;
         root.delegatedTaskRequest = xhr;
         root.delegatedTaskLoading = true;
         root.delegatedTasksError = "";
@@ -2466,7 +2473,8 @@ Singleton {
             if (xhr.readyState !== 4 || xhr !== root.delegatedTaskRequest) return;
             root.delegatedTaskRequest = null;
             root.delegatedTaskLoading = false;
-            if (!root.delegationIdentityCurrent(ghost, sessionId)) return;
+            if (!root.delegationIdentityCurrent(ghost, sessionId)
+                    || generation !== root.delegatedTaskReadGeneration) return;
             if (xhr.status === 200) {
                 try {
                     const task = DelegationModel.task(JSON.parse(xhr.responseText), true);
@@ -2506,6 +2514,9 @@ Singleton {
         const ghost = root.activeGhost;
         const sessionId = root.currentSessionId;
         if (!root.delegationIdentityCurrent(ghost, sessionId)) return;
+        root.delegatedTaskReadGeneration += 1;
+        root.retireDelegationRequest("list");
+        root.retireDelegationRequest("detail");
         const xhr = root.makeDelegationRequest();
         root.delegatedTaskMutationRequest = xhr;
         root.delegatedTasksError = "";

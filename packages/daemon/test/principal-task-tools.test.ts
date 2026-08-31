@@ -152,10 +152,16 @@ describe("principal task tools", () => {
   it("restricts opaque agents to Claude and keeps controller failures generic", async () => {
     const current = fixture();
     await expect(call(current.context, "task", {
+      harness: "codex",
+      assignment: " \n\t ",
+    })).rejects.toMatchObject({ code: "invalid_task" });
+    await expect(call(current.context, "task", {
       harness: "pi",
       assignment: "Work.",
       agent: "not-for-pi",
     })).rejects.toMatchObject({ code: "invalid_task_agent" });
+    expect(current.mintBinding).not.toHaveBeenCalled();
+    expect(current.start).not.toHaveBeenCalled();
     current.list.mockRejectedValueOnce(new Error("PRIVATE_RAW_STORE_FAILURE"));
     await expect(call(current.context, "task_list", {})).rejects.toMatchObject({
       code: "task_operation_failed",
@@ -186,5 +192,15 @@ describe("principal task tools", () => {
       .rejects.toMatchObject({ code: "task_not_found" });
     expect(current.followUp).not.toHaveBeenCalled();
     expect(current.cancel).not.toHaveBeenCalled();
+  });
+
+  it("rejects a blank follow-up before touching its durable task", async () => {
+    const current = fixture();
+    await expect(call(current.context, "task_send", {
+      task_id: record().id,
+      message: " \n\t ",
+    })).rejects.toMatchObject({ code: "invalid_task" });
+    expect(current.get).not.toHaveBeenCalled();
+    expect(current.followUp).not.toHaveBeenCalled();
   });
 });

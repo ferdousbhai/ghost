@@ -32,11 +32,13 @@ no Omarchy-specific file or directory path. Native realpath deduplication and
 name validation apply. Machine skills enter at session construction with lowest
 name precedence, before ghost-home and then project resources; no hardcoded
 skill-name allowlist exists. This owner-trusted machine discovery is deliberately
-outside the descriptor-confined project scanner. A pi session has no `task`
-tool, and every custom or
-ambient subagent definition stays disabled until #31 supplies an isolated
-per-session agent boundary. Ghost and project `agents/*.md` definitions remain
-previewed but inert. Claude Code retains its own native subagents.
+outside the descriptor-confined project scanner. A principal pi session has
+Ghost's exact `task`, `task_list`, `task_get`, `task_send`, and `task_cancel`
+coding-delegation tools. Those tools admit only the native Pi, Codex, and Claude
+Code workers through the durable task boundary below; they do not activate any
+custom or ambient subagent definition. Ghost and project `agents/*.md`
+definitions remain previewed but inert. Claude Code retains its own native
+subagents.
 
 ```
 ~/ghosts/<name>/
@@ -420,6 +422,9 @@ harness, agent, task, binding, state, createdAt, updatedAt, events, eventCursor,
 result, resultTruncated, error }`. `parent` is the runtime-qualified
 conversation identity. `agent` is null except for an optional, bounded opaque
 Claude Code agent name; Ghost passes it through without interpreting it.
+The assignment and every follow-up are bounded strings containing at least one
+non-whitespace character. These invariants and the Claude-only agent rule are
+enforced by the durable parser/controller as well as by each public caller.
 `binding` is an exact `task-binding/v1` authority
 receipt: `{ version: 1, root, rootIdentity, cwd, cwdIdentity, generation }`.
 The project-binding authority revalidates that opaque receipt with the task's
@@ -499,7 +504,11 @@ the authoritative boundary. No result is durable before that group is fully
 quiescent, and no process outside the captured group may be signalled.
 
 The Pi delegated adapter runs the freshly admitted executable in its native RPC
-mode with the exact cwd and the positive `pi-native` environment. It does not
+mode with one-run `--approve`, the exact cwd, and the positive `pi-native`
+environment. The project-binding authority has already admitted and immediately
+revalidated that exact project; one-run approval lets pinned Pi load its native
+project resources without reading or persisting a separate Pi trust decision.
+It does not
 disable Pi's project discovery, skills, extensions, tools, model fallback,
 session behavior, or other native defaults. The first task is `prompt`, a
 running follow-up is `steer`, and cancellation sends one best-effort `abort`.
@@ -515,7 +524,11 @@ instructions, project discovery, skills, MCP, tools, and execution behavior
 unmodified. A running follow-up is `turn/steer` with the exact active turn id;
 cancellation sends one best-effort `turn/interrupt`. Only correlated responses,
 agent-message text, and the exact active `turn/completed` notification affect
-task state. Server-initiated requests fail closed because delegated work has no
+task state. Before the correlated `turn/start` response, at most one early
+completion is retained, only while that request is in flight; its bounded id
+must equal the returned active turn. A second, late, malformed, or mismatched
+early completion fails and quiesces the task rather than growing protocol
+state. Server-initiated requests fail closed because delegated work has no
 approval or elicitation UI; all other progress and tool payloads are discarded.
 
 The Claude delegated adapter loads the pinned owner-installed Agent SDK through
@@ -599,7 +612,10 @@ principal Ghost surface. The machine-wide catalogue renders only harness,
 availability, and signed-in/logged-out/unknown state. Task state is stamped to
 the exact active ghost and runtime-qualified conversation: selection changes
 retire stale list, detail, and mutation requests before their response can be
-adopted. Creation is enabled only when that same conversation has a current
+adopted. Starting any mutation increments a cross-operation read generation,
+retires pending list/detail reads, and blocks new reads until the mutation
+settles, so an older `running` projection cannot overwrite a confirmed terminal
+response. Creation is enabled only when that same conversation has a current
 non-null trusted project binding, and it sends the binding's exact cwd; the HUD
 cannot create from unbound Home context or type an arbitrary cwd. It shows the
 bounded assignment preview, cwd, state, recent structured events, and result
@@ -659,8 +675,9 @@ pi's native tools in a Ghost session are `bash`, `edit`, `find`, `grep`, `ls`,
 `read`, and `write`. Ghost's own tools — `ghost_browser`, `ghost_desktop`,
 `ghost_screen`, the `ask` tool, and MCP
 tools named `mcp__<server>_<tool>` — are registered directly as pi custom
-tools and appear in `getActiveToolNames()`; there is no separate mount. There
-is no `task` tool; no bundled, custom, or ambient subagent can be spawned.
+tools and appear in `getActiveToolNames()`; there is no separate mount. The
+five Ghost-owned task tools add only the native coding-worker boundary defined
+above; no bundled, custom, or ambient subagent definition can be spawned.
 Claude Code retains its own native subagent behavior, and its native tool preset
 is subtracted from exactly once, by `disallowedTools`: a native tool is removed
 when it would keep durable state or reach the owner outside Ghost's surfaces,
@@ -689,8 +706,9 @@ factories, adapted to pi by `packages/daemon/src/pi-extension-bridge.ts`;
 neither the ghost home's `tools/` nor any owner-home or bound-project root is
 offered to pi. Project extensions, hooks, TypeScript
 commands, custom code tools, and LSP are disabled for phase 1. Project and
-ghost-file agent definitions are excluded from the spawn allow-list until #31
-supplies an isolated custom-agent seam. MCP comes only from Ghost's own
+ghost-file agent definitions are excluded from execution; native delegated
+workers select an installed harness explicitly and never consume that agent
+catalogue. MCP comes only from Ghost's own
 `GhostMcpManager` (over `@modelcontextprotocol/sdk`): a session receives only
 the ghost's `mcp.json` plus the explicitly bound project's native
 `.omp/mcp.json`/`.omp/.mcp.json` files. It never scans pi's user/global config
@@ -1629,7 +1647,9 @@ daemon. Failure to discover Claude does not prevent a pi or `--no-turn` smoke.
   `alwaysApply` rule bodies, and compact skill/discoverable-rule indexes. No
   lexical post-load filter is an authority boundary.
   Project and ghost-file agent definitions are counted but inactive. A pi
-  session has no `task` tool and performs no live/ambient agent discovery.
+  principal has the five native coding-delegation tools, but performs no
+  live/ambient agent discovery; each worker start revalidates the exact bound
+  project receipt independently.
   Machine-skill discovery is the explicit exception described above. Claude
   keeps native `skills:[]` and `settingSources:[]`; the SDK's `skills: "all"`
   option is not usable here because it is a context filter, not a path sandbox.
@@ -2116,8 +2136,10 @@ daemon. Failure to discover Claude does not prevent a pi or `--no-turn` smoke.
   persisted `ask` result, commits the answer as a sibling, and resumes the model
   on that branch. Its response is an SSE stream and includes `branch_changed`.
   Re-answer and awaited Ghost hooks use the conversation's actual live cwd;
-  the pi runtime still has no `task` tool and never discovers agents from
-  that cwd.
+  pi's five principal task tools remain available, but their binding authority
+  is still the conversation's admitted project receipt; re-answer never turns
+  its live cwd into discovery authority and never discovers agent definitions
+  from that cwd.
 - `POST /api/ghosts/:name/greeting` `{}` → `{ greeting: string | null,
   onboarding: boolean }` — one smol-lane completion (see below) writes a short
   in-persona opener for an empty chat from the character file, memory index,
@@ -2217,14 +2239,17 @@ value is read into or emitted from a response.
 
 ### Native harness discovery foundation
 
-Ghost has one source-level discovery catalogue for the owner-installed native
-harnesses `claude-code`, `codex`, and `pi`. This catalogue is not yet exposed on
-the daemon wire and does not start work. Its public rows contain only the
+Ghost has one discovery catalogue for the owner-installed native harnesses
+`claude-code`, `codex`, and `pi`. Its public rows are exposed through the
+authenticated `GET /api/harnesses`, the HUD's Delegation destination, and the
+side-effect-free local `ghost delegation` command. The catalogue itself does
+not start work. Its public rows contain only the
 harness id, `available | unavailable`, and `authenticated | logged_out |
 unknown`; they never contain an executable path, version, account identifier,
 probe output, or raw error. A bounded catalogue cache is display state only.
-It can never authorize a start: a future worker/controller must run the
-harness's fresh private probe immediately before process admission. That
+It can never authorize a start: the durable task controller and selected native
+adapter run the harness's fresh private probe immediately before process
+admission. That
 admission supplies one required `AbortSignal`; the catalogue threads it through
 SDK loading, executable and mise resolution, filesystem identity checks,
 version discovery, and authentication or account discovery. An aborted SDK

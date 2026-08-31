@@ -83,6 +83,10 @@ TestCase {
         const extra = task();
         extra.protocol = { secret: true };
         compare(DelegationModel.task(extra, false), null);
+        compare(DelegationModel.task(task({
+            harness: "pi",
+            agent: "claude-only-agent"
+        }), false), null);
     }
 
     function test_progressOrderingTerminalSummaryAndExactStates(): void {

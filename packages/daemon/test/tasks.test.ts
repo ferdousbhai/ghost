@@ -35,11 +35,10 @@ function runtime(options: { force?: () => Promise<void>; start?: (context: TaskA
   } };
   return { adapter, result, quiet, context: () => context };
 }
-async function start(controller: TaskController, agent?: string) {
+async function start(controller: TaskController) {
   return controller.start({
     parent,
     harness: "native",
-    ...(agent === undefined ? {} : { agent }),
     task: "inspect",
     binding,
   });
@@ -54,9 +53,10 @@ function record(state: TaskRecord["state"]): TaskRecord {
 describe("durable task foundation", () => {
   it("requires initialization and revalidates the exact admitted binding before spawn", async () => {
     const home = await mkdtemp(join(tmpdir(), "ghost-task-")); const store = trackedStore(home); let received: unknown; const native = runtime();
-    const controller = new TaskController(store, new Map([["native", { ...native.adapter, async start(input, context) { received = input; return native.adapter.start(input, context); } }]]), authority);
+    const admitted: TaskAdapter = { ...native.adapter, async start(input, context) { received = input; return native.adapter.start(input, context); } };
+    const controller = new TaskController(store, new Map([["native", admitted], ["claude-code", admitted]]), authority);
     await expect(start(controller)).rejects.toMatchObject({ code: "tasks_uninitialized" }); await controller.initialize();
-    const task = await start(controller, "owner-agent"); await eventually(store, task.id, "running");
+    const task = await controller.start({ parent, harness: "claude-code", agent: "owner-agent", task: "inspect", binding }); await eventually(store, task.id, "running");
     expect(received).toMatchObject({ cwd: "/project/exact", binding, agent: "owner-agent" });
     expect((await store.read(task.id)).agent).toBe("owner-agent");
     expect(await readFile(new URL("../src/tasks.ts", import.meta.url), "utf8")).not.toMatch(/node:child_process|\bgit\b/iu);
@@ -74,6 +74,18 @@ describe("durable task foundation", () => {
     for (const execution of executions) { execution.result.resolve("done"); execution.quiet.resolve(); }
   });
 
+  it("rejects blank work and non-Claude agents at the durable boundary", async () => {
+    const native = runtime();
+    const { store, controller } = await fixture(native.adapter);
+    await expect(controller.start({
+      parent, harness: "native", task: " \n\t ", binding,
+    })).rejects.toMatchObject({ code: "invalid_task" });
+    await expect(controller.start({
+      parent, harness: "native", agent: "claude-only", task: "work", binding,
+    })).rejects.toMatchObject({ code: "invalid_task" });
+    expect(await store.list()).toEqual([]);
+  });
+
   it("keeps follow-up and cancellation within the qualified parent", async () => {
     const native = runtime();
     const { store, controller } = await fixture(native.adapter);
@@ -85,6 +97,8 @@ describe("durable task foundation", () => {
     await expect(controller.cancel(task.id, foreign))
       .rejects.toMatchObject({ code: "task_not_found", status: 404 });
     expect((await store.read(task.id)).state).toBe("running");
+    await expect(controller.followUp(task.id, " \n\t ", parent))
+      .rejects.toMatchObject({ code: "invalid_task", status: 400 });
     await controller.cancel(task.id, parent);
   });
 
@@ -407,5 +421,7 @@ describe("durable task foundation", () => {
     const firstAt = new Date(Date.parse(at) + 2_000).toISOString(); const secondAt = new Date(Date.parse(at) + 1_000).toISOString();
     const reversed = { ...row, updatedAt: firstAt, events: [{ sequence: 1, at: firstAt, code: "progress", message: "first" }, { sequence: 2, at: secondAt, code: "progress", message: "second" }], eventCursor: { nextSequence: 3, dropped: 0 } };
     await writeFile(path, JSON.stringify(reversed), { mode: 0o600 }); await expect(store.read(row.id)).rejects.toMatchObject({ code: "invalid_task_record" });
+    await writeFile(path, JSON.stringify({ ...row, task: " \n\t " }), { mode: 0o600 }); await expect(store.read(row.id)).rejects.toMatchObject({ code: "invalid_task_record" });
+    await writeFile(path, JSON.stringify({ ...row, agent: "claude-only" }), { mode: 0o600 }); await expect(store.read(row.id)).rejects.toMatchObject({ code: "invalid_task_record" });
   });
 });

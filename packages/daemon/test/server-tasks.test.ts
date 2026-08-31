@@ -209,6 +209,21 @@ describe("delegated task API", () => {
       }),
     })).status).toBe(400);
     expect(createTask).not.toHaveBeenCalled();
+    expect((await request(collection, {
+      method: "POST",
+      body: JSON.stringify({ harness: "codex", assignment: " \n\t " }),
+    })).status).toBe(400);
+    expect((await request(collection, {
+      method: "POST",
+      body: JSON.stringify({ harness: "pi", assignment: "work", agent: "claude-only" }),
+    })).status).toBe(400);
+    expect(createTask).not.toHaveBeenCalled();
+
+    expect((await request(`${collection}/${TASK_ID}/send`, {
+      method: "POST",
+      body: JSON.stringify({ message: " \n\t " }),
+    })).status).toBe(400);
+    expect(sendTask).not.toHaveBeenCalled();
 
     const failed = await request(`${collection}/${TASK_ID}/send`, {
       method: "POST",

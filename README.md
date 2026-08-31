@@ -11,10 +11,11 @@ tool, model roles and fallback chains, bounded declarative skills, rules,
 Markdown commands/prompts, and MCP from the visible ghost home plus one
 explicitly trusted project. Live voice remains deferred; remote sharing uses
 the built-in tailnet viewer over Tailscale Serve, and no separate collaboration
-relay is planned. There is no `task` tool and every subagent definition is
-disabled in phase 1; project
+relay is planned. The principal Ghost can delegate coding through five durable
+task tools to native Pi, Codex, or Claude Code workers. Project and ghost-file
+subagent definitions remain inert; project
 plugins, hooks, custom code tools, and LSP are also disabled pending a
-per-session isolation boundary. Trusted visible `hooks/pre` and `hooks/post`
+separate isolation boundary. Trusted visible `hooks/pre` and `hooks/post`
 files in the ghost home remain the explicit in-process extension surface. The
 optional Claude Code runtime retains Claude's native subagents. Ghost replaces
 pi's coding-oriented system prompt with its
