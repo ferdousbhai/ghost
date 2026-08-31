@@ -71,8 +71,10 @@ import { makeFakeCatalogRuntime } from "./helpers/fake-catalog-runtime.js";
 import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
 import { recordingLogger } from "./helpers/recording-logger.js";
 import type { TaskAdapter } from "../src/tasks.js";
+import { fakeTaskScopeManager } from "./helpers/task-scope.js";
 
 const claudeTaskServices = () => ({
+  ownership: fakeTaskScopeManager(),
   adapters: new Map<string, TaskAdapter>([["claude-code", {
     async start() {
       throw new Error("inert Claude task adapter");

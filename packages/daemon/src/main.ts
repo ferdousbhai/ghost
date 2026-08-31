@@ -29,6 +29,10 @@ import {
   createNativeHarnessCatalog,
   type NativeHarnessEnvironments,
 } from "./native-harness-runtime.js";
+import {
+  captureNativeTaskControlEnvironment,
+  SystemdNativeTaskScopeManager,
+} from "./native-task-scope.js";
 import { PiTaskAdapter } from "./pi-task-adapter.js";
 import type { TaskAdapter } from "./tasks.js";
 import { createRelayHub } from "./relay.js";
@@ -366,10 +370,12 @@ export async function main(argv: string[] = process.argv.slice(2), runtime: Main
     return 1;
   }
 
-  // Claude Code owns its native external authentication. Capture only that
-  // reviewed child environment before the process-global Pi scrub removes it.
+  // Capture the reviewed native child profiles and the two user-bus selectors
+  // before the process-global provider scrub. The scope-control snapshot can
+  // never carry provider values.
   const claudeCodeEnvironment = captureClaudeCodeEnvironment(process.env);
   const nativeHarnessEnvironments = captureNativeHarnessEnvironments(process.env);
+  const nativeTaskControlEnvironment = captureNativeTaskControlEnvironment(process.env);
 
   // Before pi, before any session. Idempotent, but this is the call that
   // matters: everything downstream inherits this environment.
@@ -414,6 +420,7 @@ export async function main(argv: string[] = process.argv.slice(2), runtime: Main
       hooksPath,
       claudeCodeEnvironment,
       nativeHarnessEnvironments,
+      nativeTaskControlEnvironment,
     );
   } finally {
     await homeReservation.close();
@@ -427,6 +434,7 @@ async function serveDaemon(
   hooksPath: string,
   claudeCodeEnvironment: Readonly<NodeJS.ProcessEnv>,
   nativeHarnessEnvironments: NativeHarnessEnvironments,
+  nativeTaskControlEnvironment: Readonly<NodeJS.ProcessEnv>,
 ): Promise<number> {
   const registry = new GhostRegistry(config.ghostsRoot);
   const ownerHome = homedir();
@@ -463,6 +471,9 @@ async function serveDaemon(
     claudeAgentSdk,
     nativeHarnessEnvironments,
   );
+  const nativeTaskScopes = new SystemdNativeTaskScopeManager({
+    controlEnvironment: nativeTaskControlEnvironment,
+  });
   const host = new SessionHost({
     registry,
     homeOperations,
@@ -485,6 +496,7 @@ async function serveDaemon(
     },
   });
   host.attachTaskServices({
+    ownership: nativeTaskScopes,
     adapters: new Map<string, TaskAdapter>([
       ["claude-code", new ClaudeTaskAdapter({
         catalog: nativeHarnesses,

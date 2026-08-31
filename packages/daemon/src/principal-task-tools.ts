@@ -6,6 +6,7 @@ import {
 import { Type } from "typebox";
 import type { ConversationIdentity } from "./conversation-identity.js";
 import { GhostError } from "./ghosts.js";
+import type { NativeTaskScopeManager } from "./native-task-scope.js";
 import {
   MAX_TASK_AGENT,
   MAX_TASK_TEXT,
@@ -45,6 +46,7 @@ export interface PrincipalTaskContext {
 
 export interface PrincipalTaskServices {
   adapters: ReadonlyMap<string, TaskAdapter>;
+  ownership: NativeTaskScopeManager;
 }
 
 function sameParent(left: ConversationIdentity, right: ConversationIdentity): boolean {

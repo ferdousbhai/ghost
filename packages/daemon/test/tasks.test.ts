@@ -6,6 +6,7 @@ import { REDACTED_MEMORY_SECRET } from "@ghost/extensions";
 import { afterEach, describe, expect, it } from "vitest";
 import { conversationIdentity } from "../src/conversation-identity.js";
 import { MAX_TASK_EVENT_MESSAGE, MAX_TASK_RESULT, TaskController, TaskStore, type TaskAdapter, type TaskAdapterContext, type TaskAdapterHandle, type TaskBindingReceipt, type TaskRecord } from "../src/tasks.js";
+import { fakeTaskScopeManager } from "./helpers/task-scope.js";
 
 function deferred<T>() {
   let resolve!: (value: T) => void; let reject!: (reason?: unknown) => void;
@@ -24,7 +25,7 @@ async function eventually(store: TaskStore, id: string, state: TaskRecord["state
 }
 async function fixture(adapter: TaskAdapter, bindingAuthority = authority) {
   const home = await mkdtemp(join(tmpdir(), "ghost-task-")); await chmod(home, 0o700);
-  const store = trackedStore(home); const controller = new TaskController(store, new Map([["native", adapter]]), bindingAuthority); await controller.initialize();
+  const store = trackedStore(home); const controller = new TaskController(store, new Map([["native", adapter]]), bindingAuthority, fakeTaskScopeManager()); await controller.initialize();
   return { home, store, controller };
 }
 function runtime(options: { force?: () => Promise<void>; start?: (context: TaskAdapterContext) => void } = {}) {
@@ -54,7 +55,7 @@ describe("durable task foundation", () => {
   it("requires initialization and revalidates the exact admitted binding before spawn", async () => {
     const home = await mkdtemp(join(tmpdir(), "ghost-task-")); const store = trackedStore(home); let received: unknown; const native = runtime();
     const admitted: TaskAdapter = { ...native.adapter, async start(input, context) { received = input; return native.adapter.start(input, context); } };
-    const controller = new TaskController(store, new Map([["native", admitted], ["claude-code", admitted]]), authority);
+    const controller = new TaskController(store, new Map([["native", admitted], ["claude-code", admitted]]), authority, fakeTaskScopeManager());
     await expect(start(controller)).rejects.toMatchObject({ code: "tasks_uninitialized" }); await controller.initialize();
     const task = await controller.start({ parent, harness: "claude-code", agent: "owner-agent", task: "inspect", binding }); await eventually(store, task.id, "running");
     expect(received).toMatchObject({ cwd: "/project/exact", binding, agent: "owner-agent" });
@@ -120,7 +121,7 @@ describe("durable task foundation", () => {
       }
     }
     const store = new DelayedStore(home); stores.push(store); const native = runtime();
-    const controller = new TaskController(store, new Map([["native", { ...native.adapter, async start(input, context) { spawned = true; return native.adapter.start(input, context); } }]]), authority); await controller.initialize();
+    const controller = new TaskController(store, new Map([["native", { ...native.adapter, async start(input, context) { spawned = true; return native.adapter.start(input, context); } }]]), authority, fakeTaskScopeManager()); await controller.initialize();
     staleList = true; const admission = start(controller); const shutdown = controller.beginShutdown(); gate.resolve(); await listEntered.promise; listRelease.resolve();
     await expect(admission).rejects.toMatchObject({ code: "tasks_shutting_down" }); await shutdown;
     staleList = false; expect(spawned).toBe(false); expect((await store.list())[0]?.state).toBe("interrupted");
@@ -203,6 +204,61 @@ describe("durable task foundation", () => {
     await native.context().emit({ code: "late", message: "not recorded" }); expect((await store.read(task.id)).events).toEqual([]);
   });
 
+  it("does not publish completion until scope inactivity is confirmed", async () => {
+    const native = runtime();
+    const confirmation = deferred<void>();
+    const ownership = fakeTaskScopeManager();
+    ownership.stopAndConfirm = async (taskId) => {
+      ownership.stops.push(taskId);
+      await confirmation.promise;
+    };
+    const home = await mkdtemp(join(tmpdir(), "ghost-task-"));
+    const store = trackedStore(home);
+    const controller = new TaskController(
+      store,
+      new Map([["native", native.adapter]]),
+      authority,
+      ownership,
+    );
+    await controller.initialize();
+    const task = await start(controller);
+    await eventually(store, task.id, "running");
+    native.result.resolve("done");
+    native.quiet.resolve();
+    await new Promise((done) => setTimeout(done, 3));
+    expect((await store.read(task.id)).state).toBe("running");
+    confirmation.resolve();
+    expect((await eventually(store, task.id, "completed")).result).toBe("done");
+  });
+
+  it("keeps cancellation nonterminal when scope ownership is unconfirmed", async () => {
+    const native = runtime();
+    const ownership = fakeTaskScopeManager();
+    let confirmations = 0;
+    ownership.stopAndConfirm = async (taskId) => {
+      ownership.stops.push(taskId);
+      confirmations += 1;
+      if (confirmations === 1) throw new Error("private bus failure");
+    };
+    const home = await mkdtemp(join(tmpdir(), "ghost-task-"));
+    const store = trackedStore(home);
+    const controller = new TaskController(
+      store,
+      new Map([["native", native.adapter]]),
+      authority,
+      ownership,
+    );
+    await controller.initialize();
+    const task = await start(controller);
+    await eventually(store, task.id, "running");
+    await expect(controller.cancel(task.id)).rejects.toMatchObject({ code: "task_cancel_failed" });
+    const cancelling = await store.read(task.id);
+    expect(cancelling.state).toBe("cancelling");
+    expect(cancelling.events.at(-1)).toMatchObject({ code: "ownership_unconfirmed" });
+    expect((await controller.cancel(task.id)).state).toBe("cancelled");
+    expect(confirmations).toBe(2);
+  });
+
   it("bounds completed results and records truncation", async () => {
     const native = runtime(); const { store, controller } = await fixture(native.adapter); const task = await start(controller); await eventually(store, task.id, "running");
     native.result.resolve("x".repeat(MAX_TASK_RESULT + 10)); native.quiet.resolve(); const completed = await eventually(store, task.id, "completed");
@@ -229,12 +285,12 @@ describe("durable task foundation", () => {
   it("makes old-generation launch and result publication durable no-ops", async () => {
     const validation = deferred<TaskBindingReceipt>(); let spawned = false; const native = runtime();
     const { home, store, controller } = await fixture({ ...native.adapter, async start(input, context) { spawned = true; return native.adapter.start(input, context); } }, { async revalidate() { return validation.promise; } });
-    const task = await start(controller); await eventually(store, task.id, "starting"); const recovery = new TaskController(store, new Map(), authority); await recovery.initialize();
+    const task = await start(controller); await eventually(store, task.id, "starting"); const recovery = new TaskController(store, new Map(), authority, fakeTaskScopeManager()); await recovery.initialize();
     const path = join(home, ".tasks", `${task.id}.json`); const before = await readFile(path); const beforeStat = await stat(path, { bigint: true }); validation.resolve(binding); await controller.beginShutdown();
     expect(spawned).toBe(false); expect(await readFile(path)).toEqual(before); expect((await stat(path, { bigint: true })).mtimeNs).toBe(beforeStat.mtimeNs);
 
     const runningNative = runtime(); const second = await fixture(runningNative.adapter); const active = await start(second.controller); await eventually(second.store, active.id, "running");
-    const secondRecovery = new TaskController(second.store, new Map(), authority); await secondRecovery.initialize(); const activePath = join(second.home, ".tasks", `${active.id}.json`);
+    const secondRecovery = new TaskController(second.store, new Map(), authority, fakeTaskScopeManager()); await secondRecovery.initialize(); const activePath = join(second.home, ".tasks", `${active.id}.json`);
     const activeBefore = await readFile(activePath); const activeStat = await stat(activePath, { bigint: true }); runningNative.result.resolve("late"); runningNative.quiet.resolve(); await second.controller.beginShutdown();
     expect(await readFile(activePath)).toEqual(activeBefore); expect((await stat(activePath, { bigint: true })).mtimeNs).toBe(activeStat.mtimeNs);
   });
@@ -246,7 +302,7 @@ describe("durable task foundation", () => {
       return { result: result.promise, async followUp() {} };
     } });
     const task = await start(current.controller); await eventually(current.store, task.id, "running");
-    const recovery = new TaskController(current.store, new Map(), authority); await recovery.initialize();
+    const recovery = new TaskController(current.store, new Map(), authority, fakeTaskScopeManager()); await recovery.initialize();
     expect((await current.controller.cancel(task.id)).state).toBe("interrupted"); expect(forces).toBe(1);
     result.resolve("late"); quiet.resolve(); await current.controller.beginShutdown();
   });
@@ -264,7 +320,7 @@ describe("durable task foundation", () => {
     const controller = new TaskController(store, new Map([["native", { async start(_input, context) {
       context.register({ async force() { forces += 1; forceEntered.resolve(); await releaseForce.promise; quiet.resolve(); result.resolve(""); }, quiescence: quiet.promise });
       return { result: result.promise, async followUp() {} };
-    } }]]), authority); await controller.initialize();
+    } }]]), authority, fakeTaskScopeManager()); await controller.initialize();
     const task = await start(controller); await eventually(store, task.id, "running"); failReads = true;
     let settled = false; const cancellation = controller.cancel(task.id); void cancellation.finally(() => { settled = true; }).catch(() => {});
     await forceEntered.promise; expect(forces).toBe(1); expect(settled).toBe(false); releaseForce.resolve();
@@ -284,7 +340,7 @@ describe("durable task foundation", () => {
       const execution = { forces: 0, quiet: false }; executions.push(execution); const quiet = deferred<void>(); const result = deferred<string>();
       context.register({ async force() { execution.forces += 1; execution.quiet = true; quiet.resolve(); result.resolve(""); }, quiescence: quiet.promise });
       return { result: result.promise, async followUp() {} };
-    } }]]), authority); await controller.initialize();
+    } }]]), authority, fakeTaskScopeManager()); await controller.initialize();
     const first = await start(controller); const second = await start(controller);
     await eventually(store, first.id, "running"); await eventually(store, second.id, "running"); failList = true;
     await expect(controller.beginShutdown()).rejects.toMatchObject({ code: "task_shutdown_failed" });
@@ -304,7 +360,7 @@ describe("durable task foundation", () => {
     const controller = new TaskController(store, new Map([["native", { async start(_input, context) {
       context.register({ async force() { forces += 1; quiet.resolve(); result.resolve(""); }, quiescence: quiet.promise });
       return { result: result.promise, async followUp() {} };
-    } }]]), authority); await controller.initialize();
+    } }]]), authority, fakeTaskScopeManager()); await controller.initialize();
     const live = await start(controller); await eventually(store, live.id, "running"); rejectAdmission = true;
     const admission = start(controller).then(() => undefined, (error: unknown) => error); await writeEntered.promise;
     const shutdown = controller.beginShutdown(); expect(forces).toBe(1); releaseWrite.resolve();
@@ -344,7 +400,7 @@ describe("durable task foundation", () => {
       }
     }
     const store = new BlockingStore(home); stores.push(store); const native = runtime();
-    const controller = new TaskController(store, new Map([["native", native.adapter]]), authority); await controller.initialize();
+    const controller = new TaskController(store, new Map([["native", native.adapter]]), authority, fakeTaskScopeManager()); await controller.initialize();
     const task = await start(controller); await eventually(store, task.id, "running"); blockCancelled = true;
     const cancelled = controller.cancel(task.id); await blocked.promise; const shutdown = controller.beginShutdown(); release.resolve();
     expect((await cancelled).state).toBe("interrupted"); await shutdown; expect((await store.read(task.id)).state).toBe("interrupted");
@@ -353,14 +409,14 @@ describe("durable task foundation", () => {
   it("clamps task, event, and recovery timestamps to a monotonic high-water mark", async () => {
     let clock = Date.parse("2030-01-01T00:00:10.000Z"); const now = () => { clock -= 1_000; return new Date(clock); }; const native = runtime();
     const home = await mkdtemp(join(tmpdir(), "ghost-task-")); const store = trackedStore(home);
-    const controller = new TaskController(store, new Map([["native", native.adapter]]), authority, now); await controller.initialize();
+    const controller = new TaskController(store, new Map([["native", native.adapter]]), authority, fakeTaskScopeManager(), now); await controller.initialize();
     const task = await start(controller); await eventually(store, task.id, "running"); await native.context().emit({ code: "progress", message: "one" });
     native.result.resolve("done"); native.quiet.resolve(); const completed = await eventually(store, task.id, "completed");
     expect(Date.parse(completed.updatedAt)).toBeGreaterThanOrEqual(Date.parse(completed.createdAt));
     expect(completed.events.every((event, index) => index === 0 || event.at >= completed.events[index - 1]!.at)).toBe(true);
 
     const pending = record("running"); pending.createdAt = "2040-01-01T00:00:00.000Z"; pending.updatedAt = "2040-01-01T00:00:05.000Z"; await store.write(pending);
-    const recovery = new TaskController(store, new Map(), authority, () => new Date("2020-01-01T00:00:00.000Z"));
+    const recovery = new TaskController(store, new Map(), authority, fakeTaskScopeManager(), () => new Date("2020-01-01T00:00:00.000Z"));
     const recovered = await recovery.initialize(); expect(recovered.find((row) => row.id === pending.id)?.updatedAt).toBe("2040-01-01T00:00:05.000Z");
   });
 
@@ -368,9 +424,61 @@ describe("durable task foundation", () => {
     const home = await mkdtemp(join(tmpdir(), "ghost-task-")); const store = trackedStore(home); await store.initialize();
     const rows = [record("queued"), record("starting"), record("running"), record("cancelling"), record("completed")]; for (const row of rows) await store.write(row);
     await writeFile(join(home, ".tasks", "task-not-a-record.json"), "foreign", { mode: 0o600 });
-    const controller = new TaskController(store, new Map(), authority); const recovered = await controller.initialize();
+    const ownership = fakeTaskScopeManager();
+    const controller = new TaskController(store, new Map(), authority, ownership); const recovered = await controller.initialize();
     expect(recovered.filter((row) => row.state === "interrupted")).toHaveLength(4); expect(recovered.filter((row) => row.state === "interrupted").every((row) => row.generation === 2)).toBe(true);
     expect(recovered.find((row) => row.id === rows[4]?.id)?.state).toBe("completed");
+    expect([...ownership.stops].sort()).toEqual(rows.slice(0, 4).map((row) => row.id).sort());
+  });
+
+  it("retries scope confirmation after a crash window before recovery publication", async () => {
+    const home = await mkdtemp(join(tmpdir(), "ghost-task-"));
+    let failInterruptedWrite = false;
+    class RecoveryCrashStore extends TaskStore {
+      override async write(row: TaskRecord): Promise<void> {
+        if (failInterruptedWrite && row.state === "interrupted") {
+          failInterruptedWrite = false;
+          throw new Error("simulated recovery publication crash");
+        }
+        await super.write(row);
+      }
+    }
+    const store = new RecoveryCrashStore(home);
+    stores.push(store);
+    await store.initialize();
+    const pending = record("running");
+    await store.write(pending);
+    failInterruptedWrite = true;
+    const firstOwnership = fakeTaskScopeManager();
+    const first = new TaskController(store, new Map(), authority, firstOwnership);
+    await expect(first.initialize()).rejects.toThrow();
+    expect((await store.read(pending.id)).state).toBe("running");
+    expect(firstOwnership.stops).toEqual([pending.id]);
+
+    const secondOwnership = fakeTaskScopeManager();
+    const second = new TaskController(store, new Map(), authority, secondOwnership);
+    await expect(second.initialize()).resolves.toEqual([
+      expect.objectContaining({ id: pending.id, state: "interrupted", generation: 2 }),
+    ]);
+    expect(secondOwnership.stops).toEqual([pending.id]);
+  });
+
+  it("leaves recovery nonterminal when the derived scope cannot be confirmed", async () => {
+    const home = await mkdtemp(join(tmpdir(), "ghost-task-"));
+    const store = trackedStore(home);
+    await store.initialize();
+    const pending = record("running");
+    await store.write(pending);
+    const ownership = fakeTaskScopeManager();
+    ownership.unconfirmed.add(pending.id);
+    const controller = new TaskController(store, new Map(), authority, ownership);
+    await expect(controller.initialize()).rejects.toThrow();
+    expect(await store.read(pending.id)).toMatchObject({
+      state: "running",
+      generation: 1,
+      error: null,
+    });
+    expect(ownership.stops).toEqual([pending.id]);
   });
 
   it("keeps monotonic event cursors when bounded history is truncated", async () => {

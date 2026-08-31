@@ -102,8 +102,10 @@ import {
 } from "./helpers/mock-provider.js";
 import { recordingLogger } from "./helpers/recording-logger.js";
 import type { TaskAdapter } from "../src/tasks.js";
+import { fakeTaskScopeManager } from "./helpers/task-scope.js";
 
 const inertTaskServices = () => ({
+  ownership: fakeTaskScopeManager(),
   adapters: new Map<string, TaskAdapter>([["codex", {
     async start() {
       throw new Error("inert test adapter");

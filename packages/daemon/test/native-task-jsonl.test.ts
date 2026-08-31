@@ -15,6 +15,7 @@ import {
   NativeTaskJsonlProcess,
 } from "../src/native-task-jsonl.js";
 import type { TaskAdapterContext, TaskAdapterControl } from "../src/tasks.js";
+import { directTaskScope } from "./helpers/task-scope.js";
 
 const roots: string[] = [];
 const unrelated: Array<ReturnType<typeof spawn>> = [];
@@ -45,6 +46,7 @@ function context(controller = new AbortController()): {
     controller,
     context: {
       signal: controller.signal,
+      scope: directTaskScope(),
       register(control) {
         if (registered) throw new Error("duplicate control");
         registered = control;

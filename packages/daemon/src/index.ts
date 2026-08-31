@@ -145,6 +145,18 @@ export {
   type NativeTaskJsonlOptions,
 } from "./native-task-jsonl.js";
 export {
+  captureNativeTaskControlEnvironment,
+  nativeTaskScopeUnit,
+  NativeTaskOwnershipError,
+  SystemdNativeTaskScopeManager,
+  type NativeTaskControlResult,
+  type NativeTaskControlRunner,
+  type NativeTaskScope,
+  type NativeTaskScopeLaunch,
+  type NativeTaskScopeManager,
+  type SystemdNativeTaskScopeManagerOptions,
+} from "./native-task-scope.js";
+export {
   PiTaskAdapter,
   type PiTaskAdapterOptions,
 } from "./pi-task-adapter.js";

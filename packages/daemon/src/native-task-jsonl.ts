@@ -1,16 +1,12 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { terminateOwnedProcessGroup } from "./owned-process.js";
+import type { ChildProcess, ChildProcessWithoutNullStreams } from "node:child_process";
 import type { TaskAdapterContext } from "./tasks.js";
 
 export const NATIVE_TASK_JSONL_MAX_FRAME_BYTES = 256 * 1024;
 export const NATIVE_TASK_JSONL_MAX_QUEUED_FRAMES = 128;
 
 type JsonObject = Record<string, unknown>;
-type SpawnChild = typeof spawn;
-
 export interface NativeTaskJsonlOptions {
   beforeForce?: () => void;
-  spawnChild?: SpawnChild;
 }
 
 export class NativeTaskProcessError extends Error {
@@ -41,8 +37,8 @@ function genericFailure(): NativeTaskProcessError {
 }
 
 /**
- * One bounded JSONL transport and one exact Linux process group for a delegated
- * native harness. The task controller is registered synchronously, before any
+ * One bounded JSONL transport in one exact delegated-task systemd scope. The
+ * task controller is registered synchronously, before any
  * catalogue or protocol await can begin.
  */
 export class NativeTaskJsonlProcess {
@@ -51,7 +47,7 @@ export class NativeTaskJsonlProcess {
 
   private readonly abortController = new AbortController();
   private readonly beforeForce: () => void;
-  private readonly spawnChild: SpawnChild;
+  private readonly scope: TaskAdapterContext["scope"];
   private readonly quiet = deferred<void>();
   private readonly queued: JsonObject[] = [];
   private readonly readers: Array<{
@@ -69,7 +65,7 @@ export class NativeTaskJsonlProcess {
     this.signal = this.abortController.signal;
     this.quiescence = this.quiet.promise;
     this.beforeForce = options.beforeForce ?? (() => undefined);
-    this.spawnChild = options.spawnChild ?? spawn;
+    this.scope = context.scope;
     context.register({
       force: () => this.force(),
       quiescence: this.quiescence,
@@ -91,17 +87,18 @@ export class NativeTaskJsonlProcess {
   }>): void {
     if (this.started || this.signal.aborted || this.teardown) throw genericFailure();
     if (process.platform !== "linux") {
-      throw new NativeTaskProcessError("Native delegated tasks require Linux process groups.");
+      throw new NativeTaskProcessError("Native delegated tasks require Linux systemd scopes.");
     }
     this.started = true;
-    let child: ReturnType<typeof spawn>;
+    let child: ChildProcess;
     try {
-      child = this.spawnChild(input.executable, [...input.args], {
+      child = this.scope.spawn({
+        executable: input.executable,
+        args: input.args,
         cwd: input.cwd,
-        detached: true,
-        env: input.environment,
-        stdio: ["pipe", "pipe", "pipe"],
-        windowsHide: true,
+        environment: input.environment,
+        signal: this.signal,
+        stderr: "pipe",
       });
     } catch {
       this.fail();
@@ -152,7 +149,7 @@ export class NativeTaskJsonlProcess {
       try {
         this.beforeForce();
       } catch {
-        // The process group remains the authoritative cancellation boundary.
+        // The transient scope remains the authoritative cancellation boundary.
       }
     }
     return this.stop();
@@ -229,10 +226,9 @@ export class NativeTaskJsonlProcess {
     this.terminal ??= genericFailure();
     for (const reader of this.readers.splice(0)) reader.reject(this.terminal);
     const child = this.child;
-    const pid = child?.pid;
     this.teardown = (async () => {
       try {
-        if (pid !== undefined) await terminateOwnedProcessGroup(pid);
+        await this.scope.stopAndConfirm();
       } catch {
         throw genericFailure();
       } finally {

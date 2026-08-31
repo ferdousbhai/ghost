@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import type {
   Options as ClaudeQueryOptions,
   Query,
@@ -14,7 +14,6 @@ import {
 import { captureNativeHarnessEnvironment } from "./env-scrub.js";
 import type { NativeHarnessProbeResult } from "./native-harness-catalog.js";
 import { NativeTaskProcessError } from "./native-task-jsonl.js";
-import { terminateOwnedProcessGroup } from "./owned-process.js";
 import type {
   TaskAdapter,
   TaskAdapterContext,
@@ -135,9 +134,10 @@ class ClaudeTaskLifecycle {
   private readonly quiet = deferred<void>();
   private readonly cwd: string;
   private readonly input: ClaudeTaskInput;
+  private readonly scope: TaskAdapterContext["scope"];
   private executable: string | undefined;
   private query: Query | undefined;
-  private child: ReturnType<typeof spawn> | undefined;
+  private child: ChildProcess | undefined;
   private teardown: Promise<void> | undefined;
   private spawned = false;
   private forceRequested = false;
@@ -149,6 +149,7 @@ class ClaudeTaskLifecycle {
   ) {
     this.input = input;
     this.cwd = cwd;
+    this.scope = context.scope;
     this.signal = this.abortController.signal;
     this.quiescence = this.quiet.promise;
     this.spawnClaudeCodeProcess = (options) => this.spawn(options);
@@ -185,7 +186,7 @@ class ClaudeTaskLifecycle {
       }
       this.abortController.abort();
       if (this.query) {
-        try { this.query.close(); } catch { /* exact group teardown remains authoritative */ }
+        try { this.query.close(); } catch { /* exact scope teardown remains authoritative */ }
       }
     }
     return this.stop();
@@ -194,7 +195,7 @@ class ClaudeTaskLifecycle {
   finish(): Promise<void> {
     this.input.close();
     if (this.query) {
-      try { this.query.close(); } catch { /* exact group teardown remains authoritative */ }
+      try { this.query.close(); } catch { /* exact scope teardown remains authoritative */ }
     }
     return this.stop();
   }
@@ -209,15 +210,15 @@ class ClaudeTaskLifecycle {
       throw failure();
     }
     this.spawned = true;
-    let child: ReturnType<typeof spawn>;
+    let child: ChildProcess;
     try {
-      child = spawn(options.command, options.args, {
+      child = this.scope.spawn({
+        executable: options.command,
+        args: options.args,
         cwd: options.cwd,
-        detached: true,
-        env: options.env,
+        environment: options.env,
         signal: options.signal,
-        stdio: ["pipe", "pipe", "ignore"],
-        windowsHide: true,
+        stderr: "ignore",
       });
     } catch {
       throw failure();
@@ -232,10 +233,9 @@ class ClaudeTaskLifecycle {
   private stop(): Promise<void> {
     if (this.teardown) return this.teardown;
     const child = this.child;
-    const pid = child?.pid;
     this.teardown = (async () => {
       try {
-        if (pid !== undefined) await terminateOwnedProcessGroup(pid);
+        await this.scope.stopAndConfirm();
       } catch {
         throw failure();
       } finally {
@@ -331,7 +331,7 @@ export class ClaudeTaskAdapter implements TaskAdapter {
       query = sdk.query({ prompt: channel, options });
       lifecycle.attach(query);
     } catch {
-      try { query?.close(); } catch { /* exact group teardown remains authoritative */ }
+      try { query?.close(); } catch { /* exact scope teardown remains authoritative */ }
       channel.close();
       await lifecycle.force().catch(() => undefined);
       throw failure();

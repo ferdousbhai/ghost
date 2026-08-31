@@ -1576,6 +1576,7 @@ export class SessionHost {
   private taskServices: PrincipalTaskServices | undefined;
   private readonly taskControllers = new Map<string, Promise<TaskController>>();
   private readonly taskControllerInstances = new Map<string, TaskController>();
+  private readonly taskAdmissions = new Set<Promise<unknown>>();
   private taskRecovery: Promise<void> | undefined;
   private nativeTaskShutdown: Promise<void> | undefined;
   private sessionActivityStarted = false;
@@ -1799,11 +1800,15 @@ export class SessionHost {
     if (adapters.size === 0) {
       throw new Error("Principal task services require at least one native adapter.");
     }
+    if (!services.ownership) {
+      throw new Error("Principal task services require native scope ownership.");
+    }
     this.claudeCode.attachPrincipalTaskTools((ghostName, conversationId, cwd) =>
       this.principalTaskContext(ghostName, "claude-code", conversationId, cwd));
-    this.taskServices = { adapters };
+    this.taskServices = { adapters, ownership: services.ownership };
     const recoveries = this.registry.list().map((ghost) => this.taskController(ghost.name));
-    this.taskRecovery = Promise.allSettled(recoveries).then(() => undefined);
+    this.taskRecovery = Promise.all(recoveries).then(() => undefined);
+    void this.taskRecovery.catch(() => {});
   }
 
   /** Wait for every boot-time task recovery attempt before opening HTTP admission. */
@@ -1815,6 +1820,7 @@ export class SessionHost {
   }
 
   private taskController(ghostName: string): Promise<TaskController> {
+    this.assertTaskAdmissionOpen();
     if (this.ghostMoveReserved(ghostName)) {
       throw new GhostError("ghost_busy", "Wait for this ghost's home move to finish.", 409);
     }
@@ -1829,6 +1835,7 @@ export class SessionHost {
       new TaskStore(paths.home),
       services.adapters,
       this.projectBindings.taskBindingAuthority(paths.sessionDir),
+      services.ownership,
     );
     const initialized = controller.initialize().then(() => {
       this.taskControllerInstances.set(ghostName, controller);
@@ -1852,17 +1859,40 @@ export class SessionHost {
   ): Promise<PrincipalTaskContext> {
     const parent = conversationIdentity(runtime, conversationId);
     const paths = ghostPaths(this.registry.get(ghostName).dir);
+    this.assertTaskAdmissionOpen();
     return Promise.resolve({
       controller: this.taskController(ghostName),
       parent,
       cwd,
-      mintBinding: (cwd, signal) => this.projectBindings.mintTaskBinding(
-        paths.sessionDir,
-        parent,
-        cwd,
-        signal,
-      ),
+      mintBinding: async (cwd, signal) => {
+        this.assertTaskAdmissionOpen();
+        const binding = await this.projectBindings.mintTaskBinding(
+          paths.sessionDir,
+          parent,
+          cwd,
+          signal,
+        );
+        this.assertTaskAdmissionOpen();
+        return binding;
+      },
     });
+  }
+
+  private assertTaskAdmissionOpen(): void {
+    if (this.disposed) {
+      throw new GhostError("tasks_shutting_down", "Tasks are shutting down.", 503);
+    }
+  }
+
+  private admitTaskCreation<T>(action: () => Promise<T>): Promise<T> {
+    this.assertTaskAdmissionOpen();
+    const admission = this.taskOperation(async () => {
+      this.assertTaskAdmissionOpen();
+      return action();
+    });
+    this.taskAdmissions.add(admission);
+    void admission.finally(() => this.taskAdmissions.delete(admission)).catch(() => {});
+    return admission;
   }
 
   private async taskOperation<T>(action: () => Promise<T>): Promise<T> {
@@ -1922,7 +1952,7 @@ export class SessionHost {
     }>,
     signal: AbortSignal,
   ): Promise<TaskRecord> {
-    return this.taskOperation(async () => {
+    return this.admitTaskCreation(async () => {
       if (input.assignment.trim() === "" || input.assignment.length > MAX_TASK_TEXT) {
         throw new GhostError("invalid_task", "The task assignment is invalid.", 400);
       }
@@ -1945,6 +1975,7 @@ export class SessionHost {
         signal,
       );
       signal.throwIfAborted();
+      this.assertTaskAdmissionOpen();
       return (await this.taskController(ghostName)).start({
         parent,
         harness: input.harness,
@@ -7676,17 +7707,29 @@ export class SessionHost {
     // owner gets a chance to capture another home path.
     const maintenanceDrain = this.maintenance?.beginShutdown();
     this.launchCleanupStep(undefined, "retention timer", () => this.retentionTimer.dispose());
-    const taskShutdowns = [...this.taskControllers.entries()].map(([ghostName, pending]) => {
-      const ready = this.taskControllerInstances.get(ghostName);
-      return ready ? ready.dispose() : pending.then((controller) => controller.dispose());
-    });
-    this.nativeTaskShutdown = Promise.allSettled(taskShutdowns).then((results) => {
+    const firstTaskControllers = [...this.taskControllers.values()];
+    const admittedTaskCreations = [...this.taskAdmissions];
+    const disposedTaskControllers = new Set<TaskController>();
+    const disposeTaskController = async (pending: Promise<TaskController>): Promise<void> => {
+      const controller = await pending;
+      if (disposedTaskControllers.has(controller)) return;
+      disposedTaskControllers.add(controller);
+      await controller.dispose();
+    };
+    const firstTaskShutdowns = firstTaskControllers.map(disposeTaskController);
+    this.nativeTaskShutdown = (async () => {
+      await Promise.allSettled(admittedTaskCreations);
+      const secondTaskControllers = [...this.taskControllers.values()];
+      const results = await Promise.allSettled([
+        ...firstTaskShutdowns,
+        ...secondTaskControllers.map(disposeTaskController),
+      ]);
       const failures = results.flatMap((result) =>
         result.status === "rejected" ? [result.reason] : []);
       if (failures.length > 0) {
         throw new AggregateError(failures, "Native task shutdown did not settle cleanly.");
       }
-    });
+    })();
     this.shutdownTasks = [
       ...(maintenanceDrain ? [maintenanceDrain] : []),
       Promise.resolve().then(() => this.liveVoice.disposeAll()),

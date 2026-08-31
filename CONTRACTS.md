@@ -442,8 +442,11 @@ neither discovers nor changes cwd.
 runtime's policy.
 
 The only states are `queued`, `starting`, `running`, `cancelling`, `completed`,
-`failed`, `cancelled`, and `interrupted`. Startup recovery atomically changes
-every nonterminal record to `interrupted`; it never resumes work implicitly.
+`failed`, `cancelled`, and `interrupted`. Startup recovery first stops and
+confirms the derived transient scope for each nonterminal record, then
+atomically changes that record to `interrupted`; it never resumes work
+implicitly. Unknown scope state or a user-manager/control-bus failure leaves
+the record nonterminal and fails recovery rather than fabricating quiescence.
 Events and errors use an exact nested schema, canonical timestamps, bounded
 structured codes, and owner-safe messages. Adapter exceptions are mapped to
 fixed typed failures rather than persisting raw stderr, provider protocol, or
@@ -468,9 +471,14 @@ complete, an adapter registers both an abort-aware force operation and a
 quiescence promise. One serialized lifecycle actor guards each task; its
 generation fences late events and results. A start is registered synchronously
 before its first durable-write await; shutdown fences that admission, waits for
-its write, and settles its record without spawning native work. Initialization is one shared
-recovery operation; repeated or concurrent callers never recover a live task a
-second time. Every revalidation, adapter handshake, follow-up, and result wait
+its write, and settles its record without spawning native work. SessionHost
+sets its task-admission fence synchronously before its first controller
+snapshot, checks it before controller lookup or creation and again after an
+asynchronous project-binding mint, settles every pre-fence admission, then
+takes a second controller snapshot. No late controller or worker can escape
+shutdown. Initialization is one shared recovery operation; repeated or
+concurrent callers never recover a live task a second time. Every
+revalidation, adapter handshake, follow-up, and result wait
 is tracked and abort-raced. A registered control survives a synchronous start
 throw or rejected handle/result; any non-cancellation failure aborts, forces,
 and waits for quiescence before becoming `failed`. Daemon shutdown has
@@ -494,14 +502,43 @@ worktrees or runs Git staging, commit, or branch commands, and it does not
 invent titles, recaps, presentation state, branch state, or queue state.
 
 Native delegated adapters register their force and quiescence boundary before
-their first catalogue or protocol await. JSONL harnesses run as one detached
-Linux process group in the exact admitted cwd. Their transport accepts only
-bounded object frames, has a bounded queue, discards stderr and unrecognized
-protocol/tool payloads, and maps malformed, oversized, or unexpected traffic to
-a generic task failure. Cancellation may send one best-effort harness-native
-interrupt, but the exact process group and confirmed descendant teardown are
-the authoritative boundary. No result is durable before that group is fully
-quiescent, and no process outside the captured group may be signalled.
+their first catalogue or protocol await. Every durable task id derives exactly
+one collected transient user-scope name,
+`ghost-task-<durable UUID>.scope`. Before launch Ghost requires that unit to be
+not found; an existing loaded unit is a collision and is never adopted. The
+literal launch, with no shell or environment expansion, is:
+
+```
+/usr/bin/systemd-run --user --scope --unit=ghost-task-<durable UUID>.scope \
+  --slice-inherit --collect --quiet --pipe --expand-environment=no \
+  --working-directory=<exact trusted cwd> \
+  --property=KillMode=control-group --property=SendSIGKILL=yes \
+  --property=TimeoutStopSec=1s -- <exact admitted executable> <native argv...>
+```
+
+The harness receives only its finite positive profile environment. User-manager
+queries and stops instead use a separate captured environment containing only
+`DBUS_SESSION_BUS_ADDRESS` and `XDG_RUNTIME_DIR`; provider values never enter
+that control process. JSONL stdin/stdout remain connected through `--pipe`.
+Stderr is drained or ignored without durable buffering. The transport accepts
+only bounded object frames, has a bounded queue, discards unrecognized
+protocol/tool payloads, and maps malformed, oversized, or unexpected traffic
+to a generic task failure.
+
+Cancellation first requests the harness-native interrupt, then issues literal
+`/usr/bin/systemctl --user stop --no-block <unit>` and polls the same unit until
+it is authoritatively `inactive` or `not-found`. Protocol completion, owner
+cancellation, daemon shutdown, and crash recovery become terminal only after
+that confirmation. An unknown state, timeout, or bus/control failure leaves an
+admitted active stop `cancelling` with bounded `ownership_unconfirmed`
+progress; startup recovery leaves the prior nonterminal state unchanged. Both
+can be retried and never become `completed`, `cancelled`, `failed`, or
+`interrupted` by assumption. Stop and confirmation are idempotent and recovery derives the unit
+only from the durable id. The scope contains ordinary forked, detached, and
+`setsid` descendants and no unrelated process is signalled. It is an ownership
+boundary, not a sandbox: a trusted harness that deliberately asks systemd to
+create another unit can escape this scope and therefore violates the native
+harness contract.
 
 The Pi delegated adapter runs the freshly admitted executable in its native RPC
 mode with one-run `--approve`, the exact cwd, and the positive `pi-native`
@@ -630,7 +667,7 @@ above.
 Graceful daemon shutdown closes admission and synchronously begins task
 shutdown before session/store teardown. Forced shutdown reuses the same
 idempotent native control cleanup and does not return from its terminal stage
-until every admitted native process group has confirmed quiescence, even when
+successfully until every admitted native scope has confirmed quiescence, even when
 ordinary session/provider teardown exceeds its bounded grace period.
 
 ### Session capabilities

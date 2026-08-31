@@ -26,6 +26,7 @@ import type {
   TaskAdapterControl,
   TaskBindingReceipt,
 } from "../src/tasks.js";
+import { directTaskScope } from "./helpers/task-scope.js";
 
 const roots: string[] = [];
 const binding: TaskBindingReceipt = {
@@ -195,6 +196,7 @@ function taskContext(): {
   return {
     context: {
       signal: controller.signal,
+      scope: directTaskScope(),
       register(control) { registered = control; },
       async emit() {},
     },

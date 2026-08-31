@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { conversationIdentity } from "../src/conversation-identity.js";
 import { ghostPaths } from "../src/ghosts.js";
+import { ProjectBindingStore } from "../src/project-binding.js";
 import { SessionHost } from "../src/session-host.js";
 import {
   TaskStore,
@@ -12,6 +13,7 @@ import {
   type TaskRecord,
 } from "../src/tasks.js";
 import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
+import { fakeTaskScopeManager } from "./helpers/task-scope.js";
 
 let temp: TempGhosts | undefined;
 let host: SessionHost | undefined;
@@ -24,7 +26,10 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-function setup(): { home: string; ownerHome: string } {
+function setup(options: { projectBindings?: ProjectBindingStore } = {}): {
+  home: string;
+  ownerHome: string;
+} {
   temp = makeTempGhosts();
   const home = seedGhost(temp.root, { name: "casper" });
   host = new SessionHost({
@@ -32,6 +37,7 @@ function setup(): { home: string; ownerHome: string } {
     ownerHome: temp.ownerHome,
     offline: true,
     scheduleCommandRunner: async () => ({ stdout: "", stderr: "", code: 0 }),
+    ...options,
   });
   return { home, ownerHome: temp.ownerHome };
 }
@@ -116,7 +122,10 @@ describe("SessionHost delegated task composition", () => {
     await store.dispose();
 
     const controlled = controlledAdapter();
-    host!.attachTaskServices({ adapters: new Map([["pi", controlled.adapter]]) });
+    host!.attachTaskServices({
+      adapters: new Map([["pi", controlled.adapter]]),
+      ownership: fakeTaskScopeManager(),
+    });
     await expect(host!.restoreTaskServices()).resolves.toBeUndefined();
     await expect(host!.restoreTaskServices()).resolves.toBeUndefined();
 
@@ -151,7 +160,10 @@ describe("SessionHost delegated task composition", () => {
       expectedGeneration: 0,
     });
     const controlled = controlledAdapter();
-    host!.attachTaskServices({ adapters: new Map([["pi", controlled.adapter]]) });
+    host!.attachTaskServices({
+      adapters: new Map([["pi", controlled.adapter]]),
+      ownership: fakeTaskScopeManager(),
+    });
     await host!.restoreTaskServices();
 
     await expect(host!.createTask("casper", parent, {
@@ -211,7 +223,10 @@ describe("SessionHost delegated task composition", () => {
     });
     const gate = Promise.withResolvers<void>();
     const controlled = controlledAdapter({ forceGate: gate.promise });
-    host!.attachTaskServices({ adapters: new Map([["pi", controlled.adapter]]) });
+    host!.attachTaskServices({
+      adapters: new Map([["pi", controlled.adapter]]),
+      ownership: fakeTaskScopeManager(),
+    });
     await host!.restoreTaskServices();
     const admitted = await host!.createTask("casper", parent, {
       harness: "pi",
@@ -230,5 +245,59 @@ describe("SessionHost delegated task composition", () => {
     gate.resolve();
     await forced;
     expect(settled).toBe(true);
+  });
+
+  it("fences a task whose binding mint crosses synchronous host shutdown", async () => {
+    temp = makeTempGhosts();
+    const home = seedGhost(temp.root, { name: "casper" });
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    class DelayedProjectBindings extends ProjectBindingStore {
+      override async mintTaskBinding(...args: Parameters<ProjectBindingStore["mintTaskBinding"]>) {
+        entered.resolve();
+        await release.promise;
+        return super.mintTaskBinding(...args);
+      }
+    }
+    const projectBindings = new DelayedProjectBindings({ ownerHome: temp.ownerHome });
+    host = new SessionHost({
+      registry: temp.registry,
+      ownerHome: temp.ownerHome,
+      offline: true,
+      projectBindings,
+      scheduleCommandRunner: async () => ({ stdout: "", stderr: "", code: 0 }),
+    });
+    const project = join(temp.ownerHome, "project");
+    mkdirSync(project);
+    const parent = conversationIdentity("pi", "shutdown-race");
+    const preview = await host.previewProject("casper", "shutdown-race", "pi", project);
+    await host.bindProject("casper", "shutdown-race", "pi", {
+      root: project,
+      trustToken: preview.trustToken,
+      expectedGeneration: 0,
+    });
+    const ownership = fakeTaskScopeManager();
+    const controlled = controlledAdapter();
+    host.attachTaskServices({
+      adapters: new Map([["pi", controlled.adapter]]),
+      ownership,
+    });
+    await host.restoreTaskServices();
+
+    const creation = host.createTask("casper", parent, {
+      harness: "pi",
+      assignment: "Must not escape shutdown.",
+    }, new AbortController().signal);
+    await entered.promise;
+    const shutdown = host.forceDisposeAll();
+    release.resolve();
+    await expect(creation).rejects.toMatchObject({ code: "tasks_shutting_down" });
+    await expect(shutdown).resolves.toBeUndefined();
+    expect(ownership.reservations).toEqual([]);
+
+    const records = new TaskStore(ghostPaths(home).home);
+    await records.initialize();
+    expect(await records.list()).toEqual([]);
+    await records.dispose();
   });
 });

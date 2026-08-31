@@ -5,6 +5,11 @@ import { descriptorPath, openDirectoryNoFollow, REDACTED_MEMORY_SECRET, redactMe
 import type { ConversationIdentity } from "./conversation-identity.js";
 import { parseConversationIdentity } from "./conversation-identity.js";
 import { GhostError } from "./ghosts.js";
+import {
+  NativeTaskOwnershipError,
+  type NativeTaskScope,
+  type NativeTaskScopeManager,
+} from "./native-task-scope.js";
 import { readPrivateFile, recoverPrivateJsonAtomicCas, writePrivateJsonAtomicCas, type PrivateFileIdentity } from "./private-file.js";
 
 export const TASK_RECORD_VERSION = 1;
@@ -52,6 +57,7 @@ export interface TaskBindingAuthority {
 export interface TaskAdapterControl { force(): Promise<void>; quiescence: Promise<void> }
 export interface TaskAdapterContext {
   signal: AbortSignal;
+  scope: NativeTaskScope;
   register(control: TaskAdapterControl): void;
   emit(event: Readonly<{ code: string; message: string }>): Promise<void>;
 }
@@ -254,9 +260,13 @@ export class TaskStore {
     }
     return records;
   }
-  async recover(at: string): Promise<TaskRecord[]> {
+  async recover(
+    at: string,
+    quiesce: (taskId: string) => Promise<void>,
+  ): Promise<TaskRecord[]> {
     const records = await this.list();
     for (const record of records) if (!TERMINAL.has(record.state)) {
+      await quiesce(record.id);
       record.generation += 1; record.state = "interrupted"; record.updatedAt = highWaterTimestamp(record, at); record.result = null; record.resultTruncated = false;
       record.error = { code: "daemon_restarted", message: "The daemon restarted before the task became quiescent." }; await this.write(record);
     }
@@ -276,8 +286,20 @@ function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
     );
   });
 }
-interface LiveTask { generation: number; abort: AbortController; control: TaskAdapterControl; handle: Promise<TaskAdapterHandle> }
-interface TrackedLaunch { generation: number; abort: AbortController; persisted: Promise<void>; promise: Promise<void> }
+interface LiveTask {
+  generation: number;
+  parent: ConversationIdentity;
+  abort: AbortController;
+  control: TaskAdapterControl;
+  handle: Promise<TaskAdapterHandle>;
+}
+interface TrackedLaunch {
+  generation: number;
+  parent: ConversationIdentity;
+  abort: AbortController;
+  persisted: Promise<void>;
+  promise: Promise<void>;
+}
 
 export class TaskController {
   readonly #actors = new Map<string, Promise<void>>();
@@ -290,11 +312,23 @@ export class TaskController {
   #initialization?: Promise<TaskRecord[]>;
   #initialized = false;
   #shuttingDown = false;
-  constructor(readonly store: TaskStore, readonly adapters: ReadonlyMap<string, TaskAdapter>, readonly authority: TaskBindingAuthority, readonly now = () => new Date()) {}
+  constructor(
+    readonly store: TaskStore,
+    readonly adapters: ReadonlyMap<string, TaskAdapter>,
+    readonly authority: TaskBindingAuthority,
+    readonly ownership: NativeTaskScopeManager,
+    readonly now = () => new Date(),
+  ) {}
   initialize(): Promise<TaskRecord[]> {
     if (this.#initialization) return this.#initialization;
     this.#initialization = (async () => {
-      await this.store.initialize(); const rows = await this.store.recover(this.now().toISOString()); this.#initialized = true; return rows;
+      await this.store.initialize();
+      const rows = await this.store.recover(
+        this.now().toISOString(),
+        (taskId) => this.ownership.recoverAndConfirm(taskId),
+      );
+      this.#initialized = true;
+      return rows;
     })();
     void this.#initialization.catch(() => { this.#initialization = undefined; });
     return this.#initialization;
@@ -335,7 +369,13 @@ export class TaskController {
       events: [], eventCursor: { nextSequence: 1, dropped: 0 }, result: null, resultTruncated: false, error: null };
     const abort = new AbortController();
     const persisted = this.store.write(record);
-    const tracked: TrackedLaunch = { generation: record.generation, abort, persisted, promise: Promise.resolve() };
+    const tracked: TrackedLaunch = {
+      generation: record.generation,
+      parent: { ...record.parent },
+      abort,
+      persisted,
+      promise: Promise.resolve(),
+    };
     tracked.promise = (async () => {
       await persisted;
       if (this.#shuttingDown) abort.abort();
@@ -350,6 +390,7 @@ export class TaskController {
     return record;
   }
   async #launch(id: string, generation: number, abort: AbortController): Promise<void> {
+    let scopeReserved = false;
     try {
       const record = await this.#actor(id, () => this.#update(id, (row) => {
         if (row.generation !== generation || row.state !== "queued") return false;
@@ -362,6 +403,8 @@ export class TaskController {
       if (!validBinding(authorityResult)) throw new Error("binding changed");
       const binding = bindingCopy(authorityResult);
       if (!sameBinding(binding, expected)) throw new Error("binding changed");
+      const scope = await abortable(this.ownership.reserve(id, abort.signal), abort.signal);
+      scopeReserved = true;
       let live: LiveTask | undefined;
       const running = await this.#actor(id, async () => {
         const current = await this.store.read(id);
@@ -372,6 +415,7 @@ export class TaskController {
         try {
           handle = Promise.resolve(adapter.start({ id, task: current.task, agent: current.agent, cwd: binding.cwd, binding: bindingCopy(binding) }, {
             signal: abort.signal,
+            scope,
             register(value) { if (control) throw new Error("control registered twice"); control = value; },
             emit: (event) => this.#emit(id, generation, event),
           }));
@@ -381,16 +425,21 @@ export class TaskController {
         void handle.catch(() => {});
         void handle.then((native) => native.result.catch(() => {}), () => {});
         if (!control || typeof control.force !== "function" || !(control.quiescence instanceof Promise)) { abort.abort(); void handle.catch(() => {}); throw new Error("missing control registration"); }
-        live = { generation, abort, control, handle }; this.#live.set(id, live);
+        live = { generation, parent: { ...current.parent }, abort, control, handle };
+        this.#live.set(id, live);
         return this.#update(id, (row) => {
           if (row.generation !== generation || row.state !== "starting") return false;
           row.state = "running"; return true;
         });
       });
-      if (!live || running.state !== "running") return;
+      if (!live || running.state !== "running") {
+        await this.ownership.stopAndConfirm(id);
+        return;
+      }
       const native = await abortable(live.handle, abort.signal);
       const result = await abortable(native.result, abort.signal);
       await abortable(live.control.quiescence, abort.signal);
+      await this.ownership.stopAndConfirm(id);
       await this.#actor(id, () => this.#update(id, (row) => {
         if (row.generation !== generation || TERMINAL.has(row.state)) return false;
         if (row.state === "cancelling") { row.state = "cancelled"; return true; }
@@ -408,10 +457,45 @@ export class TaskController {
         catch {
           await this.#actor(id, () => this.#update(id, (row) => {
             if (row.generation !== generation || TERMINAL.has(row.state)) return false;
-            row.state = "cancelling"; this.#appendEvent(row, "quiescence_failed", "The native task has not confirmed quiescence."); return true;
+            row.state = "cancelling";
+            this.#appendEvent(
+              row,
+              "ownership_unconfirmed",
+              "The native task scope has not confirmed quiescence.",
+            );
+            return true;
           })).catch(() => {});
           return;
         }
+      } else if (scopeReserved) {
+        try {
+          await this.ownership.stopAndConfirm(id);
+        } catch {
+          await this.#actor(id, () => this.#update(id, (row) => {
+            if (row.generation !== generation || TERMINAL.has(row.state)) return false;
+            row.state = "cancelling";
+            this.#appendEvent(
+              row,
+              "ownership_unconfirmed",
+              "The native task scope has not confirmed quiescence.",
+            );
+            return true;
+          })).catch(() => {});
+          return;
+        }
+      } else if (error instanceof NativeTaskOwnershipError
+        && error.code === "unconfirmed") {
+        await this.#actor(id, () => this.#update(id, (row) => {
+          if (row.generation !== generation || TERMINAL.has(row.state)) return false;
+          row.state = "cancelling";
+          this.#appendEvent(
+            row,
+            "ownership_unconfirmed",
+            "The native task scope has not confirmed quiescence.",
+          );
+          return true;
+        })).catch(() => {});
+        return;
       }
       await this.#actor(id, async () => {
         const row = await this.store.read(id); if (row.generation !== generation || TERMINAL.has(row.state)) return;
@@ -478,16 +562,32 @@ export class TaskController {
   }
   async cancel(id: string, parent?: ConversationIdentity): Promise<TaskRecord> {
     this.#ready();
-    if (parent && !sameParent((await this.store.read(id)).parent, parent)) {
+    const active = this.#live.get(id) ?? this.#launches.get(id);
+    if (active) {
+      if (parent && !sameParent(active.parent, parent)) {
+        fail("task_not_found", "Task not found.", 404);
+      }
+      return this.#sharedStop(id, "cancelled");
+    }
+    const current = await this.store.read(id);
+    if (parent && !sameParent(current.parent, parent)) {
       fail("task_not_found", "Task not found.", 404);
     }
+    if (TERMINAL.has(current.state)) return current;
     return this.#sharedStop(id, "cancelled");
   }
   #sharedStop(id: string, final: "cancelled" | "interrupted"): Promise<TaskRecord> {
     if (final === "interrupted" || !this.#stopTargets.has(id)) this.#stopTargets.set(id, final);
     const launch = this.#launches.get(id); launch?.abort.abort();
-    const live = this.#live.get(id); const cleanup = live ? this.#cleanup(live) : undefined;
     const existing = this.#stops.get(id); if (existing) return existing;
+    const live = this.#live.get(id);
+    const nativeCleanup = live ? this.#cleanup(live) : undefined;
+    const ownershipCleanup = this.ownership.stopAndConfirm(id);
+    const cleanup = Promise.all([
+      ...(nativeCleanup ? [nativeCleanup.catch(() => undefined)] : []),
+      ownershipCleanup,
+    ]).then(() => undefined);
+    void cleanup.catch(() => undefined);
     const stop = this.#stop(id, cleanup).catch((error: unknown) => {
       if (error instanceof GhostError) throw error;
       throw new GhostError("task_storage_failed", "Task state could not be settled after native quiescence.", 500);
@@ -498,30 +598,47 @@ export class TaskController {
     }).catch(() => {});
     return stop;
   }
-  async #stop(id: string, cleanup: Promise<void> | undefined): Promise<TaskRecord> {
+  async #stop(id: string, cleanup: Promise<void>): Promise<TaskRecord> {
     const admittedLaunch = this.#launches.get(id);
-    try { await cleanup; }
-    catch { throw new GhostError("task_cancel_failed", "The native task did not confirm quiescence.", 502); }
-    await admittedLaunch?.persisted;
-    const prepared = await this.#actor(id, async () => {
-      const row = await this.store.read(id);
-      const launch = this.#launches.get(id); const live = this.#live.get(id); const followUp = this.#followUps.get(id);
-      const destination = this.#stopTargets.get(id) ?? "cancelled";
-      if (TERMINAL.has(row.state) && destination === "cancelled") return { row, alreadyTerminal: true };
-      if (TERMINAL.has(row.state)) return { row, launch, live, followUp, alreadyTerminal: true };
-      const next = await this.#update(id, (current) => {
-        if (TERMINAL.has(current.state) || current.state === "cancelling") return false;
-        current.state = "cancelling"; return true;
+    let prepared: {
+      row: TaskRecord;
+      launch?: TrackedLaunch;
+      live?: LiveTask;
+      followUp?: Promise<void>;
+      alreadyTerminal: boolean;
+    };
+    try {
+      await admittedLaunch?.persisted;
+      prepared = await this.#actor(id, async () => {
+        const row = await this.store.read(id);
+        const launch = this.#launches.get(id); const live = this.#live.get(id); const followUp = this.#followUps.get(id);
+        const destination = this.#stopTargets.get(id) ?? "cancelled";
+        if (TERMINAL.has(row.state) && destination === "cancelled" && !launch && !live) {
+          return { row, alreadyTerminal: true };
+        }
+        if (TERMINAL.has(row.state)) return { row, launch, live, followUp, alreadyTerminal: true };
+        const next = await this.#update(id, (current) => {
+          if (TERMINAL.has(current.state) || current.state === "cancelling") return false;
+          current.state = "cancelling"; return true;
+        });
+        return { row: next, live, launch, followUp, alreadyTerminal: false };
       });
-      return { row: next, live, launch, followUp, alreadyTerminal: false };
-    });
-    if (!("launch" in prepared)) return prepared.row;
+    } catch (error) {
+      await Promise.allSettled([cleanup, admittedLaunch?.promise]);
+      throw error;
+    }
+    if (!prepared.launch && !prepared.live && prepared.alreadyTerminal) return prepared.row;
     prepared.launch?.abort.abort();
-    try { await prepared.launch?.promise; await prepared.followUp; }
+    try { await cleanup; await prepared.launch?.promise; await prepared.followUp; }
     catch {
       await this.#actor(id, () => this.#update(id, (row) => {
         if (TERMINAL.has(row.state)) return false;
-        this.#appendEvent(row, "cancel_failed", "The native task did not confirm quiescence."); return true;
+        this.#appendEvent(
+          row,
+          "ownership_unconfirmed",
+          "The native task scope has not confirmed quiescence.",
+        );
+        return true;
       }));
       throw new GhostError("task_cancel_failed", "The native task did not confirm quiescence.", 502);
     }
