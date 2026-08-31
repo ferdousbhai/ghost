@@ -424,6 +424,9 @@ The project-binding authority revalidates that opaque receipt with the task's
 abort signal immediately before native spawn. Root and cwd are canonical,
 byte-bounded, and cwd is lexically within a non-null root; receipt comparison
 binds every path, identity, and generation field independent of JSON key order.
+A start snapshots that receipt before its first await. The authority and native
+adapter each receive a separate frozen copy, so in-place mutation cannot change
+either the durable request or its comparison value.
 A naked lexical cwd is never authority; the task layer
 neither discovers nor changes cwd.
 `harness` is an opaque bounded adapter id, not a place for Ghost to reproduce a
@@ -436,24 +439,37 @@ Events and errors use an exact nested schema, canonical timestamps, bounded
 structured codes, and owner-safe messages. Adapter exceptions are mapped to
 fixed typed failures rather than persisting raw stderr, provider protocol, or
 environment values. Arbitrary owner and harness text receives bounded
-best-effort credential-pattern redaction; this is defense in depth, not a claim
+best-effort credential-pattern redaction before safe truncation, including an
+unterminated structured-secret tail; this is defense in depth, not a claim
 that arbitrary prose can be proven secret-free. Results are bounded. Event
 sequence numbers are monotonic and never renumbered: retained event index `i`
 has sequence `eventCursor.dropped + i + 1`. `eventCursor` reports the next
 sequence and the exact number dropped from the bounded history.
+All record and event timestamps use the record's monotonic high-water mark when
+the machine clock moves backwards; recovery never decreases it.
 
 There is no task concurrency limit or daemon-owned queue policy: every accepted
 task starts independently. A follow-up is accepted only while `running`, and
-follow-up and cancellation operations for one task are serialized. Cancellation
+follow-ups for one task are serialized in their own abort-raced lane. They
+never hold the lifecycle actor across a native handle or acknowledgement, so
+cancellation and shutdown enter immediately. Cancellation
 does not become `cancelled` and its request does not resolve until the native
 adapter confirms the entire task is quiescent. Before its start handshake can
 complete, an adapter registers both an abort-aware force operation and a
 quiescence promise. One serialized lifecycle actor guards each task; its
-generation fences late events and results. Initialization is one shared
+generation fences late events and results. A start is registered synchronously
+before its first durable-write await; shutdown fences that admission, waits for
+its write, and settles its record without spawning native work. Initialization is one shared
 recovery operation; repeated or concurrent callers never recover a live task a
-second time. Every revalidation, adapter handshake, and result wait is tracked
-and abort-raced. Daemon shutdown aborts and forces
+second time. Every revalidation, adapter handshake, follow-up, and result wait
+is tracked and abort-raced. A registered control survives a synchronous start
+throw or rejected handle/result; any non-cancellation failure aborts, forces,
+and waits for quiescence before becoming `failed`. Daemon shutdown has
+destination precedence over an in-flight owner cancellation: either ordering
+settles as `interrupted`. It aborts and forces
 all live tasks, waits for quiescence, and durably marks them `interrupted`.
+Cancellation of an already-terminal record is a pure read and never touches a
+retained native control.
 Startup never resumes an old generation. Adapters own native session and
 subagent behavior; this layer owns only durable lifecycle. It never creates Git
 worktrees or runs Git staging, commit, or branch commands, and it does not

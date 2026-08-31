@@ -2,9 +2,10 @@ import { randomUUID } from "node:crypto";
 import { chmod, link, mkdir, mkdtemp, readFile, rename, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { REDACTED_MEMORY_SECRET } from "@ghost/extensions";
 import { afterEach, describe, expect, it } from "vitest";
 import { conversationIdentity } from "../src/conversation-identity.js";
-import { MAX_TASK_RESULT, TaskController, TaskStore, type TaskAdapter, type TaskAdapterContext, type TaskAdapterHandle, type TaskBindingReceipt, type TaskRecord } from "../src/tasks.js";
+import { MAX_TASK_EVENT_MESSAGE, MAX_TASK_RESULT, TaskController, TaskStore, type TaskAdapter, type TaskAdapterContext, type TaskAdapterHandle, type TaskBindingReceipt, type TaskRecord } from "../src/tasks.js";
 
 function deferred<T>() {
   let resolve!: (value: T) => void; let reject!: (reason?: unknown) => void;
@@ -70,6 +71,18 @@ describe("durable task foundation", () => {
     expect((await store.read(task.id)).state).toBe("running");
   });
 
+  it("registers admission before a blocked durable write and lets shutdown fence it", async () => {
+    const home = await mkdtemp(join(tmpdir(), "ghost-task-")); const gate = deferred<void>(); let firstWrite = true; let spawned = false;
+    class DelayedStore extends TaskStore {
+      override async write(row: TaskRecord): Promise<void> { if (firstWrite) { firstWrite = false; await gate.promise; } await super.write(row); }
+    }
+    const store = new DelayedStore(home); stores.push(store); const native = runtime();
+    const controller = new TaskController(store, new Map([["native", { ...native.adapter, async start(input, context) { spawned = true; return native.adapter.start(input, context); } }]]), authority); await controller.initialize();
+    const admission = start(controller); const shutdown = controller.beginShutdown(); gate.resolve();
+    await expect(admission).rejects.toMatchObject({ code: "tasks_shutting_down" }); await shutdown;
+    expect(spawned).toBe(false); expect((await store.list())[0]?.state).toBe("interrupted");
+  });
+
   it("cancels while binding validation is blocked without spawning", async () => {
     const admitted = deferred<TaskBindingReceipt>(); let spawned = false; const native = runtime();
     const { store, controller } = await fixture({ ...native.adapter, async start(input, context) { spawned = true; return native.adapter.start(input, context); } }, { async revalidate() { return admitted.promise; } });
@@ -86,6 +99,17 @@ describe("durable task foundation", () => {
     const rejected = await start(changed.controller); await eventually(changed.store, rejected.id, "failed"); expect(spawned).toBe(false);
   });
 
+  it("isolates and freezes binding copies across authority and adapter calls", async () => {
+    let authorityFrozen = false; let adapterFrozen = false;
+    const native = runtime(); const { store, controller } = await fixture({ ...native.adapter, async start(input, context) {
+      adapterFrozen = Object.isFrozen(input.binding); return native.adapter.start(input, context);
+    } }, { async revalidate(receipt) {
+      authorityFrozen = Object.isFrozen(receipt); expect(Reflect.set(receipt, "cwd", "/mutated")).toBe(false); return receipt;
+    } });
+    const task = await start(controller); await eventually(store, task.id, "running");
+    expect(authorityFrozen).toBe(true); expect(adapterFrozen).toBe(true); expect((await store.read(task.id)).binding).toEqual(binding);
+  });
+
   it("aborts a blocked handle and tracks it through shutdown", async () => {
     const never = deferred<TaskAdapterHandle>(); const quiet = deferred<void>();
     const { store, controller } = await fixture({ start(_input, context) {
@@ -94,6 +118,39 @@ describe("durable task foundation", () => {
     const task = await start(controller); await eventually(store, task.id, "running"); await controller.beginShutdown();
     expect((await store.read(task.id)).state).toBe("interrupted");
     await controller.dispose(); await expect(store.list()).rejects.toMatchObject({ code: "task_store_uninitialized" });
+  });
+
+  it("lets cancellation enter while follow-up waits on a handle or native acknowledgement", async () => {
+    const pendingHandle = deferred<TaskAdapterHandle>(); const quiet = deferred<void>();
+    const first = await fixture({ start(_input, context) {
+      context.register({ async force() { quiet.resolve(); }, quiescence: quiet.promise }); return pendingHandle.promise;
+    } });
+    const firstTask = await start(first.controller); await eventually(first.store, firstTask.id, "running");
+    const waitingForHandle = first.controller.followUp(firstTask.id, "more"); expect((await first.controller.cancel(firstTask.id)).state).toBe("cancelled");
+    await expect(waitingForHandle).rejects.toMatchObject({ code: "task_not_running" });
+
+    const followGate = deferred<void>(); const secondNative = runtime(); secondNative.adapter.start = async (_input, context) => {
+      context.register({ async force() { secondNative.quiet.resolve(); secondNative.result.resolve(""); }, quiescence: secondNative.quiet.promise });
+      return { result: secondNative.result.promise, async followUp() { await followGate.promise; } };
+    };
+    const second = await fixture(secondNative.adapter); const secondTask = await start(second.controller); await eventually(second.store, secondTask.id, "running");
+    const waitingForFollow = second.controller.followUp(secondTask.id, "more"); expect((await second.controller.cancel(secondTask.id)).state).toBe("cancelled");
+    await expect(waitingForFollow).rejects.toMatchObject({ code: "task_not_running" }); followGate.resolve();
+  });
+
+  it("forces and quiesces sync start, handle, and result failures before failing", async () => {
+    for (const kind of ["sync", "handle", "result"] as const) {
+      const forceGate = deferred<void>(); const quiet = deferred<void>(); let forces = 0;
+      const adapter: TaskAdapter = { start(_input, context) {
+        context.register({ async force() { forces += 1; await forceGate.promise; quiet.resolve(); }, quiescence: quiet.promise });
+        if (kind === "sync") throw new Error("raw sync stderr");
+        if (kind === "handle") return Promise.reject(new Error("raw handle protocol"));
+        return Promise.resolve({ result: Promise.reject(new Error("raw result environment")), async followUp() {} });
+      } };
+      const current = await fixture(adapter); const task = await start(current.controller); await eventually(current.store, task.id, "running");
+      await new Promise((done) => setTimeout(done, 2)); expect((await current.store.read(task.id)).state).not.toBe("failed"); expect(forces).toBe(1);
+      forceGate.resolve(); expect((await eventually(current.store, task.id, "failed")).error).toEqual({ code: "task_failed", message: "The native task failed safely." });
+    }
   });
 
   it("does not publish completion until quiescence and fences late emissions", async () => {
@@ -107,6 +164,16 @@ describe("durable task foundation", () => {
     const native = runtime(); const { store, controller } = await fixture(native.adapter); const task = await start(controller); await eventually(store, task.id, "running");
     native.result.resolve("x".repeat(MAX_TASK_RESULT + 10)); native.quiet.resolve(); const completed = await eventually(store, task.id, "completed");
     expect(completed.result).toHaveLength(MAX_TASK_RESULT); expect(completed.resultTruncated).toBe(true);
+  });
+
+  it("redacts PEM secrets spanning event and result truncation boundaries", async () => {
+    const native = runtime(); const { store, controller } = await fixture(native.adapter); const task = await start(controller); await eventually(store, task.id, "running");
+    const eventPem = `${"e".repeat(MAX_TASK_EVENT_MESSAGE - 40)}-----BEGIN PRIVATE KEY-----${"S".repeat(200)}`;
+    await native.context().emit({ code: "progress", message: eventPem }); const event = (await store.read(task.id)).events[0]?.message ?? "";
+    expect(event).toContain(REDACTED_MEMORY_SECRET); expect(event).not.toContain("BEGIN PRIVATE KEY"); expect(event).not.toContain("SSSSSSSS");
+    const resultPem = `${"r".repeat(MAX_TASK_RESULT - 40)}-----BEGIN PRIVATE KEY-----${"K".repeat(200)}-----END PRIVATE KEY-----`;
+    native.result.resolve(resultPem); native.quiet.resolve(); const completed = await eventually(store, task.id, "completed");
+    expect(completed.result).toContain(REDACTED_MEMORY_SECRET); expect(completed.result).not.toContain("BEGIN PRIVATE KEY"); expect(completed.result).not.toContain("KKKKKKKK");
   });
 
   it("keeps terminal cancellation byte- and mtime-stable", async () => {
@@ -129,6 +196,18 @@ describe("durable task foundation", () => {
     expect(await readFile(activePath)).toEqual(activeBefore); expect((await stat(activePath, { bigint: true })).mtimeNs).toBe(activeStat.mtimeNs);
   });
 
+  it("returns a terminal cancellation without touching retained native control", async () => {
+    const result = deferred<string>(); const quiet = deferred<void>(); let forces = 0;
+    const current = await fixture({ async start(_input, context) {
+      context.register({ async force() { forces += 1; quiet.resolve(); result.resolve(""); }, quiescence: quiet.promise });
+      return { result: result.promise, async followUp() {} };
+    } });
+    const task = await start(current.controller); await eventually(current.store, task.id, "running");
+    const recovery = new TaskController(current.store, new Map(), authority); await recovery.initialize();
+    expect((await current.controller.cancel(task.id)).state).toBe("interrupted"); expect(forces).toBe(0);
+    result.resolve("late"); quiet.resolve(); await current.controller.beginShutdown();
+  });
+
   it("serializes follow-up and repeated cancellation until full quiescence", async () => {
     const gate = deferred<void>(); const quiet = deferred<void>(); const result = deferred<string>(); const order: string[] = [];
     const adapter: TaskAdapter = { async start(_input, context) { context.register({ async force() { order.push("force"); await gate.promise; }, quiescence: quiet.promise }); return { result: result.promise, async followUp() { order.push("follow"); } }; } };
@@ -136,6 +215,34 @@ describe("durable task foundation", () => {
     await controller.followUp(task.id, "more"); const first = controller.cancel(task.id); const second = controller.cancel(task.id);
     await new Promise((done) => setTimeout(done, 2)); expect(order).toEqual(["follow", "force"]); gate.resolve(); quiet.resolve(); result.resolve("");
     expect((await first).state).toBe("cancelled"); expect((await second).state).toBe("cancelled"); expect(order.filter((item) => item === "force")).toHaveLength(1);
+  });
+
+  it("gives shutdown deterministic precedence over cancellation in either ordering", async () => {
+    for (const shutdownFirst of [false, true]) {
+      const gate = deferred<void>(); const quiet = deferred<void>(); const result = deferred<string>();
+      const current = await fixture({ async start(_input, context) {
+        context.register({ async force() { await gate.promise; quiet.resolve(); result.resolve(""); }, quiescence: quiet.promise });
+        return { result: result.promise, async followUp() {} };
+      } });
+      const task = await start(current.controller); await eventually(current.store, task.id, "running");
+      const first = shutdownFirst ? current.controller.beginShutdown() : current.controller.cancel(task.id);
+      const second = shutdownFirst ? current.controller.cancel(task.id) : current.controller.beginShutdown();
+      gate.resolve(); await Promise.all([first, second]); expect((await current.store.read(task.id)).state).toBe("interrupted");
+    }
+  });
+
+  it("clamps task, event, and recovery timestamps to a monotonic high-water mark", async () => {
+    let clock = Date.parse("2030-01-01T00:00:10.000Z"); const now = () => { clock -= 1_000; return new Date(clock); }; const native = runtime();
+    const home = await mkdtemp(join(tmpdir(), "ghost-task-")); const store = trackedStore(home);
+    const controller = new TaskController(store, new Map([["native", native.adapter]]), authority, now); await controller.initialize();
+    const task = await start(controller); await eventually(store, task.id, "running"); await native.context().emit({ code: "progress", message: "one" });
+    native.result.resolve("done"); native.quiet.resolve(); const completed = await eventually(store, task.id, "completed");
+    expect(Date.parse(completed.updatedAt)).toBeGreaterThanOrEqual(Date.parse(completed.createdAt));
+    expect(completed.events.every((event, index) => index === 0 || event.at >= completed.events[index - 1]!.at)).toBe(true);
+
+    const pending = record("running"); pending.createdAt = "2040-01-01T00:00:00.000Z"; pending.updatedAt = "2040-01-01T00:00:05.000Z"; await store.write(pending);
+    const recovery = new TaskController(store, new Map(), authority, () => new Date("2020-01-01T00:00:00.000Z"));
+    const recovered = await recovery.initialize(); expect(recovered.find((row) => row.id === pending.id)?.updatedAt).toBe("2040-01-01T00:00:05.000Z");
   });
 
   it("recovers every nonterminal state with a generation fence and skips unrelated names", async () => {
