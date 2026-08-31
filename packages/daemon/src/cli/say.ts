@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { ArgsError, flagBoolean, flagString, type ParsedCliArgs } from "./args.js";
 import { EXIT_CODE } from "./client.js";
-import { latestSession, listSessions, resolveGhost, resolveSessionPrefix, resolveTarget } from "./common.js";
+import { latestSession, listSessions, resolveGhost, resolveSessionPrefix } from "./common.js";
 import { dim, emit, truncate, type RenderedOutput } from "./output.js";
 import type { CliContext, CliStdin } from "./types.js";
 
@@ -55,26 +55,11 @@ export async function sayCommand(
   parsed: ParsedCliArgs,
   ctx: CliContext,
 ): Promise<number> {
-  const steering = flagBoolean(parsed, "steer");
-  const followUp = flagBoolean(parsed, "follow-up");
   const startNew = flagBoolean(parsed, "new");
-  if ([steering, followUp, startNew].filter(Boolean).length > 1) {
-    throw new ArgsError("--new, --steer, and --follow-up are mutually exclusive");
-  }
   const text = await messageText(parsed.positionals, flagString(parsed, "message"), ctx.runtime.stdin);
   if (!text.trim()) throw new ArgsError("Message text cannot be empty.");
   const { name } = await resolveGhost(ctx.client, ctx.runtime, flagString(parsed, "ghost"));
   const requestedSession = flagString(parsed, "session");
-
-  if (steering || followUp) {
-    const { path } = await resolveTarget(ctx.client, ctx, parsed);
-    const response = await ctx.client.request("POST", `${path}/queue`, {
-      mode: steering ? "steer" : "followUp",
-      text,
-    });
-    emit(ctx, response.body);
-    return 0;
-  }
 
   const sessions = startNew ? [] : await listSessions(ctx.client, name);
   const fallbackSession = latestSession(sessions);

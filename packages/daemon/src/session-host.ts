@@ -373,7 +373,7 @@ function persistedPiOwnerTurnCount(entries: readonly SessionEntry[]): number {
   return count;
 }
 
-type PiOwnerPassKind = "direct" | "steer" | "followUp" | "collaboration" | "voice" | "reanswer";
+type PiOwnerPassKind = "direct" | "collaboration" | "voice" | "reanswer";
 
 const ASK_REANSWER_OWNER_MESSAGE_TYPE = "ghost-ask-reanswer-owner";
 const DEFAULT_AUTO_BACKGROUND_MS = 60_000;
@@ -449,10 +449,6 @@ function passEntryMatches(
   owner: { kind: PiOwnerPassKind; prompt: string },
 ): boolean {
   if (pass.kind === "direct") return owner.kind === "direct" || owner.kind === "collaboration";
-  // pi queues steer and follow-up text as ordinary user messages.
-  if (pass.kind === "steer" || pass.kind === "followUp") {
-    return owner.kind === "direct" && owner.prompt === pass.ownerPrompt;
-  }
   return owner.kind === pass.kind && owner.prompt === pass.ownerPrompt;
 }
 
@@ -661,6 +657,13 @@ export interface TurnAdmission {
   release(): void;
 }
 
+interface ActiveTurnStop {
+  readonly controller: AbortController;
+  readonly runtime: ConversationRuntime;
+  readonly settled: Promise<void>;
+  readonly resolveSettled: () => void;
+}
+
 type ConfiguredTurnRuntime =
   | { readonly runtime: "pi" }
   | { readonly runtime: "claude-code"; readonly modelId: string };
@@ -696,13 +699,6 @@ export interface GhostSessionHandle {
   commands: readonly GhostFileCommand[];
 }
 
-export interface QueuedMessages {
-  streaming: boolean;
-  count: number;
-  steering: readonly string[];
-  followUp: readonly string[];
-}
-
 export interface TrashedConversationArtifact extends TrashPathResult {
   artifact: "omp-transcript" | "claude-sidecar"
     | "project-binding" | "project-snapshot" | "tool-cwds" | "maintenance-state";
@@ -712,8 +708,6 @@ export interface TrashedConversationArtifact extends TrashPathResult {
 export interface TrashedConversation {
   artifacts: TrashedConversationArtifact[];
 }
-
-export type QueueMode = "steer" | "followUp";
 
 interface McpSource {
   path: string;
@@ -1532,6 +1526,8 @@ export class SessionHost {
   private readonly deleting = new Set<string>();
   /** Turn calls reserve a conversation before their first asynchronous open. */
   private readonly turnAdmissions = new Set<string>();
+  /** Owner-visible stop waits on the same release boundary as turn admission. */
+  private readonly activeTurnStops = new Map<string, ActiveTurnStop>();
   /** External open/close calls hold a conversation reservation across awaits. */
   private readonly lifecycleAdmissions = new Map<string, number>();
   /** Fork markers owned by this process are not crash-recovered mid-publication. */
@@ -2962,56 +2958,6 @@ export class SessionHost {
     }
   }
 
-  queuedMessages(
-    ghostName: string,
-    sessionId?: string | null,
-    runtime: ConversationRuntime = "pi",
-  ): QueuedMessages {
-    assertPiConversation(runtime, "Message queues");
-    this.registry.get(ghostName);
-    const hosted = this.sessions.get(this.keyOf(ghostName, sessionId));
-    if (!hosted) return { streaming: false, count: 0, steering: [], followUp: [] };
-    return {
-      streaming: hosted.session.isStreaming,
-      count: hosted.session.pendingMessageCount,
-      steering: [...hosted.session.getSteeringMessages()],
-      followUp: [...hosted.session.getFollowUpMessages()],
-    };
-  }
-
-  async queueMessage(
-    ghostName: string,
-    sessionId: string | null | undefined,
-    mode: QueueMode,
-    text: string,
-    runtime: ConversationRuntime = "pi",
-  ): Promise<QueuedMessages> {
-    assertPiConversation(runtime, "Message queues");
-    this.registry.get(ghostName);
-    const hosted = this.sessions.get(this.keyOf(ghostName, sessionId));
-    if (!hosted?.session.isStreaming) {
-      throw new GhostError(
-        "session_not_streaming",
-        "This conversation is not currently streaming; send a normal message instead.",
-        409,
-      );
-    }
-    const pass = await this.preparePiOwnerPass(hosted, {
-      kind: mode,
-      ownerPrompt: text,
-      delivery: mode,
-    });
-    try {
-      if (mode === "followUp") await hosted.session.followUp(text);
-      else await hosted.session.steer(text);
-    } catch (error) {
-      hosted.pendingOwnerPasses = hosted.pendingOwnerPasses.filter((candidate) => candidate !== pass);
-      await pass.finish();
-      throw error;
-    }
-    return this.queuedMessages(ghostName, sessionId, runtime);
-  }
-
   /**
    * Re-bind the chat model on every live session for one ghost.
    *
@@ -4397,7 +4343,16 @@ export class SessionHost {
         409,
       );
     }
+    const configured = this.selectedTurnRuntime(ghostName);
     this.turnAdmissions.add(admissionKey);
+    const stopSettled = Promise.withResolvers<void>();
+    const activeStop: ActiveTurnStop = {
+      controller: new AbortController(),
+      runtime: configured.runtime,
+      settled: stopSettled.promise,
+      resolveSettled: stopSettled.resolve,
+    };
+    this.activeTurnStops.set(admissionKey, activeStop);
     let released = false;
     let started = false;
     let maintenanceAdmission: MaintenanceOwnerAdmission | undefined;
@@ -4412,9 +4367,12 @@ export class SessionHost {
       released = true;
       releaseMaintenance();
       this.turnAdmissions.delete(admissionKey);
+      if (this.activeTurnStops.get(admissionKey) === activeStop) {
+        this.activeTurnStops.delete(admissionKey);
+      }
+      activeStop.resolveSettled();
     };
     try {
-      const configured = this.selectedTurnRuntime(ghostName);
       await this.assertProjectRuntimeMatches(ghostName, conversationId, configured.runtime);
       const bashCommand = parseUserBashCommand(options.prompt);
       if (bashCommand && configured.runtime === "claude-code") {
@@ -4450,13 +4408,18 @@ export class SessionHost {
             maintenanceAdmission,
             releaseMaintenance,
           );
+          const abortFromCaller = () => activeStop.controller.abort(streamOptions.signal?.reason);
+          if (streamOptions.signal?.aborted) abortFromCaller();
+          else streamOptions.signal?.addEventListener("abort", abortFromCaller, { once: true });
           try {
             await this.runAdmittedTurn(ghostName, {
               sessionId: conversationId,
               prompt: options.prompt,
               ...streamOptions,
+              signal: activeStop.controller.signal,
             }, selected, finishMaintenance);
           } finally {
+            streamOptions.signal?.removeEventListener("abort", abortFromCaller);
             await finishMaintenance();
             release();
           }
@@ -4488,6 +4451,23 @@ export class SessionHost {
     } finally {
       admission.release();
     }
+  }
+
+  async stopTurn(
+    ghostName: string,
+    sessionId: string | null | undefined,
+    runtime: ConversationRuntime,
+  ): Promise<boolean> {
+    this.registry.get(ghostName);
+    const key = this.keyOf(ghostName, sessionId);
+    const active = this.activeTurnStops.get(key);
+    if (!active) return false;
+    if (active.runtime !== runtime) {
+      throw new GhostError("not_found", "That conversation is not active on this runtime.", 404);
+    }
+    active.controller.abort();
+    await active.settled;
+    return true;
   }
 
   private async runAdmittedTurn(
@@ -4634,8 +4614,8 @@ export class SessionHost {
       includeThinking: options.includeThinking,
       getCwd: () => hosted.session.sessionManager.getCwd(),
       // The shell rendered the POST's prompt before opening the stream. pi
-      // emits it again as the run's first user message; only later dequeued
-      // steering/follow-ups belong on the live wire.
+      // emits it again as the run's first user message; only later
+      // owner-attributed collaboration or voice passes belong on the live wire.
       skipOwnerMessages: 1,
       // Ghost owns the settle boundary so session_stop can continue this same
       // HTTP turn before its one terminal frame is emitted.
@@ -6198,6 +6178,28 @@ export class SessionHost {
       throw new GhostError("session_busy", "This conversation already has an owner action.", 409);
     }
     this.turnAdmissions.add(admissionKey);
+    const stopSettled = Promise.withResolvers<void>();
+    const activeStop: ActiveTurnStop = {
+      controller: new AbortController(),
+      runtime: "pi",
+      settled: stopSettled.promise,
+      resolveSettled: stopSettled.resolve,
+    };
+    this.activeTurnStops.set(admissionKey, activeStop);
+    const abortFromCaller = () => activeStop.controller.abort(options.signal?.reason);
+    if (options.signal?.aborted) abortFromCaller();
+    else options.signal?.addEventListener("abort", abortFromCaller, { once: true });
+    let admissionReleased = false;
+    const releaseAdmission = () => {
+      if (admissionReleased) return;
+      admissionReleased = true;
+      options.signal?.removeEventListener("abort", abortFromCaller);
+      this.turnAdmissions.delete(admissionKey);
+      if (this.activeTurnStops.get(admissionKey) === activeStop) {
+        this.activeTurnStops.delete(admissionKey);
+      }
+      activeStop.resolveSettled();
+    };
     const maintenanceIdentity: MaintenanceIdentity = {
       ghostName,
       runtime: "pi",
@@ -6212,7 +6214,7 @@ export class SessionHost {
       await maintenanceAdmission?.ready;
     } catch (error) {
       await finishMaintenance();
-      this.turnAdmissions.delete(admissionKey);
+      releaseAdmission();
       throw error;
     }
     let pendingTerminal: Extract<PiMessagesEvent, { type: "done" | "error" }> | undefined;
@@ -6237,7 +6239,7 @@ export class SessionHost {
       );
     } catch (error) {
       await finishMaintenance();
-      this.turnAdmissions.delete(admissionKey);
+      releaseAdmission();
       throw error;
     }
     let unsubscribe: (() => void) | undefined;
@@ -6252,7 +6254,8 @@ export class SessionHost {
     let turnFailure: { error: unknown; aborted: boolean } | undefined;
     try {
       unsubscribe = hosted.session.subscribe((event: AgentSessionEvent) => adapter.handle(asRuntimeSessionEvent(event)));
-      options.signal?.addEventListener("abort", onAbort, { once: true });
+      if (activeStop.controller.signal.aborted) onAbort();
+      else activeStop.controller.signal.addEventListener("abort", onAbort, { once: true });
       const reopen = this.reopenableAsk(hosted, options.entryId);
       if (!reopen) {
         throw new GhostError(
@@ -6276,7 +6279,7 @@ export class SessionHost {
         result = await askTool.execute(
           syntheticId,
           { questions: reopen.questions },
-          options.signal,
+          activeStop.controller.signal,
           undefined,
           {} as never,
         );
@@ -6330,7 +6333,7 @@ export class SessionHost {
       reanswerPass = await this.preparePiOwnerPass(hosted, {
         kind: "reanswer",
         ownerPrompt,
-        ...(options.signal ? { signal: options.signal } : {}),
+        signal: activeStop.controller.signal,
         finish: finishMaintenance,
         callerOwnsFinishOnFailure: true,
       });
@@ -6346,10 +6349,10 @@ export class SessionHost {
     } catch (error) {
       turnFailure = {
         error: error instanceof AskCancelledError ? new Error("Ask re-answer cancelled.") : error,
-        aborted: options.signal?.aborted === true,
+        aborted: activeStop.controller.signal.aborted,
       };
     } finally {
-      options.signal?.removeEventListener("abort", onAbort);
+      activeStop.controller.signal.removeEventListener("abort", onAbort);
       try {
         const persistedBoundary = reanswerPass
           ? this.persistedPiPassBoundary(hosted, reanswerPass, new Set())
@@ -6398,7 +6401,7 @@ export class SessionHost {
         await this.announceConversationUpdated(ghostName, "pi", conversationId);
       } finally {
         unsubscribe?.();
-        this.turnAdmissions.delete(admissionKey);
+        releaseAdmission();
       }
     }
   }

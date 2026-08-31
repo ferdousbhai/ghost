@@ -12,7 +12,8 @@ TestCase {
     }
 
     function init(): void {
-        Ghostd.cancel();
+        const previous = Ghostd.activeTurnState(false);
+        if (previous && previous.streaming) Ghostd.cancelTurn(previous);
         Ghostd.turnStates = ({});
         Ghostd.liveConversationKeys = [];
         Ghostd.activeGhost = "casper";

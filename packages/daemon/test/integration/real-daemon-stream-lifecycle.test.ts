@@ -71,54 +71,44 @@ function memoryStep(index: number, barrier?: ReturnType<typeof createMockProvide
 }
 
 describe("real ghostd streaming lifecycle", () => {
-  it("streams a dequeued steering message and exactly one terminal after a tool-heavy turn", async () => {
-    const dequeueBoundary = createMockProviderBarrier();
+  it("stops a tool-heavy turn through an acknowledged principal boundary", async () => {
+    const stopBoundary = createMockProviderBarrier();
     daemon = await startRealDaemonHarness({
       script: [
         memoryStep(1),
         memoryStep(2),
         memoryStep(3),
-        memoryStep(4, dequeueBoundary),
+        memoryStep(4, stopBoundary),
         memoryStep(5),
         memoryStep(6),
         memoryStep(7),
         memoryStep(8),
-        { kind: "text", text: "The steered tool-heavy turn is complete." },
+        { kind: "text", text: "The tool-heavy turn is complete." },
       ],
     });
 
-    const stream = await daemon.startTurn("conv-steering", "Run the long integration task.");
+    const stream = await daemon.startTurn("conv-stop", "Run the long integration task.");
     expect(stream.status).toBe(200);
     expect(stream.headers["content-type"]).toContain("text/event-stream");
     await stream.waitForEvent("start");
-    await within(dequeueBoundary.waitForArrivals(), "the held provider step");
+    await within(stopBoundary.waitForArrivals(), "the held provider step");
 
-    const steeringText = "Keep the remaining tool work concise.";
-    const queued = await daemon.request<{
-      streaming: boolean;
-      steering: string[];
-    }>(
+    const stopped = await daemon.request<{ stopped: boolean }>(
       "POST",
-      "/api/ghosts/casper/sessions/pi%3Aconv-steering/queue",
-      { mode: "steer", text: steeringText },
+      "/api/ghosts/casper/sessions/pi%3Aconv-stop/stop",
+      {},
     );
-    expect(queued.status).toBe(200);
-    expect(queued.body).toMatchObject({ streaming: true, steering: [steeringText] });
+    expect(stopped.status).toBe(200);
+    expect(stopped.body).toEqual({ stopped: true });
+    await within(stream.completion, "the stopped SSE stream to reach EOF");
 
-    dequeueBoundary.release();
-    await within(stream.completion, "the steered SSE stream to reach EOF");
-
-    const ownerIndex = stream.events.findIndex((event) => event.type === "owner_message");
-    expect(stream.events[ownerIndex]).toEqual({ type: "owner_message", text: steeringText });
-    expect(stream.events.slice(0, ownerIndex).filter((event) =>
-      event.type === "tool_execution_end").length).toBeGreaterThanOrEqual(4);
-    expect(stream.events.slice(ownerIndex + 1).some((event) =>
-      event.type === "toolcall_start" || event.type === "text_start")).toBe(true);
-    expect(stream.events.filter((event) => event.type === "tool_execution_end")).toHaveLength(8);
+    expect(stream.events.filter((event) => event.type === "tool_execution_end").length)
+      .toBeGreaterThanOrEqual(3);
     expect(terminalEvents(stream.events)).toEqual([
-      expect.objectContaining({ type: "done", reason: "stop" }),
+      expect.objectContaining({ type: "error", reason: "aborted" }),
     ]);
     expectOneTerminalAtWireEnd(stream);
+    stopBoundary.release();
   });
 
   it("turns a real runtime completion with its terminal callback suppressed into an SSE error", async () => {

@@ -4502,170 +4502,51 @@ describe("SessionHost.runTurn", () => {
     }, 15_000);
   });
 
-  it("queues OMP steering and follow-up messages while a turn is live", async () => {
-    const hooks = new GhostHookRunner();
-    const beforePrompts: string[] = [];
-    const stoppedOwners: string[] = [];
-    await hooks.register((api) => {
-      api.on("before_prompt", (event) => {
-        beforePrompts.push(event.prompt);
-      });
-      api.on("session_stop", (event) => {
-        stoppedOwners.push(event.owner_prompt);
-      });
-    });
-    const admitted: MaintenanceIdentity[] = [];
-    const finished: Array<SettledMaintenanceTurn | undefined> = [];
-    const reservation = () => ({ drained: Promise.resolve(), release: () => {} });
-    const maintenance: NonNullable<SessionHostOptions["maintenance"]> = {
-      admitOwnerAction: (identity) => {
-        admitted.push(identity);
-        return {
-          ready: Promise.resolve(),
-          finish: async (turn) => {
-            finished.push(turn);
-          },
-          release: () => {},
-        };
-      },
-      recordOwnerActivity: async () => {},
-      reserveConversationDelete: reservation,
-      completeConversationDelete: () => {},
-      reserveGhostMove: reservation,
-      completeGhostRename: async () => {},
-      completeGhostDelete: () => {},
-      beginShutdown: async () => {},
-      disposeAll: async () => {},
-    };
-    await setup([
-      {
-        kind: "tool",
-        name: "ask",
-        args: {
-          questions: [{
-            id: "ready",
-            question: "Ready to continue?",
-            options: [{ label: "Yes" }, { label: "No" }],
-          }],
-        },
-      },
-      { kind: "text", text: "I adjusted the direction." },
-      { kind: "text", text: "And handled the follow-up." },
-    ], { hooks, maintenance });
-    const turn = host!.runTurn("casper", {
-      sessionId: "conv-queue",
-      prompt: "Start.",
-      emit: () => {},
-    });
-    const pending = await waitFor(() => host!.pendingAsk("casper", "conv-queue"));
-
-    await host!.queueMessage("casper", "conv-queue", "steer", "Use the quieter direction.");
-    await host!.queueMessage("casper", "conv-queue", "followUp", "Then explain the tradeoff.");
-    expect(host!.queuedMessages("casper", "conv-queue")).toMatchObject({
-      streaming: true,
-      steering: ["Use the quieter direction."],
-      followUp: ["Then explain the tradeoff."],
-    });
-
-    host!.answerAsk("casper", "conv-queue", pending.id, {
-      kind: "submit",
-      results: [{ id: "ready", selectedOptions: ["Yes"] }],
-    });
-    await turn;
-    const requests = JSON.stringify(provider!.requests.map((request) => request.messages));
-    expect(requests).toContain("Use the quieter direction.");
-    expect(requests).toContain("Then explain the tradeoff.");
-    expect(host!.queuedMessages("casper", "conv-queue").count).toBe(0);
-    expect(beforePrompts).toEqual([
-      "Start.",
-      "Use the quieter direction.",
-      "Then explain the tradeoff.",
-    ]);
-    expect(admitted).toEqual(Array(3).fill({
-      ghostName: "casper",
-      runtime: "pi",
-      conversationId: "conv-queue",
-    }));
-    expect(finished.map((entry) => entry?.ownerPrompt)).toEqual([
-      undefined,
-      "Use the quieter direction.",
-      "Then explain the tradeoff.",
-    ]);
-    expect(stoppedOwners).toEqual([
-      "Use the quieter direction.",
-      "Then explain the tradeoff.",
-    ]);
-    const revisions = finished.flatMap((entry) => entry ? [entry.sourceRevision.value] : []);
-    expect(revisions).toHaveLength(new Set(revisions).size);
-    expect(finished.slice(1).every((entry) => entry?.assistantText.length)).toBe(true);
-  });
-
-  it("fails the shared terminal when a queued native pass cannot persist maintenance", async () => {
-    let rejected = false;
-    const recorded = recordMaintenanceTurns(async (turn) => {
-      if (turn?.ownerPrompt === "Use the queued correction." && !rejected) {
-        rejected = true;
-        throw new Error("sensitive queued sidecar failure");
-      }
+  it("acknowledges a Pi stop only after the owner turn releases", async () => {
+    const barrier = createMockProviderBarrier();
+    const finishEntered = deferred();
+    const allowFinish = deferred();
+    const recorded = recordMaintenanceTurns(async () => {
+      finishEntered.resolve();
+      await allowFinish.promise;
     });
     await setup([
-      {
-        kind: "tool",
-        name: "ask",
-        args: {
-          questions: [{
-            id: "ready",
-            question: "Ready?",
-            options: [{ label: "Yes" }, { label: "No" }],
-          }],
-        },
-      },
-      { kind: "text", text: "Queued durable answer." },
-      { kind: "text", text: "Retry answer." },
+      { kind: "text", text: "held", barrier },
+      { kind: "text", text: "fresh answer" },
     ], { maintenance: recorded.maintenance });
     const events: PiMessagesEvent[] = [];
     const turn = host!.runTurn("casper", {
-      sessionId: "strict-queued-maintenance",
-      prompt: "Start and ask first.",
+      sessionId: "stop-then-send",
+      prompt: "Hold this turn.",
       emit: (event) => events.push(event),
     });
-    const pending = await waitFor(() => host!.pendingAsk("casper", "strict-queued-maintenance"));
-    await host!.queueMessage(
-      "casper",
-      "strict-queued-maintenance",
-      "steer",
-      "Use the queued correction.",
-    );
-    host!.answerAsk("casper", "strict-queued-maintenance", pending.id, {
-      kind: "submit",
-      results: [{ id: "ready", selectedOptions: ["Yes"] }],
-    });
-    await turn;
+    await barrier.waitForArrivals();
 
-    expect(recorded.finished).toEqual([
-      undefined,
-      expect.objectContaining({
-        ownerPrompt: "Use the queued correction.",
-        assistantText: expect.stringContaining("Queued durable answer."),
-        sourceRevision: { kind: "pi-leaf", value: expect.any(String) },
-      }),
-    ]);
-    expect(recorded.released.count).toBe(2);
-    expect(events.filter((event) => event.type === "done" || event.type === "error"))
-      .toEqual([expect.objectContaining({
-        type: "error",
-        errorMessage: "Could not durably settle this owner turn.",
-      })]);
-    expect(JSON.stringify(events)).not.toContain("sensitive queued sidecar failure");
+    await expect(host!.stopTurn("casper", "stop-then-send", "claude-code"))
+      .rejects.toMatchObject({ code: "not_found", status: 404 });
+
+    let acknowledged = false;
+    const stopping = host!.stopTurn("casper", "stop-then-send", "pi").then((stopped) => {
+      acknowledged = true;
+      return stopped;
+    });
+    await finishEntered.promise;
+    expect(acknowledged).toBe(false);
+    allowFinish.resolve();
+
+    await expect(stopping).resolves.toBe(true);
+    await turn;
+    expect(events.at(-1)).toMatchObject({ type: "error", reason: "aborted" });
+    await expect(host!.stopTurn("casper", "stop-then-send", "pi")).resolves.toBe(false);
+    barrier.release();
 
     const retryEvents: PiMessagesEvent[] = [];
     await host!.runTurn("casper", {
-      sessionId: "strict-queued-maintenance",
-      prompt: "Try a fresh owner pass.",
+      sessionId: "stop-then-send",
+      prompt: "Start a fresh turn.",
       emit: (event) => retryEvents.push(event),
     });
-    expect(retryEvents.at(-1)?.type).toBe("done");
-    expect(recorded.released.count).toBe(3);
+    expect(retryEvents.at(-1)).toMatchObject({ type: "done" });
   });
 
   it("admits and settles a writable collaboration prompt as its own persisted owner pass", async () => {

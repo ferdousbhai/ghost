@@ -583,7 +583,7 @@ function seedMockHome(name) {
   );
   writeFileSync(
     join(dir, "plans", "hud-work-strip.md"),
-    "# HUD work strip\n\nShow the conversation plan, todo phases, and background jobs above the queue.\n",
+    "# HUD work strip\n\nShow background jobs above the composer.\n",
     "utf8",
   );
 }
@@ -1027,7 +1027,7 @@ function previewProject(name, conversation, path) {
   };
 }
 
-function recordTurn(name, sessionId, prompt, assistantText, ownerMessages = []) {
+function recordTurn(name, sessionId, prompt, assistantText) {
   if (!sessionId) return;
   const store = ghostSessions(name);
   const now = Date.now();
@@ -1046,9 +1046,6 @@ function recordTurn(name, sessionId, prompt, assistantText, ownerMessages = []) 
     store.set(identity.id, s);
   }
   s.messages.push(entry({ role: "user", content: prompt, timestamp: now }));
-  for (const text of ownerMessages) {
-    s.messages.push(entry({ role: "user", content: text, timestamp: now }));
-  }
   s.messages.push(entry({ role: "assistant", content: assistantText, timestamp: now }));
   s.updatedAt = new Date(now).toISOString();
   // Background titling after the first turn: derive a title from the prompt.
@@ -1486,7 +1483,7 @@ function openStream(req, res, name, sessionId) {
  * which is how a turn pauses on a question. Returns the last completed
  * assistant text, or null if the client left mid-stream.
  */
-async function pump(res, events, stream, turn) {
+async function pump(res, events, stream) {
   let assistantText = "";
   let resumeWith;
   for (;;) {
@@ -1501,15 +1498,6 @@ async function pump(res, events, stream, turn) {
     }
     if (event.type === "text_end") assistantText = event.content;
     res.write(`data: ${JSON.stringify(event)}\n\n`);
-    // OMP injects accepted steering at the next provider boundary and emits a
-    // user message before the following assistant step. QueueLine owns it until
-    // this point; owner_message moves it into transcript order.
-    if (event.type === "tool_execution_end" && turn.steering.length > 0) {
-      for (const text of turn.steering.splice(0)) {
-        turn.consumedOwners.push(text);
-        res.write(`data: ${JSON.stringify({ type: "owner_message", text })}\n\n`);
-      }
-    }
     await new Promise((r) => setTimeout(r, event.type === "text_delta" ? DELTA_MS : 220));
   }
 }
@@ -1517,17 +1505,26 @@ async function pump(res, events, stream, turn) {
 async function streamTurn(req, res, name, body) {
   const prompt = extractPrompt(body);
   const sessionId = body?.options?.sessionId;
+  const runtime = resolveCurrent(name).current?.provider === "claude-code" ? "claude-code" : "pi";
   const stream = openStream(req, res, name, sessionId);
   const key = turnKey(name, sessionId);
-  const turn = { streaming: true, steering: [], followUp: [], consumedOwners: [] };
+  const settled = Promise.withResolvers();
+  const turn = {
+    runtime,
+    streaming: true,
+    stream,
+    settled: settled.promise,
+    resolveSettled: settled.resolve,
+  };
   activeTurns.set(key, turn);
   answering.add(key);
   let assistantText;
   try {
-    assistantText = await pump(res, script(name, prompt, sessionId), stream, turn);
+    assistantText = await pump(res, script(name, prompt, sessionId), stream);
   } finally {
     answering.delete(key);
     turn.streaming = false;
+    turn.resolveSettled();
     activeTurns.delete(key);
   }
   if (assistantText === null) return;
@@ -1540,7 +1537,7 @@ async function streamTurn(req, res, name, body) {
   // matching the daemon's lazy-create-and-title behaviour. A --fail turn wrote
   // no reply, so nothing is recorded.
   if (!flag("--fail")) {
-    recordTurn(name, sessionId, prompt, assistantText, turn.consumedOwners);
+    recordTurn(name, sessionId, prompt, assistantText);
   }
 }
 
@@ -1599,10 +1596,7 @@ async function streamReanswer(req, res, name, sessionId, session, entryId, recor
   const key = turnKey(name, sessionId);
   answering.add(key);
   try {
-    await pump(res, reanswerScript(name, sessionId, session, entryId, record), stream, {
-      steering: [],
-      consumedOwners: [],
-    });
+    await pump(res, reanswerScript(name, sessionId, session, entryId, record), stream);
   } finally {
     answering.delete(key);
   }
@@ -2538,41 +2532,21 @@ const mockServer = createServer(async (req, res) => {
     }
     return json(res, 200, transcriptOf(s, url.searchParams));
   }
-  if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "queue") {
+  if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "stop") {
     const conversation = routeConversation(parts);
     if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
-    if (conversation.runtime !== "pi") {
-      return json(res, 409, { error: { code: "not_supported", message: "Claude Code has no OMP queue" } });
-    }
     const turn = activeTurns.get(turnKey(name, conversation.conversationId));
-    const snapshot = () => ({
-      streaming: turn?.streaming === true,
-      count: (turn?.steering.length ?? 0) + (turn?.followUp.length ?? 0),
-      steering: turn?.steering ?? [],
-      followUp: turn?.followUp ?? [],
-    });
-    if (req.method === "GET") return json(res, 200, snapshot());
     if (req.method === "POST") {
-      const body = await readBody(req).catch(() => ({}));
-      const text = typeof body?.text === "string" ? body.text.trim() : "";
-      if (body?.mode !== "steer" && body?.mode !== "followUp") {
-        return json(res, 400, {
-          error: { message: 'mode must be "steer" or "followUp"', code: "invalid_request" },
+      if (!turn?.streaming) return json(res, 200, { stopped: false });
+      if (turn.runtime !== conversation.runtime) {
+        return json(res, 404, {
+          error: { code: "not_found", message: "That conversation is not active on this runtime." },
         });
       }
-      if (text === "") {
-        return json(res, 400, {
-          error: { message: "text must not be empty", code: "invalid_request" },
-        });
-      }
-      if (!turn?.streaming) {
-        return json(res, 409, {
-          error: { message: "this conversation is not streaming", code: "session_not_streaming" },
-        });
-      }
-      const queue = body.mode === "steer" ? turn.steering : turn.followUp;
-      queue.push(text);
-      return json(res, 200, snapshot());
+      turn.stream.closed = true;
+      pendingAsks.get(askKey(name, conversation.conversationId))?.settle({ kind: "cancel" });
+      await turn.settled;
+      return json(res, 200, { stopped: true });
     }
   }
   // Renaming one conversation. An empty title is how the HUD clears it back to

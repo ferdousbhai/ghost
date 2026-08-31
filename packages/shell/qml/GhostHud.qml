@@ -513,8 +513,8 @@ FloatingWindow {
 
                     Text {
                         anchors.verticalCenter: parent.verticalCenter
-                        visible: Ghostd.streaming
-                        text: "Esc to stop"
+                        visible: Ghostd.streaming || Ghostd.stopSubmitting
+                        text: Ghostd.stopSubmitting ? "Stopping…" : "Esc to stop"
                         color: Theme.foregroundDim
                         font.family: Theme.fontFamily
                         font.pixelSize: Theme.fontSizeSmall
@@ -963,11 +963,14 @@ FloatingWindow {
                         Layout.fillWidth: true
                     }
 
-                    QueueLine {
+                    Text {
+                        visible: Ghostd.stopError !== ""
                         Layout.fillWidth: true
-                        steering: Ghostd.steeringQueue
-                        followUps: Ghostd.followUpQueue
-                        error: Ghostd.queueError
+                        text: Ghostd.stopError
+                        color: Theme.ghostRose
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSizeSmall
+                        wrapMode: Text.Wrap
                     }
 
                     // A branch that refused. It belongs here, under the
@@ -1011,10 +1014,7 @@ FloatingWindow {
                             value: composer.hasDraft
                         }
 
-                        onSubmitted: (prompt, mode) => {
-                            if (mode === "prompt") Ghostd.send(prompt);
-                            else Ghostd.queueMessage(prompt, mode);
-                        }
+                        onSubmitted: prompt => Ghostd.send(prompt)
 
                         // The ask form takes the keyboard while a question is
                         // standing, so answering or dismissing one has to hand
@@ -1278,10 +1278,6 @@ FloatingWindow {
             }
             function onModelSwitchNeedsLogin(provider: string): void {
                 hud.openLoginForSelectedModel();
-            }
-            function onQueueMessageRejected(text: string): void {
-                composer.text = text;
-                composer.take();
             }
             function onBranchDraftReady(text: string): void {
                 composer.text = text;

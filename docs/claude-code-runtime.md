@@ -155,6 +155,11 @@ opaque Claude session id and a freshly derived system prompt. A failed or
 malformed resume metadata file is an explicit error; Ghost does not silently
 start a replacement conversation.
 
+The runtime-neutral `POST …/sessions/:id/stop` path aborts that scoped query
+through the same signal used for a disconnected stream. Its response waits for
+query finalization, hooks, metadata persistence, and turn-admission release, so
+the HUD cannot race a replacement owner message into a still-busy Claude turn.
+
 Claude owns the actual transcript under its normal `~/.claude/projects/`
 storage. Ghost stores a `0600` metadata sidecar in `<ghost>/sessions/` so a
 conversation can resume after daemon restart and can appear in the existing

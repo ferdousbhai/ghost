@@ -1580,9 +1580,17 @@ streams emit one complete event object per line.
   tool (`packages/daemon/src/ask-tool.ts`) hands the `AskBroker` that deadline
   per question, beneath the two things only the question knows: one that names
   its own `timeout` keeps it.
-- `GET|POST /api/ghosts/:name/sessions/:id/queue` reads or enqueues pi's
-  native mid-turn queues. POST is `{ mode: "steer"|"followUp", text }`:
-  steering enters the active run, while follow-up runs after it.
+- Principal conversations expose no owner-facing mid-turn message queue. While
+  a turn is streaming, the owner stops it before sending another ordinary
+  message. Runtime-native delivery remains an internal mechanism for
+  collaboration, live voice, and background-job results; it is not an HTTP or
+  HUD interaction primitive.
+- `POST /api/ghosts/:name/sessions/:id/stop` aborts the active principal turn
+  for either runtime and does not return until that turn's admission, hooks,
+  and persistence boundary have released. It returns `{ stopped: boolean }`;
+  `false` means the conversation was already idle. The HUD keeps the current
+  draft while this acknowledgement is pending, so the next ordinary send
+  cannot race the old turn's settlement.
 - `POST /api/ghosts/:name/sessions/:id/branch` with `{ action: "fork",
   entryId }` → `{ id, conversationId, runtime, sessionId, title, draft,
   transcript }` — branching off is a
@@ -2384,7 +2392,7 @@ whole model before any non-local exposure.
   tree. Both development and stable packages declare `fd` and `ripgrep` as
   runtime dependencies for pi's native search tools; the executable must not
   populate pi's cache by downloading them on demand.
-- `packages/shell` — the Omarchy/Quickshell HUD, model routing, ask/queue and
+- `packages/shell` — the Omarchy/Quickshell HUD, model routing, ask and
   branching UI, live tool cards, and summoning indicator.
 - `packages/chromium-extension` — the browser relay, driving tabs of the
   browser the user is already signed into. One extension serves every ghost and

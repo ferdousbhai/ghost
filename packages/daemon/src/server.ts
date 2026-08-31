@@ -1647,50 +1647,23 @@ export function createDaemonServer(options: ServerOptions): Server {
     ));
   };
 
-  const handleQueue = async (
+  const handleStop = async (
     ghostName: string,
     conversation: ConversationIdentity,
     method: string,
-    request: IncomingMessage,
     response: ServerResponse,
   ): Promise<void> => {
-    if (method === "GET") {
-      jsonResponse(response, 200, options.host.queuedMessages(
-        ghostName,
-        conversation.conversationId,
-        conversation.runtime,
-      ));
-      return;
-    }
     if (method !== "POST") {
       errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
       return;
     }
-    const body = await readJsonBody(request, maxBodyBytes);
-    if (body === null || typeof body !== "object" || Array.isArray(body)) {
-      errorResponse(response, 400, "invalid_request", "Request body must be a JSON object.");
-      return;
-    }
-    const { mode, text } = body as { mode?: unknown; text?: unknown };
-    if (mode !== "steer" && mode !== "followUp") {
-      errorResponse(response, 400, "invalid_request", '"mode" must be "steer" or "followUp".');
-      return;
-    }
-    if (typeof text !== "string" || text.trim() === "") {
-      errorResponse(response, 400, "invalid_request", '"text" must be a non-empty string.');
-      return;
-    }
-    jsonResponse(
-      response,
-      200,
-      await options.host.queueMessage(
+    jsonResponse(response, 200, {
+      stopped: await options.host.stopTurn(
         ghostName,
         conversation.conversationId,
-        mode,
-        text.trim(),
         conversation.runtime,
       ),
-    );
+    });
   };
 
   const server = createServer((request, response) => {
@@ -2142,12 +2115,11 @@ export function createDaemonServer(options: ServerOptions): Server {
             response,
           );
         }
-        if (segments.length === 6 && segments[3] === "sessions" && segments[5] === "queue") {
-          return await handleQueue(
+        if (segments.length === 6 && segments[3] === "sessions" && segments[5] === "stop") {
+          return await handleStop(
             ghostName,
             decodeConversationIdentity(segments[4] ?? ""),
             method,
-            request,
             response,
           );
         }

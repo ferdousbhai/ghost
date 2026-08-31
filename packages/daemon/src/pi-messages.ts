@@ -278,7 +278,8 @@ export interface PiMessagesAdapterOptions {
   includeThinking?: boolean;
   /**
    * Owner messages already rendered before this adapter subscribed. A normal
-   * prompt skips one; later dequeued steering/follow-ups still cross the wire.
+   * prompt skips one; later owner-attributed collaboration/voice passes still
+   * cross the wire.
    */
   skipOwnerMessages?: number;
   deferAgentEnd?: boolean;
@@ -455,7 +456,8 @@ export function createPiMessagesAdapter(
           const message = event.message;
           // Forced /skill prompts are persisted as displayable custom messages
           // attributed to the owner. Count that as the POST's already-rendered
-          // input too, or the first later steer would consume the skip instead.
+          // input too, or the first later owner-attributed pass would consume
+          // the skip instead.
           const ownerAuthored = message.role === "user"
             || (message.role === "custom"
               && message.attribution === "user"

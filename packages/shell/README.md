@@ -19,7 +19,7 @@ qml/
   GhostBarSurface.qml  opt-in standalone layer strip carrying the widget
   TrayBridge.qml       system-tray (StatusNotifierItem) presence, via a helper
   tray/ghost-tray.py   the SNI + DBusMenu D-Bus object Quickshell cannot expose
-  components/          chat, ask, work strip, queue, tool-card, routing and orb UI
+  components/          chat, ask, work strip, tool-card, routing and orb UI
   services/            Ghostd, Theme, Notifier (singletons)     → qs.services
 contrib/               keybinds, systemd unit, Omarchy bar integration
 dev/                   mock daemon, demo script, lint
@@ -91,12 +91,13 @@ question and no way to answer it. A settled ask keeps a card in the transcript
 carrying the question, the options offered, and how it actually ended — answered,
 never answered, timed out, or talked through instead, from the transcript's
 `ghostAsk.settled`. An unanswered one wears the rose that failure wears, and
-offers to answer it now on the branch the daemon kept. While a model
-is streaming, Enter steers the active run, Ctrl+Enter queues a follow-up, and
-Shift+Enter inserts a newline. The queued state is visible below the composer.
+offers to answer it now on the branch the daemon kept. While a model is
+streaming, Esc requests a stop and keeps any composer draft. The composer
+accepts the next message only after ghostd acknowledges that the old runtime
+turn and its persistence boundary have released. Shift+Enter inserts a newline.
 
 The chat column also carries a conversation-scoped background-job strip above
-that queue, with cancellation and bounded output disclosure. It disappears
+the composer, with cancellation and bounded output disclosure. It disappears
 when no jobs exist and polls running jobs only while the HUD is visible.
 
 A project bound before the first owner turn is still an unpublished draft. The

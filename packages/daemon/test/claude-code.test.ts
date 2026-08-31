@@ -2825,6 +2825,78 @@ describe("Claude Code subscription runtime", () => {
     expect(events.at(-1)).toMatchObject({ type: "error", reason: "aborted" });
   });
 
+  it("acknowledges a Claude stop only after maintenance releases", async () => {
+    const queryStarted = deferred();
+    const finishEntered = deferred();
+    const allowFinish = deferred();
+    const reservation = () => ({ drained: Promise.resolve(), release: () => {} });
+    const maintenance: NonNullable<SessionHostOptions["maintenance"]> = {
+      admitOwnerAction: () => ({
+        ready: Promise.resolve(),
+        finish: async () => {
+          finishEntered.resolve();
+          await allowFinish.promise;
+        },
+        release: () => {},
+      }),
+      recordOwnerActivity: async () => {},
+      reserveConversationDelete: reservation,
+      completeConversationDelete: () => {},
+      reserveGhostMove: reservation,
+      completeGhostRename: async () => {},
+      completeGhostDelete: () => {},
+      beginShutdown: async () => {},
+      disposeAll: async () => {},
+    };
+    const { lifecycle } = setupClaudeHost({
+      maintenance,
+      createQuery: (input, state) => {
+        const stream = (async function* () {
+          queryStarted.resolve();
+          await new Promise<void>((resolve) => {
+            const signal = input.options.abortController?.signal;
+            if (signal?.aborted) resolve();
+            else signal?.addEventListener("abort", () => resolve(), { once: true });
+          });
+        })();
+        return Object.assign(stream, {
+          interrupt: async () => {
+            state.interrupted += 1;
+          },
+          close: () => {
+            state.closed += 1;
+          },
+        }) as unknown as Query;
+      },
+    });
+    const events: PiMessagesEvent[] = [];
+    const turn = host!.runTurn("casper", {
+      sessionId: "claude-stop-then-send",
+      prompt: "Hold this Claude turn.",
+      emit: (event) => events.push(event),
+    });
+    await queryStarted.promise;
+
+    let acknowledged = false;
+    const stopping = host!.stopTurn(
+      "casper",
+      "claude-stop-then-send",
+      "claude-code",
+    ).then((stopped) => {
+      acknowledged = true;
+      return stopped;
+    });
+    await finishEntered.promise;
+    expect(acknowledged).toBe(false);
+    allowFinish.resolve();
+
+    await expect(stopping).resolves.toBe(true);
+    await turn;
+    expect(lifecycle.interrupted).toBe(1);
+    expect(lifecycle.closed).toBe(1);
+    expect(events.at(-1)).toMatchObject({ type: "error", reason: "aborted" });
+  });
+
   it("uses the SDK abort controller when interrupt rejects during cancellation", async () => {
     let markStarted!: () => void;
     const started = new Promise<void>((resolve) => {

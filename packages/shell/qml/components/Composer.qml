@@ -13,7 +13,7 @@ import "CommandCatalog.js" as CommandCatalog
 Item {
     id: root
 
-    signal submitted(string text, string mode)
+    signal submitted(string text)
 
     property alias text: field.text
     property bool slashDismissed: false
@@ -251,11 +251,10 @@ Item {
                         return;
                     }
                     if (enter && !(event.modifiers & Qt.ShiftModifier)) {
-                        const mode = Ghostd.streaming
-                            ? ((event.modifiers & Qt.ControlModifier) ? "followUp" : "steer")
-                            : "prompt";
-                        root.submitted(field.text, mode);
-                        field.text = "";
+                        if (!Ghostd.streaming && !Ghostd.stopSubmitting) {
+                            root.submitted(field.text);
+                            field.text = "";
+                        }
                         event.accepted = true;
                     }
                 }
@@ -265,9 +264,12 @@ Item {
                     visible: field.text === ""
                     text: Ghostd.activeGhost === ""
                         ? "No ghost selected"
-                        : (Ghostd.streaming
-                            ? "Steer " + Ghostd.activeGhost + "…  ·  Ctrl+Enter follows up"
+                        : (Ghostd.stopSubmitting
+                            ? "Stopping " + Ghostd.activeGhost + "…"
+                            : (Ghostd.streaming
+                            ? "Press Esc to stop before sending another message"
                             : "Message " + Ghostd.activeGhost + "…")
+                        )
                     color: Theme.foregroundDim
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.fontSize

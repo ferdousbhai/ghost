@@ -3,20 +3,45 @@ import QtTest
 import qs.services
 
 TestCase {
+    id: tc
     name: "GhostdStream"
+    property var stopRequests: []
+
+    function fakeStopRequest(): var {
+        const xhr = {
+            readyState: 0, status: 0, responseText: "", onreadystatechange: null,
+            open: function () { this.readyState = 1; },
+            setRequestHeader: function () {},
+            send: function () {},
+            abort: function () { this.readyState = 4; },
+            complete: function (status, body) {
+                this.status = status;
+                this.responseText = JSON.stringify(body);
+                this.readyState = 4;
+                if (this.onreadystatechange) this.onreadystatechange();
+            }
+        };
+        tc.stopRequests.push(xhr);
+        return xhr;
+    }
 
     function init(): void {
-        Ghostd.cancel();
+        const previous = Ghostd.activeTurnState(false);
+        if (previous && previous.streaming) Ghostd.cancelTurn(previous);
         Ghostd.activeGhost = "casper";
         Ghostd.currentSessionId = "pi:stream-test";
         Ghostd.sessionIds = ({ casper: "pi:stream-test" });
         Ghostd.clearTranscript();
         Ghostd.lastError = "";
         Ghostd.reachable = true;
+        stopRequests = [];
+        Ghostd.stopRequestFactory = function () { return tc.fakeStopRequest(); };
     }
 
     function cleanup(): void {
-        Ghostd.cancel();
+        const state = Ghostd.activeTurnState(false);
+        if (state && state.streaming) Ghostd.cancelTurn(state);
+        Ghostd.stopRequestFactory = null;
         Ghostd.clearTranscript();
     }
 
@@ -39,10 +64,6 @@ TestCase {
         Ghostd.pendingAsk = ({ id: "ask-1" });
         Ghostd.askSubmitting = true;
         Ghostd.askError = "old ask error";
-        Ghostd.steeringQueue = ["steer"];
-        Ghostd.followUpQueue = ["later"];
-        Ghostd.queueSubmitting = true;
-        Ghostd.queueError = "old queue error";
     }
 
     function verifyInteractionSettled(): void {
@@ -52,15 +73,10 @@ TestCase {
         compare(Ghostd.pendingAsk, null);
         verify(!Ghostd.askSubmitting);
         compare(Ghostd.askError, "");
-        compare(Ghostd.steeringQueue.length, 0);
-        compare(Ghostd.followUpQueue.length, 0);
-        verify(!Ghostd.queueSubmitting);
-        compare(Ghostd.queueError, "");
     }
 
-    function test_dequeuedSteerBecomesTranscriptRowWithoutReload(): void {
+    function test_ownerAttributedPassBecomesTranscriptRowWithoutReload(): void {
         openTurn();
-        Ghostd.steeringQueue = ["Use the shorter version."];
         Ghostd.handleEvent({ type: "text_end", contentIndex: 0, content: "First pass" });
         Ghostd.handleEvent({ type: "owner_message", text: "Use the shorter version." });
 
@@ -71,22 +87,46 @@ TestCase {
         compare(Ghostd.transcript.get(2).text, "Use the shorter version.");
         compare(Ghostd.transcript.get(3).role, "assistant");
         verify(Ghostd.transcript.get(3).pending);
-        compare(Ghostd.steeringQueue.length, 0);
         verify(Ghostd.streaming);
     }
 
-    function test_consecutiveSteersDoNotCreateEmptyAssistantRows(): void {
+    function test_consecutiveOwnerPassesDoNotCreateEmptyAssistantRows(): void {
         openTurn();
 
-        Ghostd.handleEvent({ type: "owner_message", text: "First steer" });
-        Ghostd.handleEvent({ type: "owner_message", text: "Second steer" });
+        Ghostd.handleEvent({ type: "owner_message", text: "First owner pass" });
+        Ghostd.handleEvent({ type: "owner_message", text: "Second owner pass" });
 
         compare(Ghostd.transcript.count, 4);
         compare(Ghostd.transcript.get(0).role, "user");
-        compare(Ghostd.transcript.get(1).text, "First steer");
-        compare(Ghostd.transcript.get(2).text, "Second steer");
+        compare(Ghostd.transcript.get(1).text, "First owner pass");
+        compare(Ghostd.transcript.get(2).text, "Second owner pass");
         compare(Ghostd.transcript.get(3).role, "assistant");
         verify(Ghostd.transcript.get(3).pending);
+    }
+
+    function test_stopKeepsTurnLiveUntilGhostdAcknowledgesRelease(): void {
+        openTurn();
+
+        Ghostd.cancel();
+        compare(stopRequests.length, 1);
+        verify(Ghostd.streaming);
+        verify(Ghostd.stopSubmitting);
+
+        stopRequests[0].complete(500, {
+            error: { code: "internal_error", message: "stop failed" }
+        });
+        verify(Ghostd.streaming);
+        verify(!Ghostd.stopSubmitting);
+        verify(Ghostd.stopError.indexOf("stop failed") >= 0);
+        compare(Ghostd.activeTurnState(false).stopRequest, null);
+
+        Ghostd.cancel();
+        compare(stopRequests.length, 2);
+        stopRequests[1].complete(200, { stopped: true });
+        verify(!Ghostd.streaming);
+        verify(!Ghostd.stopSubmitting);
+        compare(Ghostd.stopError, "");
+        compare(Ghostd.activeTurnState(false).stopRequest, null);
     }
 
     function test_eofWithoutTerminalSettlesEveryTurnField(): void {
@@ -228,8 +268,10 @@ TestCase {
             }
         };
         Ghostd.request = xhr;
+        const state = Ghostd.activeTurnState(false);
+        Ghostd.captureActiveTurn(state);
 
-        Ghostd.cancel();
+        Ghostd.cancelTurn(state);
 
         compare(aborts, 1);
         verify(Ghostd.reachable);

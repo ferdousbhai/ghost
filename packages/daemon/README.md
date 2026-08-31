@@ -344,9 +344,9 @@ ad-hoc prompts:
 - Ghost's own `ask` tool pauses the harness on structured questions. The HTTP bridge supports
   submit, chat-about-this, and cancel outcomes; validates all option ids; is
   first-response-wins; and remains pollable across a shell reconnect.
-- `steer` injects text into the active generation. `followUp` queues a new turn
-  after the current generation. The shell maps Enter/Ctrl+Enter accordingly
-  while streaming.
+- Principal conversations have no owner-facing mid-turn queue. Stop the active
+  turn before sending another message; the stop route waits for runtime,
+  persistence, and hook settlement before acknowledging it.
 - Tool lifecycle events include start, update, completion, error, bounded
   result summaries, and model-fallback state so the shell can render durable
   activity cards rather than a transient name.
@@ -422,7 +422,7 @@ The authoritative route and payload contract is
 | GET/POST | `/api/ghosts/:name/sessions/:id/live` | inspect or control realtime voice |
 | GET/POST | `/api/ghosts/:name/sessions/:id/collab` | unsupported legacy collaboration compatibility seam |
 | GET/POST | `/api/ghosts/:name/sessions/:id/ask` | poll or resolve the active ask |
-| GET/POST | `/api/ghosts/:name/sessions/:id/queue` | inspect or enqueue steer/follow-up |
+| POST | `/api/ghosts/:name/sessions/:id/stop` | stop a principal turn and await release |
 | POST | `/api/ghosts/:name/sessions/:id/branch` | fork the conversation at a message |
 | POST | `/api/ghosts/:name/sessions/:id/reanswer` | branch an ask answer and resume via SSE |
 | GET | `/api/ghosts/:name/harnesses` | inspect native-harness availability, auth, and Omarchy usage |

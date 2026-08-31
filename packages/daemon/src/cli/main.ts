@@ -38,8 +38,6 @@ const CLI_ARGS: ArgsSpec = {
   boolean: [
     "version",
     "new",
-    "steer",
-    "follow-up",
     "yes",
     "list",
     "exit-on-first",
@@ -60,8 +58,8 @@ export const COMMANDS: readonly Command[] = [
   },
   {
     verb: "say",
-    usage: "say [text] [-m <text>] [--new|--steer|--follow-up] [-g <name>] [-s <id>] [--json] [-q]",
-    summary: "Send a turn, or steer/follow up on one.",
+    usage: "say [text] [-m <text>] [--new] [-g <name>] [-s <id>] [--json] [-q]",
+    summary: "Send a conversation turn.",
     example: 'ghost say --new "Start fresh"',
     positionals: [0, Number.POSITIVE_INFINITY],
     run: sayCommand,

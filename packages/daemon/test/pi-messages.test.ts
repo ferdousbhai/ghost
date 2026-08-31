@@ -126,7 +126,7 @@ function toolStep(id: string, name: string, args: string): AgentSessionEvent[] {
 }
 
 describe("createPiMessagesAdapter", () => {
-  it("surfaces dequeued owner messages but not the prompt the shell already rendered", () => {
+  it("surfaces later owner-attributed passes but not the prompt the shell already rendered", () => {
     const { events, emit } = collect();
     const adapter = createPiMessagesAdapter(emit, { skipOwnerMessages: 1 });
 

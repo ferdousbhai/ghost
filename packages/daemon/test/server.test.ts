@@ -1702,6 +1702,39 @@ describe("POST /api/ghosts/:name/messages", () => {
 });
 
 describe("OMP ask interaction", () => {
+  it("stops a live principal turn and acknowledges the released admission", async () => {
+    const base = await serve([{
+      kind: "tool",
+      name: "ask",
+      args: {
+        questions: [{
+          id: "wait",
+          question: "Keep waiting?",
+          options: [{ label: "Yes" }, { label: "No" }],
+        }],
+      },
+    }]);
+    const turn = postTurn(base, {
+      ...TURN_BODY,
+      options: { sessionId: "conv-stop" },
+    });
+    await waitForAsk(base, "conv-stop");
+
+    const stopped = await fetch(
+      `${base}/api/ghosts/casper/sessions/${piSegment("conv-stop")}/stop`,
+      { method: "POST" },
+    );
+    expect(stopped.status).toBe(200);
+    expect(await stopped.json()).toEqual({ stopped: true });
+    expect((await turn).events.at(-1)).toMatchObject({ type: "error" });
+
+    const idle = await fetch(
+      `${base}/api/ghosts/casper/sessions/${piSegment("conv-stop")}/stop`,
+      { method: "POST" },
+    );
+    expect(await idle.json()).toEqual({ stopped: false });
+  });
+
   it("publishes a blocking ask and accepts the first validated answer", async () => {
     const base = await serve([
       {
@@ -1724,21 +1757,6 @@ describe("OMP ask interaction", () => {
     });
     const ask = await waitForAsk(base, "conv-ask");
     expect(ask.questions[0]).toMatchObject({ id: "paper", question: "Which paper stock?" });
-
-    const queued = await fetch(`${base}/api/ghosts/casper/sessions/${piSegment("conv-ask")}/queue`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ mode: "steer", text: "Keep the result understated." }),
-    });
-    expect(queued.status).toBe(200);
-    expect(await queued.json()).toMatchObject({
-      streaming: true,
-      steering: ["Keep the result understated."],
-    });
-    const queueStatus = await fetch(
-      `${base}/api/ghosts/casper/sessions/${piSegment("conv-ask")}/queue`,
-    );
-    expect(await queueStatus.json()).toMatchObject({ count: 1 });
 
     const invalid = await fetch(`${base}/api/ghosts/casper/sessions/${piSegment("conv-ask")}/ask`, {
       method: "POST",
@@ -1776,12 +1794,6 @@ describe("OMP ask interaction", () => {
     });
     expect(duplicate.status).toBe(409);
 
-    const tooLate = await fetch(`${base}/api/ghosts/casper/sessions/${piSegment("conv-ask")}/queue`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ mode: "followUp", text: "Too late" }),
-    });
-    expect(tooLate.status).toBe(409);
   });
 });
 

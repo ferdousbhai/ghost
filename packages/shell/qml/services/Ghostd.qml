@@ -918,14 +918,11 @@ Singleton {
     property var pendingAsk: null
     property bool askSubmitting: false
     property string askError: ""
-    property var steeringQueue: []
-    property var followUpQueue: []
-    property bool queueSubmitting: false
-    property string queueError: ""
+    property bool stopSubmitting: false
+    property string stopError: ""
 
     signal turnFinished(string ghost, string text)
     signal turnFailed(string ghost, string message)
-    signal queueMessageRejected(string text)
     signal branchDraftReady(string text)
     signal mcpMutationFinished(string action, string server, bool ok)
     signal liveActionFinished(string action, bool ok)
@@ -1048,8 +1045,8 @@ Singleton {
     property var readSessionRequests: ({})
     property var askRequest: null
     property var askSubmitRequest: null
-    property var queueRequest: null
-    property var queueStatusRequest: null
+    /** Test seam; production constructs a native QML XHR. */
+    property var stopRequestFactory: null
     property var branchRequest: null
     property var branchRequestFactory: null
 
@@ -1139,14 +1136,6 @@ Singleton {
         repeat: true
         running: root.anyStreaming
         onTriggered: root.pollPendingAsks()
-    }
-
-    Timer {
-        id: queuePoll
-        interval: 350
-        repeat: true
-        running: root.anyStreaming
-        onTriggered: root.pollQueues()
     }
 
     Component.onCompleted: root.refresh()
@@ -1756,10 +1745,8 @@ Singleton {
             pendingAsk: null,
             askSubmitting: false,
             askError: "",
-            steeringQueue: [],
-            followUpQueue: [],
-            queueSubmitting: false,
-            queueError: "",
+            stopSubmitting: false,
+            stopError: "",
             blocks: ({}),
             toolNames: [],
             toolActivities: [],
@@ -1770,8 +1757,7 @@ Singleton {
             presentationDirty: false,
             askRequest: null,
             askSubmitRequest: null,
-            queueRequest: null,
-            queueStatusRequest: null,
+            stopRequest: null,
             transcriptRequest: null,
             transcriptGeneration: 0,
             transcriptLoad: null
@@ -1825,10 +1811,8 @@ Singleton {
         state.pendingAsk = root.pendingAsk;
         state.askSubmitting = root.askSubmitting;
         state.askError = root.askError;
-        state.steeringQueue = root.steeringQueue.slice();
-        state.followUpQueue = root.followUpQueue.slice();
-        state.queueSubmitting = root.queueSubmitting;
-        state.queueError = root.queueError;
+        state.stopSubmitting = root.stopSubmitting;
+        state.stopError = root.stopError;
         state.blocks = root.blocks;
         state.toolNames = root.toolNames.slice();
         state.toolActivities = root.toolActivities.slice();
@@ -1865,10 +1849,8 @@ Singleton {
         root.pendingAsk = state.pendingAsk;
         root.askSubmitting = state.askSubmitting;
         root.askError = state.askError;
-        root.steeringQueue = state.steeringQueue;
-        root.followUpQueue = state.followUpQueue;
-        root.queueSubmitting = state.queueSubmitting;
-        root.queueError = state.queueError;
+        root.stopSubmitting = state.stopSubmitting;
+        root.stopError = state.stopError;
         root.blocks = state.blocks;
         root.toolNames = state.toolNames;
         root.toolActivities = state.toolActivities;
@@ -1893,10 +1875,8 @@ Singleton {
         root.pendingAsk = null;
         root.askSubmitting = false;
         root.askError = "";
-        root.steeringQueue = [];
-        root.followUpQueue = [];
-        root.queueSubmitting = false;
-        root.queueError = "";
+        root.stopSubmitting = false;
+        root.stopError = "";
         root.blocks = ({});
         root.toolNames = [];
         root.toolActivities = [];
@@ -1996,13 +1976,6 @@ Singleton {
             if (state && state.activity === "ask" && state.pendingAsk === null
                     && !state.askSubmitting)
                 root.fetchPendingAskFor(state);
-        }
-    }
-
-    function pollQueues(): void {
-        for (const key of root.liveConversationKeys) {
-            const state = root.turnStates[key];
-            if (state && state.pendingAsk === null) root.fetchQueueFor(state);
         }
     }
 
@@ -3456,8 +3429,8 @@ Singleton {
     /**
      * Make one conversation the ghost's active one, clearing everything the
      * last one owned. Shared with branching, which lands the user in the copy
-     * it just made: without this the source's queues, its pending ask and its
-     * errors would follow them into a conversation that never had them.
+     * it just made: without this the source's pending ask and errors would
+     * follow them into a conversation that never had them.
      */
     function adoptConversation(ghost: string, id: string): void {
         const previous = root.activeTurnState(false);
@@ -4006,9 +3979,48 @@ Singleton {
         const state = root.activeTurnState(false);
         if (!state) return;
         root.captureActiveTurn(state);
-        root.cancelTurn(state);
+        root.requestStopFor(state);
     }
 
+    function newStopRequest(): var {
+        return root.stopRequestFactory ? root.stopRequestFactory() : new XMLHttpRequest();
+    }
+
+    function requestStopFor(state: var): void {
+        if (!state.streaming || state.stopSubmitting) return;
+        state.stopSubmitting = true;
+        state.stopError = "";
+        const xhr = root.newStopRequest();
+        state.stopRequest = xhr;
+        root.projectTurnFields(state);
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || xhr !== state.stopRequest) return;
+            state.stopRequest = null;
+            state.stopSubmitting = false;
+            if (xhr.status === 200) {
+                try {
+                    const body = JSON.parse(xhr.responseText);
+                    if (typeof body.stopped !== "boolean")
+                        throw new Error("missing stopped state");
+                    if (!body.stopped && state.streaming) {
+                        state.stopError = "ghostd found no active turn to stop";
+                    } else {
+                        state.stopError = "";
+                        if (state.streaming) root.cancelTurn(state);
+                    }
+                } catch (error) {
+                    state.stopError = "ghostd sent malformed stop state";
+                }
+            } else {
+                state.stopError = root.describeError(xhr, "stop turn");
+            }
+            root.projectTurnFields(state);
+        };
+        root.dispatch(xhr, "POST", "/api/ghosts/" + encodeURIComponent(state.ghost)
+            + "/sessions/" + encodeURIComponent(state.sessionId) + "/stop", ({}), null);
+    }
+
+    /** Settle the presentation only after ghostd has released the old turn. */
     function cancelTurn(state: var): void {
         const xhr = state.request;
         // Retire the callback before abort(), because Qt may synchronously run
@@ -4040,6 +4052,9 @@ Singleton {
 
     function beginTurnFor(state: var): void {
         root.cancelTranscriptLoad(state);
+        state.stopSubmitting = false;
+        state.stopError = "";
+        state.stopRequest = null;
         root.resetAssistantSegmentFor(state);
         state.assistantRow = -1;
         state.consumed = 0;
@@ -4088,10 +4103,6 @@ Singleton {
         state.statusText = "";
         state.activity = "";
         root.resetAskStateFor(state);
-        state.steeringQueue = [];
-        state.followUpQueue = [];
-        state.queueSubmitting = false;
-        state.queueError = "";
         root.projectTurnFields(state);
     }
 
@@ -4526,22 +4537,6 @@ Singleton {
     function receiveOwnerMessageFor(state: var, text: string): void {
         const message = text.trim();
         if (!state.streaming || message === "") return;
-        // The SSE event is the dequeue boundary. Move one matching chip now;
-        // the 350ms queue poll remains the authority for unusual duplicates or
-        // non-owner queue entries, but the ordinary row never renders twice.
-        const steering = state.steeringQueue.slice();
-        const steerIndex = steering.indexOf(message);
-        if (steerIndex >= 0) {
-            steering.splice(steerIndex, 1);
-            state.steeringQueue = steering;
-        } else {
-            const followUp = state.followUpQueue.slice();
-            const followIndex = followUp.indexOf(message);
-            if (followIndex >= 0) {
-                followUp.splice(followIndex, 1);
-                state.followUpQueue = followUp;
-            }
-        }
         const hasAssistant = state.assistantRow >= 0
             && state.assistantRow < state.rows.length;
         const emptyPlaceholder = hasAssistant
@@ -4550,15 +4545,15 @@ Singleton {
             && state.toolActivities.length === 0
             && Object.keys(state.blocks).length === 0;
         if (emptyPlaceholder) {
-            // OMP can dequeue a batch of owner messages before starting the
-            // next provider step. Keep those as consecutive owner rows rather
-            // than manufacturing a blank assistant row between each pair.
+            // Internal collaboration or voice delivery can publish a batch of
+            // owner-attributed messages before the next provider step. Keep
+            // those consecutive rather than manufacturing blank assistant rows.
             root.removeTurnRow(state, state.assistantRow);
             state.assistantRow = -1;
         } else {
             root.settleToolActivityFor(state, false);
             // The HTTP turn continues, but this assistant segment ends where
-            // the dequeued owner message enters. Its trailing prose is a reply,
+            // the owner-attributed message enters. Its trailing prose is a reply,
             // not an in-progress status line.
             root.flushTurn(state, true, true);
             if (hasAssistant)
@@ -4654,84 +4649,6 @@ Singleton {
      */
     function dismissAsk(): void {
         root.answerAsk({ kind: "cancel" });
-    }
-
-
-    function applyQueue(body: var): void {
-        const state = root.activeTurnState(false);
-        if (state) root.applyQueueFor(state, body);
-    }
-
-    function applyQueueFor(state: var, body: var): void {
-        state.steeringQueue = Array.isArray(body.steering) ? body.steering : [];
-        state.followUpQueue = Array.isArray(body.followUp) ? body.followUp : [];
-        root.projectTurnFields(state);
-    }
-
-    function fetchQueue(): void {
-        const state = root.activeTurnState(false);
-        if (state) root.fetchQueueFor(state);
-    }
-
-    function fetchQueueFor(state: var): void {
-        if (!state.streaming) return;
-        if (state.queueStatusRequest && state.queueStatusRequest.readyState !== 4) return;
-        const xhr = new XMLHttpRequest();
-        state.queueStatusRequest = xhr;
-        if (root.isActiveTurn(state)) root.queueStatusRequest = xhr;
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== state.queueStatusRequest || !state.streaming) return;
-            if (xhr.status === 200) {
-                try {
-                    root.applyQueueFor(state, JSON.parse(xhr.responseText));
-                } catch (error) {
-                    state.queueError = "ghostd sent malformed queue state";
-                }
-            }
-            root.projectTurnFields(state);
-        };
-        root.dispatch(xhr, "GET", "/api/ghosts/" + encodeURIComponent(state.ghost)
-            + "/sessions/" + encodeURIComponent(state.sessionId) + "/queue", ({}), null);
-    }
-
-    function queueMessage(text: string, mode: string): void {
-        const prompt = text.trim();
-        const state = root.activeTurnState(false);
-        if (!state) return;
-        root.captureActiveTurn(state);
-        if (prompt === "" || state.queueSubmitting || !state.streaming) return;
-        state.queueSubmitting = true;
-        state.queueError = "";
-        // Show the chip immediately; the authoritative GET will remove it once
-        // OMP consumes it into the next provider boundary.
-        if (mode === "followUp") state.followUpQueue = state.followUpQueue.concat([prompt]);
-        else state.steeringQueue = state.steeringQueue.concat([prompt]);
-
-        const xhr = new XMLHttpRequest();
-        state.queueRequest = xhr;
-        root.queueRequest = xhr;
-        root.projectTurnFields(state);
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== state.queueRequest) return;
-            state.queueSubmitting = false;
-            if (xhr.status === 200) {
-                try {
-                    root.applyQueueFor(state, JSON.parse(xhr.responseText));
-                    state.queueError = "";
-                } catch (error) {
-                    state.queueError = "ghostd sent malformed queue state";
-                }
-            } else {
-                state.queueError = root.describeError(xhr, "POST queue");
-                root.fetchQueueFor(state);
-                root.queueMessageRejected(prompt);
-            }
-            root.projectTurnFields(state);
-        };
-        root.dispatch(xhr, "POST", "/api/ghosts/" + encodeURIComponent(state.ghost)
-            + "/sessions/" + encodeURIComponent(state.sessionId) + "/queue",
-            ({ "Content-Type": "application/json" }),
-            JSON.stringify({ mode: mode, text: prompt }));
     }
 
 
